@@ -38,7 +38,7 @@ contains
     function rocblas_sscal_fortran(handle, n, alpha, x, incx) &
         bind(c, name='rocblas_sscal_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sscal_fortran
         type(c_ptr), value :: handle
@@ -54,7 +54,7 @@ contains
     function rocblas_dscal_fortran(handle, n, alpha, x, incx) &
         bind(c, name='rocblas_dscal_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dscal_fortran
         type(c_ptr), value :: handle
@@ -70,7 +70,7 @@ contains
     function rocblas_cscal_fortran(handle, n, alpha, x, incx) &
         bind(c, name='rocblas_cscal_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cscal_fortran
         type(c_ptr), value :: handle
@@ -86,7 +86,7 @@ contains
     function rocblas_zscal_fortran(handle, n, alpha, x, incx) &
         bind(c, name='rocblas_zscal_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zscal_fortran
         type(c_ptr), value :: handle
@@ -102,7 +102,7 @@ contains
     function rocblas_csscal_fortran(handle, n, alpha, x, incx) &
         bind(c, name='rocblas_csscal_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csscal_fortran
         type(c_ptr), value :: handle
@@ -118,7 +118,7 @@ contains
     function rocblas_zdscal_fortran(handle, n, alpha, x, incx) &
         bind(c, name='rocblas_zdscal_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdscal_fortran
         type(c_ptr), value :: handle
@@ -135,7 +135,7 @@ contains
     function rocblas_sscal_64_fortran(handle, n, alpha, x, incx) &
         bind(c, name='rocblas_sscal_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sscal_64_fortran
         type(c_ptr), value :: handle
@@ -151,7 +151,7 @@ contains
     function rocblas_dscal_64_fortran(handle, n, alpha, x, incx) &
         bind(c, name='rocblas_dscal_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dscal_64_fortran
         type(c_ptr), value :: handle
@@ -167,7 +167,7 @@ contains
     function rocblas_cscal_64_fortran(handle, n, alpha, x, incx) &
         bind(c, name='rocblas_cscal_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cscal_64_fortran
         type(c_ptr), value :: handle
@@ -183,7 +183,7 @@ contains
     function rocblas_zscal_64_fortran(handle, n, alpha, x, incx) &
         bind(c, name='rocblas_zscal_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zscal_64_fortran
         type(c_ptr), value :: handle
@@ -199,7 +199,7 @@ contains
     function rocblas_csscal_64_fortran(handle, n, alpha, x, incx) &
         bind(c, name='rocblas_csscal_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csscal_64_fortran
         type(c_ptr), value :: handle
@@ -215,7 +215,7 @@ contains
     function rocblas_zdscal_64_fortran(handle, n, alpha, x, incx) &
         bind(c, name='rocblas_zdscal_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdscal_64_fortran
         type(c_ptr), value :: handle
@@ -232,7 +232,7 @@ contains
     function rocblas_sscal_batched_fortran(handle, n, alpha, x, incx, batch_count) &
         bind(c, name='rocblas_sscal_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sscal_batched_fortran
         type(c_ptr), value :: handle
@@ -249,7 +249,7 @@ contains
     function rocblas_dscal_batched_fortran(handle, n, alpha, x, incx, batch_count) &
         bind(c, name='rocblas_dscal_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dscal_batched_fortran
         type(c_ptr), value :: handle
@@ -266,7 +266,7 @@ contains
     function rocblas_cscal_batched_fortran(handle, n, alpha, x, incx, batch_count) &
         bind(c, name='rocblas_cscal_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cscal_batched_fortran
         type(c_ptr), value :: handle
@@ -283,7 +283,7 @@ contains
     function rocblas_zscal_batched_fortran(handle, n, alpha, x, incx, batch_count) &
         bind(c, name='rocblas_zscal_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zscal_batched_fortran
         type(c_ptr), value :: handle
@@ -300,7 +300,7 @@ contains
     function rocblas_csscal_batched_fortran(handle, n, alpha, x, incx, batch_count) &
         bind(c, name='rocblas_csscal_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csscal_batched_fortran
         type(c_ptr), value :: handle
@@ -317,7 +317,7 @@ contains
     function rocblas_zdscal_batched_fortran(handle, n, alpha, x, incx, batch_count) &
         bind(c, name='rocblas_zdscal_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdscal_batched_fortran
         type(c_ptr), value :: handle
@@ -335,7 +335,7 @@ contains
     function rocblas_sscal_batched_64_fortran(handle, n, alpha, x, incx, batch_count) &
         bind(c, name='rocblas_sscal_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sscal_batched_64_fortran
         type(c_ptr), value :: handle
@@ -352,7 +352,7 @@ contains
     function rocblas_dscal_batched_64_fortran(handle, n, alpha, x, incx, batch_count) &
         bind(c, name='rocblas_dscal_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dscal_batched_64_fortran
         type(c_ptr), value :: handle
@@ -369,7 +369,7 @@ contains
     function rocblas_cscal_batched_64_fortran(handle, n, alpha, x, incx, batch_count) &
         bind(c, name='rocblas_cscal_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cscal_batched_64_fortran
         type(c_ptr), value :: handle
@@ -386,7 +386,7 @@ contains
     function rocblas_zscal_batched_64_fortran(handle, n, alpha, x, incx, batch_count) &
         bind(c, name='rocblas_zscal_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zscal_batched_64_fortran
         type(c_ptr), value :: handle
@@ -403,7 +403,7 @@ contains
     function rocblas_csscal_batched_64_fortran(handle, n, alpha, x, incx, batch_count) &
         bind(c, name='rocblas_csscal_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csscal_batched_64_fortran
         type(c_ptr), value :: handle
@@ -420,7 +420,7 @@ contains
     function rocblas_zdscal_batched_64_fortran(handle, n, alpha, x, incx, batch_count) &
         bind(c, name='rocblas_zdscal_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdscal_batched_64_fortran
         type(c_ptr), value :: handle
@@ -438,7 +438,7 @@ contains
     function rocblas_sscal_strided_batched_fortran(handle, n, alpha, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_sscal_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sscal_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -456,7 +456,7 @@ contains
     function rocblas_dscal_strided_batched_fortran(handle, n, alpha, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_dscal_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dscal_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -474,7 +474,7 @@ contains
     function rocblas_cscal_strided_batched_fortran(handle, n, alpha, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_cscal_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cscal_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -492,7 +492,7 @@ contains
     function rocblas_zscal_strided_batched_fortran(handle, n, alpha, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_zscal_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zscal_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -510,7 +510,7 @@ contains
     function rocblas_csscal_strided_batched_fortran(handle, n, alpha, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_csscal_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csscal_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -528,7 +528,7 @@ contains
     function rocblas_zdscal_strided_batched_fortran(handle, n, alpha, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_zdscal_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdscal_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -547,7 +547,7 @@ contains
     function rocblas_sscal_strided_batched_64_fortran(handle, n, alpha, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_sscal_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sscal_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -565,7 +565,7 @@ contains
     function rocblas_dscal_strided_batched_64_fortran(handle, n, alpha, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_dscal_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dscal_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -583,7 +583,7 @@ contains
     function rocblas_cscal_strided_batched_64_fortran(handle, n, alpha, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_cscal_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cscal_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -601,7 +601,7 @@ contains
     function rocblas_zscal_strided_batched_64_fortran(handle, n, alpha, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_zscal_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zscal_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -619,7 +619,7 @@ contains
     function rocblas_csscal_strided_batched_64_fortran(handle, n, alpha, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_csscal_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csscal_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -637,7 +637,7 @@ contains
     function rocblas_zdscal_strided_batched_64_fortran(handle, n, alpha, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_zdscal_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdscal_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -656,7 +656,7 @@ contains
     function rocblas_scopy_fortran(handle, n, x, incx, y, incy) &
         bind(c, name='rocblas_scopy_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_scopy_fortran
         type(c_ptr), value :: handle
@@ -673,7 +673,7 @@ contains
     function rocblas_dcopy_fortran(handle, n, x, incx, y, incy) &
         bind(c, name='rocblas_dcopy_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dcopy_fortran
         type(c_ptr), value :: handle
@@ -690,7 +690,7 @@ contains
     function rocblas_ccopy_fortran(handle, n, x, incx, y, incy) &
         bind(c, name='rocblas_ccopy_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ccopy_fortran
         type(c_ptr), value :: handle
@@ -707,7 +707,7 @@ contains
     function rocblas_zcopy_fortran(handle, n, x, incx, y, incy) &
         bind(c, name='rocblas_zcopy_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zcopy_fortran
         type(c_ptr), value :: handle
@@ -725,7 +725,7 @@ contains
     function rocblas_scopy_64_fortran(handle, n, x, incx, y, incy) &
         bind(c, name='rocblas_scopy_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_scopy_64_fortran
         type(c_ptr), value :: handle
@@ -742,7 +742,7 @@ contains
     function rocblas_dcopy_64_fortran(handle, n, x, incx, y, incy) &
         bind(c, name='rocblas_dcopy_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dcopy_64_fortran
         type(c_ptr), value :: handle
@@ -759,7 +759,7 @@ contains
     function rocblas_ccopy_64_fortran(handle, n, x, incx, y, incy) &
         bind(c, name='rocblas_ccopy_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ccopy_64_fortran
         type(c_ptr), value :: handle
@@ -776,7 +776,7 @@ contains
     function rocblas_zcopy_64_fortran(handle, n, x, incx, y, incy) &
         bind(c, name='rocblas_zcopy_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zcopy_64_fortran
         type(c_ptr), value :: handle
@@ -794,7 +794,7 @@ contains
     function rocblas_scopy_batched_fortran(handle, n, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_scopy_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_scopy_batched_fortran
         type(c_ptr), value :: handle
@@ -812,7 +812,7 @@ contains
     function rocblas_dcopy_batched_fortran(handle, n, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_dcopy_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dcopy_batched_fortran
         type(c_ptr), value :: handle
@@ -830,7 +830,7 @@ contains
     function rocblas_ccopy_batched_fortran(handle, n, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_ccopy_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ccopy_batched_fortran
         type(c_ptr), value :: handle
@@ -848,7 +848,7 @@ contains
     function rocblas_zcopy_batched_fortran(handle, n, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_zcopy_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zcopy_batched_fortran
         type(c_ptr), value :: handle
@@ -867,7 +867,7 @@ contains
     function rocblas_scopy_batched_64_fortran(handle, n, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_scopy_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_scopy_batched_64_fortran
         type(c_ptr), value :: handle
@@ -885,7 +885,7 @@ contains
     function rocblas_dcopy_batched_64_fortran(handle, n, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_dcopy_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dcopy_batched_64_fortran
         type(c_ptr), value :: handle
@@ -903,7 +903,7 @@ contains
     function rocblas_ccopy_batched_64_fortran(handle, n, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_ccopy_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ccopy_batched_64_fortran
         type(c_ptr), value :: handle
@@ -921,7 +921,7 @@ contains
     function rocblas_zcopy_batched_64_fortran(handle, n, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_zcopy_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zcopy_batched_64_fortran
         type(c_ptr), value :: handle
@@ -940,7 +940,7 @@ contains
     function rocblas_scopy_strided_batched_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_scopy_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_scopy_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -960,7 +960,7 @@ contains
     function rocblas_dcopy_strided_batched_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_dcopy_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dcopy_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -980,7 +980,7 @@ contains
     function rocblas_ccopy_strided_batched_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_ccopy_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ccopy_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -1000,7 +1000,7 @@ contains
     function rocblas_zcopy_strided_batched_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_zcopy_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zcopy_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -1021,7 +1021,7 @@ contains
     function rocblas_scopy_strided_batched_64_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_scopy_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_scopy_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -1041,7 +1041,7 @@ contains
     function rocblas_dcopy_strided_batched_64_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_dcopy_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dcopy_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -1061,7 +1061,7 @@ contains
     function rocblas_ccopy_strided_batched_64_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_ccopy_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ccopy_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -1081,7 +1081,7 @@ contains
     function rocblas_zcopy_strided_batched_64_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_zcopy_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zcopy_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -1102,7 +1102,7 @@ contains
     function rocblas_sdot_fortran(handle, n, x, incx, y, incy, result) &
         bind(c, name='rocblas_sdot_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sdot_fortran
         type(c_ptr), value :: handle
@@ -1120,7 +1120,7 @@ contains
     function rocblas_ddot_fortran(handle, n, x, incx, y, incy, result) &
         bind(c, name='rocblas_ddot_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ddot_fortran
         type(c_ptr), value :: handle
@@ -1138,7 +1138,7 @@ contains
     function rocblas_hdot_fortran(handle, n, x, incx, y, incy, result) &
         bind(c, name='rocblas_hdot_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_hdot_fortran
         type(c_ptr), value :: handle
@@ -1156,7 +1156,7 @@ contains
     function rocblas_bfdot_fortran(handle, n, x, incx, y, incy, result) &
         bind(c, name='rocblas_bfdot_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_bfdot_fortran
         type(c_ptr), value :: handle
@@ -1174,7 +1174,7 @@ contains
     function rocblas_cdotu_fortran(handle, n, x, incx, y, incy, result) &
         bind(c, name='rocblas_cdotu_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cdotu_fortran
         type(c_ptr), value :: handle
@@ -1192,7 +1192,7 @@ contains
     function rocblas_cdotc_fortran(handle, n, x, incx, y, incy, result) &
         bind(c, name='rocblas_cdotc_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cdotc_fortran
         type(c_ptr), value :: handle
@@ -1210,7 +1210,7 @@ contains
     function rocblas_zdotu_fortran(handle, n, x, incx, y, incy, result) &
         bind(c, name='rocblas_zdotu_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdotu_fortran
         type(c_ptr), value :: handle
@@ -1228,7 +1228,7 @@ contains
     function rocblas_zdotc_fortran(handle, n, x, incx, y, incy, result) &
         bind(c, name='rocblas_zdotc_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdotc_fortran
         type(c_ptr), value :: handle
@@ -1247,7 +1247,7 @@ contains
     function rocblas_sdot_64_fortran(handle, n, x, incx, y, incy, result) &
         bind(c, name='rocblas_sdot_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sdot_64_fortran
         type(c_ptr), value :: handle
@@ -1265,7 +1265,7 @@ contains
     function rocblas_ddot_64_fortran(handle, n, x, incx, y, incy, result) &
         bind(c, name='rocblas_ddot_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ddot_64_fortran
         type(c_ptr), value :: handle
@@ -1283,7 +1283,7 @@ contains
     function rocblas_hdot_64_fortran(handle, n, x, incx, y, incy, result) &
         bind(c, name='rocblas_hdot_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_hdot_64_fortran
         type(c_ptr), value :: handle
@@ -1301,7 +1301,7 @@ contains
     function rocblas_bfdot_64_fortran(handle, n, x, incx, y, incy, result) &
         bind(c, name='rocblas_bfdot_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_bfdot_64_fortran
         type(c_ptr), value :: handle
@@ -1319,7 +1319,7 @@ contains
     function rocblas_cdotu_64_fortran(handle, n, x, incx, y, incy, result) &
         bind(c, name='rocblas_cdotu_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cdotu_64_fortran
         type(c_ptr), value :: handle
@@ -1337,7 +1337,7 @@ contains
     function rocblas_cdotc_64_fortran(handle, n, x, incx, y, incy, result) &
         bind(c, name='rocblas_cdotc_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cdotc_64_fortran
         type(c_ptr), value :: handle
@@ -1355,7 +1355,7 @@ contains
     function rocblas_zdotu_64_fortran(handle, n, x, incx, y, incy, result) &
         bind(c, name='rocblas_zdotu_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdotu_64_fortran
         type(c_ptr), value :: handle
@@ -1373,7 +1373,7 @@ contains
     function rocblas_zdotc_64_fortran(handle, n, x, incx, y, incy, result) &
         bind(c, name='rocblas_zdotc_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdotc_64_fortran
         type(c_ptr), value :: handle
@@ -1392,7 +1392,7 @@ contains
     function rocblas_sdot_batched_fortran(handle, n, x, incx, y, incy, batch_count, result) &
         bind(c, name='rocblas_sdot_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sdot_batched_fortran
         type(c_ptr), value :: handle
@@ -1411,7 +1411,7 @@ contains
     function rocblas_ddot_batched_fortran(handle, n, x, incx, y, incy, batch_count, result) &
         bind(c, name='rocblas_ddot_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ddot_batched_fortran
         type(c_ptr), value :: handle
@@ -1430,7 +1430,7 @@ contains
     function rocblas_hdot_batched_fortran(handle, n, x, incx, y, incy, batch_count, result) &
         bind(c, name='rocblas_hdot_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_hdot_batched_fortran
         type(c_ptr), value :: handle
@@ -1449,7 +1449,7 @@ contains
     function rocblas_bfdot_batched_fortran(handle, n, x, incx, y, incy, batch_count, result) &
         bind(c, name='rocblas_bfdot_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_bfdot_batched_fortran
         type(c_ptr), value :: handle
@@ -1468,7 +1468,7 @@ contains
     function rocblas_cdotu_batched_fortran(handle, n, x, incx, y, incy, batch_count, result) &
         bind(c, name='rocblas_cdotu_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cdotu_batched_fortran
         type(c_ptr), value :: handle
@@ -1487,7 +1487,7 @@ contains
     function rocblas_cdotc_batched_fortran(handle, n, x, incx, y, incy, batch_count, result) &
         bind(c, name='rocblas_cdotc_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cdotc_batched_fortran
         type(c_ptr), value :: handle
@@ -1506,7 +1506,7 @@ contains
     function rocblas_zdotu_batched_fortran(handle, n, x, incx, y, incy, batch_count, result) &
         bind(c, name='rocblas_zdotu_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdotu_batched_fortran
         type(c_ptr), value :: handle
@@ -1525,7 +1525,7 @@ contains
     function rocblas_zdotc_batched_fortran(handle, n, x, incx, y, incy, batch_count, result) &
         bind(c, name='rocblas_zdotc_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdotc_batched_fortran
         type(c_ptr), value :: handle
@@ -1545,7 +1545,7 @@ contains
     function rocblas_sdot_batched_64_fortran(handle, n, x, incx, y, incy, batch_count, result) &
         bind(c, name='rocblas_sdot_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sdot_batched_64_fortran
         type(c_ptr), value :: handle
@@ -1564,7 +1564,7 @@ contains
     function rocblas_ddot_batched_64_fortran(handle, n, x, incx, y, incy, batch_count, result) &
         bind(c, name='rocblas_ddot_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ddot_batched_64_fortran
         type(c_ptr), value :: handle
@@ -1583,7 +1583,7 @@ contains
     function rocblas_hdot_batched_64_fortran(handle, n, x, incx, y, incy, batch_count, result) &
         bind(c, name='rocblas_hdot_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_hdot_batched_64_fortran
         type(c_ptr), value :: handle
@@ -1602,7 +1602,7 @@ contains
     function rocblas_bfdot_batched_64_fortran(handle, n, x, incx, y, incy, batch_count, result) &
         bind(c, name='rocblas_bfdot_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_bfdot_batched_64_fortran
         type(c_ptr), value :: handle
@@ -1621,7 +1621,7 @@ contains
     function rocblas_cdotu_batched_64_fortran(handle, n, x, incx, y, incy, batch_count, result) &
         bind(c, name='rocblas_cdotu_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cdotu_batched_64_fortran
         type(c_ptr), value :: handle
@@ -1640,7 +1640,7 @@ contains
     function rocblas_cdotc_batched_64_fortran(handle, n, x, incx, y, incy, batch_count, result) &
         bind(c, name='rocblas_cdotc_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cdotc_batched_64_fortran
         type(c_ptr), value :: handle
@@ -1659,7 +1659,7 @@ contains
     function rocblas_zdotu_batched_64_fortran(handle, n, x, incx, y, incy, batch_count, result) &
         bind(c, name='rocblas_zdotu_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdotu_batched_64_fortran
         type(c_ptr), value :: handle
@@ -1678,7 +1678,7 @@ contains
     function rocblas_zdotc_batched_64_fortran(handle, n, x, incx, y, incy, batch_count, result) &
         bind(c, name='rocblas_zdotc_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdotc_batched_64_fortran
         type(c_ptr), value :: handle
@@ -1698,7 +1698,7 @@ contains
     function rocblas_sdot_strided_batched_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count, result) &
         bind(c, name='rocblas_sdot_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sdot_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -1719,7 +1719,7 @@ contains
     function rocblas_ddot_strided_batched_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count, result) &
         bind(c, name='rocblas_ddot_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ddot_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -1740,7 +1740,7 @@ contains
     function rocblas_hdot_strided_batched_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count, result) &
         bind(c, name='rocblas_hdot_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_hdot_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -1761,7 +1761,7 @@ contains
     function rocblas_bfdot_strided_batched_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count, result) &
         bind(c, name='rocblas_bfdot_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_bfdot_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -1782,7 +1782,7 @@ contains
     function rocblas_cdotu_strided_batched_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count, result) &
         bind(c, name='rocblas_cdotu_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cdotu_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -1803,7 +1803,7 @@ contains
     function rocblas_cdotc_strided_batched_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count, result) &
         bind(c, name='rocblas_cdotc_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cdotc_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -1824,7 +1824,7 @@ contains
     function rocblas_zdotu_strided_batched_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count, result) &
         bind(c, name='rocblas_zdotu_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdotu_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -1845,7 +1845,7 @@ contains
     function rocblas_zdotc_strided_batched_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count, result) &
         bind(c, name='rocblas_zdotc_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdotc_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -1867,7 +1867,7 @@ contains
     function rocblas_sdot_strided_batched_64_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count, result) &
         bind(c, name='rocblas_sdot_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sdot_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -1888,7 +1888,7 @@ contains
     function rocblas_ddot_strided_batched_64_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count, result) &
         bind(c, name='rocblas_ddot_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ddot_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -1909,7 +1909,7 @@ contains
     function rocblas_hdot_strided_batched_64_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count, result) &
         bind(c, name='rocblas_hdot_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_hdot_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -1930,7 +1930,7 @@ contains
     function rocblas_bfdot_strided_batched_64_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count, result) &
         bind(c, name='rocblas_bfdot_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_bfdot_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -1951,7 +1951,7 @@ contains
     function rocblas_cdotu_strided_batched_64_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count, result) &
         bind(c, name='rocblas_cdotu_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cdotu_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -1972,7 +1972,7 @@ contains
     function rocblas_cdotc_strided_batched_64_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count, result) &
         bind(c, name='rocblas_cdotc_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cdotc_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -1993,7 +1993,7 @@ contains
     function rocblas_zdotu_strided_batched_64_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count, result) &
         bind(c, name='rocblas_zdotu_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdotu_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -2014,7 +2014,7 @@ contains
     function rocblas_zdotc_strided_batched_64_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count, result) &
         bind(c, name='rocblas_zdotc_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdotc_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -2036,7 +2036,7 @@ contains
     function rocblas_sswap_fortran(handle, n, x, incx, y, incy) &
         bind(c, name='rocblas_sswap_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sswap_fortran
         type(c_ptr), value :: handle
@@ -2053,7 +2053,7 @@ contains
     function rocblas_dswap_fortran(handle, n, x, incx, y, incy) &
         bind(c, name='rocblas_dswap_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dswap_fortran
         type(c_ptr), value :: handle
@@ -2070,7 +2070,7 @@ contains
     function rocblas_cswap_fortran(handle, n, x, incx, y, incy) &
         bind(c, name='rocblas_cswap_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cswap_fortran
         type(c_ptr), value :: handle
@@ -2087,7 +2087,7 @@ contains
     function rocblas_zswap_fortran(handle, n, x, incx, y, incy) &
         bind(c, name='rocblas_zswap_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zswap_fortran
         type(c_ptr), value :: handle
@@ -2105,7 +2105,7 @@ contains
     function rocblas_sswap_64_fortran(handle, n, x, incx, y, incy) &
         bind(c, name='rocblas_sswap_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sswap_64_fortran
         type(c_ptr), value :: handle
@@ -2122,7 +2122,7 @@ contains
     function rocblas_dswap_64_fortran(handle, n, x, incx, y, incy) &
         bind(c, name='rocblas_dswap_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dswap_64_fortran
         type(c_ptr), value :: handle
@@ -2139,7 +2139,7 @@ contains
     function rocblas_cswap_64_fortran(handle, n, x, incx, y, incy) &
         bind(c, name='rocblas_cswap_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cswap_64_fortran
         type(c_ptr), value :: handle
@@ -2156,7 +2156,7 @@ contains
     function rocblas_zswap_64_fortran(handle, n, x, incx, y, incy) &
         bind(c, name='rocblas_zswap_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zswap_64_fortran
         type(c_ptr), value :: handle
@@ -2174,7 +2174,7 @@ contains
     function rocblas_sswap_batched_fortran(handle, n, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_sswap_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sswap_batched_fortran
         type(c_ptr), value :: handle
@@ -2192,7 +2192,7 @@ contains
     function rocblas_dswap_batched_fortran(handle, n, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_dswap_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dswap_batched_fortran
         type(c_ptr), value :: handle
@@ -2210,7 +2210,7 @@ contains
     function rocblas_cswap_batched_fortran(handle, n, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_cswap_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cswap_batched_fortran
         type(c_ptr), value :: handle
@@ -2228,7 +2228,7 @@ contains
     function rocblas_zswap_batched_fortran(handle, n, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_zswap_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zswap_batched_fortran
         type(c_ptr), value :: handle
@@ -2247,7 +2247,7 @@ contains
     function rocblas_sswap_batched_64_fortran(handle, n, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_sswap_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sswap_batched_64_fortran
         type(c_ptr), value :: handle
@@ -2265,7 +2265,7 @@ contains
     function rocblas_dswap_batched_64_fortran(handle, n, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_dswap_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dswap_batched_64_fortran
         type(c_ptr), value :: handle
@@ -2283,7 +2283,7 @@ contains
     function rocblas_cswap_batched_64_fortran(handle, n, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_cswap_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cswap_batched_64_fortran
         type(c_ptr), value :: handle
@@ -2301,7 +2301,7 @@ contains
     function rocblas_zswap_batched_64_fortran(handle, n, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_zswap_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zswap_batched_64_fortran
         type(c_ptr), value :: handle
@@ -2320,7 +2320,7 @@ contains
     function rocblas_sswap_strided_batched_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_sswap_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sswap_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -2340,7 +2340,7 @@ contains
     function rocblas_dswap_strided_batched_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_dswap_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dswap_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -2360,7 +2360,7 @@ contains
     function rocblas_cswap_strided_batched_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_cswap_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cswap_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -2380,7 +2380,7 @@ contains
     function rocblas_zswap_strided_batched_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_zswap_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zswap_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -2401,7 +2401,7 @@ contains
     function rocblas_sswap_strided_batched_64_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_sswap_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sswap_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -2421,7 +2421,7 @@ contains
     function rocblas_dswap_strided_batched_64_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_dswap_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dswap_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -2441,7 +2441,7 @@ contains
     function rocblas_cswap_strided_batched_64_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_cswap_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cswap_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -2461,7 +2461,7 @@ contains
     function rocblas_zswap_strided_batched_64_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_zswap_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zswap_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -2482,7 +2482,7 @@ contains
     function rocblas_haxpy_fortran(handle, n, alpha, x, incx, y, incy) &
         bind(c, name='rocblas_haxpy_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_haxpy_fortran
         type(c_ptr), value :: handle
@@ -2500,7 +2500,7 @@ contains
     function rocblas_saxpy_fortran(handle, n, alpha, x, incx, y, incy) &
         bind(c, name='rocblas_saxpy_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_saxpy_fortran
         type(c_ptr), value :: handle
@@ -2518,7 +2518,7 @@ contains
     function rocblas_daxpy_fortran(handle, n, alpha, x, incx, y, incy) &
         bind(c, name='rocblas_daxpy_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_daxpy_fortran
         type(c_ptr), value :: handle
@@ -2536,7 +2536,7 @@ contains
     function rocblas_caxpy_fortran(handle, n, alpha, x, incx, y, incy) &
         bind(c, name='rocblas_caxpy_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_caxpy_fortran
         type(c_ptr), value :: handle
@@ -2554,7 +2554,7 @@ contains
     function rocblas_zaxpy_fortran(handle, n, alpha, x, incx, y, incy) &
         bind(c, name='rocblas_zaxpy_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zaxpy_fortran
         type(c_ptr), value :: handle
@@ -2573,7 +2573,7 @@ contains
     function rocblas_haxpy_64_fortran(handle, n, alpha, x, incx, y, incy) &
         bind(c, name='rocblas_haxpy_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_haxpy_64_fortran
         type(c_ptr), value :: handle
@@ -2591,7 +2591,7 @@ contains
     function rocblas_saxpy_64_fortran(handle, n, alpha, x, incx, y, incy) &
         bind(c, name='rocblas_saxpy_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_saxpy_64_fortran
         type(c_ptr), value :: handle
@@ -2609,7 +2609,7 @@ contains
     function rocblas_daxpy_64_fortran(handle, n, alpha, x, incx, y, incy) &
         bind(c, name='rocblas_daxpy_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_daxpy_64_fortran
         type(c_ptr), value :: handle
@@ -2627,7 +2627,7 @@ contains
     function rocblas_caxpy_64_fortran(handle, n, alpha, x, incx, y, incy) &
         bind(c, name='rocblas_caxpy_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_caxpy_64_fortran
         type(c_ptr), value :: handle
@@ -2645,7 +2645,7 @@ contains
     function rocblas_zaxpy_64_fortran(handle, n, alpha, x, incx, y, incy) &
         bind(c, name='rocblas_zaxpy_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zaxpy_64_fortran
         type(c_ptr), value :: handle
@@ -2664,7 +2664,7 @@ contains
     function rocblas_haxpy_batched_fortran(handle, n, alpha, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_haxpy_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_haxpy_batched_fortran
         type(c_ptr), value :: handle
@@ -2683,7 +2683,7 @@ contains
     function rocblas_saxpy_batched_fortran(handle, n, alpha, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_saxpy_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_saxpy_batched_fortran
         type(c_ptr), value :: handle
@@ -2702,7 +2702,7 @@ contains
     function rocblas_daxpy_batched_fortran(handle, n, alpha, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_daxpy_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_daxpy_batched_fortran
         type(c_ptr), value :: handle
@@ -2721,7 +2721,7 @@ contains
     function rocblas_caxpy_batched_fortran(handle, n, alpha, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_caxpy_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_caxpy_batched_fortran
         type(c_ptr), value :: handle
@@ -2740,7 +2740,7 @@ contains
     function rocblas_zaxpy_batched_fortran(handle, n, alpha, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_zaxpy_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zaxpy_batched_fortran
         type(c_ptr), value :: handle
@@ -2760,7 +2760,7 @@ contains
     function rocblas_haxpy_batched_64_fortran(handle, n, alpha, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_haxpy_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_haxpy_batched_64_fortran
         type(c_ptr), value :: handle
@@ -2779,7 +2779,7 @@ contains
     function rocblas_saxpy_batched_64_fortran(handle, n, alpha, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_saxpy_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_saxpy_batched_64_fortran
         type(c_ptr), value :: handle
@@ -2798,7 +2798,7 @@ contains
     function rocblas_daxpy_batched_64_fortran(handle, n, alpha, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_daxpy_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_daxpy_batched_64_fortran
         type(c_ptr), value :: handle
@@ -2817,7 +2817,7 @@ contains
     function rocblas_caxpy_batched_64_fortran(handle, n, alpha, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_caxpy_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_caxpy_batched_64_fortran
         type(c_ptr), value :: handle
@@ -2836,7 +2836,7 @@ contains
     function rocblas_zaxpy_batched_64_fortran(handle, n, alpha, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_zaxpy_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zaxpy_batched_64_fortran
         type(c_ptr), value :: handle
@@ -2856,7 +2856,7 @@ contains
     function rocblas_haxpy_strided_batched_fortran(handle, n, alpha, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_haxpy_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_haxpy_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -2877,7 +2877,7 @@ contains
     function rocblas_saxpy_strided_batched_fortran(handle, n, alpha, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_saxpy_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_saxpy_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -2898,7 +2898,7 @@ contains
     function rocblas_daxpy_strided_batched_fortran(handle, n, alpha, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_daxpy_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_daxpy_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -2919,7 +2919,7 @@ contains
     function rocblas_caxpy_strided_batched_fortran(handle, n, alpha, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_caxpy_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_caxpy_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -2940,7 +2940,7 @@ contains
     function rocblas_zaxpy_strided_batched_fortran(handle, n, alpha, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_zaxpy_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zaxpy_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -2962,7 +2962,7 @@ contains
     function rocblas_haxpy_strided_batched_64_fortran(handle, n, alpha, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_haxpy_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_haxpy_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -2983,7 +2983,7 @@ contains
     function rocblas_saxpy_strided_batched_64_fortran(handle, n, alpha, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_saxpy_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_saxpy_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -3004,7 +3004,7 @@ contains
     function rocblas_daxpy_strided_batched_64_fortran(handle, n, alpha, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_daxpy_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_daxpy_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -3025,7 +3025,7 @@ contains
     function rocblas_caxpy_strided_batched_64_fortran(handle, n, alpha, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_caxpy_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_caxpy_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -3046,7 +3046,7 @@ contains
     function rocblas_zaxpy_strided_batched_64_fortran(handle, n, alpha, x, incx, stride_x, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_zaxpy_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zaxpy_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -3068,7 +3068,7 @@ contains
     function rocblas_sasum_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_sasum_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sasum_fortran
         type(c_ptr), value :: handle
@@ -3084,7 +3084,7 @@ contains
     function rocblas_dasum_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_dasum_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dasum_fortran
         type(c_ptr), value :: handle
@@ -3100,7 +3100,7 @@ contains
     function rocblas_scasum_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_scasum_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_scasum_fortran
         type(c_ptr), value :: handle
@@ -3116,7 +3116,7 @@ contains
     function rocblas_dzasum_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_dzasum_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dzasum_fortran
         type(c_ptr), value :: handle
@@ -3133,7 +3133,7 @@ contains
     function rocblas_sasum_64_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_sasum_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sasum_64_fortran
         type(c_ptr), value :: handle
@@ -3149,7 +3149,7 @@ contains
     function rocblas_dasum_64_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_dasum_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dasum_64_fortran
         type(c_ptr), value :: handle
@@ -3165,7 +3165,7 @@ contains
     function rocblas_scasum_64_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_scasum_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_scasum_64_fortran
         type(c_ptr), value :: handle
@@ -3181,7 +3181,7 @@ contains
     function rocblas_dzasum_64_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_dzasum_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dzasum_64_fortran
         type(c_ptr), value :: handle
@@ -3198,7 +3198,7 @@ contains
     function rocblas_sasum_batched_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_sasum_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sasum_batched_fortran
         type(c_ptr), value :: handle
@@ -3215,7 +3215,7 @@ contains
     function rocblas_dasum_batched_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_dasum_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dasum_batched_fortran
         type(c_ptr), value :: handle
@@ -3232,7 +3232,7 @@ contains
     function rocblas_scasum_batched_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_scasum_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_scasum_batched_fortran
         type(c_ptr), value :: handle
@@ -3249,7 +3249,7 @@ contains
     function rocblas_dzasum_batched_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_dzasum_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dzasum_batched_fortran
         type(c_ptr), value :: handle
@@ -3267,7 +3267,7 @@ contains
     function rocblas_sasum_batched_64_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_sasum_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sasum_batched_64_fortran
         type(c_ptr), value :: handle
@@ -3284,7 +3284,7 @@ contains
     function rocblas_dasum_batched_64_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_dasum_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dasum_batched_64_fortran
         type(c_ptr), value :: handle
@@ -3301,7 +3301,7 @@ contains
     function rocblas_scasum_batched_64_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_scasum_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_scasum_batched_64_fortran
         type(c_ptr), value :: handle
@@ -3318,7 +3318,7 @@ contains
     function rocblas_dzasum_batched_64_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_dzasum_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dzasum_batched_64_fortran
         type(c_ptr), value :: handle
@@ -3336,7 +3336,7 @@ contains
     function rocblas_sasum_strided_batched_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_sasum_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sasum_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -3354,7 +3354,7 @@ contains
     function rocblas_dasum_strided_batched_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_dasum_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dasum_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -3372,7 +3372,7 @@ contains
     function rocblas_scasum_strided_batched_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_scasum_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_scasum_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -3390,7 +3390,7 @@ contains
     function rocblas_dzasum_strided_batched_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_dzasum_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dzasum_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -3409,7 +3409,7 @@ contains
     function rocblas_sasum_strided_batched_64_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_sasum_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sasum_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -3427,7 +3427,7 @@ contains
     function rocblas_dasum_strided_batched_64_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_dasum_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dasum_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -3445,7 +3445,7 @@ contains
     function rocblas_scasum_strided_batched_64_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_scasum_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_scasum_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -3463,7 +3463,7 @@ contains
     function rocblas_dzasum_strided_batched_64_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_dzasum_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dzasum_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -3482,7 +3482,7 @@ contains
     function rocblas_snrm2_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_snrm2_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_snrm2_fortran
         type(c_ptr), value :: handle
@@ -3498,7 +3498,7 @@ contains
     function rocblas_dnrm2_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_dnrm2_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dnrm2_fortran
         type(c_ptr), value :: handle
@@ -3514,7 +3514,7 @@ contains
     function rocblas_scnrm2_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_scnrm2_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_scnrm2_fortran
         type(c_ptr), value :: handle
@@ -3530,7 +3530,7 @@ contains
     function rocblas_dznrm2_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_dznrm2_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dznrm2_fortran
         type(c_ptr), value :: handle
@@ -3547,7 +3547,7 @@ contains
     function rocblas_snrm2_64_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_snrm2_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_snrm2_64_fortran
         type(c_ptr), value :: handle
@@ -3563,7 +3563,7 @@ contains
     function rocblas_dnrm2_64_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_dnrm2_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dnrm2_64_fortran
         type(c_ptr), value :: handle
@@ -3579,7 +3579,7 @@ contains
     function rocblas_scnrm2_64_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_scnrm2_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_scnrm2_64_fortran
         type(c_ptr), value :: handle
@@ -3595,7 +3595,7 @@ contains
     function rocblas_dznrm2_64_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_dznrm2_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dznrm2_64_fortran
         type(c_ptr), value :: handle
@@ -3612,7 +3612,7 @@ contains
     function rocblas_snrm2_batched_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_snrm2_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_snrm2_batched_fortran
         type(c_ptr), value :: handle
@@ -3629,7 +3629,7 @@ contains
     function rocblas_dnrm2_batched_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_dnrm2_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dnrm2_batched_fortran
         type(c_ptr), value :: handle
@@ -3646,7 +3646,7 @@ contains
     function rocblas_scnrm2_batched_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_scnrm2_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_scnrm2_batched_fortran
         type(c_ptr), value :: handle
@@ -3663,7 +3663,7 @@ contains
     function rocblas_dznrm2_batched_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_dznrm2_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dznrm2_batched_fortran
         type(c_ptr), value :: handle
@@ -3681,7 +3681,7 @@ contains
     function rocblas_snrm2_batched_64_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_snrm2_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_snrm2_batched_64_fortran
         type(c_ptr), value :: handle
@@ -3698,7 +3698,7 @@ contains
     function rocblas_dnrm2_batched_64_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_dnrm2_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dnrm2_batched_64_fortran
         type(c_ptr), value :: handle
@@ -3715,7 +3715,7 @@ contains
     function rocblas_scnrm2_batched_64_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_scnrm2_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_scnrm2_batched_64_fortran
         type(c_ptr), value :: handle
@@ -3732,7 +3732,7 @@ contains
     function rocblas_dznrm2_batched_64_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_dznrm2_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dznrm2_batched_64_fortran
         type(c_ptr), value :: handle
@@ -3750,7 +3750,7 @@ contains
     function rocblas_snrm2_strided_batched_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_snrm2_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_snrm2_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -3768,7 +3768,7 @@ contains
     function rocblas_dnrm2_strided_batched_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_dnrm2_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dnrm2_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -3786,7 +3786,7 @@ contains
     function rocblas_scnrm2_strided_batched_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_scnrm2_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_scnrm2_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -3804,7 +3804,7 @@ contains
     function rocblas_dznrm2_strided_batched_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_dznrm2_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dznrm2_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -3823,7 +3823,7 @@ contains
     function rocblas_snrm2_strided_batched_64_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_snrm2_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_snrm2_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -3841,7 +3841,7 @@ contains
     function rocblas_dnrm2_strided_batched_64_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_dnrm2_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dnrm2_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -3859,7 +3859,7 @@ contains
     function rocblas_scnrm2_strided_batched_64_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_scnrm2_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_scnrm2_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -3877,7 +3877,7 @@ contains
     function rocblas_dznrm2_strided_batched_64_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_dznrm2_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dznrm2_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -3896,7 +3896,7 @@ contains
     function rocblas_isamax_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_isamax_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_isamax_fortran
         type(c_ptr), value :: handle
@@ -3912,7 +3912,7 @@ contains
     function rocblas_idamax_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_idamax_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_idamax_fortran
         type(c_ptr), value :: handle
@@ -3928,7 +3928,7 @@ contains
     function rocblas_icamax_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_icamax_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_icamax_fortran
         type(c_ptr), value :: handle
@@ -3944,7 +3944,7 @@ contains
     function rocblas_izamax_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_izamax_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_izamax_fortran
         type(c_ptr), value :: handle
@@ -3961,7 +3961,7 @@ contains
     function rocblas_isamax_64_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_isamax_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_isamax_64_fortran
         type(c_ptr), value :: handle
@@ -3977,7 +3977,7 @@ contains
     function rocblas_idamax_64_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_idamax_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_idamax_64_fortran
         type(c_ptr), value :: handle
@@ -3993,7 +3993,7 @@ contains
     function rocblas_icamax_64_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_icamax_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_icamax_64_fortran
         type(c_ptr), value :: handle
@@ -4009,7 +4009,7 @@ contains
     function rocblas_izamax_64_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_izamax_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_izamax_64_fortran
         type(c_ptr), value :: handle
@@ -4026,7 +4026,7 @@ contains
     function rocblas_isamax_batched_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_isamax_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_isamax_batched_fortran
         type(c_ptr), value :: handle
@@ -4043,7 +4043,7 @@ contains
     function rocblas_idamax_batched_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_idamax_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_idamax_batched_fortran
         type(c_ptr), value :: handle
@@ -4060,7 +4060,7 @@ contains
     function rocblas_icamax_batched_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_icamax_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_icamax_batched_fortran
         type(c_ptr), value :: handle
@@ -4077,7 +4077,7 @@ contains
     function rocblas_izamax_batched_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_izamax_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_izamax_batched_fortran
         type(c_ptr), value :: handle
@@ -4095,7 +4095,7 @@ contains
     function rocblas_isamax_batched_64_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_isamax_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_isamax_batched_64_fortran
         type(c_ptr), value :: handle
@@ -4112,7 +4112,7 @@ contains
     function rocblas_idamax_batched_64_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_idamax_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_idamax_batched_64_fortran
         type(c_ptr), value :: handle
@@ -4129,7 +4129,7 @@ contains
     function rocblas_icamax_batched_64_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_icamax_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_icamax_batched_64_fortran
         type(c_ptr), value :: handle
@@ -4146,7 +4146,7 @@ contains
     function rocblas_izamax_batched_64_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_izamax_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_izamax_batched_64_fortran
         type(c_ptr), value :: handle
@@ -4164,7 +4164,7 @@ contains
     function rocblas_isamax_strided_batched_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_isamax_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_isamax_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -4182,7 +4182,7 @@ contains
     function rocblas_idamax_strided_batched_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_idamax_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_idamax_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -4200,7 +4200,7 @@ contains
     function rocblas_icamax_strided_batched_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_icamax_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_icamax_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -4218,7 +4218,7 @@ contains
     function rocblas_izamax_strided_batched_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_izamax_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_izamax_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -4237,7 +4237,7 @@ contains
     function rocblas_isamax_strided_batched_64_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_isamax_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_isamax_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -4255,7 +4255,7 @@ contains
     function rocblas_idamax_strided_batched_64_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_idamax_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_idamax_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -4273,7 +4273,7 @@ contains
     function rocblas_icamax_strided_batched_64_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_icamax_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_icamax_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -4291,7 +4291,7 @@ contains
     function rocblas_izamax_strided_batched_64_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_izamax_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_izamax_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -4310,7 +4310,7 @@ contains
     function rocblas_isamin_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_isamin_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_isamin_fortran
         type(c_ptr), value :: handle
@@ -4326,7 +4326,7 @@ contains
     function rocblas_idamin_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_idamin_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_idamin_fortran
         type(c_ptr), value :: handle
@@ -4342,7 +4342,7 @@ contains
     function rocblas_icamin_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_icamin_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_icamin_fortran
         type(c_ptr), value :: handle
@@ -4358,7 +4358,7 @@ contains
     function rocblas_izamin_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_izamin_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_izamin_fortran
         type(c_ptr), value :: handle
@@ -4375,7 +4375,7 @@ contains
     function rocblas_isamin_64_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_isamin_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_isamin_64_fortran
         type(c_ptr), value :: handle
@@ -4391,7 +4391,7 @@ contains
     function rocblas_idamin_64_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_idamin_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_idamin_64_fortran
         type(c_ptr), value :: handle
@@ -4407,7 +4407,7 @@ contains
     function rocblas_icamin_64_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_icamin_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_icamin_64_fortran
         type(c_ptr), value :: handle
@@ -4423,7 +4423,7 @@ contains
     function rocblas_izamin_64_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_izamin_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_izamin_64_fortran
         type(c_ptr), value :: handle
@@ -4440,7 +4440,7 @@ contains
     function rocblas_isamin_batched_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_isamin_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_isamin_batched_fortran
         type(c_ptr), value :: handle
@@ -4457,7 +4457,7 @@ contains
     function rocblas_idamin_batched_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_idamin_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_idamin_batched_fortran
         type(c_ptr), value :: handle
@@ -4474,7 +4474,7 @@ contains
     function rocblas_icamin_batched_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_icamin_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_icamin_batched_fortran
         type(c_ptr), value :: handle
@@ -4491,7 +4491,7 @@ contains
     function rocblas_izamin_batched_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_izamin_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_izamin_batched_fortran
         type(c_ptr), value :: handle
@@ -4509,7 +4509,7 @@ contains
     function rocblas_isamin_batched_64_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_isamin_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_isamin_batched_64_fortran
         type(c_ptr), value :: handle
@@ -4526,7 +4526,7 @@ contains
     function rocblas_idamin_batched_64_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_idamin_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_idamin_batched_64_fortran
         type(c_ptr), value :: handle
@@ -4543,7 +4543,7 @@ contains
     function rocblas_icamin_batched_64_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_icamin_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_icamin_batched_64_fortran
         type(c_ptr), value :: handle
@@ -4560,7 +4560,7 @@ contains
     function rocblas_izamin_batched_64_fortran(handle, n, x, incx, batch_count, result) &
         bind(c, name='rocblas_izamin_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_izamin_batched_64_fortran
         type(c_ptr), value :: handle
@@ -4578,7 +4578,7 @@ contains
     function rocblas_isamin_strided_batched_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_isamin_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_isamin_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -4596,7 +4596,7 @@ contains
     function rocblas_idamin_strided_batched_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_idamin_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_idamin_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -4614,7 +4614,7 @@ contains
     function rocblas_icamin_strided_batched_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_icamin_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_icamin_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -4632,7 +4632,7 @@ contains
     function rocblas_izamin_strided_batched_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_izamin_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_izamin_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -4651,7 +4651,7 @@ contains
     function rocblas_isamin_strided_batched_64_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_isamin_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_isamin_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -4669,7 +4669,7 @@ contains
     function rocblas_idamin_strided_batched_64_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_idamin_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_idamin_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -4687,7 +4687,7 @@ contains
     function rocblas_icamin_strided_batched_64_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_icamin_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_icamin_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -4705,7 +4705,7 @@ contains
     function rocblas_izamin_strided_batched_64_fortran(handle, n, x, incx, stride_x, batch_count, result) &
         bind(c, name='rocblas_izamin_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_izamin_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -4724,7 +4724,7 @@ contains
     function rocblas_srot_fortran(handle, n, x, incx, y, incy, c, s) &
         bind(c, name='rocblas_srot_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_srot_fortran
         type(c_ptr), value :: handle
@@ -4743,7 +4743,7 @@ contains
     function rocblas_drot_fortran(handle, n, x, incx, y, incy, c, s) &
         bind(c, name='rocblas_drot_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_drot_fortran
         type(c_ptr), value :: handle
@@ -4762,7 +4762,7 @@ contains
     function rocblas_crot_fortran(handle, n, x, incx, y, incy, c, s) &
         bind(c, name='rocblas_crot_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_crot_fortran
         type(c_ptr), value :: handle
@@ -4781,7 +4781,7 @@ contains
     function rocblas_csrot_fortran(handle, n, x, incx, y, incy, c, s) &
         bind(c, name='rocblas_csrot_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csrot_fortran
         type(c_ptr), value :: handle
@@ -4800,7 +4800,7 @@ contains
     function rocblas_zrot_fortran(handle, n, x, incx, y, incy, c, s) &
         bind(c, name='rocblas_zrot_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zrot_fortran
         type(c_ptr), value :: handle
@@ -4819,7 +4819,7 @@ contains
     function rocblas_zdrot_fortran(handle, n, x, incx, y, incy, c, s) &
         bind(c, name='rocblas_zdrot_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdrot_fortran
         type(c_ptr), value :: handle
@@ -4839,7 +4839,7 @@ contains
     function rocblas_srot_64_fortran(handle, n, x, incx, y, incy, c, s) &
         bind(c, name='rocblas_srot_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_srot_64_fortran
         type(c_ptr), value :: handle
@@ -4858,7 +4858,7 @@ contains
     function rocblas_drot_64_fortran(handle, n, x, incx, y, incy, c, s) &
         bind(c, name='rocblas_drot_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_drot_64_fortran
         type(c_ptr), value :: handle
@@ -4877,7 +4877,7 @@ contains
     function rocblas_crot_64_fortran(handle, n, x, incx, y, incy, c, s) &
         bind(c, name='rocblas_crot_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_crot_64_fortran
         type(c_ptr), value :: handle
@@ -4896,7 +4896,7 @@ contains
     function rocblas_csrot_64_fortran(handle, n, x, incx, y, incy, c, s) &
         bind(c, name='rocblas_csrot_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csrot_64_fortran
         type(c_ptr), value :: handle
@@ -4915,7 +4915,7 @@ contains
     function rocblas_zrot_64_fortran(handle, n, x, incx, y, incy, c, s) &
         bind(c, name='rocblas_zrot_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zrot_64_fortran
         type(c_ptr), value :: handle
@@ -4934,7 +4934,7 @@ contains
     function rocblas_zdrot_64_fortran(handle, n, x, incx, y, incy, c, s) &
         bind(c, name='rocblas_zdrot_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdrot_64_fortran
         type(c_ptr), value :: handle
@@ -4956,7 +4956,7 @@ contains
     function rocblas_srot_batched_fortran(handle, n, x, incx, y, incy, c, s, batch_count) &
         bind(c, name='rocblas_srot_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_srot_batched_fortran
         type(c_ptr), value :: handle
@@ -4976,7 +4976,7 @@ contains
     function rocblas_drot_batched_fortran(handle, n, x, incx, y, incy, c, s, batch_count) &
         bind(c, name='rocblas_drot_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_drot_batched_fortran
         type(c_ptr), value :: handle
@@ -4996,7 +4996,7 @@ contains
     function rocblas_crot_batched_fortran(handle, n, x, incx, y, incy, c, s, batch_count) &
         bind(c, name='rocblas_crot_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_crot_batched_fortran
         type(c_ptr), value :: handle
@@ -5016,7 +5016,7 @@ contains
     function rocblas_csrot_batched_fortran(handle, n, x, incx, y, incy, c, s, batch_count) &
         bind(c, name='rocblas_csrot_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csrot_batched_fortran
         type(c_ptr), value :: handle
@@ -5036,7 +5036,7 @@ contains
     function rocblas_zrot_batched_fortran(handle, n, x, incx, y, incy, c, s, batch_count) &
         bind(c, name='rocblas_zrot_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zrot_batched_fortran
         type(c_ptr), value :: handle
@@ -5056,7 +5056,7 @@ contains
     function rocblas_zdrot_batched_fortran(handle, n, x, incx, y, incy, c, s, batch_count) &
         bind(c, name='rocblas_zdrot_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdrot_batched_fortran
         type(c_ptr), value :: handle
@@ -5079,7 +5079,7 @@ contains
     function rocblas_srot_batched_64_fortran(handle, n, x, incx, y, incy, c, s, batch_count) &
         bind(c, name='rocblas_srot_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_srot_batched_64_fortran
         type(c_ptr), value :: handle
@@ -5099,7 +5099,7 @@ contains
     function rocblas_drot_batched_64_fortran(handle, n, x, incx, y, incy, c, s, batch_count) &
         bind(c, name='rocblas_drot_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_drot_batched_64_fortran
         type(c_ptr), value :: handle
@@ -5119,7 +5119,7 @@ contains
     function rocblas_crot_batched_64_fortran(handle, n, x, incx, y, incy, c, s, batch_count) &
         bind(c, name='rocblas_crot_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_crot_batched_64_fortran
         type(c_ptr), value :: handle
@@ -5139,7 +5139,7 @@ contains
     function rocblas_csrot_batched_64_fortran(handle, n, x, incx, y, incy, c, s, batch_count) &
         bind(c, name='rocblas_csrot_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csrot_batched_64_fortran
         type(c_ptr), value :: handle
@@ -5159,7 +5159,7 @@ contains
     function rocblas_zrot_batched_64_fortran(handle, n, x, incx, y, incy, c, s, batch_count) &
         bind(c, name='rocblas_zrot_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zrot_batched_64_fortran
         type(c_ptr), value :: handle
@@ -5179,7 +5179,7 @@ contains
     function rocblas_zdrot_batched_64_fortran(handle, n, x, incx, y, incy, c, s, batch_count) &
         bind(c, name='rocblas_zdrot_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdrot_batched_64_fortran
         type(c_ptr), value :: handle
@@ -5200,7 +5200,7 @@ contains
     function rocblas_srot_strided_batched_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, c, s, batch_count) &
         bind(c, name='rocblas_srot_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_srot_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -5222,7 +5222,7 @@ contains
     function rocblas_drot_strided_batched_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, c, s, batch_count) &
         bind(c, name='rocblas_drot_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_drot_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -5244,7 +5244,7 @@ contains
     function rocblas_crot_strided_batched_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, c, s, batch_count) &
         bind(c, name='rocblas_crot_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_crot_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -5266,7 +5266,7 @@ contains
     function rocblas_csrot_strided_batched_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, c, s, batch_count) &
         bind(c, name='rocblas_csrot_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csrot_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -5288,7 +5288,7 @@ contains
     function rocblas_zrot_strided_batched_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, c, s, batch_count) &
         bind(c, name='rocblas_zrot_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zrot_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -5310,7 +5310,7 @@ contains
     function rocblas_zdrot_strided_batched_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, c, s, batch_count) &
         bind(c, name='rocblas_zdrot_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdrot_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -5334,7 +5334,7 @@ contains
     function rocblas_srot_strided_batched_64_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, c, s, batch_count) &
         bind(c, name='rocblas_srot_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_srot_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -5356,7 +5356,7 @@ contains
     function rocblas_drot_strided_batched_64_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, c, s, batch_count) &
         bind(c, name='rocblas_drot_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_drot_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -5378,7 +5378,7 @@ contains
     function rocblas_crot_strided_batched_64_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, c, s, batch_count) &
         bind(c, name='rocblas_crot_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_crot_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -5400,7 +5400,7 @@ contains
     function rocblas_csrot_strided_batched_64_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, c, s, batch_count) &
         bind(c, name='rocblas_csrot_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csrot_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -5422,7 +5422,7 @@ contains
     function rocblas_zrot_strided_batched_64_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, c, s, batch_count) &
         bind(c, name='rocblas_zrot_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zrot_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -5444,7 +5444,7 @@ contains
     function rocblas_zdrot_strided_batched_64_fortran(handle, n, x, incx, stride_x, y, incy, stride_y, c, s, batch_count) &
         bind(c, name='rocblas_zdrot_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdrot_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -5467,7 +5467,7 @@ contains
     function rocblas_srotg_fortran(handle, a, b, c, s) &
         bind(c, name='rocblas_srotg_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_srotg_fortran
         type(c_ptr), value :: handle
@@ -5483,7 +5483,7 @@ contains
     function rocblas_drotg_fortran(handle, a, b, c, s) &
         bind(c, name='rocblas_drotg_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_drotg_fortran
         type(c_ptr), value :: handle
@@ -5499,7 +5499,7 @@ contains
     function rocblas_crotg_fortran(handle, a, b, c, s) &
         bind(c, name='rocblas_crotg_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_crotg_fortran
         type(c_ptr), value :: handle
@@ -5515,7 +5515,7 @@ contains
     function rocblas_zrotg_fortran(handle, a, b, c, s) &
         bind(c, name='rocblas_zrotg_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zrotg_fortran
         type(c_ptr), value :: handle
@@ -5532,7 +5532,7 @@ contains
     function rocblas_srotg_64_fortran(handle, a, b, c, s) &
         bind(c, name='rocblas_srotg_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_srotg_64_fortran
         type(c_ptr), value :: handle
@@ -5548,7 +5548,7 @@ contains
     function rocblas_drotg_64_fortran(handle, a, b, c, s) &
         bind(c, name='rocblas_drotg_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_drotg_64_fortran
         type(c_ptr), value :: handle
@@ -5564,7 +5564,7 @@ contains
     function rocblas_crotg_64_fortran(handle, a, b, c, s) &
         bind(c, name='rocblas_crotg_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_crotg_64_fortran
         type(c_ptr), value :: handle
@@ -5580,7 +5580,7 @@ contains
     function rocblas_zrotg_64_fortran(handle, a, b, c, s) &
         bind(c, name='rocblas_zrotg_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zrotg_64_fortran
         type(c_ptr), value :: handle
@@ -5597,7 +5597,7 @@ contains
     function rocblas_srotg_batched_fortran(handle, a, b, c, s, batch_count) &
         bind(c, name='rocblas_srotg_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_srotg_batched_fortran
         type(c_ptr), value :: handle
@@ -5614,7 +5614,7 @@ contains
     function rocblas_drotg_batched_fortran(handle, a, b, c, s, batch_count) &
         bind(c, name='rocblas_drotg_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_drotg_batched_fortran
         type(c_ptr), value :: handle
@@ -5631,7 +5631,7 @@ contains
     function rocblas_crotg_batched_fortran(handle, a, b, c, s, batch_count) &
         bind(c, name='rocblas_crotg_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_crotg_batched_fortran
         type(c_ptr), value :: handle
@@ -5648,7 +5648,7 @@ contains
     function rocblas_zrotg_batched_fortran(handle, a, b, c, s, batch_count) &
         bind(c, name='rocblas_zrotg_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zrotg_batched_fortran
         type(c_ptr), value :: handle
@@ -5666,7 +5666,7 @@ contains
     function rocblas_srotg_batched_64_fortran(handle, a, b, c, s, batch_count) &
         bind(c, name='rocblas_srotg_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_srotg_batched_64_fortran
         type(c_ptr), value :: handle
@@ -5683,7 +5683,7 @@ contains
     function rocblas_drotg_batched_64_fortran(handle, a, b, c, s, batch_count) &
         bind(c, name='rocblas_drotg_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_drotg_batched_64_fortran
         type(c_ptr), value :: handle
@@ -5700,7 +5700,7 @@ contains
     function rocblas_crotg_batched_64_fortran(handle, a, b, c, s, batch_count) &
         bind(c, name='rocblas_crotg_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_crotg_batched_64_fortran
         type(c_ptr), value :: handle
@@ -5717,7 +5717,7 @@ contains
     function rocblas_zrotg_batched_64_fortran(handle, a, b, c, s, batch_count) &
         bind(c, name='rocblas_zrotg_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zrotg_batched_64_fortran
         type(c_ptr), value :: handle
@@ -5735,7 +5735,7 @@ contains
     function rocblas_srotg_strided_batched_fortran(handle, a, stride_a, b, stride_b, c, stride_c, s, stride_s, batch_count) &
         bind(c, name='rocblas_srotg_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_srotg_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -5756,7 +5756,7 @@ contains
     function rocblas_drotg_strided_batched_fortran(handle, a, stride_a, b, stride_b, c, stride_c, s, stride_s, batch_count) &
         bind(c, name='rocblas_drotg_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_drotg_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -5777,7 +5777,7 @@ contains
     function rocblas_crotg_strided_batched_fortran(handle, a, stride_a, b, stride_b, c, stride_c, s, stride_s, batch_count) &
         bind(c, name='rocblas_crotg_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_crotg_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -5798,7 +5798,7 @@ contains
     function rocblas_zrotg_strided_batched_fortran(handle, a, stride_a, b, stride_b, c, stride_c, s, stride_s, batch_count) &
         bind(c, name='rocblas_zrotg_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zrotg_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -5820,7 +5820,7 @@ contains
     function rocblas_srotg_strided_batched_64_fortran(handle, a, stride_a, b, stride_b, c, stride_c, s, stride_s, batch_count) &
         bind(c, name='rocblas_srotg_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_srotg_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -5841,7 +5841,7 @@ contains
     function rocblas_drotg_strided_batched_64_fortran(handle, a, stride_a, b, stride_b, c, stride_c, s, stride_s, batch_count) &
         bind(c, name='rocblas_drotg_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_drotg_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -5862,7 +5862,7 @@ contains
     function rocblas_crotg_strided_batched_64_fortran(handle, a, stride_a, b, stride_b, c, stride_c, s, stride_s, batch_count) &
         bind(c, name='rocblas_crotg_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_crotg_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -5883,7 +5883,7 @@ contains
     function rocblas_zrotg_strided_batched_64_fortran(handle, a, stride_a, b, stride_b, c, stride_c, s, stride_s, batch_count) &
         bind(c, name='rocblas_zrotg_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zrotg_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -5905,7 +5905,7 @@ contains
     function rocblas_srotm_fortran(handle, n, x, incx, y, incy, param) &
         bind(c, name='rocblas_srotm_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_srotm_fortran
         type(c_ptr), value :: handle
@@ -5923,7 +5923,7 @@ contains
     function rocblas_drotm_fortran(handle, n, x, incx, y, incy, param) &
         bind(c, name='rocblas_drotm_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_drotm_fortran
         type(c_ptr), value :: handle
@@ -5942,7 +5942,7 @@ contains
     function rocblas_srotm_64_fortran(handle, n, x, incx, y, incy, param) &
         bind(c, name='rocblas_srotm_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_srotm_64_fortran
         type(c_ptr), value :: handle
@@ -5960,7 +5960,7 @@ contains
     function rocblas_drotm_64_fortran(handle, n, x, incx, y, incy, param) &
         bind(c, name='rocblas_drotm_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_drotm_64_fortran
         type(c_ptr), value :: handle
@@ -5979,7 +5979,7 @@ contains
     function rocblas_srotm_batched_fortran(handle, n, x, incx, y, incy, param, batch_count) &
         bind(c, name='rocblas_srotm_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_srotm_batched_fortran
         type(c_ptr), value :: handle
@@ -5998,7 +5998,7 @@ contains
     function rocblas_drotm_batched_fortran(handle, n, x, incx, y, incy, param, batch_count) &
         bind(c, name='rocblas_drotm_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_drotm_batched_fortran
         type(c_ptr), value :: handle
@@ -6018,7 +6018,7 @@ contains
     function rocblas_srotm_batched_64_fortran(handle, n, x, incx, y, incy, param, batch_count) &
         bind(c, name='rocblas_srotm_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_srotm_batched_64_fortran
         type(c_ptr), value :: handle
@@ -6037,7 +6037,7 @@ contains
     function rocblas_drotm_batched_64_fortran(handle, n, x, incx, y, incy, param, batch_count) &
         bind(c, name='rocblas_drotm_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_drotm_batched_64_fortran
         type(c_ptr), value :: handle
@@ -6058,7 +6058,7 @@ contains
                                                    stride_param, batch_count) &
         bind(c, name='rocblas_srotm_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_srotm_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -6082,7 +6082,7 @@ contains
                                                    stride_param, batch_count) &
         bind(c, name='rocblas_drotm_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_drotm_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -6107,7 +6107,7 @@ contains
                                                    stride_param, batch_count) &
         bind(c, name='rocblas_srotm_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_srotm_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -6131,7 +6131,7 @@ contains
                                                    stride_param, batch_count) &
         bind(c, name='rocblas_drotm_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_drotm_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -6155,7 +6155,7 @@ contains
     function rocblas_srotmg_fortran(handle, d1, d2, x1, y1, param) &
         bind(c, name='rocblas_srotmg_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_srotmg_fortran
         type(c_ptr), value :: handle
@@ -6172,7 +6172,7 @@ contains
     function rocblas_drotmg_fortran(handle, d1, d2, x1, y1, param) &
         bind(c, name='rocblas_drotmg_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_drotmg_fortran
         type(c_ptr), value :: handle
@@ -6190,7 +6190,7 @@ contains
     function rocblas_srotmg_64_fortran(handle, d1, d2, x1, y1, param) &
         bind(c, name='rocblas_srotmg_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_srotmg_64_fortran
         type(c_ptr), value :: handle
@@ -6207,7 +6207,7 @@ contains
     function rocblas_drotmg_64_fortran(handle, d1, d2, x1, y1, param) &
         bind(c, name='rocblas_drotmg_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_drotmg_64_fortran
         type(c_ptr), value :: handle
@@ -6225,7 +6225,7 @@ contains
     function rocblas_srotmg_batched_fortran(handle, d1, d2, x1, y1, param, batch_count) &
         bind(c, name='rocblas_srotmg_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_srotmg_batched_fortran
         type(c_ptr), value :: handle
@@ -6243,7 +6243,7 @@ contains
     function rocblas_drotmg_batched_fortran(handle, d1, d2, x1, y1, param, batch_count) &
         bind(c, name='rocblas_drotmg_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_drotmg_batched_fortran
         type(c_ptr), value :: handle
@@ -6262,7 +6262,7 @@ contains
     function rocblas_srotmg_batched_64_fortran(handle, d1, d2, x1, y1, param, batch_count) &
         bind(c, name='rocblas_srotmg_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_srotmg_batched_64_fortran
         type(c_ptr), value :: handle
@@ -6280,7 +6280,7 @@ contains
     function rocblas_drotmg_batched_64_fortran(handle, d1, d2, x1, y1, param, batch_count) &
         bind(c, name='rocblas_drotmg_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_drotmg_batched_64_fortran
         type(c_ptr), value :: handle
@@ -6300,7 +6300,7 @@ contains
                                                     y1, stride_y1, param, stride_param, batch_count) &
         bind(c, name='rocblas_srotmg_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_srotmg_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -6325,7 +6325,7 @@ contains
                                                     y1, stride_y1, param, stride_param, batch_count) &
         bind(c, name='rocblas_drotmg_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_drotmg_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -6351,7 +6351,7 @@ contains
                                                     y1, stride_y1, param, stride_param, batch_count) &
         bind(c, name='rocblas_srotmg_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_srotmg_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -6376,7 +6376,7 @@ contains
                                                     y1, stride_y1, param, stride_param, batch_count) &
         bind(c, name='rocblas_drotmg_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_drotmg_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -6406,7 +6406,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_strsv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_strsv_fortran
         type(c_ptr), value :: handle
@@ -6427,7 +6427,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_dtrsv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtrsv_fortran
         type(c_ptr), value :: handle
@@ -6448,7 +6448,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_ctrsv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctrsv_fortran
         type(c_ptr), value :: handle
@@ -6469,7 +6469,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_ztrsv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztrsv_fortran
         type(c_ptr), value :: handle
@@ -6491,7 +6491,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_strsv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_strsv_64_fortran
         type(c_ptr), value :: handle
@@ -6512,7 +6512,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_dtrsv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtrsv_64_fortran
         type(c_ptr), value :: handle
@@ -6533,7 +6533,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_ctrsv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctrsv_64_fortran
         type(c_ptr), value :: handle
@@ -6554,7 +6554,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_ztrsv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztrsv_64_fortran
         type(c_ptr), value :: handle
@@ -6576,7 +6576,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_strsv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_strsv_batched_fortran
         type(c_ptr), value :: handle
@@ -6598,7 +6598,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_dtrsv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtrsv_batched_fortran
         type(c_ptr), value :: handle
@@ -6620,7 +6620,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_ctrsv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctrsv_batched_fortran
         type(c_ptr), value :: handle
@@ -6642,7 +6642,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_ztrsv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztrsv_batched_fortran
         type(c_ptr), value :: handle
@@ -6665,7 +6665,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_strsv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_strsv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -6687,7 +6687,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_dtrsv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtrsv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -6709,7 +6709,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_ctrsv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctrsv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -6731,7 +6731,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_ztrsv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztrsv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -6754,7 +6754,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_strsv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_strsv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -6778,7 +6778,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_dtrsv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtrsv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -6802,7 +6802,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_ctrsv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctrsv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -6826,7 +6826,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_ztrsv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztrsv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -6851,7 +6851,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_strsv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_strsv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -6875,7 +6875,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_dtrsv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtrsv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -6899,7 +6899,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_ctrsv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctrsv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -6923,7 +6923,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_ztrsv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztrsv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -6947,7 +6947,7 @@ contains
     function rocblas_sgbmv_fortran(handle, trans, m, n, kl, ku, alpha, A, lda, x, incx, beta, y, incy) &
         bind(c, name='rocblas_sgbmv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgbmv_fortran
         type(c_ptr), value :: handle
@@ -6971,7 +6971,7 @@ contains
     function rocblas_dgbmv_fortran(handle, trans, m, n, kl, ku, alpha, A, lda, x, incx, beta, y, incy) &
         bind(c, name='rocblas_dgbmv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgbmv_fortran
         type(c_ptr), value :: handle
@@ -6995,7 +6995,7 @@ contains
     function rocblas_cgbmv_fortran(handle, trans, m, n, kl, ku, alpha, A, lda, x, incx, beta, y, incy) &
         bind(c, name='rocblas_cgbmv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgbmv_fortran
         type(c_ptr), value :: handle
@@ -7019,7 +7019,7 @@ contains
     function rocblas_zgbmv_fortran(handle, trans, m, n, kl, ku, alpha, A, lda, x, incx, beta, y, incy) &
         bind(c, name='rocblas_zgbmv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgbmv_fortran
         type(c_ptr), value :: handle
@@ -7044,7 +7044,7 @@ contains
     function rocblas_sgbmv_64_fortran(handle, trans, m, n, kl, ku, alpha, A, lda, x, incx, beta, y, incy) &
         bind(c, name='rocblas_sgbmv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgbmv_64_fortran
         type(c_ptr), value :: handle
@@ -7068,7 +7068,7 @@ contains
     function rocblas_dgbmv_64_fortran(handle, trans, m, n, kl, ku, alpha, A, lda, x, incx, beta, y, incy) &
         bind(c, name='rocblas_dgbmv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgbmv_64_fortran
         type(c_ptr), value :: handle
@@ -7092,7 +7092,7 @@ contains
     function rocblas_cgbmv_64_fortran(handle, trans, m, n, kl, ku, alpha, A, lda, x, incx, beta, y, incy) &
         bind(c, name='rocblas_cgbmv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgbmv_64_fortran
         type(c_ptr), value :: handle
@@ -7116,7 +7116,7 @@ contains
     function rocblas_zgbmv_64_fortran(handle, trans, m, n, kl, ku, alpha, A, lda, x, incx, beta, y, incy) &
         bind(c, name='rocblas_zgbmv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgbmv_64_fortran
         type(c_ptr), value :: handle
@@ -7142,7 +7142,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_sgbmv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgbmv_batched_fortran
         type(c_ptr), value :: handle
@@ -7169,7 +7169,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_dgbmv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgbmv_batched_fortran
         type(c_ptr), value :: handle
@@ -7196,7 +7196,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_cgbmv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgbmv_batched_fortran
         type(c_ptr), value :: handle
@@ -7223,7 +7223,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_zgbmv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgbmv_batched_fortran
         type(c_ptr), value :: handle
@@ -7251,7 +7251,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_sgbmv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgbmv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -7278,7 +7278,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_dgbmv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgbmv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -7305,7 +7305,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_cgbmv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgbmv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -7332,7 +7332,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_zgbmv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgbmv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -7360,7 +7360,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_sgbmv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgbmv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -7390,7 +7390,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_dgbmv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgbmv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -7420,7 +7420,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_cgbmv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgbmv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -7450,7 +7450,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_zgbmv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgbmv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -7481,7 +7481,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_sgbmv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgbmv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -7511,7 +7511,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_dgbmv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgbmv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -7541,7 +7541,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_cgbmv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgbmv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -7571,7 +7571,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_zgbmv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgbmv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -7603,7 +7603,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_sgemv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgemv_fortran
         type(c_ptr), value :: handle
@@ -7626,7 +7626,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_dgemv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgemv_fortran
         type(c_ptr), value :: handle
@@ -7649,7 +7649,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_cgemv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgemv_fortran
         type(c_ptr), value :: handle
@@ -7672,7 +7672,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_zgemv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgemv_fortran
         type(c_ptr), value :: handle
@@ -7696,7 +7696,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_sgemv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgemv_64_fortran
         type(c_ptr), value :: handle
@@ -7719,7 +7719,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_dgemv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgemv_64_fortran
         type(c_ptr), value :: handle
@@ -7742,7 +7742,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_cgemv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgemv_64_fortran
         type(c_ptr), value :: handle
@@ -7765,7 +7765,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_zgemv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgemv_64_fortran
         type(c_ptr), value :: handle
@@ -7789,7 +7789,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_sgemv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgemv_batched_fortran
         type(c_ptr), value :: handle
@@ -7813,7 +7813,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_dgemv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgemv_batched_fortran
         type(c_ptr), value :: handle
@@ -7837,7 +7837,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_cgemv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgemv_batched_fortran
         type(c_ptr), value :: handle
@@ -7861,7 +7861,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_zgemv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgemv_batched_fortran
         type(c_ptr), value :: handle
@@ -7885,7 +7885,7 @@ contains
                                    x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_hshgemv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_hshgemv_batched_fortran
         type(c_ptr), value :: handle
@@ -7909,7 +7909,7 @@ contains
                                    x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_hssgemv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_hssgemv_batched_fortran
         type(c_ptr), value :: handle
@@ -7933,7 +7933,7 @@ contains
                                    x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_tstgemv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_tstgemv_batched_fortran
         type(c_ptr), value :: handle
@@ -7957,7 +7957,7 @@ contains
                                    x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_tssgemv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_tssgemv_batched_fortran
         type(c_ptr), value :: handle
@@ -7982,7 +7982,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_sgemv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgemv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -8006,7 +8006,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_dgemv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgemv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -8030,7 +8030,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_cgemv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgemv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -8054,7 +8054,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_zgemv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgemv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -8078,7 +8078,7 @@ contains
                                    x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_hshgemv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_hshgemv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -8102,7 +8102,7 @@ contains
                                    x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_hssgemv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_hssgemv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -8126,7 +8126,7 @@ contains
                                    x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_tstgemv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_tstgemv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -8150,7 +8150,7 @@ contains
                                    x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_tssgemv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_tssgemv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -8175,7 +8175,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_sgemv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgemv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -8203,7 +8203,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_dgemv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgemv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -8231,7 +8231,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_cgemv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgemv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -8259,7 +8259,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_zgemv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgemv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -8287,7 +8287,7 @@ contains
         x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_hshgemv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_hshgemv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -8315,7 +8315,7 @@ contains
         x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_hssgemv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_hssgemv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -8343,7 +8343,7 @@ contains
         x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_tstgemv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_tstgemv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -8371,7 +8371,7 @@ contains
         x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_tssgemv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_tssgemv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -8400,7 +8400,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_sgemv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgemv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -8428,7 +8428,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_dgemv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgemv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -8456,7 +8456,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_cgemv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgemv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -8484,7 +8484,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_zgemv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgemv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -8512,7 +8512,7 @@ contains
         x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_hshgemv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_hshgemv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -8540,7 +8540,7 @@ contains
         x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_hssgemv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_hssgemv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -8568,7 +8568,7 @@ contains
         x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_tstgemv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_tstgemv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -8596,7 +8596,7 @@ contains
         x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_tssgemv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_tssgemv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -8625,7 +8625,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_chbmv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chbmv_fortran
         type(c_ptr), value :: handle
@@ -8648,7 +8648,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_zhbmv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhbmv_fortran
         type(c_ptr), value :: handle
@@ -8672,7 +8672,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_chbmv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chbmv_64_fortran
         type(c_ptr), value :: handle
@@ -8695,7 +8695,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_zhbmv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhbmv_64_fortran
         type(c_ptr), value :: handle
@@ -8719,7 +8719,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_chbmv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chbmv_batched_fortran
         type(c_ptr), value :: handle
@@ -8744,7 +8744,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_zhbmv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhbmv_batched_fortran
         type(c_ptr), value :: handle
@@ -8770,7 +8770,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_chbmv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chbmv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -8795,7 +8795,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_zhbmv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhbmv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -8821,7 +8821,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_chbmv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chbmv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -8849,7 +8849,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_zhbmv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhbmv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -8878,7 +8878,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_chbmv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chbmv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -8906,7 +8906,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_zhbmv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhbmv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -8935,7 +8935,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_chemv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chemv_fortran
         type(c_ptr), value :: handle
@@ -8957,7 +8957,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_zhemv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhemv_fortran
         type(c_ptr), value :: handle
@@ -8980,7 +8980,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_chemv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chemv_64_fortran
         type(c_ptr), value :: handle
@@ -9002,7 +9002,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_zhemv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhemv_64_fortran
         type(c_ptr), value :: handle
@@ -9025,7 +9025,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_chemv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chemv_batched_fortran
         type(c_ptr), value :: handle
@@ -9049,7 +9049,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_zhemv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhemv_batched_fortran
         type(c_ptr), value :: handle
@@ -9074,7 +9074,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_chemv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chemv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -9098,7 +9098,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_zhemv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhemv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -9123,7 +9123,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_chemv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chemv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -9150,7 +9150,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_zhemv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhemv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -9178,7 +9178,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_chemv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chemv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -9205,7 +9205,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_zhemv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhemv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -9233,7 +9233,7 @@ contains
                                   x, incx, A, lda) &
         bind(c, name='rocblas_cher_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cher_fortran
         type(c_ptr), value :: handle
@@ -9252,7 +9252,7 @@ contains
                                   x, incx, A, lda) &
         bind(c, name='rocblas_zher_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zher_fortran
         type(c_ptr), value :: handle
@@ -9272,7 +9272,7 @@ contains
                                   x, incx, A, lda) &
         bind(c, name='rocblas_cher_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cher_64_fortran
         type(c_ptr), value :: handle
@@ -9291,7 +9291,7 @@ contains
                                   x, incx, A, lda) &
         bind(c, name='rocblas_zher_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zher_64_fortran
         type(c_ptr), value :: handle
@@ -9311,7 +9311,7 @@ contains
                                           x, incx, A, lda, batch_count) &
         bind(c, name='rocblas_cher_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cher_batched_fortran
         type(c_ptr), value :: handle
@@ -9331,7 +9331,7 @@ contains
                                           x, incx, A, lda, batch_count) &
         bind(c, name='rocblas_zher_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zher_batched_fortran
         type(c_ptr), value :: handle
@@ -9352,7 +9352,7 @@ contains
                                              x, incx, A, lda, batch_count) &
         bind(c, name='rocblas_cher_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cher_batched_64_fortran
         type(c_ptr), value :: handle
@@ -9372,7 +9372,7 @@ contains
                                              x, incx, A, lda, batch_count) &
         bind(c, name='rocblas_zher_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zher_batched_64_fortran
         type(c_ptr), value :: handle
@@ -9393,7 +9393,7 @@ contains
                                                   x, incx, stride_x, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_cher_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cher_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -9416,7 +9416,7 @@ contains
                                                   x, incx, stride_x, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_zher_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zher_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -9440,7 +9440,7 @@ contains
                                                      x, incx, stride_x, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_cher_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cher_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -9463,7 +9463,7 @@ contains
                                                      x, incx, stride_x, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_zher_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zher_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -9487,7 +9487,7 @@ contains
                                    x, incx, y, incy, A, lda) &
         bind(c, name='rocblas_cher2_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cher2_fortran
         type(c_ptr), value :: handle
@@ -9509,7 +9509,7 @@ contains
                                    x, incx, y, incy, A, lda) &
         bind(c, name='rocblas_zher2_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zher2_fortran
         type(c_ptr), value :: handle
@@ -9532,7 +9532,7 @@ contains
                                    x, incx, y, incy, A, lda) &
         bind(c, name='rocblas_cher2_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cher2_64_fortran
         type(c_ptr), value :: handle
@@ -9554,7 +9554,7 @@ contains
                                    x, incx, y, incy, A, lda) &
         bind(c, name='rocblas_zher2_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zher2_64_fortran
         type(c_ptr), value :: handle
@@ -9577,7 +9577,7 @@ contains
                                            x, incx, y, incy, A, lda, batch_count) &
         bind(c, name='rocblas_cher2_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cher2_batched_fortran
         type(c_ptr), value :: handle
@@ -9600,7 +9600,7 @@ contains
                                            x, incx, y, incy, A, lda, batch_count) &
         bind(c, name='rocblas_zher2_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zher2_batched_fortran
         type(c_ptr), value :: handle
@@ -9624,7 +9624,7 @@ contains
                                               x, incx, y, incy, A, lda, batch_count) &
         bind(c, name='rocblas_cher2_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cher2_batched_64_fortran
         type(c_ptr), value :: handle
@@ -9647,7 +9647,7 @@ contains
                                               x, incx, y, incy, A, lda, batch_count) &
         bind(c, name='rocblas_zher2_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zher2_batched_64_fortran
         type(c_ptr), value :: handle
@@ -9671,7 +9671,7 @@ contains
                                                    x, incx, stride_x, y, incy, stride_y, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_cher2_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cher2_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -9697,7 +9697,7 @@ contains
                                                    x, incx, stride_x, y, incy, stride_y, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_zher2_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zher2_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -9724,7 +9724,7 @@ contains
                                                       x, incx, stride_x, y, incy, stride_y, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_cher2_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cher2_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -9750,7 +9750,7 @@ contains
                                                       x, incx, stride_x, y, incy, stride_y, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_zher2_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zher2_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -9777,7 +9777,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_chpmv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chpmv_fortran
         type(c_ptr), value :: handle
@@ -9799,7 +9799,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_zhpmv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhpmv_fortran
         type(c_ptr), value :: handle
@@ -9822,7 +9822,7 @@ contains
                                       x, incx, beta, y, incy) &
         bind(c, name='rocblas_chpmv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chpmv_64_fortran
         type(c_ptr), value :: handle
@@ -9844,7 +9844,7 @@ contains
                                       x, incx, beta, y, incy) &
         bind(c, name='rocblas_zhpmv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhpmv_64_fortran
         type(c_ptr), value :: handle
@@ -9867,7 +9867,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_chpmv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chpmv_batched_fortran
         type(c_ptr), value :: handle
@@ -9890,7 +9890,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_zhpmv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhpmv_batched_fortran
         type(c_ptr), value :: handle
@@ -9914,7 +9914,7 @@ contains
                                               x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_chpmv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chpmv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -9937,7 +9937,7 @@ contains
                                               x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_zhpmv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhpmv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -9961,7 +9961,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_chpmv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chpmv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -9987,7 +9987,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_zhpmv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhpmv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -10014,7 +10014,7 @@ contains
                                                       x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_chpmv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chpmv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -10040,7 +10040,7 @@ contains
                                                       x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_zhpmv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhpmv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -10067,7 +10067,7 @@ contains
                                   x, incx, AP) &
         bind(c, name='rocblas_chpr_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chpr_fortran
         type(c_ptr), value :: handle
@@ -10085,7 +10085,7 @@ contains
                                   x, incx, AP) &
         bind(c, name='rocblas_zhpr_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhpr_fortran
         type(c_ptr), value :: handle
@@ -10104,7 +10104,7 @@ contains
                                   x, incx, AP) &
         bind(c, name='rocblas_chpr_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chpr_64_fortran
         type(c_ptr), value :: handle
@@ -10122,7 +10122,7 @@ contains
                                   x, incx, AP) &
         bind(c, name='rocblas_zhpr_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhpr_64_fortran
         type(c_ptr), value :: handle
@@ -10141,7 +10141,7 @@ contains
                                           x, incx, AP, batch_count) &
         bind(c, name='rocblas_chpr_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chpr_batched_fortran
         type(c_ptr), value :: handle
@@ -10160,7 +10160,7 @@ contains
                                           x, incx, AP, batch_count) &
         bind(c, name='rocblas_zhpr_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhpr_batched_fortran
         type(c_ptr), value :: handle
@@ -10180,7 +10180,7 @@ contains
                                           x, incx, AP, batch_count) &
         bind(c, name='rocblas_chpr_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chpr_batched_64_fortran
         type(c_ptr), value :: handle
@@ -10199,7 +10199,7 @@ contains
                                           x, incx, AP, batch_count) &
         bind(c, name='rocblas_zhpr_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhpr_batched_64_fortran
         type(c_ptr), value :: handle
@@ -10219,7 +10219,7 @@ contains
                                                   x, incx, stride_x, AP, stride_AP, batch_count) &
         bind(c, name='rocblas_chpr_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chpr_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -10241,7 +10241,7 @@ contains
                                                   x, incx, stride_x, AP, stride_AP, batch_count) &
         bind(c, name='rocblas_zhpr_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhpr_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -10264,7 +10264,7 @@ contains
                                                   x, incx, stride_x, AP, stride_AP, batch_count) &
         bind(c, name='rocblas_chpr_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chpr_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -10286,7 +10286,7 @@ contains
                                                   x, incx, stride_x, AP, stride_AP, batch_count) &
         bind(c, name='rocblas_zhpr_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhpr_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -10309,7 +10309,7 @@ contains
                                    x, incx, y, incy, AP) &
         bind(c, name='rocblas_chpr2_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chpr2_fortran
         type(c_ptr), value :: handle
@@ -10330,7 +10330,7 @@ contains
                                    x, incx, y, incy, AP) &
         bind(c, name='rocblas_zhpr2_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhpr2_fortran
         type(c_ptr), value :: handle
@@ -10352,7 +10352,7 @@ contains
                                    x, incx, y, incy, AP) &
         bind(c, name='rocblas_chpr2_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chpr2_64_fortran
         type(c_ptr), value :: handle
@@ -10373,7 +10373,7 @@ contains
                                    x, incx, y, incy, AP) &
         bind(c, name='rocblas_zhpr2_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhpr2_64_fortran
         type(c_ptr), value :: handle
@@ -10395,7 +10395,7 @@ contains
                                            x, incx, y, incy, AP, batch_count) &
         bind(c, name='rocblas_chpr2_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chpr2_batched_fortran
         type(c_ptr), value :: handle
@@ -10417,7 +10417,7 @@ contains
                                            x, incx, y, incy, AP, batch_count) &
         bind(c, name='rocblas_zhpr2_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhpr2_batched_fortran
         type(c_ptr), value :: handle
@@ -10440,7 +10440,7 @@ contains
                                               x, incx, y, incy, AP, batch_count) &
         bind(c, name='rocblas_chpr2_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chpr2_batched_64_fortran
         type(c_ptr), value :: handle
@@ -10462,7 +10462,7 @@ contains
                                               x, incx, y, incy, AP, batch_count) &
         bind(c, name='rocblas_zhpr2_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhpr2_batched_64_fortran
         type(c_ptr), value :: handle
@@ -10485,7 +10485,7 @@ contains
                                                    x, incx, stride_x, y, incy, stride_y, AP, stride_AP, batch_count) &
         bind(c, name='rocblas_chpr2_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chpr2_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -10510,7 +10510,7 @@ contains
                                                    x, incx, stride_x, y, incy, stride_y, AP, stride_AP, batch_count) &
         bind(c, name='rocblas_zhpr2_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhpr2_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -10536,7 +10536,7 @@ contains
                                                       x, incx, stride_x, y, incy, stride_y, AP, stride_AP, batch_count) &
         bind(c, name='rocblas_chpr2_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chpr2_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -10561,7 +10561,7 @@ contains
                                                       x, incx, stride_x, y, incy, stride_y, AP, stride_AP, batch_count) &
         bind(c, name='rocblas_zhpr2_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhpr2_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -10587,7 +10587,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_strmv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_strmv_fortran
         type(c_ptr), value :: handle
@@ -10608,7 +10608,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_dtrmv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtrmv_fortran
         type(c_ptr), value :: handle
@@ -10629,7 +10629,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_ctrmv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctrmv_fortran
         type(c_ptr), value :: handle
@@ -10650,7 +10650,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_ztrmv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztrmv_fortran
         type(c_ptr), value :: handle
@@ -10672,7 +10672,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_strmv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_strmv_64_fortran
         type(c_ptr), value :: handle
@@ -10693,7 +10693,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_dtrmv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtrmv_64_fortran
         type(c_ptr), value :: handle
@@ -10714,7 +10714,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_ctrmv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctrmv_64_fortran
         type(c_ptr), value :: handle
@@ -10735,7 +10735,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_ztrmv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztrmv_64_fortran
         type(c_ptr), value :: handle
@@ -10757,7 +10757,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_strmv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_strmv_batched_fortran
         type(c_ptr), value :: handle
@@ -10779,7 +10779,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_dtrmv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtrmv_batched_fortran
         type(c_ptr), value :: handle
@@ -10801,7 +10801,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_ctrmv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctrmv_batched_fortran
         type(c_ptr), value :: handle
@@ -10823,7 +10823,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_ztrmv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztrmv_batched_fortran
         type(c_ptr), value :: handle
@@ -10846,7 +10846,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_strmv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_strmv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -10868,7 +10868,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_dtrmv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtrmv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -10890,7 +10890,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_ctrmv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctrmv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -10912,7 +10912,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_ztrmv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztrmv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -10935,7 +10935,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_strmv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_strmv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -10959,7 +10959,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_dtrmv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtrmv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -10983,7 +10983,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_ctrmv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctrmv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -11007,7 +11007,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_ztrmv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztrmv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -11032,7 +11032,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_strmv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_strmv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -11056,7 +11056,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_dtrmv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtrmv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -11080,7 +11080,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_ctrmv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctrmv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -11104,7 +11104,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_ztrmv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztrmv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -11129,7 +11129,7 @@ contains
                                    AP, x, incx) &
         bind(c, name='rocblas_stpmv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_stpmv_fortran
         type(c_ptr), value :: handle
@@ -11149,7 +11149,7 @@ contains
                                    AP, x, incx) &
         bind(c, name='rocblas_dtpmv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtpmv_fortran
         type(c_ptr), value :: handle
@@ -11169,7 +11169,7 @@ contains
                                    AP, x, incx) &
         bind(c, name='rocblas_ctpmv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctpmv_fortran
         type(c_ptr), value :: handle
@@ -11189,7 +11189,7 @@ contains
                                    AP, x, incx) &
         bind(c, name='rocblas_ztpmv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztpmv_fortran
         type(c_ptr), value :: handle
@@ -11210,7 +11210,7 @@ contains
                                    AP, x, incx) &
         bind(c, name='rocblas_stpmv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_stpmv_64_fortran
         type(c_ptr), value :: handle
@@ -11230,7 +11230,7 @@ contains
                                    AP, x, incx) &
         bind(c, name='rocblas_dtpmv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtpmv_64_fortran
         type(c_ptr), value :: handle
@@ -11250,7 +11250,7 @@ contains
                                    AP, x, incx) &
         bind(c, name='rocblas_ctpmv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctpmv_64_fortran
         type(c_ptr), value :: handle
@@ -11270,7 +11270,7 @@ contains
                                    AP, x, incx) &
         bind(c, name='rocblas_ztpmv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztpmv_64_fortran
         type(c_ptr), value :: handle
@@ -11291,7 +11291,7 @@ contains
                                            AP, x, incx, batch_count) &
         bind(c, name='rocblas_stpmv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_stpmv_batched_fortran
         type(c_ptr), value :: handle
@@ -11312,7 +11312,7 @@ contains
                                            AP, x, incx, batch_count) &
         bind(c, name='rocblas_dtpmv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtpmv_batched_fortran
         type(c_ptr), value :: handle
@@ -11333,7 +11333,7 @@ contains
                                            AP, x, incx, batch_count) &
         bind(c, name='rocblas_ctpmv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctpmv_batched_fortran
         type(c_ptr), value :: handle
@@ -11354,7 +11354,7 @@ contains
                                            AP, x, incx, batch_count) &
         bind(c, name='rocblas_ztpmv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztpmv_batched_fortran
         type(c_ptr), value :: handle
@@ -11376,7 +11376,7 @@ contains
                                            AP, x, incx, batch_count) &
         bind(c, name='rocblas_stpmv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_stpmv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -11397,7 +11397,7 @@ contains
                                            AP, x, incx, batch_count) &
         bind(c, name='rocblas_dtpmv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtpmv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -11418,7 +11418,7 @@ contains
                                            AP, x, incx, batch_count) &
         bind(c, name='rocblas_ctpmv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctpmv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -11439,7 +11439,7 @@ contains
                                            AP, x, incx, batch_count) &
         bind(c, name='rocblas_ztpmv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztpmv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -11461,7 +11461,7 @@ contains
                                                    AP, stride_AP, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_stpmv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_stpmv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -11484,7 +11484,7 @@ contains
                                                    AP, stride_AP, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_dtpmv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtpmv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -11507,7 +11507,7 @@ contains
                                                    AP, stride_AP, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_ctpmv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctpmv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -11530,7 +11530,7 @@ contains
                                                    AP, stride_AP, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_ztpmv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztpmv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -11554,7 +11554,7 @@ contains
                                                    AP, stride_AP, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_stpmv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_stpmv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -11577,7 +11577,7 @@ contains
                                                    AP, stride_AP, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_dtpmv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtpmv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -11600,7 +11600,7 @@ contains
                                                    AP, stride_AP, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_ctpmv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctpmv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -11623,7 +11623,7 @@ contains
                                                    AP, stride_AP, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_ztpmv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztpmv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -11647,7 +11647,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_stbmv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_stbmv_fortran
         type(c_ptr), value :: handle
@@ -11669,7 +11669,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_dtbmv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtbmv_fortran
         type(c_ptr), value :: handle
@@ -11691,7 +11691,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_ctbmv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctbmv_fortran
         type(c_ptr), value :: handle
@@ -11713,7 +11713,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_ztbmv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztbmv_fortran
         type(c_ptr), value :: handle
@@ -11736,7 +11736,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_stbmv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_stbmv_64_fortran
         type(c_ptr), value :: handle
@@ -11758,7 +11758,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_dtbmv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtbmv_64_fortran
         type(c_ptr), value :: handle
@@ -11780,7 +11780,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_ctbmv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctbmv_64_fortran
         type(c_ptr), value :: handle
@@ -11802,7 +11802,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_ztbmv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztbmv_64_fortran
         type(c_ptr), value :: handle
@@ -11825,7 +11825,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_stbmv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_stbmv_batched_fortran
         type(c_ptr), value :: handle
@@ -11848,7 +11848,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_dtbmv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtbmv_batched_fortran
         type(c_ptr), value :: handle
@@ -11871,7 +11871,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_ctbmv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctbmv_batched_fortran
         type(c_ptr), value :: handle
@@ -11894,7 +11894,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_ztbmv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztbmv_batched_fortran
         type(c_ptr), value :: handle
@@ -11918,7 +11918,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_stbmv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_stbmv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -11941,7 +11941,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_dtbmv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtbmv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -11964,7 +11964,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_ctbmv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctbmv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -11987,7 +11987,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_ztbmv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztbmv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -12011,7 +12011,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_stbmv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_stbmv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -12036,7 +12036,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_dtbmv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtbmv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -12061,7 +12061,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_ctbmv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctbmv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -12086,7 +12086,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_ztbmv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztbmv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -12112,7 +12112,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_stbmv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_stbmv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -12137,7 +12137,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_dtbmv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtbmv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -12162,7 +12162,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_ctbmv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctbmv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -12187,7 +12187,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_ztbmv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztbmv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -12213,7 +12213,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_stbsv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_stbsv_fortran
         type(c_ptr), value :: handle
@@ -12235,7 +12235,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_dtbsv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtbsv_fortran
         type(c_ptr), value :: handle
@@ -12257,7 +12257,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_ctbsv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctbsv_fortran
         type(c_ptr), value :: handle
@@ -12279,7 +12279,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_ztbsv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztbsv_fortran
         type(c_ptr), value :: handle
@@ -12302,7 +12302,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_stbsv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_stbsv_64_fortran
         type(c_ptr), value :: handle
@@ -12324,7 +12324,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_dtbsv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtbsv_64_fortran
         type(c_ptr), value :: handle
@@ -12346,7 +12346,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_ctbsv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctbsv_64_fortran
         type(c_ptr), value :: handle
@@ -12368,7 +12368,7 @@ contains
                                    A, lda, x, incx) &
         bind(c, name='rocblas_ztbsv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztbsv_64_fortran
         type(c_ptr), value :: handle
@@ -12391,7 +12391,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_stbsv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_stbsv_batched_fortran
         type(c_ptr), value :: handle
@@ -12414,7 +12414,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_dtbsv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtbsv_batched_fortran
         type(c_ptr), value :: handle
@@ -12437,7 +12437,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_ctbsv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctbsv_batched_fortran
         type(c_ptr), value :: handle
@@ -12460,7 +12460,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_ztbsv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztbsv_batched_fortran
         type(c_ptr), value :: handle
@@ -12484,7 +12484,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_stbsv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_stbsv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -12507,7 +12507,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_dtbsv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtbsv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -12530,7 +12530,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_ctbsv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctbsv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -12553,7 +12553,7 @@ contains
                                            A, lda, x, incx, batch_count) &
         bind(c, name='rocblas_ztbsv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztbsv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -12577,7 +12577,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_stbsv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_stbsv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -12602,7 +12602,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_dtbsv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtbsv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -12627,7 +12627,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_ctbsv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctbsv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -12652,7 +12652,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_ztbsv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztbsv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -12678,7 +12678,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_stbsv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_stbsv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -12703,7 +12703,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_dtbsv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtbsv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -12728,7 +12728,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_ctbsv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctbsv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -12753,7 +12753,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_ztbsv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztbsv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -12779,7 +12779,7 @@ contains
                                    AP, x, incx) &
         bind(c, name='rocblas_stpsv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_stpsv_fortran
         type(c_ptr), value :: handle
@@ -12799,7 +12799,7 @@ contains
                                    AP, x, incx) &
         bind(c, name='rocblas_dtpsv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtpsv_fortran
         type(c_ptr), value :: handle
@@ -12819,7 +12819,7 @@ contains
                                    AP, x, incx) &
         bind(c, name='rocblas_ctpsv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctpsv_fortran
         type(c_ptr), value :: handle
@@ -12839,7 +12839,7 @@ contains
                                    AP, x, incx) &
         bind(c, name='rocblas_ztpsv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztpsv_fortran
         type(c_ptr), value :: handle
@@ -12860,7 +12860,7 @@ contains
                                    AP, x, incx) &
         bind(c, name='rocblas_stpsv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_stpsv_64_fortran
         type(c_ptr), value :: handle
@@ -12880,7 +12880,7 @@ contains
                                    AP, x, incx) &
         bind(c, name='rocblas_dtpsv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtpsv_64_fortran
         type(c_ptr), value :: handle
@@ -12900,7 +12900,7 @@ contains
                                    AP, x, incx) &
         bind(c, name='rocblas_ctpsv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctpsv_64_fortran
         type(c_ptr), value :: handle
@@ -12920,7 +12920,7 @@ contains
                                    AP, x, incx) &
         bind(c, name='rocblas_ztpsv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztpsv_64_fortran
         type(c_ptr), value :: handle
@@ -12941,7 +12941,7 @@ contains
                                            AP, x, incx, batch_count) &
         bind(c, name='rocblas_stpsv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_stpsv_batched_fortran
         type(c_ptr), value :: handle
@@ -12962,7 +12962,7 @@ contains
                                            AP, x, incx, batch_count) &
         bind(c, name='rocblas_dtpsv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtpsv_batched_fortran
         type(c_ptr), value :: handle
@@ -12983,7 +12983,7 @@ contains
                                            AP, x, incx, batch_count) &
         bind(c, name='rocblas_ctpsv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctpsv_batched_fortran
         type(c_ptr), value :: handle
@@ -13004,7 +13004,7 @@ contains
                                            AP, x, incx, batch_count) &
         bind(c, name='rocblas_ztpsv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztpsv_batched_fortran
         type(c_ptr), value :: handle
@@ -13026,7 +13026,7 @@ contains
                                            AP, x, incx, batch_count) &
         bind(c, name='rocblas_stpsv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_stpsv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -13047,7 +13047,7 @@ contains
                                            AP, x, incx, batch_count) &
         bind(c, name='rocblas_dtpsv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtpsv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -13068,7 +13068,7 @@ contains
                                            AP, x, incx, batch_count) &
         bind(c, name='rocblas_ctpsv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctpsv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -13089,7 +13089,7 @@ contains
                                            AP, x, incx, batch_count) &
         bind(c, name='rocblas_ztpsv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztpsv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -13111,7 +13111,7 @@ contains
                                                    AP, stride_AP, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_stpsv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_stpsv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -13134,7 +13134,7 @@ contains
                                                    AP, stride_AP, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_dtpsv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtpsv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -13157,7 +13157,7 @@ contains
                                                    AP, stride_AP, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_ctpsv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctpsv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -13180,7 +13180,7 @@ contains
                                                    AP, stride_AP, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_ztpsv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztpsv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -13204,7 +13204,7 @@ contains
                                                    AP, stride_AP, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_stpsv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_stpsv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -13227,7 +13227,7 @@ contains
                                                    AP, stride_AP, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_dtpsv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtpsv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -13250,7 +13250,7 @@ contains
                                                    AP, stride_AP, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_ctpsv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctpsv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -13273,7 +13273,7 @@ contains
                                                    AP, stride_AP, x, incx, stride_x, batch_count) &
         bind(c, name='rocblas_ztpsv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztpsv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -13297,7 +13297,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_ssymv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssymv_fortran
         type(c_ptr), value :: handle
@@ -13320,7 +13320,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_dsymv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsymv_fortran
         type(c_ptr), value :: handle
@@ -13343,7 +13343,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_csymv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csymv_fortran
         type(c_ptr), value :: handle
@@ -13366,7 +13366,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_zsymv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsymv_fortran
         type(c_ptr), value :: handle
@@ -13390,7 +13390,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_ssymv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssymv_64_fortran
         type(c_ptr), value :: handle
@@ -13413,7 +13413,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_dsymv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsymv_64_fortran
         type(c_ptr), value :: handle
@@ -13436,7 +13436,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_csymv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csymv_64_fortran
         type(c_ptr), value :: handle
@@ -13459,7 +13459,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_zsymv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsymv_64_fortran
         type(c_ptr), value :: handle
@@ -13483,7 +13483,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_ssymv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssymv_batched_fortran
         type(c_ptr), value :: handle
@@ -13507,7 +13507,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_dsymv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsymv_batched_fortran
         type(c_ptr), value :: handle
@@ -13531,7 +13531,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_csymv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csymv_batched_fortran
         type(c_ptr), value :: handle
@@ -13555,7 +13555,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_zsymv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsymv_batched_fortran
         type(c_ptr), value :: handle
@@ -13580,7 +13580,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_ssymv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssymv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -13604,7 +13604,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_dsymv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsymv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -13628,7 +13628,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_csymv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csymv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -13652,7 +13652,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_zsymv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsymv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -13677,7 +13677,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_ssymv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssymv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -13704,7 +13704,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_dsymv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsymv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -13731,7 +13731,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_csymv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csymv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -13758,7 +13758,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_zsymv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsymv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -13786,7 +13786,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_ssymv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssymv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -13813,7 +13813,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_dsymv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsymv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -13840,7 +13840,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_csymv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csymv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -13867,7 +13867,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_zsymv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsymv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -13895,7 +13895,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_sspmv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sspmv_fortran
         type(c_ptr), value :: handle
@@ -13917,7 +13917,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_dspmv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dspmv_fortran
         type(c_ptr), value :: handle
@@ -13940,7 +13940,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_sspmv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sspmv_64_fortran
         type(c_ptr), value :: handle
@@ -13962,7 +13962,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_dspmv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dspmv_64_fortran
         type(c_ptr), value :: handle
@@ -13985,7 +13985,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_sspmv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sspmv_batched_fortran
         type(c_ptr), value :: handle
@@ -14008,7 +14008,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_dspmv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dspmv_batched_fortran
         type(c_ptr), value :: handle
@@ -14032,7 +14032,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_sspmv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sspmv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -14055,7 +14055,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_dspmv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dspmv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -14079,7 +14079,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_sspmv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sspmv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -14105,7 +14105,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_dspmv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dspmv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -14132,7 +14132,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_sspmv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sspmv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -14158,7 +14158,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_dspmv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dspmv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -14185,7 +14185,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_ssbmv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssbmv_fortran
         type(c_ptr), value :: handle
@@ -14209,7 +14209,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_dsbmv_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsbmv_fortran
         type(c_ptr), value :: handle
@@ -14234,7 +14234,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_ssbmv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssbmv_64_fortran
         type(c_ptr), value :: handle
@@ -14258,7 +14258,7 @@ contains
                                    x, incx, beta, y, incy) &
         bind(c, name='rocblas_dsbmv_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsbmv_64_fortran
         type(c_ptr), value :: handle
@@ -14283,7 +14283,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_ssbmv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssbmv_batched_fortran
         type(c_ptr), value :: handle
@@ -14308,7 +14308,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_dsbmv_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsbmv_batched_fortran
         type(c_ptr), value :: handle
@@ -14334,7 +14334,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_ssbmv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssbmv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -14359,7 +14359,7 @@ contains
                                            x, incx, beta, y, incy, batch_count) &
         bind(c, name='rocblas_dsbmv_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsbmv_batched_64_fortran
         type(c_ptr), value :: handle
@@ -14385,7 +14385,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_ssbmv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssbmv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -14413,7 +14413,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_dsbmv_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsbmv_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -14442,7 +14442,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_ssbmv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssbmv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -14470,7 +14470,7 @@ contains
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
         bind(c, name='rocblas_dsbmv_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsbmv_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -14499,7 +14499,7 @@ contains
                                   y, incy, A, lda) &
         bind(c, name='rocblas_sger_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sger_fortran
         type(c_ptr), value :: handle
@@ -14521,7 +14521,7 @@ contains
                                   y, incy, A, lda) &
         bind(c, name='rocblas_dger_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dger_fortran
         type(c_ptr), value :: handle
@@ -14543,7 +14543,7 @@ contains
                                    y, incy, A, lda) &
         bind(c, name='rocblas_cgeru_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgeru_fortran
         type(c_ptr), value :: handle
@@ -14565,7 +14565,7 @@ contains
                                    y, incy, A, lda) &
         bind(c, name='rocblas_cgerc_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgerc_fortran
         type(c_ptr), value :: handle
@@ -14587,7 +14587,7 @@ contains
                                    y, incy, A, lda) &
         bind(c, name='rocblas_zgeru_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgeru_fortran
         type(c_ptr), value :: handle
@@ -14609,7 +14609,7 @@ contains
                                    y, incy, A, lda) &
         bind(c, name='rocblas_zgerc_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgerc_fortran
         type(c_ptr), value :: handle
@@ -14632,7 +14632,7 @@ contains
                                      y, incy, A, lda) &
         bind(c, name='rocblas_sger_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sger_64_fortran
         type(c_ptr), value :: handle
@@ -14654,7 +14654,7 @@ contains
                 y, incy, A, lda) &
         bind(c, name='rocblas_dger_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dger_64_fortran
         type(c_ptr), value :: handle
@@ -14676,7 +14676,7 @@ contains
                 y, incy, A, lda) &
         bind(c, name='rocblas_cgeru_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgeru_64_fortran
         type(c_ptr), value :: handle
@@ -14698,7 +14698,7 @@ contains
                 y, incy, A, lda) &
         bind(c, name='rocblas_cgerc_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgerc_64_fortran
         type(c_ptr), value :: handle
@@ -14720,7 +14720,7 @@ contains
                 y, incy, A, lda) &
         bind(c, name='rocblas_zgeru_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgeru_64_fortran
         type(c_ptr), value :: handle
@@ -14742,7 +14742,7 @@ contains
                 y, incy, A, lda) &
         bind(c, name='rocblas_zgerc_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgerc_64_fortran
         type(c_ptr), value :: handle
@@ -14765,7 +14765,7 @@ contains
                                           y, incy, A, lda, batch_count) &
         bind(c, name='rocblas_sger_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sger_batched_fortran
         type(c_ptr), value :: handle
@@ -14788,7 +14788,7 @@ contains
                                           y, incy, A, lda, batch_count) &
         bind(c, name='rocblas_dger_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dger_batched_fortran
         type(c_ptr), value :: handle
@@ -14811,7 +14811,7 @@ contains
                                            y, incy, A, lda, batch_count) &
         bind(c, name='rocblas_cgeru_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgeru_batched_fortran
         type(c_ptr), value :: handle
@@ -14834,7 +14834,7 @@ contains
                                            y, incy, A, lda, batch_count) &
         bind(c, name='rocblas_cgerc_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgerc_batched_fortran
         type(c_ptr), value :: handle
@@ -14857,7 +14857,7 @@ contains
                                            y, incy, A, lda, batch_count) &
         bind(c, name='rocblas_zgeru_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgeru_batched_fortran
         type(c_ptr), value :: handle
@@ -14880,7 +14880,7 @@ contains
                                            y, incy, A, lda, batch_count) &
         bind(c, name='rocblas_zgerc_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgerc_batched_fortran
         type(c_ptr), value :: handle
@@ -14904,7 +14904,7 @@ contains
             y, incy, A, lda, batch_count) &
         bind(c, name='rocblas_sger_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sger_batched_64_fortran
         type(c_ptr), value :: handle
@@ -14927,7 +14927,7 @@ contains
                 y, incy, A, lda, batch_count) &
         bind(c, name='rocblas_dger_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dger_batched_64_fortran
         type(c_ptr), value :: handle
@@ -14950,7 +14950,7 @@ contains
                 y, incy, A, lda, batch_count) &
         bind(c, name='rocblas_cgeru_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgeru_batched_64_fortran
         type(c_ptr), value :: handle
@@ -14973,7 +14973,7 @@ contains
                 y, incy, A, lda, batch_count) &
         bind(c, name='rocblas_cgerc_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgerc_batched_64_fortran
         type(c_ptr), value :: handle
@@ -14996,7 +14996,7 @@ contains
                 y, incy, A, lda, batch_count) &
         bind(c, name='rocblas_zgeru_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgeru_batched_64_fortran
         type(c_ptr), value :: handle
@@ -15019,7 +15019,7 @@ contains
                 y, incy, A, lda, batch_count) &
         bind(c, name='rocblas_zgerc_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgerc_batched_64_fortran
         type(c_ptr), value :: handle
@@ -15043,7 +15043,7 @@ contains
                                                   y, incy, stride_y, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_sger_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sger_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -15069,7 +15069,7 @@ contains
                                                   y, incy, stride_y, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_dger_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dger_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -15095,7 +15095,7 @@ contains
                                                    y, incy, stride_y, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_cgeru_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgeru_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -15121,7 +15121,7 @@ contains
                                                    y, incy, stride_y, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_cgerc_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgerc_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -15147,7 +15147,7 @@ contains
                                                    y, incy, stride_y, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_zgeru_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgeru_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -15173,7 +15173,7 @@ contains
                                                    y, incy, stride_y, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_zgerc_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgerc_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -15200,7 +15200,7 @@ contains
                 y, incy, stride_y, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_sger_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sger_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -15226,7 +15226,7 @@ contains
                                                     y, incy, stride_y, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_dger_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dger_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -15252,7 +15252,7 @@ contains
                                                        y, incy, stride_y, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_cgeru_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgeru_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -15278,7 +15278,7 @@ contains
                 y, incy, stride_y, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_cgerc_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgerc_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -15304,7 +15304,7 @@ contains
                                                       y, incy, stride_y, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_zgeru_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgeru_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -15330,7 +15330,7 @@ contains
                                                       y, incy, stride_y, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_zgerc_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgerc_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -15356,7 +15356,7 @@ contains
     function rocblas_sspr_fortran(handle, uplo, n, alpha, x, incx, AP) &
         bind(c, name='rocblas_sspr_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sspr_fortran
         type(c_ptr), value :: handle
@@ -15374,7 +15374,7 @@ contains
     function rocblas_dspr_fortran(handle, uplo, n, alpha, x, incx, AP) &
         bind(c, name='rocblas_dspr_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dspr_fortran
         type(c_ptr), value :: handle
@@ -15392,7 +15392,7 @@ contains
     function rocblas_cspr_fortran(handle, uplo, n, alpha, x, incx, AP) &
         bind(c, name='rocblas_cspr_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cspr_fortran
         type(c_ptr), value :: handle
@@ -15410,7 +15410,7 @@ contains
     function rocblas_zspr_fortran(handle, uplo, n, alpha, x, incx, AP) &
         bind(c, name='rocblas_zspr_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zspr_fortran
         type(c_ptr), value :: handle
@@ -15429,7 +15429,7 @@ contains
     function rocblas_sspr_64_fortran(handle, uplo, n, alpha, x, incx, AP) &
         bind(c, name='rocblas_sspr_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sspr_64_fortran
         type(c_ptr), value :: handle
@@ -15447,7 +15447,7 @@ contains
     function rocblas_dspr_64_fortran(handle, uplo, n, alpha, x, incx, AP) &
         bind(c, name='rocblas_dspr_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dspr_64_fortran
         type(c_ptr), value :: handle
@@ -15465,7 +15465,7 @@ contains
     function rocblas_cspr_64_fortran(handle, uplo, n, alpha, x, incx, AP) &
         bind(c, name='rocblas_cspr_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cspr_64_fortran
         type(c_ptr), value :: handle
@@ -15483,7 +15483,7 @@ contains
     function rocblas_zspr_64_fortran(handle, uplo, n, alpha, x, incx, AP) &
         bind(c, name='rocblas_zspr_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zspr_64_fortran
         type(c_ptr), value :: handle
@@ -15502,7 +15502,7 @@ contains
     function rocblas_sspr_batched_fortran(handle, uplo, n, alpha, x, incx, AP, batch_count) &
         bind(c, name='rocblas_sspr_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sspr_batched_fortran
         type(c_ptr), value :: handle
@@ -15521,7 +15521,7 @@ contains
     function rocblas_dspr_batched_fortran(handle, uplo, n, alpha, x, incx, AP, batch_count) &
         bind(c, name='rocblas_dspr_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dspr_batched_fortran
         type(c_ptr), value :: handle
@@ -15540,7 +15540,7 @@ contains
     function rocblas_cspr_batched_fortran(handle, uplo, n, alpha, x, incx, AP, batch_count) &
         bind(c, name='rocblas_cspr_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cspr_batched_fortran
         type(c_ptr), value :: handle
@@ -15559,7 +15559,7 @@ contains
     function rocblas_zspr_batched_fortran(handle, uplo, n, alpha, x, incx, AP, batch_count) &
         bind(c, name='rocblas_zspr_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zspr_batched_fortran
         type(c_ptr), value :: handle
@@ -15579,7 +15579,7 @@ contains
     function rocblas_sspr_batched_64_fortran(handle, uplo, n, alpha, x, incx, AP, batch_count) &
         bind(c, name='rocblas_sspr_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sspr_batched_64_fortran
         type(c_ptr), value :: handle
@@ -15598,7 +15598,7 @@ contains
     function rocblas_dspr_batched_64_fortran(handle, uplo, n, alpha, x, incx, AP, batch_count) &
         bind(c, name='rocblas_dspr_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dspr_batched_64_fortran
         type(c_ptr), value :: handle
@@ -15617,7 +15617,7 @@ contains
     function rocblas_cspr_batched_64_fortran(handle, uplo, n, alpha, x, incx, AP, batch_count) &
         bind(c, name='rocblas_cspr_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cspr_batched_64_fortran
         type(c_ptr), value :: handle
@@ -15636,7 +15636,7 @@ contains
     function rocblas_zspr_batched_64_fortran(handle, uplo, n, alpha, x, incx, AP, batch_count) &
         bind(c, name='rocblas_zspr_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zspr_batched_64_fortran
         type(c_ptr), value :: handle
@@ -15657,7 +15657,7 @@ contains
                                                   AP, stride_AP, batch_count) &
         bind(c, name='rocblas_sspr_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sspr_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -15679,7 +15679,7 @@ contains
                                                   AP, stride_AP, batch_count) &
         bind(c, name='rocblas_dspr_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dspr_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -15701,7 +15701,7 @@ contains
                                                   AP, stride_AP, batch_count) &
         bind(c, name='rocblas_cspr_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cspr_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -15723,7 +15723,7 @@ contains
                                                   AP, stride_AP, batch_count) &
         bind(c, name='rocblas_zspr_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zspr_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -15746,7 +15746,7 @@ contains
                                                   AP, stride_AP, batch_count) &
         bind(c, name='rocblas_sspr_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sspr_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -15768,7 +15768,7 @@ contains
                                                   AP, stride_AP, batch_count) &
         bind(c, name='rocblas_dspr_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dspr_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -15790,7 +15790,7 @@ contains
                                                   AP, stride_AP, batch_count) &
         bind(c, name='rocblas_cspr_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cspr_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -15812,7 +15812,7 @@ contains
                                                   AP, stride_AP, batch_count) &
         bind(c, name='rocblas_zspr_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zspr_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -15835,7 +15835,7 @@ contains
                                    y, incy, AP) &
         bind(c, name='rocblas_sspr2_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sspr2_fortran
         type(c_ptr), value :: handle
@@ -15856,7 +15856,7 @@ contains
                                    y, incy, AP) &
         bind(c, name='rocblas_dspr2_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dspr2_fortran
         type(c_ptr), value :: handle
@@ -15878,7 +15878,7 @@ contains
                                    y, incy, AP) &
         bind(c, name='rocblas_sspr2_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sspr2_64_fortran
         type(c_ptr), value :: handle
@@ -15899,7 +15899,7 @@ contains
                                    y, incy, AP) &
         bind(c, name='rocblas_dspr2_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dspr2_64_fortran
         type(c_ptr), value :: handle
@@ -15921,7 +15921,7 @@ contains
                                            y, incy, AP, batch_count) &
         bind(c, name='rocblas_sspr2_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sspr2_batched_fortran
         type(c_ptr), value :: handle
@@ -15943,7 +15943,7 @@ contains
                                            y, incy, AP, batch_count) &
         bind(c, name='rocblas_dspr2_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dspr2_batched_fortran
         type(c_ptr), value :: handle
@@ -15966,7 +15966,7 @@ contains
                                            y, incy, AP, batch_count) &
         bind(c, name='rocblas_sspr2_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sspr2_batched_64_fortran
         type(c_ptr), value :: handle
@@ -15988,7 +15988,7 @@ contains
                                            y, incy, AP, batch_count) &
         bind(c, name='rocblas_dspr2_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dspr2_batched_64_fortran
         type(c_ptr), value :: handle
@@ -16011,7 +16011,7 @@ contains
                                                    y, incy, stride_y, AP, stride_AP, batch_count) &
         bind(c, name='rocblas_sspr2_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sspr2_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -16036,7 +16036,7 @@ contains
                                                    y, incy, stride_y, AP, stride_AP, batch_count) &
         bind(c, name='rocblas_dspr2_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dspr2_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -16062,7 +16062,7 @@ contains
                                                    y, incy, stride_y, AP, stride_AP, batch_count) &
         bind(c, name='rocblas_sspr2_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sspr2_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -16087,7 +16087,7 @@ contains
                                                    y, incy, stride_y, AP, stride_AP, batch_count) &
         bind(c, name='rocblas_dspr2_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dspr2_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -16112,7 +16112,7 @@ contains
     function rocblas_ssyr_fortran(handle, uplo, n, alpha, x, incx, A, lda) &
         bind(c, name='rocblas_ssyr_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyr_fortran
         type(c_ptr), value :: handle
@@ -16131,7 +16131,7 @@ contains
     function rocblas_dsyr_fortran(handle, uplo, n, alpha, x, incx, A, lda) &
         bind(c, name='rocblas_dsyr_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyr_fortran
         type(c_ptr), value :: handle
@@ -16150,7 +16150,7 @@ contains
     function rocblas_csyr_fortran(handle, uplo, n, alpha, x, incx, A, lda) &
         bind(c, name='rocblas_csyr_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyr_fortran
         type(c_ptr), value :: handle
@@ -16169,7 +16169,7 @@ contains
     function rocblas_zsyr_fortran(handle, uplo, n, alpha, x, incx, A, lda) &
         bind(c, name='rocblas_zsyr_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyr_fortran
         type(c_ptr), value :: handle
@@ -16189,7 +16189,7 @@ contains
     function rocblas_ssyr_64_fortran(handle, uplo, n, alpha, x, incx, A, lda) &
         bind(c, name='rocblas_ssyr_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyr_64_fortran
         type(c_ptr), value :: handle
@@ -16208,7 +16208,7 @@ contains
     function rocblas_dsyr_64_fortran(handle, uplo, n, alpha, x, incx, A, lda) &
         bind(c, name='rocblas_dsyr_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyr_64_fortran
         type(c_ptr), value :: handle
@@ -16227,7 +16227,7 @@ contains
     function rocblas_csyr_64_fortran(handle, uplo, n, alpha, x, incx, A, lda) &
         bind(c, name='rocblas_csyr_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyr_64_fortran
         type(c_ptr), value :: handle
@@ -16246,7 +16246,7 @@ contains
     function rocblas_zsyr_64_fortran(handle, uplo, n, alpha, x, incx, A, lda) &
         bind(c, name='rocblas_zsyr_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyr_64_fortran
         type(c_ptr), value :: handle
@@ -16266,7 +16266,7 @@ contains
     function rocblas_ssyr_batched_fortran(handle, uplo, n, alpha, x, incx, A, lda, batch_count) &
         bind(c, name='rocblas_ssyr_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyr_batched_fortran
         type(c_ptr), value :: handle
@@ -16286,7 +16286,7 @@ contains
     function rocblas_dsyr_batched_fortran(handle, uplo, n, alpha, x, incx, A, lda, batch_count) &
         bind(c, name='rocblas_dsyr_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyr_batched_fortran
         type(c_ptr), value :: handle
@@ -16306,7 +16306,7 @@ contains
     function rocblas_csyr_batched_fortran(handle, uplo, n, alpha, x, incx, A, lda, batch_count) &
         bind(c, name='rocblas_csyr_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyr_batched_fortran
         type(c_ptr), value :: handle
@@ -16326,7 +16326,7 @@ contains
     function rocblas_zsyr_batched_fortran(handle, uplo, n, alpha, x, incx, A, lda, batch_count) &
         bind(c, name='rocblas_zsyr_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyr_batched_fortran
         type(c_ptr), value :: handle
@@ -16347,7 +16347,7 @@ contains
     function rocblas_ssyr_batched_64_fortran(handle, uplo, n, alpha, x, incx, A, lda, batch_count) &
         bind(c, name='rocblas_ssyr_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyr_batched_64_fortran
         type(c_ptr), value :: handle
@@ -16367,7 +16367,7 @@ contains
     function rocblas_dsyr_batched_64_fortran(handle, uplo, n, alpha, x, incx, A, lda, batch_count) &
         bind(c, name='rocblas_dsyr_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyr_batched_64_fortran
         type(c_ptr), value :: handle
@@ -16387,7 +16387,7 @@ contains
     function rocblas_csyr_batched_64_fortran(handle, uplo, n, alpha, x, incx, A, lda, batch_count) &
         bind(c, name='rocblas_csyr_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyr_batched_64_fortran
         type(c_ptr), value :: handle
@@ -16407,7 +16407,7 @@ contains
     function rocblas_zsyr_batched_64_fortran(handle, uplo, n, alpha, x, incx, A, lda, batch_count) &
         bind(c, name='rocblas_zsyr_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyr_batched_64_fortran
         type(c_ptr), value :: handle
@@ -16429,7 +16429,7 @@ contains
                                                   A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_ssyr_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyr_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -16452,7 +16452,7 @@ contains
                                                   A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_dsyr_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyr_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -16475,7 +16475,7 @@ contains
                                                   A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_csyr_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyr_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -16498,7 +16498,7 @@ contains
                                                   A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_zsyr_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyr_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -16522,7 +16522,7 @@ contains
                                                   A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_ssyr_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyr_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -16545,7 +16545,7 @@ contains
                                                   A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_dsyr_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyr_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -16568,7 +16568,7 @@ contains
                                                   A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_csyr_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyr_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -16591,7 +16591,7 @@ contains
                                                   A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_zsyr_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyr_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -16615,7 +16615,7 @@ contains
                                    y, incy, A, lda) &
         bind(c, name='rocblas_ssyr2_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyr2_fortran
         type(c_ptr), value :: handle
@@ -16637,7 +16637,7 @@ contains
                                    y, incy, A, lda) &
         bind(c, name='rocblas_dsyr2_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyr2_fortran
         type(c_ptr), value :: handle
@@ -16659,7 +16659,7 @@ contains
                                    y, incy, A, lda) &
         bind(c, name='rocblas_csyr2_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyr2_fortran
         type(c_ptr), value :: handle
@@ -16681,7 +16681,7 @@ contains
                                    y, incy, A, lda) &
         bind(c, name='rocblas_zsyr2_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyr2_fortran
         type(c_ptr), value :: handle
@@ -16704,7 +16704,7 @@ contains
                                    y, incy, A, lda) &
         bind(c, name='rocblas_ssyr2_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyr2_64_fortran
         type(c_ptr), value :: handle
@@ -16726,7 +16726,7 @@ contains
                                    y, incy, A, lda) &
         bind(c, name='rocblas_dsyr2_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyr2_64_fortran
         type(c_ptr), value :: handle
@@ -16748,7 +16748,7 @@ contains
                                    y, incy, A, lda) &
         bind(c, name='rocblas_csyr2_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyr2_64_fortran
         type(c_ptr), value :: handle
@@ -16770,7 +16770,7 @@ contains
                                    y, incy, A, lda) &
         bind(c, name='rocblas_zsyr2_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyr2_64_fortran
         type(c_ptr), value :: handle
@@ -16793,7 +16793,7 @@ contains
                                            y, incy, A, lda, batch_count) &
         bind(c, name='rocblas_ssyr2_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyr2_batched_fortran
         type(c_ptr), value :: handle
@@ -16816,7 +16816,7 @@ contains
                                            y, incy, A, lda, batch_count) &
         bind(c, name='rocblas_dsyr2_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyr2_batched_fortran
         type(c_ptr), value :: handle
@@ -16839,7 +16839,7 @@ contains
                                            y, incy, A, lda, batch_count) &
         bind(c, name='rocblas_csyr2_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyr2_batched_fortran
         type(c_ptr), value :: handle
@@ -16862,7 +16862,7 @@ contains
                                            y, incy, A, lda, batch_count) &
         bind(c, name='rocblas_zsyr2_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyr2_batched_fortran
         type(c_ptr), value :: handle
@@ -16886,7 +16886,7 @@ contains
                                            y, incy, A, lda, batch_count) &
         bind(c, name='rocblas_ssyr2_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyr2_batched_64_fortran
         type(c_ptr), value :: handle
@@ -16909,7 +16909,7 @@ contains
                                            y, incy, A, lda, batch_count) &
         bind(c, name='rocblas_dsyr2_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyr2_batched_64_fortran
         type(c_ptr), value :: handle
@@ -16932,7 +16932,7 @@ contains
                                            y, incy, A, lda, batch_count) &
         bind(c, name='rocblas_csyr2_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyr2_batched_64_fortran
         type(c_ptr), value :: handle
@@ -16955,7 +16955,7 @@ contains
                                            y, incy, A, lda, batch_count) &
         bind(c, name='rocblas_zsyr2_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyr2_batched_64_fortran
         type(c_ptr), value :: handle
@@ -16979,7 +16979,7 @@ contains
                                                    y, incy, stride_y, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_ssyr2_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyr2_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -17005,7 +17005,7 @@ contains
                                                    y, incy, stride_y, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_dsyr2_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyr2_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -17031,7 +17031,7 @@ contains
                                                    y, incy, stride_y, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_csyr2_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyr2_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -17057,7 +17057,7 @@ contains
                                                    y, incy, stride_y, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_zsyr2_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyr2_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -17084,7 +17084,7 @@ contains
                                                    y, incy, stride_y, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_ssyr2_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyr2_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -17110,7 +17110,7 @@ contains
                                                    y, incy, stride_y, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_dsyr2_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyr2_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -17136,7 +17136,7 @@ contains
                                                    y, incy, stride_y, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_csyr2_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyr2_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -17162,7 +17162,7 @@ contains
                                                    y, incy, stride_y, A, lda, stride_A, batch_count) &
         bind(c, name='rocblas_zsyr2_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyr2_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -17193,7 +17193,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_hgemm_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_hgemm_fortran
         type(c_ptr), value :: handle
@@ -17219,7 +17219,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_sgemm_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgemm_fortran
         type(c_ptr), value :: handle
@@ -17245,7 +17245,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_dgemm_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgemm_fortran
         type(c_ptr), value :: handle
@@ -17271,7 +17271,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_cgemm_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgemm_fortran
         type(c_ptr), value :: handle
@@ -17297,7 +17297,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_zgemm_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgemm_fortran
         type(c_ptr), value :: handle
@@ -17324,7 +17324,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_hgemm_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_hgemm_64_fortran
         type(c_ptr), value :: handle
@@ -17350,7 +17350,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_sgemm_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgemm_64_fortran
         type(c_ptr), value :: handle
@@ -17376,7 +17376,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_dgemm_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgemm_64_fortran
         type(c_ptr), value :: handle
@@ -17402,7 +17402,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_cgemm_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgemm_64_fortran
         type(c_ptr), value :: handle
@@ -17428,7 +17428,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_zgemm_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgemm_64_fortran
         type(c_ptr), value :: handle
@@ -17455,7 +17455,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_hgemm_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_hgemm_batched_fortran
         type(c_ptr), value :: handle
@@ -17482,7 +17482,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_sgemm_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgemm_batched_fortran
         type(c_ptr), value :: handle
@@ -17509,7 +17509,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_dgemm_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgemm_batched_fortran
         type(c_ptr), value :: handle
@@ -17536,7 +17536,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_cgemm_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgemm_batched_fortran
         type(c_ptr), value :: handle
@@ -17563,7 +17563,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_zgemm_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgemm_batched_fortran
         type(c_ptr), value :: handle
@@ -17591,7 +17591,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_hgemm_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_hgemm_batched_64_fortran
         type(c_ptr), value :: handle
@@ -17618,7 +17618,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_sgemm_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgemm_batched_64_fortran
         type(c_ptr), value :: handle
@@ -17645,7 +17645,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_dgemm_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgemm_batched_64_fortran
         type(c_ptr), value :: handle
@@ -17672,7 +17672,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_cgemm_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgemm_batched_64_fortran
         type(c_ptr), value :: handle
@@ -17699,7 +17699,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_zgemm_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgemm_batched_64_fortran
         type(c_ptr), value :: handle
@@ -17730,7 +17730,7 @@ contains
                                                    group_size) &
         bind(c, name='rocblas_sgemm_grouped_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgemm_grouped_batched_fortran
         type(c_ptr), value :: handle
@@ -17764,7 +17764,7 @@ contains
                                                    group_size) &
         bind(c, name='rocblas_dgemm_grouped_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgemm_grouped_batched_fortran
         type(c_ptr), value :: handle
@@ -17799,7 +17799,7 @@ contains
                                                       group_size) &
         bind(c, name='rocblas_sgemm_grouped_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgemm_grouped_batched_64_fortran
         type(c_ptr), value :: handle
@@ -17833,7 +17833,7 @@ contains
                                                       group_size) &
         bind(c, name='rocblas_dgemm_grouped_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgemm_grouped_batched_64_fortran
         type(c_ptr), value :: handle
@@ -17869,7 +17869,7 @@ contains
                                                      compute_type, algo, flags) &
         bind(c, name='rocblas_gemm_grouped_batched_ex_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_gemm_grouped_batched_ex_fortran
         type(c_ptr), value :: handle
@@ -17914,7 +17914,7 @@ contains
                                                         compute_type, algo, flags) &
         bind(c, name='rocblas_gemm_grouped_batched_ex_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_gemm_grouped_batched_ex_64_fortran
         type(c_ptr), value :: handle
@@ -17956,7 +17956,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_hgemm_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_hgemm_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -17986,7 +17986,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_sgemm_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgemm_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -18016,7 +18016,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_dgemm_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgemm_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -18046,7 +18046,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_cgemm_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgemm_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -18076,7 +18076,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_zgemm_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgemm_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -18107,7 +18107,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_hgemm_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_hgemm_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -18137,7 +18137,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_sgemm_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgemm_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -18167,7 +18167,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_dgemm_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgemm_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -18197,7 +18197,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_cgemm_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgemm_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -18227,7 +18227,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_zgemm_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgemm_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -18258,7 +18258,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_sgemmt_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgemmt_fortran
         type(c_ptr), value :: handle
@@ -18284,7 +18284,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_dgemmt_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgemmt_fortran
         type(c_ptr), value :: handle
@@ -18310,7 +18310,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_cgemmt_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgemmt_fortran
         type(c_ptr), value :: handle
@@ -18336,7 +18336,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_zgemmt_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgemmt_fortran
         type(c_ptr), value :: handle
@@ -18363,7 +18363,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_sgemmt_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgemmt_64_fortran
         type(c_ptr), value :: handle
@@ -18389,7 +18389,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_dgemmt_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgemmt_64_fortran
         type(c_ptr), value :: handle
@@ -18415,7 +18415,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_cgemmt_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgemmt_64_fortran
         type(c_ptr), value :: handle
@@ -18441,7 +18441,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_zgemmt_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgemmt_64_fortran
         type(c_ptr), value :: handle
@@ -18468,7 +18468,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_sgemmt_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgemmt_batched_fortran
         type(c_ptr), value :: handle
@@ -18495,7 +18495,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_dgemmt_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgemmt_batched_fortran
         type(c_ptr), value :: handle
@@ -18522,7 +18522,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_cgemmt_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgemmt_batched_fortran
         type(c_ptr), value :: handle
@@ -18549,7 +18549,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_zgemmt_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgemmt_batched_fortran
         type(c_ptr), value :: handle
@@ -18578,7 +18578,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_sgemmt_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgemmt_batched_64_fortran
         type(c_ptr), value :: handle
@@ -18605,7 +18605,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_dgemmt_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgemmt_batched_64_fortran
         type(c_ptr), value :: handle
@@ -18632,7 +18632,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_cgemmt_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgemmt_batched_64_fortran
         type(c_ptr), value :: handle
@@ -18659,7 +18659,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_zgemmt_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgemmt_batched_64_fortran
         type(c_ptr), value :: handle
@@ -18687,7 +18687,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_sgemmt_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgemmt_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -18717,7 +18717,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_dgemmt_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgemmt_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -18747,7 +18747,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_cgemmt_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgemmt_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -18777,7 +18777,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_zgemmt_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgemmt_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -18809,7 +18809,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_sgemmt_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgemmt_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -18839,7 +18839,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_dgemmt_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgemmt_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -18869,7 +18869,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_cgemmt_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgemmt_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -18899,7 +18899,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_zgemmt_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgemmt_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -18930,7 +18930,7 @@ contains
                                     A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_ssyrkx_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyrkx_fortran
         type(c_ptr), value :: handle
@@ -18955,7 +18955,7 @@ contains
                                     A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_dsyrkx_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyrkx_fortran
         type(c_ptr), value :: handle
@@ -18980,7 +18980,7 @@ contains
                                     A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_csyrkx_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyrkx_fortran
         type(c_ptr), value :: handle
@@ -19005,7 +19005,7 @@ contains
                                     A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_zsyrkx_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyrkx_fortran
         type(c_ptr), value :: handle
@@ -19031,7 +19031,7 @@ contains
                                             A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_ssyrkx_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyrkx_batched_fortran
         type(c_ptr), value :: handle
@@ -19057,7 +19057,7 @@ contains
                                             A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_dsyrkx_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyrkx_batched_fortran
         type(c_ptr), value :: handle
@@ -19083,7 +19083,7 @@ contains
                                             A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_csyrkx_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyrkx_batched_fortran
         type(c_ptr), value :: handle
@@ -19109,7 +19109,7 @@ contains
                                             A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_zsyrkx_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyrkx_batched_fortran
         type(c_ptr), value :: handle
@@ -19136,7 +19136,7 @@ contains
                                                     A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_ssyrkx_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyrkx_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -19165,7 +19165,7 @@ contains
                                                     A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_dsyrkx_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyrkx_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -19194,7 +19194,7 @@ contains
                                                     A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_csyrkx_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyrkx_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -19223,7 +19223,7 @@ contains
                                                     A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_zsyrkx_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyrkx_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -19253,7 +19253,7 @@ contains
                                     A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_ssyrkx_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyrkx_64_fortran
         type(c_ptr), value :: handle
@@ -19278,7 +19278,7 @@ contains
                                     A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_dsyrkx_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyrkx_64_fortran
         type(c_ptr), value :: handle
@@ -19303,7 +19303,7 @@ contains
                                     A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_csyrkx_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyrkx_64_fortran
         type(c_ptr), value :: handle
@@ -19328,7 +19328,7 @@ contains
                                     A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_zsyrkx_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyrkx_64_fortran
         type(c_ptr), value :: handle
@@ -19354,7 +19354,7 @@ contains
                                             A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_ssyrkx_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyrkx_batched_64_fortran
         type(c_ptr), value :: handle
@@ -19380,7 +19380,7 @@ contains
                                             A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_dsyrkx_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyrkx_batched_64_fortran
         type(c_ptr), value :: handle
@@ -19406,7 +19406,7 @@ contains
                                             A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_csyrkx_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyrkx_batched_64_fortran
         type(c_ptr), value :: handle
@@ -19432,7 +19432,7 @@ contains
                                             A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_zsyrkx_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyrkx_batched_64_fortran
         type(c_ptr), value :: handle
@@ -19459,7 +19459,7 @@ contains
                                                     A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_ssyrkx_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyrkx_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -19488,7 +19488,7 @@ contains
                                                     A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_dsyrkx_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyrkx_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -19517,7 +19517,7 @@ contains
                                                     A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_csyrkx_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyrkx_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -19546,7 +19546,7 @@ contains
                                                     A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_zsyrkx_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyrkx_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -19576,7 +19576,7 @@ contains
                                               A, lda, B, ldb, C, ldc) &
         bind(c, name='rocblas_strmm_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_strmm_fortran
         type(c_ptr), value :: handle
@@ -19602,7 +19602,7 @@ contains
                                               A, lda, B, ldb, C, ldc) &
         bind(c, name='rocblas_dtrmm_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtrmm_fortran
         type(c_ptr), value :: handle
@@ -19628,7 +19628,7 @@ contains
                                               A, lda, B, ldb, C, ldc) &
         bind(c, name='rocblas_ctrmm_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctrmm_fortran
         type(c_ptr), value :: handle
@@ -19654,7 +19654,7 @@ contains
                                               A, lda, B, ldb, C, ldc) &
         bind(c, name='rocblas_ztrmm_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztrmm_fortran
         type(c_ptr), value :: handle
@@ -19681,7 +19681,7 @@ contains
                                               A, lda, B, ldb, C, ldc) &
         bind(c, name='rocblas_strmm_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_strmm_64_fortran
         type(c_ptr), value :: handle
@@ -19707,7 +19707,7 @@ contains
                                               A, lda, B, ldb, C, ldc) &
         bind(c, name='rocblas_dtrmm_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtrmm_64_fortran
         type(c_ptr), value :: handle
@@ -19733,7 +19733,7 @@ contains
                                               A, lda, B, ldb, C, ldc) &
         bind(c, name='rocblas_ctrmm_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctrmm_64_fortran
         type(c_ptr), value :: handle
@@ -19759,7 +19759,7 @@ contains
                                               A, lda, B, ldb, C, ldc) &
         bind(c, name='rocblas_ztrmm_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztrmm_64_fortran
         type(c_ptr), value :: handle
@@ -19786,7 +19786,7 @@ contains
                                                       A, lda, B, ldb, C, ldc, batch_count) &
         bind(c, name='rocblas_strmm_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_strmm_batched_fortran
         type(c_ptr), value :: handle
@@ -19813,7 +19813,7 @@ contains
                                                       A, lda, B, ldb, C, ldc, batch_count) &
         bind(c, name='rocblas_dtrmm_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtrmm_batched_fortran
         type(c_ptr), value :: handle
@@ -19840,7 +19840,7 @@ contains
                                                       A, lda, B, ldb, C, ldc, batch_count) &
         bind(c, name='rocblas_ctrmm_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctrmm_batched_fortran
         type(c_ptr), value :: handle
@@ -19867,7 +19867,7 @@ contains
                                                       A, lda, B, ldb, C, ldc, batch_count) &
         bind(c, name='rocblas_ztrmm_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztrmm_batched_fortran
         type(c_ptr), value :: handle
@@ -19895,7 +19895,7 @@ contains
                                                       A, lda, B, ldb, C, ldc, batch_count) &
         bind(c, name='rocblas_strmm_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_strmm_batched_64_fortran
         type(c_ptr), value :: handle
@@ -19922,7 +19922,7 @@ contains
                                                       A, lda, B, ldb, C, ldc, batch_count) &
         bind(c, name='rocblas_dtrmm_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtrmm_batched_64_fortran
         type(c_ptr), value :: handle
@@ -19949,7 +19949,7 @@ contains
                                                       A, lda, B, ldb, C, ldc, batch_count) &
         bind(c, name='rocblas_ctrmm_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctrmm_batched_64_fortran
         type(c_ptr), value :: handle
@@ -19976,7 +19976,7 @@ contains
                                                       A, lda, B, ldb, C, ldc, batch_count) &
         bind(c, name='rocblas_ztrmm_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztrmm_batched_64_fortran
         type(c_ptr), value :: handle
@@ -20004,7 +20004,7 @@ contains
                                                               A, lda, stride_A, B, ldb, stride_B, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_strmm_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_strmm_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -20034,7 +20034,7 @@ contains
                                                               A, lda, stride_A, B, ldb, stride_B, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_dtrmm_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtrmm_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -20064,7 +20064,7 @@ contains
                                                               A, lda, stride_A, B, ldb, stride_B, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_ctrmm_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctrmm_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -20094,7 +20094,7 @@ contains
                                                               A, lda, stride_A, B, ldb, stride_B, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_ztrmm_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztrmm_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -20125,7 +20125,7 @@ contains
                                                               A, lda, stride_A, B, ldb, stride_B, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_strmm_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_strmm_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -20155,7 +20155,7 @@ contains
                                                               A, lda, stride_A, B, ldb, stride_B, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_dtrmm_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dtrmm_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -20185,7 +20185,7 @@ contains
                                                               A, lda, stride_A, B, ldb, stride_B, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_ctrmm_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ctrmm_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -20215,7 +20215,7 @@ contains
                                                               A, lda, stride_A, B, ldb, stride_B, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_ztrmm_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ztrmm_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -20246,7 +20246,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_chemm_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chemm_fortran
         type(c_ptr), value :: handle
@@ -20271,7 +20271,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_zhemm_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhemm_fortran
         type(c_ptr), value :: handle
@@ -20297,7 +20297,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_chemm_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chemm_batched_fortran
         type(c_ptr), value :: handle
@@ -20323,7 +20323,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_zhemm_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhemm_batched_fortran
         type(c_ptr), value :: handle
@@ -20350,7 +20350,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_chemm_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chemm_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -20379,7 +20379,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_zhemm_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhemm_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -20409,7 +20409,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_chemm_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chemm_64_fortran
         type(c_ptr), value :: handle
@@ -20434,7 +20434,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_zhemm_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhemm_64_fortran
         type(c_ptr), value :: handle
@@ -20460,7 +20460,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_chemm_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chemm_batched_64_fortran
         type(c_ptr), value :: handle
@@ -20486,7 +20486,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_zhemm_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhemm_batched_64_fortran
         type(c_ptr), value :: handle
@@ -20513,7 +20513,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_chemm_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_chemm_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -20542,7 +20542,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_zhemm_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zhemm_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -20572,7 +20572,7 @@ contains
                                    A, lda, beta, C, ldc) &
         bind(c, name='rocblas_cherk_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cherk_fortran
         type(c_ptr), value :: handle
@@ -20595,7 +20595,7 @@ contains
                                    A, lda, beta, C, ldc) &
         bind(c, name='rocblas_zherk_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zherk_fortran
         type(c_ptr), value :: handle
@@ -20619,7 +20619,7 @@ contains
                                    A, lda, beta, C, ldc) &
         bind(c, name='rocblas_cherk_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cherk_64_fortran
         type(c_ptr), value :: handle
@@ -20642,7 +20642,7 @@ contains
                                    A, lda, beta, C, ldc) &
         bind(c, name='rocblas_zherk_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zherk_64_fortran
         type(c_ptr), value :: handle
@@ -20666,7 +20666,7 @@ contains
                                            A, lda, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_cherk_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cherk_batched_fortran
         type(c_ptr), value :: handle
@@ -20690,7 +20690,7 @@ contains
                                            A, lda, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_zherk_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zherk_batched_fortran
         type(c_ptr), value :: handle
@@ -20715,7 +20715,7 @@ contains
                                            A, lda, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_cherk_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cherk_batched_64_fortran
         type(c_ptr), value :: handle
@@ -20739,7 +20739,7 @@ contains
                                            A, lda, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_zherk_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zherk_batched_64_fortran
         type(c_ptr), value :: handle
@@ -20764,7 +20764,7 @@ contains
                                                    A, lda, stride_A, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_cherk_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cherk_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -20790,7 +20790,7 @@ contains
                                                    A, lda, stride_A, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_zherk_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zherk_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -20817,7 +20817,7 @@ contains
                                                    A, lda, stride_A, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_cherk_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cherk_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -20843,7 +20843,7 @@ contains
                                                    A, lda, stride_A, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_zherk_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zherk_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -20870,7 +20870,7 @@ contains
                                     A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_cher2k_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cher2k_fortran
         type(c_ptr), value :: handle
@@ -20895,7 +20895,7 @@ contains
                                     A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_zher2k_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zher2k_fortran
         type(c_ptr), value :: handle
@@ -20921,7 +20921,7 @@ contains
                                             A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_cher2k_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cher2k_batched_fortran
         type(c_ptr), value :: handle
@@ -20947,7 +20947,7 @@ contains
                                             A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_zher2k_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zher2k_batched_fortran
         type(c_ptr), value :: handle
@@ -20974,7 +20974,7 @@ contains
                                                     A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_cher2k_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cher2k_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -21003,7 +21003,7 @@ contains
                                                     A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_zher2k_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zher2k_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -21033,7 +21033,7 @@ contains
                                     A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_cher2k_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cher2k_64_fortran
         type(c_ptr), value :: handle
@@ -21058,7 +21058,7 @@ contains
                                     A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_zher2k_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zher2k_64_fortran
         type(c_ptr), value :: handle
@@ -21084,7 +21084,7 @@ contains
                                             A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_cher2k_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cher2k_batched_64_fortran
         type(c_ptr), value :: handle
@@ -21110,7 +21110,7 @@ contains
                                             A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_zher2k_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zher2k_batched_64_fortran
         type(c_ptr), value :: handle
@@ -21137,7 +21137,7 @@ contains
                                                     A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_cher2k_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cher2k_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -21166,7 +21166,7 @@ contains
                                                     A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_zher2k_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zher2k_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -21196,7 +21196,7 @@ contains
                                     A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_cherkx_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cherkx_fortran
         type(c_ptr), value :: handle
@@ -21221,7 +21221,7 @@ contains
                                     A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_zherkx_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zherkx_fortran
         type(c_ptr), value :: handle
@@ -21247,7 +21247,7 @@ contains
                                             A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_cherkx_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cherkx_batched_fortran
         type(c_ptr), value :: handle
@@ -21273,7 +21273,7 @@ contains
                                             A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_zherkx_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zherkx_batched_fortran
         type(c_ptr), value :: handle
@@ -21300,7 +21300,7 @@ contains
                                                     A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_cherkx_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cherkx_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -21329,7 +21329,7 @@ contains
                                                     A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_zherkx_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zherkx_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -21359,7 +21359,7 @@ contains
                                     A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_cherkx_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cherkx_64_fortran
         type(c_ptr), value :: handle
@@ -21384,7 +21384,7 @@ contains
                                     A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_zherkx_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zherkx_64_fortran
         type(c_ptr), value :: handle
@@ -21410,7 +21410,7 @@ contains
                                             A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_cherkx_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cherkx_batched_64_fortran
         type(c_ptr), value :: handle
@@ -21436,7 +21436,7 @@ contains
                                             A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_zherkx_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zherkx_batched_64_fortran
         type(c_ptr), value :: handle
@@ -21463,7 +21463,7 @@ contains
                                                     A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_cherkx_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cherkx_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -21492,7 +21492,7 @@ contains
                                                     A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_zherkx_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zherkx_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -21522,7 +21522,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_ssymm_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssymm_fortran
         type(c_ptr), value :: handle
@@ -21547,7 +21547,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_dsymm_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsymm_fortran
         type(c_ptr), value :: handle
@@ -21572,7 +21572,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_csymm_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csymm_fortran
         type(c_ptr), value :: handle
@@ -21597,7 +21597,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_zsymm_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsymm_fortran
         type(c_ptr), value :: handle
@@ -21623,7 +21623,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_ssymm_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssymm_batched_fortran
         type(c_ptr), value :: handle
@@ -21649,7 +21649,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_dsymm_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsymm_batched_fortran
         type(c_ptr), value :: handle
@@ -21675,7 +21675,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_csymm_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csymm_batched_fortran
         type(c_ptr), value :: handle
@@ -21701,7 +21701,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_zsymm_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsymm_batched_fortran
         type(c_ptr), value :: handle
@@ -21728,7 +21728,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_ssymm_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssymm_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -21757,7 +21757,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_dsymm_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsymm_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -21786,7 +21786,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_csymm_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csymm_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -21815,7 +21815,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_zsymm_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsymm_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -21846,7 +21846,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_ssymm_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssymm_64_fortran
         type(c_ptr), value :: handle
@@ -21871,7 +21871,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_dsymm_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsymm_64_fortran
         type(c_ptr), value :: handle
@@ -21896,7 +21896,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_csymm_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csymm_64_fortran
         type(c_ptr), value :: handle
@@ -21921,7 +21921,7 @@ contains
                                    A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_zsymm_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsymm_64_fortran
         type(c_ptr), value :: handle
@@ -21947,7 +21947,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_ssymm_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssymm_batched_64_fortran
         type(c_ptr), value :: handle
@@ -21973,7 +21973,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_dsymm_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsymm_batched_64_fortran
         type(c_ptr), value :: handle
@@ -21999,7 +21999,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_csymm_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csymm_batched_64_fortran
         type(c_ptr), value :: handle
@@ -22025,7 +22025,7 @@ contains
                                            A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_zsymm_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsymm_batched_64_fortran
         type(c_ptr), value :: handle
@@ -22052,7 +22052,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_ssymm_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssymm_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -22081,7 +22081,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_dsymm_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsymm_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -22110,7 +22110,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_csymm_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csymm_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -22139,7 +22139,7 @@ contains
                                                    A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_zsymm_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsymm_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -22169,7 +22169,7 @@ contains
                                    A, lda, beta, C, ldc) &
         bind(c, name='rocblas_ssyrk_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyrk_fortran
         type(c_ptr), value :: handle
@@ -22192,7 +22192,7 @@ contains
                                    A, lda, beta, C, ldc) &
         bind(c, name='rocblas_dsyrk_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyrk_fortran
         type(c_ptr), value :: handle
@@ -22215,7 +22215,7 @@ contains
                                    A, lda, beta, C, ldc) &
         bind(c, name='rocblas_csyrk_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyrk_fortran
         type(c_ptr), value :: handle
@@ -22238,7 +22238,7 @@ contains
                                    A, lda, beta, C, ldc) &
         bind(c, name='rocblas_zsyrk_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyrk_fortran
         type(c_ptr), value :: handle
@@ -22262,7 +22262,7 @@ contains
                                            A, lda, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_ssyrk_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyrk_batched_fortran
         type(c_ptr), value :: handle
@@ -22286,7 +22286,7 @@ contains
                                            A, lda, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_dsyrk_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyrk_batched_fortran
         type(c_ptr), value :: handle
@@ -22310,7 +22310,7 @@ contains
                                            A, lda, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_csyrk_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyrk_batched_fortran
         type(c_ptr), value :: handle
@@ -22334,7 +22334,7 @@ contains
                                            A, lda, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_zsyrk_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyrk_batched_fortran
         type(c_ptr), value :: handle
@@ -22359,7 +22359,7 @@ contains
                                                    A, lda, stride_A, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_ssyrk_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyrk_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -22385,7 +22385,7 @@ contains
                                                    A, lda, stride_A, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_dsyrk_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyrk_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -22411,7 +22411,7 @@ contains
                                                    A, lda, stride_A, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_csyrk_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyrk_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -22437,7 +22437,7 @@ contains
                                                    A, lda, stride_A, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_zsyrk_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyrk_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -22464,7 +22464,7 @@ contains
                                    A, lda, beta, C, ldc) &
         bind(c, name='rocblas_ssyrk_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyrk_64_fortran
         type(c_ptr), value :: handle
@@ -22487,7 +22487,7 @@ contains
                                    A, lda, beta, C, ldc) &
         bind(c, name='rocblas_dsyrk_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyrk_64_fortran
         type(c_ptr), value :: handle
@@ -22510,7 +22510,7 @@ contains
                                    A, lda, beta, C, ldc) &
         bind(c, name='rocblas_csyrk_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyrk_64_fortran
         type(c_ptr), value :: handle
@@ -22533,7 +22533,7 @@ contains
                                    A, lda, beta, C, ldc) &
         bind(c, name='rocblas_zsyrk_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyrk_64_fortran
         type(c_ptr), value :: handle
@@ -22557,7 +22557,7 @@ contains
                                            A, lda, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_ssyrk_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyrk_batched_64_fortran
         type(c_ptr), value :: handle
@@ -22581,7 +22581,7 @@ contains
                                            A, lda, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_dsyrk_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyrk_batched_64_fortran
         type(c_ptr), value :: handle
@@ -22605,7 +22605,7 @@ contains
                                            A, lda, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_csyrk_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyrk_batched_64_fortran
         type(c_ptr), value :: handle
@@ -22629,7 +22629,7 @@ contains
                                            A, lda, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_zsyrk_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyrk_batched_64_fortran
         type(c_ptr), value :: handle
@@ -22654,7 +22654,7 @@ contains
                                                    A, lda, stride_A, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_ssyrk_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyrk_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -22680,7 +22680,7 @@ contains
                                                    A, lda, stride_A, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_dsyrk_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyrk_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -22706,7 +22706,7 @@ contains
                                                    A, lda, stride_A, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_csyrk_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyrk_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -22732,7 +22732,7 @@ contains
                                                    A, lda, stride_A, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_zsyrk_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyrk_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -22759,7 +22759,7 @@ contains
                                     A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_ssyr2k_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyr2k_fortran
         type(c_ptr), value :: handle
@@ -22784,7 +22784,7 @@ contains
                                     A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_dsyr2k_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyr2k_fortran
         type(c_ptr), value :: handle
@@ -22809,7 +22809,7 @@ contains
                                     A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_csyr2k_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyr2k_fortran
         type(c_ptr), value :: handle
@@ -22834,7 +22834,7 @@ contains
                                     A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_zsyr2k_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyr2k_fortran
         type(c_ptr), value :: handle
@@ -22860,7 +22860,7 @@ contains
                                             A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_ssyr2k_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyr2k_batched_fortran
         type(c_ptr), value :: handle
@@ -22886,7 +22886,7 @@ contains
                                             A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_dsyr2k_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyr2k_batched_fortran
         type(c_ptr), value :: handle
@@ -22912,7 +22912,7 @@ contains
                                             A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_csyr2k_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyr2k_batched_fortran
         type(c_ptr), value :: handle
@@ -22938,7 +22938,7 @@ contains
                                             A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_zsyr2k_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyr2k_batched_fortran
         type(c_ptr), value :: handle
@@ -22965,7 +22965,7 @@ contains
                                                     A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_ssyr2k_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyr2k_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -22994,7 +22994,7 @@ contains
                                                     A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_dsyr2k_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyr2k_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -23023,7 +23023,7 @@ contains
                                                     A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_csyr2k_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyr2k_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -23052,7 +23052,7 @@ contains
                                                     A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_zsyr2k_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyr2k_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -23082,7 +23082,7 @@ contains
                                     A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_ssyr2k_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyr2k_64_fortran
         type(c_ptr), value :: handle
@@ -23107,7 +23107,7 @@ contains
                                     A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_dsyr2k_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyr2k_64_fortran
         type(c_ptr), value :: handle
@@ -23132,7 +23132,7 @@ contains
                                     A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_csyr2k_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyr2k_64_fortran
         type(c_ptr), value :: handle
@@ -23157,7 +23157,7 @@ contains
                                     A, lda, B, ldb, beta, C, ldc) &
         bind(c, name='rocblas_zsyr2k_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyr2k_64_fortran
         type(c_ptr), value :: handle
@@ -23183,7 +23183,7 @@ contains
                                             A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_ssyr2k_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyr2k_batched_64_fortran
         type(c_ptr), value :: handle
@@ -23209,7 +23209,7 @@ contains
                                             A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_dsyr2k_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyr2k_batched_64_fortran
         type(c_ptr), value :: handle
@@ -23235,7 +23235,7 @@ contains
                                             A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_csyr2k_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyr2k_batched_64_fortran
         type(c_ptr), value :: handle
@@ -23261,7 +23261,7 @@ contains
                                             A, lda, B, ldb, beta, C, ldc, batch_count) &
         bind(c, name='rocblas_zsyr2k_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyr2k_batched_64_fortran
         type(c_ptr), value :: handle
@@ -23288,7 +23288,7 @@ contains
                                                     A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_ssyr2k_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ssyr2k_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -23317,7 +23317,7 @@ contains
                                                     A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_dsyr2k_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dsyr2k_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -23346,7 +23346,7 @@ contains
                                                     A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_csyr2k_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_csyr2k_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -23375,7 +23375,7 @@ contains
                                                     A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_zsyr2k_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zsyr2k_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -23405,7 +23405,7 @@ contains
                                    A, lda, x, incx, C, ldc) &
         bind(c, name='rocblas_sdgmm_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sdgmm_fortran
         type(c_ptr), value :: handle
@@ -23427,7 +23427,7 @@ contains
                                    A, lda, x, incx, C, ldc) &
         bind(c, name='rocblas_ddgmm_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ddgmm_fortran
         type(c_ptr), value :: handle
@@ -23449,7 +23449,7 @@ contains
                                    A, lda, x, incx, C, ldc) &
         bind(c, name='rocblas_cdgmm_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cdgmm_fortran
         type(c_ptr), value :: handle
@@ -23471,7 +23471,7 @@ contains
                                    A, lda, x, incx, C, ldc) &
         bind(c, name='rocblas_zdgmm_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdgmm_fortran
         type(c_ptr), value :: handle
@@ -23494,7 +23494,7 @@ contains
                                            A, lda, x, incx, C, ldc, batch_count) &
         bind(c, name='rocblas_sdgmm_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sdgmm_batched_fortran
         type(c_ptr), value :: handle
@@ -23517,7 +23517,7 @@ contains
                                            A, lda, x, incx, C, ldc, batch_count) &
         bind(c, name='rocblas_ddgmm_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ddgmm_batched_fortran
         type(c_ptr), value :: handle
@@ -23540,7 +23540,7 @@ contains
                                            A, lda, x, incx, C, ldc, batch_count) &
         bind(c, name='rocblas_cdgmm_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cdgmm_batched_fortran
         type(c_ptr), value :: handle
@@ -23563,7 +23563,7 @@ contains
                                            A, lda, x, incx, C, ldc, batch_count) &
         bind(c, name='rocblas_zdgmm_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdgmm_batched_fortran
         type(c_ptr), value :: handle
@@ -23587,7 +23587,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_sdgmm_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sdgmm_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -23613,7 +23613,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_ddgmm_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ddgmm_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -23639,7 +23639,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_cdgmm_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cdgmm_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -23665,7 +23665,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_zdgmm_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdgmm_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -23692,7 +23692,7 @@ contains
                                    A, lda, x, incx, C, ldc) &
         bind(c, name='rocblas_sdgmm_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sdgmm_64_fortran
         type(c_ptr), value :: handle
@@ -23714,7 +23714,7 @@ contains
                                    A, lda, x, incx, C, ldc) &
         bind(c, name='rocblas_ddgmm_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ddgmm_64_fortran
         type(c_ptr), value :: handle
@@ -23736,7 +23736,7 @@ contains
                                    A, lda, x, incx, C, ldc) &
         bind(c, name='rocblas_cdgmm_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cdgmm_64_fortran
         type(c_ptr), value :: handle
@@ -23758,7 +23758,7 @@ contains
                                    A, lda, x, incx, C, ldc) &
         bind(c, name='rocblas_zdgmm_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdgmm_64_fortran
         type(c_ptr), value :: handle
@@ -23781,7 +23781,7 @@ contains
                                            A, lda, x, incx, C, ldc, batch_count) &
         bind(c, name='rocblas_sdgmm_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sdgmm_batched_64_fortran
         type(c_ptr), value :: handle
@@ -23804,7 +23804,7 @@ contains
                                            A, lda, x, incx, C, ldc, batch_count) &
         bind(c, name='rocblas_ddgmm_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ddgmm_batched_64_fortran
         type(c_ptr), value :: handle
@@ -23827,7 +23827,7 @@ contains
                                            A, lda, x, incx, C, ldc, batch_count) &
         bind(c, name='rocblas_cdgmm_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cdgmm_batched_64_fortran
         type(c_ptr), value :: handle
@@ -23850,7 +23850,7 @@ contains
                                            A, lda, x, incx, C, ldc, batch_count) &
         bind(c, name='rocblas_zdgmm_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdgmm_batched_64_fortran
         type(c_ptr), value :: handle
@@ -23874,7 +23874,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_sdgmm_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sdgmm_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -23900,7 +23900,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_ddgmm_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_ddgmm_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -23926,7 +23926,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_cdgmm_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cdgmm_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -23952,7 +23952,7 @@ contains
                                                    A, lda, stride_A, x, incx, stride_x, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_zdgmm_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zdgmm_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -23979,7 +23979,7 @@ contains
                                    A, lda, beta, B, ldb, C, ldc) &
         bind(c, name='rocblas_sgeam_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgeam_fortran
         type(c_ptr), value :: handle
@@ -24004,7 +24004,7 @@ contains
                                    A, lda, beta, B, ldb, C, ldc) &
         bind(c, name='rocblas_dgeam_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgeam_fortran
         type(c_ptr), value :: handle
@@ -24029,7 +24029,7 @@ contains
                                    A, lda, beta, B, ldb, C, ldc) &
         bind(c, name='rocblas_cgeam_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgeam_fortran
         type(c_ptr), value :: handle
@@ -24054,7 +24054,7 @@ contains
                                    A, lda, beta, B, ldb, C, ldc) &
         bind(c, name='rocblas_zgeam_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgeam_fortran
         type(c_ptr), value :: handle
@@ -24080,7 +24080,7 @@ contains
                                            A, lda, beta, B, ldb, C, ldc, batch_count) &
         bind(c, name='rocblas_sgeam_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgeam_batched_fortran
         type(c_ptr), value :: handle
@@ -24106,7 +24106,7 @@ contains
                                            A, lda, beta, B, ldb, C, ldc, batch_count) &
         bind(c, name='rocblas_dgeam_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgeam_batched_fortran
         type(c_ptr), value :: handle
@@ -24132,7 +24132,7 @@ contains
                                            A, lda, beta, B, ldb, C, ldc, batch_count) &
         bind(c, name='rocblas_cgeam_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgeam_batched_fortran
         type(c_ptr), value :: handle
@@ -24158,7 +24158,7 @@ contains
                                            A, lda, beta, B, ldb, C, ldc, batch_count) &
         bind(c, name='rocblas_zgeam_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgeam_batched_fortran
         type(c_ptr), value :: handle
@@ -24185,7 +24185,7 @@ contains
                                                    A, lda, stride_A, beta, B, ldb, stride_B, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_sgeam_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgeam_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -24214,7 +24214,7 @@ contains
                                                    A, lda, stride_A, beta, B, ldb, stride_B, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_dgeam_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgeam_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -24243,7 +24243,7 @@ contains
                                                    A, lda, stride_A, beta, B, ldb, stride_B, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_cgeam_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgeam_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -24272,7 +24272,7 @@ contains
                                                    A, lda, stride_A, beta, B, ldb, stride_B, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_zgeam_strided_batched_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgeam_strided_batched_fortran
         type(c_ptr), value :: handle
@@ -24302,7 +24302,7 @@ contains
                                    A, lda, beta, B, ldb, C, ldc) &
         bind(c, name='rocblas_sgeam_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgeam_64_fortran
         type(c_ptr), value :: handle
@@ -24327,7 +24327,7 @@ contains
                                    A, lda, beta, B, ldb, C, ldc) &
         bind(c, name='rocblas_dgeam_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgeam_64_fortran
         type(c_ptr), value :: handle
@@ -24352,7 +24352,7 @@ contains
                                    A, lda, beta, B, ldb, C, ldc) &
         bind(c, name='rocblas_cgeam_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgeam_64_fortran
         type(c_ptr), value :: handle
@@ -24377,7 +24377,7 @@ contains
                                    A, lda, beta, B, ldb, C, ldc) &
         bind(c, name='rocblas_zgeam_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgeam_64_fortran
         type(c_ptr), value :: handle
@@ -24403,7 +24403,7 @@ contains
                                            A, lda, beta, B, ldb, C, ldc, batch_count) &
         bind(c, name='rocblas_sgeam_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgeam_batched_64_fortran
         type(c_ptr), value :: handle
@@ -24429,7 +24429,7 @@ contains
                                            A, lda, beta, B, ldb, C, ldc, batch_count) &
         bind(c, name='rocblas_dgeam_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgeam_batched_64_fortran
         type(c_ptr), value :: handle
@@ -24455,7 +24455,7 @@ contains
                                            A, lda, beta, B, ldb, C, ldc, batch_count) &
         bind(c, name='rocblas_cgeam_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgeam_batched_64_fortran
         type(c_ptr), value :: handle
@@ -24481,7 +24481,7 @@ contains
                                            A, lda, beta, B, ldb, C, ldc, batch_count) &
         bind(c, name='rocblas_zgeam_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgeam_batched_64_fortran
         type(c_ptr), value :: handle
@@ -24508,7 +24508,7 @@ contains
                                                    A, lda, stride_A, beta, B, ldb, stride_B, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_sgeam_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_sgeam_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -24537,7 +24537,7 @@ contains
                                                    A, lda, stride_A, beta, B, ldb, stride_B, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_dgeam_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dgeam_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -24566,7 +24566,7 @@ contains
                                                    A, lda, stride_A, beta, B, ldb, stride_B, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_cgeam_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_cgeam_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -24595,7 +24595,7 @@ contains
                                                    A, lda, stride_A, beta, B, ldb, stride_B, C, ldc, stride_C, batch_count) &
         bind(c, name='rocblas_zgeam_strided_batched_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_zgeam_strided_batched_64_fortran
         type(c_ptr), value :: handle
@@ -24625,7 +24625,7 @@ contains
         A, lda, B, ldb) &
     bind(c, name='rocblas_strsm_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_strsm_fortran
     type(c_ptr), value :: handle
@@ -24649,7 +24649,7 @@ contains
             A, lda, B, ldb) &
     bind(c, name='rocblas_dtrsm_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_dtrsm_fortran
     type(c_ptr), value :: handle
@@ -24673,7 +24673,7 @@ contains
             A, lda, B, ldb) &
     bind(c, name='rocblas_ctrsm_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_ctrsm_fortran
     type(c_ptr), value :: handle
@@ -24697,7 +24697,7 @@ contains
             A, lda, B, ldb) &
     bind(c, name='rocblas_ztrsm_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_ztrsm_fortran
     type(c_ptr), value :: handle
@@ -24722,7 +24722,7 @@ contains
         A, lda, B, ldb) &
     bind(c, name='rocblas_strsm_64_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_strsm_64_fortran
     type(c_ptr), value :: handle
@@ -24746,7 +24746,7 @@ contains
             A, lda, B, ldb) &
     bind(c, name='rocblas_dtrsm_64_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_dtrsm_64_fortran
     type(c_ptr), value :: handle
@@ -24770,7 +24770,7 @@ contains
             A, lda, B, ldb) &
     bind(c, name='rocblas_ctrsm_64_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_ctrsm_64_fortran
     type(c_ptr), value :: handle
@@ -24794,7 +24794,7 @@ contains
             A, lda, B, ldb) &
     bind(c, name='rocblas_ztrsm_64_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_ztrsm_64_fortran
     type(c_ptr), value :: handle
@@ -24819,7 +24819,7 @@ contains
                     A, lda, B, ldb, batch_count) &
     bind(c, name='rocblas_strsm_batched_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_strsm_batched_fortran
     type(c_ptr), value :: handle
@@ -24844,7 +24844,7 @@ contains
                     A, lda, B, ldb, batch_count) &
     bind(c, name='rocblas_dtrsm_batched_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_dtrsm_batched_fortran
     type(c_ptr), value :: handle
@@ -24869,7 +24869,7 @@ contains
                     A, lda, B, ldb, batch_count) &
     bind(c, name='rocblas_ctrsm_batched_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_ctrsm_batched_fortran
     type(c_ptr), value :: handle
@@ -24894,7 +24894,7 @@ contains
                     A, lda, B, ldb, batch_count) &
     bind(c, name='rocblas_ztrsm_batched_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_ztrsm_batched_fortran
     type(c_ptr), value :: handle
@@ -24920,7 +24920,7 @@ contains
                     A, lda, B, ldb, batch_count) &
     bind(c, name='rocblas_strsm_batched_64_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_strsm_batched_64_fortran
     type(c_ptr), value :: handle
@@ -24945,7 +24945,7 @@ contains
                     A, lda, B, ldb, batch_count) &
     bind(c, name='rocblas_dtrsm_batched_64_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_dtrsm_batched_64_fortran
     type(c_ptr), value :: handle
@@ -24970,7 +24970,7 @@ contains
                     A, lda, B, ldb, batch_count) &
     bind(c, name='rocblas_ctrsm_batched_64_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_ctrsm_batched_64_fortran
     type(c_ptr), value :: handle
@@ -24995,7 +24995,7 @@ contains
                     A, lda, B, ldb, batch_count) &
     bind(c, name='rocblas_ztrsm_batched_64_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_ztrsm_batched_64_fortran
     type(c_ptr), value :: handle
@@ -25021,7 +25021,7 @@ contains
                             A, lda, stride_A, B, ldb, stride_B, batch_count) &
     bind(c, name='rocblas_strsm_strided_batched_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_strsm_strided_batched_fortran
     type(c_ptr), value :: handle
@@ -25048,7 +25048,7 @@ contains
                             A, lda, stride_A, B, ldb, stride_B, batch_count) &
     bind(c, name='rocblas_dtrsm_strided_batched_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_dtrsm_strided_batched_fortran
     type(c_ptr), value :: handle
@@ -25075,7 +25075,7 @@ contains
                             A, lda, stride_A, B, ldb, stride_B, batch_count) &
     bind(c, name='rocblas_ctrsm_strided_batched_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_ctrsm_strided_batched_fortran
     type(c_ptr), value :: handle
@@ -25102,7 +25102,7 @@ contains
                             A, lda, stride_A, B, ldb, stride_B, batch_count) &
     bind(c, name='rocblas_ztrsm_strided_batched_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_ztrsm_strided_batched_fortran
     type(c_ptr), value :: handle
@@ -25130,7 +25130,7 @@ contains
                             A, lda, stride_A, B, ldb, stride_B, batch_count) &
     bind(c, name='rocblas_strsm_strided_batched_64_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_strsm_strided_batched_64_fortran
     type(c_ptr), value :: handle
@@ -25157,7 +25157,7 @@ contains
                             A, lda, stride_A, B, ldb, stride_B, batch_count) &
     bind(c, name='rocblas_dtrsm_strided_batched_64_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_dtrsm_strided_batched_64_fortran
     type(c_ptr), value :: handle
@@ -25184,7 +25184,7 @@ contains
                             A, lda, stride_A, B, ldb, stride_B, batch_count) &
     bind(c, name='rocblas_ctrsm_strided_batched_64_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_ctrsm_strided_batched_64_fortran
     type(c_ptr), value :: handle
@@ -25211,7 +25211,7 @@ contains
                             A, lda, stride_A, B, ldb, stride_B, batch_count) &
     bind(c, name='rocblas_ztrsm_strided_batched_64_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_ztrsm_strided_batched_64_fortran
     type(c_ptr), value :: handle
@@ -25239,7 +25239,7 @@ contains
         A, lda, invA, ldinvA) &
     bind(c, name='rocblas_strtri_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_strtri_fortran
     type(c_ptr), value :: handle
@@ -25259,7 +25259,7 @@ contains
             A, lda, invA, ldinvA) &
     bind(c, name='rocblas_dtrtri_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_dtrtri_fortran
     type(c_ptr), value :: handle
@@ -25279,7 +25279,7 @@ contains
             A, lda, invA, ldinvA) &
     bind(c, name='rocblas_ctrtri_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_ctrtri_fortran
     type(c_ptr), value :: handle
@@ -25299,7 +25299,7 @@ contains
             A, lda, invA, ldinvA) &
     bind(c, name='rocblas_ztrtri_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_ztrtri_fortran
     type(c_ptr), value :: handle
@@ -25320,7 +25320,7 @@ contains
                     A, lda, invA, ldinvA, batch_count) &
     bind(c, name='rocblas_strtri_batched_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_strtri_batched_fortran
     type(c_ptr), value :: handle
@@ -25341,7 +25341,7 @@ contains
                     A, lda, invA, ldinvA, batch_count) &
     bind(c, name='rocblas_dtrtri_batched_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_dtrtri_batched_fortran
     type(c_ptr), value :: handle
@@ -25362,7 +25362,7 @@ contains
                     A, lda, invA, ldinvA, batch_count) &
     bind(c, name='rocblas_ctrtri_batched_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_ctrtri_batched_fortran
     type(c_ptr), value :: handle
@@ -25383,7 +25383,7 @@ contains
                     A, lda, invA, ldinvA, batch_count) &
     bind(c, name='rocblas_ztrtri_batched_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_ztrtri_batched_fortran
     type(c_ptr), value :: handle
@@ -25405,7 +25405,7 @@ contains
                             A, lda, stride_A, invA, ldinvA, stride_invA, batch_count) &
     bind(c, name='rocblas_strtri_strided_batched_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_strtri_strided_batched_fortran
     type(c_ptr), value :: handle
@@ -25428,7 +25428,7 @@ contains
                             A, lda, stride_A, invA, ldinvA, stride_invA, batch_count) &
     bind(c, name='rocblas_dtrtri_strided_batched_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_dtrtri_strided_batched_fortran
     type(c_ptr), value :: handle
@@ -25451,7 +25451,7 @@ contains
                             A, lda, stride_A, invA, ldinvA, stride_invA, batch_count) &
     bind(c, name='rocblas_ctrtri_strided_batched_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_ctrtri_strided_batched_fortran
     type(c_ptr), value :: handle
@@ -25474,7 +25474,7 @@ contains
                             A, lda, stride_A, invA, ldinvA, stride_invA, batch_count) &
     bind(c, name='rocblas_ztrtri_strided_batched_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_ztrtri_strided_batched_fortran
     type(c_ptr), value :: handle
@@ -25503,7 +25503,7 @@ contains
             compute_type, geam_ex_op) &
         bind(c, name='rocblas_geam_ex_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_geam_ex_fortran
         type(c_ptr), value :: handle
@@ -25540,7 +25540,7 @@ contains
                                      y, y_type, incy, execution_type) &
         bind(c, name='rocblas_axpy_ex_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_axpy_ex_fortran
         type(c_ptr), value :: handle
@@ -25563,7 +25563,7 @@ contains
                                              y, y_type, incy, batch_count, execution_type) &
         bind(c, name='rocblas_axpy_batched_ex_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_axpy_batched_ex_fortran
         type(c_ptr), value :: handle
@@ -25588,7 +25588,7 @@ contains
                                                      y, y_type, incy, stridey, batch_count, execution_type) &
         bind(c, name='rocblas_axpy_strided_batched_ex_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_axpy_strided_batched_ex_fortran
         type(c_ptr), value :: handle
@@ -25616,7 +25616,7 @@ contains
                                      y, y_type, incy, execution_type) &
         bind(c, name='rocblas_axpy_ex_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_axpy_ex_64_fortran
         type(c_ptr), value :: handle
@@ -25639,7 +25639,7 @@ contains
                                              y, y_type, incy, batch_count, execution_type) &
         bind(c, name='rocblas_axpy_batched_ex_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_axpy_batched_ex_64_fortran
         type(c_ptr), value :: handle
@@ -25664,7 +25664,7 @@ contains
                                                      y, y_type, incy, stridey, batch_count, execution_type) &
         bind(c, name='rocblas_axpy_strided_batched_ex_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_axpy_strided_batched_ex_64_fortran
         type(c_ptr), value :: handle
@@ -25692,7 +25692,7 @@ contains
                                     y, y_type, incy, result, result_type, execution_type) &
         bind(c, name='rocblas_dot_ex_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dot_ex_fortran
         type(c_ptr), value :: handle
@@ -25716,7 +25716,7 @@ contains
                                     y, y_type, incy, result, result_type, execution_type) &
         bind(c, name='rocblas_dot_ex_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dot_ex_64_fortran
         type(c_ptr), value :: handle
@@ -25740,7 +25740,7 @@ contains
                                      y, y_type, incy, result, result_type, execution_type) &
         bind(c, name='rocblas_dotc_ex_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dotc_ex_fortran
         type(c_ptr), value :: handle
@@ -25764,7 +25764,7 @@ contains
                                      y, y_type, incy, result, result_type, execution_type) &
         bind(c, name='rocblas_dotc_ex_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dotc_ex_64_fortran
         type(c_ptr), value :: handle
@@ -25788,7 +25788,7 @@ contains
                                             y, y_type, incy, batch_count, result, result_type, execution_type) &
         bind(c, name='rocblas_dot_batched_ex_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dot_batched_ex_fortran
         type(c_ptr), value :: handle
@@ -25813,7 +25813,7 @@ contains
                                             y, y_type, incy, batch_count, result, result_type, execution_type) &
         bind(c, name='rocblas_dot_batched_ex_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dot_batched_ex_64_fortran
         type(c_ptr), value :: handle
@@ -25838,7 +25838,7 @@ contains
                                              y, y_type, incy, batch_count, result, result_type, execution_type) &
         bind(c, name='rocblas_dotc_batched_ex_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dotc_batched_ex_fortran
         type(c_ptr), value :: handle
@@ -25863,7 +25863,7 @@ contains
                                              y, y_type, incy, batch_count, result, result_type, execution_type) &
         bind(c, name='rocblas_dotc_batched_ex_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dotc_batched_ex_64_fortran
         type(c_ptr), value :: handle
@@ -25888,7 +25888,7 @@ contains
                                                     y, y_type, incy, stride_y, batch_count, result, result_type, execution_type) &
         bind(c, name='rocblas_dot_strided_batched_ex_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dot_strided_batched_ex_fortran
         type(c_ptr), value :: handle
@@ -25915,7 +25915,7 @@ contains
                                                     y, y_type, incy, stride_y, batch_count, result, result_type, execution_type) &
         bind(c, name='rocblas_dot_strided_batched_ex_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dot_strided_batched_ex_64_fortran
         type(c_ptr), value :: handle
@@ -25942,7 +25942,7 @@ contains
                                                      y, y_type, incy, stride_y, batch_count, result, result_type, execution_type) &
         bind(c, name='rocblas_dotc_strided_batched_ex_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dotc_strided_batched_ex_fortran
         type(c_ptr), value :: handle
@@ -25969,7 +25969,7 @@ contains
                                                      y, y_type, incy, stride_y, batch_count, result, result_type, execution_type) &
         bind(c, name='rocblas_dotc_strided_batched_ex_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_dotc_strided_batched_ex_64_fortran
         type(c_ptr), value :: handle
@@ -25996,7 +25996,7 @@ contains
     function rocblas_nrm2_ex_fortran(handle, n, x, x_type, incx, result, result_type, execution_type) &
         bind(c, name='rocblas_nrm2_ex_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_nrm2_ex_fortran
         type(c_ptr), value :: handle
@@ -26016,7 +26016,7 @@ contains
                                              result, result_type, execution_type) &
         bind(c, name='rocblas_nrm2_batched_ex_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_nrm2_batched_ex_fortran
         type(c_ptr), value :: handle
@@ -26038,7 +26038,7 @@ contains
                                                      result, result_type, execution_type) &
         bind(c, name='rocblas_nrm2_strided_batched_ex_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_nrm2_strided_batched_ex_fortran
         type(c_ptr), value :: handle
@@ -26061,7 +26061,7 @@ contains
     function rocblas_nrm2_ex_64_fortran(handle, n, x, x_type, incx, result, result_type, execution_type) &
         bind(c, name='rocblas_nrm2_ex_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_nrm2_ex_64_fortran
         type(c_ptr), value :: handle
@@ -26081,7 +26081,7 @@ contains
                                              result, result_type, execution_type) &
         bind(c, name='rocblas_nrm2_batched_ex_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_nrm2_batched_ex_64_fortran
         type(c_ptr), value :: handle
@@ -26103,7 +26103,7 @@ contains
                                                      result, result_type, execution_type) &
         bind(c, name='rocblas_nrm2_strided_batched_ex_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_nrm2_strided_batched_ex_64_fortran
         type(c_ptr), value :: handle
@@ -26127,7 +26127,7 @@ contains
                                     c, s, cs_type, execution_type) &
         bind(c, name='rocblas_rot_ex_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_rot_ex_fortran
         type(c_ptr), value :: handle
@@ -26151,7 +26151,7 @@ contains
                                             c, s, cs_type, batch_count, execution_type) &
         bind(c, name='rocblas_rot_batched_ex_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_rot_batched_ex_fortran
         type(c_ptr), value :: handle
@@ -26176,7 +26176,7 @@ contains
                                                     c, s, cs_type, batch_count, execution_type) &
         bind(c, name='rocblas_rot_strided_batched_ex_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_rot_strided_batched_ex_fortran
         type(c_ptr), value :: handle
@@ -26206,7 +26206,7 @@ contains
                                     c, s, cs_type, execution_type) &
         bind(c, name='rocblas_rot_ex_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_rot_ex_64_fortran
         type(c_ptr), value :: handle
@@ -26230,7 +26230,7 @@ contains
                                             c, s, cs_type, batch_count, execution_type) &
         bind(c, name='rocblas_rot_batched_ex_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_rot_batched_ex_64_fortran
         type(c_ptr), value :: handle
@@ -26255,7 +26255,7 @@ contains
                                                     c, s, cs_type, batch_count, execution_type) &
         bind(c, name='rocblas_rot_strided_batched_ex_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_rot_strided_batched_ex_64_fortran
         type(c_ptr), value :: handle
@@ -26283,7 +26283,7 @@ contains
     function rocblas_scal_ex_fortran(handle, n, alpha, alpha_type, x, x_type, incx, execution_type) &
         bind(c, name='rocblas_scal_ex_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_scal_ex_fortran
         type(c_ptr), value :: handle
@@ -26302,7 +26302,7 @@ contains
     function rocblas_scal_ex_64_fortran(handle, n, alpha, alpha_type, x, x_type, incx, execution_type) &
         bind(c, name='rocblas_scal_ex_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_scal_ex_64_fortran
         type(c_ptr), value :: handle
@@ -26322,7 +26322,7 @@ contains
                                              batch_count, execution_type) &
         bind(c, name='rocblas_scal_batched_ex_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_scal_batched_ex_fortran
         type(c_ptr), value :: handle
@@ -26343,7 +26343,7 @@ contains
                                              batch_count, execution_type) &
         bind(c, name='rocblas_scal_batched_ex_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_scal_batched_ex_64_fortran
         type(c_ptr), value :: handle
@@ -26364,7 +26364,7 @@ contains
                                                      batch_count, execution_type) &
         bind(c, name='rocblas_scal_strided_batched_ex_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_scal_strided_batched_ex_fortran
         type(c_ptr), value :: handle
@@ -26387,7 +26387,7 @@ contains
                                                      batch_count, execution_type) &
         bind(c, name='rocblas_scal_strided_batched_ex_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_scal_strided_batched_ex_64_fortran
         type(c_ptr), value :: handle
@@ -26411,7 +26411,7 @@ contains
         B, ldb, invA, invA_size, compute_type) &
     bind(c, name='rocblas_trsm_ex_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_trsm_ex_fortran
     type(c_ptr), value :: handle
@@ -26438,7 +26438,7 @@ contains
                     B, ldb, batch_count, invA, invA_size, compute_type) &
     bind(c, name='rocblas_trsm_batched_ex_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_trsm_batched_ex_fortran
     type(c_ptr), value :: handle
@@ -26466,7 +26466,7 @@ contains
                             B, ldb, stride_B, batch_count, invA, invA_size, stride_invA, compute_type) &
     bind(c, name='rocblas_trsm_strided_batched_ex_fortran')
     use iso_c_binding
-    use rocblas_enums
+    use rocblas
     implicit none
     integer(kind(rocblas_status_success)) :: rocblas_trsm_strided_batched_ex_fortran
     type(c_ptr), value :: handle
@@ -26500,7 +26500,7 @@ contains
                                      compute_type, algo, solution_index, flags) &
         bind(c, name='rocblas_gemm_ex_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_gemm_ex_fortran
         type(c_ptr), value :: handle
@@ -26541,7 +26541,7 @@ contains
                                      compute_type, algo, solution_index, flags) &
         bind(c, name='rocblas_gemm_ex_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_gemm_ex_64_fortran
         type(c_ptr), value :: handle
@@ -26581,7 +26581,7 @@ contains
                                              batch_count, compute_type, algo, solution_index, flags) &
         bind(c, name='rocblas_gemm_batched_ex_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_gemm_batched_ex_fortran
         type(c_ptr), value :: handle
@@ -26622,7 +26622,7 @@ contains
                                              batch_count, compute_type, algo, solution_index, flags) &
         bind(c, name='rocblas_gemm_batched_ex_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_gemm_batched_ex_64_fortran
         type(c_ptr), value :: handle
@@ -26663,7 +26663,7 @@ contains
                                                      stride_d, batch_count, compute_type, algo, solution_index, flags) &
         bind(c, name='rocblas_gemm_strided_batched_ex_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_gemm_strided_batched_ex_fortran
         type(c_ptr), value :: handle
@@ -26708,7 +26708,7 @@ contains
                                                      stride_d, batch_count, compute_type, algo, solution_index, flags) &
         bind(c, name='rocblas_gemm_strided_batched_ex_64_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_gemm_strided_batched_ex_64_fortran
         type(c_ptr), value :: handle
@@ -26754,7 +26754,7 @@ contains
                                      compute_type) &
         bind(c, name='rocblas_syrk_ex_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_syrk_ex_fortran
         type(c_ptr), value :: handle
@@ -26783,7 +26783,7 @@ contains
                                      compute_type) &
         bind(c, name='rocblas_herk_ex_fortran')
         use iso_c_binding
-        use rocblas_enums
+        use rocblas
         implicit none
         integer(kind(rocblas_status_success)) :: rocblas_herk_ex_fortran
         type(c_ptr), value :: handle

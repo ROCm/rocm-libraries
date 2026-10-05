@@ -259,11 +259,6 @@ add_subdirectory( src )
 
 execute_process(COMMAND ${CMAKE_COMMAND} -E copy_directory ${PROJECT_SOURCE_DIR}/library/include ${PROJECT_BINARY_DIR}/include/rocblas)
 
-# Force installation of .f90 module file
-rocm_install(FILES "include/rocblas_module.f90"
-	DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/rocblas/"
-)
-
 ############################################################
 # Packaging
 
