@@ -29,6 +29,10 @@ public:
                 recordReferenceError,
                 (const std::string& bundlePath, const std::string& reason),
                 (override));
+    MOCK_METHOD(void,
+                recordVerifier,
+                (const std::string& bundlePath, Verifier verifier),
+                (override));
 };
 
 } // namespace hipdnn_integration_tests::bundle

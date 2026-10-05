@@ -15,11 +15,13 @@ gelu/silu ``_mode`` map) -- with fake tensors and a fake ``state``, so they run 
 on any box (no bootstrap, no GPU, no provider ``.so``).
 """
 
+import os
 from types import SimpleNamespace
 
 import pytest
 
 from hipdnn_torch.activation import GeluOverride, SiluOverride
+from hipdnn_torch.bootstrap import BootstrapError, _torch_backend_path
 from hipdnn_torch.conv import Conv2dFpropOverride, _ntuple, _resolve_pads
 from hipdnn_torch.layernorm import LayerNormOverride
 from hipdnn_torch.linear import LinearOverride
@@ -252,6 +254,49 @@ def test_silu_mode():
 
 
 # --------------------------------------------------------------------------- #
+# bootstrap._torch_backend_path -- find torch's bundled hipDNN backend        #
+# --------------------------------------------------------------------------- #
+def _fake_site(tmp_path, sdk_dir):
+    """A site-packages holding torch and, if given, an SDK dir with the backend."""
+    (tmp_path / "torch").mkdir()
+    (tmp_path / "torch" / "__init__.py").touch()
+    if sdk_dir:
+        lib = tmp_path / sdk_dir / "lib"
+        lib.mkdir(parents=True)
+        (lib / "libhipdnn_backend.so").touch()
+    return SimpleNamespace(__file__=str(tmp_path / "torch" / "__init__.py"))
+
+
+@pytest.mark.parametrize(
+    "sdk_dir", ["_rocm_sdk_libraries", "_rocm_sdk_libraries_gfx1151"]
+)
+def test_torch_backend_found_in_either_sdk_wheel_layout(tmp_path, monkeypatch, sdk_dir):
+    monkeypatch.delenv("HIPDNN_TORCH_BACKEND_GLOB", raising=False)
+    torch = _fake_site(tmp_path, sdk_dir)
+    found = _torch_backend_path(torch)
+    assert found == str(tmp_path / sdk_dir / "lib" / "libhipdnn_backend.so")
+
+
+def test_torch_backend_missing_raises_naming_both_layouts(tmp_path, monkeypatch):
+    monkeypatch.delenv("HIPDNN_TORCH_BACKEND_GLOB", raising=False)
+    torch = _fake_site(tmp_path, None)
+    with pytest.raises(BootstrapError) as excinfo:
+        _torch_backend_path(torch)
+    message = str(excinfo.value)
+    for sdk_dir in ("_rocm_sdk_libraries", "_rocm_sdk_libraries_*"):
+        expected = os.path.join(str(tmp_path), sdk_dir, "lib", "libhipdnn_backend.so")
+        assert repr(expected) in message
+
+
+def test_torch_backend_override_wins(tmp_path, monkeypatch):
+    torch = _fake_site(tmp_path, "_rocm_sdk_libraries")
+    other = tmp_path / "custom" / "libhipdnn_backend.so"
+    other.parent.mkdir()
+    other.touch()
+    monkeypatch.setenv("HIPDNN_TORCH_BACKEND_GLOB", str(other))
+    assert _torch_backend_path(torch) == str(other)
+
+
 # sdpa._output_layout -- O takes Q's dimension order                          #
 # --------------------------------------------------------------------------- #
 def _layout_strides(alloc_dims, inverse):
