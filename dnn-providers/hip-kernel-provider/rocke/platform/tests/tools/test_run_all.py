@@ -220,23 +220,33 @@ def test_native_setup_failure_prevents_silently_skipped_pytest(
 def test_fresh_build_prepares_entire_ctest_suite(
     runner, monkeypatch, tmp_path, override
 ):
-    if not shutil.which("cmake") or not shutil.which("ctest"):
-        pytest.skip("CMake and CTest required for fresh-build regression")
+    if not all(shutil.which(tool) for tool in ("cmake", "ctest", "ninja")):
+        pytest.skip("CMake, CTest, and Ninja required for fresh-build regression")
     source = tmp_path / "source"
     source.mkdir()
-    (source / "main.c").write_text("int main(void) { return 0; }\n")
+    # Exercise real build/discovery/execution without requiring a C toolchain.
+    # Copy CMake itself as each executable: `-E true` supplies the trivial
+    # success behavior, and the executable exists only after its target builds.
     (source / "CMakeLists.txt").write_text(
         "cmake_minimum_required(VERSION 3.20)\n"
-        "project(runner_fixture C)\n"
+        "project(runner_fixture LANGUAGES NONE)\n"
         "enable_testing()\n"
-        "add_library(rocke_core STATIC main.c)\n"
-        "add_executable(rocke_storage main.c)\n"
-        "add_executable(rocke_dtypes main.c)\n"
-        "add_test(NAME rocke_storage COMMAND rocke_storage)\n"
-        "add_test(NAME rocke_dtypes COMMAND rocke_dtypes)\n"
+        'add_custom_target(rocke_core COMMAND "${CMAKE_COMMAND}" -E touch core.ready)\n'
+        'get_filename_component(tool_suffix "${CMAKE_COMMAND}" LAST_EXT)\n'
+        "foreach(name rocke_storage rocke_dtypes)\n"
+        '  set(output "${CMAKE_CURRENT_BINARY_DIR}/fixtures/${name}${tool_suffix}")\n'
+        '  add_custom_command(OUTPUT "${output}"\n'
+        '    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/fixtures"\n'
+        '    COMMAND "${CMAKE_COMMAND}" -E copy "${CMAKE_COMMAND}" "${output}"\n'
+        "    VERBATIM)\n"
+        '  add_custom_target(${name} ALL DEPENDS "${output}")\n'
+        '  add_test(NAME ${name} COMMAND "${output}" -E true)\n'
+        "endforeach()\n"
     )
     build = tmp_path / "build"
-    subprocess.run(["cmake", "-S", str(source), "-B", str(build)], check=True)
+    subprocess.run(
+        ["cmake", "-G", "Ninja", "-S", str(source), "-B", str(build)], check=True
+    )
     # Reproduce the byte-identity gate's partial build before pytest setup.
     subprocess.run(
         ["cmake", "--build", str(build), "--target", "rocke_core"], check=True
