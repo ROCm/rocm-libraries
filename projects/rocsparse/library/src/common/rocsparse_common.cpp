@@ -24,6 +24,7 @@
 
 #include "rocsparse_common.h"
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include <hip/hip_runtime.h>
@@ -48,23 +49,28 @@ namespace rocsparse
         array[lid + ld * wid] = value;
     }
 
-    template <uint32_t BLOCKSIZE, typename I, typename A, typename T>
+    template <uint32_t BLOCKSIZE, bool GRID_STRIDE, typename I, typename A, typename T>
     ROCSPARSE_DEVICE_ILF void scale_device(I length, T scalar, A* __restrict__ array)
     {
-        const I gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+        const int64_t stride = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
 
-        if(gid >= length)
+        for(int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+            gid < length;
+            gid += stride)
         {
-            return;
-        }
+            if(scalar == static_cast<T>(0))
+            {
+                array[gid] = static_cast<A>(0);
+            }
+            else
+            {
+                array[gid] *= scalar;
+            }
 
-        if(scalar == static_cast<T>(0))
-        {
-            array[gid] = static_cast<A>(0);
-        }
-        else
-        {
-            array[gid] *= scalar;
+            if constexpr(!GRID_STRIDE)
+            {
+                break;
+            }
         }
     }
 
@@ -156,7 +162,7 @@ namespace rocsparse
         rocsparse::valset_2d_device<BLOCKSIZE>(m, n, ld, value, array, order);
     }
 
-    template <uint32_t BLOCKSIZE, typename I, typename A, typename T>
+    template <uint32_t BLOCKSIZE, bool GRID_STRIDE, typename I, typename A, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void scale_kernel(I length,
                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, scalar),
@@ -166,7 +172,7 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(scalar);
         if(scalar != static_cast<T>(1))
         {
-            rocsparse::scale_device<BLOCKSIZE>(length, scalar, array);
+            rocsparse::scale_device<BLOCKSIZE, GRID_STRIDE>(length, scalar, array);
         }
     }
 
@@ -262,16 +268,30 @@ rocsparse_status rocsparse::scale_array(rocsparse_handle       handle,
         }
         else if((on_host && *scalar_device_host != static_cast<T>(1)) || on_host == false)
         {
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::scale_kernel<256>),
-                dim3((length - 1) / 256 + 1),
-                dim3(256),
-                0,
-                handle->stream,
-                length,
-                ROCSPARSE_SCALAR_HOST_DEVICE_ARGUMENT(pointer_mode, scalar_device_host),
-                array,
-                on_host);
+#define LAUNCH_SCALE(GRID_STRIDE)                                                \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                          \
+        (rocsparse::scale_kernel<256, GRID_STRIDE>),                             \
+        dim3(grid_size),                                                         \
+        dim3(256),                                                               \
+        0,                                                                       \
+        handle->stream,                                                          \
+        length,                                                                  \
+        ROCSPARSE_SCALAR_HOST_DEVICE_ARGUMENT(pointer_mode, scalar_device_host), \
+        array,                                                                   \
+        on_host)
+
+            // Only a clamped grid needs the grid-stride loop.
+            const int64_t  num_blocks = (static_cast<int64_t>(length) - 1) / 256 + 1;
+            const uint32_t grid_size  = rocsparse::get_grid_size_x(handle, num_blocks, 256);
+            if(grid_size < num_blocks)
+            {
+                LAUNCH_SCALE(true);
+            }
+            else
+            {
+                LAUNCH_SCALE(false);
+            }
+#undef LAUNCH_SCALE
         }
     }
     return rocsparse_status_success;

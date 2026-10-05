@@ -175,12 +175,13 @@ void testing_axpby_extra(const Arguments& arg)
     // touched. The fix casts the block index to the (64-bit) index type before
     // the multiply and iterates with a grid-stride loop.
     //
-    // This drives the 64-bit-index path of rocsparse_axpby (which dispatches to
-    // axpyi_template) with nnz just past the 2^32 boundary and checks that an
-    // element beyond that boundary is actually accumulated into y. To stay
-    // within a single device allocation (host mirrors of the full arrays would
-    // need tens of GB) everything is initialized on the device and a single
-    // element is probed.
+    // This drives the 64-bit-index path of rocsparse_axpby with nnz and size
+    // just past the 2^32 boundary. beta is neither 0 nor 1, so axpby first
+    // launches the scale kernel over all of y and then axpyi_template over x.
+    // The test checks that an element beyond the boundary is accumulated into
+    // y and that the last element of y is scaled. Everything is initialized on
+    // the device and only a few elements are probed, so no host buffer of this
+    // size is needed.
     using I = int64_t;
     using T = float;
 
@@ -188,8 +189,10 @@ void testing_axpby_extra(const Arguments& arg)
 
     // nnz just beyond 2^32 so at least one block has a block index whose
     // (blockIdx * BLOCKSIZE) product overflows 32-bit arithmetic.
-    const I nnz  = two_pow_32 + 512;
-    const I size = 2;
+    const I nnz = two_pow_32 + 512;
+
+    // A sparse-vector descriptor requires nnz <= size.
+    const I size = nnz;
 
     const rocsparse_index_base base = rocsparse_index_base_zero;
 
@@ -215,9 +218,18 @@ void testing_axpby_extra(const Arguments& arg)
     CHECK_HIP_ERROR(
         hipMemcpy(static_cast<T*>(dx_val) + probe_idx, &x_in, sizeof(T), hipMemcpyHostToDevice));
 
-    // beta == 1 leaves the existing y untouched; alpha scales the gathered x.
+    // y[1] is the probe's output; y[size - 1] is past the 2^32 boundary and is
+    // only touched by the beta scaling.
+    const I tail_idx = size - 1;
+    const T y_in     = static_cast<T>(1);
+    const T tail_in  = static_cast<T>(5);
+    CHECK_HIP_ERROR(
+        hipMemcpy(static_cast<T*>(dy) + probe_ind, &y_in, sizeof(T), hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(
+        hipMemcpy(static_cast<T*>(dy) + tail_idx, &tail_in, sizeof(T), hipMemcpyHostToDevice));
+
     const T halpha = static_cast<T>(2);
-    const T hbeta  = static_cast<T>(1);
+    const T hbeta  = static_cast<T>(3);
 
     rocsparse_local_spvec x(size, nnz, dx_ind, dx_val, get_indextype<I>(), base, get_datatype<T>());
     rocsparse_local_dnvec y(size, dy, get_datatype<T>());
@@ -225,10 +237,19 @@ void testing_axpby_extra(const Arguments& arg)
     CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
     CHECK_ROCSPARSE_ERROR(testing::rocsparse_axpby(handle, &halpha, x, &hbeta, y));
 
-    // y[1] = beta * 0 + alpha * x_in = 2. Before the fix the wrapped block index
-    // leaves the probe element unprocessed, so y[1] stays 0.
+    // y[1] = beta * y_in + alpha * x_in = 5. Before the fix the wrapped block
+    // index leaves the probe element unprocessed.
     T y_out = static_cast<T>(0);
-    CHECK_HIP_ERROR(hipMemcpy(&y_out, static_cast<T*>(dy) + 1, sizeof(T), hipMemcpyDeviceToHost));
+    CHECK_HIP_ERROR(
+        hipMemcpy(&y_out, static_cast<T*>(dy) + probe_ind, sizeof(T), hipMemcpyDeviceToHost));
 
-    unit_check_scalar<T>(static_cast<T>(2), y_out);
+    unit_check_scalar<T>(hbeta * y_in + halpha * x_in, y_out);
+
+    // y[size - 1] = beta * tail_in = 15. An unclamped scale grid is rejected at
+    // launch, and a clamped grid without a grid-stride loop leaves it unscaled.
+    T tail_out = static_cast<T>(0);
+    CHECK_HIP_ERROR(
+        hipMemcpy(&tail_out, static_cast<T*>(dy) + tail_idx, sizeof(T), hipMemcpyDeviceToHost));
+
+    unit_check_scalar<T>(hbeta * tail_in, tail_out);
 }
