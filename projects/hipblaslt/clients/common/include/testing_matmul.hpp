@@ -1630,10 +1630,12 @@ std::tuple<hipDataType, hipDataType> derive_unset_compute_input_type(const Argum
 }
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
-// HostPreSwizzle (EXT) descriptors use Gfx950 pad-8/32; generateMXInput emits
-// compact K-blocks, so the harness must restride before the GFX950 swizzle.
-// NoSwizzle / VEC32 stays on develop's compact generateMXInput path.
-inline bool mxNeedsHostPreSwizzleScalePad(hipblaslt_scaling_format fmt)
+// EXT (HostPreSwizzle) swizzle output is ceil(MN/32)*32 × ceil(Kblocks/8)*8.
+// Size the test buffer for that headroom; generateMXInput(GFX950) still emits
+// compact scales and pads inside preSwizzleScalesGFX950. This is not a new
+// user-facing pad-before-API step — production EXT users pass already-swizzled
+// buffers whose size is that same swizzle output.
+inline bool mxNeedsHostPreSwizzleScaleBuf(hipblaslt_scaling_format fmt)
 {
     return fmt == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
 }
@@ -2165,9 +2167,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                     size_t kDim        = kAlongRowsA ? scaleA_r : scaleA_c;
                     size_t mnDim       = kAlongRowsA ? scaleA_c : scaleA_r;
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
-                    if(mxNeedsHostPreSwizzleScalePad(arg.scaleA))
+                    if(mxNeedsHostPreSwizzleScaleBuf(arg.scaleA))
                     {
-                        // Match setMXScale Gfx950 pad (K→×8, free→×32).
+                        // Headroom for preSwizzleScalesGFX950 output (MN→×32, K→×8).
                         size_t paddedK    = (kDim + 7) / 8 * 8;
                         size_t paddedMN   = (mnDim + 31) / 32 * 32;
                         size_scaleAVec[i] = paddedK * paddedMN;
@@ -2204,8 +2206,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                     size_t kDim        = kAlongRowsB ? scaleB_r : scaleB_c;
                     size_t mnDim       = kAlongRowsB ? scaleB_c : scaleB_r;
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
-                    if(mxNeedsHostPreSwizzleScalePad(arg.scaleB))
+                    if(mxNeedsHostPreSwizzleScaleBuf(arg.scaleB))
                     {
+                        // Headroom for preSwizzleScalesGFX950 output (MN→×32, K→×8).
                         size_t paddedK    = (kDim + 7) / 8 * 8;
                         size_t paddedMN   = (mnDim + 31) / 32 * 32;
                         size_scaleBVec[i] = paddedK * paddedMN;
@@ -2922,70 +2925,28 @@ void testing_matmul_with_bias(const Arguments& arg,
             size_t scaleBatchBytesA = (num_batches[i] > 1) ? size_scaleAVec[i] : 0;
             std::vector<float> refAAll;
             refAAll.reserve(static_cast<size_t>(A_row[i]) * A_col[i] * num_batches[i]);
-            bool const padHostPreSwizzleA = mxNeedsHostPreSwizzleScalePad(arg.scaleA);
-            size_t const mxBlockA         = blockSize(arg.scaleA);
-            bool const   kAlongRowsA      = (transA == HIPBLAS_OP_T);
-            size_t const compactKA
-                = static_cast<size_t>((K[i] + static_cast<int64_t>(mxBlockA) - 1)
-                                      / static_cast<int64_t>(mxBlockA));
-            size_t const paddedKA = (compactKA + 7) / 8 * 8;
-            size_t const freeDimA = static_cast<size_t>(M[i]);
             for(int64_t b = 0; b < num_batches[i]; b++)
             {
                 auto* dataPtrA  = reinterpret_cast<uint8_t*>(hA[i].buf()) + b * dataBatchBytesA;
                 auto* scalePtrA = reinterpret_cast<uint8_t*>(hScaleA[i].buf()) + b * scaleBatchBytesA;
-                if(padHostPreSwizzleA)
-                {
-                    // HostPreSwizzle: emit compact, restride to Gfx950 pad, then swizzle.
-                    std::memset(scalePtrA, 0, size_scaleAVec[i]);
-                    auto batchRef
-                        = generateMXInput(TiA,
-                                          scaleDataType(arg.scaleA),
-                                          dataPtrA,
-                                          scalePtrA,
-                                          A_row[i],
-                                          A_col[i],
-                                          lda[i],
-                                          transA == HIPBLAS_OP_T,
-                                          blockSize(arg.scaleA),
-                                          1,
-                                          /*isMatrixA=*/true,
-                                          MXScaleLayout::None,
-                                          hipblaslt_initialization2string(arg.initialization),
-                                          /*min_val=*/-1.0f,
-                                          /*max_val=*/1.0f);
-                    if(kAlongRowsA)
-                        restrideMXScaleBufferKFast(
-                            scalePtrA, freeDimA, compactKA, paddedKA, /*elemBytes=*/1);
-                    applyMXScaleLayoutInPlace(scalePtrA,
-                                              freeDimA * paddedKA,
-                                              scaleLayoutA,
-                                              /*slowDim=*/freeDimA,
-                                              /*fastDim=*/paddedKA,
-                                              mxBlockA);
-                    refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
-                }
-                else
-                {
-                    // NoSwizzle / other: develop path — layout applied inside generateMXInput.
-                    auto batchRef
-                        = generateMXInput(TiA,
-                                          scaleDataType(arg.scaleA),
-                                          dataPtrA,
-                                          scalePtrA,
-                                          A_row[i],
-                                          A_col[i],
-                                          lda[i],
-                                          transA == HIPBLAS_OP_T,
-                                          blockSize(arg.scaleA),
-                                          1,
-                                          /*isMatrixA=*/true,
-                                          scaleLayoutA,
-                                          hipblaslt_initialization2string(arg.initialization),
-                                          /*min_val=*/-1.0f,
-                                          /*max_val=*/1.0f);
-                    refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
-                }
+                // Develop path: EXT → GFX950 layout pads+swizzles inside generateMXInput.
+                auto batchRef
+                    = generateMXInput(TiA,
+                                      scaleDataType(arg.scaleA),
+                                      dataPtrA,
+                                      scalePtrA,
+                                      A_row[i],
+                                      A_col[i],
+                                      lda[i],
+                                      transA == HIPBLAS_OP_T,
+                                      blockSize(arg.scaleA),
+                                      1,
+                                      /*isMatrixA=*/true,
+                                      scaleLayoutA,
+                                      hipblaslt_initialization2string(arg.initialization),
+                                      /*min_val=*/-1.0f,
+                                      /*max_val=*/1.0f);
+                refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
             }
             refA.emplace_back(std::move(refAAll));
             CHECK_HIP_ERROR(synchronize(dA[i], hA[i], block_count));
@@ -3076,68 +3037,28 @@ void testing_matmul_with_bias(const Arguments& arg,
             size_t             scaleBatchBytesB   = (num_batches[i] > 1) ? size_scaleBVec[i] : 0;
             std::vector<float> refBAll;
             refBAll.reserve(static_cast<size_t>(B_row[i]) * B_col[i] * num_batches[i]);
-            bool const padHostPreSwizzleB = mxNeedsHostPreSwizzleScalePad(arg.scaleB);
-            size_t const mxBlockB         = blockSize(arg.scaleB);
-            bool const   kAlongRowsB      = (transB == HIPBLAS_OP_N);
-            size_t const compactKB
-                = static_cast<size_t>((K[i] + static_cast<int64_t>(mxBlockB) - 1)
-                                      / static_cast<int64_t>(mxBlockB));
-            size_t const paddedKB = (compactKB + 7) / 8 * 8;
-            size_t const freeDimB = static_cast<size_t>(N[i]);
             for(int64_t b = 0; b < num_batches[i]; b++)
             {
                 auto* dataPtrB  = reinterpret_cast<uint8_t*>(hB[i].buf()) + b * dataBatchBytesB;
                 auto* scalePtrB = reinterpret_cast<uint8_t*>(hScaleB[i].buf()) + b * scaleBatchBytesB;
-                if(padHostPreSwizzleB)
-                {
-                    std::memset(scalePtrB, 0, size_scaleBVec[i]);
-                    auto batchRef
-                        = generateMXInput(TiB,
-                                          scaleDataType(arg.scaleB),
-                                          dataPtrB,
-                                          scalePtrB,
-                                          B_row[i],
-                                          B_col[i],
-                                          ldb[i],
-                                          transB == HIPBLAS_OP_T,
-                                          1,
-                                          blockSize(arg.scaleB),
-                                          /*isMatrixA=*/false,
-                                          MXScaleLayout::None,
-                                          hipblaslt_initialization2string(arg.initialization),
-                                          /*min_val=*/-1.0f,
-                                          /*max_val=*/1.0f);
-                    if(kAlongRowsB)
-                        restrideMXScaleBufferKFast(
-                            scalePtrB, freeDimB, compactKB, paddedKB, /*elemBytes=*/1);
-                    applyMXScaleLayoutInPlace(scalePtrB,
-                                              freeDimB * paddedKB,
-                                              scaleLayoutB,
-                                              /*slowDim=*/freeDimB,
-                                              /*fastDim=*/paddedKB,
-                                              mxBlockB);
-                    refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
-                }
-                else
-                {
-                    auto batchRef
-                        = generateMXInput(TiB,
-                                          scaleDataType(arg.scaleB),
-                                          dataPtrB,
-                                          scalePtrB,
-                                          B_row[i],
-                                          B_col[i],
-                                          ldb[i],
-                                          transB == HIPBLAS_OP_T,
-                                          1,
-                                          blockSize(arg.scaleB),
-                                          /*isMatrixA=*/false,
-                                          scaleLayoutB,
-                                          hipblaslt_initialization2string(arg.initialization),
-                                          /*min_val=*/-1.0f,
-                                          /*max_val=*/1.0f);
-                    refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
-                }
+                // Develop path: EXT → GFX950 layout pads+swizzles inside generateMXInput.
+                auto batchRef
+                    = generateMXInput(TiB,
+                                      scaleDataType(arg.scaleB),
+                                      dataPtrB,
+                                      scalePtrB,
+                                      B_row[i],
+                                      B_col[i],
+                                      ldb[i],
+                                      transB == HIPBLAS_OP_T,
+                                      1,
+                                      blockSize(arg.scaleB),
+                                      /*isMatrixA=*/false,
+                                      scaleLayoutB,
+                                      hipblaslt_initialization2string(arg.initialization),
+                                      /*min_val=*/-1.0f,
+                                      /*max_val=*/1.0f);
+                refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
             }
             refB.emplace_back(std::move(refBAll));
             CHECK_HIP_ERROR(synchronize(dB[i], hB[i], block_count));
