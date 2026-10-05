@@ -179,3 +179,10 @@ static_if(host_bool, body)             # raises TypeError on SSA Value
 - `ir_lowering/ir_model.md` for the IRBuilder API by category.
 - `ir_lowering/lowering_pipeline.md` for the op-to-LLVM mapping.
 - `ir_lowering/backend_details.md` for purity classification and waitcnt encoding.
+
+`IRBuilder.cvt_f32_to_tf32` / `rocke_b_cvt_f32_to_tf32` is a scalar F32-to-TF32
+RNE recipe built from existing integer arithmetic, select, and bitcast ops; it
+introduces no serialized opcode. It quiets NaNs and retains their upper payload
+bits. `bitcast` to logical TF32 only reinterprets the payload. Logical TF32 uses
+I32 storage; general arithmetic requires explicitly reinterpreting it as F32.
+See [TF32 numerics](../../python/rocke/examples/gfx942/tf32_numerics/README.md).

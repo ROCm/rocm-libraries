@@ -21,7 +21,6 @@
  *     .kernel_name() / .validate()             rocke_direct_conv_4c_kernel_name / _validate
  *   is_valid_spec_16c(spec, arch)              rocke_direct_conv_16c_is_valid_spec()
  *   is_valid_spec_4c(spec, arch)               rocke_direct_conv_4c_is_valid_spec()
- *   (C-port-only 6-entry manifest ABI)         rocke_direct_conv_signature()
  *
  * The reason strings + the kernel name are formatted byte-identically to Python
  * (kernel_name_join, the ValueError messages) so a sweep driver sees the same
@@ -247,6 +246,37 @@ rocke_status_t rocke_direct_conv_16c_kernel_name(const rocke_direct_conv_16c_spe
     return rocke_kernel_name_join(spec->name, parts, 4, flag_names, flag_on, 2, out, out_cap, NULL);
 }
 
+/* Why a forward direct-conv kernel cannot compute `p`; false when it can.
+ *
+ * Mirrors conv_direct_grouped.forward_padding_reason. Every forward
+ * direct-conv kernel streams input rows and flushes output row y - (KH-1)
+ * while it is below H -- it indexes output rows by input rows. That is only
+ * right under "same" padding PAD == (KH-1)/2 with an odd filter; any other
+ * padding makes the kernel write wrong rows (including the next image's)
+ * rather than fail, so it is refused before a binary is built. */
+static bool rocke_direct_forward_padding_reason(const rocke_direct_conv_problem_t* p,
+                                                char* why,
+                                                size_t why_cap)
+{
+    if(p->KH % 2 == 0 || p->KW % 2 == 0)
+    {
+        snprintf(
+            why, why_cap, "forward direct conv needs odd filter extents (got %dx%d)", p->KH, p->KW);
+        return true;
+    }
+    if(p->PAD != (p->KH - 1) / 2)
+    {
+        snprintf(why,
+                 why_cap,
+                 "forward direct conv needs 'same' padding PAD == (KH-1)/2 = %d (got PAD=%d); "
+                 "the row stream indexes output rows by input rows",
+                 (p->KH - 1) / 2,
+                 p->PAD);
+        return true;
+    }
+    return false;
+}
+
 rocke_status_t rocke_direct_conv_16c_validate(const rocke_direct_conv_16c_spec_t* spec,
                                               char* reason,
                                               size_t reason_cap)
@@ -342,6 +372,26 @@ bool rocke_direct_conv_16c_is_valid_spec(const rocke_direct_conv_16c_spec_t* spe
         {
             CK_DCONV16C_REJECT("unsupported dtype '%s'; expected 'fp16' or 'bf16'", dt);
         }
+    }
+    {
+        char why_[256];
+        if(rocke_direct_forward_padding_reason(p, why_, sizeof why_))
+        {
+            if(reason != NULL && reason_cap > 0)
+                snprintf(reason, reason_cap, "%s", why_);
+            return false;
+        }
+    }
+    /* the fold_k32 16c kernel folds taps s=0/1 into one MFMA atom and handles s=2 as
+     * a separate residual, so the filter has to be exactly three wide. */
+    if(spec->fold_k32 && p->KW != 3)
+    {
+        if(reason != NULL && reason_cap > 0)
+            snprintf(reason,
+                     reason_cap,
+                     "the fold_k32 16c kernel is built for a 3-wide filter (got KW=%d)",
+                     p->KW);
+        return false;
     }
     /* if p.cpg != 16 or p.kpg != 16: return False, ... */
     if(p->cpg != 16 || p->kpg != 16)
@@ -556,6 +606,15 @@ bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
                               "no mfma_f32_4x4x4_bf16 atom");
         }
     }
+    {
+        char why_[256];
+        if(rocke_direct_forward_padding_reason(p, why_, sizeof why_))
+        {
+            if(reason != NULL && reason_cap > 0)
+                snprintf(reason, reason_cap, "%s", why_);
+            return false;
+        }
+    }
     /* if p.cpg != 4 or p.kpg != 4: return False, ... */
     if(p->cpg != 4 || p->kpg != 4)
     {
@@ -592,126 +651,9 @@ bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
 #undef CK_DCONV4C_REJECT
 }
 
-/* ===================================================================== *
- *  SIGNATURE (manifest) -- the 6-entry ABI shared by both kernels:
- *    ptr A:f16, ptr B:f16, ptr D:f16, scalar A_bytes:i32, B_bytes:i32,
- *    D_bytes:i32.
- * ===================================================================== */
-
-rocke_status_t rocke_direct_conv_signature(struct rocke_arena* arena,
-                                           struct rocke_sig_entry* out,
-                                           size_t out_cap,
-                                           size_t* out_count)
-{
-    rocke_status_t st;
-
-    if(arena == NULL || out == NULL || out_cap < 6)
-    {
-        return ROCKE_ERR_VALUE;
-    }
-
-    st = rocke_sig_param(arena, "A", "f16", NULL, &out[0]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-    st = rocke_sig_param(arena, "B", "f16", NULL, &out[1]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-    st = rocke_sig_param(arena, "D", "f16", NULL, &out[2]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-    st = rocke_sig_scalar(arena, "A_bytes", "i32", &out[3]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-    st = rocke_sig_scalar(arena, "B_bytes", "i32", &out[4]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-    st = rocke_sig_scalar(arena, "D_bytes", "i32", &out[5]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-
-    if(out_count != NULL)
-    {
-        *out_count = 6;
-    }
-    return ROCKE_OK;
-}
-
-rocke_status_t rocke_direct_conv_signature_for_dtype(struct rocke_arena* arena,
-                                                     const char* dtype,
-                                                     struct rocke_sig_entry* out,
-                                                     size_t out_cap,
-                                                     size_t* out_count)
-{
-    rocke_status_t st;
-    /* Resolve dtype: "fp16" -> "f16", "bf16" -> "bf16", NULL -> "f16". */
-    const char* dt;
-
-    if(arena == NULL || out == NULL || out_cap < 6)
-    {
-        return ROCKE_ERR_VALUE;
-    }
-    if(dtype == NULL || strcmp(dtype, "fp16") == 0 || strcmp(dtype, "f16") == 0)
-    {
-        dt = "f16";
-    }
-    else if(strcmp(dtype, "bf16") == 0)
-    {
-        dt = "bf16";
-    }
-    else
-    {
-        return ROCKE_ERR_VALUE; /* unsupported dtype */
-    }
-
-    st = rocke_sig_param(arena, "A", dt, NULL, &out[0]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-    st = rocke_sig_param(arena, "B", dt, NULL, &out[1]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-    st = rocke_sig_param(arena, "D", dt, NULL, &out[2]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-    st = rocke_sig_scalar(arena, "A_bytes", "i32", &out[3]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-    st = rocke_sig_scalar(arena, "B_bytes", "i32", &out[4]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-    st = rocke_sig_scalar(arena, "D_bytes", "i32", &out[5]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-
-    if(out_count != NULL)
-    {
-        *out_count = 6;
-    }
-    return ROCKE_OK;
-}
+/* The launch signature is not built here: every direct kernel takes the AOT
+ * argument list of rocke_conv_direct_arg_names() (conv_abi.cpp), which hosts
+ * pack from directly. */
 
 /* ===================================================================== *
  *  DirectConv8cSpec  (cpg = kpg = 8)
@@ -870,6 +812,26 @@ bool rocke_direct_conv_8c_is_valid_spec(const rocke_direct_conv_8c_spec_t* spec,
             }
             return false;
         }
+    }
+    {
+        char why_[256];
+        if(rocke_direct_forward_padding_reason(p, why_, sizeof why_))
+        {
+            if(reason != NULL && reason_cap > 0)
+                snprintf(reason, reason_cap, "%s", why_);
+            return false;
+        }
+    }
+    /* the 8c kernel folds taps s=0/1 into one MFMA atom and handles s=2 as
+     * a separate residual, so the filter has to be exactly three wide. */
+    if(p->KW != 3)
+    {
+        if(reason != NULL && reason_cap > 0)
+            snprintf(reason,
+                     reason_cap,
+                     "the 8c kernel is built for a 3-wide filter (got KW=%d)",
+                     p->KW);
+        return false;
     }
     if(p->cpg != 8 || p->kpg != 8)
     {
@@ -1079,6 +1041,15 @@ bool rocke_direct_conv_32c_is_valid_spec(const rocke_direct_conv_32c_spec_t* spe
             return false;
         }
     }
+    {
+        char why_[256];
+        if(rocke_direct_forward_padding_reason(p, why_, sizeof why_))
+        {
+            if(reason != NULL && reason_cap > 0)
+                snprintf(reason, reason_cap, "%s", why_);
+            return false;
+        }
+    }
     if(p->cpg != 32 || p->kpg != 32)
     {
         if(reason && reason_cap > 0)
@@ -1260,6 +1231,15 @@ bool rocke_direct_depthwise_is_valid_spec(const rocke_direct_depthwise_spec_t* s
         return false;
     }
     p = &spec->problem;
+    {
+        char why_[256];
+        if(rocke_direct_forward_padding_reason(p, why_, sizeof why_))
+        {
+            if(reason != NULL && reason_cap > 0)
+                snprintf(reason, reason_cap, "%s", why_);
+            return false;
+        }
+    }
     if(p->cpg != 1 || p->kpg != 1)
     {
         if(reason && reason_cap > 0)
@@ -1373,6 +1353,15 @@ bool rocke_direct_depthwise_spatial_is_valid_spec(const rocke_direct_depthwise_s
         return false;
     }
     p = &spec->problem;
+    {
+        char why_[256];
+        if(rocke_direct_forward_padding_reason(p, why_, sizeof why_))
+        {
+            if(reason != NULL && reason_cap > 0)
+                snprintf(reason, reason_cap, "%s", why_);
+            return false;
+        }
+    }
     if(p->cpg != 1 || p->kpg != 1)
     {
         if(reason && reason_cap > 0)
