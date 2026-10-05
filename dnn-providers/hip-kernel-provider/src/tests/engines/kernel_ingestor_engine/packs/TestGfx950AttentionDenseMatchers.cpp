@@ -16,6 +16,7 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
@@ -237,6 +238,8 @@ struct GraphSpec
         = data_objects::AttentionImplementation::AUTO;
 
     bool twoNodes = false;
+    /// One RELU node from Q to O in place of the SDPA node: a graph with no SDPA in it.
+    bool pointwiseOnly = false;
 
     void setEveryLayout(StrideLayout layout)
     {
@@ -445,11 +448,34 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     };
 
     std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
-    nodes.push_back(data_objects::CreateNodeDirect(builder,
-                                                   "sdpa",
-                                                   data_objects::DataType::FLOAT,
-                                                   data_objects::NodeAttributes::SdpaAttributes,
-                                                   attributesFor().Union()));
+    if(spec.pointwiseOnly)
+    {
+        const auto relu
+            = data_objects::CreatePointwiseAttributes(builder,
+                                                      data_objects::PointwiseMode::RELU_FWD,
+                                                      flatbuffers::nullopt, // relu_lower_clip
+                                                      flatbuffers::nullopt, // relu_upper_clip
+                                                      flatbuffers::nullopt, // relu_lower_clip_slope
+                                                      flatbuffers::nullopt, // axis_tensor_uid
+                                                      Q_UID, // in_0_tensor_uid
+                                                      flatbuffers::nullopt, // in_1_tensor_uid
+                                                      flatbuffers::nullopt, // in_2_tensor_uid
+                                                      O_UID); // out_0_tensor_uid
+        nodes.push_back(
+            data_objects::CreateNodeDirect(builder,
+                                           "relu",
+                                           data_objects::DataType::FLOAT,
+                                           data_objects::NodeAttributes::PointwiseAttributes,
+                                           relu.Union()));
+    }
+    else
+    {
+        nodes.push_back(data_objects::CreateNodeDirect(builder,
+                                                       "sdpa",
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::NodeAttributes::SdpaAttributes,
+                                                       attributesFor().Union()));
+    }
     if(spec.twoNodes)
     {
         nodes.push_back(data_objects::CreateNodeDirect(builder,
@@ -1023,6 +1049,7 @@ TEST(TestGfx950AttentionDenseGraphMatch, LogsTheCauseOfEachOtherDecline)
     };
     std::vector<Case> cases;
 
+    // Two SDPA nodes: an attention graph this engine cannot take whole, so it says why.
     GraphSpec twoNodes;
     twoNodes.twoNodes = true;
     cases.push_back({"two nodes", twoNodes, "node"});
@@ -1073,6 +1100,16 @@ TEST(TestGfx950AttentionDenseGraphMatch, LogsNoDeclineForAGraphItServes)
     EXPECT_TRUE(matchGraph(GraphSpec{}).has_value());
     EXPECT_FALSE(recorder.hasLogContaining(std::string(GFX950_ATTENTION_DENSE_ENGINE_NAME)
                                            + " declined the graph"));
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, LogsNoDeclineForAGraphWithNoSdpaForwardNode)
+{
+    // graph_match sees every graph the catalog misses on. One with no SDPA-forward node
+    // was never this engine's, so it declines without a line.
+    GraphSpec spec;
+    spec.pointwiseOnly = true;
+    const auto decline = loggedDecline(spec);
+    EXPECT_TRUE(decline.cause.empty()) << "[" << decline.cause << "]" << decline.detail;
 }
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesPaddedOutputSequenceStride)

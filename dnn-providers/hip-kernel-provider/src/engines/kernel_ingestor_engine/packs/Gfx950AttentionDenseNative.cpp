@@ -230,6 +230,21 @@ std::ostream& operator<<(std::ostream& out, const Declined& declined)
                << "]: ";
 }
 
+/// Whether any node of the graph is an SDPA-forward node. Only such a graph hears why it
+/// was declined: graph_match sees every graph the catalog misses on, and a line for each
+/// convolution or normalization graph would bury the attention ones.
+bool hasSdpaForwardNode(const MatchContext& context)
+{
+    for(const auto& node : context.graph.nodeWrappers())
+    {
+        if(node->attributesType() == data_objects::NodeAttributes::SdpaAttributes)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 /// "Q (uid 1): dims [..], strides [..]". Null dims or strides print as [].
 std::string describeOperand(std::string_view role, const data_objects::TensorAttributes& tensor)
 {
@@ -399,8 +414,9 @@ AttentionDenseProblem problemFor(const data_objects::TensorAttributes& q,
 /**
  * @brief Graph-scoped applicability for the whole engine.
  *
- * Each decline logs its cause at INFO (see Declined). The message is built inside the
- * logging macro, so with INFO off a decline costs the check and nothing more.
+ * Each decline of a graph with an SDPA-forward node logs its cause at INFO (see Declined);
+ * any other graph declines silently. The message is built inside the logging macro, so
+ * with INFO off a decline costs the check and nothing more.
  *
  * @warning Returning std::nullopt empties this engine's WHOLE catalog and skips
  *          EVERY remaining pack, not just this one.
@@ -411,8 +427,12 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     const auto* attributesPtr = sdpaNode(context);
     if(attributesPtr == nullptr)
     {
-        HIPDNN_PLUGIN_LOG_INFO(Declined{"node"} << "the graph is not a single SDPA-forward node ("
-                                                << context.graph.nodeCount() << " node(s))");
+        if(HIPDNN_PLUGIN_LOG_IS_INFO_ENABLED() && hasSdpaForwardNode(context))
+        {
+            HIPDNN_PLUGIN_LOG_INFO(Declined{"node"}
+                                   << "the graph is not a single SDPA-forward node ("
+                                   << context.graph.nodeCount() << " node(s))");
+        }
         return std::nullopt;
     }
     const auto& attributes = *attributesPtr;
