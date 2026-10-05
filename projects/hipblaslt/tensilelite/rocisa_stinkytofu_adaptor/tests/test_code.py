@@ -31,6 +31,8 @@ import pickle
 import sys
 import unittest
 
+from _adaptor_testcase import AdaptorTestCase
+
 # ---------------------------------------------------------------------------
 # Self-contained sys.path bootstrap (mirrors test_container.py).
 # ---------------------------------------------------------------------------
@@ -48,6 +50,7 @@ from rocisa_stinkytofu_adaptor.code import (  # noqa: E402
     Macro,
     Module,
     RegSet,
+    _detect_epilogue_range,
     SignatureBase,
     SignatureCodeMeta,
     StructuredModule,
@@ -106,7 +109,7 @@ class _VgprMsbIsolation:
         self._base.setVgprMsb(self._saved_vgpr_msb)
 
 
-class _SignatureKernelSetup(unittest.TestCase):
+class _SignatureKernelSetup(AdaptorTestCase):
     """Pump ISA + wavefront so signature emitters can read kernel()."""
 
     def setUp(self) -> None:
@@ -121,7 +124,7 @@ class _SignatureKernelSetup(unittest.TestCase):
 # ===========================================================================
 
 
-class TestTextBlockConstruction(unittest.TestCase):
+class TestTextBlockConstruction(AdaptorTestCase):
     def test_default_text_empty(self):
         tb = TextBlock()
         self.assertEqual(tb.text, "")
@@ -209,7 +212,7 @@ class TestTextBlockConstruction(unittest.TestCase):
 # ===========================================================================
 
 
-class TestTextBlockPrettyPrint(unittest.TestCase):
+class TestTextBlockPrettyPrint(AdaptorTestCase):
     """``TextBlock.prettyPrint`` inherits ``rocisa::Item::prettyPrint``::
 
         return indent + className + " " + toString();   // base.hpp:287-293
@@ -254,7 +257,7 @@ class TestTextBlockPrettyPrint(unittest.TestCase):
 # ===========================================================================
 
 
-class TestTextBlockOutputNoComment(unittest.TestCase):
+class TestTextBlockOutputNoComment(AdaptorTestCase):
     """``rocIsa.outputNoComment=True`` blanket-suppresses TextBlock text.
 
     Mirrors rocisa code.hpp:154-159 -- the flag suppresses EVERY TextBlock
@@ -323,7 +326,7 @@ class TestTextBlockOutputNoComment(unittest.TestCase):
 # ===========================================================================
 
 
-class TestTextBlockPickle(unittest.TestCase):
+class TestTextBlockPickle(AdaptorTestCase):
     """rocisa code.cpp:149-154 -- ``(name, text)`` tuple round-trip."""
 
     def test_pickle_round_trip_default(self):
@@ -367,7 +370,7 @@ class TestTextBlockPickle(unittest.TestCase):
 # ===========================================================================
 
 
-class TestModuleConstruction(unittest.TestCase):
+class TestModuleConstruction(AdaptorTestCase):
     def test_default_name_empty(self):
         m = Module()
         self.assertEqual(m.name, "")
@@ -390,7 +393,7 @@ class TestModuleConstruction(unittest.TestCase):
 # ===========================================================================
 
 
-class TestModuleAdd(unittest.TestCase):
+class TestModuleAdd(AdaptorTestCase):
     def test_add_returns_item(self):
         # rocisa returns the added item to enable one-liners
         # like ``foo = mod.add(SomeInstr(...))``.
@@ -474,7 +477,7 @@ class TestModuleAdd(unittest.TestCase):
 # ===========================================================================
 
 
-class TestModuleCommentHelpers(unittest.TestCase):
+class TestModuleCommentHelpers(AdaptorTestCase):
     def test_addSpaceLine_appends_newline_textblock(self):
         m = Module()
         m.addSpaceLine()
@@ -529,7 +532,7 @@ class TestModuleCommentHelpers(unittest.TestCase):
 # ===========================================================================
 
 
-class TestModuleAccessors(unittest.TestCase):
+class TestModuleAccessors(AdaptorTestCase):
     def test_items_returns_list_alias(self):
         # rocisa returns ``const vector<...>&``; in Python we expose the
         # underlying list (callers must NOT mutate it directly -- but the
@@ -586,7 +589,7 @@ class TestModuleAccessors(unittest.TestCase):
 # ===========================================================================
 
 
-class TestModuleGetSetItem(unittest.TestCase):
+class TestModuleGetSetItem(AdaptorTestCase):
     def test_getItem_returns_child(self):
         m = Module()
         a, b = TextBlock("a"), TextBlock("b")
@@ -642,7 +645,7 @@ class TestModuleGetSetItem(unittest.TestCase):
 # ===========================================================================
 
 
-class TestModuleFind(unittest.TestCase):
+class TestModuleFind(AdaptorTestCase):
     def test_findNamedItem_returns_matching(self):
         m = Module()
         named = Module("target")
@@ -697,7 +700,7 @@ class TestModuleFind(unittest.TestCase):
 # ===========================================================================
 
 
-class TestModuleReplace(unittest.TestCase):
+class TestModuleReplace(AdaptorTestCase):
     def test_replaceItem_swaps_first_identity_match(self):
         m = Module()
         a, b, replacement = TextBlock("a"), TextBlock("b"), TextBlock("R")
@@ -742,7 +745,7 @@ class TestModuleReplace(unittest.TestCase):
         self.assertEqual(m.itemList[0].text, "a")
 
 
-class TestModuleRemove(unittest.TestCase):
+class TestModuleRemove(AdaptorTestCase):
     def test_removeItem_identity_match(self):
         m = Module()
         a, b, c = TextBlock("a"), TextBlock("b"), TextBlock("c")
@@ -797,7 +800,7 @@ class TestModuleRemove(unittest.TestCase):
         self.assertEqual(m.itemList, [b])
 
 
-class TestModulePop(unittest.TestCase):
+class TestModulePop(AdaptorTestCase):
     def test_popFirstItem(self):
         m = Module()
         a, b = TextBlock("a"), TextBlock("b")
@@ -840,7 +843,7 @@ class TestModulePop(unittest.TestCase):
 # ===========================================================================
 
 
-class TestModuleTreeOps(unittest.TestCase):
+class TestModuleTreeOps(AdaptorTestCase):
     def test_appendModule_copies_children(self):
         # Each child of ``module`` is added to ``self`` (parent gets
         # rewritten to ``self``). The donor module is returned.
@@ -899,7 +902,7 @@ class TestModuleTreeOps(unittest.TestCase):
         self.assertIs(leaf.parent, inner)
 
 
-class TestModuleSetters(unittest.TestCase):
+class TestModuleSetters(AdaptorTestCase):
     def test_setNoOpt_isNoOpt_roundtrip(self):
         m = Module()
         self.assertFalse(m.isNoOpt())
@@ -945,7 +948,7 @@ class TestModuleSetters(unittest.TestCase):
 # ===========================================================================
 
 
-class TestModuleToString(unittest.TestCase):
+class TestModuleToString(AdaptorTestCase):
     def test_empty_module_empty_string(self):
         self.assertEqual(str(Module()), "")
         self.assertEqual(Module().toString(), "")
@@ -971,7 +974,7 @@ class TestModuleToString(unittest.TestCase):
         self.assertEqual(str(m), m.toString())
 
 
-class TestModulePrettyPrint(unittest.TestCase):
+class TestModulePrettyPrint(AdaptorTestCase):
     def test_empty_module(self):
         out = Module("Foo").prettyPrint()
         self.assertIn('Module "Foo"', out)
@@ -1085,7 +1088,7 @@ class TestModulePrettyPrint(unittest.TestCase):
 # ===========================================================================
 
 
-class TestModuleDeepCopy(unittest.TestCase):
+class TestModuleDeepCopy(AdaptorTestCase):
     def test_deepcopy_returns_independent_module(self):
         m = Module("orig")
         m.add(TextBlock("a"))
@@ -1127,7 +1130,7 @@ class TestModuleDeepCopy(unittest.TestCase):
         self.assertIs(c.itemList[0].itemList[0].parent, c.itemList[0])
 
 
-class TestModulePickleRejected(unittest.TestCase):
+class TestModulePickleRejected(AdaptorTestCase):
     def test_pickle_raises_runtime_error(self):
         # rocisa explicitly raises ``Module is not picklable`` to keep
         # ParallelMap2 workers from silently shipping malformed IR.
@@ -1177,14 +1180,32 @@ class _MockLogicalModule:
     def add_set_directive(self, symbol, value):
         self.items.append(("set", symbol, value))
 
+    def add_if_directive(self, condition):
+        self.items.append(("if", condition))
+
+    def add_endif_directive(self, comment):
+        self.items.append(("endif", comment))
+
     def add_textblock(self, text):
         self.items.append(("textblock", text))
 
     def add_label(self, name, alignment, comment):
         self.items.append(("label", name, alignment, comment))
 
+    def begin_callable(self, name):
+        self.items.append(("begin_callable", name))
 
-class TestPopulateLogicalModule(unittest.TestCase):
+    def end_callable(self, name):
+        self.items.append(("end_callable", name))
+
+    def begin_group(self, name):
+        self.items.append(("begin_group", name))
+
+    def end_group(self, name):
+        self.items.append(("end_group", name))
+
+
+class TestPopulateLogicalModule(AdaptorTestCase):
     def _payloads(self, m):
         """Helper: run _populate_logical_module and return recorded items."""
         mock = _MockLogicalModule()
@@ -1213,6 +1234,37 @@ class TestPopulateLogicalModule(unittest.TestCase):
         m.add(b)
         m.add(c)
         self.assertEqual(self._payloads(m), [("inst", "A"), ("inst", "B"), ("inst", "C")])
+
+    def test_tags_global_write_epilogue_span(self):
+        """First-to-last GlobalWriteElements subtree, including items between."""
+        root = Module("kernel")
+        root.add(_FakeLogicalInst("pre"))
+        first = Module("store0")
+        first.add(Module("GlobalWriteElements"))
+        first.add(_FakeLogicalInst("store"))
+        middle = _FakeLogicalInst("mid")
+        second = Module("store1")
+        nested = Module("wrap")
+        nested.add(Module("GlobalWriteElements"))
+        second.add(nested)
+        second.add(_FakeLogicalInst("store2"))
+        root.add(first)
+        root.add(middle)
+        root.add(second)
+        root.add(_FakeLogicalInst("post"))
+
+        mock = _MockLogicalModule()
+        root._populate_logical_module(mock, None, _detect_epilogue_range(root.itemList))
+        items = mock.items
+        begin = items.index(("begin_group", "globalWriteEpilogue"))
+        end = items.index(("end_group", "globalWriteEpilogue"))
+        self.assertEqual(items[begin + 1], ("textblock", ""))
+        self.assertEqual(items[end - 1], ("textblock", ""))
+        self.assertLess(items.index(("inst", "pre")), begin)
+        self.assertLess(begin, items.index(("inst", "store")))
+        self.assertLess(items.index(("inst", "mid")), end)
+        self.assertLess(items.index(("inst", "store2")), end)
+        self.assertLess(end, items.index(("inst", "post")))
 
     def test_in_order_traversal_with_nested_modules(self):
         outer = Module()
@@ -1257,6 +1309,54 @@ class TestPopulateLogicalModule(unittest.TestCase):
         self.assertEqual(items[3], ("inst", "B"))
         self.assertEqual(items[4], ("set", "vgprBase", "UNDEF"))
 
+    def test_if_and_endif_emitted_as_conditional_directives(self):
+        m = Module()
+        m.add(_FakeLogicalInst("A"))
+        m.add(ValueIf("0"))
+        m.add(_FakeLogicalInst("B"))
+        m.add(ValueEndif("overflowed resources"))
+        self.assertEqual(
+            self._payloads(m),
+            [
+                ("inst", "A"),
+                ("if", "0"),
+                ("inst", "B"),
+                ("endif", "overflowed resources"),
+            ],
+        )
+
+    def test_endif_comment_dropped_when_outputNoComment(self):
+        from rocisa_stinkytofu_adaptor import rocIsa  # noqa: WPS433
+
+        opts = rocIsa.getInstance().getOutputOptions()
+        saved = opts.outputNoComment
+        m = Module()
+        m.add(ValueIf("0"))
+        m.add(ValueEndif("overflowed resources"))
+        try:
+            opts.outputNoComment = True
+            items = self._payloads(m)
+        finally:
+            opts.outputNoComment = saved
+        self.assertEqual(items[-1], ("endif", ""))
+
+    def test_callable_module_emits_callable_markers(self):
+        outer = Module()
+        callable_module = Module("activation")
+        callable_module.isCallable = True
+        callable_module.callableName = "label_Activation_Relu_VW1"
+        callable_module.add(_FakeLogicalInst("BODY"))
+        outer.add(callable_module)
+
+        self.assertEqual(
+            self._payloads(outer),
+            [
+                ("begin_callable", "label_Activation_Relu_VW1"),
+                ("inst", "BODY"),
+                ("end_callable", "label_Activation_Relu_VW1"),
+            ],
+        )
+
 
 # ===========================================================================
 # to_stinky_asm -- end-to-end binding call (gated on built stinkytofu).
@@ -1269,13 +1369,16 @@ try:
         hasattr(_stinky, "LogicalModule")
         and hasattr(_stinky, "lower_logical_module")
         and hasattr(_stinky, "VMovB32")
+        and hasattr(_stinky.LogicalModule, "begin_callable")
+        and hasattr(_stinky.LogicalModule, "add_if_directive")
+        and hasattr(_stinky.LogicalModule, "add_endif_directive")
     )
 except ImportError:
     _STINKY_OK = False
 
 
 @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built / missing left-path symbols")
-class TestToStinkyAsm(unittest.TestCase):
+class TestToStinkyAsm(AdaptorTestCase):
     """Run the full left-path lowering on a single-VMovB32 toy module.
 
     Uses a thin wrapper class that fabricates the ``_stinkytofu.VMovB32``
@@ -1336,6 +1439,22 @@ class TestToStinkyAsm(unittest.TestCase):
         # Two leaves were added, so two v_mov_b32 lines should emerge.
         self.assertEqual(text.count("v_mov_b32"), 2)
 
+    def test_callable_module_is_emitted_after_entry_function(self):
+        m = Module("kCallable")
+        callable_module = Module("activation")
+        callable_module.isCallable = True
+        callable_module.callableName = "label_Activation_Relu_VW1"
+        callable_module.add(Label("Activation_Relu_VW1", ""))
+        callable_module.add(self._make_fake_vmovb32())
+
+        m.add(self._make_fake_vmovb32())
+        m.add(callable_module)
+        m.add(Label("ASM_End", ""))
+
+        text = m.to_stinky_asm([12, 5, 0]).emitAssembly()
+
+        self.assertLess(text.index("label_ASM_End:"), text.index("label_Activation_Relu_VW1:"))
+
     def test_textblock_items_appear_in_output(self):
         # TextBlock items are emitted via add_textblock and appear in
         # the final assembly output as standalone comments.
@@ -1348,6 +1467,37 @@ class TestToStinkyAsm(unittest.TestCase):
         self.assertIn("v_mov_b32", text)
         self.assertIn("a header comment", text)
         self.assertIn("a footer comment", text)
+
+    def test_if_and_endif_appear_in_output(self):
+        m = Module("kConditional")
+        m.add(self._make_fake_vmovb32())
+        m.add(ValueIf("0"))
+        m.add(self._make_fake_vmovb32())
+        m.add(ValueEndif("overflowed resources"))
+        text = m.to_stinky_asm([12, 5, 0]).emitAssembly()
+        self.assertIn(".if 0\n", text)
+        self.assertIn(
+            ".endif" + " " * 44 + " // overflowed resources\n",
+            text,
+        )
+
+    def test_endif_omits_comment_when_outputNoComment(self):
+        from rocisa_stinkytofu_adaptor import rocIsa  # noqa: WPS433
+
+        m = Module("kConditionalNoComment")
+        m.add(self._make_fake_vmovb32())
+        m.add(ValueIf("0"))
+        m.add(self._make_fake_vmovb32())
+        m.add(ValueEndif("overflowed resources"))
+        opts = rocIsa.getInstance().getOutputOptions()
+        saved = opts.outputNoComment
+        try:
+            opts.outputNoComment = True
+            text = m.to_stinky_asm([12, 5, 0]).emitAssembly()
+        finally:
+            opts.outputNoComment = saved
+        self.assertIn(".endif\n", text)
+        self.assertNotIn("overflowed resources", text)
 
     def test_arch_accepts_sequence_not_just_list(self):
         # Tuples / arrays are common in KernelWriter (kernel["ISA"] is
@@ -1364,7 +1514,7 @@ class TestToStinkyAsm(unittest.TestCase):
 # ===========================================================================
 
 
-class TestKernelWriterModuleUsage(unittest.TestCase):
+class TestKernelWriterModuleUsage(AdaptorTestCase):
     """Pin the Module/TextBlock interactions KernelWriter relies on.
 
     KernelWriter constructs a kernel as a Module containing named child
@@ -1490,7 +1640,7 @@ class TestKernelWriterModuleUsage(unittest.TestCase):
 # ===========================================================================
 
 
-class TestStinkytofuOptional(unittest.TestCase):
+class TestStinkytofuOptional(AdaptorTestCase):
     def test_module_works_without_stinkytofu(self):
         # to_stinky_asm imports stinkytofu *lazily*; constructing /
         # editing Modules must work even when the binding is missing
@@ -1513,7 +1663,7 @@ class TestStinkytofuOptional(unittest.TestCase):
 # recursive ``countType`` / ``countExactType`` (code.hpp:441-459).
 
 
-class TestDummyClassesInheritItem(unittest.TestCase):
+class TestDummyClassesInheritItem(AdaptorTestCase):
     """``BitfieldUnion`` is the only code export outside the Item tree."""
 
     def test_bitfieldunion_is_not_item(self):
@@ -1526,7 +1676,7 @@ class TestDummyClassesInheritItem(unittest.TestCase):
         self.assertNotIsInstance(BitfieldUnion(), Item)
 
 
-class TestKernelBodyItemDefaults(unittest.TestCase):
+class TestKernelBodyItemDefaults(AdaptorTestCase):
     """``KernelBody`` inherits ``Item.countType`` and raises on empty
     ``toString`` when no body is attached (rocisa parity)."""
 
@@ -1547,7 +1697,7 @@ class TestKernelBodyItemDefaults(unittest.TestCase):
         self.assertEqual(kb.countType(Module), 0)
 
 
-class TestModuleCountTypeRecursion(unittest.TestCase):
+class TestModuleCountTypeRecursion(AdaptorTestCase):
     """``Module.countType`` / ``countExactType`` override Item's default
     to recurse through ``itemList``. Mirror of rocisa C++ code.hpp:
     441-459."""
@@ -1624,7 +1774,7 @@ class TestModuleCountTypeRecursion(unittest.TestCase):
         self.assertEqual(sm.countType(Module), 4)
 
 
-class TestStructuredModuleConstruction(unittest.TestCase):
+class TestStructuredModuleConstruction(AdaptorTestCase):
     """``StructuredModule`` is a real ``Module`` subclass that
     auto-adds three named sub-modules ``(header, middle, footer)`` to
     ``itemList`` at construction. Mirror of ``rocisa::StructuredModule``
@@ -1688,7 +1838,7 @@ class TestStructuredModuleConstruction(unittest.TestCase):
         self.assertIs(sm.footer.parent, sm)
 
 
-class TestStructuredModuleEmission(unittest.TestCase):
+class TestStructuredModuleEmission(AdaptorTestCase):
     """``StructuredModule.toString`` is inherited from ``Module`` and
     just concatenates ``str(item)`` over itemList -- so the emission
     is the concatenation of header + middle + footer (in order)."""
@@ -1728,7 +1878,7 @@ class TestStructuredModuleEmission(unittest.TestCase):
         self.assertEqual(str(sm), "M\nX\n")
 
 
-class TestStructuredModuleAttributeSwap(unittest.TestCase):
+class TestStructuredModuleAttributeSwap(AdaptorTestCase):
     """The ``header / middle / footer`` attributes are read-write
     (``def_rw`` in rocisa). A caller may swap one out for a freshly
     built Module -- emission must reflect the swap, but ONLY if the
@@ -1750,7 +1900,7 @@ class TestStructuredModuleAttributeSwap(unittest.TestCase):
         self.assertEqual(str(sm), "")
 
 
-class TestStructuredModuleFind(unittest.TestCase):
+class TestStructuredModuleFind(AdaptorTestCase):
     """``findIndexByName`` / ``findIndexByType`` inherited from Module
     must locate the 3 sub-modules at their fixed positions."""
 
@@ -1776,7 +1926,7 @@ class TestStructuredModuleFind(unittest.TestCase):
         self.assertEqual(sm.findIndexByType(TextBlock), 3)
 
 
-class TestStructuredModuleDeepCopy(unittest.TestCase):
+class TestStructuredModuleDeepCopy(AdaptorTestCase):
     """``copy.deepcopy(sm)`` returns an isolated clone that PRESERVES
     the construction-time aliasing between ``header / middle /
     footer`` and ``itemList[0..2]``.
@@ -1864,7 +2014,7 @@ class TestStructuredModuleDeepCopy(unittest.TestCase):
         self.assertEqual(str(clone), "yes\n")
 
 
-class TestStructuredModulePickleRejected(unittest.TestCase):
+class TestStructuredModulePickleRejected(AdaptorTestCase):
     """``StructuredModule`` is explicitly NOT picklable -- rocisa's
     nanobind binding installs a ``__reduce__`` that raises with a
     class-specific message (distinct from Module's own
@@ -1896,7 +2046,7 @@ class TestStructuredModulePickleRejected(unittest.TestCase):
         self.assertIn("Module is not picklable", m_msg)
 
 
-class TestStructuredModuleCountType(unittest.TestCase):
+class TestStructuredModuleCountType(AdaptorTestCase):
     """``countType`` inherited from Module recurses through itemList,
     so a fresh StructuredModule counts as 4 Modules (self + 3 sub-
     modules) and 4 Items."""
@@ -1926,8 +2076,8 @@ class TestStructuredModuleCountType(unittest.TestCase):
 # adapter output to the rocisa baseline.
 
 
-class TestValueIfConstruction(unittest.TestCase):
-    """``ValueIf`` ctor + toString format + Item integration."""
+class TestValueIfConstruction(AdaptorTestCase):
+    """``ValueIf`` payload and Item integration."""
 
     def test_construction_positional(self):
         vi = ValueIf("foo == 1")
@@ -1953,24 +2103,7 @@ class TestValueIfConstruction(unittest.TestCase):
         # type-walks see ValueIf as a code-composition node.
         self.assertIsInstance(ValueIf("x"), Item)
 
-    def test_toString_format(self):
-        # ``".if " + value + "\\n"``. The trailing newline matters
-        # because Module.toString concatenates child toString()
-        # outputs verbatim.
-        self.assertEqual(ValueIf("a == b").toString(), ".if a == b\n")
-
-    def test_toString_empty_value(self):
-        # C++ doesn't reject empty value; produces ".if \n".
-        # KernelWriter never does this in practice but parity is
-        # cheap so we keep it.
-        self.assertEqual(ValueIf("").toString(), ".if \n")
-
-    def test_str_delegates_to_toString(self):
-        # Inherited Item.__str__ -> self.toString().
-        self.assertEqual(str(ValueIf("k > 0")), ".if k > 0\n")
-
-
-class TestValueElseIfConstruction(unittest.TestCase):
+class TestValueElseIfConstruction(AdaptorTestCase):
     """``ValueElseIf`` -- mirror of ``ValueIf`` with ``.elseif`` prefix."""
 
     def test_construction(self):
@@ -1993,7 +2126,7 @@ class TestValueElseIfConstruction(unittest.TestCase):
         self.assertEqual(str(ValueElseIf("a")), ".elseif a\n")
 
 
-class TestValueEndifConstruction(unittest.TestCase):
+class TestValueEndifConstruction(AdaptorTestCase):
     """``ValueEndif`` -- ``.endif`` with optional trailing comment."""
 
     def test_construction_default_comment(self):
@@ -2019,62 +2152,7 @@ class TestValueEndifConstruction(unittest.TestCase):
         self.assertIsInstance(ValueEndif(), Item)
 
 
-class TestValueEndifToStringFormatting(unittest.TestCase):
-    """ValueEndif's ``toString`` mirrors rocisa's ``formatStr``
-    byte-for-byte. The padding-to-column-50 behaviour is the only
-    non-trivial bit in this batch; we pin it explicitly because
-    production-build diffs against the rocisa baseline would
-    otherwise show as spurious whitespace changes."""
-
-    def test_empty_comment_no_padding(self):
-        # rocisa formatStr: empty comment -> ".endif\n" with no
-        # padding (avoids trailing-whitespace lines).
-        self.assertEqual(ValueEndif().toString(), ".endif\n")
-        self.assertEqual(ValueEndif("").toString(), ".endif\n")
-
-    def test_nonempty_comment_padded_to_column_50(self):
-        # ``.endif`` is 6 chars, so 44 spaces are appended to reach
-        # column 50, then ``" // closing\n"``. Total line length:
-        # 6 + 44 + 4 + 7 + 1 = 62 chars.
-        out = ValueEndif("closing").toString()
-        expected = ".endif" + " " * 44 + " // closing\n"
-        self.assertEqual(out, expected)
-        self.assertEqual(len(out), 62)
-        # The ``//`` must land at exactly column 51 (0-indexed),
-        # the same column rocisa instruction lines target.
-        self.assertEqual(out.index("//"), 51)
-
-    def test_long_instr_no_negative_padding(self):
-        # The ``max(0, 50 - len)`` guard in _format_endif_str
-        # protects against the unlikely future case where the
-        # instruction string itself exceeds width 50. We exercise
-        # it via the private helper directly since ValueEndif's
-        # instr is always ``.endif`` (6 chars).
-        from rocisa_stinkytofu_adaptor.code import _format_endif_str
-        out = _format_endif_str("X" * 55, "tail")
-        # No padding (negative clamped to 0), so the comment is
-        # appended immediately after the long instr.
-        self.assertEqual(out, "X" * 55 + " // tail\n")
-
-    def test_outputNoComment_suppresses_comment(self):
-        # When the rocIsa output-options flag is set, ValueEndif
-        # drops the comment AND the padding -- matches rocisa's
-        # ``formatStr`` ``noComment=True`` branch (falls through to
-        # ``formattedStr + "\n"``).
-        from rocisa_stinkytofu_adaptor import rocIsa  # noqa: WPS433
-        opts = rocIsa.getInstance().getOutputOptions()
-        saved = opts.outputNoComment
-        try:
-            opts.outputNoComment = True
-            self.assertEqual(
-                ValueEndif("would be suppressed").toString(),
-                ".endif\n",
-            )
-        finally:
-            opts.outputNoComment = saved
-
-
-class TestValueConditionalPickle(unittest.TestCase):
+class TestValueConditionalPickle(AdaptorTestCase):
     """Pickle round-trip preserves the single string field on each of
     the three classes. Mirrors rocisa's pickle hooks which serialise
     just the value/comment string."""
@@ -2086,7 +2164,6 @@ class TestValueConditionalPickle(unittest.TestCase):
         self.assertEqual(restored.value, "count > 0")
         self.assertEqual(restored.name, "ValueIf")
         self.assertIsNone(restored.parent)
-        self.assertEqual(restored.toString(), original.toString())
 
     def test_valueelseif_pickle_round_trip(self):
         original = ValueElseIf("y == 2")
@@ -2100,7 +2177,6 @@ class TestValueConditionalPickle(unittest.TestCase):
         restored = pickle.loads(pickle.dumps(original))
         self.assertIsInstance(restored, ValueEndif)
         self.assertEqual(restored.comment, "EndIf guard")
-        self.assertEqual(restored.toString(), original.toString())
 
     def test_valueendif_pickle_round_trip_default(self):
         # The bare ``ValueEndif()`` case picks up the default "".
@@ -2108,7 +2184,7 @@ class TestValueConditionalPickle(unittest.TestCase):
         self.assertEqual(restored.comment, "")
 
 
-class TestValueConditionalDeepCopy(unittest.TestCase):
+class TestValueConditionalDeepCopy(AdaptorTestCase):
     """deepcopy yields a fresh instance with the same string payload
     and no shared mutable state, matching rocisa's copy ctor."""
 
@@ -2132,11 +2208,8 @@ class TestValueConditionalDeepCopy(unittest.TestCase):
         self.assertEqual(clone.comment, "c")
 
 
-class TestValueConditionalModuleIntegration(unittest.TestCase):
-    """A full ``.if`` / ``.elseif`` / ``.endif`` block built inside a
-    Module reproduces the CustomSchedule.py:448-466 pattern. The
-    emitted string must concatenate the three children verbatim
-    (each child supplies its own trailing newline)."""
+class TestValueConditionalModuleIntegration(AdaptorTestCase):
+    """Conditional nodes remain ordered and owned by their Module."""
 
     def _build_if_elseif_endif_module(self) -> Module:
         m = Module("conditional")
@@ -2144,15 +2217,6 @@ class TestValueConditionalModuleIntegration(unittest.TestCase):
         m.add(ValueElseIf("\\useGR == 0"))
         m.add(ValueEndif("EndIf useGR"))
         return m
-
-    def test_module_toString_concatenates_block(self):
-        out = str(self._build_if_elseif_endif_module())
-        expected = (
-            ".if \\useGR == 1\n"
-            ".elseif \\useGR == 0\n"
-            ".endif" + " " * 44 + " // EndIf useGR\n"
-        )
-        self.assertEqual(out, expected)
 
     def test_reparented_on_add(self):
         # Item.parent must be set to the containing Module on add()
@@ -2173,15 +2237,13 @@ class TestValueConditionalModuleIntegration(unittest.TestCase):
         self.assertEqual(m.countType(ValueElseIf), 1)
         self.assertEqual(m.countType(ValueEndif), 1)
 
-    def test_deepcopy_module_with_conditionals_preserves_block(self):
-        # Cloning a Module containing ValueIf/ElseIf/Endif must
-        # round-trip the emitted block exactly -- ParallelMap2-style
-        # workers rely on this if they ever decide to deepcopy a
-        # Module subtree (rare but legal).
+    def test_deepcopy_module_with_conditionals_preserves_payloads(self):
         m = self._build_if_elseif_endif_module()
         clone = copy.deepcopy(m)
         self.assertIsNot(clone, m)
-        self.assertEqual(str(clone), str(m))
+        self.assertEqual(clone.items()[0].value, "\\useGR == 1")
+        self.assertEqual(clone.items()[1].value, "\\useGR == 0")
+        self.assertEqual(clone.items()[2].comment, "EndIf useGR")
 
 
 # ===========================================================================
@@ -2197,7 +2259,7 @@ class TestValueConditionalModuleIntegration(unittest.TestCase):
 # rocisa baseline.
 
 
-class TestValueSetCtorIntPath(unittest.TestCase):
+class TestValueSetCtorIntPath(AdaptorTestCase):
     """Single Python ``__init__`` dispatches to the int-payload branch
     when ``value`` is not a string. Mirrors the ``int`` and
     ``uint32_t`` C++ ctors which both store the integer in ``value``
@@ -2226,7 +2288,7 @@ class TestValueSetCtorIntPath(unittest.TestCase):
         self.assertEqual(vs.format, -1)
 
 
-class TestValueSetCtorRefPath(unittest.TestCase):
+class TestValueSetCtorRefPath(AdaptorTestCase):
     """``isinstance(value, str)`` discriminator routes string payloads
     into the ref-payload branch (mirror of the third C++ ctor)."""
 
@@ -2243,7 +2305,7 @@ class TestValueSetCtorRefPath(unittest.TestCase):
         self.assertEqual(vs.format, 0)
 
 
-class TestValueSetToStringValuePath(unittest.TestCase):
+class TestValueSetToStringValuePath(AdaptorTestCase):
     """``.set <name>, <integer-payload>`` rendering for the three
     ``format`` codes. Byte-for-byte match required."""
 
@@ -2291,7 +2353,7 @@ class TestValueSetToStringValuePath(unittest.TestCase):
         )
 
 
-class TestValueSetToStringRefPath(unittest.TestCase):
+class TestValueSetToStringRefPath(AdaptorTestCase):
     """``.set <name>, <ref-payload>`` rendering. ``format == -1`` emits
     the ref alone; any other format suffixes ``+<offset>`` (including
     the literal ``+0`` -- not short-circuited)."""
@@ -2326,7 +2388,7 @@ class TestValueSetToStringRefPath(unittest.TestCase):
         )
 
 
-class TestValueSetInheritance(unittest.TestCase):
+class TestValueSetInheritance(AdaptorTestCase):
     """``ValueSet`` is an ``Item`` subclass so Module type-walks /
     cap proxies / Item defaults all apply."""
 
@@ -2339,7 +2401,7 @@ class TestValueSetInheritance(unittest.TestCase):
         self.assertEqual(str(vs), ".set a, 5\n")
 
 
-class TestValueSetPickle(unittest.TestCase):
+class TestValueSetPickle(AdaptorTestCase):
     """5-tuple round-trip: ``(name, ref, value, offset, format)``.
     Both ref and value branches must survive the round-trip with
     identical ``toString`` output."""
@@ -2363,7 +2425,7 @@ class TestValueSetPickle(unittest.TestCase):
         self.assertEqual(restored.toString(), original.toString())
 
 
-class TestValueSetDeepCopy(unittest.TestCase):
+class TestValueSetDeepCopy(AdaptorTestCase):
     def test_int_payload_independent(self):
         original = ValueSet("foo", 42, 3, 1)
         clone = copy.deepcopy(original)
@@ -2379,7 +2441,7 @@ class TestValueSetDeepCopy(unittest.TestCase):
         self.assertEqual(clone.toString(), original.toString())
 
 
-class TestValueSetModuleIntegration(unittest.TestCase):
+class TestValueSetModuleIntegration(AdaptorTestCase):
     """Module operations (add, str, countType) treat ValueSet leaves
     correctly -- parent rebind, recursive counting, concatenation."""
 
@@ -2409,7 +2471,7 @@ class TestValueSetModuleIntegration(unittest.TestCase):
 # ===========================================================================
 
 
-class TestRegSetCtor(_VgprIdxIsolation, unittest.TestCase):
+class TestRegSetCtor(_VgprIdxIsolation, AdaptorTestCase):
     """RegSet ctor accepts ``(regType, name, int_or_str, offset=0)``
     and stores ``regType`` on top of ValueSet's fields."""
 
@@ -2437,7 +2499,7 @@ class TestRegSetCtor(_VgprIdxIsolation, unittest.TestCase):
         self.assertIsInstance(rs, Item)
 
 
-class TestRegSetVgprIdxSideEffect(_VgprIdxIsolation, unittest.TestCase):
+class TestRegSetVgprIdxSideEffect(_VgprIdxIsolation, AdaptorTestCase):
     """When ``regType == "v"`` AND ``HasVgprMSB == 1``, both ``__init__``
     and ``toString`` MUST refresh ``getVgprIdx()`` with the latest
     binding (stripping the ``"vgpr"`` prefix from the name)."""
@@ -2501,7 +2563,7 @@ class TestRegSetVgprIdxSideEffect(_VgprIdxIsolation, unittest.TestCase):
         self.assertEqual(rs.toString(), ".set vgprFoo, 5\n")
 
 
-class TestRegSetNoSideEffectWhenDisabled(_VgprIdxIsolation, unittest.TestCase):
+class TestRegSetNoSideEffectWhenDisabled(_VgprIdxIsolation, AdaptorTestCase):
     """The side effect is gated on BOTH ``regType == "v"`` AND
     ``HasVgprMSB``; missing either skips the index update."""
 
@@ -2529,7 +2591,7 @@ class TestRegSetNoSideEffectWhenDisabled(_VgprIdxIsolation, unittest.TestCase):
         self.assertEqual(self._base.getVgprIdx(), before)
 
 
-class TestRegSetPickle(_VgprIdxIsolation, unittest.TestCase):
+class TestRegSetPickle(_VgprIdxIsolation, AdaptorTestCase):
     """6-tuple round-trip ``(regType, name, ref, value, offset, format)``.
     ``format`` is preserved even though the ctor does not accept it
     (mirror of C++ which does ``self.format = std::get<5>(t)`` after
@@ -2568,7 +2630,7 @@ class TestRegSetPickle(_VgprIdxIsolation, unittest.TestCase):
         self.assertEqual(self._base.getVgprIdx()["Foo"], 7)
 
 
-class TestRegSetDeepCopy(_VgprIdxIsolation, unittest.TestCase):
+class TestRegSetDeepCopy(_VgprIdxIsolation, AdaptorTestCase):
     def test_int_payload_independent_with_format_preserved(self):
         self._caps["HasVgprMSB"] = 0
         original = RegSet("s", "sgprFoo", 5, 2)
@@ -2586,7 +2648,7 @@ class TestRegSetDeepCopy(_VgprIdxIsolation, unittest.TestCase):
         self.assertEqual(clone.ref, "vgprOther")
 
 
-class TestRegSetModuleIntegration(_VgprIdxIsolation, unittest.TestCase):
+class TestRegSetModuleIntegration(_VgprIdxIsolation, AdaptorTestCase):
     """Mix RegSet leaves into a Module tree and verify str / countType /
     parent rebind behave like any other Item subclass."""
 
@@ -2636,7 +2698,7 @@ class TestRegSetModuleIntegration(_VgprIdxIsolation, unittest.TestCase):
 # pickle / deepcopy / Module-integration round-trips.
 
 
-class TestLabelConstruction(unittest.TestCase):
+class TestLabelConstruction(AdaptorTestCase):
     """``Label(label, comment, alignment=1)`` stores the three fields
     verbatim and leaves ``Item.name`` empty (rocisa's ``Item("")``)."""
 
@@ -2675,7 +2737,7 @@ class TestLabelConstruction(unittest.TestCase):
         self.assertIsInstance(Label(0, ""), Item)
 
 
-class TestLabelGetFormatting(unittest.TestCase):
+class TestLabelGetFormatting(AdaptorTestCase):
     """Static ``Label.getFormatting`` formats an ``int | str`` payload
     into ``label_<text>``. Mirror of code.hpp:87-103."""
 
@@ -2691,7 +2753,7 @@ class TestLabelGetFormatting(unittest.TestCase):
         self.assertEqual(Label.getFormatting(-1), "label_-1")
 
 
-class TestLabelGetLabelName(unittest.TestCase):
+class TestLabelGetLabelName(AdaptorTestCase):
     """``Label.getLabelName`` is the public accessor branch
     instructions reference -- forwards to ``getFormatting(self.label)``."""
 
@@ -2702,7 +2764,7 @@ class TestLabelGetLabelName(unittest.TestCase):
         self.assertEqual(Label("foo", "").getLabelName(), "label_foo")
 
 
-class TestLabelToString(_VgprMsbIsolation, unittest.TestCase):
+class TestLabelToString(_VgprMsbIsolation, AdaptorTestCase):
     """``Label.toString`` produces ``[.align <N>\\n]label_<x>:[  /// <c>]\\n``.
 
     Mirror of code.hpp:110-127. Caps init is required because the
@@ -2773,7 +2835,7 @@ class TestLabelToString(_VgprMsbIsolation, unittest.TestCase):
         self.assertEqual(str(lbl), lbl.toString())
 
 
-class TestLabelMsbSideEffect(_VgprMsbIsolation, unittest.TestCase):
+class TestLabelMsbSideEffect(_VgprMsbIsolation, AdaptorTestCase):
     """``Label.toString`` resets ``setVgprMsb(-1)`` on a HasVgprMSB
     arch -- mirror of code.hpp:122-125. The semantic is "emitting a
     label means we're entering a new basic block whose entry MSB is
@@ -2805,7 +2867,7 @@ class TestLabelMsbSideEffect(_VgprMsbIsolation, unittest.TestCase):
         self.assertEqual(self._base.getVgprMsb(), 7)
 
 
-class TestLabelDeepCopy(unittest.TestCase):
+class TestLabelDeepCopy(AdaptorTestCase):
     """``copy.deepcopy(label)`` produces an isolated clone with every
     field preserved. Mirror of code.cpp:123-127."""
 
@@ -2836,7 +2898,7 @@ class TestLabelDeepCopy(unittest.TestCase):
         self.assertEqual(clone.name, "custom_name")
 
 
-class TestLabelPickle(unittest.TestCase):
+class TestLabelPickle(AdaptorTestCase):
     """Pickle round-trip uses the 4-tuple ``(name, label, comment,
     alignment)`` shape from rocisa's ``__getstate__`` /
     ``__setstate__`` (code.cpp:128-138)."""
@@ -2866,7 +2928,7 @@ class TestLabelPickle(unittest.TestCase):
         self.assertEqual(clone.name, "custom")
 
 
-class TestLabelModuleIntegration(_VgprMsbIsolation, unittest.TestCase):
+class TestLabelModuleIntegration(_VgprMsbIsolation, AdaptorTestCase):
     """Real Label inside a real Module -- emission, parent linkage,
     and findIndexByType all behave like any other Item."""
 
@@ -2913,7 +2975,7 @@ class TestLabelModuleIntegration(_VgprMsbIsolation, unittest.TestCase):
 # attached to a parent Module via ``module.add(macro)``.
 
 
-class TestMacroConstruction(unittest.TestCase):
+class TestMacroConstruction(AdaptorTestCase):
     def test_basic_construction(self):
         mc = Macro("GLOBAL_OFFSET_A", ["vgprAddr:req", "vgprTmp:req"])
         self.assertEqual(mc.name, "GLOBAL_OFFSET_A")
@@ -2940,7 +3002,7 @@ class TestMacroConstruction(unittest.TestCase):
         self.assertNotIsInstance(mc, Module)
 
 
-class TestMacroAdd(unittest.TestCase):
+class TestMacroAdd(AdaptorTestCase):
     def test_add_TextBlock(self):
         mc = Macro("X", [])
         tb = TextBlock("inst\n")
@@ -2988,7 +3050,7 @@ class TestMacroAdd(unittest.TestCase):
             mc.add(42)
 
 
-class TestMacroAddComment0(unittest.TestCase):
+class TestMacroAddComment0(AdaptorTestCase):
     """Single-line ``/* ... */\\n``, distinct from Module's 3-line banner."""
 
     def test_addComment0_single_line(self):
@@ -3009,7 +3071,7 @@ class TestMacroAddComment0(unittest.TestCase):
         self.assertEqual(mc.itemList[0].text, mod.itemList[0].text)
 
 
-class TestMacroSetItems(unittest.TestCase):
+class TestMacroSetItems(AdaptorTestCase):
     def test_setItems_replaces_list(self):
         mc = Macro("X", [])
         mc.add(TextBlock("a"))
@@ -3027,7 +3089,7 @@ class TestMacroSetItems(unittest.TestCase):
         self.assertIsNone(tb.parent)  # NOT reparented
 
 
-class TestMacroToString(unittest.TestCase):
+class TestMacroToString(AdaptorTestCase):
     """Byte-parity with ``rocisa::Macro::toString``."""
 
     def test_empty_macro(self):
@@ -3076,7 +3138,7 @@ class TestMacroToString(unittest.TestCase):
         self.assertEqual(str(mc), expected)
 
 
-class TestMacroPrettyPrint(unittest.TestCase):
+class TestMacroPrettyPrint(AdaptorTestCase):
     def test_prettyPrint_header_and_children(self):
         mc = Macro("MyMacro", [])
         mc.add(TextBlock("inst\n"))
@@ -3086,7 +3148,7 @@ class TestMacroPrettyPrint(unittest.TestCase):
         self.assertIn("|--", out)
 
 
-class TestMacroDeepCopy(unittest.TestCase):
+class TestMacroDeepCopy(AdaptorTestCase):
     def test_deepcopy_independent(self):
         mc = Macro("X", ["a:req"])
         mc.add(TextBlock("inst\n"))
@@ -3120,7 +3182,7 @@ class TestMacroDeepCopy(unittest.TestCase):
         self.assertIs(type(c), Macro)
 
 
-class TestMacroPickleRejected(unittest.TestCase):
+class TestMacroPickleRejected(AdaptorTestCase):
     def test_pickle_raises(self):
         import pickle
         mc = Macro("X", [])
@@ -3128,7 +3190,7 @@ class TestMacroPickleRejected(unittest.TestCase):
             pickle.dumps(mc)
 
 
-class TestMacroModuleIntegration(unittest.TestCase):
+class TestMacroModuleIntegration(AdaptorTestCase):
     """KernelWriter pattern: ``module.add(macro)`` -- the Macro itself
     is an Item, so a parent Module can carry it like any other child."""
 
@@ -3183,7 +3245,7 @@ def _make_signature_base(**kwargs) -> SignatureBase:
     return SignatureBase(**defaults)
 
 
-class TestSignatureCodeMetaConstruction(unittest.TestCase):
+class TestSignatureCodeMetaConstruction(AdaptorTestCase):
     def test_is_item_subclass(self):
         meta = _make_signature_code_meta()
         self.assertIsInstance(meta, Item)
@@ -3199,7 +3261,7 @@ class TestSignatureCodeMetaConstruction(unittest.TestCase):
         self.assertEqual(meta.argList, [])
 
 
-class TestSignatureCodeMetaAddArg(_SignatureKernelSetup, unittest.TestCase):
+class TestSignatureCodeMetaAddArg(_SignatureKernelSetup, AdaptorTestCase):
     def test_add_arg_accumulates_offset(self):
         meta = _make_signature_code_meta()
         meta.addArg("alpha", SVK.SIG_VALUE, "f32")
@@ -3217,7 +3279,7 @@ class TestSignatureCodeMetaAddArg(_SignatureKernelSetup, unittest.TestCase):
             meta.addArg("x", SVK.SIG_VALUE, "not_a_type")
 
 
-class TestSignatureCodeMetaSetGprs(_SignatureKernelSetup, unittest.TestCase):
+class TestSignatureCodeMetaSetGprs(_SignatureKernelSetup, AdaptorTestCase):
     def test_set_gprs_updates_counts(self):
         meta = _make_signature_code_meta()
         meta.setGprs(40, 20)
@@ -3226,7 +3288,7 @@ class TestSignatureCodeMetaSetGprs(_SignatureKernelSetup, unittest.TestCase):
         self.assertIn(".sgpr_count:                 20", s)
 
 
-class TestSignatureCodeMetaToString(_SignatureKernelSetup, unittest.TestCase):
+class TestSignatureCodeMetaToString(_SignatureKernelSetup, AdaptorTestCase):
     def test_metadata_header_and_kernarg_align(self):
         meta = _make_signature_code_meta()
         meta.addArg("numWG", SVK.SIG_VALUE, "u32")
@@ -3244,7 +3306,7 @@ class TestSignatureCodeMetaToString(_SignatureKernelSetup, unittest.TestCase):
         self.assertIn("amdhsa.version:\n  - 1\n  - 2\n", s)
 
 
-class TestSignatureCodeMetaCopyRejected(unittest.TestCase):
+class TestSignatureCodeMetaCopyRejected(AdaptorTestCase):
     def test_deepcopy_raises(self):
         meta = _make_signature_code_meta()
         with self.assertRaises(RuntimeError):
@@ -3256,7 +3318,7 @@ class TestSignatureCodeMetaCopyRejected(unittest.TestCase):
             pickle.dumps(meta)
 
 
-class TestSignatureBaseConstruction(unittest.TestCase):
+class TestSignatureBaseConstruction(AdaptorTestCase):
     def test_is_item_subclass(self):
         sig = _make_signature_base()
         self.assertIsInstance(sig, Item)
@@ -3268,7 +3330,7 @@ class TestSignatureBaseConstruction(unittest.TestCase):
         self.assertEqual(sig.codeMeta.name, "my_k")
 
 
-class TestSignatureBaseSetGprs(_SignatureKernelSetup, unittest.TestCase):
+class TestSignatureBaseSetGprs(_SignatureKernelSetup, AdaptorTestCase):
     def test_set_gprs_syncs_both_children(self):
         sig = _make_signature_base()
         sig.setGprs(32, 4, 16)
@@ -3279,7 +3341,46 @@ class TestSignatureBaseSetGprs(_SignatureKernelSetup, unittest.TestCase):
         self.assertIn(".vgpr_count:                 32", s)
 
 
-class TestSignatureBaseAddArg(_SignatureKernelSetup, unittest.TestCase):
+class TestSignatureBaseOptimizationConfig(_SignatureKernelSetup, AdaptorTestCase):
+    def test_prints_after_num_sgpr_from_options(self):
+        sig = _make_signature_base()
+        sig.setOptimizationConfig(
+            (64, 8), (4, 32), (2, 1), 1, 1, 2, 2, False, False, 0
+        )
+        s = sig.kernelDescriptor.toString()
+        sgpr = s.index("/* Num SGPR   =")
+        opt = s.index("/* Optimizations and Config:")
+        self.assertGreater(opt, sgpr)
+        self.assertIn("/* ThreadTile= 64 x 8 */", s)
+        self.assertIn("/* SubGroup= 4 x 32 */", s)
+        self.assertIn("/* VectorWidthA=1 */", s)
+        self.assertIn("/* VectorWidthB=1 */", s)
+        self.assertIn(
+            "/* GlobalReadVectorWidthA=2, GlobalReadVectorWidthB=2 */", s
+        )
+        self.assertIn("/* DirectToLdsA=False */", s)
+        self.assertIn("/* DirectToLdsB=False */", s)
+        self.assertIn("/* UseSgprForGRO=False */", s)
+
+    def test_survives_outputNoComment(self):
+        from rocisa_stinkytofu_adaptor import rocIsa  # noqa: WPS433
+
+        sig = _make_signature_base()
+        sig.setOptimizationConfig(
+            (64, 8), (4, 32), (2, 1), 1, 1, 2, 2, False, False, 0
+        )
+        opts = rocIsa.getInstance().getOutputOptions()
+        saved = opts.outputNoComment
+        try:
+            opts.outputNoComment = True
+            s = sig.kernelDescriptor.toString()
+        finally:
+            opts.outputNoComment = saved
+        self.assertIn("/* Optimizations and Config:", s)
+        self.assertIn("/* ThreadTile= 64 x 8 */", s)
+
+
+class TestSignatureBaseAddArg(_SignatureKernelSetup, AdaptorTestCase):
     def test_add_arg_delegates_to_code_meta(self):
         sig = _make_signature_base()
         sig.addArg("A", SVK.SIG_GLOBALBUFFER, "f32", "generic")
@@ -3287,7 +3388,7 @@ class TestSignatureBaseAddArg(_SignatureKernelSetup, unittest.TestCase):
         self.assertIn("- .name:            A", sig.toString())
 
 
-class TestSignatureBaseDescriptions(_SignatureKernelSetup, unittest.TestCase):
+class TestSignatureBaseDescriptions(_SignatureKernelSetup, AdaptorTestCase):
     def test_description_helpers_emit_in_order(self):
         sig = _make_signature_base()
         sig.addDescriptionTopic("Optimizations and Config:")
@@ -3306,7 +3407,7 @@ class TestSignatureBaseDescriptions(_SignatureKernelSetup, unittest.TestCase):
         self.assertIn("Optimizations and Config:", s2)
 
 
-class TestSignatureBaseToString(_SignatureKernelSetup, unittest.TestCase):
+class TestSignatureBaseToString(_SignatureKernelSetup, AdaptorTestCase):
     def test_smoke_matches_rocisa_test_shape(self):
         sig = SignatureBase(
             kernelName="123",
@@ -3334,7 +3435,7 @@ class TestSignatureBaseToString(_SignatureKernelSetup, unittest.TestCase):
         self.assertNotIn(".amdhsa_user_sgpr_count", s)
 
 
-class TestSignatureBaseCopyRejected(unittest.TestCase):
+class TestSignatureBaseCopyRejected(AdaptorTestCase):
     def test_deepcopy_raises(self):
         sig = _make_signature_base()
         with self.assertRaises(RuntimeError):
@@ -3356,7 +3457,7 @@ def _make_kernel_body(**kwargs) -> KernelBody:
     return KernelBody(name)
 
 
-class TestKernelBodyConstruction(unittest.TestCase):
+class TestKernelBodyConstruction(AdaptorTestCase):
     def test_is_item_subclass(self):
         kb = _make_kernel_body()
         self.assertIsInstance(kb, Item)
@@ -3371,7 +3472,7 @@ class TestKernelBodyConstruction(unittest.TestCase):
         self.assertEqual(kb.totalSgprs, 0)
 
 
-class TestKernelBodyAddSignatureAndBody(_SignatureKernelSetup, unittest.TestCase):
+class TestKernelBodyAddSignatureAndBody(_SignatureKernelSetup, AdaptorTestCase):
     def test_add_signature_and_body(self):
         kb = _make_kernel_body()
         sig = _make_signature_base()
@@ -3389,7 +3490,7 @@ class TestKernelBodyAddSignatureAndBody(_SignatureKernelSetup, unittest.TestCase
         self.assertIs(kb.body, body)
 
 
-class TestKernelBodySetGprs(_SignatureKernelSetup, unittest.TestCase):
+class TestKernelBodySetGprs(_SignatureKernelSetup, AdaptorTestCase):
     def test_set_gprs_updates_fields_and_signature(self):
         kb = _make_kernel_body()
         kb.addSignature(_make_signature_base())
@@ -3406,7 +3507,7 @@ class TestKernelBodySetGprs(_SignatureKernelSetup, unittest.TestCase):
         self.assertEqual(kb.getNextFreeSgpr(), 0)
 
 
-class TestKernelBodyToString(_SignatureKernelSetup, unittest.TestCase):
+class TestKernelBodyToString(_SignatureKernelSetup, AdaptorTestCase):
     def test_emits_banner_signature_and_body(self):
         kb = _make_kernel_body()
         kb.addSignature(_make_signature_base(kernelName="my_k"))
@@ -3425,7 +3526,7 @@ class TestKernelBodyToString(_SignatureKernelSetup, unittest.TestCase):
             kb.toString()
 
 
-class TestKernelBodyCheckResourcesPattern(_SignatureKernelSetup, unittest.TestCase):
+class TestKernelBodyCheckResourcesPattern(_SignatureKernelSetup, AdaptorTestCase):
     def test_body_add_after_set_gprs(self):
         """Mirror ``KernelWriterAssembly.checkResources`` overflow patch."""
         kb = _make_kernel_body()
@@ -3438,7 +3539,7 @@ class TestKernelBodyCheckResourcesPattern(_SignatureKernelSetup, unittest.TestCa
         self.assertIn(".amdhsa_next_free_vgpr 32 // vgprs", s)
 
 
-class TestKernelBodyCopyRejected(unittest.TestCase):
+class TestKernelBodyCopyRejected(AdaptorTestCase):
     def test_deepcopy_raises(self):
         kb = _make_kernel_body()
         with self.assertRaises(RuntimeError):
@@ -3450,7 +3551,7 @@ class TestKernelBodyCopyRejected(unittest.TestCase):
             pickle.dumps(kb)
 
 
-class TestKernelBodyModuleIntegration(_SignatureKernelSetup, unittest.TestCase):
+class TestKernelBodyModuleIntegration(_SignatureKernelSetup, AdaptorTestCase):
     def test_kernel_body_counted_in_module_tree(self):
         outer = Module("outer")
         kb = _make_kernel_body()

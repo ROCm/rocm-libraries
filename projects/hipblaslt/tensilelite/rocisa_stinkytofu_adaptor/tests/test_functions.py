@@ -24,6 +24,8 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+
+from _adaptor_testcase import AdaptorTestCase
 from unittest import mock
 
 # ---------------------------------------------------------------------------
@@ -60,7 +62,7 @@ FUNCTIONS_DUMMY_EXPORTS: tuple[str, ...] = (
 # ===========================================================================
 
 
-class TestArgumentLoaderConstruction(unittest.TestCase):
+class TestArgumentLoaderConstruction(AdaptorTestCase):
     def test_initial_offset_is_zero(self):
         # Mirrors ``ArgumentLoader() : kernArgOffset(0)`` in argument.hpp:34.
         loader = ArgumentLoader()
@@ -73,7 +75,7 @@ class TestArgumentLoaderConstruction(unittest.TestCase):
         self.assertIsInstance(loader.getOffset(), int)
 
 
-class TestArgumentLoaderSetGetReset(unittest.TestCase):
+class TestArgumentLoaderSetGetReset(AdaptorTestCase):
     def test_setOffset_then_getOffset(self):
         loader = ArgumentLoader()
         loader.setOffset(64)
@@ -103,7 +105,7 @@ class TestArgumentLoaderSetGetReset(unittest.TestCase):
         self.assertEqual(loader.getOffset(), 0)
 
 
-class TestArgumentLoaderLoadKernArg(unittest.TestCase):
+class TestArgumentLoaderLoadKernArg(AdaptorTestCase):
     def test_default_dword_advances_4_bytes(self):
         loader = ArgumentLoader()
         loader.loadKernArg("AddressDbg", "KernArgAddress")
@@ -166,7 +168,7 @@ class TestArgumentLoaderLoadKernArg(unittest.TestCase):
         self.assertIsInstance(item, TextBlock)
 
 
-class TestArgumentLoaderLoadAllKernArg(unittest.TestCase):
+class TestArgumentLoaderLoadAllKernArg(AdaptorTestCase):
     def test_basic_total_advance(self):
         loader = ArgumentLoader()
         loader.loadAllKernArg(sgprStartIndex=0, srcAddr="KernArgAddress",
@@ -244,7 +246,7 @@ class TestArgumentLoaderLoadAllKernArg(unittest.TestCase):
         self.assertEqual(countSMemLoad(mod), 2)
 
 
-class TestArgumentLoaderTensileRegression(unittest.TestCase):
+class TestArgumentLoaderTensileRegression(AdaptorTestCase):
     def test_kernarg_wait_arithmetic_does_not_raise(self):
         # Reproduce the L1909-1916 + L2351 pattern: reset, loadAllKernArg,
         # then read getOffset() and subtract numSgprPreload*4.
@@ -277,7 +279,7 @@ class TestArgumentLoaderTensileRegression(unittest.TestCase):
 # ===========================================================================
 
 
-class TestFunctionsModuleExports(unittest.TestCase):
+class TestFunctionsModuleExports(AdaptorTestCase):
     def test_argument_loader_is_real_class(self):
         self.assertTrue(callable(ArgumentLoader))
         self.assertIsInstance(ArgumentLoader(), ArgumentLoader)
@@ -339,7 +341,7 @@ class TestFunctionsModuleExports(unittest.TestCase):
         self.assertEqual(set(FUNCTIONS_DUMMY_EXPORTS), module_dummies)
 
 
-class TestFunctionsDummyCallables(unittest.TestCase):
+class TestFunctionsDummyCallables(AdaptorTestCase):
     def test_each_dummy_callable_returns_none(self):
         for name in FUNCTIONS_DUMMY_EXPORTS:
             with self.subTest(name=name):
@@ -364,13 +366,14 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     Instruction, BufferLoadB128, BufferLoadB32, FlatLoadB64,
     DSLoadB32, DSLoadB64, DSLoadB192, DSLoad2B32,
     DSStoreB32, DSStoreB64, DSStoreB128, DSStoreB192, DSStoreB256,
+    DSStoreB8, DSStoreB8HID16, DSStoreD16HIB16, DSStoreU16, DSBPermuteB32,
     DSStore2B32, VMovB32, SLoadB32, SLoadB128,
     GlobalLoadTR8B64, MFMAInstruction, SMFMAInstruction, MXMFMAInstruction,
     SAddU32, SNop,
 )
 
 
-class TestCountInstruction(unittest.TestCase):
+class TestCountInstruction(AdaptorTestCase):
     def test_empty_module(self):
         self.assertEqual(countInstruction(Module()), 0)
 
@@ -397,7 +400,7 @@ class TestCountInstruction(unittest.TestCase):
         self.assertEqual(countInstruction(m), 1)
 
 
-class TestCountGlobalRead(unittest.TestCase):
+class TestCountGlobalRead(AdaptorTestCase):
     def test_buffer_loads(self):
         m = Module()
         m.add(BufferLoadB128())
@@ -422,7 +425,7 @@ class TestCountGlobalRead(unittest.TestCase):
         self.assertEqual(countGlobalRead(m), 0)
 
 
-class TestCountSMemLoad(unittest.TestCase):
+class TestCountSMemLoad(AdaptorTestCase):
     def test_sloads(self):
         m = Module()
         m.add(SLoadB32())
@@ -431,7 +434,7 @@ class TestCountSMemLoad(unittest.TestCase):
         self.assertEqual(countSMemLoad(m), 2)
 
 
-class TestCountLocalRead(unittest.TestCase):
+class TestCountLocalRead(AdaptorTestCase):
     def test_ds_loads(self):
         m = Module()
         m.add(DSLoadB32())
@@ -449,7 +452,7 @@ class TestCountLocalRead(unittest.TestCase):
         self.assertEqual(countLocalRead(m), 2)
 
 
-class TestCountLocalWrite(unittest.TestCase):
+class TestCountLocalWrite(AdaptorTestCase):
     def test_ds_stores(self):
         m = Module()
         m.add(DSStoreB32())
@@ -458,8 +461,28 @@ class TestCountLocalWrite(unittest.TestCase):
         m.add(DSLoadB32())
         self.assertEqual(countLocalWrite(m), 3)
 
+    def test_counts_all_local_write_subclasses(self):
+        """SIA writesPerItem uses this count; packed byte stores must be included.
 
-class TestCountWeighted(unittest.TestCase):
+        Mirrors rocisa ``countX<LocalWriteInstruction>``. A module of 8x
+        ``ds_store_b8`` + 8x ``ds_store_b8_d16_hi`` is 16 writes, not 8.
+        """
+        m = Module()
+        for _ in range(8):
+            m.add(DSStoreB8())
+            m.add(DSStoreB8HID16())
+        self.assertEqual(countLocalWrite(m), 16)
+
+    def test_hi_and_u16_and_bpermute_are_local_writes(self):
+        m = Module()
+        m.add(DSStoreD16HIB16())
+        m.add(DSStoreU16())
+        m.add(DSBPermuteB32())
+        m.add(VMovB32(dst="v0", src="v1"))
+        self.assertEqual(countLocalWrite(m), 3)
+
+
+class TestCountWeighted(AdaptorTestCase):
     def test_weighted_local_read(self):
         m = Module()
         m.add(DSLoadB32())
@@ -474,7 +497,7 @@ class TestCountWeighted(unittest.TestCase):
         self.assertEqual(countWeightedLocalWrite(m), 5)  # 1 + 2 + 2
 
 
-class TestCountExactType(unittest.TestCase):
+class TestCountExactType(AdaptorTestCase):
     def test_ds_store_b128(self):
         m = Module()
         m.add(DSStoreB128())
@@ -490,7 +513,7 @@ class TestCountExactType(unittest.TestCase):
         self.assertEqual(countVMovB32(m), 2)
 
 
-class TestCountMFMA(unittest.TestCase):
+class TestCountMFMA(AdaptorTestCase):
     def test_no_mfma(self):
         m = Module()
         m.add(BufferLoadB128())
@@ -498,7 +521,7 @@ class TestCountMFMA(unittest.TestCase):
         self.assertEqual(getMFMAs(m), [])
 
 
-class TestFindInstCount(unittest.TestCase):
+class TestFindInstCount(AdaptorTestCase):
     def test_found(self):
         target = DSLoadB32()
         m = Module()
@@ -538,7 +561,7 @@ class TestFindInstCount(unittest.TestCase):
         self.assertEqual(cnt, 1)
 
 
-class TestCountType(unittest.TestCase):
+class TestCountType(AdaptorTestCase):
     def test_generic_isinstance(self):
         m = Module()
         m.add(BufferLoadB128())

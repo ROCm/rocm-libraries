@@ -20,28 +20,54 @@ from .base import IsaInfo, KernelInfo, OutputOptions
 # Make submodules importable as attributes (``rocisa.code`` etc.). The
 # rocisa dispatcher in ``tensilelite/rocisa/rocisa/__init__.py`` is what
 # ultimately installs them under the ``rocisa.*`` name in ``sys.modules``.
-from . import asmpass as asmpass
+#
+# Heavy submodules (code, asmpass, functions, container, instruction, …) are
+# loaded lazily via ``__getattr__`` so that *importing this package* does not
+# pull in ``_stinkytofu.so``.  This matters when a multiprocessing worker
+# unpickles an adapter-typed object (e.g. ``base.IsaInfo``) while native
+# ``_rocisa.so`` is already loaded: eager import would trigger a fatal
+# nanobind duplicate-type abort.
 from . import base as base
-from . import code as code
-from . import container as container
-from . import enum as enum
-from . import functions as functions
-from . import instruction as instruction
-from . import label as label
-from . import macro as macro
-from . import register as register
-from .stinky_interop import toStinkyTofuModule
+
+_LAZY_SUBMODULES = frozenset({
+    "asmpass", "code", "container", "enum", "functions",
+    "instruction", "label", "macro", "register",
+})
+
+def __getattr__(name: str):
+    if name in _LAZY_SUBMODULES:
+        import importlib, sys as _sys
+        mod = importlib.import_module(f".{name}", __name__)
+        globals()[name] = mod
+        # Wire under ``rocisa.*`` so ``from rocisa.code import Module``
+        # finds the same object (the adapter is installed as ``rocisa``).
+        _sys.modules.setdefault(f"rocisa.{name}", mod)
+        return mod
+    if name in ("toStinkyTofuModule", "StinkyAsmModule", "CloneSpec"):
+        _ensure_stinky_types()
+        val = globals()[name]
+        return val
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 _P = "rocisa"
 
-try:
-    import stinkytofu as _stinkytofu  # type: ignore[import-not-found]
+# Lazy-loaded on first access (avoids pulling in _stinkytofu.so at import time).
+_stinky_types_loaded = False
 
-    StinkyAsmModule = _stinkytofu.StinkyAsmModule
-    CloneSpec = _stinkytofu.CloneSpec
-except ImportError:
-    StinkyAsmModule = make_dummy_class(f"{_P}.StinkyAsmModule")
-    CloneSpec = make_dummy_class(f"{_P}.CloneSpec")
+def _ensure_stinky_types():
+    global _stinky_types_loaded
+    if _stinky_types_loaded:
+        return
+    _stinky_types_loaded = True
+    from .stinky_interop import toStinkyTofuModule as _tsm
+    globals()["toStinkyTofuModule"] = _tsm
+    try:
+        import stinkytofu as _st
+        globals()["StinkyAsmModule"] = _st.StinkyAsmModule
+        globals()["CloneSpec"] = _st.CloneSpec
+    except ImportError:
+        globals()["StinkyAsmModule"] = make_dummy_class(f"{_P}.StinkyAsmModule")
+        globals()["CloneSpec"] = make_dummy_class(f"{_P}.CloneSpec")
 
 
 # ---------------------------------------------------------------------------
@@ -209,8 +235,9 @@ def getSlcBitName() -> str:
 # Module-level counting / analysis functions
 # ==========================================================================
 # Mirrors ``rocisa/src/count.cpp``. The C++ uses dynamic_cast to traverse
-# a Module tree and count instructions by type. Here we use isinstance()
-# against tuples of concrete adaptor classes.
+# a Module tree and count instructions by type. Local writes match
+# ``countX<LocalWriteInstruction>`` (any subclass); other counters still
+# use tuples of concrete adaptor classes.
 
 def _count_recursive(item, type_tuple, weights=None):
     """Recursively count instructions matching *type_tuple* in *item* tree."""
@@ -285,8 +312,14 @@ def countLocalRead(item):
 
 
 def countLocalWrite(item):
-    """Count DSStore* instructions (mirrors ``countX<LocalWriteInstruction>``)."""
-    return _count_recursive(item, _local_write_types())
+    """Count every ``LocalWriteInstruction`` (mirrors ``countX<LocalWriteInstruction>``).
+
+    Must use the base class, not a mnemonic whitelist: SIA's
+    ``writesPerItem`` is this count, and packed LDS stores such as
+    ``DSStoreB8HID16`` were dropped from the old tuple.
+    """
+    from .instruction import LocalWriteInstruction as _LW
+    return _count_recursive(item, _LW)
 
 
 def countWeightedLocalRead(item):
@@ -300,7 +333,7 @@ def countWeightedLocalWrite(item):
     """Count local writes with weights: DSStoreB192/B256 count as 2."""
     from . import instruction as _inst
     weights = {_inst.DSStoreB192: 2, _inst.DSStoreB256: 2}
-    return _count_recursive(item, _local_write_types(), weights)
+    return _count_recursive(item, _inst.LocalWriteInstruction, weights)
 
 
 def countDSStoreB128(item):
@@ -400,17 +433,6 @@ def _local_read_types():
         _inst.DSLoadB128TrB16, _inst.DSLoadB64TrB8,
         _inst.DSLoadB128, _inst.DSLoadB192,
         _inst.DSLoad2B32, _inst.DSLoad2B64,
-    )
-
-
-def _local_write_types():
-    from . import instruction as _inst
-    return (
-        _inst.DSStoreB8, _inst.DSStoreB16,
-        _inst.DSStoreB32, _inst.DSStoreB64,
-        _inst.DSStoreB96, _inst.DSStoreB128,
-        _inst.DSStoreB192, _inst.DSStoreB256,
-        _inst.DSStore2B32, _inst.DSStore2B64,
     )
 
 

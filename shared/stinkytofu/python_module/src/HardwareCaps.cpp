@@ -189,6 +189,9 @@ std::map<std::string, int> initAsmCaps(const IsaVersion& v, const MnemonicMap& m
     rv["HasMovRelsD2B32"] = hasMnemonic(m, "v_movrelsd_2_b32");
 
     rv["HasAtomicAdd"] = hasAnyMnemonic(m, {"buffer_atomic_add_f32"});
+    // Packed 2xBF16 atomic add gating GSU AtomicDest for a BF16 D
+    // (mirrors rocisa hardware_caps.hpp HasAtomicPkAddBF16).
+    rv["HasAtomicPkAddBF16"] = hasAnyMnemonic(m, {"buffer_atomic_pk_add_bf16"});
 
     // Scalar-memory atomics (s_atomic_*): false on gfx12/gfx1250. The GSU and
     // StreamK paths gate on asmCaps["HasSAtomic"] (mirrors rocisa
@@ -329,6 +332,20 @@ std::map<std::string, int> initArchCaps(const IsaVersion& v, GfxArchID archID) {
 
     rv["LDSBankCount"] = 64;
     rv["LDSBankWidth"] = 4;
+
+    // Per-XCD work-queue count baked into StreamK dynamic-queue kernels. Single
+    // codegen-side mirror of origami get_default_num_xcds(): gfx942/gfx950 bake
+    // 8 (the MI300X value), every other arch 1. gfx942 covers BOTH MI300X (8
+    // XCDs) and MI300A (6 XCDs), which codegen cannot tell apart, so it always
+    // bakes 8; the host guard rejects a device whose runtime NUM_XCD != this
+    // baked value (so MI300A's 6 is excluded at runtime). Power-of-two keeps the
+    // StreamK queue masking (AND/shift) valid. Kept in sync with rocisa
+    // hardware_caps.hpp.
+    rv["NumXCD"] = checkInList(v, {{9, 4, 2}, {9, 5, 0}}) ? 8 : 1;
+
+    // Per-queue counter stride = L2 cache-line size (uniform 128B on supported
+    // archs). Kept in sync with rocisa hardware_caps.hpp.
+    rv["CacheLineBytes"] = 128;
 
     return rv;
 }

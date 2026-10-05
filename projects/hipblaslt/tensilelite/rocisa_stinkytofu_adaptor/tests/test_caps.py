@@ -6,6 +6,8 @@ import os
 import sys
 import unittest
 
+from _adaptor_testcase import AdaptorTestCase
+
 _PKG_PARENT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), os.pardir)
 )
@@ -27,7 +29,7 @@ def _stinkytofu_available() -> bool:
 
 
 @unittest.skipUnless(_stinkytofu_available(), "stinkytofu binding not on PYTHONPATH")
-class TestGetCapsDynamic(unittest.TestCase):
+class TestGetCapsDynamic(AdaptorTestCase):
     def test_gfx1250_shape(self):
         asm, arch, reg, bugs = caps.getCaps(_GFX1250)
         self.assertIsInstance(asm, dict)
@@ -71,7 +73,7 @@ class TestGetCapsDynamic(unittest.TestCase):
 
 
 @unittest.skipUnless(_stinkytofu_available(), "stinkytofu binding not on PYTHONPATH")
-class TestStinkyTofuArchProbes(unittest.TestCase):
+class TestStinkyTofuArchProbes(AdaptorTestCase):
     def test_has_backend_when_binding_present(self):
         self.assertTrue(rocisa.hasStinkyTofuBackend())
 
