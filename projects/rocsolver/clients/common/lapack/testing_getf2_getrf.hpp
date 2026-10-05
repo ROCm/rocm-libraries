@@ -268,7 +268,7 @@ void getf2_getrf_getError(const rocblas_handle handle,
     for(I b = 0; b < bc; ++b)
     {
         err = norm_error('F', m, n, lda, hA[b], hARes[b]);
-        *max_err = err > *max_err ? err : *max_err;
+        *max_err = rocblas_max_nan(err, (*max_err));
 
         // also check pivoting (count the number of incorrect pivots)
         err = 0;
@@ -278,7 +278,7 @@ void getf2_getrf_getError(const rocblas_handle handle,
             if(hIpiv[b][i] != hIpivRes[b][i])
                 err++;
         }
-        *max_err = err > *max_err ? err : *max_err;
+        *max_err = rocblas_max_nan(err, (*max_err));
     }
 
     // also check info for singularities

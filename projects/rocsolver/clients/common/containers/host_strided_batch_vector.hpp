@@ -27,6 +27,7 @@
 
 #pragma once
 
+#include <cstring>
 #include <ostream>
 
 //
@@ -111,6 +112,18 @@ public:
             {
                 // Value-initialization (`new T{}` or `new T[]{}`) of a non-class type yields zero-initialization
                 this->m_data = new T[this->m_nmemb]{};
+#ifndef NDEBUG
+                {
+                    // -------------------------------
+                    // set initial data to NaN or 0xFF
+                    // to assist in debugging
+                    // -------------------------------
+                    void* const dst = (void*)this->m_data;
+                    int const val = 0xFF;
+                    size_t const nbytes = (this->m_nmemb) * sizeof(T);
+                    static_cast<void>(std::memset(dst, val, nbytes));
+                }
+#endif
             }
         }
     }

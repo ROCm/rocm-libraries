@@ -32,6 +32,7 @@
 
 #pragma once
 
+#include "lapack_host_functions.hpp"
 #include "rocblas.hpp"
 #include "roclapack_getf2.hpp"
 #include "rocsolver/rocsolver.h"
@@ -203,18 +204,23 @@ ROCSOLVER_KERNEL void getrf_row_permutate(const I n,
                                           const I lda,
                                           const rocblas_stride strideA,
                                           I* pividx,
-                                          const rocblas_stride stridePI)
+                                          const rocblas_stride stridePI,
+                                          const I batch_count)
 {
-    I id = hipBlockIdx_z;
-    I tx = hipThreadIdx_x;
-    I ty = hipThreadIdx_y;
-    I bdx = hipBlockDim_x;
-    I j = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
-    if(j >= offset)
-        j += blk;
+    I const tx = hipThreadIdx_x;
+    I const ty = hipThreadIdx_y;
+    I const bdx = hipBlockDim_x;
 
-    if(j < n)
+    I const id_start = hipBlockIdx_z;
+    I const id_inc = hipGridDim_z;
+
+    for(I id = id_start; id < batch_count; id += id_inc)
     {
+        I j = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
+
+        if(j >= offset)
+            j += blk;
+
         // batch instance
         T* A = load_ptr_batch(AA, id, shiftA, strideA);
         I* piv = pividx + id * stridePI;
@@ -223,16 +229,23 @@ ROCSOLVER_KERNEL void getrf_row_permutate(const I n,
         extern __shared__ double lmem[];
         T* temp = reinterpret_cast<T*>(lmem);
 
-        // do permutations in parallel (each tx perform a row swap)
-        I idx1 = piv[tx];
-        I idx2 = piv[idx1];
-        temp[tx + ty * bdx] = A[idx1 * inca + j * lda];
-        A[idx1 * inca + j * lda] = A[idx2 * inca + j * lda];
+        if(j < n)
+        {
+            // do permutations in parallel (each tx perform a row swap)
+            I idx1 = piv[tx];
+            I idx2 = piv[idx1];
+            temp[tx + ty * bdx] = A[idx1 * inca + j * lda];
+            A[idx1 * inca + j * lda] = A[idx2 * inca + j * lda];
+        }
         __syncthreads();
 
-        // copy temp results back to A
-        A[tx * inca + j * lda] = temp[tx + ty * bdx];
-    }
+        if(j < n)
+        {
+            // copy temp results back to A
+            A[tx * inca + j * lda] = temp[tx + ty * bdx];
+        }
+        __syncthreads();
+    } // end for id
 }
 
 /** This function returns the outer block size based on defined variables
@@ -488,6 +501,7 @@ rocblas_status getrf_panelLU(rocblas_handle handle,
     I blk = getrf_get_innerBlkSize<ISBATCHED, T>(mm, nn, pivot);
     I jb;
     I dimx, dimy, blocks, blocksy;
+    I const max_blocks = get_nblocks_yz(handle);
     dim3 grid, threads;
     size_t lmemsize;
 
@@ -507,14 +521,14 @@ rocblas_status getrf_panelLU(rocblas_handle handle,
             constexpr int max_threads = ROCSOLVER_ASAN_VALUE(256, 1024);
             dimy = std::max(I(1), I(max_threads) / dimx);
             blocks = (n - jb - 1) / dimy + 1;
-            grid = dim3(1, blocks, batch_count);
+            grid = dim3(1, blocks, std::min(max_blocks, batch_count));
             threads = dim3(dimx, dimy, 1);
             lmemsize = dimx * dimy * sizeof(T);
 
             // swap rows
             ROCSOLVER_LAUNCH_KERNEL(getrf_row_permutate<T>, grid, threads, lmemsize, stream, n,
                                     offset + k, jb, A, r_shiftA + k * inca, inca, lda, strideA,
-                                    permut_idx, stridePI);
+                                    permut_idx, stridePI, batch_count);
         }
 
         // update trailing sub-block
@@ -661,6 +675,7 @@ rocblas_status rocsolver_getrf_template(rocblas_handle handle,
     static constexpr bool ISBATCHED = BATCHED || STRIDED;
     I dim = std::min(m, n);
     I blocks, blocksy;
+    I const max_blocks = get_nblocks_yz(handle);
     dim3 grid, threads;
 
     // quick return if no dimensions

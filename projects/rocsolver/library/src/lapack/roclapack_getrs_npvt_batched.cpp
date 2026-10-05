@@ -35,42 +35,44 @@ rocblas_status rocsolver_getrs_npvt_batched_impl(rocblas_handle handle,
                                                  const rocblas_operation trans,
                                                  const I n,
                                                  const I nrhs,
-                                                 U A,
+                                                 U A_arg,
                                                  const I lda,
-                                                 U B,
+                                                 U B_arg,
                                                  const I ldb,
-                                                 const I batch_count)
+                                                 const I batch_count_arg)
 try
 {
     ROCSOLVER_ENTER_TOP("getrs_npvt_batched", "--trans", trans, "-n", n, "--nrhs", nrhs, "--lda",
-                        lda, "--ldb", ldb, "--batch_count", batch_count);
+                        lda, "--ldb", ldb, "--batch_count", batch_count_arg);
+    {
+        auto const A = A_arg;
+        auto const B = B_arg;
+        auto const batch_count = batch_count_arg;
 
-    if(!handle)
-        return rocblas_status_invalid_handle;
+        if(!handle)
+            return rocblas_status_invalid_handle;
 
-    // argument checking
-    rocblas_status st
-        = rocsolver_getrs_npvt_argCheck(handle, trans, n, nrhs, lda, ldb, A, B, batch_count);
-    if(st != rocblas_status_continue)
-        return st;
+        // argument checking
+        rocblas_status st
+            = rocsolver_getrs_npvt_argCheck(handle, trans, n, nrhs, lda, ldb, A, B, batch_count);
+        if(st != rocblas_status_continue)
+            return st;
+    }
 
-    // working with unshifted arrays
-    rocblas_stride shiftA = 0;
-    rocblas_stride shiftB = 0;
-
-    // batched execution
-    I inca = 1;
-    I incb = 1;
-    rocblas_stride strideA = 0;
-    rocblas_stride strideB = 0;
+    I const max_batch_count = 64 * 1024;
+    I const nsweep = (batch_count_arg == 0) ? 0 : ceildiv(batch_count_arg, max_batch_count);
+    I const bid_inc = (batch_count_arg == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
 
     // memory workspace sizes:
     // size of workspace (for calling TRSM)
     bool optim_mem;
     size_t size_work1, size_work2, size_work3, size_work4;
-    rocsolver_getrs_npvt_getMemorySize<true, false, T>(trans, n, nrhs, batch_count, &size_work1,
-                                                       &size_work2, &size_work3, &size_work4,
-                                                       &optim_mem, lda, ldb);
+    {
+        I const lbatch_count = bid_inc;
+        rocsolver_getrs_npvt_getMemorySize<true, false, T>(trans, n, nrhs, lbatch_count,
+                                                           &size_work1, &size_work2, &size_work3,
+                                                           &size_work4, &optim_mem, lda, ldb);
+    }
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(handle, size_work1, size_work2, size_work3,
@@ -88,10 +90,37 @@ try
     work3 = mem[2];
     work4 = mem[3];
 
-    // execution
-    return rocsolver_getrs_npvt_template<true, false, T>(
-        handle, trans, n, nrhs, A, shiftA, inca, lda, strideA, B, shiftB, incb, ldb, strideB,
-        batch_count, work1, work2, work3, work4, optim_mem);
+    for(I isweep = 0; isweep < nsweep; isweep++)
+    {
+        I const bid = isweep * bid_inc;
+        I const bid_end = bid + std::min(batch_count_arg - bid, bid_inc);
+        I const batch_count = bid_end - bid;
+
+        auto const A = (A_arg == nullptr) ? nullptr : A_arg + bid;
+        auto const B = (B_arg == nullptr) ? nullptr : B_arg + bid;
+
+        // working with unshifted arrays
+        rocblas_stride shiftA = 0;
+        rocblas_stride shiftB = 0;
+
+        // batched execution
+        I inca = 1;
+        I incb = 1;
+        rocblas_stride strideA = 0;
+        rocblas_stride strideB = 0;
+
+        // execution
+        rocblas_status const istat = rocsolver_getrs_npvt_template<true, false, T>(
+            handle, trans, n, nrhs, A, shiftA, inca, lda, strideA, B, shiftB, incb, ldb, strideB,
+            batch_count, work1, work2, work3, work4, optim_mem);
+
+        if(istat != rocblas_status_success)
+        {
+            return (istat);
+        }
+
+    } // end for isweep
+    return (rocblas_status_success);
 }
 catch(...)
 {
