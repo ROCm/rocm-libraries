@@ -48,6 +48,7 @@
 | HIP | Matching TheRock | GPU programming interface (included with ROCm/TheRock) |
 | clang-format | 18.x | Code formatting tool |
 | clang-tidy | 20.x | Static analysis tool |
+| clang-tidy (ROCm) | 23.x | Static analysis tool for the embedded HIP kernels |
 | LLVM Tools | 20.x | LLVM tools for code_coverage, and ASAN enabled builds |
 
 #### Optional Dependencies
@@ -491,6 +492,13 @@ cmake --preset release -DROCM_CMAKE_PATH=/custom/rocm -DCMAKE_INSTALL_PREFIX=/an
 ### Clang Tools
 
 Different versions of Clang tools are required. For example, clang-format version 18 and clang-tidy version 20. The hipDNN project tool discovery provides two mechanism to assist with finding the needed version of each tool.
+
+Two clang-tidy binaries are used, and they are discovered independently:
+
+* **Host C++** uses the clang-tidy on the system path, pinned by `EXPECTED_CLANG_TIDY_VERSION`.
+* **Embedded HIP kernels** in hip-kernel-provider use the clang-tidy from the ROCm toolchain, pinned by `EXPECTED_ROCM_CLANG_TIDY_VERSION`. Only `${ROCM_PATH}/llvm/bin` and `/opt/rocm/llvm/bin` are searched, so the system clang-tidy can never be picked up by mistake. Used to tidy HIP kernels that are compiled at runtime by hipRTC, not finding it is not an error, instead the kernel tidy target is not created.
+
+Both binaries share `projects/hipdnn/.clang-tidy`.
 
 #### Version Suffix
 

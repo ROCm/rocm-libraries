@@ -211,9 +211,9 @@ TEST(TestLayernormBwdPlan, CompileCallsCompilerWithCorrectKernelName)
         .Times(1);
 
     auto mockProgram = std::make_unique<MockCompiledProgram>();
-    EXPECT_CALL(*mockProgram, getKernel("LayernormBwd"))
+    EXPECT_CALL(*mockProgram, getKernel("layernormBwd"))
         .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernel))));
-    EXPECT_CALL(*mockProgram, getKernel("LayernormBwdScaleBias"))
+    EXPECT_CALL(*mockProgram, getKernel("layernormBwdScaleBias"))
         .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernelScaleBias))));
 
     EXPECT_CALL(mockCompiler, compile("LayernormBwd.cpp", ::testing::_))
@@ -240,9 +240,9 @@ TEST(TestLayernormBwdPlan, CompileIncludesOffloadArchOption)
         .Times(1);
 
     auto mockProgram = std::make_unique<MockCompiledProgram>();
-    EXPECT_CALL(*mockProgram, getKernel("LayernormBwd"))
+    EXPECT_CALL(*mockProgram, getKernel("layernormBwd"))
         .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernel))));
-    EXPECT_CALL(*mockProgram, getKernel("LayernormBwdScaleBias"))
+    EXPECT_CALL(*mockProgram, getKernel("layernormBwdScaleBias"))
         .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernelScaleBias))));
 
     EXPECT_CALL(mockCompiler,
@@ -272,9 +272,9 @@ TEST(TestLayernormBwdPlanFp32, CompileSetsCorrectDefines)
             EXPECT_CALL(*kernelScaleBias, setGridSize(::testing::_, ::testing::_, ::testing::_))
                 .Times(1);
             auto program = std::make_unique<MockCompiledProgram>();
-            EXPECT_CALL(*program, getKernel("LayernormBwd"))
+            EXPECT_CALL(*program, getKernel("layernormBwd"))
                 .WillOnce(::testing::Return(::testing::ByMove(std::move(kernel))));
-            EXPECT_CALL(*program, getKernel("LayernormBwdScaleBias"))
+            EXPECT_CALL(*program, getKernel("layernormBwdScaleBias"))
                 .WillOnce(::testing::Return(::testing::ByMove(std::move(kernelScaleBias))));
             return program;
         });
@@ -326,11 +326,11 @@ TEST(TestLayernormBwdPlanFp32, CompileSetsCorrectDefinesParallel)
                         setGridSize(::testing::_, ::testing::_, ::testing::_))
                 .Times(1);
             auto program = std::make_unique<MockCompiledProgram>();
-            EXPECT_CALL(*program, getKernel("LayernormBwd"))
+            EXPECT_CALL(*program, getKernel("layernormBwd"))
                 .WillOnce(::testing::Return(::testing::ByMove(std::move(kernel))));
-            EXPECT_CALL(*program, getKernel("LayernormBwdScaleBiasParallel"))
+            EXPECT_CALL(*program, getKernel("layernormBwdScaleBiasParallel"))
                 .WillOnce(::testing::Return(::testing::ByMove(std::move(kernelScaleBiasParallel))));
-            EXPECT_CALL(*program, getKernel("LayernormBwdScaleBiasReduceSum"))
+            EXPECT_CALL(*program, getKernel("layernormBwdScaleBiasReduceSum"))
                 .WillOnce(
                     ::testing::Return(::testing::ByMove(std::move(kernelScaleBiasReduceSum))));
             return program;
@@ -374,9 +374,9 @@ TEST(TestLayernormBwdPlanFp16, CompileSetsCorrectDefines)
             EXPECT_CALL(*kernelScaleBias, setGridSize(::testing::_, ::testing::_, ::testing::_))
                 .Times(1);
             auto program = std::make_unique<MockCompiledProgram>();
-            EXPECT_CALL(*program, getKernel("LayernormBwd"))
+            EXPECT_CALL(*program, getKernel("layernormBwd"))
                 .WillOnce(::testing::Return(::testing::ByMove(std::move(kernel))));
-            EXPECT_CALL(*program, getKernel("LayernormBwdScaleBias"))
+            EXPECT_CALL(*program, getKernel("layernormBwdScaleBias"))
                 .WillOnce(::testing::Return(::testing::ByMove(std::move(kernelScaleBias))));
             return program;
         });
@@ -431,11 +431,11 @@ TEST(TestLayernormBwdPlanFp16, CompileSetsCorrectDefinesParallel)
                         setGridSize(::testing::_, ::testing::_, ::testing::_))
                 .Times(1);
             auto program = std::make_unique<MockCompiledProgram>();
-            EXPECT_CALL(*program, getKernel("LayernormBwd"))
+            EXPECT_CALL(*program, getKernel("layernormBwd"))
                 .WillOnce(::testing::Return(::testing::ByMove(std::move(kernel))));
-            EXPECT_CALL(*program, getKernel("LayernormBwdScaleBiasParallel"))
+            EXPECT_CALL(*program, getKernel("layernormBwdScaleBiasParallel"))
                 .WillOnce(::testing::Return(::testing::ByMove(std::move(kernelScaleBiasParallel))));
-            EXPECT_CALL(*program, getKernel("LayernormBwdScaleBiasReduceSum"))
+            EXPECT_CALL(*program, getKernel("layernormBwdScaleBiasReduceSum"))
                 .WillOnce(
                     ::testing::Return(::testing::ByMove(std::move(kernelScaleBiasReduceSum))));
             return program;
@@ -481,9 +481,9 @@ TEST(TestLayernormBwdPlanBfp16, CompileSetsCorrectDefines)
             EXPECT_CALL(*kernelScaleBias, setGridSize(::testing::_, ::testing::_, ::testing::_))
                 .Times(1);
             auto program = std::make_unique<MockCompiledProgram>();
-            EXPECT_CALL(*program, getKernel("LayernormBwd"))
+            EXPECT_CALL(*program, getKernel("layernormBwd"))
                 .WillOnce(::testing::Return(::testing::ByMove(std::move(kernel))));
-            EXPECT_CALL(*program, getKernel("LayernormBwdScaleBias"))
+            EXPECT_CALL(*program, getKernel("layernormBwdScaleBias"))
                 .WillOnce(::testing::Return(::testing::ByMove(std::move(kernelScaleBias))));
             return program;
         });
@@ -538,11 +538,11 @@ TEST(TestLayernormBwdPlanBfp16, CompileSetsCorrectDefinesParallel)
                         setGridSize(::testing::_, ::testing::_, ::testing::_))
                 .Times(1);
             auto program = std::make_unique<MockCompiledProgram>();
-            EXPECT_CALL(*program, getKernel("LayernormBwd"))
+            EXPECT_CALL(*program, getKernel("layernormBwd"))
                 .WillOnce(::testing::Return(::testing::ByMove(std::move(kernel))));
-            EXPECT_CALL(*program, getKernel("LayernormBwdScaleBiasParallel"))
+            EXPECT_CALL(*program, getKernel("layernormBwdScaleBiasParallel"))
                 .WillOnce(::testing::Return(::testing::ByMove(std::move(kernelScaleBiasParallel))));
-            EXPECT_CALL(*program, getKernel("LayernormBwdScaleBiasReduceSum"))
+            EXPECT_CALL(*program, getKernel("layernormBwdScaleBiasReduceSum"))
                 .WillOnce(
                     ::testing::Return(::testing::ByMove(std::move(kernelScaleBiasReduceSum))));
             return program;

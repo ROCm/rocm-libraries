@@ -299,7 +299,7 @@ TEST(TestRMSnormFwdPlan, CompileCallsCompilerWithCorrectKernelNameForSingleNodeG
     EXPECT_CALL(*mockKernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
 
     auto mockProgram = std::make_unique<MockCompiledProgram>();
-    EXPECT_CALL(*mockProgram, getKernel("RMSnormFwd"))
+    EXPECT_CALL(*mockProgram, getKernel("rmsNormFwd"))
         .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernel))));
 
     EXPECT_CALL(mockCompiler, compile("RMSNormFwd.cpp", ::testing::_))
@@ -320,7 +320,7 @@ TEST(TestRMSnormFwdPlan, CompileCallsCompilerWithCorrectKernelNameForDoubleNodeG
     EXPECT_CALL(*mockKernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
 
     auto mockProgram = std::make_unique<MockCompiledProgram>();
-    EXPECT_CALL(*mockProgram, getKernel("RMSnormFwd"))
+    EXPECT_CALL(*mockProgram, getKernel("rmsNormFwd"))
         .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernel))));
 
     EXPECT_CALL(mockCompiler, compile("RMSNormFwd.cpp", ::testing::_))

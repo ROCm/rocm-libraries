@@ -241,7 +241,7 @@ TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileCallsCompilerWithCorrectK
     EXPECT_CALL(*mockKernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
 
     auto mockProgram = std::make_unique<MockCompiledProgram>();
-    EXPECT_CALL(*mockProgram, getKernel("BatchNormFwdInferSpatialEst"))
+    EXPECT_CALL(*mockProgram, getKernel("batchNormFwdInferSpatialEst"))
         .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernel))));
 
     EXPECT_CALL(mockCompiler, compile("BatchNormFwdInferSpatial.cpp", ::testing::_))
