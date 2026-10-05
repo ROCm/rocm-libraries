@@ -1,0 +1,131 @@
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+! Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+!
+! SPDX-License-Identifier: MIT
+!
+! Permission is hereby granted, free of charge, to any person obtaining a copy
+! of this software and associated documentation files (the "Software"), to deal
+! in the Software without restriction, including without limitation the rights
+! to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+! copies of the Software, and to permit persons to whom the Software is
+! furnished to do so, subject to the following conditions:
+!
+! The above copyright notice and this permission notice shall be included in
+! all copies or substantial portions of the Software.
+!
+! THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+! IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+! FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+! AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+! LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+! OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+! THE SOFTWARE.
+!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+!!!!!!!!!!!!!/
+! hipsolverSsyevj example (single-precision Jacobi symmetric eigensolver,
+! Fortran 2003 interfaces)
+! see: https://rocm.docs.amd.com/projects/hipSOLVER/en/latest/
+!
+! Self-verifying: with jobz=vector, A is overwritten with the eigenvectors (as
+! columns) and W holds the eigenvalues. We confirm A0*v_k = lambda_k*v_k.
+!
+! f2003 style: device buffers are type(c_ptr) allocated by byte count; host
+! data is moved with hipMemcpy + c_loc. syevj takes a syevjInfo params handle,
+! an explicit workspace sized by _bufferSize, and a device devInfo, which the
+! binding types as a type(c_ptr) passed by value.
+!!!!!!!!!!!!!!/
+!
+program ssyevj
+  use iso_c_binding
+  use hip
+  use hipsolver
+
+  implicit none
+  integer(c_int), target :: hInfo
+  integer :: i, k ! indices for iterating over results
+
+  integer(c_int), parameter :: N = 3
+  integer(c_int), parameter :: lda = 3
+
+  ! Symmetric input (column-major); eigenvalues are 2-sqrt(2), 2, 2+sqrt(2)
+  real(c_float), target :: hA(3,3) = reshape((/2, -1, 0, -1, 2, -1, 0, -1, 2/), (/3, 3/))
+  real(c_float) :: hA0(3,3)   ! original kept for verification
+  real(c_float), target :: hW(3)      ! eigenvalues
+  real(c_float) :: lhs(3), rhs(3)
+
+  integer(c_size_t) :: size_A = size(hA)
+  integer(c_size_t) :: size_W = size(hW)
+
+  type(c_ptr) :: handle = c_null_ptr
+  type(c_ptr) :: params = c_null_ptr
+  type(c_ptr) :: dA, dW, dInfo, dWork
+  integer(c_int) :: lwork
+
+  real(c_float) :: error
+  real(c_float), parameter :: error_max = 1.0e-4
+  !
+  write(*,"(a)",advance="no") "-- Running test 'hipsolverSsyevj' (Fortran 2003 interfaces) - "
+
+  hA0 = hA ! keep original for the A*v = lambda*v check
+
+  call hipsolverCheck(hipsolverCreate(handle))
+  call hipsolverCheck(hipsolverCreateSyevjInfo(params))
+
+  ! Allocate device-side memory
+  call hipCheck(hipMalloc(dA, size_A * 4))
+  call hipCheck(hipMalloc(dW, size_W * 4))
+  call hipCheck(hipMalloc(dInfo, 4_c_size_t))
+
+  ! Copy memory from host to device
+  call hipCheck(hipMemcpy(dA, c_loc(hA(1,1)), size_A * 4, hipMemcpyHostToDevice))
+
+  ! Query workspace size and allocate it
+  call hipsolverCheck(hipsolverSsyevj_bufferSize(handle, HIPSOLVER_EIG_MODE_VECTOR, &
+       HIPSOLVER_FILL_MODE_UPPER, N, dA, lda, dW, lwork, params))
+  call hipCheck(hipMalloc(dWork, int(lwork,c_size_t) * 4))
+
+  ! Compute eigenvalues and eigenvectors (A overwritten with eigenvectors)
+  hInfo = -1
+  call hipCheck(hipMemcpy(dInfo, c_loc(hInfo), 4_c_size_t, hipMemcpyHostToDevice))
+  call hipsolverCheck(hipsolverSsyevj(handle, HIPSOLVER_EIG_MODE_VECTOR, &
+       HIPSOLVER_FILL_MODE_UPPER, N, dA, lda, dW, dWork, lwork, dInfo, params))
+  call hipCheck(hipMemcpy(c_loc(hInfo), dInfo, 4_c_size_t, hipMemcpyDeviceToHost))
+  if (hInfo /= 0) then
+    write(*,*) "FAILED! info = ", hInfo, " (expected 0)"; call exit(1)
+  end if
+
+  ! Copy results back to host
+  call hipCheck(hipMemcpy(c_loc(hA(1,1)), dA, size_A * 4, hipMemcpyDeviceToHost))
+  call hipCheck(hipMemcpy(c_loc(hW(1)), dW, size_W * 4, hipMemcpyDeviceToHost))
+
+  ! Verify A0 * v_k = lambda_k * v_k for each eigenpair
+  do k = 1,N
+    lhs = matmul(hA0, hA(:,k))
+    rhs = hW(k) * hA(:,k)
+    error = abs(sqrt(sum(abs(hA(:,k))**2)) - 1)
+    if(.not. (error .le. error_max)) then
+        write(*,*) "FAILED! eigenvector ", k, " norm error = ", error; call exit(1)
+    end if
+    do i = 1,N
+        error = abs(lhs(i) - rhs(i))
+        if(.not. (error .le. error_max)) then
+            write(*,*) "FAILED! Error bigger than max! Error = ", error, " eigenpair ", k
+            call exit(1)
+        end if
+    end do
+  end do
+
+  ! Clean up
+  call hipCheck(hipFree(dWork))
+  call hipCheck(hipFree(dA))
+  call hipCheck(hipFree(dW))
+  call hipCheck(hipFree(dInfo))
+  call hipsolverCheck(hipsolverDestroySyevjInfo(params))
+  call hipsolverCheck(hipsolverDestroy(handle))
+  call hipCheck(hipDeviceReset())
+
+  write(*,*) "PASSED!"
+
+end program ssyevj
