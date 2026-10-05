@@ -309,8 +309,10 @@ struct Modifier {
         LABEL_NAME,
         MFMA_DATA,
         COMMENT,
+        WAIT_PROVENANCE,
         MATRIX_FMT,
         MEM_TOKEN,
+        LDS_RING,
         WMMA_POOL_INDEX,
         CALL_TARGETS,
         EXEC_GROUP,
@@ -1079,6 +1081,18 @@ struct CommentData : public TypedModifier<CommentData> {
     std::string comment;
 };
 
+/// Serialized diagnostic explaining which dynamic operations a generated wait
+/// retires. Kept separate from MemTokenData because it is path/frame aware and
+/// is not dependency metadata for later optimization passes.
+struct WaitProvenanceData : public TypedModifier<WaitProvenanceData> {
+    static constexpr Modifier::Type Type = Modifier::Type::WAIT_PROVENANCE;
+
+    explicit WaitProvenanceData(std::string text = {})
+        : TypedModifier<WaitProvenanceData>(), text(std::move(text)) {}
+
+    std::string text;
+};
+
 struct MemTokenData : public TypedModifier<MemTokenData> {
     static constexpr Modifier::Type Type = Modifier::Type::MEM_TOKEN;
 
@@ -1086,6 +1100,49 @@ struct MemTokenData : public TypedModifier<MemTokenData> {
 
     MemTokenData(const std::vector<int>& tokens = {})
         : TypedModifier<MemTokenData>(), tokens(tokens) {}
+};
+
+enum class LdsRingAccessKind : int {
+    Read = 0,
+    Write = 1,
+    Publish = 2,
+    Protect = 3,
+};
+
+/// One class-specific access into a rotating LDS ring.
+///
+/// The physical buffer is `(frame + gdelta) mod ring`. `bufferClass` keeps
+/// independent rings (A, B, metadata, ...) disjoint.
+struct LdsRingAccess {
+    int bufferClass = 0;
+    int frame = 0;
+    int ring = 0;
+    int gdelta = 0;
+    LdsRingAccessKind kind = LdsRingAccessKind::Read;
+
+    bool operator==(const LdsRingAccess&) const = default;
+};
+
+/// Frame movement performed by one CFG edge.
+struct LdsFrameAdvance {
+    int frame = 0;
+    int amount = 0;
+
+    bool operator==(const LdsFrameAdvance&) const = default;
+};
+
+/// Opt-in rotating-ring metadata. Absent on legacy/non-triple-buffer kernels.
+struct LdsRingData : public TypedModifier<LdsRingData> {
+    static constexpr Modifier::Type Type = Modifier::Type::LDS_RING;
+
+    std::vector<LdsRingAccess> accesses;
+    std::vector<LdsFrameAdvance> advances;
+
+    LdsRingData(std::vector<LdsRingAccess> accesses = {},
+                std::vector<LdsFrameAdvance> advances = {})
+        : TypedModifier<LdsRingData>(),
+          accesses(std::move(accesses)),
+          advances(std::move(advances)) {}
 };
 
 /// Buffer pool index for WMMA instructions in double/triple/N-buffered GEMM kernels.

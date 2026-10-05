@@ -32,6 +32,7 @@
 
 #include <cstdint>
 #include <sstream>
+#include <stdexcept>
 
 #include "HardwareCaps.hpp"
 #include "stinkytofu/bindings/python/LogicalModule.hpp"
@@ -652,6 +653,28 @@ NB_MODULE(_stinkytofu, m) {
             },
             nb::arg("tokens"),
             "Set memory token IDs for LDS dependency tracking (forwarded to MemTokenData)")
+        .def(
+            "set_lds_ring",
+            [](LogicalInstruction& inst, const std::vector<int>& flatAccesses,
+               const std::vector<int>& flatAdvances) {
+                if (flatAccesses.size() % 5 != 0 || flatAdvances.size() % 2 != 0)
+                    throw std::invalid_argument(
+                        "LDS ring rows must contain 5 access or 2 advance integers");
+
+                std::vector<LdsRingAccess> accesses;
+                std::vector<LdsFrameAdvance> advances;
+                for (size_t i = 0; i < flatAccesses.size(); i += 5) {
+                    accesses.push_back({flatAccesses[i], flatAccesses[i + 1], flatAccesses[i + 2],
+                                        flatAccesses[i + 3],
+                                        static_cast<LdsRingAccessKind>(flatAccesses[i + 4])});
+                }
+                for (size_t i = 0; i < flatAdvances.size(); i += 2) {
+                    advances.push_back({flatAdvances[i], flatAdvances[i + 1]});
+                }
+                inst.ldsRing = LdsRingData{std::move(accesses), std::move(advances)};
+            },
+            nb::arg("accesses"), nb::arg("advances"),
+            "Set rotating LDS ring metadata (flattened access and frame-advance rows)")
         .def(
             "set_swaitcnt",
             [](LogicalInstruction& inst, int vlcnt, int vscnt, int dlcnt, int dscnt, int kmcnt) {

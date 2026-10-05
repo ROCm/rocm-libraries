@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #pragma once
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <memory>
@@ -203,14 +204,14 @@ namespace rocisa
     // are not printed.
     struct GLOBALModifiers : public Container
     {
-        GLOBALModifiers(int        offset  = 0,
-                        bool       glc     = false,
-                        bool       slc     = false,
-                        bool       dlc     = false,
-                        CacheScope scope   = CacheScope::SCOPE_NONE,
-                        bool       lds     = false,
-                        bool       isStore = false,
-                        TemporalHint th     = TemporalHint::TH_NONE)
+        GLOBALModifiers(int          offset  = 0,
+                        bool         glc     = false,
+                        bool         slc     = false,
+                        bool         dlc     = false,
+                        CacheScope   scope   = CacheScope::SCOPE_NONE,
+                        bool         lds     = false,
+                        bool         isStore = false,
+                        TemporalHint th      = TemporalHint::TH_NONE)
             : Container()
             , offset(offset)
             , glc(glc)
@@ -278,13 +279,13 @@ namespace rocisa
             return kStr;
         }
 
-        int        offset;
-        bool       glc;
-        bool       slc;
-        bool       dlc;
-        CacheScope scope;
-        bool       lds;
-        bool       isStore;
+        int          offset;
+        bool         glc;
+        bool         slc;
+        bool         dlc;
+        CacheScope   scope;
+        bool         lds;
+        bool         isStore;
         TemporalHint th;
     };
 
@@ -536,11 +537,11 @@ namespace rocisa
         std::vector<int> quad_perm;
         int              row_xmask;
 
-        DPPModifiers(int                      row_shr    = -1,
-                     int                      row_bcast  = -1,
-                     int                      bound_ctrl = -1,
-                     const std::vector<int>&  quad_perm  = {},
-                     int                      row_xmask  = -1)
+        DPPModifiers(int                     row_shr    = -1,
+                     int                     row_bcast  = -1,
+                     int                     bound_ctrl = -1,
+                     const std::vector<int>& quad_perm  = {},
+                     int                     row_xmask  = -1)
             : row_shr(row_shr)
             , row_bcast(row_bcast)
             , bound_ctrl(bound_ctrl)
@@ -791,7 +792,7 @@ namespace rocisa
     {
         std::string      name;
         std::vector<int> offsets;
-        mutable int nameIdx;
+        mutable int      nameIdx;
 
         RegName(const std::string& name = "", const std::vector<int>& offsets = {})
             : name(name)
@@ -893,7 +894,7 @@ namespace rocisa
         std::optional<RegName> regName;
         int                    regIdx;
         int                    regNum;
-        mutable  int           msb;
+        mutable int            msb;
         bool                   isInlineAsm;
         bool                   isMinus;
         bool                   isAbs;
@@ -1173,8 +1174,8 @@ namespace rocisa
 
             std::string minusStr = isMinus ? "-" : "";
             minusStr             = isAbs ? "abs(" + minusStr : minusStr;
-            auto absStr          = isAbs ? ")" : "";
-            std::string halfStr = "";
+            auto        absStr   = isAbs ? ")" : "";
+            std::string halfStr  = "";
             if(halfSelect.has_value() && *halfSelect != HighBitSel::NONE)
             {
                 halfStr = (*halfSelect == HighBitSel::HIGH) ? ".h" : ".l";
@@ -1201,8 +1202,9 @@ namespace rocisa
                 else
                 {
                     return minusStr + regType + "[" + macroSlash + regType + "gpr"
-                           + regName->toString() + msbStr + ":" + macroSlash + regType + "gpr" + regName->toString() + msbStr + "+"
-                           + std::to_string(regNum - 1) + "]" + absStr;
+                           + regName->toString() + msbStr + ":" + macroSlash + regType + "gpr"
+                           + regName->toString() + msbStr + "+" + std::to_string(regNum - 1) + "]"
+                           + absStr;
                 }
             }
             else
@@ -1210,7 +1212,8 @@ namespace rocisa
                 if(regNum == 1)
                 {
                     if(msb > 0)
-                        return minusStr + regType + "["  + std::to_string(regIdx) + msbStr + "]" + halfStr + absStr;
+                        return minusStr + regType + "[" + std::to_string(regIdx) + msbStr + "]"
+                               + halfStr + absStr;
                     return minusStr + regType + std::to_string(regIdx) + halfStr + absStr;
                 }
                 else
@@ -1261,9 +1264,9 @@ namespace rocisa
 
     struct HolderContainer : public RegisterContainer
     {
-        std::string holderName;
-        int         holderIdx;
-        int         holderType;
+        std::string      holderName;
+        int              holderIdx;
+        int              holderType;
         std::vector<int> holderOffsets;
 
         HolderContainer(const std::string& regType, const std::string& holderName, float regNum)
@@ -1316,9 +1319,9 @@ namespace rocisa
             if(this != &other)
             {
                 RegisterContainer::operator=(other);
-                holderName = other.holderName;
-                holderIdx  = other.holderIdx;
-                holderType = other.holderType;
+                holderName    = other.holderName;
+                holderIdx     = other.holderIdx;
+                holderType    = other.holderType;
                 holderOffsets = other.holderOffsets;
             }
             return *this;
@@ -1329,9 +1332,9 @@ namespace rocisa
             if(this != &other)
             {
                 RegisterContainer::operator=(std::move(other));
-                holderName = std::move(other.holderName);
-                holderIdx  = other.holderIdx;
-                holderType = other.holderType;
+                holderName    = std::move(other.holderName);
+                holderIdx     = other.holderIdx;
+                holderType    = other.holderType;
                 holderOffsets = std::move(other.holderOffsets);
             }
             return *this;
@@ -1352,7 +1355,8 @@ namespace rocisa
             {
                 regName = std::move(RegName(holderName));
                 regName->offsets.insert(regName->offsets.begin(), num);
-                for(int offset : holderOffsets) {
+                for(int offset : holderOffsets)
+                {
                     regName->offsets.push_back(offset);
                 }
             }
@@ -1360,9 +1364,10 @@ namespace rocisa
 
         RegisterContainer getCopiedRC() const
         {
-            RegisterContainer rc = (holderType == 0)
-                                       ? RegisterContainer{regType, std::nullopt, regIdx, (float)regNum}
-                                       : RegisterContainer{regType, regName, regIdx, (float)regNum};
+            RegisterContainer rc
+                = (holderType == 0)
+                      ? RegisterContainer{regType, std::nullopt, regIdx, (float)regNum}
+                      : RegisterContainer{regType, regName, regIdx, (float)regNum};
             // Preserve the true16 half-select when a Holder lowers to its register,
             // else the .l/.h suffix is lost and the operand is invalid on NoSDWA.
             rc.halfSelect = halfSelect;
@@ -1504,6 +1509,34 @@ namespace rocisa
                 result += " " + std::to_string(tokens[i]);
             }
             return result;
+        }
+    };
+
+    struct LdsRingData : public Container
+    {
+        // Flattened rows:
+        //   accesses: [class, frame, ring, gdelta, kind]
+        //   advances: [frame, amount]
+        std::vector<std::array<int, 5>> accesses;
+        std::vector<std::array<int, 2>> advances;
+
+        LdsRingData(const std::vector<std::array<int, 5>>& accesses = {},
+                    const std::vector<std::array<int, 2>>& advances = {})
+            : Container()
+            , accesses(accesses)
+            , advances(advances)
+        {
+        }
+
+        std::shared_ptr<Container> clone() const override
+        {
+            return std::make_shared<LdsRingData>(*this);
+        }
+
+        std::string toString() const override
+        {
+            return "lds_ring: accesses=" + std::to_string(accesses.size())
+                   + " advances=" + std::to_string(advances.size());
         }
     };
 

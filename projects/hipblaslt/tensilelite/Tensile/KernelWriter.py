@@ -11438,6 +11438,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           # barrier hoisted into the prologue (emitted right before the loop
           # label) instead of one that re-fires every iteration.
           prologueBarrierTokens = []
+          prologueBarrierTokensByKind = {}
           tailStates = {token: info[1] for token, info in loopHeadInfo[labelName].items()}
           for token, (firstAccess, _) in loopHeadInfo[labelName].items():
             # Next iteration this token names the buffer that
@@ -11452,6 +11453,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             loopPendingTokens.add(token)
             if _conflicts(firstAccess, preState) and not _conflicts(firstAccess, carriedState):
               prologueBarrierTokens.append(token)
+              ringKind = 2 if firstAccess == "read" else 3
+              prologueBarrierTokensByKind.setdefault(ringKind, []).append(token)
           if prologueBarrierTokens:
             # Prologue barrier must stay at the loop label; do not hoist across guards.
             if openGuards:
@@ -11459,8 +11462,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                   (sorted(set(prologueBarrierTokens)),
                    "the loop prologue barrier for %s has to stay on the loop label, "
                    "which is inside a wave-divergent region" % labelName))
-            plannedBarriers.append((owner, pos, sorted(set(prologueBarrierTokens)),
-                                    "auto token transition barrier (loop prologue)"))
+            for ringKind, tokens in prologueBarrierTokensByKind.items():
+              plannedBarriers.append(
+                (owner, pos, sorted(set(tokens)),
+                 "auto token transition barrier (loop prologue)", ringKind))
         continue
 
       if not isinstance(item, Instruction):
@@ -11472,6 +11477,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         branchTokenStateSnapshot[branchLabelName] = deepcopy(tokenState)
       if branchLabelName in loopHeadInfo:
         # Reached the loop back-branch: drop any stale loop-entry overrides.
+        if kernel.get("TDMPlusLdsBuf", 0) == 1:
+          item.setLdsRing(self._ldsRingData(
+            kernel, advances=[[0, self.states.unrollLoopCopies]]))
         loopEntryOverride.clear()
         loopPendingTokens.clear()
       if idx in guardEndByIndex:
@@ -11498,8 +11506,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
       if barrierTokens:
         uniqueTokens = sorted(set(barrierTokens))
+        ringKind = 2 if access == "read" else 3  # Publish / Protect
         if not openGuards:
-          plannedBarriers.append((owner, pos, uniqueTokens, "auto token transition barrier"))
+          plannedBarriers.append(
+            (owner, pos, uniqueTokens, "auto token transition barrier", ringKind))
         else:
           outer = openGuards[0]
           blockers = sorted(outer[4].intersection(uniqueTokens))
@@ -11511,7 +11521,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             reason = None
           if reason is None:
             plannedBarriers.append((outer[2], outer[3], uniqueTokens,
-                                    "auto token transition barrier (ahead of a wave-divergent branch)"))
+                                    "auto token transition barrier (ahead of a wave-divergent branch)",
+                                    ringKind))
           else:
             unsafeBarriers.append(
                 (uniqueTokens,
@@ -11535,16 +11546,18 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # Two transitions relocated to the same point want one barrier, not two
     # adjacent ones. plannedBarriers is in program order, so they are adjacent.
     mergedBarriers = []
-    for owner, pos, tokens, prefix in plannedBarriers:
+    for owner, pos, tokens, prefix, ringKind in plannedBarriers:
       if mergedBarriers and mergedBarriers[-1][0] is owner and mergedBarriers[-1][1] == pos:
         mergedBarriers[-1][2] = sorted(set(mergedBarriers[-1][2]) | set(tokens))
+        mergedBarriers[-1][4].add(ringKind)
         continue
-      mergedBarriers.append([owner, pos, tokens, prefix])
+      mergedBarriers.append([owner, pos, tokens, prefix, {ringKind}])
 
     # Insert from highest index downward; reverse equal-index entries to preserve order.
     barriersByOwner = {}
-    for order, (owner, pos, tokens, prefix) in enumerate(mergedBarriers):
-      barriersByOwner.setdefault(id(owner), (owner, []))[1].append((pos, order, tokens, prefix))
+    for order, (owner, pos, tokens, prefix, ringKinds) in enumerate(mergedBarriers):
+      barriersByOwner.setdefault(id(owner), (owner, []))[1].append(
+        (pos, order, tokens, prefix, ringKinds))
     # Reject barriers targeting an aliased module: one index names multiple positions.
     ambiguousOwners = sorted({owner.name for ownerId, (owner, _entries)
                               in barriersByOwner.items() if ownerId in aliasedModules})
@@ -11557,10 +11570,20 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     for owner, entries in barriersByOwner.values():
       items = list(owner.items())
-      for pos, _order, tokens, prefix in sorted(entries, key=lambda e: (e[0], e[1]), reverse=True):
+      for pos, _order, tokens, prefix, ringKinds in sorted(
+          entries, key=lambda e: (e[0], e[1]), reverse=True):
         syncComments = ", ".join([f"sync LDS{token}" for token in tokens])
         barrier = SBarrier(comment=f"{prefix}, {syncComments}")
-        barrier.setMemToken(MemTokenData(tokens))
+        barrierToken = MemTokenData(tokens)
+        barrier.setMemToken(barrierToken)
+        ringAccesses = [
+          row
+          for kind in sorted(ringKinds)
+          for row in self._ldsRingAccessRows(kernel, ["A", "B"], tokens, kind)
+        ]
+        if ringAccesses:
+          from rocisa.container import LdsRingData
+          barrier.setLdsRing(LdsRingData(ringAccesses))
         items.insert(pos, barrier)
         insertedCount += 1
       owner.setItems(items)
@@ -12008,6 +12031,35 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       return (idx + 1) % self.states.numLDSBlk
     return self.states.memTokenLdsBuffer1 if idx == self.states.memTokenLdsBuffer0 \
       else self.states.memTokenLdsBuffer0
+
+  @staticmethod
+  def _ldsRingClass(tensorChar: str) -> int:
+    classes = {"A": 0, "B": 1, "Metadata": 2, "MXSA": 3, "MXSB": 4}
+    return classes[tensorChar]
+
+  def _ldsRingBufferForToken(self, token: int) -> int:
+    for bufferIdx, row in enumerate(self.states.memTokenLdsSplit):
+      if token in row:
+        return bufferIdx
+    raise RuntimeError("rotating LDS token %s is not in memTokenLdsSplit" % token)
+
+  def _ldsRingAccessRows(self, kernel, tensorChars, tokens, kind: int):
+    """Build [class, frame, ring, gdelta, kind] rows for triple-buffer metadata."""
+    if kernel.get("TDMPlusLdsBuf", 0) != 1:
+      return []
+    buffers = sorted({self._ldsRingBufferForToken(token) for token in tokens})
+    return [
+      [self._ldsRingClass(tc), 0, self.states.numLDSBlk, bufferIdx, kind]
+      for tc in tensorChars
+      for bufferIdx in buffers
+    ]
+
+  def _ldsRingData(self, kernel, tensorChars=(), tokens=(), kind=0, advances=()):
+    from rocisa.container import LdsRingData
+    accesses = self._ldsRingAccessRows(kernel, tensorChars, tokens, kind)
+    if not accesses and not advances:
+      return None
+    return LdsRingData(accesses, list(advances))
 
   def _ldsTokenBackEdgeMap(self) -> dict:
     """Map each LDS token to the token naming the same LDS region one iteration later.

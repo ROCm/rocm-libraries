@@ -1,0 +1,41 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=4 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# Production triple-buffer order:
+#
+#   protect slot 2 -> write slot 2 -> publish slot 1
+#
+# The protecting barrier has no tensor dependency. At the publishing barrier,
+# the queue is [required slot 1, newer slot 2], so tlcnt=1 retires the required
+# fill while preserving the new one. This must hold on both entry and backedge
+# paths; static memtoken PHIs must not force an early tlcnt=0 at Protect.
+#
+# CHECK-LABEL: @waitcnt_insertion_lds_ring_protect_write_publish
+# CHECK: ^loop:
+# CHECK-NOT: s_wait_tensorcnt
+# CHECK-NEXT: s_barrier_signal
+# CHECK-SAME: accesses = [0,0,3,2,3]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NEXT: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 1
+# CHECK-SAME: mod.wait_provenance = { text = "drains token LDS0 from ^entry (frame k, ring slot 0); token LDS1 from ^entry (frame k, ring slot 1); token LDS2 from ^loop (frame k-1, ring slot 1)" }
+# CHECK-NEXT: s_barrier_signal
+# CHECK-SAME: accesses = [0,0,3,1,2]
+
+st.func @waitcnt_insertion_lds_ring_protect_write_publish() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[8:15]) { mod.memtoken = { tokens = [0] }, mod.lds_ring = { accesses = [0,0,3,0,1], advances = [] } }
+  "st.tensor_load_to_lds"(s[0:3], s[16:23]) { mod.memtoken = { tokens = [1] }, mod.lds_ring = { accesses = [0,0,3,1,1], advances = [] } }
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  "st.s_barrier_signal"(-1) { mod.memtoken = { tokens = [2] }, mod.lds_ring = { accesses = [0,0,3,2,3], advances = [] } }
+  "st.s_barrier_wait"(-1) { mod.memtoken = { tokens = [2] } }
+  "st.tensor_load_to_lds"(s[0:3], s[24:31]) { mod.memtoken = { tokens = [2] }, mod.lds_ring = { accesses = [0,0,3,2,1], advances = [] } }
+  "st.s_barrier_signal"(-1) { mod.memtoken = { tokens = [1] }, mod.lds_ring = { accesses = [0,0,3,1,2], advances = [] } }
+  "st.s_barrier_wait"(-1) { mod.memtoken = { tokens = [1] } }
+  SCC0 = "st.s_cmp_eq_u32"(s60, 0x1)
+  "st.s_cbranch_scc1"("loop", SCC0) { mod.lds_ring = { accesses = [], advances = [0,1] } }
+  Successors: ^loop, ^exit
+^exit:
+}

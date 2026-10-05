@@ -44,6 +44,7 @@ from rocisa_stinkytofu_adaptor.container import (  # noqa: E402
     FLATModifiers,
     GLOBALModifiers,
     HWRegContainer,
+    LdsRingData,
     MemTokenData,
     MUBUFModifiers,
     SDWAModifiers,
@@ -1933,6 +1934,12 @@ class TestMemTokenData(unittest.TestCase):
         # KernelWriterAssembly passes a one-element list from memTokenLdsBufferMeta.
         m = MemTokenData([42])
         self.assertEqual(str(m), "mem_token: 42")
+
+    def test_ring_metadata_survives_copy_and_pickle(self):
+        m = LdsRingData([[0, 0, 3, 2, 1]], [[0, 2]])
+        for copied in (copy.copy(m), copy.deepcopy(m), pickle.loads(pickle.dumps(m))):
+            self.assertEqual(copied.accesses, [[0, 0, 3, 2, 1]])
+            self.assertEqual(copied.advances, [[0, 2]])
 
 
 if __name__ == "__main__":

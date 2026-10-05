@@ -1,0 +1,29 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=4 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# Ring 3, frame K advances once per backedge. The previous trip's phase-0 read
+# becomes phase 2. The protecting barrier therefore drains that older read with
+# dlcnt=1 while preserving this trip's phase-0 read.
+#
+# CHECK-LABEL: @waitcnt_insertion_lds_ring_war
+# CHECK: ^loop:
+# CHECK-NEXT: ds_load_b64
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-SAME: dlcnt = 1
+# CHECK-NEXT: s_barrier_signal
+# CHECK-SAME: accesses = [0,0,3,2,3]
+# CHECK: s_cbranch_scc1
+# CHECK-SAME: advances = [0,1]
+
+st.func @waitcnt_insertion_lds_ring_war() {
+^entry:
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  v[20:21] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] }, mod.lds_ring = { accesses = [0,0,3,0,0], advances = [] } }
+  "st.s_barrier_signal"(-1) { mod.memtoken = { tokens = [2] }, mod.lds_ring = { accesses = [0,0,3,2,3], advances = [] } }
+  "st.s_barrier_wait"(-1) { mod.memtoken = { tokens = [2] } }
+  SCC0 = "st.s_cmp_eq_u32"(s60, 0x1)
+  "st.s_cbranch_scc1"("loop", SCC0) { mod.lds_ring = { accesses = [], advances = [0,1] } }
+  Successors: ^loop, ^exit
+^exit:
+}

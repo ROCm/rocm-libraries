@@ -92,6 +92,7 @@ class LogicalInstruction : public IRBase {
     std::optional<VOP3PModifiers> vop3;        ///< VOP3P (op_sel) modifier
     std::optional<True16Modifiers> true16;     ///< True16 (.l/.h half-select) modifier
     std::optional<std::vector<int>> memtoken;  ///< Memory token IDs for LDS dependency tracking
+    std::optional<LdsRingData> ldsRing;        ///< Opt-in rotating LDS ring metadata
     std::optional<std::array<int, 5>>
         swaitcnt;  ///< s_waitcnt values {vlcnt,vscnt,dlcnt,dscnt,kmcnt} for gfx12+ split
 

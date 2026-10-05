@@ -1,0 +1,25 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=4 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --emit-asm --preserve-comments
+#
+# The comment identifies every logical LDS token the final tensor wait can
+# retire, the direct CFG predecessor, dynamic frame, and resolved ring slot.
+#
+# CHECK: s_wait_tensorcnt 1
+# CHECK-SAME: drains token LDS0 from ^entry (frame k, ring slot 0);
+# CHECK-SAME: token LDS1 from ^loop (frame k-1, ring slot 0);
+# CHECK-SAME: token LDS2 from ^loop (frame k-2, ring slot 0)
+
+st.func @waitcnt_insertion_lds_ring_comments() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[8:15]) { mod.memtoken = { tokens = [0] }, mod.lds_ring = { accesses = [0,0,3,0,1], advances = [] } }
+  "st.tensor_load_to_lds"(s[0:3], s[16:23]) { mod.memtoken = { tokens = [1] }, mod.lds_ring = { accesses = [0,0,3,1,1], advances = [] } }
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  "st.s_barrier_signal"(-1) { mod.memtoken = { tokens = [0] }, mod.lds_ring = { accesses = [0,0,3,0,2], advances = [] } }
+  "st.s_barrier_wait"(-1) { mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[24:31]) { mod.memtoken = { tokens = [2] }, mod.lds_ring = { accesses = [0,0,3,2,1], advances = [] } }
+  SCC0 = "st.s_cmp_eq_u32"(s60, 0x1)
+  "st.s_cbranch_scc1"("loop", SCC0) { mod.lds_ring = { accesses = [], advances = [0,1] } }
+  Successors: ^loop, ^exit
+^exit:
+}

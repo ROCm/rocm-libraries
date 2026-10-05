@@ -1,0 +1,28 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=4 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# The explicit dscnt=0 retires the previous trip's aliasing LDS read. The
+# protecting barrier must not receive a duplicate wait.
+#
+# CHECK-LABEL: @waitcnt_insertion_lds_ring_war_already_drained
+# CHECK: ^loop:
+# CHECK-NEXT: ds_load_b64
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-SAME: dlcnt = 0
+# CHECK-NEXT: s_barrier_signal
+# CHECK-NOT: s_wait_dscnt
+# CHECK: s_cbranch_scc1
+
+st.func @waitcnt_insertion_lds_ring_war_already_drained() {
+^entry:
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  v[20:21] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] }, mod.lds_ring = { accesses = [0,0,3,0,0], advances = [] } }
+  "st.s_wait_dscnt"(0) { mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 0, dscnt = -1, kmcnt = -1 } }
+  "st.s_barrier_signal"(-1) { mod.memtoken = { tokens = [2] }, mod.lds_ring = { accesses = [0,0,3,2,3], advances = [] } }
+  "st.s_barrier_wait"(-1) { mod.memtoken = { tokens = [2] } }
+  SCC0 = "st.s_cmp_eq_u32"(s60, 0x1)
+  "st.s_cbranch_scc1"("loop", SCC0) { mod.lds_ring = { accesses = [], advances = [0,1] } }
+  Successors: ^loop, ^exit
+^exit:
+}

@@ -1377,8 +1377,7 @@ class HWRegContainer(Container):
 class MemTokenData(Container):
     """Memory-token list carried on fence/barrier instructions.
 
-    Constructor: ``MemTokenData(tokens=[])``. ``tokens`` is a mutable
-    list of ints (mirrors C++ ``std::vector<int>``).
+    Constructor: ``MemTokenData(tokens=[])``. ``tokens`` is a mutable list.
     """
 
     __slots__ = ("tokens",)
@@ -1403,11 +1402,45 @@ class MemTokenData(Container):
     def __deepcopy__(self, memo: dict) -> "MemTokenData":
         return MemTokenData(list(self.tokens))
 
-    def __getstate__(self) -> List[int]:
+    def __getstate__(self):
         return list(self.tokens)
 
-    def __setstate__(self, state: List[int]) -> None:
+    def __setstate__(self, state) -> None:
         self.tokens = list(state)
+
+
+class LdsRingData(Container):
+    """Rotating LDS metadata independent of scheduling memtokens."""
+
+    __slots__ = ("accesses", "advances")
+
+    def __init__(
+        self,
+        accesses: Optional[List[List[int]]] = None,
+        advances: Optional[List[List[int]]] = None,
+    ) -> None:
+        self.accesses = [list(access) for access in accesses] if accesses else []
+        self.advances = [list(advance) for advance in advances] if advances else []
+
+    def toString(self) -> str:
+        return f"lds_ring: accesses={len(self.accesses)} advances={len(self.advances)}"
+
+    def __copy__(self) -> "LdsRingData":
+        return LdsRingData(self.accesses, self.advances)
+
+    def __deepcopy__(self, memo: dict) -> "LdsRingData":
+        return LdsRingData(
+            [list(access) for access in self.accesses],
+            [list(advance) for advance in self.advances],
+        )
+
+    def __getstate__(self):
+        return ([list(access) for access in self.accesses],
+                [list(advance) for advance in self.advances])
+
+    def __setstate__(self, state) -> None:
+        self.accesses = [list(access) for access in state[0]]
+        self.advances = [list(advance) for advance in state[1]]
 
 
 # ---------------------------------------------------------------------------

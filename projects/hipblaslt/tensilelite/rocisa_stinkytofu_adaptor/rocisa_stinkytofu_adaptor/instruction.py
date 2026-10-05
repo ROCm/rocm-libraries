@@ -81,7 +81,7 @@ class Instruction:
     __slots__ = (
         "name", "parent",
         "instType", "comment", "instStr", "outputInlineAsm",
-        "m_memToken",
+        "m_memToken", "m_ldsRing",
     )
 
     def __init__(self, instType: Any, comment: str = ""):
@@ -96,6 +96,7 @@ class Instruction:
         self.instStr: str = ""
         self.outputInlineAsm: bool = False
         self.m_memToken: Any = None
+        self.m_ldsRing: Any = None
 
     # ---------------------------------------------------- memToken / inline
     def setMemToken(self, token: Any) -> None:
@@ -103,6 +104,12 @@ class Instruction:
 
     def getMemToken(self) -> Any:
         return self.m_memToken
+
+    def setLdsRing(self, ring: Any) -> None:
+        self.m_ldsRing = ring
+
+    def getLdsRing(self) -> Any:
+        return self.m_ldsRing
 
     def setInlineAsm(self, is_true: bool) -> None:
         self.outputInlineAsm = bool(is_true)
@@ -274,6 +281,7 @@ class CommonInstruction(Instruction):
         clone.outputInlineAsm = self.outputInlineAsm
         clone.instStr = self.instStr
         clone.m_memToken = _deepcopy(self.m_memToken, memo) if self.m_memToken else None
+        clone.m_ldsRing = _deepcopy(self.m_ldsRing, memo) if self.m_ldsRing else None
         clone.dst = _deepcopy(self.dst, memo) if self.dst is not None else None
         clone.dst1 = _deepcopy(self.dst1, memo) if self.dst1 is not None else None
         clone.srcs = [_deepcopy(s, memo) for s in self.srcs]
@@ -357,6 +365,7 @@ class MacroInstruction(Instruction):
         clone.outputInlineAsm = self.outputInlineAsm
         clone.instStr = self.instStr
         clone.m_memToken = _deepcopy(self.m_memToken, memo) if self.m_memToken else None
+        clone.m_ldsRing = _deepcopy(self.m_ldsRing, memo) if self.m_ldsRing else None
         clone.name = self.name
         # Containers deep-clone via their own __deepcopy__; primitives
         # (int/float/str) round-trip identity-equal, matching C++ visit.
@@ -1716,6 +1725,9 @@ class SMemLoadInstruction(Instruction):
         clone.m_memToken = (
             _deepcopy(self.m_memToken, memo) if self.m_memToken is not None else None
         )
+        clone.m_ldsRing = (
+            _deepcopy(self.m_ldsRing, memo) if self.m_ldsRing is not None else None
+        )
         clone.dst = _deepcopy(self.dst, memo) if self.dst is not None else None
         clone.base = _deepcopy(self.base, memo) if self.base is not None else None
         if isinstance(self.soffset, (int, float, str, bool)):
@@ -1883,6 +1895,9 @@ class SMemStoreInstruction(Instruction):
         clone.instStr = self.instStr
         clone.m_memToken = (
             _deepcopy(self.m_memToken, memo) if self.m_memToken is not None else None
+        )
+        clone.m_ldsRing = (
+            _deepcopy(self.m_ldsRing, memo) if self.m_ldsRing is not None else None
         )
         clone.src = _deepcopy(self.src, memo) if self.src is not None else None
         clone.base = _deepcopy(self.base, memo) if self.base is not None else None
@@ -4663,6 +4678,7 @@ class MFMAInstruction(Instruction):
         clone.outputInlineAsm = self.outputInlineAsm
         clone.instStr = self.instStr
         clone.m_memToken = None
+        clone.m_ldsRing = None
         clone.accType = self.accType
         clone.variant = list(self.variant)
         clone.mfma1k = self.mfma1k
@@ -4778,6 +4794,7 @@ class MXMFMAInstruction(Instruction):
         clone.outputInlineAsm = self.outputInlineAsm
         clone.instStr = self.instStr
         clone.m_memToken = None
+        clone.m_ldsRing = None
         clone.accType = self.accType
         clone.mxScaleAType = self.mxScaleAType
         clone.mxScaleBType = self.mxScaleBType
@@ -4878,6 +4895,7 @@ class SMFMAInstruction(Instruction):
         clone.outputInlineAsm = self.outputInlineAsm
         clone.instStr = self.instStr
         clone.m_memToken = None
+        clone.m_ldsRing = None
         clone.accType = self.accType
         clone.variant = list(self.variant)
         clone.mfma1k = self.mfma1k

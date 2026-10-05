@@ -7,7 +7,7 @@ from rocisa.code import Module, Label
 from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32, SLShiftLeftB64, \
     SLShiftRightB32, SAddU32, SAddCU32, SMulI32, SBranch, SCBranchSCC1, SCSelectB32, TensorLoadToLds, \
     VReadfirstlaneB32
-from rocisa.container import sgpr, vgpr, RegisterContainer, ContinuousRegister, MemTokenData
+from rocisa.container import sgpr, vgpr, RegisterContainer, ContinuousRegister, MemTokenData, LdsRingData
 from rocisa.functions import scalarMultiply64Bpe
 from math import log2, ceil, prod
 # from ..KernelWriterAssembly import KernelWriterAssembly
@@ -20,9 +20,14 @@ class TensorDataMoverLoad(TensorDataMover):
     GROUP2_NUM_SGPR = 4
     GROUP3_NUM_SGPR = 4
     mem_token = None
+    ring_accesses = None
 
     def setMemToken(self, mem_token: list[int]):
         self.mem_token = mem_token
+        self.ring_accesses = []
+
+    def setLdsRingAccesses(self, ring_accesses: list[list[int]]):
+        self.ring_accesses = ring_accesses
 
     def __call__(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping):
         pass
@@ -305,6 +310,8 @@ class TensorDataMoverLoad(TensorDataMover):
 
         if self.mem_token is not None:
             tensorLoadToLds.setMemToken(MemTokenData(self.mem_token))
+        if self.ring_accesses:
+            tensorLoadToLds.setLdsRing(LdsRingData(self.ring_accesses))
 
         mod.add(tensorLoadToLds)
         return mod

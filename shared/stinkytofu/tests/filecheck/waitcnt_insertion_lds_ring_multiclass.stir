@@ -1,0 +1,20 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=4 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# One TDM instruction fills A and B but occupies one tensor-counter slot. The
+# B publishing barrier matches the older phase-0 instruction, so tlcnt=1 leaves
+# the newer phase-1 instruction outstanding.
+#
+# CHECK-LABEL: @waitcnt_insertion_lds_ring_multiclass
+# CHECK: tensor_load_to_lds
+# CHECK: tensor_load_to_lds
+# CHECK-NEXT: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 1
+# CHECK-NEXT: s_barrier_signal
+
+st.func @waitcnt_insertion_lds_ring_multiclass() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[8:15]) { mod.memtoken = { tokens = [0] }, mod.lds_ring = { accesses = [0,0,3,0,1,1,0,3,0,1], advances = [] } }
+  "st.tensor_load_to_lds"(s[0:3], s[16:23]) { mod.memtoken = { tokens = [1] }, mod.lds_ring = { accesses = [0,0,3,1,1,1,0,3,1,1], advances = [] } }
+  "st.s_barrier_signal"(-1) { mod.memtoken = { tokens = [0] }, mod.lds_ring = { accesses = [1,0,3,0,2], advances = [] } }
+  "st.s_barrier_wait"(-1) { mod.memtoken = { tokens = [0] } }
+}

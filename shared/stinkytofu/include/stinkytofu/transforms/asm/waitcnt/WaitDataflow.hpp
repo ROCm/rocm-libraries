@@ -114,14 +114,34 @@ int waitToDrain(CounterKind c, int countFrom);
 /// At block entry there is one entry per CFG predecessor; these are kept
 /// (not collapsed) at block exit so a successor's mergeFromPredecessors can
 /// recover each predecessor's path length.
+/// One dynamic execution of a static memory instruction.
+///
+/// `frameDeltas[i]` is the issuing frame minus the current frame for
+/// LdsRingData::accesses[i], reduced modulo that access's ring.
+/// `tripsBack` is the exact number of loop back-edges crossed, retained only
+/// for diagnostics; it does not participate in ring-alias decisions.
+struct QueuedOp {
+    StinkyInstruction* op = nullptr;
+    std::vector<int> frameDeltas;
+    unsigned tripsBack = 0;
+    bool tripAgeSaturated = false;
+
+    bool operator==(const QueuedOp& other) const {
+        return op == other.op && frameDeltas == other.frameDeltas && tripsBack == other.tripsBack &&
+               tripAgeSaturated == other.tripAgeSaturated;
+    }
+};
+
 struct PerPredQueue {
     BasicBlock* pred = nullptr;
-    std::deque<StinkyInstruction*> ops;
+    std::deque<QueuedOp> ops;
     std::unordered_set<StinkyInstruction*> saturatedOps;
+    bool ringSaturated = false;
 
     int countFrom(StinkyInstruction* op) const;
     bool operator==(const PerPredQueue& other) const {
-        return pred == other.pred && ops == other.ops && saturatedOps == other.saturatedOps;
+        return pred == other.pred && ops == other.ops && saturatedOps == other.saturatedOps &&
+               ringSaturated == other.ringSaturated;
     }
 };
 
@@ -220,6 +240,13 @@ class WaitDataflow {
    private:
     const std::vector<BasicBlock*>& rpo;
     DataflowResult result;
+    std::unordered_map<const BasicBlock*, unsigned> rpoIndex;
+
+    bool isBackEdge(const BasicBlock* pred, const BasicBlock* succ) const {
+        auto p = rpoIndex.find(pred);
+        auto s = rpoIndex.find(succ);
+        return p != rpoIndex.end() && s != rpoIndex.end() && p->second >= s->second;
+    }
 
     /// Per-counter RAW-wait constraint, indexed by CounterKind. Seeded with
     /// the built-in defaults by the constructor; overridable via

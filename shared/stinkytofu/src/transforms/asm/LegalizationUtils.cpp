@@ -260,6 +260,7 @@ Legalized legalizeBarrier(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxA
     const CommentData* commentMod = inst->getModifier<CommentData>();
     std::string comment = commentMod ? commentMod->comment : "";
     const MemTokenData* memTokenMod = inst->getModifier<MemTokenData>();
+    const LdsRingData* ringMod = inst->getModifier<LdsRingData>();
 
     // Create s_barrier_signal -1 (signal global barrier)
     const HwInstDesc* signalDesc = getMCIDByUOp(GFX::s_barrier_signal, archId);
@@ -276,6 +277,10 @@ Legalized legalizeBarrier(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxA
     if (memTokenMod) {
         signalInst->addModifier<MemTokenData>(MemTokenData{memTokenMod->tokens});
         waitInst->addModifier<MemTokenData>(MemTokenData{memTokenMod->tokens});
+    }
+    if (ringMod) {
+        signalInst->addModifier<LdsRingData>(*ringMod);
+        waitInst->addModifier<LdsRingData>(*ringMod);
     }
 
     // Remove the original s_barrier instruction

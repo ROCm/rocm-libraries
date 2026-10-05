@@ -256,6 +256,10 @@ class LocalRead(Component):
         fullComment = "%s %s" % (comment, syncComment) if comment else syncComment
         inst = LocalReadX(dst=dst, src=src, ds=ds, comment=fullComment)
         inst.setMemToken(ldsMemToken)
+        ring = writer._ldsRingData(
+            kernel, [tP["tensorChar"]], tokenList, 0)  # LdsRingAccessKind::Read
+        if ring is not None:
+            inst.setLdsRing(ring)
         module.add(inst)
 
 class SumUnroll(Component):

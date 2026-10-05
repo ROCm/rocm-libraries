@@ -123,6 +123,7 @@ namespace rocisa
         std::string      instStr;
         bool             outputInlineAsm;
         std::shared_ptr<MemTokenData> m_memToken;
+        std::shared_ptr<LdsRingData>  m_ldsRing;
 
         Instruction(InstType instType, const std::string& comment = "")
             : instType(instType)
@@ -141,6 +142,7 @@ namespace rocisa
             , m_memToken(other.m_memToken
                              ? std::make_shared<MemTokenData>(*other.m_memToken)
                              : nullptr)
+            , m_ldsRing(other.m_ldsRing ? std::make_shared<LdsRingData>(*other.m_ldsRing) : nullptr)
         {
         }
 
@@ -152,6 +154,16 @@ namespace rocisa
         std::shared_ptr<MemTokenData> getMemToken() const
         {
             return m_memToken;
+        }
+
+        void setLdsRing(const std::shared_ptr<LdsRingData>& ring)
+        {
+            m_ldsRing = ring;
+        }
+
+        std::shared_ptr<LdsRingData> getLdsRing() const
+        {
+            return m_ldsRing;
         }
 
         std::shared_ptr<Item> clone() const override

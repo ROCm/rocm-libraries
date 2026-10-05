@@ -56,6 +56,23 @@ def _forward_memtoken(rocisa_item: Any, logical: Any) -> None:
             setter(tokens)
 
 
+def _forward_lds_ring(rocisa_item: Any, logical: Any) -> None:
+    getter = getattr(rocisa_item, "getLdsRing", None)
+    if not callable(getter):
+        return
+    ring = getter()
+    if ring is None:
+        return
+    targets = logical if isinstance(logical, list) else (logical,)
+    for inst in targets:
+        setter = getattr(inst, "set_lds_ring", None)
+        if callable(setter):
+            setter(
+                [value for row in ring.accesses for value in row],
+                [value for row in ring.advances for value in row],
+            )
+
+
 def _forward_true16(rocisa_item: Any, logical: Any) -> None:
     from .instruction import _apply_true16  # noqa: WPS433
 
@@ -1550,6 +1567,7 @@ class Module(Item):
         # this the DAG scheduler cannot see LDS store->load / barrier ordering
         # and may reorder tensor_load_to_lds, corrupting the tensor descriptor.
         _forward_memtoken(it, logical)
+        _forward_lds_ring(it, logical)
         _forward_true16(it, logical)
         if isinstance(logical, list):
             for inst in logical:
@@ -1575,6 +1593,7 @@ class Module(Item):
             if logical is None:
                 continue
             _forward_memtoken(it, logical)
+            _forward_lds_ring(it, logical)
             _forward_true16(it, logical)
             if isinstance(logical, list):
                 out.extend(logical)
