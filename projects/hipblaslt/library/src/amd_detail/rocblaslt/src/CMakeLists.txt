@@ -10,6 +10,7 @@ target_sources(hipblaslt
         "${CMAKE_CURRENT_SOURCE_DIR}/rocblaslt_auxiliary.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocblaslt_mat.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/status.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/kfa_solution_selection.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/tensile_host.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/UserDrivenTuningParser.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/utility.cpp"
@@ -20,6 +21,8 @@ target_sources(hipblaslt
         "${CMAKE_CURRENT_SOURCE_DIR}/rocblaslt_transform.cpp"
 )
 target_include_directories(hipblaslt PRIVATE "${PROJECT_SOURCE_DIR}/device-library")
+# kfa_solution_selection.cpp calls origami even when rocRoller is not linked.
+target_link_libraries(hipblaslt PRIVATE roc::origami)
 
 # The tuning file's row format and store. A library of its own so the
 # host-only tests can link it without the rest of hipBLASLt or a device.
