@@ -1105,8 +1105,8 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
     // Only VALU-pipe ops fill a coexec slot.
     if (pickKind == kValu) nonWmmaFillsSinceActiveWmma_++;
     if (pickKind == kOther || pickKind == kValu) {
-        fillsThisWindow_++;
-        fillersIssuedThisRegion_++;
+        fillsThisWindow_++;  // a prefetch issued from otherQueue (no lead) still takes a slot
+        if (!isGlobalPrefetch(*node->inst)) fillersIssuedThisRegion_++;  // as regionFillerCount
     }
     if (isGlobalPrefetch(*node->inst)) prefetchIssued_.insert(node->inst);
     // (A) RAW: stamp this producer's dest data-ready latency (e.g. ds_load).
@@ -2755,7 +2755,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         StinkyInstruction& inst = *instPtr;
         regionInsts.insert(instPtr);
 
-        // Fillers are exactly what push() routes to otherQueue/valuQueue.
+        // Fillers are what push() routes to otherQueue/valuQueue, minus global prefetches: with
+        // PrefetchLeadWmmas = 0 a prefetch sits in otherQueue but is not counted here.
         if (!isMatrixInstruction(inst) && !isDSRead(inst) && !isBarrier(inst) &&
             !(dagFeatures.distributeGlobalRead && isTensorLoad(inst)) && !isGlobalPrefetch(inst))
             ++regionFillerCount;
