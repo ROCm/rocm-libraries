@@ -1839,6 +1839,32 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesCausalWithNonZeroRightBound)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
+TEST(TestGfx950AttentionDenseGraphMatch, ServesDeprecatedCausalWithCausalBounds)
+{
+    // The bounds describe the same causal band the boolean does, so the merge agrees.
+    GraphSpec spec;
+    spec.causalMaskDeprecated = true;
+
+    KernelSpec causal;
+    causal.causal = 1;
+    EXPECT_TRUE(matchesKernel(spec, causal));
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, ReadsDeprecatedCausalWithBottomRightAlignmentAsBottomRight)
+{
+    // causal_mask keeps the stored alignment, so this is bottom-right causal: served at
+    // Sq == Skv, declined where the corners differ.
+    GraphSpec spec;
+    spec.causalMaskDeprecated = true;
+    spec.leftBound = std::nullopt;
+    spec.rightBound = std::nullopt;
+    spec.alignment = data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+
+    spec.seqLenKv = SEQ * 2;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
 // ---------------------------------------------------------------------------
 // kernel_match
 // ---------------------------------------------------------------------------

@@ -130,12 +130,12 @@ class TestSdpaAttributeBindings:
                 ("set_generate_stats", (True,), "generate_stats", True),
                 ("set_alibi_mask", (True,), "alibi_mask", True),
                 ("set_padding_mask", (True,), "padding_mask", True),
-                ("set_causal_mask", (True,), "causal_mask", True),
+                ("set_causal_mask", (True,), "right_bound", 0),
                 (
                     "set_causal_mask_bottom_right",
                     (True,),
-                    "causal_mask_bottom_right",
-                    True,
+                    "diagonal_alignment",
+                    hipdnn.DiagonalAlignment.BOTTOM_RIGHT,
                 ),
                 # set_dropout(prob, mask, scale) is a convenience wrapper over the
                 # standalone dropout setters; mask and scale round-trip there.
@@ -218,12 +218,12 @@ class TestSdpaAttributeBindings:
                 ),
                 ("set_alibi_mask", (True,), "alibi_mask", True),
                 ("set_padding_mask", (True,), "padding_mask", True),
-                ("set_causal_mask", (True,), "causal_mask", True),
+                ("set_causal_mask", (True,), "right_bound", 0),
                 (
                     "set_causal_mask_bottom_right",
                     (True,),
-                    "causal_mask_bottom_right",
-                    True,
+                    "diagonal_alignment",
+                    hipdnn.DiagonalAlignment.BOTTOM_RIGHT,
                 ),
                 (
                     "set_dropout",

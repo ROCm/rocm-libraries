@@ -318,10 +318,10 @@ SdpaGraph buildSdpaGraph(const std::string& name, const GraphShape& shape)
         attributes.set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
         break;
     case Mask::CAUSAL_MASK_FLAG:
-        attributes.set_causal_mask(true);
+        attributes.causal_mask = true;
         break;
     case Mask::CAUSAL_MASK_BOTTOM_RIGHT_FLAG:
-        attributes.set_causal_mask_bottom_right(true);
+        attributes.causal_mask_bottom_right = true;
         break;
     default:
         throw std::invalid_argument("buildSdpaGraph: unhandled Mask value");

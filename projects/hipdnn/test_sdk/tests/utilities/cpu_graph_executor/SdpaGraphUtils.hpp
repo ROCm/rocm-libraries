@@ -67,8 +67,8 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
 
     hipdnn_frontend::graph::SdpaAttributes sdpaAttrs;
     sdpaAttrs.set_name("SdpaFwd");
-    sdpaAttrs.set_causal_mask(causalMask);
-    sdpaAttrs.set_causal_mask_bottom_right(causalMaskBottomRight);
+    sdpaAttrs.causal_mask = causalMask;
+    sdpaAttrs.causal_mask_bottom_right = causalMaskBottomRight;
     sdpaAttrs.set_alibi_mask(alibiMask);
     sdpaAttrs.set_diagonal_alignment(diagonalAlignment);
     sdpaAttrs.set_generate_stats(generateStats);
@@ -142,7 +142,13 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
                       hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                       // Non-const: the variant pack stores void*.
                       // NOLINTNEXTLINE(readability-non-const-parameter)
-                      float* runtimeScaleHostPtr = nullptr)
+                      float* runtimeScaleHostPtr = nullptr,
+                      bool causalMask = false,
+                      bool causalMaskBottomRight = false,
+                      std::optional<int64_t> leftBound = std::nullopt,
+                      std::optional<int64_t> rightBound = std::nullopt,
+                      hipdnn_frontend::DiagonalAlignment diagonalAlignment
+                      = hipdnn_frontend::DiagonalAlignment::TOP_LEFT)
 {
     const auto frontendDataType = hipdnn_test_sdk::utilities::sdkToFrontendDataType(dataType);
 
@@ -187,6 +193,17 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
 
     hipdnn_frontend::graph::SdpaBackwardAttributes sdpaBwdAttrs;
     sdpaBwdAttrs.set_name("SdpaBwd");
+    sdpaBwdAttrs.causal_mask = causalMask;
+    sdpaBwdAttrs.causal_mask_bottom_right = causalMaskBottomRight;
+    sdpaBwdAttrs.set_diagonal_alignment(diagonalAlignment);
+    if(leftBound.has_value())
+    {
+        sdpaBwdAttrs.set_diagonal_band_left_bound(leftBound.value());
+    }
+    if(rightBound.has_value())
+    {
+        sdpaBwdAttrs.set_diagonal_band_right_bound(rightBound.value());
+    }
 
     std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> scaleTensorAttr;
     if(runtimeScaleHostPtr != nullptr)

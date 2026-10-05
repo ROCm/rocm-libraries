@@ -19,6 +19,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <optional>
 
 namespace asm_sdpa_engine
 {
@@ -886,10 +887,10 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsAsymmetricHdim)
 // Canonical mask-attribute policy (plan_utils::getMaskType)
 // =============================================================================
 //
-// These tests exercise the shared mask-precedence policy directly through
-// plan_utils::getMaskType rather than through isApplicable. When a deprecated
-// causal boolean is set it takes precedence over the modern bounds trio; only
-// setting both deprecated booleans at once throws. The policy is
+// These tests exercise the shared mask policy directly through
+// plan_utils::getMaskType rather than through isApplicable. A deprecated causal
+// boolean is merged with the stored bounds and alignment (see
+// plan_utils::resolveDiagonalBand); only setting both booleans throws. The policy is
 // hardware-agnostic (it runs before any device dispatch and independent of the
 // kernel registry), so the assertions are meaningful on any device — including
 // this gfx950 box. The backward isApplicable cannot be used here: it rejects
@@ -1009,93 +1010,148 @@ plan_utils::MaskType classifyMask(const flatbuffers::FlatBufferBuilder& builder)
     return plan_utils::getMaskType(attrs);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsCausalMaskAndBottomRightSetTogether)
+struct DeprecatedCausalMaskCase
 {
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    const char* name;
+    bool causalMask;
+    bool causalMaskBottomRight;
+    flatbuffers::Optional<int64_t> leftBound;
+    flatbuffers::Optional<int64_t> rightBound;
+    hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment alignment;
+    std::optional<plan_utils::MaskType> expected;
+};
 
-    // Both deprecated causal booleans set is a contradiction.
-    auto builder = createSdpaBwdGraphWithMask(
-        /*causalMask=*/true,
-        /*causalMaskBottomRight=*/true,
-        flatbuffers::nullopt,
-        flatbuffers::nullopt,
-        DiagonalAlignment::TOP_LEFT);
-
-    EXPECT_THROW(classifyMask(builder), hipdnn_plugin_sdk::HipdnnPluginException);
-}
-
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicablePrefersCausalMaskOverWindowBounds)
+class TestSdpaBwdDeprecatedCausalMask : public ::testing::TestWithParam<DeprecatedCausalMaskCase>
 {
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
+};
 
-    // causal_mask=true takes precedence over the bounds trio, even though the
-    // bounds describe a sliding window (left=64, right=64): result is causal.
-    auto builder = createSdpaBwdGraphWithMask(
-        /*causalMask=*/true,
-        /*causalMaskBottomRight=*/false,
-        flatbuffers::Optional<int64_t>(64),
-        flatbuffers::Optional<int64_t>(64),
-        DiagonalAlignment::TOP_LEFT);
+TEST_P(TestSdpaBwdDeprecatedCausalMask, Classifies)
+{
+    const auto& param = GetParam();
+    auto builder = createSdpaBwdGraphWithMask(param.causalMask,
+                                              param.causalMaskBottomRight,
+                                              param.leftBound,
+                                              param.rightBound,
+                                              param.alignment);
 
+    if(!param.expected.has_value())
+    {
+        EXPECT_THROW(classifyMask(builder), hipdnn_plugin_sdk::HipdnnPluginException);
+        return;
+    }
     plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
     EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
+    EXPECT_EQ(maskType, param.expected.value());
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicablePrefersBottomRightCausalOverTopLeftBounds)
+constexpr auto ALIGN_TOP_LEFT = hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT;
+constexpr auto ALIGN_BOTTOM_RIGHT
+    = hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+const flatbuffers::Optional<int64_t> NO_BOUND = flatbuffers::nullopt;
+
+// BottomRightAloneDefaultAlignment: TOP_LEFT is the schema default, so it must not
+// be read as contradicting causal_mask_bottom_right.
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestSdpaBwdDeprecatedCausalMask,
+    ::testing::Values(
+        DeprecatedCausalMaskCase{"CausalAlone",
+                                 true,
+                                 false,
+                                 NO_BOUND,
+                                 NO_BOUND,
+                                 ALIGN_TOP_LEFT,
+                                 plan_utils::MaskType::TOP_LEFT_CAUSAL},
+        DeprecatedCausalMaskCase{"BottomRightAlone",
+                                 false,
+                                 true,
+                                 NO_BOUND,
+                                 NO_BOUND,
+                                 ALIGN_BOTTOM_RIGHT,
+                                 plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL},
+        DeprecatedCausalMaskCase{"BottomRightAloneDefaultAlignment",
+                                 false,
+                                 true,
+                                 NO_BOUND,
+                                 NO_BOUND,
+                                 ALIGN_TOP_LEFT,
+                                 plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL},
+        DeprecatedCausalMaskCase{
+            "BothDeprecated", true, true, NO_BOUND, NO_BOUND, ALIGN_TOP_LEFT, std::nullopt},
+        DeprecatedCausalMaskCase{"CausalWithBottomRightAlignment",
+                                 true,
+                                 false,
+                                 NO_BOUND,
+                                 NO_BOUND,
+                                 ALIGN_BOTTOM_RIGHT,
+                                 plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL},
+        DeprecatedCausalMaskCase{"CausalWithConsistentBounds",
+                                 true,
+                                 false,
+                                 -1,
+                                 0,
+                                 ALIGN_TOP_LEFT,
+                                 plan_utils::MaskType::TOP_LEFT_CAUSAL},
+        DeprecatedCausalMaskCase{"CausalWithLeftBoundOnly",
+                                 true,
+                                 false,
+                                 64,
+                                 NO_BOUND,
+                                 ALIGN_TOP_LEFT,
+                                 plan_utils::MaskType::SLIDING_WINDOW},
+        DeprecatedCausalMaskCase{"CausalWithRightBoundOnly",
+                                 true,
+                                 false,
+                                 NO_BOUND,
+                                 0,
+                                 ALIGN_TOP_LEFT,
+                                 plan_utils::MaskType::TOP_LEFT_CAUSAL},
+        DeprecatedCausalMaskCase{"CausalWithUnboundedRight",
+                                 true,
+                                 false,
+                                 NO_BOUND,
+                                 -1,
+                                 ALIGN_TOP_LEFT,
+                                 plan_utils::MaskType::TOP_LEFT_CAUSAL},
+        DeprecatedCausalMaskCase{"CausalWithPositiveRightBound",
+                                 true,
+                                 false,
+                                 NO_BOUND,
+                                 16,
+                                 ALIGN_TOP_LEFT,
+                                 plan_utils::MaskType::SLIDING_WINDOW},
+        DeprecatedCausalMaskCase{"BottomRightWithConsistentBounds",
+                                 false,
+                                 true,
+                                 -1,
+                                 0,
+                                 ALIGN_BOTTOM_RIGHT,
+                                 plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL},
+        DeprecatedCausalMaskCase{"BottomRightWithRightBoundOnly",
+                                 false,
+                                 true,
+                                 NO_BOUND,
+                                 64,
+                                 ALIGN_BOTTOM_RIGHT,
+                                 plan_utils::MaskType::SLIDING_WINDOW}),
+    [](const ::testing::TestParamInfo<DeprecatedCausalMaskCase>& info) { return info.param.name; });
+
+// The backward sliding-window path hands the resolved band to the kernel, so a
+// deprecated boolean must contribute its causal right bound to the window.
+TEST(TestSdpaBwdDeprecatedCausalMaskBand, CausalWithLeftBoundResolvesToCausalWindow)
 {
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    auto builder = createSdpaBwdGraphWithMask(true, false, 64, NO_BOUND, ALIGN_BOTTOM_RIGHT);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto& attrs
+        = graphWrapper.nodeWrappers()
+              .front()
+              ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes>();
 
-    // causal_mask_bottom_right=true takes precedence over the bounds trio, even
-    // though the trio (left=-1, right=0, diag=TOP_LEFT) would derive
-    // TOP_LEFT_CAUSAL: result is bottom-right causal.
-    auto builder = createSdpaBwdGraphWithMask(
-        /*causalMask=*/false,
-        /*causalMaskBottomRight=*/true,
-        flatbuffers::Optional<int64_t>(-1),
-        flatbuffers::Optional<int64_t>(0),
-        DiagonalAlignment::TOP_LEFT);
-
-    plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
-    EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
-}
-
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsConsistentCausalMaskAndBounds)
-{
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
-
-    // causal_mask=true with a consistent bounds trio (left=-1, right=0,
-    // diag=TOP_LEFT -> TOP_LEFT_CAUSAL) must not throw and classify as causal.
-    auto builder = createSdpaBwdGraphWithMask(
-        /*causalMask=*/true,
-        /*causalMaskBottomRight=*/false,
-        flatbuffers::Optional<int64_t>(-1),
-        flatbuffers::Optional<int64_t>(0),
-        DiagonalAlignment::TOP_LEFT);
-
-    plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
-    EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
-}
-
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicablePrefersBottomRightCausalOverWindowBounds)
-{
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
-
-    // causal_mask_bottom_right=true takes precedence over the bounds trio, even
-    // though a symmetric sliding window (left=64, right=64) would derive
-    // SLIDING_WINDOW: result is bottom-right causal.
-    auto builder = createSdpaBwdGraphWithMask(
-        /*causalMask=*/false,
-        /*causalMaskBottomRight=*/true,
-        flatbuffers::Optional<int64_t>(64),
-        flatbuffers::Optional<int64_t>(64),
-        DiagonalAlignment::BOTTOM_RIGHT);
-
-    plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
-    EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
+    const auto band = plan_utils::resolveDiagonalBand(attrs);
+    EXPECT_EQ(band.leftBound, 64);
+    EXPECT_EQ(band.rightBound, 0);
+    EXPECT_EQ(band.alignment, ALIGN_BOTTOM_RIGHT);
 }
 
 // Modern bounds-trio path (no deprecated boolean set). An unset bound is treated

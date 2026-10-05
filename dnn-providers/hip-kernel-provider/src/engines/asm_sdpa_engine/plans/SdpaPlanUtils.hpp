@@ -55,35 +55,32 @@ enum class MaskType : int
     SLIDING_WINDOW = 3
 };
 
-// Classify the mask requested by an SDPA (forward or backward) attribute set.
+// The diagonal band an SDPA (forward or backward) attribute set requests, with
+// the deprecated causal_mask / causal_mask_bottom_right booleans merged in.
+struct DiagonalBand
+{
+    int64_t leftBound;
+    int64_t rightBound;
+    hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment alignment;
+};
+
+// Resolve the requested diagonal band, merging the deprecated booleans the way
+// cuDNN's setters compose: a boolean acts as if its setter ran first (right
+// bound 0, plus BOTTOM_RIGHT alignment for causal_mask_bottom_right) and the
+// stored bounds and alignment are applied on top. An unset bound, or one equal
+// to -1, does not override the causal right bound. causal_mask keeps the stored
+// alignment; causal_mask_bottom_right always resolves to BOTTOM_RIGHT, because
+// TOP_LEFT is the schema default and indistinguishable from an unset alignment.
 //
-// Two sources can describe the mask: the modern left_bound / right_bound /
-// diagonal_alignment trio, and the deprecated causal_mask /
-// causal_mask_bottom_right booleans. When a deprecated boolean is set it takes
-// precedence and the modern trio is ignored; otherwise the trio is
-// authoritative. The two deprecated booleans are mutually exclusive, so setting
-// both throws HipdnnPluginException(INVALID_VALUE).
-//
-// Guaranteeing the two parameter sets agree belongs in the hipDNN frontend; this
-// helper only resolves which source wins for dispatch.
-//
-// Absence-awareness: the generated flatbuffer accessors expose the causal_mask*
-// fields as plain bool defaulting to false, with no has_*() accessor.
-// "Explicitly false" and "unset" are therefore indistinguishable; a false bool
-// is treated as "not requested". left_bound / right_bound are
-// flatbuffers::Optional, but an unset bound is treated as unbounded (-1) to
-// match the canonical convention used across the SDPA path, so a partially
-// specified trio (e.g. only right_bound = 0) still derives a mask rather than
-// silently falling back to NO_MASK.
+// Setting both booleans throws HipdnnPluginException(INVALID_VALUE).
 template <typename SdpaAttrsT>
-MaskType getMaskType(const SdpaAttrsT& attrs)
+DiagonalBand resolveDiagonalBand(const SdpaAttrsT& attrs)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     const bool causalDeprecated = attrs.causal_mask();
     const bool bottomRightDeprecated = attrs.causal_mask_bottom_right();
 
-    // The two deprecated booleans are mutually exclusive.
     if(causalDeprecated && bottomRightDeprecated)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -92,31 +89,35 @@ MaskType getMaskType(const SdpaAttrsT& attrs)
             "but both are set");
     }
 
-    // Deprecated booleans take precedence: when either is set, defer to it and
-    // ignore the modern bounds trio.
-    if(causalDeprecated)
-    {
-        return MaskType::TOP_LEFT_CAUSAL;
-    }
-    if(bottomRightDeprecated)
-    {
-        return MaskType::BOTTOM_RIGHT_CAUSAL;
-    }
-
-    // No deprecated boolean set: the modern bounds trio is authoritative. An
-    // unset bound means unbounded, represented here as -1, so a partially
-    // specified trio still resolves to the mask it describes.
     const int64_t left = attrs.left_bound().has_value() ? attrs.left_bound().value() : -1;
     const int64_t right = attrs.right_bound().has_value() ? attrs.right_bound().value() : -1;
-    if(left == -1 && right == -1) // both unbounded
+
+    if(!causalDeprecated && !bottomRightDeprecated)
+    {
+        return {left, right, attrs.diagonal_alignment()};
+    }
+
+    return {left,
+            right >= 0 ? right : 0,
+            bottomRightDeprecated ? DiagonalAlignment::BOTTOM_RIGHT : attrs.diagonal_alignment()};
+}
+
+// Classify the mask requested by an SDPA (forward or backward) attribute set,
+// after resolveDiagonalBand() merges the deprecated booleans into the band.
+template <typename SdpaAttrsT>
+MaskType getMaskType(const SdpaAttrsT& attrs)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    const auto band = resolveDiagonalBand(attrs);
+    if(band.leftBound == -1 && band.rightBound == -1) // both unbounded
     {
         return MaskType::NO_MASK;
     }
-    if(left == -1 && right == 0) // causal: attend up to the diagonal
+    if(band.leftBound == -1 && band.rightBound == 0) // causal: attend up to the diagonal
     {
-        return attrs.diagonal_alignment() == DiagonalAlignment::BOTTOM_RIGHT
-                   ? MaskType::BOTTOM_RIGHT_CAUSAL
-                   : MaskType::TOP_LEFT_CAUSAL;
+        return band.alignment == DiagonalAlignment::BOTTOM_RIGHT ? MaskType::BOTTOM_RIGHT_CAUSAL
+                                                                 : MaskType::TOP_LEFT_CAUSAL;
     }
     return MaskType::SLIDING_WINDOW; // anything else is a sliding window
 }

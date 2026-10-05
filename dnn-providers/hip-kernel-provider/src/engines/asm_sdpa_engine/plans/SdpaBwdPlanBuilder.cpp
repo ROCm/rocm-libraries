@@ -1175,14 +1175,11 @@ void SdpaBwdPlanBuilder::buildPlan(
     params.maskOrdinal = static_cast<int32_t>(maskType);
     if(maskType == MaskType::SLIDING_WINDOW)
     {
-        params.windowLeft = sdpaAttrs.left_bound().has_value()
-                                ? static_cast<int32_t>(sdpaAttrs.left_bound().value())
-                                : -1;
-        params.windowRight = sdpaAttrs.right_bound().has_value()
-                                 ? static_cast<int32_t>(sdpaAttrs.right_bound().value())
-                                 : -1;
+        const auto band = plan_utils::resolveDiagonalBand(sdpaAttrs);
+        params.windowLeft = static_cast<int32_t>(band.leftBound);
+        params.windowRight = static_cast<int32_t>(band.rightBound);
         params.topLeftAlignment
-            = sdpaAttrs.diagonal_alignment()
+            = band.alignment
               != hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::BOTTOM_RIGHT;
     }
 
