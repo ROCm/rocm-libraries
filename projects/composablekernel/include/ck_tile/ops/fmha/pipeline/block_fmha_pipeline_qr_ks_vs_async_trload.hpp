@@ -133,7 +133,8 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
     }
 
     // Decode
-    template <typename QDramBlockWindowTmp,
+    template <bool kHasBlockMask = false,
+              typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,
               typename BiasDramBlockWindowTmp,
@@ -149,7 +150,8 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                PositionEncoding position_encoding,
                float scale_s,
                void* smem_ptr,
-               float sink_v) const
+               float sink_v,
+               const int32_t* block_mask_row_ptr = nullptr) const
     {
 #if defined(__gfx950__)
         // Hdim256 optimization is only available on gfx950
@@ -164,26 +166,29 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                                          position_encoding,
                                          scale_s,
                                          smem_ptr,
-                                         sink_v);
+                                         sink_v,
+                                         block_mask_row_ptr);
         }
         else
 #endif
         {
-            return operator_impl_decode(q_dram_block_window_tmp,
-                                        k_dram_block_window_tmp,
-                                        v_dram_block_window_tmp,
-                                        bias_dram_block_window_tmp,
-                                        lse_acc_dram_window_tmp,
-                                        mask,
-                                        position_encoding,
-                                        scale_s,
-                                        smem_ptr,
-                                        sink_v);
+            return operator_impl_decode<kHasBlockMask>(q_dram_block_window_tmp,
+                                                       k_dram_block_window_tmp,
+                                                       v_dram_block_window_tmp,
+                                                       bias_dram_block_window_tmp,
+                                                       lse_acc_dram_window_tmp,
+                                                       mask,
+                                                       position_encoding,
+                                                       scale_s,
+                                                       smem_ptr,
+                                                       sink_v,
+                                                       block_mask_row_ptr);
         }
     }
 
     // Decode implementation - single buffer, hdim < 256
-    template <typename QDramBlockWindowTmp,
+    template <bool kHasBlockMask = false,
+              typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,
               typename BiasDramBlockWindowTmp,
@@ -199,7 +204,8 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                          PositionEncoding position_encoding,
                          float scale_s,
                          void* smem_ptr,
-                         float sink_v) const
+                         float sink_v,
+                         const int32_t* block_mask_row_ptr = nullptr) const
     {
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -410,8 +416,37 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
         constexpr index_t k_vmem_insts = k_dram_window.get_num_of_access();
         constexpr index_t v_vmem_insts = v_dram_window.get_num_of_access();
 
+        const index_t kv_block_idx_base_decode = physical_seqlen_k_start / kN0;
+
         do
         {
+            // Block sparsity: skip fully-masked KV blocks.
+            // The previous iteration left a K async load in flight (initial setup or the
+            // prefetch at the bottom of the non-skip path). Decode uses a single LDS buffer
+            // so we must drain that load before advancing.
+            if constexpr(kHasBlockMask)
+            {
+                if(block_mask_row_ptr[kv_block_idx_base_decode + i_total_loops] == 0)
+                {
+                    async_load_fence(k_dram_window.get_num_of_access());
+                    block_sync_lds();
+
+                    i_total_loops++;
+                    if(i_total_loops < num_total_loop)
+                    {
+                        move_tile_window(k_dram_window, {kN0, 0});
+                        async_load_tile(k_lds_write_window, k_dram_window);
+                    }
+                    move_tile_window(v_dram_window, {kN0, 0});
+                    continue;
+                }
+            }
+            else
+            {
+                (void)block_mask_row_ptr;
+                (void)kv_block_idx_base_decode;
+            }
+
             block_sync_lds();
             async_load_tile(v_lds_write_window, v_dram_window); // prefetch load v tile
 
@@ -750,7 +785,8 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
     }
 
     // Prefill, double lds
-    template <typename QDramBlockWindowTmp,
+    template <bool kHasBlockMask = false,
+              typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,
               typename BiasDramBlockWindowTmp,
@@ -769,7 +805,8 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                void* __restrict__ smem_ptrk0,
                void* __restrict__ smem_ptrk1,
                void* __restrict__ smem_ptrv0,
-               void* __restrict__ smem_ptrv1) const
+               void* __restrict__ smem_ptrv1,
+               const int32_t* block_mask_row_ptr = nullptr) const
     {
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -788,6 +825,7 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                       "wrong!");
         ignore = bias_dram_block_window_tmp;
         ignore = position_encoding;
+        (void)block_mask_row_ptr;
 
         // Block GEMM
         constexpr auto gemm_0 = Policy::template GetQKBlockGemm<Problem>();
@@ -1360,7 +1398,8 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
 
 #if defined(__gfx950__)
     // Hdim256 implementation - single buffer, hdim == 256 (gfx950 only)
-    template <typename QDramBlockWindowTmp,
+    template <bool kHasBlockMask_ = false,
+              typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,
               typename BiasDramBlockWindowTmp,
@@ -1376,7 +1415,8 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                           PositionEncoding position_encoding,
                           float scale_s,
                           void* smem_ptr,
-                          float sink_v) const
+                          float sink_v,
+                          const int32_t* block_mask_row_ptr = nullptr) const
     {
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -1395,6 +1435,7 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                       "wrong!");
         ignore = bias_dram_block_window_tmp;
         ignore = position_encoding;
+        (void)block_mask_row_ptr;
         // Block GEMM
         constexpr auto gemm_0 = Policy::template GetQKBlockGemm<Problem>();
         constexpr auto gemm_1 = Policy::template GetPVBlockGemm<Problem>();
