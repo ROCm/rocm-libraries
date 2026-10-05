@@ -11,6 +11,13 @@ Documentation for rocFFT is available at
 * JIT callbacks specified with the `rocfft_plan_description_set_load_callback` and
   `rocfft_plan_description_set_store_callback` APIs can now be used with transforms that have fields
   specified on the same plan description.
+* Generated Fortran bindings, as a single `rocfft` module: `use rocfft`, link `roc::rocfft_fortran`.
+  Controlled by `BUILD_FORTRAN_BINDINGS` (on by default on Linux, off on Windows),
+  `BUILD_FORTRAN_CLIENTS` and `FORTRAN_ARRAY_INTERFACES` (`assumed-shape` by default; `none` or `assumed-rank`).
+  Found with `find_package(rocfft-fortran)`; the archive and the `.mod` files install per compiler,
+  under `<libdir>/fortran/<compiler>` and `<includedir>/fortran/<compiler>`.
+  The archive has one section per procedure: link with `-Wl,--gc-sections` to keep only the wrappers
+  you call.
 
 ### Changed
 
