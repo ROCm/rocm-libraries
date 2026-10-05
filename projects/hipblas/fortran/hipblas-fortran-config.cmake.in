@@ -1,0 +1,155 @@
+# ########################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
+# ies of the Software, and to permit persons to whom the Software is furnished
+# to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
+# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
+# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+# ########################################################################
+
+# Config package for the hipBLAS Fortran bindings.
+#
+#   find_package(hipblas-fortran REQUIRED)
+#   target_link_libraries(my_app PRIVATE roc::hipblas_fortran)
+#
+# One archive and .mod set is installed per Fortran compiler. Set
+# HIPBLAS_FORTRAN_COMPILER_DIR before find_package to pick one explicitly.
+
+@PACKAGE_INIT@
+
+set(_hipblas_built_dir "@HIPBLAS_FORTRAN_COMPILER_DIR@")
+
+# Absolute, relocatable paths written by PATH_VARS (see PACKAGE_INIT above).
+set(_hipblas_libdir "@PACKAGE_HIPBLAS_FORTRAN_LIBDIR@")
+set(_hipblas_incdir "@PACKAGE_HIPBLAS_FORTRAN_INCLUDEDIR@")
+
+set(hipblas_FORTRAN_FOUND FALSE)
+
+if(NOT CMAKE_Fortran_COMPILER_LOADED)
+  set(hipblas-fortran_FOUND FALSE)
+  string(CONCAT hipblas-fortran_NOT_FOUND_MESSAGE
+      "The hipBLAS Fortran bindings need Fortran enabled before find_package: "
+      "add Fortran to your project() languages, or call enable_language(Fortran).")
+  return()
+endif()
+
+# Accepts FC itself or FC plus a separator and suffix (gfortran-13). Not a regex:
+# FC may be an arbitrary basename, and CMake has no regex-escape.
+function(_hipblas_dir_matches DIR FC OUT)
+  set(${OUT} FALSE PARENT_SCOPE)
+  if(DIR STREQUAL FC)
+    set(${OUT} TRUE PARENT_SCOPE)
+    return()
+  endif()
+  string(LENGTH "${FC}" _n)
+  string(LENGTH "${DIR}" _dn)
+  if(_dn GREATER _n)
+    string(SUBSTRING "${DIR}" 0 ${_n} _head)
+    string(SUBSTRING "${DIR}" ${_n} 1 _sep)
+    if(_head STREQUAL FC AND _sep MATCHES "^[-._]$")
+      set(${OUT} TRUE PARENT_SCOPE)
+    endif()
+  endif()
+endfunction()
+
+file(GLOB _hipblas_avail RELATIVE "${_hipblas_incdir}" "${_hipblas_incdir}/*")
+
+set(_hipblas_dir "")
+if(DEFINED HIPBLAS_FORTRAN_COMPILER_DIR)
+  if(NOT EXISTS "${_hipblas_incdir}/${HIPBLAS_FORTRAN_COMPILER_DIR}/hipblas.mod" OR
+     NOT EXISTS "${_hipblas_libdir}/${HIPBLAS_FORTRAN_COMPILER_DIR}/libhipblas_fortran.a")
+    set(hipblas-fortran_FOUND FALSE)
+    string(CONCAT hipblas-fortran_NOT_FOUND_MESSAGE
+        "HIPBLAS_FORTRAN_COMPILER_DIR is '${HIPBLAS_FORTRAN_COMPILER_DIR}', but "
+        "no hipblas.mod and libhipblas_fortran.a are installed under "
+        "${_hipblas_incdir}/${HIPBLAS_FORTRAN_COMPILER_DIR} and "
+        "${_hipblas_libdir}/${HIPBLAS_FORTRAN_COMPILER_DIR}. Available: "
+        "${_hipblas_avail}.")
+    return()
+  endif()
+  set(_hipblas_dir "${HIPBLAS_FORTRAN_COMPILER_DIR}")
+else()
+  # Must mirror the mapping in projects/hipblas/fortran/CMakeLists.txt.
+  if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+    set(_hipblas_fc "gfortran")
+  elseif(CMAKE_Fortran_COMPILER_ID MATCHES "Flang")
+    set(_hipblas_fc "amdflang")
+  elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Cray")
+    set(_hipblas_fc "ftn")
+  elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "IntelLLVM")
+    set(_hipblas_fc "ifx")
+  elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Intel")
+    set(_hipblas_fc "ifort")
+  elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "NVHPC")
+    set(_hipblas_fc "nvfortran")
+  else()
+    get_filename_component(_hipblas_fc "${CMAKE_Fortran_COMPILER}" NAME_WE)
+    string(TOLOWER "${_hipblas_fc}" _hipblas_fc)
+  endif()
+
+  # A prefix can hold several compilers' artifacts; the recorded one is a fallback.
+  if(EXISTS "${_hipblas_incdir}/${_hipblas_fc}/hipblas.mod")
+    set(_hipblas_dir "${_hipblas_fc}")
+  else()
+    _hipblas_dir_matches("${_hipblas_built_dir}" "${_hipblas_fc}" _hipblas_ok)
+    if(_hipblas_ok)
+      set(_hipblas_dir "${_hipblas_built_dir}")
+    endif()
+  endif()
+
+  if(NOT _hipblas_dir)
+    set(hipblas-fortran_FOUND FALSE)
+    string(CONCAT hipblas-fortran_NOT_FOUND_MESSAGE
+        "This project builds with ${_hipblas_fc}, but no hipblas.mod for it is "
+        "installed under ${_hipblas_incdir}. Available: "
+        "${_hipblas_avail}. A Fortran .mod cannot be shared across compilers; "
+        "rebuild the bindings with ${_hipblas_fc}, or set "
+        "HIPBLAS_FORTRAN_COMPILER_DIR to the directory to use.")
+    return()
+  endif()
+endif()
+
+# Written TRUE only when the archive links roc::hipblas, which must be imported
+# before the targets file. hip's config needs C or CXX enabled (FindThreads).
+if(@HIPBLAS_FORTRAN_NEEDS_C_PACKAGE@)
+  if(NOT TARGET roc::hipblas)
+    if(NOT CMAKE_C_COMPILER_LOADED AND NOT CMAKE_CXX_COMPILER_LOADED)
+      enable_language(C)
+    endif()
+    include(CMakeFindDependencyMacro)
+    find_dependency(hipblas)
+  endif()
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/hipblas-fortran-targets.cmake")
+
+# The targets file hardcodes the directory the package was built with.
+if(NOT _hipblas_dir STREQUAL "${_hipblas_built_dir}")
+  set_target_properties(roc::hipblas_fortran PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${_hipblas_incdir}/${_hipblas_dir}")
+  get_target_property(_hipblas_cfgs roc::hipblas_fortran IMPORTED_CONFIGURATIONS)
+  foreach(_hipblas_c IN LISTS _hipblas_cfgs)
+    set_target_properties(roc::hipblas_fortran PROPERTIES
+      IMPORTED_LOCATION_${_hipblas_c}
+        "${_hipblas_libdir}/${_hipblas_dir}/libhipblas_fortran.a")
+  endforeach()
+endif()
+
+set(hipblas_FORTRAN_FOUND TRUE)
+
+check_required_components(hipblas-fortran)

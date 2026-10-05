@@ -197,7 +197,3 @@ else( )
     INCLUDE "${PROJECT_SOURCE_DIR}/cmake/hipblas-cuda-dependencies.cmake"
   )
 endif( )
-
-# Force installation of .f90 module files
-rocm_install(FILES "hipblas_module.f90"
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hipblas")
