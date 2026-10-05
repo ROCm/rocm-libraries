@@ -120,6 +120,11 @@ struct PassFeatureConfig {
         /// WMMA windows by the region's matrix latency. 0 disables the extra
         /// gap. Mirrors ModuleOptions::TensorLoadDsLoadGapCycles.
         int tensorLoadDsLoadGapCycles = 64;
+        /// WMMA windows kept inside one signal/wait pair. separationSlack is
+        /// barrierHalfSlack + barrierHalfSlack + 1 (the extra 1 is the tensor
+        /// load). 0 leaves the pair on one threshold. Mirrors
+        /// ModuleOptions::BarrierHalfSlack.
+        int barrierHalfSlack = 2;
         /// Max cycle-distance between two adjacent barrier groups for
         /// StinkyMergeBarrierPass to merge them into a single multi-token
         /// barrier group. 0 = use the CDNA5 default (kCdna5MergeBarrierThreshold).

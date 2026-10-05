@@ -508,6 +508,11 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return std::max(
             0, getPassContext().getPassFeatureConfig().dagFeatures.tensorLoadDsLoadGapCycles);
     }
+    // WMMA windows reserved inside one signal/wait pair. 0 keeps the pair on
+    // one threshold. Negative values are treated as off.
+    int barrierHalfSlack() const {
+        return std::max(0, getPassContext().getPassFeatureConfig().dagFeatures.barrierHalfSlack);
+    }
     // Whether to run the per-window hide-budget policy at the top of each region.
     // The gfx1250 production backend enables it; the standalone pass keeps an
     // explicit flag so tests and custom pipelines can opt in.
@@ -2857,9 +2862,11 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             int pendingThreshold = 0;
             // Descendants used when publishing hard orderings on overlap.
             std::vector<StinkyInstruction*> descendantLoads;
-            // Pair-half slack (±2) is only for a group whose overlap placements
-            // were all gap. A proportional placement keeps signal/wait together.
-            bool sawGapPlacement = false;
+            // Pair-half slack (BarrierHalfSlack WMMA windows) spreads signal/wait
+            // unless a proportional placement kept them together for
+            // MergeBarrierPass. Gap placement and a non-overlapping pair both
+            // spread: the overlap check already reserves
+            // BarrierHalfSlack+BarrierHalfSlack+1 windows between the groups.
             bool sawProportionalPlacement = false;
         };
         auto setGroupThreshold = [&](const BarrierGroupThresholdSummary& group, int threshold) {
@@ -3009,12 +3016,15 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         // When the issue demands plus the separation slack fit, leave before
         // in place and pull after to before minus that slack. Otherwise split
         // the WMMA windows in proportion to each side's demand.
+        // ModuleOptions::BarrierHalfSlack. Each exclusive group keeps this
+        // many WMMA windows inside its signal/wait pair. The gap between the
+        // two groups is that budget twice, plus 1 for the tensor load.
+        const int barrierHalfSlack = this->barrierHalfSlack();
+        const int separationSlack = barrierHalfSlack + barrierHalfSlack + 1;
         for (auto& afterGroup : exclusiveAfterGroups) {
             for (auto& beforeGroup : exclusiveBeforeGroups) {
-                // Slack is 2 + 2 WMMA windows of before/after barrier budget,
-                // plus 1 for the tensor load. It is a gap between the two
-                // thresholds, so the claim windows themselves stay unchanged.
-                const int separationSlack = 2 + 2 + 1;
+                // separationSlack is a gap between the two thresholds, so the
+                // claim windows themselves stay unchanged.
                 // Extra gap so a tensor load is not issued next to the
                 // before-side ds_loads. ModuleOptions::TensorLoadDsLoadGapCycles
                 // cycles, rounded up to whole WMMA windows of this region's
@@ -3093,8 +3103,6 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                         // TensorLoadDsLoadGapCycles (default 64) worth of WMMA
                         // windows so tensor loads stay off the ds_loads.
                         placement = "gap";
-                        afterGroup.sawGapPlacement = true;
-                        beforeGroup.sawGapPlacement = true;
                         // Do not pull the after barrier earlier than the issue
                         // windows it needs (splitNeeded is wmmaWindowsNeeded, no
                         // drain). The configured gap (TensorLoadDsLoadGapCycles,
@@ -3133,10 +3141,10 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                            << " afterWmmaWindow=" << afterGroup.claimWindow
                            << " beforeWmmaWindow=" << beforeGroup.claimWindow
                            << " overlap=" << overlap << " baseAfterEnd=" << baseAfterEnd
-                           << " baseBeforeBegin=" << baseBeforeBegin
-                           << " proportionalSplit=" << proportionalSplit
-                           << " tensorLoadDsLoadGapWmma=" << tensorLoadDsLoadGapWmma
-                           << " placement=" << placement
+                           << " baseBeforeBegin=" << baseBeforeBegin << " proportionalSplit="
+                           << proportionalSplit << " barrierHalfSlack=" << barrierHalfSlack
+                           << " separationSlack=" << separationSlack << " tensorLoadDsLoadGapWmma="
+                           << tensorLoadDsLoadGapWmma << " placement=" << placement
                            << " pendingAfterThreshold=" << afterGroup.pendingThreshold
                            << " pendingBeforeThreshold=" << beforeGroup.pendingThreshold << "\n");
             }
@@ -3210,12 +3218,14 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         normalizeBarrierPairs(/*useSrcTokens=*/true);
         normalizeBarrierPairs(/*useSrcTokens=*/false);
 
-        // Gap placement reserves 2 WMMA windows inside each signal/wait pair.
-        // Proportional placement leaves the averaged threshold on both halves
-        // so the later merge pass can still see an adjacent signal/wait pair.
-        //   after:  signal stays, wait = threshold + 2
-        //   before: signal = threshold - 2, wait stays
-        const int barrierHalfSlack = 2;
+        // Spread each signal/wait pair by BarrierHalfSlack WMMA windows unless
+        // Layer 2 packed the group proportionally. A non-overlapping pair
+        // (placement=none) already cleared separationSlack, so the same
+        // internal gap is free there; gap placement spends that budget
+        // explicitly. Proportional placement leaves the averaged threshold on
+        // both halves so MergeBarrierPass can still see an adjacent pair.
+        //   after:  signal stays, wait = threshold + BarrierHalfSlack
+        //   before: signal = threshold - BarrierHalfSlack, wait stays
         auto shiftPairHalf = [&](const BarrierGroupThresholdSummary& group, bool waitHalf,
                                  int delta) {
             for (StinkyInstruction* barrier : group.barriers) {
@@ -3231,13 +3241,13 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                                      << " threshold=" << it->second << " delta=" << delta << "\n");
             }
         };
-        auto spreadGapPair = [](const BarrierGroupThresholdSummary& group) {
-            return group.sawGapPlacement && !group.sawProportionalPlacement;
+        auto spreadPair = [](const BarrierGroupThresholdSummary& group) {
+            return !group.sawProportionalPlacement;
         };
         for (const auto& group : exclusiveAfterGroups)
-            if (spreadGapPair(group)) shiftPairHalf(group, /*waitHalf=*/true, barrierHalfSlack);
+            if (spreadPair(group)) shiftPairHalf(group, /*waitHalf=*/true, barrierHalfSlack);
         for (const auto& group : exclusiveBeforeGroups)
-            if (spreadGapPair(group)) shiftPairHalf(group, /*waitHalf=*/false, -barrierHalfSlack);
+            if (spreadPair(group)) shiftPairHalf(group, /*waitHalf=*/false, -barrierHalfSlack);
 
         // Publish the final, normalized threshold together with each barrier
         // estimator's DS-load demand. Publish once per split-barrier group:

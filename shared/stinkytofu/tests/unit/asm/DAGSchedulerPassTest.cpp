@@ -174,11 +174,13 @@ class DAGSchedulerPassTest : public ::testing::Test {
         pass->run(*func, ctx, am);
     }
 
-    void runPassWithUnrollGemm() {
+    // barrierHalfSlack < 0 leaves DagFeatures' default (2).
+    void runPassWithUnrollGemm(int barrierHalfSlack = -1) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
         PassFeatureConfig pfc;
         pfc.loopConfig.unrollGemm = true;
+        if (barrierHalfSlack >= 0) pfc.dagFeatures.barrierHalfSlack = barrierHalfSlack;
         ctx.setPassFeatureConfig(pfc);
         pass->run(*func, ctx, am);
     }
@@ -976,6 +978,95 @@ TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWhenPerWmmaBudgetsSeparateWindo
     }
     EXPECT_EQ(signals, 2);
     EXPECT_EQ(waits, 2);
+}
+
+// Windows that miss each other still have the 2+2+1 separation budget free, so
+// each signal/wait pair is spread by 2 WMMA windows. The after pair's wait
+// moves later; the before pair's signal moves earlier. Proportional placement
+// is the case that keeps a pair on one threshold.
+TEST_F(DAGSchedulerPassTest, NonOverlappingBarrierPairSpreadsSignalAndWait) {
+    bb->addSuccessor(bb);
+
+    // One token-0 ds_load consumed by the first WMMA, then independent WMMAs,
+    // so the after window stays near the front. The token-1 ds_load and its
+    // consumer sit at the end, so the before window stays near the back.
+    // 1 + 22 + 1 = 24 WMMAs: after threshold 9, before threshold 17, and
+    // 17 >= 9 + 5 so Layer 2 reports no overlap.
+    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/200, /*ldsToken=*/0);
+    StinkyInstruction* afterConsumer =
+        createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/0);
+    for (int i = 0; i < 22; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/400 + i * 16, /*src0Start=*/64 + i * 16);
+    auto [afterSignal, afterWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    createMovableTensorLoad(bb, /*src0Reg=*/220, /*src1Reg=*/224, /*ldsToken=*/0);
+    auto [beforeSignal, beforeWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+    createMovableDsLoad(/*destReg=*/500, /*addrReg=*/204, /*ldsToken=*/1);
+    StinkyInstruction* beforeConsumer =
+        createWmmaF32_16x16x16_bf16(/*destStart=*/800, /*src0Start=*/500);
+
+    runPassWithUnrollGemm();
+
+    const auto* overlaps = am.getCachedResult<Layer2BarrierOverlapAnalysis>();
+    ASSERT_NE(overlaps, nullptr);
+    EXPECT_FALSE(overlaps->contains(afterSignal, beforeSignal));
+    EXPECT_FALSE(overlaps->contains(afterWait, beforeWait));
+
+    auto wmmasBetween = [&](const StinkyInstruction* from, const StinkyInstruction* to) {
+        int count = 0;
+        bool started = false;
+        for (const IRBase& ir : *bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr) continue;
+            if (inst == to) return started ? count : -1;
+            if (started && isMatrixInstruction(*inst)) ++count;
+            if (inst == from) started = true;
+        }
+        return -1;
+    };
+
+    EXPECT_LT(positionOf(*bb, afterSignal), positionOf(*bb, afterWait)) << scheduleOrder(*bb);
+    EXPECT_EQ(wmmasBetween(afterSignal, afterWait), 2) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, beforeSignal), positionOf(*bb, beforeWait)) << scheduleOrder(*bb);
+    EXPECT_EQ(wmmasBetween(beforeSignal, beforeWait), 2) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, afterWait), positionOf(*bb, beforeSignal)) << scheduleOrder(*bb);
+    EXPECT_GE(positionOf(*bb, afterConsumer), 0);
+    EXPECT_GE(positionOf(*bb, beforeConsumer), 0);
+}
+
+// BarrierHalfSlack=0 makes separationSlack 1 and does not move either half,
+// so a non-overlapping pair stays on one threshold and issues together.
+TEST_F(DAGSchedulerPassTest, BarrierHalfSlackZeroKeepsNonOverlappingPairTogether) {
+    bb->addSuccessor(bb);
+
+    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/200, /*ldsToken=*/0);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/0);
+    for (int i = 0; i < 22; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/400 + i * 16, /*src0Start=*/64 + i * 16);
+    auto [afterSignal, afterWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    createMovableTensorLoad(bb, /*src0Reg=*/220, /*src1Reg=*/224, /*ldsToken=*/0);
+    auto [beforeSignal, beforeWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+    createMovableDsLoad(/*destReg=*/500, /*addrReg=*/204, /*ldsToken=*/1);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/800, /*src0Start=*/500);
+
+    runPassWithUnrollGemm(/*barrierHalfSlack=*/0);
+
+    auto wmmasBetween = [&](const StinkyInstruction* from, const StinkyInstruction* to) {
+        int count = 0;
+        bool started = false;
+        for (const IRBase& ir : *bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr) continue;
+            if (inst == to) return started ? count : -1;
+            if (started && isMatrixInstruction(*inst)) ++count;
+            if (inst == from) started = true;
+        }
+        return -1;
+    };
+
+    EXPECT_EQ(positionOf(*bb, afterWait), positionOf(*bb, afterSignal) + 1) << scheduleOrder(*bb);
+    EXPECT_EQ(wmmasBetween(afterSignal, afterWait), 0) << scheduleOrder(*bb);
+    EXPECT_EQ(positionOf(*bb, beforeWait), positionOf(*bb, beforeSignal) + 1) << scheduleOrder(*bb);
+    EXPECT_EQ(wmmasBetween(beforeSignal, beforeWait), 0) << scheduleOrder(*bb);
 }
 
 TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWithoutBeforeGroup) {

@@ -185,6 +185,7 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--ds-issue-cap-span-cycles=") ||
                 arg.starts_with("--tensor-load-wmma-space=") ||
                 arg.starts_with("--tensor-load-ds-load-gap-cycles=") ||
+                arg.starts_with("--barrier-half-slack=") ||
                 arg.starts_with("--global-read-queue-depth=") ||
                 arg.starts_with("--global-read-drain-latency=") ||
                 arg.starts_with("--merge-barrier-threshold=") ||
@@ -547,6 +548,9 @@ int main(int argc, char** argv) {
         } else if (a.starts_with("--tensor-load-ds-load-gap-cycles=")) {
             passFeatureConfig.dagFeatures.tensorLoadDsLoadGapCycles =
                 std::stoi(a.substr(std::string("--tensor-load-ds-load-gap-cycles=").size()));
+        } else if (a.starts_with("--barrier-half-slack=")) {
+            passFeatureConfig.dagFeatures.barrierHalfSlack =
+                std::stoi(a.substr(std::string("--barrier-half-slack=").size()));
         } else if (a.starts_with("--global-read-queue-depth=")) {
             passFeatureConfig.dagFeatures.globalReadQueueDepth = std::stoi(a.substr(26));
         } else if (a.starts_with("--global-read-drain-latency=")) {
