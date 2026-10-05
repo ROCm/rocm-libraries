@@ -41,6 +41,8 @@ Every layout is either tight (no extra LDS) or aligned (padded to a segment boun
 LDS and needs PrefetchGlobalRead=2).
 """
 
+from Tensile.Components.TDMFuse import tdmWavePartition
+
 # gfx1250 LDS segment size (5 x 64 KiB segments).
 SEG = 65536
 
@@ -262,6 +264,12 @@ def evaluate(state):
     # per active dim. [2,2] interleaves both tensors; [4,1]/[1,4] have one active + one shared
     # tensor and are handled by _evaluate_asymmetric below.
     if state["NumWaves"] // 2 != 2:                             return _no("numComp!=2")
+    # Every layout below places exactly two components per operand.
+    for tc in ("A", "B"):
+        numCompTc = tdmWavePartition(state, tc)[0]
+        if numCompTc != 2:
+            return _no("%s moves in %d TDM components (TDMFuse=%d); needs 2"
+                       % (tc, numCompTc, state.get("TDMFuse", 0)))
     if pt.get("Sparse"):
         return _no("sparse")
     # Subtile uses a separate codegen body; the emit path these offsets target runs only for

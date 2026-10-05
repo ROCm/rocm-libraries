@@ -39,7 +39,7 @@ from ..Common import assignParameterWithDefault, IsaInfo, \
                     print2, printExit, printWarning, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
                     roundUpToNearestMultiple, effectiveMatrixInstMN, isPow2, \
-                    clusterEnabled, streamKCluster, streamKMulticast, \
+                    streamKCluster, streamKMulticast, \
                     streamK2DCluster, deriveWaveParams, \
                     swizzleGeometry
 from ..Common.DataType import DataType
@@ -50,6 +50,7 @@ from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, 
                                        decoupledOneBlockBoth, decouplePGRBlocks, \
                                        equalPairDegeneratesToScalar, \
                                        divergentPairUnsupportedReason, \
+                                       dcpClusterRejectReason, \
                                        decoupledThickGateRelaxation, \
                                        DCP_THICK_GATE_TEXT, \
                                        pgrAutoPairRequested, \
@@ -6097,12 +6098,6 @@ class Solution(collections.abc.Mapping):
     # Divergent block counts take the owner-grouped LDS layout; equal counts keep
     # legacy's, which makes them byte-identical kernels.
     dcpDivergent = decouplePGR and numLdsBlkA != numLdsBlkB
-    if clusterEnabled(state["ClusterDim"]) and dcpDivergent:
-      reject(state, printRejectionReason,
-             "PrefetchGlobalReadA/B: ClusterDim != [1, 1] is incompatible with "
-             "divergent LDS block counts (A=%u, B=%u); use an equal pair"
-             % (numLdsBlkA, numLdsBlkB))
-      return
     if decouplePGR:
       if not tdmBothTensors(state):
         reject(state, printRejectionReason,
@@ -6146,6 +6141,12 @@ class Solution(collections.abc.Mapping):
                  "PrefetchGlobalReadA/B: divergent LDS blocks (A=%u, B=%u) give the two "
                  "groups different strides, so the persistent tail cannot normalize LDS to "
                  "buffer 0" % (numLdsBlkA, numLdsBlkB))
+          return
+        dcpClusterReject = dcpClusterRejectReason(state)
+        if dcpClusterReject:
+          reject(state, printRejectionReason,
+                 "PrefetchGlobalReadA/B: divergent LDS blocks (A=%u, B=%u) at ClusterDim=%s: %s"
+                 % (numLdsBlkA, numLdsBlkB, state["ClusterDim"], dcpClusterReject))
           return
         dcpUnsupported = divergentPairUnsupportedReason(state)
         if dcpUnsupported:

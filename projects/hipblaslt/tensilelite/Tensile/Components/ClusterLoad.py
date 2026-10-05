@@ -12,6 +12,8 @@ Capability-selected (``HasTDM`` + ``TDMInst == 3``), like ``TensorDataMoverLoad`
 from ..Component import ClusterLoad
 from ..Common import clusterEnabled, persistent2DCluster, persistentSpatialCluster, \
     persistentMulticast
+from .DecouplePGR import DCP_LDS_SIDE, decouplePGRBlocks
+from .TDMFuse import tdmMemberIsLive, tdmWavePartition
 from typing import Mapping
 from rocisa.code import Module, Label
 from rocisa.container import sgpr
@@ -32,27 +34,43 @@ class ClusterLoadTDM(ClusterLoad):
     def usesCombinedMask(self, kernel: Mapping) -> bool:
         """True when the single-parity combined ``MulticastMask`` applies.
 
-        Subtile and StreamK cluster multicast both need the split A/B masks
-        (subtile issues A and B on every wave; the StreamK cluster broadcasts A
+        Subtile and persistent cluster multicast both need the split A/B masks
+        (subtile issues A and B on every wave; the persistent cluster broadcasts A
         and B along different cluster axes), so the combined parity mask applies
-        only to the wave-separated dense case.
+        only to the wave-separated dense case whose TDMFuse grouping keeps each
+        wave on one cluster axis.
         """
         if persistentSpatialCluster(kernel):
             return False
         tdmA: bool = kernel["enableTDMA"]
         tdmB: bool = kernel["enableTDMB"]
-        return tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl")
+        if not (tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl")):
+            return False
+        return self.waveParityMatchesMaskAxis(kernel)
+
+    @staticmethod
+    def waveParityMatchesMaskAxis(kernel: Mapping) -> bool:
+        """The combined mask is maskA on even waves and maskB on odd ones, and
+        each MX scale multicasts along its data tensor's axis."""
+        for tc in ("A", "B", "MXSA", "MXSB"):
+            if not tdmMemberIsLive(kernel, tc):
+                continue
+            _, waves = tdmWavePartition(kernel, tc)
+            onOddWaves = tc.endswith("B")
+            if any((w % 2 == 1) != onOddWaves for w in waves):
+                return False
+        return True
 
     def maskSgprName(self, kernel: Mapping, tc: str, *, subtile: bool = False,
                      waveSeparated: bool = False) -> str:
         """Resolve the multicast-mask SGPR name.
 
-        Wave-separated (non-subtile, non-StreamK-multicast) uses the combined
-        ``"MulticastMask"``; dense/subtile and StreamK multicast use the split
+        Wave-separated (non-subtile) uses the combined ``"MulticastMask"`` when
+        ``usesCombinedMask`` holds; everything else uses the split
         ``f"MulticastMask{tc}"`` (any ``MXS`` prefix stripped) so B never resolves
         to the never-declared combined SGPR.
         """
-        if waveSeparated and not subtile and not persistentSpatialCluster(kernel):
+        if waveSeparated and not subtile and self.usesCombinedMask(kernel):
             return "MulticastMask"
         return f"MulticastMask{tc.removeprefix('MXS')}"
 
@@ -213,6 +231,11 @@ class ClusterLoadTDM(ClusterLoad):
         mod = Module()
         if kernel["Multicast"] and clusterEnabled(kernel["ClusterDim"]):
             mask = self.maskSgprName(kernel, tc, subtile=subtile, waveSeparated=waveSeparated)
+            _, numLdsBlkA, numLdsBlkB = decouplePGRBlocks(kernel)
+            if numLdsBlkA != numLdsBlkB and tc in DCP_LDS_SIDE:
+                thinSide, thinAxis = ("A", 1) if numLdsBlkA < numLdsBlkB else ("B", 0)
+                assert DCP_LDS_SIDE[tc] != thinSide or kernel["ClusterDim"][thinAxis] == 1, \
+                    "%s is single-buffered, so its multicast mask must stay self-only" % tc
             # A persistent self-only A-side mask SGPR is freed (see
             # persistentDropsSelfOnlyMaskA): with Ck == 1 the A mask carries no
             # multicast peers, so re-applying it is a no-op. Skip it so the freed

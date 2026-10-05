@@ -1014,6 +1014,47 @@ bool isImmediatelyPrecededByClusterBarrierWait(StinkyInstruction* anchor) {
     return false;
 }
 
+bool loopBodyHasClusterBarrier(StinkyInstruction* loopHead) {
+    BasicBlock* parent = loopHead->getParent();
+    StinkyInstruction* latch = findLatchBranchFor(loopHead);
+    if (parent == nullptr || latch == nullptr) return true;
+    for (auto it = BasicBlock::iterator(loopHead); it != parent->end(); ++it) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr) continue;
+        if (isClusterBarrierSignal(*inst) || isClusterBarrierWait(*inst)) return true;
+        if (inst == latch) break;
+    }
+    return false;
+}
+
+/// Whether the only way into the loop from above is falling into \p loopHead,
+/// so that a wait planted directly in front of the head runs once per entry.
+bool isEnteredOnlyByFallingIntoHead(StinkyInstruction* loopHead) {
+    BasicBlock* parent = loopHead->getParent();
+    const auto* headData = loopHead->getModifier<LabelData>();
+    if (parent == nullptr || headData == nullptr) return false;
+    StinkyInstruction* prevReal = nullptr;
+    for (auto it = parent->begin(); it != BasicBlock::iterator(loopHead); ++it) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr) continue;
+        if (isBranch(*inst) && getBranchTarget(*inst) == headData->label) return false;
+        if (!isPseudoInst(inst)) prevReal = inst;
+    }
+    return prevReal != nullptr && !isUnconditionalBranch(*prevReal) &&
+           !isEndOfFunction(*prevReal);
+}
+
+/// Innermost loop around \p firstLoad whose trips would all wait on one run-up
+/// signal, including one a previous run already drained; null otherwise.
+StinkyInstruction* findLoopRepeatingFirstLoadWait(StinkyInstruction* firstLoad) {
+    StinkyInstruction* loopHead = findEnclosingLoopHead(firstLoad);
+    if (loopHead == nullptr) return nullptr;
+    if (isImmediatelyPrecededByClusterBarrierWait(loopHead)) return loopHead;
+    if (loopBodyHasClusterBarrier(loopHead) || !isEnteredOnlyByFallingIntoHead(loopHead))
+        return nullptr;
+    return loopHead;
+}
+
 struct PreLoopSignalAnchor {
     IRBase* anchor = nullptr;
     /// True when the climb found no workgroup barrier to sit behind. Only wave 0
@@ -1575,12 +1616,33 @@ class InsertClusterBarrierPassImpl : public Pass {
         // load, pairing Rule 1's prologue arrive. Only skip when that load is
         // already directly preceded by a cluster wait; a wait on a different CFG
         // path above (e.g. StreamK zero-iter skip) does not count.
+        //
+        // A first load inside a loop would wait every trip on one run-up signal:
+        // drain it on loop entry and plant the load's per-trip handshake here,
+        // since Rule 3 would take the drain for an already-handled trigger.
         StinkyInstruction* firstTL = findFirstTensorLoadInFunc(func);
         if (firstTL != nullptr && !isImmediatelyPrecededByClusterBarrierWait(firstTL)) {
             BasicBlock* parent = firstTL->getParent();
             AsmIRBuilder irBuilder(*parent, archId);
-            insertClusterBarrierWaitBefore(hoistAboveLeadingWaitCnts(firstTL),
-                                           "cluster_barrier wait", irBuilder, archId);
+            IRBase* waitAnchor = hoistAboveLeadingWaitCnts(firstTL);
+            StinkyInstruction* loopHead = findLoopRepeatingFirstLoadWait(firstTL);
+            if (loopHead == nullptr) {
+                insertClusterBarrierWaitBefore(waitAnchor, "cluster_barrier wait", irBuilder,
+                                               archId);
+            } else if (!isImmediatelyPrecededByClusterBarrierWait(loopHead)) {
+                insertClusterBarrierWaitBefore(loopHead, "drain run-up cluster signal", irBuilder,
+                                               archId);
+                const auto segBegin = segmentBegin(BasicBlock::iterator(firstTL), parent->begin());
+                StinkyInstruction* trigger =
+                    findPrecedingWorkgroupBarrierSignalInSegment(segBegin, firstTL);
+                IRBase* handshakeWait =
+                    (trigger != nullptr) ? hoistAboveLeadingWaitCnts(trigger) : waitAnchor;
+                const Rule3SignalAnchor found = findRule3SignalAnchorByCycleLead(
+                    cast<StinkyInstruction>(handshakeWait), segBegin, handshakeWait, cycleMap,
+                    rule3SignalLeadCycles_, kRule3SignalMaxLeadCycles, /*priorWaitAnchors=*/{},
+                    /*maxHops=*/0, loopHead);
+                insertRule3HandshakeBefore(found.anchor, handshakeWait, irBuilder, archId);
+            }
         }
 
         for (BasicBlock& bb : func) {
