@@ -3063,6 +3063,25 @@ class Solution(collections.abc.Mapping):
     if state["enableLDSTrB"] or state["enableGLTrB"]:
       state["VectorWidthB"] = 1
 
+    if state["ProblemType"]["Sparse"]:
+      if not state["DirectToVgprSparseMetadata"]:
+        state["VectorWidthMetadata"] = state["VectorWidthA"] if state["ProblemType"]["Sparse"] == 1 else state["VectorWidthB"]
+
+    state["enableLDSTrMetadata"] = isaInfoMap[isa].asmCaps["HasLDSTrB64B8"] and state["ProblemType"]["MetadataLayout"]
+    if state["enableLDSTrMetadata"]:
+      state["VectorWidthMetadata"] = 1
+      # The metadata read and the sparse operand's read used to be required to share a
+      # VectorWidth, which forced VectorWidthA=1 for Sparse==1 and VectorWidthB=1 for
+      # Sparse==2. That coupling is gone on the A side: ds_read_tr fixes the metadata read at
+      # VW=1 in the tile direction regardless (lrvwTileMetadata, KernelWriter.py), and A's
+      # VW>1 is now expressed in the epilogue by accumShuffleForLDSTrVW rather than in the
+      # read geometry, so the two no longer have to agree. Sparse==2 still clamps B, but for
+      # an unrelated reason -- see the enableLDSTrB clamp: N is the strided direction of C/D.
+      if state["ProblemType"]["Sparse"] == 1:
+        state["VectorWidthA"] = 1
+      else:
+        state["VectorWidthB"] = 1
+
     if state["_ScheduleIterAlg"] == 2:
       state["ExpandPointerSwap"] = True
       print2("\nSet SIA=2, force ExpandPointerSwap=1")
@@ -3167,12 +3186,6 @@ class Solution(collections.abc.Mapping):
         # So far, continue with VectorWidthB //=state["numSubTiles"]
         while state["MIWaveTile"][1] % (state["VectorWidthB"] * state["numSubTiles"]) != 0:
           state["VectorWidthB"] //= state["numSubTiles"]
-
-    if state["ProblemType"]["Sparse"]:
-      if not state["DirectToVgprSparseMetadata"]:
-        state["VectorWidthMetadata"] = state["VectorWidthA"] if state["ProblemType"]["Sparse"] == 1 else state["VectorWidthB"]
-      # ON/OFF the sourceswap according to the sparse type automatically
-      state["SourceSwap"] = False if state["ProblemType"]["Sparse"] == 1 else True
 
     # ds_read_tr hands lane L the tile row (m_base + L), so the A read is laid out VW=1 in
     # the tile direction whatever VectorWidthA is (see mTileOffset in Components/LocalRead.py).
@@ -5632,19 +5645,6 @@ class Solution(collections.abc.Mapping):
       if state["DirectToVgprB"] and state['MIWaveGroup'][0] > 1:
         reject(state, printRejectionReason, "DirectToLds + (DirectToVgprB + WaveGroups along M-Dim) is not supported yet")
         return False
-
-    state["enableLDSTrMetadata"] = isaInfoMap[isa].asmCaps["HasLDSTrB64B8"] and state["ProblemType"]["MetadataLayout"]
-    if state["enableLDSTrMetadata"]:
-      state["VectorWidthMetadata"] = 1
-      # The metadata read and the sparse operand's read used to be required to share a
-      # VectorWidth, which forced VectorWidthA=1 for Sparse==1 and VectorWidthB=1 for
-      # Sparse==2. That coupling is gone on the A side: ds_read_tr fixes the metadata read at
-      # VW=1 in the tile direction regardless (lrvwTileMetadata, KernelWriter.py), and A's
-      # VW>1 is now expressed in the epilogue by accumShuffleForLDSTrVW rather than in the
-      # read geometry, so the two no longer have to agree. Sparse==2 still clamps B, but for
-      # an unrelated reason -- see the enableLDSTrB clamp: N is the strided direction of C/D.
-      if state["ProblemType"]["Sparse"] == 2:
-        state["VectorWidthB"] = 1
 
     wmmaV3 = isaInfoMap[isa].asmCaps["HasWMMA_V3"]
     if wmmaV3:
