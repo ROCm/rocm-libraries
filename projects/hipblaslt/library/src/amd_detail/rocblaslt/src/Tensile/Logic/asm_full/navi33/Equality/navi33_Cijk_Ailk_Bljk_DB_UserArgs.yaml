@@ -313,7 +313,7 @@ Solutions:
   MacroTile1: 8
   MacroTileA: 8
   MacroTileB: 8
-  MaxOccupancy: 40
+  MaxOccupancy: 64
   NoLdsWriteCode: false
   NoTailLoop: false
   NumElementsPerThread: 1
