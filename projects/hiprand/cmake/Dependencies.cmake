@@ -298,11 +298,6 @@ if (NOT BUILD_WITH_LIB STREQUAL "CUDA")
     endif()
 endif()
 
-# Fortran Wrapper
-if(BUILD_FORTRAN_WRAPPER)
-    enable_language(Fortran)
-endif()
-
 # Test dependencies
 if(USER_BUILD_TEST)
   # NOTE: Google Test has created a mess with legacy FindGTest.cmake and newer GTestConfig.cmake
