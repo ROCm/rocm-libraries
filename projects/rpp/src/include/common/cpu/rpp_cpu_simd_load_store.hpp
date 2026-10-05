@@ -25,6 +25,9 @@ SOFTWARE.
 #ifndef RPP_CPU_SIMD_LOAD_STORE_HPP
 #define RPP_CPU_SIMD_LOAD_STORE_HPP
 
+#include <algorithm>
+#include <type_traits>
+
 #include "rppdefs.h"
 #include "stdio.h"
 
@@ -96,6 +99,8 @@ const __m128i xmm_px4 = _mm_set1_epi32(4);
 const __m128i xmm_px5 = _mm_set1_epi32(5);
 const __m128i xmm_pxConvertI8 = _mm_set1_epi8((char)128);
 const __m128i xmm_pxDstLocInit = _mm_setr_epi32(0, 1, 2, 3);
+const __m128i xmm_pxI8Black = _mm_set1_epi8((char)0x80);  // -128 in every byte lane (I8 black for
+                                                          // invalid/out-of-bounds gather lanes)
 
 const __m256 avx_p2 = _mm256_set1_ps(2.0f);
 const __m256 avx_pm2 = _mm256_set1_ps(-2.0f);
@@ -3685,7 +3690,7 @@ inline void rpp_generic_nn_load_i8pkd3(Rpp8s* srcPtrChannel, Rpp32s* srcLoc, Rpp
     __m128i px[4];
     px[0] =
         invalidLoad[0]
-            ? xmm_px0
+            ? xmm_pxI8Black
             : _mm_loadu_si128((
                   __m128i*)(srcPtrChannel +
                             srcLoc
@@ -3694,7 +3699,7 @@ inline void rpp_generic_nn_load_i8pkd3(Rpp8s* srcPtrChannel, Rpp32s* srcLoc, Rpp
                                         // - Need RGB 01
     px[1] =
         invalidLoad[1]
-            ? xmm_px0
+            ? xmm_pxI8Black
             : _mm_loadu_si128((
                   __m128i*)(srcPtrChannel +
                             srcLoc
@@ -3703,7 +3708,7 @@ inline void rpp_generic_nn_load_i8pkd3(Rpp8s* srcPtrChannel, Rpp32s* srcLoc, Rpp
                                         // - Need RGB 11
     px[2] =
         invalidLoad[2]
-            ? xmm_px0
+            ? xmm_pxI8Black
             : _mm_loadu_si128((
                   __m128i*)(srcPtrChannel +
                             srcLoc
@@ -3712,7 +3717,7 @@ inline void rpp_generic_nn_load_i8pkd3(Rpp8s* srcPtrChannel, Rpp32s* srcLoc, Rpp
                                         // - Need RGB 21
     px[3] =
         invalidLoad[3]
-            ? xmm_px0
+            ? xmm_pxI8Black
             : _mm_loadu_si128((
                   __m128i*)(srcPtrChannel +
                             srcLoc
@@ -3734,7 +3739,7 @@ inline void rpp_generic_nn_load_i8pkd3_avx(Rpp8s* srcPtrChannel, Rpp32s* srcLoc,
     __m128i px[7];
     px[0] =
         invalidLoad[0]
-            ? xmm_px0
+            ? xmm_pxI8Black
             : _mm_loadu_si128((
                   __m128i*)(srcPtrChannel +
                             srcLoc
@@ -3743,7 +3748,7 @@ inline void rpp_generic_nn_load_i8pkd3_avx(Rpp8s* srcPtrChannel, Rpp32s* srcLoc,
                                         // - Need RGB 01
     px[1] =
         invalidLoad[1]
-            ? xmm_px0
+            ? xmm_pxI8Black
             : _mm_loadu_si128((
                   __m128i*)(srcPtrChannel +
                             srcLoc
@@ -3752,7 +3757,7 @@ inline void rpp_generic_nn_load_i8pkd3_avx(Rpp8s* srcPtrChannel, Rpp32s* srcLoc,
                                         // - Need RGB 11
     px[2] =
         invalidLoad[2]
-            ? xmm_px0
+            ? xmm_pxI8Black
             : _mm_loadu_si128((
                   __m128i*)(srcPtrChannel +
                             srcLoc
@@ -3761,7 +3766,7 @@ inline void rpp_generic_nn_load_i8pkd3_avx(Rpp8s* srcPtrChannel, Rpp32s* srcLoc,
                                         // - Need RGB 21
     px[3] =
         invalidLoad[3]
-            ? xmm_px0
+            ? xmm_pxI8Black
             : _mm_loadu_si128((
                   __m128i*)(srcPtrChannel +
                             srcLoc
@@ -3779,7 +3784,7 @@ inline void rpp_generic_nn_load_i8pkd3_avx(Rpp8s* srcPtrChannel, Rpp32s* srcLoc,
 
     px[0] =
         invalidLoad[4]
-            ? xmm_px0
+            ? xmm_pxI8Black
             : _mm_loadu_si128((
                   __m128i*)(srcPtrChannel +
                             srcLoc
@@ -3788,7 +3793,7 @@ inline void rpp_generic_nn_load_i8pkd3_avx(Rpp8s* srcPtrChannel, Rpp32s* srcLoc,
                                         // - Need RGB 41
     px[1] =
         invalidLoad[5]
-            ? xmm_px0
+            ? xmm_pxI8Black
             : _mm_loadu_si128((
                   __m128i*)(srcPtrChannel +
                             srcLoc
@@ -3797,7 +3802,7 @@ inline void rpp_generic_nn_load_i8pkd3_avx(Rpp8s* srcPtrChannel, Rpp32s* srcLoc,
                                         // - Need RGB 51
     px[2] =
         invalidLoad[6]
-            ? xmm_px0
+            ? xmm_pxI8Black
             : _mm_loadu_si128((
                   __m128i*)(srcPtrChannel +
                             srcLoc
@@ -3806,7 +3811,7 @@ inline void rpp_generic_nn_load_i8pkd3_avx(Rpp8s* srcPtrChannel, Rpp32s* srcLoc,
                                         // - Need RGB 61
     px[3] =
         invalidLoad[7]
-            ? xmm_px0
+            ? xmm_pxI8Black
             : _mm_loadu_si128((
                   __m128i*)(srcPtrChannel +
                             srcLoc
@@ -3836,22 +3841,22 @@ inline void rpp_generic_nn_load_i8pln1(Rpp8s* srcPtrChannel, Rpp32s* srcLoc, Rpp
                                        __m128i& p) {
     __m128i px[4];
     px[0] = invalidLoad[0]
-                ? xmm_px0
+                ? xmm_pxI8Black
                 : _mm_loadu_si128(
                       (__m128i*)(srcPtrChannel +
                                  srcLoc[0]));  // LOC0 load [R01|R02|R03|R04|R05|R06...] - Need R01
     px[1] = invalidLoad[1]
-                ? xmm_px0
+                ? xmm_pxI8Black
                 : _mm_loadu_si128(
                       (__m128i*)(srcPtrChannel +
                                  srcLoc[1]));  // LOC1 load [R11|R12|R13|R14|R15|R16...] - Need R11
     px[2] = invalidLoad[2]
-                ? xmm_px0
+                ? xmm_pxI8Black
                 : _mm_loadu_si128(
                       (__m128i*)(srcPtrChannel +
                                  srcLoc[2]));  // LOC2 load [R21|R22|R23|R24|R25|R26...] - Need R21
     px[3] = invalidLoad[3]
-                ? xmm_px0
+                ? xmm_pxI8Black
                 : _mm_loadu_si128(
                       (__m128i*)(srcPtrChannel +
                                  srcLoc[3]));  // LOC3 load [R31|R32|R33|R34|R35|R36...] - Need R31
@@ -3863,7 +3868,8 @@ inline void rpp_generic_nn_load_i8pln1(Rpp8s* srcPtrChannel, Rpp32s* srcLoc, Rpp
 
 inline void rpp_generic_nn_load_i8pln1_avx(Rpp8s* srcPtrChannel, Rpp32s* srcLoc,
                                            Rpp32s* invalidLoad, __m256i& p) {
-    Rpp8s buffer[16] = {0};
+    Rpp8s buffer[16];
+    std::fill_n(buffer, 16, (Rpp8s)-128);  // -128 default for invalid (out-of-bounds) I8 lanes
     for (int i = 0; i < 8; i++) {
         if (!invalidLoad[i]) buffer[i] = *(srcPtrChannel + srcLoc[i]);
     }
@@ -3888,7 +3894,15 @@ inline void rpp_generic_bilinear_load_1c_avx(T* srcPtrChannel, RpptDescPtr srcDe
                                              __m256& pSrcX, __m256* pRoiLTRB, __m256* pSrc) {
     Rpp32s invalidLoadMask[8];
     RpptBilinearNbhoodValsVecLen8 srcVals;
-    memset(&srcVals, 0, sizeof(RpptBilinearNbhoodValsVecLen8));
+    if constexpr (std::is_same<T, Rpp8s>::value) {
+        // -128 (I8 black) default for out-of-bounds lanes, since values here are the raw
+        // (unbiased) signed pixel domain
+        for (int i = 0; i < 24; i++)
+            srcVals.srcValsTL.data[i] = srcVals.srcValsTR.data[i] = srcVals.srcValsBL.data[i] =
+                srcVals.srcValsBR.data[i] = -128.0f;
+    } else {
+        memset(&srcVals, 0, sizeof(RpptBilinearNbhoodValsVecLen8));
+    }
     rpp_generic_bilinear_load_mask_avx(pSrcY, pSrcX, pRoiLTRB, invalidLoadMask);
     for (int j = 0; j < 8; j++) {
         if (invalidLoadMask[j] == 0)  // Loading specific pixels where invalidLoadMask is set to 0
@@ -3911,7 +3925,15 @@ inline void rpp_generic_bilinear_load_3c_avx(T* srcPtrChannel, RpptDescPtr srcDe
                                              __m256& pSrcX, __m256* pRoiLTRB, __m256* pSrc) {
     Rpp32s invalidLoadMask[8];
     RpptBilinearNbhoodValsVecLen8 srcVals;
-    memset(&srcVals, 0, sizeof(RpptBilinearNbhoodValsVecLen8));
+    if constexpr (std::is_same<T, Rpp8s>::value) {
+        // -128 (I8 black) default for out-of-bounds lanes, since values here are the raw
+        // (unbiased) signed pixel domain
+        for (int i = 0; i < 24; i++)
+            srcVals.srcValsTL.data[i] = srcVals.srcValsTR.data[i] = srcVals.srcValsBL.data[i] =
+                srcVals.srcValsBR.data[i] = -128.0f;
+    } else {
+        memset(&srcVals, 0, sizeof(RpptBilinearNbhoodValsVecLen8));
+    }
     rpp_generic_bilinear_load_mask_avx(pSrcY, pSrcX, pRoiLTRB, invalidLoadMask);
     for (int j = 0; j < 8; j++) {
         if (invalidLoadMask[j] == 0)  // Loading specific pixels where invalidLoadMask is set to 0
