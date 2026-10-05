@@ -61,8 +61,9 @@ batch, set `DsReadPerCap` explicitly.
 
 | Module option | Default | CLI | Meaning |
 |---|---|---|---|
-| `DsReadPerCap` | -1 → heuristic | `--ds-read-per-cap=N` | Ceiling: at most N ds_loads in any `DsIssueCapSpanCycles` cycles (a sliding window on the real timeline). It is a wait, not a veto. Must be > 0 when set. Alias: `DsReadPerWmma` (deprecated). |
-| *CLI only* `dsIssueCapSpanCycles` | 0 → one batch window | `--ds-issue-cap-span-cycles=N` | The span `DsReadPerCap` applies over. The pair is the cap: neither means anything alone. |
+| `DsReadPerCap` | -1 → heuristic | `--ds-read-per-cap=N` | Ceiling A: at most N ds_loads per `DsIssueCapSpanCycles` cycles (how the span expires is set by `DsIssueCapMode`). It is a wait, not a veto. Must be > 0 when set. Alias: `DsReadPerWmma` (deprecated). |
+| `DsIssueCapSpanCycles` | 0 → one batch window | `--ds-issue-cap-span-cycles=N` | The span X `DsReadPerCap` applies over. The pair is the cap: neither means anything alone. TensileLite: global parameter `StinkyTofuDsIssueCapSpanCycles`. |
+| `DsIssueCapMode` | 0 (`Sliding`) | `--ds-issue-cap-mode=sliding\|periodic` | How the cap expires. `0` / `sliding`: each ds_load frees its slot X cycles after its own issue (keeps the LDS return queue from running busy). `1` / `periodic`: a period opens at its first ds_load and all slots free X cycles later, so the cap is exactly A per X-cycle period. Tight back-to-back bursts behave the same in both modes. TensileLite: global parameter `StinkyTofuDsIssueCapMode`. |
 | `DsReadQueueDepth` | 0 → HW 16 | `--ds-read-queue-depth=N` | In-flight ds_load credits modeled for the LDS return queue. |
 | `DsReadThrottleLatency` | -1 → heuristic | `--ds-read-throttle-latency=N` | Lifetime of one credit. A saturated queue issues one ds_load per `DsReadThrottleLatency / DsReadQueueDepth` cycles. |
 | `DsReadThrottleTransitionFactor` | 1.0 | `--ds-read-throttle-transition-factor=F` | Fraction of the full throttle interval used for the first `TransitionEntries` loads past the queue depth. Clamped to [0, 1]; 1.0 = full throttle. |
@@ -137,3 +138,4 @@ dependences allow.
 | Batch, uncapped ds bursts | `WmmaBatchSize=5, DsReadPerCap=1000, DsReadThrottleLatency=1` |
 | Fillers packed early instead of spread | `EvenSpreadFillers=false` |
 | Free ds order | `LockDsReadOrder=false` |
+| A ds_loads per fixed X-cycle period (e.g. 12 per 32) | `DsReadPerCap=12, DsIssueCapSpanCycles=32, DsIssueCapMode=1, DsReadQueueDepth=16, DsReadThrottleLatency=1` |

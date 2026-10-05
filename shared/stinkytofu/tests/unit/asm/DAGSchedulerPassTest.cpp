@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <functional>
 #include <iostream>
 #include <sstream>
 #include <string_view>
@@ -172,6 +173,26 @@ class DAGSchedulerPassTest : public ::testing::Test {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
         pass->run(*func, ctx, am);
+    }
+
+    // Run with a ds-cap mode (plus optional extra tweaks) and return the
+    // StinkyDAGSchedulerPass debug trace.
+    std::string runWithDsCapMode(PassFeatureConfig::DsIssueCapMode mode,
+                                 const std::function<void(PassFeatureConfig&)>& tweak = {}) {
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsIssueCapMode = mode;
+        if (tweak) tweak(pfc);
+        ctx.setPassFeatureConfig(pfc);
+        PassManagerDebugConfig::addDebugOnly("StinkyDAGSchedulerPass");
+        std::ostringstream captured;
+        std::streambuf* oldBuf = std::cerr.rdbuf(captured.rdbuf());
+        pass->run(*func, ctx, am);
+        std::cerr.rdbuf(oldBuf);
+        PassManagerDebugConfig::clearDebugOnly();
+        return captured.str();
     }
 
     void runPassWithUnrollGemm() {
@@ -1752,6 +1773,46 @@ TEST_F(DAGSchedulerPassTest, DSWindowCap_SpanCoversTheWmmaBatchWindow) {
     ASSERT_NE(spanPos, std::string::npos);
     EXPECT_EQ(std::stoi(captured.str().substr(spanPos + 5)), 8 + 4 * 7)
         << "{1,8} WMMA, batch of 5: 8 + (5-1)*(8-1)";
+}
+
+// DsIssueCapMode: Sliding (default) and Periodic both enforce "at most
+// dsReadPerCap ds_loads per dsIssueCapSpanCycles"; they differ only in when an
+// issued ds_load stops counting.
+TEST_F(DAGSchedulerPassTest, DsIssueCapMode_DefaultIsSliding) {
+    createMovableDsLoad(0, 80, 1);
+    createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/0);
+    const std::string trace = runWithDsCapMode(PassFeatureConfig{}.dagFeatures.dsIssueCapMode);
+    EXPECT_NE(trace.find("mode=sliding"), std::string::npos) << trace;
+}
+
+TEST_F(DAGSchedulerPassTest, DsIssueCapMode_PeriodicIsReportedAndHonorsSpan) {
+    createMovableDsLoad(0, 80, 1);
+    createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/0);
+    const std::string trace =
+        runWithDsCapMode(PassFeatureConfig::DsIssueCapMode::Periodic,
+                         [](PassFeatureConfig& p) { p.dagFeatures.dsIssueCapSpanCycles = 32; });
+    EXPECT_NE(trace.find("span=32 mode=periodic"), std::string::npos) << trace;
+}
+
+// Either mode caps a back-to-back ds_load run at dsReadPerCap while fillers are
+// left to run in the wait (a cap wait emits no instruction, so a tail of only
+// ds_loads is not a run), with the queue throttle out of the way (latency 1).
+TEST_F(DAGSchedulerPassTest, DsIssueCapMode_BothModesBoundTheBurst) {
+    for (auto mode : {PassFeatureConfig::DsIssueCapMode::Sliding,
+                      PassFeatureConfig::DsIssueCapMode::Periodic}) {
+        SetUp();
+        for (int i = 0; i < 12; i++) createMovableDsLoad(i * 4, 80, i + 1);
+        for (int i = 0; i < 48; i++) createVAddInBlock(bb, arch, 60 + i, 100 + i, 180 + i);
+        runWithDsCapMode(mode, [](PassFeatureConfig& p) {
+            p.dagFeatures.dsReadPerCap = 4;
+            p.dagFeatures.dsIssueCapSpanCycles = 16;
+            p.dagFeatures.dsReadQueueDepth = 16;
+            p.dagFeatures.dsReadThrottleLatency = 1;
+        });
+        EXPECT_LE(maxConsecutiveDsLoads(*bb), 4)
+            << (mode == PassFeatureConfig::DsIssueCapMode::Periodic ? "periodic" : "sliding");
+        EXPECT_EQ(mnemonicSequence(*bb).size(), 60u) << "no instruction may be lost";
+    }
 }
 
 // A batch window's ds_load budget lands on the batch's first WMMA; the rest of
