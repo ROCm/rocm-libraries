@@ -1367,6 +1367,34 @@ void zungtr_(char* uplo,
              rocblas_double_complex* work,
              int* size_w,
              int* info);
+void sorghr_(int* n, int* ilo, int* ihi, float* A, int* lda, float* tau, float* work, int* lwork, int* info);
+void dorghr_(int* n,
+             int* ilo,
+             int* ihi,
+             double* A,
+             int* lda,
+             double* tau,
+             double* work,
+             int* lwork,
+             int* info);
+void cunghr_(int* n,
+             int* ilo,
+             int* ihi,
+             rocblas_float_complex* A,
+             int* lda,
+             rocblas_float_complex* tau,
+             rocblas_float_complex* work,
+             int* lwork,
+             int* info);
+void zunghr_(int* n,
+             int* ilo,
+             int* ihi,
+             rocblas_double_complex* A,
+             int* lda,
+             rocblas_double_complex* tau,
+             rocblas_double_complex* work,
+             int* lwork,
+             int* info);
 
 void sorm2r_(char* side,
              char* trans,
@@ -4662,6 +4690,63 @@ void cpu_orgtr_ungtr<rocblas_double_complex>(rocblas_fill uplo,
     int info;
     char uploC = rocblas2char_fill(uplo);
     zungtr_(&uploC, &n, A, &lda, Ipiv, work, &size_w, &info);
+}
+
+// orghr & unghr
+template <>
+void cpu_orghr_unghr<float>(rocblas_int n,
+                            rocblas_int ilo,
+                            rocblas_int ihi,
+                            float* A,
+                            rocblas_int lda,
+                            float* tau,
+                            float* work,
+                            rocblas_int size_w)
+{
+    int info;
+    sorghr_(&n, &ilo, &ihi, A, &lda, tau, work, &size_w, &info);
+}
+
+template <>
+void cpu_orghr_unghr<double>(rocblas_int n,
+                             rocblas_int ilo,
+                             rocblas_int ihi,
+                             double* A,
+                             rocblas_int lda,
+                             double* tau,
+                             double* work,
+                             rocblas_int size_w)
+{
+    int info;
+    dorghr_(&n, &ilo, &ihi, A, &lda, tau, work, &size_w, &info);
+}
+
+template <>
+void cpu_orghr_unghr<rocblas_float_complex>(rocblas_int n,
+                                            rocblas_int ilo,
+                                            rocblas_int ihi,
+                                            rocblas_float_complex* A,
+                                            rocblas_int lda,
+                                            rocblas_float_complex* tau,
+                                            rocblas_float_complex* work,
+                                            rocblas_int size_w)
+{
+    int info;
+    cunghr_(&n, &ilo, &ihi, A, &lda, tau, work, &size_w, &info);
+}
+
+template <>
+void cpu_orghr_unghr<rocblas_double_complex>(rocblas_int n,
+                                             rocblas_int ilo,
+                                             rocblas_int ihi,
+                                             rocblas_double_complex* A,
+                                             rocblas_int lda,
+                                             rocblas_double_complex* tau,
+                                             rocblas_double_complex* work,
+                                             rocblas_int size_w)
+{
+    int info;
+    zunghr_(&n, &ilo, &ihi, A, &lda, tau, work, &size_w, &info);
 }
 
 // ormqr & unmqr

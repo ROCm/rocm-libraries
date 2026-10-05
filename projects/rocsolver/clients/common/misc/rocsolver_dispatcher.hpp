@@ -51,6 +51,7 @@
 #include "common/auxiliary/testing_latrd_forsytrd.hpp"
 #include "common/auxiliary/testing_lauum.hpp"
 #include "common/auxiliary/testing_orgbr_ungbr.hpp"
+#include "common/auxiliary/testing_orghr_unghr.hpp"
 #include "common/auxiliary/testing_orglx_unglx.hpp"
 #include "common/auxiliary/testing_orgtr_ungtr.hpp"
 #include "common/auxiliary/testing_orgxl_ungxl.hpp"
@@ -413,6 +414,7 @@ class rocsolver_dispatcher
             {"orgl2", testing_orglx_unglx<T, 0>},
             {"orglq", testing_orglx_unglx<T, 1>},
             {"orgbr", testing_orgbr_ungbr<T>},
+            {"orghr", testing_orghr_unghr<T>},
             {"orgtr", testing_orgtr_ungtr<T>},
             // ormxx
             {"orm2r", testing_ormxr_unmxr<T, 0>},
@@ -535,6 +537,7 @@ class rocsolver_dispatcher
             {"ungl2", testing_orglx_unglx<T, 0>},
             {"unglq", testing_orglx_unglx<T, 1>},
             {"ungbr", testing_orgbr_ungbr<T>},
+            {"unghr", testing_orghr_unghr<T>},
             {"ungtr", testing_orgtr_ungtr<T>},
             // unmxx
             {"unm2r", testing_ormxr_unmxr<T, 0>},
