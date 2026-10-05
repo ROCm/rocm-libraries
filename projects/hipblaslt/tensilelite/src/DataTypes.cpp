@@ -131,21 +131,12 @@ namespace rocisa
             return TensileLite::TypeInfo<Float8BFloat8_fnuz>::ElementSize;
         case rocisa::DataType::BFloat8Float8_fnuz:
             return TensileLite::TypeInfo<BFloat8Float8_fnuz>::ElementSize;
-#ifdef _WIN32
-        case rocisa::DataType::Float6:
-            return TensileLite::TypeInfo<TensileLite::Float6>::ElementSize;
-        case rocisa::DataType::BFloat6:
-            return TensileLite::TypeInfo<TensileLite::BFloat6>::ElementSize;
-        case rocisa::DataType::Float4:
-            return TensileLite::TypeInfo<TensileLite::Float4>::ElementSize;
-#else // _WIN32
         case rocisa::DataType::Float6:
             return TensileLite::TypeInfo<TensileLite::Float6x32>::ElementSize;
         case rocisa::DataType::BFloat6:
             return TensileLite::TypeInfo<TensileLite::BFloat6x32>::ElementSize;
         case rocisa::DataType::Float4:
             return TensileLite::TypeInfo<TensileLite::Float4x2>::ElementSize;
-#endif // _WIN32
         case rocisa::DataType::E8:
             return TensileLite::TypeInfo<TensileLite::E8>::ElementSize;
         case rocisa::DataType::E5M3:
@@ -232,15 +223,9 @@ namespace TensileLite
         registerTypeInfo<BFloat8Float8>();
         registerTypeInfo<Float8BFloat8_fnuz>();
         registerTypeInfo<BFloat8Float8_fnuz>();
-#ifdef _WIN32
-        registerTypeInfo<Float6>();
-        registerTypeInfo<BFloat6>();
-        registerTypeInfo<Float4>();
-#else // _WIN32
         registerTypeInfo<Float6x32>();
         registerTypeInfo<BFloat6x32>();
         registerTypeInfo<Float4x2>();
-#endif // _WIN32
         registerTypeInfo<E8>();
         registerTypeInfo<E5M3>();
     }
