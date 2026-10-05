@@ -43,7 +43,13 @@ N_gemm = K
 K_gemm = Y * X * C
 ```
 
-Kernel ABI (`conv_args_signature()`):
+Kernel ABI: conv kernels are AOT, so the problem shape travels as kernargs.
+The ordered argument list is owned by the conv instances, not by the platform
+helpers: `kernels.common.conv_abi` in the library (`conv_arg_names`,
+`conv_args_signature`, `conv_direct_args_signature`) and its C++ twin
+`rocke/instance_conv_abi.h`. Every direction opens with the same six entries,
+followed by the runtime problem block (extents, strides, magic-division
+pairs) and any direction-specific extras:
 
 ```text
 A: ptr<f16, global>      8 bytes
@@ -52,6 +58,7 @@ D: ptr<f16, global>      8 bytes
 A_bytes: i32             4 bytes   # buffer rsrc bound
 B_bytes: i32             4 bytes
 D_bytes: i32             4 bytes
+p_N, p_Hi, p_Wi, ...: i32          # runtime problem block (see conv_abi)
 ```
 
 The `*_bytes` args drive the AMDGPU buffer descriptor `num_records` field (DW2). With the DW3 flags `0x00027000`, OOB byte offsets silently return zero on load and are dropped on store.
@@ -238,7 +245,7 @@ for k0 in scf_for(0, K_gemm, tile_k):
       schedule_policy.emit_after_mfma_step(...)
 ```
 
-`unroll_k=True` replaces the runtime `scf_for_iter` over k0 with a Python `static_for` when `K_gemm` is a compile-time multiple of `tile_k`. This produces straight-line IR and lets the LLVM backend see the entire K-loop body for scheduling, at the cost of larger compiled code.
+`unroll_k=True` double-buffers the K-loop over two LDS tile pairs. The trip count is a kernel argument (AOT), so the loop body is unrolled twice and steps by `2 * tile_k`, binding each phase to a build-time buffer; with an odd tile count the second phase of the last step reads a zero tile (under wgrad split-K it is redirected to `wg_K`, which zero-fills, instead of the next slice's first tile). The kernel name carries an `unroll` tag.
 
 ### Epilogue
 
@@ -278,7 +285,7 @@ for each thread's coalesced output chunk:
  4. Allocate A_smem, B_smem (and D_smem if cshuffle).
  5. Decompose tid into lane / warp_m_idx / warp_n_idx / warp_m_off / warp_n_off.
  6. Initialize all f32 accumulator vectors to zero.
- 7. Enter K_gemm tile loop (runtime or Python-unrolled).
+ 7. Enter the K_gemm tile loop (runtime trip count; double-buffered for `unroll_k` / `async_dma`).
  8. Per K tile: load A chunk(s), load B chunk(s), wait/sync.
  9. For each MFMA K atom: read A/B fragments, atom.emit, scheduler hint.
 10. Carry updated accumulators across the loop.
@@ -426,9 +433,10 @@ M-outer default for dgrad, and matches the fp32 reference for wgrad.
 
 ### Backward Knob Changes
 
-- `pipeline="basic"`: now uses a bounded runtime `scf.for` K-loop (load → sync → MFMA → sync per tile), identical to the `"mem"` path. No K-trip-count limit, no `split_k=0` restriction on wgrad. dgrad has no `basic` branch.
+- `pipeline="basic"`: now uses a bounded runtime `scf.for` K-loop (load → sync → MFMA → sync per tile), identical to the `"mem"` path. No K-trip-count limit. dgrad has no `basic` branch.
 - `async_dma` is a swept axis on the wgrad sweep driver, not a run-level flag. Unlike `lds_k_outer` it is not deducible from `(arch, spec)`: it removes the register staging of the tile, but it also forces the K-outer row pad to 0 and coarsens the load-width ladder to the widths the intrinsic accepts, and both terms are functions of tile width and channel run, which are themselves sweep axes.
-- `_MAX_UNROLLED_K_ITERS = 128` (wgrad) caps the statically-unrolled `async_dma` loop only. `pipeline="basic"` is no longer unrolled and is not bounded by this constant. Mirrored as `ROCKE_MAX_UNROLLED_K_ITERS` in the C engine.
+- No K loop is unrolled at build time any more: `async_dma` runs `SoftwarePipeline.run_ping_pong_dynamic` and `unroll_k` a hand-rolled 2x ping-pong, both over the runtime extent, so the former `_MAX_UNROLLED_K_ITERS` / `ROCKE_MAX_UNROLLED_K_ITERS` cap is gone.
+- wgrad `split_k`: `1` = no split (direct store); any value `> 1` builds the one split-K kernel (name tag `spk`), whose degree is the `ks_count` / `ks` kernargs chosen at launch. There is no `split_k=0` "runtime degree" encoding.
 - Removed: the `--lds-k-outer`, `--lds-k-pad` and `--dtype-d` CLI flags and the `ROCKE_WGRAD_LDS_K_OUTER` env override. All replaced by deduction or dropped.
 
 ## Direct Grouped Convolution
@@ -577,20 +585,12 @@ Constraints (Python `is_valid_depthwise_spec` / C++ `rocke_direct_depthwise_is_v
 Grid: `(ceil(W / block_w), ceil(groups / block_ch), N)` where
 `block_ch = block_waves * wave_size`.
 
-H-loop: the builder selects between two emission strategies based on
-`_UNROLL_THRESH = 20_000`:
+H-loop: the input height is a kernel argument (AOT), so the rows stream
+through a runtime `scf_for_iter` that takes `KH` input rows per iteration with
+`KH × block_w` loop-carried f32 accumulators; there is no build-time-unrolled
+form, since it would bake the height into the trip count.
 
-```text
-_use_unroll = n_iters * block_w * KH * KW <= 20_000
-```
-
-- **Unroll**: static Python/C loop — every iteration emits straight-line IR.
-  Faster to compile for small kernels.
-- **Runtime** (`scf_for_iter`): groups `KH` input rows per loop iteration
-  with `KH × block_w` loop-carried f32 accumulators. Keeps IR size bounded
-  for large `H` or many filter taps.
-
-Flush condition (both paths):
+Flush condition:
 
 ```text
 p_flush_val = y - (KH - 1)
@@ -636,7 +636,7 @@ Constraints (`is_valid_depthwise_spatial_spec`):
 Grid: `(ceil(Wo / block_w), 1, N)` — no channel tile (all channels handled
 within one wavefront via the spatial thread mapping).
 
-Uses the same `_UNROLL_THRESH` / `scf_for_iter` branch logic as
+Streams the input rows through the same runtime `scf_for_iter` as
 `DirectDepthwiseSpec`, but accumulates over a single output W position
 (no `block_w` outer loop). `stride >= 1` supported via `D[N, Ho, Wo, total_k]`.
 

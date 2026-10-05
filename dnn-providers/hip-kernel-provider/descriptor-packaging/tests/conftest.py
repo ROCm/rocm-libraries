@@ -90,6 +90,12 @@ def empty_arch_fixture(fixtures_dir):
 
 
 @pytest.fixture(scope="session")
+def hsaco_fixture_dir(fixtures_dir):
+    """Committed bare-ELF code objects, one per arch, for the authored-hsaco tests."""
+    return fixtures_dir / "hsaco"
+
+
+@pytest.fixture(scope="session")
 def rocke_fixture(fixtures_dir):
     """rocKE descriptor data, read without rocke: the disabled-kind and
     disabled-folder tests hand it to a build without rocKE, and tests/rocke/ packs

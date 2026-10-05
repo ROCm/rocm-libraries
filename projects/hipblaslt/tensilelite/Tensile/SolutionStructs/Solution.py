@@ -6752,6 +6752,21 @@ class Solution(collections.abc.Mapping):
       epilogueSize += int(state["NumThreads"] * state["ProblemType"]["ComputeDataType"].numBytes() * vecDT.scaleAlpha(0).turn)
     if state["ProblemType"]["UseScaleAB"] == "Vector":
       epilogueSize += int(state["NumThreads"] * state["ProblemType"]["ComputeDataType"].numBytes() * (vecDT.scaleA.turn + vecDT.scaleB.turn))
+    # Classic persistent TDM epilogues reuse LDS for vectors. Without PAP,
+    # a tile-end rendezvous lets compute reuse that storage. With PAP, the
+    # successor's compute data is already live during the epilogue, so the
+    # vectors need storage outside every compute bank.
+    state["_PersistentVectorEpilogueLds"] = bool(
+      epilogueSize and isPersistent(state) and state["enableTDMA"] and state["enableTDMB"]
+      and not state["UseSubtileImpl"] and not state["StoreRemapVectorWidth"]
+      and not state["ProblemType"]["Gradient"])
+    state["_SeparateEpilogueLds"] = bool(
+      state["_PersistentVectorEpilogueLds"] and state["PrefetchAcrossPersistent"])
+    if state["_SeparateEpilogueLds"]:
+      epilogueOffset = int(math.ceil(ldsNumBytes / 16) * 16)
+      state["LdsOffsetBias"] = epilogueOffset
+      state["LdsOffsetBiasNonGSU"] = epilogueOffset
+      state["LdsOffsetBiasGSU"] = epilogueOffset
     ldsNumBytes = max(ldsNumBytes, state["LdsOffsetBias"] + epilogueSize)
 
     state["LdsBytesNoAmax"] = ldsNumBytes

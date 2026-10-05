@@ -35,8 +35,9 @@ def _split_arches(values):
 def _parse_args(argv):
     p = argparse.ArgumentParser(
         prog="hkp_pack",
-        description="Compile authored hip and rocKE UKDs, prune per arch, and "
-        "pack a per-arch kpack release tree for the hip-kernel-provider.",
+        description="Compile authored hip and rocKE UKDs, pack authored hsaco code "
+        "objects as-is without compiling, prune per arch, and pack a per-arch "
+        "kpack release tree for the hip-kernel-provider.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "environment:\n"
@@ -79,7 +80,8 @@ def _parse_args(argv):
     p.add_argument(
         "--source-root",
         required=True,
-        help="The authored source root (KDP + generic JSON + HIP sources). "
+        help="The authored source root (KDP + generic JSON + HIP sources + prebuilt "
+        "hsaco code objects, which are packed without compiling). "
         "Walked recursively; child folders scope the content (e.g. hip/, "
         "rocKE/, per-integration folders) and each descriptor's authored "
         "subpath is preserved into the staged and installed trees. Producer "
