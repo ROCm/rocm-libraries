@@ -128,7 +128,8 @@ inline uint64_t roundRightToEven(uint64_t value, unsigned int shift)
     const auto result = value >> shift;
     const auto remainder = value & ((uint64_t{1} << shift) - 1);
     const auto midpoint = uint64_t{1} << (shift - 1);
-    return result + (remainder > midpoint || (remainder == midpoint && (result & 1) != 0));
+    const bool roundUp = remainder > midpoint || (remainder == midpoint && (result & 1) != 0);
+    return result + static_cast<uint64_t>(roundUp);
 }
 
 inline float floatFromBits(uint32_t bits)
@@ -182,9 +183,10 @@ inline float finiteFloat(double value, const char* paramName)
 }
 
 template <typename Integer, std::enable_if_t<std::is_integral_v<Integer>, int> = 0>
-float finiteFloat(Integer value, const char*)
+float finiteFloat(Integer value, const char* /*paramName*/)
 {
-    const auto signedValue = static_cast<int64_t>(value);
+    // Int8 tensor values are signed, so a signed char sign-extends by design.
+    const auto signedValue = static_cast<int64_t>(value); // NOLINT(bugprone-signed-char-misuse)
     const bool negative = signedValue < 0;
     const auto magnitude = negative ? uint64_t{0} - static_cast<uint64_t>(signedValue)
                                     : static_cast<uint64_t>(signedValue);
