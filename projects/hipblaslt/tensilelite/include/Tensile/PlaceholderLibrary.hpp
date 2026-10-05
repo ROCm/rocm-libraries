@@ -184,7 +184,19 @@ namespace TensileLite
                 std::string path       = (libraryDirectory + "/" + filePrefix + suffix).c_str();
                 auto        newLibrary = LoadLibraryFile<MyProblem, MySolution>(path);
                 auto        mLibrary
-                    = static_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
+                    = dynamic_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
+
+                // LoadLibraryFile returns null when no loader can read the shard,
+                // e.g. it was not packaged for this architecture. Leaving library
+                // unset lets callers report "no solution" instead of faulting.
+                if(!mLibrary)
+                {
+                    if(Debug::Instance().printCodeObjectInfo())
+                        std::cout << "failed to load placeholder library " << path << std::endl;
+
+                    return false;
+                }
+
                 library = mLibrary->library;
 
                 // Indexed shards publish solutions later; stamp the name on
@@ -261,6 +273,9 @@ namespace TensileLite
             if(!library)
                 loadPlaceholderLibrary();
 
+            if(!library)
+                return nullptr;
+
             auto solution = library->getSolutionByIndex(problem, hardware, index);
 
             if(solution)
@@ -276,6 +291,9 @@ namespace TensileLite
         {
             if(!library)
                 loadPlaceholderLibrary();
+
+            if(!library)
+                return nullptr;
 
             auto solution = library->findBestSolution(problem, hardware, fitness);
 
@@ -302,6 +320,9 @@ namespace TensileLite
                 loadPlaceholderLibrary();
             }
 
+            if(!library)
+                return SolutionSet<MySolution>();
+
             auto solutions = library->findAllSolutions(problem, hardware, searchType);
 
             for(auto& solution : solutions)
@@ -323,6 +344,9 @@ namespace TensileLite
                 loadPlaceholderLibrary();
             }
 
+            if(!library)
+                return SolutionSet<MySolution>();
+
             auto solutions = library->findAllSolutionsGroupedGemm(problems, hardware, searchType);
 
             for(auto& solution : solutions)
@@ -340,6 +364,12 @@ namespace TensileLite
             if(!library)
             {
                 loadPlaceholderLibrary();
+            }
+
+            if(!library)
+            {
+                lastFindTopRetAll = true;
+                return SolutionVector<MySolution>();
             }
 
             auto solutions = library->findTopSolutions(problem, hardware, numSolutions);
@@ -368,6 +398,9 @@ namespace TensileLite
             {
                 loadPlaceholderLibrary();
             }
+
+            if(!library)
+                return SolutionVector<MySolution>();
 
             auto solutions = library->findTopSolutionsGroupedGemm(problems, hardware, numSolutions);
 
