@@ -1,0 +1,91 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Test YAML for PyTorch Offset Overflow Bug
+# This test reproduces the memory corruption issue where OOB threads
+# wrote to base_address + 4GB instead of being safely rejected.
+#
+# Problem: M=67,108,863 (just under 2^26), N=1, K=8 or K=32
+# This size triggers the BufferOOB bug when:
+# - Buffer descriptor size was incorrectly set to 0xFFFFFFFF
+# - BufferOOB offset was 0xFFFFF000
+# - Hardware check: 0xFFFFF000 < 0xFFFFFFFF → TRUE → OOB write allowed
+#
+# The fix uses actual buffer size (StrideD * N * bpe) so OOB is rejected.
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  CMakeBuildType: Release
+  PrintLevel: 1
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  NumElementsToValidate: -1  # Validate all elements
+  BoundsCheck: 1             # Enable bounds checking to catch corruption
+  ValidationMaxToPrint: 10
+  ValidationPrintValids: False
+  KernelTime: True
+  Device: 0
+  PrintWinnersOnly: True
+
+BenchmarkProblems:
+
+  ########################################
+  # PyTorch Offset Overflow - Bias_SAV variant (f32)
+  # Critical test case with ScaleAlphaVec and Bias support
+  # Kernel: MacroTile 256x16, DepthU=16, WorkGroup=[64,4,1]
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s           # f32_r (single precision float)
+      DestDataType: s       # f32_r
+      ComputeDataType: s    # f32_r
+      TransposeA: False     # N
+      TransposeB: False     # N
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+      BiasSrc: D
+      UseScaleAlphaVec: 1
+
+    - # BenchmarkProblemSizeGroup - Assembly (matching 00_Final.yaml config)
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 4, 1]  # MFMA 16x16x4 for gfx942, f32
+        - ThreadTile:
+          - [ 16, 1 ]
+        - WorkGroup:
+          - [ 64, 4, 1 ]
+        - DepthU: [16]
+        - WorkGroupMapping: [6]
+        - GlobalSplitU: [1]
+        - VectorWidthA: [4]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [1]
+        - LocalReadVectorWidth: [2]
+        - GlobalWriteVectorWidth: [4]
+        - StoreVectorWidth: [4]
+        - TransposeLDS: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # The original failing case: M=67,108,863, N=1, K=8
+          # With MacroTile 256x16: 15 out of 16 columns are OOB (93.75% waste)
+          - Exact: [67108863, 1, 1, 8]
+
+          # Smaller M variant to ensure fix doesn't break normal cases
+          - Exact: [1048576, 1, 1, 8]    # 2^20
+          - Exact: [1048576, 1, 1, 32]
+
