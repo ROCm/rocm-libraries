@@ -2727,10 +2727,10 @@ inline void testing_aux_rocblaslt_utility_func(const Arguments& arg)
     // Test rocblaslt_matrix_layout_attributes_to_string
     ASSERT_TRUE(std::string_view{rocblaslt_matrix_layout_attributes_to_string(
                     ROCBLASLT_MATRIX_LAYOUT_BATCH_COUNT)}
-                == "MATRIX_LAYOUT_BATCH_COUNT");
+                == "ROCBLASLT_MATRIX_LAYOUT_BATCH_COUNT");
     ASSERT_TRUE(std::string_view{rocblaslt_matrix_layout_attributes_to_string(
                     ROCBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET)}
-                == "MATRIX_LAYOUT_STRIDED_BATCH_OFFSET");
+                == "ROCBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET");
     ASSERT_TRUE(
         std::string_view{rocblaslt_matrix_layout_attributes_to_string(ROCBLASLT_MATRIX_LAYOUT_TYPE)}
         == "ROCBLASLT_MATRIX_LAYOUT_TYPE");

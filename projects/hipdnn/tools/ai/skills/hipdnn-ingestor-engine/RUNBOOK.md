@@ -28,7 +28,7 @@ ENGINE=<your-bundle-engine-id>
 
 Replace `<your-bundle-engine-id>` with your bundle's engine ID; it is consumed verbatim
 as `--expect-engine` below. A gfx942 dense attention bundle would spell it
-`hipkernel:Gfx942AttentionDense`; this tree ships no such engine.
+`hipkernel:Gfx942AttentionDense`; the name is an illustration, not an engine to look for.
 
 Follow the **Setup** section of `$GEN/README.md`. Authoring and mining imports need the
 profile's rocKE library environment; production packaging uses its own selected
@@ -93,7 +93,24 @@ miner:
   --include-windowed --out "$SHAPES"
 ```
 
-Add `--rocke-bench <actual-benchmark-tree>` when applicable. Reconcile each source's
+Add `--rocke-bench <actual-benchmark-tree>` when applicable. A dense prefill
+benchmark (`benchmark_dense_prefill_live.py`) keeps its shapes in Python, so the tree
+alone misses them. `--rocke-bench` takes one tree, and a repeated flag keeps only the
+last one, so copy the benchmark tree, emit the dense shapes into the copy and mine the
+copy in place of the original tree. Emitting needs no GPU and no torch, only an
+interpreter that imports the rocKE library (numpy):
+
+```bash
+OWNER_BENCH=/absolute/path/to/owner-bench-tree   # a new directory; cp creates it
+cp -r "$PROVIDER/rocke/library/benchmarks/$ARCH/attention" "$OWNER_BENCH"
+"$PY" "$PROVIDER/rocke/library/benchmarks/$ARCH/attention/prefill/benchmark_dense_prefill_live.py" \
+  --emit-shapes "$OWNER_BENCH/dense_prefill_live_shapes.json" \
+  --dtype bf16 --hq 128 --hkv 8 --d 128
+```
+
+Repeat the emit with another file name per dtype or head configuration the owner
+measures, then pass `--rocke-bench "$OWNER_BENCH"`. Packed varlen rows are skipped and
+counted. Reconcile each source's
 total, parsed, servable, covered and excluded counts; do not discard window/sink or
 independent operand dimensions to fit the request schema.
 
@@ -126,6 +143,10 @@ Generate into an empty scratch directory, never over the live engine:
   --output-dir "$GENERATED" --dry-run
 "$PY" "$GEN/generate.py" --config "$CONFIG" --output-dir "$GENERATED"
 ```
+
+Run both against the revision you are about to splice; a render from an earlier revision
+is not evidence for this one. The config loader rejects a YAML mapping that repeats a key,
+including a repeated `<<`, and reports both source positions.
 
 The verification root follows the configured dialect (see **Descriptor placement**):
 `direct_load` emits under `test_descriptors/`, `packaged` under `descriptors/`. A root
@@ -161,7 +182,7 @@ Apply fragments to their actual consumers, preserving unrelated entries:
 | `IngestorPacks.hpp` declaration **and** `IngestorPacks.cpp`'s `s_packs` row | `$PROVIDER/src/engines/kernel_ingestor_engine/` | Always — both, or the pack vanishes from the static-archive binary |
 | Engine test `target_sources` | `$PROVIDER/src/tests/engines/kernel_ingestor_engine/CMakeLists.txt` | Always — the applicable tests and any census suite |
 | `add_kernels_for_embedding(TARGET … FILES … KEYS …)` | `$PROVIDER/src/tests/CMakeLists.txt` | Only `kernel_source.kind == "embedded_source"` — see [extend.md](extend.md) |
-| `hkp_register_census_tests(TARGET … PACK_NAME … SUITES … EXPECTED_CASES …)` | `$PROVIDER/src/tests/CMakeLists.txt` | A census suite that reads exactly one pack target's shard |
+| `hkp_register_census_tests(TARGET hip_kernel_provider_census_tests PACK_NAME … [ARCHES …] SUITES … EXPECTED_CASES …)` | `$PROVIDER/src/tests/CMakeLists.txt` | A census suite that reads exactly one pack target's shard |
 | Descriptors themselves | — | **Never.** There is no descriptor splice |
 
 **Descriptors need no CMake edit.** The packer walks a source root recursively and no
@@ -174,7 +195,7 @@ test target exists:
 
 ```cmake
 hkp_register_census_tests(
-    TARGET hip_kernel_provider_tests
+    TARGET hip_kernel_provider_census_tests
     PACK_NAME unit
     SUITES TestPointwisePacks
     EXPECTED_CASES
@@ -189,8 +210,16 @@ hkp_register_census_tests(
 )
 ```
 
-`PACK_NAME` selects the wired pack target whose `OUT_ROOT` and recorded arch list the
-entries address. A suite is declarable **only where it reads exactly one pack's shard**:
+`TARGET` is the census binary, `hip_kernel_provider_census_tests`: census suites
+(`Test<Name>Packs.cpp`) are compiled into it, never into `hip_kernel_provider_tests`,
+because every census case needs a shard and the census environment that an ordinary
+unit run must not require. `PACK_NAME` selects the wired pack target whose `OUT_ROOT`
+and recorded arch list the entries address. `ARCHES` optionally narrows that list:
+omitted, the suite registers at every arch the pack target was wired for (right for a
+suite whose fixtures cover the whole root, as here); given, at the intersection with
+the wired list, so a bundle that emits only for gfx950 passes `ARCHES gfx950` and a
+build packing other arches registers nothing for it; the keyword with no arch is fatal.
+A suite is declarable **only where it reads exactly one pack's shard**:
 `TestPointwisePacks` qualifies at the `unit` target, while `TestConvFwdPack` reads both
 the `unit` and `unit_shared` shards and is censused nowhere. `EXPECTED_CASES` pins the
 suite's case-name set and is hand-maintained for a hand-written suite: adding or
@@ -275,9 +304,9 @@ If the profile declares a launch-surface audit, also run:
 "$PY" "$GEN/tools/launch_surface.py" "$PROFILE" --check
 ```
 
-**Gate:** final authored inventory, completed hooks and source/test splices, no
-selected-path placeholders, and reviewed structural/field/ABI results. None proves
-native loading or numerical dispatch.
+**Gate:** a current-revision dry-run and render, final authored inventory, completed hooks
+and source/test splices, no selected-path placeholders, and reviewed structural/field/ABI
+results. None proves native loading or numerical dispatch.
 
 ## 4. Build, pack, install and prove the host boundary
 
@@ -312,10 +341,12 @@ a KDP is what arch pruning consumes. Outcomes:
 | KDP present, pruned on every arch, built-in default root | Dormant, so configuring for an undeclared arch is not a build error |
 | Root set but not a directory | Fatal at configure |
 
-That default root is `$PROVIDER/src/engines/kernel_ingestor_engine/descriptors/` and
-holds no bundle, so a default configure leaves production packaging dormant. Supply your
-own bundle under it — or repoint the cache variable — before expecting output, and
-substitute your bundle's name wherever a bundle path appears below.
+That default root is `$PROVIDER/src/engines/kernel_ingestor_engine/descriptors/`, which
+holds the bundles the provider ships. Packaging from it skips when nothing under it
+declares an architecture this build packs for, so what a build ships depends on its
+configuration. Add your own bundle under it, or repoint the cache variable, before
+expecting output for it, and substitute your bundle's name wherever a bundle path
+appears below.
 `descriptors/README.md` carries the authoring rules that root enforces, including the
 native pack whose symbols a bundle's UKDs must name before it serves. The packaging
 dependencies are documented from the repository root in
@@ -411,18 +442,19 @@ census is a direct native obligation with no Python launcher and no XML guard. S
 count decides eligibility, not the authored dialect: `TestPointwisePacks` is censused
 although `unit/pointwise/` is `embedded_source`.
 
-For each declared suite and each arch in the pack target's recorded list, CMake
-registers **four** tests. The census entry is
+For each declared suite and each eligible arch — the pack target's recorded list,
+narrowed by `ARCHES` when given — CMake registers **four** tests. The census entry is
 `hip-kernel-provider-hkp-census-<arch>-<suite>`, which invokes
 
 ```text
-hip_kernel_provider_tests --gtest_filter=<suite>.*
+hip_kernel_provider_census_tests --gtest_filter=<suite>.*
 ```
 
 with `HIPDNN_TEST_CENSUS_SUITE` set to that suite, `HIPDNN_TEST_EXPECTED_ARCH` to that
 arch — taken from the wired arch list, never from a detected device or the descriptors —
 and `HIPDNN_DESCRIPTOR_DIR` to that pack target's own `OUT_ROOT` shard for the arch,
-never a shared stage tree; labelled `unit_test;hip-kernel-provider;host`. The other
+never a shared stage tree; labelled `unit_test;hip-kernel-provider;host` plus the tier
+labels `HKP_PACK_CTEST_CATEGORIES_YAML` assigns, which the installed twin carries too. The other
 three append `-control-unvisited`, `-control-absent-root` and
 `-control-unregistered-case`, the last only where a pin exists. Each control breaks one
 precondition deliberately and passes on the census's own refusal wording rather than on
@@ -447,7 +479,7 @@ HIPDNN_TEST_CENSUS_SUITE="$CENSUS_SUITE" \
 HIPDNN_TEST_EXPECTED_ARCH="$ARCH" \
 HIPDNN_TEST_CENSUS_EXPECTED_CASES="$EXPECTED_CASES" \
 HIPDNN_DESCRIPTOR_DIR="$FINAL_DESCRIPTOR_ROOT" \
-"$INSTALL/bin/hip_kernel_provider_tests" --gtest_filter="${CENSUS_SUITE}.*"
+"$INSTALL/bin/hip_kernel_provider_census_tests" --gtest_filter="${CENSUS_SUITE}.*"
 ```
 
 Set `EXPECTED_CASES` to the same reviewed comma-separated case-name list the build-tree
@@ -474,7 +506,8 @@ directions, and an unpinned call also drops `-control-unregistered-case`.
 Fatal at configure, because a census that registers nothing looks like one that passed:
 a `PACK_NAME` no `hkp_wire_pack_target()` call wired and no dormancy accounts for (the
 message names wired and dormant roots separately); a `TARGET` missing or not given; an
-empty recorded arch list; and one suite declared at two pack targets, whose entry names
+`ARCHES` keyword naming no arch; an empty recorded arch list; and one suite declared at
+two pack targets, whose entry names
 carry arch and suite alone, so the second registration would silently take the first
 one's shard. A **dormant** `PACK_NAME` is the deliberate exception: the call registers
 nothing and reports at `STATUS`, naming the suites it left unregistered.
@@ -513,11 +546,11 @@ provider's default installed CTest root is **`$INSTALL/bin/hip_kernel_provider`*
 `hip_kernel_provider_asm_sdpa_gpu_ref_integration_tests`, which is the ASM SDPA engine
 reached by a different path and never ingestor evidence.
 
-The production descriptor root ships no bundle, so no dense-attention target is
-registered. Replace `<your-bundle-ctest-target>` with the name your own registration
-creates — a gfx942 dense bundle would be shaped like
-`hip_kernel_provider_gfx942_attention_dense_gpu_ref_integration_tests`, which exists
-nowhere in this tree:
+Other bundles in the production root may register their own targets; they are not
+evidence for yours. Replace `<your-bundle-ctest-target>` with the name your own
+registration creates. A gfx942 dense bundle would be shaped like
+`hip_kernel_provider_gfx942_attention_dense_gpu_ref_integration_tests`; treat it as an
+illustration, not a name to copy:
 
 ```bash
 CTEST_ROOT="$INSTALL/bin/hip_kernel_provider"
@@ -649,3 +682,43 @@ Report [SKILL.md](SKILL.md)'s completion evidence and exact limitations. Keep ex
 copies and probes disposable and retain their inputs/results in the evidence directory
 defined under **Paths and interpreters**. For blocked work, name the last completed
 stage and missing prerequisite; do not substitute a proposed command or queued job for proof.
+
+Open the handoff with a scope/proof cover sheet that binds each claim to the reports
+proving it:
+
+- **Source.** The exact commit SHA. For an uncommitted candidate, add a fingerprint of
+  its dirty state, for example digests of the diff against `HEAD` and of every untracked
+  input.
+- **Engine and scope.** The installed engine ID (`$ENGINE`) and the families and
+  architectures the claims cover.
+- **Catalog and artifact.** The digest of the descriptor catalog the claims are about,
+  and separately the `sha256sum` of each tested artifact (packed archive, installed
+  plugin). The catalog digest is the sha256 of the `sha256sum` lines
+  (`<sha256>  ./<relative path>`) of every `*.json` under the compared root, in byte
+  order of path. The recipe exits non-zero and prints no digest when the root is missing
+  or holds no `*.kdp.json`:
+
+  ```bash
+  CATALOG_ROOT=/absolute/path/to/compared-descriptor-root
+  (
+    set -euo pipefail
+    cd "$CATALOG_ROOT"
+    [ -n "$(find . -name '*.kdp.json' -type f -print -quit)" ] ||
+      { echo "no *.kdp.json under $CATALOG_ROOT" >&2; exit 1; }
+    lines=$(find . -name '*.json' -type f -print0 | LC_ALL=C sort -z | xargs -0r sha256sum)
+    printf '%s\n' "$lines" | sha256sum
+  )
+  ```
+- **Evidence.** Links to the tools' unedited reports and logs; every count is derived
+  from them, never retyped into a hand-maintained table.
+- **Proof rung per claim.** Constructed/static, compiled, loaded/censused or GPU-served:
+  the rung the linked evidence observed for that claim. A rung not run is written as not
+  run; a missing report is missing, not implied by a lower or older one.
+- **Outcome accounting.** Served, skipped and declined counts taken from the reports,
+  with each intentional decline named as intentional.
+
+No tool records a report's source revision or dirty-state fingerprint, or its catalog
+digest in this format; record them beside the report in the evidence directory when it is
+produced. A report is current proof only when its source, engine, catalog digest,
+families/arches and artifact digest match the current candidate; otherwise it is
+historical, cited as such and never as proof of the current catalog.

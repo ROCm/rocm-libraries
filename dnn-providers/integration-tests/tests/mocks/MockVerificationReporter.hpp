@@ -18,6 +18,8 @@ class MockVerificationReporter : public IVerificationReporter
 {
 public:
     MOCK_METHOD(void, recordCoverage, (const CoverageUpdate& update), (override));
+    MOCK_METHOD(void, recordSelectedWithClaims, (), (override));
+    MOCK_METHOD(void, recordReachedBody, (), (override));
     MOCK_METHOD(void, recordVerdict, (const SupportResult& record), (override));
     MOCK_METHOD(void,
                 recordUnverifiable,
@@ -26,6 +28,10 @@ public:
     MOCK_METHOD(void,
                 recordReferenceError,
                 (const std::string& bundlePath, const std::string& reason),
+                (override));
+    MOCK_METHOD(void,
+                recordVerifier,
+                (const std::string& bundlePath, Verifier verifier),
                 (override));
 };
 
