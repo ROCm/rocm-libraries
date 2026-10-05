@@ -80,6 +80,12 @@ struct PassFeatureConfig {
         AscendingCache,  ///< Zigzag for cache reuse: A0 B0 B1 A1
     };
 
+    /// How the rule (4) ds_load cap (dsReadPerCap per dsIssueCapSpanCycles) expires.
+    enum class DsIssueCapMode {
+        Sliding,   ///< Each ds_load frees its slot span cycles after its own issue
+        Periodic,  ///< A period opens at its first ds_load; all slots free span cycles later
+    };
+
     struct DagFeatures {
         bool distributeGlobalRead = false;                 ///< Enable global read distribution
         DsReadOrder dsReadOrder = DsReadOrder::Ascending;  ///< DS read reorder strategy
@@ -114,6 +120,9 @@ struct PassFeatureConfig {
         /// (wmmaIssueConfig.latency), or the arch constant
         /// (CDNA5Config::dsIssueCapSpanCycles) where no matrix op sets one.
         int dsIssueCapSpanCycles = 0;
+        /// Sliding mimics the LDS queue and keeps it from running busy; Periodic is a
+        /// hard "at most dsReadPerCap per dsIssueCapSpanCycles period" kernel limit.
+        DsIssueCapMode dsIssueCapMode = DsIssueCapMode::Sliding;
         int tensorLoadWmmaSpace = 0;
         /// WMMA issue queue: max WMMAs outstanding in the matrix pipe (the pipe buffers
         /// ~8 on gfx1250). A WMMA is appended whenever fewer are outstanding, instead

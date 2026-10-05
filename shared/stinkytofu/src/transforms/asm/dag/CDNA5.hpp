@@ -42,6 +42,7 @@
 #include <utility>
 #include <vector>
 
+#include "DsIssueCap.hpp"
 #include "InFlightQueue.hpp"
 #include "ReadyQueue.hpp"
 #include "RegionDAG.hpp"
@@ -430,7 +431,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     //
     // It stays a CAP: N may issue back-to-back while the window has room, and a
     // busy in-flight queue places fewer, so windows stay unevenly filled.
-    InFlightQueue dsIssueCap_;
+    DsIssueCap dsIssueCap_;
 
     int globalReadQueueDepth() const {
         return getPassContext().getPassFeatureConfig().dagFeatures.globalReadQueueDepth;
@@ -2723,7 +2724,8 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     // scheduler's single RPO pass (a loop header is visited before its latch, so
     // sawLoopPred never goes true -- see restoreCrossBBStateFromLoop), so
     // carrying the cap window would be code with no effect until that is fixed.
-    dsIssueCap_ = InFlightQueue(dsReadPerCap());
+    dsIssueCap_ = DsIssueCap(getPassContext().getPassFeatureConfig().dagFeatures.dsIssueCapMode,
+                             dsReadPerCap());
     assert(dsIssueCap_.depth() > 0 && "rule (4) cap must have a positive depth");
     const int dsDepth = dsReadQueueDepth();
     const double dsThrottleInterval =
@@ -2974,8 +2976,11 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     // dsIssueCapSpan() cycles of the real timeline. Sliding, so it is defined
     // in the region tail too, where no WMMA remains to delimit a window. The
     // window itself lives across regions -- it is built in onInit(), not here.
-    PASS_DEBUG(std::cerr << "[CDNA5 dsCap] dsReadPerCap=" << dsReadPerCap()
-                         << " span=" << dsIssueCapSpan() << "\n");
+    PASS_DEBUG(
+        std::cerr << "[CDNA5 dsCap] dsReadPerCap=" << dsReadPerCap() << " span=" << dsIssueCapSpan()
+                  << " mode="
+                  << (dsIssueCap_.mode() == DsIssueCap::Mode::Periodic ? "periodic" : "sliding")
+                  << "\n");
 
     barrierWmmaThresholds_.clear();
     barrierDsLoadCounts_.clear();
