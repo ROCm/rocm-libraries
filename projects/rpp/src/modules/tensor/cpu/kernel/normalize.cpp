@@ -667,6 +667,13 @@ RppStatus normalize_f32_f32_host_tensor(Rpp32f* srcPtr, RpptGenericDescPtr srcGe
                 normalize_3D_tensor_axis3_toggle(srcPtrChannel, srcGenericDescPtr, dstPtrTemp,
                                                  dstGenericDescPtr, meanTensor, stdDevTensor, shift,
                                                  paramStride, length);
+            else if (srcGenericDescPtr->layout == dstGenericDescPtr->layout)
+                // Same-layout 3D that is not NHWC (e.g. NCHW): the non-toggle writer steps outer
+                // dims by the descriptor strides and the innermost contiguously, so it is
+                // layout-agnostic for dense tensors. Without this the output is left zero-filled.
+                normalize_3D_tensor_nontoggle(srcPtrChannel, srcGenericDescPtr, dstPtrTemp,
+                                              dstGenericDescPtr, meanTensor, stdDevTensor, shift,
+                                              paramStride, length);
         } else  // Handle any other ND tensor is passed to kernel
         {
             // Compute length of input tensors as they differ based on axisMask and tensorDims
@@ -695,6 +702,10 @@ RppStatus normalize_f32_f32_host_tensor(Rpp32f* srcPtr, RpptGenericDescPtr srcGe
 
             if (computeMeanStddev & 1)  // Check if mean is to be computed internally
             {
+                // compute_ND_mean accumulates with +=, so the destination must start at zero.
+                // Unlike the 2D/3D helpers it does not self-zero, and the buffer still holds the
+                // caller-supplied mean here, which would otherwise corrupt the reduction.
+                for (int i = 0; i < size; i++) meanTensor[i] = 0.0f;
                 compute_ND_mean(srcPtrChannel, meanTensor, newDims, srcStride, newAxis,
                                 newTensorDims, 0, 0, size, 0, lastNormAxis);
                 Rpp32f normFactor = 1.0 / totalElements;
@@ -702,6 +713,8 @@ RppStatus normalize_f32_f32_host_tensor(Rpp32f* srcPtr, RpptGenericDescPtr srcGe
             }
             if (computeMeanStddev & 2)  // Check if stddev is to be computed internally
             {
+                // compute_ND_stddev also accumulates with +=; zero it first (see mean above).
+                for (int i = 0; i < size; i++) stdDevTensor[i] = 0.0f;
                 compute_ND_stddev(srcPtrChannel, meanTensor, stdDevTensor, newDims, srcStride,
                                   newAxis, newTensorDims, 0, 0, size, 0, lastNormAxis);
                 Rpp32f normFactor = (Rpp32f)(1.0 / totalElements);
@@ -794,6 +807,10 @@ RppStatus normalize_generic_host_tensor(T1* srcPtr, RpptGenericDescPtr srcGeneri
 
         if (computeMeanStddev & 1)  // Check if mean is to be computed internally
         {
+            // compute_ND_mean accumulates with +=, so the destination must start at zero. Unlike
+            // the 2D/3D helpers it does not self-zero, and the buffer still holds the
+            // caller-supplied mean here, which would otherwise corrupt the reduction.
+            for (int i = 0; i < size; i++) meanTensor[i] = 0.0f;
             compute_ND_mean(srcPtrChannel, meanTensor, newDims, srcStride, newAxis, newTensorDims,
                             0, 0, size, 0, lastNormAxis);
             Rpp32f normFactor = 1.0 / totalElements;
@@ -801,6 +818,8 @@ RppStatus normalize_generic_host_tensor(T1* srcPtr, RpptGenericDescPtr srcGeneri
         }
         if (computeMeanStddev & 2)  // Check if stddev is to be computed internally
         {
+            // compute_ND_stddev also accumulates with +=; zero it first (see mean above).
+            for (int i = 0; i < size; i++) stdDevTensor[i] = 0.0f;
             compute_ND_stddev(srcPtrChannel, meanTensor, stdDevTensor, newDims, srcStride, newAxis,
                               newTensorDims, 0, 0, size, 0, lastNormAxis);
             Rpp32f normFactor = (Rpp32f)(1.0 / totalElements);
