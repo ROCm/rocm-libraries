@@ -15,6 +15,7 @@ kernel must:
 """
 
 import os
+import re
 
 import pytest
 
@@ -32,6 +33,31 @@ _CONFIG = os.path.join(
     "gfx1250",
     "cluster_padding.yaml",
 )
+
+_CONFIG_NPOT_MT1 = os.path.join(
+    os.path.dirname(__file__),
+    "data",
+    "test_data",
+    "_designed",
+    "gfx1250",
+    "cluster_padding_npot_mt1.yaml",
+)
+
+# Instructions whose first operand is a source, not a destination.
+_NO_DST_PREFIXES = ("s_cmp", "s_bitcmp", "s_cbranch", "s_branch", "s_nop")
+
+
+def _sgpr_written(line, reg):
+    """True if the instruction on ``line`` writes SGPR ``reg`` (sN or s[a:b])."""
+    code = line.split("//", 1)[0].strip()
+    if not code.startswith("s_") or code.startswith(_NO_DST_PREFIXES):
+        return False
+    m = re.match(r"\S+\s+s(?:\[(\d+):(\d+)\]|(\d+))\b", code)
+    if not m:
+        return False
+    if m.group(3) is not None:
+        return int(m.group(3)) == reg
+    return int(m.group(1)) <= reg <= int(m.group(2))
 
 
 def test_cluster_padding_gfx1250_emits_early_exit_and_reduced_mask():
@@ -58,4 +84,38 @@ def test_cluster_padding_gfx1250_emits_early_exit_and_reduced_mask():
         # The multicast mask must be reduced to the real WGs of the cluster.
         assert "reduce multicast mask to real WGs in cluster" in src, (
             f"Kernel {base!r}: multicast mask not reduced for boundary cluster"
+        )
+
+
+def test_cluster_padding_npot_mt1_keeps_wg_x_for_mask_shift():
+    """Non-power-of-2 MT1: the mask-reduction scratch must not clobber wg_x.
+
+    The reduction ceil-divides SizeJ by MT1=176 with a magic multiply into SGPR
+    scratch. If that scratch aliases the decoded wg_x SGPR, maskA is shifted by
+    floor(SizeJ/MT1)*MT1 instead of wg_x and the A/MXSA multicast targets WGs
+    outside the cluster (AIHPBLAS-5043: GPU memory fault past the MXSA buffer).
+    """
+    results = emit_kernels_from_config(_CONFIG_NPOT_MT1, limit=8, arch=_ARCH)
+    assert len(results) >= 1, f"Expected >=1 kernel, got {len(results)}"
+    assert all(err == 0 for (_b, _s, err) in results), (
+        "All kernels must emit with err==0; "
+        + str([(b, e) for (b, _s, e) in results if e != 0])
+    )
+    for base, src, _err in results:
+        assert_assembles(src, base)
+        assert "STATIC_DIV: divisor=176" in src, (
+            f"Kernel {base!r}: expected the magic-number divide by MT1=176"
+        )
+        lines = src.splitlines()
+        wgx_idx = next(i for i, l in enumerate(lines) if "Etract wg_x." in l)
+        wgx = int(re.match(r"\s*s_and_b32\s+s(\d+),", lines[wgx_idx]).group(1))
+        shift_idx = next(i for i, l in enumerate(lines)
+                         if l.lstrip().startswith("s_lshl_b32") and "Setting maskA" in l)
+        shift = lines[shift_idx].split("//", 1)[0].rstrip().rsplit(",", 1)[1].strip()
+        assert shift == f"s{wgx}", (
+            f"Kernel {base!r}: maskA shifted by {shift}, expected wg_x s{wgx}"
+        )
+        clobbers = [l.strip() for l in lines[wgx_idx + 1:shift_idx] if _sgpr_written(l, wgx)]
+        assert not clobbers, (
+            f"Kernel {base!r}: wg_x s{wgx} overwritten before the maskA shift: {clobbers}"
         )
