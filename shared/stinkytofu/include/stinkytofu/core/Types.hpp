@@ -118,7 +118,7 @@ struct PassFeatureConfig {
         int tensorLoadWmmaSpace = 0;
         /// Extra cycles kept between an after-barrier and the before-side
         /// ds_loads when exclusive overlap uses gap placement. Converted to
-        /// WMMA windows by the region's matrix latency. 0 disables the extra
+        /// WMMAs at the region's batch rate (rounded up). 0 disables the extra
         /// gap. Mirrors ModuleOptions::TensorLoadDsLoadGapCycles.
         int tensorLoadDsLoadGapCycles = 64;
         /// Max independent WMMAs issued back-to-back as one batch; the window
