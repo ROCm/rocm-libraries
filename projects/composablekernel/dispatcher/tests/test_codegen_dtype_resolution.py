@@ -7,6 +7,8 @@
 UnifiedGemmCodegen must resolve the arch-validation dtype triple exactly: a
 mapped --datatype (fp32) is validated as itself, and an unmapped one (pk_fp4)
 raises naming the value instead of being silently validated as fp16.
+--show-arch-info prints the warp tiles listed under that triple, and the
+gfx1250 fp32 gates drop configs inside _get_configs_for_variant.
 
 Run: python3 -m pytest -q tests/test_codegen_dtype_resolution.py
 """
@@ -21,7 +23,7 @@ sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
 sys.path.insert(0, str(DISPATCHER_DIR / "python"))
 
 import unified_gemm_codegen as ugc  # noqa: E402
-from arch_filter import ELEMENT_SIZE_MAP  # noqa: E402
+from arch_filter import ELEMENT_SIZE_MAP, WARP_TILE_SUPPORTED_COMBINATIONS  # noqa: E402
 from codegen_common import CommonTypeMappings, TileConfig  # noqa: E402
 from ctypes_utils import KernelConfig, validate_kernel_config  # noqa: E402
 
@@ -54,11 +56,48 @@ def test_show_arch_info_unmapped_datatype_raises():
 
 
 @pytest.mark.skipif(not ugc.HAS_ARCH_FILTER, reason="arch_filter not importable")
-def test_show_arch_info_strips_feature_suffix(capsys):
-    ugc._show_arch_info("gfx1250:xnack-", "fp32")
+@pytest.mark.parametrize(
+    "gpu_target,datatype,key",
+    [
+        ("gfx1250:xnack-", "fp32", "fp32_fp32_fp32"),
+        ("gfx942", "fp16", "fp16_fp16_fp32"),
+    ],
+)
+def test_show_arch_info_prints_the_listed_warp_tiles(capsys, gpu_target, datatype, key):
+    # Keyed by the accumulator triple and looked up with the suffix stripped.
+    arch = gpu_target.split(":")[0]
+    ugc._show_arch_info(gpu_target, datatype)
     out = capsys.readouterr().out
-    assert "Architecture Info for gfx1250 ===" in out
-    assert "[16, 16, 4]" in out
+    assert f"Architecture Info for {arch} ===" in out
+    block = out.split(f"Warp tile configurations for {key} ")[1].split("\n\n")[0]
+    printed = [line.strip() for line in block.splitlines()[1:]]
+    expected = [str(t) for t in WARP_TILE_SUPPORTED_COMBINATIONS[arch][key]]
+    assert printed and printed == expected
+    assert arch != "gfx1250" or printed == ["[16, 16, 4]"]
+
+
+@pytest.mark.skipif(not ugc.HAS_ARCH_FILTER, reason="arch_filter not importable")
+@pytest.mark.parametrize("layout", ["rcr", "rrr"])
+def test_gfx1250_fp32_configs_apply_both_gates(tmp_path, layout):
+    # The codegen drops the 256x256 / 4-wave tile (accumulator spill) for every
+    # pipeline and comp_tdm_v2 outside rcr (TDM fp32 layout rule).
+    codegen = ugc.UnifiedGemmCodegen(
+        output_dir=tmp_path, datatype="fp32", layout=layout, gpu_target="gfx1250"
+    )
+    codegen.arch_filter = _RecordingFilter()
+    tiles = [TileConfig(t, t, 32, 2, 2, 1, 16, 16, 4) for t in (256, 128)]
+    traits = [
+        ugc.TraitConfig(pipe, epi, "intrawave", False, False, False)
+        for pipe, epi in (("compv3", "cshuffle"), ("comp_tdm_v2", "tdm"))
+    ]
+    codegen._get_tile_configs = lambda: tiles
+    codegen._get_trait_configs = lambda: traits
+
+    configs = codegen._get_configs_for_variant(ugc.GemmVariant.STANDARD)
+
+    got = {(c.tile.tile_m, c.trait.pipeline) for c in configs}
+    tdm = {(128, "comp_tdm_v2")} if layout == "rcr" else set()
+    assert got == {(128, "compv3")} | tdm
 
 
 @pytest.mark.skipif(not ugc.HAS_ARCH_FILTER, reason="arch_filter not importable")
