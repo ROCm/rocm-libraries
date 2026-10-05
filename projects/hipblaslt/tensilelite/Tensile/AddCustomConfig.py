@@ -56,8 +56,8 @@ import argparse
 import os
 import sys
 
-from Tensile.Common.Utilities import deriveWaveParams
-from Tensile.Common.ValidParameters import (
+from .Common.Utilities import deriveWaveParams
+from .Common.ValidParameters import (
     ASSERT_DIM_MAP_PARAMETERS,
     checkParametersAreValid,
     validParameters,

@@ -1466,6 +1466,7 @@
     'NumLoadsCoalescedA',
     'NumLoadsCoalescedB',
     'OptNoLoadLoop',
+    'PersistentXCCMapping',
     'PrefetchAcrossPersistent',
     'PrefetchGL2',
     'PrefetchGlobalRead',
@@ -1517,6 +1518,7 @@
     'TemporalHintMetadata',
     'TemporalHintWS',
     'ThreadTile',
+    'TileProcessingStrategy',
     'TransposeLDS',
     'TransposeLDSMetadata',
     'UnrollLoopSwapGlobalReadOrder',
@@ -1535,11 +1537,13 @@
     'WaveSeparateGlobalReadB',
     'WaveSplitK',
     'WavefrontSize',
+    'WorkAssignment',
     'WorkGroup',
     'WorkGroupMapping',
     'WorkGroupMappingXCC',
     'WorkGroupMappingXCCGroup',
     'WorkGroupReduction',
+    'WorkQueueStealing',
   ])
 # ---
 # name: test_valid_parameters_structure
@@ -2451,6 +2455,15 @@
       'len': 3,
       'type': 'list',
     }),
+    'PersistentXCCMapping': dict({
+      'head': list([
+        0,
+        2,
+        3,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
     'PrefetchAcrossPersistent': dict({
       'head': list([
         0,
@@ -2893,6 +2906,15 @@
       'len': 5625,
       'type': 'list',
     }),
+    'TileProcessingStrategy': dict({
+      'head': list([
+        'None',
+        'DataParallel',
+        'StreamK',
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
     'TransposeLDS': dict({
       'head': list([
         -1,
@@ -3048,6 +3070,15 @@
       'len': 3,
       'type': 'list',
     }),
+    'WorkAssignment': dict({
+      'head': list([
+        'StaticGrid',
+        'DynamicWorkQueue',
+        'Hybrid',
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
     'WorkGroup': dict({
       'head': list([
         list([
@@ -3101,6 +3132,14 @@
         False,
       ]),
       'len': 1,
+      'type': 'list',
+    }),
+    'WorkQueueStealing': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
       'type': 'list',
     }),
   })

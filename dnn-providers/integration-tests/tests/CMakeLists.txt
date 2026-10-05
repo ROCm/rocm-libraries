@@ -19,6 +19,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     ../src/harness/bundle/SupportClaimWriter.cpp
     ../src/harness/bundle/SupportClaims.cpp
     ../src/harness/bundle/SupportVerdict.cpp
+    ../src/harness/bundle/SweepManifestCache.cpp
     ../src/harness/bundle/VariantPackBuilder.cpp
     ../src/harness/input-init/FillInputs.cpp
     ../src/harness/reference-validation/BundleReferenceValidationHarness.cpp
@@ -63,6 +64,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestFillInputs.cpp
     TestToleranceResolver.cpp
     TestVerificationModePaths.cpp
+    TestVerifierTally.cpp
     TestErrorPaths.cpp
     TestLoadedEngineTable.cpp
     TestReferenceOpCoverage.cpp
@@ -130,6 +132,8 @@ add_executable(hipdnn_gpu_ref_tests
     gpu-ref/TestGpuFpReferenceBatchnormFwdInf.cpp
     gpu-ref/TestGpuFpReferenceBatchnormFwdInfWithVariance.cpp
     gpu-ref/TestGpuFpReferenceBatchnormFwdTrain.cpp
+    gpu-ref/TestGpuRefLaunch.cpp
+
 )
 
 target_link_libraries(hipdnn_gpu_ref_tests

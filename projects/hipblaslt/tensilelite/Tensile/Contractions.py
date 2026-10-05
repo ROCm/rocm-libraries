@@ -22,18 +22,20 @@
 #
 ################################################################################
 
+from .ExecutionPolicy import isPersistent, isStreamK, isPersistentDataParallel, normalize_execution_policy
+
 from typing import Dict
 
 from .Activation import ActivationType
 from . import Hardware
 from . import Properties
-from Tensile.Common import state, state_key_ordering, IsaInfo
-from Tensile.Common.Architectures import gfxToIsa
-from Tensile.Common.DataType import DataType
-from Tensile.Common.GlobalParameters import internalParameters
-from Tensile.SolutionStructs import Solution as OriginalSolution
-from Tensile.SolutionStructs.Problem import getBiasDataTypeListDefault, getGateResidualDataTypeListDefault
-from Tensile.Toolchain.Component import Assembler
+from .Common import state, state_key_ordering, IsaInfo
+from .Common.Architectures import gfxToIsa
+from .Common.DataType import DataType
+from .Common.GlobalParameters import internalParameters
+from .SolutionStructs import Solution as OriginalSolution
+from .SolutionStructs.Problem import getBiasDataTypeListDefault, getGateResidualDataTypeListDefault
+from .Toolchain.Component import Assembler
 from math import ceil
 
 MIN_K_FOR_GSU = 32
@@ -478,7 +480,7 @@ class TaskPredicate(Properties.Predicate):
         # LaunchLimits predicate checks that launch grid will not overflow hip API limits
         # TODO This predicate could also verify limits on some kernel arguments
         # Stream-k kernels currently do not need limit check since launch grid should be limited by the grid model
-        if ('StreamK' not in state) or (state['StreamK'] == 0):
+        if not isPersistent(state):
             rv += [cls('LaunchLimits')]
 
         return rv
@@ -552,7 +554,7 @@ class ProblemPredicate(Properties.Predicate):
                 rv += [cls('SynchronizerSizeCheck', index=0, value=valuepredicates)]
 
         if state["InternalSupportParams"]["KernArgsVersion"] >= 1 and \
-                 not (('StreamK' in state) and (state['StreamK'] > 0)):
+                 not isPersistent(state):
             valuepredicates = []
             valuepredicates.append(state["MacroTile0"])
             valuepredicates.append(state["MacroTile1"])
@@ -578,7 +580,7 @@ class ProblemPredicate(Properties.Predicate):
             if ('_GlobalAccumulation' not in state) or (state['_GlobalAccumulation'] != 'MultipleBuffer'):
                 rv += [cls("DeterministicMode", value = False)]
 
-        if ('StreamK' in state) and (state['StreamK'] > 0) and ('StreamKAtomic' in state) and (state['StreamKAtomic'] == 1):
+        if isStreamK(state) and ('StreamKAtomic' in state) and (state['StreamKAtomic'] == 1):
             # StreamKAtomic = 1 uses atomic for partial tiles
             rv += [cls("DeterministicMode", value = False)]
 
@@ -610,7 +612,7 @@ class ProblemPredicate(Properties.Predicate):
         if 'BufferStore' in state and state['BufferStore'] == True:
             rv += [cls('BufferStoreOffsetLimitCheck', value=state['MacroTile1'])]
 
-        if '_GlobalAccumulation' in state and state['_GlobalAccumulation'] != None and not state["StreamK"]:
+        if '_GlobalAccumulation' in state and state['_GlobalAccumulation'] != None and not isPersistent(state):
             value = MIN_K_FOR_GSU
             rv += [cls('GlobalSplitUCheckMinK', value=[value, state["GlobalSplitU"]])]
 
@@ -721,8 +723,8 @@ class SizeMapping:
                  'workGroupMapping',
                  'packBatchDims',
                  'magicDivAlg',
-                 'streamK',
-                 'streamKForceDPOnly',
+                 'tileProcessingStrategy',
+                 'workAssignment',
                  'streamKAtomic',
                  'prefetchAcrossPersistent',
                  'sourceKernel',
@@ -767,6 +769,9 @@ class SizeMapping:
 
     @classmethod
     def FromOriginalState(cls, d):
+        # This describes an existing artifact: preserve its argument version
+        # while translating selectors and inactive legacy options together.
+        d = normalize_execution_policy(d, regenerate=False)
         globalAccum = 0
         if d['_GlobalAccumulation'] == 'SingleBuffer':
             globalAccum = 1
@@ -817,8 +822,8 @@ class SizeMapping:
                    globalSplitU             = d['GlobalSplitU'],
                    staggerStrideShift       = d['_staggerStrideShift'] if '_staggerStrideShift' in d else 0,
                    packBatchDims            = 0,
-                   streamK                  = d['StreamK'] if 'StreamK' in d else 0,
-                   streamKForceDPOnly       = d.get('StreamKForceDPOnly', 0),
+                   tileProcessingStrategy   = d['TileProcessingStrategy'],
+                   workAssignment           = d['WorkAssignment'],
                    streamKAtomic            = d['StreamKAtomic'] if 'StreamKAtomic' in d else 0,
                    prefetchAcrossPersistent = d.get('PrefetchAcrossPersistent', 0),
                    magicDivAlg              = d.get('MagicDivAlg', 1),
@@ -874,6 +879,7 @@ class SizeMapping:
 
 class InternalArgsSupport:
     StateKeys = ['version',
+                 'persistentLoopArgsVersion',
                  'gsu',
                  'wgm',
                  'staggerU',
@@ -889,6 +895,7 @@ class InternalArgsSupport:
         useSFC = d['InternalSupportParams']['UseSFC'] or len(d.get('SpaceFillingAlgo', [])) > 0
         isp = d['InternalSupportParams']
         return cls(version = isp['KernArgsVersion'],
+                   persistentLoopArgsVersion = isp.get('PersistentLoopArgsVersion', 0),
                    gsu = isp['SupportUserGSU'],
                    wgm = isp['SupportCustomWGM'],
                    staggerU = isp['SupportCustomStaggerU'],
