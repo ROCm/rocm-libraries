@@ -203,7 +203,10 @@ unknown id, knobs that no longer reproduce the key -- raises
 `rocke.dispatch.PinRefused` with the reason and never falls back to another
 kernel. Because the key includes a fingerprint of the defaults the knobs are
 relative to, a changed default refuses old pins instead of silently building a
-different kernel; a long-lived cache should also store `spec_hash` and treat a
+different kernel. Adding a declared default intentionally has the same effect:
+validate the replacement tuning ids and remove the old ids from the external
+tuning store. The refusal reports the stored and newly canonicalized ids; it
+never adopts the replacement. A long-lived cache should also store `spec_hash` and treat a
 mismatch on replay as a miss (ARCHITECTURE.md section 11.1). Knobs that compile to the default are dropped and
 illegal ones are refused with a reason, so one kernel has one id however it was
 reached (sweep, sample, knob pin, or id). Knob values are converted to the type

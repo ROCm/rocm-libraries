@@ -162,7 +162,7 @@ def list_combos(args) -> int:
             kernel_spec = getattr(spec, "kernel_spec", spec)
             if isinstance(kernel_spec, AttentionDenseSpec):
                 extra = (
-                    f"  bm={kernel_spec.block_m} "
+                    f"  bm={kernel_spec.block_m} bn={kernel_spec.block_n} "
                     f"persist={kernel_spec.persistent} "
                     f"wdma={getattr(kernel_spec, 'wide_lds_dma', None)}"
                 )

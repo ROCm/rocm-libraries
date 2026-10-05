@@ -25,8 +25,8 @@ from .common import (
     UNIFIED_HEAD_SIZES,
     AttentionRequest,
     _dense_kernel_module,
-    _problem,
     _request_errors,
+    _tuning_problem,
 )
 from .dense_rules import DenseSpace, DenseSupports
 from .unified_rules import TUNING_ALGORITHM, AttentionGeometryVariant, unified_space
@@ -69,7 +69,7 @@ def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
 
         payload = dict(tensors)
         if "problem" not in payload:
-            payload["problem"] = _problem(request)
+            payload["problem"] = _tuning_problem(request)
         return bind_tuning_attention_torch(request, spec, payload, **kwargs)
 
     return make_tuned_candidate(
@@ -89,15 +89,15 @@ def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
             supports_features=ATTENTION_FEATURES,
         ),
         space=unified_space(variant),
-        base=_problem,
+        base=_tuning_problem,
         request_errors=_request_errors,
         precheck=lambda req: supports_native_unified_attention(
-            _problem(req), arch=variant.arch
+            _tuning_problem(req), arch=variant.arch
         ),
         signature=signature,
         build=build,
         bind_torch=bind_torch,
-        grid=lambda spec, req: spec.launch_grid(_problem(req)),
+        grid=lambda spec, req: spec.launch_grid(_tuning_problem(req)),
     )
 
 

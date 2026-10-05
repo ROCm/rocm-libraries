@@ -59,14 +59,25 @@ def resolve_pinned(
         if spec is None:
             return None, why
         return None, (
-            f"tuning_knobs canonicalize to config_key {spec.config_key!r}, not "
-            f"{key!r}: the knobs, or the defaults they are relative to, changed"
+            f"stored tuning_id {wanted!r} is stale: tuning_knobs canonicalize to "
+            f"tuning_id {spec.tuning_id!r} (config_key {spec.config_key!r}), not "
+            f"config_key {key!r}; the knobs, the defaults they are relative to, "
+            "or the identity schema changed; re-sweep/revalidate and replace the "
+            "stored tuning_id; no fallback was selected"
         )
     found = find(wanted)
     if found is None:
+        current = (
+            ""
+            if spec is None
+            else f"; this candidate's current default is {spec.tuning_id!r}"
+        )
         return None, (
             f"unknown tuning_id {wanted!r}: no production spec has config_key "
-            f"{key!r}; a full-space id must be pinned with its tuning_knobs"
+            f"{key!r}{current}. A full-space id must be pinned with its "
+            "tuning_knobs; an id generated under older defaults or an older "
+            "identity schema must be re-swept/revalidated and replaced. No "
+            "fallback was selected"
         )
     return found, "ok"
 
@@ -93,18 +104,27 @@ def make_tuned_candidate(
     """An opt-in candidate over ``space``.
 
     ``base(req)`` is the input the space builds from for one request (raise
-    ``ValueError`` when the request cannot have one). ``precheck(req)`` is any
-    request-level gate to run before resolving (a backend coverage check).
-    The remaining callables are the family's build, signature, grid and Torch
-    binding for its tuned spec.
+    ``ValueError`` when the request cannot have one). It must be a pure function
+    of the request's hash/equality-visible fields: the result is memoized and
+    shared by pin resolution, sweeps and sampling. Device or process state must
+    first be normalized into the request. ``precheck(req)`` is any request-level
+    gate to run before resolving (a backend coverage check). The remaining
+    callables are the family's build, signature, grid and Torch binding for its
+    tuned spec.
     """
 
     @lru_cache(maxsize=32)
-    def resolve(req) -> Verdict:
+    def resolve_base(req):
         try:
-            b = base(req)
+            return base(req), "ok"
         except ValueError as e:
             return None, str(e)
+
+    @lru_cache(maxsize=32)
+    def resolve(req) -> Verdict:
+        b, why = resolve_base(req)
+        if b is None:
+            return None, why
         return resolve_pinned(
             req,
             default=lambda: space.default(b),
@@ -134,12 +154,14 @@ def make_tuned_candidate(
     def sweep(req: OperatorRequest):
         if not candidate.admits(req)[0]:
             return ()
-        return space.stream(base(req), current_sweep_level())
+        b, _why = resolve_base(req)
+        return space.stream(b, current_sweep_level())
 
     def sample(req: OperatorRequest, n: int, seed: int):
         if not candidate.admits(req)[0]:
             return ()
-        return space.sample(base(req), n, seed)
+        b, _why = resolve_base(req)
+        return space.sample(b, n, seed)
 
     candidate = KernelCandidate(
         name=name,

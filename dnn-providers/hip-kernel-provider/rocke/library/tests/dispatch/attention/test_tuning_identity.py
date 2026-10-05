@@ -278,6 +278,10 @@ class TestStoredPinsAcrossReleases(unittest.TestCase):
             self.assertIn("defaults they are relative to", why)
             fresh = upgraded.select_spec(replace(pin, tuning_id="auto"))
             self.assertNotEqual(fresh.config_key, stored.config_key)
+            self.assertIn(stored.tuning_id, why)
+            self.assertIn(fresh.tuning_id, why)
+            self.assertIn("re-sweep/revalidate", why)
+            self.assertIn("no fallback", why)
 
     def test_stale_pins_raise_with_the_reason_and_never_fall_back(self):
         stored = tuning_spec_with_knobs(_req(), _DENSE, {"pv_priority": 2})
@@ -296,7 +300,7 @@ class TestStoredPinsAcrossReleases(unittest.TestCase):
             ),
             "knobs do not reproduce the id": (
                 replace(_pin(_DENSE, stored), tuning_knobs={"pv_priority": 3}),
-                "canonicalize to config_key",
+                "canonicalize to tuning_id",
             ),
         }
         for label, (pin, reason) in cases.items():

@@ -5,9 +5,11 @@
 from __future__ import annotations
 
 import ast
+import io
 import inspect
 import sys
 import unittest
+from contextlib import redirect_stdout
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest import mock
@@ -331,6 +333,45 @@ class TestComboSweepLifecycle(unittest.TestCase):
                 ):
                     module.main()
                 self.assertEqual(raised.exception.code, 2)
+
+    def test_table_list_combos_unwraps_dense_specs_and_prints_both_tile_knobs(self):
+        candidate = ATTENTION_EXECUTION_REGISTRY.get(_DENSE)
+        req = _req(algorithm=candidate.algorithm, spec_id=candidate.spec_id)
+        spec = candidate.select_spec(req)
+        common = dict(
+            dtype="bf16",
+            algorithm="auto",
+            candidate_prefix="",
+            tuning_id_prefix="",
+            tuning_sample=0,
+            seed=0,
+            sweep_level="production",
+            kv_block_size=16,
+            batch=0,
+            offset=0,
+            limit=0,
+        )
+        cases = (
+            (dense_prefill_table_sweep, [("model", 32, 8, 128, 1024)]),
+            (decode_table_sweep, [("model", 32, 8, 128, 1024, 16)]),
+        )
+        for module, shapes in cases:
+            with (
+                self.subTest(module=module.__name__),
+                mock.patch.object(module, "_iter_shapes", return_value=shapes),
+                mock.patch.object(
+                    module,
+                    "iter_registered_attention_combos",
+                    return_value=((candidate, spec),),
+                ),
+                redirect_stdout(io.StringIO()) as stdout,
+            ):
+                self.assertEqual(module.list_combos(SimpleNamespace(**common)), 0)
+            text = stdout.getvalue()
+            self.assertIn(f"bm={spec.kernel_spec.block_m}", text)
+            self.assertIn(f"bn={spec.kernel_spec.block_n}", text)
+            self.assertIn("persist=True", text)
+            self.assertIn("wdma=True", text)
 
     def test_table_sweeps_rewrite_json_after_each_row(self):
         import json

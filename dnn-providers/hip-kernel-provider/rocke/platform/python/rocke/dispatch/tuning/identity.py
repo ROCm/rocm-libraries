@@ -17,6 +17,12 @@ kernel dataclass default) the same knobs would silently build a different
 kernel. With the defaults in the key, the recomputed key no longer matches the
 stored one and the pin is refused instead.
 
+This is deliberately conservative: adding any declared default re-keys every
+configuration of the variant, even if that field is currently behavior-neutral.
+The new ids must be validated before publication, and consumers must replace
+the old ids in their tuning stores. Replay reports both the stored id and the
+newly canonicalized id; it never substitutes the new configuration silently.
+
 ``tuning_id`` is ``{stem}@{config_key}``, the stem being the family's display
 name for the spec (``KnobSpace.stem``; the variant id by default). Pins are
 matched on the ``config_key`` suffix (:func:`key_of`), never on the stem.

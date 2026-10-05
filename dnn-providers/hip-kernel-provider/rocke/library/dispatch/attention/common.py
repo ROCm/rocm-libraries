@@ -302,7 +302,9 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
     return 120
 
 
-def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:
+def _problem_with_num_cus(
+    req: AttentionRequest, num_cus: int
+) -> UnifiedAttentionProblem:
     # total_q = batch * seqlen_q (the flattened query rows). num_seqs = batch.
     return UnifiedAttentionProblem(
         total_q=int(req.batch) * int(req.seqlen_q),
@@ -318,10 +320,27 @@ def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:
         use_sinks=bool(req.use_sinks),
         use_fp8=bool(req.use_fp8),
         fp8_fnuz=bool(req.fp8_fnuz),
-        num_cus=_resolve_num_cus(req),
+        num_cus=int(num_cus),
         target_ctas=int(req.target_ctas),
         clamp_arch=req.arch.lower(),
     )
+
+
+def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:
+    """The production-routing problem, including the live-device CU policy."""
+    return _problem_with_num_cus(req, _resolve_num_cus(req))
+
+
+def _tuning_problem(req: AttentionRequest) -> UnifiedAttentionProblem:
+    """Problem input for an explicit tuning candidate.
+
+    A tuning candidate already fixes path and geometry, so it does not consume
+    the live-device CU heuristic used by production routing. Keep its base a
+    pure function of the request: honor an explicit ``num_cus`` and otherwise
+    use the deterministic cross-compile fallback.
+    """
+    num_cus = int(req.num_cus)
+    return _problem_with_num_cus(req, num_cus if num_cus > 0 else 120)
 
 
 # Shared pin-selector: identical across families, so it lives in the dispatch

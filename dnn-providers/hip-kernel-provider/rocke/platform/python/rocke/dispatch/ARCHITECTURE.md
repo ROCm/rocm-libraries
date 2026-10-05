@@ -1707,7 +1707,10 @@ config_key = sha256(json({v: TUNING_ID_VERSION, abi, arch, path, variant_id,
   of a spec. The defaults fingerprint covers every declared default, so adding
   a defaulted field to a kernel spec, or changing a default, changes every id
   of that variant and old pins are refused (see "Drift across releases"
-  below); changing the payload or the canonical-knob rules bumps
+  below). This conservative invalidation is intentional even for a new
+  behavior-neutral field: replacement ids are validated before publication and
+  old ids are removed from the consumer's tuning store. Changing the payload
+  or the canonical-knob rules bumps
   `TUNING_ID_VERSION` (currently 2: the defaults fingerprint was added).
 - **Problem-independent.** Problem fields (batch, lengths, heads) are not in
   it, so one `config_key` names the same configuration on every problem the
@@ -1759,8 +1762,9 @@ config_key = sha256(json({v: TUNING_ID_VERSION, abi, arch, path, variant_id,
   variant's `KnobSpace.defaults` reports those values (never problem fields or
   recorded fields), and their fingerprint is part of `config_key`. If a
   default changes, the same knobs give a new key, the stored id no longer
-  matches, and the pin is refused with "the knobs, or the defaults they are
-  relative to, changed". Anything that changes what a knob *means* without
+  matches, and the pin is refused with both the stored id and the newly
+  canonicalized id plus an instruction to re-sweep/revalidate. The replacement
+  is never selected automatically. Anything that changes what a knob *means* without
   changing a declared default -- builder logic, a policy function -- must bump
   `TUNING_ID_VERSION`, which changes every key.
 - **What a long-lived cache should store and check** (hipDNN): `spec_id`,
@@ -2197,7 +2201,12 @@ declared default bumps `TUNING_ID_VERSION`.
 **The candidate.** One `make_tuned_candidate(...)` per variant, giving the
 space, `base(req)`, the family's request-error check, and its signature,
 build, grid and Torch binding. Register the same instance on both registries,
-so a pinned replay resolves once.
+so a pinned replay resolves once. `base(req)` must be a pure function of the
+request's hash/equality-visible fields: it is memoized once and shared by
+resolution, sweeping and sampling. Normalize device or process state into the
+request first; do not probe it from `base`. Attention's explicit tuning
+candidates therefore use `_tuning_problem`, while production path routing uses
+the live-CU-aware `_problem`.
 
 **The test.** Call `assert_tuning_contract(candidate, requests,
 other_requests=..., default_knobs=..., refused_knobs=...)` for a

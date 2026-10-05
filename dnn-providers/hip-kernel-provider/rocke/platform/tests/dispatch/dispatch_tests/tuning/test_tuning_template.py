@@ -162,11 +162,11 @@ class ToySpace(KnobSpace):
 
 
 # ------------------------------------------------------------ the candidates
-def _candidate(tile: int, space_type=ToySpace):
+def _candidate(tile: int, space_type=ToySpace, base_fn=None):
     variant_id = f"tile{tile}"
     name = f"toy_gfx950_{variant_id}"
 
-    def base(req: ToyRequest) -> ToyKernel:
+    def default_base(req: ToyRequest) -> ToyKernel:
         if int(req.m) <= 0:
             raise ValueError("m must be positive")
         return ToyKernel(m=int(req.m), tile=tile)
@@ -186,7 +186,7 @@ def _candidate(tile: int, space_type=ToySpace):
             variant_id=variant_id,
             candidate_name=name,
         ),
-        base=base,
+        base=base_fn or default_base,
         request_errors=lambda req: [],
         signature=lambda spec: (),
         build=lambda spec, arch: spec.kernel,
@@ -242,6 +242,24 @@ class TestToyFamily(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("register budget", why)
 
+    def test_the_request_base_is_memoized_across_resolution_sweep_and_sample(self):
+        calls = []
+
+        def base(req):
+            calls.append(req)
+            return ToyKernel(m=int(req.m), tile=64)
+
+        candidate = _candidate(64, base_fn=base)
+        req = ToyRequest(m=1024, algorithm="toy_tuned", spec_id="gfx950_tile64")
+        self.assertTrue(candidate.admits(req)[0])
+        candidate.select_spec(replace(req))
+        tuple(candidate.sweep_space(req))
+        tuple(candidate.sample_space(req, 2, 3))
+        self.assertEqual(calls, [req])
+
+        candidate.select_spec(replace(req, m=2048))
+        self.assertEqual([call.m for call in calls], [1024, 2048])
+
     def test_sweep_results_pin_their_spec(self):
         registry = _registry()
         results = list(registry.iter_dispatch_all(ToyRequest(m=1024), kernel_id=_kid))
@@ -283,6 +301,38 @@ class TestStalePins(unittest.TestCase):
     def test_bad_knob_values_fail_when_the_request_is_built(self):
         with self.assertRaisesRegex(TypeError, "JSON scalar"):
             ToyRequest(m=8, tuning_knobs={"unroll": [2]})
+
+    def test_adding_a_declared_default_intentionally_rekeys_every_config(self):
+        class AddedDefaultSpace(ToySpace):
+            def defaults(self, base, kernel):
+                return {**super().defaults(base, kernel), "future_default": False}
+
+        req = ToyRequest(m=1024, algorithm="toy_tuned", spec_id="gfx950_tile64")
+        old = _candidate(64)
+        upgraded = _candidate(64, AddedDefaultSpace)
+        stored = old.select_spec(replace(req, tuning_knobs={"unroll": 2}))
+        pin = replace(req, tuning_id=stored.tuning_id, tuning_knobs=stored.knobs)
+
+        ok, why = upgraded.admits(pin)
+        self.assertFalse(ok)
+        current = upgraded.select_spec(replace(pin, tuning_id="auto"))
+        self.assertNotEqual(current.tuning_id, stored.tuning_id)
+        self.assertIn(stored.tuning_id, why)
+        self.assertIn(current.tuning_id, why)
+        self.assertIn("re-sweep/revalidate", why)
+        self.assertIn("no fallback", why)
+
+    def test_an_unknown_bare_id_reports_the_current_default(self):
+        candidate = _candidate(64)
+        req = ToyRequest(m=1024, algorithm="toy_tuned", spec_id="gfx950_tile64")
+        current = candidate.select_spec(req)
+        stale = replace(req, tuning_id="tile64_wpe2@" + "0" * 16)
+
+        ok, why = candidate.admits(stale)
+        self.assertFalse(ok)
+        self.assertIn(current.tuning_id, why)
+        self.assertIn("re-swept/revalidated", why)
+        self.assertIn("No fallback", why)
 
     def test_the_opt_in_refusal_names_both_selectors(self):
         candidate = _registry().get("toy_gfx950_tile128")

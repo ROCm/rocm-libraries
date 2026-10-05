@@ -319,8 +319,12 @@ fields, so it is the same on every problem the variant admits. The defaults
 fingerprint covers every declared default of the kernel spec, so adding a
 defaulted field or changing a default changes every id of that variant: a
 stored pin is then refused instead of silently building a different kernel,
-and has to be re-swept. A change to the payload or the canonicalization rules
-bumps `TUNING_ID_VERSION` in `rocke.dispatch.tuning.identity`. gfx942 dense
+and has to be re-swept. This broad invalidation is intentional, including for
+a newly added behavior-neutral default: validate the replacement ids before
+publishing them and remove the old ids from the external tuning store. The
+refusal reports the stored id and the newly canonicalized id; it never adopts
+the replacement silently. A change to the payload or the canonicalization
+rules bumps `TUNING_ID_VERSION` in `rocke.dispatch.tuning.identity`. gfx942 dense
 resolves `persistent` and `waves_per_eu` per problem, so those two are always
 recorded with their effective value. Pins match on `config_key`; the
 `{variant_id}_wpe{N}` stem (`waves.py`: `waves_per_eu` is the attention
