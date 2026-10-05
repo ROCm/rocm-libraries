@@ -40,7 +40,9 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
     "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
 
-project( rocfft-clients-samples-fixed-large LANGUAGES CXX )
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  project( rocfft-clients-samples-fixed-large LANGUAGES CXX )
+endif()
 
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 
@@ -62,7 +64,7 @@ foreach( sample ${sample_list} )
     PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
   )
 
-  target_link_libraries( ${sample} PRIVATE roc::rocfft )
+  target_link_libraries( ${sample} PRIVATE roc::rocfft hip::device )
 
   target_compile_options( ${sample} PRIVATE ${WARNING_FLAGS} )
 
@@ -72,11 +74,11 @@ foreach( sample ${sample_list} )
   )
 
   if( ROCFFT_BUILD_SCOPE )
-    set( FIXED_LARGE_OUT_DIR "/../../staging" )
+    set( FIXED_LARGE_OUT_DIR "/clients/staging" )
   elseif( ROCFFT_CLIENTS_BUILD_SCOPE )
-    set( FIXED_LARGE_OUT_DIR "/../../bin" )
+    set( FIXED_LARGE_OUT_DIR "/bin" )
   elseif( ROCFFT_CLIENTS_SAMPLES_BUILD_SCOPE )
-    set( FIXED_LARGE_OUT_DIR "/../bin" )
+    set( FIXED_LARGE_OUT_DIR "/bin" )
   else()
     set( FIXED_LARGE_OUT_DIR "/bin" )
   endif()
