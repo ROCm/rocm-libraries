@@ -677,30 +677,37 @@ endif()
 
 # Create device_conv_operations from CK_DEVICE_CONV_INSTANCES (like the old approach)
 if(CK_DEVICE_CONV_INSTANCES AND (NOT HIPTENSOR_REQ_LIBS_ONLY OR MIOPEN_REQ_LIBS_ONLY))
-    add_library(device_conv_operations ${CK_DEVICE_CONV_INSTANCES})
-    add_library(composablekernels::device_conv_operations ALIAS device_conv_operations)
-    target_compile_features(device_conv_operations PUBLIC)
-    set_target_properties(device_conv_operations PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    set_target_properties(device_conv_operations
+  if(MIOPEN_REQ_LIBS_ONLY)
+    string(REPLACE ";" "_" gpuarchs "${GPU_TARGETS}")
+    set(libs "device_conv_operations" "device_conv_operations_${gpuarchs}")
+  else()
+    set(libs "device_conv_operations")
+  endif()
+  foreach(lib IN LISTS libs)
+    add_library("${lib}" ${CK_DEVICE_CONV_INSTANCES})
+    add_library("composablekernels::${lib}" ALIAS "${lib}")
+    target_compile_features("${lib}" PUBLIC)
+    set_target_properties("${lib}" PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    set_target_properties("${lib}"
         PROPERTIES
         VERSION ${CMAKE_PROJECT_VERSION}
         SOVERSION ${CMAKE_PROJECT_VERSION_MAJOR}
     )
-    target_include_directories(device_conv_operations PUBLIC
+    target_include_directories("${lib}" PUBLIC
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ck/library/tensor_operation_instance/gpu>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ck/library/tensor_operation_instance/gpu/conv_tensor_rearrange>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ck/library/tensor_operation_instance/gpu/grouped_conv_bwd_data>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ck/library/tensor_operation_instance/gpu/grouped_conv_bwd_weight>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ck/library/tensor_operation_instance/gpu/grouped_conv_fwd>
     )
-    rocm_install(TARGETS device_conv_operations
-        EXPORT device_conv_operationsTargets)
-    rocm_install(EXPORT device_conv_operationsTargets
-        FILE composable_kerneldevice_conv_operationsTargets.cmake
+    rocm_install(TARGETS "${lib}"
+        EXPORT "${lib}Targets")
+    rocm_install(EXPORT "${lib}Targets"
+        FILE "composable_kernel${lib}Targets.cmake"
         NAMESPACE composable_kernel::
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/composable_kernel
     )
-
+  endforeach()
     if(MIOPEN_REQ_LIBS_ONLY)
         message(STATUS "Created device_conv_operations STATIC library (MIOpen-required layouts only)")
     else()
