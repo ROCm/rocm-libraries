@@ -63,3 +63,9 @@ To build hipFFT and hipFFTW from source, follow these steps:
    .. note::
 
       The ``-DBUILD_CLIENTS=ON`` option is only allowed with the amdclang++ or HIPCC compilers.
+
+   The following CMake options control the Fortran bindings:
+
+   *  ``-DBUILD_FORTRAN_BINDINGS``: Builds the Fortran bindings. Defaults to ``ON`` on Linux, ``OFF`` on Windows and with the CUDA backend.
+   *  ``-DBUILD_FORTRAN_CLIENTS``: Builds the Fortran binding tests when the clients are built. Defaults to ``ON``.
+   *  ``-DFORTRAN_ARRAY_INTERFACES``: Selects the array interfaces. ``assumed-shape`` by default; ``none`` or ``assumed-rank``.
