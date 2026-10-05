@@ -100,6 +100,7 @@ Infer options from the user request:
      ```bash
      python3 <scripts>/cmake_run.py --build-dir <build-dir> --binary <hipdnn_integration_tests> -- <--test-article ... --test-engine ... --test-config ...> --gtest_filter=<filter> > <log> 2>&1
      ```
+   - Discovery reports only the provider-wide `<provider>-external-integration-check` target and its command. Engine-pinned registrations are not listed: for `hipkernel:Gfx950AttentionDense` they are the build target `hip-kernel-provider-gfx950-attention-dense-external-integration-check`, its tiered CTest entries `hip-kernel-provider-gfx950-attention-dense-external-integration_<tier>_suite`, and `hip_kernel_provider_gfx950_attention_dense_gpu_ref_integration_tests`. Find them with `ctest --test-dir <installed-ctest-root> -N` and a name regex. An ingestor engine's explicit-selection C++ cases run inside the shared `hip_kernel_provider_integration_tests` binary (CTest entry `hip_kernel_provider_integration_tests_quick_suite`, which runs every engine's cases); the ingestor RUNBOOK stage 5 gives the filtered command.
 
 9. For every command, keep full output in a log and show only a short tail on failure. Track pass/fail per component. Stop at the first failure unless keep-going was requested.
 

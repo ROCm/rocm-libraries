@@ -980,6 +980,153 @@ class TestStructuralModeNeverClaimsCompiledAgreement:
         assert "COMPILED SPECIALIZATION AGREEMENT" in capsys.readouterr().out
 
 
+class _FakeArchive:
+    def get_kernel(self, toc_key, arch):
+        return _PAYLOAD
+
+
+class _FakeKpack:
+    class PackedKernelArchive:
+        @staticmethod
+        def read(path):
+            return _FakeArchive()
+
+
+class TestMissingRocmKpackIsAnEnvironmentError:
+    """rocm_kpack not importable is a property of the machine, not of the catalog.
+    It must not surface as one gate failure per packed kernel (942:S4-1 saw 144), and
+    the image's /opt/rocm-kpack/python must be found without a flag, as
+    KpackPython.cmake finds it."""
+
+    @staticmethod
+    def _tree(packed, tag):
+        root = packed(tag=tag)
+        (root / "kpack").mkdir()
+        (root / "kpack" / "test.kpack").write_bytes(b"")
+        return root
+
+    @staticmethod
+    def _resolver(monkeypatch, importable_from):
+        """Replace load_kpack: only directories in `importable_from` import."""
+        calls = []
+
+        def fake_load_kpack(rocm_kpack_dir=None):
+            calls.append(rocm_kpack_dir)
+            if rocm_kpack_dir in importable_from:
+                return _FakeKpack, None
+            raise HkpPackError(f"unable to import rocm_kpack from {rocm_kpack_dir}")
+
+        import hkp_pack.kpack_resolver as resolver  # noqa: PLC0415
+
+        monkeypatch.setattr(resolver, "load_kpack", fake_load_kpack)
+        return calls
+
+    def test_unimportable_rocm_kpack_exits_with_the_environment_code(
+        self, packed, monkeypatch, tmp_path, capsys
+    ):
+        default = tmp_path / "opt-rocm-kpack-python"
+        default.mkdir()
+        monkeypatch.setattr(gate_module, "DEFAULT_KPACK_PYTHON_DIRS", (default,))
+        calls = self._resolver(monkeypatch, importable_from=set())
+        root = self._tree(packed, "no_kpack")
+
+        code = gate_module.main(["set", str(root), "--mode", "full", "--arch", _ARCH])
+
+        captured = capsys.readouterr()
+        assert code == gate_module.EXIT_ENVIRONMENT == 3, captured.out
+        assert "ENVIRONMENT ERROR" in captured.err
+        assert "GATE FAILED" not in captured.out
+        assert calls == [None, str(default)]
+
+    def test_the_default_directory_is_used_when_no_flag_is_given(
+        self, packed, monkeypatch, tmp_path, capsys
+    ):
+        default = tmp_path / "opt-rocm-kpack-python"
+        default.mkdir()
+        monkeypatch.setattr(gate_module, "DEFAULT_KPACK_PYTHON_DIRS", (default,))
+        calls = self._resolver(monkeypatch, importable_from={str(default)})
+        root = self._tree(packed, "default_kpack")
+
+        code = gate_module.main(["set", str(root), "--mode", "full", "--arch", _ARCH])
+
+        captured = capsys.readouterr()
+        assert code != gate_module.EXIT_ENVIRONMENT, captured.err
+        assert calls == [None, str(default)]
+        # The payload was read through the fallback and agreed with the evidence.
+        assert "distinct-binaries=    1 OK" in captured.out, captured.out
+
+    def test_a_named_directory_is_not_second_guessed(
+        self, packed, monkeypatch, tmp_path, capsys
+    ):
+        default = tmp_path / "opt-rocm-kpack-python"
+        default.mkdir()
+        monkeypatch.setattr(gate_module, "DEFAULT_KPACK_PYTHON_DIRS", (default,))
+        calls = self._resolver(monkeypatch, importable_from={str(default)})
+        root = self._tree(packed, "named_kpack")
+        named = str(tmp_path / "named")
+
+        code = gate_module.main(
+            [
+                "set",
+                str(root),
+                "--mode",
+                "full",
+                "--arch",
+                _ARCH,
+                "--kpack-python-dir",
+                named,
+            ]
+        )
+
+        assert code == gate_module.EXIT_ENVIRONMENT, capsys.readouterr().out
+        assert calls == [named]
+
+    @staticmethod
+    def _package(root: Path, *modules: str) -> Path:
+        """A rocm_kpack package under `root` holding only `modules`."""
+        package = root / "rocm_kpack"
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("")
+        for module in modules:
+            (package / f"{module}.py").write_text(f"ORIGIN = {str(root)!r}\n")
+        return root
+
+    @pytest.fixture
+    def no_cached_rocm_kpack(self):
+        """Run with no rocm_kpack module cached, and put the cache back afterwards."""
+
+        def cached():
+            return {
+                n: m
+                for n, m in sys.modules.items()
+                if n == "rocm_kpack" or n.startswith("rocm_kpack.")
+            }
+
+        saved = cached()
+        for name in saved:
+            del sys.modules[name]
+        yield
+        for name in cached():
+            del sys.modules[name]
+        sys.modules.update(saved)
+
+    def test_a_broken_installed_package_does_not_hide_the_default_directory(
+        self, monkeypatch, tmp_path, no_cached_rocm_kpack
+    ):
+        # The installed package imports, but has no kpack submodule. The first
+        # attempt caches its `rocm_kpack`; the directory attempt must not reuse it.
+        installed = self._package(tmp_path / "site-packages")
+        default = self._package(
+            tmp_path / "opt-rocm-kpack-python", "kpack", "compression"
+        )
+        monkeypatch.syspath_prepend(str(installed))
+        monkeypatch.setattr(gate_module, "DEFAULT_KPACK_PYTHON_DIRS", (default,))
+
+        module = gate_module.Payloads()._load_kpack()
+
+        assert module.ORIGIN == str(default)
+
+
 # TestRealArchiveSelectedConsumer is the one class that builds a real kpack archive,
 # carried as a skip rather than a hard failure so a checkout without rocm_kpack keeps
 # the no-producer property.

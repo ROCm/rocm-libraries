@@ -21,6 +21,7 @@ never by filename.
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import sys
@@ -31,6 +32,15 @@ SENTINEL = -1
 
 #: The two claims this gate can make, selected explicitly on every run.
 MODES = ("full", "structural")
+
+#: Searched for rocm_kpack when `--kpack-python-dir` is not given and the installed
+#: package cannot be imported. Mirrors KpackPython.cmake's
+#: HIPKERNELPROVIDER_KPACK_DEFAULT_DIRS, where the dev image stages it.
+DEFAULT_KPACK_PYTHON_DIRS = (Path("/opt/rocm-kpack/python"),)
+
+#: Exit code for an environment that cannot run a requested check (rocm_kpack not
+#: importable). 1 is a gate failure about the descriptors; 2 is argparse's.
+EXIT_ENVIRONMENT = 3
 
 
 def _agreement_python_root() -> Path:
@@ -57,6 +67,24 @@ from hkp_pack.errors import HkpPackError  # noqa: E402
 class GateError(RuntimeError):
     """Invalid or ambiguous input, distinct from descriptor validation
     failures, which are reported and counted."""
+
+
+class KpackUnavailable(RuntimeError):
+    """rocm_kpack cannot be imported, so no payload can be read. An environment
+    problem, reported once with its own exit code, never as a failure of every
+    packed descriptor."""
+
+
+def _forget_rocm_kpack() -> None:
+    """Drop the rocm_kpack modules a failed import attempt left cached. A broken
+    installed package leaves its parent `rocm_kpack` in sys.modules, and the next
+    candidate's import would then resolve submodules against that package instead
+    of the candidate directory."""
+    for name in [
+        n for n in sys.modules if n == "rocm_kpack" or n.startswith("rocm_kpack.")
+    ]:
+        del sys.modules[name]
+    importlib.invalidate_caches()
 
 
 class Profile:
@@ -237,13 +265,38 @@ class Payloads:
         self._archives: dict = {}
         self._module = None
 
+    def _load_kpack(self):
+        """rocm_kpack from the named directory; or, with none named, the installed
+        package, then each existing DEFAULT_KPACK_PYTHON_DIRS entry."""
+        from hkp_pack.kpack_resolver import load_kpack  # noqa: PLC0415
+
+        if self._dir is not None:
+            candidates = [self._dir]
+        else:
+            candidates = [None] + [
+                str(d) for d in DEFAULT_KPACK_PYTHON_DIRS if d.is_dir()
+            ]
+        errors = []
+        for candidate in candidates:
+            try:
+                module, _compression = load_kpack(candidate)
+                return module
+            except HkpPackError as exc:
+                errors.append(f"{candidate or 'installed package'}: {exc}")
+                _forget_rocm_kpack()
+        searched = ", ".join(str(d) for d in DEFAULT_KPACK_PYTHON_DIRS)
+        raise KpackUnavailable(
+            "rocm_kpack is not importable, so --mode full cannot read the payload "
+            "bytes packed descriptors name. This is an environment problem, not a "
+            f"descriptor failure. Tried: {'; '.join(errors)}. Pass --kpack-python-dir "
+            f"<rocm-kpack>/python (default search when omitted: {searched})."
+        )
+
     def _archive(self, path: Path):
         key = str(path)
         if key not in self._archives:
             if self._module is None:
-                from hkp_pack.kpack_resolver import load_kpack  # noqa: PLC0415
-
-                self._module, _compression = load_kpack(self._dir)
+                self._module = self._load_kpack()
             self._archives[key] = self._module.PackedKernelArchive.read(path)
         return self._archives[key]
 
@@ -271,7 +324,7 @@ class Payloads:
             )
         try:
             blob = self._archive(archive_path).get_kernel(toc_key, arch)
-        except HkpPackError:
+        except (HkpPackError, KpackUnavailable):
             raise
         except Exception as exc:
             raise GateError(
@@ -608,7 +661,8 @@ def main(argv=None) -> int:
         "--kpack-python-dir",
         help="Directory holding the rocm_kpack package, for reading the payload "
         "bytes a packed descriptor names under --mode full. Omit it to use the "
-        "installed one.",
+        "installed one, falling back to /opt/rocm-kpack/python when that exists. "
+        f"Exits {EXIT_ENVIRONMENT} when rocm_kpack cannot be imported.",
     )
     args = parser.parse_args(argv)
 
@@ -641,6 +695,9 @@ def main(argv=None) -> int:
             skipped += unchecked
             unverified += [f"{label}: {u}" for u in unbound]
             knobs |= declared
+    except KpackUnavailable as exc:
+        print(f"ENVIRONMENT ERROR: {exc}", file=sys.stderr)
+        return EXIT_ENVIRONMENT
     except (GateError, HkpPackError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1

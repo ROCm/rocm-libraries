@@ -579,9 +579,22 @@ class TestRepoRootResolution:
     """The CLI resolves cpp_mirror/test paths against the REPO ROOT, not the process
     cwd, so the same profile reports the same result from anywhere."""
 
-    def test_find_repo_root_locates_the_git_checkout(self):
+    def test_find_repo_root_locates_the_tree_holding_this_tool(self):
+        """A checkout or a `git archive` extract: either way the root is the
+        directory holding projects/hipdnn, never the tools directory."""
         found = launch_surface.find_repo_root(_TOOLS)
-        assert (found / ".git").exists()
+        assert (found / "projects" / "hipdnn" / "tools" / "IngestorGenerator").is_dir()
+
+    def test_a_tree_without_git_metadata_resolves_to_its_root(self, tmp_path):
+        """`git archive` drops .git. Falling back to the start directory made every
+        repo-relative profile path resolve under tools/."""
+        if any((p / ".git").exists() for p in (tmp_path, *tmp_path.parents)):
+            pytest.skip("the temporary directory sits inside a git checkout")
+        tools = (
+            tmp_path / "projects" / "hipdnn" / "tools" / "IngestorGenerator" / "tools"
+        )
+        tools.mkdir(parents=True)
+        assert launch_surface.find_repo_root(tools) == tmp_path.resolve()
 
     def test_check_from_a_nested_cwd_matches_check_from_the_repo_root(self):
         from_root = _run(

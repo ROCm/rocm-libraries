@@ -143,3 +143,26 @@ class TestGeneratedOutput:
             / "scale_add.kmd.json"
         ).exists()
         assert (output_dir / "packs" / "ScaleAddNative.cpp").exists()
+
+
+class TestLineEndings:
+    """Every committed descriptor and source is LF. A CRLF render (Python's text-mode
+    default on Windows) turns a copied file into a whole-file diff."""
+
+    def test_every_written_file_is_lf_only(self, tmp_path):
+        # binary_ops is multi-pack, so the operation UMDs are written too.
+        for config in ("scale_add.yaml", "binary_ops.yaml"):
+            out = tmp_path / config
+            result = run_cli(
+                "--config",
+                str(TOOL_ROOT / "configs" / config),
+                "--output-dir",
+                str(out),
+            )
+            assert result.returncode == 0, result.stderr
+            files = [p for p in out.rglob("*") if p.is_file()]
+            assert any(p.name.endswith(".umd.json") for p in files)
+            with_cr = [
+                str(p.relative_to(out)) for p in files if b"\r" in p.read_bytes()
+            ]
+            assert with_cr == []

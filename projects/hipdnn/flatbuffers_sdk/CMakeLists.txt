@@ -237,9 +237,10 @@ install(
     PATTERN "*.h.in" EXCLUDE
 )
 
-# Install generated version header
+# Install generated version headers
 install(
     FILES "${CMAKE_CURRENT_BINARY_DIR}/include/hipdnn_flatbuffers_sdk/version.h"
+          "${CMAKE_CURRENT_BINARY_DIR}/include/hipdnn_flatbuffers_sdk/version_number.h"
     DESTINATION ${HIP_DNN_FLATBUFFERS_SDK_INSTALL_INCLUDE_DIR}/hipdnn_flatbuffers_sdk
     COMPONENT Development
 )

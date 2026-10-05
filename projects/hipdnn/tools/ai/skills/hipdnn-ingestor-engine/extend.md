@@ -10,6 +10,20 @@ UED, referenced KMD, dispatch, optional heuristic, shared/per-pack matchers, KDP
 inline/standalone UKDs. Resolve by UUID, not filename — pointwise ADD/MUL/SUB share a
 KMD whose filename does not follow the individual packs.
 
+Take the installed half with `tools/inventory.py` from the IngestorGenerator: kernels per
+KDP (from `kernelDescriptors`), source kinds, distinct metadata tuples (`--group-by`, for
+attention `head_size,num_query_heads,num_kv_heads`), the catalog digest RUNBOOK stage 8
+uses, and the `hipdnn_validate_descriptors` verdict:
+
+```bash
+"$PY" "$GEN/tools/inventory.py" \
+  "$INSTALL/lib/hipdnn_plugins/engines/arch_content/hip-kernel-provider/$ARCH" \
+  --engine "$ENGINE" --group-by <fields> \
+  --validator "$BUILD/bin/hipdnn_validate_descriptors" --json <evidence-dir>/inventory_base.json
+```
+
+Run it again on the extended installation; the two reports are the before/after record.
+
 Preserve old names, UUIDs, symbols, references and native hooks; only genuinely new
 objects get new IDs. Compare completed, KMD-typed metadata across the whole engine:
 conflicting tuples on overlapping effective architectures fail, equal tuples on disjoint
@@ -23,10 +37,20 @@ retain existing engine-wide identities and hooks.
 
 ## Addition-only splicing
 
-The generator has no incremental mode. Scratch generation emits engine-level identities
-too, and `--force` against a live tree can replace shared objects and hand-filled
-bodies. An extension therefore copies only reviewed additions and explicitly changed
-references, never the whole scratch tree or an entire CMake list.
+The generator has no incremental mode and mints fresh UUIDs on every run. Scratch
+generation emits engine-level identities too, and `--force` against a live tree, or a
+copy of a scratch descriptor directory, replaces shared objects, retained UUIDs and
+hand-filled bodies. An extension therefore copies only reviewed additions and explicitly
+changed references, never the whole scratch tree or an entire CMake list.
+
+`tools/splice_additions.py --scratch <scratch bundle dir> --live <live bundle dir>` does
+this for descriptors: it maps every scratch UUID to its live twin (documents by file
+name, kernel entries by `name`), refuses and writes nothing if any retained document or
+kernel differs beyond that map or is missing from scratch, and appends only new kernel
+entries after the live ones. A refusal means the config change is not addition-only:
+review it as a change, not a splice. The generated census test carries no UUIDs and is
+copied whole. Review KDP diffs with `git diff --diff-algorithm=histogram`; the default
+algorithm can show an interleaved addition as thousands of deletions.
 
 Every scratch reference to an existing UED/KMD/UDD/UHD/shared matcher must use the real
 retained UUID, as must consumer IDs in the enclosing KDP's
@@ -97,7 +121,9 @@ when it names any. The entry runs `hip_kernel_provider_census_tests`, the binary
 suites are compiled into. An addition under an uncensused suite states its inventory
 through that suite's ordinary host run. [native-pack.md](native-pack.md) owns
 eligibility. Device proof must explicitly select and numerically verify the new
-candidate; passing the unchanged default is not extension acceptance.
+candidate; passing the unchanged default is not extension acceptance. RUNBOOK stage 5
+(*Where an extension's explicit selection runs*) names where those cases go and the
+command that runs only them.
 
 The handoff identifies retained IDs/references, changed/new files, baseline/final
 installations, whole-engine results and the addition's actual dispatch. RUNBOOK stage 5

@@ -49,7 +49,9 @@ BACKWARD_GRADIENT_TENSOR_NAMES = {
 }
 
 
-def from_published_csv(path: Path, arch: str, include_windowed: bool) -> list[dict]:
+def from_published_csv(
+    path: Path, arch: str, include_windowed: bool, excluded: list | None = None
+) -> list[dict]:
     """Shapes from the kernel team's results CSV: the shape list already
     resolved, naming which kernel each published number refers to and carrying
     `priority`/`ticket_group`, a signal available nowhere else."""
@@ -77,6 +79,11 @@ def from_published_csv(path: Path, arch: str, include_windowed: bool) -> list[di
                         f"FAIL: {path}: windowed CSV row requires a positive window_size width"
                     )
                 window = int(raw_window)
+            try:
+                dtype = _normalise_dtype(row.get("dtype"), path, "bf16")
+            except OutOfFamilyDtype as exc:
+                _exclude(excluded, path, str(exc), shape_idx=row.get("shape_idx") or "")
+                continue
             shapes.append(
                 {
                     "batch": int(row["batch"]),
@@ -86,7 +93,7 @@ def from_published_csv(path: Path, arch: str, include_windowed: bool) -> list[di
                     "seqlen_k": int(row["seq_kv"]),
                     "hdim_q": head_dim,
                     "hdim_v": head_dim,
-                    "dtype": _normalise_dtype(row.get("dtype"), path, "bf16"),
+                    "dtype": dtype,
                     "mask_type": mask_type,
                     "sliding_window": window,
                     "use_sinks": False,
@@ -154,27 +161,60 @@ _DTYPE_SPELLINGS = {
     "torch.float16": "fp16",
 }
 
+#: Recognised spellings of dtypes outside the bf16/fp16 family this miner
+#: emits requests for. A graph in one of them is a real request nobody here can
+#: serve, so it is recorded as excluded with its reason and counted rather than
+#: aborting the source; an unrecognised spelling is still refused.
+_OUT_OF_FAMILY_DTYPES = {
+    "float": "fp32",
+    "float32": "fp32",
+    "fp32": "fp32",
+    "torch.float32": "fp32",
+    "double": "fp64",
+    "float64": "fp64",
+    "fp64": "fp64",
+    "torch.float64": "fp64",
+}
+
+
+class OutOfFamilyDtype(Exception):
+    """A recognised dtype this miner's request family does not cover."""
+
+    def __init__(self, dtype: str):
+        super().__init__(f"dtype {dtype} is outside the bf16/fp16 request family")
+        self.dtype = dtype
+
 
 def _normalise_dtype(raw, path: Path, fallback: str) -> str:
     """One spelling for a dtype, or a refusal naming the source.
 
-    An absent dtype falls back; an unrecognised one is a mapping this table
-    owes, since a guessed dtype builds a different binary and still validates.
+    An absent dtype falls back; a recognised out-of-family one raises
+    `OutOfFamilyDtype` for the reader to record as an exclusion; an
+    unrecognised one is a mapping this table owes, since a guessed dtype builds
+    a different binary and still validates.
     """
     if raw is None or str(raw).strip() == "":
         return fallback
     spelling = str(raw).strip().lower()
     resolved = _DTYPE_SPELLINGS.get(spelling)
     if resolved is None:
+        if spelling in _OUT_OF_FAMILY_DTYPES:
+            raise OutOfFamilyDtype(_OUT_OF_FAMILY_DTYPES[spelling])
         raise SystemExit(
             f"FAIL: unknown dtype spelling {raw!r} in {path}. Add it to "
-            f"_DTYPE_SPELLINGS rather than defaulting -- a guessed dtype builds the "
-            f"wrong binary and still validates."
+            f"_DTYPE_SPELLINGS (or _OUT_OF_FAMILY_DTYPES) rather than defaulting "
+            f"-- a guessed dtype builds the wrong binary and still validates."
         )
     return resolved
 
 
-def from_graph_corpus(root: Path) -> list[dict]:
+def _exclude(excluded: list | None, path: Path, reason: str, **extra) -> None:
+    """Record one excluded input with its reason; the caller skips it."""
+    if excluded is not None:
+        excluded.append({"path": str(path), "reason": reason, **extra})
+
+
+def from_graph_corpus(root: Path, excluded: list | None = None) -> list[dict]:
     """Shapes from a dnn-benchmarking graph tree, one JSON per graph. The suite
     name is kept because it is the axis a result must be split along: a single
     geomean over model traces and parameter sweeps reports the synthetic
@@ -201,6 +241,7 @@ def from_graph_corpus(root: Path) -> list[dict]:
             n
             for n in graph.get("nodes", [])
             if n.get("type") == "SdpaAttributes"
+            or "q_tensor_uid" in (n.get("inputs") or {})
             or "q_tensor_uid" in (n.get("attributes") or {})
         ]
         if len(sdpa) > 1:
@@ -219,13 +260,22 @@ def from_graph_corpus(root: Path) -> list[dict]:
                 {},
             )
         )
+        # hipDNN graphs bind operands under the node's `inputs`; an older
+        # spelling put the UIDs among the attributes. Read both, so a sink bound
+        # in `inputs` is not mined as use_sinks=False. A null input slot means
+        # unbound there, so it never hides an attribute binding.
+        node = sdpa[0] if sdpa else {}
+        bindings = {
+            **attrs,
+            **{k: v for k, v in (node.get("inputs") or {}).items() if v is not None},
+        }
         by_uid = {t["uid"]: t for t in graph.get("tensors", []) if "uid" in t}
         selected = []
         for short, long in (("q", "query"), ("k", "key"), ("v", "value")):
             uid_key = f"{short}_tensor_uid"
             tensor = (
-                by_uid.get(attrs[uid_key])
-                if uid_key in attrs
+                by_uid.get(bindings[uid_key])
+                if bindings.get(uid_key) is not None
                 else (tensors.get(long) or tensors.get(short))
             )
             selected.append(tensor)
@@ -249,13 +299,19 @@ def from_graph_corpus(root: Path) -> list[dict]:
             raise SystemExit(
                 f"FAIL: {path}: incompatible independent Q/K/V dimensions {dimensions}"
             )
-        dtypes = [_normalise_dtype(t.get("data_type"), path, "bf16") for t in selected]
+        try:
+            dtypes = [
+                _normalise_dtype(t.get("data_type"), path, "bf16") for t in selected
+            ]
+        except OutOfFamilyDtype as exc:
+            _exclude(excluded, path, str(exc), graph=graph.get("name", path.stem))
+            continue
         if len(set(dtypes)) != 1:
             raise SystemExit(
                 f"FAIL: {path}: mixed Q/K/V dtypes cannot form one request"
             )
         mask = _mask_from_attributes(attrs, path, qdims[2], kdims[2])
-        sink_uid = attrs.get("sink_token_tensor_uid")
+        sink_uid = bindings.get("sink_token_tensor_uid")
         if sink_uid is not None and sink_uid not in by_uid:
             raise SystemExit(
                 f"FAIL: {path}: sink_token_tensor_uid names a missing tensor"
@@ -298,7 +354,9 @@ def _bench_graph_name(shape: dict) -> str:
     return "rocke_bench__" + hashlib.sha256(_shape_key(shape).encode()).hexdigest()
 
 
-def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
+def from_rocke_bench(
+    root: Path, dtype_default: str, excluded: list | None = None
+) -> list[dict]:
     """Shapes from rocKE's own benchmark tree; for an arch with no published
     CSV it is the only source saying what the kernel team measures.
 
@@ -370,7 +428,11 @@ def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
                 continue
             # `q_dtype` is a torch spelling ("torch.bfloat16"), normalised
             # through the same table the graph corpus uses.
-            dtype = _normalise_dtype(record.get("q_dtype"), path, dtype_default)
+            try:
+                dtype = _normalise_dtype(record.get("q_dtype"), path, dtype_default)
+            except OutOfFamilyDtype as exc:
+                _exclude(excluded, path, str(exc), trace=path.stem)
+                continue
             shapes.append(
                 {
                     "batch": int(record.get("num_seqs") or 1),
@@ -465,6 +527,11 @@ def main(argv=None) -> int:
         "but they are excluded LOUDLY here rather than folded onto causal.",
     )
     parser.add_argument("--out", required=True, help="Write the shape corpus here.")
+    parser.add_argument(
+        "--excluded-out",
+        help="Write the excluded inputs (out-of-family dtypes), one record each "
+        "with its path and reason. Default: <out stem>.excluded.json next to --out.",
+    )
     args = parser.parse_args(argv)
 
     if not args.published and not args.graphs and not args.rocke_bench:
@@ -476,26 +543,49 @@ def main(argv=None) -> int:
         )
 
     shapes: list[dict] = []
+    excluded: list[dict] = []
     if args.published:
         found = from_published_csv(
-            Path(args.published), args.arch, args.include_windowed
+            Path(args.published), args.arch, args.include_windowed, excluded
         )
         print(f"  published CSV : {len(found):5d} rows for {args.arch}")
         shapes += found
     if args.graphs:
-        found = from_graph_corpus(Path(args.graphs))
+        found = from_graph_corpus(Path(args.graphs), excluded)
         print(f"  graph corpus  : {len(found):5d} forward graphs")
         shapes += found
     if args.rocke_bench:
-        found = from_rocke_bench(Path(args.rocke_bench), "bf16")
+        found = from_rocke_bench(Path(args.rocke_bench), "bf16", excluded)
         print(f"  rocKE bench   : {len(found):5d} trace records")
         shapes += found
+
+    out = Path(args.out)
+    excluded_out = (
+        Path(args.excluded_out)
+        if args.excluded_out
+        else out.with_name(f"{out.stem}.excluded.json")
+    )
+    reasons: dict = {}
+    for record in excluded:
+        reasons[record["reason"]] = reasons.get(record["reason"], 0) + 1
+    print(f"  excluded      : {len(excluded):5d}  {reasons or ''}")
+    excluded_out.write_text(json.dumps(excluded, indent=2))
 
     unique, duplicates = deduplicate(shapes)
     print(
         f"  distinct      : {len(unique):5d}  ({duplicates} duplicate shape(s) merged)"
     )
 
+    if not unique and excluded:
+        # Everything was excluded with a reason: an accounted-for empty source,
+        # which downstream tools take as such, not a mining failure.
+        out.write_text("[]")
+        print(
+            f"\n  WARNING: every input was excluded; wrote an empty {out} and "
+            f"{excluded_out}",
+            file=sys.stderr,
+        )
+        return 0
     if not unique:
         print(
             "\nFAIL: no shapes mined; nothing downstream can use this.", file=sys.stderr
@@ -508,8 +598,8 @@ def main(argv=None) -> int:
         by_source[shape["_provenance"]["source"]] += 1
     print(f"  by source     : {by_source}")
 
-    Path(args.out).write_text(json.dumps(unique, indent=2))
-    print(f"\n  wrote {args.out}")
+    out.write_text(json.dumps(unique, indent=2))
+    print(f"\n  wrote {args.out} (exclusions: {excluded_out})")
     print(
         "  Provenance is carried on every shape. Split every reported result by it: a "
         "geomean over a mixed corpus reports the synthetic population's win as if it "
