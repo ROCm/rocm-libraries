@@ -229,6 +229,9 @@ class TestFlatFoldLoadBatching(unittest.TestCase):
 _XCD_FLAT = {"N": 1, "Hi": 13, "Wi": 11, "C": 288, "K": 480, "groups": 3}
 # cpg 80 / kpg 128: tap-outer loop.
 _XCD_TAP = {"N": 2, "Hi": 9, "Wi": 7, "C": 400, "K": 640, "groups": 5}
+# 1x1, cpg 48 (one N tile) / kpg 192: every dY element is read by one tile.
+_XCD_POINTWISE_ONE_N = {"N": 4, "Hi": 8, "Wi": 8, "C": 192, "K": 768, "groups": 4}
+_XCD_POINTWISE_ONE_N.update({"Y": 1, "X": 1, "pH": 0, "pW": 0})
 
 
 class TestXcdContiguousTileOrder(unittest.TestCase):
@@ -236,7 +239,8 @@ class TestXcdContiguousTileOrder(unittest.TestCase):
     in XCD-contiguous order on gfx950 (see ``xcd_contiguous_tile_order``):
     launch order sends the tiles that share a group's operands to different
     XCDs, so every XCD refetches them into its own L2. Never for ungrouped
-    problems, the runtime record, split-K or other targets."""
+    problems, the runtime record, split-K or other targets, nor where every
+    dY element is read by one tile (1x1 filter and a single N tile)."""
 
     def _ops(self, spec, arch=_ARCH):
         return _op_names(build_implicit_gemm_conv_dgrad(spec, arch=arch))
@@ -263,6 +267,34 @@ class TestXcdContiguousTileOrder(unittest.TestCase):
                 self.assertGreater(
                     remapped.count("arith.select"), plain.count("arith.select")
                 )
+
+    def test_single_n_tile_needs_a_shared_dy_row(self):
+        # One N tile and one tap: no dY row is shared between tiles.
+        one_n = _problem(**_XCD_POINTWISE_ONE_N)
+        # Same 1x1 problem with two N tiles (cpg 80): the N tiles share dY.
+        two_n = _problem(**{**_XCD_POINTWISE_ONE_N, "C": 320})
+        # Same single-N-tile problem with a 3x3 filter: neighbouring M tiles
+        # share the dY halo rows.
+        taps = _problem(**{**_XCD_POINTWISE_ONE_N, "Y": 3, "X": 3, "pH": 1, "pW": 1})
+        # Strided 1x1 with one N tile: still one tap per dY element.
+        strided = _problem(
+            **{**_XCD_POINTWISE_ONE_N, "Hi": 16, "Wi": 16, "sH": 2, "sW": 2}
+        )
+        for label, problem, xcds in (
+            ("1x1, one N tile", one_n, 0),
+            ("1x1 strided, one N tile", strided, 0),
+            ("1x1, two N tiles", two_n, 8),
+            ("3x3, one N tile", taps, 8),
+        ):
+            with self.subTest(case=label):
+                spec = _spec(problem=problem)
+                self.assertTrue(spec.folds_sub_gemm_record)
+                self.assertGreaterEqual(
+                    spec.compute_sub_gemms()[-1].block_end * problem.groups, 8
+                )
+                self.assertEqual(xcd_contiguous_tile_order(spec, _ARCH), xcds)
+                same = self._ops(spec) == self._ops_launch_order(spec)
+                self.assertEqual(same, xcds == 0)
 
     def test_withheld_elsewhere(self):
         flat = _problem(**_XCD_FLAT)

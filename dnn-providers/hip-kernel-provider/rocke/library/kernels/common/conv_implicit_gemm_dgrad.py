@@ -1325,6 +1325,15 @@ def xcd_contiguous_tile_order(spec: DgradConvSpec, arch: str) -> int:
     record (:attr:`DgradConvSpec.folds_sub_gemm_record`): with several
     sub-GEMMs of different sizes the contiguous ranges load the XCDs
     unevenly. Not with split-K, whose slices ride ``blockIdx.z``.
+
+    Not when no dY row is shared between tiles: one N tile (``cpg <=
+    tile_n``) and a 1x1 filter (one tap per sub-GEMM). There each dY element
+    is read by exactly one workgroup and only the small weight slice is
+    shared, so the order removes little traffic. It mostly moves the
+    concurrently streamed dY rows apart, which raised DRAM-side stalls; on
+    that class launch order was faster on average with cold caches. A filter
+    with more than one tap keeps the order even with one N tile: neighbouring
+    M tiles share dY halo rows, and the order won there.
     """
     num_xcds = _XCD_TILE_ORDER_ARCHES.get(arch, 0)
     if not num_xcds:
@@ -1333,7 +1342,11 @@ def xcd_contiguous_tile_order(spec: DgradConvSpec, arch: str) -> int:
         return 0
     if not spec.folds_sub_gemm_record:
         return 0
-    num_wgs = spec.compute_sub_gemms()[-1].block_end * spec.problem.groups
+    sub_gemm = spec.compute_sub_gemms()[-1]
+    taps = sub_gemm.y_dot_slice * sub_gemm.x_dot_slice
+    if taps == 1 and _ceil_div(sub_gemm.gemm_n, spec.tile_n) == 1:
+        return 0
+    num_wgs = sub_gemm.block_end * spec.problem.groups
     if num_wgs < num_xcds:
         return 0
     return num_xcds

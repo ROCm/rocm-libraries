@@ -96,8 +96,10 @@ All convolutions — stride=1 and strided — use a **single unified tiled kerne
   and fetches each group's dY and weights into its own L2. Launch order spreads
   every group over all XCDs, and on many-group problems whose operands
   outgrow the L2 the refetch, not the K loop, set the kernel time. Ungrouped
-  problems and the runtime record keep launch order. Python only (the C++
-  builder refuses grouped dgrad).
+  problems and the runtime record keep launch order, and so do 1x1 problems
+  with a single N tile (`cpg <= tile_n`): there no dY row is shared between
+  tiles, the order removes little traffic, and launch order was faster with
+  cold caches. Python only (the C++ builder refuses grouped dgrad).
 - **Epilogue dispatch** based on `needs_atomic`:
   - `False` (1 sub-GEMM, split_k=1): direct `buffer_store` into `dX`.
   - `True` (stride > 1 or split_k > 1): `global_atomic_fadd` into `dX`

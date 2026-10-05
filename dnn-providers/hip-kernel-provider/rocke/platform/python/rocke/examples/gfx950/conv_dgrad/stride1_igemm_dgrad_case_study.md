@@ -554,6 +554,8 @@ fetched into one L2. Scope:
   XCDs.
 - `split_k == 1` (the slices ride `blockIdx.z`), and at least as many
   workgroups as XCDs.
+- Not for 1x1 problems with a single N tile (`cpg <= tile_n`); see
+  "Single N tile, 1x1" below.
 - No knob and no kernel-name tag: like the `waves_per_eu` hint and load
   batching it is a derived gfx950 rule of the builder.
   `_XCD_TILE_ORDER_ARCHES` holds the targets and their XCD counts.
@@ -571,26 +573,50 @@ previous build (`noxcd`) in one locked session, timed both back to back and
 with a 512 MiB fill before every launch:
 - The review's losing problems are now well above the unmodified tree, and
   the hint and batching rules no longer lose there.
-- Across the review cohorts, a fresh hold-out cohort over `cpg % 64` 0/16/32/48,
-  `kpg % 64` 0 and 32, 1x1/3x3/5x5, 1..300 groups and per-group `N*H*W` from
-  196 up, and earlier cohorts of tap-outer, dense, odd-channel and strided
-  folded problems, no problem routed differently from the unmodified tree
-  was below it in either timing mode.
-- The new order gives up some wins of the previous build, in both timing
-  modes. Most are on small grids, where all workgroups are resident at once
-  and launch order matters little, and on grouped 1x1 problems with one N
-  tile and a small weight tensor, where each dY row is read by one
-  workgroup and launch order streams it well. These were not split off by a
-  further rule. The traffic saved (dY reuse across N tiles plus weight
-  reuse across M tiles) correlated with the gain, but did not cleanly
-  separate the problems that lost.
+- An earlier version of this section said that across the review cohorts no
+  differently-routed problem was below the unmodified tree in either timing
+  mode. That was wrong: the next review found grouped 1x1 problems with a
+  single N tile, many groups and a large `N*H*W` below the unmodified tree
+  with cold caches (they won with warm caches), and the build without the
+  order (`noxcd`) above it on every one. The rule below fixed them.
+- With that rule, the review's losing problems, a fresh cohort around the
+  boundary (`cpg` 16..128, so one or two N tiles, 1x1 and 3x3, 4..64
+  groups, large and small `N*H*W`), the earlier 1x1 single-N-tile probes,
+  a sample of the problems where the order won, and the target problems
+  were all above the unmodified tree in both timing modes.
+- The order still gives up some wins of the previous build, in both timing
+  modes, mostly on small grids, where all workgroups are resident at once
+  and launch order matters little.
+
+Single N tile, 1x1. With one N tile (`cpg <= tile_n`) and a 1x1 filter,
+every dY element is read by exactly one workgroup, and the only operand
+tiles share is the group's weight slice, which is small. The order then
+has almost no refetch to remove. Hardware counters on losing problems
+showed the same fabric read count with and without the order, but more
+DRAM credit stalls (`TCC_EA0_RDREQ_DRAM_CREDIT_STALL`) and L2 tag stalls:
+the order only moved the dY rows that are streamed at the same time apart.
+Across that class the order was slower on average with cold caches, so
+`xcd_contiguous_tile_order` withholds it there. Both conditions are needed:
+- With one N tile and a 3x3 or larger filter, neighbouring M tiles share dY
+  halo rows. The order kept clear wins there, so withholding it on a single
+  N tile alone would have given them up.
+- With two or more N tiles, the N tiles of an M tile read the same dY rows,
+  which is the reuse the order was introduced for.
+
+The class is not uniform. Some single-N-tile 1x1 problems still ran faster
+with the order, mostly ones with many groups and few M tiles per group,
+where every XCD refetches each group's weights. A weight-refetch term
+recovered part of that on the measured problems, but it needs a fitted
+cutoff and its gain was small, so it was not added. No problem in the class
+is below the unmodified tree with launch order.
 - All picks pass the reference check (fp64 reference, NaN-poisoned output,
   NaN counted as a failure), apart from the known unwritten pixels of 1x1
   stride-2 problems, a pre-existing issue in the unmodified tree.
 - Pinned by `TestXcdContiguousTileOrder` (applies to grouped folded flat
   and tap-outer loops, never to ungrouped, runtime-record, split-K, strided,
-  tiny-grid or gfx942 builds, and the remap is a permutation with one
-  contiguous range per XCD). Two grouped cases with a launch-order remainder
+  tiny-grid or gfx942 builds, or to 1x1 problems with a single N tile while
+  a second N tile or a 3x3 filter keeps it, and the remap is a permutation
+  with one contiguous range per XCD). Two grouped cases with a launch-order remainder
   were added to `_STRIDE1_CASES`, compared bit for bit with the flat and
   runtime-record builds and against the reference.
 
@@ -814,7 +840,8 @@ python -m pytest tests/test_conv_dgrad_spec_policy.py tests/dispatch/test_groupe
 # order), and time both with kernel traces, back to back and with a large
 # fill before every launch. The kernel names are the same, so keep the two
 # HSACOs apart. For the L2 evidence, run rocprofv3 --pmc TCC_HIT_sum
-# TCC_MISS_sum TCC_EA0_RDREQ_sum on each.
+# TCC_MISS_sum TCC_EA0_RDREQ_sum on each; for the single-N-tile 1x1 class add
+# TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum TCC_TAG_STALL_sum.
 
 # Byte identity, Python vs C++ engine.
 cd ../platform && python tools/check_byte_identity.py --only conv_implicit_gemm_dgrad
