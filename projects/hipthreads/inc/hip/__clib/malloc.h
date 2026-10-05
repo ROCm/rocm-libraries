@@ -41,12 +41,19 @@ namespace internal {
  */
 inline hipStream_t &getEnqueingStream() {
     // TODO: investigate using hipExtStreamCreateWithCUMask for this
-    static hipStream_t enqueingStream = []() -> hipStream_t {
-        hipStream_t s;
-        __LIBHIPTHREADS_HIP_CHECK__(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
-        return s;
-    }();
-    return enqueingStream;
+    struct StreamOwner {
+        hipStream_t stream;
+        StreamOwner() {
+            __LIBHIPTHREADS_HIP_CHECK__(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+        }
+        ~StreamOwner() {
+            // Drain asynchronous frees before releasing the queue at shutdown.
+            (void)hipStreamSynchronize(stream);
+            (void)hipStreamDestroy(stream);
+        }
+    };
+    static StreamOwner enqueingStream;
+    return enqueingStream.stream;
 }
 }
 

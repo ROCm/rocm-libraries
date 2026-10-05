@@ -333,15 +333,25 @@ __host__ WrappedFnPointer getWrapperFn() {
 
     // Note that we only do this once for a given set of Fn_t and Args_t types
     static WrappedFnPointer saved_wrapper_fn = []() {
-        WrappedFnPointer *tmp, *tmp_d;
-        __LIBHIPTHREADS_HIP_CHECK__(hipHostMalloc(reinterpret_cast<void **>(&tmp), sizeof(tmp), hipHostRegisterMapped));
-        __LIBHIPTHREADS_HIP_CHECK__(hipHostGetDevicePointer(reinterpret_cast<void **>(&tmp_d), tmp, 0));
+        WrappedFnPointer tmp;
+        struct TemporaryStorage {
+            WrappedFnPointer *ptr = nullptr;
+            ~TemporaryStorage() {
+                if (ptr != nullptr) {
+                    (void)hipFreeAsync(ptr, getEnqueingStream());
+                }
+            }
+        } storage;
+        __LIBHIPTHREADS_HIP_CHECK__(hipMallocAsync(reinterpret_cast<void **>(&storage.ptr), sizeof(tmp), getEnqueingStream()));
+        WrappedFnPointer *tmp_d = storage.ptr;
         hipLaunchKernelGGL(getWrapperFn<WorkNode<Callable_t>>, dim3(1), dim3(1), 0, getEnqueingStream(), tmp_d);
+        __LIBHIPTHREADS_HIP_CHECK__(hipMemcpyAsync(&tmp, tmp_d, sizeof(tmp), hipMemcpyDeviceToHost, getEnqueingStream()));
+        __LIBHIPTHREADS_HIP_CHECK__(hipFreeAsync(tmp_d, getEnqueingStream()));
+        storage.ptr = nullptr;
         __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
-        // TODO: Memory Leak! We can't un-register or free tmp because of the implicit hipDeviceSynchronize() that would
-        // cause. However, this should only be a small amount of memory, and because this code only runs once per
-        // specialization of the WorkNode class, it cannot grow indefinitely.
-        return *tmp;
+        // Stream-ordered allocation/free avoids a device-wide synchronization
+        // while the persistent scheduler may still be executing.
+        return tmp;
     }();
     return saved_wrapper_fn;
 }
