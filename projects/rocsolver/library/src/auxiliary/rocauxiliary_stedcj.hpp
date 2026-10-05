@@ -702,16 +702,24 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCJ_BDIM)
                     top += in;
                     if(idd[base] == 1 && idd[top] == 1 && top < sz + in)
                     {
-                        if(abs(D[base] - D[top]) <= tol)
+                        // the rotation that eliminates the component z[top] leaves an
+                        // off-diagonal entry (D[top] - D[base]) c s; deflate if it is within
+                        // tolerance, as LAPACK (xLAED2): |D[top] - D[base]| |f g| <= tol (f^2 + g^2)
+                        g = z[top];
+                        f = z[base];
+                        if(abs(D[top] - D[base]) * abs(f * g) <= tol * (f * f + g * g))
                         {
-                            // deflated ev because it is repeated
+                            // deflated ev because it is (nearly) repeated
                             idd[top] = 0;
                             // rotation to eliminate component in z
-                            g = z[top];
-                            f = z[base];
                             lartg(f, g, c, s, rr);
                             z[base] = rr;
                             z[top] = 0;
+                            // rotated diagonal entries
+                            valf = D[base];
+                            valg = D[top];
+                            D[base] = c * c * valf + s * s * valg;
+                            D[top] = s * s * valf + c * c * valg;
                             // update C with the rotation
                             for(int ii = 0; ii < n; ++ii)
                             {
