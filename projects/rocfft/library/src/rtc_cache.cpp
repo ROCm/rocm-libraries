@@ -233,19 +233,28 @@ void RTCCache::db_file::connect_db(const fs::path& path, bool readonly)
     // create the default table
     if(!readonly)
     {
-        auto create = prepare_stmt(db.get(),
-                                   "CREATE TABLE IF NOT EXISTS cache_v1 ("
-                                   "  kernel_name TEXT NOT NULL,"
-                                   "  arch TEXT NOT NULL,"
-                                   "  hip_version INTEGER NOT NULL,"
-                                   "  generator_sum BLOB NOT NULL,"
-                                   "  code BLOB NOT NULL,"
-                                   "  timestamp INTEGER NOT NULL,"
-                                   "  PRIMARY KEY ("
-                                   "      kernel_name, arch, hip_version, generator_sum"
-                                   "      ))");
-        if(sqlite3_step(create.get()) != SQLITE_DONE)
-            throw std::runtime_error(sqlite3_errmsg(db.get()));
+        try
+        {
+            auto create = prepare_stmt(db.get(),
+                                       "CREATE TABLE IF NOT EXISTS cache_v1 ("
+                                       "  kernel_name TEXT NOT NULL,"
+                                       "  arch TEXT NOT NULL,"
+                                       "  hip_version INTEGER NOT NULL,"
+                                       "  generator_sum BLOB NOT NULL,"
+                                       "  code BLOB NOT NULL,"
+                                       "  timestamp INTEGER NOT NULL,"
+                                       "  PRIMARY KEY ("
+                                       "      kernel_name, arch, hip_version, generator_sum"
+                                       "      ))");
+            if(sqlite3_step(create.get()) != SQLITE_DONE)
+                throw std::runtime_error(sqlite3_errmsg(db.get()));
+        }
+        catch(std::exception&)
+        {
+            // connection is not usable
+            db.reset();
+            return;
+        }
     }
 
     static const char* get_stmt_text = "SELECT code "
