@@ -52,6 +52,8 @@ namespace
         if(!handle)
             return rocblas_status_invalid_handle;
 
+        rocblas_internal_api_scope api_scope(handle, rocblas_herkx_name<T>);
+
         RETURN_ZERO_DEVICE_MEMORY_SIZE_IF_QUERIED(handle);
 
         // Copy alpha and beta to host if on device. This is because gemm is called and it
