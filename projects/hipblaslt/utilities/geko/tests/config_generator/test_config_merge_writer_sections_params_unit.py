@@ -57,6 +57,43 @@ def test_config_merger_group_key_and_merge_paths() -> None:
     assert len(merged["Groups"].values[0]) == 2
 
 
+def test_config_merger_freeze_nested_list() -> None:
+    assert cm._freeze(1) == 1
+    assert cm._freeze([1, 2]) == (1, 2)
+    assert cm._freeze([[1, 1]]) == ((1, 1),)
+    assert cm._freeze([[1, 1], [2, 2]]) == ((1, 1), (2, 2))
+
+
+def test_config_merger_group_key_with_nested_list_values() -> None:
+    # gfx1250's ClusterDim carries nested-list values (e.g. [[1, 1]]), unlike
+    # flat MatrixInstruction/WorkGroup lists. _group_entry_key must hash these
+    # without raising TypeError: unhashable type: 'list'.
+    e0 = {"ClusterDim": _fp("ClusterDim", [[1, 1]])}
+    e1 = {"ClusterDim": _fp("ClusterDim", [[1, 1]])}
+    e2 = {"ClusterDim": _fp("ClusterDim", [[2, 2]])}
+
+    assert cm._group_entry_key(e0) == cm._group_entry_key(e1)
+    assert cm._group_entry_key(e0) != cm._group_entry_key(e2)
+
+
+def test_config_merger_merge_groups_with_nested_list_values() -> None:
+    # Reproduces the gfx1250 multi-size merge path (bbs_tn_multi_size_single_kernel):
+    # merging two sizes whose Groups dimension entries carry ClusterDim's
+    # nested-list values must not crash, and duplicate entries must be deduped.
+    e0 = {"ClusterDim": _fp("ClusterDim", [[1, 1]])}
+    e0_dup = {"ClusterDim": _fp("ClusterDim", [[1, 1]])}
+    e1 = {"ClusterDim": _fp("ClusterDim", [[2, 2]])}
+
+    base = _fp("Groups", [[e0]])
+    other = _fp("Groups", [[e0_dup, e1]])
+
+    cm._merge_groups(base, other)
+
+    assert len(base.values[0]) == 2
+    assert base.values[0][0] is e0
+    assert base.values[0][1] is e1
+
+
 def test_config_merger_cluster_split_and_do_merge(monkeypatch) -> None:
     p0 = {
         "DepthU": _fp("DepthU", [16]),
