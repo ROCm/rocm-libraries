@@ -74,6 +74,8 @@ from dispatch.attention import (  # noqa: E402
     dense_spec_for_request,
 )
 from kernels.gfx942.attention_dense import (  # noqa: E402
+    GFX942_PERSIST_DECODES,
+    NONPERSIST_DECODES,
     Gfx942AttentionDenseSpec,
     attention_dense_block,
     attention_dense_grid,
@@ -91,10 +93,11 @@ _TORCH_DT = {"bf16": torch.bfloat16, "fp16": torch.float16}
 # Spec fields a harness may override on top of the dispatch-resolved spec. Every
 # one of these is a real ``AttentionDenseSpec`` field with no ``AttentionRequest``
 # counterpart, so dispatch cannot resolve it and an explicit flag is the only way
-# to reach it. The persistent knobs are deliberately NOT here: they have request
-# fields (``dense_persistent`` / ``dense_num_persistent`` /
-# ``dense_persist_decode``), so they go through dispatch and get its gfx942
-# normalization (e.g. the shared 256-CTA default -> 304) instead of bypassing it.
+# to reach it. The persistent and block-order knobs are deliberately NOT here:
+# they have request fields (``dense_persistent`` / ``dense_num_persistent`` /
+# ``dense_persist_decode`` / ``dense_nonpersist_decode``), so they go through
+# dispatch and get its gfx942 normalization (e.g. the shared 256-CTA default ->
+# 304) instead of bypassing it.
 _OVERRIDE_FIELDS = (
     "block_n",
     "waves_per_eu",
@@ -151,9 +154,16 @@ def add_dense_tuning_args(ap: argparse.ArgumentParser) -> None:
     ap.add_argument(
         "--persist-decode",
         dest="persist_decode",
-        choices=["auto", "qb_major", "hkv_major"],
+        choices=sorted(GFX942_PERSIST_DECODES),
         default=None,
         help="persistent work-item decode; default = dispatch's 'auto'",
+    )
+    ap.add_argument(
+        "--nonpersist-decode",
+        dest="nonpersist_decode",
+        choices=sorted({"auto", *NONPERSIST_DECODES}),
+        default=None,
+        help="non-persistent block order; default = dispatch's 'auto'",
     )
     ap.add_argument(
         "--interleave",
@@ -203,9 +213,9 @@ def dense_request(
 ) -> AttentionRequest:
     """The :class:`AttentionRequest` a production caller would submit.
 
-    Shape comes from the caller; the three persistent knobs come from the CLI when
-    explicitly passed and otherwise keep the request defaults, so dispatch applies
-    its own gfx942 normalization to them. ``sliding_window`` is a request property
+    Shape comes from the caller; the persistent and block-order knobs come from the
+    CLI when explicitly passed and otherwise keep the request defaults, so dispatch
+    applies its own gfx942 normalization to them. ``sliding_window`` is a request property
     (0 = full causal), so dispatch ships the SWA-pruned spec.
     """
     req_kwargs = {}
@@ -215,6 +225,8 @@ def dense_request(
         req_kwargs["dense_num_persistent"] = int(args.num_persistent)
     if getattr(args, "persist_decode", None) is not None:
         req_kwargs["dense_persist_decode"] = args.persist_decode
+    if getattr(args, "nonpersist_decode", None) is not None:
+        req_kwargs["dense_nonpersist_decode"] = args.nonpersist_decode
     return AttentionRequest(
         batch=int(batch),
         nhead_q=int(num_query_heads),
@@ -455,10 +467,15 @@ def main():
         )
         spec = resolve_dense_spec(req, overrides)
         if args.dry_run:
+            decode = (
+                spec.resolved_persist_decode
+                if spec.persistent
+                else spec.resolved_nonpersist_decode
+            )
             print(
                 f"Sq={sq:<6d} {describe_dense_spec(spec, overrides)}  "
                 f"(persistent={spec.persistent} np={spec.num_persistent} "
-                f"decode={spec.persist_decode} wpe={spec.waves_per_eu} "
+                f"decode={decode} wpe={spec.waves_per_eu} "
                 f"bn={spec.block_n} kpad={spec.lds_k_group_pad})"
             )
             continue

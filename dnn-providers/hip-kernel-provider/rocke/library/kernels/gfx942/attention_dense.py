@@ -190,7 +190,12 @@ from rocke.core.ir import (
 from rocke.helpers.attention import mfma_32x32x8_for_dtype
 
 # Shared problem/geometry fields live in an architecture-neutral module.
+from kernels.common.attention_dense_decode import (
+    NONPERSIST_DECODES,
+    PERSIST_DECODES,
+)
 from kernels.common.attention_dense_spec import (
+    COMMON_PERSIST_DECODES,
     AttentionDenseSpec,
     DENSE_TILE_GEOMETRIES,
     attention_dense_cache_key,
@@ -232,6 +237,9 @@ if _BLOCK_M % 32 != 0:
 # and the baseline a conditional name tag compares against.
 _DEFAULT_LDS_ROW_PAD = 8
 _DEFAULT_IGLP = False
+
+
+GFX942_PERSIST_DECODES = COMMON_PERSIST_DECODES
 
 
 @dataclass(frozen=True)
@@ -1882,47 +1890,16 @@ def _build_attention_dense_single_buffer(
             # barrier suffices because there is no pending lgkm to sink here.
             b.s_waitcnt(vmcnt=0)
             b.s_barrier_bare()
-            if spec.resolved_persist_decode == "hkv_major":
-                # hkv-MAJOR + causal-balanced decode (gfx950 §):
-                #   wi = hkv*(NQB*gqa*B) + blk*(gqa*B) + hql*B + bt
-                # hkv in the MSB keeps each grid-stride phase within ~1 kv-head so the
-                # shared GQA K/V stays L2-resident across its gqa query heads; blk is
-                # folded so a CTA striding both halves of a kv-head does qb=X and
-                # qb=NQB-1-X (constant causal cost) -- qb_major's balance + L2 win.
-                half = NQB // 2
-                bt_v = b.mod(wi, b.const_i32(B))
-                rem = b.div(wi, b.const_i32(B))
-                hql = b.mod(rem, b.const_i32(gqa))
-                r2 = b.div(rem, b.const_i32(gqa))
-                blk = b.mod(r2, b.const_i32(NQB))
-                hkv_wi = b.div(r2, b.const_i32(NQB))
-                hq_v = b.add(b.mul(hkv_wi, b.const_i32(gqa)), hql)
-                qb_hi = b.sub(b.const_i32(NQB - 1 + half), blk)  # NQB-1-(blk-half)
-                qb_v = b.select(b.cmp_lt(blk, b.const_i32(half)), blk, qb_hi)
-            elif spec.resolved_persist_decode == "qb_major":
-                # qb-MAJOR decode: wi = qb*(Hq*B) + hq*B + bt. Putting qb (the
-                # triangular causal-cost index) in the MSB spreads cheap+expensive
-                # query blocks across each CTA under grid-stride. Optional interleave
-                # flips on ODD `rem` (= qb0*Hq + hq, so it alternates per-hq within a
-                # qb0 row, NOT per qb0) to further balance the causal tail.
-                bt_v = b.mod(wi, b.const_i32(B))
-                rem = b.div(wi, b.const_i32(B))
-                hq_v = b.mod(rem, b.const_i32(Hq))
-                qb0 = b.div(rem, b.const_i32(Hq))
-                if spec.interleave and causal and NQB > 1:
-                    odd = b.cmp_eq(b.mod(rem, b.const_i32(2)), b.const_i32(1))
-                    qb_v = b.select(odd, b.sub(b.const_i32(NQB - 1), qb0), qb0)
-                else:
-                    qb_v = qb0
-            else:
-                raise ValueError(
-                    "gfx942 attention_dense: persist_decode="
-                    f"{spec.resolved_persist_decode!r} is not implemented "
-                    "by this builder"
-                )
-            _run_work_item(qb_v, hq_v, bt_v)
+            # hkv is re-derived in _run_work_item, so it is not taken from the decode.
+            d = PERSIST_DECODES[spec.resolved_persist_decode].emit_decode(
+                b, spec, wi, seqlen_q_p
+            )
+            _run_work_item(d.qb, d.hq, d.bt)
     else:
-        _run_work_item(b.block_id_x(), b.block_id_y(), b.block_id_z())
+        d = NONPERSIST_DECODES[spec.resolved_nonpersist_decode].emit_decode(
+            b, spec, b.block_id_x(), b.block_id_y(), b.block_id_z(), seqlen_q_p
+        )
+        _run_work_item(d.qb, d.hq, d.bt)
     b.ret()
     return b.kernel
 
@@ -1932,7 +1909,8 @@ def _build_attention_dense_single_buffer(
 
 def attention_dense_grid(spec: AttentionDenseSpec) -> tuple[int, int, int]:
     """Launch grid: persistent = 1-D grid of ``num_persistent`` CTAs; default =
-    one CTA per (query-block, query-head, batch).
+    one CTA per (query-block, query-head, batch), laid out by the nonpersist
+    decode.
 
     Sized from ``spec.block_m`` (``_BLOCK_M`` at the default) so the grid and the
     body's query tiling cannot disagree -- a mismatch writes some rows twice and
@@ -1942,11 +1920,7 @@ def attention_dense_grid(spec: AttentionDenseSpec) -> tuple[int, int, int]:
     if spec.persistent:
         return (spec.num_persistent, 1, 1)
     spec = _as_gfx942_spec(spec)
-    # ceil kept for parity with the gfx950 helper; on gfx942 it is always exact,
-    # because ragged is rejected and supports_attention_dense then enforces
-    # seqlen_q % block_m == 0.
-    nqb = (spec.seqlen_q + spec.block_m - 1) // spec.block_m
-    return (nqb, spec.num_query_heads, spec.batch)
+    return NONPERSIST_DECODES[spec.resolved_nonpersist_decode].grid(spec)
 
 
 def attention_dense_block(spec: AttentionDenseSpec) -> tuple[int, int, int]:

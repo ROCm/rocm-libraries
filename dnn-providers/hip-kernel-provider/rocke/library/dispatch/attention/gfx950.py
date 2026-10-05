@@ -144,8 +144,8 @@ def _auto_variant(req: AttentionRequest) -> Gfx950DenseVariant:
     """Historical serving/strata policy, expressed as a catalog entry.
 
     Tile is ``default`` unless pinned. Persist turns on once
-    ``nqb * Hq * B >= num_persistent``. Wide DMA follows persist + D128 +
-    causal + aligned + no sinks.
+    ``nqb * Hq * B >= num_persistent``. Wide DMA follows persist + D128 + causal
+    + aligned + no sinks.
     """
     from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
 
@@ -265,7 +265,7 @@ def _dense_spec(req: OperatorRequest, variant: Gfx950DenseVariant | None = None)
     """Build the launch-ready ``Gfx950AttentionDenseSpec`` for ``variant``.
 
     Tile, persist, and wide-DMA come from the frozen variant. ``persist_decode``
-    stays on the request (``auto`` selects GQA-local mappings inside the spec).
+    stays on the request (``auto`` resolves inside the spec).
     Non-tile-multiple self-attention lengths use the on-chip ragged path.
     ``variant=None`` keeps the one-argument call used by existing tests and
     selects the auto-policy variant.
@@ -290,7 +290,6 @@ def _dense_spec(req: OperatorRequest, variant: Gfx950DenseVariant | None = None)
     layout = GFX950_DENSE_LAYOUTS[_DENSE_LAYOUT]
     bm = int(geometry["block_m"])
     bn = int(geometry["block_n"])
-    decode = req.dense_persist_decode.strip().lower()
     mask_type = _parse_attention_mask_type(req.mask_type)
     causal = mask_type != AttentionMaskType.NO_MASK
     moving_bottom_right = (
@@ -316,7 +315,8 @@ def _dense_spec(req: OperatorRequest, variant: Gfx950DenseVariant | None = None)
         lds_v_row_pad=int(layout["lds_v_row_pad"]),
         persistent=variant.persistent,
         num_persistent=int(req.dense_num_persistent),
-        persist_decode=decode,
+        persist_decode=req.dense_persist_decode.strip().lower(),
+        nonpersist_decode=req.dense_nonpersist_decode.strip().lower(),
         ragged=ragged,
         sliding_window=sw,
         use_sinks=use_sinks,

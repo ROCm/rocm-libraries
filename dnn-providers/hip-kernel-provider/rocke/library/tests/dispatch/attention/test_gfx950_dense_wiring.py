@@ -120,9 +120,9 @@ class TestDenseWavesPerEuWiring(unittest.TestCase):
 
 
 class TestDenseGqaPairWiring(unittest.TestCase):
-    """Invariant-compatible shapes select a balanced GQA-local decode."""
+    """Invariant-compatible shapes accept an explicit balanced GQA-local decode."""
 
-    def test_exact_llama3_8b_prefill_auto_selects_gqa_pair(self):
+    def test_exact_llama3_8b_prefill_explicit_gqa_pair(self):
         req = _gfx950_dense_req(
             batch=1,
             nhead_q=32,
@@ -133,7 +133,7 @@ class TestDenseGqaPairWiring(unittest.TestCase):
             hdim_v=128,
             dtype="fp16",
             dense_persistent="on",
-            dense_persist_decode="auto",
+            dense_persist_decode="gqa_pair",
         )
         spec = dense_spec_for_request(req)
         self.assertEqual(spec.resolved_persist_decode, "gqa_pair")
@@ -166,7 +166,7 @@ class TestDenseGqaPairWiring(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "persist_decode"):
             dense_spec_for_request(req)
 
-    def test_s4096_shape_selects_two_phase_pair_and_wide_dma(self):
+    def test_s4096_shape_accepts_two_phase_pair_and_wide_dma(self):
         req = _gfx950_dense_req(
             batch=1,
             nhead_q=32,
@@ -177,7 +177,7 @@ class TestDenseGqaPairWiring(unittest.TestCase):
             hdim_v=128,
             dtype="fp16",
             dense_persistent="on",
-            dense_persist_decode="auto",
+            dense_persist_decode="gqa_pair_2phase",
         )
         spec = dense_spec_for_request(req)
         self.assertEqual(spec.resolved_persist_decode, "gqa_pair_2phase")
@@ -196,13 +196,13 @@ class TestDenseGqaPairWiring(unittest.TestCase):
             hdim_v=128,
             dtype="bf16",
             dense_persistent="on",
-            dense_persist_decode="auto",
+            dense_persist_decode="gqa_pair",
         )
         spec = dense_spec_for_request(req)
         self.assertEqual(spec.resolved_persist_decode, "gqa_pair")
         self.assertTrue(spec.wide_lds_dma)
 
-    def test_s2048_h64_selects_two_phase_pair(self):
+    def test_s2048_h64_accepts_two_phase_pair(self):
         req = _gfx950_dense_req(
             batch=1,
             nhead_q=64,
@@ -213,7 +213,7 @@ class TestDenseGqaPairWiring(unittest.TestCase):
             hdim_v=128,
             dtype="fp16",
             dense_persistent="on",
-            dense_persist_decode="auto",
+            dense_persist_decode="gqa_pair_2phase",
         )
         spec = dense_spec_for_request(req)
         self.assertEqual(spec.resolved_persist_decode, "gqa_pair_2phase")
@@ -248,6 +248,7 @@ class TestDenseGqaPairWiring(unittest.TestCase):
             hdim_v=128,
             dtype="fp16",
             dense_persistent="on",
+            dense_persist_decode="gqa_pair",
             use_sinks=True,
         )
         spec = dense_spec_for_request(req)
@@ -272,7 +273,7 @@ class TestDenseGqaPairWiring(unittest.TestCase):
         self.assertEqual(spec.resolved_persist_decode, "qb_major")
         self.assertFalse(spec.wide_lds_dma)
 
-    def test_mha_falls_back_to_qb_major(self):
+    def test_mha_selects_bt_hkv_minor(self):
         req = _gfx950_dense_req(
             batch=1,
             nhead_q=32,
@@ -285,9 +286,55 @@ class TestDenseGqaPairWiring(unittest.TestCase):
             dense_persistent="on",
         )
         spec = dense_spec_for_request(req)
-        self.assertEqual(spec.resolved_persist_decode, "qb_major")
+        self.assertEqual(spec.resolved_persist_decode, "bt_hkv_minor")
         self.assertTrue(spec.wide_lds_dma)
         self.assertNotIn("gqapair", spec.kernel_name())
+
+    def test_large_batch_selects_hkv_major_for_gqa(self):
+        req = _gfx950_dense_req(
+            batch=16,
+            nhead_q=32,
+            nhead_k=8,
+            seqlen_q=8192,
+            seqlen_k=8192,
+            hdim_q=128,
+            hdim_v=128,
+            dtype="fp16",
+            dense_persistent="on",
+        )
+        spec = dense_spec_for_request(req)
+        self.assertEqual(spec.resolved_persist_decode, "hkv_major")
+
+    def test_large_batch_selects_hq_minor_swz_for_mha(self):
+        req = _gfx950_dense_req(
+            batch=16,
+            nhead_q=32,
+            nhead_k=32,
+            seqlen_q=2048,
+            seqlen_k=2048,
+            hdim_q=128,
+            hdim_v=128,
+            dtype="fp16",
+            dense_persistent="on",
+        )
+        spec = dense_spec_for_request(req)
+        self.assertEqual(spec.resolved_persist_decode, "hq_minor_swz")
+
+    def test_large_batch_mha_without_head_bands_selects_qb_major(self):
+        # head bands need a head count divisible by the XCD count
+        req = _gfx950_dense_req(
+            batch=16,
+            nhead_q=36,
+            nhead_k=36,
+            seqlen_q=2048,
+            seqlen_k=2048,
+            hdim_q=128,
+            hdim_v=128,
+            dtype="fp16",
+            dense_persistent="on",
+        )
+        spec = dense_spec_for_request(req)
+        self.assertEqual(spec.resolved_persist_decode, "qb_major")
 
 
 class TestDenseBottomRightWiring(unittest.TestCase):
@@ -350,7 +397,7 @@ class TestDenseBottomRightWiring(unittest.TestCase):
                 self.assertFalse(spec.wide_lds_dma)
                 self.assertTrue(spec.causal_bottom_right)
 
-    def test_equal_length_bottom_right_preserves_gqa_pair_and_wide_dma(self):
+    def test_equal_length_bottom_right_preserves_decode_and_wide_dma(self):
         common = dict(
             batch=1,
             nhead_q=32,
@@ -377,7 +424,9 @@ class TestDenseBottomRightWiring(unittest.TestCase):
                 self.assertEqual(bottom_right_spec, top_left_spec)
                 self.assertFalse(bottom_right_spec.causal_bottom_right)
                 self.assertTrue(bottom_right_spec.persistent)
-                self.assertEqual(bottom_right_spec.resolved_persist_decode, "gqa_pair")
+                self.assertEqual(
+                    bottom_right_spec.resolved_persist_decode, "bt_hkv_minor"
+                )
                 self.assertTrue(bottom_right_spec.wide_lds_dma)
 
 
@@ -417,7 +466,7 @@ class TestDenseGeometrySpec(unittest.TestCase):
         self.assertEqual(spec.lds_v_row_pad, layout["lds_v_row_pad"])
 
     def test_block_m_controls_grid_and_kernel_identity(self):
-        default = self._spec()
+        default = replace(self._spec(), nonpersist_decode="qb_minor")
         bm128 = replace(default, block_m=128)
         self.assertEqual(attention_dense_grid(default), (2, 32, 1))
         self.assertEqual(attention_dense_grid(bm128), (4, 32, 1))
@@ -978,11 +1027,33 @@ class TestGfx950DenseVariants(unittest.TestCase):
         self.assertEqual(spec.block_m, 256)
         self.assertTrue(spec.persistent)
         self.assertTrue(spec.wide_lds_dma)
-        self.assertEqual(spec.resolved_persist_decode, "gqa_pair")
+        self.assertEqual(spec.resolved_persist_decode, "bt_hkv_minor")
         from dispatch.attention import dispatch_attention
 
         result = dispatch_attention(req)
         self.assertEqual(result.candidate.name, "attention_gfx950_dense")
+
+    def test_large_causal_mha_uses_persistent_swizzled_head_first(self):
+        req = _gfx950_dense_req(
+            batch=4,
+            nhead_q=64,
+            nhead_k=64,
+            seqlen_q=8192,
+            seqlen_k=8192,
+            hdim_q=128,
+            hdim_v=128,
+            dtype="fp16",
+        )
+        spec = dense_spec_for_request(req)
+        self.assertTrue(spec.persistent)
+        self.assertTrue(spec.wide_lds_dma)
+        self.assertEqual(spec.resolved_persist_decode, "hq_minor_swz")
+
+    def test_nonpersist_decode_request_pin_reaches_spec(self):
+        req = _gfx950_dense_req(dense_nonpersist_decode="hq_minor_swz")
+        spec = dense_spec_for_request(req)
+        self.assertFalse(spec.persistent)
+        self.assertEqual(spec.resolved_nonpersist_decode, "hq_minor_swz")
 
     def test_registered_combos_include_dense_not_unified_2d(self):
         from dispatch.attention import registered_attention_combos

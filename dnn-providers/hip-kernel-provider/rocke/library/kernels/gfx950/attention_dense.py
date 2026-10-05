@@ -80,10 +80,17 @@ from rocke.core.ir import IRBuilder, KernelDef, PtrType, F32, I32, I64
 from rocke.helpers.attention import mfma_32x32x16_for_dtype, pv32_v_load_paired
 from rocke.helpers.schedule import MFMA, VALU, TRANS, DS_READ
 from kernels.common.attention_dense_spec import (
+    COMMON_PERSIST_DECODES,
     AttentionDenseSpec as _AttentionDenseSpecBase,
     DENSE_TILE_GEOMETRIES,
     attention_dense_cache_key,
     check_dense_spec_preflight,
+)
+from kernels.common.attention_dense_decode import (
+    NONPERSIST_DECODES,
+    PERSIST_DECODES,
+    PersistGqaPair,
+    PersistGqaPair2Phase,
 )
 from kernels.gfx950.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_col
 
@@ -111,6 +118,12 @@ _LDS_PAD = 8
 _LAZY_RESCALE_THRESHOLD = 8.0
 
 
+GFX950_PERSIST_DECODES = COMMON_PERSIST_DECODES | {
+    PersistGqaPair.name,
+    PersistGqaPair2Phase.name,
+}
+
+
 @dataclass(frozen=True)
 class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
     """gfx950 dense-attention spec and architecture-specific codegen policy."""
@@ -119,10 +132,7 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
     wide_lds_dma: bool = False
 
     def supported_persist_decodes(self) -> frozenset[str]:
-        return super().supported_persist_decodes() | {
-            "gqa_pair",
-            "gqa_pair_2phase",
-        }
+        return GFX950_PERSIST_DECODES
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -164,65 +174,6 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                 raise ValueError(
                     "wide_lds_dma requires K/V slab padding of 8/32 elements"
                 )
-
-        if self.persist_decode == "gqa_pair":
-            gqa = self.num_queries_per_kv
-            nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
-            expected_np = nqb * self.num_kv_heads * self.batch
-            if not self.persistent or not self.causal:
-                raise ValueError("gqa_pair requires persistent causal attention")
-            if self.ragged or self.varlen or self.paged:
-                raise ValueError(
-                    "gqa_pair is validated only for aligned dense attention"
-                )
-            if nqb % 2 or gqa % 2:
-                raise ValueError("gqa_pair requires even NQB and even GQA ratio")
-            if self.num_persistent != expected_np:
-                raise ValueError(
-                    "gqa_pair requires num_persistent == NQB*Hkv*B "
-                    f"({expected_np}), got {self.num_persistent}"
-                )
-        if self.persist_decode == "gqa_pair_2phase":
-            gqa = self.num_queries_per_kv
-            nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
-            expected_np = nqb * self.num_kv_heads * self.batch * gqa // 2
-            if not self.persistent or not self.causal:
-                raise ValueError("gqa_pair_2phase requires persistent causal attention")
-            if self.ragged or self.varlen or self.paged:
-                raise ValueError(
-                    "gqa_pair_2phase is validated only for aligned dense attention"
-                )
-            if nqb % 2 or gqa < 2:
-                raise ValueError("gqa_pair_2phase requires even NQB and GQA ratio >= 2")
-            if self.num_persistent != expected_np:
-                raise ValueError(
-                    "gqa_pair_2phase requires num_persistent == W/2 "
-                    f"({expected_np}), got {self.num_persistent}"
-                )
-
-    @property
-    def resolved_persist_decode(self) -> str:
-        if self.persist_decode != "auto":
-            return self.persist_decode
-        gqa = self.num_queries_per_kv
-        nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
-        aligned_causal = (
-            self.persistent
-            and self.causal
-            and not self.ragged
-            and not self.varlen
-            and not self.paged
-            and self.sliding_window == 0
-        )
-        if aligned_causal and nqb % 2 == 0 and gqa % 2 == 0:
-            pair_np = nqb * self.num_kv_heads * self.batch
-            if self.num_persistent == pair_np:
-                return "gqa_pair"
-        if aligned_causal and nqb % 2 == 0 and gqa >= 2:
-            two_phase_np = nqb * self.num_kv_heads * self.batch * gqa // 2
-            if self.num_persistent == two_phase_np:
-                return "gqa_pair_2phase"
-        return super().resolved_persist_decode
 
     @property
     def runtime_shape(self) -> bool:
@@ -285,13 +236,6 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
         if self.waves_per_eu != 2:
             parts.append(f"wpe{self.waves_per_eu}")
         return tuple(parts)
-
-    def _persist_decode_name_part(self) -> str:
-        return {
-            "hkv_major": "hkvmaj",
-            "gqa_pair": "gqapair",
-            "gqa_pair_2phase": "gqapair2",
-        }.get(self.resolved_persist_decode, "")
 
 
 # Compatibility name for existing gfx950 callers. Cross-architecture code must
@@ -461,9 +405,9 @@ def build_attention_dense(
         rcp_ln2 = b.const_f32(LOG2E)
         one_f = b.const_f32(1.0)
 
-    qb = b.block_id_x()
-    hq = b.block_id_y()
-    bt = b.block_id_z()
+    qb, hq, bt, _ = NONPERSIST_DECODES[spec.resolved_nonpersist_decode].emit_decode(
+        b, spec, b.block_id_x(), b.block_id_y(), b.block_id_z(), seqlen_q_p
+    )
     hkv = b.div(hq, b.const_i32(gqa))
     q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
 
@@ -1148,7 +1092,6 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     NBUF = _NBUF
     PAD = _LDS_PAD
     NP = spec.num_persistent
-    INTERLEAVE = spec.interleave
 
     K_STEPS = D // 16
     D_TILES = D // 32
@@ -1296,83 +1239,11 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         b.s_waitcnt(vmcnt=0)
         b.s_barrier_bare()
 
-        if spec.resolved_persist_decode == "gqa_pair_2phase":
-            # NP=W/2 CTAs. gqa neighboring CTAs cover all local query heads
-            # for one (qb_pair,hkv,bt); phase 0/1 selects complementary qbs.
-            cta = b.mod(wi, b.const_i32(NP))
-            phase = b.div(wi, b.const_i32(NP))
-            hql = b.mod(cta, b.const_i32(gqa))
-            rem = b.div(cta, b.const_i32(gqa))
-            bt = b.mod(rem, b.const_i32(B))
-            rem = b.div(rem, b.const_i32(B))
-            hkv = b.mod(rem, b.const_i32(Hkv))
-            qb_pair = b.div(rem, b.const_i32(Hkv))
-            hq = b.add(b.mul(hkv, b.const_i32(gqa)), hql)
-            qb = b.select(
-                b.cmp_ne(phase, b.const_i32(0)),
-                b.sub(b.const_i32(NQB - 1), qb_pair),
-                qb_pair,
-            )
-        elif spec.resolved_persist_decode == "gqa_pair":
-            # NP=NQB*Hkv*B CTAs. Two neighboring CTAs cover one
-            # (qb_pair,hkv,bt) group; each handles half the local query heads
-            # at both complementary qbs. The low/high costs sum to a constant.
-            cta = b.mod(wi, b.const_i32(NP))
-            phase = b.div(wi, b.const_i32(NP))
-            pair_lane = b.mod(cta, b.const_i32(2))
-            rem = b.div(cta, b.const_i32(2))
-            bt = b.mod(rem, b.const_i32(B))
-            rem = b.div(rem, b.const_i32(B))
-            hkv = b.mod(rem, b.const_i32(Hkv))
-            qb_pair = b.div(rem, b.const_i32(Hkv))
-            half_gqa = gqa // 2
-            high = b.cmp_ge(phase, b.const_i32(half_gqa))
-            phase_half = b.mod(phase, b.const_i32(half_gqa))
-            hql = b.add(b.mul(pair_lane, b.const_i32(half_gqa)), phase_half)
-            hq = b.add(b.mul(hkv, b.const_i32(gqa)), hql)
-            qb = b.select(
-                high,
-                b.sub(b.const_i32(NQB - 1), qb_pair),
-                qb_pair,
-            )
-        elif spec.resolved_persist_decode == "hkv_major":
-            # hkv-MAJOR + causal-balanced decode:
-            #   wi = hkv*(NQB*gqa*B) + blk*(gqa*B) + hql*B + bt
-            # * hkv in the MSB -> each grid-stride phase (NP consecutive wi) stays
-            #   within ~1 kv-head, so the shared GQA K/V is L2-resident across its
-            #   gqa query heads (recovers the non-persistent grid's locality:
-            #   measured L2 hit 57% -> ~90%+ vs qb_major).
-            # * `blk` (0..NQB-1) is folded to a query-block index that PAIRS a low
-            #   and a high qb per CTA: blk<half -> qb=blk (cheap), blk>=half ->
-            #   qb=NQB-1-(blk-half) (expensive), so a CTA that grid-strides over
-            #   both halves of a kv-head does qb=X and qb=NQB-1-X (constant causal
-            #   cost) -> keeps qb_major's load balance while gaining L2 locality.
-            half = NQB // 2
-            bt = b.mod(wi, b.const_i32(B))
-            rem = b.div(wi, b.const_i32(B))  # hkv*(NQB*gqa) + blk*gqa + hql
-            hql = b.mod(rem, b.const_i32(gqa))
-            r2 = b.div(rem, b.const_i32(gqa))  # hkv*NQB + blk
-            blk = b.mod(r2, b.const_i32(NQB))
-            hkv = b.div(r2, b.const_i32(NQB))
-            hq = b.add(b.mul(hkv, b.const_i32(gqa)), hql)
-            # qb = blk<half ? blk : (NQB-1 - (blk-half))
-            qb_hi = b.sub(b.const_i32(NQB - 1 + half), blk)  # NQB-1-(blk-half)
-            qb = b.select(b.cmp_lt(blk, b.const_i32(half)), blk, qb_hi)
-        else:
-            # qb-MAJOR decode: wi = qb*(Hq*B) + hq*B + bt. Putting qb (the
-            # triangular causal cost index) in the MSB spreads cheap+expensive
-            # query blocks across each CTA under grid-stride; a qb-fast decode
-            # would alias qb to a constant per CTA when NP is a multiple of NQB
-            # (32x imbalance).
-            bt = b.mod(wi, b.const_i32(B))
-            rem = b.div(wi, b.const_i32(B))
-            hq = b.mod(rem, b.const_i32(Hq))
-            qb0 = b.div(rem, b.const_i32(Hq))
-            if INTERLEAVE and causal and NQB > 1:
-                odd = b.cmp_eq(b.mod(rem, b.const_i32(2)), b.const_i32(1))
-                qb = b.select(odd, b.sub(b.const_i32(NQB - 1), qb0), qb0)
-            else:
-                qb = qb0
+        # No shape params on this body: the decode reads the baked shape.
+        qb, hq, bt, hkv = PERSIST_DECODES[spec.resolved_persist_decode].emit_decode(
+            b, spec, wi, None
+        )
+        if hkv is None:
             hkv = b.div(hq, b.const_i32(gqa))
 
         q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
@@ -2013,40 +1884,12 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         o_acc = do_pv(o_acc, p_prev, last_vbuf)
 
         # Epilogue: recompute (bt, hq) from the live loop IV so they need not cross
-        # the KV loop (keeps the loop-carried live set minimal -> 0 spill). Must
-        # mirror the work-item decode used at the top of the loop.
+        # the KV loop (keeps the loop-carried live set minimal -> 0 spill). Same
+        # decode as the top of the loop; its unused outputs are dead ops.
         rcp_l = b.rcp(l_i)
-        if spec.resolved_persist_decode == "gqa_pair_2phase":
-            cta_e = b.mod(wi, b.const_i32(NP))
-            hql_e = b.mod(cta_e, b.const_i32(gqa))
-            rem_e = b.div(cta_e, b.const_i32(gqa))
-            bt_e = b.mod(rem_e, b.const_i32(B))
-            rem_e = b.div(rem_e, b.const_i32(B))
-            hkv_e = b.mod(rem_e, b.const_i32(Hkv))
-            hq_e = b.add(b.mul(hkv_e, b.const_i32(gqa)), hql_e)
-        elif spec.resolved_persist_decode == "gqa_pair":
-            cta_e = b.mod(wi, b.const_i32(NP))
-            phase_e = b.div(wi, b.const_i32(NP))
-            pair_lane_e = b.mod(cta_e, b.const_i32(2))
-            rem_e = b.div(cta_e, b.const_i32(2))
-            bt_e = b.mod(rem_e, b.const_i32(B))
-            rem_e = b.div(rem_e, b.const_i32(B))
-            hkv_e = b.mod(rem_e, b.const_i32(Hkv))
-            phase_half_e = b.mod(phase_e, b.const_i32(gqa // 2))
-            hql_e = b.add(
-                b.mul(pair_lane_e, b.const_i32(gqa // 2)),
-                phase_half_e,
-            )
-            hq_e = b.add(b.mul(hkv_e, b.const_i32(gqa)), hql_e)
-        elif spec.resolved_persist_decode == "hkv_major":
-            bt_e = b.mod(wi, b.const_i32(B))
-            rem_e = b.div(wi, b.const_i32(B))
-            hql_e = b.mod(rem_e, b.const_i32(gqa))
-            hkv_e = b.div(b.div(rem_e, b.const_i32(gqa)), b.const_i32(NQB))
-            hq_e = b.add(b.mul(hkv_e, b.const_i32(gqa)), hql_e)
-        else:
-            bt_e = b.mod(wi, b.const_i32(B))
-            hq_e = b.mod(b.div(wi, b.const_i32(B)), b.const_i32(Hq))
+        _, hq_e, bt_e, _ = PERSIST_DECODES[spec.resolved_persist_decode].emit_decode(
+            b, spec, wi, None
+        )
         o_base = b.add(
             b.mul(b.mul(bt_e, b.const_i32(Sq)), b.const_i32(stride_q_tok)),
             b.mul(hq_e, b.const_i32(D)),
@@ -2083,13 +1926,11 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
 
 def attention_dense_grid(spec: AttentionDenseSpec) -> Tuple[int, int, int]:
     """Launch grid for ``spec``. Persistent = 1-D grid of ``num_persistent`` CTAs;
-    default = one CTA per (query-block, query-head, batch)."""
+    default = one CTA per (query-block, query-head, batch), laid out by the
+    nonpersist decode."""
     if spec.persistent:
         return (spec.num_persistent, 1, 1)
-    nqb = (
-        spec.seqlen_q + spec.block_m - 1
-    ) // spec.block_m  # ceil: ragged partial block
-    return (nqb, spec.num_query_heads, spec.batch)
+    return NONPERSIST_DECODES[spec.resolved_nonpersist_decode].grid(spec)
 
 
 def attention_dense_block(spec: AttentionDenseSpec) -> Tuple[int, int, int]:

@@ -8,8 +8,8 @@ Required by ``library/dispatch/AGENTS.md`` step 4. Covers:
     every other attention candidate
   - ``spec_id`` is an equivalent opt-in door
   - routing on gfx942, and rejection of every out-of-scope request
-  - ``dense_persistent``: 'auto' turns the persistent grid on once there is enough
-    work; an explicit 'on' is accepted
+  - ``dense_persistent``: 'auto' turns the persistent grid on at D128; an explicit
+    'on' is accepted
   - non-persistent gfx942 dense reads ``batch`` / ``seqlen_q`` / ``seqlen_kv`` as
     runtime kernel params, so those fields drop out of ``kernel_name()`` and the
     dispatched signature includes them. The persistent grid still bakes batch.
@@ -214,8 +214,9 @@ class TestGfx942BottomRightSafety(unittest.TestCase):
 
     def test_equal_length_bottom_right_preserves_persistent_policy(self):
         common = dict(
-            seqlen_q=8192,
-            seqlen_k=8192,
+            batch=16,
+            seqlen_q=2048,
+            seqlen_k=2048,
             dense_persistent="auto",
         )
         mask_pairs = (
@@ -236,15 +237,37 @@ class TestGfx942BottomRightSafety(unittest.TestCase):
 
 
 class TestGfx942DensePersistent(unittest.TestCase):
-    def test_auto_persistent_turns_on_for_large_sq(self):
-        """Post-P4 (ledger row 16): 'auto' turns the persistent grid-stride variant
-        ON once there is enough work to fill the grid -- the large-Sq prefill
-        regime -- and the request is accepted."""
+    def test_auto_persistent_turns_on_for_d128(self):
+        """'auto' turns the persistent grid-stride variant ON at D128, off at D64,
+        and the request is accepted."""
         with _Gfx942Arch():
-            req = _req(seqlen_q=8192, seqlen_k=8192, dense_persistent="auto")
+            req = _req(dense_persistent="auto")
             ok, why = _candidate().admits(req)
             self.assertTrue(ok, why)
             self.assertTrue(_dense_spec(req).persistent)
+            req = _req(hdim_q=64, hdim_v=64, dense_persistent="auto")
+            self.assertFalse(_dense_spec(req).persistent)
+
+    def test_large_causal_mha_uses_persistent_swizzled_head_first(self):
+        with _Gfx942Arch():
+            req = _req(
+                batch=16,
+                nhead_q=64,
+                nhead_k=64,
+                seqlen_q=4096,
+                seqlen_k=4096,
+                dense_persistent="auto",
+            )
+            spec = _dense_spec(req)
+            self.assertTrue(spec.persistent)
+            self.assertEqual(spec.resolved_persist_decode, "hq_minor_swz")
+
+    def test_nonpersist_decode_request_pin_reaches_spec(self):
+        with _Gfx942Arch():
+            req = _req(dense_persistent="off", dense_nonpersist_decode="hq_minor_swz")
+            spec = _dense_spec(req)
+            self.assertFalse(spec.persistent)
+            self.assertEqual(spec.resolved_nonpersist_decode, "hq_minor_swz")
 
     def test_explicit_persistent_on_is_accepted_and_builds_persistent(self):
         """Post-P4 the persistent variant ships, so an explicit 'on' is accepted
