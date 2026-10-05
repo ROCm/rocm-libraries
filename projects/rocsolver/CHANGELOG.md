@@ -21,6 +21,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Resolved issues
 
+* Fixed memory access faults for matrices with more than 2^31 elements (for example in GEQLF and ORGQL/UNGQL), caused by 32-bit internal matrix offsets.
 * Fixed a loss of accuracy in STEDC, and therefore in SYEVD and HEEVD, observed when the input
   matrix is scaled by a small number.
 
