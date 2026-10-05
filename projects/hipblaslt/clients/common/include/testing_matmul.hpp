@@ -1629,6 +1629,13 @@ std::tuple<hipDataType, hipDataType> derive_unset_compute_input_type(const Argum
     return {real_compute_input_typeA, real_compute_input_typeB};
 }
 
+// Swizzled-scale M/N tile block granularity expected by the kernel (swizzleSize0=32 in
+// KernelWriterAssembly).  The permuted layout is {padK/dimk, padMN, dimk} where
+// padMN = roundUp(M_or_N, kMXScaleMNTileBlock).  Must be kept in sync with the
+// kernel's swizzleSize0 parameter; used by both swizzle_mx_scale and the allocation
+// size computations in testing_matmul_with_bias.
+constexpr size_t kMXScaleMNTileBlock = 32;
+
 // Swizzle MX scale tensor for the new MX layout expected by the kernel.
 // The kernel expects scale data in a permuted layout where the K-block dimension
 // is split into outer tiles of size dimk (=128/MXBlock) and interleaved with the
@@ -1688,16 +1695,21 @@ size_t swizzle_mx_scale(void*  scalePtr,
         auto tmpTensor = Tensor({mnDim, kDim}, sizeof(uint8_t));
         memcpy(tmpTensor.as<void>(), scalePtr, mnDim * kDim);
 
-        // Pad kDim (K/MX, the fast dim) to multiple of dimk
-        ::Tensor::Manipulation::Shape paddedShape{mnDim, (kDim + dimk - 1) / dimk * dimk};
+        // Pad kDim (K/MX, fast dim) to multiple of dimk, AND mnDim (M/N tile dim)
+        // to kMXScaleMNTileBlock (=32).  In the permuted {padK/dimk, padMN, dimk}
+        // layout the K-outer stride is padMN*dimk; leaving MN unpadded misaligns
+        // that stride for any M/N not a multiple of 32 and corrupts the last block.
+        ::Tensor::Manipulation::Shape paddedShape{
+            (mnDim + kMXScaleMNTileBlock - 1) / kMXScaleMNTileBlock * kMXScaleMNTileBlock,
+            (kDim + dimk - 1) / dimk * dimk};
         uint64_t padVal{};
         auto     paddedTensor
             = ::Tensor::Manipulation::pad(tmpTensor, paddedShape, &padVal, sizeof(uint8_t));
 
-        // Reshape: {M, padK/dimk, dimk}
+        // Reshape: {padMN, padK/dimk, dimk}
         paddedTensor.reshape({paddedShape[0], paddedShape[1] / dimk, dimk});
 
-        // Permute {1,0,2}: {padK/dimk, M, dimk}
+        // Permute {1,0,2}: {padK/dimk, padMN, dimk}
         Tensor permuted = permute(paddedTensor, {1, 0, 2});
 
         auto totalElements = permuted.getDesc().flattenSize();
@@ -2156,7 +2168,17 @@ void testing_matmul_with_bias(const Arguments& arg,
                     size_t mnDim       = kAlongRowsA ? scaleA_c : scaleA_r;
                     size_t padDim      = kAlongRowsA ? kDim : mnDim;
                     size_t paddedDim   = (padDim + dimk - 1) / dimk * dimk;
-                    size_scaleAVec[i]  = kAlongRowsA ? (mnDim * paddedDim) : (kDim * paddedDim);
+                    if(kAlongRowsA)
+                    {
+                        // swizzle_mx_scale pads mnDim (M) to kMXScaleMNTileBlock.
+                        size_t paddedMn   = (mnDim + kMXScaleMNTileBlock - 1)
+                                            / kMXScaleMNTileBlock * kMXScaleMNTileBlock;
+                        size_scaleAVec[i] = paddedMn * paddedDim;
+                    }
+                    else
+                    {
+                        size_scaleAVec[i] = kDim * paddedDim;
+                    }
                 }
                 else
                 {
@@ -2183,7 +2205,17 @@ void testing_matmul_with_bias(const Arguments& arg,
                     size_t mnDim       = kAlongRowsB ? scaleB_c : scaleB_r;
                     size_t padDim      = kAlongRowsB ? kDim : mnDim;
                     size_t paddedDim   = (padDim + dimk - 1) / dimk * dimk;
-                    size_scaleBVec[i]  = kAlongRowsB ? (mnDim * paddedDim) : (kDim * paddedDim);
+                    if(kAlongRowsB)
+                    {
+                        // swizzle_mx_scale pads mnDim (N) to kMXScaleMNTileBlock.
+                        size_t paddedMn   = (mnDim + kMXScaleMNTileBlock - 1)
+                                            / kMXScaleMNTileBlock * kMXScaleMNTileBlock;
+                        size_scaleBVec[i] = paddedMn * paddedDim;
+                    }
+                    else
+                    {
+                        size_scaleBVec[i] = kDim * paddedDim;
+                    }
                 }
                 else
                 {

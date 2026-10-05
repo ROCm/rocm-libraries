@@ -2818,6 +2818,34 @@ Tests:
   norm_check: 1
   gpu_arch: '950'
 
+# Regression: size_scaleAVec/size_scaleBVec must account for the M/N padding that
+# the scale swizzle applies (roundUp to kMXScaleMNTileBlock=32) when allocating the
+# device-side scale buffer.  Under-allocation caused the H2D copy to write past the
+# buffer end, corrupting adjacent memory and feeding the GPU a wrong scale for any
+# M/N not a multiple of 32.  Uses scaleA=1001 (Block_32_UE8M0_32_8_EXT / GFX950
+# HostPreSwizzle path, which is the path this fix was validated on).
+- name: matmul_mx_non_mult32_shapes
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: f16_r,  d_type: f16_r,  compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  matrix_size:
+    - { M:  17, N:  64, K: 256 }   # M prime, N mult-of-32
+    - { M:  64, N:  17, K: 256 }   # symmetric: N prime
+    - { M:  33, N: 128, K: 256 }   # M = 32+1
+    - { M: 128, N:  33, K: 256 }   # symmetric: N = 32+1
+    - { M:  48, N:  96, K: 256 }   # both non-mult-of-32
+    - { M:  96, N:  48, K: 256 }   # swapped
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
 - name: matmul_mx_large
   category: pre_checkin
   function:
