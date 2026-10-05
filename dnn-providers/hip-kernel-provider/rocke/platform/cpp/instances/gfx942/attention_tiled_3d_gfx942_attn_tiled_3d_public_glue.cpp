@@ -270,6 +270,7 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
     {
         snprintf(kv_part, sizeof(kv_part), "kv%s", s->kv_storage_dtype);
         parts[np++] = kv_part;
+        parts[np++] = "fnuz";
     }
     if(s->use_sinks)
     {
