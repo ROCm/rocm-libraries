@@ -3628,5 +3628,43 @@
   "// archetypes": "Correlated tuples from real networks (RFC 0019.13 \u00a712.2). Realism is a joint fact: C=3 is a real convolution beside K=64, a 7x7 filter and a 224x224 image, and meaningless beside K=905. Each archetype fixes one coherent geometry -- filter size, dilation and padding together -- and varies stride inside it, because padding is chosen to suit the filter and dilation while stride is chosen independently of both. Between them these cover stride 1/2/4/16, padding 0 through 5, dilation 1 through 4, and group counts from 1 through depthwise.",
   "// neighbourhood": "How a draw may drift and stay a layer. R, S, stride, padding and dilation are all deliberately absent: they form one coupled geometry, and moving any of them alone breaks the pairing the archetypes exist to record -- a 7x7 that drifts to 3x3 while pad stays 3, or a 16x16 patch projection whose stride falls to 1, is valid and is in no network. Coverage of those axes comes from declaring more geometries, not from perturbing one. W repeats the 1 ratio because most images are square and a uniform draw over {1, 1.33, 2} would say otherwise.",
   "// mixture": "Anchors alone memorise a handful of shapes; the wide net alone put 0.04% of ten thousand draws anywhere near a real layer. The exploration share is \u00a75.4's floor -- an engine still has to answer for problems nobody wrote down.",
-  "// spatial": "spatial and layout are axes of the problem: 3-D problems add a depth to every tensor and to the geometry, and channels_last stores activations NHWC/NDHWC and the filter KRSC. 2-D problems pin every depth parameter to its identity."
+  "// spatial": "spatial and layout are axes of the problem: 3-D problems add a depth to every tensor and to the geometry, and channels_last stores activations NHWC/NDHWC and the filter KRSC. 2-D problems pin every depth parameter to its identity.",
+  "// kernel_catalog": [
+    "How a pack of fixed-shape conv kernels (hipkernel:Gfx950ConvFwd's KDP) reads as problems: each",
+    "descriptor's metadata names one 2-D, channels-last shape; the 3-D axes are the 2-D constants."
+  ],
+  "kernel_catalog": {
+    "metadata": {
+      "N": "N",
+      "C": "C",
+      "K": "K",
+      "groups": "groups",
+      "H": "Hi",
+      "W": "Wi",
+      "R": "Y",
+      "S": "X",
+      "pad_h": "pH",
+      "pad_w": "pW",
+      "stride_h": "sH",
+      "stride_w": "sW",
+      "dilation_h": "dH",
+      "dilation_w": "dW",
+      "dtype": "dtype",
+      "layout": "layout"
+    },
+    "enums": {
+      "layout": {
+        "NHWC": "channels_last",
+        "NCHW": "channels_first"
+      }
+    },
+    "constants": {
+      "spatial": "2d",
+      "D": 1,
+      "T": 1,
+      "pad_d": 0,
+      "stride_d": 1,
+      "dilation_d": 1
+    }
+  }
 }

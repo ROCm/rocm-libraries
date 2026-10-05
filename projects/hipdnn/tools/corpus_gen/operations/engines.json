@@ -1,4 +1,9 @@
 {
   "// engines": "What shape generation knows about an engine's coverage that the engine cannot yet state (see EngineCoverage.hpp). coverage \"pack\": the engine serves exactly its pack's shapes, so --kdp-root is required and no search is run. An engine not listed here is searched.",
-  "engines": {}
+  "engines": {
+    "hipkernel:Gfx950ConvFwd": {
+      "coverage": "pack",
+      "reason": "Each kernel in its pack is built for one shape (N, Hi, Wi, C, K, filter, stride, pad, dilation, groups); the engine serves exactly those shapes."
+    }
+  }
 }
