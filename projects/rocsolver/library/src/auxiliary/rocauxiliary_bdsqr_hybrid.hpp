@@ -33,6 +33,8 @@
 
 #pragma once
 
+#include <optional>
+
 #include "common_host_helpers.hpp"
 #include "lapack_host_functions.hpp"
 #include "rocauxiliary_bdsqr_rotlog.hpp"
@@ -1438,12 +1440,15 @@ rocblas_status rocsolver_bdsqr_host_batch_template(rocblas_handle handle,
         }
     }
 
+    // the operations on the singular vectors, if any, are applied in blocks (see bdsqr_rotlog)
+    // (created first: it throws if its buffers cannot be allocated)
+    std::optional<bdsqr_rotlog<S, T, I>> rlog;
+    if(nv > 0 || nu > 0 || nc > 0)
+        rlog.emplace(handle, stream, n);
     S* hwork = nullptr;
     HIP_CHECK(hipHostMalloc(&hwork, sizeof(S) * (4 * n)));
     S* dwork = nullptr;
     HIP_CHECK(hipMalloc(&dwork, sizeof(S) * (4 * n)));
-    // the operations on the singular vectors are applied in blocks (see bdsqr_rotlog)
-    bdsqr_rotlog<S, T, I> rlog(handle, stream, n);
 
     // --------------------------------------
     // Execute for each instance in the batch
@@ -1456,10 +1461,13 @@ rocblas_status rocsolver_bdsqr_host_batch_template(rocblas_handle handle,
         char uplo = (uplo_in == rocblas_fill_lower) ? 'L' : 'U';
         I info = 0;
 
-        rlog.set_matrices(n, hV[bid], ldv, nv, hU[bid], ldu, nu, hC[bid], ldc, nc);
+        if(rlog)
+            rlog->set_matrices(n, hV[bid], ldv, nv, hU[bid], ldu, nu, hC[bid], ldc, nc);
         bdsqr_single_template<S, T, I>(handle, uplo, n, nv, nu, nc, hD[bid], hE[bid], hV[bid], ldv,
-                                       hU[bid], ldu, hC[bid], ldc, hwork, info, dwork, stream, &rlog);
-        rlog.finish();
+                                       hU[bid], ldu, hC[bid], ldc, hwork, info, dwork, stream,
+                                       rlog ? &*rlog : nullptr);
+        if(rlog)
+            rlog->finish();
 
         if(info == 0)
         {

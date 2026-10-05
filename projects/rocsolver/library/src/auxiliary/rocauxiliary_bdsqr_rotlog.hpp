@@ -252,6 +252,27 @@ void bdsqr_rot_gemm(rocblas_handle handle,
     }
 }
 
+/** BDSQR_ROT_GROW grows the device buffer p to at least need entries (at least doubling it). The
+    old buffer is freed first; if the allocation fails, p is null and capacity 0 (so that the buffer
+    is not freed twice) and an exception is thrown. **/
+template <typename P>
+void bdsqr_rot_grow(P*& p, size_t& capacity, size_t need)
+{
+    if(need <= capacity)
+        return;
+    const size_t newcap = std::max(need, capacity * 2);
+    if(p)
+        (void)hipFree(p);
+    p = nullptr;
+    capacity = 0;
+    if(hipMalloc(&p, sizeof(P) * newcap) != hipSuccess)
+    {
+        p = nullptr;
+        THROW_IF_ROCBLAS_ERROR(rocblas_status_memory_error);
+    }
+    capacity = newcap;
+}
+
 template <typename S, typename T, typename I>
 class bdsqr_rotlog
 {
@@ -291,13 +312,7 @@ class bdsqr_rotlog
     template <typename P>
     static void grow(P*& p, size_t& capacity, size_t need)
     {
-        if(need <= capacity)
-            return;
-        if(p)
-            (void)hipFree(p);
-        capacity = std::max(need, capacity * 2);
-        if(hipMalloc(&p, sizeof(P) * capacity) != hipSuccess)
-            THROW_IF_ROCBLAS_ERROR(rocblas_status_memory_error);
+        bdsqr_rot_grow(p, capacity, need);
     }
 
     // matrix and index of a reference to an element of the first column of VT or C (rows = true),
@@ -325,35 +340,67 @@ public:
         : handle(h)
         , stream(s)
     {
-        cap = std::max(long(BDSQR_ROT_CHUNK), long(2) * nmax);
-        for(int i = 0; i < 2; i++)
-            if(hipHostMalloc(&hcb[i], sizeof(S) * cap) != hipSuccess
-               || hipHostMalloc(&hsb[i], sizeof(S) * cap) != hipSuccess
-               || hipEventCreateWithFlags(&ev[i], hipEventDisableTiming) != hipSuccess)
-                THROW_IF_ROCBLAS_ERROR(rocblas_status_memory_error);
+        // rotations recorded before a chunk is applied: enough for several groups of BDSQR_ROT_K
+        // sweeps (at most BDSQR_ROT_CHUNK), and at least two sweeps
+        cap = std::max(long(2) * nmax, std::min(long(BDSQR_ROT_CHUNK), long(8) * BDSQR_ROT_K * nmax));
+        bool ok = true;
+        for(int i = 0; i < 2 && ok; i++)
+            ok = hipHostMalloc(&hcb[i], sizeof(S) * cap) == hipSuccess
+                && hipHostMalloc(&hsb[i], sizeof(S) * cap) == hipSuccess
+                && hipEventCreateWithFlags(&ev[i], hipEventDisableTiming) == hipSuccess;
+        ok = ok && hipMalloc(&dc, sizeof(S) * cap) == hipSuccess
+            && hipMalloc(&ds, sizeof(S) * cap) == hipSuccess;
+        if(!ok)
+        {
+            // (the destructor does not run when the constructor throws)
+            release();
+            THROW_IF_ROCBLAS_ERROR(rocblas_status_memory_error);
+        }
         hc = hcb[0];
         hs = hsb[0];
-        if(hipMalloc(&dc, sizeof(S) * cap) != hipSuccess
-           || hipMalloc(&ds, sizeof(S) * cap) != hipSuccess)
-            THROW_IF_ROCBLAS_ERROR(rocblas_status_memory_error);
     }
     ~bdsqr_rotlog()
     {
         (void)hipStreamSynchronize(stream);
+        release();
+    }
+    // free all the buffers (null pointers are skipped)
+    void release()
+    {
         for(int i = 0; i < 2; i++)
         {
-            (void)hipHostFree(hcb[i]);
-            (void)hipHostFree(hsb[i]);
-            (void)hipEventDestroy(ev[i]);
+            if(hcb[i])
+                (void)hipHostFree(hcb[i]);
+            if(hsb[i])
+                (void)hipHostFree(hsb[i]);
+            if(ev[i])
+                (void)hipEventDestroy(ev[i]);
+            hcb[i] = hsb[i] = nullptr;
+            ev[i] = nullptr;
         }
-        (void)hipFree(dc);
-        (void)hipFree(ds);
-        (void)hipFree(dQ);
-        (void)hipFree(dT);
-        (void)hipFree(dgrp);
-        (void)hipFree(dseq);
-        (void)hipFree(dwg);
-        (void)hipFree(dwt);
+        for(S** p : {&dc, &ds})
+        {
+            if(*p)
+                (void)hipFree(*p);
+            *p = nullptr;
+        }
+        for(T** p : {&dQ, &dT})
+        {
+            if(*p)
+                (void)hipFree(*p);
+            *p = nullptr;
+        }
+        if(dgrp)
+            (void)hipFree(dgrp);
+        if(dseq)
+            (void)hipFree(dseq);
+        if(dwg)
+            (void)hipFree(dwg);
+        if(dwt)
+            (void)hipFree(dwt);
+        dgrp = nullptr;
+        dseq = nullptr;
+        dwg = dwt = nullptr;
     }
 
     // the matrices of one problem (n = order of the bidiagonal matrix)
@@ -732,19 +779,19 @@ class bdsqr_gpulog
     template <typename P>
     static void grow(P*& p, size_t& capacity, size_t need)
     {
-        if(need <= capacity)
-            return;
-        if(p)
-            (void)hipFree(p);
-        capacity = std::max(need, capacity * 2);
-        if(hipMalloc(&p, sizeof(P) * capacity) != hipSuccess)
-            THROW_IF_ROCBLAS_ERROR(rocblas_status_memory_error);
+        bdsqr_rot_grow(p, capacity, need);
     }
+    // (an allocation in the constructor: on failure, everything is released before throwing, as the
+    // destructor does not run)
     template <typename P>
-    static void alloc(P*& p, size_t count)
+    void alloc(P*& p, size_t count)
     {
         if(hipMalloc(&p, sizeof(P) * std::max(count, size_t(1))) != hipSuccess)
+        {
+            p = nullptr;
+            release();
             THROW_IF_ROCBLAS_ERROR(rocblas_status_memory_error);
+        }
     }
 
 public:
@@ -786,17 +833,40 @@ public:
     ~bdsqr_gpulog()
     {
         (void)hipStreamSynchronize(stream);
-        for(S* p : {lA_c, lA_s, lB_c, lB_s})
-            (void)hipFree(p);
-        (void)hipFree(ddesc);
-        (void)hipFree(dnd);
-        (void)hipFree(dQA);
-        (void)hipFree(dQB);
-        (void)hipFree(dT);
-        (void)hipFree(dgrp);
-        (void)hipFree(dseq);
-        (void)hipFree(dwg);
-        (void)hipFree(dwt);
+        release();
+    }
+    // free all the buffers (null pointers are skipped)
+    void release()
+    {
+        for(S** p : {&lA_c, &lA_s, &lB_c, &lB_s})
+        {
+            if(*p)
+                (void)hipFree(*p);
+            *p = nullptr;
+        }
+        for(T** p : {&dQA, &dQB, &dT})
+        {
+            if(*p)
+                (void)hipFree(*p);
+            *p = nullptr;
+        }
+        if(ddesc)
+            (void)hipFree(ddesc);
+        if(dnd)
+            (void)hipFree(dnd);
+        if(dgrp)
+            (void)hipFree(dgrp);
+        if(dseq)
+            (void)hipFree(dseq);
+        if(dwg)
+            (void)hipFree(dwg);
+        if(dwt)
+            (void)hipFree(dwt);
+        ddesc = nullptr;
+        dnd = nullptr;
+        dgrp = nullptr;
+        dseq = nullptr;
+        dwg = dwt = nullptr;
     }
 
     int sweeps() const
