@@ -14,11 +14,6 @@ transform start or when storing output to global memory at the
 transform end.  If specified, these functions are Just-In-Time (JIT)
 compiled to combine them with rocFFT's own device code.
 
-.. note::
-   JIT callbacks cannot currently be used on transforms that
-   have fields or bricks also specified on the same plan description.
-   This support will be added in a future release of rocFFT.
-
 These optional user-defined callback functions can be supplied
 to the library using
 :cpp:func:`rocfft_plan_description_set_load_callback` and
@@ -180,13 +175,6 @@ store callbacks) of the transform.  A transform which does not
 specify a field and brick layout for input (or output) is
 considered to have a single brick for input (or output).
 
-.. note::
-   As JIT callbacks cannot currently be used on transforms that have
-   fields or bricks specified on the plan description, the length of the
-   array of callback data pointers will always be 1 if callback data is
-   specified.
-
-
 Here is an example showing how to pass filtering data to a load
 callback.
 
@@ -242,6 +230,9 @@ functionality will be removed in a future release.
    Function pointer callbacks are not functional on the gfx1250
    architecture and :cpp:func:`rocfft_execute` will return an error
    on this architecture if they are specified.
+
+   Function pointer callbacks also cannot be used on transforms that
+   have fields or bricks also specified on the same plan description.
 
 Legacy callback functions are passed as arrays of function pointers, with
 one function per brick in the :ref:`input or output field<input_output_fields>`.  For example, to
