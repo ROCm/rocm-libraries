@@ -1332,6 +1332,7 @@ private:
         ss << ",\"spaces_per_indent\":" << s.spaces_per_indent;
         ss << ",\"stream_blocking_timeout_secs\":" << s.stream_blocking_timeout_secs;
         ss << ",\"skip_header\":" << s.skip_header;
+        ss << ",\"skip_tests\":" << s.skip_tests;
 
         ss << "}";
         return ss.str();
@@ -3295,7 +3296,8 @@ public:
                                                                      "output-batches",
                                                                      "spaces-per-indent",
                                                                      "stream-blocking-timeout-secs",
-                                                                     "skip-header"};
+                                                                     "skip-header",
+                                                                     "skip-tests"};
 
         auto parse_value = [](const std::string& value) -> settings::custom_arg_value
         {
