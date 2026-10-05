@@ -99,7 +99,8 @@ set(DEFAULT_GPUS
 )
 
 if(BUILD_ADDRESS_SANITIZER)
-  add_compile_options(-fsanitize=address)
+  # Kept off Fortran; fortran/ skips its tests under ASan, so links no Fortran.
+  add_compile_options($<$<COMPILE_LANGUAGE:C,CXX,HIP>:-fsanitize=address>)
   add_link_options(-fsanitize=address)
   add_link_options(-shared-libasan)
   SET(DEFAULT_GPUS
@@ -193,6 +194,19 @@ if( ROCmCMakeBuildTools_FOUND )
 endif()
 
 add_subdirectory( library )
+
+# fortran/ registers its tests under any client switch (BUILD_CLIENTS is
+# expanded only below), but enable_testing() below needs BUILD_CLIENTS_TESTS.
+if( BUILD_CLIENTS
+    OR BUILD_CLIENTS_SAMPLES
+    OR BUILD_CLIENTS_TESTS
+    OR BUILD_CLIENTS_BENCH )
+  enable_testing()
+endif()
+
+# Fortran bindings; self-guarding, reports HIP{FFT,FFTW}_HAVE_FORTRAN_BINDINGS.
+# After library/, or its find_package( hipfft ) fallback finds an INSTALLED hipFFT.
+add_subdirectory( fortran )
 
 # Build clients of the library
 if( BUILD_CLIENTS )
