@@ -58,7 +58,11 @@ static void
 void rocke_conv_emit_kloop_unroll(rocke_conv_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
-    const rocke_conv_problem_t* p = ctx->p;
+    /* p_load, not p: the trip count walks the reduction axis this workgroup's
+     * tile actually covers, and under group_merge that axis is Gm x longer
+     * (K_gemm decodes to (y, x, g_k) rather than (y, x)). At group_merge == 1
+     * p_load aliases the same values, so the default path is unchanged. */
+    const rocke_conv_problem_t* p = ctx->p_load;
     int block_k = ctx->block_k;
     int K_iters = (ctx->kloop_num_iters > 0)
                       ? ctx->kloop_num_iters
@@ -195,7 +199,10 @@ void rocke_conv_emit_kloop_simple(rocke_conv_build_ctx_t* ctx)
 void rocke_conv_emit_kloop_async(rocke_conv_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
-    const rocke_conv_problem_t* p = ctx->p;
+    /* p_load for the same reason as the unroll driver above. The merge gate
+     * rejects async_dma outright, so this leg never runs merged today -- it is
+     * routed anyway so the two drivers cannot drift if that gate ever relaxes. */
+    const rocke_conv_problem_t* p = ctx->p_load;
     int block_k = ctx->block_k;
     int num_iters = (ctx->kloop_num_iters > 0)
                         ? ctx->kloop_num_iters

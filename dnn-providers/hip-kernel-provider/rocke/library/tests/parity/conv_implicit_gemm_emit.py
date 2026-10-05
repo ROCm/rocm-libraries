@@ -329,6 +329,45 @@ def _spec(idx: int):
             ),
             "gfx950",
         )
+    # --- depthwise + merged groups -------------------------------------------
+    # Every config below is depthwise (C == K == groups, so cpg == kpg == 1),
+    # which is the only shape group_merge admits. 17 is the unmerged control:
+    # without it the merged configs would have nothing to differ *from*, and the
+    # depthwise path itself carried no structural coverage at all.
+    #
+    # 18-21 span the axes that change emitted IR under merge:
+    #   - the shift/mask width (log2 Gm) on the B diagonal,
+    #   - whether merged groups is still > 1 (k_out_group_base emitted) or has
+    #     collapsed to 1 (elided),
+    #   - and which epilogue consumes the merged dims.
+    if idx in (17, 18, 19, 20, 21):
+        # groups=64, C=64 -> cpg=1, K=64 -> kpg=1. M = 2*14*14 = 392.
+        p = _cp(N=2, Hi=14, Wi=14, C=64, K=64, fy=3, fx=3, pH=1, pW=1, groups=64)
+        # 17 is the unmerged depthwise control. 20 keeps the *direct* epilogue by
+        # pinning vector_size_c=1 -- merged kpg would otherwise auto-derive
+        # vec_c > 1, which the validator turns into a cshuffle requirement, so
+        # without the pin no merged config would exercise _emit_direct_epilogue.
+        gm = {17: 1, 18: 8, 19: 32, 20: 4, 21: 64}[idx]
+        epi = "default" if idx in (17, 20) else "cshuffle"
+        kw = {"vector_size_c": 1} if idx == 20 else {}
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue=epi,
+                group_merge=gm,
+                **kw,
+            ),
+            "gfx950",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 

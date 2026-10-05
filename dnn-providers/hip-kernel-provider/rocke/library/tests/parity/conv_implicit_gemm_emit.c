@@ -165,6 +165,44 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char**
         spec->problem.groups = 32;
         *arch = "gfx950";
         return 0;
+    /* --- depthwise + merged groups ---------------------------------------
+     * Every config below is depthwise (C == K == groups, so cpg == kpg == 1),
+     * which is the only shape group_merge admits. 17 is the unmerged control:
+     * without it the merged configs would have nothing to differ *from*, and
+     * the depthwise path itself carried no structural coverage at all.
+     *
+     * 18-21 span the axes that change emitted IR under merge: the shift/mask
+     * width (log2 Gm) on the B diagonal, whether merged groups is still > 1
+     * (k_out_group_base emitted) or has collapsed to 1 (elided), and which
+     * epilogue consumes the merged dims. Keep in lockstep with the matching
+     * block in conv_implicit_gemm_emit.py. */
+    case 17:
+    case 18:
+    case 19:
+    case 20:
+    case 21:
+    {
+        /* groups=64, C=64 -> cpg=1, K=64 -> kpg=1. M = 2*14*14 = 392. */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 64;
+        static const int kGm[] = {1, 8, 32, 4, 64}; /* idx 17..21 */
+        spec->group_merge = kGm[idx - 17];
+        /* 20 keeps the *direct* epilogue by pinning vector_size_c=1 -- merged
+         * kpg would otherwise auto-derive vec_c > 1, which the validator turns
+         * into a cshuffle requirement, so without the pin no merged config
+         * would exercise rocke_conv_emit_direct_epilogue. */
+        if(idx == 20)
+        {
+            spec->has_vector_size_c = true;
+            spec->vector_size_c = 1;
+        }
+        else if(idx != 17)
+        {
+            spec->epilogue = "cshuffle";
+        }
+        *arch = "gfx950";
+        return 0;
+    }
     default:
         return -1;
     }

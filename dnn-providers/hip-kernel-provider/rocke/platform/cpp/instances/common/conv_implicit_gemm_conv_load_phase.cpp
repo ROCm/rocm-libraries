@@ -232,6 +232,76 @@ rocke_value_t* rocke_conv_b_descriptor(rocke_ir_builder_t* b,
 }
 
 /* ===================================================================== *
+ *  b_descriptor_merged -- the B load for group_merge > 1.
+ *
+ *  Python span: conv_implicit_gemm.py b_descriptor_merged:
+ *      def b_descriptor_merged(b_, row, col):
+ *          g_n  = b_.add(block_n_off_v, row)
+ *          kg   = b_.add(k_off_capture[0], col)
+ *          g_k  = b_.land(kg, b_.const_i32(Gm - 1))
+ *          yx   = b_.lshr(kg, b_.const_i32(log2(Gm)))
+ *          k_out = b_.add(k_out_group_base, g_n) if grouped else g_n
+ *          off, valid = B_desc.offset(b_, k_out=k_out, k_gemm=yx)
+ *          diag = b_.cmp_eq(g_k, g_n)
+ *          return off, (b_.land(valid, diag) if valid is not None else diag)
+ *
+ *  The merged GEMM indexes n by the merged group g_n and k by (y, x, g_k) with
+ *  g_k innermost. Only g_k == g_n is real work; every other (n, k) pair is a
+ *  redundant MAC that must contribute zero. The mask therefore rides on the
+ *  *weight* load, not the store: an invalid element is handed to the loader as
+ *  valid = False, takes the buffer descriptor's OOB sentinel, and reads back as
+ *  a hardware zero with no memory traffic -- so the redundant MAC is a no-op and
+ *  the output store stays a dense contiguous run of Gm real outputs.
+ *
+ *  Emission order is load-bearing. The IR builder does no constant folding or
+ *  CSE, so each const_i32 must be materialised at exactly the point Python
+ *  materialises it or every downstream SSA value renumbers and byte-identity
+ *  breaks. C leaves argument evaluation order unspecified, hence the hoisted
+ *  temporaries below rather than nesting the const in the land/lshr call.
+ * ===================================================================== */
+rocke_value_t* rocke_conv_b_descriptor_merged(rocke_ir_builder_t* b,
+                                              rocke_value_t* row,
+                                              rocke_value_t* col,
+                                              rocke_value_t** out_valid,
+                                              void* ctx_user)
+{
+    rocke_conv_build_ctx_t* ctx = (rocke_conv_build_ctx_t*)ctx_user;
+
+    /* g_n: which merged group this tile column owns. Self-bounding -- for
+     * row >= Gm the diagonal is false for every k, so no N-axis clamp is needed
+     * here (the epilogue still bounds the store). */
+    rocke_value_t* g_n = rocke_b_add(b, ctx->block_n_off_v, row);
+    rocke_value_t* kg = rocke_b_add(b, ctx->k_off_capture, col);
+
+    /* Gm is a power of two (enforced by the gate), so the split is a mask and a
+     * shift rather than a division. Not just cheaper: div/mod lower to *signed*
+     * ops, and the compiler cannot see that kg >= 0, so it would emit the
+     * sign-correction sequence for a quantity that is non-negative by
+     * construction (kg = k0 + col). */
+    rocke_value_t* c_mask = rocke_b_const_i32(b, ctx->group_merge - 1);
+    rocke_value_t* g_k = rocke_b_land(b, kg, c_mask);
+    rocke_value_t* c_shift = rocke_b_const_i32(b, ctx->group_merge_log2);
+    rocke_value_t* yx = rocke_b_lshr(b, kg, c_shift);
+
+    /* k_out is the ABSOLUTE output filter index into the physical weight
+     * tensor: merged_group * Gm + g_n. When Gm == groups there is a single
+     * merged group and k_out_group_base is NULL, so the base term is elided. */
+    rocke_value_t* k_out = g_n;
+    if(ctx->k_out_group_base != NULL)
+        k_out = rocke_b_add(b, ctx->k_out_group_base, g_n);
+
+    const char* names[2] = {"k_out", "k_gemm"};
+    rocke_value_t* vals[2] = {k_out, yx};
+    rocke_value_t* off = NULL;
+    rocke_value_t* valid = NULL;
+    rocke_transforms_descriptor_offset(b, ctx->B_desc, names, vals, 2, &off, &valid);
+
+    rocke_value_t* diag = rocke_b_cmp_eq(b, g_k, g_n);
+    *out_valid = (valid != NULL) ? rocke_b_land(b, valid, diag) : diag;
+    return off;
+}
+
+/* ===================================================================== *
  *  emit_load_phase -- global -> LDS copy for one K tile via the descriptor DAG.
  *
  *  Python span: conv_implicit_gemm.py lines 1034-1106.

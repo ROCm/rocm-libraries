@@ -178,6 +178,16 @@ void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
                                      rocke_value_t* ir_c_K_pw)
 {
     const rocke_conv_problem_t* p = &spec->problem;
+    /* Under group_merge the N coord *is* the merged group index and every one
+     * of its Gm values is a real output at a consecutive NHWC channel -- there
+     * is no diagonal to gather here, because the mask was spent on the B load.
+     * So the only things that move to the merged problem are the group stride
+     * and the bounds; the store itself is untouched and dense.
+     *
+     * D's descriptor depends only on (N, Ho, Wo, K), none of which merging
+     * touches, so it keeps reading p and builds the identical DAG. */
+    rocke_conv_problem_t merged;
+    rocke_implicit_gemm_conv_spec_merged_problem(spec, &merged);
     rocke_direct_epilogue_t epi;
 
     epi.atom = rocke_mfma_atom("f16", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
@@ -191,10 +201,13 @@ void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
          *   _c_K_ir  = b.const_i32(p.kpg)       <- first
          *   bound_m  = b.const_i32(p.M)          <- second (inside bounds= arg)
          *   bound_n  = b.const_i32(p.N_gemm)     <- third
-         * Match this order exactly. */
+         * Match this order exactly. The bounds come from the merged dims (see
+         * the non-pointwise branch); merge rejects pointwise, so here they are
+         * the same integers p would have produced. */
         rocke_value_t* c_K = rocke_b_const_i32(b, rocke_conv_problem_kpg(p));
-        rocke_value_t* bound_m = rocke_b_const_i32(b, rocke_conv_problem_m(p));
-        rocke_value_t* bound_n = rocke_b_const_i32(b, rocke_conv_problem_n_gemm(p));
+        rocke_value_t* bound_m = rocke_b_const_i32(b, rocke_implicit_gemm_conv_spec_grid_m(spec));
+        rocke_value_t* bound_n
+            = rocke_b_const_i32(b, rocke_implicit_gemm_conv_spec_grid_n_gemm(spec));
         (void)ir_c_K_pw;
         rocke_direct_epilogue_store(b,
                                     &epi,
@@ -213,10 +226,18 @@ void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
         rocke_tensor_descriptor_t* D_desc = rocke_conv_make_d_descriptor(b, p);
         rocke_conv_d_addr_ctx_t dctx;
         dctx.D_desc = D_desc;
-        dctx.k_out_group_base = rocke_conv_make_k_out_group_base(b, p);
-        /* hoist bounds in Python's left-to-right order: M first, then N_gemm */
-        rocke_value_t* bound_m = rocke_b_const_i32(b, rocke_conv_problem_m(p));
-        rocke_value_t* bound_n = rocke_b_const_i32(b, rocke_conv_problem_n_gemm(p));
+        /* Grouped conv: the per-warp N coord is within-group; recover the
+         * absolute output filter k_out = g*kpg + n_val. Merged: g is the merged
+         * group and kpg is Gm, so the same expression yields
+         * k_out = merged_group*Gm + g_n. Byte-identical for group_merge == 1. */
+        dctx.k_out_group_base = rocke_conv_make_k_out_group_base(b, &merged);
+        /* hoist bounds in Python's left-to-right order: M first, then N_gemm.
+         * With the TRUE N_gemm (== 1 on depthwise) this clamp would discard
+         * Gm-1 of every Gm real outputs -- silently, as a wrong answer rather
+         * than a crash. */
+        rocke_value_t* bound_m = rocke_b_const_i32(b, rocke_implicit_gemm_conv_spec_grid_m(spec));
+        rocke_value_t* bound_n
+            = rocke_b_const_i32(b, rocke_implicit_gemm_conv_spec_grid_n_gemm(spec));
         rocke_direct_epilogue_store(b,
                                     &epi,
                                     accs,
@@ -254,6 +275,13 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
                                           rocke_value_t* ir_c_K_pw)
 {
     const rocke_conv_problem_t* p = &spec->problem;
+    /* group_merge does not reach here: the gate is MFMA-only (wave_size 64).
+     * The merged dims are routed below anyway so this cannot become the
+     * silently wrong copy if that gate is ever narrowed -- but routing them is
+     * *not* a claim that WMMA + merge works. The loader side is unverified on
+     * WMMA and the gate, not this function, is what makes that true. */
+    rocke_conv_problem_t merged;
+    rocke_implicit_gemm_conv_spec_merged_problem(spec, &merged);
     int mfmas_m = rocke_implicit_gemm_conv_spec_mfmas_per_warp_m(spec);
     int mfmas_n = rocke_implicit_gemm_conv_spec_mfmas_per_warp_n(spec);
     const char* dtype_d = spec->dtype_d;
@@ -270,9 +298,9 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
     rocke_value_t* warp_n_off
         = rocke_b_mul(b, warp_n_idx, rocke_b_const_i32(b, mfmas_n * spec->warp_tile_n));
 
-    /* c_M = b.const_i32(p.M); c_N = b.const_i32(p.N_gemm) */
-    rocke_value_t* c_M = rocke_b_const_i32(b, rocke_conv_problem_m(p));
-    rocke_value_t* c_N = rocke_b_const_i32(b, rocke_conv_problem_n_gemm(p));
+    /* c_M = b.const_i32(spec.grid_M); c_N = b.const_i32(spec.grid_N_gemm) */
+    rocke_value_t* c_M = rocke_b_const_i32(b, rocke_implicit_gemm_conv_spec_grid_m(spec));
+    rocke_value_t* c_N = rocke_b_const_i32(b, rocke_implicit_gemm_conv_spec_grid_n_gemm(spec));
     /* Pointwise: skip descriptor, use kpg constant for flat D offset. */
     bool _is_pointwise = rocke_conv_problem_is_pointwise(p);
     /* Python _emit_direct_epilogue_wmma emits its own _c_K_wmma = b.const_i32(kpg).
@@ -282,9 +310,10 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
     (void)ir_c_K_pw; /* prologue value not used in wmma path */
     /* D_desc = make_d_descriptor(p) (NULL when pointwise) */
     rocke_tensor_descriptor_t* D_desc = _is_pointwise ? NULL : rocke_conv_make_d_descriptor(b, p);
-    /* Grouped conv: k_out_group_base = b.mul(b.block_id_z(), b.const_i32(p.kpg))
-     * if p.groups > 1 else None  (Python PR #10064 _emit_direct_epilogue_wmma). */
-    rocke_value_t* k_out_group_base = _is_pointwise ? NULL : rocke_conv_make_k_out_group_base(b, p);
+    /* Grouped conv: k_out_group_base = b.mul(b.block_id_z(), b.const_i32(kpg))
+     * if groups > 1 else None, read off the merged problem. */
+    rocke_value_t* k_out_group_base
+        = _is_pointwise ? NULL : rocke_conv_make_k_out_group_base(b, &merged);
     /* c_map = op.c_layout() */
     const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
 
@@ -410,6 +439,13 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        const rocke_mmaop_t* op)
 {
     const rocke_conv_problem_t* p = &spec->problem;
+    /* This is the epilogue group_merge actually ships on (the validator rejects
+     * `default` once the merged store vector exceeds 1). Merging is a strictly
+     * better fit for it than CK's arrangement: because the diagonal mask was
+     * spent on the B load, all Gm N-lanes hold real outputs at consecutive
+     * stride-1 output channels, so the LDS-staged wide store is fully dense. */
+    rocke_conv_problem_t merged;
+    rocke_implicit_gemm_conv_spec_merged_problem(spec, &merged);
     int max_store_vec;
     if(spec->has_vector_size_c)
     {
@@ -418,8 +454,14 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
     else
     {
         /* Mirror Python default_vector_sizes(cpg, kpg, dtype_d)[2] (depends only on kpg):
-         * largest power-of-two dividing kpg (fp32: max 4, otherwise max 8). */
-        int kpg = rocke_conv_problem_kpg(p);
+         * largest power-of-two dividing kpg (fp32: max 4, otherwise max 8).
+         *
+         * The merged problem here is the store-side half of the win: merged kpg
+         * is Gm, so this goes from 1 to min(Gm, 8). It must agree with the
+         * identical computation in rocke_implicit_gemm_conv_is_valid_spec,
+         * which is why both read the merged problem -- if they diverge the
+         * validator admits a spec whose epilogue it would have rejected. */
+        int kpg = rocke_conv_problem_kpg(&merged);
         bool is_fp32_d = (spec->dtype_d && strcmp(spec->dtype_d, "fp32") == 0);
         if(is_fp32_d)
             max_store_vec = (kpg % 4 == 0) ? 4 : (kpg % 2 == 0) ? 2 : 1;
@@ -448,8 +490,9 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
          *   _c_K_ir = b.const_i32(kpg)            <- first
          *   bounds = (b.const_i32(M), b.const_i32(N_gemm))   <- second/third */
         rocke_value_t* c_K = rocke_b_const_i32(b, rocke_conv_problem_kpg(p));
-        rocke_value_t* bound_m = rocke_b_const_i32(b, rocke_conv_problem_m(p));
-        rocke_value_t* bound_n = rocke_b_const_i32(b, rocke_conv_problem_n_gemm(p));
+        rocke_value_t* bound_m = rocke_b_const_i32(b, rocke_implicit_gemm_conv_spec_grid_m(spec));
+        rocke_value_t* bound_n
+            = rocke_b_const_i32(b, rocke_implicit_gemm_conv_spec_grid_n_gemm(spec));
         (void)ir_c_K_pw;
         rocke_cshuffle_epilogue_store(b,
                                       &epi,
@@ -467,10 +510,14 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
         rocke_tensor_descriptor_t* D_desc = rocke_conv_make_d_descriptor(b, p);
         rocke_conv_d_addr_ctx_t dctx;
         dctx.D_desc = D_desc;
-        dctx.k_out_group_base = rocke_conv_make_k_out_group_base(b, p);
-        /* hoist bounds in Python's left-to-right order: M first, then N_gemm */
-        rocke_value_t* bound_m = rocke_b_const_i32(b, rocke_conv_problem_m(p));
-        rocke_value_t* bound_n = rocke_b_const_i32(b, rocke_conv_problem_n_gemm(p));
+        dctx.k_out_group_base = rocke_conv_make_k_out_group_base(b, &merged);
+        /* hoist bounds in Python's left-to-right order: M first, then N_gemm.
+         * See the matching note in rocke_conv_emit_direct_epilogue: the true
+         * N_gemm is 1 on depthwise and would clamp away Gm-1 of every Gm
+         * outputs. */
+        rocke_value_t* bound_m = rocke_b_const_i32(b, rocke_implicit_gemm_conv_spec_grid_m(spec));
+        rocke_value_t* bound_n
+            = rocke_b_const_i32(b, rocke_implicit_gemm_conv_spec_grid_n_gemm(spec));
         rocke_cshuffle_epilogue_store(
             b, &epi, accs, num_accs, rocke_conv_d_addr, (void*)&dctx, d_rsrc, bound_m, bound_n);
     }

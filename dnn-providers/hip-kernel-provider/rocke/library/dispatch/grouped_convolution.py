@@ -141,6 +141,7 @@ hard-coded defaults if the model is absent or predicts an invalid config.
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
 from typing import Optional, Sequence, Tuple
 
@@ -493,6 +494,11 @@ class ConvGroupedSpec:
     arch: str
     split_k: int = 1  # wgrad only
     lds_k_outer: bool = False  # wgrad only
+    # fwd only. Folds Gm depthwise groups into one GEMM tile so the group index
+    # becomes the fastest-varying factor of GemmN and GemmK, restoring Gm-wide
+    # vector access on a shape whose per-group channel count is 1. Default 1 is
+    # the unmerged path, byte-for-byte.
+    group_merge: int = 1
     name: str = "rocke_conv_grouped"
 
     def kernel_name(self) -> str:
@@ -516,6 +522,12 @@ class ConvGroupedSpec:
         #     fetch rather than a transpose-on-store.
         if self.direction in ("wgrad", "dgrad") and self.lds_k_outer:
             parts.append("kouter")
+        #   group_merge: changes the launch grid, the B load's addressing and
+        #     mask, and every operand's vector width. Same cache-collision
+        #     argument as the one above -- untagged, two Gm degrees resolve to
+        #     one symbol and the second silently runs the first's binary.
+        if self.direction == "fwd" and self.group_merge != 1:
+            parts.append(f"gm{self.group_merge}")
         return kernel_name_join(self.name, *parts)
 
     def to_fwd_spec(self, problem: "ConvProblem") -> "ImplicitGemmConvSpec":
@@ -542,6 +554,7 @@ class ConvGroupedSpec:
             pipeline=self.pipeline,
             epilogue=self.epilogue,
             groups=problem.groups,
+            group_merge=self.group_merge,
         )
 
     def to_wgrad_spec(self, problem: "ConvProblem") -> "WgradConvSpec":
@@ -627,10 +640,18 @@ class ConvGroupedSpec:
 def _fwd_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, int]:
     assert isinstance(req, ConvGroupedRequest)
     p = _problem(req)
+    # Launch over the MERGED dims, which is what the emitted kernel indexes.
+    # Under group_merge=Gm a workgroup owns Gm conv groups at once: the GEMM-N
+    # extent grows by Gm (kpg -> kpg*Gm) and the number of group-slices shrinks
+    # by Gm. Taking either off the true problem is host/device divergence --
+    # the true N_gemm is 1 on depthwise, so gn would stay 1 while the kernel
+    # writes Gm columns, and z would launch Gm x redundant CTAs racing on the
+    # same outputs. Both expressions are the identity at Gm == 1.
+    gmerge = spec.group_merge if spec.direction == "fwd" else 1
     gm = (p.M + spec.tile_m - 1) // spec.tile_m
-    gn = (p.N_gemm + spec.tile_n - 1) // spec.tile_n
+    gn = (p.N_gemm * gmerge + spec.tile_n - 1) // spec.tile_n
     # grid_order "NM": x=n-tiles, y=m-tiles — mirrors the fwd conv manifest
-    return (gn, gm, p.groups)
+    return (gn, gm, p.groups // gmerge)
 
 
 # ws_bytes is i32 in the kernel ABI, so a two-stage workspace above this would
@@ -853,6 +874,383 @@ def _make_gfx950_fwd_candidate() -> KernelCandidate:
         spec_id=spec_id,
         abi_version=CONV_GROUPED_ABI_VERSION,
         priority=10,
+        capability=Capability(
+            arches=("gfx950",),
+            dtypes=("fp16", "bf16"),
+            layouts=("NHWC",),
+        ),
+        _supports=support,
+        select_spec=select,
+        signature=lambda _spec: (),
+        grid=_fwd_grid,
+        block=_block,
+        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+    )
+    return candidate
+
+
+# ---------------------------------------------------------------------------
+# gfx950 depthwise forward candidate with merged groups
+# ---------------------------------------------------------------------------
+
+# Degrees the emitter's gate accepts, ascending. The policy below evaluates a
+# cost at each and takes the argmin, and ties resolve to the first entry, so the
+# order *is* the tie-break: prefer the smaller degree.
+_FWD_MERGE_DEGREES = (1, 2, 4, 8, 16, 32, 64)
+
+# Fitted constants of the merge-degree cost model (see _fwd_merge_cost for the
+# mechanism each one weighs). Reviewers reasonably ask where eight magic numbers
+# came from, so, briefly:
+#
+# WHERE THEY COME FROM. The functional form is hand-derived from the four things
+# that move when Gm changes -- K padding, A-load vector width, cache-line
+# utilisation, and the CTA's A working set. Only the *weights* are fitted: a
+# random search over a measured corpus of several hundred depthwise shapes, each
+# swept across every admissible degree at the tile this file pins. The target is
+# the geometric mean of the realised fraction -- what share of a shape's own
+# measured best the single modelled pick keeps -- so every quantity in the fit is
+# a ratio inside one shape.
+#
+# WHY A SEARCH AND NOT A SOLVE. The model's output is an argmin over seven
+# degrees, so the objective is piecewise constant in these constants: nudging one
+# changes nothing at all until it flips some shape's winner. There is no gradient
+# to descend, anywhere. Brute force is the method, not a shortcut.
+#
+# WHY EIGHT. Each term was admitted by cross-validation against a *nested* model
+# that pins the constant at the value making its term vanish, so a win is
+# attributable to the term added rather than to a reparametrisation. All eight
+# earn their place; the A-load vector term is the largest single contributor and
+# removing it is clearly visible out of sample.
+#
+# WHY TWO OF THEM LOOK NEGLIGIBLE. B_ALOAD_ISSUE and W_MEMORY are ~1e-2 and
+# ~3e-4, which reads as inert until you notice they are weighed against
+# D_CTA_FIXED at ~2e6. The cost has no physical unit -- only ratios between
+# degrees are ever compared -- so the scale is arbitrary and absolute magnitude
+# says nothing about influence. Do not "simplify" a small-looking constant away;
+# check it with a nested fit instead.
+#
+# SCOPE. gfx950, fp16/bf16, forward, at the tile this file pins. Re-fit before
+# pointing this at another arch, element size, or tile. The corpus, the fitting
+# driver and the scoring harness are in
+# ``platform/python/rocke/examples/gfx950/conv_fwd/merge_degree_model/``;
+# ``score_shipped.py`` there re-derives every pick from this very function and
+# fails if it has drifted from the reference model it was fitted as.
+
+# Cost of issuing the A load, relative to one K step of MFMA: charged per step
+# and divided by the achieved vector width, so narrow loads cost more issue.
+_FWD_MERGE_B_ALOAD_ISSUE = 0.014175
+# Weight of the DRAM bucket against the compute bucket -- how many cost units one
+# byte of A traffic is worth.
+_FWD_MERGE_W_MEMORY = 0.00030657
+# How much of the available W-direction halo reuse the cache actually delivers.
+# 0 would be none, 1 perfect; fitted below 1/2, i.e. real but partial.
+_FWD_MERGE_R_REUSE = 0.4249
+# Per-CTA overhead that no degree can avoid (launch, prologue, epilogue). Large
+# relative to the degree-dependent terms, which is exactly why halving the CTA
+# count is such a strong pull toward merging.
+_FWD_MERGE_D_CTA_FIXED = 1.9548e6
+# Effective CTAs resident machine-wide. Divides the CTA count into waves, so it
+# is what makes "this shape has too little parallelism left to merge further"
+# expressible at all.
+_FWD_MERGE_CUPAR = 558.42
+# Footprint scale of the brake, in elements: the CTA A working set at which the
+# penalty has doubled before exponentiation. The only term that argues against
+# merging.
+_FWD_MERGE_C_FOOTPRINT = 130.64
+# Exponent on cache-line utilisation. Above 1, so a half-used line costs rather
+# more than twice a full one -- partial lines also burn request slots, not just
+# bandwidth.
+_FWD_MERGE_A_UTIL = 2.7279
+# Exponent on the brake. Above 1, so the working-set penalty is superlinear and
+# can eventually overturn the halved CTA count; at 1 it never does.
+_FWD_MERGE_Q_BRAKE = 1.6812
+
+# Machine constants the model is written against, not fitted: a 128-byte cache
+# line and a 16-byte (dwordx4) widest load.
+_FWD_MERGE_LINE_BYTES = 128
+_FWD_MERGE_VEC_BYTES = 16
+
+
+def _pick_group_merge(req: ConvGroupedRequest, tile_m: int, tile_n: int) -> int:
+    """Merge degree worth paying for on this request, or 1.
+
+    Unwraps the request and defers to :func:`fwd_group_merge_for_geometry`,
+    which is where the policy actually lives.
+    """
+    groups = int(req.G)
+    y, x, stride = int(req.Y), int(req.X), int(req.stride_w)
+    try:
+        m = int(_problem(req).M)
+    except Exception:
+        # A degenerate shape is _request_errors' business, not this function's;
+        # m <= 0 lets the model fall back to the geometry-free admissibility set.
+        m = 0
+    # support() already rejects everything but fp16/bf16 (see _request_errors),
+    # so the element size is 2 by construction. Passed rather than assumed so
+    # the model stays re-fittable against a wider dtype corpus.
+    return fwd_group_merge_for_geometry(
+        groups, m, tile_m, tile_n, y=y, x=x, stride=stride, esize=2
+    )
+
+
+def _fwd_merge_admissible(groups: int, tile_n: int, y: int, x: int) -> tuple:
+    """Degrees the emitter's gate will actually build for this geometry.
+
+    Mirrors ``fwd_group_merge_available``: a power of two that divides ``groups``
+    (a workgroup must not own a partial group) and fits the N tile (the GEMM-N
+    extent under merge *is* ``Gm``). Pointwise is excluded by the gate outright,
+    so there is nothing to choose and the caller gets ``(1,)``.
+    """
+    if y * x <= 1:
+        return (1,)
+    return tuple(gm for gm in _FWD_MERGE_DEGREES if gm <= tile_n and groups % gm == 0)
+
+
+def _fwd_merge_cost(
+    gm: int,
+    *,
+    groups: int,
+    m: int,
+    y: int,
+    x: int,
+    stride: int,
+    tile_m: int,
+    tile_k: int,
+    esize: int,
+) -> float:
+    """Modelled time for one degree, in arbitrary units -- only ratios are used.
+
+    ``Gm`` consecutive conv groups fold into one GEMM with ``Gm`` on GemmN *and*
+    GemmK, so ``M`` is untouched and the launch becomes
+
+        CTAs(Gm) = ceil(M/tile_m) * G/Gm          -- halves per doubling
+        Kpad(Gm) = tile_k * ceil(Y*X*Gm/tile_k)   -- grows ~linearly
+
+    Four things move with the degree, three of them in its favour:
+
+    ``pad``  K-padding waste, already folded into ``Kpad``. At ``Y*X = 9`` the
+        per-group K extent is 9 of a 64-wide tile, so ``Gm = 1`` wastes 7.1x and
+        by ``Gm = 8`` it is 1.1x. At ``Y*X = 961`` there is nothing to recover,
+        which is the first reason huge filters never want to merge.
+    ``vw``   A-load vector width, ``min(Gm, 16/esize)``. k's innermost field is
+        the channel, so merging makes ``Gm`` channels contiguous in NHWC.
+        Saturates at dwordx4 -- but the gain does *not* stop there, which is why
+        an earlier revision capping at ``dwordx4/itemsize = 8`` was wrong.
+    ``u``    A-load cache-line utilisation, ``min(1, Gm*esize/128)``. This is
+        what keeps 8 -> 16 -> 32 paying on large shapes after ``vw`` saturates.
+    ``fp``   The brake: the CTA's A working set is ``tile_m * Y*X*Gm`` elements,
+        linear in the degree *and* in the filter area.
+
+    Occupancy is the obvious candidate for that brake and it is the wrong one.
+    Shapes with tens of thousands of CTAs, where the machine cannot run dry,
+    still turn over at 8..16, and they turn over sooner the larger ``Y*X`` is --
+    across the corpus whether the top degree still pays is a clean monotone
+    function of ``Y*X`` alone, essentially independent of how many CTAs the
+    shape has. So the penalty multiplies the *whole* per-CTA cost rather than
+    the DRAM bucket only: an oversized K working set costs issue slots and
+    occupancy, not just traffic. Charged against traffic alone it never has the
+    leverage to overturn a halved CTA count, and the model merges to 64 almost
+    everywhere.
+
+    Occupancy is still in here, as ``ceil(CTAs/CUPAR)``, and still does the work
+    it was doing before: an ``N = 1``, ``7x7`` shape has M in a single tile, so
+    ``grid.z`` *is* its parallelism and merging hands the machine back to itself
+    empty.
+    """
+    ctas = -(-m // tile_m) * (groups // gm)
+    kpad = tile_k * -(-(y * x * gm) // tile_k)
+
+    vw = min(gm, _FWD_MERGE_VEC_BYTES // esize)
+    u = min(1.0, gm * esize / _FWD_MERGE_LINE_BYTES)
+    footprint = tile_m * y * x * gm * esize
+    # Available W-direction reuse: adjacent output columns read input columns
+    # `stride` apart, so X-1 of the X taps land on data a neighbour already
+    # pulled at stride 1, and about half that at stride 2.
+    reuse = (1.0 + (x - 1) / stride) ** _FWD_MERGE_R_REUSE
+
+    compute = kpad * (1.0 + _FWD_MERGE_B_ALOAD_ISSUE / vw)
+    memory = (
+        kpad
+        * tile_m
+        * esize
+        * _FWD_MERGE_W_MEMORY
+        / max(u**_FWD_MERGE_A_UTIL * reuse, 1e-30)
+    )
+
+    brake = (1.0 + footprint / _FWD_MERGE_C_FOOTPRINT) ** _FWD_MERGE_Q_BRAKE
+    per_cta = (compute + memory) * brake + _FWD_MERGE_D_CTA_FIXED
+    return math.ceil(ctas / _FWD_MERGE_CUPAR) * per_cta
+
+
+def fwd_group_merge_for_geometry(
+    groups: int,
+    m: int,
+    tile_m: int,
+    tile_n: int,
+    *,
+    y: int,
+    x: int,
+    stride: int,
+    esize: int = 2,
+    tile_k: int = _GFX950_TILE_K,
+) -> int:
+    """:func:`_pick_group_merge` with the request unwrapped to plain integers.
+
+    Evaluate :func:`_fwd_merge_cost` at every admissible degree and return the
+    argmin; ties go to the smaller degree, which is the safer side on shapes the
+    model cannot see (odd ``Ho*Wo`` tails, say).
+
+    Split out so the sweep benchmark can centre its merge-degree window on the
+    *same* policy dispatch will apply, without constructing a
+    ``ConvGroupedRequest`` it does not otherwise need. Keeping one implementation
+    matters more than the indirection costs: the benchmark prunes the degree axis
+    around this pick, so a second copy drifting from this one would silently
+    sweep a window that no longer brackets what ships.
+
+    ``m <= 0`` means "geometry unknown": every cost then shares the same CTA
+    count, which leaves the degree-dependent part of the model intact, so the
+    pick degrades rather than failing.
+
+    This replaced a three-cap rule (tile fit, a flat ``Gm <= 32`` ceiling, and an
+    occupancy floor) that was fitted by hand to a corpus of a few dozen shapes.
+    Held out from the fit, the model keeps a materially larger share of each
+    shape's own measured best than that rule did, and leaves materially fewer
+    shapes far short of it. The measured comparison, the per-shape curves and the
+    reasoning behind the functional form are in
+    ``platform/python/rocke/examples/gfx950/conv_fwd/fwd_merged_groups_case_study.md``;
+    the corpus, the fitting driver and the scoring harness are beside it in
+    ``platform/python/rocke/examples/gfx950/conv_fwd/merge_degree_model/``.
+    """
+    cands = _fwd_merge_admissible(groups, tile_n, y, x)
+    best, best_cost = 1, None
+    for gm in cands:
+        c = _fwd_merge_cost(
+            gm,
+            groups=groups,
+            m=max(int(m), 1),
+            y=y,
+            x=x,
+            stride=max(int(stride), 1),
+            tile_m=max(int(tile_m), 1),
+            tile_k=tile_k,
+            esize=esize,
+        )
+        if best_cost is None or c < best_cost * (1.0 - 1e-9):
+            best, best_cost = gm, c
+    return best
+
+
+def _make_gfx950_fwd_dw_merged_candidate() -> KernelCandidate:
+    """Depthwise forward conv for gfx950 with ``group_merge`` folded in.
+
+    Same tile as :func:`_make_gfx950_fwd_candidate`; the only difference is the
+    merge degree. It sits at a higher priority so it wins whenever it admits,
+    and falls through to the plain fwd candidate when it does not -- which is
+    the whole gating story, since ``support()`` defers to the same
+    ``is_valid_spec`` the builder calls. A shape with no admissible degree
+    (``G = 3`` in the corpus: no power of two divides it) picks ``Gm = 1``, and
+    is rejected here rather than shipping a merged spec that is merged in name
+    only.
+    """
+    # Distinct from the plain fwd candidate: candidate names key the registry
+    # (duplicates are a hard error) and also prefix the emitted symbol.
+    name = "implicit_gemm_conv_dw_merged"
+    spec_id = "igemm_conv_fwd_dw_merged_64x64"
+    algorithm = "implicit_gemm_fwd"
+
+    def _tile(req: ConvGroupedRequest):
+        return (
+            _GFX950_TILE_M,
+            _GFX950_TILE_N,
+            _GFX950_TILE_K,
+            _GFX950_WARP_M,
+            _GFX950_WARP_N,
+            _GFX950_WARP_TILE_MN,
+            _GFX950_WARP_TILE_K,
+        )
+
+    def _build_instance_spec(req: ConvGroupedRequest) -> ImplicitGemmConvSpec:
+        tm, tn, tk, wm, wn, wtmn, wtk = _tile(req)
+        return ImplicitGemmConvSpec(
+            problem=_problem(req),
+            name=name,
+            data=_data_spec(req),
+            tile_m=tm,
+            tile_n=tn,
+            tile_k=tk,
+            warp_m=wm,
+            warp_n=wn,
+            warp_tile_m=wtmn,
+            warp_tile_n=wtmn,
+            warp_tile_k=wtk,
+            wave_size=ArchTarget.from_gfx(req.arch).wave_size,
+            pipeline=_PIPELINE,
+            # Forced, not derived. Merging makes the store vector Gm-wide, and
+            # is_valid_spec rejects the direct epilogue once that exceeds 1.
+            # _epilogue_for reads the *true* C/K, which on depthwise happens to
+            # land on cshuffle anyway -- relying on that coincidence is how the
+            # dispatcher would come to hand the builder a spec it then rejects.
+            epilogue="cshuffle",
+            groups=int(req.G),
+            group_merge=_pick_group_merge(req, tm, tn),
+        )
+
+    def support(req: OperatorRequest) -> Tuple[bool, str]:
+        errors = _request_errors(req)
+        if errors:
+            return False, "; ".join(errors)
+        assert isinstance(req, ConvGroupedRequest)
+        if not _is_gfx950(req):
+            return False, f"gfx950 candidate requires arch=gfx950 (got {req.arch!r})"
+        if req.direction != "fwd":
+            return False, f"candidate handles 'fwd', got direction={req.direction!r}"
+        tm, tn, *_rest = _tile(req)
+        gm = _pick_group_merge(req, tm, tn)
+        if gm == 1:
+            return False, f"no admissible merge degree for groups={int(req.G)}"
+        ok, why = selector_matches(req, candidate)
+        if not ok:
+            return False, why
+        # Depthwise, power-of-two degree, wave64, non-pointwise, no async_dma:
+        # all of it lives in fwd_group_merge_available, reached through here.
+        ok, why = _fwd_is_valid_spec(_build_instance_spec(req), arch=req.arch)
+        if not ok:
+            return False, why
+        return True, "ok"
+
+    def select(req: OperatorRequest) -> ConvGroupedSpec:
+        ok, why = candidate.admits(req)
+        if not ok:
+            raise ValueError(f"{name} does not support request: {why}")
+        assert isinstance(req, ConvGroupedRequest)
+        tm, tn, tk, wm, wn, wtmn, wtk = _tile(req)
+        return ConvGroupedSpec(
+            direction="fwd",
+            tile_m=tm,
+            tile_n=tn,
+            tile_k=tk,
+            warp_m=wm,
+            warp_n=wn,
+            warp_tile_mn=wtmn,
+            warp_tile_k=wtk,
+            pipeline=_PIPELINE,
+            epilogue="cshuffle",
+            dtype=req.dtype.lower(),
+            arch=req.arch,
+            name=name,
+            group_merge=_pick_group_merge(req, tm, tn),
+        )
+
+    candidate = KernelCandidate(
+        name=name,
+        family=_FAMILY_FWD,
+        algorithm=algorithm,
+        spec_id=spec_id,
+        abi_version=CONV_GROUPED_ABI_VERSION,
+        # Ahead of the plain fwd candidate's 10. Lower number wins:
+        # CandidateRegistry.candidates() sorts ascending and select() takes
+        # ranked[0], so "higher priority" here is a smaller integer.
+        priority=5,
         capability=Capability(
             arches=("gfx950",),
             dtypes=("fp16", "bf16"),
@@ -1670,6 +2068,7 @@ CONV_DGRAD_REGISTRY.register(_make_gfx950_dgrad_candidate())
 CONV_FWD_REGISTRY = CandidateRegistry(_FAMILY_FWD, dim_vocabulary=_CONV_DIM_VOCABULARY)
 CONV_FWD_REGISTRY.register(_make_gfx942_fwd_candidate())
 CONV_FWD_REGISTRY.register(_make_gfx950_fwd_candidate())
+CONV_FWD_REGISTRY.register(_make_gfx950_fwd_dw_merged_candidate())
 CONV_FWD_REGISTRY.register(_make_gfx1250_fwd_candidate())
 
 CONV_WGRAD_REGISTRY = CandidateRegistry(
