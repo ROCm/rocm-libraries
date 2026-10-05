@@ -222,6 +222,13 @@ segment its own CTA, then reduces:
   writes a *partial* $(m, \ell, \mathbf{o})$ to a workspace
   `segm_output[total_q, num_qh, num_segments, head_size]` (plus `segm_max` and
   `segm_expsum`, all fp32).
+- **All-decode grid:** `total_num_q_blocks` is the prefill upper bound
+  `total_q // BLOCK_Q + num_seqs`, and each CTA binary-searches `query_start_len`
+  for its sequence. When every sequence has one query token (`all_decode`) the
+  dispatcher sets `use_decode_grid` instead: grid x is `num_seqs` and
+  `seq_idx = block_id_x`. That removes the empty early-exit CTAs and the search;
+  at `BLOCK_Q == 1` (16 query heads per KV head) the upper bound also put every
+  useful CTA on an even x, so on half of the XCDs.
 - **`reduce_segments`** then combines the per-segment partials into the final
   output. Because flash-attention's $(m, \ell, \mathbf{o})$ merge is associative
   (re-base each segment's accumulator to the global max, sum the denominators),

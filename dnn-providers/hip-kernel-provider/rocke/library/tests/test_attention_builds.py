@@ -2547,6 +2547,70 @@ class TestAttentionHelpers(unittest.TestCase):
                 )
                 self.assertTrue(reason)
 
+    def test_unified_attention_3d_tiled_decode_grid(self):
+        """``use_decode_grid``: seq_idx = block_id_x, no binary search over
+        ``query_start_len`` (its ``bs_i`` induction variable), on both arches."""
+        from dataclasses import replace
+
+        import kernels.common.attention_unified as au
+
+        for arch in ("gfx950", "gfx942"):
+            with self.subTest(arch=arch), _patch_resolved_arch(arch):
+                spec_type, _, build, _, _ = au._tiled_3d_impl(arch)
+                spec = spec_type(
+                    head_size=128,
+                    block_size=16,
+                    num_query_heads=32,
+                    num_kv_heads=2,
+                    dtype="fp16",
+                    use_sinks=False,
+                    sliding_window=0,
+                    has_softcap=False,
+                    num_segments=16,
+                    num_seqs=16,
+                )
+                dg_spec = replace(spec, use_decode_grid=True)
+                base_ll = lower_kernel_to_llvm(build(spec, arch=arch))
+                dg_ll = lower_kernel_to_llvm(build(dg_spec, arch=arch))
+                self.assertTrue(dg_spec.kernel_name().endswith("_dg"))
+                self.assertIn("bs_i", base_ll)
+                self.assertNotIn("bs_i", dg_ll)
+
+    def test_3d_dispatch_derives_decode_grid(self):
+        """Default dispatch turns the decode grid on for all-decode problems on
+        gfx942/gfx950 and keys the kernel cache on it."""
+        from unittest import mock
+
+        import kernels.common.attention_unified as au
+
+        def problem(sq):
+            return au.UnifiedAttentionProblem(
+                total_q=16 * sq,
+                num_seqs=16,
+                num_query_heads=32,
+                num_kv_heads=2,
+                head_size=128,
+                block_size=16,
+                max_seqlen_q=sq,
+                max_seqlen_k=4096,
+                dtype="fp16",
+                num_cus=256,
+            )
+
+        for arch in ("gfx950", "gfx942"):
+            with self.subTest(arch=arch), _patch_resolved_arch(arch):
+                self.assertTrue(
+                    au._tiled_3d_spec_from_problem(problem(1)).use_decode_grid
+                )
+                self.assertFalse(
+                    au._tiled_3d_spec_from_problem(problem(4)).use_decode_grid
+                )
+                keys = {}
+                for on in (False, True):
+                    with mock.patch.object(au, "_use_decode_grid", return_value=on):
+                        keys[on] = au._tiled_3d_cache_key(problem(1))
+                self.assertNotEqual(keys[False], keys[True])
+
     def test_unified_attention_3d_tiled_kernel_compiles_gfx942(self):
         """gfx942 analogue of ``test_unified_attention_3d_tiled_kernel_compiles``
         (which exercises the default gfx950 arch only). Builds the gfx942 3D

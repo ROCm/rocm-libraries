@@ -135,6 +135,7 @@ rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_de
     s.tile_size_override = 0;
     s.use_invariant_hoist = false;
     s.use_wide_kv_load = false;
+    s.use_decode_grid = false;
     return s;
 }
 
@@ -234,7 +235,8 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
      *   dtype, kv<...> if kv_storage_dtype else "", "sinks" if use_sinks else "",
      *   "sw<sw>" if sw>0 else "", "softcap" if has_softcap else "",
      *   "alibi" if use_alibi else "", "qqb" if use_qq_bias else "",
-     *   "hoist" if use_invariant_hoist else "", "wkv" if use_wide_kv_load else "")
+     *   "hoist" if use_invariant_hoist else "", "wkv" if use_wide_kv_load else "",
+     *   "dg" if use_decode_grid else "")
      *
      * The whole thing is a positional parts list (NOT flags=...): empty parts
      * are skipped by kernel_name_join. We materialise each part string and feed
@@ -245,7 +247,7 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
     char seg_part[32];
     char kv_part[32];
     char sw_part[32];
-    const char* parts[16];
+    const char* parts[24];
     size_t np = 0;
     size_t out_len = 0;
     rocke_status_t st;
@@ -300,6 +302,10 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
     if(s->use_wide_kv_load)
     {
         parts[np++] = "wkv";
+    }
+    if(s->use_decode_grid)
+    {
+        parts[np++] = "dg";
     }
 
     /* kernel_name_join takes prefix + parts; we pass everything as parts with a
@@ -672,6 +678,7 @@ bool rocke_gfx942_attn_tiled_3d_config_from_spec(
 
     /* WIDE_KV = use_wide_kv_load && !KV_FP8 && WIDE_OK (line 703). */
     out->WIDE_KV = spec->use_wide_kv_load && !out->KV_FP8 && out->WIDE_OK;
+    out->DECODE_GRID = spec->use_decode_grid;
 
     /* Q -> LDS feed (lines 438-439). */
     out->Q_VECS_PER_ROW = out->HD / 8;

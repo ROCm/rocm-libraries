@@ -112,6 +112,34 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->kv_storage_dtype = NULL;
         s->use_i64_kv_addr = true;
         break;
+    case 6:
+        /* All-decode grid (seq_idx = block_id_x, no search). Decode-shaped GQA. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->use_decode_grid = true;
+        break;
+    case 7:
+        /* All-decode grid at NQK=16 (BLOCK_Q=1) with fp8 KV and sinks. */
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 1;
+        s->dtype = "bf16";
+        s->num_segments = 32;
+        s->use_sinks = true;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = "fp8e4m3";
+        s->use_decode_grid = true;
+        break;
     default:
         return -1;
     }

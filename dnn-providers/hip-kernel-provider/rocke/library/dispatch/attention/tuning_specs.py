@@ -151,6 +151,7 @@ _SEMANTIC_FIELDS = frozenset(
         "num_seqs",
         "kv_storage_dtype",
         "use_i64_kv_addr",
+        "use_decode_grid",
     }
 )
 
@@ -278,6 +279,9 @@ def make_explicit_attention_3d_specs(
         num_segments=int(config.num_segments),
         waves_per_eu=config.waves_per_eu,
         tile_size_override=(None if tile == int(problem.block_size) else int(tile)),
+        # Both explicit 3D arches implement the all-decode grid
+        # (``_use_decode_grid``); it follows the problem, never the config.
+        use_decode_grid=bool(problem.all_decode),
         **knobs,
     )
     ok, why = supports(

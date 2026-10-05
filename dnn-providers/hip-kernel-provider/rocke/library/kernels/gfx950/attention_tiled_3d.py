@@ -143,6 +143,17 @@ class UnifiedAttention3DTiledSpec:
     # this when the cache is actually that large (see ``_enable_i64_kv_addr``),
     # so the default (small-cache) build is byte-identical to before.
     use_i64_kv_addr: bool = False
+    # All-decode launch grid: one CTA per sequence along grid x
+    # (``seq_idx = block_id_x``, single query block per sequence) instead of
+    # the prefill upper bound ``total_q // BLOCK_Q + num_seqs`` with a binary
+    # search over ``query_start_len``. Legal only when every sequence has at
+    # most one query token (``UnifiedAttentionProblem.all_decode``); the
+    # dispatcher derives it from the problem (``_use_decode_grid``) and the
+    # launcher sizes grid x to ``num_seqs``. It could later be relaxed to
+    # ``max_seqlen_q <= BLOCK_Q`` (one query block per sequence), which needs
+    # its own checks of the per-row causal diagonal, sliding window and
+    # per-segment KV range.
+    use_decode_grid: bool = False
 
     def __post_init__(self):
         if self.kv_storage_dtype is not None and self.kv_storage_dtype != "fp8e4m3":
@@ -193,6 +204,7 @@ class UnifiedAttention3DTiledSpec:
             "softcap" if self.has_softcap else "",
             "alibi" if self.use_alibi else "",
             "qqb" if self.use_qq_bias else "",
+            "dg" if self.use_decode_grid else "",
         )
 
 
@@ -375,19 +387,26 @@ def build_unified_attention_3d_tiled(
     seg_idx = b.block_id_z()
     tid = b.thread_id_x()
 
-    seq_idx = _binary_search_seq_idx_helper(
-        b,
-        cu_q,
-        q_block_global_idx,
-        num_seqs_p,
-        block_q=BLOCK_Q,
-        iterations=spec.binary_search_iters,
-    )
+    if spec.use_decode_grid:
+        # One CTA per sequence along x, one query block each: no search.
+        seq_idx = q_block_global_idx
+    else:
+        seq_idx = _binary_search_seq_idx_helper(
+            b,
+            cu_q,
+            q_block_global_idx,
+            num_seqs_p,
+            block_q=BLOCK_Q,
+            iterations=spec.binary_search_iters,
+        )
     cu_q_start = b.global_load_i32(cu_q, seq_idx)
     cu_q_stop = b.global_load_i32(cu_q, b.add(seq_idx, b.const_i32(1)))
     cur_batch_q_len = b.sub(cu_q_stop, cu_q_start)
-    q_block_start_idx = b.add(b.div(cu_q_start, b.const_i32(BLOCK_Q)), seq_idx)
-    q_block_local_idx = b.sub(q_block_global_idx, q_block_start_idx)
+    if spec.use_decode_grid:
+        q_block_local_idx = b.const_i32(0)
+    else:
+        q_block_start_idx = b.add(b.div(cu_q_start, b.const_i32(BLOCK_Q)), seq_idx)
+        q_block_local_idx = b.sub(q_block_global_idx, q_block_start_idx)
     seq_len = b.global_load_i32(seq_lens, seq_idx)
     context_len = b.sub(seq_len, cur_batch_q_len)
 

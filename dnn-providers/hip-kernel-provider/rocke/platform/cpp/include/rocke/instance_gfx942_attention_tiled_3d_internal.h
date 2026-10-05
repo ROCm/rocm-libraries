@@ -140,6 +140,7 @@ typedef struct rocke_gfx942_attn_tiled_3d_config
     int fp8_total_chunks; /* (T*HD)//8 */
     int fp8_chunks_per_thread; /* fp8_total_chunks // THREADS */
     bool WIDE_KV; /* use_wide_kv_load && !KV_FP8 && WIDE_OK */
+    bool DECODE_GRID; /* spec.use_decode_grid (seq_idx = block_id_x, no search) */
 
     /* Q -> LDS feed (lines 438-439) */
     int Q_VECS_PER_ROW; /* HD // 8 */

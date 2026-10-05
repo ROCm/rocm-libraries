@@ -469,8 +469,10 @@ class AttentionTuningSpec:
     def launch_grid(self, problem: UnifiedAttentionProblem) -> Tuple[int, int, int]:
         ks = self.kernel_spec
         if self.path == "3d":
+            from kernels.common.attention_unified import _num_q_blocks
+
             block_q = max(1, 16 // problem.num_queries_per_kv)
-            qblocks = problem.total_q // block_q + problem.num_seqs
+            qblocks = _num_q_blocks(problem, block_q, decode_grid=ks.use_decode_grid)
             return (int(qblocks), int(problem.num_kv_heads), int(ks.num_segments))
         if self.builder_kind == "gfx942_4warp_gqa":
             from kernels.common.attention_unified import gfx942_4warp_launch_grid
