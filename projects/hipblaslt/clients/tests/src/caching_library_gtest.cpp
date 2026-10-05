@@ -94,6 +94,12 @@
 // straight to the sub-library) and so carry no collision risk.
 
 #include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
+#include <hipblaslt/hipblaslt-ext.hpp>
+#include <hipblaslt/hipblaslt.h>
+
+#include <cstdint>
+#include <vector>
 
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/CachingLibrary.hpp>
@@ -665,4 +671,177 @@ TEST(CachingLibraryCollision, smoke_IdenticalProblemIsServedFromCache)
     EXPECT_EQ(library.findTopSolutions(makeKeyedProblem(), gpu, 1).size(), 1u);
     EXPECT_EQ(library.findTopSolutions(makeKeyedProblem(), gpu, 1).size(), 1u);
     EXPECT_EQ(sub->findTopCalls, 1);
+}
+
+// The same collision through the public API and the shipped libraries. Every f16 GEMM shares the
+// one CachingLibrary at the root of the master library, and its kernels' BiasDataTypeWhiteList is
+// a solution predicate below that cache, not a library split.
+namespace
+{
+    // f16 D = A * B + bias with A = B = 0 and beta = 0, so every element of D must equal the bias.
+    struct F16BiasGemm
+    {
+        static constexpr int64_t m = 1024;
+        static constexpr int64_t n = 512;
+        static constexpr int64_t k = 1024;
+
+        hipblasLtHandle_t                  handle = nullptr;
+        hipblasLtMatrixLayout_t            layA = nullptr, layB = nullptr, layD = nullptr;
+        hipblasLtMatmulPreference_t        pref = nullptr;
+        std::vector<hipblasLtMatmulDesc_t> descs;
+        void *dA = nullptr, *dB = nullptr, *dD = nullptr, *dBias = nullptr, *dWorkspace = nullptr;
+        size_t workspaceBytes = size_t{32} << 20;
+        float  alpha = 1.0f, beta = 0.0f;
+
+        ~F16BiasGemm()
+        {
+            for(auto desc : descs)
+                hipblasLtMatmulDescDestroy(desc);
+            if(pref)
+                hipblasLtMatmulPreferenceDestroy(pref);
+            for(auto layout : {layA, layB, layD})
+                if(layout)
+                    hipblasLtMatrixLayoutDestroy(layout);
+            if(handle)
+                hipblasLtDestroy(handle);
+            for(auto buffer : {dA, dB, dD, dBias, dWorkspace})
+                if(buffer)
+                    static_cast<void>(hipFree(buffer));
+        }
+
+        void create()
+        {
+            ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtMatrixLayoutCreate(&layA, HIP_R_16F, m, k, m), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtMatrixLayoutCreate(&layB, HIP_R_16F, k, n, k), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtMatrixLayoutCreate(&layD, HIP_R_16F, m, n, m), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtMatmulPreferenceSetAttribute(pref,
+                                                            HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                                                            &workspaceBytes,
+                                                            sizeof(workspaceBytes)),
+                      HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipMalloc(&dA, m * k * sizeof(uint16_t)), hipSuccess);
+            ASSERT_EQ(hipMalloc(&dB, k * n * sizeof(uint16_t)), hipSuccess);
+            ASSERT_EQ(hipMalloc(&dD, m * n * sizeof(uint16_t)), hipSuccess);
+            ASSERT_EQ(hipMalloc(&dBias, m * sizeof(uint16_t)), hipSuccess);
+            ASSERT_EQ(hipMalloc(&dWorkspace, workspaceBytes), hipSuccess);
+            ASSERT_EQ(hipMemset(dA, 0, m * k * sizeof(uint16_t)), hipSuccess);
+            ASSERT_EQ(hipMemset(dB, 0, k * n * sizeof(uint16_t)), hipSuccess);
+        }
+
+        hipblasLtMatmulDesc_t desc(hipDataType biasType)
+        {
+            hipblasLtMatmulDesc_t desc = nullptr;
+            EXPECT_EQ(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+                      HIPBLAS_STATUS_SUCCESS);
+            descs.push_back(desc);
+            hipblasLtEpilogue_t epilogue = HIPBLASLT_EPILOGUE_BIAS;
+            EXPECT_EQ(hipblasLtMatmulDescSetAttribute(
+                          desc, HIPBLASLT_MATMUL_DESC_EPILOGUE, &epilogue, sizeof(epilogue)),
+                      HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipblasLtMatmulDescSetAttribute(
+                          desc, HIPBLASLT_MATMUL_DESC_BIAS_POINTER, &dBias, sizeof(dBias)),
+                      HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipblasLtMatmulDescSetAttribute(
+                          desc, HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, &biasType, sizeof(biasType)),
+                      HIPBLAS_STATUS_SUCCESS);
+            return desc;
+        }
+
+        std::vector<hipblasLtMatmulHeuristicResult_t> heuristic(hipblasLtMatmulDesc_t desc)
+        {
+            std::vector<hipblasLtMatmulHeuristicResult_t> results(4);
+            int                                           returned = 0;
+            EXPECT_EQ(hipblasLtMatmulAlgoGetHeuristic(handle,
+                                                      desc,
+                                                      layA,
+                                                      layB,
+                                                      layD,
+                                                      layD,
+                                                      pref,
+                                                      static_cast<int>(results.size()),
+                                                      results.data(),
+                                                      &returned),
+                      HIPBLAS_STATUS_SUCCESS);
+            results.resize(returned);
+            return results;
+        }
+
+        bool supports(hipblasLtMatmulDesc_t desc, hipblasLtMatmulAlgo_t algo)
+        {
+            size_t workspace = 0;
+            return hipblaslt_ext::matmulIsAlgoSupported(
+                       handle, desc, &alpha, layA, layB, &beta, layD, layD, algo, workspace)
+                   == HIPBLAS_STATUS_SUCCESS;
+        }
+
+        // Runs `algo` with a bias of 1.0 stored as `biasType` and counts the elements of D that
+        // are not f16 1.0.
+        size_t wrongElements(hipblasLtMatmulDesc_t        desc,
+                             hipDataType                  biasType,
+                             hipblasLtMatmulAlgo_t const& algo)
+        {
+            std::vector<uint16_t> bias(m, biasType == HIP_R_16BF ? 0x3F80 : 0x3C00);
+            EXPECT_EQ(
+                hipMemcpy(dBias, bias.data(), bias.size() * sizeof(uint16_t), hipMemcpyHostToDevice),
+                hipSuccess);
+            EXPECT_EQ(hipMemset(dD, 0xFF, m * n * sizeof(uint16_t)), hipSuccess);
+            EXPECT_EQ(hipblasLtMatmul(handle,
+                                      desc,
+                                      &alpha,
+                                      dA,
+                                      layA,
+                                      dB,
+                                      layB,
+                                      &beta,
+                                      dD,
+                                      layD,
+                                      dD,
+                                      layD,
+                                      &algo,
+                                      dWorkspace,
+                                      workspaceBytes,
+                                      nullptr),
+                      HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+            std::vector<uint16_t> d(m * n);
+            EXPECT_EQ(hipMemcpy(d.data(), dD, d.size() * sizeof(uint16_t), hipMemcpyDeviceToHost),
+                      hipSuccess);
+            size_t wrong = 0;
+            for(auto value : d)
+                wrong += value != 0x3C00;
+            return wrong;
+        }
+    };
+}
+
+// The shipped f16 GEMM kernels read an f16 or f32 bias and none reads bf16, so a bf16-bias query
+// must not be served the solutions an f16-bias query of the same shape cached.
+TEST(CachingLibraryCollision, smoke_Bf16BiasHeuristicIsNotServedF16BiasSolutions)
+{
+    int devices = 0;
+    if(hipGetDeviceCount(&devices) != hipSuccess || devices == 0)
+        GTEST_SKIP() << "No GPU available";
+
+    F16BiasGemm gemm;
+    ASSERT_NO_FATAL_FAILURE(gemm.create());
+
+    auto f16Desc      = gemm.desc(HIP_R_16F);
+    auto f16Solutions = gemm.heuristic(f16Desc);
+    if(f16Solutions.empty())
+        GTEST_SKIP() << "No f16-bias solution for this shape on this device";
+    ASSERT_EQ(gemm.wrongElements(f16Desc, HIP_R_16F, f16Solutions[0].algo), 0u)
+        << "an f16-bias solution does not compute D = bias";
+
+    auto bf16Desc = gemm.desc(HIP_R_16BF);
+    for(auto const& result : gemm.heuristic(bf16Desc))
+    {
+        int const index = *reinterpret_cast<int const*>(result.algo.data);
+        EXPECT_TRUE(gemm.supports(bf16Desc, result.algo))
+            << "the bf16-bias heuristic returned solution " << index
+            << ", which matmulIsAlgoSupported rejects for a bf16 bias";
+        EXPECT_EQ(gemm.wrongElements(bf16Desc, HIP_R_16BF, result.algo), 0u)
+            << "solution " << index << " ran with a bf16 bias of 1.0 and left D elements not 1.0";
+    }
 }
