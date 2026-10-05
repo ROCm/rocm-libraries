@@ -67,6 +67,27 @@ TEST(TestPluginArchMatchPrefix, FamilyStemDoesNotMatchWiderArch)
     EXPECT_FALSE(archMatches("gfx1150", "gfx115", ArchMatchMode::PREFIX));
 }
 
+TEST(TestPluginArchMatchPrefix, HyphenatedTargetDoesNotMatchItsBaseArch)
+{
+    EXPECT_FALSE(archMatches("gfx1250-strict", "gfx1250", ArchMatchMode::PREFIX));
+    EXPECT_FALSE(archMatches("gfx1250-strict:sramecc+", "gfx1250", ArchMatchMode::PREFIX));
+}
+
+TEST(TestPluginArchMatchPrefix, BaseArchDoesNotMatchHyphenatedTarget)
+{
+    EXPECT_FALSE(archMatches("gfx1250", "gfx1250-strict", ArchMatchMode::PREFIX));
+}
+
+TEST(TestPluginArchMatchPrefix, HyphenatedTargetMatchesItselfAgainstFeatureSuffix)
+{
+    EXPECT_TRUE(archMatches("gfx1250-strict:sramecc+", "gfx1250-strict", ArchMatchMode::PREFIX));
+}
+
+TEST(TestPluginArchMatchPrefix, StripArchFeaturesKeepsHyphenatedTargetName)
+{
+    EXPECT_EQ(stripArchFeatures("gfx1250-strict:sramecc+"), "gfx1250-strict");
+}
+
 TEST(TestPluginArchMatchPrefix, StripArchFeaturesStripsFeatureSuffix)
 {
     EXPECT_EQ(stripArchFeatures("gfx942:sramecc+:xnack-"), "gfx942");
