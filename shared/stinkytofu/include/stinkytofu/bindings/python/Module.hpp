@@ -136,7 +136,8 @@
     X(DsReadPerCap, int, -1)                                                                    \
     X(DsReadPerWmma, int, -1) /* deprecated alias for DsReadPerCap */                           \
     X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                             \
-    X(TensorLoadDsLoadGapCycles, int, 64)
+    X(TensorLoadDsLoadGapCycles, int, 64)                                                       \
+    X(BarrierHalfSlack, int, 0) /* WMMA windows inside a signal/wait pair; 0 = together */
 
 namespace stinkytofu {
 /**
