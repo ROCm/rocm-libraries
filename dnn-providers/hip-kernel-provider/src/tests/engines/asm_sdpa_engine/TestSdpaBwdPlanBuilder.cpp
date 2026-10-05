@@ -883,7 +883,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsAsymmetricHdim)
 }
 
 // =============================================================================
-// Canonical mask-attribute policy (plan_utils::resolveMask / getMaskType)
+// Canonical mask-attribute policy (plan_utils::resolveMask)
 // =============================================================================
 //
 // These tests exercise the shared mask-precedence policy directly through
@@ -895,7 +895,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsAsymmetricHdim)
 // kernel registry), so the assertions are meaningful on any device — including
 // this gfx950 box. The backward isApplicable cannot be used here: it rejects
 // non-gfx942 devices at its first gate, so on gfx950 it would return false
-// before ever reaching getMaskType, making an isApplicable-based assertion
+// before ever reaching resolveMask, making an isApplicable-based assertion
 // pass for the wrong reason.
 
 // Build a backward SDPA graph that sets the deprecated causal booleans and the

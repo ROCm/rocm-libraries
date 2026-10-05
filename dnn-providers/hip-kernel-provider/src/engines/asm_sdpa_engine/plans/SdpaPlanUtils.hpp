@@ -165,15 +165,6 @@ ResolvedMask resolveMask(const SdpaAttrsT& attrs)
     return mask;
 }
 
-// The kind of mask resolveMask() derives from the attributes alone; see there for
-// the precedence rules. An engine choosing a kernel wants resolveMaskFor(), which
-// also accounts for the sequence lengths.
-template <typename SdpaAttrsT>
-MaskType getMaskType(const SdpaAttrsT& attrs)
-{
-    return resolveMask(attrs).type;
-}
-
 // Narrow a SLIDING_WINDOW mask's bounds to the kernel's int32 window fields.
 //
 // A bound that reaches the widest offset the band can span for this alignment

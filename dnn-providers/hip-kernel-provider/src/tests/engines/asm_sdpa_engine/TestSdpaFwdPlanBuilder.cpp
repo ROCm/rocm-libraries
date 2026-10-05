@@ -800,11 +800,11 @@ TEST_F(TestSdpaFwdPlanBuilder, GetMaxWorkspaceSizeCalculatesCorrectly)
 }
 
 // =============================================================================
-// Canonical mask-attribute policy (plan_utils::getMaskType)
+// Canonical mask-attribute policy (plan_utils::resolveMask)
 // =============================================================================
 //
 // These tests exercise the shared mask-precedence policy directly through
-// plan_utils::getMaskType rather than through isApplicable. A deprecated causal
+// plan_utils::resolveMask rather than through isApplicable. A deprecated causal
 // boolean fixes the diagonal and its alignment but keeps a real left_bound
 // (a causal sliding window). Setting both deprecated booleans at once, or a
 // boolean together with a positive right_bound, throws. The policy is
@@ -917,7 +917,7 @@ plan_utils::MaskType classifyMask(const flatbuffers::FlatBufferBuilder& builder)
     const auto& attrs = graphWrapper.nodeWrappers()
                             .front()
                             ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>();
-    return plan_utils::getMaskType(attrs);
+    return plan_utils::resolveMask(attrs).type;
 }
 
 // The mask the builder classifies at the given sequence lengths.
