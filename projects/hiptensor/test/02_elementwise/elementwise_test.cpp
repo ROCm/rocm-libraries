@@ -59,7 +59,8 @@ namespace hiptensor
     bool PermutationTest::checkDevice(hiptensorDataType_t datatype) const
     {
         return (isF16Supported() && (datatype == HIPTENSOR_R_16F))
-               || (isF32Supported() && (datatype == HIPTENSOR_R_32F));
+               || (isF32Supported() && (datatype == HIPTENSOR_R_32F))
+               || (isF64Supported() && (datatype == HIPTENSOR_R_64F));
     }
 
     bool PermutationTest::checkSizes() const
@@ -179,7 +180,8 @@ namespace hiptensor
 
         EXPECT_EQ(dataTypes.size(), 2); // HIPTENSOR_R_16F or HIPTENSOR_R_32F
         auto abDataType = dataTypes[0];
-        EXPECT_TRUE((abDataType == HIPTENSOR_R_16F) || (abDataType == HIPTENSOR_R_32F));
+        EXPECT_TRUE((abDataType == HIPTENSOR_R_16F) || (abDataType == HIPTENSOR_R_32F)
+                    || (abDataType == HIPTENSOR_R_64F));
 
         mRunFlag &= checkDevice(abDataType);
 
@@ -381,14 +383,19 @@ namespace hiptensor
             CHECK_HIPTENSOR_ERROR(
                 hiptensorCreatePlan(handle, &plan, desc, planPref, 0 /* workspaceSizeLimit */));
 
-            float alphaValue{};
+            // 8-byte storage so the R_64F (double) write below cannot overflow the buffer
+            double alphaValue{};
             if(computeDataType == HIPTENSOR_R_16F)
             {
                 *(reinterpret_cast<_Float16*>(&alphaValue)) = static_cast<_Float16>(alpha);
             }
-            else
+            else if(computeDataType == HIPTENSOR_R_32F)
             {
                 *(reinterpret_cast<float*>(&alphaValue)) = static_cast<float>(alpha);
+            }
+            else if(computeDataType == HIPTENSOR_R_64F)
+            {
+                *(reinterpret_cast<double*>(&alphaValue)) = static_cast<double>(alpha);
             }
 
             auto& opts     = HiptensorOptions::instance();
@@ -488,6 +495,28 @@ namespace hiptensor
                         = compareEqualLaunchKernel<_Float16>(
                             (_Float16*)resource->deviceOutput().get(),
                             (_Float16*)resource->deviceReference().get(),
+                            resource->getCurrentMatrixElement(),
+                            convertToComputeType(computeDataType));
+                }
+                else if(abDataType == HIPTENSOR_R_64F)
+                {
+                    CHECK_HIPTENSOR_ERROR(hiptensorElementwisePermuteReference(
+                        &alphaValue,
+                        (const double*)resource->hostInput1().get(),
+                        descA,
+                        modeA.data(),
+                        Aop,
+                        (double*)resource->hostReference().get(),
+                        descB,
+                        modeB.data(),
+                        computeDataType,
+                        0 /* stream */));
+
+                    resource->copyReferenceToDevice();
+                    std::tie(mValidationResult, mMaxRelativeError)
+                        = compareEqualLaunchKernel<double>(
+                            (double*)resource->deviceOutput().get(),
+                            (double*)resource->deviceReference().get(),
                             resource->getCurrentMatrixElement(),
                             convertToComputeType(computeDataType));
                 }
