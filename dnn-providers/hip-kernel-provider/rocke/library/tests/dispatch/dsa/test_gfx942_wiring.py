@@ -3,8 +3,9 @@
 
 """Dispatch wiring for the gfx942 lightning indexer (CPU-only, no GPU).
 
-Asserts the candidate is registered and selectable, that it produces the spec /
-grid / signature, that the arch gate rejects gfx950, and that a non-DSA op is
+Asserts the gfx942 candidates are registered and selectable, that they produce
+the spec / grid / signature, that gfx950 is also supported (selects its own
+candidate), that an unsupported arch is rejected, and that a non-DSA op is
 rejected (the DSA and standard-attention candidate sets are mutually exclusive).
 """
 

@@ -26,13 +26,16 @@ from rocke.run_manifest import register_manifest_runner
 from .hostpack import NEG_INF_SCORE, f32_to_bf16_bits, make_inputs, ref_indexer_scores
 
 KIND = "lightning_indexer_bf16"
-RUNNER_MODULE = "builders.gfx942.dsa.manifest"
+RUNNER_MODULE = "builders.common.dsa.manifest"
 
 # seqlen_q, seqlen_k, n_index_heads. seqlen_k > 2048 is where sparsity would
 # matter, but the indexer scores every key regardless, so a small shape is a
 # fine smoke default here.
 _DEFAULT_SHAPE = (8, 64, 4)
-_DEFAULT_TOL = 3e-2
+# Tight relative-error gate: the kernel computes in f32 from bf16-rounded
+# operands, so real error is ~1e-4; 1e-3 leaves margin without letting a dropped
+# head or a broken causal mask pass.
+_DEFAULT_TOL = 1e-3
 
 
 def _with_size_bytes(signature: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
@@ -57,6 +60,7 @@ def make_lightning_indexer_manifest(
     args_signature: Sequence[Mapping[str, Any]],
     q_pos_base: int = 0,
     default_shape: Sequence[int] = _DEFAULT_SHAPE,
+    verify_tol: float = _DEFAULT_TOL,
     warmup_iters: int = 5,
     timed_iters: int = 100,
     notes: str = "",
@@ -83,7 +87,7 @@ def make_lightning_indexer_manifest(
             "index_head_dim": int(spec.index_head_dim),
             "q_pos_base": int(q_pos_base),
             "body": str(getattr(spec, "body", "scalar")),
-            "verify_tol": _DEFAULT_TOL,
+            "verify_tol": float(verify_tol),
         },
     )
 
@@ -157,15 +161,26 @@ def run_lightning_indexer_manifest_problem(
             return 0.0, 0, int(scores.size)
         s_dev = ptrs[3]
         rt.memcpy_d2h(as_u8_buffer(scores), s_dev, nbytes(scores))
-        got = scores.astype(np.float64)
-        # Only grade the causal-valid region: masked entries are the sentinel on
-        # both sides and would swamp the relative error otherwise.
+        got = scores
         valid = ref > (0.5 * NEG_INF_SCORE)
-        err = np.abs(got - ref)[valid]
-        d = float(err.max()) if err.size else 0.0
-        den = max(float(np.abs(ref[valid]).max()) if valid.any() else 0.0, 1e-30)
-        bad = int(np.count_nonzero(err > tol * den))
-        return d, bad, int(valid.sum())
+        bad = 0
+        # 1. Future (masked) keys must be written exactly as the sentinel -- this
+        #    is what catches a broken causal mask (a real/zero score there fails).
+        bad += int((got[~valid] != np.float32(NEG_INF_SCORE)).sum())
+        # 2. Valid scores must be finite -- NaN/inf slip past a plain `> tol`
+        #    comparison because NaN comparisons are always False.
+        bad += int((~np.isfinite(got[valid])).sum())
+        # 3. Valid scores within a tight relative tolerance. The denominator is
+        #    floored at a fraction of the row max so a near-zero score (a dropped
+        #    head shows up here) cannot hide behind a huge relative denominator.
+        r = ref[valid].astype(np.float64)
+        g = got[valid].astype(np.float64)
+        row_max = float(np.abs(r).max()) if r.size else 1.0
+        denom = np.maximum(np.abs(r), 1e-3 * row_max)
+        rel = np.abs(g - r) / denom
+        bad += int((rel > tol).sum())
+        d = float(rel.max()) if rel.size else 0.0
+        return d, bad, int(got.size)
 
     return make_args, grid, block, flop, bytes_xfer, check
 

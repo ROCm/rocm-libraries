@@ -4212,9 +4212,12 @@ def cases():
     )
 
     # Lightning indexer (DSA scoring, bf16) on gfx942 and gfx950 -- the kernel is
-    # arch-neutral, so both lower the same specs (scalar-v1 model-shaped cases:
-    # DeepSeek H_I=64, GLM H_I=32, a small case; plus the MFMA body on 16-aligned
-    # shapes). The emitted IR differs per arch, so each carries its own golden.
+    # arch-neutral (no arch-specific atom, intrinsic, or LDS), so both lower the
+    # same specs (scalar-v1 model-shaped cases: DeepSeek H_I=64, GLM H_I=32, a
+    # small case; plus the MFMA body on 16-aligned shapes). The emitted IR is
+    # currently identical across arches, so the two per-arch goldens hold the same
+    # SHAs; the split is kept to catch future arch-specific divergence (fp8, wider
+    # atoms) the moment it appears.
     for _arch in ("gfx942", "gfx950"):
         for _case_id, _over in (
             (

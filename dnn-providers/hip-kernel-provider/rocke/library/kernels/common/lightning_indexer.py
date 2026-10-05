@@ -1,27 +1,28 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Lightning indexer forward (DSA relevance scorer) -- gfx942, bf16, v1.
+"""Lightning indexer forward (DSA relevance scorer) -- gfx942 / gfx950, bf16.
 
 The lightning indexer is the first stage of DeepSeek Sparse Attention. It is a
 score-only kernel: for each query position ``t`` it scores every allowed key
 position ``s`` and emits a single relevance score
 
-    I(t, s) = sum over heads h of  w_h * ReLU( index_q[t, h] . index_k[s] )
+    I(t, s) = sum over heads h of  w[t, h] * ReLU( index_q[t, h] . index_k[s] )
 
 with no softmax and no value output. The scores feed top-k selection (a separate
-stage). The index-query is per head; the index-key is shared across heads
-(one D_I vector per token, MQA-style), so ``index_k`` carries no head axis.
+stage). The index-query is per head; the index-key is shared across heads (one
+D_I vector per token, MQA-style), so ``index_k`` carries no head axis; the weight
+``w[t, h]`` is per query token and head (shape [seqlen_q, H_I]) and signed.
 
-Scope of this module (v1):
+Scope:
 
 * Score-only. The projection, RoPE, and index-key cache write are caller-side
   (the reference's fused qk-norm-rope-quant op); this kernel consumes an already
   projected + RoPE'd ``index_q`` and an already populated ``index_k``.
-* Scalar reduction body. The per-key dot is a straight FMA reduction over D_I,
-  not an MFMA. This is the correctness-first bf16 baseline; the MFMA score body
-  is a later perf hoist under the optimization runbook.
-* gfx942, bf16 only. fp8 and gfx950 are later phases.
+* Two bodies behind ``IndexerSpec.body``: a scalar FMA reduction (the correctness
+  oracle and the fallback for unaligned shapes) and an MFMA matrix-core body for
+  16-aligned shapes. Both run on gfx942 (CDNA3) and gfx950 (CDNA4) in bf16 and
+  use no LDS. fp8 is a later phase.
 
 Two seams are kept so later work is additive, not a rewrite:
 
@@ -32,9 +33,9 @@ Two seams are kept so later work is additive, not a rewrite:
   read. Folding the pre-step (projection/RoPE) into the kernel later replaces
   these with a project-then-score prologue that produces the same values.
 
-Grid: ``(seqlen_q, 1, 1)`` -- one workgroup per query row. The workgroup's
-threads stride over the key range; each thread owns keys ``tid, tid + block,
-...`` and writes their scores.
+Grid is body-dependent: the scalar body launches ``(seqlen_q, 1, 1)`` (one
+workgroup per query row, threads striding the key range); the MFMA body launches
+``(seqlen_q/16, seqlen_k/16, 1)`` (one wave64 per 16x16 output block).
 """
 
 from __future__ import annotations
@@ -45,13 +46,15 @@ from typing import Tuple
 from rocke.core.ir import BF16, F32, I32, IRBuilder, KernelDef, PtrType
 from rocke.helpers.spec import SignatureBuilder, kernel_name_join
 
-# gfx942 has 64 KiB LDS per CU. The scalar v1 body uses no LDS; the ceiling is
-# carried so the validator has one place to check once the MFMA/fused forms
-# (which do allocate an indexer tile plus a top-k candidate reserve) arrive.
+# Conservative LDS ceiling (the gfx942 64 KiB figure). Both bodies use no LDS, so
+# the validator's real check sources the arch's capacity from ArchTarget; this
+# constant is kept for the export and the spec test until a fused top-k needs a
+# per-arch budget.
 LDS_LIMIT = 64 * 1024
 # Causal mask sentinel. A future key must never be selectable by top-k, so its
-# score is driven far below any real score rather than merely to zero (a real
-# ReLU-weighted score is >= 0, so zero would still be a selection candidate).
+# score is driven far below any real score. Real scores can be negative (the
+# per-head weights are signed), so the sentinel sits far below the most negative
+# possible real score, not merely at zero.
 NEG_INF_SCORE = -3.0e38
 # Declared coverage, exported so a dispatch candidate states what it serves by
 # importing these rather than transcribing them.
@@ -60,11 +63,12 @@ INDEXER_DTYPES: Tuple[str, ...] = ("bf16",)
 
 @dataclass(frozen=True)
 class IndexerTileSpec:
-    """Scalar-body tiling knobs.
+    """Tiling knobs.
 
-    v1 is a scalar FMA reduction, so the only knob is how many threads cover a
-    query row's key range. Bq / Bk / head-streaming appear with the MFMA score
-    body, where the per-head query tile is the binding LDS resource.
+    The only knob today is ``block_size`` (threads per workgroup): 256 for the
+    scalar body, one wave64 (64) for the MFMA body. Bq / Bk and head-streaming
+    would appear with an LDS-staged MFMA variant; the current register-only MFMA
+    body needs none.
     """
 
     block_size: int = 256
@@ -145,14 +149,31 @@ def is_valid_spec(spec: IndexerSpec, arch: str = "gfx942") -> Tuple[bool, str]:
             False,
             f"seqlen_q/seqlen_k must be positive (got {spec.seqlen_q}, {spec.seqlen_k})",
         )
+    # Element offsets are i32 in both bodies: the score store index is
+    # row_q*seqlen_k + k_col and the query base is q*n_index_heads*index_head_dim.
+    # Reject shapes whose largest offset would overflow 2**31 (silent OOB store).
+    if spec.seqlen_q * spec.seqlen_k >= 2**31:
+        return (
+            False,
+            f"seqlen_q*seqlen_k ({spec.seqlen_q * spec.seqlen_k}) overflows the i32 "
+            f"score-matrix offset",
+        )
+    if spec.seqlen_q * spec.n_index_heads * spec.index_head_dim >= 2**31:
+        return (
+            False,
+            "seqlen_q*n_index_heads*index_head_dim overflows the i32 index-query offset",
+        )
     bs = spec.tile.block_size
     wave = target.wave_size
     if bs <= 0 or bs > 1024:
         return False, f"block_size {bs} outside (0, 1024]"
     if bs % wave != 0:
         return False, f"block_size {bs} not a multiple of wave_size {wave} for {arch}"
-    if spec.lds_bytes() > LDS_LIMIT:
-        return False, f"lds_bytes {spec.lds_bytes()} exceeds {LDS_LIMIT} on {arch}"
+    if spec.lds_bytes() > target.lds_capacity_bytes:
+        return (
+            False,
+            f"lds_bytes {spec.lds_bytes()} exceeds {target.lds_capacity_bytes} on {arch}",
+        )
     if spec.body not in ("scalar", "mfma"):
         return False, f"unknown body {spec.body!r} (scalar | mfma)"
     if spec.body == "mfma":
@@ -248,7 +269,10 @@ def _emit_scalar_body(b, spec, index_q, index_k, w, scores, q_pos_base):
                 kv = _load_index_k_elem(b, index_k, k_row_base, c_d)
                 dot = b.fma(qv, kv, dot)
             relu = b.fmax(dot, c_zero_f)
-            w_h = b.global_load_f32(w, h)
+            # Per-query weight: w has shape [seqlen_q, H_I], indexed by this
+            # workgroup's query row q and head h (DSA weight is w_{t,h}, not a
+            # per-head constant).
+            w_h = b.global_load_f32(w, b.add(b.mul(q, c_HI), h))
             b.scf_yield(b.fma(w_h, relu, score))
         score = head_loop.results[0]
         causal_ok = b.cmp_le(s, q_pos)
@@ -288,6 +312,7 @@ def _emit_mfma_body(b, spec, index_q, index_k, w, scores, q_pos_base):
     c_apl = b.const_i32(apl)
     c_atomk = b.const_i32(atom.k)
     c_cpl = b.const_i32(cpl)
+    c_HI = b.const_i32(H_I)
     c_qrow_stride = b.const_i32(H_I * D_I)
 
     lane = b.thread_id_x()
@@ -329,11 +354,14 @@ def _emit_mfma_body(b, spec, index_q, index_k, w, scores, q_pos_base):
                 index_q, b.add(q_head_base, d_start), BF16, apl, align=apl * 2
             )
             score = b.mfma_f32_16x16x16_bf16(q_vec, k_vecs[ka], score)
-        w_h = b.global_load_f32(w, h)
         new_cells = []
         for r in range(cpl):
             relu = b.fmax(b.vec_extract(score, r), c_zero_f)
-            new_cells.append(b.fadd(acc_cells[r], b.fmul(w_h, relu)))
+            # Per-query weight: output cell r is query row q_tile_base + m_blk*cpl
+            # + r, so each cell takes its own w[row_q, h] = w[row_q*H_I + h].
+            row_q = b.add(q_tile_base, b.add(b.mul(m_blk, c_cpl), b.const_i32(r)))
+            w_hr = b.global_load_f32(w, b.add(b.mul(row_q, c_HI), h))
+            new_cells.append(b.fadd(acc_cells[r], b.fmul(w_hr, relu)))
         b.scf_yield(*new_cells)
     acc = head_loop.results
     # Causal bound + write. Output cell r is matrix (row = m_blk*4 + r,

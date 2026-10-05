@@ -39,7 +39,7 @@ pytestmark = [
 ]
 
 _ARCH = "gfx950"
-_TOL = 3e-2
+_TOL = 1e-3
 
 
 @pytest.mark.parametrize(
@@ -57,7 +57,7 @@ def test_indexer_scores_match_oracle(Q, Sk, HI, D, block, q_pos_base, body):
     from rocke.helpers.compile import compile_kernel
     from rocke.run_manifest import run_manifest
 
-    from builders.gfx942.dsa.manifest import make_lightning_indexer_manifest
+    from builders.common.dsa.manifest import make_lightning_indexer_manifest
     from kernels.common.lightning_indexer import (
         IndexerSpec,
         IndexerTileSpec,
@@ -82,6 +82,7 @@ def test_indexer_scores_match_oracle(Q, Sk, HI, D, block, q_pos_base, body):
         args_signature=lightning_indexer_signature(spec),
         q_pos_base=q_pos_base,
         default_shape=(Q, Sk, HI),
+        verify_tol=_TOL,
     )
 
     with tempfile.TemporaryDirectory() as tmp:
