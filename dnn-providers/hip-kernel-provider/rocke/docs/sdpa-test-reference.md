@@ -82,7 +82,8 @@ Use a Python environment outside the source tree with `numpy`, `pytest`, and
 `pytest-timeout`. A working HIP runtime and COMGR are required for current kernel
 compilation. Set `ROCM_PATH` or the runtime's library overrides when needed, and
 select `ROCKE_LLVM_FLAVOR` to match COMGR as described in
-[`platform/AGENTS.md`](../platform/AGENTS.md). Torch is not required.
+[`platform/AGENTS.md`](../platform/AGENTS.md). Use an environment without Torch for reference verification. The shared worker
+launcher blocks Torch imports in both baseline and current interpreters.
 
 From the rocm-libraries root, fetch the existing archive with DVC installed:
 
@@ -233,8 +234,9 @@ The existing TheRock CI flow builds and tests the installed provider artifact:
    prepares the Python/runtime dependencies. The existing provider runner selects
    CTest entries using the provider's category YAML. `rocke_sdpa_gpu_pytest` runs
    the same pytest file used locally: eight numerical cases and three negative
-   checks. `rocke_sdpa_reference_unit_pytest` runs the host contract/artifact checks
-   independently of the GPU bundle.
+   checks. `rocke_sdpa_reference_unit_pytest` runs the SDPA host contract checks;
+   `rocke_reference_common_pytest` runs shared archive and worker-isolation checks.
+   Both host entries run independently of GPU bundles.
 
 This uses the existing workflows; no additional workflow is required. CI verifies
 an already qualified baseline and cannot generate or approve its own replacement.
@@ -244,6 +246,10 @@ With reference installation enabled, an extracted bundle can override DVC archiv
 ```text
 -DROCKE_TEST_SDPA_REFERENCE_INSTALL_SOURCE_gfx942=<qualified-bundle-directory>
 ```
+
+For a candidate with a different reviewed lock, also pass
+`-DROCKE_TEST_SDPA_REFERENCE_INSTALL_LOCK_gfx942=<reviewed-lock>`. A lock override
+requires the extracted-source override. These controls do not publish the candidate.
 
 Run the installed GPU entry with:
 

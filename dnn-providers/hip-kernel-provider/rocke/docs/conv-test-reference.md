@@ -9,9 +9,9 @@ The convolution harness compares current GPU kernels with precompiled baseline
 kernels qualified offline against an independent NumPy reference. Ordinary
 verification computes neither CPU reference answers nor replacement budgets and
 requires no Torch. This is infrastructure for a bounded gfx942 forward cohort;
-no convolution baseline lock or DVC object is promoted by this change. Convolution
-is absent from the published-bundle registry until its baseline is reviewed and
-published; explicit local source and lock overrides can enroll a candidate.
+the gfx942 baseline lock and DVC pointer identify its published bundle. The
+publication registry enables default provider installation alongside SDPA;
+explicit local source and lock overrides can select a replacement candidate.
 
 ## Coverage and execution
 
@@ -68,10 +68,11 @@ For independent reference R, qualified baseline O, and current output N, define
 S = max(max(abs(R)), 1). S is recorded in the locked manifest. Both offline and
 online distances use max(abs(A - B))/S, with subtraction/division rounded
 conservatively. The original forward threshold is 0.05 for both dtypes; qualification
-reserves a 0.0025 margin:
+reserves a 0.0025 margin. Each R_j below is an enabled offline reference; S
+always comes from NumPy:
 
 ```text
-baseline_bound = upper_bound(max(abs(O - R)) / S)
+baseline_bound = max over enabled references R_j of upper_bound(max(abs(O - R_j)) / S)
 comparison_limit + baseline_bound + margin <= 0.05
 max(abs(N - O)) / S <= comparison_limit
 ```
@@ -83,6 +84,10 @@ repeated observed errors alone do not bound unknown future baseline outputs, and
 atomic workspaces need initialization rather than indiscriminate NaN poisoning.
 
 ## Qualification and verification
+
+Run verification in an environment with NumPy, pytest, and pytest-timeout,
+without Torch. HIP and COMGR are required for GPU execution. Optional Torch
+qualification uses a separate offline environment.
 
 From the rocKE root, with NumPy installed:
 
@@ -106,7 +111,8 @@ python library/tests/run_conv_reference.py verify --arch gfx942 \
 To include the optional Torch CPU checks, install Torch in the offline
 qualification environment and add `--torch-reference` to the qualification
 command. A CPU-only Torch build suffices; rocKE still needs a GPU to execute
-the baseline. The oracle-only checks can also run without a GPU:
+the baseline. The oracle-only checks can also run without a GPU; invoke this file explicitly
+(it is not collected by normal pytest discovery or installed in CI):
 
 ```bash
 python -m pytest library/tests/conv_reference/check_torch_reference.py -v
@@ -168,7 +174,7 @@ lock. Host checks register as `rocke_conv_reference_unit_pytest`; the GPU entry
 published or explicitly staged local bundle passes validation. Both entries are
 in the provider category YAML.
 
-For testing installation before publishing DVC, configure explicitly:
+For testing a replacement candidate before publishing it, configure explicitly:
 
 ```text
 -DROCKE_INSTALL_TEST_GPU_REFERENCES=ON
@@ -187,3 +193,46 @@ in `library/tests/reference_common`. Both operations import that support directl
 also freeze the shared support needed by their replay workers.
 
 Archive packaging uses the [shared artifact command](../TESTING.md#shared-gpu-reference-artifact-command).
+
+## Validation evidence
+
+On 2026-10-05, local gfx942 validation established:
+
+- All twelve cases qualified against NumPy using three baseline repetitions.
+  A separate qualification also passed the optional CPU Torch float64/float32
+  checks. This is offline evidence, not a Torch CI dependency.
+- A fresh installation with SDPA and a local convolution candidate passed all
+  five reference CTest suites in an environment that explicitly confirmed Torch
+  was not installed: 137 host checks, 11 SDPA GPU checks, and 15 convolution GPU
+  checks. Both current and pinned kernels executed.
+- The convolution GPU checks include twelve numerical cases plus rejection of
+  perturbed current output, perturbed replay output, and a missing launch.
+- Repository pre-commit checks and configuration checks for default installation,
+  disabled installation, local overrides, and missing/corrupt artifacts passed.
+
+These checks cover the installed Python reference harness and Python-emitted
+kernels. They do not establish native C++ provider execution or a completed
+downstream CI run. The qualified NumPy baseline has since been uploaded to DVC,
+retrieved through an empty cache, and validated against the source lock; the
+publication registry now enables its default installation.
+
+## Published bundle identity
+
+The gfx942 archive is `library/tests/reference_bundles/conv/gfx942.tar.gz`,
+tracked by its adjacent `.dvc` pointer. Its trusted lock is
+`library/tests/conv_reference/architectures/gfx942/baseline_lock.json`.
+
+- Baseline revision: `3c7094a26e39f4d42e1c0cbeee613f7d3f8ac4ef`.
+- Manifest SHA-256: `18f1eefec57c9e64bada990260b99cd7a0bd256e2fcbe4b002507cdfac40c832`.
+- Archive SHA-256: `8bbb0cad597b667b06b6d924f8a88ceaa27cf999f4edb44dbf2a42a368797fbe`.
+- DVC MD5: `3e02db6084a58bae0a6c5397ca6a7247`.
+- Archive size: 1,913,497 bytes.
+- Qualification: NumPy float64, three baseline repetitions per case.
+
+The separate optional Torch audit does not replace this bundle's NumPy
+qualification manifest or lock. Fetch the published archive from the
+rocm-libraries root before provider configuration:
+
+```bash
+dvc pull dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/conv/gfx942.tar.gz.dvc
+```

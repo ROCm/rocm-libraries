@@ -26,7 +26,7 @@ testing instructions:
 | [**`platform/dsl_docs/development/testing.md`**](platform/dsl_docs/development/testing.md) | how to run & debug tests locally | "how do I run this / why did it fail?" |
 
 **Scope: the whole rocKE engine** — both the `platform/` tree (core engines, IR,
-dispatch) and the `library/` tree (the attention kernel surface). Platform vs.
+dispatch) and the `library/` tree (the operation-specific kernel surface). Platform vs.
 library is an **emerging modular boundary**; the strategy spans both today and
 will evolve to reflect that modularity. Out of scope: `ck4inductor` /
 `example/ck_tile/dsl` tests, which drive external packages and live in
@@ -106,7 +106,7 @@ Question A. The quality of the *artifacts* rocKE emits.
 The **reference oracle**, and the *only* place ground-truth correctness is
 established: emit → compile → launch on a **HIP device** → compare to an
 independent numpy/torch reference. These lanes are the narrowest and slowest part
-of the strategy, require a GPU (skipped, not failed, off-device), and are where
+of the strategy, require a GPU (legacy lanes skip off-device; required pinned-reference lanes fail), and are where
 the strategy's biggest holes live (see
 [§7](#7-current-state-vs-target-the-gap-registry-wip)):
 
@@ -160,20 +160,30 @@ the strategy's biggest holes live (see
   shared by CMake and Python. Each architecture owns its case list, source-dispatch
   adapter, and baseline lock under `sdpa_reference/architectures/<arch>/`, with a
   separate DVC archive under `reference_bundles/sdpa/<arch>.tar.gz`. Each operation
-  owns its directory under `reference_bundles/`, so future convolution references
-  can use `reference_bundles/conv/<arch>.tar.gz` and be updated independently.
+  owns its directory under `reference_bundles/`, and convolution references
+  use `reference_bundles/conv/<arch>.tar.gz` and be updated independently.
   Source pytest looks for extracted bundles under `reference_bundles/sdpa/<arch>/`;
   the runtime override can select another directory. Installed bundles
   live under `engines/test_arch_content/rocke/sdpa/<arch>/` relative to the test
   root. The `engines/test_arch_content` spelling is required by TheRock's artifact
   manifest and the hipkernelprovider kpack splitting handler. `arch_content` is
   reserved for runtime content and must not be used for these test references.
-  When reference installation is enabled, every architecture in the registry is
-  installed; TheRock splits the payloads by target. Only gfx942 is currently enrolled.
-  Adding another architecture requires its adapter, independently qualified lock
-  and bundle, and a registry entry; adding an empty registry entry is insufficient.
+  When reference installation is enabled, CMake installs each pair in
+  `reference_common/published_bundles.json`; TheRock splits the payloads by target.
+  The operation's architecture registry describes supported qualification cohorts,
+  not publication status. SDPA/gfx942 and convolution/gfx942 are published. Adding another
+  published pair requires its adapter, independently qualified lock, retrievable
+  bundle, and publication entry.
   Qualification accepts `--arch` and freezes the shared worker and architecture
   adapters into the new bundle. Existing bundles keep their original frozen code.
+
+- The [convolution reference lane](docs/conv-test-reference.md) implements the
+  same offline qualification and GPU replay workflow for a bounded gfx942
+  forward cohort. It shares artifact, digest, budget, snapshot, and worker
+  transport code with SDPA. Its published gfx942 bundle is installed by default
+  alongside SDPA; explicit local source/lock overrides support replacement
+  candidates. Both operations use NumPy and ROCm without Torch in CI.
+  Optional Torch cross-checking belongs only to offline convolution qualification.
 
 - **Nothing else in this document proves the math is right.** Byte-identity
   ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)) and golden IR
@@ -184,10 +194,13 @@ the strategy's biggest holes live (see
 
 Schema-2 reference bundles contain compiled kernels, the frozen replay runtime,
 and qualification metadata, but no input or output tensor files. Tests regenerate
-Q, K, and V using the versioned `numpy-pcg64-normal-f32-v1` recipe: a fresh
+SDPA Q, K, and V using the versioned `numpy-pcg64-normal-f32-v1` recipe: a fresh
 PCG64 stream seeded with zero, float32 normal samples in Q/K/V order, followed
 by the existing fp16 or round-to-nearest-even bf16 encoding. Each tensor's shape,
 dtype, and values must match its qualified digest before either GPU worker runs.
+Convolution uses `numpy-pcg64-uniform-f32-conv-v1`: seed-zero PCG64 uniform
+samples in [-1, 1), activation then weight order, cast to float32 and encoded
+to the case's FP16/BF16 storage. Its input digests are checked in the same way.
 A NumPy distribution implementation change that alters those bytes fails the test;
 a seed alone is not considered sufficient evidence of reproducibility.
 
@@ -337,6 +350,7 @@ need to be checked against both registration and the selected CI tier.
 Installed library GPU selection includes attention tests, but their Torch and
 architecture gates can still skip all numeric execution. The pinned SDPA lane
 uses an independently qualified bundle to run its enrolled cases without Torch.
+The published convolution lane uses the same workflow for its forward cohort.
 Inspect collection and GPU comparison counts separately from host-test passes;
 directory coverage alone does not establish GPU correctness.
 
@@ -482,16 +496,17 @@ Read coverage from the emitter configs ([`platform/tests/README.md`](platform/te
 
 | # | Gap | Impact | Target |
 |---|---|---|---|
-| G1 | **Correctness reference lane is torch-based** | The kernel-correctness reference oracle depends on torch, contradicting the numpy-only target below | De-torch to a numpy reference oracle |
-| G2 | **Numeric coverage is narrow** — only fp32/fp16/bf16 across a handful of families | fp8/bf8/int8/mx and conv/moe/grouped-gemm have *differential* agreement but **no reference-oracle check** — two engines could agree on wrong fp8 saturation | Extend correctness lanes to the low-precision & fused families |
+| G1 | **Many legacy numeric lanes still require Torch** | Pinned SDPA and the bounded forward-convolution cohort run without Torch. Other Torch-gated cohorts remain uncovered in environments without Torch | Extend independently qualified references to the remaining cohorts |
+| G2 | **Numeric coverage is narrow** — only fp32/fp16/bf16 across a handful of families | Pinned reference coverage is bounded; broader convolution directions, low-precision and fused families need independent numeric coverage beyond differential agreement | Extend correctness lanes to the low-precision & fused families |
 | G3 | **No C-engine on-GPU correctness lane** | C++ engine numerics validated only transitively (byte-identity to the Python engine) | Add a C-emitted `.ll` → HSACO → launch → compare lane |
 | G4 | **Two overlapping correctness lanes** | Duplication between the platform and legacy numeric lanes | Consolidate to one canonical lane (needs GPU validation) |
 | G5 | **Loose correctness verdict** — single worst-case tolerance (fp16 `atol=rtol=1e-2`) | Structural bugs can hide inside dtype-truncation noise; no structural-vs-quantization separation; NaN/Inf/denormal caught only incidentally | Split structural from dtype tolerance; add numeric edge-case tests |
 | G8 | **Performance largely ungated** ([§3.2](#32-are-the-kernels-fast)) | Perf regression caught only by a manual smoke gate; benchmark suites orphaned | Wire a perf tier into CI |
 
-> **Aspirational principle (target, not yet true — see G1):** correctness
-> reference oracles should be **torch-free** (numpy only); bf16 gets a hand-rolled
-> encoding or an explicit `NotImplementedError`, never a silent upcast.
+> **Reference CI policy:** pinned-reference verification runs with NumPy and
+> ROCm, without installing Torch. Independent oracles, including optional Torch,
+> run offline during qualification. BF16 storage has explicit encoding and
+> rounding. Extending this coverage to legacy lanes remains G1.
 
 ### 7.2 Platform-quality gaps (Question B)
 
@@ -519,14 +534,15 @@ reference them, don't copy them here.*
 ## Pinned-reference documentation
 
 - [SDPA implementation and usage](docs/sdpa-test-reference.md)
+- [Convolution implementation and usage](docs/conv-test-reference.md)
 - [GPU attention coverage and gaps](docs/gpu-attention-test-coverage.md)
 - [Reference methodology and extension strategy](docs/gpu-ci-pinned-rocke-test-reference-plan.md)
 
 ## Pinned convolution references
 
 A Torch-free gfx942 forward-convolution qualification and GPU replay harness is
-available alongside SDPA. Convolution is not in the published-bundle registry pending a
-reviewed baseline and published bundle. See [the convolution reference guide](docs/conv-test-reference.md)
+available alongside SDPA. Both gfx942 bundles are listed in the publication
+registry and installed by default for provider artifact builds. See [the convolution reference guide](docs/conv-test-reference.md)
 for the cohort, numerical contract, qualification commands, and installed tests.
 
 ## Shared GPU reference artifact command
@@ -576,3 +592,27 @@ To test an unpublished candidate while the umbrella flag is ON, provide
 candidate to the installed references without changing publication enrollment.
 A lock override requires an extracted-source override. Once the reviewed lock and
 DVC object are published, add the architecture to the operation's published list.
+
+### Running installed reference tests without Torch
+
+Use an environment containing NumPy, pytest, and pytest-timeout, with HIP and
+COMGR available. Do not install Torch for these suites. From the installed
+provider test directory:
+
+```bash
+python -c 'import importlib.util; assert importlib.util.find_spec("torch") is None'
+ctest -V -R '^rocke_(reference_common|sdpa_reference_unit|conv_reference_unit|sdpa_gpu|conv_gpu)_pytest$' --output-on-failure
+```
+
+Inspect the selected tests: a missing bundle prevents its GPU entry from being
+registered, so a successful CTest command alone does not establish that both
+operations ran. Default publication supplies both gfx942 bundles. Fetch both
+DVC archives before configuring; local source/lock overrides are only needed
+when testing replacement candidates.
+See the [reference inventory](platform/tests/README.md#installed-pinned-reference-suites)
+for the expected entries and cases.
+
+The shared launcher blocks Torch imports in baseline and current worker
+interpreters, including frozen replay workers. Neither CPU oracle runs during
+verification. This restriction is confined to reference workers and does not
+change the runtime's behavior for other callers or the legacy Torch test suites.
