@@ -1,73 +1,41 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include "engines/asm_sdpa_engine/asm/AsmKernelPath.hpp"
 
 #include <gtest/gtest.h>
-
-// Define AITER_ASM_DIR for the test if not already defined
-#ifndef AITER_ASM_DIR
-#define AITER_ASM_DIR "/test/default/asm/dir"
-#endif
-
-#include "engines/asm_sdpa_engine/asm/AsmKernelPath.hpp"
 
 namespace asm_sdpa_engine::asm_kernels
 {
 namespace
 {
 
-TEST(TestAsmKernelPath, GetAsmKernelDirReturnsCompileTimeDefault)
+TEST(TestAsmKernelPath, GetAsmKernelTocKeyStripsArchPrefix)
 {
-    // Ensure the env var is unset for this test
-    hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_AITER_ASM_DIR");
-
-    const std::string dir = getAsmKernelDir();
-    EXPECT_EQ(dir, AITER_ASM_DIR);
+    EXPECT_EQ(getAsmKernelTocKey("gfx942/fmha_v3_bwd/bwd_hd128_odo_bf16.co"),
+              "fmha_v3_bwd/bwd_hd128_odo_bf16.co");
 }
 
-TEST(TestAsmKernelPath, GetAsmKernelDirReturnsEnvVarWhenSet)
+TEST(TestAsmKernelPath, GetAsmKernelTocKeyStripsArchPrefixWithVariant)
 {
-    const char* customDir = "/custom/kernel/path";
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_AITER_ASM_DIR", customDir);
-
-    const std::string dir = getAsmKernelDir();
-    EXPECT_EQ(dir, customDir);
-
-    // Clean up
-    hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_AITER_ASM_DIR");
+    EXPECT_EQ(getAsmKernelTocKey("gfx942/fmha_v3_fwd/MI300/fwd_hd128_bf16_rtne.co"),
+              "fmha_v3_fwd/MI300/fwd_hd128_bf16_rtne.co");
 }
 
-TEST(TestAsmKernelPath, GetAsmKernelDirIgnoresEmptyEnvVar)
+TEST(TestAsmKernelPath, GetAsmKernelTocKeyStripsGfx950Prefix)
 {
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_AITER_ASM_DIR", "");
-
-    const std::string dir = getAsmKernelDir();
-    EXPECT_EQ(dir, AITER_ASM_DIR);
-
-    // Clean up
-    hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_AITER_ASM_DIR");
+    EXPECT_EQ(getAsmKernelTocKey("gfx950/fmha_v3_fwd/fwd_hd128_bf16.co"),
+              "fmha_v3_fwd/fwd_hd128_bf16.co");
 }
 
-TEST(TestAsmKernelPath, GetAsmKernelPathAppendsFilename)
+TEST(TestAsmKernelPath, GetAsmKernelTocKeyNoSlashReturnsInput)
 {
-    hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_AITER_ASM_DIR");
-
-    const std::string path = getAsmKernelPath("kernel.co");
-    const std::string expected = std::string(AITER_ASM_DIR) + "/kernel.co";
-    EXPECT_EQ(path, expected);
+    EXPECT_EQ(getAsmKernelTocKey("kernel_name_only.co"), "kernel_name_only.co");
 }
 
-TEST(TestAsmKernelPath, GetAsmKernelPathUsesEnvVarDir)
+TEST(TestAsmKernelPath, GetAsmKernelTocKeyEmptyStringReturnsEmpty)
 {
-    const char* customDir = "/env/kernels";
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_AITER_ASM_DIR", customDir);
-
-    const std::string path = getAsmKernelPath("gfx942/test.co");
-    EXPECT_EQ(path, "/env/kernels/gfx942/test.co");
-
-    // Clean up
-    hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_AITER_ASM_DIR");
+    EXPECT_EQ(getAsmKernelTocKey(""), "");
 }
 
 } // namespace

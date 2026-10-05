@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <hip/hip_runtime.h>
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
@@ -26,6 +27,7 @@ using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::types;
 using namespace hipdnn_integration_tests::test_utils;
 using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 
 TEST(TestGpuConvolutionFwdPlanBuilder, PlanConstruction)
 {
@@ -196,8 +198,8 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& xDims,
     hipdnn_data_sdk::utilities::Tensor<YType> cpuY(yDims, yStrides);
 
     constexpr unsigned int SEED = 42;
-    cpuX.fillWithRandomValues(static_cast<XType>(-1), static_cast<XType>(1), SEED);
-    cpuW.fillWithRandomValues(static_cast<WType>(-1), static_cast<WType>(1), SEED + 1);
+    fillWithRandomValues(cpuX, static_cast<XType>(-1), static_cast<XType>(1), SEED);
+    fillWithRandomValues(cpuW, static_cast<WType>(-1), static_cast<WType>(1), SEED + 1);
 
     // Allocate device buffers (RAII — freed automatically)
     const hipdnn_data_sdk::utilities::Workspace dX(xCount * sizeof(XType));

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <hip/hip_runtime.h>
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn_data_sdk/types/Bfloat16.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceResampleFwd.hpp>
@@ -16,6 +17,7 @@ using namespace hipdnn_frontend::graph;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_integration_tests;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 
 namespace
 {
@@ -255,7 +257,10 @@ protected:
             Tensor<float> xScratch(dxTensorAttr->get_dim(), dxTensorAttr->get_stride());
             Tensor<float> yScratch(dyDims, dyStrides);
             Tensor<int32_t> indexScratch(dyDims, dyStrides);
-            xScratch.fillWithRandomValues(-1.0f, 1.0f, getGlobalTestSeed());
+            fillWithRandomValues(xScratch, -1.0f, 1.0f, getGlobalTestSeed());
+
+            // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+            xScratch.memory().hostData();
 
             CpuFpReferenceResampleFwd::forward<float, float, float, int32_t>(
                 xScratch,
