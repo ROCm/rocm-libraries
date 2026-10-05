@@ -355,8 +355,8 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [64, 2, 1]
-    WorkGroupMapping: 8
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
@@ -587,7 +587,7 @@
     SpaceFillingAlgo: []
     StaggerU: 8
     StaggerUMapping: 0
-    StaggerUStride: 256
+    StaggerUStride: 512
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
@@ -669,7 +669,7 @@
     _VectorStore: 1
     _WorkspaceSizePerElemBias: 0
     _WorkspaceSizePerElemC: 4
-    _staggerStrideShift: 1
+    _staggerStrideShift: 2
     enableGLTrA: false
     enableGLTrB: false
     enableLDSTrA: false
@@ -1234,8 +1234,8 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [64, 2, 1]
-    WorkGroupMapping: 8
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
@@ -1826,7 +1826,7 @@
     WavefrontSize: 32
     WorkGroup: [16, 4, 1]
     WorkGroupMapping: 0
-    WorkGroupMappingXCC: 1
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
@@ -2417,8 +2417,8 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 2, 1]
-    WorkGroupMapping: 8
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
