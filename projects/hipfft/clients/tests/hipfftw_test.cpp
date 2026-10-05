@@ -1495,11 +1495,10 @@ namespace
             return ret;
         };
         auto get_random_dist = []() {
+            static const ptrdiff_t half_range = static_cast<ptrdiff_t>(max_byte_size_for_hipfftw_tests())
+                    / (static_cast<ptrdiff_t>(max_nbatch_for_hipfftw_test) * sizeof(hipfftw_complex_t<prec>));
             static std::uniform_int_distribution<ptrdiff_t> dist_rng(
-                -max_byte_size_for_hipfftw_tests()
-                    / (max_nbatch_for_hipfftw_test * sizeof(hipfftw_complex_t<prec>)),
-                max_byte_size_for_hipfftw_tests()
-                    / (max_nbatch_for_hipfftw_test * sizeof(hipfftw_complex_t<prec>)));
+                -half_range, half_range);
             return dist_rng(get_pseudo_rng());
         };
 
