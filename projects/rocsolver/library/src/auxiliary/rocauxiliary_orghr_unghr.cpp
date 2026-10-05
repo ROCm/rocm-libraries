@@ -145,9 +145,9 @@ extern "C" {
     lda         rocblas_int. lda >= n.
                 The leading dimension of A.
     @param[in]
-    tau        pointer to type. Array on the GPU of at least ihi - ilo scalars.
-                The Householder scalars as returned by \ref rocsolver_sgehrd "GEHRD" for reflectors
-                H(ilo) through H(ihi-1).
+    tau        pointer to type. Array on the GPU of dimension n-1 (at least ihi-1).
+                The Householder scalars as returned by \ref rocsolver_sgehrd "GEHRD"; the entries
+                tau[ilo-1] through tau[ihi-2] (for reflectors H(ilo) through H(ihi-1)) are used.
     ********************************************************************/
 ROCSOLVER_EXPORT rocblas_status rocsolver_sorghr(rocblas_handle handle,
                                                  const rocblas_int n,
@@ -213,9 +213,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dorghr(rocblas_handle handle,
     lda         rocblas_int. lda >= n.
                 The leading dimension of A.
     @param[in]
-    tau        pointer to type. Array on the GPU of at least ihi - ilo scalars.
-                The Householder scalars as returned by \ref rocsolver_sgehrd "GEHRD" for reflectors
-                H(ilo) through H(ihi-1).
+    tau        pointer to type. Array on the GPU of dimension n-1 (at least ihi-1).
+                The Householder scalars as returned by \ref rocsolver_sgehrd "GEHRD"; the entries
+                tau[ilo-1] through tau[ihi-2] (for reflectors H(ilo) through H(ihi-1)) are used.
     ********************************************************************/
 ROCSOLVER_EXPORT rocblas_status rocsolver_cunghr(rocblas_handle handle,
                                                  const rocblas_int n,
