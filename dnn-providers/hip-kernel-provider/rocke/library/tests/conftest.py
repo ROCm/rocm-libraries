@@ -31,6 +31,29 @@ _PYROOT = Path(__file__).resolve().parents[2] / "platform" / "python"
 if str(_PYROOT) not in sys.path:
     sys.path.insert(0, str(_PYROOT))
 
+# Test support packages are also used by standalone worker subprocesses. Make
+# them importable with pytest's importlib mode in both source and install trees,
+# after the library packages so tests/dispatch cannot shadow dispatch/.
+_TESTROOT = Path(__file__).resolve().parent
+if str(_TESTROOT) not in sys.path:
+    sys.path.append(str(_TESTROOT))
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--gdn-batch",
+        action="store",
+        type=int,
+        default=None,
+        help="run GDN all-candidate numeric coverage for one batch",
+    )
+    parser.addoption(
+        "--gdn-spec-id",
+        action="store",
+        default=None,
+        help="run GDN all-candidate numeric coverage for one stable spec ID",
+    )
+
 
 @pytest.fixture(autouse=True)
 def _restore_attention_arch_state():

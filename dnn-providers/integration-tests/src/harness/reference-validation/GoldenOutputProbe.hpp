@@ -7,9 +7,8 @@
 #include <map>
 #include <optional>
 
-#include <nlohmann/json.hpp>
-
 #include "harness/bundle/BundleDiscovery.hpp"
+#include "harness/bundle/SweepManifestCache.hpp"
 
 namespace hipdnn_integration_tests::bundle::detail
 {
@@ -49,14 +48,14 @@ public:
     bool mayCarryGoldenOutputs(const DiscoveredBundle& disc);
 
 private:
-    // Parsed once per sweep.json rather than once per case: a single manifest can
-    // carry thousands of cases, and re-parsing it for each is the cost this probe
-    // exists to avoid.
-    const nlohmann::json* sweepManifest(const std::filesystem::path& path);
+    // Parsed and indexed once per sweep.json rather than once per case: a single
+    // manifest can carry thousands of cases, and re-parsing or re-scanning it for
+    // each is the cost this probe exists to avoid.
+    const SweepManifest* sweepManifest(const std::filesystem::path& path);
 
     bool sweepCaseHasGoldenBlobs(const DiscoveredBundle& disc);
 
-    std::map<std::filesystem::path, std::optional<nlohmann::json>> _manifests;
+    std::map<std::filesystem::path, std::optional<SweepManifest>> _manifests;
 };
 
 } // namespace hipdnn_integration_tests::bundle::detail
