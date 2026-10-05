@@ -34,6 +34,7 @@ def _legacy_argv(
     debug: bool,
     cuda: bool,
     static: bool,
+    therock: bool,
     address_sanitizer: bool,
     relwithdebinfo: bool,
     codecoverage: bool,
@@ -70,6 +71,8 @@ def _legacy_argv(
         argv.append("--cuda")
     if static:
         argv.append("--static")
+    if therock:
+        argv.append("--therock")
     if address_sanitizer:
         argv.append("--address-sanitizer")
     if relwithdebinfo:
@@ -125,6 +128,7 @@ def _legacy_argv(
         "debug": "Debug CMake build (-g).",
         "cuda": "CUDA backend (--cuda).",
         "static": "Static library (--static).",
+        "therock": "Build against a staged hipBLASLt package instead of add_subdirectory (--therock).",
         "address_sanitizer": "AddressSanitizer (--address-sanitizer).",
         "relwithdebinfo": "RelWithDebInfo (-k).",
         "codecoverage": "Code coverage (--codecoverage).",
@@ -156,6 +160,7 @@ def build(
     debug=False,
     cuda=False,
     static=False,
+    therock=False,
     address_sanitizer=False,
     relwithdebinfo=False,
     codecoverage=False,
@@ -192,6 +197,7 @@ def build(
         debug=debug,
         cuda=cuda,
         static=static,
+        therock=therock,
         address_sanitizer=address_sanitizer,
         relwithdebinfo=relwithdebinfo,
         codecoverage=codecoverage,
