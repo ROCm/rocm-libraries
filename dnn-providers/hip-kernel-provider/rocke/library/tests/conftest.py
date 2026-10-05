@@ -18,12 +18,41 @@ from pathlib import Path
 import pytest
 
 _LIBROOT = Path(__file__).resolve().parents[1]  # tests -> rocke/library
-if str(_LIBROOT) not in sys.path:
-    sys.path.insert(0, str(_LIBROOT))
+# Keep the library packages ahead of the CTest working directory. In the
+# standalone install layout that directory is bin/rocke, whose platform
+# `dispatch` subpackage would otherwise shadow the library's top-level package.
+try:
+    sys.path.remove(str(_LIBROOT))
+except ValueError:
+    pass
+sys.path.insert(0, str(_LIBROOT))
 
 _PYROOT = Path(__file__).resolve().parents[2] / "platform" / "python"
 if str(_PYROOT) not in sys.path:
     sys.path.insert(0, str(_PYROOT))
+
+# Test support packages are also used by standalone worker subprocesses. Make
+# them importable with pytest's importlib mode in both source and install trees,
+# after the library packages so tests/dispatch cannot shadow dispatch/.
+_TESTROOT = Path(__file__).resolve().parent
+if str(_TESTROOT) not in sys.path:
+    sys.path.append(str(_TESTROOT))
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--gdn-batch",
+        action="store",
+        type=int,
+        default=None,
+        help="run GDN all-candidate numeric coverage for one batch",
+    )
+    parser.addoption(
+        "--gdn-spec-id",
+        action="store",
+        default=None,
+        help="run GDN all-candidate numeric coverage for one stable spec ID",
+    )
 
 
 @pytest.fixture(autouse=True)

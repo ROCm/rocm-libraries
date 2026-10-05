@@ -482,6 +482,7 @@ rocblaslt_status
     RocRollerHandle* rocroller_handle = static_cast<RocRollerHandle*>(handle->rocroller_handle);
     auto             kernelType       = genKernelType(prob);
     int              index;
+    *returnAlgoCount = 0;
 
     if(prob.bias != nullptr)
     {

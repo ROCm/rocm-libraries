@@ -26,7 +26,7 @@ how it is compiled into a ``.so``.
 """
 
 from __future__ import annotations
-from dispatcher_common import unified_framework_flags
+from dispatcher_common import unified_framework_flags, arch_feature_defines
 
 import ctypes
 import functools
@@ -359,6 +359,12 @@ class GemmKernelConfig:
     pad_n: bool = True
     pad_k: bool = True
     persistent: bool = False
+    # Fixed A/B/C global vector widths (elements). All 0 = native widths; else
+    # the canonical triple from codegen_common.resolve_gemm_vector_sizes (use
+    # with_vector_sizes() to set it so the name matches the codegen's).
+    vector_size_a: int = 0
+    vector_size_b: int = 0
+    vector_size_c: int = 0
 
     # No silent default: the arch must be resolved (rocminfo-detected or passed
     # explicitly) before this config feeds the compiler. expand_sweep /
@@ -438,6 +444,59 @@ class GemmKernelConfig:
         return f"{self.warp_tile_m}x{self.warp_tile_n}x{self.warp_tile_k}"
 
     @property
+    def vector_sizes(self) -> Tuple[int, int, int]:
+        return (self.vector_size_a, self.vector_size_b, self.vector_size_c)
+
+    def _vector_args(self) -> Dict[str, Any]:
+        return dict(
+            dtype_a=self.dtype_a,
+            dtype_b=self.dtype_b,
+            dtype_c=self.dtype_c,
+            layout=self.layout,
+            tile=(self.tile_m, self.tile_n, self.tile_k),
+            waves=(self.wave_m, self.wave_n, self.wave_k),
+            warp_tile=(self.warp_tile_m, self.warp_tile_n, self.warp_tile_k),
+            gfx_arch=self.gfx_arch,
+        )
+
+    @property
+    def effective_vector_sizes(self) -> Tuple[int, int, int]:
+        """A/B/C widths the kernel really uses (native ones when unset)."""
+        if any(self.vector_sizes):
+            return self.vector_sizes
+        return _codegen_common().gemm_native_vector_sizes(
+            **self._vector_args(), epilogue=self.epilogue
+        )
+
+    def with_vector_sizes(
+        self, requested: Tuple[int, int, int]
+    ) -> Tuple["GemmKernelConfig", Optional[str]]:
+        """Copy with ``requested`` widths resolved exactly as the codegen does.
+
+        Returns ``(config, reject_reason)``; the reason is None when legal.
+        """
+        if not any(requested):
+            return replace(self, vector_size_a=0, vector_size_b=0, vector_size_c=0), None
+        vec, reason = _codegen_common().resolve_gemm_vector_sizes(
+            **self._vector_args(),
+            requested=requested,
+            pipeline=self.pipeline,
+            epilogue=self.epilogue,
+            variant=self.variant,
+        )
+        if reason:
+            reason = (
+                f"{self.tile_str} {self.pipeline}/{self.epilogue} "
+                f"vec{'_'.join(map(str, vec))}: {reason}"
+            )
+        # Fixed widths only serve misaligned extents, which always need padding.
+        pads = dict(pad_m=True, pad_n=True, pad_k=True) if any(vec) else {}
+        cfg = replace(
+            self, vector_size_a=vec[0], vector_size_b=vec[1], vector_size_c=vec[2], **pads
+        )
+        return cfg, reason
+
+    @property
     def name(self) -> str:
         """Registry / runtime lookup key.
 
@@ -463,6 +522,8 @@ class GemmKernelConfig:
             f"_{_cap(self.persistent)}"
             f"_{self.tile_str}_{self.wave_str}_{self.warp_tile_str}"
         )
+        if any(self.vector_sizes):
+            name += _codegen_common().gemm_vector_size_suffix(self.vector_sizes)
         if self.variant == "preshuffle":
             name += "_preshuffle"
             if self.permute_n:
@@ -521,6 +582,9 @@ class GemmKernelConfig:
                 "pad_n": [self.pad_n],
                 "pad_k": [self.pad_k],
                 "persistent": [self.persistent],
+                "vector_size_a": [self.vector_size_a],
+                "vector_size_b": [self.vector_size_b],
+                "vector_size_c": [self.vector_size_c],
             },
             # Top-level knob read by unified_gemm_codegen for the preshuffle
             # variant (selects shuffle_b_permuteN vs shuffle_b). Harmless for
@@ -568,6 +632,7 @@ class GemmKernelConfig:
             "epilogue": self.epilogue,
             "pad": [self.pad_m, self.pad_n, self.pad_k],
             "persistent": self.persistent,
+            "vector_sizes": list(self.vector_sizes),
             "gfx_arch": self.gfx_arch,
             "variant": self.variant,
             "name": self.name,
@@ -660,6 +725,16 @@ class GroupedGemmProblem:
         return cls(groups=[(int(m), int(n), int(k)) for (m, n, k) in d["groups"]])
 
 
+# ctypes run() status codes (see bindings/ctypes/*_ctypes_lib.cpp).
+# STATUS_UNSUPPORTED (-3) is returned only when the selected kernel rejects the
+# problem (IsSupportedArgument throws "... not supported ..." inside run());
+# callers treat it as "not run" (skip, no verification). Every other negative
+# code (-1 host/HIP/launch error, -2 no suitable kernel) is a real failure.
+STATUS_OK = 0
+STATUS_NO_KERNEL = -2
+STATUS_UNSUPPORTED = -3
+
+
 @dataclass
 class GemmResult:
     output: np.ndarray
@@ -675,7 +750,13 @@ class GemmResult:
 
     @property
     def success(self) -> bool:
-        return self.status == 0
+        return self.status == STATUS_OK
+
+    @property
+    def unsupported(self) -> bool:
+        """True when the kernel did not run because run() returned
+        STATUS_UNSUPPORTED. success stays False; callers count it as a skip."""
+        return self.status == STATUS_UNSUPPORTED
 
 
 @dataclass
@@ -691,7 +772,13 @@ class GroupedGemmResult:
 
     @property
     def success(self) -> bool:
-        return self.status == 0
+        return self.status == STATUS_OK
+
+    @property
+    def unsupported(self) -> bool:
+        """True when the kernel did not run because run() returned
+        STATUS_UNSUPPORTED. success stays False; callers count it as a skip."""
+        return self.status == STATUS_UNSUPPORTED
 
 
 # ============================================================================
@@ -1418,7 +1505,13 @@ class MultiDGemmResult:
 
     @property
     def success(self) -> bool:
-        return self.status == 0
+        return self.status == STATUS_OK
+
+    @property
+    def unsupported(self) -> bool:
+        """True when the kernel did not run because run() returned
+        STATUS_UNSUPPORTED. success stays False; callers count it as a skip."""
+        return self.status == STATUS_UNSUPPORTED
 
 
 def _multi_d_layout_from_kernel_name(name: str) -> str:
@@ -2067,12 +2160,9 @@ def _build_compile_jobs(
         f"--offload-arch={config.gfx_arch}",
         f'-DGFX_ARCH="{config.gfx_arch}"',
         *unified_framework_flags(config.gfx_arch),
-        # Pin the fp8/bf8 encoding so BOTH compiler passes agree. Without this the
-        # device pass of config.hpp sees __gfx950__ and picks OCP while the host
-        # pass falls back to FNUZ -- and the numpy reference, which follows the
-        # arch (see numpy_dtype_for), then disagrees with the kernel by a factor
-        # of two. FNUZ archs need no define; the list is empty for them.
-        *_ocp_arch_defines(config.gfx_arch),
+        # Keep host/device fp8 encodings consistent and enable the target's
+        # WMMA/MX features, matching the CMake build.
+        *arch_feature_defines(config.gfx_arch),
         # Match Tile Engine's AMDGPU codegen flags exactly (see variant_flags /
         # _tile_engine_codegen_flags). Without them the kernel is compiled with
         # different inlining/register allocation, which changes occupancy;
@@ -2103,7 +2193,14 @@ def _build_compile_jobs(
     if not registry_bypass:
         link_cmd.append(str(static_lib))
     link_cmd += ["-o", str(lib_path)]
-    job = {"compile_cmd": compile_cmd, "link_cmd": link_cmd, "lib_path": str(lib_path)}
+    job = {
+        "compile_cmd": compile_cmd,
+        "link_cmd": link_cmd,
+        "lib_path": str(lib_path),
+        # Fixed-width instantiations of large tiles can exceed 600 seconds.
+        # Keep the native and linker limits unchanged.
+        "compile_timeout": 1200 if any(config.vector_sizes) else 300,
+    }
     return job, lib_path
 
 
@@ -2126,22 +2223,6 @@ def setup_multiple_gemm_dispatchers(
     if n == 0:
         return results
 
-    # Guard the compile path: every config's gfx_arch must be a concrete,
-    # supported arch before it reaches -DGFX_ARCH / --offload-arch / gpu_target.
-    # expand_sweep already resolves this, but a config built directly (gfx_arch
-    # left as None) would otherwise emit a literal "None" arch. Resolve/validate
-    # here too, defaulting a None to the rocminfo-detected arch (never gfx942).
-    _shared_arch: Optional[str] = None
-    resolved_configs: List[GemmKernelConfig] = []
-    for c in configs:
-        if c.gfx_arch:
-            resolved_configs.append(replace(c, gfx_arch=_resolve_arch(c.gfx_arch)))
-        else:
-            if _shared_arch is None:
-                _shared_arch = _get_arch()
-            resolved_configs.append(replace(c, gfx_arch=_shared_arch))
-    configs = resolved_configs
-
     # Hard-fail rather than build a runnable but WRONG kernel: a preshuffle config
     # with permute_n=True would compile a "_permuteN" kernel whose device pipeline
     # is not yet bridged (it mis-shuffles B -> wrong results; see BRIDGE_PERMUTE_N).
@@ -2159,6 +2240,22 @@ def setup_multiple_gemm_dispatchers(
                     f"that would mis-shuffle B ({c.name}). Flip BRIDGE_PERMUTE_N once "
                     "the permuteN pipeline is emitted in unified_gemm_codegen."
                 )
+
+    # Guard the compile path: every config's gfx_arch must be a concrete,
+    # supported arch before it reaches -DGFX_ARCH / --offload-arch / gpu_target.
+    # expand_sweep already resolves this, but a config built directly (gfx_arch
+    # left as None) would otherwise emit a literal "None" arch. Resolve/validate
+    # here too, defaulting a None to the rocminfo-detected arch (never gfx942).
+    _shared_arch: Optional[str] = None
+    resolved_configs: List[GemmKernelConfig] = []
+    for c in configs:
+        if c.gfx_arch:
+            resolved_configs.append(replace(c, gfx_arch=_resolve_arch(c.gfx_arch)))
+        else:
+            if _shared_arch is None:
+                _shared_arch = _get_arch()
+            resolved_configs.append(replace(c, gfx_arch=_shared_arch))
+    configs = resolved_configs
 
     max_workers = max_workers or min(multiprocessing.cpu_count(), 8)
 
@@ -2366,6 +2463,77 @@ def _warp_config_supported(wave_m: int, wave_n: int, wave_k: int, arch: str) -> 
     return [wave_m, wave_n, wave_k] in allowed
 
 
+# --- gfx1250 pipeline gate (parity with unified_gemm_codegen) --------------
+# Non-MX comp_async / comp_tdm / comp_tdm_v2 are only generated for gfx1250 by
+# unified_gemm_codegen. expand_sweep must drop the same combinations up front,
+# otherwise it hands back configs whose header is never emitted. The rules live
+# in codegen_common.gfx1250_pipeline_reject_reason (single source of truth
+# shared with the codegen and arch_filter); pipelines outside that set are
+# untouched.
+_CODEGEN_DIR = Path(__file__).resolve().parent.parent / "codegen"
+
+
+@functools.lru_cache(maxsize=1)
+def _codegen_common():
+    """The codegen_common module, importable regardless of whether a caller
+    already put the codegen dir on ``sys.path``."""
+    import sys  # noqa: WPS433 (local: only needed for this lazy import)
+
+    codegen_dir = str(_CODEGEN_DIR)
+    if codegen_dir not in sys.path:
+        sys.path.append(codegen_dir)
+    import codegen_common  # noqa: WPS433
+
+    return codegen_common
+
+
+def _gfx1250_reject_reason_fn():
+    return _codegen_common().gfx1250_pipeline_reject_reason
+
+
+def _gfx1250_pipeline_supported(
+    pipeline: str,
+    scheduler: str,
+    epilogue: str,
+    persistent: bool,
+    wave_m: int,
+    wave_n: int,
+    wave_k: int,
+    arch: str,
+    variant: str,
+    pad_m: bool = False,
+    pad_n: bool = False,
+    pad_k: bool = False,
+    layout: str = "",
+    dtype: str = "",
+    warp_tile_k: int = 0,
+) -> bool:
+    """False iff the (pipeline, epilogue) pair is a gfx1250 combination that
+    the codegen would reject for this arch/variant/trait.
+
+    ``layout`` is the A/B/C layout code (e.g. ``rcr``); empty skips the
+    comp_async layout rule. ``dtype``/``warp_tile_k`` feed the comp_async
+    8-bit warp_tile_k rule; an empty dtype skips it."""
+    if pipeline not in ("comp_async", "comp_tdm", "comp_tdm_v2") and epilogue != "tdm":
+        return True
+    reason = _gfx1250_reject_reason_fn()(
+        arch,
+        pipeline,
+        epilogue,
+        scheduler,
+        num_waves=wave_m * wave_n * wave_k,
+        warp_tile_k=warp_tile_k,
+        dtype_a=dtype,
+        dtype_b=dtype,
+        layout=layout,
+        variant_supported=variant in ("standard", "batched"),
+        variant_name=variant,
+        persistent=bool(persistent),
+        pads=(bool(pad_m), bool(pad_n), bool(pad_k)),
+    )
+    return not reason
+
+
 def expand_sweep(
     config_path: str,
     arch: Optional[str] = None,
@@ -2379,6 +2547,8 @@ def expand_sweep(
     b_elementwise_op: str = "PassThrough",
     cde_elementwise_op: str = "PassThrough",
     mabd_cli_overrides: Optional[Dict[str, Any]] = None,
+    vector_sizes: Optional[List[Tuple[int, int, int]]] = None,
+    rejects: Optional[Dict[str, int]] = None,
 ) -> List[GemmKernelConfig]:
     """Expand a Tile Engine GEMM JSON sweep config into GemmKernelConfig list.
 
@@ -2403,6 +2573,12 @@ def expand_sweep(
     carries a concrete, supported ``gfx_arch`` -- the compile command's
     ``-DGFX_ARCH`` / ``--offload-arch`` never see ``None``. An explicit,
     unsupported arch raises ``ValueError``.
+
+    ``vector_sizes`` lists requested A/B/C global vector widths (0 = native);
+    default is the ``trait_config`` ``vector_size_a/b/c`` product, else native
+    only. Each base config is emitted once per distinct resolved triple; a
+    triple that is illegal for the tile is dropped and its reason counted in
+    ``rejects`` (when given).
     """
     # Multi-ABD is fp16-only end-to-end (codegen, ctypes lib, and GpuMultiABDRunner
     # all assume fp16). Reject other dtypes here -- before any codegen/build -- so
@@ -2440,6 +2616,12 @@ def expand_sweep(
     pad_ns = _expand_values(tr.get("pad_n"), [False])
     pad_ks = _expand_values(tr.get("pad_k"), [False])
     persistents = _expand_values(tr.get("persistent"), [False])
+    if vector_sizes is None:
+        vector_sizes = list(
+            itertools.product(
+                *(_expand_values(tr.get(f"vector_size_{x}"), [0]) for x in "abc")
+            )
+        )
 
     # Preshuffle B-shuffle permutation knob -- pinned to the single source of
     # truth BRIDGE_PERMUTE_N (see its definition for the full rationale). We
@@ -2610,7 +2792,30 @@ def expand_sweep(
         # producing wrong results (on-device max_rel 0.14-0.87 vs an fp32 CPU
         # reference; <=4-warp compv3 and all compv4/mem/interwave kernels are
         # bit-accurate). Gate it off until the pipeline is ported to wave32.
-        if arch == "gfx1250" and pipe == "compv3" and sched == "intrawave" and wm * wn == 8:
+        if (
+            arch == "gfx1250"
+            and pipe == "compv3"
+            and sched == "intrawave"
+            and wm * wn == 8
+        ):
+            continue
+        if not _gfx1250_pipeline_supported(
+            pipe,
+            sched,
+            epi,
+            bool(persist),
+            wm,
+            wn,
+            wk,
+            arch,
+            variant,
+            pad_m=bool(pm),
+            pad_n=bool(pn),
+            pad_k=bool(pk),
+            layout=layout,
+            dtype=dtype,
+            warp_tile_k=wtk,
+        ):
             continue
         if epi == "cshuffle" and not _cshuffle_store_ok(
             tm // m_div, tn // n_div, wtm, wtn
@@ -2663,12 +2868,20 @@ def expand_sweep(
                     elementwise_op=ew_op,
                     d_layout=d_layout_word,
                 )
-                if c.name in seen:
-                    continue
-                val = _cu.validate_kernel_config(c.to_ctypes_config())
-                if not val.is_valid:
-                    continue
-                seen.add(c.name)
-                configs.append(c)
+                val = None
+                for vec in vector_sizes:
+                    cv, reason = c.with_vector_sizes(tuple(vec))
+                    if reason:
+                        if rejects is not None:
+                            rejects[reason] = rejects.get(reason, 0) + 1
+                        continue
+                    if cv.name in seen:
+                        continue
+                    if val is None:
+                        val = _cu.validate_kernel_config(c.to_ctypes_config())
+                    if not val.is_valid:
+                        break
+                    seen.add(cv.name)
+                    configs.append(cv)
 
     return configs

@@ -135,6 +135,10 @@ def configure(
     apply_input_config_defaults, and runs config_generator.run to write
     tensilelite tuning YAML (and side artifacts) under output_dir.
 
+    Each GemmConfig carries its own ``mx`` flag. MX-only data types (F4)
+    auto-enable MX in GemmConfig.__post_init__; for F8, MX is set by the
+    caller (CLI inline arg, workload log scaleA/scaleB, or YAML config).
+
     Args:
         hipblaslt_path (str | Path): Path to hipBLASLt installation.
         gemm_configs (GemmConfig | Sequence[GemmConfig]): One GemmConfig
@@ -158,7 +162,7 @@ def configure(
     )
 
     for gc in gcs:
-        logger.info(f"{gc.gemm_type} with {len(gc.sizes)} sizes")
+        logger.info(f"{gc.gemm_type} with {len(gc.sizes)} sizes (mx={gc.mx})")
         gt = gc.gemm_type
         logger.debug(
             f"Preparing optimization config: gemm_type={gc.gemm_type} "
@@ -257,7 +261,11 @@ def run(
         logger.info("No optimizations to run")
         return
 
-    build_tensilelite_client(hipblaslt_path, build_dir=client_build_dir)
+    build_tensilelite_client(
+        hipblaslt_path,
+        build_dir=client_build_dir,
+        gpu_targets=_gpu_targets_from_configs(configs),
+    )
 
     _timing_lock = Lock()
 
@@ -369,7 +377,7 @@ def analyze(
     error_thr: float = 0.03,
     up_thr: float = 1.03,
     duration: float = 1.0,
-    beta: bool = True,
+    beta: bool = False,
     log_summary: str | Path = None,
     verify: bool = True,
     bench_freq: bool = False,
@@ -403,7 +411,7 @@ def analyze(
         duration (float, optional): Benchmark duration in seconds.
             Defaults to 1.0.
         beta (bool, optional): Whether to use non-zero beta values.
-            Defaults to True.
+            Defaults to False.
         log_summary (str | Path, optional): CSV file with GEMM contribution to
             calculate weighted uplift. Defaults to None.
         bench_freq (bool, optional): Forwarded to bench.compare (controls

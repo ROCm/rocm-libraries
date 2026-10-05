@@ -35,8 +35,15 @@ def _ck_state(**over):
     }
     problem_type.update(over.pop("ProblemType", {}))
     state = {
-        "CustomKernel": {"name": "k", "macrotile": [128, 256, 64], "threads": [256, 1, 1]},
-        "StreamK": 0,
+        # Workspace keys mirror the setdefaults getCustomKernelConfig applies.
+        "CustomKernel": {
+            "name": "k", "macrotile": [128, 256, 64], "threads": [256, 1, 1],
+            "workspaceType": "None",
+            "workspaceSizePerElemC": 0,
+            "workspaceSizePerElemBias": 0,
+        },
+        "TileProcessingStrategy": "None",
+        "WorkAssignment": "StaticGrid",
         "StreamKAtomic": 0,
         "GlobalSplitUAlgorithm": "",
         "ProblemType": problem_type,
@@ -66,6 +73,46 @@ def test_assign_custom_kernel_params_basic_derivation():
     assert state["GlobalReadVectorWidthB"] == 1
     assert state["StoreVectorWidth"] == 1
     assert state["_GlobalAccumulation"] is None  # GlobalSplitUAlgorithm == ""
+
+
+def test_assign_custom_kernel_params_unset_macrotile_falls_back_to_logic_file():
+    # Any handwritten kernel without MI fields and without an MTxxx name token
+    # reaches here with macrotile [0, 0, 0]. Taking that zero over the logic-file tile put
+    # a 0 in sizeMapping.macroTile, and getNumTiles() then divided by it.
+    state = _ck_state(MacroTile0=256, MacroTile1=256, DepthU=128)
+    state["CustomKernel"]["macrotile"] = [0, 0, 0]
+    Solution._assignCustomKernelParameters(state)
+
+    assert state["MacroTile0"] == 256
+    assert state["MacroTile1"] == 256
+    assert state["DepthU"] == 128
+    # The C++ runtime reads this block directly, so it must agree with the state.
+    assert state["CustomKernel"]["macrotile"] == [256, 256, 128]
+
+
+def test_assign_custom_kernel_params_macrotile_wins_over_logic_file():
+    # When the kernel does declare a tile it stays authoritative.
+    state = _ck_state(MacroTile0=64, MacroTile1=64, DepthU=16)
+    Solution._assignCustomKernelParameters(state)
+
+    assert [state["MacroTile0"], state["MacroTile1"], state["DepthU"]] == [128, 256, 64]
+
+
+def test_assign_custom_kernel_params_unresolvable_macrotile_raises():
+    # Neither source supplies a tile: fail the build rather than emit a library
+    # that divides by zero at solution-selection time.
+    state = _ck_state()
+    state["CustomKernel"]["macrotile"] = [0, 0, 0]
+    with pytest.raises(RuntimeError, match="no usable MacroTile0"):
+        Solution._assignCustomKernelParameters(state)
+
+
+def test_assign_custom_kernel_params_default_depthu_is_not_a_tile():
+    # Logic files default DepthU to -1; that must not be accepted as a tile.
+    state = _ck_state(MacroTile0=256, MacroTile1=256, DepthU=-1)
+    state["CustomKernel"]["macrotile"] = [0, 0, 0]
+    with pytest.raises(RuntimeError, match="no usable DepthU"):
+        Solution._assignCustomKernelParameters(state)
 
 
 def test_assign_custom_kernel_params_enable_mi_sets_wave_params():
@@ -100,9 +147,49 @@ def test_assign_custom_kernel_params_direct_to_lds(dtl, expect_a, expect_b):
 
 
 def test_assign_custom_kernel_params_streamk_partials_accumulation():
-    state = _ck_state(StreamK=2, StreamKAtomic=0)
+    state = _ck_state(TileProcessingStrategy="StreamK", StreamKAtomic=0)
     Solution._assignCustomKernelParameters(state)
     assert state["_GlobalAccumulation"] == "PartialsBuffer"
+
+
+def test_assign_custom_kernel_params_derives_streamk_workspace():
+    # Non-atomic Stream-K reduces partial tiles through the workspace, so a
+    # block that declares none must be sized from the compute type.
+    state = _ck_state(TileProcessingStrategy="StreamK", StreamKAtomic=0)
+    Solution._assignCustomKernelParameters(state)
+    assert state["CustomKernel"]["workspaceType"] == "StreamKWithReduction"
+    assert state["CustomKernel"]["workspaceSizePerElemC"] == 4
+    assert state["_WorkspaceSizePerElemC"] == 4
+
+
+def test_assign_custom_kernel_params_derives_streamk_workspace_from_compute_type():
+    state = _ck_state(
+        TileProcessingStrategy="StreamK",
+        StreamKAtomic=0,
+        ProblemType={"ComputeDataType": DataType("d"), "DestDataType": DataType("d")},
+    )
+    Solution._assignCustomKernelParameters(state)
+    assert state["CustomKernel"]["workspaceSizePerElemC"] == 8
+
+
+def test_assign_custom_kernel_params_keeps_declared_workspace():
+    state = _ck_state(TileProcessingStrategy="StreamK", StreamKAtomic=0)
+    state["CustomKernel"]["workspaceType"] = "StreamK"
+    state["CustomKernel"]["workspaceSizePerElemC"] = 2
+    Solution._assignCustomKernelParameters(state)
+    assert state["CustomKernel"]["workspaceType"] == "StreamK"
+    assert state["CustomKernel"]["workspaceSizePerElemC"] == 2
+
+
+@pytest.mark.parametrize("over", [
+    {},                                # not Stream-K at all
+    {"TileProcessingStrategy": "StreamK", "StreamKAtomic": 1},  # atomic needs no reduction buffer
+])
+def test_assign_custom_kernel_params_no_workspace_without_partials(over):
+    state = _ck_state(**over)
+    Solution._assignCustomKernelParameters(state)
+    assert state["CustomKernel"]["workspaceType"] == "None"
+    assert state["_WorkspaceSizePerElemC"] == 0
 
 
 def test_assign_custom_kernel_params_single_buffer_accumulation():

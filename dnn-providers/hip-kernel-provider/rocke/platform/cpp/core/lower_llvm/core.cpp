@@ -20,6 +20,7 @@
  * stub bodies remain in this file.
  */
 #include "rocke/lower_llvm_internal.h"
+#include "rocke/tf32_internal.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -935,7 +936,7 @@ void rocke_ll_need_dynamic(rocke_lower_t* L, const char* key, const char* decl)
 }
 
 /* ====================================================================== */
-/* Type rendering (Python _llvm_type / _llvm_type_from_name)              */
+/* Type rendering (Python _llvm_type)                                     */
 /* ====================================================================== */
 
 const char* rocke_ll_llvm_type(rocke_lower_t* L, const rocke_type_t* t)
@@ -978,7 +979,7 @@ const char* rocke_ll_llvm_type(rocke_lower_t* L, const rocke_type_t* t)
             return "i8";
         if(strcmp(n, "i16") == 0)
             return "i16";
-        if(strcmp(n, "i32") == 0)
+        if(strcmp(n, "i32") == 0 || strcmp(n, "tf32") == 0)
             return "i32";
         if(strcmp(n, "i64") == 0)
             return "i64";
@@ -1068,62 +1069,6 @@ int rocke_ll_anyptr_space(rocke_lower_t* L,
                   op,
                   ty,
                   list);
-}
-
-const char* rocke_ll_llvm_type_from_name(rocke_lower_t* L, const char* name)
-{
-    if(!name)
-    {
-        rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "no LLVM type for (null)");
-    }
-    if(strcmp(name, "i32") == 0)
-        return "i32";
-    if(strcmp(name, "i64") == 0)
-        return "i64";
-    if(strcmp(name, "i8") == 0)
-        return "i8";
-    if(strcmp(name, "f16") == 0)
-        return "half";
-    if(strcmp(name, "bf16") == 0)
-        return "bfloat";
-    if(strcmp(name, "f32") == 0)
-        return "float";
-    if(strcmp(name, "fp8e4m3") == 0)
-        return "i8";
-    if(strncmp(name, "vec<", 4) == 0)
-    {
-        /* vec<elemxN> -> "<N x llvm_elem>" */
-        const char* inner = name + 4;
-        const char* xpos = strchr(inner, 'x');
-        const char* end = strrchr(name, '>');
-        if(xpos && end && end > xpos)
-        {
-            char elem[32];
-            size_t elen = (size_t)(xpos - inner);
-            if(elen >= sizeof elem)
-            {
-                elen = sizeof elem - 1;
-            }
-            memcpy(elem, inner, elen);
-            elem[elen] = '\0';
-            int count = atoi(xpos + 1);
-            const char* lelem = "i32";
-            if(strcmp(elem, "f32") == 0)
-                lelem = "float";
-            else if(strcmp(elem, "f16") == 0)
-                lelem = "half";
-            else if(strcmp(elem, "bf16") == 0)
-                lelem = "bfloat";
-            else if(strcmp(elem, "i32") == 0)
-                lelem = "i32";
-            else
-            {
-                rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "no LLVM type for vec elem %s", elem);
-            }
-            return rocke_arena_printf(&L->arena, "<%d x %s>", count, lelem);
-        }
-    }
-    rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "no LLVM type for %s", name);
 }
 
 const char* rocke_ll_smem_storage_type(rocke_lower_t* L, const rocke_type_t* smem)
@@ -1629,7 +1574,7 @@ static int ll_smem_seg_size(const rocke_type_t* stype)
         eb = 1;
     else if(strcmp(n, "f16") == 0 || strcmp(n, "bf16") == 0)
         eb = 2;
-    else if(strcmp(n, "i32") == 0 || strcmp(n, "f32") == 0)
+    else if(strcmp(n, "i32") == 0 || strcmp(n, "tf32") == 0 || strcmp(n, "f32") == 0)
         eb = 4;
     else if(strcmp(n, "i64") == 0)
         eb = 8;
@@ -1932,6 +1877,9 @@ void rocke_ll_lower_op(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
+    const char* tf32_error = rocke_tf32_op_error(op);
+    if(tf32_error)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", tf32_error);
     rocke_opcode_t oc = op->opcode;
     rocke_ll_op_fn fn = NULL;
     if(oc > ROCKE_OP_INVALID && oc < ROCKE_OP__COUNT)

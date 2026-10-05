@@ -65,6 +65,8 @@ stinkytofu-opt [options] <ir_file> [--pass1] [--pass2] ...
 - `--arch <arch>`: Target GPU architecture (default: gfx1250). Supported: `gfx1250`
 - `--remarks`: Enable optimization remarks on stderr (e.g. loop region diagnostics)
 - `--tensor-load-wmma-space=<int>`: Scheduler tuning knob for tensor-load/WMMA spacing (`TensorLoadWmmaSpace`). `0` disables this adjustment; values `> 0` apply the CDNA5 barrier-threshold offset.
+- `--tensor-load-ds-load-gap-cycles=<int>`: Extra cycles between an after-barrier and the before-side ds_loads on gap placement (`TensorLoadDsLoadGapCycles`). Default `64`; `0` disables the extra gap.
+- `--time-passes`: Report per-pass wall time on stderr (self / total / runs, slowest first)
 - `--list-passes`: Display all available optimization passes
 - `--help`: Show usage information
 

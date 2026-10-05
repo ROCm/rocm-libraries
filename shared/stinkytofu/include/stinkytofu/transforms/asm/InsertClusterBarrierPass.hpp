@@ -60,7 +60,11 @@ class Pass;
 /// tensor drain for StreamK cluster multicast at PrefetchGlobalRead >= 2.
 /// \p rule3SignalLeadCycles controls how far ahead of its wait the Rule 3
 /// signal is targeted; 0 co-locates them.
+/// \p splitWaveLoop duplicates each Rule 3 loop. Wave 0 falls into the original
+/// body and posts a bare cluster signal; every other wave takes the copy, which
+/// keeps the wait and omits the signal. Off by default.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass(
-    bool streamKMulticast = false, int pgrValue = 1, int rule3SignalLeadCycles = 100);
+    bool streamKMulticast = false, int pgrValue = 1, int rule3SignalLeadCycles = 100,
+    bool splitWaveLoop = false);
 
 }  // namespace stinkytofu
