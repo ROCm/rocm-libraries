@@ -43,12 +43,15 @@
 #    include <hip/hip_runtime.h>
 
 #    include <algorithm>
+#    include <cassert>
+#    include <cerrno>
 #    include <cstddef>
 #    include <cstdint>
 #    include <cstring>
+#    include <limits>
+#    include <memory>
 #    include <memory_resource>
 #    include <new>
-#    include <stdexcept>
 
 #    if __has_include(<malloc.h>)
 #      include <malloc.h>
@@ -64,22 +67,39 @@ struct Header
   std::size_t align;
 };
 
+// Clears a HIP failure that the interposer handles itself, unless an error was
+// already pending before its HIP calls, as captured by hipPeekAtLastError in
+// pending. The next hipGetLastError, which rocPRIM calls after every kernel
+// launch, then reports an error exactly when it would have without them.
+inline hipError_t __consume_error(hipError_t e, hipError_t pending) noexcept
+{
+  if (e != hipSuccess && pending == hipSuccess)
+  {
+    static_cast<void>(hipGetLastError());
+  }
+  return e;
+}
+
 inline std::pmr::synchronized_pool_resource heap{
   std::pmr::pool_options{0u, 15u * 1024u}, []() {
     static class final : public std::pmr::memory_resource
     {
-      // TODO: add exception handling
       void* do_allocate(std::size_t n, std::size_t a) override
       {
         void* r{};
-        hipMallocManaged(&r, n);
+        const auto pending = hipPeekAtLastError();
+        if (__consume_error(hipMallocManaged(&r, n), pending) != hipSuccess || !r)
+        {
+          throw std::bad_alloc{};
+        }
 
         return r;
       }
 
       void do_deallocate(void* p, std::size_t, std::size_t) override
       {
-        hipFree(p);
+        const auto pending = hipPeekAtLastError();
+        static_cast<void>(__consume_error(hipFree(p), pending));
       }
 
       bool do_is_equal(const std::pmr::memory_resource& x) const noexcept override
@@ -90,24 +110,73 @@ inline std::pmr::synchronized_pool_resource heap{
 
     return &r;
   }()};
+
+// True if p was handed out by the managed pool. Query p itself rather than the
+// Header before it: for a libc block that address lies outside the block, for
+// example in the preceding mapping when glibc serves the block with mmap.
+inline bool __is_pool_allocation(const void* p) noexcept
+{
+  hipPointerAttribute_t tmp{};
+  const auto pending = hipPeekAtLastError();
+  static_cast<void>(__consume_error(hipPointerGetAttributes(&tmp, p), pending));
+
+  return tmp.isManaged;
+}
 } // Namespace hipstd.
 
 extern "C" inline __attribute__((used)) void* __hipstdpar_aligned_alloc(std::size_t a, std::size_t n)
-{ // TODO: tidy up, revert to using std.
-  auto m = n + sizeof(hipstd::Header) + a - 1;
+{
+  constexpr auto max_size             = (std::numeric_limits<std::size_t>::max)();
+  constexpr auto header_size          = sizeof(hipstd::Header);
+  constexpr auto allocation_alignment = alignof(hipstd::Header);
 
-  auto r = hipstd::heap.allocate(m, a);
-
-  if (!r)
+  // memalign and aligned_alloc are both routed here. Like glibc memalign, round
+  // an alignment that is not a power of two up rather than rejecting it.
+  if (a > max_size / 2 + 1)
   {
-    return r;
+    errno = EINVAL;
+    return nullptr;
+  }
+  if (a == 0 || (a & (a - 1)) != 0)
+  {
+    std::size_t rounded = alignof(std::max_align_t);
+    while (rounded < a)
+    {
+      rounded <<= 1;
+    }
+    a = rounded;
   }
 
-  const auto h                             = static_cast<hipstd::Header*>(r) + 1;
-  const auto p                             = (reinterpret_cast<std::uintptr_t>(h) + a - 1) & -a;
-  reinterpret_cast<hipstd::Header*>(p)[-1] = {r, m, a};
+  const auto padding = a - 1;
+  if (padding > max_size - header_size || n > max_size - header_size - padding)
+  {
+    errno = ENOMEM;
+    return nullptr;
+  }
 
-  return reinterpret_cast<void*>(p);
+  const auto allocation_size = header_size + n + padding;
+
+  void* allocation{};
+  try
+  {
+    allocation = hipstd::heap.allocate(allocation_size, allocation_alignment);
+  }
+  catch (...)
+  {
+    // Rewritten C allocation calls must not let exceptions escape.
+    errno = ENOMEM;
+    return nullptr;
+  }
+
+  void* aligned = static_cast<std::byte*>(allocation) + header_size;
+  auto space    = allocation_size - header_size;
+  // Cannot fail: space is n + a - 1 and aligning advances by at most a - 1.
+  [[maybe_unused]] const auto fits = std::align(a, n, aligned, space);
+  assert(fits);
+
+  static_cast<hipstd::Header*>(aligned)[-1] = {allocation, allocation_size, allocation_alignment};
+
+  return aligned;
 }
 
 extern "C" inline __attribute__((used)) void* __hipstdpar_malloc(std::size_t n)
@@ -119,22 +188,41 @@ extern "C" inline __attribute__((used)) void* __hipstdpar_malloc(std::size_t n)
 
 extern "C" inline __attribute__((used)) void* __hipstdpar_calloc(std::size_t n, std::size_t sz)
 {
-  return std::memset(__hipstdpar_malloc(n * sz), 0, n * sz);
+  std::size_t bytes{};
+  if (__builtin_mul_overflow(n, sz, &bytes))
+  {
+    errno = ENOMEM;
+    return nullptr;
+  }
+
+  auto p = __hipstdpar_malloc(bytes);
+
+  return p ? std::memset(p, 0, bytes) : nullptr;
 }
 
 extern "C" inline __attribute__((used)) int __hipstdpar_posix_aligned_alloc(void** p, std::size_t a, std::size_t n)
-{ // TODO: check invariants on alignment
-  if (!p || n == 0)
+{
+  if (!p || a < sizeof(void*) || (a & (a - 1)) != 0)
   {
-    return 0;
+    return EINVAL;
   }
 
-  *p = __hipstdpar_aligned_alloc(a, n);
+  const auto saved_errno = errno;
+  auto allocation        = __hipstdpar_aligned_alloc(a, n);
+  errno                  = saved_errno;
+  if (!allocation)
+  {
+    return ENOMEM;
+  }
 
-  return 1;
+  *p = allocation;
+  return 0;
 }
 
 extern "C" __attribute__((weak)) void __hipstdpar_hidden_free(void*);
+
+// Declared ahead of __hipstdpar_realloc, which frees through it below.
+extern "C" inline __attribute__((used)) void __hipstdpar_free(void*);
 
 extern "C" inline __attribute__((used)) void* __hipstdpar_realloc(void* p, std::size_t n)
 {
@@ -155,12 +243,7 @@ extern "C" inline __attribute__((used)) void* __hipstdpar_realloc(void* p, std::
     return nullptr;
   }
 
-  auto h = static_cast<hipstd::Header*>(p) - 1;
-
-  hipPointerAttribute_t tmp{};
-  auto r = hipPointerGetAttributes(&tmp, h);
-
-  if (!tmp.isManaged)
+  if (!hipstd::__is_pool_allocation(p))
   {
     std::size_t old = n;
 #    if defined(__HIPSTDPAR_HAS_MALLOC_USABLE_SIZE__)
@@ -171,6 +254,7 @@ extern "C" inline __attribute__((used)) void* __hipstdpar_realloc(void* p, std::
   }
   else
   {
+    const auto h   = static_cast<hipstd::Header*>(p) - 1;
     const auto old = reinterpret_cast<std::uintptr_t>(h->alloc_ptr) + h->size
                      - reinterpret_cast<std::uintptr_t>(p);
     std::memcpy(q, p, std::min<std::size_t>(old, n));
@@ -181,37 +265,59 @@ extern "C" inline __attribute__((used)) void* __hipstdpar_realloc(void* p, std::
 }
 
 extern "C" inline __attribute__((used)) void* __hipstdpar_realloc_array(void* p, std::size_t n, std::size_t sz)
-{ // TODO: handle overflow in n * sz gracefully, as per spec.
-  return __hipstdpar_realloc(p, n * sz);
+{
+  // Checked before reallocating: a wrapped product of zero would be taken as a
+  // request to free p, leaving the caller holding a dangling pointer.
+  std::size_t bytes{};
+  if (__builtin_mul_overflow(n, sz, &bytes))
+  {
+    errno = ENOMEM;
+    return nullptr;
+  }
+
+  return __hipstdpar_realloc(p, bytes);
 }
 
 extern "C" inline __attribute__((used)) void __hipstdpar_free(void* p)
 {
-  auto h = static_cast<hipstd::Header*>(p) - 1;
+  if (!p)
+  {
+    return;
+  }
 
-  hipPointerAttribute_t tmp{};
-  auto r = hipPointerGetAttributes(&tmp, h);
-
-  if (!tmp.isManaged)
+  if (!hipstd::__is_pool_allocation(p))
   {
     return __hipstdpar_hidden_free(p);
   }
+
+  const auto h = static_cast<hipstd::Header*>(p) - 1;
 
   return hipstd::heap.deallocate(h->alloc_ptr, h->size, h->align);
 }
 
 extern "C" inline __attribute__((used)) void* __hipstdpar_operator_new_aligned(std::size_t n, std::size_t a)
 {
-  if (auto p = __hipstdpar_aligned_alloc(a, n))
+  const auto allocation_size = n == 0 ? 1 : n;
+  while (true)
   {
-    return p;
-  }
+    if (auto p = __hipstdpar_aligned_alloc(a, allocation_size))
+    {
+      return p;
+    }
 
-  throw std::runtime_error{"Failed __hipstdpar_operator_new_aligned"};
+    if (auto handler = std::get_new_handler())
+    {
+      handler();
+    }
+    else
+    {
+      throw std::bad_alloc{};
+    }
+  }
 }
 
 extern "C" inline __attribute__((used)) void* __hipstdpar_operator_new(std::size_t n)
-{ // TODO: consider adding the special handling for operator new
+{
   return __hipstdpar_operator_new_aligned(n, alignof(std::max_align_t));
 }
 
@@ -223,35 +329,27 @@ extern "C" inline __attribute__((used)) void* __hipstdpar_operator_new_nothrow(s
   }
   catch (...)
   {
-    // TODO: handle the potential exception
+    return nullptr;
   }
 }
 
 extern "C" inline __attribute__((used)) void*
 __hipstdpar_operator_new_aligned_nothrow(std::size_t n, std::size_t a, std::nothrow_t) noexcept
-{ // TODO: consider adding the special handling for operator new
+{
   try
   {
     return __hipstdpar_operator_new_aligned(n, a);
   }
   catch (...)
   {
-    // TODO: handle the potential exception.
+    return nullptr;
   }
 }
 
 extern "C" inline __attribute__((used)) void
-__hipstdpar_operator_delete_aligned_sized(void* p, std::size_t n, std::size_t a) noexcept
+__hipstdpar_operator_delete_aligned_sized(void* p, std::size_t, std::size_t) noexcept
 {
-  hipPointerAttribute_t tmp{};
-  auto r = hipPointerGetAttributes(&tmp, p);
-
-  if (!tmp.isManaged)
-  {
-    return __hipstdpar_hidden_free(p);
-  }
-
-  return hipstd::heap.deallocate(p, n, a);
+  return __hipstdpar_free(p);
 }
 
 extern "C" inline __attribute__((used)) void __hipstdpar_operator_delete(void* p) noexcept
@@ -260,7 +358,7 @@ extern "C" inline __attribute__((used)) void __hipstdpar_operator_delete(void* p
 }
 
 extern "C" inline __attribute__((used)) void __hipstdpar_operator_delete_aligned(void* p, std::size_t) noexcept
-{ // TODO: use alignment
+{
   return __hipstdpar_free(p);
 }
 
