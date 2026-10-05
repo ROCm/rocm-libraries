@@ -28,6 +28,7 @@ namespace rocsparse
 
     template <unsigned int BLOCKSIZE,
               unsigned int WF_SIZE,
+              bool         GRID_STRIDE,
               typename I,
               typename J,
               typename A,
@@ -65,6 +66,7 @@ namespace rocsparse
 
     template <unsigned int BLOCKSIZE,
               unsigned int WF_SIZE,
+              bool         GRID_STRIDE,
               typename I,
               typename J,
               typename A,
@@ -102,6 +104,7 @@ namespace rocsparse
     template <unsigned int BLOCKSIZE,
               unsigned int WF_SIZE,
               unsigned int LOOPS,
+              bool         GRID_STRIDE,
               typename T,
               typename I,
               typename J,
@@ -136,6 +139,7 @@ namespace rocsparse
 
     template <unsigned int BLOCKSIZE,
               unsigned int WF_SIZE,
+              bool         GRID_STRIDE,
               typename T,
               typename I,
               typename J,
