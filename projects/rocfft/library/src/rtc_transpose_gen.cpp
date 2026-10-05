@@ -270,9 +270,9 @@ std::string transpose_rtc(const std::string& kernel_name, const TransposeSpecs& 
     Variable i{"i", rtc_kint_type(KIntType::U32)};
     Variable logical_row{"logical_row", "auto"};
     Variable logical_col{"logical_col", "auto"};
-    Variable idx0{"idx0", "auto"};
-    Variable idx1{"idx1", "auto"};
-    Variable idx2{"idx2", "auto"};
+    Variable idx0{"idx0", "integer_type"};
+    Variable idx1{"idx1", "integer_type"};
+    Variable idx2{"idx2", "integer_type"};
     Variable global_read_idx{"global_read_idx", "auto"};
     Variable global_write_idx{"global_write_idx", "auto"};
     Variable elem{"elem", "scalar_type"};
