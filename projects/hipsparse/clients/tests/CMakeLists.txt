@@ -154,6 +154,7 @@ if(HIPSPARSE_ENABLE_HIP)
         "${CMAKE_CURRENT_SOURCE_DIR}/test_hybmv.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/test_csr2hyb.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/test_hyb2csr.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_hyb_mat_info.cpp"
     )
 endif()
 

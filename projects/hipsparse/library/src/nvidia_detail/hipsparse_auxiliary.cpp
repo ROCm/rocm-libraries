@@ -28,6 +28,10 @@
 
 #include "utility.h"
 
+#include <algorithm>
+#include <iterator>
+#include <limits>
+
 hipsparseStatus_t hipsparseCreate(hipsparseHandle_t* handle)
 {
     return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseCreate((cusparseHandle_t*)handle));
@@ -195,6 +199,217 @@ hipsparseStatus_t hipsparseCreateHybMat(hipsparseHybMat_t* hybA)
 hipsparseStatus_t hipsparseDestroyHybMat(hipsparseHybMat_t hybA)
 {
     return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseDestroyHybMat((cusparseHybMat_t)hybA));
+}
+
+// cuSPARSE exposes no public accessor for its opaque cusparseHybMat_t. This
+// mirror struct is an ASSUMED layout of cuSPARSE's internal HYB type (the same
+// layout the pre-11.0 cuSPARSE HYB routines have always been assumed to use);
+// it is not guaranteed by NVIDIA and is not validated by any cuSPARSE header.
+// In particular it has no value data type field. Kept private to this
+// translation unit: callers only ever go through hipsparseHybMatGetInfo/SetInfo.
+struct cusparse_hyb_mat_mirror
+{
+    int                    m;
+    int                    n;
+    cusparseHybPartition_t partition;
+    int                    ell_nnz;
+    int                    ell_width;
+    int*                   ell_col_ind;
+    void*                  ell_val;
+    int                    coo_nnz;
+    int*                   coo_row_ind;
+    int*                   coo_col_ind;
+    void*                  coo_val;
+};
+
+hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t  hyb,
+                                         int*                     m,
+                                         int*                     n,
+                                         hipsparseHybPartition_t* partition,
+                                         int64_t*                 ell_nnz,
+                                         int*                     ell_width,
+                                         const int**              ell_col_ind,
+                                         const void**             ell_val,
+                                         int*                     coo_nnz,
+                                         const int**              coo_row_ind,
+                                         const int**              coo_col_ind,
+                                         const void**             coo_val,
+                                         hipDataType*             data_type)
+{
+    if(hyb == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+    if(data_type != nullptr)
+    {
+        return HIPSPARSE_STATUS_NOT_SUPPORTED;
+    }
+
+    const cusparse_hyb_mat_mirror* dhyb = (const cusparse_hyb_mat_mirror*)hyb;
+
+    if(partition != nullptr)
+    {
+        try
+        {
+            *partition = hipsparse::cudaHybPartitionToHipHybPartition(dhyb->partition);
+        }
+        catch(...)
+        {
+            return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        }
+    }
+    if(m != nullptr)
+    {
+        *m = dhyb->m;
+    }
+    if(n != nullptr)
+    {
+        *n = dhyb->n;
+    }
+    if(ell_nnz != nullptr)
+    {
+        *ell_nnz = dhyb->ell_nnz;
+    }
+    if(ell_width != nullptr)
+    {
+        *ell_width = dhyb->ell_width;
+    }
+    if(ell_col_ind != nullptr)
+    {
+        *ell_col_ind = dhyb->ell_col_ind;
+    }
+    if(ell_val != nullptr)
+    {
+        *ell_val = dhyb->ell_val;
+    }
+    if(coo_nnz != nullptr)
+    {
+        *coo_nnz = dhyb->coo_nnz;
+    }
+    if(coo_row_ind != nullptr)
+    {
+        *coo_row_ind = dhyb->coo_row_ind;
+    }
+    if(coo_col_ind != nullptr)
+    {
+        *coo_col_ind = dhyb->coo_col_ind;
+    }
+    if(coo_val != nullptr)
+    {
+        *coo_val = dhyb->coo_val;
+    }
+    return HIPSPARSE_STATUS_SUCCESS;
+}
+
+hipsparseStatus_t hipsparseHybMatSetInfo(hipsparseHybMat_t              hyb,
+                                         const int*                     m,
+                                         const int*                     n,
+                                         const hipsparseHybPartition_t* partition,
+                                         const int64_t*                 ell_nnz,
+                                         const int*                     ell_width,
+                                         int* const*                    ell_col_ind,
+                                         void* const*                   ell_val,
+                                         const int*                     coo_nnz,
+                                         int* const*                    coo_row_ind,
+                                         int* const*                    coo_col_ind,
+                                         void* const*                   coo_val,
+                                         const hipDataType*             data_type)
+{
+    if(hyb == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+    if(data_type != nullptr)
+    {
+        return HIPSPARSE_STATUS_NOT_SUPPORTED;
+    }
+
+    // Validate everything before modifying hyb, so that an error leaves it unchanged.
+    if((m != nullptr && *m < 0) || (n != nullptr && *n < 0)
+       || (ell_width != nullptr && *ell_width < 0) || (coo_nnz != nullptr && *coo_nnz < 0))
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+    if(ell_nnz != nullptr && (*ell_nnz < 0 || *ell_nnz > std::numeric_limits<int>::max()))
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    cusparseHybPartition_t cuda_partition = CUSPARSE_HYB_PARTITION_AUTO;
+    if(partition != nullptr)
+    {
+        try
+        {
+            cuda_partition = hipsparse::hipHybPartitionToCudaHybPartition(*partition);
+        }
+        catch(...)
+        {
+            return HIPSPARSE_STATUS_INVALID_VALUE;
+        }
+    }
+
+    cusparse_hyb_mat_mirror* dhyb = (cusparse_hyb_mat_mirror*)hyb;
+
+    void* const old_arrays[]
+        = {dhyb->ell_col_ind, dhyb->ell_val, dhyb->coo_row_ind, dhyb->coo_col_ind, dhyb->coo_val};
+
+    int*  new_ell_col_ind = (ell_col_ind != nullptr) ? *ell_col_ind : dhyb->ell_col_ind;
+    void* new_ell_val     = (ell_val != nullptr) ? *ell_val : dhyb->ell_val;
+    int*  new_coo_row_ind = (coo_row_ind != nullptr) ? *coo_row_ind : dhyb->coo_row_ind;
+    int*  new_coo_col_ind = (coo_col_ind != nullptr) ? *coo_col_ind : dhyb->coo_col_ind;
+    void* new_coo_val     = (coo_val != nullptr) ? *coo_val : dhyb->coo_val;
+
+    const void* const new_arrays[]
+        = {new_ell_col_ind, new_ell_val, new_coo_row_ind, new_coo_col_ind, new_coo_val};
+
+    // Ownership of the new arrays is transferred to hyb: release every previously
+    // held array that is not kept by any field.
+    for(void* old_array : old_arrays)
+    {
+        if(old_array == nullptr
+           || std::find(std::begin(new_arrays), std::end(new_arrays), old_array)
+                  != std::end(new_arrays))
+        {
+            continue;
+        }
+        if(cudaFree(old_array) != cudaSuccess)
+        {
+            return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        }
+    }
+
+    if(m != nullptr)
+    {
+        dhyb->m = *m;
+    }
+    if(n != nullptr)
+    {
+        dhyb->n = *n;
+    }
+    if(partition != nullptr)
+    {
+        dhyb->partition = cuda_partition;
+    }
+    if(ell_nnz != nullptr)
+    {
+        dhyb->ell_nnz = static_cast<int>(*ell_nnz);
+    }
+    if(ell_width != nullptr)
+    {
+        dhyb->ell_width = *ell_width;
+    }
+    if(coo_nnz != nullptr)
+    {
+        dhyb->coo_nnz = *coo_nnz;
+    }
+
+    dhyb->ell_col_ind = new_ell_col_ind;
+    dhyb->ell_val     = new_ell_val;
+    dhyb->coo_row_ind = new_coo_row_ind;
+    dhyb->coo_col_ind = new_coo_col_ind;
+    dhyb->coo_val     = new_coo_val;
+
+    return HIPSPARSE_STATUS_SUCCESS;
 }
 #endif
 

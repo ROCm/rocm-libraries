@@ -134,6 +134,16 @@ hipsparseDestroyHybMat()
 
 .. doxygenfunction:: hipsparseDestroyHybMat
 
+hipsparseHybMatGetInfo()
+========================
+
+.. doxygenfunction:: hipsparseHybMatGetInfo
+
+hipsparseHybMatSetInfo()
+========================
+
+.. doxygenfunction:: hipsparseHybMatSetInfo
+
 hipsparseCreateBsrsv2Info()
 ===========================
 

@@ -9,6 +9,7 @@ Documentation for hipSPARSE is available at
 ### Added
 * Added the generic API routines `hipsparseSpGEAM_createDescr`, `hipsparseSpGEAM_destroyDescr`, `hipsparseSpGEAM_bufferSize`, `hipsparseSpGEAM_nnz`, and `hipsparseSpGEAM` for sparse matrix-matrix addition (`C = alpha * op(A) + beta * op(B)`), along with the `hipsparseSpGEAMDescr_t` type and the `hipsparseSpGEAMAlg_t` algorithm enum, to match the cuSPARSE 13.3 generic `SpGEAM` API.
 * Added batched support to `hipsparseSDDMM` for CSR format.
+* Added `hipsparseHybMatGetInfo` and `hipsparseHybMatSetInfo`, which get and set the fields of a `hipsparseHybMat_t` (dimensions, partition, ELL and COO sizes and arrays, and, on the rocSPARSE backend, the value data type as a `hipDataType`) without reinterpreting the opaque handle as a raw struct. `hipsparseHybMatSetInfo` rejects negative or out-of-range sizes and invalid enums, and takes ownership of the `hipMalloc`-allocated arrays passed to it (releasing any array it replaces); arrays returned by `hipsparseHybMatGetInfo` remain owned by the `HYB` matrix. Like the other `HYB` routines, they are only available for CUDA versions below 11.0 on the cuSPARSE backend.
 
 ## hipSPARSE 4.7.0 for ROCm 10.0
 

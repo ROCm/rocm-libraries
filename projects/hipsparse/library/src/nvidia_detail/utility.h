@@ -405,6 +405,21 @@ namespace hipsparse
             throw "Non existent hipsparseHybPartition_t";
         }
     }
+
+    inline hipsparseHybPartition_t cudaHybPartitionToHipHybPartition(cusparseHybPartition_t part)
+    {
+        switch(part)
+        {
+        case CUSPARSE_HYB_PARTITION_AUTO:
+            return HIPSPARSE_HYB_PARTITION_AUTO;
+        case CUSPARSE_HYB_PARTITION_USER:
+            return HIPSPARSE_HYB_PARTITION_USER;
+        case CUSPARSE_HYB_PARTITION_MAX:
+            return HIPSPARSE_HYB_PARTITION_MAX;
+        default:
+            throw "Non existent cusparseHybPartition_t";
+        }
+    }
 #endif
 
     inline cusparseSolvePolicy_t hipPolicyToCudaPolicy(hipsparseSolvePolicy_t policy)

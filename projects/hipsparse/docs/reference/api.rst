@@ -62,6 +62,10 @@ Auxiliary functions
 +------------------------------------------+
 |:cpp:func:`hipsparseDestroyHybMat`        |
 +------------------------------------------+
+|:cpp:func:`hipsparseHybMatGetInfo`        |
++------------------------------------------+
+|:cpp:func:`hipsparseHybMatSetInfo`        |
++------------------------------------------+
 |:cpp:func:`hipsparseCreateBsrsv2Info`     |
 +------------------------------------------+
 |:cpp:func:`hipsparseDestroyBsrsv2Info`    |

@@ -7634,21 +7634,6 @@ double get_time_us_sync(hipStream_t stream);
 }
 #endif
 
-struct testhyb
-{
-    int                     m;
-    int                     n;
-    hipsparseHybPartition_t partition;
-    int                     ell_nnz;
-    int                     ell_width;
-    int*                    ell_col_ind;
-    void*                   ell_val;
-    int                     coo_nnz;
-    int*                    coo_row_ind;
-    int*                    coo_col_ind;
-    void*                   coo_val;
-};
-
 template <typename I>
 hipsparseIndexType_t getIndexType()
 {
