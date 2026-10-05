@@ -5,7 +5,7 @@
 
 Compiles the kernel, launches it through the numpy ``run_manifest`` path, and
 checks the emitted scores against the CPU oracle in
-``builders.gfx942.dsa.hostpack.ref_indexer_scores``. Gated on an actual gfx942
+``builders.common.dsa.hostpack.ref_indexer_scores``. Gated on an actual gfx942
 device via a torch-free probe, so it skips cleanly on any other host (this lane
 cannot run on gfx90a/gfx950).
 """
@@ -44,7 +44,7 @@ pytestmark = [
 _ARCH = "gfx942"
 # One multiply per fp8/bf16 pair plus per-head weights stay in f32; the score is
 # a ranking input, so a relaxed relative tolerance is the correct gate.
-_TOL = 3e-2
+_TOL = 1e-3
 
 
 @pytest.mark.parametrize(
@@ -62,7 +62,7 @@ def test_indexer_scores_match_oracle(Q, Sk, HI, D, block, q_pos_base, body):
     from rocke.helpers.compile import compile_kernel
     from rocke.run_manifest import run_manifest
 
-    from builders.gfx942.dsa.manifest import make_lightning_indexer_manifest
+    from builders.common.dsa.manifest import make_lightning_indexer_manifest
     from kernels.common.lightning_indexer import (
         IndexerSpec,
         IndexerTileSpec,
@@ -87,6 +87,7 @@ def test_indexer_scores_match_oracle(Q, Sk, HI, D, block, q_pos_base, body):
         args_signature=lightning_indexer_signature(spec),
         q_pos_base=q_pos_base,
         default_shape=(Q, Sk, HI),
+        verify_tol=_TOL,
     )
 
     with tempfile.TemporaryDirectory() as tmp:

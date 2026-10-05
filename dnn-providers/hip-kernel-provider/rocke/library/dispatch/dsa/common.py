@@ -63,10 +63,13 @@ DSA_INDEXER_FEATURES = frozenset()
 class IndexerRequest(OperatorRequest):
     """Normalized lightning-indexer forward request.
 
-    ``seqlen_q`` is the number of query tokens (batch axis in decode, packed
-    query count in prefill); ``seqlen_k`` is the key length Sk. ``n_index_heads``
-    (H_I) and ``index_head_dim`` (D_I) are the indexer geometry, distinct from
-    the MLA attention geometry.
+    ``seqlen_q`` is a run of consecutive query positions of a single sequence
+    (one shared ``index_k`` cache, one scalar ``q_pos_base`` with pos(q) =
+    q_pos_base + q), not a batch axis: batched / varlen decode (a per-sequence
+    cache pointer or block table plus per-row positions) is not supported yet.
+    ``seqlen_k`` is the key length Sk. ``n_index_heads`` (H_I) and
+    ``index_head_dim`` (D_I) are the indexer geometry, distinct from the MLA
+    attention geometry.
     """
 
     seqlen_q: int
