@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -71,7 +71,7 @@ extern "C" {
 *  It can return before the actual computation has finished.
 *
 *  \deprecated
-*  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be 
+*  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be
 *  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
 *
 *  @param[in]
@@ -119,7 +119,7 @@ extern "C" {
 *          \p m, \p n, \p k, or \p nnz is negative, \p ldb or \p ldc is invalid, or
 *          \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p B, or \p C is nullptr.
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
-*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t is not 
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t is not
 *          \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
 */
 /**@{*/
@@ -141,6 +141,99 @@ hipsparseStatus_t hipsparseScsrmm(hipsparseHandle_t         handle,
                                   const float*              beta,
                                   float*                    C,
                                   int                       ldc);
+/*! \ingroup level3_module
+*  \brief Sparse matrix dense matrix multiplication using the CSR storage format.
+*
+*  \details
+*  \p hipsparseXcsrmm multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times k\f$
+*  matrix \f$A\f$, defined in CSR storage format, and the column-oriented dense \f$k \times n\f$
+*  matrix \f$B\f$ and adds the result to the column-oriented dense \f$m \times n\f$ matrix \f$C\f$ that
+*  is multiplied by the scalar \f$\beta\f$, such that
+*  \f[
+*    C := \alpha \cdot op(A) \cdot B + \beta \cdot C,
+*  \f]
+*  with
+*  \f[
+*    op(A) = \left\{
+*    \begin{array}{ll}
+*        A,   & \text{if transA == HIPSPARSE_OPERATION_NON_TRANSPOSE} \\
+*        A^T, & \text{if transA == HIPSPARSE_OPERATION_TRANSPOSE} \\
+*        A^H, & \text{if transA == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE}
+*    \end{array}
+*    \right.
+*  \f]
+*
+*  \code{.c}
+*      for(i = 0; i < ldc; ++i)
+*      {
+*          for(j = 0; j < n; ++j)
+*          {
+*              C[i][j] = beta * C[i][j];
+*
+*              for(k = csrRowPtr[i]; k < csrRowPtr[i + 1]; ++k)
+*              {
+*                  C[i][j] += alpha * csrVal[k] * B[csrColInd[k]][j];
+*              }
+*          }
+*      }
+*  \endcode
+*
+ *  \note
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
+*
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be
+*  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
+*
+*  @param[in]
+*  handle              handle to the hipSPARSE library context queue.
+*  @param[in]
+*  transA              matrix \f$A\f$ operation type.
+*  @param[in]
+*  m                   number of rows of the sparse CSR matrix \f$A\f$. Must be non-negative.
+*  @param[in]
+*  n                   number of columns of the dense matrix \f$op(B)\f$ and \f$C\f$. Must be non-negative.
+*  @param[in]
+*  k                   number of columns of the sparse CSR matrix \f$A\f$. Must be non-negative.
+*  @param[in]
+*  nnz                 number of non-zero entries of the sparse CSR matrix \f$A\f$. Must be non-negative.
+*  @param[in]
+*  alpha               scalar \f$\alpha\f$.
+*  @param[in]
+*  descrA              descriptor of the sparse CSR matrix \f$A\f$. Currently, only
+*                      \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  csrSortedValA       array of \p nnz elements of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedRowPtrA    array of \p m+1 elements that point to the start of every row of the
+*                      sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedColIndA    array of \p nnz elements containing the column indices of the sparse
+*                      CSR matrix \f$A\f$.
+*  @param[in]
+*  B                   array of dimension \p ldb*n (\f$op(B) == B\f$),
+*                      \p ldb*k otherwise.
+*  @param[in]
+*  ldb                 leading dimension of \f$B\f$, must be at least \f$\max{(1, k)}\f$
+*                      (\f$op(B) == B\f$), \f$\max{(1, n)}\f$ otherwise.
+*  @param[in]
+*  beta                scalar \f$\beta\f$.
+*  @param[inout]
+*  C                   array of dimension \p ldc*n.
+*  @param[in]
+*  ldc                 leading dimension of \f$C\f$, must be at least \f$\max{(1, m)}\f$
+*                      (\f$op(A) == A\f$), \f$\max{(1, k)}\f$ otherwise.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha, or \p beta is nullptr,
+*          \p m, \p n, \p k, or \p nnz is negative, \p ldb or \p ldc is invalid, or
+*          \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p B, or \p C is nullptr.
+*  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t is not
+*          \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDcsrmm(hipsparseHandle_t         handle,
@@ -159,6 +252,99 @@ hipsparseStatus_t hipsparseDcsrmm(hipsparseHandle_t         handle,
                                   const double*             beta,
                                   double*                   C,
                                   int                       ldc);
+/*! \ingroup level3_module
+*  \brief Sparse matrix dense matrix multiplication using the CSR storage format.
+*
+*  \details
+*  \p hipsparseXcsrmm multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times k\f$
+*  matrix \f$A\f$, defined in CSR storage format, and the column-oriented dense \f$k \times n\f$
+*  matrix \f$B\f$ and adds the result to the column-oriented dense \f$m \times n\f$ matrix \f$C\f$ that
+*  is multiplied by the scalar \f$\beta\f$, such that
+*  \f[
+*    C := \alpha \cdot op(A) \cdot B + \beta \cdot C,
+*  \f]
+*  with
+*  \f[
+*    op(A) = \left\{
+*    \begin{array}{ll}
+*        A,   & \text{if transA == HIPSPARSE_OPERATION_NON_TRANSPOSE} \\
+*        A^T, & \text{if transA == HIPSPARSE_OPERATION_TRANSPOSE} \\
+*        A^H, & \text{if transA == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE}
+*    \end{array}
+*    \right.
+*  \f]
+*
+*  \code{.c}
+*      for(i = 0; i < ldc; ++i)
+*      {
+*          for(j = 0; j < n; ++j)
+*          {
+*              C[i][j] = beta * C[i][j];
+*
+*              for(k = csrRowPtr[i]; k < csrRowPtr[i + 1]; ++k)
+*              {
+*                  C[i][j] += alpha * csrVal[k] * B[csrColInd[k]][j];
+*              }
+*          }
+*      }
+*  \endcode
+*
+ *  \note
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
+*
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be
+*  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
+*
+*  @param[in]
+*  handle              handle to the hipSPARSE library context queue.
+*  @param[in]
+*  transA              matrix \f$A\f$ operation type.
+*  @param[in]
+*  m                   number of rows of the sparse CSR matrix \f$A\f$. Must be non-negative.
+*  @param[in]
+*  n                   number of columns of the dense matrix \f$op(B)\f$ and \f$C\f$. Must be non-negative.
+*  @param[in]
+*  k                   number of columns of the sparse CSR matrix \f$A\f$. Must be non-negative.
+*  @param[in]
+*  nnz                 number of non-zero entries of the sparse CSR matrix \f$A\f$. Must be non-negative.
+*  @param[in]
+*  alpha               scalar \f$\alpha\f$.
+*  @param[in]
+*  descrA              descriptor of the sparse CSR matrix \f$A\f$. Currently, only
+*                      \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  csrSortedValA       array of \p nnz elements of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedRowPtrA    array of \p m+1 elements that point to the start of every row of the
+*                      sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedColIndA    array of \p nnz elements containing the column indices of the sparse
+*                      CSR matrix \f$A\f$.
+*  @param[in]
+*  B                   array of dimension \p ldb*n (\f$op(B) == B\f$),
+*                      \p ldb*k otherwise.
+*  @param[in]
+*  ldb                 leading dimension of \f$B\f$, must be at least \f$\max{(1, k)}\f$
+*                      (\f$op(B) == B\f$), \f$\max{(1, n)}\f$ otherwise.
+*  @param[in]
+*  beta                scalar \f$\beta\f$.
+*  @param[inout]
+*  C                   array of dimension \p ldc*n.
+*  @param[in]
+*  ldc                 leading dimension of \f$C\f$, must be at least \f$\max{(1, m)}\f$
+*                      (\f$op(A) == A\f$), \f$\max{(1, k)}\f$ otherwise.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha, or \p beta is nullptr,
+*          \p m, \p n, \p k, or \p nnz is negative, \p ldb or \p ldc is invalid, or
+*          \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p B, or \p C is nullptr.
+*  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t is not
+*          \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCcsrmm(hipsparseHandle_t         handle,
@@ -177,6 +363,99 @@ hipsparseStatus_t hipsparseCcsrmm(hipsparseHandle_t         handle,
                                   const hipComplex*         beta,
                                   hipComplex*               C,
                                   int                       ldc);
+/*! \ingroup level3_module
+*  \brief Sparse matrix dense matrix multiplication using the CSR storage format.
+*
+*  \details
+*  \p hipsparseXcsrmm multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times k\f$
+*  matrix \f$A\f$, defined in CSR storage format, and the column-oriented dense \f$k \times n\f$
+*  matrix \f$B\f$ and adds the result to the column-oriented dense \f$m \times n\f$ matrix \f$C\f$ that
+*  is multiplied by the scalar \f$\beta\f$, such that
+*  \f[
+*    C := \alpha \cdot op(A) \cdot B + \beta \cdot C,
+*  \f]
+*  with
+*  \f[
+*    op(A) = \left\{
+*    \begin{array}{ll}
+*        A,   & \text{if transA == HIPSPARSE_OPERATION_NON_TRANSPOSE} \\
+*        A^T, & \text{if transA == HIPSPARSE_OPERATION_TRANSPOSE} \\
+*        A^H, & \text{if transA == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE}
+*    \end{array}
+*    \right.
+*  \f]
+*
+*  \code{.c}
+*      for(i = 0; i < ldc; ++i)
+*      {
+*          for(j = 0; j < n; ++j)
+*          {
+*              C[i][j] = beta * C[i][j];
+*
+*              for(k = csrRowPtr[i]; k < csrRowPtr[i + 1]; ++k)
+*              {
+*                  C[i][j] += alpha * csrVal[k] * B[csrColInd[k]][j];
+*              }
+*          }
+*      }
+*  \endcode
+*
+ *  \note
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
+*
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be
+*  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
+*
+*  @param[in]
+*  handle              handle to the hipSPARSE library context queue.
+*  @param[in]
+*  transA              matrix \f$A\f$ operation type.
+*  @param[in]
+*  m                   number of rows of the sparse CSR matrix \f$A\f$. Must be non-negative.
+*  @param[in]
+*  n                   number of columns of the dense matrix \f$op(B)\f$ and \f$C\f$. Must be non-negative.
+*  @param[in]
+*  k                   number of columns of the sparse CSR matrix \f$A\f$. Must be non-negative.
+*  @param[in]
+*  nnz                 number of non-zero entries of the sparse CSR matrix \f$A\f$. Must be non-negative.
+*  @param[in]
+*  alpha               scalar \f$\alpha\f$.
+*  @param[in]
+*  descrA              descriptor of the sparse CSR matrix \f$A\f$. Currently, only
+*                      \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  csrSortedValA       array of \p nnz elements of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedRowPtrA    array of \p m+1 elements that point to the start of every row of the
+*                      sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedColIndA    array of \p nnz elements containing the column indices of the sparse
+*                      CSR matrix \f$A\f$.
+*  @param[in]
+*  B                   array of dimension \p ldb*n (\f$op(B) == B\f$),
+*                      \p ldb*k otherwise.
+*  @param[in]
+*  ldb                 leading dimension of \f$B\f$, must be at least \f$\max{(1, k)}\f$
+*                      (\f$op(B) == B\f$), \f$\max{(1, n)}\f$ otherwise.
+*  @param[in]
+*  beta                scalar \f$\beta\f$.
+*  @param[inout]
+*  C                   array of dimension \p ldc*n.
+*  @param[in]
+*  ldc                 leading dimension of \f$C\f$, must be at least \f$\max{(1, m)}\f$
+*                      (\f$op(A) == A\f$), \f$\max{(1, k)}\f$ otherwise.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha, or \p beta is nullptr,
+*          \p m, \p n, \p k, or \p nnz is negative, \p ldb or \p ldc is invalid, or
+*          \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p B, or \p C is nullptr.
+*  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t is not
+*          \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseZcsrmm(hipsparseHandle_t         handle,
@@ -319,6 +598,106 @@ hipsparseStatus_t hipsparseScsrmm2(hipsparseHandle_t         handle,
                                    const float*              beta,
                                    float*                    C,
                                    int                       ldc);
+/*! \ingroup level3_module
+*  \brief Sparse matrix dense matrix multiplication using the CSR storage format.
+*
+*  \details
+*  \p hipsparseXcsrmm2 multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times k\f$
+*  matrix \f$A\f$, defined in CSR storage format, and the column-oriented dense \f$k \times n\f$
+*  matrix \f$B\f$ and adds the result to the column-oriented dense \f$m \times n\f$ matrix \f$C\f$ that
+*  is multiplied by the scalar \f$\beta\f$, such that
+*  \f[
+*    C := \alpha \cdot op(A) \cdot op(B) + \beta \cdot C,
+*  \f]
+*  with
+*  \f[
+*    op(A) = \left\{
+*    \begin{array}{ll}
+*        A,   & \text{if transA == HIPSPARSE_OPERATION_NON_TRANSPOSE} \\
+*        A^T, & \text{if transA == HIPSPARSE_OPERATION_TRANSPOSE} \\
+*        A^H, & \text{if transA == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE}
+*    \end{array}
+*    \right.
+*  \f]
+*  and
+*  \f[
+*    op(B) = \left\{
+*    \begin{array}{ll}
+*        B,   & \text{if transB == HIPSPARSE_OPERATION_NON_TRANSPOSE} \\
+*        B^T, & \text{if transB == HIPSPARSE_OPERATION_TRANSPOSE} \\
+*        B^H, & \text{if transB == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE}
+*    \end{array}
+*    \right.
+*  \f]
+*
+*  \code{.c}
+*      for(i = 0; i < ldc; ++i)
+*      {
+*          for(j = 0; j < n; ++j)
+*          {
+*              C[i][j] = beta * C[i][j];
+*
+*              for(k = csrRowPtr[i]; k < csrRowPtr[i + 1]; ++k)
+*              {
+*                  C[i][j] += alpha * csrVal[k] * B[csrColInd[k]][j];
+*              }
+*          }
+*      }
+*  \endcode
+*
+*  \note
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
+*
+*  @param[in]
+*  handle      handle to the hipSPARSE library context queue.
+*  @param[in]
+*  transA      matrix \f$A\f$ operation type.
+*  @param[in]
+*  transB      matrix \f$B\f$ operation type.
+*  @param[in]
+*  m           number of rows of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  n           number of columns of the dense matrix \f$op(B)\f$ and \f$C\f$.
+*  @param[in]
+*  k           number of columns of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  nnz         number of non-zero entries of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  alpha       scalar \f$\alpha\f$.
+*  @param[in]
+*  descrA      descriptor of the sparse CSR matrix \f$A\f$. Currently, only
+*              \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  csrSortedValA array of \p nnz elements of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedRowPtrA array of \p m+1 elements that point to the start of every row of the
+*              sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedColIndA array of \p nnz elements containing the column indices of the sparse
+*              CSR matrix \f$A\f$.
+*  @param[in]
+*  B           array of dimension \p ldb*n (\f$op(B) == B\f$),
+*              \p ldb*k otherwise.
+*  @param[in]
+*  ldb         leading dimension of \f$B\f$. Must be at least \f$\max{(1, k)}\f$
+*              (\f$op(B) == B\f$), \f$\max{(1, n)}\f$ otherwise.
+*  @param[in]
+*  beta        scalar \f$\beta\f$.
+*  @param[inout]
+*  C           array of dimension \p ldc*n.
+*  @param[in]
+*  ldc         leading dimension of \f$C\f$. Must be at least \f$\max{(1, m)}\f$
+*              (\f$op(A) == A\f$), \f$\max{(1, k)}\f$ otherwise.
+*
+*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p k, \p nnz, \p ldb, \p ldc,
+*              \p descrA, \p alpha, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA,
+*              \p B, \p beta, or \p C is invalid.
+*  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
+*  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
+*              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDcsrmm2(hipsparseHandle_t         handle,
@@ -338,6 +717,106 @@ hipsparseStatus_t hipsparseDcsrmm2(hipsparseHandle_t         handle,
                                    const double*             beta,
                                    double*                   C,
                                    int                       ldc);
+/*! \ingroup level3_module
+*  \brief Sparse matrix dense matrix multiplication using the CSR storage format.
+*
+*  \details
+*  \p hipsparseXcsrmm2 multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times k\f$
+*  matrix \f$A\f$, defined in CSR storage format, and the column-oriented dense \f$k \times n\f$
+*  matrix \f$B\f$ and adds the result to the column-oriented dense \f$m \times n\f$ matrix \f$C\f$ that
+*  is multiplied by the scalar \f$\beta\f$, such that
+*  \f[
+*    C := \alpha \cdot op(A) \cdot op(B) + \beta \cdot C,
+*  \f]
+*  with
+*  \f[
+*    op(A) = \left\{
+*    \begin{array}{ll}
+*        A,   & \text{if transA == HIPSPARSE_OPERATION_NON_TRANSPOSE} \\
+*        A^T, & \text{if transA == HIPSPARSE_OPERATION_TRANSPOSE} \\
+*        A^H, & \text{if transA == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE}
+*    \end{array}
+*    \right.
+*  \f]
+*  and
+*  \f[
+*    op(B) = \left\{
+*    \begin{array}{ll}
+*        B,   & \text{if transB == HIPSPARSE_OPERATION_NON_TRANSPOSE} \\
+*        B^T, & \text{if transB == HIPSPARSE_OPERATION_TRANSPOSE} \\
+*        B^H, & \text{if transB == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE}
+*    \end{array}
+*    \right.
+*  \f]
+*
+*  \code{.c}
+*      for(i = 0; i < ldc; ++i)
+*      {
+*          for(j = 0; j < n; ++j)
+*          {
+*              C[i][j] = beta * C[i][j];
+*
+*              for(k = csrRowPtr[i]; k < csrRowPtr[i + 1]; ++k)
+*              {
+*                  C[i][j] += alpha * csrVal[k] * B[csrColInd[k]][j];
+*              }
+*          }
+*      }
+*  \endcode
+*
+*  \note
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
+*
+*  @param[in]
+*  handle      handle to the hipSPARSE library context queue.
+*  @param[in]
+*  transA      matrix \f$A\f$ operation type.
+*  @param[in]
+*  transB      matrix \f$B\f$ operation type.
+*  @param[in]
+*  m           number of rows of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  n           number of columns of the dense matrix \f$op(B)\f$ and \f$C\f$.
+*  @param[in]
+*  k           number of columns of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  nnz         number of non-zero entries of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  alpha       scalar \f$\alpha\f$.
+*  @param[in]
+*  descrA      descriptor of the sparse CSR matrix \f$A\f$. Currently, only
+*              \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  csrSortedValA array of \p nnz elements of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedRowPtrA array of \p m+1 elements that point to the start of every row of the
+*              sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedColIndA array of \p nnz elements containing the column indices of the sparse
+*              CSR matrix \f$A\f$.
+*  @param[in]
+*  B           array of dimension \p ldb*n (\f$op(B) == B\f$),
+*              \p ldb*k otherwise.
+*  @param[in]
+*  ldb         leading dimension of \f$B\f$. Must be at least \f$\max{(1, k)}\f$
+*              (\f$op(B) == B\f$), \f$\max{(1, n)}\f$ otherwise.
+*  @param[in]
+*  beta        scalar \f$\beta\f$.
+*  @param[inout]
+*  C           array of dimension \p ldc*n.
+*  @param[in]
+*  ldc         leading dimension of \f$C\f$. Must be at least \f$\max{(1, m)}\f$
+*              (\f$op(A) == A\f$), \f$\max{(1, k)}\f$ otherwise.
+*
+*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p k, \p nnz, \p ldb, \p ldc,
+*              \p descrA, \p alpha, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA,
+*              \p B, \p beta, or \p C is invalid.
+*  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
+*  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
+*              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCcsrmm2(hipsparseHandle_t         handle,
@@ -357,6 +836,106 @@ hipsparseStatus_t hipsparseCcsrmm2(hipsparseHandle_t         handle,
                                    const hipComplex*         beta,
                                    hipComplex*               C,
                                    int                       ldc);
+/*! \ingroup level3_module
+*  \brief Sparse matrix dense matrix multiplication using the CSR storage format.
+*
+*  \details
+*  \p hipsparseXcsrmm2 multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times k\f$
+*  matrix \f$A\f$, defined in CSR storage format, and the column-oriented dense \f$k \times n\f$
+*  matrix \f$B\f$ and adds the result to the column-oriented dense \f$m \times n\f$ matrix \f$C\f$ that
+*  is multiplied by the scalar \f$\beta\f$, such that
+*  \f[
+*    C := \alpha \cdot op(A) \cdot op(B) + \beta \cdot C,
+*  \f]
+*  with
+*  \f[
+*    op(A) = \left\{
+*    \begin{array}{ll}
+*        A,   & \text{if transA == HIPSPARSE_OPERATION_NON_TRANSPOSE} \\
+*        A^T, & \text{if transA == HIPSPARSE_OPERATION_TRANSPOSE} \\
+*        A^H, & \text{if transA == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE}
+*    \end{array}
+*    \right.
+*  \f]
+*  and
+*  \f[
+*    op(B) = \left\{
+*    \begin{array}{ll}
+*        B,   & \text{if transB == HIPSPARSE_OPERATION_NON_TRANSPOSE} \\
+*        B^T, & \text{if transB == HIPSPARSE_OPERATION_TRANSPOSE} \\
+*        B^H, & \text{if transB == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE}
+*    \end{array}
+*    \right.
+*  \f]
+*
+*  \code{.c}
+*      for(i = 0; i < ldc; ++i)
+*      {
+*          for(j = 0; j < n; ++j)
+*          {
+*              C[i][j] = beta * C[i][j];
+*
+*              for(k = csrRowPtr[i]; k < csrRowPtr[i + 1]; ++k)
+*              {
+*                  C[i][j] += alpha * csrVal[k] * B[csrColInd[k]][j];
+*              }
+*          }
+*      }
+*  \endcode
+*
+*  \note
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
+*
+*  @param[in]
+*  handle      handle to the hipSPARSE library context queue.
+*  @param[in]
+*  transA      matrix \f$A\f$ operation type.
+*  @param[in]
+*  transB      matrix \f$B\f$ operation type.
+*  @param[in]
+*  m           number of rows of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  n           number of columns of the dense matrix \f$op(B)\f$ and \f$C\f$.
+*  @param[in]
+*  k           number of columns of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  nnz         number of non-zero entries of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  alpha       scalar \f$\alpha\f$.
+*  @param[in]
+*  descrA      descriptor of the sparse CSR matrix \f$A\f$. Currently, only
+*              \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  csrSortedValA array of \p nnz elements of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedRowPtrA array of \p m+1 elements that point to the start of every row of the
+*              sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedColIndA array of \p nnz elements containing the column indices of the sparse
+*              CSR matrix \f$A\f$.
+*  @param[in]
+*  B           array of dimension \p ldb*n (\f$op(B) == B\f$),
+*              \p ldb*k otherwise.
+*  @param[in]
+*  ldb         leading dimension of \f$B\f$. Must be at least \f$\max{(1, k)}\f$
+*              (\f$op(B) == B\f$), \f$\max{(1, n)}\f$ otherwise.
+*  @param[in]
+*  beta        scalar \f$\beta\f$.
+*  @param[inout]
+*  C           array of dimension \p ldc*n.
+*  @param[in]
+*  ldc         leading dimension of \f$C\f$. Must be at least \f$\max{(1, m)}\f$
+*              (\f$op(A) == A\f$), \f$\max{(1, k)}\f$ otherwise.
+*
+*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p k, \p nnz, \p ldb, \p ldc,
+*              \p descrA, \p alpha, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA,
+*              \p B, \p beta, or \p C is invalid.
+*  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
+*  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
+*              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseZcsrmm2(hipsparseHandle_t         handle,
