@@ -88,6 +88,10 @@ CI_CONFIG_NAMES = (
     "default_ci_config_{dtype}.json",
     "default_ci_config.json",
 )
+# A dtype without a CI config of its own falls back to its family's file, tried
+# right after its own name at each level (bf8 lists the same warp tiles as fp8
+# on every arch, so default_ci_config_gfx1250_fp8.json serves bf8 too).
+CI_CONFIG_DTYPE_ALIAS = {"bf8": "fp8"}
 EXAMPLE_PROBLEMS_NAME = "example_problems.json"
 
 # Map the driver's --variant (a configs-dir selector) onto the single codegen/
@@ -174,7 +178,9 @@ def resolve_configs(args, arch):
     if args.configs:
         return args.configs
     cfg_dir = _THIS_DIR / VARIANT_CONFIGS[args.variant]
-    names = [n.format(arch=arch, dtype=args.dtype) for n in CI_CONFIG_NAMES]
+    alias = CI_CONFIG_DTYPE_ALIAS.get(args.dtype, args.dtype)
+    names = [n.format(arch=arch, dtype=d)
+             for n in CI_CONFIG_NAMES for d in (args.dtype, alias)]
     return [str(next((cfg_dir / n for n in names if (cfg_dir / n).exists()),
                      cfg_dir / names[-1]))]
 

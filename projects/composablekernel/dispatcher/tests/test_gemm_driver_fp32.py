@@ -67,11 +67,20 @@ def test_fp16_only_variants_reject_fp32(monkeypatch, capsys, variant):
         ("gfx1250", "fp32", GFX1250_FP32_CI),
         ("gfx1250", "fp16", CFG_DIR / "default_ci_config_gfx1250.json"),
         ("gfx1250", "fp8", CFG_DIR / "default_ci_config_gfx1250_fp8.json"),
+        # bf8 has no file of its own and shares fp8's warp tiles.
+        ("gfx1250", "bf8", CFG_DIR / "default_ci_config_gfx1250_fp8.json"),
     ],
 )
 def test_ci_config_selected_by_arch_and_dtype(arch, dtype, expected):
     args = SimpleNamespace(configs=[], variant="gemm_universal", dtype=dtype)
     assert drv.resolve_configs(args, arch) == [str(expected)]
+
+
+@pytest.mark.parametrize("dtype", drv.SUPPORTED_DTYPES)
+def test_gfx1250_default_ci_config_expands_for_every_dtype(dtype):
+    args = SimpleNamespace(configs=[], variant="gemm_universal", dtype=dtype)
+    (path,) = drv.resolve_configs(args, "gfx1250")
+    assert expand_sweep(path, "gfx1250", dtype=dtype, layout="rcr")
 
 
 def test_explicit_configs_win_over_dtype_ci_config():
