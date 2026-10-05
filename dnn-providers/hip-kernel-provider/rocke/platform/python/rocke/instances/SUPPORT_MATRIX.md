@@ -72,7 +72,7 @@ See the [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
 | `conv_implicit_gemm` | ✅ | ✅ | ✅ | gfx1151: WMMA 16x16x16, `mem`+`default`, `wave_size=32`, `groups=1` |
 | `conv_implicit_gemm_auto` | ✅ | ✅ | ❌ | MFMA-specialized autotuned path (raw `MfmaAtom`, K=32 kpack); not ported to WMMA |
 | `direct_conv_16c` | ❌ | ✅ | ❌ | `fold_k32` needs 16x16x32 atom (CDNA4) |
-| `direct_conv_4c` | ✅ | ✅ | ❌ | 4x4x4 MFMA atom not in WMMA catalog |
+| `direct_conv_4c` | ✅ | ✅ | ❌ | fp16 + bf16 (`mfma_f32_4x4x4_{f16,bf16}`); also stride-1 dgrad at cpg=kpg=4 via `make_dgrad_4c_spec` (single kernel with `dgrad_fused_weights`; `dgrad_weights_lds` needs `ds_read_b64_tr_b16`, gfx950 only); 4x4x4 MFMA atom not in WMMA catalog |
 
 ---
 

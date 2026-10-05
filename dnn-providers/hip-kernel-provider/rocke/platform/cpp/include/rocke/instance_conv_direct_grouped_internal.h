@@ -199,6 +199,14 @@ typedef struct rocke_dconv_16c_ctx
  *
  *  Field order follows the Python prologue (lines 837-966).
  * ===================================================================== */
+/* Upper bound on the 4c fused-dgrad LDS staging passes
+ * (ceil(block_groups * cpg*KH*KW*kpg / 8 / threads)); 3x3 needs <= 5. */
+#define ROCKE_DCONV4C_MAX_WL_PASSES 32
+/* Upper bound on 4c filter taps KH*KW: sizes the 4c ctx weights[] and
+ * s_consts[] arrays; mirrors DCONV4C_MAX_TAPS in the Python emitter and is
+ * enforced by rocke_direct_conv_4c_is_valid_spec. */
+#define ROCKE_DCONV4C_MAX_TAPS 16
+
 typedef struct rocke_dconv_4c_ctx
 {
     /* ---- inputs / resolved environment -- */
@@ -209,6 +217,8 @@ typedef struct rocke_dconv_4c_ctx
 
     int q_tiles_per_wave; /* block_q // 4                              */
     int n_iters; /* H + KH - 1                                */
+    const rocke_type_t* io_type; /* _io_type(p.dtype): f16 or bf16  */
+    int is_bf16; /* p.dtype == "bf16"                         */
 
     /* ---- kernel params (Values) -- */
     rocke_value_t* A;
@@ -225,7 +235,7 @@ typedef struct rocke_dconv_4c_ctx
     rocke_value_t* c_kpg; /* const_i32(kpg)                        */
     rocke_value_t* c_half_bytes; /* const_i32(2)                          */
     rocke_value_t* oob_sentinel; /* const_i32((1<<31)-1)                  */
-    rocke_value_t* io_vec4_zero; /* zero_vec_f16(4)                       */
+    rocke_value_t* io_vec4_zero; /* zero_vec(io_type, 4)                  */
     rocke_value_t* zero_acc; /* zero_vec_f32(4)                       */
 
     /* ---- thread / wave / lane decode (SSA) -- */
@@ -251,14 +261,14 @@ typedef struct rocke_dconv_4c_ctx
     /* ---- weights (per (r,s) per lane; length KH*KW <= 9) -- */
     const rocke_tensor_descriptor_t* b_desc; /* B[total_k,KH,KW,cpg] naive   */
     rocke_value_t* k_out_val; /* g*kpg + lane_q               */
-    rocke_value_t* weights[16];
+    rocke_value_t* weights[ROCKE_DCONV4C_MAX_TAPS];
     int n_weights;
 
     /* ---- descriptors + precomputed loop-invariant locals -- */
     const rocke_tensor_descriptor_t* a_desc; /* A[N,H,W,total_c] + 2 embeds  */
     const rocke_tensor_descriptor_t* d_desc; /* D[N,H,W,total_k] naive       */
     rocke_value_t* c_val_groupc; /* g * cpg                      */
-    rocke_value_t* s_consts[16]; /* const_i32(s) for s in KW     */
+    rocke_value_t* s_consts[ROCKE_DCONV4C_MAX_TAPS]; /* const_i32(s) for s in KW */
     int n_s_consts; /* KW                           */
 
     /* ---- accumulator iter-state across the unrolled H-loop -- *

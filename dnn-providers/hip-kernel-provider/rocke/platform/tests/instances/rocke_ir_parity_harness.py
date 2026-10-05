@@ -828,6 +828,9 @@ def build_direct_4c(
     *,
     block_q=4,
     block_groups=16,
+    dtype="fp16",
+    dgrad_fused_weights=False,
+    dgrad_weights_lds=False,
 ):
     def _build():
         from kernels.common.conv_direct_grouped import (
@@ -846,14 +849,45 @@ def build_direct_4c(
             KH=KH,
             KW=KW,
             PAD=PAD,
+            dtype=dtype,
         )
         spec = DirectConv4cSpec(
             problem=p,
             name=name,
             block_q=block_q,
             block_groups=block_groups,
+            dgrad_fused_weights=dgrad_fused_weights,
+            dgrad_weights_lds=dgrad_weights_lds,
         )
         return build_direct_conv_4c(spec, arch=arch)
+
+    return _build
+
+
+def build_direct_mfma_dgrad_fused(
+    arch, N, H, W, groups, cpg, kpg, *, dtype, fold_k32, weights_lds, block_groups=2
+):
+    """Single-kernel direct-MFMA dgrad (DirectConvSpec, fused weights)."""
+
+    def _build():
+        from kernels.common.conv_direct_grouped import (
+            DirectConvProblem,
+            build_direct_conv,
+            make_dgrad_fprop_spec,
+        )
+
+        p = DirectConvProblem(
+            N=N, H=H, W=W, groups=groups, cpg=cpg, kpg=kpg, dtype=dtype
+        )
+        spec = make_dgrad_fprop_spec(
+            p,
+            block_q=16,
+            block_groups=block_groups,
+            fold_k32=fold_k32,
+            dgrad_fused_weights=True,
+            dgrad_weights_lds=weights_lds,
+        )
+        return build_direct_conv(spec, arch=arch)
 
     return _build
 
@@ -2869,6 +2903,132 @@ def cases():
             PAD=1,
             block_q=4,
             block_groups=16,
+        ),
+    )
+    # --- 4c bf16 (mfma_f32_4x4x4_bf16 `_1k` atom), gfx950 and gfx942 ---
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/4c_bf16_n2h13",
+        "gfx950",
+        build_direct_4c(
+            "irhash_direct4c_950_bf16",
+            "gfx950",
+            N=2,
+            H=13,
+            W=13,
+            groups=32,
+            KH=3,
+            KW=3,
+            PAD=1,
+            block_q=8,
+            block_groups=32,
+            dtype="bf16",
+        ),
+    )
+    add(
+        "conv_direct",
+        "conv_direct/gfx942/4c_bf16_n1h8",
+        "gfx942",
+        build_direct_4c(
+            "irhash_direct4c_942_bf16",
+            "gfx942",
+            N=1,
+            H=8,
+            W=8,
+            groups=16,
+            KH=3,
+            KW=3,
+            PAD=1,
+            block_q=4,
+            block_groups=16,
+            dtype="bf16",
+        ),
+    )
+    # --- dgrad with fused weight transform (no pre-pass kernel) ---
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/4c_dgrad_fwl_bf16_n2h13",
+        "gfx950",
+        build_direct_4c(
+            "irhash_direct4c_950_dgrad_fwl",
+            "gfx950",
+            N=2,
+            H=13,
+            W=13,
+            groups=32,
+            block_q=4,
+            block_groups=32,
+            dtype="bf16",
+            dgrad_fused_weights=True,
+            dgrad_weights_lds=True,
+        ),
+    )
+    add(
+        "conv_direct",
+        "conv_direct/gfx942/4c_dgrad_fw_fp16_n1h8",
+        "gfx942",
+        build_direct_4c(
+            "irhash_direct4c_942_dgrad_fw",
+            "gfx942",
+            N=1,
+            H=8,
+            W=8,
+            groups=16,
+            block_q=4,
+            block_groups=16,
+            dtype="fp16",
+            dgrad_fused_weights=True,
+        ),
+    )
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/mfma_dgrad_fwl_c16_bf16",
+        "gfx950",
+        build_direct_mfma_dgrad_fused(
+            "gfx950",
+            N=2,
+            H=7,
+            W=13,
+            groups=32,
+            cpg=16,
+            kpg=16,
+            dtype="bf16",
+            fold_k32=False,
+            weights_lds=True,
+        ),
+    )
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/mfma_dgrad_fwl_c32_k32_bf16",
+        "gfx950",
+        build_direct_mfma_dgrad_fused(
+            "gfx950",
+            N=2,
+            H=7,
+            W=13,
+            groups=16,
+            cpg=32,
+            kpg=32,
+            dtype="bf16",
+            fold_k32=True,
+            weights_lds=True,
+        ),
+    )
+    add(
+        "conv_direct",
+        "conv_direct/gfx942/mfma_dgrad_fw_c12_fp16",
+        "gfx942",
+        build_direct_mfma_dgrad_fused(
+            "gfx942",
+            N=1,
+            H=9,
+            W=11,
+            groups=8,
+            cpg=12,
+            kpg=12,
+            dtype="fp16",
+            fold_k32=False,
+            weights_lds=False,
         ),
     )
     # --- 8c, gfx950 ---

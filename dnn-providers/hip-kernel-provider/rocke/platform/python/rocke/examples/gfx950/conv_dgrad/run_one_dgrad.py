@@ -58,8 +58,8 @@ def _parse_args(argv=None):
         help="override -u/-v in --miopen-cmd. stride > 1 takes the tilde "
         "sub-GEMM decomposition, which is a different kernel shape entirely.",
     )
-    # Defaults are the shipped dispatch geometry -- see _GFX950_TILE_* and
-    # _GFX950_WARP_* in library/dispatch/grouped_convolution.py.
+    # Defaults are the 64x64 entry of the shipped dispatch tile table -- see
+    # _gfx950_dgrad_tile in library/dispatch/grouped_convolution.py.
     ap.add_argument("--tile-m", type=int, default=64)
     ap.add_argument("--tile-n", type=int, default=64)
     ap.add_argument("--tile-k", type=int, default=64)
@@ -90,6 +90,23 @@ def _parse_args(argv=None):
         "layouts in-process -- which is how you get an M-outer baseline to "
         "trace against. Neither dispatch nor the sweep driver takes an "
         "override.",
+    )
+    ap.add_argument(
+        "--static-record",
+        choices=("on", "off"),
+        default="on",
+        help="DgradConvSpec.static_sub_gemm: fold the single tilde sub-GEMM "
+        "record into immediates (on, the default) or keep the runtime "
+        "binary-search + record-load path (off). See "
+        "stride1_igemm_dgrad_case_study.md.",
+    )
+    ap.add_argument(
+        "--tap-outer",
+        choices=("on", "off"),
+        default="on",
+        help="DgradConvSpec.tap_outer_k: stride-1 (tap outer) x (channel chunk "
+        "inner) K loop where it applies (on, the default) or the flat k_dg "
+        "loop (off).",
     )
     ap.add_argument("--warmup", type=int, default=5)
     ap.add_argument("--iters", type=int, default=200)
@@ -194,6 +211,8 @@ def main(argv=None) -> int:
         epilogue=a.epilogue,
         split_k=a.split_k,
         lds_k_outer=lds_k_outer,
+        static_sub_gemm=a.static_record == "on",
+        tap_outer_k=a.tap_outer == "on",
         vector_size_a=vec_a,
         vector_size_b=vec_b,
         vector_size_c=vec_c,

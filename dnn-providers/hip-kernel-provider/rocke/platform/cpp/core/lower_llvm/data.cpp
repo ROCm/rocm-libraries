@@ -158,6 +158,10 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"fabs.f32", "declare float @llvm.fabs.f32(float)"},
     {"fabs.f16", "declare half @llvm.fabs.f16(half)"},
     {"fabs.bf16", "declare bfloat @llvm.fabs.bf16(bfloat)"},
+    {"amdgcn.fdot2.f16",
+     "declare float @llvm.amdgcn.fdot2(<2 x half>, <2 x half>, float, i1 immarg)"},
+    {"amdgcn.fdot2.bf16",
+     "declare float @llvm.amdgcn.fdot2.f32.bf16(<2 x bfloat>, <2 x bfloat>, float, i1 immarg)"},
     {"fmuladd.f32", "declare float @llvm.fmuladd.f32(float, float, float)"},
     {"fmuladd.f16", "declare half @llvm.fmuladd.f16(half, half, half)"},
     {"fmuladd.bf16", "declare bfloat @llvm.fmuladd.bf16(bfloat, bfloat, bfloat)"},
@@ -258,6 +262,9 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"mfma.f32.4x4x4f16",
      "declare <4 x float> @llvm.amdgcn.mfma.f32.4x4x4f16(<4 x half>, <4 x half>, <4 x float>, i32 "
      "immarg, i32 immarg, i32 immarg)"},
+    {"mfma.f32.4x4x4bf16.1k",
+     "declare <4 x float> @llvm.amdgcn.mfma.f32.4x4x4bf16.1k(<4 x i16>, <4 x i16>, <4 x float>, "
+     "i32 immarg, i32 immarg, i32 immarg)"},
     {"mfma.f32.16x16x32.fp8.fp8",
      "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8(<2 x i32>, <2 x i32>, <4 x "
      "float>, i32 immarg, i32 immarg, i32 immarg)"},

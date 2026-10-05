@@ -962,6 +962,7 @@ static const rocke_ati_mma_frag_row_t rocke_ati_mma_frag[] = {
     {"mfma_f32_32x32x8_f16", 16},
     {"mfma_f32_32x32x16_f16", 16},
     {"mfma_f32_4x4x4_f16", 4},
+    {"mfma_f32_4x4x4_bf16", 4},
     /* --- MFMA bf16 (wave64) --- */
     {"mfma_f32_16x16x16_bf16", 4},
     {"mfma_f32_16x16x32_bf16", 4},

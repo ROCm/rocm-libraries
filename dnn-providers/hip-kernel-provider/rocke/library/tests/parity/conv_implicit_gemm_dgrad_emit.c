@@ -59,9 +59,11 @@ static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
         *arch = "gfx950";
         return 0;
     case 3:
-        /* async_dma pipeline, gfx950 */
+        /* Runtime sub-GEMM record on a stride-1 problem (static_sub_gemm off):
+         * binary search + record loads, flat K loop. (Previously async_dma,
+         * which dgrad now rejects instead of silently ignoring.) */
         spec->problem = rocke_conv_problem_make(8, 56, 56, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
-        spec->async_dma = true;
+        spec->static_sub_gemm = false;
         *arch = "gfx950";
         return 0;
     case 4:
@@ -104,15 +106,15 @@ static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
         *arch = "gfx1201";
         return 0;
     case 10:
-        /* chiplet_swizzle, gfx950 */
+        /* Folded record with the flat K loop (tap_outer_k off); not a
+         * dispatch warp tile, so no waves_per_eu accumulator hint.
+         * (Previously chiplet_swizzle, which dgrad now rejects instead of
+         * ignoring.) */
         spec->problem = rocke_conv_problem_make(8, 56, 56, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
         spec->tile_m = 128;
         spec->tile_n = 128;
         spec->tile_k = 64;
-        spec->chiplet_swizzle = true;
-        spec->chiplet_wgm = 8;
-        spec->chiplet_num_xcds = 8;
-        spec->chiplet_chunk_size = 64;
+        spec->tap_outer_k = false;
         *arch = "gfx950";
         return 0;
     case 11:
@@ -163,6 +165,143 @@ static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
         spec->epilogue = "default";
         spec->lds_k_outer = true;
         *arch = "gfx1250";
+        return 0;
+    case 14:
+        /* K not a multiple of tile_k: a K tile straddles two taps, so the
+         * folded record keeps the flat K loop. */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 48, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        *arch = "gfx950";
+        return 0;
+    case 15:
+        /* Tap-outer K loop on an odd, non-square, partial-tile problem: N=1,
+         * 13x17, pad 2 with a 5x5 filter, C not a multiple of tile_n. */
+        spec->problem = rocke_conv_problem_make(1, 13, 17, 48, 64, 5, 5, 1, 1, 2, 2, 1, 1);
+        spec->tile_k = 32;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 16;
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        *arch = "gfx950";
+        return 0;
+    case 16:
+        /* Tap-outer K loop with the M-outer B tile, compv3 schedule hints. */
+        spec->problem = rocke_conv_problem_make(4, 28, 28, 128, 128, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->tile_m = 128;
+        spec->tile_n = 64;
+        spec->warp_m = 4;
+        spec->warp_n = 2;
+        spec->pipeline = "compv3";
+        spec->epilogue = "cshuffle";
+        *arch = "gfx950";
+        return 0;
+    case 17:
+        /* Ungrouped pointwise (1x1, stride 1, pad 0): static_sub_gemm stays
+         * on but the record is not folded (runtime record, opaque trip
+         * count); C not a multiple of tile_n. */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 96, 128, 1, 1, 1, 1, 0, 0, 1, 1);
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        *arch = "gfx950";
+        return 0;
+    case 18:
+        /* Folded record, flat K loop, 4-element dY and W loads (K and C not
+         * multiples of 8): the waves_per_eu accumulator hint is withheld. */
+        spec->problem = rocke_conv_problem_make(2, 13, 11, 100, 68, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        *arch = "gfx950";
+        return 0;
+    case 19:
+        /* Folded record, flat K loop, 8-element loads, explicit waves_per_eu:
+         * the explicit value wins over the accumulator hint. */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 48, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        spec->has_waves_per_eu = true;
+        spec->waves_per_eu = 1;
+        *arch = "gfx950";
+        return 0;
+    case 20:
+        /* The large-problem dispatch tile: 128x128x64, 2x2 waves, 16x16x32
+         * atom, K-outer B, tap-outer K loop. fp16: the C++ CoalescedTileLoader
+         * has no elem_dtype yet, so a bf16 config cannot be compared. */
+        spec->problem = rocke_conv_problem_make(2, 16, 16, 256, 256, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->tile_m = 128;
+        spec->tile_n = 128;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        *arch = "gfx950";
+        return 0;
+    case 21:
+        /* Flat K loop (kpg not a multiple of tile_k), 8-element loads, 256
+         * fp32 accumulators per lane (256x128 tile, 1x2 waves, 32x32 atom):
+         * above 128 the record is not folded and the waves_per_eu accumulator
+         * hint is withheld (both would add spills). */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 128, 48, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->tile_m = 256;
+        spec->tile_n = 128;
+        spec->warp_m = 1;
+        spec->lds_k_outer = true;
+        *arch = "gfx950";
+        return 0;
+    case 22:
+        /* Flat K loop, 8-element loads, 128 fp32 accumulators per lane with
+         * the 16x16x32 atom on a single warp (64x128 tile, 1x1 waves): the
+         * record is folded, but the waves_per_eu accumulator hint is withheld
+         * (not a dispatch warp tile; under its 256-register cap this tile
+         * spills). */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 128, 48, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->tile_n = 128;
+        spec->warp_m = 1;
+        spec->warp_n = 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->lds_k_outer = true;
+        *arch = "gfx950";
+        return 0;
+    case 23:
+        /* Flat K loop, 8-element loads, 64 fp32 accumulators per lane on a
+         * warp tile that is not a dispatch tile (256x64x64, 2x2 waves, 32x32
+         * atom): the record is folded but the waves_per_eu accumulator hint
+         * is withheld (it is applied only to the two dispatch tiles). */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 128, 48, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->tile_m = 256;
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        *arch = "gfx950";
+        return 0;
+    case 24:
+        /* Tap-aligned K, 256 fp32 accumulators per lane (256x128 tile, 1x2
+         * waves, 32x32 atom) and an N tile wider than the input channels
+         * (C=64 < tile_n): the folded record with the tap-outer K loop (the
+         * 128-accumulator fold limit applies to the flat loop only). */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 128, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->tile_m = 256;
+        spec->tile_n = 128;
+        spec->warp_m = 1;
+        spec->lds_k_outer = true;
+        *arch = "gfx950";
+        return 0;
+    case 25:
+        /* The large-problem dispatch tile (128x128x64, 2x2 waves, 16x16x32
+         * atom) on a flat K loop (kpg 96 not a multiple of tile_k): folded
+         * record with the waves_per_eu accumulator hint. fp16, see 20. */
+        spec->problem = rocke_conv_problem_make(2, 16, 16, 256, 96, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->tile_m = 128;
+        spec->tile_n = 128;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        *arch = "gfx950";
         return 0;
     default:
         return -1;

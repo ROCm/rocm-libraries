@@ -205,8 +205,16 @@ from .common.conv_direct_grouped import (  # noqa: F401
     DirectConvProblem,
     DirectConv4cSpec,
     DirectConv16cSpec,
+    build_direct_4c_dgrad,
+    build_direct_dgrad,
     build_direct_conv_4c,
     build_direct_conv_16c,
+    dgrad_4c_spec_for_problem,
+    direct_dgrad_launch,
+    direct_dgrad_spec_for_problem,
+    direct_4c_dgrad_launch,
+    is_valid_dgrad_4c_problem,
+    make_dgrad_4c_spec,
 )
 from .common.img2col import (  # noqa: F401
     Img2ColSpec,

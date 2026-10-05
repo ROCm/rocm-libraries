@@ -1574,7 +1574,9 @@ std::vector<std::string> conv_implicit_gemm_verify(const py::dict& d, const std:
 
 /* The direct-grouped family has two distinct spec structs (16-channel and
  * 4-channel). The dict carries "kind" ("16c"|"4c") to select the path. */
-void fill_direct_conv_problem(rocke_direct_conv_problem_t* p, const py::dict& d)
+void fill_direct_conv_problem(rocke_direct_conv_problem_t* p,
+                              const py::dict& d,
+                              std::deque<std::string>& store)
 {
     p->N = dict_int(d, "N", p->N);
     p->H = dict_int(d, "H", p->H);
@@ -1586,6 +1588,16 @@ void fill_direct_conv_problem(rocke_direct_conv_problem_t* p, const py::dict& d)
     p->KW = dict_int(d, "KW", p->KW);
     p->PAD = dict_int(d, "PAD", p->PAD);
     p->stride = dict_int(d, "stride", p->stride);
+    {
+        /* dtype is a borrowed C string; park it in `store` so it outlives the
+         * spec (same pattern as the spec name). */
+        std::string v;
+        if(dict_str(d, "dtype", v))
+        {
+            store.push_back(v);
+            p->dtype = store.back().c_str();
+        }
+    }
 }
 
 std::string conv_direct_grouped_kind(const py::dict& d)
@@ -1603,7 +1615,7 @@ rocke_direct_conv_16c_spec_t dg16_build_spec(const py::dict& d, std::deque<std::
     };
     rocke_direct_conv_16c_spec_t s = rocke_direct_conv_16c_spec_default();
     if(d.contains("problem") && py::isinstance<py::dict>(d["problem"]))
-        fill_direct_conv_problem(&s.problem, d["problem"].cast<py::dict>());
+        fill_direct_conv_problem(&s.problem, d["problem"].cast<py::dict>(), store);
     {
         std::string v;
         if(dict_str(d, "name", v))
@@ -1625,7 +1637,7 @@ rocke_direct_conv_4c_spec_t dg4_build_spec(const py::dict& d, std::deque<std::st
     };
     rocke_direct_conv_4c_spec_t s = rocke_direct_conv_4c_spec_default();
     if(d.contains("problem") && py::isinstance<py::dict>(d["problem"]))
-        fill_direct_conv_problem(&s.problem, d["problem"].cast<py::dict>());
+        fill_direct_conv_problem(&s.problem, d["problem"].cast<py::dict>(), store);
     {
         std::string v;
         if(dict_str(d, "name", v))
@@ -1634,6 +1646,8 @@ rocke_direct_conv_4c_spec_t dg4_build_spec(const py::dict& d, std::deque<std::st
     s.block_q = dict_int(d, "block_q", s.block_q);
     s.block_groups = dict_int(d, "block_groups", s.block_groups);
     s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    s.dgrad_fused_weights = dict_bool(d, "dgrad_fused_weights", s.dgrad_fused_weights);
+    s.dgrad_weights_lds = dict_bool(d, "dgrad_weights_lds", s.dgrad_weights_lds);
     return s;
 }
 

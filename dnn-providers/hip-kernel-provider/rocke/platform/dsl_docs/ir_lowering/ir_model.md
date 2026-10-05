@@ -216,6 +216,7 @@ mfma_f32_16x16x32_bf16(a, b, c)    # <8 x bfloat>, <8 x bfloat>, <4 x float>
 mfma_f32_32x32x8_f16(a, b, c)      # <4 x half>, <4 x half>, <16 x float>
 mfma_f32_32x32x16_f16(a, b, c)     # <8 x half>, <8 x half>, <16 x float>  (gfx950 only)
 mfma_f32_4x4x4_f16(a, b, c)        # 16 independent 4x4 matmuls per wave
+mfma_f32_4x4x4_bf16(a, b, c)       # bf16 twin, lowers via *_1k variant with <4 x i16> operands
 ```
 
 The shipped `MFMA_F16_ATOMS` catalog in `helpers/atoms.py` exposes the five f16 variants with full lane mapping and dispatch. See `reference/mfma_atom_catalog.md`. These MFMA atoms target the CDNA (wave64) backends. For RDNA (wave32) targets the builder also exposes WMMA matrix ops (`wmma_f32_16x16x16_f16` / `wmma_f32_16x16x16_bf16`, and the gfx12 variants) backed by `WmmaAtom` in `helpers/atoms.py`; all matrix ops route through the generic `mma()` builder method.
