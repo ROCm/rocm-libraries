@@ -231,7 +231,8 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
     const rocke_unified_attention_3d_tiled_spec_t* s, char* buf, size_t cap)
 {
     /* kernel_name_join("rocke_uattn3d_tiled_gfx942", d.., b.., h..kv.., seg..,
-     *   dtype, kv<...> if kv_storage_dtype else "", "sinks" if use_sinks else "",
+     *   dtype, kv<...> if kv_storage_dtype else "", "fnuz" if kv_storage_dtype
+     *   else "", "sinks" if use_sinks else "",
      *   "sw<sw>" if sw>0 else "", "softcap" if has_softcap else "",
      *   "alibi" if use_alibi else "", "qqb" if use_qq_bias else "",
      *   "hoist" if use_invariant_hoist else "", "wkv" if use_wide_kv_load else "")
@@ -270,6 +271,9 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
     {
         snprintf(kv_part, sizeof(kv_part), "kv%s", s->kv_storage_dtype);
         parts[np++] = kv_part;
+        /* Python emits "fnuz" under the *same* condition as the kv part, not
+         * under a format test, so it is tagged here rather than separately. */
+        parts[np++] = "fnuz";
     }
     if(s->use_sinks)
     {
