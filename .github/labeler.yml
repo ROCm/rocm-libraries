@@ -111,11 +111,11 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/rocfft/**/*'
 
-"project: rocprim":
+"project: rocprim-deprecated":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocprim/**/*'
 
-"project: rocprim-deprecated":
+"project: rocprim":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipccl/hipccl3/rocprim/**/*'
 
