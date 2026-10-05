@@ -18,7 +18,8 @@ arch modules, and adding an arch touches exactly one line here.
 
 from __future__ import annotations
 
-from typing import Iterator, Sequence, Tuple
+from dataclasses import replace
+from typing import Dict, Iterator, Sequence, Tuple
 
 from rocke.core.arch import ArchTarget
 from rocke.dispatch.core import (
@@ -50,6 +51,7 @@ from .common import (
     _request_errors,
     _resolve_num_cus,
     _selector_matches,
+    canonical_arch,
 )
 
 _FAMILY = FAMILY
@@ -223,7 +225,7 @@ def dense_spec_for_request(req: AttentionRequest):
     """Return the concrete dense spec selected by an explicit ``req.arch``."""
     if not isinstance(req, AttentionRequest):
         raise TypeError(f"expected AttentionRequest, got {type(req).__name__}")
-    arch = req.arch.strip() if isinstance(req.arch, str) else ""
+    arch = req.arch  # canonical already: AttentionRequest.__post_init__
     if not arch:
         raise ValueError("attention dense dispatch requires an explicit arch")
     try:
@@ -385,6 +387,94 @@ def dispatch_attention(
     )
 
 
+def dispatch_for_arches(
+    req: AttentionRequest,
+    arches: str | Sequence[str],
+    *,
+    ranker: Ranker | None = None,
+    strict: bool = True,
+) -> Dict[str, "DispatchResult | Exception"]:
+    """Run :func:`dispatch_attention` for each of ``arches``.
+
+    Returns a ``{canonical_arch: DispatchResult}`` mapping so the caller can
+    compare selections across architectures from a single host.
+
+    .. note:: **The arch is taken from the request, never from the device** --
+       that part is unconditional. One host read remains: with ``req.num_cus ==
+       0`` the CU count is auto-resolved, and on a box whose arch matches the
+       target arch that resolution reads the live device (see
+       :func:`~.common._resolve_num_cus`). Since ``num_cus`` drives 2D/3D routing
+       and ``num_segments``, the same ``(req, arch)`` pair can select a different
+       kernel on a gfx942 box, a gfx950 box, and a CPU box. **Pass an explicit
+       ``num_cus`` (or ``target_ctas``) to make the comparison reproducible and
+       fully host-independent.**
+
+    Example::
+
+        results = dispatch_for_arches(req, ["gfx942", "gfx950"])
+        print(results["gfx942"].candidate.name)
+        print(results["gfx950"].candidate.name)
+
+    Each arch is canonicalized via :func:`canonical_arch` (strips suffixes such
+    as ``:sramecc+``, normalizes case) before dispatch, so ``"GFX950"`` and
+    ``"gfx950:sramecc+"`` both appear in the output under the key ``"gfx950"``.
+    Duplicate arches after canonicalization are dispatched only once, and
+    insertion order is preserved so the output reads in the caller's order.
+
+    Args:
+        req:    Base :class:`AttentionRequest`. Its ``arch`` field is overridden
+                for each target; all other fields are preserved.
+        arches: A sequence of arch names (``["gfx942", "gfx950"]``) or, for CLI
+                and config callers, one comma-separated string
+                (``"gfx942,gfx950"``). Splitting happens only for the ``str``
+                form -- a sequence is used as given, so an arch name is never
+                silently cut in half.
+        ranker: Optional ranker forwarded to :func:`dispatch_attention`.
+        strict: ``True`` (default) propagates the first dispatch failure.
+                ``False`` maps each failing arch to its exception instead, so
+                one unsupported arch does not discard the results for the
+                others -- the point of a cross-arch comparison. Values are then
+                ``DispatchResult | Exception``; test with ``isinstance``.
+
+    Raises:
+        ValueError: if ``arches`` is empty, or an entry does not canonicalize.
+                    This is a malformed argument, not a per-arch dispatch
+                    failure, so ``strict=False`` does not suppress it.
+    """
+    if isinstance(arches, str):
+        # CLI boundary only: --arches gfx942,gfx950. A Sequence[str] is already
+        # the structured form and must not be re-split.
+        requested = arches.split(",")
+    else:
+        requested = list(arches)
+        # canonical_arch() truncates a target ID at its first comma, so an entry
+        # like "gfx942,gfx950" would quietly canonicalize to "gfx942" and the
+        # second arch would vanish from the results. Reject it instead.
+        joined = [a for a in requested if isinstance(a, str) and "," in a]
+        if joined:
+            raise ValueError(
+                f"comma-joined entries in a sequence of arches: {joined!r}. "
+                "Pass the whole thing as one string, or split it yourself"
+            )
+    if not requested:
+        raise ValueError("arches is empty: nothing to dispatch for")
+
+    results: Dict[str, "DispatchResult | Exception"] = {}
+    for raw in requested:
+        arch = canonical_arch(raw)
+        if not arch:
+            raise ValueError(f"invalid arch {raw!r} in arches {arches!r}")
+        if arch in results:
+            continue  # deduplicate after canonicalization
+        try:
+            results[arch] = dispatch_attention(replace(req, arch=arch), ranker=ranker)
+        except Exception as exc:
+            if strict:
+                raise
+            results[arch] = exc
+    return results
+
+
 __all__ = [
     "ATTENTION_ABI_VERSION",
     "ATTENTION_DIM_VOCABULARY",
@@ -405,6 +495,7 @@ __all__ = [
     "attention_sweep_space",
     "dense_spec_for_request",
     "dispatch_attention",
+    "dispatch_for_arches",
     "dispatch_attention_all",
     "iter_dispatch_attention_all",
     "iter_registered_attention_combos",

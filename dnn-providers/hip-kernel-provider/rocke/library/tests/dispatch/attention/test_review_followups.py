@@ -66,20 +66,15 @@ class TestReviewFollowups(unittest.TestCase):
 
     def test_gfx950_3d_graph_replay_is_opt_in(self):
         problem = _problem(_req(arch="gfx950", seqlen_q=1, seqlen_k=4096))
-        old = au._RESOLVED_ATTENTION_ARCH
-        try:
-            au._RESOLVED_ATTENTION_ARCH = "gfx950"
-            with mock.patch.dict("os.environ", {}, clear=False):
-                import os
+        with mock.patch.dict("os.environ", {}, clear=False):
+            import os
 
-                os.environ.pop("HIPDNN_GFX950_3D_GRAPH", None)
-                self.assertFalse(au._enable_3d_graph_replay(problem))
-                os.environ["HIPDNN_GFX950_3D_GRAPH"] = "1"
-                self.assertTrue(au._enable_3d_graph_replay(problem))
-                os.environ["HIPDNN_GFX950_3D_GRAPH"] = "off"
-                self.assertFalse(au._enable_3d_graph_replay(problem))
-        finally:
-            au._RESOLVED_ATTENTION_ARCH = old
+            os.environ.pop("HIPDNN_GFX950_3D_GRAPH", None)
+            self.assertFalse(au._enable_3d_graph_replay(problem, "gfx950"))
+            os.environ["HIPDNN_GFX950_3D_GRAPH"] = "1"
+            self.assertTrue(au._enable_3d_graph_replay(problem, "gfx950"))
+            os.environ["HIPDNN_GFX950_3D_GRAPH"] = "off"
+            self.assertFalse(au._enable_3d_graph_replay(problem, "gfx950"))
 
     def test_capture_fence_is_only_used_while_capturing(self):
         calls = []
@@ -202,24 +197,20 @@ class TestReviewFollowups(unittest.TestCase):
 
     def test_explicit_path_support_is_not_skipped(self):
         problem = _problem(_req(hdim_q=7, hdim_v=7, arch="gfx950"))
-        old = au._RESOLVED_ATTENTION_ARCH
-        try:
-            au._RESOLVED_ATTENTION_ARCH = "gfx950"
-            ok, _why = au._explicit_path_supported(problem, None, "2d")
-            self.assertFalse(ok)
-            ok, _why = au._explicit_path_supported(
-                problem, AttentionTuningSpec(**_TUNING_FIELDS), "2d"
-            )
-            self.assertFalse(ok)
-            ok, why = au._explicit_path_supported(
-                problem,
-                AttentionTuningSpec(**_TUNING_FIELDS, allow_unsupported=True),
-                "2d",
-            )
-            self.assertTrue(ok)
-            self.assertIn("unsupported override", why)
-        finally:
-            au._RESOLVED_ATTENTION_ARCH = old
+        ok, _why = au._explicit_path_supported(problem, None, "2d", "gfx950")
+        self.assertFalse(ok)
+        ok, _why = au._explicit_path_supported(
+            problem, AttentionTuningSpec(**_TUNING_FIELDS), "2d", "gfx950"
+        )
+        self.assertFalse(ok)
+        ok, why = au._explicit_path_supported(
+            problem,
+            AttentionTuningSpec(**_TUNING_FIELDS, allow_unsupported=True),
+            "2d",
+            "gfx950",
+        )
+        self.assertTrue(ok)
+        self.assertIn("unsupported override", why)
 
     def test_tuning_spec_backend_conflict_raises(self):
         spec = AttentionTuningSpec(**dict(_TUNING_FIELDS, path="3d"))

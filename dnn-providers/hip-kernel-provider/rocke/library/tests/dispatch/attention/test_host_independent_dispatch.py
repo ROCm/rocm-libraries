@@ -1,0 +1,693 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""CPU off-device dispatch tests for AICK-2146.
+
+Verifies that the attention dispatcher makes selection decisions based solely on
+``req.arch`` — the request parameter — without reading the live GPU device arch
+(``_resolve_attention_arch()``).  All tests run on a CPU-only box with no GPU
+and dispatch for arches that are NOT the host arch.
+
+Definition of Done from the ticket:
+- ``_resolve_attention_arch()`` is never called on the selection/geometry path.
+- ``arch`` flows from the request end-to-end.
+- CPU tests dispatch for an architecture that is not the host, across every arch
+  the dispatcher currently declares.
+
+The behavioural tests above drive the *selection* path only.  That left a real
+gap: ``library/`` is build-time-only Python, so a builder or benchmark that
+calls a gate without an ``arch`` is never imported by any GPU lane and the
+``TypeError`` ships green.  ``TestEveryGateCallSiteSuppliesArch`` closes it
+statically -- see that class for the full argument.
+"""
+
+from __future__ import annotations
+
+import ast
+import contextlib
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+import kernels.common.attention_unified as au
+import rocke.runtime.hip_module as hip_module
+from dispatch.attention import (
+    AttentionRequest,
+    dispatch_attention,
+)
+from kernels.common.attention_unified import (
+    _enable_gfx942_fp16_flash,
+    _enable_gfx942_bf16_flash,
+    _enable_combo_2d,
+    _enable_single_batch_combo,
+    supports_native_unified_attention,
+    supports_native_unified_attention_tiled,
+)
+
+
+def _make_request(arch: str, **kw) -> AttentionRequest:
+    """Build a minimal AttentionRequest for ``arch``."""
+    defaults = dict(
+        batch=2,
+        nhead_q=16,
+        nhead_k=16,
+        seqlen_q=512,
+        seqlen_k=512,
+        hdim_q=128,
+        hdim_v=128,
+        arch=arch,
+        dtype="fp16",
+    )
+    defaults.update(kw)
+    return AttentionRequest(**defaults)
+
+
+@contextlib.contextmanager
+def _no_live_device():
+    """Run the body as if the box had no GPU at all.
+
+    Patching only ``au._resolve_attention_arch`` is not enough: the dispatcher
+    has a second, independent device read in
+    ``dispatch.attention.common._resolve_num_cus``, which goes through
+    ``rocke.runtime.hip_module.get_device_arch`` / ``get_device_num_cus``. A test
+    that patches just the first one proves nothing about the second. Patch both,
+    so anything reaching for hardware during selection is visible here.
+
+    ``_resolve_num_cus`` swallows exceptions by design (an off-box build must not
+    fail), so a raising ``get_device_arch`` lands on the documented ``120``
+    fallback rather than erroring -- which is exactly the no-device behaviour
+    this harness is meant to simulate.
+    """
+    with (
+        patch.object(au, "_RESOLVED_ATTENTION_ARCH", None),
+        patch.object(
+            au,
+            "_resolve_attention_arch",
+            side_effect=AssertionError(
+                "live GPU arch read on the selection path -- selection must use "
+                "req.arch only"
+            ),
+        ),
+        patch.object(
+            hip_module,
+            "get_device_arch",
+            side_effect=RuntimeError("no GPU on this box (simulated)"),
+        ),
+        patch.object(
+            hip_module,
+            "get_device_num_cus",
+            side_effect=RuntimeError("no GPU on this box (simulated)"),
+        ),
+    ):
+        yield
+
+
+@contextlib.contextmanager
+def _simulated_host(arch: "str | None", num_cus: int = 304):
+    """Pretend the running box is ``arch`` with ``num_cus`` CUs.
+
+    ``arch=None`` simulates a box with no visible GPU. Used to prove which
+    decisions move with the host and which do not.
+    """
+
+    def _arch():
+        if arch is None:
+            raise RuntimeError("no GPU on this box (simulated)")
+        return arch
+
+    def _cus():
+        if arch is None:
+            raise RuntimeError("no GPU on this box (simulated)")
+        return num_cus
+
+    with (
+        patch.object(hip_module, "get_device_arch", side_effect=_arch),
+        patch.object(hip_module, "get_device_num_cus", side_effect=_cus),
+    ):
+        yield
+
+
+class TestDispatchDoesNotReadLiveDevice(unittest.TestCase):
+    """_resolve_attention_arch must NOT be called during selection."""
+
+    def _assert_no_live_arch_call(self, arch: str, **kw):
+        req = _make_request(arch, **kw)
+        with _no_live_device():
+            # If _resolve_attention_arch() is called on the selection path the
+            # patch raises AssertionError, failing the test. hip_module is
+            # patched too, so the CU resolver cannot reach hardware either.
+            result = dispatch_attention(req)
+        self.assertIsNotNone(result)
+        self.assertIsNotNone(result.spec)
+
+    def test_gfx942_fp16_no_live_device(self):
+        self._assert_no_live_arch_call("gfx942", dtype="fp16")
+
+    def test_gfx942_bf16_no_live_device(self):
+        self._assert_no_live_arch_call("gfx942", dtype="bf16")
+
+    def test_gfx950_fp16_no_live_device(self):
+        self._assert_no_live_arch_call("gfx950", dtype="fp16")
+
+    def test_gfx950_bf16_no_live_device(self):
+        self._assert_no_live_arch_call("gfx950", dtype="bf16")
+
+
+class TestArchFromRequestNotDevice(unittest.TestCase):
+    """Selector functions return results consistent with req.arch, not the host."""
+
+    def _simulate_no_gpu(self):
+        """Return a patcher that removes the memoized GPU arch so _resolve_attention_arch
+        would fall back to "gfx950" (the default), letting tests prove that
+        a DIFFERENT arch was used for selection."""
+        return patch.object(au, "_RESOLVED_ATTENTION_ARCH", None)
+
+    def test_gfx942_selector_fires_for_gfx942_request(self):
+        """_enable_gfx942_fp16_flash returns True only when arch="gfx942"."""
+        from kernels.common.attention_unified import UnifiedAttentionProblem
+
+        problem = UnifiedAttentionProblem(
+            total_q=1024,
+            num_seqs=2,
+            num_query_heads=16,
+            num_kv_heads=16,
+            head_size=128,
+            block_size=16,
+            max_seqlen_q=512,
+            max_seqlen_k=512,
+            dtype="fp16",
+        )
+        self.assertTrue(_enable_gfx942_fp16_flash(problem, "gfx942"))
+        self.assertFalse(_enable_gfx942_fp16_flash(problem, "gfx950"))
+        self.assertFalse(_enable_gfx942_fp16_flash(problem, "gfx1250"))
+
+    def test_combo_2d_fires_only_for_gfx950(self):
+        """_enable_combo_2d is gfx950-only and must respect the explicit arch param."""
+        from kernels.common.attention_unified import UnifiedAttentionProblem
+
+        problem = UnifiedAttentionProblem(
+            total_q=2048,
+            num_seqs=2,
+            num_query_heads=64,
+            num_kv_heads=8,
+            head_size=64,
+            block_size=32,
+            max_seqlen_q=1024,
+            max_seqlen_k=1024,
+            dtype="bf16",
+            use_sinks=True,
+        )
+        self.assertTrue(_enable_combo_2d(problem, "gfx950"))
+        self.assertFalse(_enable_combo_2d(problem, "gfx942"))
+        self.assertFalse(_enable_combo_2d(problem, "gfx1250"))
+
+    def test_supports_tiled_uses_request_arch(self):
+        """supports_native_unified_attention_tiled uses the passed arch, not the device.
+
+        Uses a gfx942-only shape (_enable_gfx942_fp16_flash fires for "gfx942"
+        but not "gfx950") to prove the arch parameter actually changes the result.
+        """
+        from kernels.common.attention_unified import UnifiedAttentionProblem
+
+        # fp16 hd128 bs16 prefill: selects the gfx942 flash/ring path on gfx942
+        # (see _enable_gfx942_fp16_flash). On gfx950 the 16x16x16 tiled path is
+        # used instead -- the two arches pick distinct dispatch paths, so
+        # ok_gfx942 != ok_gfx950 for at least one of the paths.
+        problem = UnifiedAttentionProblem(
+            total_q=1024,
+            num_seqs=2,
+            num_query_heads=16,
+            num_kv_heads=16,
+            head_size=128,
+            block_size=16,
+            max_seqlen_q=512,
+            max_seqlen_k=512,
+            dtype="fp16",
+        )
+        with self._simulate_no_gpu():
+            ok_gfx942, _ = supports_native_unified_attention_tiled(problem, "gfx942")
+            ok_gfx950, _ = supports_native_unified_attention_tiled(problem, "gfx950")
+            ok_gfx1250, _ = supports_native_unified_attention_tiled(problem, "gfx1250")
+        # The selector must return concrete booleans (not raise).
+        self.assertIsInstance(ok_gfx942, bool)
+        self.assertIsInstance(ok_gfx950, bool)
+        self.assertIsInstance(ok_gfx1250, bool)
+        # At least two arches must differ: proves arch actually affects selection.
+        arch_results = {ok_gfx942, ok_gfx950, ok_gfx1250}
+        self.assertGreater(
+            len(arch_results),
+            1,
+            "supports_native_unified_attention_tiled returned identical results for "
+            "gfx942/gfx950/gfx1250 — arch parameter is not being used",
+        )
+        # gfx942 fp16 hd128 tiled is supported (flash/ring path).
+        self.assertTrue(ok_gfx942, "gfx942 fp16 hd128 tiled should be supported")
+
+    def test_dispatch_for_non_host_arch_succeeds(self):
+        """Dispatching for a non-host arch completes without touching the GPU."""
+        # Simulate CPU-only box: clear the memoized arch AND make any real GPU
+        # lookup raise so the test fails fast if the dispatch path falls through.
+        with _no_live_device():
+            for arch in ("gfx942", "gfx950", "gfx1250"):
+                with self.subTest(arch=arch):
+                    req = _make_request(arch, dtype="fp16")
+                    result = dispatch_attention(req)
+                    self.assertIsNotNone(result.spec)
+
+    def test_bf16_gfx942_dispatch_no_device_read(self):
+        """bf16 gfx942 dispatch uses request arch, not live device."""
+        with _no_live_device():
+            req = _make_request("gfx942", dtype="bf16", seqlen_q=1024, seqlen_k=2048)
+            result = dispatch_attention(req)
+            self.assertIsNotNone(result.spec)
+
+    def test_gfx950_dispatch_no_device_read(self):
+        """gfx950 dispatch (combo/transposed path) uses request arch."""
+        with _no_live_device():
+            req = _make_request(
+                "gfx950",
+                dtype="bf16",
+                batch=2,
+                nhead_q=64,
+                nhead_k=8,
+                seqlen_q=1024,
+                seqlen_k=1024,
+                hdim_q=64,
+                hdim_v=64,
+            )
+            result = dispatch_attention(req)
+            self.assertIsNotNone(result.spec)
+
+    def test_gfx1250_dispatch_no_device_read(self):
+        """gfx1250 dispatch uses request arch, not live device."""
+        with _no_live_device():
+            req = _make_request(
+                "gfx1250",
+                dtype="fp16",
+                batch=2,
+                nhead_q=16,
+                nhead_k=16,
+                seqlen_q=512,
+                seqlen_k=512,
+                hdim_q=128,
+                hdim_v=128,
+            )
+            result = dispatch_attention(req)
+            self.assertIsNotNone(result.spec)
+
+
+class TestNumCusHostDependence(unittest.TestCase):
+    """Pin the exact scope of the host-independence guarantee.
+
+    ``_resolve_num_cus`` is the one selection input still allowed to read the
+    box, and only when ``num_cus`` is left at 0 and the host arch equals the
+    target arch. ``num_cus`` feeds 2D/3D routing and ``num_segments``, so that
+    read is load-bearing, not cosmetic.
+
+    Rather than claim it away, both halves are pinned here: setting ``num_cus``
+    buys a fully host-independent decision, and leaving it at 0 does not. If a
+    later change collapses the auto-resolve branch to a per-arch constant,
+    ``test_unset_num_cus_is_host_derived`` is the test that should fail and be
+    deleted -- deliberately, not by accident.
+    """
+
+    # 64 q-heads / 8 kv-heads hd128 bf16: a shape near the 2D<->3D boundary, so a
+    # change in the CU-count target moves the routing decision.
+    _SHAPE = dict(
+        batch=1,
+        nhead_q=64,
+        nhead_k=8,
+        seqlen_q=128,
+        seqlen_k=1024,
+        hdim_q=128,
+        hdim_v=128,
+        dtype="bf16",
+    )
+
+    def _selected(self, arch: str, host: "str | None", **kw) -> str:
+        with _simulated_host(host):
+            return dispatch_attention(_make_request(arch, **kw)).candidate.name
+
+    def test_explicit_num_cus_is_fully_host_independent(self):
+        """With num_cus pinned, every simulated host selects the same kernel."""
+        for arch in ("gfx942", "gfx950"):
+            for cus in (120, 304):
+                with self.subTest(arch=arch, num_cus=cus):
+                    picked = {
+                        host: self._selected(arch, host, num_cus=cus, **self._SHAPE)
+                        for host in ("gfx942", "gfx950", None)
+                    }
+                    self.assertEqual(
+                        len(set(picked.values())),
+                        1,
+                        "an explicit num_cus must make selection a pure function "
+                        f"of (problem, arch); got {picked}",
+                    )
+
+    def test_unset_num_cus_is_host_derived(self):
+        """Documented limitation: num_cus=0 lets the host move the decision.
+
+        Not an aspiration -- the current, intended behaviour. An on-box request
+        is meant to pick the kernel tuned for the part it runs on. This test
+        exists so the limitation stays visible and tested instead of being
+        quietly contradicted by the module docstrings.
+        """
+        on_box = self._selected("gfx950", "gfx950", **self._SHAPE)
+        off_box = self._selected("gfx950", None, **self._SHAPE)
+        # The claim under test is "the host can change this", not "it always
+        # does" -- a 304-CU gfx950 and the 120 fallback straddle the 2D/3D
+        # boundary for this shape.
+        self.assertNotEqual(
+            on_box,
+            off_box,
+            "expected the simulated 304-CU gfx950 host and the no-GPU 120 "
+            "fallback to route this boundary shape differently; if this now "
+            "matches, either the shape drifted off the boundary (repick it) or "
+            "auto-resolution was removed (then delete this test and tighten the "
+            "_resolve_num_cus / dispatch_for_arches docstrings)",
+        )
+
+    def test_arch_is_never_host_derived(self):
+        """The arch half of the guarantee holds unconditionally.
+
+        Even with num_cus unset, a gfx942 request never becomes a gfx950
+        selection because the box is gfx950.
+        """
+        for host in ("gfx942", "gfx950", None):
+            with self.subTest(host=host), _simulated_host(host):
+                result = dispatch_attention(_make_request("gfx942", **self._SHAPE))
+                self.assertIn("gfx942", result.explanation[0])
+                self.assertNotIn("gfx950", result.explanation[0])
+
+
+# =====================================================================
+# Static guard: every call site of an arch-gated selector supplies arch
+# =====================================================================
+
+# Anchored on the module object, never on a repo-relative literal.
+_GATE_MODULE = Path(au.__file__).resolve()
+_LIBRARY_ROOT = _GATE_MODULE.parents[2]
+
+# Gates whose ``arch`` still carries a default. A default is what lets a caller
+# omit the arch and silently get some other box's answer, so this set is a
+# RATCHET: entries may be removed as gates are tightened, never added. A new
+# name here means a new implicit host dependency was introduced.
+# All selection-path gates now require arch as a positional argument (no default).
+# Only the arch-neutral scalar builder functions remain with an optional arch:
+# they are validated-but-not-consumed (the emitted KernelDef is identical for
+# every target) and kept optional for API uniformity with tiled builders.
+_ARCH_IS_OPTIONAL = frozenset(
+    {
+        "build_unified_attention_2d",
+        "build_unified_attention_3d",
+        "build_unified_attention_reduce",
+    }
+)
+
+
+def _gate_signatures():
+    """Partition ``attention_unified``'s top-level functions that take ``arch``.
+
+    Returns ``(required, optional)``, each mapping a function name to the
+    positional index of its ``arch`` parameter (``None`` when keyword-only).
+    """
+    tree = ast.parse(_GATE_MODULE.read_text(encoding="utf-8"), str(_GATE_MODULE))
+    required, optional = {}, {}
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        args = node.args
+        positional = [p.arg for p in args.posonlyargs] + [p.arg for p in args.args]
+        kwonly = [p.arg for p in args.kwonlyargs]
+        if "arch" in positional:
+            index = positional.index("arch")
+            # Defaults right-align onto the positional list.
+            has_default = index >= len(positional) - len(args.defaults)
+        elif "arch" in kwonly:
+            index = None
+            has_default = args.kw_defaults[kwonly.index("arch")] is not None
+        else:
+            continue
+        (optional if has_default else required)[node.name] = index
+    return required, optional
+
+
+def _called_name(func):
+    """Bare name for a call target: ``f(...)`` and ``au.f(...)`` both give ``f``."""
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
+# Functions that answer "what arch is this box?". An arch argument that is a
+# call to one of these supplies an arch, so the signature guard is satisfied --
+# and yet the call site is exactly the host dependency this PR removes. Spelling
+# them out is what turns that guard from "no TypeError" into "no device read".
+_LIVE_ARCH_PROBES = frozenset(
+    {
+        "_resolve_attention_arch",
+        "get_device_arch",
+    }
+)
+
+# Returned when ``*args``/``**kwargs`` forwarding makes the arch argument
+# undecidable from the AST alone. Counts as supplied: this guard reports only
+# what it can prove.
+_UNDECIDABLE = object()
+
+
+def _arch_argument(call, positional_index):
+    """The AST node passed as ``arch``, ``None`` if absent, or ``_UNDECIDABLE``."""
+    if any(keyword.arg is None for keyword in call.keywords):
+        return _UNDECIDABLE
+    if any(isinstance(arg, ast.Starred) for arg in call.args):
+        return _UNDECIDABLE
+    for keyword in call.keywords:
+        if keyword.arg == "arch":
+            return keyword.value
+    if positional_index is not None and len(call.args) > positional_index:
+        return call.args[positional_index]
+    return None
+
+
+def _is_live_device_probe(node) -> bool:
+    """Whether ``node`` is a call to something that reads the running device."""
+    return isinstance(node, ast.Call) and _called_name(node.func) in _LIVE_ARCH_PROBES
+
+
+def _supplies_arch(call, positional_index):
+    """Whether ``call`` can be shown to pass ``arch``.
+
+    Thin wrapper over :func:`_arch_argument`, kept because "did it pass one?"
+    and "what did it pass?" are two different questions and the sweep asks both.
+    """
+    return _arch_argument(call, positional_index) is not None
+
+
+def _live_arch_call_owners(tree):
+    """``(top_level_function_name, lineno)`` for every live-arch probe call.
+
+    Attribution is to the OUTERMOST enclosing function, so a closure defined
+    inside a launch entry point (the graph-replay ``_do()`` bodies, for one)
+    counts as part of that entry point rather than as an unnamed escapee.
+    Module-level calls are reported with owner ``None`` and never allow-listed.
+
+    A probe's own body is skipped: ``_resolve_attention_arch`` calling
+    ``get_device_arch`` is its implementation, not a leak out of one.
+    """
+    found = []
+
+    def visit(node, owner):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            owner = owner or node.name
+        if isinstance(node, ast.Call) and _called_name(node.func) in _LIVE_ARCH_PROBES:
+            if owner not in _LIVE_ARCH_PROBES:
+                found.append((owner, node.lineno))
+        for child in ast.iter_child_nodes(node):
+            visit(child, owner)
+
+    visit(tree, None)
+    return found
+
+
+class TestEveryGateCallSiteSuppliesArch(unittest.TestCase):
+    """Static sweep: no in-tree caller of a required-arch gate omits the arch.
+
+    Why static, and why here. Making ``arch`` required turns every missed call
+    site into a ``TypeError`` at the moment it is reached -- which is the right
+    failure, but only if something reaches it. Most of ``library/`` is
+    build-time-only Python that no GPU lane imports, and the one production
+    caller that *is* reached sits on the launch path, which the behavioural
+    tests above deliberately do not cover. That combination is how a broken 3D
+    launch shipped through green CI. Parsing beats importing for the same
+    reason: it needs no GPU, no torch, and no module to be import-clean.
+
+    Matching is by bare name against the top-level functions of
+    ``attention_unified``, so a same-named method elsewhere in the tree would
+    be a false positive. There are none today; if one appears, rename it or
+    give this guard a skip list rather than loosening the signature.
+    """
+
+    def _sweep(self, gates):
+        """Return ``(missing_arch, probed_arch, unparseable)``.
+
+        ``missing_arch`` is a call that would raise ``TypeError``.
+        ``probed_arch`` is a call that satisfies the signature by handing the
+        gate a freshly-read device arch -- ``_select_2d_tile_size(problem,
+        _resolve_attention_arch())``. That passes a signature check and defeats
+        the entire point, so it is swept for separately.
+        """
+        missing, probed, unparseable = [], [], []
+        for path in sorted(_LIBRARY_ROOT.rglob("*.py")):
+            if "__pycache__" in path.parts:
+                continue
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
+            except SyntaxError as exc:
+                unparseable.append(f"{path.relative_to(_LIBRARY_ROOT)}: {exc}")
+                continue
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                name = _called_name(node.func)
+                if name not in gates:
+                    continue
+                where = f"{path.relative_to(_LIBRARY_ROOT)}:{node.lineno} {name}()"
+                supplied = _arch_argument(node, gates[name])
+                if supplied is None:
+                    missing.append(f"{where} -- no arch")
+                elif supplied is not _UNDECIDABLE and _is_live_device_probe(supplied):
+                    probed.append(
+                        f"{where} -- arch={_called_name(supplied.func)}() "
+                        "(reads the running device)"
+                    )
+        return missing, probed, unparseable
+
+    def test_gate_set_is_populated(self):
+        """A vacuous sweep passes for free, so pin that the gates were found."""
+        required, _ = _gate_signatures()
+        self.assertGreater(
+            len(required),
+            40,
+            "expected several required-arch gates in attention_unified; found "
+            f"{len(required)} -- the sweep is not looking at what it thinks it is",
+        )
+
+    def test_optional_arch_gates_are_only_the_known_ones(self):
+        """Ratchet: a gate may lose its arch default, never gain one."""
+        _, optional = _gate_signatures()
+        self.assertEqual(
+            set(optional),
+            set(_ARCH_IS_OPTIONAL),
+            "the set of gates with a defaulted arch changed. Removing a name is "
+            "the intended direction -- drop it from _ARCH_IS_OPTIONAL too. Adding "
+            "one re-introduces an implicit host dependency and is what this "
+            "guard exists to block",
+        )
+
+    def test_no_call_site_omits_a_required_arch(self):
+        required, _ = _gate_signatures()
+        missing, _probed, unparseable = self._sweep(required)
+        self.assertEqual(
+            unparseable, [], f"unparseable sources under {_LIBRARY_ROOT.name}/"
+        )
+        self.assertEqual(
+            missing,
+            [],
+            "these call sites raise TypeError the moment they are reached -- the "
+            "gate requires an arch and none is passed:\n  " + "\n  ".join(missing),
+        )
+
+    def test_no_call_site_satisfies_a_gate_with_a_live_device_read(self):
+        """The signature guard is not the host-independence guard.
+
+        ``_select_2d_tile_size(problem, _resolve_attention_arch())`` passes
+        ``test_no_call_site_omits_a_required_arch`` and re-introduces exactly
+        the dependency this PR removes. Requiring the parameter only proves the
+        parameter exists; this proves the value did not come from the box.
+        """
+        required, _ = _gate_signatures()
+        _missing, probed, _unparseable = self._sweep(required)
+        self.assertEqual(
+            probed,
+            [],
+            "these call sites satisfy the arch parameter by reading the running "
+            "device, which is the dependency the parameter exists to remove. "
+            "Thread the caller's arch through instead:\n  " + "\n  ".join(probed),
+        )
+
+
+# Top-level functions of ``attention_unified`` allowed to ask the box what it
+# is. All three are launch entry points: they are about to compile and launch on
+# the local device, so the local device IS the authority there. Everything below
+# them receives that answer as an argument.
+#
+# This is a RATCHET, like _ARCH_IS_OPTIONAL. Removing a name is fine; adding one
+# means a new code path reads hardware, and that needs to be argued for in
+# review rather than absorbed by editing this set.
+_LIVE_ARCH_CALLERS_ALLOWED = frozenset(
+    {
+        "run_unified_attention_torch",  # the public launch entry
+        "_run_3d_tiled",  # split-KV decode launch
+        "_run_2d_graphed",  # 2D graph-replay launch
+    }
+)
+
+
+class TestLiveArchReadsAreConfinedToTheLaunchPath(unittest.TestCase):
+    """Every ``_resolve_attention_arch()`` call sits in an allow-listed launcher.
+
+    The call-site sweep above is per-gate: it can only see functions it knows
+    the signature of. This one is per-*call*, so a device read introduced
+    anywhere in ``attention_unified`` -- in a new helper, a new selector, a
+    refactored cache lookup -- fails here immediately, without waiting for a
+    behavioural test to happen to route through it.
+
+    Together the two directions close the loop: selection-path functions must be
+    given an arch, and the module may only produce one in a launcher.
+    """
+
+    def _owners(self):
+        tree = ast.parse(_GATE_MODULE.read_text(encoding="utf-8"), str(_GATE_MODULE))
+        return _live_arch_call_owners(tree)
+
+    def test_sweep_finds_the_launch_path_reads(self):
+        """Guard the guard: a sweep that finds nothing would pass vacuously."""
+        owners = self._owners()
+        self.assertGreater(
+            len(owners),
+            0,
+            "found no _resolve_attention_arch() calls at all in "
+            f"{_GATE_MODULE.name} -- either the probe names in _LIVE_ARCH_PROBES "
+            "drifted, or the launch path stopped resolving an arch",
+        )
+
+    def test_no_live_arch_read_outside_the_allow_list(self):
+        strays = sorted(
+            f"{_GATE_MODULE.name}:{lineno} in {owner or '<module level>'}"
+            for owner, lineno in self._owners()
+            if owner not in _LIVE_ARCH_CALLERS_ALLOWED
+        )
+        self.assertEqual(
+            strays,
+            [],
+            "these read the live device outside the launch path. Selection and "
+            "geometry must take the arch as an argument; only a function that is "
+            "about to compile-and-launch on this box may ask what this box is:\n  "
+            + "\n  ".join(strays),
+        )
+
+    def test_allow_list_has_no_dead_entries(self):
+        """A name that no longer reads the device should leave the allow-list."""
+        actual = {owner for owner, _ in self._owners()}
+        self.assertEqual(
+            set(_LIVE_ARCH_CALLERS_ALLOWED) - actual,
+            set(),
+            "allow-listed functions that no longer call _resolve_attention_arch(). "
+            "Drop them -- a stale entry silently re-permits a future device read",
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
