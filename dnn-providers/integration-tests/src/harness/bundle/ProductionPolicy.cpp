@@ -21,6 +21,7 @@ HarnessPolicy productionPolicy(TensorPlacement placement)
     policy.validator = TestConfig::get().getValidatorDevice();
     policy.claims = claimMode();
     policy.placement = placement;
+    policy.failOnNoOracle = TestConfig::get().failOnNoOracle();
     policy.arch = TestConfig::get().getCurrentArch();
     policy.platform = currentPlatform();
     policy.deviceVramMb = TestConfig::get().getCurrentDeviceVramMb();

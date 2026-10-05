@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -68,8 +69,12 @@ struct ClaimPhase
 
 /// Runs one bundle against the engine under test and decides what that says.
 ///
-/// Fallback chain: golden → GPU ref → CPU ref → SKIP (RFC 0010 §4.4). Inputs are
-/// read-only (shared); outputs are separate allocations per executor.
+/// Fallback chain: golden → GPU ref → CPU ref (RFC 0010 §4.4). Oracle availability is
+/// resolved before the engine runs, but the engine still answers first: a decline is
+/// a SKIP whatever the oracles said. An engine that ran with nothing left to verify it
+/// SKIPs, or FAILs under policy.failOnNoOracle. A reference that errored is a FAIL
+/// either way. Inputs are read-only (shared); outputs are separate allocations
+/// per executor.
 ///
 /// **This class has no virtual members.** Everything that needs a GPU, a handle, a
 /// loaded engine plugin, or process-wide state lives behind one of the four
@@ -308,6 +313,10 @@ private:
     VerificationOutcome unverifiable(const std::string& reason,
                                      VerificationDepth reached = VerificationDepth::NOT_REACHED);
 
+    // The one wording of "unverifiable", shared by the SKIP above and the FAIL that
+    // --fail-on-no-oracle turns it into, so a log grep finds both.
+    std::string unverifiableMessage(const std::string& reason) const;
+
     // The single definition of "this graph's claims are this run's business": an engine
     // was named to check against, this is not an authoring run, and a sidecar exists.
     // Deliberately free of the claim mode -- what a broken claim costs is
@@ -374,10 +383,45 @@ private:
     // APPLICABILITY and BUILDABLE come here; FULL takes the comparison path.
     VerificationOutcome enforceAtLevel(EnforcementLevel level, GraphSession& session);
 
+    /// A reference executor that said, before the engine ran, that it can take this graph.
+    struct ResolvedReference
+    {
+        ReferenceExecutorType type;
+        IReferenceGraphExecutor* executor;
+    };
+
+    /// The oracles a non-golden mode may use, in fallback order, and what became of
+    /// each one tried. Probed lazily: only as far as the first applicable reference
+    /// up front, so a working GPU reference never instantiates the CPU one; the rest
+    /// are probed only if the ones before them fail at execute().
+    struct OracleChain
+    {
+        bool golden = false;
+        bool autoMode = false;
+        /// The --verification-mode an explicit chain was asked for ("gpu"/"cpu");
+        /// empty in auto mode.
+        std::string explicitMode;
+        std::vector<ReferenceExecutorType> candidates;
+        std::size_t next = 0; ///< first candidate not yet probed
+        std::optional<ResolvedReference> ready;
+        /// One entry per oracle tried and why it could not verify, for the message.
+        std::vector<std::string> tried;
+        /// A reference errored rather than declined. That is a bug in the oracle, not
+        /// a coverage gap, so the bundle fails whatever policy.failOnNoOracle says.
+        bool refErrored = false;
+    };
+
+    OracleChain resolveOracles(VerificationMode mode);
+    std::optional<ResolvedReference> nextApplicableReference(OracleChain& chain);
+
     VerificationOutcome runComparison(GraphSession& session);
     VerificationOutcome runGoldenMode(GraphSession& session);
-    VerificationOutcome runExplicitRefMode(GraphSession& session, ReferenceExecutorType type);
-    VerificationOutcome runAutoMode(GraphSession& session);
+    VerificationOutcome runReferenceMode(GraphSession& session, OracleChain& oracles);
+    VerificationOutcome runOracleChain(OutputTensors& engineOutputs, OracleChain& chain);
+
+    // Every oracle in `chain` declined. Recorded as unverifiable; SKIPs, or FAILs
+    // under policy.failOnNoOracle -- unless one errored, which always FAILs.
+    VerificationOutcome noOracle(const OracleChain& chain, VerificationDepth reached);
 
     // nullopt when the inputs are ready; otherwise the outcome to return.
     std::optional<VerificationOutcome> prepareInputs();
@@ -388,7 +432,7 @@ private:
     EngineRunResult runEngine(GraphSession& session);
     VerificationOutcome engineDidNotRun(const EngineRunResult& run) const;
 
-    RefRunResult runReferenceCapturingOutputs(ReferenceExecutorType type,
+    RefRunResult runReferenceCapturingOutputs(const ResolvedReference& ref,
                                               OutputTensors& refOutputs);
     void markOutputsModified(OutputTensors& outputs) const;
 
