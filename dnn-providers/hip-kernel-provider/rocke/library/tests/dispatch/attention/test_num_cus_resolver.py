@@ -161,6 +161,24 @@ class TestNumCusResolver(unittest.TestCase):
         finally:
             p.restore()
 
+    def test_explicit_tuning_problem_is_pure_and_never_reads_the_device(self):
+        """Tuned candidates fix their path/geometry, so their memoized base uses
+        request data only; the live CU policy belongs to production routing."""
+        p = _Patch()
+
+        def _unexpected(*_args, **_kwargs):
+            raise AssertionError("explicit tuning consulted live device state")
+
+        try:
+            p.attr(hipm, "get_device_arch", _unexpected)
+            p.attr(AC, "_device_num_cus", _unexpected)
+            fallback = AC._tuning_problem(_req(num_cus=0, arch="gfx950"))
+            explicit = AC._tuning_problem(_req(num_cus=208, arch="gfx950"))
+            self.assertEqual(fallback.num_cus, 120)
+            self.assertEqual(explicit.num_cus, 208)
+        finally:
+            p.restore()
+
     def test_routing_scales_with_num_cus(self):
         """The resolved count changes routing: an under-filled grid flips 2D->3D."""
         # b64 GQA-64/8 D64 kv8192: num_2d=768 -> 2D at 120 (target 480), 3D at 304 (target 1216)

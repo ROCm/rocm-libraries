@@ -24,12 +24,9 @@ _GFX950_DENSE_FEATURES = {"causal", "sinks", "sliding_window"}
 _GFX950_DENSE_GRID_FEATURES = _GFX950_DENSE_FEATURES | {"causal_bottom_right"}
 EXPECTED_FEATURES = {
     "attention_gfx942_dense": {"causal", "sliding_window"},
-    "attention_gfx950_dense": set(_GFX950_DENSE_FEATURES),
-    "attention_gfx950_dense_grid_default": set(_GFX950_DENSE_GRID_FEATURES),
-    "attention_gfx950_dense_persist_default": set(_GFX950_DENSE_FEATURES),
-    "attention_gfx950_dense_grid_bm128": set(_GFX950_DENSE_GRID_FEATURES),
-    "attention_gfx950_dense_persist_bm128": set(_GFX950_DENSE_FEATURES),
-    "attention_gfx950_dense_persist_widedma_bm128": set(_GFX950_DENSE_FEATURES),
+    "attention_gfx950_dense_grid": set(_GFX950_DENSE_GRID_FEATURES),
+    "attention_gfx950_dense_persist": set(_GFX950_DENSE_FEATURES),
+    "attention_gfx950_dense_persist_widedma": set(_GFX950_DENSE_FEATURES),
     "attention_d256_decode": {"causal", "causal_bottom_right"},
     "attention_gfx1250_wmma": {"causal"},
     "attention_gfx942_dense_pipe": {
@@ -331,8 +328,8 @@ class TestAttentionDispatch(unittest.TestCase):
                     common.update(
                         seqlen_q=512,
                         seqlen_k=1024,
-                        algorithm="attention_dense",
-                        dense_persistent="off",
+                        algorithm="attention_dense_grid",
+                        spec_id="gfx950_dense_grid",
                     )
                     base_kw["mask_type"] = AttentionMaskType.TOP_LEFT_CAUSAL
                 base = _attn(**common, **base_kw)

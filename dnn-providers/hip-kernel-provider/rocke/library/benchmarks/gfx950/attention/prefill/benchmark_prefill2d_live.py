@@ -734,7 +734,8 @@ def main() -> int:
         "--sweep-level",
         choices=("production", "full"),
         default="production",
-        help="production walks the curated stacks in the 'sweep' lane. "
+        help="production walks the curated unified-tuning stacks in the 'sweep' "
+        "lane (unified specs only; dense runs in the combo / table sweeps). "
         "full samples every kernel knob; see --sweep-tuning-sample",
     )
     ap.add_argument(

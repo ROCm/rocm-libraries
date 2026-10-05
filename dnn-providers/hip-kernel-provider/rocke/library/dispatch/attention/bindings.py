@@ -276,27 +276,23 @@ _DENSE_OPTIONAL_INPUTS = {
 
 def _dense_runner(arch: str):
     if arch == "gfx942":
-        from kernels.gfx942.attention_dense import (
-            attention_dense_block,
-            attention_dense_grid,
-            run_attention_dense_torch,
-        )
+        from kernels.gfx942.attention_dense import run_attention_dense_torch
     elif arch == "gfx950":
-        from kernels.gfx950.attention_dense import (
-            attention_dense_block,
-            attention_dense_grid,
-            run_attention_dense_torch,
-        )
+        from kernels.gfx950.attention_dense import run_attention_dense_torch
     else:
         raise ValueError(f"no dense attention Torch runner for arch {arch!r}")
-    return run_attention_dense_torch, attention_dense_grid, attention_dense_block
+    return run_attention_dense_torch
 
 
 def bind_dense_attention_torch(
-    request, spec, tensors: Mapping[str, Any], **kwargs
+    request, tuning_spec, tensors: Mapping[str, Any], **kwargs
 ) -> TorchBinding:
-    """Bind a concrete dense spec to ``q``/``k``/``v``/``out`` tensors."""
-    run, grid_fn, block_fn = _dense_runner(str(getattr(request, "arch", "")))
+    """Bind a dense ``AttentionTuningSpec`` to ``q``/``k``/``v``/``out`` tensors.
+
+    Grid and block come from the spec, the same values the candidate reports.
+    """
+    run = _dense_runner(str(getattr(request, "arch", "")))
+    spec = tuning_spec.kernel_spec
     scale = kwargs.get("scale")
     if scale is None:
         scale = 1.0 / math.sqrt(int(getattr(request, "hdim_q", spec.head_size)))
@@ -331,7 +327,11 @@ def bind_dense_attention_torch(
             call[name] = value
         return run(**call)
 
-    return TorchBinding(launch=launch, grid=grid_fn(spec), block=block_fn(spec))
+    return TorchBinding(
+        launch=launch,
+        grid=tuple(tuning_spec.launch_grid()),
+        block=tuple(tuning_spec.launch_block()),
+    )
 
 
 def bind_tuning_attention_torch(
@@ -398,9 +398,11 @@ def bind_tuning_attention_torch(
             tuning_spec=spec,
         )
 
-    grid = kwargs.get("grid") or (0, 0, 0)
-    block = kwargs.get("block") or (0, 0, 0)
-    return TorchBinding(launch=launch, grid=tuple(grid), block=tuple(block))
+    return TorchBinding(
+        launch=launch,
+        grid=tuple(spec.launch_grid(problem)),
+        block=tuple(spec.launch_block()),
+    )
 
 
 def bind_wmma_attention_torch(

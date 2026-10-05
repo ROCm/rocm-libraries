@@ -164,11 +164,16 @@ class TestRegistrySplit(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "declares no build"):
             registry.register(candidate)
 
-    def test_dense_select_spec_returns_the_concrete_dense_spec(self):
-        candidate = ATTENTION_EXECUTION_REGISTRY.get("attention_gfx950_dense")
-        req = _req(algorithm="attention_dense")
+    def test_dense_select_spec_returns_an_attention_tuning_spec(self):
+        candidate = ATTENTION_EXECUTION_REGISTRY.get(
+            "attention_gfx950_dense_persist_widedma"
+        )
+        req = _req(algorithm=candidate.algorithm, spec_id=candidate.spec_id)
         spec = candidate.select_spec(req)
-        self.assertIsInstance(spec, AttentionDenseSpec)
+        self.assertIsInstance(spec, AttentionTuningSpec)
+        self.assertEqual(spec.path, "dense")
+        self.assertIsInstance(spec.kernel_spec, AttentionDenseSpec)
+        self.assertIn("@", spec.tuning_id)
         self.assertNotEqual(candidate.grid(spec, req), (0, 0, 0))
         self.assertNotEqual(candidate.block(spec), (0, 0, 0))
         self.assertTrue(candidate.signature(spec))
@@ -189,7 +194,12 @@ class TestRegistrySplit(unittest.TestCase):
 
     def test_gfx942_dense_bind_torch_omits_paged_kwargs(self):
         candidate = ATTENTION_EXECUTION_REGISTRY.get("attention_gfx942_dense")
-        req = _req(arch="gfx942", dtype="fp16", algorithm="attention_dense")
+        req = _req(
+            arch="gfx942",
+            dtype="fp16",
+            algorithm=candidate.algorithm,
+            spec_id=candidate.spec_id,
+        )
         spec = candidate.select_spec(req)
         tensors = {"q": object(), "k": object(), "v": object(), "out": object()}
         captured = {}
@@ -222,10 +232,13 @@ class TestRegistrySplit(unittest.TestCase):
         with mock.patch.object(
             attention_bindings,
             "_dense_runner",
-            return_value=(fake_run, lambda _s: (1, 1, 1), lambda _s: (64, 1, 1)),
+            return_value=fake_run,
         ):
             binding = attention_bindings.bind_dense_attention_torch(req, spec, tensors)
             binding.launch()
+        self.assertEqual(captured["spec"], spec.kernel_spec)
+        self.assertEqual(binding.grid, candidate.grid(spec, req))
+        self.assertEqual(binding.block, candidate.block(spec))
         self.assertEqual(captured["q"], tensors["q"])
         self.assertEqual(captured["arch"], "gfx942")
         self.assertNotIn("block_tables", captured)
@@ -370,7 +383,8 @@ class TestRegistrySplit(unittest.TestCase):
         runtime_spec = captured["tuning_spec"]
         self.assertTrue(runtime_spec.kernel_spec.use_i64_kv_addr)
         self.assertEqual(runtime_spec.num_kv_blocks, 65537)
-        self.assertNotEqual(runtime_spec.tuning_id, spec.tuning_id)
+        self.assertEqual(runtime_spec.tuning_id, spec.tuning_id)
+        self.assertEqual(binding.grid, runtime_spec.launch_grid(_problem(req)))
 
 
 if __name__ == "__main__":

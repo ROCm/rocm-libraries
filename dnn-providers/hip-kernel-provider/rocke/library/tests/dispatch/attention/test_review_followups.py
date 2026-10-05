@@ -15,12 +15,11 @@ from dispatch.attention import (
     ATTENTION_ROUTE_REGISTRY,
     AttentionRequest,
     attention_dispatch_result,
+    attention_tuning_spec,
 )
 from dispatch.attention.bindings import bind_dense_attention_torch
 from dispatch.attention.common import AttentionTuningSpec, _problem
-from dispatch.attention.gfx942 import _dense_spec as _dense_spec_gfx942
-from dispatch.attention.gfx950 import _dense_spec as _dense_spec_gfx950
-from dispatch.attention.tuning_common import (
+from dispatch.attention.unified_rules import (
     AttentionGeometryVariant,
     _explicit_configs,
 )
@@ -124,7 +123,7 @@ class TestReviewFollowups(unittest.TestCase):
             au.gfx942_4warp_launch_grid(_problem(pinned)),
         )
 
-    def test_one_arg_gfx950_dense_spec_selects_a_variant(self):
+    def test_pinned_gfx950_dense_spec_is_its_candidate_default(self):
         req = _req(
             arch="gfx950",
             nhead_q=16,
@@ -133,11 +132,10 @@ class TestReviewFollowups(unittest.TestCase):
             seqlen_k=2048,
             hdim_q=64,
             hdim_v=64,
-            algorithm="attention_dense",
-            dense_persistent="off",
         )
-        spec = _dense_spec_gfx950(req)
-        self.assertGreater(spec.block_m, 0)
+        spec = attention_tuning_spec(req, "gfx950_dense_grid").kernel_spec
+        self.assertEqual((spec.block_m, spec.block_n), (256, 64))
+        self.assertFalse(spec.persistent)
 
     def test_gfx942_dense_binding_rejects_paged_block_tables(self):
         req = _req(
@@ -147,10 +145,8 @@ class TestReviewFollowups(unittest.TestCase):
             seqlen_k=2048,
             hdim_q=64,
             hdim_v=64,
-            algorithm="attention_dense",
-            dense_persistent="off",
         )
-        spec = _dense_spec_gfx942(req)
+        spec = attention_tuning_spec(req, "gfx942_dense")
         binding = bind_dense_attention_torch(
             req, spec, {"q": None, "k": None, "v": None, "out": None}
         )
