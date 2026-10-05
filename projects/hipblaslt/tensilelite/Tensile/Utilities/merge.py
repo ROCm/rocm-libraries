@@ -30,6 +30,12 @@ import argparse
 from copy import deepcopy
 from enum import IntEnum
 
+try:
+    from ..ExactLogicSidecar import attachSidecar
+except ImportError:  # run as a standalone script
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from ExactLogicSidecar import attachSidecar
+
 verbosity = 1
 
 def ensurePath(path):
@@ -138,7 +144,7 @@ def loadData(filename):
         sys.stdout.flush()
         sys.exit(-1)
     data = yaml.load(stream, yaml.SafeLoader)
-    return data
+    return attachSidecar(data, filename)
 
 def compareDestFolderToYaml(originalDir, incFile, incData):
     checkFolders = ["Equality", "GridBased"]
