@@ -56,19 +56,30 @@ endif()
 project(hipRAND CXX)
 
 # Build options
+
+# Above option(BUILD_FORTRAN_BINDINGS), whose default reads it.
+set(BUILD_WITH_LIB "ROCM" CACHE STRING "Select backend library to build with (ROCM or CUDA)")
+set_property(CACHE BUILD_WITH_LIB PROPERTY STRINGS "ROCM" "CUDA")
+
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
 option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
-option(BUILD_FORTRAN_WRAPPER "Build Fortran wrapper" OFF)
+# Also declared here so that the configuration summary, printed before
+# add_subdirectory(fortran), has a value; same default as in fortran/.
+if(BUILD_WITH_LIB STREQUAL "CUDA")
+  set(_hiprand_fortran_default OFF)
+else()
+  set(_hiprand_fortran_default "${UNIX}")
+endif()
+option(BUILD_FORTRAN_BINDINGS "Build the hipRAND Fortran bindings"
+       "${_hiprand_fortran_default}")
+unset(_hiprand_fortran_default)
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
 option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Download non-ROCm dependencies and do not search for packages" OFF)
 option(DISABLE_WERROR "Disable building with Werror" ON)
 option(DOWNLOAD_ROCRAND "Download rocRAND if it is not found in the default install directory or the manually-specified directory" OFF)
 option(CMAKE_INSTALL_RPATH_USE_LINK_PATH ON)
 option(BUILD_SHARED_LIBS "Build shared" ON)
-
-set(BUILD_WITH_LIB "ROCM" CACHE STRING "Select backend library to build with (ROCM or CUDA)")
-set_property(CACHE BUILD_WITH_LIB PROPERTY STRINGS "ROCM" "CUDA")
 
 # Set up options for obtaining dependency rocPRIM.
 # PACKAGE: Search for an install package that contains the dependency.
@@ -199,9 +210,11 @@ include(Summary)
 print_configuration_summary()
 
 # hipRAND library
-# This adds library targets: hiprand,
-# also includes Fortran wrapper
+# This adds library targets: hiprand
 add_subdirectory(library)
+
+# Fortran bindings; self-guarding.
+add_subdirectory(fortran)
 
 # Tests
 if(BUILD_TEST)

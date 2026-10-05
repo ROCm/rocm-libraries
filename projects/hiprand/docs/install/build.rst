@@ -30,6 +30,8 @@ along with the following components:
 
 * `ROCm Software <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/>`_ (version 5.0.0 or later)
 * `rocRAND <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocrand>`_
+* (Optional) Fortran compiler (This is only required for the Fortran bindings. AMDFlang and GFortran are
+  both supported.)
 
 Downloading the source code
 ----------------------------
@@ -114,7 +116,16 @@ The default build configuration is ``Release``.
 
 Here are the CMake options:
 
-* ``BUILD_FORTRAN_WRAPPER``: Builds the Fortran wrapper when set to ``ON``. Defaults to ``OFF``.
+* ``BUILD_FORTRAN_BINDINGS``: Controls whether to build the hipRAND Fortran bindings. Defaults to ``ON``
+  on Linux, ``OFF`` on Windows and with the CUDA backend, but is skipped when no Fortran compiler is
+  available. Use ``HIPRAND_BUILD_FORTRAN_BINDINGS`` to override this for hipRAND alone.
+* ``BUILD_FORTRAN_CLIENTS``: Controls whether to build the hipRAND Fortran clients and binding
+  tests. Defaults to ``ON``, but is skipped when the bindings were not built. In an in-tree build
+  the tests are GPU test executables and additionally require ``BUILD_TEST``, so they are not built
+  unless you also ask for the hipRAND test suite. Use ``HIPRAND_BUILD_FORTRAN_CLIENTS`` to override
+  this for hipRAND alone.
+* ``FORTRAN_ARRAY_INTERFACES``: Selects which array-argument overloads the Fortran module exposes:
+  ``none``, ``assumed-shape`` (the default) or ``assumed-rank``.
 * ``BUILD_TEST``: Builds the hipRAND tests when set to ``ON``. Defaults to ``OFF``.
 * ``BUILD_BENCHMARK``: Builds the hipRAND benchmarks when set to ``ON``. Defaults to ``OFF``.
 * ``BUILD_ADDRESS_SANITIZER``: Builds with address sanitization enabled when set to ``ON``. Defaults to ``OFF``.
