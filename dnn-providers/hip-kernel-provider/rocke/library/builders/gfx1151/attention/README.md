@@ -1,6 +1,6 @@
 # gfx1151 WMMA FMHA-forward: an optimization case study
 
-## Inference coverage and AOTriton comparison
+## Inference coverage benchmark
 
 The current inference harness is
 [`benchmarks/gfx1151/attention`](../../../benchmarks/gfx1151/attention/).
@@ -17,31 +17,18 @@ absorbed-attention or backward benchmark.
 - `candidate.py` uses public `dispatch_attention` and its tensor binding.
   Real HIP tensor owners exercise the library path without requiring torch;
   unsupported rows remain required.
-- `aotriton.py` / `aotriton_bridge.cpp` call the native
-  [AOTriton 0.14.2b](https://github.com/ROCm/aotriton/releases/tag/0.14.2b) API
-  with its published gfx115x images, not a PyTorch math fallback. Its only
-  available forward backend on gfx1151 is Triton. Unsupported features and
-  precision mismatches remain N/A; FP32 QQ-bias is not silently rounded to
-  AOTriton's Q-matched bias dtype. Finite window diagonals preserve both the
-  requested width and causal alignment.
-- Correctness is checked before and after timing. Both arms use one HIP stream,
-  graph replays of 32 operations, seven alternating timing batches, and the
-  median batch duration. Required AOTriton scheduling-counter resets are
-  included. Compilation, allocation, transfers, and the oracle are not timed.
-- Every run prints a per-case record, a grouped comparison table, provenance,
-  and `METRIC` lines. `coverage_passed` is the coverage-phase primary metric;
-  speedups use only identical cases where both arms pass. Coverage growth can
-  change the compared subset, so aggregate speedups are not a fixed-cohort
-  tuning score until the required coverage is complete.
+- Correctness is checked before and after timing. Timing uses one HIP stream,
+  graph replays of 32 operations, seven timing batches, and the median batch
+  duration. Compilation, allocation, transfers, and the oracle are not timed.
+- Every run prints a per-case record, a grouped table, provenance, and
+  `METRIC` lines; `coverage_passed` is the primary metric.
 
-From the repository root, `bash autoresearch.sh` uses a private site file
-selected by `ROCKE_SDPA_SITE` (default `~/.rocke/gfx1151-sdpa-site.json`).
-`run_remote.py` documents its site fields and creates a content-addressed
-source snapshot, then submits one exclusive, time-bounded Slurm job. The GPU
-workload is offline; SSH only transports source and results. The setup uses
-Python 3.12, NumPy 2.5.1, ml_dtypes 0.5.4, and checksum-pinned AOTriton runtime
-and image archives. Runtime artifacts and absolute performance results stay
-outside the source tree. On Windows, use Git Bash rather than the WSL launcher.
+Run on a gfx1151 device with the platform Python package and library on
+`PYTHONPATH`:
+
+```bash
+python -m benchmarks.gfx1151.attention.benchmark_sdpa
+```
 
 ### Dense forward dtype support
 
@@ -275,7 +262,7 @@ After external stream synchronization, call
 tensor owners. Captured launch owners must remain alive until their graphs
 are destroyed. The benchmark drains them at that boundary, outside timing.
 
-The sections below are a historical campaign, not results for this comparator.
+The sections below are a historical campaign, not results for this benchmark.
 
 ## TL;DR (executive summary)
 

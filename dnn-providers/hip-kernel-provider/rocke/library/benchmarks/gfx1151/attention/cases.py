@@ -6,8 +6,8 @@
 This module is pure NumPy (``ml_dtypes`` imported lazily, only where an
 actual bf16/fp8 array is materialized) so it can be imported and exercised
 without a HIP device, a build toolchain, or torch. It owns exactly four
-public surfaces the benchmark runner (owned by the parent) composes with the
-native rocKE / AOTriton launchers:
+public surfaces that the benchmark runner and numeric tests compose with the
+public rocKE attention dispatch:
 
 - ``SdpaCase``   -- one frozen, hashable row of the fixed synthetic suite.
 - ``CASES``      -- the immutable tuple of every row (the suite).
