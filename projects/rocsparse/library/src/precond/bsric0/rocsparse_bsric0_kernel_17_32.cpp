@@ -59,7 +59,20 @@ namespace rocsparse
         __shared__ T values[BSRDIM][BSRDIM + 1];
 
         // Current block row this wavefront is working on
-        auto block_row = block_map[hipBlockIdx_x];
+        const J idx = hipBlockIdx_x;
+
+        //
+        // Do not run out of bounds. The row map is indexed by the block id, and
+        // bsrilu0_kernel_general is the only kernel in the family that checked
+        // it; the CSR kernels all do. Cheap, and the only thing standing between
+        // a grid rounded up past mb and a read outside the map allocation.
+        //
+        if(idx >= mb)
+        {
+            return;
+        }
+
+        auto block_row = block_map[idx];
 
         // Block diagonal entry point of the current block row
         I block_row_diag = bsr_diag_ind[block_row];

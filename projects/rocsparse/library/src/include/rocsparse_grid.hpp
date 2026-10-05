@@ -34,6 +34,8 @@
 //
 //     for(int64_t i = hipBlockIdx_x; i < count; i += hipGridDim_x)
 //
+// or, if it spins on done flags, walk the contiguous chunk grid_x_chunk returns.
+//
 // The axes are not symmetric because the limits are different quantities. On y
 // and z the limit is a work-group count, and maxGridSize reports it. On x the
 // limit is a work-item count, and no device property exposes it.
@@ -92,6 +94,42 @@ namespace rocsparse
         const int64_t device_cap = static_cast<int64_t>(handle->properties.maxGridSize[0]);
         const int64_t arch_cap   = rocsparse::dispatch_limit_x(block_size);
         return rocsparse::clamp_grid_extent(count, (device_cap < arch_cap) ? device_cap : arch_cap);
+    }
+
+    //
+    // Half-open range [first, last) of the count work items owned by block
+    // block_id when the items are split into grid_size contiguous chunks. The
+    // range is empty when the block has nothing to do, which happens for the
+    // trailing blocks when grid_size does not divide count.
+    //
+    // This is the alternative to the grid-stride loop for kernels launched with
+    // a clamped grid.x that spin on done flags, for example the incomplete
+    // factorizations. Those kernels wait on the flags of the rows they depend
+    // on, and the row map is a topological order, so an item only ever waits on
+    // items earlier in that order. With contiguous chunks every item a block
+    // waits on belongs either to itself, earlier in its own chunk, or to a lower
+    // numbered block, which the dispatcher started first. That is the same
+    // property the unclamped launch relies on, and it is what keeps the spin
+    // from deadlocking when the grid is larger than the device can hold
+    // resident.
+    //
+    // A grid-stride loop does not have that property. Block 0 on its second item
+    // waits on the first item of block grid_size - 1, which cannot start until
+    // some block retires, and no block retires while it is spinning.
+    //
+    static __device__ __host__ __forceinline__ void grid_x_chunk(
+        int64_t count, uint32_t grid_size, uint32_t block_id, int64_t& first, int64_t& last)
+    {
+        const int64_t chunk = (count - 1) / static_cast<int64_t>(grid_size) + 1;
+        const int64_t start = static_cast<int64_t>(block_id) * chunk;
+
+        //
+        // Both ends are clamped, not just the upper one. grid_size does not have
+        // to divide count, so a trailing block can start past the end and must
+        // come back with an empty range rather than an inverted one.
+        //
+        first = (start < count) ? start : count;
+        last  = ((first + chunk) < count) ? (first + chunk) : count;
     }
 
     // Clamp a grid.y extent.
