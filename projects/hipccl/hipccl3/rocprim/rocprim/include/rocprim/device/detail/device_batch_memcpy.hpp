@@ -1277,13 +1277,8 @@ static hipError_t batch_memcpy_func(void*              temporary_storage,
                                                                0 /* dynSharedMemPerBlk */);
             if(error != hipSuccess)
             {
-                // Attempt to reset the device.
                 static_cast<void>(hipSetDevice(previous_device));
-
                 return error;
-
-                // Restore the default device id to initial state
-                ROCPRIM_RETURN_ON_ERROR(hipSetDevice(previous_device));
             }
 
             auto batch_memcpy_blev_grid_size

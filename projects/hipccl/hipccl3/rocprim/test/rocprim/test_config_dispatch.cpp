@@ -178,6 +178,10 @@ TEST(RocprimConfigDispatchTests, DeviceIdFromStream)
     HIP_CHECK(get_device_from_stream(stream, result));
     HIP_CHECK(hipStreamDestroy(stream));
     ASSERT_EQ(result, device_id);
+
+    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamDestroy(stream));
+    ASSERT_EQ(get_device_from_stream(stream, result), hipErrorInvalidHandle);
 }
 #endif
 
