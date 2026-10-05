@@ -454,18 +454,17 @@ DEF_T(GlobalAtomicIncU32SaddrInst, "global_atomic_inc_u32", .format = VGLOBAL_AT
 // to L2 cache; no destination register. Not marked HasSideEffect: it is only a cache hint,
 // so reordering it affects performance but not correctness.
 // Support null saddr + 64-bit vaddr or 64-bit saddr + 32-bit vaddr.
-// vaddr is declared 32-bit (saddr form): a 64-bit declaration makes the verifier reject
-// that form, and the width cannot depend on saddr, so the null-saddr width goes unchecked.
+// vaddr carries SADDR_OFFSET: 64 bits with a null saddr, 32 bits with a register saddr.
 // temporal hint / cache scope (e.g."th:TH_LOAD_NT scope:SCOPE_SE") are carried as GLOBALModifiers.
 DEF_T(GlobalPrefetchB8Inst, "global_prefetch_b8", .format = VGLOBAL, .flags = {GLOBALPrefetch},
     .logical = "GlobalPrefetchB8",
-    .operand_fields = { {S0, vaddr, vgpr, 32}, {S1, saddr, sreg, 64} })
+    .operand_fields = { {S0, vaddr, vgpr, 64, SADDR_OFFSET}, {S1, saddr, sreg, 64} })
 
 // FLAT-addressed form of the same prefetch: identical operands and semantics, including
 // both addressing modes (null saddr + 64-bit vaddr, or 64-bit saddr + 32-bit vaddr).
 // Only the spelling of a null saddr differs: GLOBAL writes "off", FLAT omits it.
 DEF_T(FlatPrefetchB8Inst, "flat_prefetch_b8", .format = FLAT, .flags = {FLATPrefetch},
-    .operand_fields = { {S0, vaddr, vgpr, 64}, {S1, saddr, sreg, 64} })
+    .operand_fields = { {S0, vaddr, vgpr, 64, SADDR_OFFSET}, {S1, saddr, sreg, 64} })
 
 // Global load with transpose-read (TR) — gfx1250 only.
 // global_load_tr_b64: 64-bit TR load; D0 = 64-bit vgpr dest,
