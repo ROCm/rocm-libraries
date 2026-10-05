@@ -65,7 +65,9 @@ endif()
 
 set(static_depends)
 
-find_package( hipblas-common REQUIRED CONFIG PATHS ${ROCM_PATH})
+if(NOT TARGET roc::hipblas-common)
+  find_package( hipblas-common REQUIRED CONFIG PATHS ${ROCM_PATH})
+endif()
 target_link_libraries( hipblas PUBLIC roc::hipblas-common )
 
 # Build hipblas from source on AMD platform
@@ -123,7 +125,9 @@ else( )
   )
 endif( )
 
-# External header includes included as system files
+# External header includes included as system files. The *_INCLUDE_DIRS come from
+# the find_package() calls above and so are empty for an in-tree dependency;
+# there the linked roc:: targets carry the same directories.
 target_include_directories( hipblas
   SYSTEM PRIVATE
     $<BUILD_INTERFACE:${ROCBLAS_INCLUDE_DIRS}>
@@ -133,7 +137,7 @@ target_include_directories( hipblas
 
 # Internal header includes
 target_include_directories( hipblas
-  PUBLIC  $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/library/include>
+  PUBLIC  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/include>
           $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include/hipblas>
           $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
           $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
@@ -175,7 +179,7 @@ endif( )
 rocm_install_targets(
   TARGETS hipblas
   INCLUDE
-    ${CMAKE_BINARY_DIR}/include
+    ${PROJECT_BINARY_DIR}/include
 )
 #         PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ GROUP_EXECUTE GROUP_READ WORLD_EXECUTE WORLD_READ
 
