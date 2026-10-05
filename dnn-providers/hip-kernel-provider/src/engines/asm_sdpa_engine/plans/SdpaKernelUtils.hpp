@@ -248,4 +248,43 @@ inline std::optional<HipModuleGuard> loadKernelModule(const std::string& coPath,
     return guard; // moved out
 }
 
+// =============================================================================
+// Kernel module loading from in-memory image
+// =============================================================================
+//
+// Same as loadKernelModule but takes a pre-loaded HSACO image (e.g. extracted
+// from a .kpack archive) instead of a filesystem path.
+
+inline std::optional<HipModuleGuard>
+    loadKernelModuleFromMemory(const void* data, size_t size, const char* funcName)
+{
+    if(data == nullptr || size == 0)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("Cannot load kernel module from null/empty image");
+        return std::nullopt;
+    }
+
+    hipModule_t rawModule = nullptr;
+    hipError_t err = hipModuleLoadData(&rawModule, data);
+    if(err != hipSuccess)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("Failed to load kernel module from memory ("
+                                << size << " bytes), error: " << hipGetErrorString(err));
+        return std::nullopt;
+    }
+    HipModuleGuard guard(rawModule);
+
+    hipFunction_t func = nullptr;
+    err = hipModuleGetFunction(&func, guard.module(), funcName);
+    if(err != hipSuccess)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("Failed to get kernel function '"
+                                << funcName << "' error: " << hipGetErrorString(err));
+        return std::nullopt; // guard destructor unloads module
+    }
+    guard.setFunction(func);
+
+    return guard; // moved out
+}
+
 } // namespace asm_sdpa_engine

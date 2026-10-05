@@ -133,4 +133,26 @@ TEST_F(TestGoldenOutputProbe, UndecidableSweepCasesAreLetThroughToTheLoader)
     EXPECT_TRUE(probe.mayCarryGoldenOutputs(sweepCase(sweepJson, "missing")));
 }
 
+// Discovery rejects a manifest with a repeated id, but the probe does not rely on
+// that: like the loader, it reads the first case with the id. Both orders are
+// checked, so a lookup that kept the last case fails one of them.
+TEST_F(TestGoldenOutputProbe, RepeatedCaseIdResolvesToTheFirstCase)
+{
+    const auto goldenFirst = _tempDir / "GoldenFirst" / "sweep.json";
+    touch(goldenFirst,
+          R"({"cases": [{"id": "a", "golden": {"path": "golden/a/tensors.dvc"}},
+                        {"id": "a"}]})");
+    touch(goldenFirst.parent_path() / "golden" / "a" / "tensor5.bin");
+
+    const auto goldenSecond = _tempDir / "GoldenSecond" / "sweep.json";
+    touch(goldenSecond,
+          R"({"cases": [{"id": "a"},
+                        {"id": "a", "golden": {"path": "golden/a/tensors.dvc"}}]})");
+    touch(goldenSecond.parent_path() / "golden" / "a" / "tensor5.bin");
+
+    GoldenOutputProbe probe;
+    EXPECT_TRUE(probe.mayCarryGoldenOutputs(sweepCase(goldenFirst, "a")));
+    EXPECT_FALSE(probe.mayCarryGoldenOutputs(sweepCase(goldenSecond, "a")));
+}
+
 // NOLINTEND(readability-identifier-naming)
