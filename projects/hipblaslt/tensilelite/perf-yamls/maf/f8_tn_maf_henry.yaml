@@ -97,7 +97,7 @@ BenchmarkProblems:
         - InitCIterWmma: [0]
         - SwInstructionPrefetch: [0]
         # - ClusterBarrierRule3SignalLeadCycles: [100,300,500]
-        - DsReadDrainLatency: [32]
+        - DsReadDrainLatency: [64]
         - DsReadPerWmma: [2]
         - DsReadThrottleLatency: [96]
 
