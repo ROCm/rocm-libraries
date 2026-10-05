@@ -7181,6 +7181,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                "PrefetchGlobalRead": int(kernel.get("PrefetchGlobalRead", 1)),
                                # PrefetchLocalRead (PLR) for Tensile scheduling. Defaults to 1.
                                "PrefetchLocalRead": int(kernel.get("PrefetchLocalRead", 1)),
+                               # How many unrolled loop bodies were emitted
+                               # (states.unrollLoopCopies). HalfPLR sets this to 3.
+                               # SchedulingKnobHeuristics logs an optimistic ds-read
+                               # throttle from it; DsReadThrottleLatency is unchanged.
+                               "UnrollLoopCopies": int(self.states.unrollLoopCopies),
                                # Abs SW prefetch: mutually exclusive with PC-rel.
                                # Abs takes priority when both are True (backend enforces via else-if).
                                "EnableSwInstructionPrefetchAbs": swpAbsEnable,
@@ -7212,6 +7217,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           cloneList.append(rocisa.CloneSpec(name="InitCIterWmma",
                                             startLabel="label_LoopBeginL" + self.RAP_ITERN_SUFFIX))
       stinky_module_options["CloneList"] = cloneList
+      # Prefetch lead before its tensor_load, in WMMA windows. With HalfPLR the loop body holds
+      # three TDM stages: measured best ~25 when A is sub-byte and ~40 otherwise on gfx1250
+      # MAF. Without it the body holds one stage, and a lead below 8 tells stinkytofu to issue
+      # the whole prefetch group in the tensor_load's window (temporary per-shape defaults).
+      # stinkytofu drops the lead itself where a stage has under 64 WMMAs (counted in the asm).
+      stinky_module_options["PrefetchLeadWmmas"] = \
+        4 if not kernel["HalfPLR"] else \
+        25 if kernel["ProblemType"]["DataTypeA"].numBytes() < 1 else 40
       if self.states.localReadSideOrder[0] == "B":
         stinky_module_options["DsReadOrder"] = 0  # Preserve selected B-then-A emission.
 
