@@ -349,7 +349,7 @@ def TensileLibLogicToYaml(
     tPrint(1, "#")
     tPrint(1, HR)
     tPrint(1, "")
-    libYaml = LibraryIO.readYAML(logicFilePath)
+    libYaml = LibraryIO.readLibraryLogic(logicFilePath)
     if libYaml == "":
         raise RuntimeError(
             "Yaml file data is empty, read yaml file :{} failed".format(logicFilePath)

@@ -68,7 +68,7 @@ def setWorkingPath( fullPathName ):
 
 
 def parseCurrentLibrary(libPath, sizePath):
-    libYaml = LibraryIO.read(libPath)
+    libYaml = LibraryIO.readLibraryLogic(libPath)
     # parseLibraryLogicData mutates the original data, so make a copy
     fields = LibraryIO.parseLibraryLogicData(copy.deepcopy(libYaml), libPath)
     (_, _, problemType, solutions, exactLogic, _, _) = fields

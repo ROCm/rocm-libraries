@@ -23,6 +23,7 @@
 ################################################################################
 
 from . import LibraryIO
+from . import ExactLogicSidecar
 from .Tensile import addCommonArguments, argUpdatedGlobalParameters
 
 from .Common.GlobalParameters import assignGlobalParameters, restoreDefaultGlobalParameters, globalParameters, __version__
@@ -39,7 +40,7 @@ import sys
 
 
 def UpdateLogic(filename, logicPath, outputPath):
-    libYaml = LibraryIO.readYAML(filename)
+    libYaml = LibraryIO.readLibraryLogic(filename)
     isDictFormat = isinstance(libYaml, dict)
     # parseLibraryLogicData mutates the original data, so make a copy
     fields = LibraryIO.parseLibraryLogicData(copy.deepcopy(libYaml), filename)
@@ -116,8 +117,15 @@ def UpdateLogic(filename, logicPath, outputPath):
         libYaml[4] = problemTypeState
         libYaml[5] = solutionList
 
+    inputFile = filename
     if outputPath != "":
         filename = filename.replace(logicPath, outputPath)
+    if os.path.abspath(filename) == os.path.abspath(inputFile) and ExactLogicSidecar.findSidecar(inputFile):
+        # Updating in place: the table is unchanged, so keep it in its sidecar.
+        if isDictFormat:
+            libYaml["ExactLogic"] = None
+        else:
+            libYaml[7] = None
     ensurePath(os.path.dirname(filename))
     LibraryIO.writeYAML(filename, libYaml, explicit_start=False, explicit_end=False)
 
