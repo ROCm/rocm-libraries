@@ -610,7 +610,7 @@ pipeline {
             }
             parallel
             {
-                stage("Run CK_TILE_FMHA Tests on gfx90a")
+                stage("gfx90a CK_TILE_FMHA Tests")
                 {
                     when {
                         beforeAgent true
@@ -628,7 +628,7 @@ pipeline {
                         }
                     }
                 }
-                stage("Run CK_TILE_FMHA Tests on gfx942")
+                stage("gfx942 CK_TILE_FMHA Tests")
                 {
                     when {
                         beforeAgent true
@@ -646,7 +646,7 @@ pipeline {
                         }
                     }
                 }
-                stage("Run CK_TILE_FMHA Tests on gfx950")
+                stage("gfx950 CK_TILE_FMHA Tests")
                 {
                     when {
                         beforeAgent true
@@ -664,7 +664,7 @@ pipeline {
                         }
                     }
                 }
-                stage("Run CK_TILE_FMHA Tests on gfx1201")
+                stage("gfx1201 CK_TILE_FMHA Tests")
                 {
                     when {
                         beforeAgent true
@@ -677,6 +677,24 @@ pipeline {
                             ck.runOnHealthyNode(rocmnode("gfx1201")) {
                                 deleteDir()
                                 ck.buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: ck.build_and_run_fmha("gfx1201"))
+                                cleanWs()
+                            }
+                        }
+                    }
+                }
+                stage("gfx1250 CK_TILE_FMHA Tests")
+                {
+                    when {
+                        beforeAgent true
+                        expression { params.RUN_CK_TILE_FMHA_TESTS.toBoolean() }
+                    }
+                    agent none
+                    steps{
+                        script {
+                            loadCk()
+                            ck.runOnHealthyNode(rocmnode("gfx90a")) {
+                                deleteDir()
+                                ck.buildAndTest(setup_args: "NO_CK_BUILD", docker_name: "${env.CK_DOCKERHUB}:ck_ub24.04_gfx1250_ffm", build_type: 'Release', execute_cmd: ck.build_and_run_fmha("gfx1250"))
                                 cleanWs()
                             }
                         }
