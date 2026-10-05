@@ -413,6 +413,17 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::SetNextValue(const ProblemD
             return false;
 
         assert(!valid_kernels.empty());
+
+        // Seed the first enumerated config to (valid_kernels[0], split_k = 1), the minimum split_k
+        // for both deterministic mode and the NextCKSplitkValue<1,128> sweep. Without this, the
+        // branch returned with kernel_id unset: GenericSearch's ComputedIterator skips configs
+        // whose IsValid() is false, so the empty kernel_id was skipped and the first split_k step
+        // advanced 1 -> 2, dropping the "valid_kernels[0]+1" candidate. That candidate was never
+        // tuned, even though it is applicable (IsArgsSupported == true) and is offered to the AI
+        // heuristic candidate list via FillValidKernels.
+        index     = 0;
+        split_k   = 1;
+        kernel_id = valid_kernels[index] + "+1";
         return true;
     }
 
