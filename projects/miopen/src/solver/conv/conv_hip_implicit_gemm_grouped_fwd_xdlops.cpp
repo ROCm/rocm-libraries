@@ -400,6 +400,15 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::SetNextValue(const ProblemD
             return false;
 
         assert(!valid_kernels.empty());
+
+        // Seed the first enumerated config to valid_kernels[0]. Without this, the branch returned
+        // with kernel_id still unset: GenericSearch's ComputedIterator skips configs whose
+        // IsValid() is false, so the empty kernel_id was skipped and enumeration began at
+        // valid_kernels[1] -- valid_kernels[0] was never tuned, even though it is applicable
+        // (IsArgsSupported == true) and is offered to the AI heuristic candidate list via
+        // FillValidKernels.
+        index     = 0;
+        kernel_id = valid_kernels[index];
         return true;
     }
     if((index + 1) < valid_kernels.size())
