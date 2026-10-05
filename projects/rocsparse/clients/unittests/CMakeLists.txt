@@ -160,6 +160,12 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_hostblocks_itilu0.cpp
   #10153: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_extra_bsrgemm.cpp
+  # --- csrgemm / bsrgemm calc grid.x clamps [AISPARSE-677] -----------------
+  # Distinct anchor (after the bsrgemm host tests) so this leaf does not conflict
+  # with the sibling grid-clamp branches that append at the end of the list.
+  # Drives the public rocsparse_spgemm entry point with
+  # handle->properties.maxGridSize[0] shrunk; no compile-in TUs.
+  unit_test_internal_extra_gemm_calc_grids.cpp
   # Residual in-scope internal-routine coverage: device __global__ wrappers for
   # collective/atomic/hash device helpers, plus host-path primitive helpers.
   # unit_test_internal_primitives_host_extras.cpp additionally needs the
