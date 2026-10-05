@@ -1,0 +1,129 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# w4a16 TN, ASYMMETRIC: int4 weights in A, bf16 activations in B, one bf16
+# scale AND one signed int4 zero-point per 64 consecutive K elements of a row
+# of A (UseScaleAB=Block, ScaleBlockSizeA=64, ScaleZeroPointA=True). The kernel
+# computes (q - z)*s after the global load and before the LDS write, so the
+# main loop is a plain bf16 GEMM.
+#
+# The zero-points are a second region of the same allocation, packed two per
+# byte over the flattened index e = m*ceil(K/G) + g.
+#
+# Constraints enforced by SolutionStructs/Validators/BlockDequant.py and
+# reflected in the parameters below:
+#   * TN only (A stored K-contiguous), BufferLoad, ConvertAfterDS=False
+#   * exactly one dword (8 int4) per A global load -> GlobalReadVectorWidthA=8
+#   * DepthU % ScaleBlockSizeA == 0
+#   * no tail loop yet -> every K here is a multiple of DepthU
+#   * GlobalSplitU=1, StaggerU=0, no TDM / DirectToVgpr / DirectToLds on A
+#
+# AssertSummationElementMultiple is kept equal to DepthU. With ASEM == 2*DepthU
+# codegen hits a pre-existing NameError in KernelWriterAssembly.closeLoop
+# ("decValue" is never assigned on the no-exit path); that bug is unrelated to
+# w4a16 and also reproduces on this branch's base commit.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: False
+  BoundsCheck: 0
+  PrintSolutionRejectionReason: True
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  DataInitTypeA: 3
+  # Random (3), not the default Two: a uniform scale tensor would pass
+  # even if the kernel indexed the wrong K-group, so vary it per group.
+  DataInitTypeScaleA: 3
+  DataInitTypeB: 3
+  DataInitTypeD: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  DataInitSeed: 24681
+  PrintLevel: 2
+  ClientLogLevel: 2
+  NumWarmups: 0
+  EnqueuesPerSync: 1
+  PrintWinnersOnly: False
+  CpuThreads: -1
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DataTypeA: i4
+      MacDataTypeA: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      UseScaleAB: Block
+      ScaleBlockSizeA: 64
+      ScaleZeroPointA: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 2, 5, 2, 2]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        # With ClusterLocalRead=0 (below) ValuA/ValuB are single-buffered, so
+        # VGPR use scales as (MIWaveTile0 + MIWaveTile1) * MIInputPerThread/2
+        # and is independent of DepthU. Past 256 the kernel will not assemble on
+        # a 256-VGPR gfx11 part.
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - StaggerU: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [0]
+        # Scheduling knobs taken from the shipped fp16 hero kernel (solution 0 of
+        # gfx1151_Cijk_Alik_Bljk_HHS_BH_Bias_HAS_SAV_UserArgs.yaml). Two of its
+        # settings cannot carry over: StaggerU 32 -> 0 (the scale SRD is not
+        # staggered alongside A) and ScheduleIterAlg 1 -> 0 (SIA=1 with PGR=2
+        # desynchronises the scale from the A data it scales; see
+        # BlockDequant.py).
+        - PrefetchGlobalRead: [2]
+        - WorkGroupMapping: [8]
+        - SourceSwap: [True]
+        - TransposeLDS: [1]
+        - LdsPadA: [8]
+        - LdsPadB: [8]
+        - LdsBlockSizePerPadA: [128]
+        - LdsBlockSizePerPadB: [128]
+        - LocalReadVectorWidth: [16]
+        # The remaining three hero knobs. Left to auto-derive, VectorWidthA
+        # reaches 4 and ClusterLocalRead 1; the latter sets numVgprBuffer to
+        # LoopIters (DepthU/MatrixInstK = 4) rather than PrefetchLocalRead+1,
+        # holding ValuA and ValuB four times over. That alone costs 391 VGPRs at
+        # MT64x160 against 223 here, i.e. it decides whether any tile past
+        # MT64x64 assembles at all.
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - StoreVectorWidth: [1]
+        - ClusterLocalRead: [0]
+        - ExpandPointerSwap: [False]
+        - 1LDSBuffer: [0]
+        # gfx11 WMMA has MIInputPerThread == MatrixInstK == 16; with PLR>0 the
+        # widest legal local read (8 bf16) is still narrower than one MI input
+        # and is rejected, so this tile runs without local-read prefetch.
+        - PrefetchLocalRead: [0]
+        - ConvertAfterDS: [False]
+        - AssertSummationElementMultiple: [64]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 128]
+          - Exact: [128, 128, 1, 256]
+          - Exact: [192, 64, 1, 128]
+          # Larger than MacroTile1 (160) in N, so the non-edge store path is
+          # covered too; the three above are all narrower than one tile.
+          - Exact: [128, 320, 1, 256]
