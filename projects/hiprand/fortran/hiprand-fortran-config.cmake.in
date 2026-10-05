@@ -1,0 +1,162 @@
+# MIT License
+#
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+# Config package for the hipRAND Fortran bindings.
+#
+#   find_package(hiprand-fortran REQUIRED)
+#   target_link_libraries(my_app PRIVATE hip::hiprand_fortran)
+#
+# One archive and .mod set is installed per Fortran compiler. Set
+# HIPRAND_FORTRAN_COMPILER_DIR before find_package to pick one explicitly.
+
+# The hiprand-config.cmake of released ROCm include()s this file; returning there
+# keeps find_dependency(hiprand) below from recursing.
+string(TOLOWER "${CMAKE_FIND_PACKAGE_NAME}" _hiprand_caller)
+if(_hiprand_caller STREQUAL "hiprand")
+  return()
+endif()
+
+@PACKAGE_INIT@
+
+set(_hiprand_built_dir "@HIPRAND_FORTRAN_COMPILER_DIR@")
+
+# Absolute, relocatable paths written by PATH_VARS (see PACKAGE_INIT above).
+set(_hiprand_libdir "@PACKAGE_HIPRAND_FORTRAN_LIBDIR@")
+set(_hiprand_incdir "@PACKAGE_HIPRAND_FORTRAN_INCLUDEDIR@")
+
+set(hiprand_FORTRAN_FOUND FALSE)
+
+if(NOT CMAKE_Fortran_COMPILER_LOADED)
+  set(hiprand-fortran_FOUND FALSE)
+  string(CONCAT hiprand-fortran_NOT_FOUND_MESSAGE
+      "The hipRAND Fortran bindings need Fortran enabled before find_package: "
+      "add Fortran to your project() languages, or call enable_language(Fortran).")
+  return()
+endif()
+
+# Accepts FC itself or FC plus a separator and suffix (gfortran-13). Not a regex:
+# FC may be an arbitrary basename, and CMake has no regex-escape.
+function(_hiprand_dir_matches DIR FC OUT)
+  set(${OUT} FALSE PARENT_SCOPE)
+  if(DIR STREQUAL FC)
+    set(${OUT} TRUE PARENT_SCOPE)
+    return()
+  endif()
+  string(LENGTH "${FC}" _n)
+  string(LENGTH "${DIR}" _dn)
+  if(_dn GREATER _n)
+    string(SUBSTRING "${DIR}" 0 ${_n} _head)
+    string(SUBSTRING "${DIR}" ${_n} 1 _sep)
+    if(_head STREQUAL FC AND _sep MATCHES "^[-._]$")
+      set(${OUT} TRUE PARENT_SCOPE)
+    endif()
+  endif()
+endfunction()
+
+file(GLOB _hiprand_avail RELATIVE "${_hiprand_incdir}" "${_hiprand_incdir}/*")
+
+set(_hiprand_dir "")
+if(DEFINED HIPRAND_FORTRAN_COMPILER_DIR)
+  if(NOT EXISTS "${_hiprand_incdir}/${HIPRAND_FORTRAN_COMPILER_DIR}/hiprand.mod" OR
+     NOT EXISTS "${_hiprand_libdir}/${HIPRAND_FORTRAN_COMPILER_DIR}/libhiprand_fortran.a")
+    set(hiprand-fortran_FOUND FALSE)
+    string(CONCAT hiprand-fortran_NOT_FOUND_MESSAGE
+        "HIPRAND_FORTRAN_COMPILER_DIR is '${HIPRAND_FORTRAN_COMPILER_DIR}', but "
+        "no hiprand.mod and libhiprand_fortran.a are installed under "
+        "${_hiprand_incdir}/${HIPRAND_FORTRAN_COMPILER_DIR} and "
+        "${_hiprand_libdir}/${HIPRAND_FORTRAN_COMPILER_DIR}. Available: "
+        "${_hiprand_avail}.")
+    return()
+  endif()
+  set(_hiprand_dir "${HIPRAND_FORTRAN_COMPILER_DIR}")
+else()
+  # Must mirror the mapping in projects/hiprand/fortran/CMakeLists.txt.
+  if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+    set(_hiprand_fc "gfortran")
+  elseif(CMAKE_Fortran_COMPILER_ID MATCHES "Flang")
+    set(_hiprand_fc "amdflang")
+  elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Cray")
+    set(_hiprand_fc "ftn")
+  elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "IntelLLVM")
+    set(_hiprand_fc "ifx")
+  elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Intel")
+    set(_hiprand_fc "ifort")
+  elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "NVHPC")
+    set(_hiprand_fc "nvfortran")
+  else()
+    get_filename_component(_hiprand_fc "${CMAKE_Fortran_COMPILER}" NAME_WE)
+    string(TOLOWER "${_hiprand_fc}" _hiprand_fc)
+  endif()
+
+  # A prefix can hold several compilers' artifacts; the recorded one is a fallback.
+  if(EXISTS "${_hiprand_incdir}/${_hiprand_fc}/hiprand.mod")
+    set(_hiprand_dir "${_hiprand_fc}")
+  else()
+    _hiprand_dir_matches("${_hiprand_built_dir}" "${_hiprand_fc}" _hiprand_ok)
+    if(_hiprand_ok)
+      set(_hiprand_dir "${_hiprand_built_dir}")
+    endif()
+  endif()
+
+  if(NOT _hiprand_dir)
+    set(hiprand-fortran_FOUND FALSE)
+    string(CONCAT hiprand-fortran_NOT_FOUND_MESSAGE
+        "This project builds with ${_hiprand_fc}, but no hiprand.mod for it is "
+        "installed under ${_hiprand_incdir}. Available: "
+        "${_hiprand_avail}. A Fortran .mod cannot be shared across compilers; "
+        "rebuild the bindings with ${_hiprand_fc}, or set "
+        "HIPRAND_FORTRAN_COMPILER_DIR to the directory to use.")
+    return()
+  endif()
+endif()
+
+# Written TRUE only when the archive links hip::hiprand, which must be imported
+# before the targets file. hip's config needs C or CXX enabled (FindThreads).
+if(@HIPRAND_FORTRAN_NEEDS_C_PACKAGE@)
+  if(NOT TARGET hip::hiprand)
+    if(NOT CMAKE_C_COMPILER_LOADED AND NOT CMAKE_CXX_COMPILER_LOADED)
+      enable_language(C)
+    endif()
+    include(CMakeFindDependencyMacro)
+    find_dependency(hiprand)
+  endif()
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/hiprand-fortran-targets.cmake")
+
+# The targets file hardcodes the directory the package was built with.
+if(NOT _hiprand_dir STREQUAL "${_hiprand_built_dir}")
+  set_target_properties(hip::hiprand_fortran PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${_hiprand_incdir}/${_hiprand_dir}")
+  get_target_property(_hiprand_cfgs hip::hiprand_fortran IMPORTED_CONFIGURATIONS)
+  foreach(_hiprand_c IN LISTS _hiprand_cfgs)
+    set_target_properties(hip::hiprand_fortran PROPERTIES
+      IMPORTED_LOCATION_${_hiprand_c}
+        "${_hiprand_libdir}/${_hiprand_dir}/libhiprand_fortran.a")
+  endforeach()
+endif()
+
+set(hiprand_FORTRAN_FOUND TRUE)
+
+check_required_components(hiprand-fortran)
