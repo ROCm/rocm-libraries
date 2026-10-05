@@ -815,10 +815,11 @@ def test_build_from_metadata_numworkgroups_grid():
 
 
 def test_build_from_metadata_default_multidim_grid():
+    # Version 0 split-K kernels need one work group per GSU slice along Y.
     ck = _buildCustomKernelFromMetadata(
         "k", _kernel_yaml([_D_ARG]), {"MatrixInstruction": [16, 16, 16, 1]}
     )
-    assert ck["grid"] == ["TilesX", "TilesY", "Batch"]
+    assert ck["grid"] == ["TilesX", "TilesYGSU", "Batch"]
 
 
 def test_build_from_metadata_macrotile_name_fallback():

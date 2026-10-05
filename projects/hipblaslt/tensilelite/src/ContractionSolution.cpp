@@ -159,6 +159,7 @@ namespace TensileLite
         case CustomGridSize::PersistentWithBatch: return "PersistentWithBatch";
         case CustomGridSize::PersistentNoBatch: return "PersistentNoBatch";
         case CustomGridSize::TilesXYBatchGSU:  return "TilesXYBatchGSU";
+        case CustomGridSize::TilesYGSU:        return "TilesYGSU";
         case CustomGridSize::CustomGridSize_Count:
             break;
         }
@@ -181,6 +182,7 @@ namespace TensileLite
             {"PersistentWithBatch", CustomGridSize::PersistentWithBatch},
             {"PersistentNoBatch", CustomGridSize::PersistentNoBatch},
             {"TilesXYBatchGSU",  CustomGridSize::TilesXYBatchGSU},
+            {"TilesYGSU",        CustomGridSize::TilesYGSU},
         };
 
         auto it = lookup.find(str);
@@ -2916,6 +2918,9 @@ namespace TensileLite
                 case CustomGridSize::TilesXYBatchGSU:
                     dim = tiles.x * tiles.y * tiles.z * (gsu > 0 ? gsu : 1);
                     break;
+                case CustomGridSize::TilesYGSU:
+                    dim = tiles.y * (gsu > 0 ? gsu : 1);
+                    break;
                 case CustomGridSize::PersistentWithBatch:
                 case CustomGridSize::StreamKWithBatch:
                     // generateCustomCall is only used for handwritten/external
@@ -2939,6 +2944,37 @@ namespace TensileLite
         assignGridSize(rv.numWorkGroups.x, customKernel.grid.x);
         assignGridSize(rv.numWorkGroups.y, customKernel.grid.y);
         assignGridSize(rv.numWorkGroups.z, customKernel.grid.z);
+
+        // A split-K kernel reduces into D only once every GSU slice of a tile has
+        // arrived, so a grid sized from tile counts alone would return success with
+        // D unwritten. GSU and persistent grids account for the split themselves.
+        auto tileCountOnly = [](CustomGridSize size) {
+            switch(size)
+            {
+            case CustomGridSize::One:
+            case CustomGridSize::TilesX:
+            case CustomGridSize::TilesY:
+            case CustomGridSize::Batch:
+            case CustomGridSize::TilesXY:
+            case CustomGridSize::TilesXYBatch:
+                return true;
+            default:
+                return false;
+            }
+        };
+        if(gsu > 1 && tileCountOnly(customKernel.grid.x) && tileCountOnly(customKernel.grid.y)
+           && tileCountOnly(customKernel.grid.z))
+            throw std::runtime_error(concatenate("Solution ",
+                                                 kernelName,
+                                                 " runs with GSU ",
+                                                 gsu,
+                                                 " but its custom-kernel grid [",
+                                                 customKernel.grid.x,
+                                                 ", ",
+                                                 customKernel.grid.y,
+                                                 ", ",
+                                                 customKernel.grid.z,
+                                                 "] launches one GSU slice per tile"));
 
         bool enableCluster = (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1);
         if(internalArgsSupport.persistentLoopArgsVersion == 1 && enableCluster)
