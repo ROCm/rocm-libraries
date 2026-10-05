@@ -211,7 +211,7 @@ public:
             h.block_direction,
             h.row_block_dim,
             row_data = to_device(nullptr, h.ptr.size(), sizeof(I), h.ptr),
-            col_data = to_device(nullptr, h.ind.size(), sizeof(I), h.ind),
+            col_data = to_device(nullptr, h.ind.size(), sizeof(J), h.ind),
             val_data = to_device(nullptr, h.val.size(), sizeof(T), h.val),
             get_indextype<I>(),
             get_indextype<J>(),
