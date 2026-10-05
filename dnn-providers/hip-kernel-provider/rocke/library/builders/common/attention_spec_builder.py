@@ -60,6 +60,7 @@ from kernels.common.attention_unified import (
     _select_gfx942_flash_num_warps,
     _tiled_2d_impl,
     _tiled_3d_impl,
+    _use_decode_grid,
 )
 
 # Imported as a module (not a bound symbol) so tests that
@@ -397,6 +398,7 @@ def _spec_generic_3d(problem: UnifiedAttentionProblem):
         use_invariant_hoist=_enable_gfx942_3d_invariant_hoist(problem),
         use_wide_kv_load=_enable_gfx942_3d_wide_kv_load(problem),
         use_i64_kv_addr=_enable_i64_kv_addr(problem),
+        use_decode_grid=_use_decode_grid(problem),
     )
 
 

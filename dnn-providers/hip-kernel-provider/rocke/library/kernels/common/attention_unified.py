@@ -3050,6 +3050,40 @@ def _enable_gfx942_3d_wide_kv_load(problem: UnifiedAttentionProblem) -> bool:
     return True
 
 
+def _use_decode_grid(
+    problem: UnifiedAttentionProblem, *, arch: Optional[str] = None
+) -> bool:
+    """All-decode launch grid: one CTA per sequence along the q-block axis.
+
+    Derived from the problem, not tuned: legal exactly when every sequence has
+    at most one query token (``all_decode``). The q-block axis is then
+    ``num_seqs`` instead of the prefill upper bound (:func:`_num_q_blocks`),
+    which removes the empty early-exit CTAs and the per-CTA binary search over
+    ``query_start_len``; at BLOCK_Q == 1 the upper bound also left every useful
+    CTA on an even index and so on half of the XCDs. Implemented by the
+    gfx942/gfx950 3D segment kernels (``use_decode_grid``). ``arch`` defaults to
+    the resolved device arch.
+    """
+    arch = arch or _resolve_attention_arch()
+    return problem.all_decode and arch in ("gfx942", "gfx950")
+
+
+def _num_q_blocks(
+    problem: UnifiedAttentionProblem, block_q: int, *, decode_grid: bool = False
+) -> int:
+    """Length of the q-block launch axis: ``num_seqs`` on the all-decode grid
+    (:func:`_use_decode_grid`), else the prefill upper bound
+    ``total_q // block_q + num_seqs`` (each sequence may start mid-block)."""
+    if decode_grid:
+        if not problem.all_decode:
+            raise ValueError(
+                "the decode grid requires an all-decode problem "
+                f"(max_seqlen_q == 1, got {problem.max_seqlen_q})"
+            )
+        return int(problem.num_seqs)
+    return problem.total_q // block_q + problem.num_seqs
+
+
 def _d256_decode_cohort(problem: UnifiedAttentionProblem) -> bool:
     """Predicate: true when this problem belongs to the D256 bf16 decode cohort.
 
@@ -3253,6 +3287,7 @@ def _strided_3d_specs_from_problem(problem: UnifiedAttentionProblem, *, arch: st
         tile_size_override=_gfx942_3d_tile_size_override(problem, arch=arch),
         use_invariant_hoist=False,
         kv_layout="strided",
+        use_decode_grid=_use_decode_grid(problem, arch=arch),
     )
     reduce = reduce_type(
         head_size=problem.head_size,
@@ -3324,6 +3359,7 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _enable_gfx942_3d_wide_kv_load(problem),
         _kv_storage_dtype(problem),
         _enable_i64_kv_addr(problem),
+        _use_decode_grid(problem),
     )
     if _resolve_attention_arch() == "gfx1250":
         sp = _tiled_3d_spec_from_problem(problem)
@@ -4081,6 +4117,12 @@ def _explicit_path_supported(
     if tuning_spec is not None and tuning_spec.allow_unsupported:
         return True, f"explicit {kind} tuning spec (unsupported override)"
     if kind == "3d":
+        if (
+            tuning_spec is not None
+            and getattr(tuning_spec.kernel_spec, "use_decode_grid", False)
+            and not problem.all_decode
+        ):
+            return False, "use_decode_grid requires an all-decode problem"
         return supports_native_unified_attention_3d_tiled(problem)
     if kind == "2d":
         return supports_native_unified_attention_tiled(problem)
@@ -4447,10 +4489,19 @@ def _get_3d_pipeline(
         cache_key=("3d_red",) + cache_key,
     )
     pipeline = PipelineLauncher([seg_launcher, red_launcher])
+    if tuning_spec is not None:
+        decode_grid = getattr(tuning_spec.kernel_spec, "use_decode_grid", False)
+    elif strided_kv:
+        segment_spec, _ = _strided_3d_specs_from_problem(
+            problem, arch=_resolve_attention_arch()
+        )
+        decode_grid = segment_spec.use_decode_grid
+    else:
+        decode_grid = _tiled_3d_spec_from_problem(problem).use_decode_grid
     block_q = (
         16 // problem.num_queries_per_kv if problem.num_queries_per_kv <= 16 else 1
     )
-    total_num_q_blocks = problem.total_q // block_q + problem.num_seqs
+    total_num_q_blocks = _num_q_blocks(problem, block_q, decode_grid=decode_grid)
     # gfx1250 (gfx1250) runs the split-KV segment + reduce as one wave32 CTA; the
     # CDNA wave64 archs (gfx950/gfx942) use a wave64 CTA.
     wave_size = 32 if _resolve_attention_arch() == "gfx1250" else 64

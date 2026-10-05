@@ -190,6 +190,10 @@ typedef struct rocke_unified_attention_3d_tiled_spec
      * kernel's use_i64_kv_addr. Default false => byte-identical small-cache
      * build. */
     bool use_i64_kv_addr; /* False */
+    /* All-decode launch grid: seq_idx = block_id_x, one query block per
+     * sequence, no binary search (legal only when every sequence has one query
+     * token; the launcher sizes grid x to num_seqs). */
+    bool use_decode_grid; /* False */
 } rocke_unified_attention_3d_tiled_spec_t;
 
 rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_default(void);

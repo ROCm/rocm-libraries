@@ -111,6 +111,34 @@ _CONFIGS = {
         kv_storage_dtype=None,
         use_i64_kv_addr=True,
     ),
+    6: dict(
+        # All-decode grid (seq_idx = block_id_x, no search). Decode-shaped GQA.
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="fp16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        use_decode_grid=True,
+    ),
+    7: dict(
+        # All-decode grid at NQK=16 (BLOCK_Q=1) with fp8 KV and sinks.
+        head_size=128,
+        block_size=32,
+        num_query_heads=16,
+        num_kv_heads=1,
+        dtype="bf16",
+        num_segments=32,
+        use_sinks=True,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype="fp8e4m3",
+        use_decode_grid=True,
+    ),
 }
 
 

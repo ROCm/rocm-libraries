@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import replace
+from types import SimpleNamespace
 from itertools import islice
 from unittest import mock
 
@@ -92,6 +93,41 @@ class TestExplicitAttentionBuilders(unittest.TestCase):
             )
         self.assertEqual(segment.num_segments, 32)
         self.assertEqual(reduce.num_segments, 32)
+
+    def test_3d_decode_grid_is_derived_from_the_problem(self):
+        decode = _problem(max_seqlen_q=1, total_q=4, num_seqs=4)
+        cfg = ExplicitAttention3DConfig(num_segments=32)
+        segment, _ = make_explicit_attention_3d_specs(decode, cfg, arch="gfx950")
+        self.assertTrue(segment.use_decode_grid)
+        segment, _ = make_explicit_attention_3d_specs(_problem(), cfg, arch="gfx950")
+        self.assertFalse(segment.use_decode_grid)
+        segment, _ = make_explicit_attention_3d_specs(decode, cfg, arch="gfx942")
+        self.assertTrue(segment.use_decode_grid)
+        # Derived, never a knob.
+        with self.assertRaisesRegex(ValueError, "semantic fields"):
+            make_explicit_attention_3d_specs(
+                decode,
+                ExplicitAttention3DConfig(
+                    num_segments=32, knobs=(("use_decode_grid", False),)
+                ),
+                arch="gfx950",
+            )
+
+    def test_3d_decode_grid_launch_and_legality(self):
+        decode = _problem(max_seqlen_q=1, total_q=4, num_seqs=4)
+        segment, _ = make_explicit_attention_3d_specs(
+            decode, ExplicitAttention3DConfig(num_segments=32), arch="gfx950"
+        )
+        # BLOCK_Q = 16 // NQK(4) = 4.
+        self.assertEqual(au._num_q_blocks(decode, 4, decode_grid=True), 4)
+        mixed = _problem(max_seqlen_q=2, total_q=8, num_seqs=4)
+        self.assertEqual(au._num_q_blocks(mixed, 4), 8 // 4 + 4)
+        with self.assertRaisesRegex(ValueError, "all-decode"):
+            au._num_q_blocks(mixed, 4, decode_grid=True)
+        tuned = SimpleNamespace(kernel_spec=segment, allow_unsupported=False)
+        ok, why = au._explicit_path_supported(mixed, tuned, "3d")
+        self.assertFalse(ok)
+        self.assertIn("all-decode", why)
 
     def test_invalid_geometry_is_rejected_not_fixed(self):
         with self.assertRaises(ValueError):

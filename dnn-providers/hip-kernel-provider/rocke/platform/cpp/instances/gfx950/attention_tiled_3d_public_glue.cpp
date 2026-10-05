@@ -201,6 +201,7 @@ rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_de
     s.use_invariant_hoist = false;
     s.use_wide_kv_load = false;
     s.use_i64_kv_addr = false;
+    s.use_decode_grid = false;
     return s;
 }
 
@@ -314,7 +315,8 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
     /* kernel_name_join("rocke_uattn3d_tiled", d.., b.., h..kv.., seg.., dtype,
      *   kv<...> if kv_storage_dtype else "", "sinks" if use_sinks else "",
      *   "sw<sw>" if sw>0 else "", "softcap" if has_softcap else "",
-     *   "alibi" if use_alibi else "", "qqb" if use_qq_bias else "")
+     *   "alibi" if use_alibi else "", "qqb" if use_qq_bias else "",
+     *   "dg" if use_decode_grid else "")
      *
      * Positional parts list (NOT flags=...): empty parts are skipped by
      * kernel_name_join. We materialise each part and feed the non-empty ones in
@@ -326,7 +328,7 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
     char seg_part[32];
     char kv_part[32];
     char sw_part[32];
-    const char* parts[16];
+    const char* parts[24];
     size_t np = 0;
     size_t out_len = 0;
     rocke_status_t st;
@@ -376,6 +378,10 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
     if(s->use_qq_bias)
     {
         parts[np++] = "qqb";
+    }
+    if(s->use_decode_grid)
+    {
+        parts[np++] = "dg";
     }
 
     st = rocke_kernel_name_join("", parts, np, NULL, NULL, 0, buf, cap, &out_len);
@@ -619,6 +625,7 @@ bool rocke_gfx950_attn_tiled_3d_config_from_spec(
     out->KV_FP8 = (spec->kv_storage_dtype != NULL
                    && rocke_attn3d950_streq(spec->kv_storage_dtype, "fp8e4m3"));
     out->I64_KV_ADDR = spec->use_i64_kv_addr;
+    out->DECODE_GRID = spec->use_decode_grid;
     out->KV_BYTES = out->KV_FP8 ? 1 : 2;
 
     nqk = out->NQK;

@@ -58,7 +58,6 @@ _NQH = 64
 _NKVH = 8
 _NQK = _NQH // _NKVH  # 8
 _BS = 16
-_BLOCK_Q = 16 // _NQK  # = 2 (block_m=16 for num_queries_per_kv<=16)
 
 
 def _ref_decode(q_f32, kc_f32, vc_f32, *, block_tables, seq_lens, scale, sinks_f32):
@@ -219,7 +218,10 @@ def _verify_one(arch, *, num_seqs, kv_len, use_sinks, tol, seed):
     segm_max_d = rt.alloc(4 * segm_ml_n)
     segm_exp_d = rt.alloc(4 * segm_ml_n)
 
-    total_num_q_blocks = total_q // _BLOCK_Q + num_seqs
+    # Grid x follows the shipped spec (all-decode grid -> one CTA per sequence).
+    total_num_q_blocks = au._num_q_blocks(
+        problem, seg_spec.block_q, decode_grid=seg_spec.use_decode_grid
+    )
     seg_grid = (int(total_num_q_blocks), int(_NKVH), int(num_segments))
     seg_waves = int(getattr(seg_spec, "num_waves", 1))
     seg_blk = (wave_size * seg_waves, 1, 1)
