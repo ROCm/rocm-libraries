@@ -74,9 +74,29 @@ public:
     static __device__ hip_bfloat16 min() noexcept
     {
         // data = 0x0080
-        return static_cast<hip_bfloat16>(0x1p-14f);
+        return static_cast<hip_bfloat16>(0x1p-126f);
     }
 };
+
+// Recent HIPRTC preambles provide this type without a disk-header include.
+#if defined(HIP_INCLUDE_HIP_HIP_BF16_H) || defined(_HIP_INCLUDE_HIP_AMD_DETAIL_HIP_BF16_H_)
+template <>
+class numeric_limits<__hip_bfloat16>
+{
+public:
+    static __device__ __hip_bfloat16 max() noexcept
+    {
+        // data = 0x7F7F
+        return static_cast<__hip_bfloat16>(0x1.FEp+127f);
+    }
+
+    static __device__ __hip_bfloat16 min() noexcept
+    {
+        // data = 0x0080
+        return static_cast<__hip_bfloat16>(0x1p-126f);
+    }
+};
+#endif
 
 #if HIP_PACKAGE_VERSION_FLAT >= 6001024024ULL
 
