@@ -1,0 +1,115 @@
+========================================================================================================================
+PARAMETERS WITH ONLY ONE VALUE USED ACROSS ALL YAML FILES
+========================================================================================================================
+
+Total Multi-Value Trackable Parameters: 160
+Parameters with Only ONE Value Used: 12
+Percentage: 7%
+
+NOTE: These parameters have multiple valid values but only one is actually
+      tested across all YAML files, indicating minimal test coverage.
+
+========================================================================================================================
+PROBLEM PARAMETERS (6 with single value)
+========================================================================================================================
+
+Parameter: ActivationNoGuard
+  Category: problem
+  Default: False
+  Valid Values: [False, True]
+  Tested Value: False
+  Coverage: ⚠️ 1/2 (50%)
+  Untested Values: [True]
+
+Parameter: AllowNoFreeDims
+  Category: problem
+  Default: False
+  Valid Values: [False, True]
+  Tested Value: False
+  Coverage: ⚠️ 1/2 (50%)
+  Untested Values: [True]
+
+Parameter: SilentHighPrecisionAccumulate
+  Category: problem
+  Default: False
+  Valid Values: [False, True]
+  Tested Value: False
+  Coverage: ⚠️ 1/2 (50%)
+  Untested Values: [True]
+
+Parameter: StridedBatched
+  Category: problem
+  Default: True
+  Valid Values: [False, True]
+  Tested Value: True
+  Coverage: ⚠️ 1/2 (50%)
+  Untested Values: [False]
+
+Parameter: TileAwareSelection
+  Category: problem
+  Default: False
+  Valid Values: [False, True]
+  Tested Value: False
+  Coverage: ⚠️ 1/2 (50%)
+  Untested Values: [True]
+
+Parameter: UseInitialStridesAB
+  Category: problem
+  Default: False
+  Valid Values: [False, True]
+  Tested Value: False
+  Coverage: ⚠️ 1/2 (50%)
+  Untested Values: [True]
+
+========================================================================================================================
+SOLUTION PARAMETERS (6 with single value)
+========================================================================================================================
+
+Parameter: DebugStreamK
+  Category: solution
+  Default: None
+  Valid Values: [0, 1, 2, 3]
+  Tested Value: 0
+  Coverage: ⚠️ 2/4 (50%)
+  Untested Values: [1, 2, 3]
+
+Parameter: GlobalReadPerMfma
+  Category: solution
+  Default: None
+  Valid Values: [0.01, 0.02, 0.03]... (3199 total values)
+  Tested Value: 1.0
+  Coverage: ⚠️ 2/3199 (0%)
+  Untested Values: [0.01, 0.02, 0.03]... (3198 values not tested)
+
+Parameter: MXLoadInst
+  Category: solution
+  Default: None
+  Valid Values: ['Auto', 'TDM', 'BufferLoad', 'GlobalLoad']
+  Tested Value: TDM
+  Coverage: ⚠️ 2/4 (50%)
+  Untested Values: ['Auto', 'BufferLoad', 'GlobalLoad']
+
+Parameter: MagicDivAlg
+  Category: solution
+  Default: None
+  Valid Values: [0, 1, 2]
+  Tested Value: 2
+  Coverage: ⚠️ 2/3 (66%)
+  Untested Values: [0, 1]
+
+Parameter: UseInstOffsetForGRO
+  Category: solution
+  Default: None
+  Valid Values: [-1, 0, 1]
+  Tested Value: 0
+  Coverage: ⚠️ 2/3 (66%)
+  Untested Values: [-1, 1]
+
+Parameter: VectorStore
+  Category: solution
+  Default: None
+  Valid Values: [-1, 0, 1]
+  Tested Value: -1
+  Coverage: ⚠️ 2/3 (66%)
+  Untested Values: [0, 1]
+
