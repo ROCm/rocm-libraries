@@ -84,7 +84,31 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 if(HIPSPARSE_ENABLE_FORTRAN)
-    enable_language(Fortran)
+    # enable_language(Fortran) freezes the compiler for the whole tree, so the
+    # amdflang preference has to come first.
+    include("${CMAKE_CURRENT_SOURCE_DIR}/fortran/cmake/ROCmFortranCompiler.cmake")
+    rocm_fortran_prefer_amdflang()
+
+    # Probe rather than fail: a site without Fortran still builds the C clients.
+    # ROCMChecks watches CMAKE_Fortran_COMPILER; silence it across the probe.
+    set(_hipsparse_warn_toolchain_var "${ROCM_WARN_TOOLCHAIN_VAR}")
+    set(_hipsparse_error_toolchain_var "${ROCM_ERROR_TOOLCHAIN_VAR}")
+    set(ROCM_WARN_TOOLCHAIN_VAR OFF)
+    set(ROCM_ERROR_TOOLCHAIN_VAR OFF)
+    include(CheckLanguage)
+    check_language(Fortran)
+    set(ROCM_WARN_TOOLCHAIN_VAR "${_hipsparse_warn_toolchain_var}")
+    set(ROCM_ERROR_TOOLCHAIN_VAR "${_hipsparse_error_toolchain_var}")
+    unset(_hipsparse_warn_toolchain_var)
+    unset(_hipsparse_error_toolchain_var)
+
+    if(CMAKE_Fortran_COMPILER)
+        enable_language(Fortran)
+    else()
+        message(STATUS
+            "hipSPARSE: no Fortran compiler found, disabling the Fortran clients.")
+        set(HIPSPARSE_ENABLE_FORTRAN OFF)
+    endif()
 endif()
 
 # --- Dependency Setup ---
@@ -111,6 +135,23 @@ endif()
 if(HIPSPARSE_ENABLE_HOST)
     add_subdirectory(library)
 endif()
+# ctest walks only directories below a root that enabled testing; fortran/
+# registers its binding tests under this same condition.
+if(HIPSPARSE_ENABLE_CLIENT OR HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
+    enable_testing()
+endif()
+
+# Fortran bindings; self-guarded. Outside HIPSPARSE_ENABLE_HOST: they need
+# libhipsparse linked, not built here.
+add_subdirectory(fortran)
+
+# The Fortran samples link roc::hipsparse_fortran.
+if(HIPSPARSE_ENABLE_FORTRAN AND NOT HIPSPARSE_HAVE_FORTRAN_BINDINGS)
+    message(STATUS
+        "hipSPARSE: the Fortran bindings were not built, skipping the Fortran "
+        "samples. Enable BUILD_FORTRAN_BINDINGS to get them back.")
+    set(HIPSPARSE_ENABLE_FORTRAN OFF)
+endif()
 
 # Must be set before add_subdirectory(clients): clients/tests needs it for CTest categories
 # (shared/ctest/TestCategories.cmake and test_categories.yaml).
@@ -121,9 +162,6 @@ endif()
 # --- Client targets ---
 
 if(HIPSPARSE_ENABLE_CLIENT OR HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
-    # Required at project root so ${CMAKE_BINARY_DIR}/CTestTestfile.cmake exists.
-    # Otherwise ctest run from the build root finds no tests (they only lived under clients/).
-    enable_testing()
     include(rocm_client_prerequisites)
     add_subdirectory(clients)
 endif()
@@ -140,13 +178,6 @@ if(HIPSPARSE_ENABLE_CLIENT OR HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
 endif()
 
 if(HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
-    rocm_package_setup_client_component(
-        tests
-        DEPENDS
-        COMPONENT clients-common
-        DEB "${GFORTRAN_DEB}"
-        RPM "${GFORTRAN_RPM}"
-    )
     rocm_package_setup_client_component(
         tests
         DEPENDS
@@ -168,8 +199,6 @@ endif()
 
 if(HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
     if(NOT WIN32)
-        rocm_package_add_rpm_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_RPM}")
-        rocm_package_add_deb_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_DEB}")
         if(HIPSPARSE_ENABLE_OPENMP)
             rocm_package_add_rpm_dependencies(COMPONENT tests DEPENDS "${OPENMP_RPM}")
             rocm_package_add_deb_dependencies(COMPONENT tests DEPENDS "${OPENMP_DEB}")
@@ -179,8 +208,6 @@ endif()
 
 if(HIPSPARSE_ENABLE_BENCHMARKS)
     if(NOT WIN32)
-        rocm_package_add_rpm_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_RPM}")
-        rocm_package_add_deb_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_DEB}")
         if(HIPSPARSE_ENABLE_OPENMP)
             rocm_package_add_rpm_dependencies(COMPONENT benchmarks DEPENDS "${OPENMP_RPM}")
             rocm_package_add_deb_dependencies(COMPONENT benchmarks DEPENDS "${OPENMP_DEB}")
@@ -249,8 +276,11 @@ if(HIPSPARSE_ENABLE_COVERAGE)
         target_compile_options(hipsparse-clients-common PUBLIC -fprofile-arcs -ftest-coverage)
         target_link_options(hipsparse-clients-common PUBLIC --coverage)
         
-        target_compile_options(hipsparse-samples-common PUBLIC -fprofile-arcs -ftest-coverage)
-        target_link_options(hipsparse-samples-common PUBLIC --coverage)
+        # Also linked by the Fortran samples; amdflang rejects these flags.
+        target_compile_options(hipsparse-samples-common PUBLIC
+            "$<$<COMPILE_LANGUAGE:C,CXX>:-fprofile-arcs;-ftest-coverage>")
+        target_link_options(hipsparse-samples-common PUBLIC
+            "$<$<LINK_LANGUAGE:C,CXX>:--coverage>")
     endif()
     
     add_custom_target(coverage_cleanup

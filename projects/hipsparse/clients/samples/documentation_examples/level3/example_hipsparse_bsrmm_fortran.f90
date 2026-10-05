@@ -21,6 +21,7 @@
 ! [doc example start]
 program example_hipsparse_bsrmm
     use iso_c_binding
+    use hipsparse
     implicit none
 
     ! HIP
@@ -56,72 +57,6 @@ program example_hipsparse_bsrmm
 
     integer, parameter :: hipMemcpyHostToDevice = 1
     integer, parameter :: hipMemcpyDeviceToHost = 2
-
-    ! hipSPARSE
-    interface
-        function hipsparseCreate(handle) &
-                bind(c, name = 'hipsparseCreate')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseCreate
-            type(c_ptr) :: handle
-        end function hipsparseCreate
-
-        function hipsparseDestroy(handle) &
-                bind(c, name = 'hipsparseDestroy')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseDestroy
-            type(c_ptr), value :: handle
-        end function hipsparseDestroy
-
-        function hipsparseCreateMatDescr(descr) &
-                bind(c, name = 'hipsparseCreateMatDescr')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseCreateMatDescr
-            type(c_ptr) :: descr
-        end function hipsparseCreateMatDescr
-
-        function hipsparseDestroyMatDescr(descr) &
-                bind(c, name = 'hipsparseDestroyMatDescr')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseDestroyMatDescr
-            type(c_ptr), value :: descr
-        end function hipsparseDestroyMatDescr
-
-        function hipsparseSbsrmm(handle, dirA, transA, transB, mb, n, kb, nnzb, alpha, descrA, &
-                                 bsrSortedValA, bsrSortedRowPtrA, bsrSortedColIndA, blockDim, &
-                                 B, ldb, beta, C, ldc) &
-                bind(c, name = 'hipsparseSbsrmm')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseSbsrmm
-            type(c_ptr), value :: handle
-            integer(c_int), value :: dirA
-            integer(c_int), value :: transA
-            integer(c_int), value :: transB
-            integer(c_int), value :: mb
-            integer(c_int), value :: n
-            integer(c_int), value :: kb
-            integer(c_int), value :: nnzb
-            type(c_ptr), intent(in), value :: alpha
-            type(c_ptr), value :: descrA
-            type(c_ptr), intent(in), value :: bsrSortedValA
-            type(c_ptr), intent(in), value :: bsrSortedRowPtrA
-            type(c_ptr), intent(in), value :: bsrSortedColIndA
-            integer(c_int), value :: blockDim
-            type(c_ptr), intent(in), value :: B
-            integer(c_int), value :: ldb
-            type(c_ptr), intent(in), value :: beta
-            type(c_ptr), value :: C
-            integer(c_int), value :: ldc
-        end function hipsparseSbsrmm
-    end interface
-
-    integer, parameter :: HIPSPARSE_DIRECTION_ROW = 0
-    integer, parameter :: HIPSPARSE_OPERATION_NON_TRANSPOSE = 0
 
     ! Variables
     type(c_ptr) :: handle
