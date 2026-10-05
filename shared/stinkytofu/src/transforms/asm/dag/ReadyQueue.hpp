@@ -43,6 +43,31 @@ namespace dag {
 // scheduler drains, rather than rebuilding their own view of it.
 struct RegionDAG;
 
+// WMMAs per TDM stage of a basic block: WMMAs / tensor_load groups (a group ends at a WMMA).
+// A stage under kMinPrefetchLeadStageWmmas WMMAs has no room for a prefetch lead, so the
+// block runs as if PrefetchLeadWmmas = 0. Blocks without WMMAs or tensor_loads keep the lead.
+inline constexpr int kMinPrefetchLeadStageWmmas = 64;
+struct StageWmmaCounter {
+    int wmmas = 0;
+    int groups = 0;
+    bool wmmaSinceTensorLoad = true;
+    void add(const StinkyInstruction& inst) {
+        if (inst.getHwInstDesc() == nullptr) return;
+        if (isMatrixInstruction(inst)) {
+            ++wmmas;
+            wmmaSinceTensorLoad = true;
+        } else if (isTensorLoad(inst)) {
+            if (wmmaSinceTensorLoad) ++groups;
+            wmmaSinceTensorLoad = false;
+        }
+    }
+    int effectiveLead(int lead) const {
+        const bool shortStage =
+            groups > 0 && wmmas > 0 && wmmas < kMinPrefetchLeadStageWmmas * groups;
+        return lead > 0 && shortStage ? 0 : lead;
+    }
+};
+
 // REMOVED: Local buildUseDefChain() has been replaced by stinkytofu::buildUseDefChain()
 // from BuildDefUseChain.hpp. All callers now use the shared implementation.
 

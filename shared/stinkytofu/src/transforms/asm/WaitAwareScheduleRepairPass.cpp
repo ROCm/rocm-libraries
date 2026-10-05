@@ -144,14 +144,13 @@ bool isHardBoundary(const StinkyInstruction& inst,
 std::vector<StinkyInstruction*> repairSegment(const std::vector<StinkyInstruction*>& instructions,
                                               const WaitAnchorMap& anchors,
                                               const PassContext& passCtx,
-                                              unsigned slotsToMovePastAnchor) {
+                                              unsigned slotsToMovePastAnchor, bool pinPrefetches) {
     if (instructions.empty()) return {};
 
     RegionDAG dag = buildRegisterDependencyDAG(instructions);
     addCounterOrderEdges(dag, instructions, anchors);
     // Prefetches placed by the DAG's prefetch lead stay where it put them.
-    if (passCtx.getPassFeatureConfig().dagFeatures.prefetchLeadWmmas > 0)
-        addPrefetchPinEdges(dag, instructions);
+    if (pinPrefetches) addPrefetchPinEdges(dag, instructions);
 
     WaitAnchoredReadyQueue queue(passCtx, anchors, dag, slotsToMovePastAnchor);
     std::vector<StinkyInstruction*> scheduled = scheduleWithWaitAnchoredReadyQueue(dag, queue);
@@ -182,10 +181,17 @@ void repairBlock(BasicBlock& bb, const PassContext& passCtx, unsigned slotsToMov
     std::vector<StinkyInstruction*> segment;
     segment.reserve(bb.size());
 
+    // Same per-block lead as the DAG scheduler (StageWmmaCounter).
+    StageWmmaCounter stage;
+    for (IRBase& ir : bb)
+        if (ir.getType() == IRBase::IRType::StinkyTofu) stage.add(*cast<StinkyInstruction>(&ir));
+    const bool pinPrefetches =
+        stage.effectiveLead(passCtx.getPassFeatureConfig().dagFeatures.prefetchLeadWmmas) > 0;
+
     auto flushSegment = [&]() {
         if (segment.empty()) return;
         const std::vector<StinkyInstruction*> repaired =
-            repairSegment(segment, anchors, passCtx, slotsToMovePastAnchor);
+            repairSegment(segment, anchors, passCtx, slotsToMovePastAnchor, pinPrefetches);
         for (StinkyInstruction* inst : repaired) emitInstWithWaits(output, inst, anchors);
         segment.clear();
     };

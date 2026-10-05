@@ -812,7 +812,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int getHazardWait(DAGNode* node) const;
     bool destOverlapsActiveWmmaSrc(DAGNode* node) const;
     bool pipeOpGateBlocks(DAGNode* node) const;
-    // Earliest WMMA count at which each prefetch may issue (dagFeatures.prefetchLeadWmmas).
+    // dagFeatures.prefetchLeadWmmas for this basic block (StageWmmaCounter, set in onInit).
+    int blockPrefetchLead_ = 0;
+    // Earliest WMMA count at which each prefetch may issue (blockPrefetchLead_).
     std::unordered_map<const StinkyInstruction*, int> prefetchEarliestWmma_;
     // The topmost barrier (the signal) of the group above the tensor_load each prefetch
     // precedes.
@@ -826,7 +828,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // Single-stage loop body (tensilelite: no HalfPLR), signalled by a short prefetch lead.
     static constexpr int kSingleStageLeadBelow = 8;
     bool singleStageLoop() const {
-        const int lead = getPassContext().getPassFeatureConfig().dagFeatures.prefetchLeadWmmas;
+        const int lead = blockPrefetchLead_;
         return lead > 0 && lead < kSingleStageLeadBelow;
     }
     bool prefetchHeldForLead(const DAGNode* node) const {
@@ -862,7 +864,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
             getPassContext().getPassFeatureConfig().dagFeatures.waitAluHoldStrictCount;
         // Multi-stage loops: any vm_vsrc wait drains older LDS reads, so it is strict at any
         // count. Single-stage loops run ds_loads up to the barrier and keep the count rule.
-        const int lead = getPassContext().getPassFeatureConfig().dagFeatures.prefetchLeadWmmas;
+        const int lead = blockPrefetchLead_;
         const bool vsrcAlways = lead >= kSingleStageLeadBelow;
         const bool strictWait = (need.vmVsrc >= 0 && (vsrcAlways || need.vmVsrc <= strict)) ||
                                 (need.vaVdst >= 0 && need.vaVdst <= strict);
@@ -2487,8 +2489,7 @@ void CDNA5ReadyQueue::push(DAGNode* node) {
         return;
     }
 
-    if (getPassContext().getPassFeatureConfig().dagFeatures.prefetchLeadWmmas > 0 &&
-        isGlobalPrefetch(*node->inst)) {
+    if (blockPrefetchLead_ > 0 && isGlobalPrefetch(*node->inst)) {
         prefetchQueue.push(node);
         if (!node->hazardFlags.empty()) hazardHoistCandidates_.push_back({node, kPrefetch});
         return;
@@ -2508,6 +2509,11 @@ bool CDNA5ReadyQueue::empty() const {
 void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regionEnd) {
     regionDag_ = nullptr;  // set per region in onInitRegion; the previous region's DAG is gone
     deferFirstHeadWmmaActive_ = false;
+    StageWmmaCounter stage;
+    for (IRList::iterator it = regionStart; it != regionEnd; ++it)
+        if (auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr())) stage.add(*inst);
+    blockPrefetchLead_ =
+        stage.effectiveLead(getPassContext().getPassFeatureConfig().dagFeatures.prefetchLeadWmmas);
     deferHeadBalanceThisRegion_ = false;
 
     // Per-BB like the PipeOps lanes: the tracker walks the BB's final order from an empty
@@ -3367,7 +3373,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     for (const auto& [barrier, window] : barrierWmmaThresholds_)
         if (isBarrierWait(*barrier)) barrierWaitWindows_.push_back(window);
     std::sort(barrierWaitWindows_.begin(), barrierWaitWindows_.end());
-    const int lead = getPassContext().getPassFeatureConfig().dagFeatures.prefetchLeadWmmas;
+    const int lead = blockPrefetchLead_;
     std::unordered_map<const StinkyInstruction*, int> loadPlannedWindow;
     if (!barrierWmmaThresholds_.empty()) {
         std::vector<StinkyInstruction*> order;
