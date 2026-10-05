@@ -2348,7 +2348,8 @@ class UnifiedGemmCodegen:
             self._unlisted_warned.add(variant)
             log.warning(
                 f"No warp tiles listed for {dtype_key} on {self.gpu_target} "
-                f"({variant}); rejecting instead of emitting them unchecked"
+                f"({variant.value if variant else 'standard'}); "
+                f"rejecting instead of emitting them unchecked"
             )
         return True
 
