@@ -1,5 +1,5 @@
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250-strict] # not supported yet
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported yet
 GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
@@ -27,13 +27,13 @@ GlobalParameters:
 
 BenchmarkProblems:
   #######################################
-  # NN - standard - SPB
+  # NN - standard
   #######################################
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: f8
-      DestDataType: s
+      DataType: i8
+      DestDataType: i
       ComputeDataType: s
       HighPrecisionAccumulate:  True
       TransposeA: False
@@ -44,7 +44,8 @@ BenchmarkProblems:
       Activation: True
       ActivationType: all
       UseScaleAlphaVec: 3
-      Sparse: 2
+      Sparse: 1
+      MetadataLayout: 0
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -57,25 +58,26 @@ BenchmarkProblems:
           # - [16, 16, 128, 1, 1, 1, 3, 2, 2]
           - [16, 16, 128, 1, 1, 2, 2, 2, 2]
           # - [16, 16, 128, 1, 1, 2, 1, 1, 4]
-          - [16, 16, 128, 1, 1, 4, 4, 2, 2]
+          # - [16, 16, 128, 1, 1, 4, 4, 2, 2]
           # - [16, 16, 128, 1, 1, 7, 2, 2, 2]
           # - [16, 16, 128, 1, 1, 8, 8, 2, 2]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
         - DepthU: [128, 256]
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - ScheduleIterAlg: [4]
         - TDMInst: [3]
         - TransposeLDS: [-1]
-        - SourceSwap: [true]
+        - SourceSwap: [false]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - LdsPadMetadata: [-1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [0]
-        # - VectorWidthA: [1, 4]
-        # - VectorWidthB: [1, 4]
+        # - VectorWidthA: [1, 2, 4, 8]
+        # - VectorWidthB: [1, 2, 4, 8]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - LDSTrInst: [True, False]
@@ -86,7 +88,7 @@ BenchmarkProblems:
         - ProblemSizes:
           # - Exact: [16, 16, 1, 32] # classic format
           - Exact: [16, 16, 1, 64] # classic format
-          - Exact: [16, 16, 1, 256] # classic format
+          - Exact: [16, 16, 1, 128] # classic format
           # - Exact: [24, 24, 1, 48] # classic format
           - Exact: [128, 128, 1, 128] # classic format
           # - Exact: [256, 256, 1, 16] # classic format
@@ -99,13 +101,13 @@ BenchmarkProblems:
           # - [Enum: relu]
 
   #######################################
-  # TN - standard - SPB
+  # TN - standard
   #######################################
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: f8
-      DestDataType: s
+      DataType: i8
+      DestDataType: i
       ComputeDataType: s
       HighPrecisionAccumulate:  True
       TransposeA: True
@@ -116,7 +118,8 @@ BenchmarkProblems:
       Activation: True
       ActivationType: all
       UseScaleAlphaVec: 3
-      Sparse: 2
+      Sparse: 1
+      MetadataLayout: 0
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -129,25 +132,26 @@ BenchmarkProblems:
           # - [16, 16, 128, 1, 1, 1, 3, 2, 2]
           - [16, 16, 128, 1, 1, 2, 2, 2, 2]
           # - [16, 16, 128, 1, 1, 2, 1, 1, 4]
-          - [16, 16, 128, 1, 1, 4, 4, 2, 2]
+          # - [16, 16, 128, 1, 1, 4, 4, 2, 2]
           # - [16, 16, 128, 1, 1, 7, 2, 2, 2]
           # - [16, 16, 128, 1, 1, 8, 8, 2, 2]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
         - DepthU: [128, 256]
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - ScheduleIterAlg: [4]
         - TDMInst: [3]
         - TransposeLDS: [-1]
-        - SourceSwap: [true]
+        - SourceSwap: [false]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - LdsPadMetadata: [-1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [0]
-        # - VectorWidthA: [1, 4]
-        # - VectorWidthB: [1, 4]
+        # - VectorWidthA: [1, 2, 4, 8]
+        # - VectorWidthB: [1, 2, 4, 8]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - LDSTrInst: [True, False]
@@ -158,7 +162,7 @@ BenchmarkProblems:
         - ProblemSizes:
           # - Exact: [16, 16, 1, 32] # classic format
           - Exact: [16, 16, 1, 64] # classic format
-          - Exact: [16, 16, 1, 256] # classic format
+          - Exact: [16, 16, 1, 128] # classic format
           # - Exact: [24, 24, 1, 48] # classic format
           - Exact: [128, 128, 1, 128] # classic format
           # - Exact: [256, 256, 1, 16] # classic format
@@ -171,13 +175,13 @@ BenchmarkProblems:
           # - [Enum: relu]
 
   #######################################
-  # NT - standard - SPB
+  # NT - standard
   #######################################
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: f8
-      DestDataType: s
+      DataType: i8
+      DestDataType: i
       ComputeDataType: s
       HighPrecisionAccumulate:  True
       TransposeA: False
@@ -188,7 +192,8 @@ BenchmarkProblems:
       Activation: True
       ActivationType: all
       UseScaleAlphaVec: 3
-      Sparse: 2
+      Sparse: 1
+      MetadataLayout: 0
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -201,25 +206,26 @@ BenchmarkProblems:
           # - [16, 16, 128, 1, 1, 1, 3, 2, 2]
           - [16, 16, 128, 1, 1, 2, 2, 2, 2]
           # - [16, 16, 128, 1, 1, 2, 1, 1, 4]
-          - [16, 16, 128, 1, 1, 4, 4, 2, 2]
+          # - [16, 16, 128, 1, 1, 4, 4, 2, 2]
           # - [16, 16, 128, 1, 1, 7, 2, 2, 2]
           # - [16, 16, 128, 1, 1, 8, 8, 2, 2]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
         - DepthU: [128, 256]
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - ScheduleIterAlg: [4]
         - TDMInst: [3]
         - TransposeLDS: [-1]
-        - SourceSwap: [true]
+        - SourceSwap: [false]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - LdsPadMetadata: [-1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [0]
-        # - VectorWidthA: [1, 4]
-        # - VectorWidthB: [1, 4]
+        # - VectorWidthA: [1, 2, 4, 8]
+        # - VectorWidthB: [1, 2, 4, 8]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - LDSTrInst: [True, False]
@@ -230,7 +236,7 @@ BenchmarkProblems:
         - ProblemSizes:
           # - Exact: [16, 16, 1, 32] # classic format
           - Exact: [16, 16, 1, 64] # classic format
-          - Exact: [16, 16, 1, 256] # classic format
+          - Exact: [16, 16, 1, 128] # classic format
           # - Exact: [24, 24, 1, 48] # classic format
           - Exact: [128, 128, 1, 128] # classic format
           # - Exact: [256, 256, 1, 16] # classic format
@@ -243,13 +249,13 @@ BenchmarkProblems:
           # - [Enum: relu]
 
   #######################################
-  # TT - standard - SPB
+  # TT - standard
   #######################################
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: f8
-      DestDataType: s
+      DataType: i8
+      DestDataType: i
       ComputeDataType: s
       HighPrecisionAccumulate:  True
       TransposeA: True
@@ -260,7 +266,8 @@ BenchmarkProblems:
       Activation: True
       ActivationType: all
       UseScaleAlphaVec: 3
-      Sparse: 2
+      Sparse: 1
+      MetadataLayout: 0
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -273,25 +280,26 @@ BenchmarkProblems:
           # - [16, 16, 128, 1, 1, 1, 3, 2, 2]
           - [16, 16, 128, 1, 1, 2, 2, 2, 2]
           # - [16, 16, 128, 1, 1, 2, 1, 1, 4]
-          - [16, 16, 128, 1, 1, 4, 4, 2, 2]
+          # - [16, 16, 128, 1, 1, 4, 4, 2, 2]
           # - [16, 16, 128, 1, 1, 7, 2, 2, 2]
           # - [16, 16, 128, 1, 1, 8, 8, 2, 2]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
         - DepthU: [128, 256]
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - ScheduleIterAlg: [4]
         - TDMInst: [3]
         - TransposeLDS: [-1]
-        - SourceSwap: [true]
+        - SourceSwap: [false]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - LdsPadMetadata: [-1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [0]
-        # - VectorWidthA: [1, 4]
-        # - VectorWidthB: [1, 4]
+        # - VectorWidthA: [1, 2, 4, 8]
+        # - VectorWidthB: [1, 2, 4, 8]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - LDSTrInst: [True, False]
@@ -302,7 +310,7 @@ BenchmarkProblems:
         - ProblemSizes:
           # - Exact: [16, 16, 1, 32] # classic format
           - Exact: [16, 16, 1, 64] # classic format
-          - Exact: [16, 16, 1, 256] # classic format
+          - Exact: [16, 16, 1, 128] # classic format
           # - Exact: [24, 24, 1, 48] # classic format
           - Exact: [128, 128, 1, 128] # classic format
           # - Exact: [256, 256, 1, 16] # classic format
