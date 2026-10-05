@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 
 namespace
@@ -99,7 +100,9 @@ namespace
             opt.initMode = DataInitMode(NaNs{});
         else if(initMethod == "Infs")
             opt.initMode = DataInitMode(Infs{});
-        else if(initMethod == "Bounded" || initMethod == "uniform_01" || initMethod == "hpl")
+        // integer_exact generates bounded values and then replaces them (makeIntegerExactMX).
+        else if(initMethod == "Bounded" || initMethod == "uniform_01" || initMethod == "hpl"
+                || initMethod == "integer_exact")
             opt.initMode = DataInitMode(Bounded{});
         else if(initMethod == "uniform_low_precision")
         {
@@ -329,6 +332,45 @@ std::vector<float> getAlignedFloat(std::vector<uint8_t>&              dataBytes,
     return refFloat;
 }
 
+// For fast_check: small integers in the fp8 elements (A in {0, 1, 2}, B in {-2, ..., 2}) and
+// E8M0 scales of 1, 2 or 4 chosen per block, so every dequantized value is an exact integer and a
+// read of the wrong scale changes the result.
+template <typename DT>
+void makeIntegerExactMX(std::vector<uint8_t>& dataBytes,
+                        std::vector<uint8_t>& scaleBytes,
+                        bool                  isMatrixA)
+{
+    constexpr bool e4m3 = std::is_same_v<DT, DGen::ocp_e4m3_mxfp8>;
+    constexpr bool e5m2 = std::is_same_v<DT, DGen::ocp_e5m2_mxfp8>;
+    if constexpr(!e4m3 && !e5m2)
+    {
+        throw std::runtime_error("integer_exact MX data supports fp8 (E4M3, E5M2) elements only");
+    }
+    else
+    {
+        // Encodings of -2, -1, 0, 1 and 2.
+        constexpr uint8_t e4m3Codes[5] = {0xC0, 0xB8, 0x00, 0x38, 0x40};
+        constexpr uint8_t e5m2Codes[5] = {0xC0, 0xBC, 0x00, 0x3C, 0x40};
+        const uint8_t*    codes        = e4m3 ? e4m3Codes : e5m2Codes;
+        auto              mix          = [](uint64_t x) {
+            x ^= x >> 33;
+            x *= 0xff51afd7ed558ccdULL;
+            x ^= x >> 33;
+            x *= 0xc4ceb9fe1a85ec53ULL;
+            return x ^ (x >> 33);
+        };
+        const uint64_t salt = isMatrixA ? 0x41 : 0x42;
+        for(size_t i = 0; i < dataBytes.size(); i++)
+        {
+            const uint64_t h = mix(i * 131 + salt);
+            const int      v = isMatrixA ? int(h % 3) : int(h % 5) - 2;
+            dataBytes[i]     = codes[v + 2];
+        }
+        for(size_t i = 0; i < scaleBytes.size(); i++)
+            scaleBytes[i] = uint8_t(127 + mix(i * 137 + salt + 2) % 3);
+    }
+}
+
 template <typename T, typename DT>
 std::vector<float> generateData(T                           dgen,
                                 void*                       data,
@@ -340,7 +382,8 @@ std::vector<float> generateData(T                           dgen,
                                 int                         elementsPerMXBlock,
                                 bool                        isTranspose,
                                 bool                        isMatrixA,
-                                MXScaleLayout               scaleLayout)
+                                MXScaleLayout               scaleLayout,
+                                bool                        integerExact = false)
 {
     using namespace DGen;
 
@@ -349,6 +392,8 @@ std::vector<float> generateData(T                           dgen,
 
     std::vector<uint8_t> dataBytes = dgen.getDataBytes();
     std::vector<uint8_t> scaleBytes = dgen.getScaleBytes();
+    if(integerExact)
+        makeIntegerExactMX<DT>(dataBytes, scaleBytes, isMatrixA);
 
     std::memcpy(data, dataBytes.data(), dataBytes.size() * sizeof(uint8_t));
 
@@ -422,7 +467,18 @@ std::vector<float> generateData(T                           dgen,
     {
         // For (1) transposed matrixA and (2) non-transposed matrixB,
         // return the reference float directly since they are aligned already.
-        return dgen.getReferenceFloat();
+        if(!integerExact)
+            return dgen.getReferenceFloat();
+        // The generator's reference floats describe its own values, which integerExact replaced;
+        // recompute them from the bytes, where each run of elementsPerMXBlock shares a scale.
+        size_t const       count = static_cast<size_t>(sizes[0]) * static_cast<size_t>(sizes[1]);
+        std::vector<float> ref(count);
+        for(size_t idx = 0; idx < count; idx++)
+            ref[idx] = DGen::toFloat<DT>(scaleBytes.data(),
+                                         dataBytes.data(),
+                                         static_cast<DGen::index_t>(idx / elementsPerMXBlock),
+                                         static_cast<DGen::index_t>(idx));
+        return ref;
     }
 
     // For types smaller than 8-bit, mxDataGenerator returns packed data (i.e., two FP4 will be
@@ -518,7 +574,8 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
                                                                   isMatrixA,
-                                                                  scaleLayout);
+                                                                  scaleLayout,
+                                                                  initMethod == "integer_exact");
     }
     else if(dataType == HIP_R_8F_E4M3)
     {
@@ -533,7 +590,8 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
                                                                   isMatrixA,
-                                                                  scaleLayout);
+                                                                  scaleLayout,
+                                                                  initMethod == "integer_exact");
     }
     else if(static_cast<hipDataType>(dataType) == HIP_R_6F_E2M3)
     {
@@ -548,7 +606,8 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
                                                                   isMatrixA,
-                                                                  scaleLayout);
+                                                                  scaleLayout,
+                                                                  initMethod == "integer_exact");
     }
     else if(static_cast<hipDataType>(dataType) == HIP_R_6F_E3M2)
     {
@@ -563,7 +622,8 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
                                                                   isMatrixA,
-                                                                  scaleLayout);
+                                                                  scaleLayout,
+                                                                  initMethod == "integer_exact");
     }
     else if(static_cast<hipDataType>(dataType) == HIP_R_4F_E2M1)
     {
@@ -571,31 +631,35 @@ std::vector<float> generateMXInput(hipDataType            dataType,
         {
             DGen::DataGenerator<DGen::ocp_e2m1_mxfp4_e4m3> dgen;
             return generateData<decltype(dgen), DGen::ocp_e2m1_mxfp4_e4m3>(dgen,
-                                                                          data,
-                                                                          scale,
-                                                                          sizes,
-                                                                          strides,
-                                                                          seed,
-                                                                          opt,
-                                                                          elementsPerMXBlock,
-                                                                          isTranspose,
-                                                                          isMatrixA,
-                                                                          scaleLayout);
+                                                                           data,
+                                                                           scale,
+                                                                           sizes,
+                                                                           strides,
+                                                                           seed,
+                                                                           opt,
+                                                                           elementsPerMXBlock,
+                                                                           isTranspose,
+                                                                           isMatrixA,
+                                                                           scaleLayout,
+                                                                           initMethod
+                                                                               == "integer_exact");
         }
         else if(scaleType == static_cast<hipDataType>(HIP_R_8F_E5M3_EXT))
         {
             DGen::DataGenerator<DGen::ocp_e2m1_mxfp4_e5m3> dgen;
             return generateData<decltype(dgen), DGen::ocp_e2m1_mxfp4_e5m3>(dgen,
-                                                                          data,
-                                                                          scale,
-                                                                          sizes,
-                                                                          strides,
-                                                                          seed,
-                                                                          opt,
-                                                                          elementsPerMXBlock,
-                                                                          isTranspose,
-                                                                          isMatrixA,
-                                                                          scaleLayout);
+                                                                           data,
+                                                                           scale,
+                                                                           sizes,
+                                                                           strides,
+                                                                           seed,
+                                                                           opt,
+                                                                           elementsPerMXBlock,
+                                                                           isTranspose,
+                                                                           isMatrixA,
+                                                                           scaleLayout,
+                                                                           initMethod
+                                                                               == "integer_exact");
         }
         else
         {
@@ -610,7 +674,9 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                                                       elementsPerMXBlock,
                                                                       isTranspose,
                                                                       isMatrixA,
-                                                                      scaleLayout);
+                                                                      scaleLayout,
+                                                                      initMethod
+                                                                          == "integer_exact");
         }
     }
     else

@@ -17,6 +17,9 @@
 #include "hipblaslt_init.hpp"
 #include "hipblaslt_math.hpp"
 #include "hipblaslt_test.hpp"
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+#include "mxDataGen.hpp"
+#endif
 
 #include <hip/hip_runtime.h>
 
@@ -545,6 +548,78 @@ namespace
         EXPECT_EQ(e.max_result, max_result);
         EXPECT_GT(max_result, max_partial) << "the beta and bias terms must count";
     }
+
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+    // integer_exact MX data: every dequantized value is an element in {0, 1, 2} (A) or
+    // {-2, ..., 2} (B) times a scale of 1, 2 or 4, and more than one scale is used, in both the
+    // layout the generator aligns itself and the one this change recomputes.
+    TEST(FastCheck_pre_checkin, integer_exact_mx_values_are_exact_with_varied_scales)
+    {
+        const uint64_t rows = 64, cols = 128;
+        for(bool isMatrixA : {true, false})
+            for(bool transpose : {false, true})
+            {
+                std::vector<uint8_t> data(rows * cols), scale(rows * cols / 32 + 64);
+                std::vector<float>   ref = generateMXInput(HIP_R_8F_E4M3,
+                                                         HIP_R_8U,
+                                                         data.data(),
+                                                         scale.data(),
+                                                         rows,
+                                                         cols,
+                                                         rows,
+                                                         transpose,
+                                                         32,
+                                                         1,
+                                                         isMatrixA,
+                                                         MXScaleLayout::None,
+                                                         "integer_exact");
+                ASSERT_EQ(ref.size(), rows * cols);
+                bool sawLargeScale = false, sawUnitScale = false, sawNegative = false;
+                for(float v : ref)
+                {
+                    const float a = std::fabs(v);
+                    ASSERT_TRUE(a == 0 || a == 1 || a == 2 || a == 4 || a == 8)
+                        << v << " isMatrixA=" << isMatrixA << " transpose=" << transpose;
+                    sawLargeScale |= a == 8 || a == 4;
+                    sawUnitScale |= a == 1;
+                    sawNegative |= v < 0;
+                }
+                EXPECT_TRUE(sawLargeScale && sawUnitScale);
+                EXPECT_EQ(sawNegative, !isMatrixA);
+
+                // The reference must describe the bytes the GPU reads: decode each element and
+                // its block's scale here, independently of the generator. K runs along the
+                // stored rows when A is transposed or B is not; each run of 32 along K shares a
+                // scale, which the other layouts index as (k / 32) * rows + row.
+                const bool kMajor = isMatrixA == transpose;
+                auto       decode = [](uint8_t code) {
+                    switch(code)
+                    {
+                    case 0xC0:
+                        return -2.f;
+                    case 0xB8:
+                        return -1.f;
+                    case 0x00:
+                        return 0.f;
+                    case 0x38:
+                        return 1.f;
+                    case 0x40:
+                        return 2.f;
+                    }
+                    ADD_FAILURE() << "unexpected E4M3 code " << int(code);
+                    return 0.f;
+                };
+                for(size_t idx = 0; idx < ref.size(); idx++)
+                {
+                    const size_t row = idx % rows, k = idx / rows;
+                    const size_t s       = kMajor ? idx / 32 : (k / 32) * rows + row;
+                    const float expected = decode(data[idx]) * std::ldexp(1.f, int(scale[s]) - 127);
+                    ASSERT_EQ(ref[idx], expected) << "element " << idx << " isMatrixA=" << isMatrixA
+                                                  << " transpose=" << transpose;
+                }
+            }
+    }
+#endif
 
     // ------------------------------------------------------------------------------------------
     // fast_check_result_device: D in device memory

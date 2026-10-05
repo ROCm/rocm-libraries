@@ -4750,6 +4750,85 @@ Tests:
   fast_check: 1
   gpu_arch: '(950|1250)'
 
+###############################################################################
+# fast_check MX block scales (AIHPBLAS-5019).
+#
+# ROCM-32046 drops the carry in the address of both the A-scale and B-scale
+# tensors of MXFP8 Stream-K kernels, and if every scale is 1.0 a read of the
+# wrong scale often changes nothing. With integer_exact, the MX generator fills
+# the fp8 elements with small integers (A in {0, 1, 2}, B in {-2, ..., 2}) and
+# the E8M0 scales with 1, 2 or 4, chosen per block of 32. fast_check checks D
+# against the dequantized values, so every element of D is exact and a scale
+# read from the wrong block changes it. One batch, lda and ldb equal to the rows.
+# The MX kernels need M and N to be multiples of 16, so 1040 x 528 is the edge-tile
+# shape here.
+###############################################################################
+
+# Every fp8 format pair, each solution launched and checked twice.
+- name: matmul_fast_check_mx_fp8
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: bf8_r, b_type: bf8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f8_r, b_type: bf8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: bf8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+  matrix_size:
+    - { M: 256, N: 256, K: 512 }
+    - { M: 1040, N: 528, K: 1024 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  requested_solution_num: 16
+  fast_check_repeat: 2
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '(950|1250)'
+
+# The A-scale and B-scale buffers placed across a 4 GiB boundary, with poison
+# 4 GiB away (AIHPBLAS-4994): a scale read whose carry was dropped returns the
+# poison, which E8M0 reads as 2^-87, and D comes out wrong instead of faulting.
+- name: matmul_fast_check_mx_fp8_placement
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+  matrix_size:
+    - { M: 1040, N: 528, K: 1024 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  placement: [ scale_a, scale_b, a, b ]
+  requested_solution_num: 16
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '(950|1250)'
+
+# Large K, where the scale tensors span many blocks.
+- name: matmul_fast_check_mx_fp8_large_k
+  category: nightly
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f8_r, b_type: bf8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+  matrix_size:
+    - { M: 3072, N: 3072, K: 16384 }
+    - { M: 2560, N: 16384, K: 2560 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  requested_solution_num: 16
+  fast_check_repeat: 2
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '(950|1250)'
+
 - name: matmul_96_complex
   category: pre_checkin
   function:
