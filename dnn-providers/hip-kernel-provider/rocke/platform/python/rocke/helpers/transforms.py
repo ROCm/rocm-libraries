@@ -170,6 +170,19 @@ def do_magic_division(
     return b.lshr(summed, b.const_i32(shift))
 
 
+def do_magic_division_dynamic(
+    b: IRBuilder, dividend: Value, multiplier: Value, shift: Value
+) -> Value:
+    """Like :func:`do_magic_division` but ``multiplier`` and ``shift`` are
+    runtime SSA ``Value`` objects (e.g. kernel arguments) instead of Python
+    ``int``. Emits the same ``umul_hi + add + lshr`` sequence; ``lshr`` is
+    always emitted (shift == 0 produces a no-op right-shift).
+    """
+    tmp = b.umul_hi_i32(dividend, multiplier)
+    summed = b.add(tmp, dividend)
+    return b.lshr(summed, shift)
+
+
 # ---------------------------------------------------------------------
 # Transforms
 # ---------------------------------------------------------------------
@@ -392,6 +405,96 @@ class Embed(Transform):
         return {self.lower[0]: CoordVar(self.lower[0], acc, valid)}
 
 
+class EmbedDynamic(Transform):
+    """Affine map with runtime strides and bounds (SSA Values).
+
+    Like :class:`Embed` but ``strides``, ``offset``, ``lo``, ``hi`` are
+    ``Value`` objects (or ``int`` for compile-time). This allows the
+    convolution stride / padding / dilation / input-height / input-width
+    parameters to come from kernel arguments at launch time, enabling
+    shape-generic (AOT) kernels.
+
+    Each parameter may be either an ``int`` (compile-time constant,
+    emitted as ``const_i32``) or a ``Value`` (runtime SSA value, used
+    as-is). This mirrors the ``PadDynamic`` design.
+    """
+
+    upper: Tuple[str, ...]
+    lower: Tuple[str, ...]
+    _strides: Tuple[Any, ...]
+    _offset: Any
+    _lo: Any
+    _hi: Any
+
+    def __init__(
+        self,
+        upper: Sequence[str],
+        lower: str,
+        strides: Sequence[Any],
+        offset: Any = 0,
+        lo: Any = None,
+        hi: Any = None,
+    ) -> None:
+        if len(upper) != len(strides):
+            raise ValueError(
+                f"EmbedDynamic expects len(upper) == len(strides) "
+                f"(got {upper!r}, {strides!r})"
+            )
+        object.__setattr__(self, "upper", tuple(upper))
+        object.__setattr__(self, "lower", (lower,))
+        object.__setattr__(self, "_strides", tuple(strides))
+        object.__setattr__(self, "_offset", offset)
+        object.__setattr__(self, "_lo", lo)
+        object.__setattr__(self, "_hi", hi)
+
+    @staticmethod
+    def _v(b: IRBuilder, x: Any) -> Value:
+        return x if isinstance(x, Value) else b.const_i32(int(x))
+
+    def apply(self, b: IRBuilder, coords: Dict[str, CoordVar]) -> Dict[str, CoordVar]:
+        acc: Optional[Value] = None
+        valid_acc: Optional[Value] = None
+        for name, s in zip(self.upper, self._strides):
+            u = coords[name]
+            valid_acc = _and(b, valid_acc, u.valid)
+            s_v = self._v(b, s)
+            if isinstance(s, int) and s == 1:
+                term = u.value
+            else:
+                term = b.mul(u.value, s_v)
+            acc = term if acc is None else b.add(acc, term)
+        off_v = self._v(b, self._offset)
+        if isinstance(self._offset, int) and self._offset == 0:
+            pass
+        else:
+            acc = b.add(acc, off_v) if acc is not None else off_v
+        if acc is None:
+            acc = off_v
+        bounds: Optional[Value] = None
+        if self._lo is not None:
+            bounds = _and(b, bounds, _ge(b, acc, self._v(b, self._lo)))
+        if self._hi is not None:
+            bounds = _and(b, bounds, _lt(b, acc, self._v(b, self._hi)))
+        valid = _and(b, valid_acc, bounds)
+        return {self.lower[0]: CoordVar(self.lower[0], acc, valid)}
+
+
+def embed_dynamic(
+    upper: Sequence[str],
+    lower: str,
+    strides: Sequence[Any],
+    offset: Any = 0,
+    lo: Any = None,
+    hi: Any = None,
+) -> EmbedDynamic:
+    """Affine map with possibly-runtime strides and bounds.
+
+    Pass ``strides`` / ``offset`` / ``lo`` / ``hi`` as ``int`` for
+    compile-time constants or as ``Value`` for runtime SSA values.
+    """
+    return EmbedDynamic(upper, lower, strides, offset, lo, hi)
+
+
 @dataclass(frozen=True)
 class Merge(Transform):
     """Flatten N upper coords into one linear lower coord.
@@ -565,6 +668,85 @@ class UnmergeMagicDiv(Transform):
             tmp = quot
         out[self.lower[0]] = CoordVar(self.lower[0], tmp, u.valid)
         return out
+
+
+class UnmergeMagicDynamic(Transform):
+    """``Unmerge`` via magic-number division with runtime magic numbers.
+
+    Like :class:`UnmergeMagicDiv` but the ``(multiplier, shift, dim)``
+    triples are SSA ``Value`` objects passed as kernel arguments, enabling
+    shape-generic (AOT) kernels. The host computes the magic constants via
+    :func:`calculate_magic_numbers` at launch time and passes them in.
+
+    ``magic_triples`` is a sequence of ``(multiplier, shift, dim)`` tuples,
+    one per lower coord except the leading one (which gets the final quotient).
+    Each element may be a ``Value`` (runtime) or ``int`` (compile-time).
+    """
+
+    upper: Tuple[str, ...]
+    lower: Tuple[str, ...]
+    _magic_triples: Tuple[Tuple[Any, Any, Any], ...]
+
+    def __init__(
+        self,
+        upper_name: str,
+        lowers: Sequence[str],
+        magic_triples: Sequence[Tuple[Any, Any, Any]],
+    ) -> None:
+        if len(magic_triples) != len(lowers) - 1:
+            raise ValueError(
+                f"UnmergeMagicDynamic needs len(lowers)-1 magic triples "
+                f"(got {len(lowers)} lowers, {len(magic_triples)} triples)"
+            )
+        object.__setattr__(self, "upper", (upper_name,))
+        object.__setattr__(self, "lower", tuple(lowers))
+        object.__setattr__(self, "_magic_triples", tuple(magic_triples))
+
+    @staticmethod
+    def _v(b: IRBuilder, x: Any) -> Value:
+        return x if isinstance(x, Value) else b.const_i32(int(x))
+
+    def apply(self, b: IRBuilder, coords: Dict[str, CoordVar]) -> Dict[str, CoordVar]:
+        u = coords[self.upper[0]]
+        n = len(self.lower)
+        out: Dict[str, CoordVar] = {}
+        tmp = u.value
+        for i in range(n - 1, 0, -1):
+            mult, shift, dim = self._magic_triples[i - 1]
+            mult_v = self._v(b, mult)
+            shift_v = self._v(b, shift)
+            dim_v = self._v(b, dim)
+            if isinstance(dim, int) and dim == 1:
+                rem = b.const_i32(0)
+                quot = tmp
+            else:
+                quot = do_magic_division_dynamic(b, tmp, mult_v, shift_v)
+                rem = b.sub(tmp, b.mul(quot, dim_v))
+            name = self.lower[i]
+            out[name] = CoordVar(name, rem, u.valid)
+            tmp = quot
+        out[self.lower[0]] = CoordVar(self.lower[0], tmp, u.valid)
+        return out
+
+
+def unmerge_magic_dynamic(
+    upper: str,
+    into: Sequence[str],
+    magic_triples: Sequence[Tuple[Any, Any, Any]],
+) -> UnmergeMagicDynamic:
+    """Unmerge with runtime magic-number division constants.
+
+    ``magic_triples`` has ``len(into) - 1`` entries, each ``(mult, shift, dim)``
+    — either ``int`` (compile-time) or ``Value`` (runtime). The triples
+    correspond to ``into[1], into[2], ...`` (the leading coord gets the
+    final quotient and needs no division).
+
+    Host-side code computes each triple via::
+
+        mult, shift = calculate_magic_numbers(dim)
+        # pass mult, shift, dim as kernel args
+    """
+    return UnmergeMagicDynamic(upper, into, magic_triples)
 
 
 @dataclass(frozen=True)
@@ -1637,9 +1819,81 @@ class TensorDescriptor:
         return b.add(prev_offset, off_delta), valid
 
 
+@dataclass
+class DynamicTensorDescriptor(TensorDescriptor):
+    """A :class:`TensorDescriptor` whose base strides are runtime SSA Values.
+
+    Constructed via :meth:`DynamicTensorDescriptor.create`. The transform
+    chain and ``offset()`` work identically to the static descriptor except
+    the final stride-multiply in ``offset()`` uses runtime Values instead of
+    ``b.const_i32(stride)``.
+
+    ``dynamic_strides`` holds one ``Value`` per base coord, in the same
+    order as ``base_names``. ``base_strides`` is set to all-ones (unused
+    sentinel) so the parent's ``offset()`` is not called directly.
+    """
+
+    dynamic_strides: Tuple[Value, ...] = ()
+
+    def offset(
+        self,
+        b: IRBuilder,
+        **upper_values: Value,
+    ) -> Tuple[Value, Optional[Value]]:
+        coords = self._run_chain(b, upper_values)
+        off: Optional[Value] = None
+        valid: Optional[Value] = None
+        for name, stride_v in zip(self.base_names, self.dynamic_strides):
+            if name not in coords:
+                raise ValueError(
+                    f"after chain, base coord {name!r} not in {sorted(coords.keys())}"
+                )
+            c = coords[name]
+            valid = _and(b, valid, c.valid)
+            term = b.mul(c.value, stride_v)
+            off = term if off is None else b.add(off, term)
+        if off is None:
+            off = b.const_i32(0)
+        return off, valid
+
+    @classmethod
+    def create(
+        cls,
+        name: str,
+        *,
+        coord_names: Sequence[str],
+        strides: Sequence[Value],
+    ) -> "DynamicTensorDescriptor":
+        """Build a dynamic descriptor from runtime SSA strides.
+
+        ``coord_names`` and ``strides`` must have the same length.
+        ``strides`` are i32 SSA Values representing the row-major strides
+        (in elements) for each coordinate, computed host-side and passed
+        as kernel arguments.
+
+        The descriptor can then be extended with ``.transform(...)`` just
+        like a static descriptor.
+        """
+        if len(coord_names) != len(strides):
+            raise ValueError("coord_names and strides length mismatch")
+        coord_names = tuple(coord_names)
+        strides = tuple(strides)
+        return cls(
+            name=name,
+            base_names=coord_names,
+            base_lengths=tuple(0 for _ in coord_names),
+            base_strides=tuple(1 for _ in coord_names),
+            chain=(),
+            upper_names=coord_names,
+            dynamic_strides=strides,
+        )
+
+
 __all__ = [
     "CoordVar",
+    "DynamicTensorDescriptor",
     "Embed",
+    "EmbedDynamic",
     "Freeze",
     "Indirect",
     "Insert",
@@ -1658,10 +1912,13 @@ __all__ = [
     "Unmerge",
     "UnmergeDivMod",
     "UnmergeMagicDiv",
+    "UnmergeMagicDynamic",
     "XorT",
     "calculate_magic_numbers",
     "do_magic_division",
+    "do_magic_division_dynamic",
     "embed",
+    "embed_dynamic",
     "freeze",
     "indirect",
     "insert",
@@ -1679,5 +1936,6 @@ __all__ = [
     "unmerge",
     "unmerge_div_mod",
     "unmerge_magic",
+    "unmerge_magic_dynamic",
     "xor_t",
 ]
