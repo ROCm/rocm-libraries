@@ -1,0 +1,100 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Gap Coverage: StaggerUMapping and StaggerUStride parameters
+# Tests unroll loop staggering for improved memory access patterns
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: -1
+  KernelTime: True
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  Architecture: gfx1250
+
+BenchmarkProblems:
+  # FP16 with StaggerU variations
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - StaggerU: [0, 32, 64]
+        - StaggerUMapping: [0, 1]
+        - StaggerUStride: [128, 256]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # === EXACT SIZES ===
+          - Exact: [64, 64, 1, 64]     # Small
+          - Exact: [128, 128, 1, 128]  # Medium
+          - Exact: [256, 256, 1, 256]  # Larger
+          - Exact: [512, 512, 1, 512]  # Large
+          - Exact: [1024, 1024, 1, 1024]  # Very large
+          - Exact: [63, 65, 1, 67]     # Odd
+          - Exact: [128, 256, 1, 128]  # Non-square
+          - Exact: [256, 512, 4, 256]  # Non-square batched
+          # === RANGE SIZES ===
+          - Range: [ [128, 128, 512], [128, 128, 512], [1], [256] ]
+          - Range: [ [512], [512], [1], [128, 128, 512] ]  # K-sweep
+
+  # BF16 with StaggerU
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - StaggerU: [32]
+        - StaggerUMapping: [0, 1]
+        - StaggerUStride: [128]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # === EXACT SIZES ===
+          - Exact: [64, 64, 1, 64]     # Small
+          - Exact: [128, 128, 1, 128]  # Medium
+          - Exact: [256, 256, 1, 256]  # Larger
+          - Exact: [384, 384, 1, 384]  # Non-power-of-2
+          - Exact: [1024, 512, 1, 512]  # Very large non-square
+          - Exact: [63, 65, 1, 67]     # Odd
+          - Exact: [64, 64, 5, 64]     # Batched
+          - Exact: [128, 256, 8, 128]  # Non-square batched
+          # === RANGE SIZES ===
+          - Range: [ [128, 128, 384], [128, 128, 384], [1], [256] ]
+          - Range: [ [256], [128], [1, 2, 4], [128] ]  # Batch sweep non-square
