@@ -382,14 +382,19 @@ namespace hiptensor
             CHECK_HIPTENSOR_ERROR(
                 hiptensorCreatePlan(handle, &plan, desc, planPref, 0 /* workspaceSizeLimit */));
 
-            float alphaValue{};
+            // 8-byte storage so the R_64F (double) write below cannot overflow the buffer
+            double alphaValue{};
             if(computeDataType == HIPTENSOR_R_16F)
             {
                 *(reinterpret_cast<_Float16*>(&alphaValue)) = static_cast<_Float16>(alpha);
             }
-            else
+            else if(computeDataType == HIPTENSOR_R_32F)
             {
                 *(reinterpret_cast<float*>(&alphaValue)) = static_cast<float>(alpha);
+            }
+            else if(computeDataType == HIPTENSOR_R_64F) 
+            {
+                *(reinterpret_cast<double*>(&alphaValue)) = static_cast<double>(alpha);
             }
 
             auto& opts     = HiptensorOptions::instance();
