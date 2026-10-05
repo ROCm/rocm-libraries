@@ -417,6 +417,10 @@ Processor _rocblas_handle::getActiveArch()
     {
         return Processor::gfx1012;
     }
+    else if(deviceString.find("gfx1013") != std::string::npos)
+    {
+        return Processor::gfx1013;
+    }
     else if(deviceString.find("gfx1030") != std::string::npos)
     {
         return Processor::gfx1030;
