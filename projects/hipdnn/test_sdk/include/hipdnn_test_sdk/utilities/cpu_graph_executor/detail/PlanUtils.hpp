@@ -19,8 +19,10 @@ struct DiagonalBandParams
 };
 
 /// Extracts diagonal band mask parameters from SDPA attributes (forward or backward).
-/// A deprecated causal_mask / causal_mask_bottom_right flag maps to a causal band on its own and
-/// is rejected alongside left_bound / right_bound, the other flag, or a contradicting alignment.
+/// A deprecated causal_mask / causal_mask_bottom_right flag is merged the way cuDNN's setters
+/// compose: it sets right_bound=0 (and BOTTOM_RIGHT alignment for causal_mask_bottom_right), then
+/// any left_bound, right_bound other than -1, and (for causal_mask) diagonal_alignment apply on
+/// top. Setting both flags is rejected.
 /// Works with both SdpaAttributes and SdpaBackwardAttributes FlatBuffers types
 /// (they expose identical accessor signatures for mask fields).
 template <typename SdpaAttributesType>
@@ -52,28 +54,9 @@ DiagonalBandParams extractDiagonalBandParams(const SdpaAttributesType& nodeAttri
                                       "left_bound=-1, right_bound=0 instead.");
     }
 
-    if((causalDeprecated || bottomRightDeprecated)
-       && (nodeAttributes.left_bound().has_value() || nodeAttributes.right_bound().has_value()))
+    if(causalDeprecated || bottomRightDeprecated)
     {
-        throw std::invalid_argument(std::string(planName)
-                                    + ": deprecated causal_mask / causal_mask_bottom_right cannot "
-                                      "be combined with left_bound or right_bound");
-    }
-
-    if(causalDeprecated && !isTopLeft)
-    {
-        throw std::invalid_argument(std::string(planName)
-                                    + ": deprecated causal_mask cannot be combined with "
-                                      "diagonal_alignment=BOTTOM_RIGHT");
-    }
-
-    if(causalDeprecated)
-    {
-        return {-1, 0, true};
-    }
-    if(bottomRightDeprecated)
-    {
-        return {-1, 0, false};
+        return {leftBound, rightBound >= 0 ? rightBound : 0, causalDeprecated && isTopLeft};
     }
 
     return {leftBound, rightBound, isTopLeft};

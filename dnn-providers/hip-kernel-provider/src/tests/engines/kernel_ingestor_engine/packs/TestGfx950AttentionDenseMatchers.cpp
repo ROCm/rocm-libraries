@@ -1796,9 +1796,10 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesSlidingWindowForCrossAttention)
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesWhenDeprecatedBoolIsSetAlongsideBound)
 {
-    // A deprecated boolean combined with any bound is ambiguous and is declined. If the
-    // boolean won instead, the window would be silently widened to the full triangle --
-    // accepted, dispatched, and wrong.
+    // A real bound wins over the deprecated boolean. causal_mask=true alone is served as
+    // plain causal; add left_bound and the graph is asking for a band the catalog cannot
+    // supply, so it must decline. If the boolean won instead, the window would be silently
+    // widened to the full triangle -- accepted, dispatched, and wrong.
     GraphSpec spec;
     spec.causalMaskDeprecated = true;
     spec.leftBound = 127;
@@ -1808,7 +1809,7 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesWhenDeprecatedBoolIsSetAlongsid
 
 TEST(TestGfx950AttentionDenseGraphMatch, StillServesPlainDeprecatedCausalWithNoBound)
 {
-    // The control: the rejection must not over-fire and decline ordinary deprecated-causal.
+    // The control: bound-wins must not over-fire and decline ordinary deprecated-causal.
     GraphSpec spec;
     spec.causalMaskDeprecated = true;
     spec.leftBound = std::nullopt;
@@ -1830,7 +1831,7 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBidirectionalSlidingWindow)
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesCausalWithNonZeroRightBound)
 {
     // A graph with causal_mask=true and right_bound > 0 also describes a shape the kernel
-    // cannot serve correctly; a deprecated boolean combined with a bound is declined.
+    // cannot serve correctly. The right_bound wins over the deprecated causal boolean.
     GraphSpec spec;
     spec.causalMaskDeprecated = true;
     spec.leftBound = std::nullopt;
@@ -1838,22 +1839,29 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesCausalWithNonZeroRightBound)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesDeprecatedCausalWithCausalBounds)
+TEST(TestGfx950AttentionDenseGraphMatch, ServesDeprecatedCausalWithCausalBounds)
 {
-    // The bounds alone already describe the same causal mask, but the two sources are
-    // never mixed: the combination is declined rather than silently reconciled.
+    // The bounds describe the same causal band the boolean does, so the merge agrees.
     GraphSpec spec;
     spec.causalMaskDeprecated = true;
-    EXPECT_FALSE(matchGraph(spec).has_value());
+
+    KernelSpec causal;
+    causal.causal = 1;
+    EXPECT_TRUE(matchesKernel(spec, causal));
 }
 
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesDeprecatedCausalWithBottomRightAlignment)
+TEST(TestGfx950AttentionDenseGraphMatch, ReadsDeprecatedCausalWithBottomRightAlignmentAsBottomRight)
 {
+    // causal_mask keeps the stored alignment, so this is bottom-right causal: served at
+    // Sq == Skv, declined where the corners differ.
     GraphSpec spec;
     spec.causalMaskDeprecated = true;
     spec.leftBound = std::nullopt;
     spec.rightBound = std::nullopt;
     spec.alignment = data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+
+    spec.seqLenKv = SEQ * 2;
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 

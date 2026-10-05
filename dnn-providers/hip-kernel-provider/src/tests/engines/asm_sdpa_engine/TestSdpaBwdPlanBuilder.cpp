@@ -889,8 +889,8 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsAsymmetricHdim)
 //
 // These tests exercise the shared mask policy directly through
 // plan_utils::getMaskType rather than through isApplicable. A deprecated causal
-// boolean is only accepted on its own; combining it with the other boolean, any
-// bound, or (for causal_mask) BOTTOM_RIGHT alignment throws. The policy is
+// boolean is merged with the stored bounds and alignment (see
+// plan_utils::resolveDiagonalBand); only setting both booleans throws. The policy is
 // hardware-agnostic (it runs before any device dispatch and independent of the
 // kernel registry), so the assertions are meaningful on any device — including
 // this gfx950 box. The backward isApplicable cannot be used here: it rejects
@@ -1025,7 +1025,7 @@ class TestSdpaBwdDeprecatedCausalMask : public ::testing::TestWithParam<Deprecat
 {
 };
 
-TEST_P(TestSdpaBwdDeprecatedCausalMask, ClassifiesOrRejects)
+TEST_P(TestSdpaBwdDeprecatedCausalMask, Classifies)
 {
     const auto& param = GetParam();
     auto builder = createSdpaBwdGraphWithMask(param.causalMask,
@@ -1084,28 +1084,75 @@ INSTANTIATE_TEST_SUITE_P(
                                  NO_BOUND,
                                  NO_BOUND,
                                  ALIGN_BOTTOM_RIGHT,
-                                 std::nullopt},
-        DeprecatedCausalMaskCase{
-            "CausalWithConsistentBounds", true, false, -1, 0, ALIGN_TOP_LEFT, std::nullopt},
-        DeprecatedCausalMaskCase{
-            "CausalWithLeftBoundOnly", true, false, 64, NO_BOUND, ALIGN_TOP_LEFT, std::nullopt},
-        DeprecatedCausalMaskCase{
-            "CausalWithRightBoundOnly", true, false, NO_BOUND, 0, ALIGN_TOP_LEFT, std::nullopt},
+                                 plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL},
+        DeprecatedCausalMaskCase{"CausalWithConsistentBounds",
+                                 true,
+                                 false,
+                                 -1,
+                                 0,
+                                 ALIGN_TOP_LEFT,
+                                 plan_utils::MaskType::TOP_LEFT_CAUSAL},
+        DeprecatedCausalMaskCase{"CausalWithLeftBoundOnly",
+                                 true,
+                                 false,
+                                 64,
+                                 NO_BOUND,
+                                 ALIGN_TOP_LEFT,
+                                 plan_utils::MaskType::SLIDING_WINDOW},
+        DeprecatedCausalMaskCase{"CausalWithRightBoundOnly",
+                                 true,
+                                 false,
+                                 NO_BOUND,
+                                 0,
+                                 ALIGN_TOP_LEFT,
+                                 plan_utils::MaskType::TOP_LEFT_CAUSAL},
+        DeprecatedCausalMaskCase{"CausalWithUnboundedRight",
+                                 true,
+                                 false,
+                                 NO_BOUND,
+                                 -1,
+                                 ALIGN_TOP_LEFT,
+                                 plan_utils::MaskType::TOP_LEFT_CAUSAL},
+        DeprecatedCausalMaskCase{"CausalWithPositiveRightBound",
+                                 true,
+                                 false,
+                                 NO_BOUND,
+                                 16,
+                                 ALIGN_TOP_LEFT,
+                                 plan_utils::MaskType::SLIDING_WINDOW},
         DeprecatedCausalMaskCase{"BottomRightWithConsistentBounds",
                                  false,
                                  true,
                                  -1,
                                  0,
                                  ALIGN_BOTTOM_RIGHT,
-                                 std::nullopt},
+                                 plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL},
         DeprecatedCausalMaskCase{"BottomRightWithRightBoundOnly",
                                  false,
                                  true,
                                  NO_BOUND,
                                  64,
                                  ALIGN_BOTTOM_RIGHT,
-                                 std::nullopt}),
+                                 plan_utils::MaskType::SLIDING_WINDOW}),
     [](const ::testing::TestParamInfo<DeprecatedCausalMaskCase>& info) { return info.param.name; });
+
+// The backward sliding-window path hands the resolved band to the kernel, so a
+// deprecated boolean must contribute its causal right bound to the window.
+TEST(TestSdpaBwdDeprecatedCausalMaskBand, CausalWithLeftBoundResolvesToCausalWindow)
+{
+    auto builder = createSdpaBwdGraphWithMask(true, false, 64, NO_BOUND, ALIGN_BOTTOM_RIGHT);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto& attrs
+        = graphWrapper.nodeWrappers()
+              .front()
+              ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes>();
+
+    const auto band = plan_utils::resolveDiagonalBand(attrs);
+    EXPECT_EQ(band.leftBound, 64);
+    EXPECT_EQ(band.rightBound, 0);
+    EXPECT_EQ(band.alignment, ALIGN_BOTTOM_RIGHT);
+}
 
 // Modern bounds-trio path (no deprecated boolean set). An unset bound is treated
 // as unbounded (-1), so a partially specified trio still derives the mask it
