@@ -126,8 +126,10 @@ program example_fortran_bsrmm
     type(c_ptr) :: handle
     type(c_ptr) :: descr
 
-    integer :: version
+    integer(c_int) :: version
 
+!   NUL-terminated C string; 64 bytes, as in the C clients.
+    character(kind=c_char), target :: rev_buf(64)
     character(len=12) :: rev
 
 !   Input data
@@ -206,7 +208,13 @@ program example_fortran_bsrmm
 
 !   Get rocSPARSE version
     call ROCSPARSE_CHECK(rocsparse_get_version(handle, version))
-    call ROCSPARSE_CHECK(rocsparse_get_git_rev(handle, rev))
+!   Pre-fill so the 12-byte copy below stops at a NUL.
+    rev_buf = c_null_char
+    call ROCSPARSE_CHECK(rocsparse_get_git_rev(handle, c_loc(rev_buf)))
+    rev = transfer(rev_buf(1:len(rev)), rev)
+
+!   Blank the NUL terminator and everything past it so it is not printed
+    if (index(rev, c_null_char) > 0) rev(index(rev, c_null_char):) = ' '
 
 !   Print version on screen
     write(*,fmt='(A,I0,A,I0,A,I0,A,A)') 'rocSPARSE version: ', version / 100000, '.', &

@@ -267,6 +267,7 @@
 /projects/rocsparse/**/.readthedocs.yaml            @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
 /projects/rocsparse/docs/                           @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
 /projects/rocsparse/library/include/                @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+/projects/rocsparse/fortran/                        @ROCm/rocm-fortran-maintainers @ROCm/sparses-reviewers
 
 /projects/rocthrust/**/*.md                         @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
 /projects/rocthrust/**/*.rst                        @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
