@@ -1918,9 +1918,8 @@ class Solution(collections.abc.Mapping):
     # GlobalSplitU -1 lets the runtime pick a split above 1.
     gsu = state.get("GlobalSplitU", 1)
     grid = ck.get("grid", [])
-    tileCountGrid = all(
+    oneSlicePerTile = all(
       g in ("One", "TilesX", "TilesY", "Batch", "TilesXY", "TilesXYBatch") for g in grid)
-    oneSlicePerTile = tileCountGrid and not isPersistent(state)
     if gsu not in (0, 1) and oneSlicePerTile:
       raise RuntimeError(
         f"Custom kernel '{ck.get('name', '?')}' runs with GlobalSplitU {gsu}, but its "
