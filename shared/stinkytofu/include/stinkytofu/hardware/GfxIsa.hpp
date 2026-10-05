@@ -288,7 +288,10 @@ struct HwInstDesc {
         uint16_t isReadWrite : 1 = 0;
         // M64: 64-bit lane mask that may be truncated to 32 bits in wave32.
         uint16_t isM64 : 1 = 0;
-        uint16_t reserved : 1 = 0;
+        // SADDR_OFFSET: fieldSizeBits is the width with a null saddr ("off");
+        // when the instruction's saddr field holds a register, this operand is
+        // instead a 32-bit offset from that 64-bit base.
+        uint16_t isSaddrOffset : 1 = 0;
     };
 
     /// Operand field descriptions for this instruction (primary encoding).
