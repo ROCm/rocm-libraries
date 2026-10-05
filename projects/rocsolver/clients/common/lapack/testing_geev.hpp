@@ -792,10 +792,10 @@ void testing_geev(Arguments& argus)
     rocblas_int lda = argus.get<rocblas_int>("lda", n);
     rocblas_int ldvl = argus.get<rocblas_int>("ldvl", n);
     rocblas_int ldvr = argus.get<rocblas_int>("ldvr", n);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
     rocblas_stride stW = argus.get<rocblas_stride>("strideW", n);
-    rocblas_stride stVL = argus.get<rocblas_stride>("strideVL", ldvl * n);
-    rocblas_stride stVR = argus.get<rocblas_stride>("strideVR", ldvr * n);
+    rocblas_stride stVL = argus.get<rocblas_stride>("strideVL", rocblas_stride(ldvl) * n);
+    rocblas_stride stVR = argus.get<rocblas_stride>("strideVR", rocblas_stride(ldvr) * n);
     rocblas_int mtype = argus.get<rocblas_int>("mtype", 0);
 
     rocblas_evect jobvl = char2rocblas_evect(jobvlC);

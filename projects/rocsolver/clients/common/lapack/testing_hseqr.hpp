@@ -997,9 +997,9 @@ void testing_hseqr(Arguments& argus)
     rocblas_int n = argus.get<rocblas_int>("n");
     rocblas_int ldh = argus.get<rocblas_int>("ldh", n);
     rocblas_int ldz = argus.get<rocblas_int>("ldz", n);
-    rocblas_stride stH = argus.get<rocblas_stride>("strideH", ldh * n);
+    rocblas_stride stH = argus.get<rocblas_stride>("strideH", rocblas_stride(ldh) * n);
     rocblas_stride stW = argus.get<rocblas_stride>("strideW", n);
-    rocblas_stride stZ = argus.get<rocblas_stride>("strideZ", ldz * n);
+    rocblas_stride stZ = argus.get<rocblas_stride>("strideZ", rocblas_stride(ldz) * n);
     rocblas_int mtype = argus.get<rocblas_int>("mtype", 0);
 
     rocsolver_schur_job job = char2rocsolver_schur_job(jobC);

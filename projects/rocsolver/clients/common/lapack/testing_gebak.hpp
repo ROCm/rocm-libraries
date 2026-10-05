@@ -337,7 +337,7 @@ void testing_gebak(Arguments& argus)
     rocblas_int m = argus.get<rocblas_int>("m", n);
     rocblas_int ldv = argus.get<rocblas_int>("ldv", n);
     rocblas_stride stS = argus.get<rocblas_stride>("strideS", n);
-    rocblas_stride stV = argus.get<rocblas_stride>("strideV", ldv * m);
+    rocblas_stride stV = argus.get<rocblas_stride>("strideV", rocblas_stride(ldv) * m);
     rocblas_int mtype = argus.get<rocblas_int>("mtype", 2);
 
     rocsolver_balance job = char2rocsolver_balance(jobC);

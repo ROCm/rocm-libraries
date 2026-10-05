@@ -66,10 +66,10 @@ void gebal_genMatrix(const rocblas_int n,
         rocblas_int nhi = n / 6;
         for(rocblas_int j = 0; j < nlo; j++)
             for(rocblas_int i = j + 1; i < n; i++)
-                A[i + j * lda] = 0;
+                A[i + rocblas_stride(j) * lda] = 0;
         for(rocblas_int i = n - nhi; i < n; i++)
             for(rocblas_int j = 0; j < i; j++)
-                A[i + j * lda] = 0;
+                A[i + rocblas_stride(j) * lda] = 0;
     }
 
     if(mtype == 3 || mtype == 6)
@@ -77,15 +77,15 @@ void gebal_genMatrix(const rocblas_int n,
         for(rocblas_int j = 0; j < n; j++)
             for(rocblas_int i = 0; i < n; i++)
                 if((mtype == 3 && i > j) || (mtype == 6 && i < j))
-                    A[i + j * lda] = 0;
+                    A[i + rocblas_stride(j) * lda] = 0;
     }
 
     if(mtype == 4 && n > 7)
     {
         for(rocblas_int i = 0; i < n; i++)
-            A[i + 3 * lda] = 0;
+            A[i + 3 * rocblas_stride(lda)] = 0;
         for(rocblas_int j = 0; j < n; j++)
-            A[7 + j * lda] = 0;
+            A[7 + rocblas_stride(j) * lda] = 0;
     }
 
     if((mtype == 1 || mtype == 2 || mtype == 4 || mtype == 5) && n > 1)
@@ -98,7 +98,7 @@ void gebal_genMatrix(const rocblas_int n,
             d[i] = std::pow(10.0, -range + 2.0 * range * i / (n - 1));
         for(rocblas_int j = 0; j < n; j++)
             for(rocblas_int i = 0; i < n; i++)
-                A[i + j * lda] = A[i + j * lda] * T(d[j] / d[i]);
+                A[i + rocblas_stride(j) * lda] = A[i + rocblas_stride(j) * lda] * T(d[j] / d[i]);
     }
 
     if(mtype == 2 || mtype == 3)
@@ -120,7 +120,7 @@ void gebal_genMatrix(const rocblas_int n,
                 B[i + size_t(j) * n] = A[p[i] + p[j] * lda];
         for(rocblas_int j = 0; j < n; j++)
             for(rocblas_int i = 0; i < n; i++)
-                A[i + j * lda] = B[i + size_t(j) * n];
+                A[i + rocblas_stride(j) * lda] = B[i + size_t(j) * n];
     }
 }
 
@@ -404,7 +404,7 @@ void testing_gebal(Arguments& argus)
     char jobC = argus.get<char>("job");
     rocblas_int n = argus.get<rocblas_int>("n");
     rocblas_int lda = argus.get<rocblas_int>("lda", n);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
     rocblas_stride stS = argus.get<rocblas_stride>("strideS", n);
     rocblas_int mtype = argus.get<rocblas_int>("mtype", 2);
 

@@ -328,8 +328,8 @@ void testing_trexc(Arguments& argus)
     rocblas_int ldq = argus.get<rocblas_int>("ldq", n);
     rocblas_int ifst = argus.get<rocblas_int>("ifst", 1);
     rocblas_int ilst = argus.get<rocblas_int>("ilst", n);
-    rocblas_stride stT = argus.get<rocblas_stride>("strideT", ldt * n);
-    rocblas_stride stQ = argus.get<rocblas_stride>("strideQ", ldq * n);
+    rocblas_stride stT = argus.get<rocblas_stride>("strideT", rocblas_stride(ldt) * n);
+    rocblas_stride stQ = argus.get<rocblas_stride>("strideQ", rocblas_stride(ldq) * n);
     rocblas_int mtype = argus.get<rocblas_int>("mtype", 0);
 
     rocsolver_schur_vectors compq = char2rocsolver_schur_vectors(compqC);
