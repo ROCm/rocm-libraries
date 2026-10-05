@@ -1252,25 +1252,7 @@ Solutions:
   tailLoopOptA: true
   tailLoopOptB: true
 IndexOrder: [2, 3, 0, 1]
-ExactLogic:
-- - [128, 1, 1, 128]
-  - [3, 0.0]
-- - [1, 128, 1, 128]
-  - [2, 0.0]
-- - [1, 1, 1, 128]
-  - [0, 0.0]
-- - [128, 128, 1, 128]
-  - [1, 0.0]
-- - [127, 127, 1, 128]
-  - [3, 0.0]
-- - [129, 129, 1, 128]
-  - [3, 0.0]
-- - [4096, 8192, 1, 1024]
-  - [4, 0.0]
-- - [4096, 1024, 1, 1024]
-  - [5, 0.0]
-- - [4096, 24576, 1, 1024]
-  - [6, 0.0]
+ExactLogic: null
 RangeLogic: null
 TileSelectionIndices: null
 PerfMetric: DeviceEfficiency
