@@ -124,6 +124,80 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
     ignore = compute_ptr_offset_of_n;
 #endif // end of if (defined(__gfx9__))
 }
+
+template <typename GridwiseGemm,
+          typename ComputePtrOffset,
+          typename AGridDesc_AK0_M_K1,
+          typename BGridDesc_BK0_N_K1,
+          typename CGridDesc_M_N,
+          bool HasMainKBlockLoop,
+          InMemoryDataOperationEnum CGlobalMemoryDataOperation,
+          index_t MinimumOccupancy = 1,
+          TailNumber TailNum       = TailNumber::Full>
+__global__ void
+#if CK_USE_LAUNCH_BOUNDS
+__launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
+#endif
+    kernel_grouped_conv_fwd_wavelet_model_xdl_cshuffle_v3_2lds(
+        typename GridwiseGemm::Argument karg,
+        const AGridDesc_AK0_M_K1 a_grid_desc_ak0_m_ak1,
+        const BGridDesc_BK0_N_K1 b_grid_desc_bk0_n_bk1,
+        const CGridDesc_M_N c_grid_desc_m_n,
+        const ComputePtrOffset compute_ptr_offset_of_groups,
+        const ComputePtrOffset compute_ptr_offset_of_n)
+{
+#if defined(__gfx950__) || defined(__gfx125__)
+    if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
+    {
+        // offset base pointer for each work-group
+        const index_t g_idx = __builtin_amdgcn_readfirstlane(blockIdx.y);
+        const index_t n_idx = __builtin_amdgcn_readfirstlane(blockIdx.z);
+
+        const long_index_t a_group_offset =
+            amd_wave_read_first_lane(compute_ptr_offset_of_groups.GetAPtrOffset(g_idx));
+        const long_index_t b_group_offset =
+            amd_wave_read_first_lane(compute_ptr_offset_of_groups.GetBPtrOffset(g_idx));
+        const long_index_t e_group_offset =
+            amd_wave_read_first_lane(compute_ptr_offset_of_groups.GetEPtrOffset(g_idx));
+
+        const long_index_t a_n_offset =
+            amd_wave_read_first_lane(compute_ptr_offset_of_n.GetAPtrOffset(n_idx));
+        const long_index_t e_n_offset =
+            amd_wave_read_first_lane(compute_ptr_offset_of_n.GetEPtrOffset(n_idx));
+
+        // Pass two lds pointer is the key to tell compiler that ds_read/write
+        // operate on different lds chunk at same time without order dependecy
+        __shared__ char p_shared_0[GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch())];
+        __shared__ char p_shared_1[GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch())];
+
+        // only direct load pipeline with double buffer supported
+        GridwiseGemm::template Run<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
+            karg.p_a_grid + a_group_offset + a_n_offset,
+            karg.p_b_grid + b_group_offset,
+            karg.p_c_grid + e_group_offset + e_n_offset,
+            p_shared_0,
+            p_shared_1,
+            karg,
+            GridwiseGemm::template TransformGrid<decltype(a_grid_desc_ak0_m_ak1),
+                                                 GridwiseGemm::AK0Number,
+                                                 GridwiseGemm::AK1Number>(a_grid_desc_ak0_m_ak1,
+                                                                          get_device_arch()),
+            GridwiseGemm::template TransformGrid<decltype(b_grid_desc_bk0_n_bk1),
+                                                 GridwiseGemm::BK0Number,
+                                                 GridwiseGemm::BK1Number>(b_grid_desc_bk0_n_bk1,
+                                                                          get_device_arch()),
+            c_grid_desc_m_n);
+    }
+#else
+    ignore = karg;
+    ignore = a_grid_desc_ak0_m_ak1;
+    ignore = b_grid_desc_bk0_n_bk1;
+    ignore = c_grid_desc_m_n;
+    ignore = compute_ptr_offset_of_groups;
+    ignore = compute_ptr_offset_of_n;
+#endif // end of if (defined(__gfx9__))
+}
+
 } // namespace
 
 template <typename T>
@@ -195,7 +269,8 @@ template <index_t NDimSpatial,
                                                      // in tuple for MultiAB), unpack if tuple was
                                                      // passed
           typename BComputeDataType = AComputeDataType,
-          index_t NumGroupsToMerge  = 1>
+          index_t NumGroupsToMerge  = 1,
+          bool DirectLoad           = false>
 struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
     : public DeviceGroupedConvFwdMultipleABD<NDimSpatial,
                                              ALayout,
@@ -216,7 +291,8 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
     static_assert(is_same_v<BElementwiseOperation, element_wise::PassThrough>);
     static_assert(is_same_v<CDEElementwiseOperation, element_wise::PassThrough>);
 
-    static constexpr GemmSpecialization GemmSpec = GemmSpecialization::Default;
+    static constexpr GemmSpecialization GemmSpec =
+        DirectLoad ? GemmSpecialization::MNKPadding : GemmSpecialization::Default;
 
     // AK0PerBlock = K0PerBlock / K1. Transfer cluster K0 dim must not exceed it,
     // otherwise thread_slice_k0 = AK0PerBlock / K0_cluster truncates to 0.
@@ -241,12 +317,8 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
     using DeviceOp = DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3;
     GET_MXDL_PER_WAVE_IMPL
     // Force usage of 16x16 instruction for WMMA
-    static constexpr bool Wave32Force16MNPerXDL =
-        is_NSpatialGC_GKSpatial_NSpatialGK<ALayout, BLayout, ELayout>() &&
-        sizeof(AComputeDataType) == 2 && sizeof(BComputeDataType) == 2 &&
-        is_same_v<CDEElementwiseOperation, tensor_operation::element_wise::PassThrough> &&
-        (ConvForwardSpecialization == ConvolutionForwardSpecialization::Filter1x1Stride1Pad0 ||
-         ConvForwardSpecialization == ConvolutionForwardSpecialization::Default);
+    // Note: transformation from 32x32 tile to 16x16 has been disabled because it was buggy
+    static constexpr bool Wave32Force16MNPerXDL = false;
     static constexpr index_t Wave32MaxMNPerXDL =
         Wave32Force16MNPerXDL ? 16 : math::max(MPerXDL, NPerXDL);
 
@@ -473,7 +545,8 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
         CDEBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,
         CDEBlockTransferScalarPerVector_NPerBlock,
         AComputeDataType,
-        BComputeDataType>;
+        BComputeDataType,
+        DirectLoad>;
     using GridwiseGemm64 = GridwiseGemmBase<math::max(NXdlPerWave64, 1)>;
     using GridwiseGemm32 = GridwiseGemmBase<NXdlPerWave32>;
 
@@ -637,7 +710,6 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
                     e_grid_desc_m_n_,
                     GridwiseGemm64::CalculateMBlock(GemmM),
                     GridwiseGemm64::CalculateNBlock(GemmN));
-
             // A/B/E Batch/N Stride
             compute_ptr_offset_of_groups_.BatchStrideA_ =
                 a_g_n_c_wis_strides_[0] * NumGroupsToMerge;
@@ -924,33 +996,105 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
                 }
             };
 
-            if(has_main_k_block_loop)
+            if constexpr(!DirectLoad)
             {
-                // Tail number always full - only v1 now
-                const auto kernel = kernel_grouped_conv_fwd_wavelet_model_xdl_cshuffle_v3<
-                    GridwiseGemm,
-                    ComputePtrOffset,
-                    DeviceOp::AGridDesc_AK0_M_AK1,
-                    DeviceOp::BGridDesc_BK0_N_BK1,
-                    DeviceOp::CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                    true,
-                    InMemoryDataOperationEnum::Set,
-                    minimum_occupancy>;
-                Run(kernel);
+                if(has_main_k_block_loop)
+                {
+                    // Tail number always full - only v1 now
+                    const auto kernel = kernel_grouped_conv_fwd_wavelet_model_xdl_cshuffle_v3<
+                        GridwiseGemm,
+                        ComputePtrOffset,
+                        DeviceOp::AGridDesc_AK0_M_AK1,
+                        DeviceOp::BGridDesc_BK0_N_BK1,
+                        DeviceOp::CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                        true,
+                        InMemoryDataOperationEnum::Set,
+                        minimum_occupancy>;
+                    Run(kernel);
+                }
+                else
+                {
+                    // Tail number always 1
+                    const auto kernel = kernel_grouped_conv_fwd_wavelet_model_xdl_cshuffle_v3<
+                        GridwiseGemm,
+                        ComputePtrOffset,
+                        DeviceOp::AGridDesc_AK0_M_AK1,
+                        DeviceOp::BGridDesc_BK0_N_BK1,
+                        DeviceOp::CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                        false,
+                        InMemoryDataOperationEnum::Set,
+                        minimum_occupancy>;
+                    Run(kernel);
+                }
             }
             else
             {
-                // Tail number always 1
-                const auto kernel = kernel_grouped_conv_fwd_wavelet_model_xdl_cshuffle_v3<
-                    GridwiseGemm,
-                    ComputePtrOffset,
-                    DeviceOp::AGridDesc_AK0_M_AK1,
-                    DeviceOp::BGridDesc_BK0_N_BK1,
-                    DeviceOp::CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                    false,
-                    InMemoryDataOperationEnum::Set,
-                    minimum_occupancy>;
-                Run(kernel);
+                if(has_main_k_block_loop)
+                {
+                    if(GridwiseGemm::CalculateKBlockLoopTailNum(K_split) == TailNumber::Odd)
+                    {
+                        const auto kernel =
+                            kernel_grouped_conv_fwd_wavelet_model_xdl_cshuffle_v3_2lds<
+                                GridwiseGemm,
+                                ComputePtrOffset,
+                                DeviceOp::AGridDesc_AK0_M_AK1,
+                                DeviceOp::BGridDesc_BK0_N_BK1,
+                                DeviceOp::CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                true,
+                                InMemoryDataOperationEnum::Set,
+                                minimum_occupancy,
+                                TailNumber::Odd>;
+                        Run(kernel);
+                    }
+                    else
+                    {
+                        const auto kernel =
+                            kernel_grouped_conv_fwd_wavelet_model_xdl_cshuffle_v3_2lds<
+                                GridwiseGemm,
+                                ComputePtrOffset,
+                                DeviceOp::AGridDesc_AK0_M_AK1,
+                                DeviceOp::BGridDesc_BK0_N_BK1,
+                                DeviceOp::CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                true,
+                                InMemoryDataOperationEnum::Set,
+                                minimum_occupancy,
+                                TailNumber::Even>;
+                        Run(kernel);
+                    }
+                }
+                else
+                {
+                    if(GridwiseGemm::CalculateKBlockLoopTailNum(K_split) == TailNumber::Odd)
+                    {
+                        const auto kernel =
+                            kernel_grouped_conv_fwd_wavelet_model_xdl_cshuffle_v3_2lds<
+                                GridwiseGemm,
+                                ComputePtrOffset,
+                                DeviceOp::AGridDesc_AK0_M_AK1,
+                                DeviceOp::BGridDesc_BK0_N_BK1,
+                                DeviceOp::CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                false,
+                                InMemoryDataOperationEnum::Set,
+                                minimum_occupancy,
+                                TailNumber::Odd>;
+                        Run(kernel);
+                    }
+                    else
+                    {
+                        const auto kernel =
+                            kernel_grouped_conv_fwd_wavelet_model_xdl_cshuffle_v3_2lds<
+                                GridwiseGemm,
+                                ComputePtrOffset,
+                                DeviceOp::AGridDesc_AK0_M_AK1,
+                                DeviceOp::BGridDesc_BK0_N_BK1,
+                                DeviceOp::CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                false,
+                                InMemoryDataOperationEnum::Set,
+                                minimum_occupancy,
+                                TailNumber::Even>;
+                        Run(kernel);
+                    }
+                }
             }
 
             return ave_time;
