@@ -115,6 +115,11 @@ struct PassFeatureConfig {
         /// (CDNA5Config::dsIssueCapSpanCycles) where no matrix op sets one.
         int dsIssueCapSpanCycles = 0;
         int tensorLoadWmmaSpace = 0;
+        /// Extra cycles kept between an after-barrier and the before-side
+        /// ds_loads when exclusive overlap uses gap placement. Converted to
+        /// WMMA windows by the region's matrix latency. 0 disables the extra
+        /// gap. Mirrors ModuleOptions::TensorLoadDsLoadGapCycles.
+        int tensorLoadDsLoadGapCycles = 64;
         /// Max cycle-distance between two adjacent barrier groups for
         /// StinkyMergeBarrierPass to merge them into a single multi-token
         /// barrier group. 0 = use the CDNA5 default (kCdna5MergeBarrierThreshold).
@@ -132,10 +137,39 @@ struct PassFeatureConfig {
         /// CDNA5ReadyQueue paths that enforce it (see
         /// ReadyQueue::clusterBarrierEnabled).
         bool clusterBarrier = false;
-        /// Mirrors ModuleOptions::LockDsReadOrder. Defaults on: every ds_load
-        /// in a scheduling region is chained into dsReadPriority order. Set
+        /// Mirrors ModuleOptions::LockDsReadOrder. Defaults on: ds_loads that
+        /// share a PSEUDO memory token are chained into dsReadPriority order.
+        /// Loads on different tokens are not ordered against each other. Set
         /// false to leave a ready lower-priority ds_load free to issue first.
         bool lockDsReadOrder = true;
+        /// Mirrors moduleOptions.EnableESM2 && EnableESM2TrackValuVsrc. The mode2 WAR
+        /// gate only recovers waits va_vsrc tracking creates, so it is inert when false.
+        bool enableESM2TrackValuVsrc = false;
+        /// Spread SALU/VALU fillers evenly across WMMA windows: each window is
+        /// owed ceil(fillers / WMMAs) of its region and closes once that quota
+        /// is met, instead of being padded to its full co-issue length. ds_load
+        /// selection and coexec hazard padding are unaffected. See
+        /// CDNA5ReadyQueue::fillQuotaPerWindow_ for the full mechanism.
+        bool evenSpreadFillers = false;
+        /// In a ds stream of 2+ ds_loads per WMMA window, a ds_load that still fits the
+        /// window goes before fillers and prefetches, so no slot is lost and the
+        /// tensor_load does not slip (mirrors ModuleOptions::DsSlotFirst).
+        bool dsSlotFirst = false;
+        /// Mirrors ModuleOptions::WaitAluHoldStrictCount. A VALU/other filler that
+        /// InsertWaitAlu would put an s_wait_alu of count <= this before (WaitAluTracker
+        /// query) is held until just before the next s_barrier_wait; < 0 = off.
+        int waitAluHoldStrictCount = -1;
+        /// Mirrors ModuleOptions::PrefetchLeadWmmas. A global prefetch is held until
+        /// this many WMMA windows before the tensor_load it precedes, staggered over its
+        /// group; below 8 marks a single-stage loop (whole group at the load's window,
+        /// ahead of the stage barrier); 0 = off.
+        int prefetchLeadWmmas = 0;
+        /// Mirrors ModuleOptions::PrefetchLeadMinStageWmmas. A basic block whose stages
+        /// (WMMAs / tensor_load groups) are shorter than this runs with no prefetch lead.
+        int prefetchLeadMinStageWmmas = 64;
+        /// Mirrors ModuleOptions::WarGateWmmas. WMMAs a ds_load waits before
+        /// overwriting a vgpr a WMMA read (WmmaVgprSrcToDsWrite); <= 0 = derived.
+        int warGateWmmas = 0;
     };
 
     LoopConfig loopConfig;
