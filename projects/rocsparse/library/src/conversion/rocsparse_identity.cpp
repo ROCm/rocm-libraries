@@ -24,7 +24,9 @@
 #include "internal/conversion/rocsparse_inverse_permutation.h"
 #include "rocsparse_utility.hpp"
 
+#include "rocsparse_common.hpp"
 #include "rocsparse_gcreate_identity_permutation.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_identity.hpp"
 
 #include "identity_device.h"
@@ -37,8 +39,14 @@ rocsparse_status rocsparse::create_identity_permutation_core(rocsparse_handle ha
     // Stream
     hipStream_t stream = handle->stream;
 
+// AISPARSE-686. n is the template index type I, 64-bit on the int64_t
+// instantiations, and the block count computed from it was narrowed into a dim3
+// with no clamp and nothing behind it. The threshold -- 1.0995e12 elements -- is
+// not reachable, which is why this is P3, but the grid is clamped now and
+// identity_kernel grid-strides over the tail.
 #define IDENTITY_DIM 512
-    dim3 identity_blocks((n - 1) / IDENTITY_DIM + 1);
+    dim3 identity_blocks(
+        rocsparse::get_grid_size_x(handle, (n - 1) / IDENTITY_DIM + 1, IDENTITY_DIM));
     dim3 identity_threads(IDENTITY_DIM);
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::identity_kernel<IDENTITY_DIM>),

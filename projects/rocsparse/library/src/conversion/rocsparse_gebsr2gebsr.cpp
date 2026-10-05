@@ -27,6 +27,7 @@
 #include "internal/conversion/rocsparse_csr2gebsr.h"
 #include "rocsparse_control.hpp"
 #include "rocsparse_gebsr2gebsr.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "gebsr2csr_device.h"
@@ -581,11 +582,20 @@ try
 
     constexpr rocsparse_int block_size     = 256;
     rocsparse_int           wavefront_size = handle->wavefront_size;
-    rocsparse_int           grid_size      = mb * row_block_dim / (block_size / wavefront_size);
-    if(mb * row_block_dim % (block_size / wavefront_size) != 0)
-    {
-        grid_size++;
-    }
+
+    // AISPARSE-684. One wavefront per row of the CSR matrix, so the launch is sized
+    // from mb * row_block_dim. Both factors are rocsparse_int and the multiply used
+    // to be evaluated before the division, so the intermediate product overflowed --
+    // signed, hence undefined behaviour -- above INT_MAX even when the final grid
+    // size was perfectly legal (mb = 65536 with row_block_dim = 32768 reaches it, and
+    // nothing bounds row_block_dim beyond rejecting zero above). The product is now
+    // formed in int64_t and the grid clamped against the device limit;
+    // gebsr2csr_nnz_kernel grid-strides over the rows the clamp drops and applies the
+    // same 64-bit widening to the bound it checks against.
+    const int64_t num_rows       = static_cast<int64_t>(mb) * row_block_dim;
+    const int64_t rows_per_block = block_size / wavefront_size;
+    const int64_t grid_size
+        = rocsparse::get_grid_size_x(handle, (num_rows - 1) / rows_per_block + 1, block_size);
 
     dim3 blocks(grid_size);
     dim3 threads(block_size);

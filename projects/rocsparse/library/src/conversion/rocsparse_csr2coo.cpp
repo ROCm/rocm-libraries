@@ -24,7 +24,9 @@
 #include "rocsparse_utility.hpp"
 
 #include "internal/conversion/rocsparse_csr2coo.h"
+#include "rocsparse_common.hpp"
 #include "rocsparse_csr2coo.hpp"
+#include "rocsparse_grid.hpp"
 
 #include "csr2coo_device.h"
 
@@ -47,107 +49,123 @@ rocsparse_status rocsparse::csr2coo_core(rocsparse_handle     handle,
 #define CSR2COO_DIM 256
     if(nnz_per_row < 4)
     {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csr2coo_kernel<CSR2COO_DIM, 2>),
-                                           dim3(((int64_t)2 * m - 1) / CSR2COO_DIM + 1),
-                                           dim3(CSR2COO_DIM),
-                                           0,
-                                           stream,
-                                           m,
-                                           csr_row_ptr_begin,
-                                           csr_row_ptr_end,
-                                           coo_row_ind,
-                                           idx_base);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::csr2coo_kernel<CSR2COO_DIM, 2>),
+            dim3(rocsparse::get_grid_size_x(
+                handle, ((int64_t)2 * m - 1) / CSR2COO_DIM + 1, CSR2COO_DIM)),
+            dim3(CSR2COO_DIM),
+            0,
+            stream,
+            m,
+            csr_row_ptr_begin,
+            csr_row_ptr_end,
+            coo_row_ind,
+            idx_base);
     }
     else if(nnz_per_row < 8)
     {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csr2coo_kernel<CSR2COO_DIM, 4>),
-                                           dim3(((int64_t)4 * m - 1) / CSR2COO_DIM + 1),
-                                           dim3(CSR2COO_DIM),
-                                           0,
-                                           stream,
-                                           m,
-                                           csr_row_ptr_begin,
-                                           csr_row_ptr_end,
-                                           coo_row_ind,
-                                           idx_base);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::csr2coo_kernel<CSR2COO_DIM, 4>),
+            dim3(rocsparse::get_grid_size_x(
+                handle, ((int64_t)4 * m - 1) / CSR2COO_DIM + 1, CSR2COO_DIM)),
+            dim3(CSR2COO_DIM),
+            0,
+            stream,
+            m,
+            csr_row_ptr_begin,
+            csr_row_ptr_end,
+            coo_row_ind,
+            idx_base);
     }
     else if(nnz_per_row < 16)
     {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csr2coo_kernel<CSR2COO_DIM, 8>),
-                                           dim3(((int64_t)8 * m - 1) / CSR2COO_DIM + 1),
-                                           dim3(CSR2COO_DIM),
-                                           0,
-                                           stream,
-                                           m,
-                                           csr_row_ptr_begin,
-                                           csr_row_ptr_end,
-                                           coo_row_ind,
-                                           idx_base);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::csr2coo_kernel<CSR2COO_DIM, 8>),
+            dim3(rocsparse::get_grid_size_x(
+                handle, ((int64_t)8 * m - 1) / CSR2COO_DIM + 1, CSR2COO_DIM)),
+            dim3(CSR2COO_DIM),
+            0,
+            stream,
+            m,
+            csr_row_ptr_begin,
+            csr_row_ptr_end,
+            coo_row_ind,
+            idx_base);
     }
     else if(nnz_per_row < 32)
     {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csr2coo_kernel<CSR2COO_DIM, 16>),
-                                           dim3(((int64_t)16 * m - 1) / CSR2COO_DIM + 1),
-                                           dim3(CSR2COO_DIM),
-                                           0,
-                                           stream,
-                                           m,
-                                           csr_row_ptr_begin,
-                                           csr_row_ptr_end,
-                                           coo_row_ind,
-                                           idx_base);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::csr2coo_kernel<CSR2COO_DIM, 16>),
+            dim3(rocsparse::get_grid_size_x(
+                handle, ((int64_t)16 * m - 1) / CSR2COO_DIM + 1, CSR2COO_DIM)),
+            dim3(CSR2COO_DIM),
+            0,
+            stream,
+            m,
+            csr_row_ptr_begin,
+            csr_row_ptr_end,
+            coo_row_ind,
+            idx_base);
     }
     else if(nnz_per_row < 64)
     {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csr2coo_kernel<CSR2COO_DIM, 32>),
-                                           dim3(((int64_t)32 * m - 1) / CSR2COO_DIM + 1),
-                                           dim3(CSR2COO_DIM),
-                                           0,
-                                           stream,
-                                           m,
-                                           csr_row_ptr_begin,
-                                           csr_row_ptr_end,
-                                           coo_row_ind,
-                                           idx_base);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::csr2coo_kernel<CSR2COO_DIM, 32>),
+            dim3(rocsparse::get_grid_size_x(
+                handle, ((int64_t)32 * m - 1) / CSR2COO_DIM + 1, CSR2COO_DIM)),
+            dim3(CSR2COO_DIM),
+            0,
+            stream,
+            m,
+            csr_row_ptr_begin,
+            csr_row_ptr_end,
+            coo_row_ind,
+            idx_base);
     }
     else if(nnz_per_row < 128)
     {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csr2coo_kernel<CSR2COO_DIM, 64>),
-                                           dim3(((int64_t)64 * m - 1) / CSR2COO_DIM + 1),
-                                           dim3(CSR2COO_DIM),
-                                           0,
-                                           stream,
-                                           m,
-                                           csr_row_ptr_begin,
-                                           csr_row_ptr_end,
-                                           coo_row_ind,
-                                           idx_base);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::csr2coo_kernel<CSR2COO_DIM, 64>),
+            dim3(rocsparse::get_grid_size_x(
+                handle, ((int64_t)64 * m - 1) / CSR2COO_DIM + 1, CSR2COO_DIM)),
+            dim3(CSR2COO_DIM),
+            0,
+            stream,
+            m,
+            csr_row_ptr_begin,
+            csr_row_ptr_end,
+            coo_row_ind,
+            idx_base);
     }
     else if(nnz_per_row < 256)
     {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csr2coo_kernel<CSR2COO_DIM, 128>),
-                                           dim3(((int64_t)128 * m - 1) / CSR2COO_DIM + 1),
-                                           dim3(CSR2COO_DIM),
-                                           0,
-                                           stream,
-                                           m,
-                                           csr_row_ptr_begin,
-                                           csr_row_ptr_end,
-                                           coo_row_ind,
-                                           idx_base);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::csr2coo_kernel<CSR2COO_DIM, 128>),
+            dim3(rocsparse::get_grid_size_x(
+                handle, ((int64_t)128 * m - 1) / CSR2COO_DIM + 1, CSR2COO_DIM)),
+            dim3(CSR2COO_DIM),
+            0,
+            stream,
+            m,
+            csr_row_ptr_begin,
+            csr_row_ptr_end,
+            coo_row_ind,
+            idx_base);
     }
     else
     {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csr2coo_kernel<CSR2COO_DIM, 256>),
-                                           dim3(((int64_t)256 * m - 1) / CSR2COO_DIM + 1),
-                                           dim3(CSR2COO_DIM),
-                                           0,
-                                           stream,
-                                           m,
-                                           csr_row_ptr_begin,
-                                           csr_row_ptr_end,
-                                           coo_row_ind,
-                                           idx_base);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::csr2coo_kernel<CSR2COO_DIM, 256>),
+            dim3(rocsparse::get_grid_size_x(
+                handle, ((int64_t)256 * m - 1) / CSR2COO_DIM + 1, CSR2COO_DIM)),
+            dim3(CSR2COO_DIM),
+            0,
+            stream,
+            m,
+            csr_row_ptr_begin,
+            csr_row_ptr_end,
+            coo_row_ind,
+            idx_base);
     }
 #undef CSR2COO_DIM
     return rocsparse_status_success;
