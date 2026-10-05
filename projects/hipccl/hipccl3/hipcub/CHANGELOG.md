@@ -2,15 +2,15 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
-## hipCUB-5.0.0 for ROCm 10.2.0 (unreleased)
- 
+## hipCUB-5.0.0 for ROCm 10.2.0
+
 ### Added
- 
+
 * Feature parity with CCCL/CUB 3.0.0.
 * Added `::hip::std` support.
- 
+
 ### Changed
- 
+
 * Changed `CCCL_MINIMUM_VERSION` to `3.0.0` to align with CUB.
 * Add support for large num_items `DeviceMerge` and `DeviceSegmentedSort`.
 * Replace `#pragma unroll` by `_CCCL_PRAGMA_UNROLL_FULL()` and `_CCCL_PRAGMA_NOUNROLL()` by `_CCCL_PRAGMA_NOUNROLL()`.
@@ -39,13 +39,13 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
   * See `shared/primbench/README.md` for its documentation.
 
 ## hipCUB 4.6.0 for ROCm 10.0
- 
+
 ### Added
- 
+
 * Return value checks for assorted locations in the codebase that were previously missing.
- 
+
 ### Fixed
- 
+
 * DeviceSegmentedRadixSort test failure when using hipMallocManaged with size 0.
 * Fixed uninitialized automatic variable bug in BlockReduce.
 
@@ -88,9 +88,9 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Removed the `GenerateResourceSpec.cmake` script - it is replaced by the added `generate_resource_spec.cpp` code mentioned above.
 
 ## hipCUB-4.2.0 for ROCm 7.2
- 
+
 ### Resolved issues
- 
+
 * Fixed memory leak issues with some unit tests.
 
 ## hipCUB-4.1.0 for ROCm 7.1
@@ -111,7 +111,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
     * `MONOREPO` - this options is intended to be used if you are building hipCUB from within a copy of the rocm-libraries repository that you have cloned (and therefore already contains rocPRIM). When selected, the build will try find the dependency in the local repository tree. If it cannot be found, the build will attempt to use git to perform a sparse-checkout of rocPRIM. If that also fails, it will fall back to using the `DOWNLOAD` option described above.
 
 * Added a new CMake option `-DUSE_SYSTEM_LIB` to allow tests to be built from installed `hipCUB` provided by the system.
-    
+
 ### Removed
 
 * Removed `TexRefInputIterator`, which was removed from CUB after CCCL's 2.6.0 release. This API should have already been removed, but somehow it remained and was not tested.
