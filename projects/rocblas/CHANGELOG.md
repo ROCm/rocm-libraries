@@ -5,6 +5,33 @@ rocBLAS documentation is available at
 
 ## rocBLAS 5.8.0
 
+### Added
+
+* Generated Fortran bindings, as a single `rocblas` module: `use rocblas`, link
+  `roc::rocblas_fortran`. Controlled by `BUILD_FORTRAN_BINDINGS` (ON on Linux, OFF on Windows)
+  and `FORTRAN_ARRAY_INTERFACES` (`assumed-shape` by default;
+  `none` or `assumed-rank`). Found with `find_package(rocblas-fortran)`; the archive and
+  `.mod` files install per compiler under `<libdir>/fortran/<compiler>` and
+  `<includedir>/fortran/<compiler>`.
+
+### Changed
+
+* `rocblas_enums` is merged into `rocblas`: the generated binding defines only `rocblas`, with
+  the enum constants folded in. `use rocblas` is unchanged; `use rocblas_enums` becomes
+  `use rocblas`.
+* The binding ships as a compiled archive and `.mod` set, not a `.f90` to compile yourself:
+  link `roc::rocblas_fortran` instead of adding the source to your build.
+* `rocblas_create_handle` and `rocblas_get_stream` now take `handle` and `stream` by reference,
+  matching the C `rocblas_handle*` and `hipStream_t*` arguments: pass the variable itself, not
+  `c_loc()` of it.
+* `rmake.py` builds use ROCm's `amdflang` for Fortran when present, falling back to `gfortran`;
+  the test and benchmark packages depend on `libgfortran` only when `gfortran` built them.
+
+### Removed
+
+* The hand-written `library/include/rocblas_module.f90`, no longer installed alongside the
+  rocBLAS headers.
+
 ### Resolved issues
 
 * Fix incorrect results and out-of-bounds reads from Level 1 ILP64 `dot` and `dotc`, including batched, strided-batched, and `_ex` forms, when a negative increment is wide enough to take the 64-bit increment path and `n` fits the single-block reduction. That path shifted by `(n - 1)` before calling the launcher, which applies the same walk, and the `y` shift tested `incx` rather than `incy`. The offsets are now passed through unshifted.

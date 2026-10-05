@@ -44,6 +44,11 @@ list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 include(build-options) # library and client
 include(toolchain-options)
 
+# Seen by clients/, where the Fortran clients are built.
+if(DEFINED ROCBLAS_BUILD_FORTRAN_CLIENTS)
+  set(BUILD_FORTRAN_CLIENTS ${ROCBLAS_BUILD_FORTRAN_CLIENTS})
+endif()
+
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
@@ -320,16 +325,21 @@ if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
         RPM "${OPENMP_RPM}"
     )
   endif()
-  if(BUILD_FORTRAN_CLIENTS)
-    rocm_package_add_rpm_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_RPM}")
-    rocm_package_add_deb_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_DEB}")
-    rocm_package_add_rpm_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_RPM}")
-    rocm_package_add_deb_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_DEB}")
-  endif()
 endif()
 
 if( NOT SKIP_LIBRARY )
     add_subdirectory( library )
+endif()
+
+# Outside the SKIP_LIBRARY guard: the bindings link librocblas, they do not build it.
+add_subdirectory(fortran)
+
+# libgfortran only for gfortran-built clients; amdflang's runtime ships with ROCm.
+if(BUILD_CLIENTS AND BUILD_FORTRAN_CLIENTS AND ROCBLAS_FORTRAN_COMPILER_ID STREQUAL "GNU")
+  rocm_package_add_rpm_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_RPM}")
+  rocm_package_add_deb_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_DEB}")
+  rocm_package_add_rpm_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_RPM}")
+  rocm_package_add_deb_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_DEB}")
 endif()
 
 # Build clients of the library

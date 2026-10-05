@@ -51,11 +51,12 @@ set( sample_list_base rocblas-example-sscal rocblas-example-scal-template rocbla
 
 if ( BUILD_FORTRAN_CLIENTS )
   # Fortran examples
-  add_executable( rocblas-example-fortran-axpy example_fortran_axpy.f90 $<TARGET_OBJECTS:rocblas_fortran>)
-  add_executable( rocblas-example-fortran-scal example_fortran_scal.f90 $<TARGET_OBJECTS:rocblas_fortran>)
-  add_executable( rocblas-example-fortran-gemv example_fortran_gemv.f90 $<TARGET_OBJECTS:rocblas_fortran>)
+  add_executable( rocblas-example-fortran-axpy example_fortran_axpy.f90 )
+  add_executable( rocblas-example-fortran-scal example_fortran_scal.f90 )
+  add_executable( rocblas-example-fortran-gemv example_fortran_gemv.f90 )
+  add_executable( rocblas-example-fortran-trmm example_fortran_trmm_v3.F90 )
 
-  set( sample_list_fortran rocblas-example-fortran-axpy rocblas-example-fortran-scal rocblas-example-fortran-gemv )
+  set( sample_list_fortran rocblas-example-fortran-axpy rocblas-example-fortran-scal rocblas-example-fortran-gemv rocblas-example-fortran-trmm )
 endif()
 
 if( BUILD_WITH_TENSILE OR BUILD_WITH_HIPBLASLT_ONLY )

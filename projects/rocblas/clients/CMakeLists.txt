@@ -73,6 +73,16 @@ if ( NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC} )
   set( CMAKE_Fortran_COMPILER "gfortran" )
 endif()
 
+# rocblas_fortran comes from ../fortran. Checked before project(), which would
+# otherwise try to enable Fortran on a host with no Fortran compiler.
+if ( BUILD_FORTRAN_CLIENTS AND NOT TARGET rocblas_fortran )
+  message(STATUS
+    "rocBLAS: the Fortran bindings were not built, so the Fortran clients are "
+    "skipped. They come from projects/rocblas/fortran, which needs "
+    "BUILD_FORTRAN_BINDINGS on and a Fortran compiler.")
+  set( BUILD_FORTRAN_CLIENTS OFF )
+endif()
+
 # This project may compile dependencies for clients
 if ( BUILD_FORTRAN_CLIENTS )
   set( fortran_language "Fortran" )
@@ -90,14 +100,12 @@ if ( BUILD_FORTRAN_CLIENTS )
   # Set Fortran module output directory
   set(CMAKE_Fortran_MODULE_DIRECTORY ${PROJECT_BINARY_DIR}/include/rocblas/internal)
 
-  # Create rocBLAS Fortran module
-  add_library(rocblas_fortran OBJECT ../library/include/rocblas_module.f90)
-
   if( BUILD_WITH_TENSILE )
     list( APPEND rocblas_f90_source_clients include/rocblas_fortran_tensile.f90 )
   endif()
 
-  add_library(rocblas_fortran_client STATIC ${rocblas_f90_source_clients} $<TARGET_OBJECTS:rocblas_fortran>)
+  add_library(rocblas_fortran_client STATIC ${rocblas_f90_source_clients})
+  target_link_libraries(rocblas_fortran_client PUBLIC roc::rocblas_fortran)
 else()
   set( rocblas_fortran_client "")
 endif()
