@@ -40,17 +40,16 @@ extern "C" {
 /* ----------------------------------------------------------- LLVM flavor */
 
 /* A small set of AMDGPU intrinsic signatures changed between LLVM 20
- * (ROCm 7.0/7.1) and LLVM 21+ (ROCm 7.2 ships LLVM 22; ROCm 7.13+ ships LLVM
- * 23 -- same emitted IR as LLVM 22 for wired targets today). The flavor pins
+ * and LLVM 21+. The flavor selects a baseline datalayout and pins
  * the declaration text emitted up front (comgr verifies declares before the
  * auto-upgrade pass). Mirrors LLVM_FLAVOR_LLVM20 / LLVM_FLAVOR_LLVM22 /
  * LLVM_FLAVOR_LLVM23. */
 typedef enum rocke_llvm_flavor
 {
-    ROCKE_LLVM_FLAVOR_AUTO = 0, /* resolve from env / ROCm version at call time */
+    ROCKE_LLVM_FLAVOR_AUTO = 0, /* explicit override or loaded COMGR compiler */
     ROCKE_LLVM_FLAVOR_LLVM20, /* "llvm20" */
     ROCKE_LLVM_FLAVOR_LLVM22, /* "llvm22" (modern default) */
-    ROCKE_LLVM_FLAVOR_LLVM23 /* "llvm23" (ROCm 7.13+) */
+    ROCKE_LLVM_FLAVOR_LLVM23 /* "llvm23" */
 } rocke_llvm_flavor_t;
 
 /* Canonical flavor string ("llvm20"/"llvm22"/"llvm23"), or "" for AUTO. */
@@ -74,9 +73,9 @@ bool rocke_llvm_flavor_is_known(rocke_llvm_flavor_t flavor);
 /* Lower `kernel` to AMDGPU LLVM IR text.
  *
  *   flavor : ROCKE_LLVM_FLAVOR_AUTO resolves via $ROCKE_LLVM_FLAVOR, then
- *            /opt/rocm/.info/version, then defaults to LLVM22. (The Python
- *            torch.version.hip step is not portable to libc-only C; see the
- *            'unported' notes.)
+ *            a natively discovered COMGR candidate's LLVM version, then defaults
+ *            to LLVM22 if no compiler can be queried. When compilation is owned
+ *            by the caller, pass an explicit flavor matching that compiler.
  *   arch   : ISA backend gfx string ("gfx942","gfx950",...). NULL => "gfx950"
  *            (the byte-identical baseline).
  *   out_text : on ROCKE_OK, receives a malloc'd NUL-terminated string the caller

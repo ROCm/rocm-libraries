@@ -1637,30 +1637,6 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
             "symbol-mangling spec",
         )
 
-    def test_flavor_for_rocm_clamps_at_both_ends(self):
-        """Version mapping is clamped, never raising: newest above, oldest below."""
-        from rocke.core.lower_llvm import (
-            LLVM_FLAVOR_LLVM20,
-            LLVM_FLAVOR_LLVM22,
-            LLVM_FLAVOR_LLVM23,
-            LLVM_FLAVORS,
-            _flavor_for_rocm,
-        )
-
-        # Exact boundaries.
-        self.assertEqual(_flavor_for_rocm(7, 1), LLVM_FLAVOR_LLVM20)
-        self.assertEqual(_flavor_for_rocm(7, 2), LLVM_FLAVOR_LLVM22)
-        self.assertEqual(_flavor_for_rocm(7, 12), LLVM_FLAVOR_LLVM22)
-        self.assertEqual(_flavor_for_rocm(7, 13), LLVM_FLAVOR_LLVM23)
-        # Clamped: a ROCm newer than anything we know resolves to the newest
-        # flavor, and one older than every row to the oldest.
-        self.assertEqual(_flavor_for_rocm(99, 9), LLVM_FLAVORS[-1])
-        self.assertEqual(_flavor_for_rocm(0, 0), LLVM_FLAVORS[0])
-        self.assertEqual(_flavor_for_rocm(6, 4), LLVM_FLAVOR_LLVM20)
-        # Never raises, and always returns a member of the enumeration.
-        for major, minor in ((0, 0), (-1, 0), (5, 7), (7, 2), (12, 0)):
-            self.assertIn(_flavor_for_rocm(major, minor), LLVM_FLAVORS)
-
     def test_is_modern_flavor_tracks_datalayout_kind(self):
         """The mfma-packing predicate is derived from the generation table."""
         from rocke.core.lower_llvm import (
@@ -1727,35 +1703,45 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
         def ir_for(flavor):
             return f'target datalayout = "{_datalayout_for_flavor(flavor)}"\n'
 
-        orig_ver = comgr_mod.resolved_lib_rocm_version
+        orig_ver = comgr_mod.loaded_compiler_info
         orig_path = comgr_mod.resolved_lib_path
         comgr_mod.resolved_lib_path = lambda: "/fake/libamd_comgr.so"
         try:
             # Same generation on both sides (including the llvm22-IR/llvm23-comgr
             # cross pair) must pass.
             for lib_ver, flavor in (
-                ((7, 0), "llvm20"),
-                ((7, 2), "llvm22"),
-                ((7, 13), "llvm23"),
-                ((7, 13), "llvm22"),
-                ((7, 2), "llvm23"),
+                ((20, 0, 0), "llvm20"),
+                ((22, 0, 0), "llvm22"),
+                ((23, 0, 0), "llvm23"),
+                ((23, 0, 0), "llvm22"),
+                ((22, 0, 0), "llvm23"),
             ):
                 with self.subTest(lib=lib_ver, ir=flavor):
-                    comgr_mod.resolved_lib_rocm_version = lambda v=lib_ver: v
+                    comgr_mod.loaded_compiler_info = (
+                        lambda v=lib_ver: comgr_mod.CompilerInfo(
+                            v, "test", None, "/fake/libamd_comgr.so", "/fake/libLLVM.so"
+                        )
+                    )
                     comgr_mod._assert_ir_flavor_matches_lib(ir_for(flavor))
             # Crossing the generation boundary must raise either way.
-            for lib_ver, flavor in (((7, 0), "llvm22"), ((7, 13), "llvm20")):
+            for lib_ver, flavor in (((20, 0, 0), "llvm22"), ((23, 0, 0), "llvm20")):
                 with self.subTest(lib=lib_ver, ir=flavor, expect="raise"):
-                    comgr_mod.resolved_lib_rocm_version = lambda v=lib_ver: v
+                    comgr_mod.loaded_compiler_info = (
+                        lambda v=lib_ver: comgr_mod.CompilerInfo(
+                            v, "test", None, "/fake/libamd_comgr.so", "/fake/libLLVM.so"
+                        )
+                    )
                     with self.assertRaises(comgr_mod.ComgrError) as cm:
                         comgr_mod._assert_ir_flavor_matches_lib(ir_for(flavor))
                     # The message must name both generations, not just "modern".
                     self.assertIn("p8_", str(cm.exception))
             # Unknown IR (no datalayout) never blocks compilation.
-            comgr_mod.resolved_lib_rocm_version = lambda: (7, 0)
+            comgr_mod.loaded_compiler_info = lambda: comgr_mod.CompilerInfo(
+                (20, 0, 0), "test", None, "/fake/libamd_comgr.so", "/fake/libLLVM.so"
+            )
             comgr_mod._assert_ir_flavor_matches_lib("define void @k() {}")
         finally:
-            comgr_mod.resolved_lib_rocm_version = orig_ver
+            comgr_mod.loaded_compiler_info = orig_ver
             comgr_mod.resolved_lib_path = orig_path
 
     def test_comgr_load_failure_names_every_candidate(self):
@@ -1867,8 +1853,7 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
 
 # Probe run in a child process: print the datalayout the Python resolver picks
 # for AUTO, and the one the C++ engine picks for AUTO (flavor=""). Must be a
-# child because the flavor depends on process environment and Python memoises
-# its answer per comgr path.
+# child because both engines retain the first successfully loaded COMGR.
 _FLAVOR_AUTO_PROBE = """
 import sys
 from rocke.core.ir import IRBuilder
@@ -1889,24 +1874,7 @@ print(cpp_dl)
 
 
 class TestCrossEngineFlavorAutoResolution(unittest.TestCase):
-    """The two engines must pick the SAME flavor when asked to auto-detect.
-
-    Both sides answer "which LLVM flavor is this host?" independently: Python in
-    ``_detect_llvm_flavor``, the engine in ``ll_resolve_flavor``. If they answer
-    differently they emit different IR from the same kernel while each looks
-    self-consistent, and no byte-identity run can see it -- the gate pins a
-    flavor explicitly, and ``backend.py`` resolves in Python before calling the
-    engine, so the engine's own resolver is never exercised on the paths the
-    suite covers. The C++ resolver used to read a single hardcoded
-    ``/opt/rocm/.info/version`` while Python located the comgr library that will
-    actually compile the IR and took *that* tree's ROCm version, so the two
-    disagreed on every host where /opt/rocm is absent, stale, or not the install
-    ``$ROCM_PATH`` names.
-
-    The layouts below are the ones that actually distinguish the resolvers; each
-    is checked through the emitted datalayout, which is the observable the
-    flavor controls.
-    """
+    """AUTO selects the loaded compiler despite conflicting package metadata."""
 
     def _probe(self, env_overrides):
         import os
@@ -1930,32 +1898,43 @@ class TestCrossEngineFlavorAutoResolution(unittest.TestCase):
         return py_dl, cpp_dl
 
     def _fake_rocm_tree(self):
-        """A packaged install: release 7.0.0 at the root, component 7.13.0 in
-        ``core-7.13/lib`` where comgr lives.
-
-        The two versions map to *different* flavors (llvm20 vs llvm23), which is
-        what makes this fixture worth having: a resolver that stops at the first
-        ``.info/version`` it meets while climbing out of the lib dir reads the
-        component version and picks llvm23 for a ROCm 7.0 toolchain.
-        """
+        """A loadable LLVM20 fixture under misleading release directories."""
         import os
         import shutil
+        import subprocess
         import tempfile
 
+        import sys
+
+        if sys.platform != "linux" or not shutil.which("cc"):
+            self.skipTest("ELF compiler fixture requires a Linux C compiler")
         root = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, root, ignore_errors=True)
-        rocm = os.path.join(root, "rocm-7.0.0")
+        rocm = os.path.join(root, "rocm-99.0.0")
         core_lib = os.path.join(rocm, "core-7.13", "lib")
-        os.makedirs(os.path.join(rocm, ".info"))
-        os.makedirs(os.path.join(rocm, "core-7.13", ".info"))
-        os.makedirs(core_lib)
-        os.makedirs(os.path.join(rocm, "lib"))
-        with open(os.path.join(rocm, ".info", "version"), "w") as fh:
-            fh.write("7.0.0-1234\n")
-        with open(os.path.join(rocm, "core-7.13", ".info", "version"), "w") as fh:
-            fh.write("7.13.0\n")
-        for d in (core_lib, os.path.join(rocm, "lib")):
-            open(os.path.join(d, "libamd_comgr.so"), "w").close()
+        for directory in (rocm, os.path.join(rocm, "core-7.13")):
+            os.makedirs(os.path.join(directory, ".info"))
+            with open(os.path.join(directory, ".info", "version"), "w") as fh:
+                fh.write("99.0.0\n")
+        source = os.path.join(root, "compiler.c")
+        with open(source, "w") as fh:
+            fh.write(
+                "void LLVMGetVersion(unsigned *a, unsigned *b, unsigned *c) "
+                "{ *a=20; *b=0; *c=0; }\n"
+            )
+        for directory in (core_lib, os.path.join(rocm, "lib")):
+            os.makedirs(directory)
+            subprocess.run(
+                [
+                    "cc",
+                    "-shared",
+                    "-fPIC",
+                    source,
+                    "-o",
+                    os.path.join(directory, "libamd_comgr.so"),
+                ],
+                check=True,
+            )
         return rocm
 
     def _assert_agree(self, env_overrides):
@@ -1982,9 +1961,7 @@ class TestCrossEngineFlavorAutoResolution(unittest.TestCase):
         """``$ROCM_PATH`` outranks /opt/rocm on both sides, or they split."""
         rocm = self._fake_rocm_tree()
         dl = self._assert_agree({"ROCM_PATH": rocm})
-        # 7.0.0 is pre-7.2, i.e. the LLVM 20 plain-p8 datalayout. Pinning the
-        # value (not just agreement) is what proves the env root was honoured
-        # rather than both engines ignoring it and agreeing on the host default.
+        # The callable LLVM20 version wins over the conflicting 99.0 metadata.
         self.assertIn("-p8:128:128-", dl)
 
     def test_agree_when_rocm_home_names_an_older_install(self):
@@ -1993,12 +1970,7 @@ class TestCrossEngineFlavorAutoResolution(unittest.TestCase):
         self.assertIn("-p8:128:128-", dl)
 
     def test_agree_when_comgr_lib_is_pinned_in_a_component_subdir(self):
-        """The RELEASE version wins over the component version next to comgr.
-
-        ``$ROCKE_COMGR_LIB`` points into ``core-7.13/lib``, whose own
-        ``.info/version`` says 7.13.0 (-> llvm23) while the install root says
-        7.0.0 (-> llvm20). Both engines must climb to the root.
-        """
+        """Neither root nor component metadata overrides the loaded compiler."""
         import os
 
         rocm = self._fake_rocm_tree()

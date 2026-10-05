@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import enum
 import os
-import sys
 from dataclasses import dataclass, field
 from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple
 
@@ -128,8 +127,8 @@ _TRIPLE = "amdgcn-amd-amdhsa"
 #
 # comgr verifies the toplevel ``declare`` lines BEFORE running the
 # auto-upgrade pass, so we have to emit the right signature up front.
-# Pick a flavor once at module import; ``lower_kernel_to_llvm`` takes
-# an ``llvm_flavor=`` override for tests.
+# Resolve from the loaded compiler when lowering; ``lower_kernel_to_llvm``
+# also accepts an explicit ``llvm_flavor=`` for offline emission.
 LLVM_FLAVOR_LLVM20 = "llvm20"
 LLVM_FLAVOR_LLVM22 = "llvm22"
 LLVM_FLAVOR_LLVM23 = "llvm23"
@@ -196,37 +195,6 @@ _P8_MARKERS: Dict[LlvmDatalayoutKind, str] = {
     LlvmDatalayoutKind.P8_PLAIN: "p8:128:128-",
 }
 
-# ROCm release -> flavor bundled with that release's comgr, newest first. Add a
-# row when a ROCm release bumps its bundled LLVM; nothing else needs editing.
-_ROCM_FLAVOR_LADDER: Tuple[Tuple[Tuple[int, int], str], ...] = (
-    # First ROCm release known to bundle LLVM 23.0.0 (confirm on an LLVM 23 host).
-    ((7, 13), LLVM_FLAVOR_LLVM23),
-    ((7, 2), LLVM_FLAVOR_LLVM22),
-)
-
-
-def _flavor_for_rocm(major: int, minor: int) -> str:
-    """ROCm release -> LLVM flavor expected by that release's bundled comgr.
-
-    The mapping is *clamped at both ends* and never raises. A release newer
-    than the newest ladder row resolves to the newest flavor (a future ROCm
-    bundles LLVM >= 23, and llvm23 is the closest shape we know how to emit);
-    anything below the last row resolves to the oldest, which is what pre-7.2
-    releases actually shipped rather than a fallback.
-
-    Raising on an unrecognised version would be wrong here: both callers are
-    best-effort. :func:`_detect_llvm_flavor` uses this to guess a host's
-    vintage at import time, and ``runtime.comgr._assert_ir_flavor_matches_lib``
-    uses it for a guard that must degrade rather than fail when the host is
-    unfamiliar. Callers wanting strictness pass ``llvm_flavor=`` explicitly,
-    which *is* validated against :data:`LLVM_FLAVORS`.
-    """
-    ver = (major, minor)
-    for min_ver, flavor in _ROCM_FLAVOR_LADDER:
-        if ver >= min_ver:
-            return flavor
-    return LLVM_FLAVORS[0]
-
 
 def _datalayout_kind_for_flavor(flavor: str) -> Optional[LlvmDatalayoutKind]:
     """Datalayout generation a flavor emits, or ``None`` if unrecognised."""
@@ -272,119 +240,53 @@ def _datalayout_for_flavor(flavor: str) -> str:
     return _DATALAYOUT_LLVM22
 
 
-def _torch_hip_version() -> Optional[Tuple[int, int]]:
-    """Return ``(major, minor)`` from ``torch.version.hip`` if torch is loaded.
+def _flavor_for_llvm(major: int) -> str:
+    """Map the loaded compiler's LLVM major to an existing emission flavor.
 
-    Torch wheels (e.g. ``torch 2.8.0+rocm7.0.2`` vs ``torch 2.12.0+rocm7.2``)
-    bundle their own ``libamd_comgr.so`` whose LLVM version follows the
-    wheel's ROCm release, not the system ``/opt/rocm`` one. When rocke
-    is paired with a torch-bundled comgr (see
-    :func:`runtime.runtime_coexistence._torch_bundled_lib`), the flavor must
-    match torch's ROCm vintage or comgr will reject the IR or
-    silently auto-upgrade declares the lowerer didn't intend.
+    LLVM 21 introduced the indexed-p8 generation represented by llvm22.
+    Newer compilers use the latest known flavor; this mapping does not claim
+    that every build of an LLVM major has an identical DataLayout.
     """
-    torch_mod = sys.modules.get("torch")
-    if torch_mod is None:
-        return None
-    version = getattr(getattr(torch_mod, "version", None), "hip", None)
-    if not version:
-        return None
-    head = str(version).strip().split("-", 1)[0]
-    parts = head.split(".")
-    try:
-        return int(parts[0]), int(parts[1]) if len(parts) >= 2 else 0
-    except (IndexError, ValueError):
-        return None
+    for minimum, flavor in reversed(_LLVM_FLAVOR_LADDER):
+        if major >= minimum:
+            return flavor
+    return LLVM_FLAVORS[0]
 
 
-def _system_rocm_version() -> Optional[Tuple[int, int]]:
-    """Return ``(major, minor)`` from ``/opt/rocm/.info/version``."""
-    try:
-        with open("/opt/rocm/.info/version") as fh:
-            head = fh.read().strip().split("-", 1)[0]
-        parts = head.split(".")
-        return int(parts[0]), int(parts[1]) if len(parts) >= 2 else 0
-    except (OSError, IndexError, ValueError):
-        return None
-
-
-def _comgr_lib_rocm_version() -> Optional[Tuple[int, int]]:
-    """ROCm vintage of the comgr lib :mod:`runtime.comgr` will actually load.
-
-    This is the authoritative flavor signal: the flavor MUST match the comgr
-    that compiles the IR, and that comgr is the torch-bundled lib whenever torch
-    is in the process (regardless of import order) -- not whatever
-    ``/opt/rocm`` happens to be. Delegates to
-    :func:`runtime.comgr.resolved_lib_rocm_version` (lazy import to avoid a
-    core->runtime module-load cycle). Returns ``None`` when the lib path /
-    version can't be determined, so the caller falls back to the proxies.
-    """
-    try:
-        from ..runtime.comgr import resolved_lib_rocm_version
-
-        return resolved_lib_rocm_version()
-    except Exception:
-        return None
+_LLVM_FLAVOR_LADDER: tuple[tuple[int, str], ...] = (
+    (0, LLVM_FLAVOR_LLVM20),
+    (21, LLVM_FLAVOR_LLVM22),
+    (23, LLVM_FLAVOR_LLVM23),
+)
 
 
 def _detect_llvm_flavor() -> str:
-    """Pick the LLVM IR flavor for this process.
+    """Choose an explicit flavor or query the compiler loaded by COMGR.
 
-    Resolution order:
-
-    1. ``$ROCKE_LLVM_FLAVOR`` (explicit override; test/dev knob).
-    2. The ROCm vintage of the **comgr lib that will actually compile the IR**
-       (:func:`_comgr_lib_rocm_version`). This is the authoritative signal --
-       it is import-order-robust and tracks the torch-bundled comgr over a
-       stale ``/opt/rocm``, so the emitted IR always matches the codegen
-       backend (no ``make.buffer.rsrc.p8.p1`` abort).
-    3. ``torch.version.hip`` if torch is imported (fallback proxy).
-    4. ``/opt/rocm/.info/version`` (fallback when the comgr path is unknown).
-    5. :data:`LLVM_FLAVOR_LLVM22` (the modern default).
-
-    Unknown env values fall through to the auto-detection rather than
-    raising on a typo. Each step is wrapped in :func:`try` so a
-    misconfigured environment never crashes import.
+    Loading and querying are owned by runtime.comgr, which caches the result
+    for its loaded handle. ROCm package versions and compiler executables on
+    PATH are not evidence about that compiler. If COMGR cannot be loaded or
+    queried, retain the llvm22 offline default; callers can pin a flavor with
+    ROCKE_LLVM_FLAVOR or the lowering API's llvm_flavor argument.
     """
     env = os.environ.get("ROCKE_LLVM_FLAVOR", "").strip().lower()
     if env in LLVM_FLAVORS:
         return env
-    comgr_ver = _comgr_lib_rocm_version()
-    if comgr_ver is not None:
-        return _flavor_for_rocm(*comgr_ver)
-    torch_ver = _torch_hip_version()
-    if torch_ver is not None:
-        return _flavor_for_rocm(*torch_ver)
-    sys_ver = _system_rocm_version()
-    if sys_ver is not None:
-        return _flavor_for_rocm(*sys_ver)
+    try:
+        from ..runtime.comgr import loaded_compiler_info
+
+        info = loaded_compiler_info()
+        if info is not None and info.llvm_version is not None:
+            return _flavor_for_llvm(info.llvm_version[0])
+    except Exception:  # noqa: BLE001 - preserve best-effort automatic detection
+        pass
     return LLVM_FLAVOR_LLVM22
 
 
-# Cached, but keyed on the resolved comgr lib path (the "basis") rather than
-# resolved-once-forever. An early torch-less call would otherwise lock in the
-# /opt/rocm flavor; keying on the comgr path means that once torch (and its
-# bundled comgr) enters the process the basis changes and the flavor
-# re-resolves. An explicit env override is stable and short-circuits.
-_LLVM_FLAVOR: Optional[str] = None
-_LLVM_FLAVOR_BASIS: Optional[str] = None
-
-
 def _resolve_llvm_flavor() -> str:
-    global _LLVM_FLAVOR, _LLVM_FLAVOR_BASIS
-    env = os.environ.get("ROCKE_LLVM_FLAVOR", "").strip().lower()
-    if env in LLVM_FLAVORS:
-        return env
-    try:
-        from ..runtime.comgr import resolved_lib_path
-
-        basis = resolved_lib_path() or "<none>"
-    except Exception:
-        basis = "<none>"
-    if _LLVM_FLAVOR is None or _LLVM_FLAVOR_BASIS != basis:
-        _LLVM_FLAVOR = _detect_llvm_flavor()
-        _LLVM_FLAVOR_BASIS = basis
-    return _LLVM_FLAVOR
+    # Cache compiler evidence with the loaded COMGR handle, not a path that
+    # can name a different binary or an unloadable candidate.
+    return _detect_llvm_flavor()
 
 
 # Intrinsic declarations we may emit.
