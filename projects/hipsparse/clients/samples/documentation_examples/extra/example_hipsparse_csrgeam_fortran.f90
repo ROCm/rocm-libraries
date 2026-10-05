@@ -21,6 +21,7 @@
 ! [doc example start]
 program example_hipsparse_csrgeam
     use iso_c_binding
+    use hipsparse
     implicit none
 
     ! HIP
@@ -56,91 +57,6 @@ program example_hipsparse_csrgeam
 
     integer, parameter :: hipMemcpyHostToDevice = 1
     integer, parameter :: hipMemcpyDeviceToHost = 2
-
-    ! hipSPARSE
-    interface
-        function hipsparseCreate(handle) &
-                bind(c, name = 'hipsparseCreate')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseCreate
-            type(c_ptr) :: handle
-        end function hipsparseCreate
-
-        function hipsparseDestroy(handle) &
-                bind(c, name = 'hipsparseDestroy')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseDestroy
-            type(c_ptr), value :: handle
-        end function hipsparseDestroy
-
-        function hipsparseCreateMatDescr(descr) &
-                bind(c, name = 'hipsparseCreateMatDescr')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseCreateMatDescr
-            type(c_ptr) :: descr
-        end function hipsparseCreateMatDescr
-
-        function hipsparseDestroyMatDescr(descr) &
-                bind(c, name = 'hipsparseDestroyMatDescr')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseDestroyMatDescr
-            type(c_ptr), value :: descr
-        end function hipsparseDestroyMatDescr
-
-        function hipsparseXcsrgeamNnz(handle, m, n, descrA, nnzA, csrRowPtrA, csrColIndA, descrB, &
-                                      nnzB, csrRowPtrB, csrColIndB, descrC, csrRowPtrC, nnzTotalDevHostPtr) &
-                bind(c, name = 'hipsparseXcsrgeamNnz')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseXcsrgeamNnz
-            type(c_ptr), value :: handle
-            integer(c_int), value :: m
-            integer(c_int), value :: n
-            type(c_ptr), value :: descrA
-            integer(c_int), value :: nnzA
-            type(c_ptr), intent(in), value :: csrRowPtrA
-            type(c_ptr), intent(in), value :: csrColIndA
-            type(c_ptr), value :: descrB
-            integer(c_int), value :: nnzB
-            type(c_ptr), intent(in), value :: csrRowPtrB
-            type(c_ptr), intent(in), value :: csrColIndB
-            type(c_ptr), value :: descrC
-            type(c_ptr), value :: csrRowPtrC
-            type(c_ptr), value :: nnzTotalDevHostPtr
-        end function hipsparseXcsrgeamNnz
-
-        function hipsparseScsrgeam(handle, m, n, alpha, descrA, nnzA, csrSortedValA, csrSortedRowPtrA, &
-                                   csrSortedColIndA, beta, descrB, nnzB, csrSortedValB, csrSortedRowPtrB, &
-                                   csrSortedColIndB, descrC, csrSortedValC, csrSortedRowPtrC, csrSortedColIndC) &
-                bind(c, name = 'hipsparseScsrgeam')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseScsrgeam
-            type(c_ptr), value :: handle
-            integer(c_int), value :: m
-            integer(c_int), value :: n
-            type(c_ptr), intent(in), value :: alpha
-            type(c_ptr), value :: descrA
-            integer(c_int), value :: nnzA
-            type(c_ptr), intent(in), value :: csrSortedValA
-            type(c_ptr), intent(in), value :: csrSortedRowPtrA
-            type(c_ptr), intent(in), value :: csrSortedColIndA
-            type(c_ptr), intent(in), value :: beta
-            type(c_ptr), value :: descrB
-            integer(c_int), value :: nnzB
-            type(c_ptr), intent(in), value :: csrSortedValB
-            type(c_ptr), intent(in), value :: csrSortedRowPtrB
-            type(c_ptr), intent(in), value :: csrSortedColIndB
-            type(c_ptr), value :: descrC
-            type(c_ptr), value :: csrSortedValC
-            type(c_ptr), value :: csrSortedRowPtrC
-            type(c_ptr), value :: csrSortedColIndC
-        end function hipsparseScsrgeam
-    end interface
 
     ! Variables
     type(c_ptr) :: handle

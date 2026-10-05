@@ -21,6 +21,7 @@
 ! [doc example start]
 program example_hipsparse_bsric02
     use iso_c_binding
+    use hipsparse
     implicit none
 
     ! HIP
@@ -56,161 +57,6 @@ program example_hipsparse_bsric02
 
     integer, parameter :: hipMemcpyHostToDevice = 1
     integer, parameter :: hipMemcpyDeviceToHost = 2
-
-    ! hipSPARSE
-    interface
-        function hipsparseCreate(handle) &
-                bind(c, name = 'hipsparseCreate')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseCreate
-            type(c_ptr) :: handle
-        end function hipsparseCreate
-
-        function hipsparseDestroy(handle) &
-                bind(c, name = 'hipsparseDestroy')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseDestroy
-            type(c_ptr), value :: handle
-        end function hipsparseDestroy
-
-        function hipsparseCreateMatDescr(descr) &
-                bind(c, name = 'hipsparseCreateMatDescr')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseCreateMatDescr
-            type(c_ptr) :: descr
-        end function hipsparseCreateMatDescr
-
-        function hipsparseDestroyMatDescr(descr) &
-                bind(c, name = 'hipsparseDestroyMatDescr')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseDestroyMatDescr
-            type(c_ptr), value :: descr
-        end function hipsparseDestroyMatDescr
-
-        function hipsparseSetMatIndexBase(descr, base) &
-                bind(c, name = 'hipsparseSetMatIndexBase')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseSetMatIndexBase
-            type(c_ptr), value :: descr
-            integer(c_int), value :: base
-        end function hipsparseSetMatIndexBase
-
-        function hipsparseSetMatFillMode(descr, fillMode) &
-                bind(c, name = 'hipsparseSetMatFillMode')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseSetMatFillMode
-            type(c_ptr), value :: descr
-            integer(c_int), value :: fillMode
-        end function hipsparseSetMatFillMode
-
-        function hipsparseSetMatDiagType(descr, diagType) &
-                bind(c, name = 'hipsparseSetMatDiagType')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseSetMatDiagType
-            type(c_ptr), value :: descr
-            integer(c_int), value :: diagType
-        end function hipsparseSetMatDiagType
-
-        function hipsparseCreateBsric02Info(info) &
-                bind(c, name = 'hipsparseCreateBsric02Info')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseCreateBsric02Info
-            type(c_ptr) :: info
-        end function hipsparseCreateBsric02Info
-
-        function hipsparseDestroyBsric02Info(info) &
-                bind(c, name = 'hipsparseDestroyBsric02Info')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseDestroyBsric02Info
-            type(c_ptr), value :: info
-        end function hipsparseDestroyBsric02Info
-
-        function hipsparseSbsric02_bufferSize(handle, dirA, mb, nnzb, descrA, bsrSortedValA, &
-                                              bsrSortedRowPtrA, bsrSortedColIndA, blockDim, &
-                                              info, pBufferSizeInBytes) &
-                bind(c, name = 'hipsparseSbsric02_bufferSize')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseSbsric02_bufferSize
-            type(c_ptr), value :: handle
-            integer(c_int), value :: dirA
-            integer(c_int), value :: mb
-            integer(c_int), value :: nnzb
-            type(c_ptr), value :: descrA
-            type(c_ptr), intent(in), value :: bsrSortedValA
-            type(c_ptr), intent(in), value :: bsrSortedRowPtrA
-            type(c_ptr), intent(in), value :: bsrSortedColIndA
-            integer(c_int), value :: blockDim
-            type(c_ptr), value :: info
-            type(c_ptr), value :: pBufferSizeInBytes
-        end function hipsparseSbsric02_bufferSize
-
-        function hipsparseSbsric02_analysis(handle, dirA, mb, nnzb, descrA, bsrSortedValA, &
-                                            bsrSortedRowPtrA, bsrSortedColIndA, blockDim, &
-                                            info, policy, pBuffer) &
-                bind(c, name = 'hipsparseSbsric02_analysis')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseSbsric02_analysis
-            type(c_ptr), value :: handle
-            integer(c_int), value :: dirA
-            integer(c_int), value :: mb
-            integer(c_int), value :: nnzb
-            type(c_ptr), value :: descrA
-            type(c_ptr), intent(in), value :: bsrSortedValA
-            type(c_ptr), intent(in), value :: bsrSortedRowPtrA
-            type(c_ptr), intent(in), value :: bsrSortedColIndA
-            integer(c_int), value :: blockDim
-            type(c_ptr), value :: info
-            integer(c_int), value :: policy
-            type(c_ptr), value :: pBuffer
-        end function hipsparseSbsric02_analysis
-
-        function hipsparseSbsric02(handle, dirA, mb, nnzb, descrA, bsrSortedValA, bsrSortedRowPtrA, &
-                                   bsrSortedColIndA, blockDim, info, policy, pBuffer) &
-                bind(c, name = 'hipsparseSbsric02')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseSbsric02
-            type(c_ptr), value :: handle
-            integer(c_int), value :: dirA
-            integer(c_int), value :: mb
-            integer(c_int), value :: nnzb
-            type(c_ptr), value :: descrA
-            type(c_ptr), value :: bsrSortedValA
-            type(c_ptr), intent(in), value :: bsrSortedRowPtrA
-            type(c_ptr), intent(in), value :: bsrSortedColIndA
-            integer(c_int), value :: blockDim
-            type(c_ptr), value :: info
-            integer(c_int), value :: policy
-            type(c_ptr), value :: pBuffer
-        end function hipsparseSbsric02
-
-        function hipsparseXbsric02_zeroPivot(handle, info, position) &
-                bind(c, name = 'hipsparseXbsric02_zeroPivot')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseXbsric02_zeroPivot
-            type(c_ptr), value :: handle
-            type(c_ptr), value :: info
-            type(c_ptr), value :: position
-        end function hipsparseXbsric02_zeroPivot
-    end interface
-
-    integer, parameter :: HIPSPARSE_INDEX_BASE_ZERO = 0
-    integer, parameter :: HIPSPARSE_FILL_MODE_LOWER = 0
-    integer, parameter :: HIPSPARSE_DIAG_TYPE_UNIT = 1
-    integer, parameter :: HIPSPARSE_DIRECTION_COLUMN = 1
-    integer, parameter :: HIPSPARSE_SOLVE_POLICY_USE_LEVEL = 1
 
     ! Variables
     type(c_ptr) :: handle
@@ -288,7 +134,7 @@ program example_hipsparse_bsric02
                                         dbsrColInd, &
                                         bs, &
                                         info, &
-                                        c_loc(bufferSize))
+                                        bufferSize)
     if (stat /= 0) stop
 
     ! Allocate temporary buffer

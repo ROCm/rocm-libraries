@@ -127,7 +127,7 @@ program example_fortran_csrilu0
     type(c_ptr) :: descr
     type(c_ptr) :: info
 
-    integer :: version
+    integer(c_int) :: version
 
 !   Input data
 
@@ -185,7 +185,7 @@ program example_fortran_csrilu0
                                                           d_csr_row_ptr, &
                                                           d_csr_col_ind, &
                                                           info, &
-                                                          c_loc(buffer_size)))
+                                                          buffer_size))
 
 !   Allocate temporary buffer
     write(*,fmt='(A,I0,A)') 'Allocating ', buffer_size / 1024, 'kB temporary storage buffer'

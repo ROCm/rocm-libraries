@@ -374,12 +374,14 @@ sanitizing follows the backend's constraints.
 
 ## Fortran Client Testing
 
-Fortran is **sample-only** — there is no Fortran path in `hipsparse-test`. `HIPSPARSE_ENABLE_FORTRAN`
-(default ON on non-Windows, OFF on Windows) builds the `hipsparse_fortran` object library from
-`library/src/hipsparse.f90` / `hipsparse_enums.f90` and Fortran example binaries under
+The Fortran binding is generated into `fortran/hipsparse.F90` (module `hipsparse`, target
+`roc::hipsparse_fortran`) under `BUILD_FORTRAN_BINDINGS`. Its 52 binding tests live in
+`fortran/test/`, one executable each, registered with ctest as `hipsparse_fortran_<name>` and
+labelled `gpu` (`ctest -LE gpu` skips them on a GPU-less machine); they are gated by
+`BUILD_FORTRAN_CLIENTS` and skipped when clients are not built or under ASAN. There is no Fortran
+path in `hipsparse-test`. Separately, `HIPSPARSE_ENABLE_FORTRAN` builds the Fortran samples under
 `clients/samples/` and `documentation_examples/` (e.g., `example_fortran_csrsv2`,
-`example_fortran_spmv`). Fortran samples require the HIP backend and are disabled under ASAN. This is
-a build/compile check of the Fortran bindings rather than a correctness test suite.
+`example_fortran_spmv`) against the same binding; they require the HIP backend.
 
 ---
 

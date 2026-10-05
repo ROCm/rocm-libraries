@@ -1,0 +1,134 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Config package for the hipSPARSE Fortran bindings.
+#
+#   find_package(hipsparse-fortran REQUIRED)
+#   target_link_libraries(my_app PRIVATE roc::hipsparse_fortran)
+#
+# One archive and .mod set is installed per Fortran compiler. Set
+# HIPSPARSE_FORTRAN_COMPILER_DIR before find_package to pick one explicitly.
+
+@PACKAGE_INIT@
+
+set(_hipsparse_built_dir "@HIPSPARSE_FORTRAN_COMPILER_DIR@")
+
+# Absolute, relocatable paths written by PATH_VARS (see PACKAGE_INIT above).
+set(_hipsparse_libdir "@PACKAGE_HIPSPARSE_FORTRAN_LIBDIR@")
+set(_hipsparse_incdir "@PACKAGE_HIPSPARSE_FORTRAN_INCLUDEDIR@")
+
+set(hipsparse_FORTRAN_FOUND FALSE)
+
+if(NOT CMAKE_Fortran_COMPILER_LOADED)
+  set(hipsparse-fortran_FOUND FALSE)
+  string(CONCAT hipsparse-fortran_NOT_FOUND_MESSAGE
+      "The hipSPARSE Fortran bindings need Fortran enabled before find_package: "
+      "add Fortran to your project() languages, or call enable_language(Fortran).")
+  return()
+endif()
+
+# Accepts FC itself or FC plus a separator and suffix (gfortran-13). Not a regex:
+# FC may be an arbitrary basename, and CMake has no regex-escape.
+function(_hipsparse_dir_matches DIR FC OUT)
+  set(${OUT} FALSE PARENT_SCOPE)
+  if(DIR STREQUAL FC)
+    set(${OUT} TRUE PARENT_SCOPE)
+    return()
+  endif()
+  string(LENGTH "${FC}" _n)
+  string(LENGTH "${DIR}" _dn)
+  if(_dn GREATER _n)
+    string(SUBSTRING "${DIR}" 0 ${_n} _head)
+    string(SUBSTRING "${DIR}" ${_n} 1 _sep)
+    if(_head STREQUAL FC AND _sep MATCHES "^[-._]$")
+      set(${OUT} TRUE PARENT_SCOPE)
+    endif()
+  endif()
+endfunction()
+
+file(GLOB _hipsparse_avail RELATIVE "${_hipsparse_incdir}" "${_hipsparse_incdir}/*")
+
+set(_hipsparse_dir "")
+if(DEFINED HIPSPARSE_FORTRAN_COMPILER_DIR)
+  if(NOT EXISTS "${_hipsparse_incdir}/${HIPSPARSE_FORTRAN_COMPILER_DIR}/hipsparse.mod" OR
+     NOT EXISTS "${_hipsparse_libdir}/${HIPSPARSE_FORTRAN_COMPILER_DIR}/libhipsparse_fortran.a")
+    set(hipsparse-fortran_FOUND FALSE)
+    string(CONCAT hipsparse-fortran_NOT_FOUND_MESSAGE
+        "HIPSPARSE_FORTRAN_COMPILER_DIR is '${HIPSPARSE_FORTRAN_COMPILER_DIR}', but "
+        "no hipsparse.mod and libhipsparse_fortran.a are installed under "
+        "${_hipsparse_incdir}/${HIPSPARSE_FORTRAN_COMPILER_DIR} and "
+        "${_hipsparse_libdir}/${HIPSPARSE_FORTRAN_COMPILER_DIR}. Available: "
+        "${_hipsparse_avail}.")
+    return()
+  endif()
+  set(_hipsparse_dir "${HIPSPARSE_FORTRAN_COMPILER_DIR}")
+else()
+  # Must mirror the mapping in projects/hipsparse/fortran/CMakeLists.txt.
+  if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+    set(_hipsparse_fc "gfortran")
+  elseif(CMAKE_Fortran_COMPILER_ID MATCHES "Flang")
+    set(_hipsparse_fc "amdflang")
+  elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Cray")
+    set(_hipsparse_fc "ftn")
+  elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "IntelLLVM")
+    set(_hipsparse_fc "ifx")
+  elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Intel")
+    set(_hipsparse_fc "ifort")
+  elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "NVHPC")
+    set(_hipsparse_fc "nvfortran")
+  else()
+    get_filename_component(_hipsparse_fc "${CMAKE_Fortran_COMPILER}" NAME_WE)
+    string(TOLOWER "${_hipsparse_fc}" _hipsparse_fc)
+  endif()
+
+  # A prefix can hold several compilers' artifacts; the recorded one is a fallback.
+  if(EXISTS "${_hipsparse_incdir}/${_hipsparse_fc}/hipsparse.mod")
+    set(_hipsparse_dir "${_hipsparse_fc}")
+  else()
+    _hipsparse_dir_matches("${_hipsparse_built_dir}" "${_hipsparse_fc}" _hipsparse_ok)
+    if(_hipsparse_ok)
+      set(_hipsparse_dir "${_hipsparse_built_dir}")
+    endif()
+  endif()
+
+  if(NOT _hipsparse_dir)
+    set(hipsparse-fortran_FOUND FALSE)
+    string(CONCAT hipsparse-fortran_NOT_FOUND_MESSAGE
+        "This project builds with ${_hipsparse_fc}, but no hipsparse.mod for it is "
+        "installed under ${_hipsparse_incdir}. Available: "
+        "${_hipsparse_avail}. A Fortran .mod cannot be shared across compilers; "
+        "rebuild the bindings with ${_hipsparse_fc}, or set "
+        "HIPSPARSE_FORTRAN_COMPILER_DIR to the directory to use.")
+    return()
+  endif()
+endif()
+
+# Written TRUE only when the archive links roc::hipsparse, which must be imported
+# before the targets file. hip's config needs C or CXX enabled (FindThreads).
+if(@HIPSPARSE_FORTRAN_NEEDS_C_PACKAGE@)
+  if(NOT TARGET roc::hipsparse)
+    if(NOT CMAKE_C_COMPILER_LOADED AND NOT CMAKE_CXX_COMPILER_LOADED)
+      enable_language(C)
+    endif()
+    include(CMakeFindDependencyMacro)
+    find_dependency(hipsparse)
+  endif()
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/hipsparse-fortran-targets.cmake")
+
+# The targets file hardcodes the directory the package was built with.
+if(NOT _hipsparse_dir STREQUAL "${_hipsparse_built_dir}")
+  set_target_properties(roc::hipsparse_fortran PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${_hipsparse_incdir}/${_hipsparse_dir}")
+  get_target_property(_hipsparse_cfgs roc::hipsparse_fortran IMPORTED_CONFIGURATIONS)
+  foreach(_hipsparse_c IN LISTS _hipsparse_cfgs)
+    set_target_properties(roc::hipsparse_fortran PROPERTIES
+      IMPORTED_LOCATION_${_hipsparse_c}
+        "${_hipsparse_libdir}/${_hipsparse_dir}/libhipsparse_fortran.a")
+  endforeach()
+endif()
+
+set(hipsparse_FORTRAN_FOUND TRUE)
+
+check_required_components(hipsparse-fortran)
