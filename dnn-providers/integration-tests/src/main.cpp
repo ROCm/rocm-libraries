@@ -34,6 +34,7 @@
 #include "harness/bundle/SupportClaimWriter.hpp"
 #include "harness/bundle/SupportObservationLog.hpp"
 #include "harness/bundle/UnverifiableBundleReport.hpp"
+#include "harness/bundle/VerifierTally.hpp"
 
 namespace
 {
@@ -428,6 +429,9 @@ int main(int argc, char** argv) noexcept
         // Register HipErrorHandler to check and clear HIP errors after each test
         testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
         listeners.Append(new hipdnn_test_sdk::utilities::HipErrorHandler);
+        // With --gtest_repeat=N the coverage summary's counts are the last iteration's;
+        // the verifier tally printed beside them has to restart with each iteration too.
+        listeners.Append(new hipdnn_integration_tests::bundle::VerifierTallyIterationReset);
 
         // Create shared handle (triggers engine loading). The guards below own
         // teardown for every exit path from here on, including the outer catch,
@@ -632,6 +636,17 @@ int main(int argc, char** argv) noexcept
                       << std::setprecision(1) << pct << "%)\n"
                       << "Skipped: " << skip << "\n"
                       << "Failed:  " << failed << "\n";
+
+            // Which oracle graded each test body that ran: auto mode falls through
+            // golden -> GPU reference -> CPU reference, and a pass alone does not say
+            // where it landed.
+            const auto verifiers = hipdnn_integration_tests::bundle::VerifierTally::get().counts();
+            if(verifiers.total() > 0)
+            {
+                std::cerr << "Verified by: golden " << verifiers.golden << ", gpu_ref "
+                          << verifiers.gpuReference << ", cpu_ref " << verifiers.cpuReference
+                          << ", none " << verifiers.none << "\n";
+            }
         }
 
         // Generate support matrix if requested
