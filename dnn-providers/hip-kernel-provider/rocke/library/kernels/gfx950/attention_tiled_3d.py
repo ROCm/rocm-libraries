@@ -495,7 +495,10 @@ def build_unified_attention_3d_tiled(
     # ---------------- LDS layout ----------------
     Q_lds = b.smem_alloc(dtype, [BLOCK_M, HD], name_hint="Qlds")
     K_lds = b.smem_alloc(dtype, [2, T, HD], name_hint="Klds")
-    V_lds = b.smem_alloc(dtype, [2, T, HD], name_hint="Vlds")
+    # One V slot: V(i) is loaded after QK(i) and consumed by PV(i) in the same
+    # iteration, and the next iteration's leading wait-all retires PV(i) before
+    # V(i+1) is issued, so a second slot would never hold a live tile.
+    V_lds = b.smem_alloc(dtype, [1, T, HD], name_hint="Vlds")
     P_lds = b.smem_alloc(dtype, [BLOCK_M, T], name_hint="Plds")
 
     # CK Tile ``TransposeLDSLayout<M=16, K=PV_K_STEP, B=1>`` lane formulas.
@@ -836,6 +839,7 @@ def build_unified_attention_3d_tiled(
         acc_vals = [carry[8 + n] for n in range(PV_N_TILES)]
         cur_buf = carry[8 + PV_N_TILES]
         nxt_buf = b.sub(b.const_i32(1), cur_buf)
+        v_buf = b.const_i32(0)
         tile_off = b.mul(kv_tile_iv, b.const_i32(T))
 
         next_tile_iv_raw = b.add(kv_tile_iv, b.const_i32(1))
@@ -860,7 +864,7 @@ def build_unified_attention_3d_tiled(
                 acc_v = _mfma_16x16x32(b, dtype, A_kits[k], B_v, acc_v)
             S_n.append(acc_v)
 
-        _issue_v(kv_tile_iv, cur_buf)
+        _issue_v(kv_tile_iv, v_buf)
         _issue_k(safe_next_tile, nxt_buf)
 
         # See attention_tiled_2d.py for the rationale on applying ALiBi /
@@ -964,10 +968,10 @@ def build_unified_attention_3d_tiled(
                     row_r0 = pv_tr_reader.row(b, k_offset=k * 32, read=0)
                     row_r1 = pv_tr_reader.row(b, k_offset=k * 32, read=1)
                     B_r0 = b.ds_read_tr16_b64(
-                        V_lds, cur_buf, row_r0, n_col_base, dtype=dtype
+                        V_lds, v_buf, row_r0, n_col_base, dtype=dtype
                     )
                     B_r1 = b.ds_read_tr16_b64(
-                        V_lds, cur_buf, row_r1, n_col_base, dtype=dtype
+                        V_lds, v_buf, row_r1, n_col_base, dtype=dtype
                     )
                     B_v = b.vec_concat(B_r0, B_r1)
                     acc_v = _mfma_16x16x32(b, dtype, A_p, B_v, acc_v)
@@ -976,7 +980,7 @@ def build_unified_attention_3d_tiled(
                     A_p = b.smem_load_vN(P_lds, lane_col, p_off, dtype=dtype, n=4)
                     row_lane = pv_tr_reader.row(b, k_offset=k * 16, read=0)
                     B_v = b.ds_read_tr16_b64(
-                        V_lds, cur_buf, row_lane, n_col_base, dtype=dtype
+                        V_lds, v_buf, row_lane, n_col_base, dtype=dtype
                     )
                     acc_v = _mfma_16x16x16(b, dtype, A_p, B_v, acc_v)
             new_acc.append(acc_v)

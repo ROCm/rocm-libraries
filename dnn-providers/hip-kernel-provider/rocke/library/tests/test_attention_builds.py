@@ -1111,6 +1111,11 @@ class TestAttentionHelpers(unittest.TestCase):
         self.assertIn("segm_output_ptr", seg_ll)
         self.assertIn("segm_max_ptr", seg_ll)
         self.assertIn("segm_expsum_ptr", seg_ll)
+        # LDS: Q [16,128] + K [2,16,128] + one V slot [1,16,128] + P [16,16],
+        # fp16. V(i) is loaded and consumed within iteration i, so a second V
+        # slot would never be live.
+        lds_bytes = 2 * (16 * 128 + 2 * 16 * 128 + 16 * 128 + 16 * 16)
+        self.assertIn(f"addrspace(3) global [{lds_bytes} x i8]", seg_ll)
         # Softmax exponents are <= 0, so p and alpha use the native exp2
         # (one v_exp_f32), not the range-reduced llvm.exp2.f32.
         self.assertIn("@llvm.amdgcn.exp2.f32", seg_ll)
