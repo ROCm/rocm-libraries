@@ -8,7 +8,7 @@ grows with seqlen_k. This harness walks seqlen_k (and optionally n_index_heads)
 and times the scalar-v1 kernel, so a later MFMA hoist has a baseline to beat.
 
 Torch-free by construction: inputs and the score oracle come from
-``builders/gfx942/dsa/hostpack.py`` (numpy), the kernel is compiled through
+``builders/common/dsa/hostpack.py`` (numpy), the kernel is compiled through
 ``rocke.helpers.compile``, and timing goes through the same ``run_manifest`` path
 the cluster CLI uses, so the bench and the manifest lane cannot drift.
 
@@ -18,7 +18,7 @@ into the repo. Send numbers to the protected performance record, not to a file.
 Run (needs a gfx942 device)::
 
     PYTHONPATH=library:platform/python \\
-      python library/benchmarks/gfx942/dsa/benchmark_indexer.py --verify
+      python library/benchmarks/common/dsa/benchmark_indexer.py --verify
 
     ... --seqlen-k 2048,8192,32768 --n-index-heads 32 --index-head-dim 128
 """
@@ -41,7 +41,7 @@ for _p in (os.path.join(_RK, "platform", "python"), os.path.join(_RK, "library")
 from rocke.helpers.compile import compile_kernel  # noqa: E402
 from rocke.run_manifest import run_manifest  # noqa: E402
 
-from builders.gfx942.dsa.manifest import make_lightning_indexer_manifest  # noqa: E402
+from builders.common.dsa.manifest import make_lightning_indexer_manifest  # noqa: E402
 from kernels.common.lightning_indexer import (  # noqa: E402
     IndexerSpec,
     IndexerTileSpec,
@@ -57,7 +57,7 @@ def _ints(s: str) -> list[int]:
 
 
 def _run_one(
-    seqlen_q, seqlen_k, n_index_heads, index_head_dim, body, verify, arch=_ARCH
+    seqlen_q, seqlen_k, n_index_heads, index_head_dim, body, verify, arch=_ARCH, q_pos_base=0
 ):
     # The MFMA body pins one wave64; the scalar body uses a wider workgroup.
     block = 64 if body == "mfma" else 256
@@ -74,6 +74,7 @@ def _run_one(
         artifact=artifact,
         spec=spec,
         args_signature=lightning_indexer_signature(spec),
+        q_pos_base=q_pos_base,
         default_shape=(seqlen_q, seqlen_k, n_index_heads),
     )
     with tempfile.TemporaryDirectory() as tmp:
@@ -93,6 +94,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--index-head-dim", type=int, default=128)
     ap.add_argument("--body", default="both", choices=["scalar", "mfma", "both"])
     ap.add_argument("--arch", default="gfx942", choices=["gfx942", "gfx950"])
+    ap.add_argument(
+        "--q-pos-base",
+        type=int,
+        default=None,
+        help="causal base; default = seqlen_k - seqlen_q, so queries sit at the "
+        "cache tail like a real long-context step (q_pos_base=0 makes almost "
+        "every score causally masked and times masked work)",
+    )
     ap.add_argument("--verify", action="store_true")
     ns = ap.parse_args(argv)
 
@@ -108,6 +117,11 @@ def main(argv: list[str] | None = None) -> int:
                         f"  {body:<7} {sk:<8} {hi:<4} {ns.index_head_dim:<5} (skip: mfma needs 16-aligned)"
                     )
                     continue
+                qpb = (
+                    ns.q_pos_base
+                    if ns.q_pos_base is not None
+                    else max(sk - ns.seqlen_q, 0)
+                )
                 s = _run_one(
                     ns.seqlen_q,
                     sk,
@@ -116,6 +130,7 @@ def main(argv: list[str] | None = None) -> int:
                     body,
                     ns.verify,
                     arch=ns.arch,
+                    q_pos_base=qpb,
                 )
                 v = (
                     "ok"

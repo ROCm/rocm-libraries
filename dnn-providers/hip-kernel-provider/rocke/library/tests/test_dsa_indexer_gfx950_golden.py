@@ -4,7 +4,9 @@
 """Golden LLVM-IR stability test for the gfx950 lightning-indexer kernel.
 
 Same arch-neutral kernel as gfx942 (kernels/common/lightning_indexer.py), lowered
-for gfx950 -- the emitted IR differs per arch, so gfx950 carries its own golden.
+for gfx950. The emitted IR is currently identical across arches (no arch-specific
+atom/intrinsic/LDS), so these SHAs match the gfx942 golden; the separate fixture
+is kept to catch future arch-specific divergence (fp8, wider atoms).
 CPU-only: no GPU, no comgr.
 
 Run or re-bless from ``rocke/library``::

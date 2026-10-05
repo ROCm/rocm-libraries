@@ -70,9 +70,9 @@ def make_inputs(
         rng.standard_normal((seqlen_q, n_index_heads, index_head_dim), dtype=np.float32)
     )
     index_k = to_bf16(rng.standard_normal((seqlen_k, index_head_dim), dtype=np.float32))
-    # Weights stay f32 (higher precision at negligible cost, per the dtype plan);
-    # keep them non-negative so no head's contribution is inverted.
-    w = np.abs(rng.standard_normal(n_index_heads, dtype=np.float32))
+    # Per-query weights w[seqlen_q, H_I], signed (in the model they come out of a
+    # linear projection weights_proj(x)). f32 at negligible cost per the dtype plan.
+    w = rng.standard_normal((seqlen_q, n_index_heads), dtype=np.float32)
     return {"index_q": index_q, "index_k": index_k, "w": w}
 
 
@@ -86,9 +86,10 @@ def ref_indexer_scores(
 ) -> np.ndarray:
     """Compute the reference score matrix [seqlen_q, seqlen_k].
 
-    I(t, s) = sum over heads h of  w_h * ReLU( index_q[t, h] . index_k[s] )
+    I(t, s) = sum over heads h of  w[t, h] * ReLU( index_q[t, h] . index_k[s] )
 
-    with the causal bound: for a query at absolute position ``q_pos_base + t``,
+    The weight is per query token and head (w shape [seqlen_q, H_I]) and is
+    signed. Causal bound: for a query at absolute position ``q_pos_base + t``,
     keys ``s > q_pos_base + t`` are future keys and get the sentinel so top-k
     never selects them.
     """
@@ -98,8 +99,8 @@ def ref_indexer_scores(
     # per-head dot products: [Q, H, D] . [Sk, D] -> [Q, H, Sk]
     dots = np.einsum("qhd,sd->qhs", qf, kf, optimize=True)
     relu = np.maximum(dots, 0.0)
-    # weight per head and sum over heads -> [Q, Sk]
-    scores = np.einsum("h,qhs->qs", wf, relu, optimize=True)
+    # per-query weight per head, summed over heads -> [Q, Sk]
+    scores = np.einsum("qh,qhs->qs", wf, relu, optimize=True)
     # causal mask
     seqlen_q, seqlen_k = scores.shape
     q_pos = q_pos_base + np.arange(seqlen_q)[:, None]
@@ -114,7 +115,7 @@ class PackedIndexer:
 
     index_q_bits: np.ndarray  # uint16 [seqlen_q, H_I, D_I]
     index_k_bits: np.ndarray  # uint16 [seqlen_k, D_I]
-    w: np.ndarray  # f32 [H_I]
+    w: np.ndarray  # f32 [seqlen_q, H_I]
     q_pos_base: int
     ref_scores: np.ndarray  # f32 [seqlen_q, seqlen_k]
 
