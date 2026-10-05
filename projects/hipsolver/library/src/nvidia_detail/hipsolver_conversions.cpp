@@ -85,6 +85,32 @@ hipsolverFillMode_t cuda2hip_fill(cublasFillMode_t fill)
     }
 }
 
+cublasDiagType_t hip2cuda_diag(hipsolverDiagType_t diag)
+{
+    switch(diag)
+    {
+    case HIPSOLVER_DIAG_NON_UNIT:
+        return CUBLAS_DIAG_NON_UNIT;
+    case HIPSOLVER_DIAG_UNIT:
+        return CUBLAS_DIAG_UNIT;
+    default:
+        throw HIPSOLVER_STATUS_INVALID_ENUM;
+    }
+}
+
+hipsolverDiagType_t cuda2hip_diag(cublasDiagType_t diag)
+{
+    switch(diag)
+    {
+    case CUBLAS_DIAG_NON_UNIT:
+        return HIPSOLVER_DIAG_NON_UNIT;
+    case CUBLAS_DIAG_UNIT:
+        return HIPSOLVER_DIAG_UNIT;
+    default:
+        throw HIPSOLVER_STATUS_INVALID_ENUM;
+    }
+}
+
 cublasSideMode_t hip2cuda_side(hipsolverSideMode_t side)
 {
     switch(side)

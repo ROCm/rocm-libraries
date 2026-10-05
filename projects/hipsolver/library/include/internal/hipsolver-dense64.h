@@ -326,6 +326,30 @@ HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnXsytrs(hipsolverDnHandle_t handle,
                                                      size_t              lworkOnHost,
                                                      int*                devInfo);
 
+// trtri
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnXtrtri_bufferSize(hipsolverDnHandle_t handle,
+                                                                hipsolverFillMode_t uplo,
+                                                                hipsolverDiagType_t diag,
+                                                                int64_t             n,
+                                                                hipDataType         dataTypeA,
+                                                                void*               A,
+                                                                int64_t             lda,
+                                                                size_t*             lworkOnDevice,
+                                                                size_t*             lworkOnHost);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnXtrtri(hipsolverDnHandle_t handle,
+                                                     hipsolverFillMode_t uplo,
+                                                     hipsolverDiagType_t diag,
+                                                     int64_t             n,
+                                                     hipDataType         dataTypeA,
+                                                     void*               A,
+                                                     int64_t             lda,
+                                                     void*               workOnDevice,
+                                                     size_t              lworkOnDevice,
+                                                     void*               workOnHost,
+                                                     size_t              lworkOnHost,
+                                                     int*                devInfo);
+
 
 #ifdef __cplusplus
 }
