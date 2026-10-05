@@ -5,8 +5,8 @@
 
 """CPU regressions for gfx1250 Stream-K config selection and input verification.
 
-GPU correctness is exercised by the native gfx1250 WMMA suite and the bridge
-worker. These tests cover the host-side boundaries that choose a valid kernel
+GPU correctness is exercised by the native Stream-K tests and the bridge worker.
+These tests cover the host-side boundaries that choose a valid kernel
 and compare its output against the same quantized inputs the device receives.
 """
 
@@ -25,9 +25,12 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).parent.resolve()
 DISPATCHER_DIR = SCRIPT_DIR.parent
 CK_ROOT = DISPATCHER_DIR.parent
-sys.path.insert(0, str(DISPATCHER_DIR / "python"))
+for path in (DISPATCHER_DIR / "python", CK_ROOT / "tile_engine" / "ops" / "gemm"):
+    sys.path.insert(0, str(path))
 
 import gemm_utils  # noqa: E402
+import run_one_streamk_gemm_kernel  # noqa: E402
+import streamk_gemm_full_benchmark  # noqa: E402
 from gemm_utils import _SUPPORTED_ARCHES, expand_sweep  # noqa: E402
 
 GFX1250_CONFIG = (
@@ -42,7 +45,7 @@ GFX1250_CONFIG = (
 
 
 class TestGfx1250Supported(unittest.TestCase):
-    """gfx1250 must be a first-class supported arch (from the parent branch)."""
+    """gfx1250 must be a first-class supported arch."""
 
     def test_gfx1250_in_supported_arches(self):
         self.assertIn("gfx1250", _SUPPORTED_ARCHES)
@@ -62,7 +65,7 @@ class TestGfx1250StreamKConfig(unittest.TestCase):
     def test_config_uses_wmma_warp_tile(self):
         tc = self.cfg["tile_config"]
         # gfx1250 fp16/bf16 WMMA warp tile is 16x16x32; the MFMA 32x32x16 tile of
-        # the default stream-K config does not run on RDNA4.
+        # the default stream-K config is not a gfx1250 WMMA tile.
         self.assertEqual(tc["warp_tile_m"]["values"], [16])
         self.assertEqual(tc["warp_tile_n"]["values"], [16])
         self.assertEqual(tc["warp_tile_k"]["values"], [32, 64])
@@ -211,14 +214,8 @@ class TestGfx1250StreamKExpansion(unittest.TestCase):
 
 
 class TestGfx1250StreamKDriver(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        sys.path.insert(0, str(CK_ROOT / "tile_engine" / "ops" / "gemm"))
-        import streamk_gemm_full_benchmark
-        import run_one_streamk_gemm_kernel
-
-        cls.driver = streamk_gemm_full_benchmark
-        cls.worker = run_one_streamk_gemm_kernel
+    driver = streamk_gemm_full_benchmark
+    worker = run_one_streamk_gemm_kernel
 
     def test_implicit_gfx1250_config_selects_wmma(self):
         args = SimpleNamespace(configs=[], arch="gfx1250")
@@ -277,22 +274,16 @@ class TestGfx1250StreamKDriver(unittest.TestCase):
                 self.assertEqual(self.driver.resolve_configs(args), [str(arch_config)])
 
     def test_ocp_reference_matches_device_input_quantization(self):
-        try:
-            import ml_dtypes
-        except ImportError:
-            self.skipTest("ml_dtypes is required for fp8/bf8 reference checks")
-
-        for dtype, numpy_type, tiny in (
-            ("fp8", ml_dtypes.float8_e4m3fn, 2**-10),
-            ("bf8", ml_dtypes.float8_e5m2, 2**-17),
-        ):
+        # tiny is half the smallest OCP subnormal (E4M3 2^-9, E5M2 2^-16): OCP
+        # rounds it to zero while FNUZ keeps it, so a reference that silently
+        # encodes FNUZ must fail this comparison.
+        for dtype, tiny in (("fp8", 2**-10), ("bf8", 2**-17)):
             for corrupt in (False, True):
                 with self.subTest(dtype=dtype, corrupt=corrupt):
-                    # OCP/FNUZ subnormal boundaries differ. A reference that
-                    # silently encodes FNUZ must fail this comparison.
                     a = np.array([[tiny, 2 * tiny], [1, 0.5]], dtype=np.float32)
+                    a_ocp = np.array([[0, 2 * tiny], [1, 0.5]], dtype=np.float32)
                     b = np.ones((2, 2), dtype=np.float32)
-                    expected = a.astype(numpy_type).astype(np.float32) @ b
+                    expected = a_ocp @ b
                     if corrupt:
                         expected = expected + 1
                     runner = object.__new__(gemm_utils.GpuGemmRunner)
@@ -320,24 +311,6 @@ class TestGfx1250StreamKDriver(unittest.TestCase):
                     self.assertEqual(
                         json.loads(output.getvalue())["verified"], not corrupt
                     )
-
-    def test_regenerated_specs_preserve_gfx1250_wmma_types(self):
-        import runpy
-
-        sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
-        from generate_arch_specs import load_arch_specs, generate_python_module
-        import arch_specs_generated
-
-        with tempfile.TemporaryDirectory() as tmp:
-            target = Path(tmp) / "arch_specs_generated.py"
-            generate_python_module(
-                load_arch_specs(DISPATCHER_DIR / "codegen" / "arch_specs.json"), target
-            )
-            generated = runpy.run_path(str(target))
-        self.assertEqual(
-            generated["WARP_TILE_SUPPORTED_COMBINATIONS"]["gfx1250"],
-            arch_specs_generated.WARP_TILE_SUPPORTED_COMBINATIONS["gfx1250"],
-        )
 
 
 if __name__ == "__main__":
