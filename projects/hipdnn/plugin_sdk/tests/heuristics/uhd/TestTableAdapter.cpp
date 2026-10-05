@@ -49,10 +49,9 @@ public:
         return *this;
     }
 
-    TableModelBuilder&
-        addEntry(std::vector<uint32_t> bucketKey, int64_t kernelId, double score = 1.0)
+    TableModelBuilder& addEntry(std::vector<uint32_t> bucketKey, double score)
     {
-        _entries.push_back({std::move(bucketKey), kernelId, score});
+        _entries.push_back({std::move(bucketKey), score});
         return *this;
     }
 
@@ -78,8 +77,7 @@ public:
         for(const auto& entry : _entries)
         {
             auto bucketKey = builder.CreateVector(entry.bucketKey);
-            entryOffsets.push_back(
-                fb::CreateTableEntry(builder, bucketKey, entry.kernelId, entry.score));
+            entryOffsets.push_back(fb::CreateTableEntry(builder, bucketKey, entry.score));
         }
 
         std::vector<flatbuffers::Offset<flatbuffers::String>> archOffsets;
@@ -111,7 +109,6 @@ private:
     struct Entry
     {
         std::vector<uint32_t> bucketKey;
-        int64_t kernelId;
         double score;
     };
 
@@ -135,8 +132,8 @@ TEST_F(TestTableAdapter, LoadFromBufferBasic)
                       .setFeaturesHash(TEST_HASH)
                       .addBucket(0, {5.0}) // Feature 0: buckets [0-5), [5+)
                       .addBucket(1, {10.0}) // Feature 1: buckets [0-10), [10+)
-                      .addEntry({0, 0}, 100, 1.0) // Bucket (0,0) -> kernel 100, score 1.0
-                      .addEntry({1, 1}, 200, 2.0) // Bucket (1,1) -> kernel 200, score 2.0
+                      .addEntry({0, 0}, 1.0) // Bucket (0,0) -> score 1.0
+                      .addEntry({1, 1}, 2.0) // Bucket (1,1) -> score 2.0
                       .build();
 
     auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
@@ -152,8 +149,8 @@ TEST_F(TestTableAdapter, ScoreExactMatch)
                       .setFeaturesHash(TEST_HASH)
                       .addBucket(0, {5.0})
                       .addBucket(1, {10.0})
-                      .addEntry({0, 0}, 100, 1.5)
-                      .addEntry({1, 1}, 200, 3.5)
+                      .addEntry({0, 0}, 1.5)
+                      .addEntry({1, 1}, 3.5)
                       .build();
 
     auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
@@ -173,7 +170,7 @@ TEST_F(TestTableAdapter, ScoreFallbackNoMatch)
                       .setFeaturesHash(TEST_HASH)
                       .addBucket(0, {5.0})
                       .addBucket(1, {10.0})
-                      .addEntry({0, 0}, 100, 1.0)
+                      .addEntry({0, 0}, 1.0)
                       .build();
 
     auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
@@ -189,7 +186,7 @@ TEST_F(TestTableAdapter, FeaturesHashMismatch)
                       .setNumFeatures(2)
                       .setFeaturesHash("sha256:wrong_hash")
                       .addBucket(0, {5.0})
-                      .addEntry({0}, 100, 1.0)
+                      .addEntry({0}, 1.0)
                       .build();
 
     auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
@@ -206,7 +203,7 @@ TEST_F(TestTableAdapter, TheFeaturesHashCheckReportsAnError)
                       .setNumFeatures(2)
                       .setFeaturesHash("sha256:wrong_hash")
                       .addBucket(0, {5.0})
-                      .addEntry({0}, 100, 1.0)
+                      .addEntry({0}, 1.0)
                       .build();
 
     EXPECT_EQ(TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH), nullptr);
@@ -221,7 +218,7 @@ TEST_F(TestTableAdapter, TrainingArchDetection)
                       .setNumFeatures(1)
                       .setFeaturesHash(TEST_HASH)
                       .addBucket(0, {5.0})
-                      .addEntry({0}, 100, 1.0)
+                      .addEntry({0}, 1.0)
                       .setTrainingArches({"gfx942", "gfx950"})
                       .build();
 
@@ -244,8 +241,8 @@ TEST_F(TestTableAdapter, MultipleBuckets)
                       .addBucket(0, {2.0, 4.0}) // Feature 0: [<2), [2-4), [>=4)
                       .addBucket(1, {8.0, 16.0}) // Feature 1: [<8), [8-16), [>=16)
                       .addBucket(2, {1.0, 10.0}) // Feature 2: [<1), [1-10), [>=10)
-                      .addEntry({0, 0, 1}, 111, 10.0) // Low, low, mid -> kernel 111
-                      .addEntry({2, 2, 2}, 222, 20.0) // High, high, high -> kernel 222
+                      .addEntry({0, 0, 1}, 10.0) // Low, low, mid
+                      .addEntry({2, 2, 2}, 20.0) // High, high, high
                       .build();
 
     auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
@@ -262,6 +259,101 @@ TEST_F(TestTableAdapter, MultipleBuckets)
 
     // {3.0, 9.0, 2.0} -> buckets {1, 1, 1} -> no entry, declined
     EXPECT_EQ(adapter->score({3.0, 9.0, 2.0}), -std::numeric_limits<double>::infinity());
+}
+
+/// The convention table_model.fbs documents: a value's bucket is the number of boundaries
+/// <= it, so N boundaries give N+1 buckets and a value on a boundary moves up.
+TEST_F(TestTableAdapter, ABucketIsTheNumberOfBoundariesAtOrBelowTheValue)
+{
+    auto buffer = TableModelBuilder()
+                      .setNumFeatures(1)
+                      .setFeaturesHash(TEST_HASH)
+                      .addBucket(0, {10.0, 20.0, 30.0})
+                      .addEntry({0}, 100.0)
+                      .addEntry({1}, 101.0)
+                      .addEntry({2}, 102.0)
+                      .addEntry({3}, 103.0)
+                      .build();
+
+    auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    ASSERT_NE(adapter, nullptr);
+
+    EXPECT_DOUBLE_EQ(adapter->score({5.0}), 100.0);
+    EXPECT_DOUBLE_EQ(adapter->score({10.0}), 101.0);
+    EXPECT_DOUBLE_EQ(adapter->score({15.0}), 101.0);
+    EXPECT_DOUBLE_EQ(adapter->score({25.0}), 102.0);
+    EXPECT_DOUBLE_EQ(adapter->score({30.0}), 103.0);
+    EXPECT_DOUBLE_EQ(adapter->score({1e9}), 103.0);
+}
+
+/// A model the verifier accepts but whose lookups could only miss or answer arbitrarily is
+/// refused at load, with an ERROR, rather than declining every candidate in silence.
+TEST_F(TestTableAdapter, AModelWhoseTableCannotBeIndexedIsRefused)
+{
+    const auto valid = []() {
+        TableModelBuilder builder;
+        builder.setNumFeatures(2).setFeaturesHash(TEST_HASH).addBucket(0, {5.0, 10.0});
+        return builder;
+    };
+
+    struct Case
+    {
+        const char* name;
+        TableModelBuilder builder;
+    };
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    std::vector<Case> cases;
+    cases.push_back(
+        {"no buckets",
+         TableModelBuilder().setNumFeatures(2).setFeaturesHash(TEST_HASH).addEntry({}, 1.0)});
+    cases.push_back({"feature index past num_features",
+                     TableModelBuilder()
+                         .setNumFeatures(2)
+                         .setFeaturesHash(TEST_HASH)
+                         .addBucket(2, {5.0})
+                         .addEntry({0}, 1.0)});
+    cases.push_back({"descending boundaries",
+                     TableModelBuilder()
+                         .setNumFeatures(2)
+                         .setFeaturesHash(TEST_HASH)
+                         .addBucket(0, {10.0, 5.0})
+                         .addEntry({0}, 1.0)});
+    cases.push_back({"repeated boundary",
+                     TableModelBuilder()
+                         .setNumFeatures(2)
+                         .setFeaturesHash(TEST_HASH)
+                         .addBucket(0, {5.0, 5.0})
+                         .addEntry({0}, 1.0)});
+    cases.push_back({"NaN boundary",
+                     TableModelBuilder()
+                         .setNumFeatures(2)
+                         .setFeaturesHash(TEST_HASH)
+                         .addBucket(0, {nan})
+                         .addEntry({0}, 1.0)});
+    cases.push_back({"key with too few indices", valid().addBucket(1, {1.0}).addEntry({0}, 1.0)});
+    cases.push_back({"key with too many indices", valid().addEntry({0, 0}, 1.0)});
+    cases.push_back({"key past the last bucket", valid().addEntry({3}, 1.0)});
+    cases.push_back({"repeated key", valid().addEntry({1}, 1.0).addEntry({1}, 2.0)});
+    cases.push_back({"infinite score", valid().addEntry({1}, inf)});
+    cases.push_back({"NaN score", valid().addEntry({1}, nan)});
+
+    // The control: the shared base loads, so each case fails for its own reason.
+    {
+        auto buffer = valid().addEntry({2}, 1.0).build();
+        ASSERT_NE(TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH), nullptr);
+    }
+
+    for(auto& testCase : cases)
+    {
+        SCOPED_TRACE(testCase.name);
+        auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+        auto buffer = testCase.builder.build();
+        EXPECT_EQ(TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH), nullptr);
+        EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U)
+            << recorder.getRecordedLogsAsString();
+    }
 }
 
 TEST_F(TestTableAdapter, LoadFromBufferNullBuffer)

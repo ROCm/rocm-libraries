@@ -10,32 +10,29 @@ table FeatureBucket {
     /// Feature index in the feature vector
     feature_index:uint32;
 
-    /// Bucket boundaries (sorted ascending). A value v falls in bucket i when
-    /// boundaries[i] <= v < boundaries[i+1]. Values below boundaries[0] map to
-    /// bucket 0; values >= boundaries[last] map to the last bucket.
+    /// Bucket boundaries: finite and strictly ascending. A value's bucket is the
+    /// number of boundaries <= it, so N boundaries give N+1 buckets, numbered
+    /// 0..N: with [10, 20, 30], 5 -> 0, 10 -> 1, 25 -> 2, 30 -> 3. No boundaries
+    /// means one bucket, 0.
     boundaries:[double];
 }
 
-/// Single table entry mapping a feature-bucket key to a kernel recommendation.
+/// The score for one combination of buckets.
 table TableEntry {
-    /// Bucket indices for each bucketed feature (parallel to TableModel.buckets).
-    /// Length must match TableModel.buckets.size(). Each value is the bucket
-    /// index within that feature's boundaries array.
+    /// One bucket index per TableModel.buckets entry, in that order, each within
+    /// that bucket's 0..boundaries.size(). Keys must be unique within a model.
     bucket_key:[uint32];
 
-    /// Recommended kernel ID for this bucket combination
-    kernel_id:int64;
-
-    /// Optional score/priority for this recommendation (higher is better).
-    /// If not provided, entries are assumed equally good within their bucket.
+    /// The model's prediction for every candidate whose features fall in this
+    /// combination; finite. The UHD's objective orients it like any adapter's
+    /// score. Bucket a `$kernel.*` feature to score kernels differently.
     score:double = 0.0;
 }
 
 /// Table-based heuristic model (RFC 0019 §7 "table" adapter).
 ///
-/// Maps coarse problem buckets to kernel recommendations. Features are quantized
-/// into discrete buckets, then looked up in the table. Falls back to priority
-/// ordering when no exact bucket match exists.
+/// Features are quantized into buckets and the bucket combination is looked up.
+/// A combination with no entry declines (scores -infinity), so it ranks last.
 table TableModel {
     /// Number of features expected in the input vector
     num_features:uint32;
@@ -44,13 +41,11 @@ table TableModel {
     /// Must match the UHD's features_hash for the model to load.
     features_hash:string;
 
-    /// Bucket definitions for quantizing continuous features.
-    /// Only features that participate in bucketing are listed here.
-    /// Non-bucketed features are ignored during lookup.
+    /// Bucket definitions, at least one. Features not listed here do not take
+    /// part in the lookup.
     buckets:[FeatureBucket];
 
-    /// Lookup table entries mapping bucket combinations to kernel IDs.
-    /// Each entry's bucket_key length must match buckets.size().
+    /// Lookup table entries, keyed by bucket_key.
     entries:[TableEntry];
 
     /// GPU architectures this model was trained/benchmarked on (e.g. ["gfx942", "gfx950"]).

@@ -8,6 +8,7 @@
 #include "IUhdAdapter.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <functional>
@@ -83,14 +84,24 @@ public:
     bool isTrainedForArch(const std::string& arch) const override;
 
 private:
+    using LookupTable = std::unordered_map<std::vector<uint32_t>, double, VectorHash>;
+
     TableAdapter(std::vector<uint8_t> ownedBuffer,
                  const hipdnn_flatbuffers_sdk::data_objects::TableModel* model,
                  std::string featuresHash,
                  size_t numFeatures,
-                 std::vector<std::string> trainingArches);
+                 std::vector<std::string> trainingArches,
+                 LookupTable lookupTable);
 
-    /// @returns Bucket index in [0, boundaries.size()]; @p boundaries must be sorted.
-    static uint32_t quantize(double value, const std::vector<double>& boundaries);
+    /// Checks what the verifier cannot (table_model.fbs) and indexes the entries.
+    /// @returns Why @p model is unusable, or empty with @p table filled.
+    static std::string
+        buildLookupTable(const hipdnn_flatbuffers_sdk::data_objects::TableModel& model,
+                         size_t numFeatures,
+                         LookupTable& table);
+
+    /// @returns The number of @p boundaries <= @p value, in [0, boundaries.size()].
+    static uint32_t quantize(double value, const flatbuffers::Vector<double>* boundaries);
 
     /// @returns One bucket index per bucketed feature, or empty if bucketing fails.
     std::vector<uint32_t> buildBucketKey(const std::vector<double>& features) const;
@@ -101,8 +112,8 @@ private:
     size_t _numFeatures;
     std::vector<std::string> _trainingArches;
 
-    /// bucket_key -> score, built from the model's entries at construction.
-    std::unordered_map<std::vector<uint32_t>, double, VectorHash> _lookupTable;
+    /// bucket_key -> score.
+    LookupTable _lookupTable;
 };
 
 namespace fb = hipdnn_flatbuffers_sdk::data_objects;
@@ -216,56 +227,137 @@ inline std::unique_ptr<TableAdapter>
         }
     }
 
+    LookupTable lookupTable;
+    const auto reason = buildLookupTable(*model, numFeatures, lookupTable);
+    if(!reason.empty())
+    {
+        HIPDNN_SDK_LOG_ERROR("TableAdapter: " << reason
+                                              << "; the model is not used -- ranking degrades to "
+                                                 "static_order and an engine estimate is reported "
+                                                 "as 0");
+        return nullptr;
+    }
+
     std::vector<uint8_t> ownedBuffer(buffer, buffer + size);
 
     // Evaluate GetTableModel BEFORE moving ownedBuffer
     const fb::TableModel* modelPtr = fb::GetTableModel(ownedBuffer.data());
-    return std::unique_ptr<TableAdapter>(new TableAdapter(
-        std::move(ownedBuffer), modelPtr, modelHash, numFeatures, std::move(trainingArches)));
+    return std::unique_ptr<TableAdapter>(new TableAdapter(std::move(ownedBuffer),
+                                                          modelPtr,
+                                                          modelHash,
+                                                          numFeatures,
+                                                          std::move(trainingArches),
+                                                          std::move(lookupTable)));
 }
 
 inline TableAdapter::TableAdapter(std::vector<uint8_t> ownedBuffer,
                                   const fb::TableModel* model,
                                   std::string featuresHash,
                                   size_t numFeatures,
-                                  std::vector<std::string> trainingArches)
+                                  std::vector<std::string> trainingArches,
+                                  LookupTable lookupTable)
     : _ownedBuffer(std::move(ownedBuffer))
     , _model(model)
     , _featuresHash(std::move(featuresHash))
     , _numFeatures(numFeatures)
     , _trainingArches(std::move(trainingArches))
+    , _lookupTable(std::move(lookupTable))
 {
-    if(_model->entries() != nullptr)
-    {
-        for(const auto* entry : *_model->entries())
-        {
-            if(entry == nullptr || entry->bucket_key() == nullptr)
-            {
-                continue;
-            }
-
-            std::vector<uint32_t> key;
-            key.reserve(entry->bucket_key()->size());
-            for(auto val : *entry->bucket_key())
-            {
-                key.push_back(val);
-            }
-
-            _lookupTable.emplace(std::move(key), entry->score());
-        }
-    }
 }
 
-inline uint32_t TableAdapter::quantize(double value, const std::vector<double>& boundaries)
+inline std::string TableAdapter::buildLookupTable(const fb::TableModel& model,
+                                                  size_t numFeatures,
+                                                  LookupTable& table)
 {
-    if(boundaries.empty())
+    const auto* buckets = model.buckets();
+    if(buckets == nullptr || buckets->empty())
+    {
+        return "the model defines no buckets";
+    }
+
+    // Bucket i's indices run 0..bucketCounts[i]-1.
+    std::vector<size_t> bucketCounts;
+    bucketCounts.reserve(buckets->size());
+    for(flatbuffers::uoffset_t i = 0; i < buckets->size(); ++i)
+    {
+        const auto* bucket = buckets->Get(i);
+        if(bucket == nullptr)
+        {
+            return "bucket " + std::to_string(i) + " is missing";
+        }
+        if(bucket->feature_index() >= numFeatures)
+        {
+            return "bucket " + std::to_string(i) + " reads feature "
+                   + std::to_string(bucket->feature_index()) + " of a model with "
+                   + std::to_string(numFeatures);
+        }
+
+        const auto* boundaries = bucket->boundaries();
+        const size_t boundaryCount = boundaries != nullptr ? boundaries->size() : 0;
+        for(size_t b = 0; b < boundaryCount; ++b)
+        {
+            const double boundary = boundaries->Get(static_cast<flatbuffers::uoffset_t>(b));
+            if(!std::isfinite(boundary)
+               || (b > 0
+                   && !(boundaries->Get(static_cast<flatbuffers::uoffset_t>(b - 1)) < boundary)))
+            {
+                return "bucket " + std::to_string(i)
+                       + "'s boundaries are not finite and strictly ascending";
+            }
+        }
+        bucketCounts.push_back(boundaryCount + 1);
+    }
+
+    if(model.entries() == nullptr)
+    {
+        return {};
+    }
+
+    table.reserve(model.entries()->size());
+    for(flatbuffers::uoffset_t e = 0; e < model.entries()->size(); ++e)
+    {
+        const auto* entry = model.entries()->Get(e);
+        const auto* bucketKey = entry != nullptr ? entry->bucket_key() : nullptr;
+        if(bucketKey == nullptr || bucketKey->size() != bucketCounts.size())
+        {
+            return "entry " + std::to_string(e)
+                   + "'s bucket_key does not have one index per bucket";
+        }
+
+        std::vector<uint32_t> key(bucketKey->begin(), bucketKey->end());
+        for(size_t i = 0; i < key.size(); ++i)
+        {
+            if(key[i] >= bucketCounts[i])
+            {
+                return "entry " + std::to_string(e) + "'s bucket_key names bucket "
+                       + std::to_string(key[i]) + " of bucket " + std::to_string(i) + ", which has "
+                       + std::to_string(bucketCounts[i]);
+            }
+        }
+
+        if(!std::isfinite(entry->score()))
+        {
+            return "entry " + std::to_string(e) + "'s score is not finite";
+        }
+
+        if(!table.emplace(std::move(key), entry->score()).second)
+        {
+            return "entry " + std::to_string(e) + " repeats an earlier entry's bucket_key";
+        }
+    }
+
+    return {};
+}
+
+inline uint32_t TableAdapter::quantize(double value, const flatbuffers::Vector<double>* boundaries)
+{
+    if(boundaries == nullptr)
     {
         return 0;
     }
 
-    auto it = std::upper_bound(boundaries.begin(), boundaries.end(), value);
-
-    return static_cast<uint32_t>(std::distance(boundaries.begin(), it));
+    const auto it = std::upper_bound(boundaries->begin(), boundaries->end(), value);
+    return static_cast<uint32_t>(it - boundaries->begin());
 }
 
 inline std::vector<uint32_t> TableAdapter::buildBucketKey(const std::vector<double>& features) const
@@ -291,17 +383,7 @@ inline std::vector<uint32_t> TableAdapter::buildBucketKey(const std::vector<doub
             return {}; // Feature index out of range
         }
 
-        std::vector<double> boundaries;
-        if(bucket->boundaries() != nullptr)
-        {
-            boundaries.reserve(bucket->boundaries()->size());
-            for(auto boundary : *bucket->boundaries())
-            {
-                boundaries.push_back(boundary);
-            }
-        }
-
-        const uint32_t bucketIdx = quantize(features[featureIdx], boundaries);
+        const uint32_t bucketIdx = quantize(features[featureIdx], bucket->boundaries());
         key.push_back(bucketIdx);
     }
 

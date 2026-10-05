@@ -19,6 +19,7 @@
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "../../TestResourcePaths.hpp"
 #include "../KernelIngestorTestFixtures.hpp"
 
 /**
@@ -32,11 +33,10 @@ namespace hipdnn_plugin_sdk::ingestor
 namespace
 {
 
-/// Where the committed `uhd_gen` output lives. A compile definition rather than a runtime
-/// search, so a missing fixture fails instead of skipping.
+/// Where the committed `uhd_gen` output is staged. A missing fixture fails rather than skips.
 std::filesystem::path fixtureDir()
 {
-    return {HIPDNN_UHD_GENERATED_FIXTURE_DIR};
+    return hipdnn_plugin_sdk::test::uhdGeneratedFixtureDir();
 }
 
 /// The committed `tile_selector.uhd.json`, parsed by the loader rather than retyped, so the

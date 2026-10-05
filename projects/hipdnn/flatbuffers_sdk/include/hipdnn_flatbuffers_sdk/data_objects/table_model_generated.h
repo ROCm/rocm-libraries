@@ -56,9 +56,10 @@ struct FeatureBucket FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   bool mutate_feature_index(uint32_t _feature_index = 0) {
     return SetField<uint32_t>(VT_FEATURE_INDEX, _feature_index, 0);
   }
-  /// Bucket boundaries (sorted ascending). A value v falls in bucket i when
-  /// boundaries[i] <= v < boundaries[i+1]. Values below boundaries[0] map to
-  /// bucket 0; values >= boundaries[last] map to the last bucket.
+  /// Bucket boundaries: finite and strictly ascending. A value's bucket is the
+  /// number of boundaries <= it, so N boundaries give N+1 buckets, numbered
+  /// 0..N: with [10, 20, 30], 5 -> 0, 10 -> 1, 25 -> 2, 30 -> 3. No boundaries
+  /// means one bucket, 0.
   const ::flatbuffers::Vector<double> *boundaries() const {
     return GetPointer<const ::flatbuffers::Vector<double> *>(VT_BOUNDARIES);
   }
@@ -124,37 +125,28 @@ inline ::flatbuffers::Offset<FeatureBucket> CreateFeatureBucketDirect(
 struct TableEntryT : public ::flatbuffers::NativeTable {
   typedef TableEntry TableType;
   std::vector<uint32_t> bucket_key{};
-  int64_t kernel_id = 0;
   double score = 0.0;
 };
 
-/// Single table entry mapping a feature-bucket key to a kernel recommendation.
+/// The score for one combination of buckets.
 struct TableEntry FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef TableEntryT NativeTableType;
   typedef TableEntryBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_BUCKET_KEY = 4,
-    VT_KERNEL_ID = 6,
-    VT_SCORE = 8
+    VT_SCORE = 6
   };
-  /// Bucket indices for each bucketed feature (parallel to TableModel.buckets).
-  /// Length must match TableModel.buckets.size(). Each value is the bucket
-  /// index within that feature's boundaries array.
+  /// One bucket index per TableModel.buckets entry, in that order, each within
+  /// that bucket's 0..boundaries.size(). Keys must be unique within a model.
   const ::flatbuffers::Vector<uint32_t> *bucket_key() const {
     return GetPointer<const ::flatbuffers::Vector<uint32_t> *>(VT_BUCKET_KEY);
   }
   ::flatbuffers::Vector<uint32_t> *mutable_bucket_key() {
     return GetPointer<::flatbuffers::Vector<uint32_t> *>(VT_BUCKET_KEY);
   }
-  /// Recommended kernel ID for this bucket combination
-  int64_t kernel_id() const {
-    return GetField<int64_t>(VT_KERNEL_ID, 0);
-  }
-  bool mutate_kernel_id(int64_t _kernel_id = 0) {
-    return SetField<int64_t>(VT_KERNEL_ID, _kernel_id, 0);
-  }
-  /// Optional score/priority for this recommendation (higher is better).
-  /// If not provided, entries are assumed equally good within their bucket.
+  /// The model's prediction for every candidate whose features fall in this
+  /// combination; finite. The UHD's objective orients it like any adapter's
+  /// score. Bucket a `$kernel.*` feature to score kernels differently.
   double score() const {
     return GetField<double>(VT_SCORE, 0.0);
   }
@@ -165,7 +157,6 @@ struct TableEntry FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_BUCKET_KEY) &&
            verifier.VerifyVector(bucket_key()) &&
-           VerifyField<int64_t>(verifier, VT_KERNEL_ID, 8) &&
            VerifyField<double>(verifier, VT_SCORE, 8) &&
            verifier.EndTable();
   }
@@ -180,9 +171,6 @@ struct TableEntryBuilder {
   ::flatbuffers::uoffset_t start_;
   void add_bucket_key(::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> bucket_key) {
     fbb_.AddOffset(TableEntry::VT_BUCKET_KEY, bucket_key);
-  }
-  void add_kernel_id(int64_t kernel_id) {
-    fbb_.AddElement<int64_t>(TableEntry::VT_KERNEL_ID, kernel_id, 0);
   }
   void add_score(double score) {
     fbb_.AddElement<double>(TableEntry::VT_SCORE, score, 0.0);
@@ -201,11 +189,9 @@ struct TableEntryBuilder {
 inline ::flatbuffers::Offset<TableEntry> CreateTableEntry(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     ::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> bucket_key = 0,
-    int64_t kernel_id = 0,
     double score = 0.0) {
   TableEntryBuilder builder_(_fbb);
   builder_.add_score(score);
-  builder_.add_kernel_id(kernel_id);
   builder_.add_bucket_key(bucket_key);
   return builder_.Finish();
 }
@@ -213,13 +199,11 @@ inline ::flatbuffers::Offset<TableEntry> CreateTableEntry(
 inline ::flatbuffers::Offset<TableEntry> CreateTableEntryDirect(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     const std::vector<uint32_t> *bucket_key = nullptr,
-    int64_t kernel_id = 0,
     double score = 0.0) {
   auto bucket_key__ = bucket_key ? _fbb.CreateVector<uint32_t>(*bucket_key) : 0;
   return hipdnn_flatbuffers_sdk::data_objects::CreateTableEntry(
       _fbb,
       bucket_key__,
-      kernel_id,
       score);
 }
 
@@ -241,9 +225,8 @@ struct TableModelT : public ::flatbuffers::NativeTable {
 
 /// Table-based heuristic model (RFC 0019 §7 "table" adapter).
 ///
-/// Maps coarse problem buckets to kernel recommendations. Features are quantized
-/// into discrete buckets, then looked up in the table. Falls back to priority
-/// ordering when no exact bucket match exists.
+/// Features are quantized into buckets and the bucket combination is looked up.
+/// A combination with no entry declines (scores -infinity), so it ranks last.
 struct TableModel FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef TableModelT NativeTableType;
   typedef TableModelBuilder Builder;
@@ -270,17 +253,15 @@ struct TableModel FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   ::flatbuffers::String *mutable_features_hash() {
     return GetPointer<::flatbuffers::String *>(VT_FEATURES_HASH);
   }
-  /// Bucket definitions for quantizing continuous features.
-  /// Only features that participate in bucketing are listed here.
-  /// Non-bucketed features are ignored during lookup.
+  /// Bucket definitions, at least one. Features not listed here do not take
+  /// part in the lookup.
   const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::FeatureBucket>> *buckets() const {
     return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::FeatureBucket>> *>(VT_BUCKETS);
   }
   ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::FeatureBucket>> *mutable_buckets() {
     return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::FeatureBucket>> *>(VT_BUCKETS);
   }
-  /// Lookup table entries mapping bucket combinations to kernel IDs.
-  /// Each entry's bucket_key length must match buckets.size().
+  /// Lookup table entries, keyed by bucket_key.
   const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TableEntry>> *entries() const {
     return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TableEntry>> *>(VT_ENTRIES);
   }
@@ -446,7 +427,6 @@ inline ::flatbuffers::Offset<FeatureBucket> CreateFeatureBucket(::flatbuffers::F
 inline bool operator==(const TableEntryT &lhs, const TableEntryT &rhs) {
   return
       (lhs.bucket_key == rhs.bucket_key) &&
-      (lhs.kernel_id == rhs.kernel_id) &&
       (lhs.score == rhs.score);
 }
 
@@ -465,7 +445,6 @@ inline void TableEntry::UnPackTo(TableEntryT *_o, const ::flatbuffers::resolver_
   (void)_o;
   (void)_resolver;
   { auto _e = bucket_key(); if (_e) { _o->bucket_key.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->bucket_key[_i] = _e->Get(_i); } } else { _o->bucket_key.resize(0); } }
-  { auto _e = kernel_id(); _o->kernel_id = _e; }
   { auto _e = score(); _o->score = _e; }
 }
 
@@ -478,12 +457,10 @@ inline ::flatbuffers::Offset<TableEntry> CreateTableEntry(::flatbuffers::FlatBuf
   (void)_o;
   struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const TableEntryT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
   auto _bucket_key = _o->bucket_key.size() ? _fbb.CreateVector(_o->bucket_key) : 0;
-  auto _kernel_id = _o->kernel_id;
   auto _score = _o->score;
   return hipdnn_flatbuffers_sdk::data_objects::CreateTableEntry(
       _fbb,
       _bucket_key,
-      _kernel_id,
       _score);
 }
 

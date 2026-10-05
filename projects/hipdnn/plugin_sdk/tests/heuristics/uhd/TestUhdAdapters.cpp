@@ -7,8 +7,9 @@
 #include <hipdnn_plugin_sdk/heuristics/uhd/UhdConfig.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/NativeAdapter.hpp>
 
-#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+
+#include "../../TestResourcePaths.hpp"
 
 #include <gtest/gtest.h>
 
@@ -95,9 +96,7 @@ TEST(TestIngestorUhdAdapters, TheFactoryDeclinesANativeKindWithNoSymbol)
 /// The scorer library TestCustomLibraryAdapter dlopen's, as an absolute path.
 std::string testScorerLibrary()
 {
-    return (std::filesystem::path(HIPDNN_TEST_PLUGIN_DIR)
-            / hipdnn_data_sdk::utilities::getLibraryName("hipdnn_test_scorer_lib"))
-        .string();
+    return hipdnn_plugin_sdk::test::testScorerLibrary().string();
 }
 
 /// The SHA-256 of @p path's bytes. Computed rather than pinned because the library's bytes
@@ -149,7 +148,7 @@ std::string writeTableModel(const std::filesystem::path& path)
     const std::vector<flatbuffers::Offset<fb::FeatureBucket>> buckets
         = {fb::CreateFeatureBucket(builder, 0, builder.CreateVector(boundaries))};
     const std::vector<flatbuffers::Offset<fb::TableEntry>> entries
-        = {fb::CreateTableEntry(builder, builder.CreateVector(key), 100, 1.0)};
+        = {fb::CreateTableEntry(builder, builder.CreateVector(key), 1.0)};
     const auto model = fb::CreateTableModel(builder,
                                             1,
                                             builder.CreateString(FEATURES_HASH),

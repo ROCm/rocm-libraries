@@ -165,6 +165,12 @@ set(HIPDNN_TEST_PLUGIN_DIR "${CMAKE_BINARY_DIR}/${HIPDNN_PLUGIN_ROOTDIR}/test_pl
 set(HIPDNN_TEST_PLUGIN_INSTALL_DIR "${HIPDNN_PLUGIN_ROOTDIR}/test_plugins"
     CACHE INTERNAL "Install directory for test plugins"
 )
+# The test plugin directory seen from a test binary. Build and install trees share this
+# offset, so a test that resolves it from its own binary reads the copy beside whichever
+# tree it runs from, as TheRock's artifact-only runners require.
+file(RELATIVE_PATH HIPDNN_TEST_PLUGIN_RELDIR "/${CMAKE_INSTALL_BINDIR}"
+     "/${HIPDNN_TEST_PLUGIN_INSTALL_DIR}"
+)
 
 # Migrate HIP_DNN_BUILD_BACKEND -> HIPDNN_BUILD_BACKEND
 if(DEFINED HIP_DNN_BUILD_BACKEND)

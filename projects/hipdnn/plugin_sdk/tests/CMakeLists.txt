@@ -91,14 +91,11 @@ add_executable(hipdnn_plugin_sdk_tests
 
 target_compile_options(hipdnn_plugin_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
 
-# Passed as a definition, not searched for at run time, so a missing fixture fails
-# instead of skipping.
-target_compile_definitions(
-    hipdnn_plugin_sdk_tests
-    PRIVATE HIPDNN_UHD_GENERATED_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/ingestor/uhd/fixtures"
-)
-# Loaded by TestCustomLibraryAdapter via dlopen from HIPDNN_TEST_PLUGIN_DIR.
+# Test resources are found from the test binary (TestResourcePaths.hpp): the build and
+# install trees keep them at the same offset from it, and TheRock runs the installed
+# binary on a runner that has neither the build nor the source tree.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    # Loaded by the custom_library adapter tests.
     add_library(hipdnn_test_scorer_lib SHARED heuristics/uhd/test_scorer_lib.cpp)
     set_target_properties(hipdnn_test_scorer_lib PROPERTIES CXX_VISIBILITY_PRESET hidden)
     target_compile_options(hipdnn_test_scorer_lib PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
@@ -117,8 +114,46 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
     )
 
+    # The committed uhd_gen output TestUhdGeneratedModel loads. Only what the runtime reads;
+    # the training inputs beside it stay in the source tree. Staged under the test plugin
+    # directory so it ships in the same artifact component as the scorer library.
+    set(_uhd_fixture_subdir "uhd_generated_fixtures")
+    set(_uhd_fixture_files
+        tile_selector.uhd.json
+        model.bin
+        dtype_selector/dtype_selector.uhd.json
+        dtype_selector/model.bin
+    )
+    set(_uhd_fixture_outputs "")
+    foreach(_file IN LISTS _uhd_fixture_files)
+        set(_source "${CMAKE_CURRENT_SOURCE_DIR}/ingestor/uhd/fixtures/${_file}")
+        set(_staged "${HIPDNN_TEST_PLUGIN_DIR}/${_uhd_fixture_subdir}/${_file}")
+        get_filename_component(_staged_dir "${_staged}" DIRECTORY)
+        add_custom_command(
+            OUTPUT "${_staged}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_staged_dir}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_source}" "${_staged}"
+            DEPENDS "${_source}"
+            COMMENT "Staging UHD test fixture ${_file}"
+            VERBATIM
+        )
+        list(APPEND _uhd_fixture_outputs "${_staged}")
+
+        get_filename_component(_subdir "${_file}" DIRECTORY)
+        install(FILES "${_source}"
+                DESTINATION "${HIPDNN_TEST_PLUGIN_INSTALL_DIR}/${_uhd_fixture_subdir}/${_subdir}"
+        )
+    endforeach()
+    add_custom_target(
+        hipdnn_plugin_sdk_test_uhd_fixtures
+        DEPENDS ${_uhd_fixture_outputs}
+        COMMENT "Staging UHD test fixtures beside the test plugins"
+    )
+    add_dependencies(hipdnn_plugin_sdk_tests hipdnn_plugin_sdk_test_uhd_fixtures)
+
     target_compile_definitions(hipdnn_plugin_sdk_tests PRIVATE
-        HIPDNN_TEST_PLUGIN_DIR="${HIPDNN_TEST_PLUGIN_DIR}")
+        HIPDNN_TEST_PLUGIN_RELDIR="${HIPDNN_TEST_PLUGIN_RELDIR}"
+        HIPDNN_UHD_GENERATED_FIXTURE_SUBDIR="${_uhd_fixture_subdir}")
 endif()
 
 target_link_libraries(

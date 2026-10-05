@@ -8,6 +8,8 @@
 
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/CustomLibraryAdapter.hpp>
 
+#include "../../TestResourcePaths.hpp"
+
 #include <gtest/gtest.h>
 
 #include <cstddef>
@@ -22,14 +24,9 @@ namespace
 {
 constexpr const char* TEST_HASH = "sha256:test_hash_12345678";
 
-// The scorer library built from test_scorer_lib.cpp into the test plugin dir.
 std::string getTestScorerLibPath()
 {
-#ifdef _WIN32
-    return std::string(HIPDNN_TEST_PLUGIN_DIR) + "/hipdnn_test_scorer_lib.dll";
-#else
-    return std::string(HIPDNN_TEST_PLUGIN_DIR) + "/libhipdnn_test_scorer_lib.so";
-#endif
+    return hipdnn_plugin_sdk::test::testScorerLibrary().string();
 }
 
 } // namespace

@@ -13,10 +13,11 @@
 #include <string>
 #include <vector>
 
-#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/EnginePredictor.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/GbdtModelTestBuilder.hpp>
+
+#include "../../TestResourcePaths.hpp"
 
 namespace
 {
@@ -158,11 +159,7 @@ TEST_F(TestEnginePredictor, NativeCustomAndTreeRecoverTheSamePhysicalThroughput)
 
     auto custom = native;
     custom.adapterType = "custom_library";
-    custom.modelArtifactPath
-        = std::filesystem::absolute(
-              std::filesystem::path(HIPDNN_TEST_PLUGIN_DIR)
-              / hipdnn_data_sdk::utilities::getLibraryName("hipdnn_test_scorer_lib"))
-              .string();
+    custom.modelArtifactPath = hipdnn_plugin_sdk::test::testScorerLibrary().string();
     custom.customLibrarySymbol = "testLinearScorer";
     const auto customResult = predict(custom);
     ASSERT_EQ(customResult.status, PredictionStatus::AVAILABLE);
@@ -186,11 +183,7 @@ TEST_F(TestEnginePredictor, ACustomLibraryWhoseDeclaredHashIsNotItsBytesYieldsNo
 {
     auto custom = config(document());
     custom.adapterType = "custom_library";
-    custom.modelArtifactPath
-        = std::filesystem::absolute(
-              std::filesystem::path(HIPDNN_TEST_PLUGIN_DIR)
-              / hipdnn_data_sdk::utilities::getLibraryName("hipdnn_test_scorer_lib"))
-              .string();
+    custom.modelArtifactPath = hipdnn_plugin_sdk::test::testScorerLibrary().string();
     custom.customLibrarySymbol = "testLinearScorer";
     custom.modelHash = sha256(std::string("not this library"));
 
