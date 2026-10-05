@@ -1092,7 +1092,6 @@ TEST(TestGfx950AttentionDenseGraphMatch, LogsTheCauseOfEachOtherDecline)
     composite.implementation = data_objects::AttentionImplementation::COMPOSITE;
     cases.push_back({"implementation", composite, "implementation"});
 
-
     for(const auto& testCase : cases)
     {
         SCOPED_TRACE(testCase.name);
