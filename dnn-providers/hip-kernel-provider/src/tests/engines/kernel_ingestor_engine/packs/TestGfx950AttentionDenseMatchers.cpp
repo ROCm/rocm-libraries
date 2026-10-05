@@ -16,6 +16,7 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
@@ -25,7 +26,9 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
+#include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 
 /**
@@ -235,6 +238,8 @@ struct GraphSpec
         = data_objects::AttentionImplementation::AUTO;
 
     bool twoNodes = false;
+    /// One RELU node from Q to O in place of the SDPA node: a graph with no SDPA in it.
+    bool pointwiseOnly = false;
 
     void setEveryLayout(StrideLayout layout)
     {
@@ -443,11 +448,34 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     };
 
     std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
-    nodes.push_back(data_objects::CreateNodeDirect(builder,
-                                                   "sdpa",
-                                                   data_objects::DataType::FLOAT,
-                                                   data_objects::NodeAttributes::SdpaAttributes,
-                                                   attributesFor().Union()));
+    if(spec.pointwiseOnly)
+    {
+        const auto relu
+            = data_objects::CreatePointwiseAttributes(builder,
+                                                      data_objects::PointwiseMode::RELU_FWD,
+                                                      flatbuffers::nullopt, // relu_lower_clip
+                                                      flatbuffers::nullopt, // relu_upper_clip
+                                                      flatbuffers::nullopt, // relu_lower_clip_slope
+                                                      flatbuffers::nullopt, // axis_tensor_uid
+                                                      Q_UID, // in_0_tensor_uid
+                                                      flatbuffers::nullopt, // in_1_tensor_uid
+                                                      flatbuffers::nullopt, // in_2_tensor_uid
+                                                      O_UID); // out_0_tensor_uid
+        nodes.push_back(
+            data_objects::CreateNodeDirect(builder,
+                                           "relu",
+                                           data_objects::DataType::FLOAT,
+                                           data_objects::NodeAttributes::PointwiseAttributes,
+                                           relu.Union()));
+    }
+    else
+    {
+        nodes.push_back(data_objects::CreateNodeDirect(builder,
+                                                       "sdpa",
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::NodeAttributes::SdpaAttributes,
+                                                       attributesFor().Union()));
+    }
     if(spec.twoNodes)
     {
         nodes.push_back(data_objects::CreateNodeDirect(builder,
@@ -953,6 +981,135 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBhsdOutput)
     GraphSpec spec;
     spec.oLayout = StrideLayout::BHSD;
     EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+// ---------------------------------------------------------------------------
+// Decline logging. hipDNN tells the caller only "No engine configurations available for
+// the graph", so the engine's INFO line is the one place the cause shows. Each line
+// carries a cause key in brackets; these tests check the key and the operand named, not
+// the wording around them.
+// ---------------------------------------------------------------------------
+
+struct LoggedDecline
+{
+    std::string cause;
+    std::string detail;
+};
+
+/// The decline the engine logged at INFO for @p spec, or an empty cause when it logged
+/// none.
+LoggedDecline loggedDecline(const GraphSpec& spec)
+{
+    const std::string marker
+        = std::string(GFX950_ATTENTION_DENSE_ENGINE_NAME) + " declined the graph [";
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    EXPECT_FALSE(matchGraph(spec).has_value());
+    for(const auto& log : recorder.getRecordedLogs())
+    {
+        const auto at = log.message.find(marker);
+        const auto causeEnd
+            = at == std::string::npos ? at : log.message.find(']', at + marker.size());
+        if(log.severity == HIPDNN_SEV_INFO && causeEnd != std::string::npos)
+        {
+            return {log.message.substr(at + marker.size(), causeEnd - at - marker.size()),
+                    log.message.substr(causeEnd + 1)};
+        }
+    }
+    return {};
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, LogsTheOperandAndTheBakedStridesWhenQIsNotBshd)
+{
+    GraphSpec spec;
+    spec.qLayout = StrideLayout::BHSD;
+    const auto decline = loggedDecline(spec);
+    EXPECT_EQ(decline.cause, "layout");
+    EXPECT_NE(decline.detail.find("Q (uid 1)"), std::string::npos) << decline.detail;
+    // The BSHD strides for dims [2, 4, 256, 128].
+    EXPECT_NE(decline.detail.find("131072, 128, 512, 1"), std::string::npos) << decline.detail;
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, LogsTheOutputWhenOnlyOIsNotBshd)
+{
+    GraphSpec spec;
+    spec.oLayout = StrideLayout::BHSD;
+    const auto decline = loggedDecline(spec);
+    EXPECT_EQ(decline.cause, "layout");
+    EXPECT_NE(decline.detail.find("O (uid 4)"), std::string::npos) << decline.detail;
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, LogsTheCauseOfEachOtherDecline)
+{
+    struct Case
+    {
+        const char* name;
+        GraphSpec spec;
+        const char* cause;
+    };
+    std::vector<Case> cases;
+
+    // Two SDPA nodes: an attention graph this engine cannot take whole, so it says why.
+    GraphSpec twoNodes;
+    twoNodes.twoNodes = true;
+    cases.push_back({"two nodes", twoNodes, "node"});
+
+    // Null strides: the operand description must survive them.
+    GraphSpec noStrides;
+    noStrides.omitStrides = true;
+    cases.push_back({"no strides", noStrides, "operand"});
+
+    GraphSpec fp32;
+    fp32.dataType = data_objects::DataType::FLOAT;
+    cases.push_back({"fp32", fp32, "data_type"});
+
+    GraphSpec d256;
+    d256.headSize = 256;
+    d256.headSizeV = 256;
+    cases.push_back({"D256", d256, "head_size"});
+
+    GraphSpec window;
+    window.leftBound = 128;
+    cases.push_back({"sliding window", window, "mask"});
+
+    GraphSpec sinks;
+    sinks.sinkTokenUid = EXTRA_UID;
+    cases.push_back({"sinks", sinks, "sinks"});
+
+    GraphSpec composite;
+    composite.implementation = data_objects::AttentionImplementation::COMPOSITE;
+    cases.push_back({"implementation", composite, "implementation"});
+
+    GraphSpec noScale;
+    noScale.attnScaleValue = std::nullopt;
+    cases.push_back({"no scale", noScale, "attn_scale_value"});
+
+    for(const auto& testCase : cases)
+    {
+        SCOPED_TRACE(testCase.name);
+        const auto decline = loggedDecline(testCase.spec);
+        EXPECT_EQ(decline.cause, testCase.cause) << decline.detail;
+        EXPECT_FALSE(decline.detail.empty());
+    }
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, LogsNoDeclineForAGraphItServes)
+{
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    EXPECT_TRUE(matchGraph(GraphSpec{}).has_value());
+    EXPECT_FALSE(recorder.hasLogContaining(std::string(GFX950_ATTENTION_DENSE_ENGINE_NAME)
+                                           + " declined the graph"));
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, LogsNoDeclineForAGraphWithNoSdpaForwardNode)
+{
+    // graph_match sees every graph the catalog misses on. One with no SDPA-forward node
+    // was never this engine's, so it declines without a line.
+    GraphSpec spec;
+    spec.pointwiseOnly = true;
+    const auto decline = loggedDecline(spec);
+    EXPECT_TRUE(decline.cause.empty()) << "[" << decline.cause << "]" << decline.detail;
 }
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesPaddedOutputSequenceStride)
