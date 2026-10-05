@@ -2555,6 +2555,61 @@ void testing_matmul_with_bias(const Arguments& arg,
             hipblaslt_cout << " (Capped to max iters: " << plan.iter_cap << ")";
         hipblaslt_cout << std::endl;
     }
+
+    // fast_check runs the large-shape cases, which can need more memory than a runner has. Skip
+    // with the amounts rather than fail an allocation or, for host memory, crash on a null buffer.
+    // The estimate follows the allocations below, block_count times for the rotating buffers; the
+    // workspace is at most user_allocated_workspace.
+    if(arg.fast_check)
+    {
+        const size_t sizeTo = realDataTypeSize(To), sizeAlpha = realDataTypeSize(Talpha);
+        size_t       hostBytes = 0, deviceBytes = 0;
+        for(int i = 0; i < gemm_count; i++)
+        {
+            deviceBytes
+                += (size_A[i] * realDataTypeSize(TiA) + size_B[i] * realDataTypeSize(TiB)
+                    + (arg.c_equal_d ? 0 : size_C[i]) * sizeTo + size_D[i] * sizeTo
+                    + size_E[i] * realDataTypeSize(Taux) + size_bias[i] * realDataTypeSize(Tbias)
+                    + (size_scaleAlphaVec[i]
+                       + (size_scaleAVec[i] + size_scaleBVec[i]) * num_batches[i])
+                          * sizeAlpha)
+                   * size_t(block_count);
+            // fast_check's contiguous copies of the A, B and C regions.
+            hostBytes += size_t(A_row[i] * A_col[i] * num_batches[i]) * realDataTypeSize(TiA)
+                         + size_t(B_row[i] * B_col[i] * num_batches[i]) * realDataTypeSize(TiB)
+                         + size_t(M[i] * N[i] * num_batches[i]) * sizeTo;
+            // The host buffers: operands, the reference and epilogue copies of D, bias, E and the
+            // scale vectors, counted as the device counts them, which is at least their size.
+            if(!fast_check_only)
+                hostBytes += size_A[i] * realDataTypeSize(TiA) + size_B[i] * realDataTypeSize(TiB);
+            if(!fast_check_only || arg.c_equal_d)
+                hostBytes += size_C[i] * sizeTo;
+            hostBytes += size_D_copy[i] * (2 * sizeTo + 3 * sizeAlpha)
+                         + 2 * size_bias[i] * realDataTypeSize(Tbias)
+                         + size_E[i] * realDataTypeSize(Taux) * (arg.use_e && !arg.gradient ? 2 : 1)
+                         + (size_scaleAlphaVec[i]
+                            + (size_scaleAVec[i] + size_scaleBVec[i]) * num_batches[i])
+                               * sizeAlpha;
+        }
+        // scaleC, scaleD and scaleE are one value each, and amaxD two on the host (result and
+        // reference); the device count reuses the host's, which is at least as large.
+        const size_t sideScalars
+            = size_t(arg.scaleC) + size_t(arg.scaleD) + size_t(arg.scaleE) + 2 * size_t(arg.amaxD);
+        deviceBytes += size_t(arg.user_allocated_workspace) * size_t(block_count)
+                       + size_t(gemm_count) * sideScalars * sizeAlpha;
+        hostBytes += size_t(gemm_count) * sideScalars * sizeAlpha;
+        std::string why = fast_check_memory_shortfall(deviceBytes, hostBytes);
+        if(!why.empty())
+        {
+#ifdef GOOGLE_TEST
+            GTEST_SKIP() << why;
+#else
+            hipblaslt_cerr << why << std::endl;
+            return;
+#endif
+        }
+    }
+
     // Calculating block count end
     matmul.resize(block_count, std::vector<hipblasLtMatmulDesc_t>(gemm_count));
 
@@ -5236,6 +5291,16 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     returnedAlgoCount = heuristicResult.size();
 
+    // A size-threshold sweep may reach shapes the library declines; that is a correct answer.
+    if(arg.allow_no_solution && returnedAlgoCount == 0)
+    {
+#ifdef GOOGLE_TEST
+        GTEST_SKIP() << "the library offers no solution for this shape";
+#else
+        hipblaslt_cout << "the library offers no solution for this shape" << std::endl;
+        return;
+#endif
+    }
     CHECK_SOLUTION_FOUND(returnedAlgoCount);
 
     // A placed workspace replaces the normal one, which placement runs never use: placement

@@ -47,6 +47,16 @@ Known bugs:
   - { name: matmul_fast_check_streamk_every_solution_repeat, function: matmul, a_type: bf16_r, known_bug_platforms: "gfx942, gfx950" }
   - { name: matmul_fast_check_every_solution_repeat, function: matmul, a_type: f16_r, M: 4099, known_bug_platforms: gfx950 }
   - { name: matmul_fast_check_streamk_every_solution_repeat, function: matmul, a_type: f16_r, M: 4099, known_bug_platforms: gfx950 }
+  # ROCM-32152 (gfx950 direct-to-LDS kernels write wrong values into large outputs)
+  # fails these size-threshold cases on gfx950. ROCM-31826 (MT16x16 Stream-K kernels
+  # leave 256 elements of D unwritten at 65,536 x 65,552) fails the Stream-K tile case
+  # on gfx942 and gfx950. REMOVE each entry in the PR that fixes the last defect it
+  # lists. Review by 2026-11-01.
+  - { name: matmul_fast_check_threshold_d_bytes_bf16, function: matmul, known_bug_platforms: gfx950 }
+  - { name: matmul_fast_check_threshold_d_bytes_all_solutions, function: matmul, known_bug_platforms: gfx950 }
+  - { name: matmul_fast_check_threshold_tiles, function: matmul, known_bug_platforms: gfx950 }
+  - { name: matmul_fast_check_threshold_tiles_streamk, function: matmul, known_bug_platforms: "gfx942, gfx950" }
+  - { name: matmul_fast_check_threshold_custom_kernel_ROCM31258, function: matmul, known_bug_platforms: gfx950 }
   # ROCM-32062: the client CPU reference (cast_mul in cblas_interface.cpp) applies
   # scaleAlpha_vector to the wrong rows of A when lda exceeds A's row count, so
   # unit_check fails a correct GPU result. Host-side, so every platform is affected
@@ -67,6 +77,15 @@ Known bugs:
   # Host-side, so every platform is affected. REMOVE this entry in the PR that
   # fixes ROCM-32139. Review by 2026-11-01.
   - { name: matmul_fast_check_aux_padded_ldd_ROCM32139, function: matmul }
+  # ROCM-32140: batch strides of 2^32 elements or more are packed into 32-bit
+  # kernel arguments, so the GEMM returns success with a wrong D (seen on gfx90a;
+  # the packing is shared by every architecture). REMOVE this entry in the PR that
+  # fixes ROCM-32140. Review by 2026-11-01.
+  - { name: matmul_fast_check_threshold_batch_stride_2_32_ROCM32140, function: matmul }
+  # ROCM-32050: an illegal memory access on gfx1250 in f32 NN 32768 x 32768 x 4096,
+  # where C and D are exactly 4 GiB; it kills the test process there. REMOVE this
+  # entry in the PR that fixes ROCM-32050. Review by 2026-11-01.
+  - { name: matmul_fast_check_threshold_cd_4gib_ROCM32050, function: matmul, known_bug_platforms: "gfx1250, gfx1250-strict" }
   # ROCM-27082: gfx950 MXFP4 subtile scaleAlphaVec TN cases fail the norm/accuracy
   # check on asymmetric (M!=N) tiles. Square tiles (128x128, 192x192) still pass and
   # remain covered. Suspected TensileLite codegen regression; remove once root-caused.

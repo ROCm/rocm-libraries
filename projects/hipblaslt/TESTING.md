@@ -182,7 +182,8 @@ reference, and TheRock superbuild is the third option if you need the whole stac
 | TensileLite kernel-generation behavior | `tox -e unit` (includes the characterization goldens) | No |
 | Anything, before pushing | `pre-commit run --all-files` | No |
 
-The four client test tiers (`quick`, `standard`, `comprehensive`, `full`) are defined in
+The five client test tiers (`quick`, `standard`, `comprehensive`, `full`, and `stress`, which
+holds only the large-memory size-threshold and address-overflow cases) are defined in
 [`clients/tests/test_categories.yaml`](clients/tests/test_categories.yaml). When hipBLASLt is built
 inside rocm-libraries, those tiers are registered as CTest labels and a relocatable
 `CTestTestfile.cmake` is installed to `bin/hipblaslt/`, so the tiers can be run with `ctest` from
@@ -321,6 +322,7 @@ kernels on CPU and hands an artifact to a GPU stage for the run phase.
 | `standard` | smoke + quick + pre_checkin | ~30 min | 3600 s |
 | `comprehensive` | standard + nightly | ~2 h | 7200 s |
 | `full` | comprehensive + HMM (needs a managed-memory capable host) | up to 24 h | 86400 s |
+| `stress` | stress only: size-threshold and address-overflow cases needing up to about 33 GiB of device memory (the 2^32 C and D batch-stride case); for large-memory runners or a weekly run. The fast_check cases among them skip in a run with no gtest filter, such as TheRock's | ~10 min on gfx90a for the fast_check cases, longer with more solutions; the older stress cases add their host-reference time | 14400 s |
 
 All tiers exclude `*known_bug*`. There are currently no multi-GPU tests.
 
