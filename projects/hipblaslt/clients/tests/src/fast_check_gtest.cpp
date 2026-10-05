@@ -1094,6 +1094,7 @@ namespace
         }
         ::testing::GTEST_FLAG(filter) = saved;
         EXPECT_TRUE(hipblaslt_category_needs_a_filter("stress"));
+        EXPECT_TRUE(hipblaslt_category_needs_a_filter("sdc_hunt"));
         EXPECT_FALSE(hipblaslt_category_needs_a_filter("nightly"));
     }
 
