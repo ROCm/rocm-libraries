@@ -17,10 +17,12 @@ instruction followed by a carry-consuming write to the next register, or a full 
 the pair. A scalar carry is followed until SCC changes, since the scheduler can move the carry-in
 far from the carry-out; a vector carry, until its carry register is written again. Anything else
 is reported if the updated value can reach a use as an address before it is overwritten,
-following branches and loop back-edges for up to FLOW_STEPS instructions. An add of two constants
-sets the register rather than advancing an address, so it is not reported. A finding is a lead to
-read, not a proof, and a clean result is not one either: the lint does not see addresses held in
-other forms, such as TDM descriptor groups.
+following branches and loop back-edges for up to FLOW_STEPS instructions. The search does not
+know which branches go together, so a register reused for an integer can look like an address
+along a path that never runs. An add of two constants sets the register rather than advancing an
+address, and an add to the result of a bit operation such as xor is integer arithmetic, so
+neither is reported. A finding is a lead to read, not a proof, and a clean result is not one
+either: the lint does not see addresses held in other forms, such as TDM descriptor groups.
 
 It is meant for Tensile-generated and hand-written kernels, which keep a 64-bit value in an
 adjacent register pair. Compiler-generated code may keep the two halves of a sum in unrelated
@@ -93,6 +95,21 @@ PAIR_DEFS = {"s_mov_b64", "v_mov_b64", "v_lshlrev_b64", "s_lshl_b64", "s_add_u64
 JUMPS = {"s_branch", "s_setpc_b64", "s_endpgm"}
 # 32-bit copies, through which an updated low dword can reach the register used as the address.
 COPIES = {"s_mov_b32", "v_mov_b32"}
+# Bit operations whose result is a plain integer, never an address: an add that updates their
+# result in place, such as Tensile's sign extension of the workgroup mapping (xor, then subtract
+# the same constant), is integer arithmetic even when the register is an address elsewhere.
+# s_and_b32 is left out, since aligning an address and then advancing it needs a carry.
+INTEGER_BIT_OPS = {
+    "s_xor_b32",
+    "s_xnor_b32",
+    "s_not_b32",
+    "s_bfe_u32",
+    "s_bfe_i32",
+    "v_xor_b32",
+    "v_not_b32",
+    "v_bfe_u32",
+    "v_bfe_i32",
+}
 # Scalar instructions that write SCC, which ends a scalar carry chain.
 _SCC_WRITERS = re.compile(
     r"^s_(add|sub|addc|subb|addk|cmp|cmpk|bitcmp|and|or|xor|andn[12]|orn[12]|nand|nor|xnor|not|"
@@ -373,12 +390,26 @@ def _lint_kernel(asm: str, first_line: int = 1) -> list[Finding]:
                 return False
         return False
 
+    def updates_bit_op_result(i: int, low: Reg) -> bool:
+        """Whether instruction i updates low in place, and the last write to low before it, in
+        the same basic block, is a bit operation that makes a plain integer."""
+        if not any(parse_regs(o) == [low] for o in insts[i].operands[1:]):
+            return False
+        j = i
+        while j > 0 and not insts[j].labels:
+            j -= 1
+            if low in writes[j]:
+                return insts[j].mnemonic in INTEGER_BIT_OPS
+        return False
+
     findings = []
     for i, inst in enumerate(insts):
         dst = writes[i]
         if len(dst) != 1 or dst[0] not in lows:
             continue
         low, high = dst[0], dst[0].plus(1)
+        if updates_bit_op_result(i, low):
+            continue
         if inst.mnemonic in NO_CARRY:
             if not any(parse_regs(o) for o in inst.operands[1:]):
                 continue

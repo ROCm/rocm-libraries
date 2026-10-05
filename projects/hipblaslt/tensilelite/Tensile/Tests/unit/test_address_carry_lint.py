@@ -377,6 +377,42 @@ def test_gfx12_scalar_add_names_are_recognized():
         assert len(reasons) == 1 and op in reasons[0] and "s8" in reasons[0]
 
 
+# From gfx950 F4 MX kernels: s12 holds the sign-extended workgroup mapping, and reaches the A
+# descriptor only on a path where the K == 0 branch skips setting it, which the K == 0 check
+# before the tail loop rules out. The lint cannot tell, so it relies on the xor to see an integer.
+_WGM = """
+    s_mov_b32 s12, s7
+    s_and_b32 s12, s12, 0x3ff
+    {bit_op}
+    s_sub_u32 s12, s12, 0x200
+    s_cmp_gt_i32 s12, 1
+    s_cmp_eq_u32 s19, 0
+    s_cbranch_scc1 label_LoadA_End
+    s_load_dwordx2 s[12:13], s[88:89], 0x0
+label_LoadA_End:
+    s_mov_b32 s15, 0x20000
+    buffer_load_dwordx4 v1, s[12:15], 0 offen lds
+    """
+
+
+def test_an_add_to_a_bit_operation_result_is_integer_arithmetic():
+    assert _reasons(_WGM.format(bit_op="s_xor_b32 s12, s12, 0x200")) == []
+    # Without the xor the subtract follows an and, which could align an address, so it stays.
+    reasons = _reasons(_WGM.format(bit_op=""))
+    assert len(reasons) == 1 and "s12" in reasons[0]
+
+
+def test_an_add_to_a_bit_operation_result_in_another_block_is_reported():
+    asm = """
+    s_xor_b32 s8, s8, 0x200
+label_Next:
+    s_add_u32 s8, s8, 64
+    s_load_dwordx2 s[10:11], s[8:9], 0x0
+    """
+    reasons = _reasons(asm)
+    assert len(reasons) == 1 and "s8" in reasons[0]
+
+
 def test_registers_are_judged_within_their_own_kernel():
     asm = """
     .amdgpu_hsa_kernel first
