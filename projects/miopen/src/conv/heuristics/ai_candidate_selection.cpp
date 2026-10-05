@@ -948,6 +948,12 @@ std::vector<std::vector<float>> CandidateSelectionModel::EncodeKernelConfigs(
     const std::vector<std::vector<float>>& encoded_candidates,
     const std::vector<std::string>* candidate_kernel_names) const
 {
+    // Precomputed config-tower fast path. Keyed on the raw EncodeKernelParams vectors (before any
+    // feature engineering), so it must run here -- ahead of EngineerKernelConfigFeaturesImpl -- and
+    // replaces the entire config tower (engineering + fdeep). nullopt on any miss -> neural path.
+    if(auto cached = TryEncodeKernelConfigsFromTable(encoded_candidates, arch_, solver_))
+        return std::move(*cached);
+
     // Engineered kernel-config path for 2D/3D models (see EncodeInputFeatures).
     if(!UsesEngineeredInputFeatures(metadata_))
     {

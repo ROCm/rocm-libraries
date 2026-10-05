@@ -1063,6 +1063,7 @@ if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     endif()
     file(GLOB MODEL_FILES CONFIGURE_DEPENDS
         kernels/*.model
+        kernels/*_kernel_config_embeddings.bin
         kernels/lgbm_model_meta.json
         kernels/lgbm_rank.bin
         kernels/lgbm_pcfg.bin)
