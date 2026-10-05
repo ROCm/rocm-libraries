@@ -820,25 +820,28 @@ TEST_F(DAGSchedulerPassTest, WmmaHideBudgetCountsSplitBarrierGroupOnce) {
 }
 
 // ---------------------------------------------------------------------------
-// HWModel::Lds::wavesPerDsIssuePipe (the ds issue pipe shared between waves)
-// is TEMPORARILY DISABLED -- see HWModel.cpp -- after real hardware measured
-// it costing f8_tn_medium/mxf4_tn_medium real throughput. With it disabled,
-// NumWaves has no effect on ds issue cost end-to-end; the sharing math itself
-// stays covered at the unit level, re-enabled on a local HWModel copy
-// (HWModelDsIssue.FourWavesRunAsPairsSoTheCostDoubles and neighbors).
-//
-// The rule (4) cap is held inert here (perCap well above the ds_load count) so
-// what is measured is the window filling up, not the cap.
+// dsReadPerCap() is the ONLY place wavesPerDsIssuePipe affects scheduling:
+// min(the tuned per-window ceiling, dsIssueCapSpan() / dsLoadIssueCycles /
+// contendingWaves), since only one of several waves sharing the ds issue pipe
+// actually stalls in a given cycle -- this wave cannot safely count on
+// issuing more than that window-derived number for itself. This scenario's
+// WMMA (createWmmaF32_16x16x16_bf16) has the arch-fallback 8-cycle
+// dsIssueCapSpan(), so the window-derived number at 4 waves (contendingWaves
+// == wavesPerDsIssuePipe == 2) is 8/1/2 == 4: a tuned ceiling at or below 4
+// (e.g. the real dsReadPerCap default of 3) is never the binding one and so
+// is NOT reduced -- only a larger requested ceiling (perCap=10 below) gets
+// clamped down to the window-derived number.
 // ---------------------------------------------------------------------------
-TEST_F(DAGSchedulerPassTest, DsIssueCostIsUnaffectedByWaveCountWhilePipeSharingIsDisabled) {
-    auto dsInFirstWmmaWindow = [this](uint32_t numWaves) {
+TEST_F(DAGSchedulerPassTest, DsReadPerCapClampsToWindowDerivedCeilingWhenSharingThePipe) {
+    auto dsAdmittedWithCap = [this](uint32_t numWaves, int perCap) {
         SetUp();  // fresh block per run
         createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/200);
         createWmmaF32_16x16x16_bf16(/*destStart=*/120, /*src0Start=*/220);
         for (int i = 0; i < 12; ++i)
             createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i, /*ldsToken=*/i + 1);
         config.NumWaves = numWaves;
-        runPassWithDsReadThrottle(/*queueDepth=*/64, /*throttleLatency=*/64, /*perCap=*/100);
+        // Wide-open queue/throttle so only the rule (4) per-window cap binds.
+        runPassWithDsReadThrottle(/*queueDepth=*/64, /*throttleLatency=*/64, perCap);
         int count = 0;
         bool seenFirstWmma = false;
         for (const IRBase& ir : *bb) {
@@ -854,14 +857,22 @@ TEST_F(DAGSchedulerPassTest, DsIssueCostIsUnaffectedByWaveCountWhilePipeSharingI
         return count;
     };
 
-    const int oneWave = dsInFirstWmmaWindow(1);
-    const int twoWaves = dsInFirstWmmaWindow(2);
-    const int fourWaves = dsInFirstWmmaWindow(4);
+    // A tuned ceiling of 3 or 4 is already at/below the window-derived number
+    // (4 at 4 waves here), so it is NOT reduced -- this is the realistic case
+    // for the arch default (dsReadPerCap == 3): most kernels see no change.
+    EXPECT_EQ(dsAdmittedWithCap(/*numWaves=*/1, /*perCap=*/4), 4);
+    EXPECT_EQ(dsAdmittedWithCap(/*numWaves=*/4, /*perCap=*/4), 4);
+    EXPECT_EQ(dsAdmittedWithCap(/*numWaves=*/4, /*perCap=*/3), 3);
 
-    EXPECT_EQ(oneWave, fourWaves)
-        << "pipe sharing is disabled, so NumWaves must not change how many "
-           "ds_loads fit in a WMMA's co-issue window (see HWModel.cpp)";
-    EXPECT_EQ(twoWaves, fourWaves);
+    // A larger tuned ceiling (10) DOES get clamped down to the window-derived
+    // number once waves share the pipe. At numWaves=1 the cap itself is not
+    // the binding constraint (some other rule already limits this synthetic
+    // 2-WMMA/12-load scenario to 7), so this only demonstrates the 4-wave
+    // clamp, not a literal 10.
+    EXPECT_EQ(dsAdmittedWithCap(/*numWaves=*/1, /*perCap=*/10), 7);
+    EXPECT_EQ(dsAdmittedWithCap(/*numWaves=*/4, /*perCap=*/10), 4);
+    EXPECT_EQ(dsAdmittedWithCap(/*numWaves=*/2, /*perCap=*/10), 4)
+        << "share saturates at wavesPerDsIssuePipe==2, so 2 and 4 waves clamp the same amount";
 }
 
 // A non-positive dsReadPerCap is not a cap anyone can mean. It used to fall
