@@ -630,7 +630,6 @@ set(rocsparse_source
   src/conversion/rocsparse_gcoo_aos2coo.cpp
   src/conversion/rocsparse_gcoo_aos2csr.cpp
   src/conversion/rocsparse_gcsr2coo_aos.cpp
-  src/conversion/rocsparse_gcoosort.cpp
   src/conversion/rocsparse_gcreate_identity_permutation.cpp
   src/conversion/rocsparse_gcsr2csc.cpp
   src/conversion/rocsparse_gcsr2coo.cpp
@@ -653,6 +652,9 @@ set(rocsparse_source
   src/conversion/rocsparse_sparse_to_csr_to_sparse.cpp
   src/conversion/rocsparse_spmat_transfer_from.cpp
   src/conversion/rocsparse_internal_spmat_print.cpp
+  src/conversion/rocsparse_spsort.cpp
+  src/conversion/rocsparse_spsort_buffer_size.cpp
+  src/conversion/rocsparse_spsort_descr.cpp
 
 # Reordering
   src/reordering/rocsparse_csrcolor.cpp
