@@ -825,6 +825,9 @@ rocblaslt_status rocblaslt_matmul(rocblaslt_handle             handle,
         log_error(__func__, "invalid workspace pointer");
         return rocblaslt_status_invalid_pointer;
     }
+    if(auto status = validateWorkspaceSize(__func__, workspaceSizeInBytes);
+       status != rocblaslt_status_success)
+        return status;
 
     if(matC->type != matD->type)
     {
@@ -1610,6 +1613,9 @@ rocblaslt_status rocblaslt_makeArgument_cpp(rocblaslt_handle              handle
                                             hipStream_t                   stream,
                                             std::shared_ptr<void>         gemmData)
 {
+    if(auto status = validateWorkspaceSize(__func__, workspaceSizeInBytes);
+       status != rocblaslt_status_success)
+        return status;
     return makeArgument(handle,
                         gemmType,
                         algo,
