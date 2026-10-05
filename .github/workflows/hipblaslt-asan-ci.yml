@@ -52,7 +52,7 @@ jobs:
         id: matrix
         run: |
           build='[{"family":"gfx90a"}]'
-          test='[{"family":"gfx90a","runs_on":"linux-gfx90a-gpu-rocm"}]'
+          test='[{"family":"gfx90a","runs_on":"linux-gfx90a-1gpu-ossci-rocm"}]'
           echo "build_matrix={\"include\":${build}}" >> "$GITHUB_OUTPUT"
           echo "test_matrix={\"include\":${test}}" >> "$GITHUB_OUTPUT"
 
