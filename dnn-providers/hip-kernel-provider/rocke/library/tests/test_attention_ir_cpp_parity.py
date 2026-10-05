@@ -9,11 +9,12 @@ The IR-sha256 golden for these kernels lives in the platform parity harness
 ``rocke_golden_static`` CTest entry. That golden pins the *Python* lowering only.
 This file adds the other half for the same case set: the C++ engine
 (``rocke_engine``) must lower each of those kernels to byte-identical IR.
+Focused LSE-enabled dense cases extend that gate without changing the golden.
 
-Cases are read back from the harness rather than redeclared, so the two gates can
-never drift apart. Importing the harness is the allowed ``library -> platform``
-direction (the reverse is forbidden); it is reached by path because the harness
-ships in the platform *test* tree, not inside the ``rocke`` package.
+The original cases are read back from the harness rather than redeclared.
+Importing the harness is the allowed ``library -> platform`` direction (the
+reverse is forbidden); it is reached by path because the harness ships in the
+platform *test* tree, not inside the ``rocke`` package.
 """
 
 from __future__ import annotations
@@ -72,6 +73,54 @@ def test_attention_ir_cpp_python_byte_identity():
     # it. Harness drift must not be reported as an engine gap.
     empty = set(_FAMILIES) - {c["family"] for c in cases}
     assert not empty, f"harness declares no cases for families {sorted(empty)}"
+
+    # Exercise both final-output stages, including the no-key/sink branches.
+    # Sq256/Skv64/window64 includes both nonempty and empty query rows.
+    for label, overrides in (
+        ("ordinary", {}),
+        ("persistent", {"persistent": True}),
+        ("empty_window", {"seqlen_q": 256, "seqlen_kv": 64, "sliding_window": 64}),
+        (
+            "persistent_empty_window",
+            {
+                "persistent": True,
+                "seqlen_q": 256,
+                "seqlen_kv": 64,
+                "sliding_window": 64,
+            },
+        ),
+        (
+            "empty_window_sinks",
+            {
+                "seqlen_q": 256,
+                "seqlen_kv": 64,
+                "sliding_window": 64,
+                "use_sinks": True,
+            },
+        ),
+        (
+            "persistent_empty_window_sinks",
+            {
+                "persistent": True,
+                "seqlen_q": 256,
+                "seqlen_kv": 64,
+                "sliding_window": 64,
+                "use_sinks": True,
+            },
+        ),
+    ):
+        cases.append(
+            {
+                "family": "attention_dense",
+                "case_id": f"attention_dense_gfx950_lse_{label}",
+                "arch": "gfx950",
+                "build": _harness().build_attention_dense(
+                    "gfx950",
+                    emit_lse=True,
+                    **overrides,
+                ),
+            }
+        )
 
     prev = os.environ.get("ROCKE_CPP_STRICT")
     os.environ["ROCKE_CPP_STRICT"] = "1"
