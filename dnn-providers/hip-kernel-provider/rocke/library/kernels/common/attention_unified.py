@@ -3218,7 +3218,8 @@ def _tiled_3d_spec_from_problem(
 
 
 def _tiled_3d_segment_lds_bytes(spec) -> int:
-    """Q[M,D], K/V[2,T,D], P[M,T] in the gfx942/gfx950 3D schedule.
+    """Q[M,D], K[2,T,D], V[v_slots,T,D], P[M,T] in the gfx942/gfx950 3D schedule
+    (one V slot on gfx950, two on gfx942).
 
     These tiles overlap in lifetime. Supported tile dimensions need no
     inter-allocation padding; the lowering aligns the final pool to 16 bytes.
@@ -3230,7 +3231,8 @@ def _tiled_3d_segment_lds_bytes(spec) -> int:
     if bits % 8:
         raise ValueError("tiled 3D LDS requires byte-addressable scalar elements")
     m, d, t = spec.block_m, spec.head_size, spec.tile_size
-    size = (m * d + 4 * t * d + m * t) * (bits // 8)
+    v_slots = 1 if type(spec).__module__.endswith("gfx950.attention_tiled_3d") else 2
+    size = (m * d + (2 + v_slots) * t * d + m * t) * (bits // 8)
     return (size + 15) & ~15
 
 

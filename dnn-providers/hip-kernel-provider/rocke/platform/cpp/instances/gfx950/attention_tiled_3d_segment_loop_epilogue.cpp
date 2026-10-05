@@ -268,6 +268,7 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
         rocke_value_t** acc_vals;
         rocke_value_t* cur_buf;
         rocke_value_t* nxt_buf;
+        rocke_value_t* v_buf;
         rocke_value_t* tile_off;
         rocke_value_t* next_tile_iv_raw;
         rocke_value_t* in_range_next;
@@ -312,6 +313,7 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
         }
         cur_buf = carry[8 + cfg->PV_N_TILES];
         nxt_buf = rocke_b_sub(b, rocke_b_const_i32(b, 1), cur_buf);
+        v_buf = rocke_b_const_i32(b, 0);
         tile_off = rocke_b_mul(b, kv_tile_iv, rocke_b_const_i32(b, cfg->T));
 
         next_tile_iv_raw = rocke_b_add(b, kv_tile_iv, rocke_b_const_i32(b, 1));
@@ -352,7 +354,7 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
             S_n[n] = acc_v;
         }
 
-        rocke_gfx950_attention_tiled_3d_issue_v(ctx, kv_tile_iv, cur_buf);
+        rocke_gfx950_attention_tiled_3d_issue_v(ctx, kv_tile_iv, v_buf);
         rocke_gfx950_attention_tiled_3d_issue_k(ctx, safe_next_tile, nxt_buf);
 
         /* alibi_per_row: use hoisted slopes (NULL when USE_ALIBI is false). */
@@ -528,11 +530,11 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
                     A_p = rocke_b_smem_load_vN(b, ctx->P_lds, p_idx, 2, dtype, 8);
                     row_r0 = rocke_bound_transpose_lds_reader_row(b, ctx->pv_tr_reader, k * 32, 0);
                     row_r1 = rocke_bound_transpose_lds_reader_row(b, ctx->pv_tr_reader, k * 32, 1);
-                    b0_idx[0] = cur_buf;
+                    b0_idx[0] = v_buf;
                     b0_idx[1] = row_r0;
                     b0_idx[2] = n_col_base;
                     B_r0 = rocke_b_ds_read_tr16_b64(b, ctx->V_lds, b0_idx, 3, dtype);
-                    b1_idx[0] = cur_buf;
+                    b1_idx[0] = v_buf;
                     b1_idx[1] = row_r1;
                     b1_idx[2] = n_col_base;
                     B_r1 = rocke_b_ds_read_tr16_b64(b, ctx->V_lds, b1_idx, 3, dtype);
@@ -554,7 +556,7 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
                     A_p = rocke_b_smem_load_vN(b, ctx->P_lds, p_idx, 2, dtype, 4);
                     row_lane
                         = rocke_bound_transpose_lds_reader_row(b, ctx->pv_tr_reader, k * 16, 0);
-                    bv_idx[0] = cur_buf;
+                    bv_idx[0] = v_buf;
                     bv_idx[1] = row_lane;
                     bv_idx[2] = n_col_base;
                     B_v = rocke_b_ds_read_tr16_b64(b, ctx->V_lds, bv_idx, 3, dtype);
