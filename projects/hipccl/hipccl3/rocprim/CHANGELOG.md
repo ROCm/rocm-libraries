@@ -11,6 +11,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Optimizations
 
 * Updated existing `ordered_block_id` and `lookback_scan` optimizations to include gfx1250/gfx1250-strict.
+* Reduced branching in `device_search` and `device_find_end`.
 
 ### Changed
 
