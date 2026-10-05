@@ -13,7 +13,24 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 * Support added for the gfx1250-strict architecture.
 
+* Generated Fortran bindings, as a single `rocsolver` module: `use rocsolver`, link `roc::rocsolver_fortran`.
+  Controlled by `BUILD_FORTRAN_BINDINGS` (defaults to `${UNIX}`: ON on Linux, OFF on Windows) and
+  `BUILD_FORTRAN_CLIENTS`. `FORTRAN_ARRAY_INTERFACES` is accepted for uniformity with the other bindings
+  but has no effect: the rocSOLVER module carries no array overloads. Found with
+  `find_package(rocsolver-fortran)`; the archive and the `.mod` files install per compiler, under
+  `<libdir>/fortran/<compiler>` and `<includedir>/fortran/<compiler>`.
+
+* The `rocsolver` module itself says `use rocblas`, so the rocBLAS Fortran bindings, built with the same
+  compiler, are required to compile and to use it. The deprecated `rocsolver-aliases.h` shims
+  (`rocsolver_create_handle`, `rocsolver_set_stream`, and the rest) are not bound: call the `rocblas_`
+  spellings through the `rocblas` module instead.
+
 ### Changed
+
+* The default Fortran compiler is now ROCm's `amdflang` when the Fortran bindings are built and the test and
+  benchmark clients are not. It stays `gfortran` when those clients are built, since they link the host LAPACK;
+  the rocBLAS Fortran bindings must then be built with `gfortran` too, or the rocSOLVER bindings are skipped.
+
 ### Removed
 ### Optimized
 
