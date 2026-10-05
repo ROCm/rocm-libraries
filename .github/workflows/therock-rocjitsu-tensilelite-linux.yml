@@ -1,0 +1,131 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Run TensileLite common GEMM tests under rocjitsu CPU emulation.
+# Advisory (continue-on-error) sidecar job following the same pattern as
+# therock-rocjitsu-race-check-linux.yml.
+
+name: TheRock rocjitsu tensilelite test Linux
+
+on:
+  workflow_call:
+    inputs:
+      therock_ref:
+        type: string
+        required: true
+      build_runs_on:
+        type: string
+        required: true
+      amdgpu_families:
+        type: string
+        required: true
+      # Test architecture when it differs from the emulated device's.
+      test_target:
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  rocjitsu-tensilelite-linux:
+    name: rocjitsu tensilelite (${{ inputs.amdgpu_families }}${{ inputs.test_target != '' && format(', {0}', inputs.test_target) || '' }})
+    continue-on-error: true
+    runs-on: ${{ inputs.build_runs_on }}
+    timeout-minutes: 400
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --ipc host
+        --user 0:0
+        --ulimit memlock=-1:-1
+        --security-opt seccomp=unconfined
+    defaults:
+      run:
+        shell: bash
+    env:
+      VENV_DIR: ${{ github.workspace }}/.venv
+      ARTIFACT_RUN_ID: ${{ github.run_id }}
+      OUTPUT_ARTIFACTS_DIR: ./build
+      ROCM_PATH: ${{ github.workspace }}/build
+      AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+      ROCJITSU_TEST_TARGET: ${{ inputs.test_target }}
+      ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
+      ROCJITSU_BUILD_DIR: ${{ github.workspace }}/rocjitsu-build
+      REPORT_DIR: ${{ github.workspace }}/rocjitsu-tensilelite-reports
+      PER_TEST_TIMEOUT: "2700"
+      SUITE_TIMEOUT_SECONDS: "19800"
+    steps:
+      - name: Checkout TheRock repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "ROCm/TheRock"
+          ref: ${{ inputs.therock_ref }}
+
+      - name: Checkout rocm-libraries repository for scripts
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          path: rocm-libraries
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: true
+
+      - name: Checkout rocm-systems for rocjitsu
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: ROCm/rocm-systems
+          # Keep the emulator fixed so retries compare the same implementation.
+          # Pinned at ROCm/rocm-systems#12515 (reduce VM and wave dispatch overhead).
+          ref: bbd1525f379c1ed3dd7f4d1b8bd77d3802c556ac
+          path: rocm-systems
+          sparse-checkout: |
+            emulation/rocjitsu
+            shared/machine-readable-isa/isa
+          sparse-checkout-cone-mode: true
+
+      - name: Install rocjitsu build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            libdrm-dev
+
+      - name: Run setup test environment workflow
+        timeout-minutes: 15
+        uses: ./.github/actions/setup_test_environment
+        with:
+          ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
+          ARTIFACT_GROUP: ${{ inputs.amdgpu_families }}
+          OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
+          VENV_DIR: ${{ env.VENV_DIR }}
+          FETCH_ARTIFACT_ARGS: --blas --tests
+
+      - name: Install TensileLite test requirements
+        run: |
+          python ./build_tools/install_additional_requirements.py \
+            --requirements-files "${ROCM_PATH}/share/hipblaslt/tensilelite/requirements-test.txt"
+
+      - name: Validate rocjitsu harness
+        run: |
+          python -m unittest discover -v \
+            -s rocm-libraries/.github/scripts/tests -p 'rocjitsu*_test.py'
+
+      - name: Run rocjitsu tensilelite tests
+        id: tests
+        # The suite supervisor stops earlier, leaving time to reap and report.
+        timeout-minutes: 345
+        run: bash rocm-libraries/.github/scripts/run_rocjitsu_tensilelite_test.sh
+
+      # A killed test step can still be reported as successful; verify the
+      # supervisor's records instead and keep the container's memory counters.
+      - name: Check suite completeness
+        if: ${{ !cancelled() && steps.tests.conclusion != 'skipped' }}
+        run: |
+          python rocm-libraries/.github/scripts/rocjitsu_check_suite.py \
+            --report-dir "${REPORT_DIR}"
+
+      - name: Upload test reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
+        with:
+          name: rocjitsu-tensilelite-reports-${{ inputs.amdgpu_families }}${{ inputs.test_target != '' && format('-{0}', inputs.test_target) || '' }}
+          path: rocjitsu-tensilelite-reports/
+          if-no-files-found: ignore
