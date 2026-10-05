@@ -25,6 +25,32 @@ protected:
     HipFlash2FwdPlanBuilder _builder;
 };
 
+// cuDNN's default: no attn_scale_value and no scale tensor means no scaling.
+TEST(TestHipFlash2AttnScale, AbsentAttnScaleValueIsOne)
+{
+    const std::vector<int64_t> dims{1, 32, 4096, 128};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+        /*withAttnMask=*/false,
+        /*withScale=*/false);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto& attrs = graph.getNodeWrapper(0)
+                            .attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>();
+    ASSERT_FALSE(attrs.attn_scale_value().has_value());
+    EXPECT_EQ(attnScaleFor(attrs), 1.0f);
+}
+
 // -- isApplicable: valid cases -------------------------------------------------
 
 TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsFP16MHACausal)

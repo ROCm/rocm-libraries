@@ -919,6 +919,24 @@ plan_utils::MaskType classifyMask(const flatbuffers::FlatBufferBuilder& builder)
     return plan_utils::getMaskType(attrs);
 }
 
+// cuDNN's default: no attn_scale_value and no scale tensor means no scaling.
+TEST_F(TestSdpaFwdPlanBuilder, AbsentAttnScaleValueIsOne)
+{
+    auto builder = createSdpaFwdGraphWithMask(
+        /*causalMask=*/false,
+        /*causalMaskBottomRight=*/false,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto& attrs = graphWrapper.nodeWrappers()
+                            .front()
+                            ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>();
+    ASSERT_FALSE(attrs.attn_scale_value().has_value());
+    EXPECT_EQ(plan_utils::attnScaleOrDefault(attrs), 1.0f);
+}
+
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsCausalMaskAndBottomRightSetTogether)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
