@@ -1575,6 +1575,198 @@ catch(...)
     return hipsolver::exception2hip_status();
 }
 
+/******************** STEDC ********************/
+hipsolverStatus_t hipsolverDnXstedc_bufferSize(hipsolverDnHandle_t handle,
+                                               hipsolverDnParams_t params,
+                                               hipsolverEigComp_t  compz,
+                                               int64_t             n,
+                                               hipDataType         dataTypeDE,
+                                               const void*         D,
+                                               const void*         E,
+                                               hipDataType         dataTypeZ,
+                                               const void*         Z,
+                                               int64_t             ldz,
+                                               hipDataType         computeType,
+                                               size_t*             lworkOnDevice,
+                                               size_t*             lworkOnHost)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!params)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(!lworkOnDevice || !lworkOnHost)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lworkOnDevice = 0;
+    *lworkOnHost   = 0;
+
+    // TODO: Update to call 64-bit rocsolver_*stedc_64 once available in rocSOLVER.
+    // Currently rocSOLVER only has 32-bit versions, so we cast int64_t to rocblas_int.
+    auto const MAX_INT             = std::numeric_limits<int32_t>::max();
+    bool const is_integer_overflow = (int64_t(ldz) * n) > MAX_INT;
+    if(is_integer_overflow)
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+
+    size_t sz;
+    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    hipsolverStatus_t status;
+
+    if(dataTypeZ == HIP_R_32F && dataTypeDE == HIP_R_32F && computeType == HIP_R_32F)
+    {
+        status = hipsolver::rocblas2hip_status(
+            rocsolver_sstedc((rocblas_handle)handle,
+                             hipsolver::hip2rocblas_evect_comp(compz),
+                             static_cast<rocblas_int>(n),
+                             nullptr,
+                             nullptr,
+                             nullptr,
+                             static_cast<rocblas_int>(ldz),
+                             nullptr));
+    }
+    else if(dataTypeZ == HIP_R_64F && dataTypeDE == HIP_R_64F && computeType == HIP_R_64F)
+    {
+        status = hipsolver::rocblas2hip_status(
+            rocsolver_dstedc((rocblas_handle)handle,
+                             hipsolver::hip2rocblas_evect_comp(compz),
+                             static_cast<rocblas_int>(n),
+                             nullptr,
+                             nullptr,
+                             nullptr,
+                             static_cast<rocblas_int>(ldz),
+                             nullptr));
+    }
+    else if(dataTypeZ == HIP_C_32F && dataTypeDE == HIP_R_32F && computeType == HIP_C_32F)
+    {
+        status = hipsolver::rocblas2hip_status(
+            rocsolver_cstedc((rocblas_handle)handle,
+                             hipsolver::hip2rocblas_evect_comp(compz),
+                             static_cast<rocblas_int>(n),
+                             nullptr,
+                             nullptr,
+                             nullptr,
+                             static_cast<rocblas_int>(ldz),
+                             nullptr));
+    }
+    else if(dataTypeZ == HIP_C_64F && dataTypeDE == HIP_R_64F && computeType == HIP_C_64F)
+    {
+        status = hipsolver::rocblas2hip_status(
+            rocsolver_zstedc((rocblas_handle)handle,
+                             hipsolver::hip2rocblas_evect_comp(compz),
+                             static_cast<rocblas_int>(n),
+                             nullptr,
+                             nullptr,
+                             nullptr,
+                             static_cast<rocblas_int>(ldz),
+                             nullptr));
+    }
+    else
+    {
+        rocblas_stop_device_memory_size_query((rocblas_handle)handle, lworkOnDevice);
+        return HIPSOLVER_STATUS_INVALID_ENUM;
+    }
+
+    rocblas_stop_device_memory_size_query((rocblas_handle)handle, lworkOnDevice);
+    return status;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverDnXstedc(hipsolverDnHandle_t handle,
+                                    hipsolverDnParams_t params,
+                                    hipsolverEigComp_t  compz,
+                                    int64_t             n,
+                                    hipDataType         dataTypeDE,
+                                    void*               D,
+                                    void*               E,
+                                    hipDataType         dataTypeZ,
+                                    void*               Z,
+                                    int64_t             ldz,
+                                    hipDataType         computeType,
+                                    void*               workOnDevice,
+                                    size_t              lworkOnDevice,
+                                    void*               workOnHost,
+                                    size_t              lworkOnHost,
+                                    int*                devInfo)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!params)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    // Validate datatype combination before workspace setup
+    if(!((dataTypeZ == HIP_R_32F && dataTypeDE == HIP_R_32F && computeType == HIP_R_32F)
+         || (dataTypeZ == HIP_R_64F && dataTypeDE == HIP_R_64F && computeType == HIP_R_64F)
+         || (dataTypeZ == HIP_C_32F && dataTypeDE == HIP_R_32F && computeType == HIP_C_32F)
+         || (dataTypeZ == HIP_C_64F && dataTypeDE == HIP_R_64F && computeType == HIP_C_64F)))
+        return HIPSOLVER_STATUS_INVALID_ENUM;
+
+    // TODO: Update to call 64-bit rocsolver_*stedc_64 once available in rocSOLVER.
+    // Currently rocSOLVER only has 32-bit versions, so we cast int64_t to rocblas_int.
+    auto const MAX_INT             = std::numeric_limits<int32_t>::max();
+    bool const is_integer_overflow = (int64_t(ldz) * n) > MAX_INT;
+    if(is_integer_overflow)
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+
+    if(dataTypeZ == HIP_R_32F && dataTypeDE == HIP_R_32F && computeType == HIP_R_32F)
+    {
+        return hipsolver::rocblas2hip_status(
+            rocsolver_sstedc((rocblas_handle)handle,
+                             hipsolver::hip2rocblas_evect_comp(compz),
+                             static_cast<rocblas_int>(n),
+                             (float*)D,
+                             (float*)E,
+                             (float*)Z,
+                             static_cast<rocblas_int>(ldz),
+                             devInfo));
+    }
+    else if(dataTypeZ == HIP_R_64F && dataTypeDE == HIP_R_64F && computeType == HIP_R_64F)
+    {
+        return hipsolver::rocblas2hip_status(
+            rocsolver_dstedc((rocblas_handle)handle,
+                             hipsolver::hip2rocblas_evect_comp(compz),
+                             static_cast<rocblas_int>(n),
+                             (double*)D,
+                             (double*)E,
+                             (double*)Z,
+                             static_cast<rocblas_int>(ldz),
+                             devInfo));
+    }
+    else if(dataTypeZ == HIP_C_32F && dataTypeDE == HIP_R_32F && computeType == HIP_C_32F)
+    {
+        return hipsolver::rocblas2hip_status(
+            rocsolver_cstedc((rocblas_handle)handle,
+                             hipsolver::hip2rocblas_evect_comp(compz),
+                             static_cast<rocblas_int>(n),
+                             (float*)D,
+                             (float*)E,
+                             (rocblas_float_complex*)Z,
+                             static_cast<rocblas_int>(ldz),
+                             devInfo));
+    }
+    else if(dataTypeZ == HIP_C_64F && dataTypeDE == HIP_R_64F && computeType == HIP_C_64F)
+    {
+        return hipsolver::rocblas2hip_status(
+            rocsolver_zstedc((rocblas_handle)handle,
+                             hipsolver::hip2rocblas_evect_comp(compz),
+                             static_cast<rocblas_int>(n),
+                             (double*)D,
+                             (double*)E,
+                             (rocblas_double_complex*)Z,
+                             static_cast<rocblas_int>(ldz),
+                             devInfo));
+    }
+    else
+        return HIPSOLVER_STATUS_INVALID_ENUM;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
 #if defined(HIPSOLVER_ENABLE_EIGENSOLVERS_64)
 // rocSOLVER's 64-bit eigensolvers report convergence status through an int64_t* info,
 // but the cuSOLVER-compatible public API exposes it as int*. Copy the low word of each
@@ -1875,17 +2067,17 @@ catch(...)
 /******************** SYEVD ********************/
 hipsolverStatus_t hipsolverDnXsyevd_bufferSize(hipsolverDnHandle_t handle,
                                                hipsolverDnParams_t params,
-                                               hipsolverEigMode_t  jobz,
+                                               hipsolverEigMode_t jobz,
                                                hipsolverFillMode_t uplo,
-                                               int64_t             n,
-                                               hipDataType         dataTypeA,
-                                               const void*         A,
-                                               int64_t             lda,
-                                               hipDataType         dataTypeW,
-                                               const void*         W,
-                                               hipDataType         computeType,
-                                               size_t*             lworkOnDevice,
-                                               size_t*             lworkOnHost)
+                                               int64_t n,
+                                               hipDataType dataTypeA,
+                                               const void* A,
+                                               int64_t lda,
+                                               hipDataType dataTypeW,
+                                               const void* W,
+                                               hipDataType computeType,
+                                               size_t* lworkOnDevice,
+                                               size_t* lworkOnHost)
 try
 {
     if(!handle)
@@ -1896,11 +2088,11 @@ try
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
     *lworkOnDevice = 0;
-    *lworkOnHost   = 0;
+    *lworkOnHost = 0;
 
     // TODO: Update to call 64-bit rocsolver_*syevd_64 / rocsolver_*heevd_64 once available in rocSOLVER.
     // Currently rocSOLVER only has 32-bit versions, so we cast int64_t to rocblas_int.
-    auto const MAX_INT             = std::numeric_limits<int32_t>::max();
+    auto const MAX_INT = std::numeric_limits<int32_t>::max();
     bool const is_integer_overflow = (int64_t(lda) * n) > MAX_INT;
     if(is_integer_overflow)
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
@@ -1989,20 +2181,20 @@ catch(...)
 
 hipsolverStatus_t hipsolverDnXsyevd(hipsolverDnHandle_t handle,
                                     hipsolverDnParams_t params,
-                                    hipsolverEigMode_t  jobz,
+                                    hipsolverEigMode_t jobz,
                                     hipsolverFillMode_t uplo,
-                                    int64_t             n,
-                                    hipDataType         dataTypeA,
-                                    void*               A,
-                                    int64_t             lda,
-                                    hipDataType         dataTypeW,
-                                    void*               W,
-                                    hipDataType         computeType,
-                                    void*               workOnDevice,
-                                    size_t              lworkOnDevice,
-                                    void*               workOnHost,
-                                    size_t              lworkOnHost,
-                                    int*                devInfo)
+                                    int64_t n,
+                                    hipDataType dataTypeA,
+                                    void* A,
+                                    int64_t lda,
+                                    hipDataType dataTypeW,
+                                    void* W,
+                                    hipDataType computeType,
+                                    void* workOnDevice,
+                                    size_t lworkOnDevice,
+                                    void* workOnHost,
+                                    size_t lworkOnHost,
+                                    int* devInfo)
 try
 {
     if(!handle)
@@ -2019,7 +2211,7 @@ try
 
     // TODO: Update to call 64-bit rocsolver_*syevd_64 / rocsolver_*heevd_64 once available in rocSOLVER.
     // Currently rocSOLVER only has 32-bit versions, so we cast int64_t to rocblas_int.
-    auto const MAX_INT             = std::numeric_limits<int32_t>::max();
+    auto const MAX_INT = std::numeric_limits<int32_t>::max();
     bool const is_integer_overflow = (int64_t(lda) * n) > MAX_INT;
     if(is_integer_overflow)
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
@@ -2029,7 +2221,7 @@ try
         = (dataTypeA == HIP_R_32F || dataTypeA == HIP_C_32F) ? sizeof(float) : sizeof(double);
 
     rocblas_device_malloc mem((rocblas_handle)handle);
-    void*                 E = nullptr;
+    void* E = nullptr;
 
     if(workOnDevice && lworkOnDevice)
     {
@@ -2452,18 +2644,18 @@ catch(...)
 /******************** SYEV_BATCHED ********************/
 hipsolverStatus_t hipsolverDnXsyevBatched_bufferSize(hipsolverDnHandle_t handle,
                                                      hipsolverDnParams_t params,
-                                                     hipsolverEigMode_t  jobz,
+                                                     hipsolverEigMode_t jobz,
                                                      hipsolverFillMode_t uplo,
-                                                     int64_t             n,
-                                                     hipDataType         dataTypeA,
-                                                     const void*         A,
-                                                     int64_t             lda,
-                                                     hipDataType         dataTypeW,
-                                                     const void*         W,
-                                                     hipDataType         computeType,
-                                                     size_t*             lworkOnDevice,
-                                                     size_t*             lworkOnHost,
-                                                     int64_t             batchSize)
+                                                     int64_t n,
+                                                     hipDataType dataTypeA,
+                                                     const void* A,
+                                                     int64_t lda,
+                                                     hipDataType dataTypeW,
+                                                     const void* W,
+                                                     hipDataType computeType,
+                                                     size_t* lworkOnDevice,
+                                                     size_t* lworkOnHost,
+                                                     int64_t batchSize)
 try
 {
     if(!handle)
@@ -2474,7 +2666,7 @@ try
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
     *lworkOnDevice = 0;
-    *lworkOnHost   = 0;
+    *lworkOnHost = 0;
 
     // rocSOLVER does not yet have 64-bit syev_strided_batched; validate args fit in 32-bit
     if(n > INT_MAX || lda > INT_MAX || batchSize > INT_MAX || int64_t(lda) * n > INT_MAX)
@@ -2483,10 +2675,10 @@ try
     size_t sz;
     rocblas_start_device_memory_size_query((rocblas_handle)handle);
 
-    hipsolverStatus_t status  = HIPSOLVER_STATUS_SUCCESS;
-    int64_t           strideA = int64_t(lda) * n;
-    int64_t           strideW = n;
-    int64_t           strideE = n;
+    hipsolverStatus_t status = HIPSOLVER_STATUS_SUCCESS;
+    int64_t strideA = int64_t(lda) * n;
+    int64_t strideW = n;
+    int64_t strideE = n;
 
     // Pass nullptr for E during workspace query
     if(dataTypeA == HIP_R_32F && dataTypeW == HIP_R_32F && computeType == HIP_R_32F)
@@ -2592,21 +2784,21 @@ catch(...)
 
 hipsolverStatus_t hipsolverDnXsyevBatched(hipsolverDnHandle_t handle,
                                           hipsolverDnParams_t params,
-                                          hipsolverEigMode_t  jobz,
+                                          hipsolverEigMode_t jobz,
                                           hipsolverFillMode_t uplo,
-                                          int64_t             n,
-                                          hipDataType         dataTypeA,
-                                          void*               A,
-                                          int64_t             lda,
-                                          hipDataType         dataTypeW,
-                                          void*               W,
-                                          hipDataType         computeType,
-                                          void*               workOnDevice,
-                                          size_t              lworkOnDevice,
-                                          void*               workOnHost,
-                                          size_t              lworkOnHost,
-                                          int*                devInfo,
-                                          int64_t             batchSize)
+                                          int64_t n,
+                                          hipDataType dataTypeA,
+                                          void* A,
+                                          int64_t lda,
+                                          hipDataType dataTypeW,
+                                          void* W,
+                                          hipDataType computeType,
+                                          void* workOnDevice,
+                                          size_t lworkOnDevice,
+                                          void* workOnHost,
+                                          size_t lworkOnHost,
+                                          int* devInfo,
+                                          int64_t batchSize)
 try
 {
     if(!handle)
@@ -2626,7 +2818,7 @@ try
         e_workspace_size = sizeof(double) * n * batchSize;
 
     rocblas_device_malloc mem((rocblas_handle)handle);
-    void*                 E_workspace;
+    void* E_workspace;
 
     if(workOnDevice && lworkOnDevice)
     {
@@ -2634,8 +2826,8 @@ try
             return HIPSOLVER_STATUS_INVALID_VALUE;
 
         // User provided workspace: E at the beginning, rocSOLVER workspace after
-        E_workspace           = workOnDevice;
-        void*  rocsolver_work = reinterpret_cast<std::byte*>(workOnDevice) + e_workspace_size;
+        E_workspace = workOnDevice;
+        void* rocsolver_work = reinterpret_cast<std::byte*>(workOnDevice) + e_workspace_size;
         size_t lwork_computed = lworkOnDevice - e_workspace_size;
         CHECK_ROCBLAS_ERROR(
             rocblas_set_workspace((rocblas_handle)handle, rocsolver_work, lwork_computed));

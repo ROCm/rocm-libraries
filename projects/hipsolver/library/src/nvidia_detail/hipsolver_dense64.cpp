@@ -613,6 +613,94 @@ catch(...)
     return hipsolver::exception2hip_status();
 }
 
+/******************** STEDC ********************/
+hipsolverStatus_t hipsolverDnXstedc_bufferSize(hipsolverDnHandle_t handle,
+                                               hipsolverDnParams_t params,
+                                               hipsolverEigComp_t  compz,
+                                               int64_t             n,
+                                               hipDataType         dataTypeDE,
+                                               const void*         D,
+                                               const void*         E,
+                                               hipDataType         dataTypeZ,
+                                               const void*         Z,
+                                               int64_t             ldz,
+                                               hipDataType         computeType,
+                                               size_t*             lworkOnDevice,
+                                               size_t*             lworkOnHost)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!params)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(
+        cusolverDnXstedc_bufferSize(dn->handle,
+                                    (cusolverDnParams_t)params,
+                                    hipsolver::hip2cuda_evect_comp(compz),
+                                    n,
+                                    dataTypeDE,
+                                    D,
+                                    E,
+                                    dataTypeZ,
+                                    Z,
+                                    ldz,
+                                    computeType,
+                                    lworkOnDevice,
+                                    lworkOnHost));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverDnXstedc(hipsolverDnHandle_t handle,
+                                    hipsolverDnParams_t params,
+                                    hipsolverEigComp_t  compz,
+                                    int64_t             n,
+                                    hipDataType         dataTypeDE,
+                                    void*               D,
+                                    void*               E,
+                                    hipDataType         dataTypeZ,
+                                    void*               Z,
+                                    int64_t             ldz,
+                                    hipDataType         computeType,
+                                    void*               workOnDevice,
+                                    size_t              lworkOnDevice,
+                                    void*               workOnHost,
+                                    size_t              lworkOnHost,
+                                    int*                devInfo)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!params)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnXstedc(dn->handle,
+                                                       (cusolverDnParams_t)params,
+                                                       hipsolver::hip2cuda_evect_comp(compz),
+                                                       n,
+                                                       dataTypeDE,
+                                                       D,
+                                                       E,
+                                                       dataTypeZ,
+                                                       Z,
+                                                       ldz,
+                                                       computeType,
+                                                       workOnDevice,
+                                                       lworkOnDevice,
+                                                       workOnHost,
+                                                       lworkOnHost,
+                                                       devInfo));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
 /******************** SYEVD ********************/
 hipsolverStatus_t hipsolverDnXsyevd_bufferSize(hipsolverDnHandle_t handle,
                                                hipsolverDnParams_t params,

@@ -197,6 +197,36 @@ hipsolverEigRange_t cuda2hip_erange(cusolverEigRange_t eig)
     }
 }
 
+cusolverEigComp_t hip2cuda_evect_comp(hipsolverEigComp_t eig)
+{
+    switch(eig)
+    {
+    case HIPSOLVER_EIG_COMP_N:
+        return CUPSOLVER_EIG_COMP_N;
+    case HIPSOLVER_EIG_COMP_I:
+        return CUPSOLVER_EIG_COMP_I;
+    case HIPSOLVER_EIG_COMP_V:
+        return CUPSOLVER_EIG_COMP_V;
+    default:
+        throw HIPSOLVER_STATUS_INVALID_ENUM;
+    }
+}
+
+hipsolverEigComp_t cuda2hip_evect_comp(cusolverEigComp_t eig)
+{
+    switch(eig)
+    {
+    case CUSOLVER_EIG_COMP_N:
+        return HIPSOLVER_EIG_COMP_N;
+    case CUSOLVER_EIG_COMP_I:
+        return HIPSOLVER_EIG_COMP_I;
+    case CUSOLVER_EIG_COMP_V:
+        return HIPSOLVER_EIG_COMP_V;
+    default:
+        throw HIPSOLVER_STATUS_INVALID_ENUM;
+    }
+}
+
 cusolverAlgMode_t hip2cuda_algmode(hipsolverAlgMode_t mode)
 {
     switch(mode)
