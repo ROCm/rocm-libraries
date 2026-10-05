@@ -2055,17 +2055,24 @@ struct FmhaBwdDQDKDVKernel
         // zeroing lse/d for the last real row and corrupting dQ/dK/dV.
         // pad_tensor_view keeps element_space_size (no extra allocation needed)
         // and supplies the per-element validity predicate.
-        const auto lse_dram = pad_tensor_view(
-            make_naive_tensor_view<address_space_enum::global>(
-                lse_ptr, make_tuple(kargs.seqlen_q), make_tuple(1), number<1>{}, number<1>{}),
-            make_tuple(number<FmhaPipeline::kM0>{}),
-            sequence<true>{});
-
-        const auto d_dram = pad_tensor_view(
-            make_naive_tensor_view<address_space_enum::global>(
-                d_ptr, make_tuple(kargs.seqlen_q), make_tuple(1), number<1>{}, number<1>{}),
-            make_tuple(number<FmhaPipeline::kM0>{}),
-            sequence<true>{});
+        // Product-dual tiles have kM0 <= warp size, so each lane reads one dword and the
+        // buffer range check already zeroes it past seqlen_q; the packed view avoids
+        // per-element predicated loads in the DKDV loop.
+        constexpr bool kLSEDSingleDword =
+            (kUseQMajorDQ || kSkipDqWorkspace) && FmhaPipeline::kM0 <= get_warp_size();
+        const auto make_lsed_dram = [&](const auto* ptr) {
+            if constexpr(kLSEDSingleDword)
+                return make_naive_tensor_view_packed<address_space_enum::global>(
+                    ptr, make_tuple(kargs.seqlen_q), number<FmhaPipeline::kM0>{});
+            else
+                return pad_tensor_view(
+                    make_naive_tensor_view<address_space_enum::global>(
+                        ptr, make_tuple(kargs.seqlen_q), make_tuple(1), number<1>{}, number<1>{}),
+                    make_tuple(number<FmhaPipeline::kM0>{}),
+                    sequence<true>{});
+        };
+        const auto lse_dram = make_lsed_dram(lse_ptr);
+        const auto d_dram   = make_lsed_dram(d_ptr);
 
         const auto do_dram_naive = make_naive_tensor_view<address_space_enum::global>(
             do_ptr,
