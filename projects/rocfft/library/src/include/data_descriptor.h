@@ -25,6 +25,7 @@
 
 #include <regex>
 #include <sstream>
+#include <stdexcept>
 
 namespace DescriptorFormatVersion
 {
@@ -172,19 +173,39 @@ struct FromString<std::string>
     }
 };
 
+struct SeekField
+{
+    void Get(const std::string& key, std::sregex_token_iterator& current) const
+    {
+        static const std::sregex_token_iterator token_end;
+        while(current != token_end && current->str() != key)
+        {
+            ++current;
+        }
+
+        if(current == token_end || ++current == token_end)
+        {
+            throw std::runtime_error("solution map: missing or truncated field '" + key + "'");
+        }
+    }
+};
+
 template <typename T>
 struct StringToVector
 {
     void Get(std::vector<T>& ret, std::sregex_token_iterator& current) const
     {
-        static const std::string hintKey("]");
-        while(current->str() != hintKey)
+        static const std::string                hintKey("]");
+        static const std::sregex_token_iterator token_end;
+        while(current != token_end && current->str() != hintKey)
         {
             T elem;
             FromString<T>().Get(elem, current);
             ret.push_back(elem);
             ++current;
         }
+        if(current == token_end)
+            throw std::runtime_error("solution map: unterminated list");
     }
 };
 
@@ -193,10 +214,7 @@ struct FieldParser
 {
     void parse(const std::string& expectedKey, T& value, std::sregex_token_iterator& current) const
     {
-        while(current->str() != expectedKey)
-            ++current;
-
-        ++current;
+        SeekField().Get(expectedKey, current);
         FromString<T>().Get(value, current);
     }
 };
@@ -208,12 +226,26 @@ struct VectorFieldParser
                std::vector<T>&             vec,
                std::sregex_token_iterator& current) const
     {
-        while(current->str() != expectedKey)
-            ++current;
-
-        ++current;
+        SeekField().Get(expectedKey, current);
         vec.clear();
         StringToVector<T>().Get(vec, current);
+    }
+};
+
+template <typename T>
+struct OptionalFieldParser
+{
+    void parse(const std::string& expectedKey, T& value, std::sregex_token_iterator& current) const
+    {
+        static const std::sregex_token_iterator token_end;
+
+        auto peek = current;
+        if(peek == token_end || ++peek == token_end || peek->str() != expectedKey)
+            return;
+
+        current = peek;
+        ++current;
+        FromString<T>().Get(value, current);
     }
 };
 
