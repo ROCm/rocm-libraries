@@ -451,7 +451,7 @@
     SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 32
-    StaggerUMapping: 1
+    StaggerUMapping: 0
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -679,9 +679,9 @@
     SolutionIndex: 2
     SourceSwap: true
     SpaceFillingAlgo: []
-    StaggerU: 32
-    StaggerUMapping: 0
-    StaggerUStride: 256
+    StaggerU: 16
+    StaggerUMapping: 1
+    StaggerUStride: 512
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
@@ -746,7 +746,7 @@
     _VectorStore: 1
     _WorkspaceSizePerElemBias: 0
     _WorkspaceSizePerElemC: 4
-    _staggerStrideShift: 1
+    _staggerStrideShift: 2
     enableGLTrA: false
     enableGLTrB: false
     enableLDSTrA: false
@@ -1357,8 +1357,8 @@
     SolutionIndex: 5
     SourceSwap: true
     SpaceFillingAlgo: []
-    StaggerU: 32
-    StaggerUMapping: 0
+    StaggerU: 16
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -1855,7 +1855,7 @@
     SpaceFillingAlgo: []
     StaggerU: 32
     StaggerUMapping: 0
-    StaggerUStride: 256
+    StaggerUStride: 128
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
@@ -1920,7 +1920,7 @@
     _VectorStore: 1
     _WorkspaceSizePerElemBias: 0
     _WorkspaceSizePerElemC: 4
-    _staggerStrideShift: 1
+    _staggerStrideShift: 0
     enableGLTrA: false
     enableGLTrB: false
     enableLDSTrA: false
@@ -2102,8 +2102,8 @@
     SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 32
-    StaggerUMapping: 0
-    StaggerUStride: 256
+    StaggerUMapping: 1
+    StaggerUStride: 128
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
@@ -2168,7 +2168,7 @@
     _VectorStore: 1
     _WorkspaceSizePerElemBias: 0
     _WorkspaceSizePerElemC: 4
-    _staggerStrideShift: 1
+    _staggerStrideShift: 0
     enableGLTrA: false
     enableGLTrB: false
     enableLDSTrA: false
@@ -2478,7 +2478,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT16x64x32_MI16x16x1_CMS_SN_LDSB0_AFC1_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB8_GSUAMB_GLS0_ISA1151_IU1_LDSTI0_LBSPPA512_LBSPPB2048_LBSPPM0_LPA16_LPB16_LPM0_LRVW16_LWPMn1_MIAV1_MIWT1_1_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA0_SGROBn1_SIA3_SS0_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS0_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS32_WG16_8_1
     LDSTrInst: false
     LSCA: 16
     LSCB: 32
@@ -2582,7 +2581,6 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 10
-    SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT16x64x32_MI16x16x1_CMS_SN_LDSB0_AFC1_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA1151_IU1_LDSTI0_LBSPPA512_LBSPPB2048_LBSPPM0_LPA16_LPB16_LPM0_LRVW16_LWPMn1_MIAV1_MIWT1_1_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA0_SGROBn1_SIA3_SS0_SU32_SUM1_SUS256_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS0_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS32_WG16_8_1_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: false
     SpaceFillingAlgo: []
     StaggerU: 32
