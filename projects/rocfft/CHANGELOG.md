@@ -11,6 +11,8 @@ Documentation for rocFFT is available at
 * Fixed out-of-bounds memory access when executing a multi-device complex-to-complex plan whose
   bricks used non-contiguous data layouts.
 * Fixed a memory leak when `rocfft_plan_create` fails.
+* Fixed incorrect results for 1D complex transforms of lengths involving large prime factors
+  with large batch sizes, where 32-bit kernel indexing could overflow.
 
 ## rocFFT 1.0.40 for ROCm 10.1
 
