@@ -10,6 +10,7 @@
 #include <memory>
 
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
@@ -57,6 +58,14 @@ public:
                         uint32_t numDeviceBuffers,
                         void* workspace) const
         = 0;
+
+    /// Whether this handler can load and dispatch a kernel whose source uses @p kind.
+    /// Called at catalog-build time so an unsupported source kind is dropped early
+    /// rather than failing at prepare() time.
+    virtual bool supportsSourceKind(KernelSourceKind kind) const
+    {
+        return kind == KernelSourceKind::EMBEDDED_SOURCE;
+    }
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor
