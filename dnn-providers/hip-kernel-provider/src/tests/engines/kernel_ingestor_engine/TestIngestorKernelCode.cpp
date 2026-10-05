@@ -8,7 +8,6 @@
 #include <filesystem>
 #include <map>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -31,13 +30,15 @@
 
 /**
  * @file TestIngestorKernelCode.cpp
- * @brief The two checks buildIngestorKernelCode makes before loading anything: path
- *        confinement, and the packaged-versus-marshalled argument signature. Called rather
- *        than copied.
+ * @brief The checks buildIngestorKernelCode makes before loading anything: path
+ *        confinement, the packaged-versus-marshalled argument signature, and whether a
+ *        source-compiled kernel reaches the compiler -- compiled when the pack supplies one,
+ *        refused when it supplies none. Called rather than copied.
  *
  * TestPackedDescriptorLoad.cpp reproduces the confinement rule inline, so deleting the
  * guard leaves that suite green; these cases turn red. No device and no archive on disk are
- * needed -- both checks throw before the first HIP call and before kpackLoader.load.
+ * needed: a case that reaches the loader stops at the missing archive, before any HIP call,
+ * and the compile case uses a recording compiler.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -52,21 +53,6 @@ using hipdnn_test_sdk::utilities::claimScratchDirectory;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
 
 constexpr const char* SCRATCH_LABEL = "ingestorkernelcode";
-
-/// buildIngestorKernelCode takes an IKernelCompiler by reference, so the KPACK path needs
-/// an object for a compiler it never reaches. A call to it means the kind switch took the
-/// wrong arm, so it throws rather than returning a silently empty program.
-class UnreachableCompiler : public compilation::IKernelCompiler
-{
-public:
-    std::unique_ptr<compilation::ICompiledProgram>
-        compile(const std::string& kernelFileName,
-                const std::vector<std::string>& /*options*/) const override
-    {
-        throw std::runtime_error("the KPACK path must not reach the source compiler; asked for '"
-                                 + kernelFileName + "'");
-    }
-};
 
 /// One unnamed device pointer, the shape clang records for a HIP kernel parameter.
 KernelArgument buffer(uint32_t offset)
@@ -107,41 +93,16 @@ KernelDefinition makeKpackKernel(const std::filesystem::path& originDirectory,
 class GuardHarness
 {
 public:
-    /// KernelCompileOptions has no default constructor and reads its tensor argument
-    /// eagerly, so it is built from the fixture's graph rather than stubbed.
-    GuardHarness()
-        : _options(&firstTensorOf(_fixture), _fixture.deviceProperties().gcnArchName)
-    {
-    }
-
     IngestorKernelCode build(const KernelDefinition& kernel,
                              const std::vector<KernelArgument>& expected = threeBuffers())
     {
-        return buildIngestorKernelCode(
-            _compiler, _loader, _fixture.context(), kernel, _options, expected);
+        return buildIngestorKernelCode(_loader, _fixture.context(), kernel, expected);
     }
 
 private:
-    static const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes&
-        firstTensorOf(const GraphFixture& fixture)
-    {
-        const auto& tensors = fixture.context().graph.getTensorMap();
-        for(const auto& [uid, attributes] : tensors)
-        {
-            static_cast<void>(uid);
-            if(attributes != nullptr)
-            {
-                return *attributes;
-            }
-        }
-        throw std::runtime_error("the pointwise fixture graph carries no tensor to compile for");
-    }
-
-    UnreachableCompiler _compiler;
     compilation::KpackModuleCache _cache;
     compilation::KpackKernelLoader _loader{_cache};
     GraphFixture _fixture{buildPointwiseGraph()};
-    compilation::KernelCompileOptions _options;
 };
 
 constexpr const char* OUTSIDE_THE_TREE = "outside the descriptor tree";
@@ -738,6 +699,76 @@ TEST(TestIngestorKernelCodeDevice, ReportsADeviceItCannotQuery)
         EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
     }
     EXPECT_TRUE(code.resolves.empty());
+}
+
+// ---------------------------------------------------------------------------
+// Source-compiled kernels
+// ---------------------------------------------------------------------------
+
+/// Records which source files it is asked to build and hands back a program no device ever
+/// loads.
+class RecordingCompiler : public compilation::IKernelCompiler
+{
+public:
+    std::unique_ptr<compilation::ICompiledProgram>
+        compile(const std::string& kernelFileName,
+                const std::vector<std::string>& /*options*/) const override
+    {
+        compiledFiles.push_back(kernelFileName);
+        return std::make_unique<CountingProgram>(0);
+    }
+
+    mutable std::vector<std::string> compiledFiles;
+};
+
+KernelDefinition makeSourceKernel()
+{
+    auto kernel = makeKpackKernel({}, {}, ABSENT_LIBRARY);
+    kernel.name = "pointwise_add_f32_embedded";
+    kernel.source.kind = KernelSourceKind::EMBEDDED_SOURCE;
+    kernel.source.sourceFile = "kernels/PointwiseAdd.cpp";
+    kernel.source.entryPoint = "PointwiseAdd";
+    return kernel;
+}
+
+TEST(TestIngestorKernelCode, RefusesASourceKernelWithoutSourceCompilationInputs)
+{
+    GuardHarness harness;
+    const auto kernel = makeSourceKernel();
+
+    // The KPACK cases above use this same harness and reach their own checks, so the refusal
+    // is not thrown for every kernel.
+    try
+    {
+        harness.build(kernel);
+        FAIL() << "expected an embedded_source kernel without compile inputs to be refused";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        const std::string what = error.what();
+        EXPECT_NE(what.find("'embedded_source'"), std::string::npos) << what;
+        EXPECT_NE(what.find(kernel.name), std::string::npos) << what;
+    }
+}
+
+TEST(TestIngestorKernelCode, CompilesASourceKernelWhenThePackSuppliesACompiler)
+{
+    const GraphFixture fixture{buildPointwiseGraph()};
+    const auto& tensors = fixture.context().graph.getTensorMap();
+    ASSERT_FALSE(tensors.empty());
+    ASSERT_NE(tensors.begin()->second, nullptr);
+    const compilation::KernelCompileOptions options(tensors.begin()->second,
+                                                    fixture.deviceProperties().gcnArchName);
+    const RecordingCompiler compiler;
+    compilation::KpackModuleCache cache;
+    const compilation::KpackKernelLoader loader{cache};
+
+    static_cast<void>(buildIngestorKernelCode(
+        compiler, loader, fixture.context(), makeSourceKernel(), options, threeBuffers()));
+
+    ASSERT_EQ(compiler.compiledFiles.size(), 1U);
+    EXPECT_EQ(compiler.compiledFiles.front(), "kernels/PointwiseAdd.cpp");
 }
 
 } // namespace

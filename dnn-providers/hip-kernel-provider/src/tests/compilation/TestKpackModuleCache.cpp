@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <system_error>
@@ -96,6 +97,27 @@ constexpr std::uintmax_t CORRUPTION_BYTE_COUNT = 64;
     }
     std::error_code error;
     return std::filesystem::file_size(archive, error) == CORRUPTION_BYTE_COUNT && !error;
+}
+
+/// Copies the test archive to @p archive with its TOC's `gfx_arches` key renamed to one of
+/// the same length, so the reader opens it and finds no architecture list. False if the
+/// key was not found or the copy did not land.
+[[nodiscard]] bool copyWithoutArchitectures(const std::filesystem::path& archive)
+{
+    std::ifstream in(testKpackArchive(), std::ios::binary);
+    std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const std::string key = "gfx_arches";
+    const auto at = bytes.find(key);
+    if(at == std::string::npos)
+    {
+        return false;
+    }
+    bytes[at + key.size() - 1] = 'z';
+
+    std::ofstream out(archive, std::ios::binary | std::ios::trunc);
+    out << bytes;
+    out.close();
+    return !out.fail();
 }
 
 TEST(TestKpackModuleCacheKey, MakeKeyFormatsCorrectly)
@@ -208,6 +230,25 @@ TEST(TestKpackModuleCacheLoad, ReportsAnArchTheArchiveDoesNotHold)
             << "the message must name the arch that was asked for: " << message;
         EXPECT_NE(message.find(ARCHIVE_ARCH), std::string::npos)
             << "the message must name the arches the archive provides: " << message;
+    }
+}
+
+TEST(TestKpackModuleCacheLoad, ReportsAnArchiveThatDeclaresNoArchitectures)
+{
+    const ScopedDirectory scratch = claimScratchDirectory("kpackmodulecache");
+    const ReleaseSharedArchives release;
+    const std::filesystem::path archive = scratch.path() / "no-arches.kpack";
+    ASSERT_TRUE(copyWithoutArchitectures(archive)) << "could not write " << archive;
+
+    // Twice: a second load must refuse the same way rather than answer from a handle the
+    // first left open and report the archive as built for some other GPU.
+    for(int attempt = 0; attempt < 2; ++attempt)
+    {
+        const auto failure = loadForAnAbsentArch(archive);
+        ASSERT_TRUE(failure.has_value()) << "attempt " << attempt;
+        EXPECT_EQ(failure->stage(), KpackLoadStage::ARCH_LOOKUP) << failure->what();
+        EXPECT_NE(std::string(failure->what()).find("declares no architectures"), std::string::npos)
+            << "attempt " << attempt << ": " << failure->what();
     }
 }
 

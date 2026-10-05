@@ -105,6 +105,13 @@ public:
                                          "cannot read the architecture list of kpack archive '"
                                              + archivePath + "' (" + error.codeName + ")");
         }
+        if(opened->arches.empty())
+        {
+            throw KpackModuleLoadFailure(KpackLoadStage::ARCH_LOOKUP,
+                                         "kpack archive '" + archivePath
+                                             + "' declares no architectures; its gfx_arches "
+                                               "entry is absent or malformed");
+        }
         return shared.open.emplace(archivePath, std::move(opened)).first->second;
     }
 

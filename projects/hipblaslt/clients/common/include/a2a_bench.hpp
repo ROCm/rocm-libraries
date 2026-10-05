@@ -9,10 +9,10 @@
 
 #include "allclose.hpp"
 #include "benchmark_timing.hpp"
-#include "collective_rendezvous.hpp"
 #include "hipblaslt_arguments.hpp"
 #include "hipblaslt_init.hpp"
 #include "hipblaslt_ostream.hpp"
+#include "multi_gpu.hpp"
 #include "norm.hpp"
 
 #include <hip/hip_runtime.h>
@@ -27,10 +27,11 @@
 
 namespace hipblaslt_bench
 {
-    constexpr int    kRendezvousTimeoutSec = 60;
-    constexpr size_t kWorkspaceSize        = 128ull * 1024 * 1024;
+    constexpr size_t kWorkspaceSize = 128ull * 1024 * 1024;
 
     constexpr uint32_t kCommChannels = 2;
+
+    constexpr uint32_t kRecvSlices = 2;
 
     struct RankResources
     {
@@ -44,9 +45,11 @@ namespace hipblaslt_bench
         void*                              dB        = nullptr;
         void*                              dC        = nullptr;
         void*                              dD        = nullptr;
-        void*                              dRecv     = nullptr;
         void*                              workspace = nullptr;
-        void*                recvPtrs[HIPBLASLT_DEVICE_COMM_MAX_WORLD] = {};
+
+        void* dRecv[kRecvSlices]                                     = {};
+        void* recvPtrs[kRecvSlices][HIPBLASLT_DEVICE_COMM_MAX_WORLD] = {};
+
         hipblasLtSdmaQueue_t queues[HIPBLASLT_DEVICE_COMM_MAX_WORLD]   = {};
         std::vector<std::unique_ptr<TensileLite::Client::SdmaQueue>> ownedQueues;
         TcpRendezvous*                                               rendezvous = nullptr;
@@ -60,10 +63,11 @@ namespace hipblaslt_bench
             if(stream != nullptr)
                 static_cast<void>(hipStreamSynchronize(stream));
 
-            // recvPtrs[rank] aliases dRecv; the rest are IPC maps.
-            for(void* p : recvPtrs)
-                if(p != nullptr && p != dRecv)
-                    static_cast<void>(hipIpcCloseMemHandle(p));
+            // recvPtrs[s][rank] aliases dRecv[s]; the rest are IPC maps.
+            for(uint32_t s = 0; s < kRecvSlices; ++s)
+                for(void* p : recvPtrs[s])
+                    if(p != nullptr && p != dRecv[s])
+                        static_cast<void>(hipIpcCloseMemHandle(p));
 
             for(hipblasLtMatrixLayout_t l : lay)
                 if(l != nullptr)
@@ -79,7 +83,8 @@ namespace hipblaslt_bench
             static_cast<void>(hipFree(dB));
             static_cast<void>(hipFree(dC));
             static_cast<void>(hipFree(dD));
-            static_cast<void>(hipFree(dRecv));
+            for(void* p : dRecv)
+                static_cast<void>(hipFree(p));
             static_cast<void>(hipFree(workspace));
 
             ownedQueues.clear();
@@ -140,11 +145,13 @@ namespace hipblaslt_bench
     }
 
     // Rank s hands peer p the feature shard [p*shard, (p+1)*shard) of all its
-    // tokens, landing at recv_p[(s*tokens + t)*shard + fw]. Both buffers are
-    // resized to one such block, laid out [token, feature].
+    // tokens, landing at recv_p[(s*tokens + t)*shard + fw] in slice
+    // launchIndex % kRecvSlices. Both buffers are resized to one such block,
+    // laid out [token, feature].
     inline bool check_recv(const LauncherEnv&              env,
                            const Arguments&                arg,
                            RankResources&                  res,
+                           int64_t                         launchIndex,
                            std::vector<hipblasLtBfloat16>& gold,
                            std::vector<hipblasLtBfloat16>& landed)
     {
@@ -174,11 +181,12 @@ namespace hipblaslt_bench
                                      size_t(shard) * sizeof(hipblasLtBfloat16),
                                      size_t(arg.N[0]),
                                      hipMemcpyDeviceToHost));
-            CHECK_HIP_RC(hipMemcpy(landed.data(),
-                                   static_cast<const hipblasLtBfloat16*>(res.recvPtrs[p])
-                                       + size_t(env.rank) * block,
-                                   block * sizeof(hipblasLtBfloat16),
-                                   hipMemcpyDeviceToHost));
+            CHECK_HIP_RC(hipMemcpy(
+                landed.data(),
+                static_cast<const hipblasLtBfloat16*>(res.recvPtrs[launchIndex % kRecvSlices][p])
+                    + size_t(env.rank) * block,
+                block * sizeof(hipblasLtBfloat16),
+                hipMemcpyDeviceToHost));
 
             for(size_t i = 0; i < block; ++i)
                 if(float(gold[i]) != 0.0f)
@@ -208,57 +216,6 @@ namespace hipblaslt_bench
         return normError == 0.0 && allClose;
     }
 
-    inline bool peers_reachable(const LauncherEnv& env, const Arguments& arg)
-    {
-        if(env.world == 1)
-            return true;
-
-        if(env.local_rank != int(env.rank))
-        {
-            hipblaslt_cerr << "error: LOCAL_RANK " << env.local_rank << " must equal RANK "
-                           << env.rank << " when every rank shares a host\n";
-            return false;
-        }
-
-        int visible = 0;
-        if(hipGetDeviceCount(&visible) != hipSuccess || visible < int(env.world))
-        {
-            hipblaslt_cerr << "error: " << visible << " device(s) visible, need " << env.world
-                           << "\n";
-            return false;
-        }
-
-        if(hipSetDevice(env.local_rank) != hipSuccess)
-        {
-            hipblaslt_cerr << "error: hipSetDevice(" << env.local_rank << ") failed\n";
-            return false;
-        }
-
-        for(uint32_t j = 0; j < arg.a2a_world; ++j)
-        {
-            if(int(j) == env.local_rank)
-                continue;
-
-            int canAccess = 0;
-            if(hipDeviceCanAccessPeer(&canAccess, env.local_rank, int(j)) != hipSuccess
-               || canAccess == 0)
-            {
-                hipblaslt_cerr << "error: device " << env.local_rank << " cannot peer with " << j
-                               << "\n";
-                return false;
-            }
-
-            const hipError_t e = hipDeviceEnablePeerAccess(int(j), 0);
-            if(e != hipSuccess && e != hipErrorPeerAccessAlreadyEnabled)
-            {
-                hipblaslt_cerr << "error: hipDeviceEnablePeerAccess(" << env.local_rank << " -> "
-                               << j << ") -> " << hipGetErrorString(e) << "\n";
-                return false;
-            }
-        }
-        return true;
-    }
-
     // Reports only the local outcome.
     inline bool
         setup_rank_resources(const LauncherEnv& env, const Arguments& arg, RankResources& res)
@@ -276,9 +233,12 @@ namespace hipblaslt_bench
         CHECK_HIP_RC(hipMalloc(&res.dB, bytesB));
         CHECK_HIP_RC(hipMalloc(&res.dC, bytesD));
         CHECK_HIP_RC(hipMalloc(&res.dD, bytesD));
-        CHECK_HIP_RC(hipMalloc(&res.dRecv, bytesRecv));
         CHECK_HIP_RC(hipMalloc(&res.workspace, kWorkspaceSize));
-        CHECK_HIP_RC(hipMemset(res.dRecv, 0, bytesRecv));
+        for(void*& p : res.dRecv)
+        {
+            CHECK_HIP_RC(hipMalloc(&p, bytesRecv));
+            CHECK_HIP_RC(hipMemset(p, 0, bytesRecv));
+        }
 
         try
         {
@@ -305,81 +265,10 @@ namespace hipblaslt_bench
         return true;
     }
 
-    inline bool exchange_recv_pointers(const LauncherEnv& env,
-                                       const Arguments&   arg,
-                                       TcpRendezvous&     rendezvous,
-                                       RankResources&     res)
-    {
-        if(env.world == 1)
-        {
-            res.recvPtrs[0] = res.dRecv;
-            return true;
-        }
-
-        struct HandleContribution
-        {
-            uint8_t           ok;
-            hipIpcMemHandle_t handle;
-        };
-        HandleContribution mine{};
-        mine.ok = hipIpcGetMemHandle(&mine.handle, res.dRecv) == hipSuccess ? 1 : 0;
-
-        std::vector<HandleContribution> all(env.world);
-        if(rendezvous.allgather(&mine, all.data(), sizeof(mine)) != HIPBLAS_STATUS_SUCCESS)
-        {
-            hipblaslt_cerr << "error: recv-pointer handle allgather failed\n";
-            return false;
-        }
-        bool gotAllHandles = true;
-        for(uint32_t j = 0; j < env.world; ++j)
-            gotAllHandles = gotAllHandles && all[j].ok != 0;
-        if(!gotAllHandles)
-        {
-            hipblaslt_cerr << "error: hipIpcGetMemHandle failed on at least one rank\n";
-            return false;
-        }
-
-        uint8_t openedAll = 1;
-        for(uint32_t j = 0; j < arg.a2a_world; ++j)
-        {
-            if(j == env.rank)
-                res.recvPtrs[j] = res.dRecv;
-            else if(hipIpcOpenMemHandle(
-                        &res.recvPtrs[j], all[j].handle, hipIpcMemLazyEnablePeerAccess)
-                    != hipSuccess)
-                openedAll = 0;
-        }
-
-        std::vector<uint8_t> allOpened(env.world);
-        if(rendezvous.allgather(&openedAll, allOpened.data(), sizeof(openedAll))
-           != HIPBLAS_STATUS_SUCCESS)
-        {
-            hipblaslt_cerr << "error: recv-pointer open-result allgather failed\n";
-            return false;
-        }
-        bool groupOpened = true;
-        for(uint32_t j = 0; j < env.world; ++j)
-            groupOpened = groupOpened && allOpened[j] != 0;
-        if(!groupOpened)
-            hipblaslt_cerr << "error: hipIpcOpenMemHandle failed on at least one rank\n";
-        return groupOpened;
-    }
-
     inline bool setup_rank(const LauncherEnv& env, const Arguments& arg, RankResources& res)
     {
-        const uint8_t ready = setup_rank_resources(env, arg, res) ? 1 : 0;
-
-        std::vector<uint8_t> allReady(env.world);
-        if(res.rendezvous->allgather(&ready, allReady.data(), sizeof(ready))
-           != HIPBLAS_STATUS_SUCCESS)
-        {
-            hipblaslt_cerr << "error: rank-readiness allgather failed\n";
-            return false;
-        }
-        bool groupReady = true;
-        for(uint32_t j = 0; j < env.world; ++j)
-            groupReady = groupReady && allReady[j] != 0;
-        if(!groupReady)
+        const bool ready = setup_rank_resources(env, arg, res);
+        if(!make_agreement(*res.rendezvous, env.world).agree(ready, std::logical_and<>{}))
         {
             hipblaslt_cerr << "error: rank-local setup failed on at least one rank\n";
             return false;
@@ -392,8 +281,9 @@ namespace hipblaslt_bench
                                            rendezvous_allgather_trampoline,
                                            res.rendezvous));
 
-        if(!exchange_recv_pointers(env, arg, *res.rendezvous, res))
-            return false;
+        for(uint32_t s = 0; s < kRecvSlices; ++s)
+            if(!exchange_ipc_pointers(env, *res.rendezvous, res.dRecv[s], res.recvPtrs[s]))
+                return false;
 
         CHECK_LT_RC(hipblasLtFusedEpilogueCreate(&res.fused));
         CHECK_LT_RC(hipblasLtFusedEpilogueAdd(res.fused,
@@ -406,8 +296,8 @@ namespace hipblaslt_bench
         CHECK_LT_RC(
             hipblasLtFusedEpilogueSetAttribute(res.fused,
                                                HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS,
-                                               res.recvPtrs,
-                                               arg.a2a_world * sizeof(res.recvPtrs[0])));
+                                               res.recvPtrs[0],
+                                               arg.a2a_world * sizeof(res.recvPtrs[0][0])));
         CHECK_LT_RC(hipblasLtFusedEpilogueSetAttribute(
             res.fused,
             HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT,
@@ -501,15 +391,5 @@ namespace hipblaslt_bench
             if(status != HIPBLAS_STATUS_SUCCESS)
                 lastStatus = status;
         };
-    }
-
-    inline CollectiveAgreement make_agreement(TcpRendezvous& rendezvous, uint32_t world)
-    {
-        CollectiveAgreement agreement;
-        agreement.world     = world;
-        agreement.allgather = [&rendezvous](const void* send, void* recv, size_t bytes) {
-            return rendezvous.allgather(send, recv, bytes) == HIPBLAS_STATUS_SUCCESS;
-        };
-        return agreement;
     }
 } // namespace hipblaslt_bench
