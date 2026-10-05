@@ -46,12 +46,6 @@ if(BUILD_VERBOSE)
   message(STATUS "\t==>CMAKE_EXE_LINKER link flags: " ${CMAKE_EXE_LINKER_FLAGS})
 endif()
 
-if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
-  find_package(hip REQUIRED PATHS ${ROCM_PATH} /opt/rocm ${HIP_PATH})
-else()
-  find_package(HIP REQUIRED)
-endif()
-
 # configure a header file to pass the CMake version settings to the source, and package the header files in the output archive
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/internal/hipsolver-version.h.in"
 	"${PROJECT_BINARY_DIR}/include/hipsolver/internal/hipsolver-version.h")

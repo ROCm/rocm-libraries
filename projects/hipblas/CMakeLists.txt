@@ -77,37 +77,20 @@ endif( )
 # BUILD_SHARED_LIBS is a cmake built-in; we make it an explicit option such that it shows in cmake-gui
 option( BUILD_SHARED_LIBS "Build hipBLAS as a shared library" ON )
 
-# Deprecated USE_CUDA option
-if(DEFINED USE_CUDA)
-  if(USE_CUDA)
-    set(ENV{HIP_PLATFORM} nvidia)
-    message(DEPRECATED "USE_CUDA is deprecated (use environment variable HIP_PLATFORM=nvidia)")
-  else()
-    set(ENV{HIP_PLATFORM} amd)
-    message(DEPRECATION "USE_CUDA is deprecated (use environment variable HIP_PLATFORM=amd)")
-  endif()
-endif()
+# USE_CUDA: select the CUDA backend, invoking nvcc directly without hipcc.
+# This replaces the old hipcc-based USE_CUDA flow (which set ENV{HIP_PLATFORM}
+# for hipconfig). The previous USE_CUDA was deprecated because it depended on
+# hipcc/hipconfig; this new option drives the CUDA backend via nvcc directly —
+# no hipcc or hipconfig involvement.
+# Pass -DUSE_CUDA=ON to cmake (or --cuda to rmake.py/install.sh) to enable.
+option(USE_CUDA "Build hipBLAS for the CUDA backend using nvcc directly (no hipcc)" OFF)
 
-# Hip headers required of all clients; clients use hip to allocate device memory
-find_package( hip CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm )
+# hip::host is needed for HIP headers on both backends; load it unconditionally.
+find_package(hip CONFIG REQUIRED PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 
-# support for cuda backend with hip < 6.0
-if(NOT hip_FOUND)
-    find_package( HIP MODULE REQUIRED )
-    list( APPEND HIP_INCLUDE_DIRS "${HIP_ROOT_DIR}/include" )
-    set(ENV{HIP_PLATFORM} nvidia)
-    if (NOT HIP_PLATFORM)
-      set(HIP_PLATFORM nvidia)
-    endif()
-else()
-    if (NOT HIP_PLATFORM)
-      set(HIP_PLATFORM amd)
-    endif()
-endif()
-
-if(HIP_PLATFORM STREQUAL nvidia)
-  find_package( CUDA REQUIRED )
-  set( HIPBLAS_HIP_PLATFORM_COMPILER_DEFINES __HIP_PLATFORM_NVCC__ __HIP_PLATFORM_NVIDIA__ )
+if(USE_CUDA)
+  find_package(CUDAToolkit REQUIRED)
+  set(HIPBLAS_CUDA_COMPILER_DEFINES __HIP_PLATFORM_NVCC__ __HIP_PLATFORM_NVIDIA__)
 endif()
 
 option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
@@ -198,7 +181,7 @@ if( WIN32 )
 endif( )
 
 # Package specific CPACK vars
-if(HIP_PLATFORM STREQUAL amd)
+if(NOT USE_CUDA)
   set(rocblas_minimum 5.8.0)
   set(rocsolver_minimum 3.33.0)
   rocm_package_add_dependencies(SHARED_DEPENDS "rocblas >= ${rocblas_minimum}" "rocsolver >= ${rocsolver_minimum}")
@@ -237,7 +220,7 @@ endif( )
 set( CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" )
 
 # Give hipblas compiled for CUDA backend a different name
-if(HIP_PLATFORM STREQUAL amd)
+if(NOT USE_CUDA)
     set( package_name hipblas )
 else( )
     set( package_name hipblas-alt )
