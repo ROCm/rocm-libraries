@@ -203,8 +203,7 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         const auto items_per_block = params.histogram_global_config.block_size
                                      * params.histogram_global_config.items_per_thread;
 
-        int device_id;
-        ROCPRIM_RETURN_ON_ERROR(get_device_from_stream(stream, device_id));
+        int device_id = hipGetStreamDeviceId(stream);
 
         // Get the number of multiprocessors
         int num_multi_processors{};
