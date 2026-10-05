@@ -539,4 +539,3 @@ struct fmha_bwd_qmajor_dq_pipeline<T, std::void_t<decltype(T::is_qmajor_dq_pipel
 };
 
 } // namespace ck_tile
-
