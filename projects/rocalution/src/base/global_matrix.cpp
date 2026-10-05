@@ -2505,8 +2505,9 @@ namespace rocalution
                 i < this->pm_->recv_offset_index_[n + 1] - this->pm_->recv_offset_index_[n];
                 ++i)
             {
-                ghost_G[k]
-                    = (i < recv_map_size[n]) ? (recv_offset_index[n] + recv_ghost_map[n][i]) : -1;
+                int coarse_map = (i < recv_map_size[n]) ? recv_ghost_map[n][i] : -1;
+
+                ghost_G[k] = (coarse_map == -1) ? -1 : recv_offset_index[n] + coarse_map;
                 ++k;
             }
         }

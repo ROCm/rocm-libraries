@@ -467,6 +467,7 @@ class StateValues:
   # tokens occupy 0..numLDSBlk-1 and metadata uses memTokenLdsBufferMeta (4), so
   # the half-1 block starts past both to keep every token unambiguous.
   memTokenLdsSplitBase: int              = 8
+  memTokenEpilogue: int                  = 0
   oneBufferScheduling: bool              = False
   doPackPreSchedulingThisLoop: bool      = False
   doPackPreSchedulingNextLoop: bool      = False
@@ -7181,6 +7182,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                "PrefetchGlobalRead": int(kernel.get("PrefetchGlobalRead", 1)),
                                # PrefetchLocalRead (PLR) for Tensile scheduling. Defaults to 1.
                                "PrefetchLocalRead": int(kernel.get("PrefetchLocalRead", 1)),
+                               # How many unrolled loop bodies were emitted
+                               # (states.unrollLoopCopies). HalfPLR sets this to 3.
+                               # SchedulingKnobHeuristics logs an optimistic ds-read
+                               # throttle from it; DsReadThrottleLatency is unchanged.
+                               "UnrollLoopCopies": int(self.states.unrollLoopCopies),
                                # Abs SW prefetch: mutually exclusive with PC-rel.
                                # Abs takes priority when both are True (backend enforces via else-if).
                                "EnableSwInstructionPrefetchAbs": swpAbsEnable,
@@ -7212,6 +7218,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           cloneList.append(rocisa.CloneSpec(name="InitCIterWmma",
                                             startLabel="label_LoopBeginL" + self.RAP_ITERN_SUFFIX))
       stinky_module_options["CloneList"] = cloneList
+      # Prefetch lead before its tensor_load, in WMMA windows. With HalfPLR the loop body holds
+      # three TDM stages: measured best ~25 when A is sub-byte and ~40 otherwise on gfx1250
+      # MAF. Without it the body holds one stage, and a lead below 8 tells stinkytofu to issue
+      # the whole prefetch group in the tensor_load's window (temporary per-shape defaults).
+      # stinkytofu drops the lead itself where a stage has under 64 WMMAs (counted in the asm).
+      stinky_module_options["PrefetchLeadWmmas"] = \
+        4 if not kernel["HalfPLR"] else \
+        25 if kernel["ProblemType"]["DataTypeA"].numBytes() < 1 else 40
       if self.states.localReadSideOrder[0] == "B":
         stinky_module_options["DsReadOrder"] = 0  # Preserve selected B-then-A emission.
 
@@ -7734,6 +7748,15 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.states.ldsReadTokenIdxB = self.states.memTokenLdsDcp["B"][0]
       self.states.ldsTensorTokenIdxA = self.states.memTokenLdsDcp["A"][0]
       self.states.ldsTensorTokenIdxB = self.states.memTokenLdsDcp["B"][0]
+    # Epilogue scratch must not alias a TDM/PAP token: otherwise scheduling
+    # its LDS stores drains unrelated prefetched tensor loads.
+    self.states.memTokenEpilogue = self.states.memTokenLdsBuffer0
+    if kernel.get("_SeparateEpilogueLds", False):
+      usedTokens = set(range(self.states.numLDSBlk)) | {self.states.memTokenLdsBufferMeta}
+      usedTokens.update(token for row in self.states.memTokenLdsSplit for token in row)
+      if self.states.dcpTokenGate:
+        usedTokens.update(token for row in self.states.memTokenLdsDcp.values() for token in row)
+      self.states.memTokenEpilogue = max(usedTokens) + 1
     self.states.ldsReadTokenIdx = self.states.memTokenLdsBuffer0
     self.states.ldsTensorTokenIdx = self.states.memTokenLdsBuffer0
     self.states.ldsDirectToLDSTokenIdx = self.states.memTokenLdsBuffer0

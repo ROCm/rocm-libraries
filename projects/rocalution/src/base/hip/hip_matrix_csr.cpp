@@ -926,6 +926,7 @@ namespace rocalution
             allocate_hip(this->nnz_, &perm);
             status = rocsparse_create_identity_permutation(
                 ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle), this->nnz_, perm);
+            CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
             status = rocsparse_csrsort(ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),
                                        this->nrow_,
@@ -10481,13 +10482,15 @@ namespace rocalution
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
-        DISCARD_HIP_ERROR(rocprim::exclusive_scan(rocprim_buffer,
-                                                  rocprim_size,
-                                                  int_csr_row_ptr,
-                                                  int_csr_row_ptr,
-                                                  0,
-                                                  nrow + 1,
-                                                  rocprim::plus<PtrType>()));
+        DISCARD_HIP_ERROR(
+            rocprim::exclusive_scan(rocprim_buffer,
+                                    rocprim_size,
+                                    int_csr_row_ptr,
+                                    int_csr_row_ptr,
+                                    0,
+                                    nrow + 1,
+                                    rocprim::plus<PtrType>(),
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         DISCARD_HIP_ERROR(
@@ -10605,7 +10608,11 @@ namespace rocalution
             allocate_hip(nrow + 1, &csr_row_ptr);
 
             // Determine maximum number of nnz per row of the merged matrix
-            kernel_csr_combined_row_nnz<<<(nrow - 1) / 256 + 1, 256>>>(
+            kernel_csr_combined_row_nnz<<<(nrow - 1) / 256 + 1,
+                                          256,
+                                          0,
+                                          HIPSTREAM(
+                                              _get_backend_descriptor()->HIP_stream_current)>>>(
                 nrow, this->mat_.row_offset, cast_ext->mat_.row_offset, csr_row_ptr);
             CHECK_HIP_ERROR(__FILE__, __LINE__);
 
@@ -10693,123 +10700,269 @@ namespace rocalution
                 }
                 else if(max_row_nnz < 128)
                 {
-                    kernel_csr_compress_add_nnz<false, 256, 64, 128>
-                        <<<(nrow - 1) / (256 / 64) + 1,
-                           256,
-                           0,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            cast_ext->mat_.row_offset,
-                            cast_ext->mat_.col,
-                            (int*)NULL,
-                            csr_row_ptr);
+                    // WFSIZE must match the physical wavefront: launch a wave32 variant with halved
+                    // BLOCKSIZE on wave32 hardware to keep the same rows-per-block and LDS footprint.
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_nnz<false, 128, 32, 128>
+                            <<<(nrow - 1) / (128 / 32) + 1,
+                               128,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                (int*)NULL,
+                                csr_row_ptr);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_nnz<false, 256, 64, 128>
+                            <<<(nrow - 1) / (256 / 64) + 1,
+                               256,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                (int*)NULL,
+                                csr_row_ptr);
+                    }
                 }
                 else if(max_row_nnz < 256)
                 {
-                    kernel_csr_compress_add_nnz<false, 256, 64, 256>
-                        <<<(nrow - 1) / (256 / 64) + 1,
-                           256,
-                           0,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            cast_ext->mat_.row_offset,
-                            cast_ext->mat_.col,
-                            (int*)NULL,
-                            csr_row_ptr);
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_nnz<false, 128, 32, 256>
+                            <<<(nrow - 1) / (128 / 32) + 1,
+                               128,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                (int*)NULL,
+                                csr_row_ptr);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_nnz<false, 256, 64, 256>
+                            <<<(nrow - 1) / (256 / 64) + 1,
+                               256,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                (int*)NULL,
+                                csr_row_ptr);
+                    }
                 }
                 else if(max_row_nnz < 512)
                 {
-                    kernel_csr_compress_add_nnz<false, 256, 64, 512>
-                        <<<(nrow - 1) / (256 / 64) + 1,
-                           256,
-                           0,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            cast_ext->mat_.row_offset,
-                            cast_ext->mat_.col,
-                            (int*)NULL,
-                            csr_row_ptr);
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_nnz<false, 128, 32, 512>
+                            <<<(nrow - 1) / (128 / 32) + 1,
+                               128,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                (int*)NULL,
+                                csr_row_ptr);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_nnz<false, 256, 64, 512>
+                            <<<(nrow - 1) / (256 / 64) + 1,
+                               256,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                (int*)NULL,
+                                csr_row_ptr);
+                    }
                 }
                 else if(max_row_nnz < 1024)
                 {
-                    kernel_csr_compress_add_nnz<false, 256, 64, 1024>
-                        <<<(nrow - 1) / (256 / 64) + 1,
-                           256,
-                           0,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            cast_ext->mat_.row_offset,
-                            cast_ext->mat_.col,
-                            (int*)NULL,
-                            csr_row_ptr);
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_nnz<false, 128, 32, 1024>
+                            <<<(nrow - 1) / (128 / 32) + 1,
+                               128,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                (int*)NULL,
+                                csr_row_ptr);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_nnz<false, 256, 64, 1024>
+                            <<<(nrow - 1) / (256 / 64) + 1,
+                               256,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                (int*)NULL,
+                                csr_row_ptr);
+                    }
                 }
                 else if(max_row_nnz < 2048)
                 {
-                    kernel_csr_compress_add_nnz<false, 256, 64, 2048>
-                        <<<(nrow - 1) / (256 / 64) + 1,
-                           256,
-                           0,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            cast_ext->mat_.row_offset,
-                            cast_ext->mat_.col,
-                            (int*)NULL,
-                            csr_row_ptr);
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_nnz<false, 128, 32, 2048>
+                            <<<(nrow - 1) / (128 / 32) + 1,
+                               128,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                (int*)NULL,
+                                csr_row_ptr);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_nnz<false, 256, 64, 2048>
+                            <<<(nrow - 1) / (256 / 64) + 1,
+                               256,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                (int*)NULL,
+                                csr_row_ptr);
+                    }
                 }
                 else if(max_row_nnz < 4096)
                 {
-                    kernel_csr_compress_add_nnz<false, 256, 64, 4096>
-                        <<<(nrow - 1) / (256 / 64) + 1,
-                           256,
-                           0,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            cast_ext->mat_.row_offset,
-                            cast_ext->mat_.col,
-                            (int*)NULL,
-                            csr_row_ptr);
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_nnz<false, 128, 32, 4096>
+                            <<<(nrow - 1) / (128 / 32) + 1,
+                               128,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                (int*)NULL,
+                                csr_row_ptr);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_nnz<false, 256, 64, 4096>
+                            <<<(nrow - 1) / (256 / 64) + 1,
+                               256,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                (int*)NULL,
+                                csr_row_ptr);
+                    }
                 }
                 else if(max_row_nnz < 8192)
                 {
-                    kernel_csr_compress_add_nnz<false, 128, 64, 8192>
-                        <<<(nrow - 1) / (128 / 64) + 1,
-                           128,
-                           0,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            cast_ext->mat_.row_offset,
-                            cast_ext->mat_.col,
-                            (int*)NULL,
-                            csr_row_ptr);
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_nnz<false, 64, 32, 8192>
+                            <<<(nrow - 1) / (64 / 32) + 1,
+                               64,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                (int*)NULL,
+                                csr_row_ptr);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_nnz<false, 128, 64, 8192>
+                            <<<(nrow - 1) / (128 / 64) + 1,
+                               128,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                (int*)NULL,
+                                csr_row_ptr);
+                    }
                 }
                 else if(max_row_nnz < 16384)
                 {
-                    kernel_csr_compress_add_nnz<false, 64, 64, 16384>
-                        <<<(nrow - 1) / (64 / 64) + 1,
-                           64,
-                           0,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            cast_ext->mat_.row_offset,
-                            cast_ext->mat_.col,
-                            (int*)NULL,
-                            csr_row_ptr);
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_nnz<false, 32, 32, 16384>
+                            <<<(nrow - 1) / (32 / 32) + 1,
+                               32,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                (int*)NULL,
+                                csr_row_ptr);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_nnz<false, 64, 64, 16384>
+                            <<<(nrow - 1) / (64 / 64) + 1,
+                               64,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                (int*)NULL,
+                                csr_row_ptr);
+                    }
                 }
                 else
                 {
@@ -10871,108 +11024,236 @@ namespace rocalution
                 }
                 else if(max_row_nnz < 128)
                 {
-                    kernel_csr_compress_add_nnz<true, 256, 64, 128>
-                        <<<(nrow - 1) / (256 / 64) + 1,
-                           256,
-                           0,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            cast_ext->mat_.row_offset,
-                            cast_col->vec_,
-                            cast_l2g->vec_,
-                            csr_row_ptr);
+                    // WFSIZE must match the physical wavefront: launch a wave32 variant with halved
+                    // BLOCKSIZE on wave32 hardware to keep the same rows-per-block and LDS footprint.
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_nnz<true, 128, 32, 128>
+                            <<<(nrow - 1) / (128 / 32) + 1,
+                               128,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_l2g->vec_,
+                                csr_row_ptr);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_nnz<true, 256, 64, 128>
+                            <<<(nrow - 1) / (256 / 64) + 1,
+                               256,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_l2g->vec_,
+                                csr_row_ptr);
+                    }
                 }
                 else if(max_row_nnz < 256)
                 {
-                    kernel_csr_compress_add_nnz<true, 256, 64, 256>
-                        <<<(nrow - 1) / (256 / 64) + 1,
-                           256,
-                           0,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            cast_ext->mat_.row_offset,
-                            cast_col->vec_,
-                            cast_l2g->vec_,
-                            csr_row_ptr);
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_nnz<true, 128, 32, 256>
+                            <<<(nrow - 1) / (128 / 32) + 1,
+                               128,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_l2g->vec_,
+                                csr_row_ptr);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_nnz<true, 256, 64, 256>
+                            <<<(nrow - 1) / (256 / 64) + 1,
+                               256,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_l2g->vec_,
+                                csr_row_ptr);
+                    }
                 }
                 else if(max_row_nnz < 512)
                 {
-                    kernel_csr_compress_add_nnz<true, 256, 64, 512>
-                        <<<(nrow - 1) / (256 / 64) + 1,
-                           256,
-                           0,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            cast_ext->mat_.row_offset,
-                            cast_col->vec_,
-                            cast_l2g->vec_,
-                            csr_row_ptr);
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_nnz<true, 128, 32, 512>
+                            <<<(nrow - 1) / (128 / 32) + 1,
+                               128,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_l2g->vec_,
+                                csr_row_ptr);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_nnz<true, 256, 64, 512>
+                            <<<(nrow - 1) / (256 / 64) + 1,
+                               256,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_l2g->vec_,
+                                csr_row_ptr);
+                    }
                 }
                 else if(max_row_nnz < 1024)
                 {
-                    kernel_csr_compress_add_nnz<true, 256, 64, 1024>
-                        <<<(nrow - 1) / (256 / 64) + 1,
-                           256,
-                           0,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            cast_ext->mat_.row_offset,
-                            cast_col->vec_,
-                            cast_l2g->vec_,
-                            csr_row_ptr);
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_nnz<true, 128, 32, 1024>
+                            <<<(nrow - 1) / (128 / 32) + 1,
+                               128,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_l2g->vec_,
+                                csr_row_ptr);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_nnz<true, 256, 64, 1024>
+                            <<<(nrow - 1) / (256 / 64) + 1,
+                               256,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_l2g->vec_,
+                                csr_row_ptr);
+                    }
                 }
                 else if(max_row_nnz < 2048)
                 {
-                    kernel_csr_compress_add_nnz<true, 256, 64, 2048>
-                        <<<(nrow - 1) / (256 / 64) + 1,
-                           256,
-                           0,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            cast_ext->mat_.row_offset,
-                            cast_col->vec_,
-                            cast_l2g->vec_,
-                            csr_row_ptr);
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_nnz<true, 128, 32, 2048>
+                            <<<(nrow - 1) / (128 / 32) + 1,
+                               128,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_l2g->vec_,
+                                csr_row_ptr);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_nnz<true, 256, 64, 2048>
+                            <<<(nrow - 1) / (256 / 64) + 1,
+                               256,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_l2g->vec_,
+                                csr_row_ptr);
+                    }
                 }
                 else if(max_row_nnz < 4096)
                 {
-                    kernel_csr_compress_add_nnz<true, 128, 64, 4096>
-                        <<<(nrow - 1) / (128 / 64) + 1,
-                           128,
-                           0,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            cast_ext->mat_.row_offset,
-                            cast_col->vec_,
-                            cast_l2g->vec_,
-                            csr_row_ptr);
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_nnz<true, 64, 32, 4096>
+                            <<<(nrow - 1) / (64 / 32) + 1,
+                               64,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_l2g->vec_,
+                                csr_row_ptr);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_nnz<true, 128, 64, 4096>
+                            <<<(nrow - 1) / (128 / 64) + 1,
+                               128,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_l2g->vec_,
+                                csr_row_ptr);
+                    }
                 }
                 else if(max_row_nnz < 8192)
                 {
-                    kernel_csr_compress_add_nnz<true, 64, 64, 8192>
-                        <<<(nrow - 1) / (64 / 64) + 1,
-                           64,
-                           0,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            cast_ext->mat_.row_offset,
-                            cast_col->vec_,
-                            cast_l2g->vec_,
-                            csr_row_ptr);
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_nnz<true, 32, 32, 8192>
+                            <<<(nrow - 1) / (32 / 32) + 1,
+                               32,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_l2g->vec_,
+                                csr_row_ptr);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_nnz<true, 64, 64, 8192>
+                            <<<(nrow - 1) / (64 / 64) + 1,
+                               64,
+                               0,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_l2g->vec_,
+                                csr_row_ptr);
+                    }
                 }
                 else
                 {
@@ -11120,122 +11401,256 @@ namespace rocalution
                 else if(max_row_nnz < 128)
                 {
                     size_t ssize = 256 / 64 * 128 * (sizeof(int64_t) + sizeof(ValueType));
-                    kernel_csr_compress_add_fill<true, 256, 64, 128>
-                        <<<(nrow - 1) / (256 / 64) + 1,
-                           256,
-                           ssize,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            this->mat_.val,
-                            cast_ext->mat_.row_offset,
-                            cast_col->vec_,
-                            cast_ext->mat_.val,
-                            cast_l2g->vec_,
-                            csr_row_ptr,
-                            cast_glo->vec_,
-                            csr_val);
+                    // WFSIZE must match the physical wavefront: launch a wave32 variant with halved
+                    // BLOCKSIZE on wave32 hardware to keep the same rows-per-block and LDS footprint.
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_fill<true, 128, 32, 128>
+                            <<<(nrow - 1) / (128 / 32) + 1,
+                               128,
+                               ssize,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                this->mat_.val,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_ext->mat_.val,
+                                cast_l2g->vec_,
+                                csr_row_ptr,
+                                cast_glo->vec_,
+                                csr_val);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_fill<true, 256, 64, 128>
+                            <<<(nrow - 1) / (256 / 64) + 1,
+                               256,
+                               ssize,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                this->mat_.val,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_ext->mat_.val,
+                                cast_l2g->vec_,
+                                csr_row_ptr,
+                                cast_glo->vec_,
+                                csr_val);
+                    }
                 }
                 else if(max_row_nnz < 256)
                 {
                     size_t ssize = 256 / 64 * 256 * (sizeof(int64_t) + sizeof(ValueType));
-                    kernel_csr_compress_add_fill<true, 256, 64, 256>
-                        <<<(nrow - 1) / (256 / 64) + 1,
-                           256,
-                           ssize,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            this->mat_.val,
-                            cast_ext->mat_.row_offset,
-                            cast_col->vec_,
-                            cast_ext->mat_.val,
-                            cast_l2g->vec_,
-                            csr_row_ptr,
-                            cast_glo->vec_,
-                            csr_val);
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_fill<true, 128, 32, 256>
+                            <<<(nrow - 1) / (128 / 32) + 1,
+                               128,
+                               ssize,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                this->mat_.val,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_ext->mat_.val,
+                                cast_l2g->vec_,
+                                csr_row_ptr,
+                                cast_glo->vec_,
+                                csr_val);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_fill<true, 256, 64, 256>
+                            <<<(nrow - 1) / (256 / 64) + 1,
+                               256,
+                               ssize,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                this->mat_.val,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_ext->mat_.val,
+                                cast_l2g->vec_,
+                                csr_row_ptr,
+                                cast_glo->vec_,
+                                csr_val);
+                    }
                 }
                 else if(max_row_nnz < 512)
                 {
                     size_t ssize = 256 / 64 * 512 * (sizeof(int64_t) + sizeof(ValueType));
-                    kernel_csr_compress_add_fill<true, 256, 64, 512>
-                        <<<(nrow - 1) / (256 / 64) + 1,
-                           256,
-                           ssize,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            this->mat_.val,
-                            cast_ext->mat_.row_offset,
-                            cast_col->vec_,
-                            cast_ext->mat_.val,
-                            cast_l2g->vec_,
-                            csr_row_ptr,
-                            cast_glo->vec_,
-                            csr_val);
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_fill<true, 128, 32, 512>
+                            <<<(nrow - 1) / (128 / 32) + 1,
+                               128,
+                               ssize,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                this->mat_.val,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_ext->mat_.val,
+                                cast_l2g->vec_,
+                                csr_row_ptr,
+                                cast_glo->vec_,
+                                csr_val);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_fill<true, 256, 64, 512>
+                            <<<(nrow - 1) / (256 / 64) + 1,
+                               256,
+                               ssize,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                this->mat_.val,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_ext->mat_.val,
+                                cast_l2g->vec_,
+                                csr_row_ptr,
+                                cast_glo->vec_,
+                                csr_val);
+                    }
                 }
                 else if(max_row_nnz < 1024)
                 {
                     size_t ssize = 256 / 64 * 1024 * (sizeof(int64_t) + sizeof(ValueType));
-                    kernel_csr_compress_add_fill<true, 256, 64, 1024>
-                        <<<(nrow - 1) / (256 / 64) + 1,
-                           256,
-                           ssize,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            this->mat_.val,
-                            cast_ext->mat_.row_offset,
-                            cast_col->vec_,
-                            cast_ext->mat_.val,
-                            cast_l2g->vec_,
-                            csr_row_ptr,
-                            cast_glo->vec_,
-                            csr_val);
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_fill<true, 128, 32, 1024>
+                            <<<(nrow - 1) / (128 / 32) + 1,
+                               128,
+                               ssize,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                this->mat_.val,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_ext->mat_.val,
+                                cast_l2g->vec_,
+                                csr_row_ptr,
+                                cast_glo->vec_,
+                                csr_val);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_fill<true, 256, 64, 1024>
+                            <<<(nrow - 1) / (256 / 64) + 1,
+                               256,
+                               ssize,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                this->mat_.val,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_ext->mat_.val,
+                                cast_l2g->vec_,
+                                csr_row_ptr,
+                                cast_glo->vec_,
+                                csr_val);
+                    }
                 }
                 else if(max_row_nnz < 2048)
                 {
                     size_t ssize = 128 / 64 * 2048 * (sizeof(int64_t) + sizeof(ValueType));
-                    kernel_csr_compress_add_fill<true, 128, 64, 2048>
-                        <<<(nrow - 1) / (128 / 64) + 1,
-                           128,
-                           ssize,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            this->mat_.val,
-                            cast_ext->mat_.row_offset,
-                            cast_col->vec_,
-                            cast_ext->mat_.val,
-                            cast_l2g->vec_,
-                            csr_row_ptr,
-                            cast_glo->vec_,
-                            csr_val);
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_fill<true, 64, 32, 2048>
+                            <<<(nrow - 1) / (64 / 32) + 1,
+                               64,
+                               ssize,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                this->mat_.val,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_ext->mat_.val,
+                                cast_l2g->vec_,
+                                csr_row_ptr,
+                                cast_glo->vec_,
+                                csr_val);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_fill<true, 128, 64, 2048>
+                            <<<(nrow - 1) / (128 / 64) + 1,
+                               128,
+                               ssize,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                this->mat_.val,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_ext->mat_.val,
+                                cast_l2g->vec_,
+                                csr_row_ptr,
+                                cast_glo->vec_,
+                                csr_val);
+                    }
                 }
                 else if(max_row_nnz < 4096)
                 {
                     size_t ssize = 64 / 64 * 4096 * (sizeof(int64_t) + sizeof(ValueType));
-                    kernel_csr_compress_add_fill<true, 64, 64, 4096>
-                        <<<(nrow - 1) / (64 / 64) + 1,
-                           64,
-                           ssize,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            this->mat_.val,
-                            cast_ext->mat_.row_offset,
-                            cast_col->vec_,
-                            cast_ext->mat_.val,
-                            cast_l2g->vec_,
-                            csr_row_ptr,
-                            cast_glo->vec_,
-                            csr_val);
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_fill<true, 32, 32, 4096>
+                            <<<(nrow - 1) / (32 / 32) + 1,
+                               32,
+                               ssize,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                this->mat_.val,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_ext->mat_.val,
+                                cast_l2g->vec_,
+                                csr_row_ptr,
+                                cast_glo->vec_,
+                                csr_val);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_fill<true, 64, 64, 4096>
+                            <<<(nrow - 1) / (64 / 64) + 1,
+                               64,
+                               ssize,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                this->mat_.val,
+                                cast_ext->mat_.row_offset,
+                                cast_col->vec_,
+                                cast_ext->mat_.val,
+                                cast_l2g->vec_,
+                                csr_row_ptr,
+                                cast_glo->vec_,
+                                csr_val);
+                    }
                 }
                 else
                 {
@@ -11314,122 +11729,256 @@ namespace rocalution
                 else if(max_row_nnz < 128)
                 {
                     size_t ssize = 256 / 64 * 128 * (sizeof(int) + sizeof(ValueType));
-                    kernel_csr_compress_add_fill<false, 256, 64, 128>
-                        <<<(nrow - 1) / (256 / 64) + 1,
-                           256,
-                           ssize,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            this->mat_.val,
-                            cast_ext->mat_.row_offset,
-                            cast_ext->mat_.col,
-                            cast_ext->mat_.val,
-                            (int*)NULL,
-                            csr_row_ptr,
-                            csr_col_ind,
-                            csr_val);
+                    // WFSIZE must match the physical wavefront: launch a wave32 variant with halved
+                    // BLOCKSIZE on wave32 hardware to keep the same rows-per-block and LDS footprint.
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_fill<false, 128, 32, 128>
+                            <<<(nrow - 1) / (128 / 32) + 1,
+                               128,
+                               ssize,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                this->mat_.val,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                cast_ext->mat_.val,
+                                (int*)NULL,
+                                csr_row_ptr,
+                                csr_col_ind,
+                                csr_val);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_fill<false, 256, 64, 128>
+                            <<<(nrow - 1) / (256 / 64) + 1,
+                               256,
+                               ssize,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                this->mat_.val,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                cast_ext->mat_.val,
+                                (int*)NULL,
+                                csr_row_ptr,
+                                csr_col_ind,
+                                csr_val);
+                    }
                 }
                 else if(max_row_nnz < 256)
                 {
                     size_t ssize = 256 / 64 * 256 * (sizeof(int) + sizeof(ValueType));
-                    kernel_csr_compress_add_fill<false, 256, 64, 256>
-                        <<<(nrow - 1) / (256 / 64) + 1,
-                           256,
-                           ssize,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            this->mat_.val,
-                            cast_ext->mat_.row_offset,
-                            cast_ext->mat_.col,
-                            cast_ext->mat_.val,
-                            (int*)NULL,
-                            csr_row_ptr,
-                            csr_col_ind,
-                            csr_val);
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_fill<false, 128, 32, 256>
+                            <<<(nrow - 1) / (128 / 32) + 1,
+                               128,
+                               ssize,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                this->mat_.val,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                cast_ext->mat_.val,
+                                (int*)NULL,
+                                csr_row_ptr,
+                                csr_col_ind,
+                                csr_val);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_fill<false, 256, 64, 256>
+                            <<<(nrow - 1) / (256 / 64) + 1,
+                               256,
+                               ssize,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                this->mat_.val,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                cast_ext->mat_.val,
+                                (int*)NULL,
+                                csr_row_ptr,
+                                csr_col_ind,
+                                csr_val);
+                    }
                 }
                 else if(max_row_nnz < 512)
                 {
                     size_t ssize = 256 / 64 * 512 * (sizeof(int) + sizeof(ValueType));
-                    kernel_csr_compress_add_fill<false, 256, 64, 512>
-                        <<<(nrow - 1) / (256 / 64) + 1,
-                           256,
-                           ssize,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            this->mat_.val,
-                            cast_ext->mat_.row_offset,
-                            cast_ext->mat_.col,
-                            cast_ext->mat_.val,
-                            (int*)NULL,
-                            csr_row_ptr,
-                            csr_col_ind,
-                            csr_val);
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_fill<false, 128, 32, 512>
+                            <<<(nrow - 1) / (128 / 32) + 1,
+                               128,
+                               ssize,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                this->mat_.val,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                cast_ext->mat_.val,
+                                (int*)NULL,
+                                csr_row_ptr,
+                                csr_col_ind,
+                                csr_val);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_fill<false, 256, 64, 512>
+                            <<<(nrow - 1) / (256 / 64) + 1,
+                               256,
+                               ssize,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                this->mat_.val,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                cast_ext->mat_.val,
+                                (int*)NULL,
+                                csr_row_ptr,
+                                csr_col_ind,
+                                csr_val);
+                    }
                 }
                 else if(max_row_nnz < 1024)
                 {
                     size_t ssize = 256 / 64 * 1024 * (sizeof(int) + sizeof(ValueType));
-                    kernel_csr_compress_add_fill<false, 256, 64, 1024>
-                        <<<(nrow - 1) / (256 / 64) + 1,
-                           256,
-                           ssize,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            this->mat_.val,
-                            cast_ext->mat_.row_offset,
-                            cast_ext->mat_.col,
-                            cast_ext->mat_.val,
-                            (int*)NULL,
-                            csr_row_ptr,
-                            csr_col_ind,
-                            csr_val);
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_fill<false, 128, 32, 1024>
+                            <<<(nrow - 1) / (128 / 32) + 1,
+                               128,
+                               ssize,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                this->mat_.val,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                cast_ext->mat_.val,
+                                (int*)NULL,
+                                csr_row_ptr,
+                                csr_col_ind,
+                                csr_val);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_fill<false, 256, 64, 1024>
+                            <<<(nrow - 1) / (256 / 64) + 1,
+                               256,
+                               ssize,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                this->mat_.val,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                cast_ext->mat_.val,
+                                (int*)NULL,
+                                csr_row_ptr,
+                                csr_col_ind,
+                                csr_val);
+                    }
                 }
                 else if(max_row_nnz < 2048)
                 {
                     size_t ssize = 128 / 64 * 2048 * (sizeof(int) + sizeof(ValueType));
-                    kernel_csr_compress_add_fill<false, 128, 64, 2048>
-                        <<<(nrow - 1) / (128 / 64) + 1,
-                           128,
-                           ssize,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            this->mat_.val,
-                            cast_ext->mat_.row_offset,
-                            cast_ext->mat_.col,
-                            cast_ext->mat_.val,
-                            (int*)NULL,
-                            csr_row_ptr,
-                            csr_col_ind,
-                            csr_val);
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_fill<false, 64, 32, 2048>
+                            <<<(nrow - 1) / (64 / 32) + 1,
+                               64,
+                               ssize,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                this->mat_.val,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                cast_ext->mat_.val,
+                                (int*)NULL,
+                                csr_row_ptr,
+                                csr_col_ind,
+                                csr_val);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_fill<false, 128, 64, 2048>
+                            <<<(nrow - 1) / (128 / 64) + 1,
+                               128,
+                               ssize,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                this->mat_.val,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                cast_ext->mat_.val,
+                                (int*)NULL,
+                                csr_row_ptr,
+                                csr_col_ind,
+                                csr_val);
+                    }
                 }
                 else if(max_row_nnz < 4096)
                 {
                     size_t ssize = 64 / 64 * 4096 * (sizeof(int) + sizeof(ValueType));
-                    kernel_csr_compress_add_fill<false, 64, 64, 4096>
-                        <<<(nrow - 1) / (64 / 64) + 1,
-                           64,
-                           ssize,
-                           HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                            nrow,
-                            this->mat_.row_offset,
-                            this->mat_.col,
-                            this->mat_.val,
-                            cast_ext->mat_.row_offset,
-                            cast_ext->mat_.col,
-                            cast_ext->mat_.val,
-                            (int*)NULL,
-                            csr_row_ptr,
-                            csr_col_ind,
-                            csr_val);
+                    if(this->local_backend_.HIP_warp == 32)
+                    {
+                        kernel_csr_compress_add_fill<false, 32, 32, 4096>
+                            <<<(nrow - 1) / (32 / 32) + 1,
+                               32,
+                               ssize,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                this->mat_.val,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                cast_ext->mat_.val,
+                                (int*)NULL,
+                                csr_row_ptr,
+                                csr_col_ind,
+                                csr_val);
+                    }
+                    else
+                    {
+                        kernel_csr_compress_add_fill<false, 64, 64, 4096>
+                            <<<(nrow - 1) / (64 / 64) + 1,
+                               64,
+                               ssize,
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+                                nrow,
+                                this->mat_.row_offset,
+                                this->mat_.col,
+                                this->mat_.val,
+                                cast_ext->mat_.row_offset,
+                                cast_ext->mat_.col,
+                                cast_ext->mat_.val,
+                                (int*)NULL,
+                                csr_row_ptr,
+                                csr_col_ind,
+                                csr_val);
+                    }
                 }
                 else
                 {
@@ -11437,8 +11986,6 @@ namespace rocalution
                     free_hip(&csr_row_ptr);
                     free_hip(&csr_col_ind);
                     free_hip(&csr_val);
-
-                    cast_glo->Clear();
 
                     return false;
                 }
