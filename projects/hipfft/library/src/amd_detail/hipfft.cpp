@@ -1206,11 +1206,15 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
     {
         rocfft_initializer()
         {
-            rocfft_setup();
+            // rocfft_setup() rolls back its usage count on failure, and throwing
+            // leaves this static uninitialized, so a later call re-initializes
+            if(rocfft_setup() != rocfft_status_success)
+                throw HIPFFT_SETUP_FAILED;
         }
         ~rocfft_initializer()
         {
-            rocfft_cleanup();
+            // unchecked: a destructor has nowhere to report to
+            (void)rocfft_cleanup();
         }
     };
     static rocfft_initializer init;
@@ -2093,8 +2097,8 @@ try
 {
     if(!value)
         return HIPFFT_INVALID_VALUE;
-    int full;
-    hipfftGetVersion(&full);
+    int full = 0;
+    HIPFFT_EXPECT_SUCCESS(hipfftGetVersion(&full));
 
     int major = full / 10000;
     int minor = (full - major * 10000) / 100;

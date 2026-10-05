@@ -34,7 +34,8 @@ std::vector<char> compile_inprocess(const std::string& kernel_src, const std::st
         {
             if(prog)
             {
-                hiprtcDestroyProgram(&prog);
+                // unchecked: a destructor has nowhere to report to
+                (void)hiprtcDestroyProgram(&prog);
             }
         }
     };

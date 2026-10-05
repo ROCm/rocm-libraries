@@ -87,6 +87,9 @@ static void open_log_stream(const char* environment_variable_name, int& log_fd)
     auto logfile_pathname = rocfft_getenv(environment_variable_name);
     if(!logfile_pathname.empty())
     {
+        // a retried rocfft_setup() reaches here with the previous fd still open
+        if(log_fd != -1)
+            CLOSE(log_fd);
         log_fd = OPEN(logfile_pathname.c_str());
     }
 }
@@ -97,8 +100,13 @@ try
 {
     std::lock_guard<std::mutex> lock(rocfft_setup_cleanup_mutex);
 
-    if(++rocfft_usage_count > 1)
+    // count the use only once initialization has succeeded, so that a failed
+    // setup does not make the next one report success without initializing
+    if(rocfft_usage_count > 0)
+    {
+        ++rocfft_usage_count;
         return rocfft_status_success;
+    }
 
     rocfft_ostream::setup();
     RTCCache::single = std::make_unique<RTCCache>();
@@ -160,6 +168,7 @@ try
     TuningBenchmarker::GetSingleton().Setup();
 
     log_trace(__func__, ROCFFT_VERSION_STRING);
+    ++rocfft_usage_count;
     return rocfft_status_success;
 }
 catch(...)

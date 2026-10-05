@@ -342,11 +342,16 @@ namespace
         {
             rocfft_initializer()
             {
-                rocfft_setup();
+                // rocfft_setup() rolls back its usage count on failure, and throwing
+                // leaves this static uninitialized, so a later call re-initializes
+                if(rocfft_setup() != rocfft_status_success)
+                    throw rocfft_failure("an error was received from rocfft when setting up "
+                                         "the library.");
             }
             ~rocfft_initializer()
             {
-                rocfft_cleanup();
+                // unchecked: a destructor has nowhere to report to
+                (void)rocfft_cleanup();
             }
         };
         // magic static to handle rocfft setup/cleanup
@@ -750,7 +755,10 @@ namespace
                       ? exec_in_ptr
                       : (output_copy_kind != hipfftw_memcpy_kind::NONE ? out_device.get_data_ptr()
                                                                        : exec_out.get_data_ptr());
-            rocfft_execute(internal_rocfft_plan, &exec_in_ptr, &exec_out_ptr, internal_rocfft_info);
+            if(rocfft_execute(
+                   internal_rocfft_plan, &exec_in_ptr, &exec_out_ptr, internal_rocfft_info)
+               != rocfft_status_success)
+                throw rocfft_failure("an error was received from rocfft when executing the plan.");
             if(output_copy_kind != hipfftw_memcpy_kind::NONE)
             {
                 const auto hip_status
