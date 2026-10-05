@@ -24,6 +24,7 @@ exclude: |
     projects/hipblas/.*|
     projects/hipblas-common/.*|
     projects/hipcub/.*|
+    projects/hipccl/.*|
     projects/hipfft/.*|
     projects/hiprand/.*|
     projects/hipsolver/.*|
