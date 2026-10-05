@@ -83,6 +83,19 @@ try
 
     void* const work = static_cast<void*>(mem[0]);
 
+#ifdef NDEBUG
+#else
+    {
+        if((work != nullptr) && (size_work > 0))
+        {
+            hipStream_t stream;
+            ROCBLAS_CHECK(rocblas_get_stream(handle, &stream));
+
+            int value = 0xFF;
+            HIP_CHECK(hipMemsetAsync(work, value, size_work, stream));
+        }
+    }
+#endif
     // execution
     return rocsolver_sytrs_template<T>(handle, uplo, n, nrhs, A, shiftA, lda, strideA, ipiv, strideP,
                                        B, shiftB, ldb, strideB, batch_count, work, size_work);
