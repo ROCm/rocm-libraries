@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 #include <hipcub/warp/warp_store.hpp>
 
@@ -39,7 +40,7 @@ struct Params
 };
 
 template<class Params>
-class HipcubWarpStoreTest : public ::testing::Test
+class HipcubWarpStoreTest : public test_controller::ControlledTest<>
 {
 public:
     using params = Params;
@@ -193,6 +194,7 @@ TYPED_TEST(HipcubWarpStoreTest, WarpStore)
 
     SKIP_IF_UNSUPPORTED_WARP_SIZE(warp_size);
 
+    CHECK_SIZE_ENABLEMENT(static_cast<size_t>(items_count));
     std::vector<T> input(items_count);
     std::iota(input.begin(), input.end(), static_cast<T>(0));
 
@@ -238,6 +240,7 @@ TYPED_TEST(HipcubWarpStoreTest, WarpStoreGuarded)
 
     SKIP_IF_UNSUPPORTED_WARP_SIZE(warp_size);
 
+    CHECK_SIZE_ENABLEMENT(static_cast<size_t>(items_count));
     std::vector<T> input(items_count);
     std::iota(input.begin(), input.end(), static_cast<T>(0));
 

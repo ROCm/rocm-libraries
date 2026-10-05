@@ -64,7 +64,7 @@ function(add_hipcub_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
     PRIVATE
       GTest::gtest
       GTest::gtest_main
-  )
+    )
 
   if(USE_SYSTEM_LIB)
     target_link_libraries(${TEST_TARGET} PRIVATE hip::hipcub)
@@ -289,5 +289,6 @@ add_hipcub_test("hipcub.Iterators" test_hipcub_iterators.cpp)
 add_hipcub_test("hipcub.Thread" test_hipcub_thread.cpp)
 add_hipcub_test("hipcub.ThreadOperators" test_hipcub_thread_operators.cpp)
 add_hipcub_test("hipcub.ThreadSort" test_hipcub_thread_sort.cpp)
-
+ 
 add_hipcub_test("hipcub.SinglePassScanOperators" test_hipcub_single_pass_scan_operators.cpp)
+add_hipcub_test("hipcub.TestController" test_hipcub_test_controller.cpp)

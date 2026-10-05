@@ -77,6 +77,12 @@ target_link_libraries(generate_resource_spec PRIVATE hip::host)
 # code it will give an unused-command-line-argument warning.
 target_compile_options(generate_resource_spec PRIVATE "-Wno-unused-command-line-argument")
 
+# Include path to generated header test_utils_controller.hpp
+target_include_directories(hipcub
+  INTERFACE
+  $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/test/hipcub>
+)
+
 # hipCUB tests
 add_subdirectory(hipcub)
 
@@ -121,7 +127,6 @@ if(BUILD_CODE_COVERAGE)
     DEPENDS coverage_summary
   )
 endif()
-
 
 # ****************************************************************************
 # Test Filter Standardization
@@ -175,7 +180,6 @@ else()
         "skipping hipCUB test category labels")
 endif()
 
-
 rocm_install(
     FILES "${INSTALL_TEST_FILE}"
     DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
@@ -191,4 +195,29 @@ install(
     TARGETS generate_resource_spec
     DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
     COMPONENT tests
+)
+
+# Test control file setup
+# Set the name of the test control file
+set(TEST_CONTROL_FILE_NAME "control.txt")
+
+# Copy control file from source to build directory if it has changed.
+# Set up the dependencies to cause this check happen every time a target is built.
+# add_custom_target(copy_control_file_changes
+#   ALL
+#   COMMAND ${CMAKE_COMMAND} -E copy_if_different "${TEST_CONTROL_FILE_SOURCE_PATH}/${TEST_CONTROL_FILE_NAME}" "${TEST_CONTROL_FILE_BUILD_PATH}/${TEST_CONTROL_FILE_NAME}"
+# )
+# add_dependencies(hipcub copy_control_file_changes)
+
+add_custom_target(copy_control_file_changes
+  ALL
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/test/${TEST_CONTROL_FILE_NAME}" "${CMAKE_CURRENT_BINARY_DIR}/${TEST_CONTROL_FILE_NAME}"
+)
+add_dependencies(hipcub copy_control_file_changes)
+
+# Install the file as well, so that installed binaries can pick it up.
+rocm_install(
+  FILES "${CMAKE_CURRENT_BINARY_DIR}/${TEST_CONTROL_FILE_NAME}"
+  DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
+  COMPONENT tests
 )

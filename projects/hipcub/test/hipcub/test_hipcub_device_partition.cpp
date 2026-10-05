@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 // hipcub API
 #include "identity_iterator.hpp"
@@ -47,7 +48,7 @@ struct DevicePartitionParams
 };
 
 template<class Params>
-class HipcubDevicePartitionTests : public ::testing::Test
+class HipcubDevicePartitionTests : public test_controller::ControlledTest<>
 {
 public:
     using input_type                            = typename Params::input_type;
@@ -92,7 +93,7 @@ TYPED_TEST(HipcubDevicePartitionTests, Flagged)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             // Generate data
@@ -403,7 +404,7 @@ TYPED_TEST(HipcubDevicePartitionTests, If)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             // Generate data
@@ -707,7 +708,7 @@ TYPED_TEST(HipcubDevicePartitionTests, IfThreeWay)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             // Generate data
