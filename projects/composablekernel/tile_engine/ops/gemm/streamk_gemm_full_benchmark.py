@@ -70,13 +70,13 @@ DEFAULT_PROBLEMS = [
 # so all 4 A/B/C layouts are supported. dtypes cover fp16 + bf16 + fp8 + bf8: the
 # bridge runner encodes fp16 natively, bf16 via bit-truncation, and fp8/bf8 via
 # architecture-specific OCP (gfx950/gfx12xx) or FNUZ (gfx942) formats. FP8/BF8
-# inputs accumulate in fp32 and store fp16 output. int8 is left out: it is blocked
-# at the ck_tile engine level, not the
-# bridge -- the int8 kernel codegens but fails to COMPILE for every reduction
-# strategy (atomic/linear/tree). warp_gemm_dispatcher has no
-# Dispatcher<int8,int8,float,32,32,16,...> specialization for the streamk CompV3
-# path, so WarpGemm resolves to `int` and the BlockUniversalGemmAsBsCr
-# WarpGemm::kM/kN static_asserts fail; this matches PR #8094 leaving int8 out.
+# inputs accumulate in fp32 and store fp16 output. int8 is left out: it is
+# blocked at the ck_tile engine level, not the bridge -- the int8 kernel codegens
+# but fails to COMPILE for every reduction strategy (atomic/linear/tree).
+# warp_gemm_dispatcher has no Dispatcher<int8,int8,float,32,32,16,...>
+# specialization for the streamk CompV3 path, so WarpGemm resolves to `int` and
+# the BlockUniversalGemmAsBsCr WarpGemm::kM/kN static_asserts fail; this matches
+# PR #8094 leaving int8 out.
 SUPPORTED_DTYPES = ("fp16", "bf16", "fp8", "bf8")
 SUPPORTED_LAYOUTS = ("rcr", "rrr", "ccr", "crr")
 
@@ -167,9 +167,7 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
             try:
                 result = json.loads(line)
             except json.JSONDecodeError:
-                lines.append(
-                    f"  [gpu{device_id}] Warning: bad result line: {line[:50]}"
-                )
+                lines.append(f"  [gpu{device_id}] Warning: bad result line: {line[:50]}")
                 n_fail += 1
                 continue
             bidx = result.get("idx", 0)
@@ -247,7 +245,8 @@ def main():
     parser.add_argument(
         "configs",
         nargs="*",
-        help="TE sweep config JSON files (default: architecture-specific Stream-K config)",
+        help="TE sweep config JSON files (default: the architecture's Stream-K "
+        "config)",
     )
     parser.add_argument(
         "--arch", default=None, help="GPU architecture (default: detect device)"
@@ -256,7 +255,8 @@ def main():
         "--reduction-strategy",
         choices=("atomic", "linear", "tree"),
         default=None,
-        help="Override the config's reduction strategy; linear/tree reduce partials in FP32",
+        help="Override the config's reduction strategy; linear/tree reduce "
+        "partials in FP32",
     )
     parser.add_argument(
         "--dtype",
