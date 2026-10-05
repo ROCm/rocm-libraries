@@ -221,6 +221,29 @@ TEST_F(HwInstDescTest, FLAT_FlatLoadB32) {
 }
 
 // ---------------------------------------------------------------------------
+// SADDR_OFFSET: vaddr is a 64-bit address with a null saddr, or a 32-bit offset
+// from a register saddr. The flag must not leak onto MUBUF vaddr.
+// ---------------------------------------------------------------------------
+TEST_F(HwInstDescTest, SaddrOffset_VaddrFields) {
+    for (const char* mnemonic : {"global_prefetch_b8", "flat_prefetch_b8"}) {
+        auto* desc = getDescByMnemonic(mnemonic);
+        ASSERT_NE(desc, nullptr) << mnemonic;
+        bool found = false;
+        for (const auto& f : desc->operandFields) {
+            if (f.encodeField != EncodeField::vaddr) continue;
+            found = true;
+            EXPECT_TRUE(f.isSaddrOffset) << mnemonic;
+            EXPECT_EQ(f.fieldSizeBits, 64u) << mnemonic;
+        }
+        EXPECT_TRUE(found) << mnemonic << " has no vaddr field";
+    }
+
+    auto* mubuf = getDescByMnemonic("buffer_load_b64");
+    ASSERT_NE(mubuf, nullptr);
+    for (const auto& f : mubuf->operandFields) EXPECT_FALSE(f.isSaddrOffset);
+}
+
+// ---------------------------------------------------------------------------
 // DS: ds_load_b32 — LDS memory, 64-bit encoding
 // ---------------------------------------------------------------------------
 TEST_F(HwInstDescTest, DS_DsLoadB32) {
