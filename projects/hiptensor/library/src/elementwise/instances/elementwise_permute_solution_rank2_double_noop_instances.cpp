@@ -31,7 +31,6 @@
 #include "../device/hiptensor_elementwise_scale_instances.hpp"
 #include "hiptensor_ck_types.hpp"
 
-
 namespace hiptensor
 {
     void ElementwiseSolutionInstances::ElementwisePermuteSolution2DDoubleNoopInstances()
