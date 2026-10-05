@@ -60,6 +60,16 @@
 
 namespace rocsparse
 {
+    // Overflow-safe ceiling division. Evaluated in 64-bit and written in the
+    // (count - 1) / block_size + 1 form, which never overflows before the
+    // divide. This is the canonical rounding form for the library; the
+    // (count + block_size - 1) / block_size form must not be used because it
+    // overflows for counts near the type maximum. Returns 0 when count <= 0.
+    static inline int64_t ceil_div(int64_t count, int64_t block_size)
+    {
+        return (count > 0) ? ((count - 1) / block_size + 1) : 0;
+    }
+
     // Compile-time log2 for power-of-2 (e.g. log2_pow2<32>::value == 5). Use for WF_SIZE, etc.
     template <uint32_t N>
     struct log2_pow2
@@ -878,6 +888,13 @@ namespace rocsparse
         // Check bounds
         if(idx >= 0 && idx < size)
         {
+            // Halves are paired by 32-bit word, so index from the 4-byte aligned
+            // address at or below base_ptr; base_ptr may be only 2-byte aligned,
+            // e.g. a per-batch pointer with an odd batch stride.
+            const int64_t shift = (reinterpret_cast<uintptr_t>(base_ptr) >> 1) & 1;
+            base_ptr -= shift;
+            idx += shift;
+            size += shift;
 
             half* addr      = &base_ptr[idx];
             int   is_second = (idx & 1);
@@ -987,6 +1004,13 @@ namespace rocsparse
         // Check bounds
         if(idx >= 0 && idx < size)
         {
+            // Halves are paired by 32-bit word, so index from the 4-byte aligned
+            // address at or below base_ptr; base_ptr may be only 2-byte aligned,
+            // e.g. a per-batch pointer with an odd batch stride.
+            const int64_t shift = (reinterpret_cast<uintptr_t>(base_ptr) >> 1) & 1;
+            base_ptr -= shift;
+            idx += shift;
+            size += shift;
 
             rocsparse_bfloat16* addr      = &base_ptr[idx];
             int                 is_second = (idx & 1);

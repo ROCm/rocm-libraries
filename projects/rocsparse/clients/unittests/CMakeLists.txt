@@ -196,6 +196,16 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # with sibling unit-test branches that append after rocsparse_unit_test_main.
   # Drives public entry points, linking roc::rocsparse; no compile-in TUs.
   unit_test_host_level2.cpp
+  # --- Batch grid.y clamp + grid-stride assign helpers [AISPARSE-696/697] ---
+  # Distinct anchor at the end of the list so this leaf does not conflict with
+  # sibling unit-test branches that append after rocsparse_unit_test_main or in
+  # the level-2 group. Exercises rocsparse::assign_async / assign_device_async
+  # (compiled in via rocsparse_assign_async.cpp below) and the ceil_div helper
+  # in rocsparse_common.hpp.
+  unit_test_internal_assign_async.cpp
+  # grid.y column-panel grid-stride loops of csrmm row_split and coomm, driven
+  # through rocsparse_spmm with maxGridSize[1] shrunk [AISPARSE-668/696].
+  unit_test_internal_level3_mm_grid_y.cpp
 )
 
 # Host building-block library translation units under test by the

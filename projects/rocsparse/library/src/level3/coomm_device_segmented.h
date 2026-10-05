@@ -57,6 +57,7 @@ namespace rocsparse
                                                             int64_t              batch_stride_C,
                                                             rocsparse_order      order_C,
                                                             rocsparse_index_base idx_base,
+                                                            I                    colB_panel,
                                                             int64_t              batch)
     {
         const int tid = hipThreadIdx_x;
@@ -68,7 +69,7 @@ namespace rocsparse
         __shared__ T shared_val_prev[WF_SIZE];
         __shared__ T shared_val[BLOCKSIZE * WF_SIZE];
 
-        const I       colB   = WF_SIZE * hipBlockIdx_y;
+        const I       colB   = colB_panel;
         const int64_t offset = bid * LOOPS * BLOCKSIZE;
 
         I row_ind;
@@ -219,11 +220,14 @@ namespace rocsparse
 
         if(tid == BLOCKSIZE - 1)
         {
-            row_block_red[bid + hipGridDim_x * batch] = row_ind;
+            // grid.x is exactly the host nblocks, the row stride of the reduction
+            // buffers. Widen it so the offsets below are not 32-bit products.
+            const int64_t nblocks = hipGridDim_x;
+
+            row_block_red[bid + nblocks * batch] = row_ind;
             for(uint32_t i = 0; i < WF_SIZE; ++i)
             {
-                val_block_red[hipGridDim_x * (colB + i) + bid + (hipGridDim_x * N) * batch]
-                    = valB[i];
+                val_block_red[nblocks * (colB + i) + bid + nblocks * N * batch] = valB[i];
             }
         }
     }
@@ -446,13 +450,15 @@ namespace rocsparse
 
         if(tid == BLOCKSIZE - 1)
         {
-            row_block_red[bid + hipGridDim_x * batch] = row_ind;
+            // nblocks as in coommnn_segmented_main_device.
+            const int64_t nblocks = hipGridDim_x;
+
+            row_block_red[bid + nblocks * batch] = row_ind;
             for(uint32_t i = 0; i < WF_SIZE; ++i)
             {
                 if((colB + i) < N)
                 {
-                    val_block_red[hipGridDim_x * (colB + i) + bid + (hipGridDim_x * N) * batch]
-                        = valB[i];
+                    val_block_red[nblocks * (colB + i) + bid + nblocks * N * batch] = valB[i];
                 }
             }
         }
