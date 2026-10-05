@@ -53,7 +53,7 @@ rocsparse_status rocsparse::cscsm_compute(rocsparse_handle            handle,
 
     const bool A_load_conjugate = (op_A == rocsparse_operation_conjugate_transpose)
                                   && rocsparse::datatype_is_complex(A->data_type);
-    
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_compute(handle,
                                                        nrhs,
 

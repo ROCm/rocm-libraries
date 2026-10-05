@@ -485,7 +485,7 @@ namespace rocsparse
                                                                p_error));
             break;
         }
-	
+
         case rocsparse_format_csr:
         {
 
