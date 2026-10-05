@@ -55,17 +55,22 @@ def main():
                         help="runtime group size (always enabled)")
     parser.add_argument("--symmetric", action="store_true",
                         help="unsigned weights with implicit zero point 8")
+    parser.add_argument("--max-n", type=int, choices=(1, 4), default=1,
+                        help="maximum number of output columns")
     parser.add_argument("--linear-k", action="store_true",
                         help="traverse K without the row-dependent rotation")
-    parser.add_argument("--load-width", type=int, choices=(4, 8), default=8)
+    parser.add_argument("--load-width", type=int, choices=(2, 4, 8), default=8)
     parser.add_argument("--unroll", type=int, choices=(1, 2, 4, 8), default=4)
     parser.add_argument("--accumulators", type=int, choices=(1, 4), default=1)
     parser.add_argument("--native-permute", action="store_true",
                         help="use compiler-native packed FP16 arithmetic and activation permutations")
+    parser.add_argument("--threads", type=int, choices=(64, 128, 256, 512), default=128)
     args = parser.parse_args()
-    width_suffix = "_W4" if args.load_width == 4 else ""
+    width_suffix = f"_W{args.load_width}" if args.load_width != 8 else ""
     schedule_suffix = (f"_U{args.unroll}_A{args.accumulators}"
                        if (args.unroll, args.accumulators) != (4, 1) else "")
+    if args.threads != 128:
+        schedule_suffix += f"_T{args.threads}"
     if args.native_permute:
         schedule_suffix += "_NativePerm"
     if args.linear_k:
@@ -73,6 +78,8 @@ def main():
     name = f"RuntimeGroup_Decode{width_suffix}{schedule_suffix}_UnsignedBias8_gfx1151"
     if args.symmetric:
         name = name.replace("_UnsignedBias8", "_Symmetric_UnsignedBias8")
+    if args.max_n > 1:
+        name = name.replace("_UnsignedBias8", f"_N{args.max_n}_UnsignedBias8")
     name = args.name or name
     source = args.source or Path(__file__).resolve().parent / "w4a16_decode.hip"
     output = args.output or source.parent.parent / f"{name}.s"
@@ -83,6 +90,7 @@ def main():
              "-fuse-cuid=none", f"-DW4A16_GROUP_SIZE={args.group_size}",
              f"-DW4A16_RUNTIME_GROUP={int(args.runtime_group)}",
              f"-DW4A16_SYMMETRIC={int(args.symmetric)}",
+             f"-DW4A16_MAX_N={args.max_n}", f"-DW4A16_THREADS={args.threads}",
              f"-DW4A16_KERNEL_NAME={name}", f"-DW4A16_LOAD_WIDTH={args.load_width}",
              f"-DW4A16_UNROLL={args.unroll}", f"-DW4A16_ACCUMULATORS={args.accumulators}",
              f"-DW4A16_NATIVE_PERMUTE={int(args.native_permute)}",
@@ -99,7 +107,13 @@ def main():
         '.amdgcn_target "amdgcn-amd-amdhsa--gfx1151"',
     )
     assert text.count("\n---\n") == 1
-    metadata = yaml.safe_dump({"custom.config": CONFIG}, sort_keys=False)
+    config = dict(CONFIG)
+    config["WorkGroup"] = [args.threads // 32, 1, 32]
+    if args.max_n > 1:
+        config["AssertSizeEqual"] = {2: 1}
+        config["AssertSizeGreaterThan"] = {1: 0, 3: 0}
+        config["AssertSizeLessThan"] = {1: args.max_n + 1}
+    metadata = yaml.safe_dump({"custom.config": config}, sort_keys=False)
     text = text.replace("\n---\n", "\n---\n" + metadata)
     header = (
         "// Copyright Advanced Micro Devices, Inc., or its affiliates.\n"

@@ -177,7 +177,7 @@ solutions keep the scalar predicate and separate partitions.
 Symmetric/asymmetric and signed/unsigned predicates remain separate, so equal
 shape keys cannot select a kernel for another quantization mode.
 
-The FP16 unsigned Equality grid selects LinearK decode for K5120, U1_A4 for
+The original FP16 unsigned Equality grid selects LinearK decode for K5120, U1_A4 for
 K17408 and NativePerm for K6144. Regenerate runtime decode with:
 
 ```sh
@@ -187,13 +187,36 @@ uv run python Tensile/CustomKernels/Source/generate_w4a16_decode.py --load-width
 ```
 
 Add `--symmetric` to each command for unsigned symmetric decode. Those kernels
-use `(q - 8) * scale` without reading a zero-point buffer. Regenerate the three
+use `(q - 8) * scale` without reading a zero-point buffer. Add both `--symmetric`
+and `--max-n 4` to generate the separate kernels selected for N=2,3,4. Their
+neighboring workgroups process different columns of the same weight rows to
+reuse weights in cache.
+
+For unsigned symmetric N=1 at M/K=3584/3584, 3584/18944 and 4608/3584,
+Equality selects a 512-thread kernel with 16 rows per workgroup. Two-dword
+loads avoid the width-four scalar fallback when K is divisible by 512 but
+not 1024. Regenerate it with:
+
+```sh
+uv run python Tensile/CustomKernels/Source/generate_w4a16_decode.py --threads 512 --load-width 2 --unroll 1 --accumulators 4 --native-permute --symmetric --linear-k
+```
+
+The unsigned symmetric matrix kernels hold packed biases in scalar registers,
+read packed weights directly, and omit zero-point address calculations. Their
+dequantization uses 18 vector instructions per eight weights, including scale
+packing and output permutations. Regenerate the three
 unsigned symmetric matrix copies and their Equality logic from the asymmetric
 implementations with:
 
 ```sh
 uv run python Tensile/CustomKernels/Source/generate_w4a16_unsigned_symmetric.py
 ```
+
+Regeneration preserves symmetric-specific equality selections and scores.
+The symmetric grid also covers M/K pairs 3584/18944, 3584/3584,
+37888/3584 and 4608/3584 at the measured decode and prefill sizes. These
+selections were tuned at G128 with adaptive timing, 256 MiB rotation and
+cache flushing; runtime G32/G64/G128 support is unchanged.
 
 `Source/optimize_w4a16_prefill.py` applies packed FP16 conversion and BF16 packing
 optimizations to fresh generated matrix assembly. `scripts/generate_q27b_w4a16.py`

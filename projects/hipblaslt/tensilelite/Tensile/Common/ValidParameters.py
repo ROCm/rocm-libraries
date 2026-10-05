@@ -639,6 +639,7 @@ validParameters = { # we need to make sure this matches develop
     # Useful for custom kernels specialized to a vector or a restricted K.
     "AssertSizeEqual": -1,
     "AssertSizeGreaterThan": -1,
+    "AssertSizeLessThan": -1,
     # Kernel generator will assume that the FreeIndex[0] size is some multiple of the element size
     # and uses this to optimize the kernel.
     # FreeIndex[0] is usually letter "I"

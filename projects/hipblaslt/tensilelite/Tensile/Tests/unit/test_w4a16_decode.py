@@ -269,19 +269,42 @@ def test_multi_group_logic_requires_runtime_argument(monkeypatch):
                                        False, {}, True)
 
 
-def test_unsigned_symmetric_logic_copies_asymmetric_selection():
+def test_unsigned_symmetric_logic_preserves_shapes_and_selects_small_n_decode():
     logic_dir = DIRECTORY.parents[2] / (
         "library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx1151/Equality")
     asymmetric = yaml.safe_load((logic_dir / "gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_Q27B.yaml").read_text())
     symmetric = yaml.safe_load((logic_dir / "gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_Q27B.yaml").read_text())
-    assert symmetric["ExactLogic"] == asymmetric["ExactLogic"]
+    original_shapes = {tuple(row[0]) for row in asymmetric["ExactLogic"]}
+    assert original_shapes <= {tuple(row[0]) for row in symmetric["ExactLogic"]}
+    old_solutions = {s["SolutionIndex"]: s["CustomKernelName"] for s in asymmetric["Solutions"]}
+    new_solutions = {s["SolutionIndex"]: s["CustomKernelName"] for s in symmetric["Solutions"]}
+    for shape, selection in symmetric["ExactLogic"]:
+        if tuple(shape) not in original_shapes:
+            continue
+        reference = list(shape)
+        if shape[1] in (2, 3, 4):
+            reference[1] = 1
+        old_index = next(row[1][0] for row in asymmetric["ExactLogic"] if row[0] == reference)
+        expected = old_solutions[old_index].replace("SABBGZPU8", "SABBGU8")
+        if "Decode" in expected:
+            expected = expected.replace("_UnsignedBias8", "_Symmetric_UnsignedBias8")
+        if shape[1] in (2, 3, 4):
+            expected = expected.replace("_UnsignedBias8", "_N4_UnsignedBias8")
+        if tuple(shape) in {(3584, 1, 1, 18944), (3584, 1, 1, 3584), (4608, 1, 1, 3584)}:
+            expected = "RuntimeGroup_Decode_W2_U1_A4_T512_NativePerm_LinearK_Symmetric_UnsignedBias8_gfx1151"
+        assert new_solutions[selection[0]] == expected
     assert symmetric["ProblemType"]["ScaleZeroPointA"] is False
     assert symmetric["ProblemType"]["Int4EncodingA"] == "UnsignedBias8"
     assert symmetric["ProblemType"]["ScaleBlockSizesA"] == [32, 64, 128]
     for solution in symmetric["Solutions"]:
         name = solution["CustomKernelName"]
         metadata = _readEmbeddedYaml(name, DIRECTORY)["amdhsa.kernels"][0]
-        original_name = name.replace("SABBGU8", "SABBGZPU8").replace("_Symmetric_", "_")
+        original_name = name.replace("SABBGU8", "SABBGZPU8").replace("_Symmetric_", "_").replace("_N4_", "_")
+        if name.startswith("RuntimeGroup_Prefill_"):
+            original_name = next(s["CustomKernelName"] for s in asymmetric["Solutions"]
+                                 if "Decode" not in s["CustomKernelName"])
+        if "_T512_" in name:
+            original_name = "RuntimeGroup_Decode_W4_NativePerm_UnsignedBias8_gfx1151"
         original = _readEmbeddedYaml(original_name, DIRECTORY)["amdhsa.kernels"][0]
         assert [(arg[".offset"], arg[".size"]) for arg in metadata[".args"]] == [
             (arg[".offset"], arg[".size"]) for arg in original[".args"]]
@@ -291,3 +314,66 @@ def test_unsigned_symmetric_logic_copies_asymmetric_selection():
             assert "buffer_load_d16_u8" not in source
             assert "v_pk_fma_f16" not in source
             assert "0xe408e408" in source and "0xd480d480" in source
+
+
+@pytest.mark.parametrize("suffix", ["_W4", "_W4_U1_A4", "_W4_NativePerm"])
+def test_small_n_decode_bounds_and_abi(suffix):
+    original_name = runtime_name(suffix).replace("_UnsignedBias8", "_Symmetric_UnsignedBias8")
+    name = original_name.replace("_UnsignedBias8", "_N4_UnsignedBias8")
+    config = readCustomKernelConfig(name, DIRECTORY)
+    assert config["AssertSizeEqual"] == {2: 1}
+    assert config["AssertSizeGreaterThan"] == {1: 0, 3: 0}
+    assert config["AssertSizeLessThan"] == {1: 5}
+    from Tensile.CustomKernels import getCustomKernelConfig
+
+    # The filtered custom config must retain the bound for serialization.
+    filtered = getCustomKernelConfig(name, config["InternalSupportParams"], DIRECTORY)
+    assert filtered["AssertSizeLessThan"] == {1: 5}
+    predicate = ProblemPredicate.FromOriginalKeyPair(
+        ("AssertSizeLessThan", config["AssertSizeLessThan"]))
+    assert state(predicate) == {"type": "SizeLessThan", "index": 1, "value": 5}
+    original = _readEmbeddedYaml(original_name, DIRECTORY)["amdhsa.kernels"][0]
+    small_n = _readEmbeddedYaml(name, DIRECTORY)["amdhsa.kernels"][0]
+    assert small_n[".kernarg_segment_size"] == original[".kernarg_segment_size"]
+    assert [(a[".offset"], a[".size"]) for a in small_n[".args"]] == [
+        (a[".offset"], a[".size"]) for a in original[".args"]]
+
+
+def test_unsigned_symmetric_regeneration_preserves_measured_selections(tmp_path):
+    import runpy
+    from Tensile.CustomYamlLoader import load_yaml_stream
+
+    generator = runpy.run_path(str(DIRECTORY / "Source/generate_w4a16_unsigned_symmetric.py"))
+    header = "# Copyright Advanced Micro Devices, Inc., or its affiliates.\n# SPDX-License-Identifier: MIT\n# Test logic\n# Runtime groups\n"
+    generated = {"Solutions": [{"SolutionIndex": 0, "CustomKernelName": "matrix"},
+                               {"SolutionIndex": 1, "CustomKernelName": "decode"}],
+                 "ExactLogic": [[[64, 1, 1, 256], [0, 1.0]]]}
+    shared = []
+    for solution in generated["Solutions"]:
+        solution["MatrixInstruction"] = shared
+    previous = {"Solutions": generated["Solutions"],
+                "ExactLogic": [[[64, 1, 1, 256], [1, 2.0]],
+                               [[128, 2, 1, 256], [1, 3.0]]]}
+    text = header + yaml.safe_dump(generated)
+    result = generator["preserve_exact_logic"](text, yaml.safe_dump(previous))
+    assert yaml.safe_load(result)["ExactLogic"] == previous["ExactLogic"]
+    path = tmp_path / "logic.yaml"
+    path.write_text(result)
+    assert load_yaml_stream(path, yaml.SafeLoader) == yaml.safe_load(result)
+    assert generator["preserve_exact_logic"](result, result) == result
+    previous["Solutions"][1]["CustomKernelName"] = "different"
+    result = generator["preserve_exact_logic"](text, yaml.safe_dump(previous))
+    retained = yaml.safe_load(result)
+    assert retained["Solutions"][2]["CustomKernelName"] == "different"
+    assert retained["Solutions"][2]["SolutionIndex"] == 2
+    assert all(selection[0] == 2 for _, selection in retained["ExactLogic"])
+    assert generator["preserve_exact_logic"](result, result) == result
+
+
+def test_wide_decode_launch_geometry():
+    name = "RuntimeGroup_Decode_W2_U1_A4_T512_NativePerm_LinearK_Symmetric_UnsignedBias8_gfx1151"
+    config = readCustomKernelConfig(name, DIRECTORY)
+    metadata = _readEmbeddedYaml(name, DIRECTORY)["amdhsa.kernels"][0]
+    assert config["WorkGroup"] == [16, 1, 32]
+    assert metadata[".max_flat_workgroup_size"] == 512
+    assert config["AssertSizeEqual"] == {1: 1, 2: 1}

@@ -515,6 +515,8 @@ class ProblemPredicate(Properties.Predicate):
             return extractDimPredicate(cls, key, value, "SizeEqual")
         if key == "AssertSizeGreaterThan":
             return extractDimPredicate(cls, key, value, "SizeGreaterThan")
+        if key == "AssertSizeLessThan":
+            return extractDimPredicate(cls, key, value, "SizeLessThan")
 
         if key.endswith('Multiple'):
             if value == 1:

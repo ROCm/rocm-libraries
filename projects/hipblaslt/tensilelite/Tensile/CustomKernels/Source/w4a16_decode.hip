@@ -4,8 +4,15 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
 
+#ifndef W4A16_THREADS
+#define W4A16_THREADS 128
+#endif
+
 #ifndef W4A16_SYMMETRIC
 #define W4A16_SYMMETRIC 0
+#endif
+#ifndef W4A16_MAX_N
+#define W4A16_MAX_N 1
 #endif
 
 #ifndef W4A16_RUNTIME_GROUP
@@ -182,7 +189,7 @@ namespace
     }
 }
 
-extern "C" __global__ __launch_bounds__(128)
+extern "C" __global__ __launch_bounds__(W4A16_THREADS)
 void W4A16_KERNEL_NAME(
     unsigned info, unsigned kernelInfo0, unsigned kernelInfo1, unsigned numWorkgroups,
     unsigned m, unsigned n, unsigned batch, unsigned k,
@@ -204,7 +211,14 @@ void W4A16_KERNEL_NAME(
     constexpr unsigned groupShift = __builtin_ctz(W4A16_GROUP_SIZE);
 #endif
     const unsigned lane = threadIdx.x % 32;
-    const unsigned row = blockIdx.x * 4 + threadIdx.x / 32;
+#if W4A16_MAX_N > 1
+    // Neighboring workgroups reuse the same weight rows across columns.
+    const unsigned column = blockIdx.x % n;
+    const unsigned row = (blockIdx.x / n) * (W4A16_THREADS / 32) + threadIdx.x / 32;
+#else
+    constexpr unsigned column = 0;
+    const unsigned row = blockIdx.x * (W4A16_THREADS / 32) + threadIdx.x / 32;
+#endif
     if(row >= m)
         return;
 
@@ -213,6 +227,7 @@ void W4A16_KERNEL_NAME(
     float sum = 0;
     if(alpha != 0)
     {
+        b += size_t(column) * ldb;
         if(k % (256 * W4A16_LOAD_WIDTH) == 0 && lda % (8 * W4A16_LOAD_WIDTH) == 0)
             sum = accumulate<W4A16_LOAD_WIDTH>(a, b, scaleA, zeroA, row, lane, k, lda, groupShift);
         else
@@ -224,7 +239,7 @@ void W4A16_KERNEL_NAME(
     {
         float result = alpha * sum;
         if(beta != 0)
-            result += beta * __half2float(c[row]);
-        d[row] = __float2half(result);
+            result += beta * __half2float(c[size_t(column) * ldc + row]);
+        d[size_t(column) * ldd + row] = __float2half(result);
     }
 }
