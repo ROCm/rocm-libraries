@@ -3229,7 +3229,17 @@ try
     size_t sz;
 
     rocblas_start_device_memory_size_query((rocblas_handle)handle);
-    hipsolverStatus_t status
+    hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_sgels((rocblas_handle)handle,
+                                                                             rocblas_operation_none,
+                                                                             m,
+                                                                             n,
+                                                                             nrhs,
+                                                                             nullptr,
+                                                                             lda,
+                                                                             nullptr,
+                                                                             ldb,
+                                                                             nullptr));
+    hipsolverStatus_t oop_status
         = hipsolver::rocblas2hip_status(rocsolver_sgels_outofplace((rocblas_handle)handle,
                                                                    rocblas_operation_none,
                                                                    m,
@@ -3242,17 +3252,12 @@ try
                                                                    nullptr,
                                                                    ldx,
                                                                    nullptr));
-    hipsolver::rocblas2hip_status(rocsolver_sgels((rocblas_handle)handle,
-                                                  rocblas_operation_none,
-                                                  m,
-                                                  n,
-                                                  nrhs,
-                                                  nullptr,
-                                                  lda,
-                                                  nullptr,
-                                                  ldb,
-                                                  nullptr));
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+
+    if(status != HIPSOLVER_STATUS_SUCCESS)
+        return status;
+    if(oop_status != HIPSOLVER_STATUS_SUCCESS)
+        return oop_status;
 
     *lwork = sz;
     return status;
@@ -3284,7 +3289,17 @@ try
     size_t sz;
 
     rocblas_start_device_memory_size_query((rocblas_handle)handle);
-    hipsolverStatus_t status
+    hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_dgels((rocblas_handle)handle,
+                                                                             rocblas_operation_none,
+                                                                             m,
+                                                                             n,
+                                                                             nrhs,
+                                                                             nullptr,
+                                                                             lda,
+                                                                             nullptr,
+                                                                             ldb,
+                                                                             nullptr));
+    hipsolverStatus_t oop_status
         = hipsolver::rocblas2hip_status(rocsolver_dgels_outofplace((rocblas_handle)handle,
                                                                    rocblas_operation_none,
                                                                    m,
@@ -3297,17 +3312,12 @@ try
                                                                    nullptr,
                                                                    ldx,
                                                                    nullptr));
-    hipsolver::rocblas2hip_status(rocsolver_dgels((rocblas_handle)handle,
-                                                  rocblas_operation_none,
-                                                  m,
-                                                  n,
-                                                  nrhs,
-                                                  nullptr,
-                                                  lda,
-                                                  nullptr,
-                                                  ldb,
-                                                  nullptr));
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+
+    if(status != HIPSOLVER_STATUS_SUCCESS)
+        return status;
+    if(oop_status != HIPSOLVER_STATUS_SUCCESS)
+        return oop_status;
 
     *lwork = sz;
     return status;
@@ -3339,7 +3349,17 @@ try
     size_t sz;
 
     rocblas_start_device_memory_size_query((rocblas_handle)handle);
-    hipsolverStatus_t status
+    hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_cgels((rocblas_handle)handle,
+                                                                             rocblas_operation_none,
+                                                                             m,
+                                                                             n,
+                                                                             nrhs,
+                                                                             nullptr,
+                                                                             lda,
+                                                                             nullptr,
+                                                                             ldb,
+                                                                             nullptr));
+    hipsolverStatus_t oop_status
         = hipsolver::rocblas2hip_status(rocsolver_cgels_outofplace((rocblas_handle)handle,
                                                                    rocblas_operation_none,
                                                                    m,
@@ -3352,17 +3372,12 @@ try
                                                                    nullptr,
                                                                    ldx,
                                                                    nullptr));
-    hipsolver::rocblas2hip_status(rocsolver_cgels((rocblas_handle)handle,
-                                                  rocblas_operation_none,
-                                                  m,
-                                                  n,
-                                                  nrhs,
-                                                  nullptr,
-                                                  lda,
-                                                  nullptr,
-                                                  ldb,
-                                                  nullptr));
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+
+    if(status != HIPSOLVER_STATUS_SUCCESS)
+        return status;
+    if(oop_status != HIPSOLVER_STATUS_SUCCESS)
+        return oop_status;
 
     *lwork = sz;
     return status;
@@ -3394,7 +3409,17 @@ try
     size_t sz;
 
     rocblas_start_device_memory_size_query((rocblas_handle)handle);
-    hipsolverStatus_t status
+    hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_zgels((rocblas_handle)handle,
+                                                                             rocblas_operation_none,
+                                                                             m,
+                                                                             n,
+                                                                             nrhs,
+                                                                             nullptr,
+                                                                             lda,
+                                                                             nullptr,
+                                                                             ldb,
+                                                                             nullptr));
+    hipsolverStatus_t oop_status
         = hipsolver::rocblas2hip_status(rocsolver_zgels_outofplace((rocblas_handle)handle,
                                                                    rocblas_operation_none,
                                                                    m,
@@ -3407,17 +3432,12 @@ try
                                                                    nullptr,
                                                                    ldx,
                                                                    nullptr));
-    hipsolver::rocblas2hip_status(rocsolver_zgels((rocblas_handle)handle,
-                                                  rocblas_operation_none,
-                                                  m,
-                                                  n,
-                                                  nrhs,
-                                                  nullptr,
-                                                  lda,
-                                                  nullptr,
-                                                  ldb,
-                                                  nullptr));
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+
+    if(status != HIPSOLVER_STATUS_SUCCESS)
+        return status;
+    if(oop_status != HIPSOLVER_STATUS_SUCCESS)
+        return oop_status;
 
     *lwork = sz;
     return status;
@@ -3625,6 +3645,487 @@ try
                                                                         (rocblas_double_complex*)X,
                                                                         ldx,
                                                                         devInfo));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+/******************** GELS_BATCHED ********************/
+hipsolverStatus_t hipsolverSgelsBatched_bufferSize(hipsolverHandle_t    handle,
+                                                   hipsolverOperation_t trans,
+                                                   int                  m,
+                                                   int                  n,
+                                                   int                  nrhs,
+                                                   float*               A[],
+                                                   int                  lda,
+                                                   float*               C[],
+                                                   int                  ldc,
+                                                   size_t*              lwork,
+                                                   int                  batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    size_t sz;
+
+    rocblas_operation roc_trans = hipsolver::hip2rocblas_operation(trans);
+
+    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    hipsolverStatus_t status
+        = hipsolver::rocblas2hip_status(rocsolver_sgels_batched((rocblas_handle)handle,
+                                                                roc_trans,
+                                                                m,
+                                                                n,
+                                                                nrhs,
+                                                                nullptr,
+                                                                lda,
+                                                                nullptr,
+                                                                ldc,
+                                                                nullptr,
+                                                                batch_count));
+    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+
+    if(status != HIPSOLVER_STATUS_SUCCESS)
+        return status;
+
+    *lwork = sz;
+    return status;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverDgelsBatched_bufferSize(hipsolverHandle_t    handle,
+                                                   hipsolverOperation_t trans,
+                                                   int                  m,
+                                                   int                  n,
+                                                   int                  nrhs,
+                                                   double*              A[],
+                                                   int                  lda,
+                                                   double*              C[],
+                                                   int                  ldc,
+                                                   size_t*              lwork,
+                                                   int                  batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    size_t sz;
+
+    rocblas_operation roc_trans = hipsolver::hip2rocblas_operation(trans);
+
+    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    hipsolverStatus_t status
+        = hipsolver::rocblas2hip_status(rocsolver_dgels_batched((rocblas_handle)handle,
+                                                                roc_trans,
+                                                                m,
+                                                                n,
+                                                                nrhs,
+                                                                nullptr,
+                                                                lda,
+                                                                nullptr,
+                                                                ldc,
+                                                                nullptr,
+                                                                batch_count));
+    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+
+    if(status != HIPSOLVER_STATUS_SUCCESS)
+        return status;
+
+    *lwork = sz;
+    return status;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverCgelsBatched_bufferSize(hipsolverHandle_t    handle,
+                                                   hipsolverOperation_t trans,
+                                                   int                  m,
+                                                   int                  n,
+                                                   int                  nrhs,
+                                                   hipFloatComplex*     A[],
+                                                   int                  lda,
+                                                   hipFloatComplex*     C[],
+                                                   int                  ldc,
+                                                   size_t*              lwork,
+                                                   int                  batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    size_t sz;
+
+    rocblas_operation roc_trans = hipsolver::hip2rocblas_operation(trans);
+
+    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    hipsolverStatus_t status
+        = hipsolver::rocblas2hip_status(rocsolver_cgels_batched((rocblas_handle)handle,
+                                                                roc_trans,
+                                                                m,
+                                                                n,
+                                                                nrhs,
+                                                                nullptr,
+                                                                lda,
+                                                                nullptr,
+                                                                ldc,
+                                                                nullptr,
+                                                                batch_count));
+    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+
+    if(status != HIPSOLVER_STATUS_SUCCESS)
+        return status;
+
+    *lwork = sz;
+    return status;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverZgelsBatched_bufferSize(hipsolverHandle_t    handle,
+                                                   hipsolverOperation_t trans,
+                                                   int                  m,
+                                                   int                  n,
+                                                   int                  nrhs,
+                                                   hipDoubleComplex*    A[],
+                                                   int                  lda,
+                                                   hipDoubleComplex*    C[],
+                                                   int                  ldc,
+                                                   size_t*              lwork,
+                                                   int                  batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    size_t sz;
+
+    rocblas_operation roc_trans = hipsolver::hip2rocblas_operation(trans);
+
+    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    hipsolverStatus_t status
+        = hipsolver::rocblas2hip_status(rocsolver_zgels_batched((rocblas_handle)handle,
+                                                                roc_trans,
+                                                                m,
+                                                                n,
+                                                                nrhs,
+                                                                nullptr,
+                                                                lda,
+                                                                nullptr,
+                                                                ldc,
+                                                                nullptr,
+                                                                batch_count));
+    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+
+    if(status != HIPSOLVER_STATUS_SUCCESS)
+        return status;
+
+    *lwork = sz;
+    return status;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverSgelsBatched(hipsolverHandle_t    handle,
+                                        hipsolverOperation_t trans,
+                                        int                  m,
+                                        int                  n,
+                                        int                  nrhs,
+                                        float*               A[],
+                                        int                  lda,
+                                        float*               C[],
+                                        int                  ldc,
+                                        void*                work,
+                                        size_t               lwork,
+                                        int*                 hInfo,
+                                        int*                 devInfo,
+                                        int                  batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(trans != HIPBLAS_OP_N && trans != HIPBLAS_OP_T && trans != HIPBLAS_OP_C)
+        *hInfo = -1;
+    else if(m < 0)
+        *hInfo = -2;
+    else if(n < 0)
+        *hInfo = -3;
+    else if(nrhs < 0)
+        *hInfo = -4;
+    else if(!A && m * n)
+        *hInfo = -5;
+    else if(lda < std::max(1, m))
+        *hInfo = -6;
+    else if(!C && m * nrhs)
+        *hInfo = -7;
+    else if(ldc < std::max(1, m))
+        *hInfo = -8;
+    else if(!devInfo)
+        *hInfo = -12;
+    else if(batch_count < 0)
+        *hInfo = -13;
+    else
+        *hInfo = 0;
+
+    if(work && lwork)
+        CHECK_ROCBLAS_ERROR(rocblas_set_workspace((rocblas_handle)handle, work, lwork));
+    else
+    {
+        CHECK_HIPSOLVER_ERROR(hipsolverSgelsBatched_bufferSize(
+            handle, trans, m, n, nrhs, A, lda, C, ldc, &lwork, batch_count));
+        CHECK_ROCBLAS_ERROR(hipsolverManageWorkspace((rocblas_handle)handle, lwork));
+    }
+
+    return hipsolver::rocblas2hip_status(
+        rocsolver_sgels_batched((rocblas_handle)handle,
+                                hipsolver::hip2rocblas_operation(trans),
+                                m,
+                                n,
+                                nrhs,
+                                A,
+                                lda,
+                                C,
+                                ldc,
+                                devInfo,
+                                batch_count));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverDgelsBatched(hipsolverHandle_t    handle,
+                                        hipsolverOperation_t trans,
+                                        int                  m,
+                                        int                  n,
+                                        int                  nrhs,
+                                        double*              A[],
+                                        int                  lda,
+                                        double*              C[],
+                                        int                  ldc,
+                                        void*                work,
+                                        size_t               lwork,
+                                        int*                 hInfo,
+                                        int*                 devInfo,
+                                        int                  batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(trans != HIPBLAS_OP_N && trans != HIPBLAS_OP_T && trans != HIPBLAS_OP_C)
+        *hInfo = -1;
+    else if(m < 0)
+        *hInfo = -2;
+    else if(n < 0)
+        *hInfo = -3;
+    else if(nrhs < 0)
+        *hInfo = -4;
+    else if(!A && m * n)
+        *hInfo = -5;
+    else if(lda < std::max(1, m))
+        *hInfo = -6;
+    else if(!C && m * nrhs)
+        *hInfo = -7;
+    else if(ldc < std::max(1, m))
+        *hInfo = -8;
+    else if(!devInfo)
+        *hInfo = -12;
+    else if(batch_count < 0)
+        *hInfo = -13;
+    else
+        *hInfo = 0;
+
+    if(work && lwork)
+        CHECK_ROCBLAS_ERROR(rocblas_set_workspace((rocblas_handle)handle, work, lwork));
+    else
+    {
+        CHECK_HIPSOLVER_ERROR(hipsolverDgelsBatched_bufferSize(
+            handle, trans, m, n, nrhs, A, lda, C, ldc, &lwork, batch_count));
+        CHECK_ROCBLAS_ERROR(hipsolverManageWorkspace((rocblas_handle)handle, lwork));
+    }
+
+    return hipsolver::rocblas2hip_status(
+        rocsolver_dgels_batched((rocblas_handle)handle,
+                                hipsolver::hip2rocblas_operation(trans),
+                                m,
+                                n,
+                                nrhs,
+                                A,
+                                lda,
+                                C,
+                                ldc,
+                                devInfo,
+                                batch_count));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverCgelsBatched(hipsolverHandle_t    handle,
+                                        hipsolverOperation_t trans,
+                                        int                  m,
+                                        int                  n,
+                                        int                  nrhs,
+                                        hipFloatComplex*     A[],
+                                        int                  lda,
+                                        hipFloatComplex*     C[],
+                                        int                  ldc,
+                                        void*                work,
+                                        size_t               lwork,
+                                        int*                 hInfo,
+                                        int*                 devInfo,
+                                        int                  batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(trans != HIPBLAS_OP_N && trans != HIPBLAS_OP_T && trans != HIPBLAS_OP_C)
+        *hInfo = -1;
+    else if(m < 0)
+        *hInfo = -2;
+    else if(n < 0)
+        *hInfo = -3;
+    else if(nrhs < 0)
+        *hInfo = -4;
+    else if(!A && m * n)
+        *hInfo = -5;
+    else if(lda < std::max(1, m))
+        *hInfo = -6;
+    else if(!C && m * nrhs)
+        *hInfo = -7;
+    else if(ldc < std::max(1, m))
+        *hInfo = -8;
+    else if(!devInfo)
+        *hInfo = -12;
+    else if(batch_count < 0)
+        *hInfo = -13;
+    else
+        *hInfo = 0;
+
+    if(work && lwork)
+        CHECK_ROCBLAS_ERROR(rocblas_set_workspace((rocblas_handle)handle, work, lwork));
+    else
+    {
+        CHECK_HIPSOLVER_ERROR(hipsolverCgelsBatched_bufferSize(
+            handle, trans, m, n, nrhs, A, lda, C, ldc, &lwork, batch_count));
+        CHECK_ROCBLAS_ERROR(hipsolverManageWorkspace((rocblas_handle)handle, lwork));
+    }
+
+    return hipsolver::rocblas2hip_status(
+        rocsolver_cgels_batched((rocblas_handle)handle,
+                                hipsolver::hip2rocblas_operation(trans),
+                                m,
+                                n,
+                                nrhs,
+                                (rocblas_float_complex**)A,
+                                lda,
+                                (rocblas_float_complex**)C,
+                                ldc,
+                                devInfo,
+                                batch_count));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverZgelsBatched(hipsolverHandle_t    handle,
+                                        hipsolverOperation_t trans,
+                                        int                  m,
+                                        int                  n,
+                                        int                  nrhs,
+                                        hipDoubleComplex*    A[],
+                                        int                  lda,
+                                        hipDoubleComplex*    C[],
+                                        int                  ldc,
+                                        void*                work,
+                                        size_t               lwork,
+                                        int*                 hInfo,
+                                        int*                 devInfo,
+                                        int                  batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(trans != HIPBLAS_OP_N && trans != HIPBLAS_OP_T && trans != HIPBLAS_OP_C)
+        *hInfo = -1;
+    else if(m < 0)
+        *hInfo = -2;
+    else if(n < 0)
+        *hInfo = -3;
+    else if(nrhs < 0)
+        *hInfo = -4;
+    else if(!A && m * n)
+        *hInfo = -5;
+    else if(lda < std::max(1, m))
+        *hInfo = -6;
+    else if(!C && m * nrhs)
+        *hInfo = -7;
+    else if(ldc < std::max(1, m))
+        *hInfo = -8;
+    else if(!devInfo)
+        *hInfo = -12;
+    else if(batch_count < 0)
+        *hInfo = -13;
+    else
+        *hInfo = 0;
+
+    if(work && lwork)
+        CHECK_ROCBLAS_ERROR(rocblas_set_workspace((rocblas_handle)handle, work, lwork));
+    else
+    {
+        CHECK_HIPSOLVER_ERROR(hipsolverZgelsBatched_bufferSize(
+            handle, trans, m, n, nrhs, A, lda, C, ldc, &lwork, batch_count));
+        CHECK_ROCBLAS_ERROR(hipsolverManageWorkspace((rocblas_handle)handle, lwork));
+    }
+
+    return hipsolver::rocblas2hip_status(
+        rocsolver_zgels_batched((rocblas_handle)handle,
+                                hipsolver::hip2rocblas_operation(trans),
+                                m,
+                                n,
+                                nrhs,
+                                (rocblas_double_complex**)A,
+                                lda,
+                                (rocblas_double_complex**)C,
+                                ldc,
+                                devInfo,
+                                batch_count));
 }
 catch(...)
 {
