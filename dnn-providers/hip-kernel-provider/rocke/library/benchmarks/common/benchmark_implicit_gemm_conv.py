@@ -2286,7 +2286,7 @@ def _run_sweep(
                 flush=True,
             )
 
-    _stop = EarlyStop(args.early_stop, args.early_stop_after)
+    _stop = EarlyStop.for_case(args, problem, dtype, "fwd")
     n_run = 0
     for combo, spec, artifact in pending:
         tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn, pipeline, epilogue = combo
@@ -2414,6 +2414,8 @@ def _run_sweep(
 
     if not results:
         print("No valid configurations found.", file=sys.stderr)
+        if _stop.summary():
+            print(_stop.summary(), file=sys.stderr)
         return 1, []
 
     results.sort(key=lambda r: r.tflops, reverse=True)
@@ -2758,7 +2760,7 @@ def _run_wgrad_sweep(
     # Set of config keys that have been pruned (skip remaining split-K degrees).
     _pruned_configs: set = set()
 
-    _stop = EarlyStop(args.early_stop, args.early_stop_after)
+    _stop = EarlyStop.for_case(args, problem, dtype, "wgrad")
     n_run = 0
     for combo, spec, resolved_split_k, artifact in pending:
         (
@@ -3195,6 +3197,8 @@ def _run_wgrad_sweep(
 
     if not results:
         print("No valid wgrad configurations found.", file=sys.stderr)
+        if _stop.summary():
+            print(_stop.summary(), file=sys.stderr)
         return 1, []
 
     results.sort(key=lambda r: r.tflops, reverse=True)
@@ -3400,7 +3404,7 @@ def _run_dgrad_sweep(
                 flush=True,
             )
 
-    _stop = EarlyStop(args.early_stop, args.early_stop_after)
+    _stop = EarlyStop.for_case(args, problem, dtype, "dgrad")
     n_measured = 0
     for _combo, spec, resolved_split_k, artifact in pending:
         sub_gemms = spec.compute_sub_gemms()
@@ -3534,6 +3538,8 @@ def _run_dgrad_sweep(
 
     if not results:
         print("No valid dgrad configurations found.", file=sys.stderr)
+        if _stop.summary():
+            print(_stop.summary(), file=sys.stderr)
         return 1, []
 
     results.sort(key=lambda r: r.tflops, reverse=True)
@@ -3608,7 +3614,12 @@ def _cache_dispatch(args, arch, target, cases) -> int:
         return rc
 
     cache = KernelCache(Path(args.run_from_cache), arch)
-    rc = describe_cache(cache)
+    # Only the directions this run launches (see _run_from_cache): describing
+    # the whole cache would parse every other direction's entries for nothing.
+    used = directions or sorted(
+        {case[2] if len(case) > 2 else args.direction for case in cases}
+    )
+    rc = describe_cache(cache, directions=used)
     if rc:
         return rc
     return _run_from_cache(args, arch, target, cases, cache, directions)
@@ -3754,7 +3765,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 if args.verify or args.dump_fail
                 else None
             )
-            _stop = EarlyStop(args.early_stop, args.early_stop_after)
+            _stop = EarlyStop.for_case(args, problem, case_dtype, direction)
             n_failed = 0
 
             n_cand = len(candidates)
@@ -3920,6 +3931,8 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 )
             if not results:
                 print("  No successful launches.", flush=True)
+                if _stop.summary():
+                    print(f"  {_stop.summary()}", flush=True)
                 overall_rc = 1
                 continue
 

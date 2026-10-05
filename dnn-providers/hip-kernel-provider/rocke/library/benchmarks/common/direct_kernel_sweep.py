@@ -130,6 +130,16 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for k, s in itertools.product(_DEPTHWISE_FILTERS, _STRIDES)
         ),
     ),
+    # Depthwise forward for groups < wave_size: lanes split over channels and
+    # output columns. Same capabilities; the spec validator offers it only to
+    # problems with fewer groups than a wave.
+    "direct_depthwise_spatial": (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=s, cpg=1, kpg=1)
+            for k, s in itertools.product(_DEPTHWISE_FILTERS, _STRIDES)
+        ),
+    ),
     # Depthwise dgrad (row-streaming kernel): same filters and strides.
     "direct_depthwise_dgrad": (
         "dgrad",
@@ -173,6 +183,9 @@ def _knob_grid(variant: str) -> Iterator[dict]:
     elif variant in ("direct_depthwise", "direct_depthwise_dgrad"):
         for bw, waves in itertools.product(DW_BLOCK_W, DW_BLOCK_WAVES):
             yield dict(block_w=bw, block_waves=waves)
+    elif variant == "direct_depthwise_spatial":
+        for waves in DW_BLOCK_WAVES:
+            yield dict(block_waves=waves)
     elif variant == "direct_grouped_dgrad":
         for bq, bg in itertools.product(DGRAD_BLOCK_Q, BLOCK_GROUPS):
             yield dict(block_q=bq, block_groups=bg)
@@ -214,6 +227,10 @@ def make_spec(variant: str, problem, knobs: dict):
     if variant == "direct_depthwise":
         return dc.DirectDepthwiseSpec(
             problem=problem, name="rocke_direct_depthwise", **knobs
+        )
+    if variant == "direct_depthwise_spatial":
+        return dc.DirectDepthwiseSpatialSpec(
+            problem=problem, name="rocke_direct_depthwise_spatial", **knobs
         )
     if variant == "direct_depthwise_dgrad":
         return dc.DirectDepthwiseDgradStreamSpec(
@@ -273,6 +290,8 @@ def validate_spec(variant: str, spec, arch: str) -> Tuple[bool, str]:
             return dc.is_valid_spec(spec, arch=arch)
         if variant == "direct_depthwise":
             return dc.is_valid_depthwise_spec(spec, arch=arch)
+        if variant == "direct_depthwise_spatial":
+            return dc.is_valid_depthwise_spatial_spec(spec, arch=arch)
         if variant == "direct_depthwise_dgrad":
             return dc.is_valid_depthwise_dgrad_stream_spec(spec, arch=arch)
         if variant == "direct_grouped_dgrad":
@@ -291,6 +310,7 @@ def _build_kernel(variant: str, spec, arch: str):
         "direct_grouped": dc.build_direct_conv,
         "direct_grouped_dgrad_mfma": dc.build_direct_conv,
         "direct_depthwise": dc.build_direct_depthwise,
+        "direct_depthwise_spatial": dc.build_direct_depthwise_spatial,
         "direct_depthwise_dgrad": dc.build_direct_depthwise_dgrad_streaming,
         "direct_grouped_dgrad": dc.build_direct_conv_dgrad,
         _TRANSPOSE: dc.build_direct_transpose_weights_dgrad,
@@ -381,18 +401,24 @@ def _caps_of(identity: KernelIdentity) -> DirectCaps:
     )
 
 
-def probe_problem(caps: DirectCaps, dtype: str = DIRECT_DTYPE):
+def probe_problem(
+    caps: DirectCaps, dtype: str = DIRECT_DTYPE, variant: Optional[str] = None
+):
     """A problem with exactly ``caps`` that every knob in the grid fits.
 
     The emitted IR does not depend on N, H, W or groups (the shape-invariance
     cases in test_conv_abi.py assert it), so the probe only has to satisfy the
     spec validators: 64 groups divide every block_groups, 256 depthwise
-    channels fill the widest depthwise block, and 64x64 leaves every stride-2
-    output wider than the widest W tile.
+    channels fill the widest depthwise block (the spatial depthwise kernel
+    takes fewer groups than a wave, so it gets 8), and 64x64 leaves every
+    stride-2 output wider than the widest W tile.
     """
     from kernels.common.conv_direct_grouped import DirectConvProblem
 
-    groups = 256 if caps.cpg == 1 else 64
+    if variant == "direct_depthwise_spatial":
+        groups = 8
+    else:
+        groups = 256 if caps.cpg == 1 else 64
     return DirectConvProblem(
         N=1,
         H=64,
@@ -435,7 +461,7 @@ def _caps_jobs(
     """
     out: List[Tuple[str, BuildJob]] = []
     n_raw = 0
-    probe = probe_problem(caps, dtype)
+    probe = probe_problem(caps, dtype, variant)
     for knobs in _knob_grid(variant):
         n_raw += 1
         if variant == "direct_grouped_dgrad_mfma" and _mfma_knobs_reason(probe, knobs):
@@ -598,7 +624,7 @@ def build_direct_job(job: BuildJob, arch: str, dtype: str):
         raise ValueError(f"direct conv builds {DIRECT_DTYPES}, not {dtype!r}")
     caps = DirectCaps(**job.caps)
     variant = job.identity.algorithm
-    spec = make_spec(variant, probe_problem(caps, dtype), job.spec_kwargs)
+    spec = make_spec(variant, probe_problem(caps, dtype, variant), job.spec_kwargs)
     ok, why = validate_spec(variant, spec, arch)
     if not ok:
         raise ValueError(why)

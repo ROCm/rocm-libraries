@@ -431,9 +431,11 @@ def _direct_builders():
                 dc.DirectDepthwiseSpec(problem=pr), arch=_ARCH
             ),
         ),
+        # Fewer groups than a wave; the multiples below keep it that way while
+        # changing the W positions each wave covers.
         (
             "depthwise_spatial",
-            dict(cpg=1, kpg=1, groups=32),
+            dict(cpg=1, kpg=1, groups=3),
             "fwd",
             lambda pr: dc.build_direct_depthwise_spatial(
                 dc.DirectDepthwiseSpatialSpec(problem=pr), arch=_ARCH
@@ -494,12 +496,6 @@ def _direct_builders():
     ]
 
 
-# The spatial depthwise kernel packs every channel of an image into one
-# wavefront, so its lane layout -- and with it the emitted IR -- follows the
-# group count. It is the one direct kernel whose groups are not a kernarg.
-_GROUPS_BAKED = {"depthwise_spatial"}
-
-
 @pytest.mark.parametrize(
     "label,channels,direction,build",
     _direct_builders(),
@@ -525,8 +521,7 @@ def test_direct_conv_abi_and_shape_invariance(label, channels, direction, build)
         [(2, 14, 14), (3, 29, 37), (1, 64, 64)], (1, 2, 3)
     ):
         shape = dict(channels)
-        if label not in _GROUPS_BAKED:
-            shape["groups"] *= group_mult
+        shape["groups"] *= group_mult
         problem = DirectConvProblem(N=N, H=H, W=W, KH=3, KW=3, PAD=1, stride=1, **shape)
         kernel = build(problem)
         fingerprints.append(_op_signature(kernel))

@@ -588,7 +588,7 @@ def _run_depthwise_sweep(
             flush=True,
         )
 
-    _stop = EarlyStop(args.early_stop, args.early_stop_after)
+    _stop = EarlyStop.for_case(args, problem, dtype, "fwd")
     n_run = 0
     for combo, spec, kernel in pending:
         block_w, block_waves = combo
@@ -684,6 +684,8 @@ def _run_depthwise_sweep(
 
     if not results:
         print("No valid depthwise configurations found.", file=sys.stderr)
+        if _stop.summary():
+            print(_stop.summary(), file=sys.stderr)
         return 1, []
 
     results.sort(key=lambda r: r.tflops, reverse=True)
@@ -796,7 +798,7 @@ def _run_sweep(
             flush=True,
         )
 
-    _stop = EarlyStop(args.early_stop, args.early_stop_after)
+    _stop = EarlyStop.for_case(args, problem, dtype, "fwd")
     n_run = 0
     for combo, spec, kernel in pending:
         block_q, block_groups, double_buffer = combo
@@ -894,6 +896,8 @@ def _run_sweep(
 
     if not results:
         print("No valid configurations found.", file=sys.stderr)
+        if _stop.summary():
+            print(_stop.summary(), file=sys.stderr)
         return 1, []
 
     results.sort(key=lambda r: r.tflops, reverse=True)
@@ -1038,7 +1042,7 @@ def _run_wgrad_sweep(
             flush=True,
         )
 
-    _stop = EarlyStop(args.early_stop, args.early_stop_after)
+    _stop = EarlyStop.for_case(args, problem, dtype, "wgrad")
     n_run = 0
     for combo, spec, kernel in pending:
         waves_k, waves_c, waves_q, hpb, mk = combo
@@ -1136,6 +1140,8 @@ def _run_wgrad_sweep(
 
     if not results:
         print("No valid wgrad configurations found.", file=sys.stderr)
+        if _stop.summary():
+            print(_stop.summary(), file=sys.stderr)
         return 1, []
 
     results.sort(key=lambda r: r["tflops"], reverse=True)
@@ -1458,7 +1464,7 @@ def _run_dgrad_sweep(
             flush=True,
         )
 
-    _stop = EarlyStop(args.early_stop, args.early_stop_after)
+    _stop = EarlyStop.for_case(args, problem, dtype, "dgrad")
     n_run = 0
     for combo, spec, kernel_or_pair in pending:
         is_mfma_pair = isinstance(kernel_or_pair, tuple)
@@ -1717,6 +1723,8 @@ def _run_dgrad_sweep(
 
     if not results:
         print("No valid dgrad configurations found.", file=sys.stderr)
+        if _stop.summary():
+            print(_stop.summary(), file=sys.stderr)
         return 1, []
 
     results.sort(key=lambda r: r["tflops"], reverse=True)
@@ -1797,7 +1805,11 @@ def _cache_dispatch(args, arch: str, cases: list) -> int:
         return rc
 
     cache = KernelCache(Path(args.run_from_cache), arch)
-    rc = describe_cache(cache)
+    # Only the direct kernels: the implicit-GEMM entries sharing the cache
+    # are far more numerous and this run never launches them.
+    rc = describe_cache(
+        cache, directions=("direct_fwd", "direct_dgrad", "direct_dgrad_helper")
+    )
     if rc:
         return rc
     return _run_from_cache(args, arch, cases, cache, directions)
@@ -1894,7 +1906,7 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
             flop = float(p.flops)
             bytes_xfer = float(In_t.nbytes + W_t.nbytes + Out_t.nbytes)
             results = []
-            _stop = EarlyStop(args.early_stop, args.early_stop_after)
+            _stop = EarlyStop.for_case(args, p, dtype, direction)
             for plan in plans:
                 try:
                     launches = [
@@ -1956,6 +1968,8 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                 rt.free(ptr)
             if not results:
                 print("  no cached kernel launched successfully", flush=True)
+                if _stop.summary():
+                    print(f"  {_stop.summary()}", flush=True)
                 overall_rc = overall_rc or 1
                 continue
             results.sort(key=lambda r: r[0], reverse=True)

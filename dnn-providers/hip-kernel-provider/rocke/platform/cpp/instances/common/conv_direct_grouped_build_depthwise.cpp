@@ -220,7 +220,7 @@ void rocke_dconv_dw_load_weights(rocke_dconv_dw_ctx_t* ctx)
 }
 
 /* ===================================================================== *
- *  H-row streaming loop  (stride-aware, Python lines 2664-2712 updated)
+ *  H-row streaming loop  (stride-aware)
  *
  *  Accumulator: acc[w_out][slot] — BLOCK_W × KH scalar f32 values.
  *  The flush uses stride-aware ho_row = p_flush_val / c_stride_dw and only
@@ -230,7 +230,66 @@ void rocke_dconv_dw_load_weights(rocke_dconv_dw_ctx_t* ctx)
  *  The rows stream through a scf_for_iter group loop over
  *  n_groups = ceil(n_iters / KH) groups of KH iterations each; the trip count
  *  follows the runtime height (AOT), so there is no build-time-unrolled form.
+ *  The input rows are software-pipelined one group ahead: each iteration
+ *  issues the loads of the next group and carries them to the next iteration
+ *  (see the Python source for why).
  * ===================================================================== */
+
+/* Raw input values of rows y0 .. y0 + KH - 1, row-major by column: one load
+ * per distinct input column, taken at the first tap (col_w, col_s) that
+ * reads it. Out-of-range rows, columns and lanes load from the OOB
+ * sentinel, which the buffer descriptor returns as zero. */
+static void dw_load_group(rocke_dconv_dw_ctx_t* ctx,
+                          rocke_value_t* y0,
+                          rocke_value_t* n_iters_v,
+                          const int* col_w,
+                          const int* col_s,
+                          int n_cols,
+                          rocke_value_t** out)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    int j, c;
+
+    for(j = 0; j < ctx->p.KH; ++j)
+    {
+        rocke_value_t* y_j = rocke_b_add(b, y0, rocke_b_const_i32(b, j));
+        rocke_value_t* j_valid = rocke_b_cmp_lt(b, y_j, n_iters_v);
+
+        for(c = 0; c < n_cols; ++c)
+        {
+            rocke_value_t* a_off = NULL;
+            rocke_value_t* valid = NULL;
+            rocke_value_t* ok;
+            rocke_value_t* safe_off;
+            const char* off_names[5];
+            rocke_value_t* off_vals[5];
+
+            off_names[0] = "n";
+            off_vals[0] = ctx->n;
+            off_names[1] = "y_iter";
+            off_vals[1] = y_j;
+            off_names[2] = "wo";
+            {
+                rocke_value_t* cwo = rocke_b_const_i32(b, col_w[c]);
+                off_vals[2] = rocke_b_add(b, ctx->q_tile_start, cwo);
+            }
+            off_names[3] = "s_off";
+            off_vals[3] = rocke_b_const_i32(b, col_s[c]);
+            off_names[4] = "c";
+            off_vals[4] = ctx->ch;
+            rocke_transforms_descriptor_offset(
+                b, ctx->a_desc, off_names, off_vals, 5, &a_off, &valid);
+
+            ok = rocke_b_land(b, rocke_b_land(b, valid, j_valid), ctx->ch_in_range);
+            safe_off = rocke_b_select(
+                b, ok, rocke_b_mul(b, a_off, ctx->c_half_bytes), ctx->oob_sentinel);
+            out[j * n_cols + c] = ctx->is_bf16
+                                      ? rocke_b_buffer_load_bf16(b, ctx->a_rsrc, safe_off, ctx->c0)
+                                      : rocke_b_buffer_load_f16(b, ctx->a_rsrc, safe_off, ctx->c0);
+        }
+    }
+}
+
 rocke_kernel_def_t* rocke_dconv_dw_stream_h_loop(rocke_dconv_dw_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
@@ -238,6 +297,7 @@ rocke_kernel_def_t* rocke_dconv_dw_stream_h_loop(rocke_dconv_dw_ctx_t* ctx)
     int KH = p->KH;
     int KW = p->KW;
     int BLOCK_W = ctx->BLOCK_W;
+    int stride = ctx->c_stride_dw;
     int n_iters = ctx->n_iters;
     /* AOT: the row count follows the runtime height, so only the
      * grouped-period scf.for form is usable -- the build-time-unrolled variant
@@ -247,10 +307,26 @@ rocke_kernel_def_t* rocke_dconv_dw_stream_h_loop(rocke_dconv_dw_ctx_t* ctx)
      * directly (no scatter, no runtime weight loads). */
     (void)n_iters;
     {
-        int num_iargs = KH * BLOCK_W;
+        /* Distinct input columns of a row in first-tap order: tap (w_out, s)
+         * reads column w_out * stride + s; col_idx maps a column to its
+         * position in that order. */
+        int max_col = (BLOCK_W - 1) * stride + KW;
+        int* col_w = (int*)alloca((size_t)max_col * sizeof(int));
+        int* col_s = (int*)alloca((size_t)max_col * sizeof(int));
+        int* col_num = (int*)alloca((size_t)max_col * sizeof(int));
+        int* col_idx = (int*)alloca((size_t)max_col * sizeof(int));
+        int n_cols = 0;
+        int num_acc = KH * BLOCK_W;
+        int num_rows;
+        int num_iargs;
         rocke_iter_arg_t* iargs;
         rocke_for_t group_loop;
         rocke_value_t** new_accs;
+        rocke_value_t** first_rows;
+        rocke_value_t** next_rows;
+        rocke_value_t** yields;
+        rocke_value_t* const* cur_rows;
+        rocke_value_t** a_row;
         rocke_value_t* c1;
         rocke_value_t* c_KH;
         rocke_value_t* c_stride_rv;
@@ -258,13 +334,46 @@ rocke_kernel_def_t* rocke_dconv_dw_stream_h_loop(rocke_dconv_dw_ctx_t* ctx)
         rocke_value_t* n_groups_v;
         int j;
 
-        /* Name storage: KH*BLOCK_W names, each at most 32 chars. */
+        {
+            int w, s;
+            for(w = 0; w < max_col; ++w)
+                col_idx[w] = -1;
+            for(w = 0; w < BLOCK_W; ++w)
+            {
+                for(s = 0; s < KW; ++s)
+                {
+                    int col = w * stride + s;
+                    if(col_idx[col] >= 0)
+                        continue;
+                    col_idx[col] = n_cols;
+                    col_w[n_cols] = w;
+                    col_s[n_cols] = s;
+                    col_num[n_cols] = col;
+                    ++n_cols;
+                }
+            }
+        }
+        num_rows = KH * n_cols;
+        num_iargs = num_acc + num_rows;
+        first_rows = (rocke_value_t**)alloca((size_t)num_rows * sizeof(rocke_value_t*));
+        next_rows = (rocke_value_t**)alloca((size_t)num_rows * sizeof(rocke_value_t*));
+        yields = (rocke_value_t**)alloca((size_t)num_iargs * sizeof(rocke_value_t*));
+        a_row = (rocke_value_t**)alloca((size_t)n_cols * sizeof(rocke_value_t*));
+
+        c1 = rocke_b_const_i32(b, 1);
+        c_KH = rocke_b_const_i32(b, KH);
+        c_stride_rv = rocke_b_const_i32(b, stride);
+        /* n_iters = Hi + KH - 1 rows; the loop walks them KH at a time. */
+        n_iters_v = rocke_b_add(b, ctx->params.p_Hi, rocke_b_const_i32(b, KH - 1));
+        n_groups_v = rocke_b_div(b, rocke_b_add(b, n_iters_v, rocke_b_const_i32(b, KH - 1)), c_KH);
+
+        /* Name storage: accumulators then carried rows, each at most 32 chars. */
         {
             char(*name_store)[32] = (char(*)[32])alloca((size_t)num_iargs * 32 * sizeof(char));
-            int kh, w, idx = 0;
+            int kh, w, c, idx = 0;
 
             iargs = (rocke_iter_arg_t*)alloca((size_t)num_iargs * sizeof(rocke_iter_arg_t));
-            new_accs = (rocke_value_t**)alloca((size_t)num_iargs * sizeof(rocke_value_t*));
+            new_accs = (rocke_value_t**)alloca((size_t)num_acc * sizeof(rocke_value_t*));
 
             for(kh = 0; kh < KH; ++kh)
             {
@@ -276,14 +385,19 @@ rocke_kernel_def_t* rocke_dconv_dw_stream_h_loop(rocke_dconv_dw_ctx_t* ctx)
                     ++idx;
                 }
             }
+            /* Group 0's rows: the loop's first iteration computes them. */
+            dw_load_group(ctx, ctx->c0, n_iters_v, col_w, col_s, n_cols, first_rows);
+            for(kh = 0; kh < KH; ++kh)
+            {
+                for(c = 0; c < n_cols; ++c)
+                {
+                    snprintf(name_store[idx], 32, "dw_a_r%d_c%d", kh, col_num[c]);
+                    iargs[idx].name = name_store[idx];
+                    iargs[idx].init = first_rows[kh * n_cols + c];
+                    ++idx;
+                }
+            }
         }
-
-        c1 = rocke_b_const_i32(b, 1);
-        c_KH = rocke_b_const_i32(b, KH);
-        c_stride_rv = rocke_b_const_i32(b, ctx->c_stride_dw);
-        /* n_iters = Hi + KH - 1 rows; the loop walks them KH at a time. */
-        n_iters_v = rocke_b_add(b, ctx->params.p_Hi, rocke_b_const_i32(b, KH - 1));
-        n_groups_v = rocke_b_div(b, rocke_b_add(b, n_iters_v, rocke_b_const_i32(b, KH - 1)), c_KH);
 
         group_loop = rocke_b_scf_for_iter(b,
                                           ctx->c0,
@@ -299,15 +413,24 @@ rocke_kernel_def_t* rocke_dconv_dw_stream_h_loop(rocke_dconv_dw_ctx_t* ctx)
         /* Seed new_accs from loop-carried values */
         {
             int i;
-            for(i = 0; i < num_iargs; ++i)
+            for(i = 0; i < num_acc; ++i)
                 new_accs[i] = group_loop.iter_vars[i];
         }
+        cur_rows = group_loop.iter_vars + num_acc;
+        /* Prefetch the next group before computing this one. */
+        dw_load_group(ctx,
+                      rocke_b_mul(b, rocke_b_add(b, group_loop.iv, c1), c_KH),
+                      n_iters_v,
+                      col_w,
+                      col_s,
+                      n_cols,
+                      next_rows);
 
         for(j = 0; j < KH; ++j)
         {
             rocke_value_t* y_j;
             rocke_value_t* j_valid;
-            int w_out, s_const, r_const;
+            int w_out, s_const, r_const, c;
             int P_FLUSH_j = (j + 1) % KH;
             rocke_value_t* p_flush_rv;
             rocke_value_t* flush_ge;
@@ -321,46 +444,15 @@ rocke_kernel_def_t* rocke_dconv_dw_stream_h_loop(rocke_dconv_dw_ctx_t* ctx)
                 y_j = rocke_b_add(b, mul_gk, cj);
             }
             j_valid = rocke_b_cmp_lt(b, y_j, n_iters_v);
+            for(c = 0; c < n_cols; ++c)
+                a_row[c] = rocke_b_cast_to_f32(b, cur_rows[j * n_cols + c]);
 
             /* Python order: outer w_out, inner s_const, innermost r_const. */
             for(w_out = 0; w_out < BLOCK_W; ++w_out)
             {
-                rocke_value_t* w_pos;
-                {
-                    rocke_value_t* cwo = rocke_b_const_i32(b, w_out);
-                    w_pos = rocke_b_add(b, ctx->q_tile_start, cwo);
-                }
-
                 for(s_const = 0; s_const < KW; ++s_const)
                 {
-                    rocke_value_t* a_off = NULL;
-                    rocke_value_t* valid = NULL;
-                    rocke_value_t* ok;
-                    rocke_value_t* safe_off;
-                    rocke_value_t* a_h;
-                    rocke_value_t* a_f32;
-                    const char* off_names[5];
-                    rocke_value_t* off_vals[5];
-
-                    off_names[0] = "n";
-                    off_vals[0] = ctx->n;
-                    off_names[1] = "y_iter";
-                    off_vals[1] = y_j;
-                    off_names[2] = "wo";
-                    off_vals[2] = w_pos;
-                    off_names[3] = "s_off";
-                    off_vals[3] = rocke_b_const_i32(b, s_const);
-                    off_names[4] = "c";
-                    off_vals[4] = ctx->ch;
-                    rocke_transforms_descriptor_offset(
-                        b, ctx->a_desc, off_names, off_vals, 5, &a_off, &valid);
-
-                    ok = rocke_b_land(b, rocke_b_land(b, valid, j_valid), ctx->ch_in_range);
-                    safe_off = rocke_b_select(
-                        b, ok, rocke_b_mul(b, a_off, ctx->c_half_bytes), ctx->oob_sentinel);
-                    a_h = ctx->is_bf16 ? rocke_b_buffer_load_bf16(b, ctx->a_rsrc, safe_off, ctx->c0)
-                                       : rocke_b_buffer_load_f16(b, ctx->a_rsrc, safe_off, ctx->c0);
-                    a_f32 = rocke_b_select(b, ok, rocke_b_cast_to_f32(b, a_h), ctx->zero_f32);
+                    rocke_value_t* a_f32 = a_row[col_idx[w_out * stride + s_const]];
 
                     for(r_const = 0; r_const < KH; ++r_const)
                     {
@@ -435,7 +527,14 @@ rocke_kernel_def_t* rocke_dconv_dw_stream_h_loop(rocke_dconv_dw_ctx_t* ctx)
             }
         }
 
-        rocke_b_scf_yield(b, new_accs, num_iargs);
+        {
+            int i;
+            for(i = 0; i < num_acc; ++i)
+                yields[i] = new_accs[i];
+            for(i = 0; i < num_rows; ++i)
+                yields[num_acc + i] = next_rows[i];
+        }
+        rocke_b_scf_yield(b, yields, num_iargs);
         rocke_b_region_leave(b);
     }
 

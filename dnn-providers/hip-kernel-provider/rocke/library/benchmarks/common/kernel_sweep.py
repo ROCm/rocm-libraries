@@ -1521,13 +1521,29 @@ def _launch_values_for(direction, problem, identity, ptrs, sizes, extras):
     )
 
 
-def describe_cache(cache: KernelCache, log=print) -> int:
-    """Print what is in the cache, grouped by direction."""
+def describe_cache(
+    cache: KernelCache, log=print, directions: Optional[Sequence[str]] = None
+) -> int:
+    """Print what is in the cache, grouped by direction.
+
+    ``directions`` limits the listing to the directions a run will use: every
+    entry is a metadata file to parse, and a full implicit-GEMM cache holds
+    hundreds of thousands of them -- reading all of them costs tens of seconds
+    before a run that needs a few hundred.
+    """
     by_direction: Dict[str, int] = {}
-    for identity, _ in cache.list_all():
+    entries = (
+        cache.list_all()
+        if directions is None
+        else [e for d in directions for e in cache.list_all(d)]
+    )
+    for identity, _ in entries:
         by_direction[identity.direction] = by_direction.get(identity.direction, 0) + 1
     if not by_direction:
-        log("AOT cache is empty.")
+        if directions is None:
+            log("AOT cache is empty.")
+        else:
+            log(f"AOT cache has no {', '.join(directions)} kernels.")
         return 2
     stale_by_direction = {}
     for direction, count in sorted(by_direction.items()):
