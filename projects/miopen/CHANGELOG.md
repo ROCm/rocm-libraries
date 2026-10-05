@@ -19,7 +19,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 
 ### Resolved Issues
 * [Conv] Fixed a `ConvHipConv` crash on gfx1250 for grouped convolutions with more than
-  65535 group-batch tiles (ALMIOPEN-2624), and an LDS race in its gfx1250 direct kernel
+  65535 group-batch tiles, and an LDS race in its gfx1250 direct kernel
   (hipconv v0.3.2).
 
 ## MIOpen 3.6.1 for ROCm 10.1.0
