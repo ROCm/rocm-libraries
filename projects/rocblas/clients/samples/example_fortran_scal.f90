@@ -139,8 +139,8 @@ program example_fortran_scal
     integer(c_int) :: i, element
 
     ! Create rocBLAS handle
-    type(c_ptr), target :: handle
-    call ROCBLAS_CHECK(rocblas_create_handle(c_loc(handle)))
+    type(c_ptr) :: handle
+    call ROCBLAS_CHECK(rocblas_create_handle(handle))
 
     ! Allocate host-side memory
     allocate(hx(n))
@@ -162,7 +162,7 @@ program example_fortran_scal
     call date_and_time(values = tbegin)
 
     ! Call rocblas_scal
-    call ROCBLAS_CHECK(rocblas_set_pointer_mode(handle, 0))
+    call ROCBLAS_CHECK(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host))
     call ROCBLAS_CHECK(rocblas_sscal(handle, n, c_loc(alpha), dx, 1))
     call HIP_CHECK(hipDeviceSynchronize())
 
