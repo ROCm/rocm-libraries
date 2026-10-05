@@ -870,13 +870,13 @@ def build_unified_attention_3d_tiled(
             row = _mfma_16x16_c_row(b, tid, reg)
             sum_p = zero_f
             for n in range(QK_N_TILES):
-                p = b.exp2(b.fsub(s_local[(reg, n)], m_new[reg]))
+                p = b.exp2_fast(b.fsub(s_local[(reg, n)], m_new[reg]))
                 col = b.add(b.mul(b.const_i32(n), b.const_i32(16)), lane_col)
                 b.smem_store_vN(P_lds, [row, col], b.cast_f32_to(p, dtype), 1)
                 sum_p = b.fadd(sum_p, p)
             l_local.append(_warp_xor_reduce_sum(b, sum_p))
 
-        alpha_regs = [b.exp2(b.fsub(m_vals[r], m_new[r])) for r in range(4)]
+        alpha_regs = [b.exp2_fast(b.fsub(m_vals[r], m_new[r])) for r in range(4)]
         new_l_vals = [
             b.fadd(b.fmul(l_vals[r], alpha_regs[r]), l_local[r]) for r in range(4)
         ]
@@ -1117,7 +1117,7 @@ def build_unified_attention_reduce_tiled(
         ms = seg_max_cache[j]
         ls = seg_l_cache[j]
         ms_finite = b.fcmp("ogt", ms, neg_inf)
-        factor_raw = b.exp2(b.fsub(ms, overall_max))
+        factor_raw = b.exp2_fast(b.fsub(ms, overall_max))
         factor = b.select(ms_finite, factor_raw, zero_f)
         local_den = b.fadd(local_den, b.fmul(ls, factor))
         if in_rng is None:

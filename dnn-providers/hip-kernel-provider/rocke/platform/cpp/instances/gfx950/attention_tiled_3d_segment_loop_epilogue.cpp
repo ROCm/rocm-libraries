@@ -450,7 +450,7 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
                 rocke_value_t* sum_p = ctx->zero_f;
                 for(n = 0; n < cfg->QK_N_TILES; n++)
                 {
-                    rocke_value_t* p = rocke_b_exp2(
+                    rocke_value_t* p = rocke_b_exp2_fast(
                         b, rocke_b_fsub(b, s_local[reg * cfg->QK_N_TILES + n], m_new[reg]));
                     rocke_value_t* pcol_n = rocke_b_const_i32(b, n);
                     rocke_value_t* pcol_16 = rocke_b_const_i32(b, 16);
@@ -469,7 +469,7 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
 
         for(r = 0; r < 4; r++)
         {
-            alpha_regs[r] = rocke_b_exp2(b, rocke_b_fsub(b, m_vals[r], m_new[r]));
+            alpha_regs[r] = rocke_b_exp2_fast(b, rocke_b_fsub(b, m_vals[r], m_new[r]));
         }
         for(r = 0; r < 4; r++)
         {

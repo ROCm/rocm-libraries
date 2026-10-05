@@ -1111,6 +1111,10 @@ class TestAttentionHelpers(unittest.TestCase):
         self.assertIn("segm_output_ptr", seg_ll)
         self.assertIn("segm_max_ptr", seg_ll)
         self.assertIn("segm_expsum_ptr", seg_ll)
+        # Softmax exponents are <= 0, so p and alpha use the native exp2
+        # (one v_exp_f32), not the range-reduced llvm.exp2.f32.
+        self.assertIn("@llvm.amdgcn.exp2.f32", seg_ll)
+        self.assertNotIn("@llvm.exp2.f32", seg_ll)
         red = build_unified_attention_reduce_tiled(
             UnifiedAttentionReduceTiledSpec(
                 head_size=128,
@@ -1121,9 +1125,11 @@ class TestAttentionHelpers(unittest.TestCase):
             )
         )
         red_ll = lower_kernel_to_llvm(red)
-        # Reduce must compute exp2-weighted segment combine and use NaN-safe
-        # factor (`-inf - overall_max -> 0`).
-        self.assertIn("@llvm.exp2.f32", red_ll)
+        # Reduce must compute exp2-weighted segment combine (native exp2: the
+        # exponent is seg_max - overall_max <= 0) and use NaN-safe factor
+        # (`-inf - overall_max -> 0`).
+        self.assertIn("@llvm.amdgcn.exp2.f32", red_ll)
+        self.assertNotIn("@llvm.exp2.f32", red_ll)
         self.assertIn("fcmp ogt", red_ll)
         # Reach comgr for both the segment and reduce kernels + LDS budget.
         seg_art = _compile_or_skip(seg, arch="gfx950")
@@ -2594,8 +2600,12 @@ class TestAttentionHelpers(unittest.TestCase):
         self.assertIn("segm_output_ptr", seg_ll)
         self.assertIn("segm_max_ptr", seg_ll)
         self.assertIn("segm_expsum_ptr", seg_ll)
+        # Native exp2 in the softmax (exponents <= 0).
+        self.assertIn("@llvm.amdgcn.exp2.f32", seg_ll)
+        self.assertNotIn("@llvm.exp2.f32", seg_ll)
         # Reduce kernel: exp2-weighted segment combine + NaN-safe factor.
-        self.assertIn("@llvm.exp2.f32", red_ll)
+        self.assertIn("@llvm.amdgcn.exp2.f32", red_ll)
+        self.assertNotIn("@llvm.exp2.f32", red_ll)
         self.assertIn("fcmp ogt", red_ll)
 
 

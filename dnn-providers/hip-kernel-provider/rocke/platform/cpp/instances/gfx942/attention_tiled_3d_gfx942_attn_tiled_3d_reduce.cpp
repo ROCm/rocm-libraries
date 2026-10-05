@@ -376,7 +376,7 @@ void rocke_gfx942_attention_tiled_3d_reduce_combine_pass(
         ls = s_seg_l ? s_seg_l[j] : NULL;
 
         ms_finite = rocke_b_fcmp(b, "ogt", ms, ctx->neg_inf);
-        factor_raw = rocke_b_exp2(b, rocke_b_fsub(b, ms, ctx->overall_max));
+        factor_raw = rocke_b_exp2_fast(b, rocke_b_fsub(b, ms, ctx->overall_max));
         factor = rocke_b_select(b, ms_finite, factor_raw, ctx->zero_f);
 
         local_den = rocke_b_fadd(b, local_den, rocke_b_fmul(b, ls, factor));
