@@ -37,7 +37,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - CustomKernel:
-          - name: "wvSpltK_hf_m2"
+          - name: "wvSpltK_f16_nn_m1"
             args: [ { type: int32, semantic: SizeSum },
                     { type: int32, semantic: SizeFree1 },
                     { type: address, semantic: AddressB },
@@ -46,7 +46,8 @@ BenchmarkProblems:
                     { type: address, semantic: AddressD },
                     { type: float32, semantic: Alpha },
                     { type: float32, semantic: Beta },
-                    { type: int32, semantic: ComputeUnits } ]
+                    { type: int32, semantic: ComputeUnits },
+                    { type: int32, semantic: StrideB0 } ]
             macrotile: [64, 16, 8]
             threads: [64, 16, 1]
             grid: [ComputeUnits, One, One]
@@ -56,33 +57,34 @@ BenchmarkProblems:
           - [16, 16, 16, 1, 1, 4, 1, 4, 4]
         - StaggerU: [0]
         - AssertSummationElementMultiple: [8]
-        # M == 2 and batch == 1: the kernel has no batch stride arguments, so a
+        # M == 1 and batch == 1: the kernel has no batch stride arguments, so a
         # strided-batched problem would leave every batch past the first unwritten.
-        - AssertSizeEqual: [{0: 2, 2: 1}]
+        - AssertSizeEqual: [{0: 1, 2: 1}]
         # N > 8: with fewer columns than the wave tile the tail fixup underflows.
         - AssertSizeGreaterThan: [{1: 8}]
-        # K <= 16384, i.e. M*K <= 32768 halves: A is only read from LDS, so the
-        # whole activation matrix has to fit the 64 KB staging buffer.
-        - AssertSizeLessThan: [{3: 16385}]
         # Packed layout: the kernel indexes A, C and D with no stride argument,
         # so index 0 (unit stride) and index 1 (leading dimension) are fixed.
-        # lda == ldc == ldd == M == 2 here. ldb == K is the one constraint left
-        # undeclared: a stride cannot be compared against a runtime size.
-        - AssertStrideAEqual: [{0: 1, 1: 2}]
+        # lda == ldc == ldd == M == 1 here. ldb is a kernarg.
+        - AssertStrideAEqual: [{0: 1, 1: 1}]
         - AssertStrideBEqual: [{0: 1}]
-        - AssertStrideCEqual: [{0: 1, 1: 2}]
-        - AssertStrideDEqual: [{0: 1, 1: 2}]
+        - AssertStrideCEqual: [{0: 1, 1: 1}]
+        - AssertStrideDEqual: [{0: 1, 1: 1}]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          # Packed NN M=2, K%8==0, N>8, K<=16384.
-          - Exact: [2, 32, 1, 64]
-          - Exact: [2, 256, 1, 128]
-          - Exact: [2, 1024, 1, 256]
-          - Exact: [2, 4096, 1, 4096]
-          - Exact: [2, 8192, 1, 1024]
-          - Exact: [2, 8192, 1, 4096]
-          - Exact: [2, 13312, 1, 16384]
+          # Packed NN M=1, K%8==0, N>8, K<=32768. Small sizes for correctness;
+          # larger Exact entries match the Hashem decode table.
+          - Exact: [1, 32, 1, 64]
+          - Exact: [1, 256, 1, 128]
+          - Exact: [1, 1024, 1, 256]
+          - Exact: [1, 4096, 1, 4096]
+          - Exact: [1, 8192, 1, 1024]
+          - Exact: [1, 8192, 1, 4096]
+          - Exact: [1, 13312, 1, 17792]
+          # K past the 32K-half LDS stage: A is read from global memory.
+          - Exact: [1, 2048, 1, 40960]
+          # Padded B: [m, n, batch, K, ldd, ldc, lda, ldb].
+          - Exact: [1, 4096, 1, 4096, 1, 1, 1, 4104]
 
 LibraryLogic:
     ScheduleName: "aquavanjaram"

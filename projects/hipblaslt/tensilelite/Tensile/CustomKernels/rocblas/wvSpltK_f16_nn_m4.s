@@ -1,11 +1,11 @@
 	.amdgcn_target "amdgcn-amd-amdhsa--gfx942"
 	.amdhsa_code_object_version 4
 	.text
-	.protected	wvSpltK_hf_m4           ; -- Begin function wvSpltK_hf_m4
-	.globl	wvSpltK_hf_m4
+	.protected	wvSpltK_f16_nn_m4       ; -- Begin function wvSpltK_f16_nn_m4
+	.globl	wvSpltK_f16_nn_m4
 	.p2align	8
-	.type	wvSpltK_hf_m4,@function
-wvSpltK_hf_m4:                          ; @wvSpltK_hf_m4
+	.type	wvSpltK_f16_nn_m4,@function
+wvSpltK_f16_nn_m4:                      ; @wvSpltK_f16_nn_m4
 ; %bb.156:
 	s_load_dwordx2 s[2:3], s[0:1], 0x0
 	s_load_dwordx8 s[4:11], s[0:1], 0x8
@@ -1921,7 +1921,7 @@ wvSpltK_hf_m4:                          ; @wvSpltK_hf_m4
 	s_endpgm
 	.section	.rodata,"a",@progbits
 	.p2align	6, 0x0
-	.amdhsa_kernel wvSpltK_hf_m4
+	.amdhsa_kernel wvSpltK_f16_nn_m4
 		.amdhsa_group_segment_fixed_size 65536
 		.amdhsa_private_segment_fixed_size 0
 		.amdhsa_kernarg_size 72
@@ -1962,18 +1962,18 @@ wvSpltK_hf_m4:                          ; @wvSpltK_hf_m4
 	.end_amdhsa_kernel
 	.text
 .Lfunc_end0:
-	.size	wvSpltK_hf_m4, .Lfunc_end0-wvSpltK_hf_m4
+	.size	wvSpltK_f16_nn_m4, .Lfunc_end0-wvSpltK_f16_nn_m4
                                         ; -- End function
-	.set wvSpltK_hf_m4.num_vgpr, 83
-	.set wvSpltK_hf_m4.num_agpr, 0
-	.set wvSpltK_hf_m4.numbered_sgpr, 60
-	.set wvSpltK_hf_m4.num_named_barrier, 0
-	.set wvSpltK_hf_m4.private_seg_size, 0
-	.set wvSpltK_hf_m4.uses_vcc, 1
-	.set wvSpltK_hf_m4.uses_flat_scratch, 0
-	.set wvSpltK_hf_m4.has_dyn_sized_stack, 0
-	.set wvSpltK_hf_m4.has_recursion, 0
-	.set wvSpltK_hf_m4.has_indirect_call, 0
+	.set wvSpltK_f16_nn_m4.num_vgpr, 83
+	.set wvSpltK_f16_nn_m4.num_agpr, 0
+	.set wvSpltK_f16_nn_m4.numbered_sgpr, 60
+	.set wvSpltK_f16_nn_m4.num_named_barrier, 0
+	.set wvSpltK_f16_nn_m4.private_seg_size, 0
+	.set wvSpltK_f16_nn_m4.uses_vcc, 1
+	.set wvSpltK_f16_nn_m4.uses_flat_scratch, 0
+	.set wvSpltK_f16_nn_m4.has_dyn_sized_stack, 0
+	.set wvSpltK_f16_nn_m4.has_recursion, 0
+	.set wvSpltK_f16_nn_m4.has_indirect_call, 0
 	.section	.AMDGPU.csdata,"",@progbits
 ; Kernel info:
 ; codeLenInByte = 8184
@@ -2010,17 +2010,17 @@ wvSpltK_hf_m4:                          ; @wvSpltK_hf_m4
 	.set amdgpu.max_num_agpr, 0
 	.set amdgpu.max_num_sgpr, 0
 	.text
-	.type	__hip_cuid_909759c178a5d610,@object ; @__hip_cuid_909759c178a5d610
+	.type	__hip_cuid_4baffbf014ba6c6,@object ; @__hip_cuid_4baffbf014ba6c6
 	.section	.bss,"aw",@nobits
-	.globl	__hip_cuid_909759c178a5d610
-__hip_cuid_909759c178a5d610:
+	.globl	__hip_cuid_4baffbf014ba6c6
+__hip_cuid_4baffbf014ba6c6:
 	.byte	0                               ; 0x0
-	.size	__hip_cuid_909759c178a5d610, 1
+	.size	__hip_cuid_4baffbf014ba6c6, 1
 
 	.ident	"AMD clang version 22.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-7.2.4 26084 f58b06dce1f9c15707c5f808fd002e18c2accf7e)"
 	.section	".note.GNU-stack","",@progbits
 	.addrsig
-	.addrsig_sym __hip_cuid_909759c178a5d610
+	.addrsig_sym __hip_cuid_4baffbf014ba6c6
 	.amdgpu_metadata
 ---
 custom.config:
@@ -2138,11 +2138,11 @@ amdhsa.kernels:
       - 2
       - 0
     .max_flat_workgroup_size: 1024
-    .name:           wvSpltK_hf_m4
+    .name:           wvSpltK_f16_nn_m4
     .private_segment_fixed_size: 0
     .sgpr_count:     66
     .sgpr_spill_count: 0
-    .symbol:         wvSpltK_hf_m4.kd
+    .symbol:         wvSpltK_f16_nn_m4.kd
     .vgpr_count:     83
     .vgpr_spill_count: 0
     .wavefront_size: 64

@@ -156,6 +156,7 @@ DefaultSolution:
   NumLoadsCoalescedA: 1
   NumLoadsCoalescedB: 1
   OptNoLoadLoop: 1
+  PersistentXCCMapping: 0
   PrefetchAcrossPersistent: 0
   PrefetchGL2: 0
   PrefetchGlobalRead: 1
@@ -178,12 +179,8 @@ DefaultSolution:
   StoreRemapVectorWidth: 0
   StoreSyncOpt: 0
   StoreVectorWidth: -1
-  StreamK: 0
   StreamKAtomic: 0
   StreamKFixupTreeReduction: 0
-  StreamKForceDPOnly: 0
-  StreamKWorkStealing: 0
-  StreamKXCCMapping: 0
   SuppressNoLoadLoop: false
   SwInstructionPrefetch: 1
   SwapGlobalReadOrder: 0
@@ -205,6 +202,7 @@ DefaultSolution:
   TemporalHintMetadata: 0
   TemporalHintWS: 0
   ThreadTile: [4, 4]
+  TileProcessingStrategy: None
   TransposeLDS: -1
   TransposeLDSMetadata: -1
   UnrollLoopSwapGlobalReadOrder: 0
@@ -224,15 +222,17 @@ DefaultSolution:
   WaveSeparateGlobalReadMetadata: 0
   WaveSplitK: false
   WavefrontSize: -1
+  WorkAssignment: StaticGrid
   WorkGroup: [16, 16, 1]
   WorkGroupMapping: 8
   WorkGroupMappingXCC: 1
   WorkGroupMappingXCCGroup: -1
   WorkGroupReduction: false
+  WorkQueueStealing: 0
 Solutions:
 - SolutionIndex: 0
-  KernelNameMin: wvSpltK_hf_m1
-  SolutionNameMin: wvSpltK_hf_m1
+  KernelNameMin: wvSpltK_f16_nn_m1
+  SolutionNameMin: wvSpltK_f16_nn_m1
   AssertSizeEqual: {0: 1, 2: 1}
   AssertSizeGreaterThan: {1: 8}
   AssertStrideAEqual: {0: 1, 1: 1}
@@ -242,7 +242,7 @@ Solutions:
   AssertSummationElementMultiple: 8
   AssignedDerivedParameters: false
   AssignedProblemIndependentDerivedParameters: false
-  BaseName: wvSpltK_hf_m1
+  BaseName: wvSpltK_f16_nn_m1
   CUCount: null
   CUOccupancy: -1
   CodeObjectVersion: '4'
@@ -257,9 +257,10 @@ Solutions:
     - {type: float32, semantic: Alpha}
     - {type: float32, semantic: Beta}
     - {type: int32, semantic: ComputeUnits}
+    - {type: int32, semantic: StrideB0}
     grid: [ComputeUnits, One, One]
     macrotile: [64, 16, 8]
-    name: wvSpltK_hf_m1
+    name: wvSpltK_f16_nn_m1
     threads: [64, 16, 1]
   DepthU: 8
   DirectToLdsA: false
@@ -269,8 +270,9 @@ Solutions:
   GlobalReadVectorWidthA: 1
   GlobalReadVectorWidthB: 1
   ISA: [9, 4, 2]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false,
-    SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
   MFMA_BF16_1K: false
@@ -303,11 +305,12 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [64, 16, 1]
   _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
   _WorkspaceSizePerElemBias: 0
   _WorkspaceSizePerElemC: 0
 - SolutionIndex: 1
-  KernelNameMin: wvSpltK_hf_m2
-  SolutionNameMin: wvSpltK_hf_m2
+  KernelNameMin: wvSpltK_f16_nn_m2
+  SolutionNameMin: wvSpltK_f16_nn_m2
   AssertSizeEqual: {0: 2, 2: 1}
   AssertSizeGreaterThan: {1: 8}
   AssertSizeLessThan: {3: 16385}
@@ -318,7 +321,7 @@ Solutions:
   AssertSummationElementMultiple: 8
   AssignedDerivedParameters: false
   AssignedProblemIndependentDerivedParameters: false
-  BaseName: wvSpltK_hf_m2
+  BaseName: wvSpltK_f16_nn_m2
   CUCount: null
   CUOccupancy: -1
   CodeObjectVersion: '4'
@@ -333,9 +336,10 @@ Solutions:
     - {type: float32, semantic: Alpha}
     - {type: float32, semantic: Beta}
     - {type: int32, semantic: ComputeUnits}
+    - {type: int32, semantic: StrideB0}
     grid: [ComputeUnits, One, One]
     macrotile: [64, 16, 8]
-    name: wvSpltK_hf_m2
+    name: wvSpltK_f16_nn_m2
     threads: [64, 16, 1]
   DepthU: 8
   DirectToLdsA: false
@@ -345,8 +349,9 @@ Solutions:
   GlobalReadVectorWidthA: 1
   GlobalReadVectorWidthB: 1
   ISA: [9, 4, 2]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false,
-    SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
   MFMA_BF16_1K: false
@@ -379,11 +384,12 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [64, 16, 1]
   _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
   _WorkspaceSizePerElemBias: 0
   _WorkspaceSizePerElemC: 0
 - SolutionIndex: 2
-  KernelNameMin: wvSpltK_hf_m4
-  SolutionNameMin: wvSpltK_hf_m4
+  KernelNameMin: wvSpltK_f16_nn_m4
+  SolutionNameMin: wvSpltK_f16_nn_m4
   AssertSizeEqual: {2: 1}
   AssertSizeGreaterThan: {0: 0, 1: 8}
   AssertSizeLessThan: {0: 5, 3: 8193}
@@ -394,7 +400,7 @@ Solutions:
   AssertSummationElementMultiple: 8
   AssignedDerivedParameters: false
   AssignedProblemIndependentDerivedParameters: false
-  BaseName: wvSpltK_hf_m4
+  BaseName: wvSpltK_f16_nn_m4
   CUCount: null
   CUOccupancy: -1
   CodeObjectVersion: '4'
@@ -416,7 +422,7 @@ Solutions:
     - {type: int32, semantic: StrideD0}
     grid: [ComputeUnits, One, One]
     macrotile: [64, 16, 8]
-    name: wvSpltK_hf_m4
+    name: wvSpltK_f16_nn_m4
     threads: [64, 16, 1]
   DepthU: 8
   DirectToLdsA: false
@@ -426,8 +432,9 @@ Solutions:
   GlobalReadVectorWidthA: 1
   GlobalReadVectorWidthB: 1
   ISA: [9, 4, 2]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false,
-    SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LocalSplitU: 1
   MFMA_BF16_1K: false
@@ -460,6 +467,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [64, 16, 1]
   _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
   _WorkspaceSizePerElemBias: 0
   _WorkspaceSizePerElemC: 0
 IndexOrder: [0, 1, 2, 3, 4, 5, 6, 7]

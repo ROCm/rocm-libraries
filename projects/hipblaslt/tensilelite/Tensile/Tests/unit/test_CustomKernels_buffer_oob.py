@@ -53,9 +53,9 @@ NO_BUFFER_OOB_KERNELS = {
     "wvSpltK_bf16_tn_m1": "rocBLAS wvSpltK, global_store only",
     "wvSpltK_bf16_tn_m2": "rocBLAS wvSpltK, global_store only",
     "wvSpltK_bf16_tn_m4": "rocBLAS wvSpltK, global_store only",
-    "wvSpltK_hf_m1": "rocBLAS wvSpltK, global_store only",
-    "wvSpltK_hf_m2": "rocBLAS wvSpltK, global_store only",
-    "wvSpltK_hf_m4": "rocBLAS wvSpltK, global_store only",
+    "wvSpltK_f16_nn_m1": "rocBLAS wvSpltK, global_store only",
+    "wvSpltK_f16_nn_m2": "rocBLAS wvSpltK, global_store only",
+    "wvSpltK_f16_nn_m4": "rocBLAS wvSpltK, global_store only",
 }
 
 _SET_BUFFER_OOB = re.compile(r"^\s*\.set\s+BufferOOB\s*,\s*([^\s/]+)", re.M)

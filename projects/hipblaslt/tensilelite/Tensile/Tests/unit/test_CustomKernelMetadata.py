@@ -1161,11 +1161,12 @@ def test_parse_tensile_yaml_skips_non_dict_and_nameless_entries(tmp_path):
 
 @pytest.mark.parametrize(
     "name,rows,maxK",
-    [("wvSpltK_hf_m1", 1, None), ("wvSpltK_hf_m2", 2, 16385)],
+    [("wvSpltK_f16_nn_m1", 1, None), ("wvSpltK_f16_nn_m2", 2, 16385)],
 )
 def test_wvspltk_shipped_family_predicates(name, rows, maxK):
     """m1 and m2 pin their own M, and m2 also bounds K: it reads A only from
-    LDS, which holds M*K <= 32768 halves."""
+    LDS, which holds M*K <= 32768 halves. B's leading dimension is a kernarg,
+    because library logic routes every NN problem with this M to them."""
     ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
     valid, msg = validateCustomKernelMetadata(name, ck_root)
     assert valid, msg
@@ -1180,18 +1181,19 @@ def test_wvspltk_shipped_family_predicates(name, rows, maxK):
         assert (maxK - 1) * rows == 32768
 
     # A, C and D are indexed with no stride argument: unit stride, and a leading
-    # dimension equal to the M this kernel pins. ldb == K stays undeclared.
+    # dimension equal to the M this kernel pins.
     for key in ("AssertStrideAEqual", "AssertStrideCEqual", "AssertStrideDEqual"):
         assert config[key] == {0: 1, 1: rows}, key
     assert config["AssertStrideBEqual"] == {0: 1}
+    assert "StrideB0" in [a["semantic"] for a in config["CustomKernel"]["args"]]
 
 
 @pytest.mark.parametrize(
     "name",
     [
-        "wvSpltK_hf_m1",
-        "wvSpltK_hf_m2",
-        "wvSpltK_hf_m4",
+        "wvSpltK_f16_nn_m1",
+        "wvSpltK_f16_nn_m2",
+        "wvSpltK_f16_nn_m4",
         "wvSpltK_bf16_tn_m1",
         "wvSpltK_bf16_tn_m2",
         "wvSpltK_bf16_tn_m4",
@@ -1214,15 +1216,15 @@ _UNIT_STRIDE_KEYS = (
 )
 
 
-def test_wvspltk_hf_m4_serves_every_m_up_to_four():
+def test_wvspltk_f16_nn_m4_serves_every_m_up_to_four():
     """m4 reads M and the leading dimensions as kernargs, so it serves M <= 4 and
     only unit strides are predicated. K is bounded for the full tile: A is read
     only from LDS, which holds M*K <= 32768 halves."""
     ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
-    valid, msg = validateCustomKernelMetadata("wvSpltK_hf_m4", ck_root)
+    valid, msg = validateCustomKernelMetadata("wvSpltK_f16_nn_m4", ck_root)
     assert valid, msg
 
-    config = getCustomKernelConfig("wvSpltK_hf_m4", {}, ck_root)
+    config = getCustomKernelConfig("wvSpltK_f16_nn_m4", {}, ck_root)
     assert config["AssertSizeEqual"] == {2: 1}
     assert config["AssertSizeLessThan"] == {0: 5, 3: 8193}
     assert (config["AssertSizeLessThan"][0] - 1) * (config["AssertSizeLessThan"][3] - 1) == 32768
@@ -1317,9 +1319,9 @@ _LOGIC_ROOT = os.path.normpath(
 )
 
 _WVSPLTK_NN_RANGES = {
-    "wvSpltK_hf_m1": [1, 1, 9, -1, 1, 1, 8, -1],
-    "wvSpltK_hf_m2": [2, 2, 9, -1, 1, 1, 8, 16384],
-    "wvSpltK_hf_m4": [3, 4, 9, -1, 1, 1, 8, 8192],
+    "wvSpltK_f16_nn_m1": [1, 1, 9, -1, 1, 1, 8, -1],
+    "wvSpltK_f16_nn_m2": [2, 2, 9, -1, 1, 1, 8, 16384],
+    "wvSpltK_f16_nn_m4": [3, 4, 9, -1, 1, 1, 8, 8192],
 }
 
 
@@ -1390,13 +1392,13 @@ def test_wvspltk_range_logic(rel, plainRel, ranges):
         assert key[6] >= config["AssertSummationElementMultiple"], name
 
 
-def test_wvspltk_hf_m1_shipped_config():
+def test_wvspltk_f16_nn_m1_shipped_config():
     """The rocBLAS M=1 GEMV kernel must stay loadable with the CU-count interface."""
     ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
-    valid, msg = validateCustomKernelMetadata("wvSpltK_hf_m1", ck_root)
+    valid, msg = validateCustomKernelMetadata("wvSpltK_f16_nn_m1", ck_root)
     assert valid, msg
 
-    config = getCustomKernelConfig("wvSpltK_hf_m1", {}, ck_root)
+    config = getCustomKernelConfig("wvSpltK_f16_nn_m1", {}, ck_root)
     ck = config["CustomKernel"]
     assert ck["grid"] == ["ComputeUnits", "One", "One"]
     assert ck["threads"] == [64, 16, 1]
@@ -1417,4 +1419,5 @@ def test_wvspltk_hf_m1_shipped_config():
         "Alpha",
         "Beta",
         "ComputeUnits",
+        "StrideB0",
     ]

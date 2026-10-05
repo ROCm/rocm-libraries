@@ -37,7 +37,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - CustomKernel:
-          - name: "wvSpltK_hf_m4"
+          - name: "wvSpltK_f16_nn_m4"
             args: [ { type: int32, semantic: SizeSum },
                     { type: int32, semantic: SizeFree1 },
                     { type: address, semantic: AddressB },
