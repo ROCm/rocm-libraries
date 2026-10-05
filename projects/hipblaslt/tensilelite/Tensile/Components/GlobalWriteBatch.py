@@ -23,7 +23,7 @@
 from ..ExecutionPolicy import isPersistent
 from rocisa.code import Label, Module, RegSet, TextBlock
 from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, GLOBALModifiers, \
-  SDWAModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister, mgpr
+  SDWAModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister, mgpr, MemTokenData
 from rocisa.enum import CvtType, HighBitSel, RoundType, SaturateCastType, SelectBit, CacheScope
 from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   BufferAtomicPkAddBF16, GlobalLoadB32, GlobalStoreB32, SLoadB128, \
@@ -701,7 +701,10 @@ class GlobalWriteBatchWriter:
     """
     if isSingleKernel and (not self.isLocalBarrierInit):
       targetModule.add(SWaitCnt(dscnt=0, comment="Wait for LDS write"))
-      targetModule.add(SBarrier(comment="LDS write barrier"))
+      barrier = SBarrier(comment="LDS write barrier")
+      if self.kernel.get("_SeparateEpilogueLds", False):
+        barrier.setMemToken(MemTokenData([self.parentWriter.states.memTokenEpilogue]))
+      targetModule.add(barrier)
       self.isLocalBarrierInit = True
 
   def _emitElt0EpilogueLoads(self, module: Module, addrCalc: 'AddrCalculation',
