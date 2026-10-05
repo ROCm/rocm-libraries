@@ -49,6 +49,21 @@ NO_BUFFER_OOB_KERNELS = {
     "num_warps_4_num_stages_2_waves_per_eu_0_matrix_instr_nonkdim_16_cache_modifier_NONE_"
     "NUM_KSPLIT_1": "Triton, global_store only",
     "c_ck_gemm_basic_hip_amdgcn_amd_amdhsa_gfx942": "Composable Kernel",
+    "RR_GEMM_TN_BF6_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2": "rocRoller",
+    "RR_GEMM_TN_BF6_BF6_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2": "rocRoller",
+    "RR_GEMM_TN_BF6_BF6_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2": "rocRoller",
+    "RR_GEMM_TN_BF6_FP6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2": "rocRoller",
+    "RR_GEMM_TN_BF6_FP6_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2": "rocRoller",
+    "RR_GEMM_TN_BF6_FP6_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2": "rocRoller",
+    "RR_GEMM_TN_FP6_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2": "rocRoller",
+    "RR_GEMM_TN_FP6_BF6_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2": "rocRoller",
+    "RR_GEMM_TN_FP6_BF6_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2": "rocRoller",
+    "RR_GEMM_TN_FP6_FP6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2": "rocRoller",
+    "RR_GEMM_TN_FP6_FP6_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x16x128_UR_2": "rocRoller",
+    "RR_GEMM_TN_FP6_FP6_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x32x128_UR_2": "rocRoller",
+    "RR_GEMM_TN_FP6_FP6_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x16x128_UR_2": "rocRoller",
+    "RR_GEMM_TN_FP6_FP6_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2": "rocRoller",
+    "RR_GEMM_TN_FP6_FP6_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2": "rocRoller",
     "wave_bf16_gemm_256x256x64": "Wave, global_store only",
 }
 
