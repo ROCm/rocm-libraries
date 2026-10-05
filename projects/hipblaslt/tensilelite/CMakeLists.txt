@@ -192,10 +192,19 @@ if(TENSILELITE_ENABLE_HOST)
     add_subdirectory(src)
     add_subdirectory(include)
 
+    # The shared library ships in its own "tensilelite" component (package
+    # tensilelite-host) rather than hipblaslt's runtime component. hipSPARSELt
+    # needs this one ~6.5 MB .so; bundling it in hipblaslt's runtime package
+    # would force every hipSPARSELt install to pull ~1.6 GB of Tensile kernel
+    # binaries it does not use. See AIHPBLAS-4434.
+    # Interim: the static archive, headers and the roc::tensilelite-host
+    # imported target still ship through hipblaslt-devel and the
+    # hipblaslt-targets export set. A standalone tensilelite package moves
+    # them to its own export set, config file and devel package.
     install(TARGETS tensilelite-host
         EXPORT hipblaslt-targets
-        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT runtime
-        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT runtime
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT tensilelite
+        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT tensilelite
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT devel
         FILE_SET tensilelite_public_headers
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT devel

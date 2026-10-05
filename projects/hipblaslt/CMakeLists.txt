@@ -907,6 +907,86 @@ if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)
     rocm_package_setup_client_component(samples)
 endif()
 
+# libtensilelite-host.so ships as its own package (tensilelite-host) instead of
+# inside hipblaslt's runtime component, so hipSPARSELt can depend on the one
+# ~6.5 MB shared library without pulling hipblaslt's ~1.6 GB of Tensile kernel
+# binaries. See AIHPBLAS-4434.
+#
+# Guard on the target TYPE rather than BUILD_SHARED_LIBS: at this scope
+# BUILD_SHARED_LIBS holds HIPBLASLT_BUILD_SHARED_LIBS, which describes
+# libhipblaslt, not tensilelite-host. The two are set independently
+# (TENSILELITE_BUILD_SHARED_LIBS vs HIPBLASLT_BUILD_SHARED_LIBS), so only the
+# target's own TYPE says whether there is a .so to package.
+if(TARGET tensilelite-host)
+    get_target_property(_tensilelite_host_type tensilelite-host TYPE)
+    if(_tensilelite_host_type STREQUAL "SHARED_LIBRARY")
+        rocm_package_setup_component(tensilelite
+            LIBRARY_NAME tensilelite
+            PACKAGE_NAME host
+        )
+
+        # rocm-cmake's packaging defaults set CPACK_RPM_PACKAGE_AUTOREQPROV to
+        # Off for every ROCm library, so no package currently Provides or
+        # Requires a soname. Re-enable rpmbuild's ELF scanning for this one
+        # component: tensilelite-host then Provides
+        # libtensilelite-host.so.1()(64bit), derived from the binary rather
+        # than hand-written, so the capability tracks SOVERSION automatically.
+        # This is scoped to the component and does not change any other
+        # package's dependency surface.
+        set(CPACK_RPM_TENSILELITE_PACKAGE_AUTOREQPROV "ON")
+
+        # CPack uses CPACK_RPM_<COMPONENT>_PACKAGE_REQUIRES *instead of* the
+        # global CPACK_RPM_PACKAGE_REQUIRES when the component-scoped variable
+        # is defined (CPackRPM.cmake:1098-1106). Defining a runtime-scoped
+        # dependency therefore drops every global one -- hipblaslt's runtime
+        # package silently lost "roctracer >= 1.0.0" and "rocm-core".
+        #
+        # Carry the global list into the component before adding anything, and
+        # add rocm-core explicitly because rocm_package_add_rocm_core_dependency
+        # appends it to the global list from inside rocm_create_package, which
+        # runs after this point.
+        if(CPACK_RPM_PACKAGE_REQUIRES)
+            rocm_package_add_rpm_dependencies(COMPONENT runtime
+                DEPENDS "${CPACK_RPM_PACKAGE_REQUIRES}")
+        endif()
+        if(ROCM_DEP_ROCMCORE)
+            if(ENABLE_ASAN_PACKAGING)
+                rocm_package_add_rpm_dependencies(COMPONENT runtime DEPENDS "rocm-core-asan")
+            else()
+                rocm_package_add_rpm_dependencies(COMPONENT runtime DEPENDS "rocm-core")
+            endif()
+        endif()
+
+        # hipBLASLt's own libhipblaslt.so carries DT_NEEDED on this soname, so
+        # the runtime package must require it. Stated as the soname capability
+        # rather than a package name: the dynamic linker enforces the same
+        # string, and a SOVERSION bump updates both sides together.
+        rocm_package_add_rpm_dependencies(COMPONENT runtime
+            DEPENDS "libtensilelite-host.so.1()(64bit)")
+
+        # Same component-shadows-global rule applies on the Debian side.
+        if(CPACK_DEBIAN_PACKAGE_DEPENDS)
+            rocm_package_add_deb_dependencies(COMPONENT runtime
+                DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}")
+        endif()
+        if(ROCM_DEP_ROCMCORE)
+            if(ENABLE_ASAN_PACKAGING)
+                rocm_package_add_deb_dependencies(COMPONENT runtime DEPENDS "rocm-core-asan")
+            else()
+                rocm_package_add_deb_dependencies(COMPONENT runtime DEPENDS "rocm-core")
+            endif()
+        endif()
+
+        # Debian gets no soname dependency here, so name the package. No
+        # version constraint: tensilelite-host is versioned with hipBLASLt only
+        # until it has a version of its own, and an exact pin would record that
+        # coupling in package metadata. The SOVERSION is the ABI contract.
+        rocm_package_add_deb_dependencies(COMPONENT runtime
+            DEPENDS "tensilelite-host")
+    endif()
+    unset(_tensilelite_host_type)
+endif()
+
 if(ROCM_LIBS_SUPERBUILD OR NOT HIPBLASLT_IS_SUBPROJECT)
     set(HIPBLASLT_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file")
     rocm_create_package(
