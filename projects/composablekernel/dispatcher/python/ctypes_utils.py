@@ -232,8 +232,14 @@ def listed_warp_tiles(
     # nonexistent) entry for a mixed-dtype caller and fall through to the
     # permissive default. Preshuffle's own scope pins dtype_a == dtype_b, but this
     # helper lives on the shared path, so key on both explicitly.
+    arch_data = get_arch_filter_data()  # also puts codegen/ on sys.path
+    # The accumulator rule and the arch normalization are the codegen's own, so
+    # a suffixed target (gfx1250:xnack-) finds the same entry here as there.
+    from codegen_common import CommonTypeMappings, normalize_gfx_arch
+
+    arch = normalize_gfx_arch(arch)
     dtype_b = dtype_b or dtype_a
-    dtype_acc = dtype_acc or ("int32" if dtype_a == "int8" else "fp32")
+    dtype_acc = dtype_acc or CommonTypeMappings.get_acc_dtype(dtype_a)
     dtype_key = f"{dtype_a}_{dtype_b}_{dtype_acc}"
     # Preshuffle consults its own (smaller) whitelist; other variants use the
     # standard GEMM warp-tile table.
@@ -242,7 +248,6 @@ def listed_warp_tiles(
         if variant == "preshuffle"
         else "warp_tile_combos"
     )
-    arch_data = get_arch_filter_data()
     return dtype_key, table_key, arch_data.get(table_key, {}).get(arch, {}).get(
         dtype_key, []
     )

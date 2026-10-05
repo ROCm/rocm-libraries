@@ -102,6 +102,8 @@ def test_listed_warp_tiles_matches_validator():
     tiles = listed_warp_tiles("gfx950", "fp32")[2]
     assert [16, 16, 4] in tiles and [32, 32, 8] in tiles
     assert listed_warp_tiles("gfx1250", "fp32")[2] == [[16, 16, 4]]
+    # Feature suffixes are stripped, as in the codegen.
+    assert listed_warp_tiles("gfx1250:xnack-", "fp32")[2] == [[16, 16, 4]]
     assert listed_warp_tiles("gfx1201", "fp32")[2] == []
     # Accumulator defaults to fp32 (int32 for int8), as the codegen keys it.
     assert listed_warp_tiles("gfx950", "fp16")[0] == "fp16_fp16_fp32"
