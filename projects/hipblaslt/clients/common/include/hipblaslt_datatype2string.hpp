@@ -126,14 +126,14 @@ inline int blockSize(hipblaslt_scaling_format s)
     }
 }
 
-// Compute host scale buffer size for block-scaled MX formats when an
-// allocator needs headroom for HostPreSwizzle / swizzle-internal padding.
+// Compute scale buffer size with padding for block-scaled MX formats.
 // dataRow, dataCol are the raw data matrix dimensions (A_row/A_col or B_row/B_col).
-//
-// This is an allocation helper for padded/swizzled layouts — API users of
-// NoSwizzle / VEC32 (scaleA=3) supply compact scales: one UE8M0 per blockSize
-// elements in A/B order ({M, Ceil(K/block)} / {Ceil(K/block), N}). They do
-// not pad K-blocks to ×8 or the free dim to ×32.
+// Scale dimensions are padded to ensure kernels that process data in 32-element (M/N)
+// or 256-element (K) blocks always have valid scale entries:
+//   scaleRows = ceil(dataRow / blockSize) rounded up to multiple of 8
+//   scaleCols = dataCol rounded up to multiple of 32
+// When pre-swizzle is active, additional layout requirements may apply but are
+// already satisfied by the rounding above.
 inline size_t scaleBufferSize(int64_t dataRow, int64_t dataCol, hipblaslt_scaling_format s)
 {
     auto   bs        = blockSize(s);

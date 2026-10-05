@@ -1630,11 +1630,12 @@ std::tuple<hipDataType, hipDataType> derive_unset_compute_input_type(const Argum
 }
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
-// EXT (HostPreSwizzle) swizzle output is ceil(MN/32)*32 × ceil(Kblocks/8)*8.
-// Size the test buffer for that headroom; generateMXInput(GFX950) still emits
-// compact scales and pads inside preSwizzleScalesGFX950. This is not a new
-// user-facing pad-before-API step — production EXT users pass already-swizzled
-// buffers whose size is that same swizzle output.
+// HostPreSwizzle/EXT generation is unchanged vs develop (generateMXInput +
+// GFX950 layout). The only harness delta is allocation size: develop's dimk
+// pad under-sizes the host buffer vs preSwizzleScalesGFX950 output
+// (ceil(MN/32)*32 × ceil(Kblocks/8)*8) for some K (e.g. K=128). EXT users
+// still supply already-swizzled buffers of that same output size — this is
+// not a new pad-before-API contract.
 inline bool mxNeedsHostPreSwizzleScaleBuf(hipblaslt_scaling_format fmt)
 {
     return fmt == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
@@ -2929,7 +2930,6 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 auto* dataPtrA  = reinterpret_cast<uint8_t*>(hA[i].buf()) + b * dataBatchBytesA;
                 auto* scalePtrA = reinterpret_cast<uint8_t*>(hScaleA[i].buf()) + b * scaleBatchBytesA;
-                // Develop path: EXT → GFX950 layout pads+swizzles inside generateMXInput.
                 auto batchRef
                     = generateMXInput(TiA,
                                       scaleDataType(arg.scaleA),
@@ -3041,7 +3041,6 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 auto* dataPtrB  = reinterpret_cast<uint8_t*>(hB[i].buf()) + b * dataBatchBytesB;
                 auto* scalePtrB = reinterpret_cast<uint8_t*>(hScaleB[i].buf()) + b * scaleBatchBytesB;
-                // Develop path: EXT → GFX950 layout pads+swizzles inside generateMXInput.
                 auto batchRef
                     = generateMXInput(TiB,
                                       scaleDataType(arg.scaleB),

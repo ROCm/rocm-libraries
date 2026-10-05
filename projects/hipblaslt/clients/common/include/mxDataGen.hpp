@@ -48,10 +48,9 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                    float                  max_val     = 1.0f,
                                    std::string_view const scaleInitMethod = "");
 
-// Optional helper: expand compact K-fast scales to a wider K stride in-place.
-// Used by tensilelite client when a descriptor reports padded K-blocks;
-// hipblaslt testing_matmul relies on preSwizzleScalesGFX950's internal pad
-// instead. NoSwizzle Compact descriptors leave compactK == paddedK (no-op).
+// generateMXInput emits scales packed for the unpadded data K, but setMXScaleA/B
+// on gfx950 pad ceil(K/mxBlock) up to a multiple of 8. K-fast layouts need this
+// in-place restride before scale swizzle / H2D (see tensile DataInitialization).
 void restrideMXScaleBufferKFast(uint8_t* buffer,
                                 size_t   compactFreeDim,
                                 size_t   compactKBlocks,
