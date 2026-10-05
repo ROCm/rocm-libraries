@@ -88,6 +88,15 @@ Definitions:
   M: [1200]
   nnz: [10]
 
+# roti is instantiated for real types only; dotci for complex types only.
+- &level1_shared_real
+  <<: *level1_shared
+  precision: *single_double_precisions
+
+- &level1_shared_complex
+  <<: *level1_shared
+  precision: *single_double_precisions_complex
+
 ###########
 # Level 2 #
 ###########
@@ -171,6 +180,11 @@ Definitions:
   denseld: [71]
   nnz: [10]
 
+# Sort, permutation, prune, and coo/csr index conversion are real-only.
+- &conversion_shared_real
+  <<: *conversion_shared
+  precision: *single_double_precisions
+
 - &conversion_shared_mixed_index
   <<: *conversion_shared
   indextype: *i32i32_i64i32_i64i64
@@ -192,13 +206,13 @@ Tests:
   function:
     - axpby: *level1_shared
     - axpyi: *level1_shared
-    - dotci: *level1_shared
+    - dotci: *level1_shared_complex
     - doti: *level1_shared
     - gather: *level1_shared
     - gthr: *level1_shared
     - gthrz: *level1_shared
     - rot: *level1_shared
-    - roti: *level1_shared
+    - roti: *level1_shared_real
     - scatter: *level1_shared
     - sctr: *level1_shared
     - spvv: *level1_shared
@@ -310,11 +324,11 @@ Tests:
   category: quick
   function:
     - bsr2csr: *conversion_shared
-    - coo2csr: *conversion_shared
+    - coo2csr: *conversion_shared_real
     - coo2dense: *conversion_shared
     - csc2dense: *conversion_shared
     - csr2bsr: *conversion_shared
-    - csr2coo: *conversion_shared
+    - csr2coo: *conversion_shared_real
     - csr2dense: *conversion_shared
     - csr2csc: *conversion_shared
     - csr2csr_compress: *conversion_shared
@@ -337,16 +351,16 @@ Tests:
     - sparse_to_dense_csc: *conversion_shared_mixed_index
     - sparse_to_dense_csr: *conversion_shared_mixed_index
     - sparse_to_sparse: *conversion_shared_formats
-    - coosort: *conversion_shared
-    - csrsort: *conversion_shared
-    - cscsort: *conversion_shared
-    - identity: *conversion_shared
-    - inverse_permutation: *conversion_shared
+    - coosort: *conversion_shared_real
+    - csrsort: *conversion_shared_real
+    - cscsort: *conversion_shared_real
+    - identity: *conversion_shared_real
+    - inverse_permutation: *conversion_shared_real
     - nnz: *conversion_shared
-    - prune_csr2csr: *conversion_shared
-    - prune_csr2csr_by_percentage: *conversion_shared
-    - prune_dense2csr: *conversion_shared
-    - prune_dense2csr_by_percentage: *conversion_shared
+    - prune_csr2csr: *conversion_shared_real
+    - prune_csr2csr_by_percentage: *conversion_shared_real
+    - prune_dense2csr: *conversion_shared_real
+    - prune_dense2csr_by_percentage: *conversion_shared_real
     - spmat_descr: *conversion_shared_mixed_index
     - spvec_descr: *conversion_shared
     - dnmat_descr: *conversion_shared
