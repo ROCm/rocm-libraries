@@ -1,0 +1,23 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyIRVerifierPass --print-output 2>&1
+#
+# The vaddr width of global_prefetch_b8 / flat_prefetch_b8 must match the saddr
+# addressing mode: 64-bit with a null saddr, 32-bit with a register saddr. The
+# assembler rejects every other combination, so the verifier must too.
+
+# CHECK: [StinkyIRVerifier] Register width validation failed:
+# CHECK-NEXT: "st.global_prefetch_b8"(v2, off)
+# CHECK-NEXT: operand src[0] has register width 1, expected 2
+# CHECK-NEXT: "st.global_prefetch_b8"(v[2:3], s[62:63])
+# CHECK-NEXT: operand src[0] has register width 2, expected 1
+# CHECK-NEXT: "st.flat_prefetch_b8"(v2)
+# CHECK-NEXT: operand src[0] has register width 1, expected 2
+# CHECK-NEXT: "st.flat_prefetch_b8"(v[2:3], s[62:63])
+# CHECK-NEXT: operand src[0] has register width 2, expected 1
+
+st.func @prefetch_vaddr_width_mismatch() {
+^entry:
+  "st.global_prefetch_b8"(v2, off) { issueCycles = 1, latencyCycles = 1 }
+  "st.global_prefetch_b8"(v[2:3], s[62:63]) { issueCycles = 1, latencyCycles = 1 }
+  "st.flat_prefetch_b8"(v2) { issueCycles = 1, latencyCycles = 1 }
+  "st.flat_prefetch_b8"(v[2:3], s[62:63]) { issueCycles = 1, latencyCycles = 1 }
+}
