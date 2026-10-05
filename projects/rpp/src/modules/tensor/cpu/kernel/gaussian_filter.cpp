@@ -1405,8 +1405,7 @@ RppStatus gaussian_filter_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstP
 #endif
 
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
@@ -1622,8 +1621,7 @@ RppStatus gaussian_filter_generic_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr,
                                               rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
@@ -1661,6 +1659,8 @@ RppStatus gaussian_filter_host_single_image(T* srcPtr, RpptDescPtr srcDescPtr, T
     RpptROI roi;
     compute_roi_validation_host(roiTensorPtrSrc, &roi, &roiDefault, roiType);
 
+    Rpp32u intraThreads = get_intra_image_threads(handle, 1, roi.xywhROI.roiHeight);
+
     Rpp32f filterTensor[MAX_FILTER_SIZE];
     create_gaussian_kernel_host(filterTensor, stdDev, kernelSize);
 
@@ -1676,12 +1676,10 @@ RppStatus gaussian_filter_host_single_image(T* srcPtr, RpptDescPtr srcDescPtr, T
     __m256 pFilterArr[MAX_FILTER_SIZE];
     for (int i = 0; i < filterSize; i++) pFilterArr[i] = _mm256_set1_ps(filterTensor[i]);
 
-    Rpp32u intraThreads = get_intra_image_threads(handle, 1, roi.xywhROI.roiHeight);
     gaussian_filter_host_impl(srcPtr, srcDescPtr, dstPtr, dstDescPtr, filterTensor, kernelSize, roi,
                               layoutParams, intraThreads, pFilterArr, pxMaskPln, pxMaskPkd);
     return RPP_SUCCESS;
 #else
-    Rpp32u intraThreads = get_intra_image_threads(handle, 1, roi.xywhROI.roiHeight);
     return gaussian_filter_host_impl(srcPtr, srcDescPtr, dstPtr, dstDescPtr, filterTensor,
                                      kernelSize, roi, layoutParams, intraThreads);
 #endif
