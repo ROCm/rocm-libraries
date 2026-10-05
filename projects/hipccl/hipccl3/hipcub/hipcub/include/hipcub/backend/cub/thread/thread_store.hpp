@@ -26,8 +26,8 @@
 
 #include <cub/thread/thread_store.cuh> // CUB thread store
 
-#include <cstdint>
-#include <type_traits>
+#include <cuda/std/cstdint> // IWYU pragma: export
+#include <cuda/std/type_traits> // IWYU pragma: export
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -58,8 +58,8 @@ template<int MODIFIER, typename T>
 HIPCUB_DEVICE
 HIPCUB_FORCEINLINE void ThreadStore(T* ptr,
                                     T  val,
-                                    ::std::integral_constant<int, MODIFIER> /*modifier*/,
-                                    ::std::true_type /*is_pointer*/)
+                                    _HIPCUB_STD::integral_constant<int, MODIFIER> /*modifier*/,
+                                    _HIPCUB_STD::true_type /*is_pointer*/)
 {
     ::cub::ThreadStore<cub_cache_store_modifier_map<MODIFIER>::value>(ptr, val);
 }
@@ -68,13 +68,13 @@ template<int MODIFIER, typename OutputIteratorT, typename T>
 HIPCUB_DEVICE
 HIPCUB_FORCEINLINE void ThreadStore(OutputIteratorT itr,
                                     T               val,
-                                    ::std::integral_constant<int, MODIFIER> /*modifier*/,
-                                    ::std::false_type /*is_pointer*/)
+                                    _HIPCUB_STD::integral_constant<int, MODIFIER> /*modifier*/,
+                                    _HIPCUB_STD::false_type /*is_pointer*/)
 {
     ThreadStore<MODIFIER>(&(*itr),
                           val,
-                          ::std::integral_constant<int, MODIFIER>{},
-                          ::std::true_type{});
+                          _HIPCUB_STD::integral_constant<int, MODIFIER>{},
+                          _HIPCUB_STD::true_type{});
 }
 
 template<CacheStoreModifier MODIFIER = STORE_DEFAULT, typename OutputIteratorT, typename T>
@@ -83,8 +83,8 @@ HIPCUB_FORCEINLINE void ThreadStore(OutputIteratorT itr, T val)
 {
     ThreadStore(itr,
                 val,
-                ::std::integral_constant<int, MODIFIER>{},
-                ::std::bool_constant<_HIPCUB_STD::is_pointer<OutputIteratorT>::value>());
+                _HIPCUB_STD::integral_constant<int, MODIFIER>{},
+                _HIPCUB_STD::bool_constant<_HIPCUB_STD::is_pointer<OutputIteratorT>::value>());
 }
 
 namespace detail
@@ -99,8 +99,8 @@ struct iterate_thread_store
     {
         ThreadStore<MODIFIER>(ptr + COUNT,
                               vals[COUNT],
-                              ::std::integral_constant<int, MODIFIER>{},
-                              ::std::true_type{});
+                              _HIPCUB_STD::integral_constant<int, MODIFIER>{},
+                              _HIPCUB_STD::true_type{});
         iterate_thread_store<COUNT + 1, MAX>::template Store<MODIFIER>(ptr, vals);
     }
 

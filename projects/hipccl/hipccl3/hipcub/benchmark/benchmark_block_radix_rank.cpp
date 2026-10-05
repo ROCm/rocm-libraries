@@ -67,7 +67,7 @@ void rank_kernel(const T* keys_input, int* ranks_output)
                                Descending,
                                BenchmarkKind == RadixRankAlgorithm::RADIX_RANK_MEMOIZE>>;
 
-    _CCCL_PRAGMA_UNROLL_FULL()
+    HIPCUB_PRAGMA_UNROLL_FULL()
     for(unsigned int key = 0; key < ItemsPerThread; key++)
     {
         unsigned_keys[key] = KeyTraits::TwiddleIn(unsigned_keys[key]);
@@ -75,7 +75,7 @@ void rank_kernel(const T* keys_input, int* ranks_output)
 
     int ranks[ItemsPerThread];
 
-    _CCCL_PRAGMA_NOUNROLL()
+    HIPCUB_PRAGMA_NOUNROLL()
     for(unsigned int trial = 0; trial < Trials; trial++)
     {
         __shared__ typename RankType::TempStorage storage;
