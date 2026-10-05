@@ -495,6 +495,24 @@ class KernelWriterAssembly(KernelWriter):
       return "A" if tc in ("A", "B") else "MXSA"
     return tdmSetOwner(kernel, tc)
 
+  def tdmLastIterDisableSgprs(self, kernel) -> list:
+    """Tensors that share a descriptor set share its group0 enable word."""
+    names = ["tdmAGroup0+0"]
+    silenced = {self.tdmDescriptorSetOwner(kernel, "A")}
+    if kernel["ProblemType"]["MXBlockA"]:
+      names.append("tdmMXSAGroup0+0")
+      silenced.add(self.tdmDescriptorSetOwner(kernel, "MXSA"))
+    if not self.isTdmWaveSeparated(kernel) or kernel.get("UseSubtileImpl"):
+      return names
+    for tc in ("B", "MXSB"):
+      if tc == "MXSB" and not kernel["ProblemType"]["MXBlockB"]:
+        continue
+      owner = self.tdmDescriptorSetOwner(kernel, tc)
+      if owner not in silenced:
+        names.append("tdm%sGroup0+0" % owner)
+        silenced.add(owner)
+    return names
+
   def _tdmPairedParityOrder(self, kernel, tPA, tPB):
     """Return this pair's even/odd members from the resolved wave partition.
 
@@ -11859,20 +11877,16 @@ class KernelWriterAssembly(KernelWriter):
         # and a branch there would split the block the scheduler works in.
         if kernel["HalfPLR"] or kernel["ReuseAcrossPersistent"]: # only support TDM
           if kernel["PrefetchGlobalRead"] > 0:
-            # Wave-separated TDM aliases one descriptor set, with even waves
-            # carrying A/MXSA and odd waves B/MXSB, so zeroing A's enable word
-            # silences whichever this wave holds and two writes cover all four
-            # tensors. Re-applied on every load because the descriptor is rebuilt
-            # each persistent iteration.
+            # Re-applied on every load because the descriptor is rebuilt each
+            # persistent iteration.
             imod.header.addComment0("disable TDM in last %u loop(s)" % kernel["PrefetchGlobalRead"])
             imod.header.add(SCmpLeI32(
               src0=self.loopCounter(kernel, loopIdx), \
               src1=kernel["PrefetchGlobalRead"], \
               comment="%s"%"is this the last iters"))
             if kernel["NumWaves"] > 1:
-              imod.header.add(SCMovB32(dst=sgpr("tdmAGroup0+0"), src=0, comment=""))
-              if kernel["ProblemType"]["MXBlockA"]:
-                imod.header.add(SCMovB32(dst=sgpr("tdmMXSAGroup0+0"), src=0, comment=""))
+              for name in self.tdmLastIterDisableSgprs(kernel):
+                imod.header.add(SCMovB32(dst=sgpr(name), src=0, comment=""))
             else:
               imod.header.add(SCMovB32(dst=sgpr("tdmAGroup0+0"), src=0, comment=""))
               imod.header.add(SCMovB32(dst=sgpr("tdmBGroup0+0"), src=0, comment=""))
