@@ -107,6 +107,21 @@ _CONFIGS = {
         kv_storage_dtype="fp8e4m3",
         use_decode_grid=True,
     ),
+    7: dict(
+        # D256 at block 64 (dispatch tile T=32): fits gfx942's 64 KiB LDS only
+        # with one V slot.
+        head_size=256,
+        block_size=64,
+        num_query_heads=16,
+        num_kv_heads=2,
+        dtype="bf16",
+        num_segments=8,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        tile_size_override=32,
+    ),
 }
 
 

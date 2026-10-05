@@ -2552,6 +2552,37 @@ class TestAttentionHelpers(unittest.TestCase):
                 )
                 self.assertTrue(reason)
 
+    def test_gfx942_3d_dispatch_specs_fit_lds(self):
+        """Every gfx942 3D segment spec default dispatch builds fits the 64 KiB
+        LDS (one V slot; D256 at block 64 needs it)."""
+        import re
+
+        import kernels.common.attention_unified as au
+
+        with _patch_resolved_arch("gfx942"):
+            _, _, build, _, _ = au._tiled_3d_impl("gfx942")
+            for head_size in (64, 128, 256):
+                for block_size in (16, 32, 64):
+                    with self.subTest(head_size=head_size, block_size=block_size):
+                        problem = au.UnifiedAttentionProblem(
+                            total_q=4,
+                            num_seqs=4,
+                            num_query_heads=16,
+                            num_kv_heads=2,
+                            head_size=head_size,
+                            block_size=block_size,
+                            max_seqlen_q=1,
+                            max_seqlen_k=4096,
+                            dtype="bf16",
+                            num_cus=304,
+                        )
+                        spec = au._tiled_3d_spec_from_problem(problem)
+                        ll = lower_kernel_to_llvm(build(spec, arch="gfx942"))
+                        lds = int(
+                            re.search(r"addrspace\(3\) global \[(\d+) x i8\]", ll).group(1)
+                        )
+                        self.assertLessEqual(lds, 64 * 1024)
+
     def test_unified_attention_3d_tiled_decode_grid(self):
         """``use_decode_grid``: seq_idx = block_id_x, no binary search over
         ``query_start_len`` (its ``bs_i`` induction variable), on both arches."""

@@ -501,9 +501,11 @@ void rocke_gfx942_attention_tiled_3d_emit_prologue(rocke_gfx942_attention_tiled_
     {
         const int q_shape[2] = {BLOCK_M, HD};
         const int k_shape[3] = {2, T, HD};
+        /* One V slot: V(i) is issued and consumed within iteration i. */
+        const int v_shape[3] = {1, T, HD};
         ctx->Q_lds = rocke_b_smem_alloc(B, dtype, q_shape, 2, "Qlds");
         ctx->K_lds = rocke_b_smem_alloc(B, dtype, k_shape, 3, "Klds");
-        ctx->V_lds = rocke_b_smem_alloc(B, dtype, k_shape, 3, "Vlds");
+        ctx->V_lds = rocke_b_smem_alloc(B, dtype, v_shape, 3, "Vlds");
     }
     {
         const int p_shape[2] = {BLOCK_M, T};

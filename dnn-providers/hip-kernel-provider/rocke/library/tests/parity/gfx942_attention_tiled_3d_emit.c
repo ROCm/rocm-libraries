@@ -115,6 +115,22 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->kv_storage_dtype = "fp8e4m3";
         s->use_decode_grid = true;
         break;
+    case 7:
+        /* D256 at block 64 (dispatch tile T=32): fits gfx942's 64 KiB LDS only
+         * with one V slot. */
+        s->head_size = 256;
+        s->block_size = 64;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 2;
+        s->dtype = "bf16";
+        s->num_segments = 8;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->has_tile_size_override = true;
+        s->tile_size_override = 32;
+        break;
     default:
         return -1;
     }

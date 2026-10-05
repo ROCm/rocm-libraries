@@ -356,12 +356,12 @@ rocke_value_t* rocke_gfx942_attention_tiled_3d_mfma_16x16_c_row(
 
 /* _strided_v_b_operand(ctx, k_iter, v_n_col, v_k_chunk_base) (lines 886-896):
  * build the <4 x dtype> PV B-operand from 4 strided V_lds loads reproducing the
- * per-lane (row, col) a 16x16x16 transpose read would deliver. cur_buf is the
- * current double-buffer index Value (loop carry). Returns the packed vector. */
+ * per-lane (row, col) a 16x16x16 transpose read would deliver. v_buf is the V
+ * slot index Value (always 0: one V slot). Returns the packed vector. */
 rocke_value_t* rocke_gfx942_attention_tiled_3d_strided_v_b_operand(
     rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
     int k_iter,
-    rocke_value_t* cur_buf,
+    rocke_value_t* v_buf,
     rocke_value_t* v_n_col,
     rocke_value_t* v_k_chunk_base);
 

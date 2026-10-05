@@ -455,11 +455,14 @@ def build_unified_attention_3d_tiled(
         b.ret()
 
     # ---------------- LDS layout ----------------
-    # gfx942 uses the natural row-major V_lds[2, T, HD]; the PV B-operand is
-    # built from strided LDS loads (no transpose-read intrinsic).
+    # gfx942 uses the natural row-major V_lds[1, T, HD]; the PV B-operand is
+    # built from strided LDS loads (no transpose-read intrinsic). One V slot:
+    # V(i) is loaded after QK(i) and consumed by PV(i) in the same iteration,
+    # and the next iteration's leading wait-all retires PV(i) before V(i+1) is
+    # issued, so a second slot would never hold a live tile.
     Q_lds = b.smem_alloc(dtype, [BLOCK_M, HD], name_hint="Qlds")
     K_lds = b.smem_alloc(dtype, [2, T, HD], name_hint="Klds")
-    V_lds = b.smem_alloc(dtype, [2, T, HD], name_hint="Vlds")
+    V_lds = b.smem_alloc(dtype, [1, T, HD], name_hint="Vlds")
     P_lds = b.smem_alloc(dtype, [BLOCK_M, T], name_hint="Plds")
 
     neg_inf = b.const_f32(float("-inf"))
@@ -774,6 +777,7 @@ def build_unified_attention_3d_tiled(
         acc_vals = [carry[8 + n] for n in range(PV_N_TILES)]
         cur_buf = carry[8 + PV_N_TILES]
         nxt_buf = b.sub(b.const_i32(1), cur_buf)
+        v_buf = b.const_i32(0)
         tile_off = b.mul(kv_tile_iv, b.const_i32(T))
 
         next_tile_iv_raw = b.add(kv_tile_iv, b.const_i32(1))
@@ -802,7 +806,7 @@ def build_unified_attention_3d_tiled(
                 acc_v = _mfma_16x16x16(b, dtype, A_kits[k], B_v, acc_v)
             S_n.append(acc_v)
 
-        _issue_v(kv_tile_iv, cur_buf)
+        _issue_v(kv_tile_iv, v_buf)
         _issue_k(safe_next_tile, nxt_buf)
 
         if USE_ALIBI:
@@ -932,9 +936,7 @@ def build_unified_attention_3d_tiled(
                 for j in range(4):
                     v_row = b.add(b.const_i32(k_iter * 16 + j), v_k_chunk_base)
                     elem = b.vec_extract(
-                        b.smem_load_vN(
-                            V_lds, cur_buf, v_row, v_n_col, dtype=dtype, n=1
-                        ),
+                        b.smem_load_vN(V_lds, v_buf, v_row, v_n_col, dtype=dtype, n=1),
                         0,
                     )
                     bv = b.vec_insert(bv, elem, j)
