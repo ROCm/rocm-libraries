@@ -14,9 +14,10 @@ import numpy as np
 import pytest
 
 from sdpa_reference.cli import load_bundle, verify_case
-from sdpa_reference.contract import checked_inputs, decode, encode
+from sdpa_reference.contract import checked_inputs
+from reference_common.numeric import decode, encode
 from sdpa_reference.architectures import ARCHITECTURES, get_architecture
-from sdpa_reference.session import reuse_workers
+from reference_common.session import reuse_workers
 from sdpa_reference.paths import default_bundle_path
 
 
@@ -51,7 +52,7 @@ def reference_bundle():
             pytest.fail(f"required {arch} SDPA reference bundle is missing: {bundle}")
         pytest.skip("qualified SDPA bundle not installed; see TESTING.md")
     manifest = load_bundle(bundle, architecture=arch)
-    with reuse_workers():
+    with reuse_workers("sdpa_reference.worker"):
         yield target, bundle, manifest
 
 
@@ -72,7 +73,7 @@ def test_sdpa_correctness_against_qualified_rocke(architecture, case, reference_
     report = verify_case(
         case, bundle=bundle, manifest=manifest, architecture=architecture
     )
-    # Torch import status is diagnostic: the launcher may use it for stream resolution.
+    assert not report["torch_imported"]
     assert report["old_launches"] == report["current_launches"] == 2
 
 

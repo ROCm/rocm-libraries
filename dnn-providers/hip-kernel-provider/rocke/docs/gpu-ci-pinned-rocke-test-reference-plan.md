@@ -253,12 +253,14 @@ The SDPA implementation lives under `library/tests/sdpa_reference/`:
 
 | Component | Responsibility |
 |---|---|
-| `contract.py` | Case model, deterministic inputs, NumPy reference, digests, and conservative numerical budgets |
+| `contract.py` | Operation-specific cases, inputs, NumPy reference, and numerical policy |
 | `architectures/registry.json` | Explicit enrolled architecture list; currently only gfx942 |
 | `architectures/gfx942/` | Case cohort, production dispatch/launch adapter, exported-kernel metadata, and trusted lock |
-| `worker.py` / `session.py` | Separate baseline/current processes, HIP execution, import isolation, and worker reuse |
-| `cli.py` | Snapshot, qualification, migration, and verification commands |
-| `artifact.py` | Validated tensor-free archive packing/extraction |
+| `worker.py` | Operation-specific HIP execution and replay |
+| `../reference_common/session.py` / `runner.py` | Isolated baseline/current processes and worker reuse |
+| `cli.py` | Snapshot, qualification, and verification commands |
+| `../reference_common/artifact.py` | Common archive command with explicit operation |
+| `../reference_common/numeric.py` / `source.py` | Storage, digests, conservative budgets, and committed snapshots |
 | `paths.py` | Relocatable source and installed bundle lookup |
 | Provider CMake and category YAML | Staging, test registration, and normal provider CI selection |
 
@@ -342,7 +344,9 @@ an enrolled target's scope should be reported separately.
 
 The proposed paths are `reference_bundles/conv/<arch>.tar.gz.dvc` and installed
 `engines/test_arch_content/rocke/conv/<arch>/`. These are a layout convention,
-not an implemented convolution reference harness. Convolution still needs:
+now used by the [forward-convolution infrastructure](conv-test-reference.md).
+That harness has a bounded gfx942 cohort and remains unenrolled by default pending
+baseline promotion. Further convolution coverage still needs:
 
 1. **An explicit cohort.** Map forward, backward-data, and backward-weight tests
    separately. Record dimensions, groups, strides, padding, dilation, layouts,

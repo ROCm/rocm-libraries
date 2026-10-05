@@ -119,7 +119,7 @@ the strategy's biggest holes live (see
   on gfx942 using a conservative triangle-inequality error budget. Required
   executions fail when hardware or qualification is missing. The first cohort
   is enrolled in installed tests when a qualified bundle is supplied at build time.
-  Provider builds enable `ROCKE_INSTALL_TEST_SDPA_REFERENCE` by default. Run
+  Provider builds enable `ROCKE_INSTALL_TEST_GPU_REFERENCES` by default. Run
   `dvc pull dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/sdpa/gfx942.tar.gz.dvc`
   from the repository root before configuring. TheRock already performs this
   DVC download during source preparation. CMake extracts the archive, validates
@@ -130,12 +130,12 @@ the strategy's biggest holes live (see
   this in the test component and splits it into the matching architecture artifact,
   while the Python harness and trusted locks remain in the generic test artifact.
   Missing or corrupt data fails configuration. For builds that intentionally
-  omit this GPU lane, use `-DROCKE_INSTALL_TEST_SDPA_REFERENCE=OFF`. This also
+  omit all pinned-reference GPU lanes, use `-DROCKE_INSTALL_TEST_GPU_REFERENCES=OFF`. This also
   ignores explicit or cached bundle-directory overrides; host checks remain installed.
   In rocm-libraries superbuild mode (`ROCM_LIBS_SUPERBUILD=ON`), this option
   defaults to OFF because the superbuild runs build-tree tests rather than the
   installed reference suite. To package the references in a superbuild, fetch
-  the bundle and explicitly pass `-DROCKE_INSTALL_TEST_SDPA_REFERENCE=ON`.
+  the bundle and explicitly pass `-DROCKE_INSTALL_TEST_GPU_REFERENCES=ON`.
   Existing build directories retain their cached option value.
   To install an unpacked local bundle, pass
   `-DROCKE_TEST_SDPA_REFERENCE_INSTALL_SOURCE_gfx942=<qualified-bundle>`.
@@ -151,7 +151,7 @@ the strategy's biggest holes live (see
   across cases. Each case still executes both versions twice and validates its
   outputs independently; worker failures and timeouts fail the test.
   To publish a replacement, independently qualify it first, update the source
-  lock, and use `python library/tests/sdpa_reference/artifact.py pack --bundle <qualified-bundle> --lock library/tests/sdpa_reference/architectures/gfx942/baseline_lock.json --archive library/tests/reference_bundles/sdpa/gfx942.tar.gz`
+  lock, and use `python library/tests/reference_common/artifact.py pack --operation sdpa --bundle <qualified-bundle> --lock library/tests/sdpa_reference/architectures/gfx942/baseline_lock.json --archive library/tests/reference_bundles/sdpa/gfx942.tar.gz`
   from the rocKE root. Then run `dvc add` and a scoped `dvc push` for the
   archive from the repository root before pushing its Git pointer. Git tracks
   the lock, pointer, and ignore entry; compiled kernels stay in DVC; inputs are regenerated.
@@ -196,30 +196,6 @@ file, which is removed after the comparison, including on worker failure. This
 keeps the frozen baseline worker unchanged. Outputs remain temporary as before.
 Neither input nor output tensors are included in the DVC archive or installed
 reference bundle. Archive validation rejects `.npz` and `.npy` payloads for schema 2.
-
-The original schema-1 gfx942 bundle was migrated without changing its corpus or
-kernels. The migration checked every generated tensor against both the recorded
-digest and the stored tensor's dtype, shape, and bytes. All retained payload
-hashes, case records, output/reference digests, compiler provenance, and error
-budgets were preserved. `storage_migration` records the original manifest hash,
-comparison method, and NumPy version; `reference` retains the original
-qualification provenance. Only the storage schema and manifest lock changed.
-
-For another schema-1 bundle, use its trusted version-controlled lock to unpack
-it, then run this offline maintenance command from the rocKE root:
-
-```bash
-python library/tests/run_sdpa_reference.py remove-stored-inputs \
-  --arch gfx942 --bundle <original-bundle> --lock <schema-1-lock> \
-  --output <new-bundle>
-```
-
-The command refuses to migrate inputs that do not reproduce exactly. In that
-case, qualify a new corpus against the independent NumPy reference; do not
-carry forward old error budgets for different input bytes. After a successful
-migration, run verification on the target GPU with the new qualification lock,
-pack the bundle, and update the architecture's committed lock and DVC pointer.
-Upload the new archive with a scoped `dvc push` before pushing those Git changes.
 
 ### 3.2 Are the kernels fast?
 
@@ -545,3 +521,58 @@ reference them, don't copy them here.*
 - [SDPA implementation and usage](docs/sdpa-test-reference.md)
 - [GPU attention coverage and gaps](docs/gpu-attention-test-coverage.md)
 - [Reference methodology and extension strategy](docs/gpu-ci-pinned-rocke-test-reference-plan.md)
+
+## Pinned convolution references
+
+A Torch-free gfx942 forward-convolution qualification and GPU replay harness is
+available alongside SDPA. Convolution is not in the published-bundle registry pending a
+reviewed baseline and published bundle. See [the convolution reference guide](docs/conv-test-reference.md)
+for the cohort, numerical contract, qualification commands, and installed tests.
+
+## Shared GPU reference artifact command
+
+SDPA and convolution use the same standalone archive tool:
+
+```bash
+python library/tests/reference_common/artifact.py pack --operation conv \
+  --bundle <qualified-bundle> --lock <reviewed-lock> --archive <archive.tar.gz>
+python library/tests/reference_common/artifact.py unpack --operation conv \
+  --archive <archive.tar.gz> --bundle <new-directory> --lock <reviewed-lock>
+python library/tests/reference_common/artifact.py validate --operation conv \
+  --bundle <bundle-directory> --lock <reviewed-lock>
+```
+
+Use `--operation sdpa` for SDPA. The operation is explicit; the tool checks it
+against the locked manifest and archive namespace. The deployed SDPA schema-2 manifest
+uses its reviewed lock to identify the operation. These commands authenticate and
+package an already qualified bundle; they do not qualify GPU outputs or promote
+a baseline. They require only Python's standard library and also work with `-I -S`.
+
+Use `reference_common/artifact.py` for all archive operations. The shared
+`rocke_reference_common_pytest` suite checks archive handling for both operations,
+independently of GPU enrollment. Schema-1 tensor bundles are not supported.
+
+### Installing enrolled GPU reference bundles
+
+`ROCKE_INSTALL_TEST_GPU_REFERENCES` is the single installation switch. It defaults
+ON for provider artifact builds and OFF for standalone and rocm-libraries
+superbuild configurations. OFF ignores all local reference source/lock overrides;
+host reference tests remain installed.
+
+[`published_bundles.json`](library/tests/reference_common/published_bundles.json)
+lists published operation/architecture pairs. With the option ON, CMake installs
+all of them, failing on a missing archive, missing lock, or failed integrity check.
+Qualification support alone does not enroll a bundle: each operation's
+`architectures/registry.json` also includes cohorts available for offline work.
+
+Archives, DVC pointers, locks, and installed directories remain separate for each
+operation and architecture. For example, `sdpa/gfx942` and `conv/gfx942` have
+independent archives under `reference_bundles/` and independent installed payloads
+under `engines/test_arch_content/rocke/`.
+
+To test an unpublished candidate while the umbrella flag is ON, provide
+`ROCKE_TEST_<OP>_REFERENCE_INSTALL_SOURCE_<arch>` and, when no committed lock exists,
+`ROCKE_TEST_<OP>_REFERENCE_INSTALL_LOCK_<arch>`. This explicitly adds that local
+candidate to the installed references without changing publication enrollment.
+A lock override requires an extracted-source override. Once the reviewed lock and
+DVC object are published, add the architecture to the operation's published list.

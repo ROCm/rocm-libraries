@@ -19,7 +19,8 @@ from pathlib import Path
 import numpy as np
 
 from .architectures import get_architecture
-from .contract import Case, array_digest, decode, file_digest, write_json
+from .contract import Case
+from reference_common.numeric import array_digest, decode, file_digest, write_json
 
 
 def run(request: dict, output: Path) -> None:
