@@ -25,8 +25,7 @@
 // forwarding stub in wrapper.cpp. The public-ABI gate
 // (script/check_public_abi.py) fails the build when these drift apart in a way
 // that changes the exported symbol set; it cannot see signature drift.
-#ifndef MIOPEN_PRIVATE_IMPL_H
-#define MIOPEN_PRIVATE_IMPL_H
+#pragma once
 
 #ifdef MIOPEN_BUILDING_PRIVATE
 #error \
@@ -1964,5 +1963,3 @@ extern "C" miopenStatus_t miopenSetTuningPolicy_impl(miopenHandle_t handle,
                                                      miopenTuningPolicy_t newValue);
 extern "C" miopenStatus_t miopenGetTuningPolicy_impl(miopenHandle_t handle,
                                                      miopenTuningPolicy_t* value);
-
-#endif // MIOPEN_PRIVATE_IMPL_H

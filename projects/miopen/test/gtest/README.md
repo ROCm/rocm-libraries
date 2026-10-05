@@ -48,9 +48,8 @@ With `MIOPEN_ENABLE_HIPDNN_WRAPPER=ON`, each `*_forwarding_parity` ctest entry r
 `script/run_forwarding_parity.py`. It replays the shim surface twice, once with
 `MIOPEN_HIPDNN_FORWARDING=disabled` and once with `=enabled`, and requires the two runs to
 agree test for test. The runs can differ only for entry points listed in
-`kForwardingEntries` in `src/private/routing.cpp`. That list is empty today, so the entries
-cannot fail yet. The harness is in place first so that the first forwarded entry point is
-tested by something already known to work.
+`kForwardingEntries` in `src/private/routing.cpp`, so a shim test that reaches an entry point
+outside that list runs the same code twice and checks nothing.
 
 Why it is set up this way:
 
@@ -87,8 +86,14 @@ on a packaged build would select nothing and pass. The packaged entries are not 
 tested elsewhere. Only the single-binary build (`MIOPEN_TEST_DISCRETE=OFF`) ships them.
 
 `wrapper_abi_check` (`script/check_wrapper_abi.py`) checks the wrapper's exported ABI from the
-two built libraries. It loads neither, so it needs no GPU and is registered whenever the flag
-is on. The packaged copy leaves out `--public-header`, which compares two source files that
+two built libraries. It also checks the wrapper's list of required shared libraries
+(`DT_NEEDED`): `libMIOpen_private` must be on it and `libhipdnn_backend` must not, so the
+hipDNN backend is opened on first use rather than required at load time. The full list is
+also committed as `test/public_abi/wrapper_needed.baseline`, but the ctest entry does not
+compare against it, because it names ROCm soversions and the x86-64 loader and would fail on
+every ROCm update. To compare it by hand, pass `--needed-baseline
+test/public_abi/wrapper_needed.baseline` to `script/check_wrapper_abi.py`. It loads neither library, so it needs
+no GPU and is registered whenever the flag is on. The packaged copy leaves out `--public-header`, which compares two source files that
 the build-tree entry already checks.
 
 `test_forwarding_parity_scripts` tests the harness scripts themselves. It needs no GPU or
@@ -100,3 +105,33 @@ Two cache variables tune the harness:
 - `MIOPEN_FORWARDING_PARITY_FILTER` (default `*HipdnnShim*`): the gtest filter replayed.
 - `MIOPEN_FORWARDING_PARITY_TIMEOUT` (default `3600`): seconds per entry, covering both
   replays and the comparison.
+
+### Saying more than pass or fail
+
+A test that reaches an ending the gtest verdict does not distinguish should record it with
+`RecordProperty("parity_<something>", ...)`. gtest writes the property into the `<testcase>`
+element, and `compare_forwarding_runs.py` folds every `parity_*` property into the outcome it
+compares. The fused convolution test uses this: it passes whether the library
+computed a result or declined the problem, and without the property the two replays look like
+they agreed when one of them did no work.
+
+Record a property from within the test's own execution, keyed so that two cases in one test
+cannot overwrite each other — gtest replaces a property recorded twice under the same key.
+
+### Known divergences
+
+`known_forwarding_divergences.txt` lists divergences that are accepted for now. Each line names
+a test, the outcome expected from each replay, and why the gap exists. A matching divergence is
+printed and tolerated; anything else still fails.
+
+Two rules make the list safe to have:
+
+- A line that stops applying fails the comparison, which asks for it to be deleted. The list
+  therefore describes gaps that are open today rather than accumulating history.
+- A run that tolerates a line says so in its output and does not print the ordinary success
+  line, so a known divergence never reads as a clean pass.
+
+To add one, run the harness, copy the failing line's test name and both outcomes into the
+file, and write down the reason. The list's own rules are covered by
+`test_forwarding_parity_scripts`, or by hand with
+`python3 -m unittest test_compare_forwarding_runs` from `script/`; neither needs a build or GPU.

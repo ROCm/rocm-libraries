@@ -87,6 +87,9 @@ def main():
         "this script's parent directory",
     )
     parser.add_argument("--compare", default=SCRIPT_DIR / "compare_forwarding_runs.py")
+    parser.add_argument(
+        "--known-divergences", default=SCRIPT_DIR / "known_forwarding_divergences.txt"
+    )
     args = parser.parse_args()
 
     gtest = Path(args.gtest).resolve()
@@ -151,7 +154,15 @@ def main():
     # --newer-than rejects stale reports from an earlier build. sys.executable rather
     # than the shebang, so a lost exec bit fails cleanly.
     ok = run(
-        [sys.executable, args.compare, *reports, "--newer-than", gtest],
+        [
+            sys.executable,
+            args.compare,
+            *reports,
+            "--newer-than",
+            gtest,
+            "--known-divergences",
+            args.known_divergences,
+        ],
         "forwarding parity comparison",
     )
 
