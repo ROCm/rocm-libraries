@@ -110,31 +110,20 @@ if(ROCKE_BUILD_PYENV)
         COMMENT "Building rocke platform wheel"
         VERBATIM)
 
-    # The library wheel is built from a fresh copy under the build tree.
-    # setuptools builds in place and writes build/lib/**/*.py next to the
-    # sources; in library/ that output matches the glob above, so the next
-    # build would hit a GLOB mismatch and re-run CMake. (Filtering the list
-    # does not help: CONFIGURE_DEPENDS re-checks the unfiltered glob.) The
-    # fresh copy also keeps setuptools' stale build/lib -- e.g. a deleted
-    # module -- out of the wheel. Any build/ or egg-info left in the source
-    # tree by an earlier in-place build is dropped from the copy, as is tests/
-    # (not packaged; keeps a stray test tree out of the build directory).
-    set(_rocke_library_stage "${CMAKE_CURRENT_BINARY_DIR}/library-wheel-src")
+    # The library wheel is built from a copy of library/ in a temporary
+    # directory, not in place: setuptools writes build/lib/**/*.py next to the
+    # sources, which would match the glob above and force a CMake re-run on
+    # the next build. (Filtering the list does not help: CONFIGURE_DEPENDS
+    # re-checks the unfiltered glob.) See cmake/build_library_wheel.py.
+    set(_rocke_library_wheel_script "${CMAKE_CURRENT_SOURCE_DIR}/cmake/build_library_wheel.py")
     set(_rocke_library_wheel "${ROCKE_WHEEL_DIR}/rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
     add_custom_command(
         OUTPUT "${_rocke_library_wheel}"
-        COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_rocke_library_stage}"
-        COMMAND "${CMAKE_COMMAND}" -E copy_directory
-                "${CMAKE_CURRENT_SOURCE_DIR}/library" "${_rocke_library_stage}"
-        COMMAND "${CMAKE_COMMAND}" -E rm -rf
-                "${_rocke_library_stage}/build"
-                "${_rocke_library_stage}/rocke_library.egg-info"
-                "${_rocke_library_stage}/tests"
         COMMAND ${_rocke_wheel_env}
-                "${ROCKE_PYENV_PYTHON}" -m pip wheel --no-deps --no-build-isolation
-                --wheel-dir "${ROCKE_WHEEL_DIR}"
-                "${_rocke_library_stage}"
+                "${ROCKE_PYENV_PYTHON}" "${_rocke_library_wheel_script}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/library" "${ROCKE_WHEEL_DIR}"
         DEPENDS "${ROCKE_PYENV_STAMP}"
+                "${_rocke_library_wheel_script}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/library/pyproject.toml"
                 ${_rocke_library_sources}
         COMMENT "Building rocke-library wheel"
