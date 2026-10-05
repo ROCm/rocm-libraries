@@ -1228,6 +1228,7 @@ class FmhaBwdApiPool:
                 F_cond_extra=trait.extra_cond,
                 F_bn0=trait.tile.F_bn0,
                 F_bm0=trait.tile.F_bm0,
+                F_maxq=trait.tile.max_seq_q,
                 F_bhdq=trait.tile.F_bhdq,
                 F_bhdv=trait.tile.F_bhdv,
             )

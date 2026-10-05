@@ -40,12 +40,13 @@ class BlockFmhaBwdDQDKDVPipelineSelector
         std::conditional_t<is_decode,
                            BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR<TS...>,
                            BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR<TS...>>,
-        std::conditional_t<Problem::kUseTdmKRKTR,
-                           BlockFmhaBwdDQDKDVPipelineTdmKRKTR<TS...>,
-                           std::conditional_t<has_dpad1 || (Problem::BlockFmhaShape::kQKHeaddim == 128 &&
-                                                                 Problem::BlockFmhaShape::kVHeaddim == 128),
-                                              BlockFmhaBwdDQDKDVPipelineKRKTRVR<TS...>,
-                                              BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP<TS...>>>>;
+        std::conditional_t<
+            Problem::kUseTdmKRKTR,
+            BlockFmhaBwdDQDKDVPipelineTdmKRKTR<TS...>,
+            std::conditional_t<has_dpad1 || (Problem::BlockFmhaShape::kQKHeaddim == 128 &&
+                                             Problem::BlockFmhaShape::kVHeaddim == 128),
+                               BlockFmhaBwdDQDKDVPipelineKRKTRVR<TS...>,
+                               BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP<TS...>>>>;
     using type = std::conditional_t<!std::is_same_v<Policy, void>,
                                     type_<Problem, Policy>,
                                     std::conditional_t<Problem::kUseTrLoad && is_decode,

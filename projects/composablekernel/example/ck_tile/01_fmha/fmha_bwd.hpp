@@ -378,9 +378,10 @@ auto fmha_bwd_dq_dk_dv_create_kargs_and_grids(fmha_bwd_args args)
         }
     }();
 
-    const auto grid_seqlen = FmhaBwdDQDKDVKernel::kUseQMajorDQ
-                                 ? (FmhaBwdDQDKDVKernel::kIsGroupMode ? args.max_seqlen_q : args.seqlen_q)
-                                 : (FmhaBwdDQDKDVKernel::kIsGroupMode ? args.max_seqlen_k : args.seqlen_k);
+    const auto grid_seqlen =
+        FmhaBwdDQDKDVKernel::kUseQMajorDQ
+            ? (FmhaBwdDQDKDVKernel::kIsGroupMode ? args.max_seqlen_q : args.seqlen_q)
+            : (FmhaBwdDQDKDVKernel::kIsGroupMode ? args.max_seqlen_k : args.seqlen_k);
     dim3 grids = FmhaBwdDQDKDVKernel::GridSize(args.batch, args.nhead_q, grid_seqlen);
     return ck_tile::make_tuple(kargs, grids);
 }
