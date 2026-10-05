@@ -1800,8 +1800,7 @@ struct ConfigEmbeddingTable
 // Build the byte key for an encoded-param vector (exact match, collision-free).
 std::string EmbeddingKey(const std::vector<float>& encoded)
 {
-    return std::string(reinterpret_cast<const char*>(encoded.data()),
-                       encoded.size() * sizeof(float));
+    return {reinterpret_cast<const char*>(encoded.data()), encoded.size() * sizeof(float)};
 }
 
 // Load and cache one {arch}_{solver}_kernel_config_embeddings.bin. A missing file is cached as
