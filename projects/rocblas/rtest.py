@@ -353,9 +353,11 @@ def batch(script, xml):
                         error = run_cmd(var_cmd, True, timeout, test_dir)
                         if (error == 2):
                             print( f'***\n*** Timed out when running: {name}\n***')
+                        # Fold this run in before the next <run> overwrites error.
+                        fail = fail or error
         else:
             error = run_cmd(cmd)
-        fail = fail or error
+            fail = fail or error
 
     if (fail):
         if (cmd == "%XML%"):

@@ -63,26 +63,55 @@ os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 
 # ---------------------------------------------------------------------------
 # Swept parameter grids
+#
+# All axes are imported from the AOT cache grid (kernel_sweep.py CACHE_*) so
+# the two stay in sync: a kernel found fastest by this JIT sweep will always
+# have a cached counterpart that --run-from-cache can offer.
+#
+# gfx1250 extensions (tile=512, warp=16) go beyond what gfx950/942 can use
+# and are defined locally; they are skipped automatically by the spec
+# validators on other targets.
 # ---------------------------------------------------------------------------
 
-_TILE_MN = (16, 32, 64, 128, 256)
-_TILE_MN_GFX1250 = (16, 32, 64, 128, 256, 512)
-_TILE_K = (16, 32, 64)
-_WARP_MN = (1, 2, 4, 8)
-_WARP_MN_GFX1250 = (1, 2, 4, 8, 16)
-_WARP_TILE_MN = (16, 32)
-_PIPELINES = ("mem", "compv3", "compv4", "wavelet", "basic")
-_EPILOGUES = ("default", "cshuffle")
+from benchmarks.common.early_stop import (  # noqa: E402
+    EarlyStop,
+    add_early_stop_arg,
+)
+from benchmarks.common.kernel_sweep import (  # noqa: E402
+    CACHE_EPILOGUES as _EPILOGUES,
+    CACHE_PIPELINES as _PIPELINES,
+    CACHE_TILE_K as _TILE_K,
+    CACHE_TILE_MN as _TILE_MN,
+    CACHE_WARP_MN as _WARP_MN,
+    CACHE_WARP_TILE_MN as _WARP_TILE_MN,
+)
+
+# gfx1250-only: wider CUs allow larger tiles and more warp concurrency.
+_TILE_MN_GFX1250 = _TILE_MN + (512,)
+_WARP_MN_GFX1250 = _WARP_MN + (16,)
 # The async leg overrides spec.pipeline (SchedulePolicy.for_pipeline("async_dma"))
 # and its K-loop branch ignores it, so one canonical value stands for all of
 # _PIPELINES there. "mem" is the neutral one: no scheduling hints.
 _ASYNC_PIPELINE = "mem"
 # Split-K degrees swept when --split-k 0 (auto) is passed for wgrad.
 _SPLIT_K_AUTO = (128, 64, 32, 16, 8, 4, 2, 1)
+# The spec split_k that builds the wgrad split-K kernel. Any value > 1 builds
+# the same kernel (the degree is a kernarg); this one is only its label.
+_SPLIT_K_BUILD = 2
+
+# Data types the benchmark accepts (--dtype) ...
+_DTYPES = ("fp16", "bf16", "fp32")
+# ... and the ones --compile-all builds when --dtype names none.
+_COMPILE_DTYPES = ("fp16", "bf16")
 
 # Group-merge degrees swept for depthwise wgrad. Powers of two only: the
 # merged index math uses shifts and an xor.
 _GROUP_MERGE_SWEEP = (2, 4, 8, 16)
+
+# Scratch replica counts swept when --ws-replicas 0 is passed. Powers of two
+# because the Stage 1 slab pick is `blockIdx.z % R`; 1 is the degenerate
+# no-replication case (one atomic target, Stage 2 collapses to a single load).
+_WS_REPLICAS_SWEEP = (1, 2, 4, 8, 16, 32)
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +143,11 @@ class WgradCombo(NamedTuple):
     # Conv groups merged into one workgroup. Only ever > 1 for depthwise, where
     # it is swept against the split-K instances rather than combined with them.
     group_merge: int = 1
+    # Scratch replica slabs for the two-stage leg. 0 means "leave the instance
+    # default"; the single-stage leg ignores it entirely (it writes dW with
+    # 16-bit atomics and allocates no scratch), which is why the axis is only
+    # expanded on the two-stage work list.
+    ws_replicas: int = 0
 
 
 @dataclass
@@ -144,6 +178,10 @@ class Result:
     # without it two rows differing only in Gm would be indistinguishable in
     # the ranked table and would collide in the prune key.
     group_merge: int = 1
+    # Scratch replica slabs. Two-stage leg only; same indistinguishability
+    # argument as group_merge -- an --ws-replicas sweep prints one row per R
+    # and they must be tellable apart.
+    ws_replicas: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -188,10 +226,11 @@ def _sample_combos(combos: list, frac: float, seed: int) -> list:
 def _verify_kernel(
     *,
     rt,
-    launcher,
-    values: dict,
-    grid: tuple,
-    block: tuple,
+    launcher=None,
+    values: "dict | None" = None,
+    grid: "tuple | None" = None,
+    block: "tuple | None" = None,
+    launch_fn=None,
     out_dev,
     out_t,
     zero_init_out: bool,
@@ -210,6 +249,13 @@ def _verify_kernel(
     zero_init_out:
         Zero the output buffer before launching (required for split-K atomic
         accumulation; not needed for direct-store kernels).
+    launch_fn:
+        Optional callable that performs the full launch sequence in place of
+        the single ``launcher(values, config=...)`` call below — e.g. a
+        multi-kernel deterministic pipeline (two-stage wgrad: Stage1 GEMM →
+        Stage2 reduce). It must clear its own scratch/output buffers, so pass
+        ``zero_init_out=False`` alongside it. When given, ``launcher``,
+        ``values``, ``grid``, and ``block`` are ignored.
     dump_fail:
         Directory path to dump tensors into on first failure, or ``None`` to
         just print the error.
@@ -229,9 +275,12 @@ def _verify_kernel(
     if zero_init_out:
         rt.memset(out_dev, 0, out_t.nbytes)
 
-    from rocke.runtime.launcher import LaunchConfig
+    if launch_fn is not None:
+        launch_fn()
+    else:
+        from rocke.runtime.launcher import LaunchConfig
 
-    launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
+        launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
 
     out_cpu = torch.empty_like(out_t)
     rt.memcpy_d2h(u8(out_cpu), out_dev, out_t.nbytes)
@@ -736,9 +785,9 @@ def main() -> int:
     )
     parser.add_argument(
         "--direction",
-        default="fwd",
+        default=None,
         choices=["fwd", "wgrad", "dgrad"],
-        help="convolution direction: forward (fwd), backward-weight (wgrad), or backward-data (dgrad) (default: fwd)",
+        help="convolution direction: forward (fwd), backward-weight (wgrad), or backward-data (dgrad) (default: fwd). With --compile-all: build only this direction (default: all three).",
     )
     parser.add_argument(
         "--arch",
@@ -747,9 +796,10 @@ def main() -> int:
     )
     parser.add_argument(
         "--dtype",
-        default="fp16",
-        choices=["fp16", "bf16", "fp32"],
-        help="data type (default: fp16)",
+        default=None,
+        choices=_DTYPES,
+        help="data type (default: fp16). --compile-all builds the cache for "
+        "fp16 and bf16 unless --dtype names one.",
     )
     parser.add_argument(
         "--top",
@@ -760,6 +810,7 @@ def main() -> int:
     parser.add_argument(
         "--warmup", type=int, default=3, help="warmup iterations (default: 3)"
     )
+    add_early_stop_arg(parser)
     parser.add_argument(
         "--iters", type=int, default=10, help="timed iterations (default: 10)"
     )
@@ -774,6 +825,15 @@ def main() -> int:
             "libamd_comgr in its own process, bypassing the GIL. "
             "Set to 0 to use os.cpu_count() workers."
         ),
+    )
+    parser.add_argument(
+        "--all-vector-sizes",
+        action="store_true",
+        dest="all_vector_sizes",
+        help="--run-from-cache: run every cached vector-width combination. By "
+        "default only kernels using the widest widths the problem admits are "
+        "run (one combination per configuration; configurations whose tile "
+        "cannot reach those widths are skipped).",
     )
     parser.add_argument(
         "--sample",
@@ -845,9 +905,26 @@ def main() -> int:
         help=(
             "two-stage deterministic wgrad pipeline (Stage1 GEMM → workspace → Stage2 reduce): "
             "auto = enable when C/groups is odd (atomics require even channel count); "
+            "also applies to --run-from-cache; "
             "always = force two-stage for all split_k>1 configs; "
             "never = skip two-stage entirely (default: auto)"
         ),
+    )
+
+    parser.add_argument(
+        "--ws-replicas",
+        type=int,
+        default=-1,
+        dest="ws_replicas",
+        metavar="R",
+        help=(
+            "two-stage scratch replica slabs (Stage 1 picks one with "
+            "blockIdx.z %% R, Stage 2 folds all R): "
+            "-1 = use the instance default (one point), "
+            "0 = sweep all of %(sweep)s, "
+            ">=1 = fixed count. Only affects the two-stage leg; the "
+            "single-stage leg allocates no scratch."
+        ).replace("%(sweep)s", str(list(_WS_REPLICAS_SWEEP))),
     )
 
     parser.add_argument(
@@ -998,7 +1075,65 @@ def main() -> int:
         help="number of conv groups; C and K must each be divisible by groups (default: 1)",
     )
 
+    cache_grp = parser.add_argument_group(
+        "AOT mode",
+        "Ahead-of-time compilation: build shape-generic kernels whose "
+        "problem dimensions are runtime kernel arguments. A single compiled "
+        "HSACO handles any compatible shape.",
+    )
+    cache_grp.add_argument(
+        "--compile-all",
+        action="store_true",
+        dest="compile_all",
+        help="AOT only: compile every valid tile/pipeline/epilogue/vec-size "
+        "variant for the target arch+dtype across --directions and save "
+        "the HSACOs to --cache-dir. Shape-independent: no problem is needed "
+        "and no GPU is used. Parallelised with --jobs.",
+    )
+    cache_grp.add_argument(
+        "--run-from-cache",
+        default=None,
+        metavar="DIR",
+        dest="run_from_cache",
+        help="AOT only: load pre-compiled HSACOs from DIR, keep the ones whose "
+        "vector widths and baked capabilities fit the requested shape, and "
+        "benchmark those. Nothing is compiled.",
+    )
+    cache_grp.add_argument(
+        "--cache-dir",
+        default=None,
+        metavar="DIR",
+        dest="cache_dir",
+        help="Directory for AOT HSACO cache (default: ./kernel_cache).",
+    )
+    cache_grp.add_argument(
+        "--directions",
+        default=None,
+        dest="directions",
+        help="Comma-separated directions to build or run. --compile-all defaults "
+        "to --direction if given, else all three; --run-from-cache defaults to "
+        "each case's own direction.",
+    )
+    cache_grp.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        dest="limit",
+        help="AOT only: stop after building this many kernels (smoke tests).",
+    )
+
     args = parser.parse_args()
+    # --dtype unset: one fp16 run for shape flags, every dtype for --compile-all.
+    args.compile_dtypes = (args.dtype,) if args.dtype is not None else _COMPILE_DTYPES
+    if args.dtype is None:
+        args.dtype = "fp16"
+    # --direction likewise: fwd for shape flags, every direction for
+    # --compile-all unless one is named.
+    args.compile_directions = (
+        (args.direction,) if args.direction is not None else ("fwd", "wgrad", "dgrad")
+    )
+    if args.direction is None:
+        args.direction = "fwd"
 
     # Checked here rather than left to the slice: --csv-top is a bare bound on
     # rocke_results, so 0 would write a headers-only CSV and a negative value
@@ -1162,6 +1297,11 @@ def main() -> int:
     ]
 
     all_rc = 0
+
+    # ---- AOT dispatch (--compile-all or --run-from-cache) ----
+    if args.compile_all or args.run_from_cache:
+        return _cache_dispatch(args, arch, target, cases)
+
     # Maps (shape, dtype, direction) -> best CK tflops/ms/gbps for that case.
     # Populated before the rocke sweep so the CSV join is available immediately.
     ck_best: dict[tuple, dict] = {}
@@ -1469,7 +1609,7 @@ def _build_wgrad_one(args_tuple):
             block_size=warp_m * warp_n * target.wave_size,
         ).split_k
     else:
-        # split_k=0 (runtime) or split_k=1 (no-split): pass through as-is.
+        # split_k=1 (no split) or > 1 (split-K, degree chosen at launch).
         resolved_split_k = split_k
     if resolved_split_k > 1:
         # See the note in _build_wgrad_two_stage_one: groups*split_k must fit
@@ -1536,6 +1676,7 @@ def _build_wgrad_two_stage_one(args_tuple):
         split_k,
     ) = combo[:10]
     group_merge = combo.group_merge
+    ws_replicas = combo.ws_replicas
 
     from rocke.core.arch import ArchTarget
     from kernels.common.conv_implicit_gemm import ConvDataSpec
@@ -1578,9 +1719,6 @@ def _build_wgrad_two_stage_one(args_tuple):
             groups=problem.groups,
             block_size=warp_m * warp_n * target.wave_size,
         ).split_k
-    elif split_k == 0:
-        # Runtime split-K is atomic, not two-stage — skip.
-        return None
     else:
         resolved_split_k = split_k
 
@@ -1617,6 +1755,9 @@ def _build_wgrad_two_stage_one(args_tuple):
         split_k=resolved_split_k,
         group_merge=group_merge,
         two_stage=True,
+        # 0 = leave the instance default rather than restate it here, so the
+        # benchmark does not pin a value the instance may retune.
+        **({} if ws_replicas <= 0 else {"ws_replicas": ws_replicas}),
         # Carried for the same comparability reason as lds_k_outer below: the
         # two legs must differ only in the epilogue, or the side-by-side
         # timings are measuring two different kernels.
@@ -1643,10 +1784,18 @@ def _build_wgrad_two_stage_one(args_tuple):
     except ValueError:
         return None
 
-    s2_spec = WgradReduceSpec(problem=problem, dtype_d=dtype, groups=problem.groups)
+    s2_spec = WgradReduceSpec(
+        problem=problem,
+        dtype_d=dtype,
+        groups=problem.groups,
+        # Must match Stage 1. Folding fewer slabs than Stage 1 wrote silently
+        # drops part of the sum; folding more reads past the scratch.
+        ws_replicas=spec.ws_replicas,
+    )
     # WgradReduceSpec carries no tile configuration -- it is a function of
-    # (problem, dtype_d, groups) alone -- so every combo in a sweep produces a
-    # bit-identical Stage-2 kernel. Memoise it; see _S2_IR_CACHE.
+    # (problem, dtype_d, groups, ws_replicas) alone -- so every combo in a
+    # sweep that shares those produces a bit-identical Stage-2 kernel. Memoise
+    # it; see _S2_IR_CACHE (keyed on the name, which carries ws_replicas).
     _s2_key = (arch, s2_spec.kernel_name())
     s2_kernel = _S2_IR_CACHE.get(_s2_key)
     if s2_kernel is None:
@@ -1753,7 +1902,9 @@ def _build_dgrad_one(args_tuple):
         split_k=resolved_split_k,
         vector_size_a=vec_a,
         vector_size_b=vec_b,
-        vector_size_c=vec_c,
+        # The default epilogue stores scalar; the validator rejects any wider
+        # vector_size_c with it.
+        vector_size_c=1 if epilogue == "default" else vec_c,
     )
     ok, _ = is_valid_dgrad_spec(spec, arch)
     if not ok:
@@ -1983,7 +2134,8 @@ def _run_sweep(
     **_ignored,  # absorbs keys from _common not used by this sweep
 ) -> int:
     import torch
-    from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_abi import conv_args_signature
+    from kernels.common.conv_args import ConvArgs
 
     _u8 = u8
 
@@ -2003,11 +2155,6 @@ def _run_sweep(
             else torch.empty(*shape).uniform_(-1.0, 1.0)
         )
 
-    # Weight is per-group: its channel extent is cpg = C / groups (== C when
-    # groups == 1), matching make_b_descriptor (KYXC/KZYXC with C = cpg), the
-    # grouped NumPy oracle, and torch's F.conv2d weight shape
-    # [K, C/groups, Y, X]. Allocating full C here silently mismatched the kernel
-    # and broke the grouped --verify reference.
     if p.is_3d:
         _A_f32 = _make(p.N, p.Di, p.Hi, p.Wi, p.C)
         _B_f32 = _make(p.K, p.Z, p.Y, p.X, p.cpg)
@@ -2022,7 +2169,11 @@ def _run_sweep(
     bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
     flop = float(p.flops)
 
-    sig = conv_args_signature(dtype)
+    sig = conv_args_signature(dtype, is_3d=p.is_3d)
+    # AOT args: extents, strides and magic constants the kernel would otherwise
+    # have had folded in as compile-time constants.
+    # Built per spec below: the tile is part of the args object because the
+    # kernel bakes it, and the sweep walks specs with different tiles.
 
     _mma_family = "wmma" if target.wave_size == 32 else "mma"
 
@@ -2135,6 +2286,7 @@ def _run_sweep(
                 flush=True,
             )
 
+    _stop = EarlyStop(args.early_stop, args.early_stop_after)
     n_run = 0
     for combo, spec, artifact in pending:
         tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn, pipeline, epilogue = combo
@@ -2163,14 +2315,17 @@ def _run_sweep(
         block = (spec.launch_block_size, 1, 1)
         stream = 0
 
-        values = {
-            "A": A_dev,
-            "B": B_dev,
-            "D": D_dev,
-            "A_bytes": A_t.nbytes,
-            "B_bytes": B_t.nbytes,
-            "D_bytes": D_t.nbytes,
-        }
+        # AOT: the whole problem shape travels as kernargs.
+        values = ConvArgs.from_problem(
+            p, tile_m=spec.tile_m, tile_n=spec.tile_n
+        ).to_launch_values(
+            int(A_dev),
+            int(B_dev),
+            int(D_dev),
+            A_t.nbytes,
+            B_t.nbytes,
+            D_t.nbytes,
+        )
         cfg = LaunchConfig(grid=grid, block=block, stream=stream)
 
         # Verify every kernel against the pre-computed reference (when --verify).
@@ -2198,12 +2353,15 @@ def _run_sweep(
                 return 1, []
             rt.memset(D_dev, 0, D_t.nbytes)
 
-        ms = time_launches(
+        ms = _stop.measure(
             lambda: launcher(values, config=cfg),
             warmup=args.warmup,
             iters=args.iters,
             stream=stream,
         )
+        if ms is None:
+            _stop.report(artifact.kernel_name)
+            continue
         synchronize_and_release(stream)
 
         cur_tflops = (flop / ms) * 1e-9
@@ -2338,7 +2496,8 @@ def _run_wgrad_sweep(
         0 (auto) — sweep all degrees in _SPLIT_K_AUTO.
     """
     import torch
-    from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_abi import conv_args_signature
+    from kernels.common.conv_args import ConvArgs
 
     _u8 = u8
     p = problem
@@ -2349,10 +2508,6 @@ def _run_wgrad_sweep(
         "fp32": torch.float32,
     }
     _torch_dtype = _TORCH_DT[dtype]
-    # dW may be wider than A/B. The packed 16-bit atomic in the split-K epilogue
-    # pairs (c, c+1) inside one filter position and so requires an even
-    # cpg=C/groups; an fp32 dW uses a scalar atomic with no pairing rule, which
-    # is the only way to reach split-K at all on an odd-cpg shape.
     _torch_dtype_d = _TORCH_DT[dtype]
     torch.manual_seed(42)
 
@@ -2363,12 +2518,6 @@ def _run_wgrad_sweep(
             else torch.empty(*shape).uniform_(-1.0, 1.0)
         )
 
-    # dW is the PyTorch grouped-weight layout [K, (Z,) Y, X, C/groups]: the filter
-    # of output channel k spans only its own group's input channels, so the inner
-    # dim is cpg, not the dense C. Using C here over-allocates by a factor of
-    # `groups` AND gives the comparison a different stride from the reference
-    # (wgrad_reference returns [K, Y, X, cpg]), so --verify reported a constant
-    # large rel_err for every grouped shape regardless of kernel correctness.
     _cpg = p.C // p.groups
     if p.is_3d:
         _X_f32 = _make(p.N, p.Di, p.Hi, p.Wi, p.C)
@@ -2385,45 +2534,28 @@ def _run_wgrad_sweep(
     bytes_xfer = float(dY_t.nbytes + X_t.nbytes + dW_t.nbytes)
     flop = float(p.flops)
 
-    sig = conv_args_signature(dtype)
-    # Extended signature for runtime split-K kernels (split_k=0): adds ks i32 arg.
-    sig_rt = sig + [{"name": "ks", "type": "i32", "size_bytes": 4}]
+    # AOT: wgrad-specific signature with runtime problem dims. There is only
+    # one form now -- ks/ks_count are always kernargs -- so the split and
+    # unsplit launches below share it.
+    sig = conv_args_signature(dtype, direction="wgrad", is_3d=p.is_3d)
 
-    # split_k degrees used to build kernel specs:
-    #   0   → compile two variants: split_k=1 (no-atomic) and split_k=0 (runtime-atomic);
-    #          actual degrees from _SPLIT_K_AUTO are swept at launch time via the ks arg.
-    #  -1   → one combo per tile config, degree resolved by CK formula at build time.
-    #  else → single fixed degree baked into the kernel.
-    # --split-k 0 means "sweep every degree". Normally one runtime-degree kernel
-    # (split_k=0) covers them all: the degree rides a kernel argument and the
-    # degrees in _SPLIT_K_AUTO are swept at launch time, which saves recompiling
-    # per degree. The async and Python-unrolled loops cannot use that kernel --
-    # they need a compile-time trip count to lay out the pipeline -- so for those
-    # we compile one kernel per concrete degree instead. Same coverage, more
-    # compiles.
-    #
-    # Decided per combo, not once per run. A run-level predicate that tested only
-    # async_dma silently dropped every pipeline='basic' combo from a --split-k 0
-    # sweep, because 'basic' is runtime-incapable too and its specs then failed
-    # validation and were discarded without a reason string.
+    # Pre-compute wgrad AOT args (dims, strides, magic numbers).
+    # Built per spec below; see the forward sweep.
+
+    # split_k values used to build kernel specs:
+    #   0   → "sweep every degree": compile the non-split kernel (split_k=1) and
+    #          the split-K kernel (_SPLIT_K_BUILD); the split-K kernel takes its
+    #          degree as a kernarg, so it is compiled once and launched at every
+    #          degree of _split_k_degrees() > 1.
+    #  -1   → one combo per tile config, degree resolved by the CK formula.
+    #  else → one kernel launched at exactly that degree.
+    # The split degree never reaches the IR (ks/ks_count are kernargs on every
+    # pipeline, async and unrolled included), so every degree > 1 builds the
+    # same kernel -- compiling one per degree would only repeat the work.
     def _split_k_values_for(pipeline: str, async_dma: bool) -> tuple:
         if args.split_k != 0:
             return (args.split_k,)
-        if async_dma or pipeline == "basic":
-            return _SPLIT_K_AUTO
-        # Fixed degrees first, then the runtime-degree variant.
-        #
-        # Returning only (0,) here used to make --split-k 0 a near no-op for any
-        # shape that takes the two-stage deterministic path: Stage 2 needs a
-        # compile-time slice count, so _build_wgrad_two_stage_one rejects a
-        # runtime degree, and the deterministic leg silently collapsed to just
-        # the basic/async pipelines. An odd-cpg (depthwise) shape therefore swept
-        # thousands of tile combinations against a handful of degrees on two
-        # pipelines. Sweeping the ladder on every pipeline is the only way the
-        # deterministic leg sees the same degrees the atomic leg does; 0 is kept
-        # last because the runtime kernel is a genuinely different variant worth
-        # measuring on the atomic leg.
-        return _SPLIT_K_AUTO + (0,)
+        return (1, _SPLIT_K_BUILD)
 
     # async_dma is a swept axis rather than a flag: unlike lds_k_outer it is not
     # deducible from (arch, spec). It removes the register staging of the tile,
@@ -2439,17 +2571,16 @@ def _run_wgrad_sweep(
     # several kernel names and measure one kernel several times.
     _legs = [(_p, False) for _p in _PIPELINES] + [(_ASYNC_PIPELINE, True)]
 
-    # Depthwise has no usable single-stage instance: split_k == 1 leaves one
-    # workgroup per (merged) group, which cannot fill the device, and split_k
-    # in (0, 1) is the only way to reach the direct-store / runtime-atomic
-    # bodies. The reduction degree is where the parallelism comes from here, so
-    # drop the single-stage degrees rather than compile and time them.
+    # Depthwise has no usable non-split instance: split_k == 1 leaves one
+    # workgroup per (merged) group, which cannot fill the device. The
+    # reduction degree is where the parallelism comes from here, so drop the
+    # non-split kernel rather than compile and time it.
     _depthwise = p.cpg == 1 and p.kpg == 1 and p.groups > 1
 
     def _degrees(pipeline: str, async_dma: bool) -> tuple:
         vals = _split_k_values_for(pipeline, async_dma)
         if _depthwise:
-            vals = tuple(v for v in vals if v not in (0, 1))
+            vals = tuple(v for v in vals if v != 1)
         return vals
 
     combos = [
@@ -2554,8 +2685,28 @@ def _run_wgrad_sweep(
                 f"  C/groups={p.C // p.groups} is odd — enabling two-stage deterministic path.",
                 flush=True,
             )
+        # The replica axis is expanded here rather than in `combos` because
+        # the single-stage leg has no scratch and would just build R identical
+        # kernels under R different names.
+        if args.ws_replicas == 0:
+            _ws_reps = _WS_REPLICAS_SWEEP
+        elif args.ws_replicas < 0:
+            _ws_reps = (0,)  # 0 => leave the instance default
+        else:
+            _ws_reps = (args.ws_replicas,)
+        work_2s = [
+            (combo._replace(ws_replicas=_r), problem, dtype, arch)
+            for combo in combos
+            for _r in _ws_reps
+        ]
+        if len(_ws_reps) > 1:
+            print(
+                f"  sweeping ws_replicas over {list(_ws_reps)} "
+                f"({len(work_2s)} two-stage configs).",
+                flush=True,
+            )
         pending_2s = _build_ir_parallel(
-            work, _build_and_compile_wgrad_two_stage_one, jobs
+            work_2s, _build_and_compile_wgrad_two_stage_one, jobs
         )
         pending_2s.sort(key=lambda r: (r[0][:8], -r[2]))
         n_built += len(pending_2s)
@@ -2607,6 +2758,7 @@ def _run_wgrad_sweep(
     # Set of config keys that have been pruned (skip remaining split-K degrees).
     _pruned_configs: set = set()
 
+    _stop = EarlyStop(args.early_stop, args.early_stop_after)
     n_run = 0
     for combo, spec, resolved_split_k, artifact in pending:
         (
@@ -2623,7 +2775,9 @@ def _run_wgrad_sweep(
         ) = combo[:10]
         _gm = combo[10] if len(combo) > 10 else 1
         warp_tile_k = spec.warp_tile_k
-        _is_rt = resolved_split_k == 0  # runtime split-K kernel
+        # A split-K kernel under --split-k 0 is timed at every usable degree;
+        # otherwise at the one degree its combo asked for.
+        _sweep = args.split_k == 0 and resolved_split_k > 1
 
         if _do_prune:
             _cfg_key = (
@@ -2641,7 +2795,7 @@ def _run_wgrad_sweep(
                 n_skipped += 1
                 continue
 
-        _kernel_sig = sig_rt if _is_rt else sig
+        _kernel_sig = sig
         try:
             launcher = KernelLauncher(
                 hsaco=artifact.hsaco,
@@ -2661,42 +2815,36 @@ def _run_wgrad_sweep(
             )
             continue
 
-        # For runtime kernels iterate over _SPLIT_K_AUTO degrees at launch time;
-        # for fixed kernels there is exactly one degree (resolved_split_k itself).
-        _rt_degrees = _SPLIT_K_AUTO if _is_rt else (resolved_split_k,)
+        _launch_degrees = (
+            _split_k_degrees(p, spec.tile_m, spec.tile_n, spec.tile_k)
+            if _sweep
+            else (resolved_split_k,)
+        )
 
-        for _i, _launch_sk in enumerate(_rt_degrees):
-            if _do_prune and _is_rt and _cfg_key in _pruned_configs:
-                n_skipped += len(_rt_degrees) - _i
+        for _i, _launch_sk in enumerate(_launch_degrees):
+            if _do_prune and _sweep and _cfg_key in _pruned_configs:
+                n_skipped += len(_launch_degrees) - _i
                 break
             block = (spec.block_size, 1, 1)
             stream = 0
 
-            if _is_rt:
-                wg_K_padded = spec.wg_K_padded(split_k=_launch_sk)
-                _ks_val = wg_K_padded // _launch_sk
-                grid = _grid_for_wgrad_spec(spec, _launch_sk)
-                values = {
-                    "A": dY_dev,
-                    "B": X_dev,
-                    "D": dW_dev,
-                    "A_bytes": dY_t.nbytes,
-                    "B_bytes": X_t.nbytes,
-                    "D_bytes": dW_t.nbytes,
-                    "ks": _ks_val,
-                }
-                _is_atomic_launch = True
-            else:
-                grid = _grid_for_wgrad_spec(spec, _launch_sk)
-                values = {
-                    "A": dY_dev,
-                    "B": X_dev,
-                    "D": dW_dev,
-                    "A_bytes": dY_t.nbytes,
-                    "B_bytes": X_t.nbytes,
-                    "D_bytes": dW_t.nbytes,
-                }
-                _is_atomic_launch = _launch_sk > 1
+            grid = _grid_for_wgrad_spec(spec, _launch_sk)
+            values = ConvArgs.from_problem(
+                p,
+                direction="wgrad",
+                tile_m=spec.tile_m,
+                tile_n=spec.tile_n,
+                tile_k=spec.tile_k,
+            ).to_launch_values(
+                int(dY_dev),
+                int(X_dev),
+                int(dW_dev),
+                dY_t.nbytes,
+                X_t.nbytes,
+                dW_t.nbytes,
+                split_k=_launch_sk,
+            )
+            _is_atomic_launch = _launch_sk > 1
 
             cfg = LaunchConfig(grid=grid, block=block, stream=stream)
 
@@ -2738,12 +2886,15 @@ def _run_wgrad_sweep(
                 _cfg_snap = cfg
                 timed_fn = lambda _v=_vals_snap, _c=_cfg_snap: launcher(_v, config=_c)
 
-            ms = time_launches(
+            ms = _stop.measure(
                 timed_fn,
                 warmup=args.warmup,
                 iters=args.iters,
                 stream=stream,
             )
+            if ms is None:
+                _stop.report(f"{artifact.kernel_name} spk{_launch_sk}")
+                continue
             synchronize_and_release(stream)
 
             cur_tflops = (flop / ms) * 1e-9
@@ -2777,7 +2928,7 @@ def _run_wgrad_sweep(
                 )
             )
 
-            _spk_label = f"spk{_launch_sk}rt" if _is_rt else f"spk{_launch_sk}"
+            _spk_label = f"spk{_launch_sk}"
             prune_marker = ""
             if _do_prune:
                 _cfg_key = (
@@ -2828,6 +2979,7 @@ def _run_wgrad_sweep(
         )
         from kernels.common.conv_implicit_gemm_wgrad_two_stage import (
             _wgrad_stage1_signature,
+            wgrad_stage1_launch_values,
             wgrad_two_stage_workspace_nbytes,
         )
         from kernels.common.conv_wgrad_workspace_reduce import (
@@ -2870,11 +3022,12 @@ def _run_wgrad_sweep(
                 ws_dev = rt2.alloc(ws_nbytes)
                 ws_nbytes_cur = ws_nbytes
 
-            s1_grid = _grid_for_wgrad_spec(spec, resolved_split_k)
             s2_spec = WgradReduceSpec(
                 problem=spec.problem,
                 dtype_d=spec.data.dtype_d,
                 groups=spec.problem.groups,
+                # Must match Stage 1 or the fold covers the wrong slab count.
+                ws_replicas=spec.ws_replicas,
             )
             s2_grid = wgrad_reduce_grid(s2_spec)
             s2_block = (s2_spec.tile_m * s2_spec.tile_n, 1, 1)
@@ -2903,89 +3056,134 @@ def _run_wgrad_sweep(
                 )
                 continue
 
-            s1_values = {
-                "A": dY_dev2,
-                "B": X_dev2,
-                "D": dW_dev2,
-                "A_bytes": dY_t.nbytes,
-                "B_bytes": X_t.nbytes,
-                "D_bytes": dW_t.nbytes,
-                "ws_ptr": ws_dev,
-                "ws_bytes": ws_nbytes,
-            }
-            s2_values = {
-                "ws_ptr": ws_dev,
-                "dw_ptr": dW_dev2,
-                "wg_M": spec.wg_M,
-                "wg_N": spec.wg_N,
-                "split_k": resolved_split_k,
-                "ws_bytes": ws_nbytes,
-                "dw_bytes": dW_t.nbytes,
-                "groups": spec.problem.groups,
-            }
-            s1_cfg = LaunchConfig(grid=s1_grid, block=(spec.block_size, 1, 1), stream=0)
-            s2_cfg = LaunchConfig(grid=s2_grid, block=s2_block, stream=0)
-
-            def _launch_two_stage(
-                _s1=s1_launcher,
-                _s2=s2_launcher,
-                _v1=s1_values,
-                _v2=s2_values,
-                _c1=s1_cfg,
-                _c2=s2_cfg,
-            ):
-                rt2.memset(dW_dev2, 0, dW_t.nbytes)
-                _s1(_v1, config=_c1)
-                _s2(_v2, config=_c2)
-
-            ms = time_launches(
-                _launch_two_stage,
-                warmup=args.warmup,
-                iters=args.iters,
-                stream=0,
+            # Under --split-k 0 the one Stage 1 binary is timed at every usable
+            # degree (the degree is a kernarg); otherwise at its combo's degree.
+            _launch_degrees_2s = (
+                _split_k_degrees(p, spec.tile_m, spec.tile_n, spec.tile_k)
+                if args.split_k == 0
+                else (resolved_split_k,)
             )
-            synchronize_and_release(0)
-
-            cur_tflops = (flop / ms) * 1e-9
-            cur_gbps = (bytes_xfer / ms) * 1e-6
-            n_run += 1
-
-            _va, _vb, _vc = WgradConvSpec.default_vector_sizes(
-                p.C, p.K, dtype, split_k=resolved_split_k
-            )
-            results.append(
-                Result(
-                    kernel_name=s1_art.kernel_name,
-                    tile_m=tile_m,
-                    tile_n=tile_n,
-                    tile_k=tile_k,
-                    warp_m=warp_m,
-                    warp_n=warp_n,
-                    warp_tile_mn=warp_tile_mn,
-                    warp_tile_k=warp_tile_k,
-                    pipeline=pipeline,
-                    epilogue=epilogue,
-                    split_k=resolved_split_k,
-                    ms=ms,
-                    tflops=cur_tflops,
-                    gbps=cur_gbps,
-                    vec_a=_va,
-                    vec_b=_vb,
-                    vec_c=_vc,
-                    two_stage=True,
-                    group_merge=_gm,
+            for _launch_sk in _launch_degrees_2s:
+                s1_grid = _grid_for_wgrad_spec(spec, _launch_sk)
+                s1_values = wgrad_stage1_launch_values(
+                    spec,
+                    dY_ptr=int(dY_dev2),
+                    X_ptr=int(X_dev2),
+                    dW_ptr=int(dW_dev2),
+                    dY_bytes=dY_t.nbytes,
+                    X_bytes=X_t.nbytes,
+                    dW_bytes=dW_t.nbytes,
+                    ws_ptr=int(ws_dev),
+                    ws_bytes=ws_nbytes,
                 )
-            )
-            print(
-                f"[{n_run:4d}] tile={tile_m}x{tile_n}x{tile_k} "
-                f"warp={warp_m}x{warp_n} "
-                f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
-                f"{pipeline}/{epilogue:9s} spk{resolved_split_k}2s  "
-                f"{f'gm{_gm} ' if _gm > 1 else '    '}"
-                f"vec={_va}/{_vb}/{_vc} "
-                f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
-                flush=True,
-            )
+                s2_values = {
+                    "ws_ptr": ws_dev,
+                    "dw_ptr": dW_dev2,
+                    "wg_M": spec.wg_M,
+                    "wg_N": spec.wg_N,
+                    "ws_bytes": ws_nbytes,
+                    "dw_bytes": dW_t.nbytes,
+                    "groups": spec.problem.groups,
+                }
+                s1_cfg = LaunchConfig(
+                    grid=s1_grid, block=(spec.block_size, 1, 1), stream=0
+                )
+                s2_cfg = LaunchConfig(grid=s2_grid, block=s2_block, stream=0)
+
+                def _launch_two_stage(
+                    _s1=s1_launcher,
+                    _s2=s2_launcher,
+                    _v1=s1_values,
+                    _v2=s2_values,
+                    _c1=s1_cfg,
+                    _c2=s2_cfg,
+                    _ws=ws_dev,
+                    _ws_nb=ws_nbytes,
+                ):
+                    # Stage 1 accumulates into the scratch, so it has to start from
+                    # zero; dW is a plain store target for Stage 2 and needs no
+                    # clearing, but zeroing it keeps a failed launch visible.
+                    rt2.memset(_ws, 0, _ws_nb)
+                    rt2.memset(dW_dev2, 0, dW_t.nbytes)
+                    _s1(_v1, config=_c1)
+                    _s2(_v2, config=_c2)
+
+                if args.verify or args.dump_fail:
+                    stopped, _ = _verify_kernel(
+                        rt=rt2,
+                        launch_fn=_launch_two_stage,
+                        out_dev=dW_dev2,
+                        out_t=dW_t,
+                        zero_init_out=False,
+                        ref_out=ref_out,
+                        kernel_name=s1_art.kernel_name,
+                        dump_fail=args.dump_fail,
+                        extra_tensors={"dY": dY_t, "X": X_t},
+                        u8=_u8,
+                        arch=arch,
+                        compute_dtype=dtype,
+                    )
+                    if stopped:
+                        if ws_dev is not None:
+                            rt2.free(ws_dev)
+                        rt2.free(dY_dev2)
+                        rt2.free(X_dev2)
+                        rt2.free(dW_dev2)
+                        return 1, []
+
+                ms = _stop.measure(
+                    _launch_two_stage,
+                    warmup=args.warmup,
+                    iters=args.iters,
+                    stream=0,
+                )
+                if ms is None:
+                    _stop.report(f"{s1_art.kernel_name} spk{_launch_sk}")
+                    continue
+                synchronize_and_release(0)
+
+                cur_tflops = (flop / ms) * 1e-9
+                cur_gbps = (bytes_xfer / ms) * 1e-6
+                n_run += 1
+
+                _va, _vb, _vc = WgradConvSpec.default_vector_sizes(
+                    p.C, p.K, dtype, split_k=_launch_sk
+                )
+                results.append(
+                    Result(
+                        kernel_name=s1_art.kernel_name,
+                        tile_m=tile_m,
+                        tile_n=tile_n,
+                        tile_k=tile_k,
+                        warp_m=warp_m,
+                        warp_n=warp_n,
+                        warp_tile_mn=warp_tile_mn,
+                        warp_tile_k=warp_tile_k,
+                        pipeline=pipeline,
+                        epilogue=epilogue,
+                        split_k=_launch_sk,
+                        ms=ms,
+                        tflops=cur_tflops,
+                        gbps=cur_gbps,
+                        vec_a=_va,
+                        vec_b=_vb,
+                        vec_c=_vc,
+                        two_stage=True,
+                        group_merge=_gm,
+                        ws_replicas=spec.ws_replicas,
+                    )
+                )
+                print(
+                    f"[{n_run:4d}] tile={tile_m}x{tile_n}x{tile_k} "
+                    f"warp={warp_m}x{warp_n} "
+                    f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
+                    f"{pipeline}/{epilogue:9s} spk{_launch_sk}2s  "
+                    f"{f'gm{_gm} ' if _gm > 1 else '    '}"
+                    f"wsr{spec.ws_replicas} "
+                    f"vec={_va}/{_vb}/{_vc} "
+                    f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
+                    flush=True,
+                )
 
         if ws_dev is not None:
             rt2.free(ws_dev)
@@ -3012,6 +3210,8 @@ def _run_wgrad_sweep(
         mode = f"spk{r.split_k}2s" if r.two_stage else f"spk{r.split_k}"
         if r.group_merge > 1:
             mode += f" gm{r.group_merge}"
+        if r.ws_replicas > 0:
+            mode += f" wsr{r.ws_replicas}"
         cfg_str = (
             f"tile={r.tile_m}x{r.tile_n}x{r.tile_k} "
             f"warp={r.warp_m}x{r.warp_n} "
@@ -3070,7 +3270,8 @@ def _run_dgrad_sweep(
     """
     import ctypes
     import torch
-    from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_abi import conv_args_signature
+    from kernels.common.conv_args import ConvArgs
 
     _u8 = u8
     p = problem
@@ -3090,9 +3291,6 @@ def _run_dgrad_sweep(
         )
 
     _dY_f32 = _make(p.N, p.Ho, p.Wo, p.K)
-    # Weight is stored per-group packed: KYXC with channel extent cpg = C/groups
-    # (== C when groups == 1), matching the dgrad w_descriptor and the forward
-    # make_b_descriptor.  dY/dX carry full K/C (the group rides the k_out/c index).
     _W_f32 = _make(p.K, p.Y, p.X, p.cpg)
     dX_t = torch.empty(p.N, p.Hi, p.Wi, p.C, dtype=_torch_dtype)
 
@@ -3102,14 +3300,15 @@ def _run_dgrad_sweep(
     bytes_xfer = float(dY_t.nbytes + W_t.nbytes + dX_t.nbytes)
     flop = float(p.flops)
 
-    # Per-group channel runs (cpg/kpg) bound the vector widths for grouped dgrad
-    # so loads/stores never straddle a group boundary (cpg==C, kpg==K ungrouped).
     vec_a, vec_b, vec_c = DgradConvSpec.default_vector_sizes(p.cpg, p.kpg, dtype)
-    base_sig = conv_args_signature(dtype)
-    ext_sig = base_sig + [
-        {"name": "sub_gemm_buf", "type": "ptr<i32, global>", "size_bytes": 8},
-        {"name": "num_sub_gemms", "type": "i32", "size_bytes": 4},
-    ]
+    # AOT: dgrad signature with runtime dims + sub_gemm tilde buffer.
+    # The dgrad ABI already carries the tilde record buffer; there is no
+    # separate "extended" form.
+    base_sig = conv_args_signature(dtype, direction="dgrad")
+    ext_sig = base_sig
+
+    # Pre-compute dgrad AOT args.
+    # Built per spec below; see the forward sweep.
 
     split_k_values = _SPLIT_K_AUTO if args.split_k == 0 else (args.split_k,)
 
@@ -3201,6 +3400,7 @@ def _run_dgrad_sweep(
                 flush=True,
             )
 
+    _stop = EarlyStop(args.early_stop, args.early_stop_after)
     n_measured = 0
     for _combo, spec, resolved_split_k, artifact in pending:
         sub_gemms = spec.compute_sub_gemms()
@@ -3217,16 +3417,20 @@ def _run_dgrad_sweep(
         # sub-GEMM geometry is channel-independent so flat_tiles is per-group.
         _groups = max(int(spec.problem.groups), 1)
         grid = (flat_tiles, _groups, resolved_split_k)
-        values = {
-            "A": dY_dev,
-            "B": W_dev,
-            "D": dX_dev,
-            "A_bytes": dY_t.nbytes,
-            "B_bytes": W_t.nbytes,
-            "D_bytes": dX_t.nbytes,
-            "sub_gemm_buf": sgbuf_dev,
-            "num_sub_gemms": len(sub_gemms),
-        }
+        # AOT: the whole problem shape travels as kernargs, including the
+        # tilde record buffer the CTA dispatch search reads.
+        values = ConvArgs.from_problem(
+            p, direction="dgrad", tile_m=spec.tile_m, tile_n=spec.tile_n
+        ).to_launch_values(
+            int(dY_dev),
+            int(W_dev),
+            int(dX_dev),
+            dY_t.nbytes,
+            W_t.nbytes,
+            dX_t.nbytes,
+            sub_gemm_buf=int(sgbuf_dev),
+            num_sub_gemms=len(sub_gemms),
+        )
 
         launcher = KernelLauncher(
             hsaco=artifact.hsaco,
@@ -3273,9 +3477,12 @@ def _run_dgrad_sweep(
         else:
             timed_fn = lambda: launcher(values, config=cfg)
 
-        ms = time_launches(
+        ms = _stop.measure(
             timed_fn, warmup=args.warmup, iters=args.iters, stream=stream
         )
+        if ms is None:
+            _stop.report(artifact.kernel_name)
+            continue
         synchronize_and_release(stream)
 
         cur_tflops = (flop / ms) * 1e-9
@@ -3352,6 +3559,668 @@ def _run_dgrad_sweep(
     best = results[0]
     print(f"\nBest: {best.tflops:.1f} TFLOPS -- {best.kernel_name}")
     return 0, results
+
+
+# ---------------------------------------------------------------------------
+# AOT dispatch: --compile-all and --run-from-cache
+# ---------------------------------------------------------------------------
+
+
+def _cache_dispatch(args, arch, target, cases) -> int:
+    """Handle the AOT-only benchmark modes.
+
+    ``--compile-all`` fills the cache and never touches a GPU; the artifacts it
+    writes are shape-generic, so the same cache serves every later run.
+    ``--run-from-cache`` takes the parsed cases, asks the cache which kernels
+    can run each one, and benchmarks those.
+    """
+    from pathlib import Path
+
+    from benchmarks.common.kernel_sweep import compile_all, describe_cache
+    from benchmarks.common.kernel_cache import KernelCache
+
+    directions = (
+        tuple(d.strip() for d in args.directions.split(",") if d.strip())
+        if getattr(args, "directions", None)
+        else None
+    )
+    for d in directions or ():
+        if d not in ("fwd", "wgrad", "dgrad"):
+            print(f"error: --directions: unknown direction {d!r}", file=sys.stderr)
+            return 2
+
+    if args.compile_all:
+        cache_dir = Path(args.cache_dir) if args.cache_dir else Path("./kernel_cache")
+        rc = 0
+        for dtype in args.compile_dtypes:
+            rc = max(
+                rc,
+                compile_all(
+                    cache=KernelCache(cache_dir, arch),
+                    arch=arch,
+                    dtype=dtype,
+                    target=target,
+                    directions=directions or args.compile_directions,
+                    jobs=max(1, int(args.jobs or 1)),
+                    limit=args.limit,
+                ),
+            )
+        return rc
+
+    cache = KernelCache(Path(args.run_from_cache), arch)
+    rc = describe_cache(cache)
+    if rc:
+        return rc
+    return _run_from_cache(args, arch, target, cases, cache, directions)
+
+
+def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
+    """Benchmark every cached kernel that can run each requested case.
+
+    No cached kernel is compiled here: the whole point of the AOT split is
+    that a compiled kernel is shape-generic, so picking one for a shape is a
+    filter, not a build. The one exception is the two-stage wgrad Stage 2
+    reduce, a small shape-generic kernel compiled once per dW dtype.
+    """
+    import ctypes
+
+    import torch
+
+    from rocke.runtime import synchronize_and_release
+    from rocke.runtime.hip_module import HipError, Runtime
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+    from benchmarks.common.kernel_sweep import _launch_values_for
+
+    _TORCH_DT = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}
+
+    def _u8(t):
+        return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
+
+    overall_rc = 0
+    # Stage 2 reduce launchers for two-stage wgrad, compiled once per dW dtype.
+    stage2_kernels: dict = {}
+    for case_idx, case in enumerate(cases, 1):
+        problem = case[0]
+        case_dtype = case[1] if len(case) > 1 else args.dtype
+        case_direction = case[2] if len(case) > 2 else args.direction
+
+        for direction in directions or (case_direction,):
+            candidates = [
+                (ident, path, meta)
+                for ident, path, meta in cache.compatible(problem, direction=direction)
+                if ident.dtype_a == case_dtype
+            ]
+            if not candidates:
+                _, why = next(
+                    (
+                        (i, cache.supports_problem(i, problem)[1])
+                        for i, _ in cache.list_all(direction)
+                    ),
+                    (None, "cache has no kernels for this direction"),
+                )
+                print(
+                    f"Case {case_idx} {problem.short()} {case_dtype} {direction}: "
+                    f"no compatible kernel ({why})",
+                    flush=True,
+                )
+                continue
+
+            if direction == "wgrad" and args.two_stage != "always":
+                # Same rule as the JIT sweep's --two-stage: by default the
+                # two-stage (scratch + reduce) kernels only run when C/groups
+                # is odd -- the case the packed-atomic epilogue cannot cover;
+                # "never" drops them outright.
+                odd = (problem.C // max(1, problem.groups)) % 2 != 0
+                if args.two_stage == "never" or not odd:
+                    candidates = [c for c in candidates if not c[0].two_stage]
+                if not candidates:
+                    print(
+                        f"Case {case_idx} {problem.short()} {case_dtype} wgrad: "
+                        f"no compatible kernel ("
+                        + (
+                            "two-stage disabled by --two-stage never"
+                            if args.two_stage == "never"
+                            else "two-stage kernels only run for odd C/groups; "
+                            "see --two-stage"
+                        )
+                        + ")",
+                        flush=True,
+                    )
+                    continue
+            n_compatible = len(candidates)
+            n_vec_pruned = 0
+            if not args.all_vector_sizes:
+                kept = _widest_vector_sizes(candidates)
+                n_vec_pruned = len(candidates) - len(kept)
+                candidates = kept
+            if args.sample is not None:
+                # Same sampling as the JIT sweep: a fixed-seed subset, so a
+                # cache holding tens of thousands of kernels for one shape can
+                # be surveyed in minutes rather than hours.
+                candidates = _sample_combos(
+                    candidates, args.sample, args.seed + case_idx
+                )
+            print(
+                f"\nCase {case_idx}: {problem.short()} {case_dtype} {direction} — "
+                f"{n_compatible} compatible kernels"
+                + (
+                    f", {n_compatible - n_vec_pruned} with the widest vector "
+                    f"sizes (--all-vector-sizes keeps them all)"
+                    if n_vec_pruned
+                    else ""
+                )
+                + (
+                    f", sampled {len(candidates)} (--sample {args.sample})"
+                    if args.sample is not None
+                    else ""
+                ),
+                flush=True,
+            )
+
+            torch_dt = _TORCH_DT[case_dtype]
+            torch.manual_seed(42)
+            # Operand shapes follow the direction: fwd contracts A x B -> D,
+            # wgrad contracts dY x X -> dW, dgrad contracts dY x W -> dX. The
+            # three tensors always bind to the same three kernarg slots, so
+            # only their extents differ.
+            nhwc = (problem.N, problem.Hi, problem.Wi, problem.C)
+            nhwk = (problem.N, problem.Ho, problem.Wo, problem.K)
+            krsc = (problem.K, problem.Y, problem.X, problem.cpg)
+            if direction == "wgrad":
+                a_shape, b_shape, d_shape = nhwk, nhwc, krsc
+            elif direction == "dgrad":
+                a_shape, b_shape, d_shape = nhwk, krsc, nhwc
+            else:
+                a_shape, b_shape, d_shape = nhwc, krsc, nhwk
+
+            A_t = torch.empty(*a_shape, dtype=torch_dt).uniform_(-1, 1)
+            B_t = torch.empty(*b_shape, dtype=torch_dt).uniform_(-1, 1)
+            D_t = torch.empty(*d_shape, dtype=torch_dt)
+
+            rt = Runtime()
+            A_dev = rt.alloc(A_t.nbytes)
+            B_dev = rt.alloc(B_t.nbytes)
+            D_dev = rt.alloc(D_t.nbytes)
+            rt.memcpy_h2d(A_dev, _u8(A_t), A_t.nbytes)
+            rt.memcpy_h2d(B_dev, _u8(B_t), B_t.nbytes)
+
+            flop = float(problem.flops)
+            bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
+            results = []
+            # --verify / --dump-fail: one reference per case and direction;
+            # every cached kernel is checked against it before it is timed.
+            ref_out = (
+                _cache_reference(direction, problem, A_t, B_t, torch_dt, arch)
+                if args.verify or args.dump_fail
+                else None
+            )
+            _stop = EarlyStop(args.early_stop, args.early_stop_after)
+            n_failed = 0
+
+            n_cand = len(candidates)
+            for cand_idx, (ident, hsaco_path, meta) in enumerate(candidates, 1):
+                kernel_name = meta.get("kernel_name")
+                if not kernel_name:
+                    print(
+                        f"  [skip] {ident.short_label()}: cache entry has no "
+                        f"kernel_name (rebuild the cache)",
+                        flush=True,
+                    )
+                    continue
+                try:
+                    launcher = KernelLauncher(
+                        hsaco=hsaco_path.read_bytes(),
+                        kernel_name=kernel_name,
+                        signature=_signature_for_identity(ident, case_dtype),
+                    )
+                except HipError as e:
+                    print(f"  [skip] {ident.short_label()}: {e}", flush=True)
+                    continue
+
+                # A split-K wgrad binary is one kernel for every degree > 1
+                # (the degree is a kernarg), so it is timed at each degree it
+                # can use.
+                if direction == "wgrad" and ident.split_k > 1:
+                    degrees = _runtime_split_ks(problem, ident)
+                    if not degrees:
+                        print(
+                            f"  [skip] {ident.short_label()}: no split-K degree > 1 "
+                            f"fits this problem",
+                            flush=True,
+                        )
+                        continue
+                else:
+                    degrees = (None,)
+
+                for split_k in degrees:
+                    try:
+                        extras, grid = _extras_and_grid(
+                            direction, problem, ident, rt, case_dtype, split_k=split_k
+                        )
+                    except ValueError as e:
+                        print(f"  [skip] {ident.short_label()}: {e}", flush=True)
+                        continue
+                    values = _launch_values_for(
+                        direction,
+                        problem,
+                        ident,
+                        (A_dev, B_dev, D_dev),
+                        (A_t.nbytes, B_t.nbytes, D_t.nbytes),
+                        extras,
+                    )
+                    cfg = LaunchConfig(
+                        grid=grid,
+                        block=(
+                            meta.get("block_size")
+                            or (ident.warp_m * ident.warp_n * ident.wave_size),
+                            1,
+                            1,
+                        ),
+                        stream=0,
+                    )
+                    run = lambda: launcher(values, config=cfg)  # noqa: E731
+                    if direction == "wgrad" and ident.two_stage:
+                        # Two-stage is three steps and all of them are the
+                        # algorithm's cost: zero the scratch (Stage 1
+                        # accumulates), Stage 1, then the fold/cast into dW.
+                        from kernels.common.conv_wgrad_workspace_reduce import (
+                            wgrad_reduce_grid,
+                        )
+
+                        s2_launcher, s2_spec = _stage2_reduce(
+                            problem,
+                            ident.dtype_d,
+                            arch,
+                            stage2_kernels,
+                            KernelLauncher,
+                            _ws_replicas_of(ident),
+                        )
+                        s2_values = {
+                            "ws_ptr": extras["ws_ptr"],
+                            "dw_ptr": D_dev,
+                            "wg_M": s2_spec.wg_M,
+                            "wg_N": s2_spec.wg_N,
+                            "ws_bytes": extras["ws_bytes"],
+                            "dw_bytes": D_t.nbytes,
+                            "groups": problem.groups,
+                        }
+                        s2_cfg = LaunchConfig(
+                            grid=wgrad_reduce_grid(s2_spec),
+                            block=(s2_spec.block_size, 1, 1),
+                            stream=0,
+                        )
+
+                        def run(
+                            values=values,
+                            cfg=cfg,
+                            extras=extras,
+                            s2_launcher=s2_launcher,
+                            s2_values=s2_values,
+                            s2_cfg=s2_cfg,
+                        ):
+                            rt.memset(extras["ws_ptr"], 0, extras["ws_bytes"])
+                            launcher(values, config=cfg)
+                            s2_launcher(s2_values, config=s2_cfg)
+
+                    label = ident.short_label()
+                    if split_k is not None:
+                        label += f" @split_k={split_k}"
+                    if ref_out is not None:
+                        # The output is zeroed first: the atomic split-K
+                        # epilogues accumulate into it. A kernel that fails is
+                        # reported and not timed, so it can never rank.
+                        stopped, passed = _verify_kernel(
+                            rt=rt,
+                            launch_fn=run,
+                            out_dev=D_dev,
+                            out_t=D_t,
+                            zero_init_out=True,
+                            ref_out=ref_out,
+                            kernel_name=label,
+                            dump_fail=args.dump_fail,
+                            u8=_u8,
+                            arch=arch,
+                            compute_dtype=case_dtype,
+                        )
+                        if stopped:
+                            return 1
+                        if not passed:
+                            n_failed += 1
+                            overall_rc = 1
+                            continue
+                    try:
+                        ms = _stop.measure(
+                            run,
+                            warmup=args.warmup,
+                            iters=args.iters,
+                            stream=0,
+                        )
+                    except (HipError, RuntimeError) as e:
+                        print(f"  [skip] {ident.short_label()}: {e}", flush=True)
+                        continue
+                    if ms is None:
+                        _stop.report(label)
+                        continue
+                    results.append(
+                        (flop / (ms * 1e9), bytes_xfer / (ms * 1e6), ms, label)
+                    )
+                    # One line per measured launch, as the JIT sweep prints,
+                    # so a long run shows its progress and partial results.
+                    print(
+                        f"  [{cand_idx:>{len(str(n_cand))}}/{n_cand}] "
+                        f"{results[-1][0]:7.1f} TFLOPS  {ms:8.3f} ms  {label}",
+                        flush=True,
+                    )
+
+            synchronize_and_release()
+            if ref_out is not None:
+                print(
+                    f"  verify: {n_failed} of the launched kernels failed",
+                    flush=True,
+                )
+            if not results:
+                print("  No successful launches.", flush=True)
+                overall_rc = 1
+                continue
+
+            results.sort(key=lambda r: -r[0])
+            top = min(args.top, len(results))
+            print(f"  Top-{top}:", flush=True)
+            for rank, (tflops, gbps, ms, label) in enumerate(results[:top], 1):
+                print(
+                    f"  {rank:>4}  {tflops:>7.1f} TFLOPS  {gbps:>7.1f} GB/s  "
+                    f"{ms:>8.3f} ms  {label}",
+                    flush=True,
+                )
+
+    return overall_rc
+
+
+def _widest_vector_sizes(candidates):
+    """Keep only the kernels that use the widest vector widths the problem admits.
+
+    The cache holds a binary per (vector_size_a, vector_size_b,
+    vector_size_c) of every configuration, so a problem whose channel runs
+    allow 8-wide access is offered the 8-, 4-, 2- and 1-wide copies of each
+    kernel -- and tiles too small for 8-wide loads (too few elements per
+    thread) only in narrower copies. Narrower access does not win, so only the
+    kernels at the problem's widest combination are run.
+
+    "Widest" is taken per kernel kind -- direction, epilogue, split-K mode and
+    group merging -- because the kind caps some widths regardless of the
+    problem: the default epilogue stores scalar (c = 1), and a group-merged
+    kernel derives its widths in the builder (recorded as 0). Default-epilogue
+    kernels are dropped altogether where a kernel of the same kind can store
+    wider than 1 for this problem.
+    ``supports_problem`` has already dropped widths the problem cannot take,
+    so the widest combination present in a kind is the problem's maximum;
+    configurations that cannot reach it are dropped, and every configuration
+    left runs exactly one combination. Widest = greatest (sum, a, b, c).
+    """
+
+    def kind(ident):
+        return (
+            ident.direction,
+            ident.epilogue,
+            ident.split_k,
+            ident.two_stage,
+            ident.group_merge,
+        )
+
+    def rank(ident):
+        return (
+            ident.vector_size_a + ident.vector_size_b + ident.vector_size_c,
+            ident.vector_size_a,
+            ident.vector_size_b,
+            ident.vector_size_c,
+        )
+
+    # The default epilogue stores scalar (c = 1) straight from the MMA
+    # accumulators. Where the same kind of kernel can store wider -- a
+    # cshuffle variant reaching c > 1 for this problem -- the default-epilogue
+    # kernels are dropped. Where nothing stores wider (two-stage wgrad is
+    # default-only, or the problem's output run is odd) they stay.
+    def store_kind(ident):
+        return (ident.direction, ident.split_k, ident.two_stage, ident.group_merge)
+
+    widest_store = {}
+    for ident, *_ in candidates:
+        k = store_kind(ident)
+        widest_store[k] = max(widest_store.get(k, 0), ident.vector_size_c)
+    candidates = [
+        c
+        for c in candidates
+        if not (c[0].epilogue == "default" and widest_store[store_kind(c[0])] > 1)
+    ]
+
+    best = {}
+    for ident, *_ in candidates:
+        k = kind(ident)
+        if k not in best or rank(ident) > best[k]:
+            best[k] = rank(ident)
+    return [c for c in candidates if rank(c[0]) == best[kind(c[0])]]
+
+
+def _cache_reference(direction, problem, A_t, B_t, torch_dt, arch):
+    """Reference output for --run-from-cache --verify.
+
+    ``A_t`` / ``B_t`` are the operands bound to the A / B kernarg slots: X / W
+    (fwd), dY / X (wgrad), dY / W (dgrad). Same references as the JIT sweeps,
+    on the device _verify_kernel compares on (host for gfx1250).
+    """
+    from builders.common import conv_reference as cr
+
+    if arch == "gfx1250":
+        if direction == "wgrad":
+            return cr.wgrad_reference_gfx1250(
+                B_t.float(), A_t.float(), problem, out_dtype=torch_dt
+            )
+        if direction == "dgrad":
+            return cr.dgrad_reference_gfx1250(
+                A_t.float(), B_t.float(), problem, out_dtype=torch_dt
+            )
+        return cr.conv_reference_gfx1250(A_t, B_t, problem, out_dtype=torch_dt)
+    if direction == "wgrad":
+        return cr.wgrad_reference(B_t.float().cuda(), A_t.float().cuda(), problem)
+    if direction == "dgrad":
+        return cr.dgrad_reference(A_t.float().cuda(), B_t.float().cuda(), problem)
+    return cr.conv_reference(A_t.cuda(), B_t.cuda(), problem, out_dtype=torch_dt)
+
+
+def _signature_for_identity(ident, dtype):
+    """Launch signature matching what this cached kernel was built with."""
+    from kernels.common.conv_abi import conv_args_signature
+
+    if ident.direction == "wgrad":
+        return conv_args_signature(
+            dtype, direction="wgrad", is_3d=ident.is_3d, two_stage=ident.two_stage
+        )
+    if ident.direction == "dgrad":
+        return conv_args_signature(dtype, direction="dgrad", is_3d=ident.is_3d)
+    return conv_args_signature(dtype, is_3d=ident.is_3d)
+
+
+def _ws_replicas_of(ident) -> int:
+    """Scratch slabs per group of a cached two-stage wgrad binary.
+
+    Recorded in the identity; entries that predate the field were all built
+    with the default count.
+    """
+    if ident.ws_replicas:
+        return ident.ws_replicas
+    from kernels.common.conv_implicit_gemm_wgrad import _DEFAULT_WS_REPLICAS
+
+    return _DEFAULT_WS_REPLICAS
+
+
+def _stage2_reduce(problem, dtype_d, arch, compiled, KernelLauncher, ws_replicas):
+    """Stage 2 (scratch fold + cast to dW) for a cached two-stage wgrad kernel.
+
+    The reduce kernel takes wg_M / wg_N / groups as kernargs, so its IR
+    depends only on the dW dtype and the replica count -- which must be the
+    Stage 1 binary's, or the fold covers the wrong slabs. It is compiled once
+    per (dtype, replicas) in a run (``compiled`` memoises it) rather than
+    cached. Returns ``(launcher, spec)``.
+    """
+    from rocke import compile_kernel
+    from kernels.common.conv_wgrad_workspace_reduce import (
+        WgradReduceSpec,
+        build_conv_wgrad_workspace_reduce,
+        wgrad_reduce_signature,
+    )
+
+    spec = WgradReduceSpec(
+        problem=problem,
+        dtype_d=dtype_d,
+        groups=problem.groups,
+        ws_replicas=ws_replicas,
+    )
+    key = (dtype_d, ws_replicas)
+    if key not in compiled:
+        art = compile_kernel(build_conv_wgrad_workspace_reduce(spec), arch=arch)
+        compiled[key] = KernelLauncher(
+            hsaco=art.hsaco,
+            kernel_name=art.kernel_name,
+            signature=wgrad_reduce_signature(spec),
+        )
+    return compiled[key], spec
+
+
+def _split_k_degrees(problem, tile_m: int, tile_n: int, tile_k: int) -> tuple:
+    """Split-K degrees to launch a wgrad split-K kernel with.
+
+    The degree is a kernarg, so one split-K binary is timed at every degree of
+    ``_SPLIT_K_AUTO`` that is > 1 (degree 1 is the separate non-atomic
+    kernel), does not exceed the number of K tiles (a larger degree only adds
+    empty slices), and keeps ``groups * degree`` inside the grid's z limit.
+    """
+    from kernels.common.conv_args import ConvArgs
+
+    wg_k = ConvArgs.from_problem(
+        problem,
+        direction="wgrad",
+        tile_m=tile_m,
+        tile_n=tile_n,
+        tile_k=tile_k,
+    ).gemm_k
+    k_tiles = -(-wg_k // tile_k)
+    groups = max(1, problem.groups)
+    return tuple(
+        sk
+        for sk in _SPLIT_K_AUTO
+        if 1 < sk <= k_tiles and groups * sk <= _MAX_GRID_DIM_Z
+    )
+
+
+def _runtime_split_ks(problem, ident) -> tuple:
+    """:func:`_split_k_degrees` for a cached split-K wgrad binary."""
+    return _split_k_degrees(problem, ident.tile_m, ident.tile_n, ident.tile_k)
+
+
+def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
+    """Trailing kernargs and the launch grid for one cached kernel.
+
+    Both backward directions need host-side state that an AOT kernel takes as
+    a buffer rather than baking in:
+
+    * **dgrad** indexes a table of tilde sub-GEMM records. The decomposition
+      depends on the launch shape, so the host enumerates it and passes the
+      records plus their count; the grid is the total tile count across them.
+    * **wgrad** with ``two_stage`` atomic-adds partial sums into an f32
+      workspace sized ``groups * ws_replicas * wg_M * wg_N``, and every wgrad
+      launch passes the split-K degree as ``ks``/``ks_count``.
+    """
+    from kernels.common.conv_args import ConvArgs
+
+    extras: dict = {}
+    if direction == "dgrad":
+        from dataclasses import replace as dc_replace
+
+        import numpy as np
+
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_dgrad import (
+            DgradConvSpec,
+            pack_sub_gemm_buffer,
+        )
+
+        spec = DgradConvSpec(
+            problem=problem,
+            data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+            tile_m=ident.tile_m,
+            tile_n=ident.tile_n,
+            tile_k=ident.tile_k,
+            warp_m=ident.warp_m,
+            warp_n=ident.warp_n,
+            warp_tile_m=ident.warp_tile_m,
+            warp_tile_n=ident.warp_tile_n,
+            warp_tile_k=ident.warp_tile_k,
+            max_sub_gemms=ident.max_sub_gemms or 64,
+        )
+        sub_gemms = spec.compute_sub_gemms()
+        if len(sub_gemms) > (ident.max_sub_gemms or 64):
+            raise ValueError(
+                f"problem needs {len(sub_gemms)} tilde sub-GEMMs, kernel "
+                f"unrolled for {ident.max_sub_gemms}"
+            )
+        flat = np.array(
+            pack_sub_gemm_buffer(sub_gemms, ident.tile_m, ident.tile_n),
+            dtype=np.int32,
+        )
+        buf = rt.alloc(flat.nbytes)
+        rt.memcpy_h2d(buf, flat.ctypes.data, flat.nbytes)
+        extras["sub_gemm_buf"] = buf
+        extras["num_sub_gemms"] = len(sub_gemms)
+        blocks = sum(
+            -(-sg.gemm_m // ident.tile_m) * -(-sg.gemm_n // ident.tile_n)
+            for sg in sub_gemms
+        )
+        # The flat tile count is per group; the kernel reads its conv group
+        # from blockIdx.y, as in the dispatcher's _dgrad_grid.
+        return extras, (blocks, max(1, problem.groups), max(1, ident.split_k))
+
+    if direction == "wgrad":
+        # The degree is a launch parameter; ConvArgs turns it into the
+        # ks/ks_count pair the kernel reads. A split-K binary is launched at
+        # the degree the caller picked.
+        if split_k is None:
+            split_k = max(1, ident.split_k)
+        extras["split_k"] = split_k
+        if ident.two_stage:
+            # One slab per (group, replica), not per K-slice: the slices
+            # atomic-add into the replica slabs (see WgradConvSpec.ws_replicas).
+            from kernels.common.conv_implicit_gemm_wgrad_two_stage import (
+                wgrad_workspace_nbytes,
+            )
+
+            ws_bytes = wgrad_workspace_nbytes(problem, _ws_replicas_of(ident))
+            ws = rt.alloc(ws_bytes)
+            rt.memset(ws, 0, ws_bytes)
+            extras["ws_ptr"] = ws
+            extras["ws_bytes"] = ws_bytes
+        return extras, _grid_for(direction, problem, ident, split_k)
+
+    return extras, _grid_for(direction, problem, ident)
+
+
+def _grid_for(direction, problem, ident, split_k=None):
+    from kernels.common.conv_args import ConvArgs
+
+    tm, tn = ident.tile_m, ident.tile_n
+    if direction == "wgrad":
+        gx, gy, _ = ConvArgs.from_problem(
+            problem, direction="wgrad", tile_m=tm, tile_n=tn, tile_k=ident.tile_k
+        ).grid()
+        sk = split_k if split_k is not None else max(1, ident.split_k)
+        # A group-merged kernel runs one workgroup per Gm groups; the group
+        # and the K-slice share z (z = groups/Gm * split_k).
+        grid_groups = max(1, problem.groups) // max(1, ident.group_merge)
+        return gx, gy, grid_groups * sk
+    if direction == "dgrad":
+        return ConvArgs.from_problem(
+            problem, direction="dgrad", tile_m=tm, tile_n=tn
+        ).grid()
+    return ConvArgs.from_problem(problem, tile_m=tm, tile_n=tn).grid()
 
 
 if __name__ == "__main__":
