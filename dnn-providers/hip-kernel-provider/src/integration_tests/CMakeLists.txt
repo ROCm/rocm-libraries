@@ -83,11 +83,19 @@ if(ENABLE_HIP_FLASH2_ENGINE)
 endif()
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_sources(hip_kernel_provider_integration_tests PRIVATE
-        kernel_ingestor_engine/IntegrationGpuGfx950AttentionDenseKnobs.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
         kernel_ingestor_engine/IntegrationGraphVerificationContext.cpp
     )
+    if(NOT HIPDNN_ENABLE_SDPA)
+        message(WARNING
+                "HIPDNN_ENABLE_KERNEL_INGESTOR is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
+                "Skipping gfx950 dense attention knob integration tests. Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable them.")
+    else()
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx950AttentionDenseKnobs.cpp
+        )
+    endif()
     # This target links only the SDKs, not hip_kernel_provider_private, so it does not
     # inherit the provider's gate and needs the definition set directly.
     target_compile_definitions(hip_kernel_provider_integration_tests
@@ -216,7 +224,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
         INSTALL_SUBDIR hip_kernel_provider
         ${_gfx950_shard_args}
         REFERENCE_EXECUTOR gpu
-        GTEST_FILTER "quick_SdpaFwd_bshd_*:standard_SdpaFwd_bshd_*"
+        GTEST_FILTER "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*"
     )
 endif()
 
