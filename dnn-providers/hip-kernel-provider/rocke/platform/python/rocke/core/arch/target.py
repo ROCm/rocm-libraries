@@ -1006,6 +1006,20 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
 }
 
 
+# Mixed operands keep the same padded ABI and scale-coordinate maps.
+_MMA_FRAGMENT_INFO.update(
+    {
+        f"wmma_gfx1250_f32_16x16x128_{a}_{b}_scale_e8m0_e8m0_k{block_k}": _MMA_FRAGMENT_INFO[
+            f"wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k{block_k}"
+        ]
+        for block_k in (32, 16)
+        for a in ("fp8", "bf8", "fp6", "bf6", "fp4")
+        for b in ("fp8", "bf8", "fp6", "bf6", "fp4")
+        if a != b
+    }
+)
+
+
 def _frag_info(op_id: str) -> _FragInfo:
     info = _MMA_FRAGMENT_INFO.get(op_id)
     if info is None:
