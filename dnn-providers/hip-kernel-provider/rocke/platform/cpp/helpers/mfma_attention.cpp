@@ -369,6 +369,18 @@ rocke_status_t rocke_mfma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "WMMA output tiling requires a wave32 target");
         return ROCKE_ERR_VALUE;
     }
+    if(p->wmma_v_head_size != 0)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "a distinct WMMA V head size requires a wave32 target");
+        return ROCKE_ERR_VALUE;
+    }
+    if(p->wmma_use_window_right)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "a right local-window bound requires a wave32 target");
+        return ROCKE_ERR_VALUE;
+    }
     if(p->k_scale != NULL)
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "explicit K dequant scale requires a wave32 target");
@@ -780,12 +792,13 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
     int a_frag = op->a_frag_len;
     int c_frag = op->c_frag_len;
     int n_dk = head_size / 16;
-    int value_head_size = p->wmma_value_tile_size != 0 ? p->wmma_value_tile_size : head_size;
-    if(value_head_size <= 0 || value_head_size > head_size || value_head_size % 16 != 0)
+    int v_total = p->wmma_v_head_size != 0 ? p->wmma_v_head_size : head_size;
+    int value_head_size = p->wmma_value_tile_size != 0 ? p->wmma_value_tile_size : v_total;
+    if(value_head_size <= 0 || value_head_size > v_total || value_head_size % 16 != 0)
     {
         rocke_i_set_err(b,
                         ROCKE_ERR_VALUE,
-                        "WMMA value tile must be a positive multiple of 16 within the head");
+                        "WMMA value tile must be a positive multiple of 16 within the V head");
         return ROCKE_ERR_VALUE;
     }
     int n_dv = value_head_size / 16;
@@ -1029,6 +1042,26 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
                                                  p->sliding_window,
                                                  p->causal_ctx_offset,
                                                  mask_neg_inf);
+            }
+            if(p->wmma_use_window_right)
+            {
+                if(p->sliding_window > 0)
+                {
+                    s_r = rocke_apply_attention_mask(b,
+                                                     s_r,
+                                                     ROCKE_ATTN_MASK_SLIDING_WINDOW,
+                                                     k_col_pos,
+                                                     row_q_pos,
+                                                     p->sliding_window,
+                                                     p->causal_ctx_offset,
+                                                     mask_neg_inf);
+                }
+                rocke_value_t* right_base = rocke_b_add(b, p->causal_ctx_offset, row_q_pos);
+                rocke_value_t* right_off = rocke_b_const_i32(b, p->wmma_window_right);
+                rocke_value_t* right_edge = rocke_b_add(b, right_base, right_off);
+                rocke_value_t* keep_r = rocke_b_cmp_le(b, k_col_pos, right_edge);
+                s_r = rocke_b_select(
+                    b, keep_r, s_r, mask_neg_inf != NULL ? mask_neg_inf : neg_inf);
             }
             if(p->wmma_kv_tail)
             {

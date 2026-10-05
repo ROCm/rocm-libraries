@@ -41,6 +41,7 @@ EXPECTED_FEATURES = {
         "softcap",
         "alibi",
         "qq_bias",
+        "window_right",
         "layout_dense",
         "layout_ragged",
         "layout_paged",

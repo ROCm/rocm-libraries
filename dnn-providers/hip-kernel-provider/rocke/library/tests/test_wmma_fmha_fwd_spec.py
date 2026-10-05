@@ -226,6 +226,111 @@ class TestWmmaFmhaFwdSpec(unittest.TestCase):
         for left, right in combinations(variants, 2):
             self.assertNotEqual(left.kernel_name(), right.kernel_name())
 
+    def test_causal_tile_skip_requires_plain_standard_causal(self):
+        base = dict(head_size=64, num_query_heads=4, causal_tile_skip=True)
+        WmmaFmhaFwdSpec(**dict(base, mask_mode="causal"))
+        for changes in (
+            {},
+            {"mask_mode": "causal", "sliding_window": 32},
+            {"mask_mode": "causal", "transposed_qk": True},
+        ):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                WmmaFmhaFwdSpec(**dict(base, **changes))
+
+    def test_causal_tile_skip_cache_key_and_emission(self):
+        from kernels.gfx1151.wmma_fmha_fwd import build_wmma_fmha_fwd
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        base = WmmaFmhaFwdSpec(
+            head_size=64,
+            num_query_heads=4,
+            mask_mode="causal",
+            causal_bottom_right=True,
+            query_tail=True,
+            kv_tail=True,
+        )
+        skipping = replace(base, causal_tile_skip=True)
+        self.assertNotEqual(base.kernel_name(), skipping.kernel_name())
+        plain = lower_kernel_to_llvm(
+            build_wmma_fmha_fwd(base, "gfx1151"), arch="gfx1151"
+        )
+        bounded = lower_kernel_to_llvm(
+            build_wmma_fmha_fwd(skipping, "gfx1151"), arch="gfx1151"
+        )
+        self.assertNotEqual(plain, bounded)
+
+    def test_v_head_size_validation_and_naming(self):
+        base = WmmaFmhaFwdSpec(head_size=128, num_query_heads=4)
+        self.assertEqual(base.v_dim, 128)
+        wide = replace(base, v_head_size=256)
+        self.assertEqual(wide.v_dim, 256)
+        self.assertNotEqual(base.kernel_name(), wide.kernel_name())
+        self.assertIn("vh256", wide.kernel_name())
+        for bad in (-16, 8, 20):
+            with self.subTest(v_head_size=bad), self.assertRaises(ValueError):
+                replace(base, v_head_size=bad)
+
+    def test_v_head_size_emission_differs_and_is_wmma_only(self):
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from kernels.gfx1151.wmma_fmha_fwd import build_wmma_fmha_fwd, is_valid_spec
+
+        base = WmmaFmhaFwdSpec(head_size=128, num_query_heads=4, v_head_size=64)
+        ok, why = is_valid_spec(base, arch="gfx1151")
+        self.assertTrue(ok, why)
+        ok, _ = is_valid_spec(base, arch="gfx942")
+        self.assertFalse(ok)
+        equal = replace(base, v_head_size=0)
+        self.assertNotEqual(
+            lower_kernel_to_llvm(build_wmma_fmha_fwd(base, "gfx1151"), arch="gfx1151"),
+            lower_kernel_to_llvm(build_wmma_fmha_fwd(equal, "gfx1151"), arch="gfx1151"),
+        )
+
+    def test_window_right_validation_and_naming(self):
+        base = WmmaFmhaFwdSpec(head_size=64, num_query_heads=4, mask_mode="none")
+        self.assertEqual(base.window_right, -1)
+        local = replace(base, window_right=16)
+        self.assertIn("wr16", local.kernel_name())
+        self.assertNotIn("wr", base.kernel_name().split("_wmma")[-1])
+        self.assertNotEqual(
+            local.kernel_name(), replace(base, window_right=32).kernel_name()
+        )
+        self.assertNotEqual(
+            local.kernel_name(),
+            replace(
+                local,
+                causal_bottom_right=True,
+                query_tail=True,
+                kv_tail=True,
+            ).kernel_name(),
+        )
+        bad = (
+            {"window_right": -2},
+            {"window_right": 8, "mask_mode": "causal"},
+            {"window_right": 8, "transposed_qk": True},
+            {"window_right": 8, "causal_tile_skip": True},
+        )
+        for changes in bad:
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                replace(base, **changes)
+
+    def test_window_right_emission_differs_and_default_is_unchanged(self):
+        from kernels.gfx1151.wmma_fmha_fwd import build_wmma_fmha_fwd
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        def ir(spec):
+            return lower_kernel_to_llvm(
+                build_wmma_fmha_fwd(spec, "gfx1151"), arch="gfx1151"
+            )
+
+        base = WmmaFmhaFwdSpec(head_size=64, num_query_heads=4, mask_mode="none")
+        narrow = ir(replace(base, window_right=0))
+        wide = ir(replace(base, window_right=64))
+        self.assertNotEqual(ir(base), narrow)
+        self.assertNotEqual(narrow, wide)
+        both = ir(replace(base, window_right=16, sliding_window=64))
+        self.assertNotEqual(both, ir(replace(base, window_right=16)))
+        self.assertEqual(ir(base), ir(replace(base, window_right=-1)))
+
 
 if __name__ == "__main__":
     unittest.main()

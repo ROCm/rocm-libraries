@@ -118,9 +118,11 @@ Its explicit selectors are `algorithm="wmma_fmha_fwd"` and
 `spec_id="gfx1151_wmma_fmha_fwd"`. Other architecture defaults are unchanged.
 
 The request describes layout (`dense`, `ragged`, or `paged`) and score features
-(`use_softcap`, `use_sinks`, `use_alibi`, `use_qq_bias`, `sliding_window`) before
-selection. `use_fp8=True` selects OCP E4M3FN K/V storage, not FP8 Q/O. Both
-FP16/BF16 Q/O and head dimensions 64/128/256 are supported. Explicit layout
+(`use_softcap`, `use_sinks`, `use_alibi`, `use_qq_bias`, `sliding_window`,
+`window_right`) before selection. `use_fp8=True` selects OCP E4M3FN K/V storage, not FP8 Q/O. Both
+FP16/BF16 Q/O and head dimensions that are multiples of 16 up to 256 (Q/K and
+V/O widths may differ) are supported. `window_right >= 0` adds a right window
+for `NO_MASK`, `SLIDING_WINDOW` and `BOTTOM_RIGHT_CAUSAL` requests. Explicit layout
 or feature requirements reject candidates that do not declare them; `layout="auto"`
 retains legacy layout conventions and resolves to dense on gfx1151.
 

@@ -132,6 +132,11 @@ class AttentionRequest(OperatorRequest):
     use_softcap: bool = False
     use_alibi: bool = False
     use_qq_bias: bool = False
+    # Two-sided local window: keep keys with k <= q + context + window_right
+    # (and k > q + context - sliding_window when a left width is set). -1 => off.
+    # Requires mask_type NO_MASK (top-left aligned) or BOTTOM_RIGHT_CAUSAL
+    # (bottom-right aligned); a candidate must declare the "window_right" feature.
+    window_right: int = -1
     # --- standalone attention_dense knobs (only consumed by the opt-in
     #     ``attention_dense`` candidate; ignored by the unified 2D/3D paths).
     #     Defaults deliver the best qualified persistent prefill path for large Sq:
@@ -201,6 +206,8 @@ class AttentionRequest(OperatorRequest):
             active.add("alibi")
         if bool(self.use_qq_bias):
             active.add("qq_bias")
+        if int(self.window_right) >= 0:
+            active.add("window_right")
         layout = self.layout.strip().lower() if isinstance(self.layout, str) else ""
         if layout not in ("auto", ""):
             active.add(f"layout_{layout}")
@@ -237,7 +244,15 @@ ATTENTION_FEATURES = frozenset(
 )
 
 
-def _request_errors(req: OperatorRequest) -> list[str]:
+def _request_errors(
+    req: OperatorRequest, *, allow_unequal_head_dims: bool = False
+) -> list[str]:
+    """Structural request errors.
+
+    ``allow_unequal_head_dims`` lets a candidate that supports a Q/K head size
+    different from the V/output head size (hdim_q != hdim_v) opt in; every
+    other candidate keeps the strict equality requirement.
+    """
     if not isinstance(req, AttentionRequest):
         return [f"expected AttentionRequest, got {type(req).__name__}"]
     errors: list[str] = []
@@ -246,7 +261,10 @@ def _request_errors(req: OperatorRequest) -> list[str]:
     for field in ("batch", "nhead_q", "nhead_k", "seqlen_q", "seqlen_k", "hdim_q"):
         if int(getattr(req, field)) <= 0:
             errors.append(f"{field} must be positive")
-    if req.hdim_q != req.hdim_v:
+    if allow_unequal_head_dims:
+        if int(req.hdim_v) <= 0:
+            errors.append("hdim_v must be positive")
+    elif req.hdim_q != req.hdim_v:
         errors.append("only hdim_q == hdim_v is supported")
     if int(req.nhead_q) % int(req.nhead_k):
         errors.append("nhead_q must be divisible by nhead_k (GQA grouping)")
@@ -257,6 +275,8 @@ def _request_errors(req: OperatorRequest) -> list[str]:
         _parse_attention_mask_type(req.mask_type)
     except ValueError as exc:
         errors.append(str(exc))
+    if int(req.window_right) < -1:
+        errors.append("window_right must be -1 (off) or nonnegative")
     try:
         ArchTarget.from_gfx(req.arch)
     except KeyError as e:

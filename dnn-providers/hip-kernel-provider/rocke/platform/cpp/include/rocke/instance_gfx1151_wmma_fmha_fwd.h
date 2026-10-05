@@ -70,6 +70,12 @@ extern "C" {
  *   kv_dtype         : empty for Q-matched storage, or OCP fp8e4m3 bytes.
  *
  * String fields are referenced as-is; keep them alive with the spec. */
+/* ABI: this struct is passed by value layout, so appending fields changes it.
+ * The kv_dtype, transposed_qk, block_n, num_waves, scheduler_strategy and
+ * value_tile_size, causal_tile_skip, v_head_size and window_right fields (and the batch * value_tiles grid z axis) are the
+ * "rocke-attention-gfx1151/v2" ABI. Code built against the v1 header must be
+ * recompiled; zero-initialise the struct with rocke_wmma_fmha_fwd_spec_default
+ * so new fields take their defaults. */
 typedef struct rocke_wmma_fmha_fwd_spec
 {
     int head_size;
@@ -96,6 +102,9 @@ typedef struct rocke_wmma_fmha_fwd_spec
     const char*
         scheduler_strategy; /* NULL: backend default; otherwise a validated codegen policy */
     int value_tile_size; /* 0 => full head; proper multiple-of-16 head divisor otherwise */
+    bool causal_tile_skip; /* standard path: bound the K loop at the causal diagonal; default false */
+    int v_head_size; /* 0 => V/O width equals head_size; else a distinct multiple of 16 */
+    int window_right; /* -1 => off; >=0 keeps k <= q + ctx + window_right (mask NONE, standard path) */
 } rocke_wmma_fmha_fwd_spec_t;
 
 /* Default-constructed spec (Python dataclass defaults). The caller must still

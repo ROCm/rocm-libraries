@@ -294,6 +294,8 @@ def mfma_attention_fwd_inner_body(
     k_scale: Optional[Value] = None,
     wmma_value_tile_size: int = 0,
     wmma_value_offset: Optional[Value] = None,
+    wmma_v_head_size: int = 0,
+    wmma_window_right: int = -1,
 ) -> None:
     """One MFMA-tiled QK→softmax→PV pass for a ``BLOCK_M``-row Q tile.
 
@@ -320,6 +322,11 @@ def mfma_attention_fwd_inner_body(
     to the aligned path; enabling either on a non-wave32 target is rejected.
     ``wmma_value_tile_size`` and ``wmma_value_offset`` optionally select a
     contiguous PV/output-column tile; QK still traverses the full head size.
+    ``wmma_v_head_size`` (default 0 = ``head_size``) sets a V/output head width
+    that differs from the Q/K ``head_size``; wave32 targets only.
+    ``wmma_window_right`` (default -1 = off) keeps only keys at most this many
+    positions right of the (context-shifted) query, composing with
+    ``sliding_window`` as the left bound for a two-sided local mask; wave32 only.
 
     ``k_token_offset_elems`` / ``v_token_offset_elems`` are added to
     the K / V row base addresses (for varlen / paged-KV layouts).
@@ -514,12 +521,18 @@ def mfma_attention_fwd_inner_body(
             k_scale=k_scale,
             value_tile_size=wmma_value_tile_size,
             value_offset=wmma_value_offset,
+            v_head_size=wmma_v_head_size,
+            window_right=wmma_window_right,
         )
         return
     if wmma_seqlen_q is not None or wmma_kv_tail:
         raise ValueError("WMMA tail options require a wave32 target")
     if wmma_value_tile_size or wmma_value_offset is not None:
         raise ValueError("WMMA output tiling requires a wave32 target")
+    if wmma_v_head_size:
+        raise ValueError("a distinct WMMA V head size requires a wave32 target")
+    if wmma_window_right >= 0:
+        raise ValueError("a right local-window bound requires a wave32 target")
     if k_scale is not None:
         raise ValueError("explicit K dequant scale requires a wave32 target")
 
@@ -1020,6 +1033,8 @@ def _wmma_attention_fwd_inner_body(
     k_scale: Optional[Value] = None,
     value_tile_size: int = 0,
     value_offset: Optional[Value] = None,
+    v_head_size: int = 0,
+    window_right: int = -1,
 ) -> None:
     """One WMMA-tiled QK->softmax->PV pass for a ``BLOCK_M``-row Q tile (wave32).
 
@@ -1047,12 +1062,14 @@ def _wmma_attention_fwd_inner_body(
     a_frag = op.a_frag_len  # 16 (gfx11) | 8 (gfx12) -- K elems per lane per step
     c_frag = op.c_frag_len  # 8  -- accumulator slots per lane (same both)
 
-    # QK always traverses the full head; only PV/output accumulators are tiled.
+    # QK always traverses the full Q/K head; the PV/output width is the V head
+    # (``v_head_size``, default ``head_size``), optionally tiled by columns.
     n_dk = head_size // 16
-    value_head_size = value_tile_size or head_size
-    if value_head_size <= 0 or value_head_size > head_size or value_head_size % 16:
+    v_total = v_head_size or head_size
+    value_head_size = value_tile_size or v_total
+    if value_head_size <= 0 or value_head_size > v_total or value_head_size % 16:
         raise ValueError(
-            "WMMA value tile must be a positive multiple of 16 within the head"
+            "WMMA value tile must be a positive multiple of 16 within the V head"
         )
     n_dv = value_head_size // 16
 
@@ -1241,6 +1258,26 @@ def _wmma_attention_fwd_inner_body(
                     sliding_window=sliding_window,
                     context_len=causal_ctx_offset,
                     neg_inf=mask_neg_inf,
+                )
+            if window_right >= 0:
+                if sliding_window > 0:
+                    s_r = apply_attention_mask(
+                        b,
+                        s_r,
+                        mask_mode="sliding_window",
+                        k_idx=k_col_pos,
+                        query_pos=row_q_pos,
+                        sliding_window=sliding_window,
+                        context_len=causal_ctx_offset,
+                        neg_inf=mask_neg_inf,
+                    )
+                right_edge = b.add(
+                    b.add(causal_ctx_offset, row_q_pos), b.const_i32(window_right)
+                )
+                s_r = b.select(
+                    b.cmp_le(k_col_pos, right_edge),
+                    s_r,
+                    mask_neg_inf if mask_neg_inf is not None else neg_inf,
                 )
             if kv_tail:
                 s_r = b.select(b.cmp_lt(k_col_pos, seqlen_k), s_r, neg_inf)

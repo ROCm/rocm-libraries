@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Tuple
 
 from kernels.gfx1151.wmma_fmha_fwd import (
@@ -27,18 +28,58 @@ from .common import (
     AttentionMaskType,
     AttentionRequest,
     FAMILY,
+    _device_num_cus,
     _request_errors,
     _selector_matches,
 )
 
-ATTENTION_GFX1151_ABI = "rocke-attention-gfx1151/v1"
+# v2: ``rocke_wmma_fmha_fwd_spec_t`` gained kv_dtype, transposed_qk, block_n,
+# num_waves, scheduler_strategy and value_tile_size, and the grid's z axis became
+# ``batch * value_tiles``. Callers compiled against the v1 header must be rebuilt.
+ATTENTION_GFX1151_ABI = "rocke-attention-gfx1151/v2"
+
+# Compute units of the reference gfx1151 part. The output-column tiling gate was
+# tuned at this size, so it is the fallback when no count is given or visible.
+_GFX1151_DEFAULT_NUM_CUS = 40
+# Workgroups per CU the tiled-value path is expected to keep in flight; the
+# tiling gate admits a request while its query groups fit this many per CU
+# (``query_groups * 5 <= num_cus * 16``, i.e. 128 groups on the 40-CU part).
+_TILED_VALUE_GROUPS_PER_16_CUS = 16
+_TILED_VALUE_GROUP_WEIGHT = 5
+
+
+def _resolve_gfx1151_num_cus(req: AttentionRequest) -> int:
+    """Compute units used by CU-aware gfx1151 selection.
+
+    An explicit ``req.num_cus`` wins. Otherwise the live device count is used when
+    this box is the same arch (a cross-compile never bakes in another device's
+    size); a WGP-mode RDNA device reports half its CUs, so the live value is
+    doubled. Anything else falls back to the reference part.
+    """
+    n = int(req.num_cus)
+    if n > 0:
+        return n
+    try:
+        from rocke.runtime.hip_module import get_device_arch
+
+        if get_device_arch() == "gfx1151":
+            live = _device_num_cus()
+            if live and live > 0:
+                return 2 * int(live)
+    except Exception:
+        pass
+    return _GFX1151_DEFAULT_NUM_CUS
+
 
 _WMMA_FWD_CAP = Capability(
     arches=("gfx1151",),
     dtypes=("fp16", "bf16"),
-    shapes=(ShapeRange("hdim_q", allowed=(64, 128, 256)),),
+    shapes=(
+        ShapeRange(
+            frozenset({"hdim_q", "hdim_v"}), min=16, max=256, multiple_of=16
+        ),
+    ),
     relations=(
-        DimRelation("hdim_q", "==", "hdim_v"),  # single head_size arg
         DimRelation("nhead_q", "multiple_of", "nhead_k"),  # GQA grouping
     ),
     supports_features=frozenset(
@@ -51,6 +92,7 @@ _WMMA_FWD_CAP = Capability(
             "softcap",
             "alibi",
             "qq_bias",
+            "window_right",
             "layout_dense",
             "layout_ragged",
             "layout_paged",
@@ -71,11 +113,14 @@ def _wmma_fwd_spec(req: OperatorRequest) -> WmmaFmhaFwdSpec:
     layout = _resolve_layout(req)
     seqlen_q = int(req.seqlen_q)
     seqlen_k = int(req.seqlen_k)
+    equal_heads = int(req.hdim_q) == int(req.hdim_v)
+    local_window = int(req.window_right) >= 0
     query_tail = layout != "dense" or bool(seqlen_q % 16)
     kv_tail = layout != "dense" or bool(seqlen_k % 16)
     transposed = (
         req.dtype.strip().lower() == "fp16"
         and layout == "dense"
+        and equal_heads
         and int(req.hdim_q) in (64, 128)
         and mask_type
         in (
@@ -88,6 +133,7 @@ def _wmma_fwd_spec(req: OperatorRequest) -> WmmaFmhaFwdSpec:
         and not (
             req.use_fp8
             or req.sliding_window
+            or local_window
             or req.use_softcap
             or req.use_sinks
             or req.use_alibi
@@ -99,8 +145,10 @@ def _wmma_fwd_spec(req: OperatorRequest) -> WmmaFmhaFwdSpec:
     tuned_small_head = (
         req.dtype.strip().lower() == "fp16"
         and int(req.hdim_q) == 64
+        and equal_heads
         and not (
             req.sliding_window
+            or local_window
             or req.use_fp8
             or req.use_softcap
             or req.use_sinks
@@ -124,10 +172,13 @@ def _wmma_fwd_spec(req: OperatorRequest) -> WmmaFmhaFwdSpec:
     tiled_values = (
         layout == "dense"
         and int(req.hdim_q) == 256
+        and equal_heads
         and seqlen_k >= 128
-        and query_groups <= 128
+        and query_groups * _TILED_VALUE_GROUP_WEIGHT
+        <= _resolve_gfx1151_num_cus(req) * _TILED_VALUE_GROUPS_PER_16_CUS
         and not (
             req.sliding_window
+            or local_window
             or req.use_fp8
             or req.use_softcap
             or req.use_sinks
@@ -141,21 +192,31 @@ def _wmma_fwd_spec(req: OperatorRequest) -> WmmaFmhaFwdSpec:
         value_tile_size = (
             32 if mask_type == AttentionMaskType.NO_MASK and not short_query else 64
         )
-    # A window covering both advertised maxima removes no causally-visible key.
-    # The admission bound also keeps context/window arithmetic within I32.
+    # Fully masked causal K tiles are skipped on the standard path; a request
+    # sliding window already bounds the loop and the transposed path bounds it
+    # at the diagonal by construction.
+    causal_tile_skip = (
+        mask_type != AttentionMaskType.NO_MASK
+        and not int(req.sliding_window)
+        and not local_window
+        and not transposed
+    )
     return WmmaFmhaFwdSpec(
         head_size=int(req.hdim_q),
+        v_head_size=0 if equal_heads else int(req.hdim_v),
         num_query_heads=int(req.nhead_q),
         num_kv_heads=int(req.nhead_k),
         dtype=req.dtype.strip().lower(),
-        mask_mode="none" if mask_type == AttentionMaskType.NO_MASK else "causal",
+        mask_mode=(
+            "none"
+            if mask_type == AttentionMaskType.NO_MASK or local_window
+            else "causal"
+        ),
+        window_right=int(req.window_right),
         # Equal maxima can still describe unequal packed sequence lengths.
         causal_bottom_right=mask_type == AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
-        sliding_window=(
-            maximum_length
-            if tuned_small_head and mask_type != AttentionMaskType.NO_MASK
-            else int(req.sliding_window)
-        ),
+        sliding_window=int(req.sliding_window),
+        causal_tile_skip=causal_tile_skip,
         v_lds_stage=tuned_small_head
         or (tiled_values and (short_query or mask_type == AttentionMaskType.NO_MASK)),
         value_tile_size=value_tile_size,
@@ -175,13 +236,64 @@ def _wmma_fwd_spec(req: OperatorRequest) -> WmmaFmhaFwdSpec:
     )
 
 
+def _sweep_variants(spec: WmmaFmhaFwdSpec, req: AttentionRequest):
+    """Valid, launchable single-knob variants of ``spec`` (baseline excluded).
+
+    Each knob changes only performance, never results, so the autotuner can
+    time them against the heuristic baseline.
+    """
+    seqlen_q = int(req.seqlen_q)
+    seqlen_k = int(req.seqlen_k)
+    variants = []
+
+    def replace(base, **changes):
+        try:
+            return dataclasses.replace(base, **changes)
+        except ValueError:
+            return None
+
+    if spec.transposed_qk:
+        for block_n in (32, 64):
+            for num_waves in (1, 2):
+                if seqlen_k % block_n or seqlen_q % (16 * num_waves):
+                    continue
+                variants.append(replace(spec, block_n=block_n, num_waves=num_waves))
+    else:
+        variants.append(replace(spec, v_lds_stage=not spec.v_lds_stage))
+        if spec.mask_mode == "causal" and not spec.sliding_window:
+            variants.append(
+                replace(spec, causal_tile_skip=not spec.causal_tile_skip)
+            )
+        if spec.layout == "dense" and spec.v_dim >= 128:
+            for tile in (0, 32, 64, 128):
+                if tile < spec.v_dim:
+                    variants.append(replace(spec, value_tile_size=tile))
+        if spec.scheduler_strategy is None:
+            variants.append(replace(spec, scheduler_strategy="max-ilp"))
+        else:
+            variants.append(replace(spec, scheduler_strategy=None))
+    out = []
+    for variant in variants:
+        if variant is None or variant == spec or variant in out:
+            continue
+        try:
+            ok, _ = _wmma_fwd_is_valid(variant, arch=req.arch)
+            if ok:
+                wmma_fmha_fwd_grid(variant, seqlen_q=seqlen_q, batch=int(req.batch))
+        except ValueError:
+            continue
+        if ok:
+            out.append(variant)
+    return tuple(out)
+
+
 def _make_wmma_fwd_candidate() -> KernelCandidate:
     """Select a complete WMMA spec for auto dispatch or an explicit pin."""
     spec_id = "gfx1151_wmma_fmha_fwd"
     name = "attention_gfx1151_wmma"
 
     def support(req: OperatorRequest) -> Tuple[bool, str]:
-        errors = _request_errors(req)
+        errors = _request_errors(req, allow_unequal_head_dims=True)
         if errors:
             return False, "; ".join(errors)
         assert isinstance(req, AttentionRequest)
@@ -212,6 +324,15 @@ def _make_wmma_fwd_candidate() -> KernelCandidate:
             and int(req.sliding_window) <= 0
         ):
             return False, "sliding-window mask_type requires sliding_window > 0"
+        if int(req.window_right) >= 0 and mask_type not in (
+            AttentionMaskType.NO_MASK,
+            AttentionMaskType.SLIDING_WINDOW,
+            AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+        ):
+            return False, (
+                "window_right requires mask_type NO_MASK or SLIDING_WINDOW "
+                "(top-left aligned) or BOTTOM_RIGHT_CAUSAL (bottom-right aligned)"
+            )
         try:
             spec = _wmma_fwd_spec(req)
         except ValueError as error:
@@ -226,6 +347,13 @@ def _make_wmma_fwd_candidate() -> KernelCandidate:
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         return _wmma_fwd_spec(req)
+
+    def sweep(req: OperatorRequest):
+        if not candidate.admits(req)[0]:
+            return ()
+        assert isinstance(req, AttentionRequest)
+        baseline = _wmma_fwd_spec(req)
+        return (baseline,) + _sweep_variants(baseline, req)
 
     def grid(spec: WmmaFmhaFwdSpec, req: OperatorRequest):
         assert isinstance(req, AttentionRequest)
@@ -250,9 +378,9 @@ def _make_wmma_fwd_candidate() -> KernelCandidate:
         select_spec=select,
         build=build_wmma_fmha_fwd,
         grid=grid,
-        block=lambda spec: (spec.block_size, 1, 1),  # one wave32 per CTA
+        block=lambda spec: (spec.block_size, 1, 1),  # num_waves wave32s per CTA
         signature=wmma_fmha_fwd_signature,
-        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+        sweep_space=sweep,
         bind_torch=bind_torch,
     )
     return candidate

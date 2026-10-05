@@ -207,7 +207,7 @@ def iter_dispatch_attention_all(
     sweep_level: str = "production",
 ) -> Iterator[DispatchResult]:
     """Yield each :func:`attention_dispatch_result` for ``req``."""
-    if _request_errors(req):
+    if _request_errors(req, allow_unequal_head_dims=True):
         return
     for candidate, spec in iter_registered_attention_combos(
         req,
@@ -271,7 +271,7 @@ def attention_sweep_space(
     ``limit`` stops after that many specs; the stream is only materialized
     up to what is returned.
     """
-    if _request_errors(req):
+    if _request_errors(req, allow_unequal_head_dims=True):
         return ()
     assert isinstance(req, AttentionRequest)
     specs = []

@@ -2,8 +2,8 @@
  * SPDX-License-Identifier: MIT
  *
  * tests/parity/gfx1151_wmma_fmha_fwd_emit.c -- C-side emitter for the gfx1151
- * WMMA FMHA forward parity harness. Selects one of 119 configurations
- * by argv[1] (0..118), builds it exactly as the
+ * WMMA FMHA forward parity harness. Selects one of 131 configurations
+ * by argv[1] (0..130), builds it exactly as the
  * Python emitter gfx1151_wmma_fmha_fwd_emit.py does, and lowers to LLVM .ll
  * text at arch=gfx1151 (flavor AUTO) so the two outputs can be byte-compared.
  *
@@ -26,6 +26,62 @@
 static int make_spec(int idx, rocke_wmma_fmha_fwd_spec_t* spec)
 {
     *spec = rocke_wmma_fmha_fwd_spec_default();
+    if(idx >= 127 && idx < 131)
+    {
+        /* head_size, sliding_window, window_right, bottom_right */
+        static const int cases[4][4] = {
+            {64, 0, 16, 0},
+            {64, 128, 16, 0},
+            {128, 64, 0, 1},
+            {64, 0, 32, 1},
+        };
+        const int* c = cases[idx - 127];
+        spec->head_size = c[0];
+        spec->num_query_heads = 8;
+        spec->num_kv_heads = 2;
+        spec->mask_mode = ROCKE_FMHA_MASK_NONE;
+        spec->sliding_window = c[1];
+        spec->window_right = c[2];
+        spec->causal_bottom_right = c[3] != 0;
+        spec->query_tail = c[3] != 0;
+        spec->kv_tail = c[3] != 0;
+        spec->v_lds_stage = c[3] != 0;
+        return 0;
+    }
+    if(idx >= 123 && idx < 127)
+    {
+        /* head_size, v_head_size, value_tile_size, causal, v_lds_stage */
+        static const int cases[4][5] = {
+            {128, 64, 0, 0, 0},
+            {64, 128, 0, 1, 1},
+            {192, 128, 0, 0, 1},
+            {128, 256, 64, 0, 0},
+        };
+        const int* c = cases[idx - 123];
+        spec->head_size = c[0];
+        spec->num_query_heads = 8;
+        spec->num_kv_heads = 2;
+        spec->mask_mode = c[3] ? ROCKE_FMHA_MASK_CAUSAL : ROCKE_FMHA_MASK_NONE;
+        spec->v_lds_stage = c[4] != 0;
+        spec->v_head_size = c[1];
+        spec->value_tile_size = c[2];
+        return 0;
+    }
+    if(idx >= 119 && idx < 123)
+    {
+        int variant = idx - 119;
+        bool bottom_right = variant % 2 != 0;
+        spec->head_size = variant < 2 ? 64 : 128;
+        spec->num_query_heads = 8;
+        spec->num_kv_heads = 2;
+        spec->mask_mode = ROCKE_FMHA_MASK_CAUSAL;
+        spec->causal_bottom_right = bottom_right;
+        spec->query_tail = bottom_right;
+        spec->kv_tail = bottom_right;
+        spec->v_lds_stage = bottom_right;
+        spec->causal_tile_skip = true;
+        return 0;
+    }
     if(idx >= 99 && idx < 115)
     {
         int variant = idx - 99;
@@ -202,7 +258,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..118>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..130>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);

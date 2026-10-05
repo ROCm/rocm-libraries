@@ -821,6 +821,58 @@ def cfgs_gfx1151_wmma_fmha_fwd():
             for dtype in ("fp16", "bf16")
             for paged in (False, True)
         ]
+        + [
+            dict(
+                head_size=head,
+                num_query_heads=8,
+                num_kv_heads=2,
+                mask_mode="causal",
+                causal_bottom_right=bottom_right,
+                query_tail=bottom_right,
+                kv_tail=bottom_right,
+                v_lds_stage=bottom_right,
+                causal_tile_skip=True,
+            )
+            for head in (64, 128)
+            for bottom_right in (False, True)
+        ]
+        + [
+            dict(
+                head_size=head,
+                num_query_heads=8,
+                num_kv_heads=2,
+                mask_mode=mask,
+                v_lds_stage=vlds,
+                v_head_size=v_head,
+                value_tile_size=tile,
+            )
+            for (head, v_head, tile, mask, vlds) in (
+                (128, 64, 0, "none", False),
+                (64, 128, 0, "causal", True),
+                (192, 128, 0, "none", True),
+                (128, 256, 64, "none", False),
+            )
+        ]
+        + [
+            dict(
+                head_size=head,
+                num_query_heads=8,
+                num_kv_heads=2,
+                mask_mode="none",
+                sliding_window=left,
+                window_right=right,
+                causal_bottom_right=bottom_right,
+                query_tail=bottom_right,
+                kv_tail=bottom_right,
+                v_lds_stage=bottom_right,
+            )
+            for (head, left, right, bottom_right) in (
+                (64, 0, 16, False),
+                (64, 128, 16, False),
+                (128, 64, 0, True),
+                (64, 0, 32, True),
+            )
+        ]
     )
 
 

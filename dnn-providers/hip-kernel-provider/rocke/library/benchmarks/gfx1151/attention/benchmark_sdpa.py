@@ -55,11 +55,13 @@ class DeviceBuffers:
         ptr = self.rt.alloc(array.nbytes)
         self.ptrs[name] = ptr
         self.arrays[name] = array
-        self.rt.memcpy_h2d(ptr, _host_bytes(array), array.nbytes)
+        if array.nbytes:  # newer HIP rejects zero-byte copies to a null allocation
+            self.rt.memcpy_h2d(ptr, _host_bytes(array), array.nbytes)
 
     def read_output(self, name):
         array = self.arrays[name]
-        self.rt.memcpy_d2h(_host_bytes(array), self.ptrs[name], array.nbytes)
+        if array.nbytes:
+            self.rt.memcpy_d2h(_host_bytes(array), self.ptrs[name], array.nbytes)
         return array.astype(np.float32)
 
     def close(self):

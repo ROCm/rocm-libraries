@@ -511,6 +511,27 @@ def _fits_i32(value: Any, name: str) -> int:
     return value
 
 
+def _check_max_element_offset_i32(tensor, name: str) -> None:
+    """Reject tensors whose highest addressable element index exceeds I32.
+
+    The kernel forms element offsets in I32 (``token * stride + head * stride``),
+    so a large KV cache would otherwise wrap silently.
+    """
+    shape = _shape(tensor, name)
+    stride = getattr(tensor, "stride", None)
+    if not callable(stride):
+        raise ValueError(f"{name} must expose strides")
+    if any(int(extent) <= 0 for extent in shape):
+        return
+    highest = sum((int(e) - 1) * int(stride(i)) for i, e in enumerate(shape))
+    if highest > 0x7FFF_FFFF:
+        raise ValueError(
+            f"{name} spans element offset {highest}, which does not fit the "
+            "I32 offset arithmetic of the gfx1151 kernel; split the tensor "
+            "(e.g. per batch or per page range) before launching"
+        )
+
+
 def _check_last_dim_contiguous(tensor, name: str) -> None:
     shape = _shape(tensor, name)
     stride = getattr(tensor, "stride", None)
@@ -563,6 +584,28 @@ def _check_gfx1151_vector_alignment(
                 )
 
 
+def _gfx1151_dense_needs_per_batch(request, tensors: Mapping[str, Any]) -> bool:
+    """True when a dense tensor is not batch-folded (batch stride != S*token stride).
+
+    The kernel derives each batch's base as ``batch * seqlen * token_stride``;
+    any other batch stride (broadcast, padded, ``[B, H, S, D]`` permuted views)
+    is served by one launch per batch on sliced views.
+    """
+    batch = int(request.batch)
+    if batch <= 1:
+        return False
+    for name, seqlen in (
+        ("q", request.seqlen_q),
+        ("out", request.seqlen_q),
+        ("k", request.seqlen_k),
+        ("v", request.seqlen_k),
+    ):
+        tensor = tensors[name]
+        if int(tensor.stride(0)) != int(seqlen) * int(tensor.stride(1)):
+            return True
+    return False
+
+
 def _gfx1151_validate_and_collect(
     request, spec, tensors: Mapping[str, Any]
 ) -> Dict[str, Any]:
@@ -605,24 +648,35 @@ def _gfx1151_validate_and_collect(
         if len(_shape(tensor, name)) != rank:
             raise ValueError(f"{name} must be rank-{rank} for {layout} layout")
     _check_gfx1151_qo(q, "q", q_kind, spec.num_query_heads, spec.head_size)
-    _check_gfx1151_qo(out, "out", q_kind, spec.num_query_heads, spec.head_size)
+    _check_gfx1151_qo(out, "out", q_kind, spec.num_query_heads, spec.v_dim)
     _check_gfx1151_qo(k, "k", kv_kind, spec.kv_heads, spec.head_size)
-    _check_gfx1151_qo(v, "v", kv_kind, spec.kv_heads, spec.head_size)
-    if _shape(out, "out") != _shape(q, "q"):
-        raise ValueError("out shape must match q shape")
-    if _shape(v, "v") != _shape(k, "k"):
-        raise ValueError("v shape must match k shape")
+    _check_gfx1151_qo(v, "v", kv_kind, spec.kv_heads, spec.v_dim)
+    if _shape(out, "out")[:-1] != _shape(q, "q")[:-1]:
+        raise ValueError("out shape must match q shape except the head dim")
+    if _shape(v, "v")[:-1] != _shape(k, "k")[:-1]:
+        raise ValueError("v shape must match k shape except the head dim")
     _check_gfx1151_vector_alignment(q, "q", 2, 16)
     _check_gfx1151_vector_alignment(k, "k", 1 if spec.kv_dtype else 2, 16)
     _check_gfx1151_vector_alignment(
         v, "v", 1 if spec.kv_dtype else 2, 8 if spec.v_lds_stage else 1
     )
     _check_gfx1151_vector_alignment(out, "out", 2, 1)
-    if int(out.stride(-2)) < spec.head_size or int(
-        out.stride(-3)
-    ) < spec.num_query_heads * int(out.stride(-2)):
-        raise ValueError("out token/head strides must not overlap")
+    out_shape = _shape(out, "out")
+    inner_span = spec.v_dim
+    for stride, extent in sorted(
+        (
+            (int(out.stride(-2)), spec.num_query_heads),
+            (int(out.stride(-3)), int(out_shape[-3])),
+        )
+    ):
+        if extent <= 1:
+            continue
+        if stride < inner_span:
+            raise ValueError("out token/head strides must not overlap")
+        inner_span = stride * extent
     _check_gfx1151_device(tensors)
+    for name, tensor in (("q", q), ("k", k), ("v", v), ("out", out)):
+        _check_max_element_offset_i32(tensor, name)
 
     values: Dict[str, Any] = {
         "Q": q,
@@ -652,15 +706,16 @@ def _gfx1151_validate_and_collect(
                 raise ValueError(
                     f"{name} shape[0:2] must be [{shape0}, {seqlen}], got {shape[:2]}"
                 )
-            stride = tensor.stride
-            token_stride = int(stride(1))
-            batch_stride = int(stride(0))
-            if batch_stride != seqlen * token_stride:
-                raise ValueError(
-                    f"{name} batch stride {batch_stride} must equal "
-                    f"seqlen*token_stride ({seqlen}*{token_stride}) for the "
-                    "gfx1151 dense batch-folded ABI"
+            if batch > 1 and int(tensor.stride(0)) < 0:
+                raise ValueError(f"{name} batch stride must be non-negative")
+            if batch > 1 and name == "out":
+                span = (
+                    (seqlen - 1) * int(tensor.stride(1))
+                    + (spec.num_query_heads - 1) * int(tensor.stride(2))
+                    + spec.v_dim
                 )
+                if int(tensor.stride(0)) < span:
+                    raise ValueError("out batch stride must not overlap")
         values.update(
             {
                 "stride_q_token": _fits_i32(q.stride(1), "stride_q_token"),
@@ -765,6 +820,18 @@ def _gfx1151_validate_and_collect(
             values["stride_v_token"] = _fits_i32(v.stride(1), "stride_v_token")
             values["stride_v_head"] = _fits_i32(v.stride(2), "stride_v_head")
 
+    if layout == "dense" and _gfx1151_dense_needs_per_batch(request, tensors):
+        for name, tensor, itemsize in (
+            ("q", q, 2),
+            ("k", k, 1 if spec.kv_dtype else 2),
+            ("v", v, 1 if spec.kv_dtype else 2),
+            ("out", out, 2),
+        ):
+            if int(tensor.stride(0)) * itemsize % 16:
+                raise ValueError(
+                    f"{name} batch stride must keep per-batch views 16-byte aligned"
+                )
+
     if spec.use_sinks:
         sinks = tensors.get("sinks")
         if sinks is None:
@@ -797,6 +864,7 @@ def _gfx1151_validate_and_collect(
         if len(bias_shape) != 2:
             raise ValueError(f"qq_bias must be rank-2 [rows, cols], got {bias_shape}")
         _check_last_dim_contiguous(qq_bias, "qq_bias")
+        _check_max_element_offset_i32(qq_bias, "qq_bias")
         values["qq_bias_ptr"] = qq_bias
         values["qq_bias_rows"] = _fits_i32(bias_shape[0], "qq_bias_rows")
         values["qq_bias_cols"] = _fits_i32(bias_shape[1], "qq_bias_cols")
@@ -834,8 +902,13 @@ def bind_gfx1151_attention_torch(
 
     arch = str(request.arch)
     base_values = _gfx1151_validate_and_collect(request, spec, tensors)
+    per_batch = spec.layout == "dense" and _gfx1151_dense_needs_per_batch(
+        request, tensors
+    )
     grid = wmma_fmha_fwd_grid(
-        spec, seqlen_q=int(request.seqlen_q), batch=int(request.batch)
+        spec,
+        seqlen_q=int(request.seqlen_q),
+        batch=1 if per_batch else int(request.batch),
     )
     block = (int(spec.block_size), 1, 1)
 
@@ -886,7 +959,23 @@ def bind_gfx1151_attention_torch(
             stream=0 if stream is None else int(stream),
             fence=bool(_kw.get("fence", fence_default)),
         )
-        launcher(values, config=config)
+        if not per_batch:
+            launcher(values, config=config)
+            return tensors["out"]
+        last = int(request.batch) - 1
+        for b in range(last + 1):
+            batch_values = dict(values)
+            for key, name in (("Q", "q"), ("K", "k"), ("V", "v"), ("O", "out")):
+                batch_values[key] = tensors[name][b : b + 1]
+            launcher(
+                batch_values,
+                config=LaunchConfig(
+                    grid=grid,
+                    block=block,
+                    stream=config.stream,
+                    fence=config.fence and b == last,
+                ),
+            )
         return tensors["out"]
 
     return TorchBinding(launch=launch, grid=grid, block=block)

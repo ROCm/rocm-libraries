@@ -5,54 +5,50 @@
 RDNA has no MFMA, so the QK^T and PV matmuls are built around the gfx11
 ``wmma_f32_16x16x16_f16`` / ``wmma_f32_16x16x16_bf16`` with a **wave32** mapping.
 
-**Unification status (folded).** The wave32 QK -> online-softmax -> PV loop is
-no longer hand-written here: it now lives in the *single* common FMHA-forward
-inner body :func:`rocke.helpers.mfma_attention.mfma_attention_fwd_inner_body`,
-which dispatches to the WMMA wave32 path on an RDNA target and the MFMA wave64
-path on CDNA off the per-arch ``MmaOp`` selected from the contract catalog --
-the attention analogue of the unified ``gemm_universal``. This module is now a
-thin **adapter**: it owns the gfx1151 kernel ABI, the ``(seqlen_q // 16,
-num_query_heads, batch)`` grid decode, and the per-batch pointer arithmetic, and
-hands the rest to the common body. The CDNA MFMA attention path stays
-byte-for-byte identical to before the unification.
+The wave32 QK -> online-softmax -> PV loop lives in the common FMHA-forward inner
+bodies of :mod:`rocke.helpers.mfma_attention`
+(:func:`~rocke.helpers.mfma_attention.mfma_attention_fwd_inner_body`, and
+``wmma_swapqk_fwd_inner_body`` for the transposed-QK specialization). Those bodies
+read the lane layout from the per-arch MMA contract and emit the matmul through
+the target-neutral ``b.mma``. This module is a thin **adapter**: it owns the
+gfx1151 kernel ABI, the ``(ceil(seqlen_q / q_rows_per_cta), num_query_heads,
+batch * value_tiles)`` grid decode, and the per-batch pointer arithmetic, and hands
+the rest to the common body.
 
-Everything physical about the WMMA fragments — which lane holds which
-``(row, k)`` / ``(k, col)`` / ``(row, col)`` element — is read inside the common
-body from the MMA contract's verified gfx1151 layout maps (``op.a_layout()`` /
-``op.b_layout()`` / ``op.c_layout()`` on the dtype-matched WMMA
-``MmaOp``), and the matmul itself is emitted through the target-neutral
-``b.mma(op, a, b, c)``. The wave size and the reduction stage count come from
-the contract so the kernel never hard-codes wave32 magic numbers.
+Algorithm (per ``(q_tile, head, batch)``; BLOCK_M = BLOCK_K = 16; one or two
+wave32 per CTA, see ``num_waves``):
 
-Algorithm (one wave32 per ``(q_tile, head, batch)``; BLOCK_M = BLOCK_K = 16):
-
-  * Grid ``(seqlen_q // 16, num_query_heads, batch)``; one wave owns 16 Q rows.
   * **QK^T**: ``S[q,k] = sum_d Q[q,d] * K[k,d]``. WMMA computes ``A @ B^T`` with
     A row-major ``M×K`` and B row-major ``N×K``; mapping A=Q (q-rows × d) and
     B=K (k-rows × d) gives exactly ``Q @ K^T``. ``head_size // 16`` WMMA steps
     accumulate the ``<8 x f32>`` score fragment.
+  * **Score features** (all optional, applied to the f32 scores before the
+    softmax): causal masks (top-left or bottom-right), sliding window, softcap,
+    ALiBi, FP32 QQ-bias and per-head sinks. Masked scores are ``-inf`` and a
+    fully masked row writes zero through the zero-denominator guard.
   * **Online softmax** over the score fragment. In the accumulator layout each
     lane ``l`` owns one k-column (``l % 16``) and 8 q-rows (slot ``i`` →
     ``row 2*i + l // 16``). A per-q-row reduction over the 16 k-columns is a
     butterfly across the 16 lanes of one wave32 half (xor masks 1,2,4,8). The
     running ``m`` (row max) / ``l`` (row sum) state and the PV accumulator are
-    carried through the K-loop as ``scf.for`` iter-args, exactly as the MFMA
-    body does, but sized to the wave32 fragment.
+    carried through the K-loop as ``scf.for`` iter-args.
   * **P staging**: the softmax probabilities live in the *accumulator* layout
     (lane = k-col), but the PV matmul needs them in the *A-operand* layout
-    (lane = q-row, the 16 k-values as the fragment). We round-trip P through a
-    16×16 LDS tile to transpose the distribution, mirroring the LDS P-staging
-    in the MFMA body.
+    (lane = q-row, the 16 k-values as the fragment). P is round-tripped through a
+    16×16 LDS tile to transpose the distribution.
   * **PV**: ``O[q,d] = sum_k P[q,k] * V[k,d]``. WMMA's ``A @ B^T`` needs B in
     ``N×K`` = ``d×k`` layout, i.e. the B fragment for d-column ``c`` is the
-    V-*column* ``V[k, c]`` for k = 0..15 — a strided gather of V. ``head_size
-    // 16`` N-tiles of d are produced, each a ``<8 x f32>`` accumulator.
-  * **Epilogue**: ``O[q,d] = acc[q,d] / l[q]`` (with the zero-denominator guard
-    the MFMA body uses for fully-masked rows), truncated to f16 and scattered
-    to the accumulator's ``(row, col)`` coordinates.
+    V-*column* ``V[k, c]`` for k = 0..15 — a strided gather of V, optionally
+    staged through LDS (``v_lds_stage``). ``head_size // 16`` N-tiles of d are
+    produced, each a ``<8 x f32>`` accumulator; ``value_tile_size`` splits them
+    across CTAs.
+  * **Epilogue**: ``O[q,d] = acc[q,d] / l[q]``, converted to the Q dtype
+    (fp16 or bf16) and scattered to the accumulator's ``(row, col)`` coordinates.
 
-No async DMA, no multi-tile-per-wave: correctness-first, like the gfx1151 WMMA
-GEMM it is modelled on. Tuning (LDS K/V staging, ping-pong) is a follow-on.
+Inputs may be dense ``[batch, seq, head, dim]``, ragged (``cu_seqlens``) or paged
+KV, optionally with OCP-E4M3FN KV storage. The FP16 aligned dense D64/D128 case
+has a transposed-QK specialization. Which spec to use for a request is decided by
+``dispatch.attention.gfx1151``, not here.
 """
 
 from __future__ import annotations
@@ -121,6 +117,15 @@ class WmmaFmhaFwdSpec:
     num_waves: int = 1
     scheduler_strategy: str | None = None
     value_tile_size: int = 0  # 0 => full head; otherwise one output-column tile per CTA
+    # Standard path only: bound the K loop at the causal diagonal so fully
+    # masked key tiles are never loaded. The transposed path always does this.
+    causal_tile_skip: bool = False
+    # V/output head width when it differs from the Q/K ``head_size``; 0 => equal.
+    v_head_size: int = 0
+    # Two-sided local window (standard path, mask_mode "none"): keep keys with
+    # k <= q + context + window_right, and k > q + context - sliding_window when
+    # a left width is set. -1 => off; 0 with a left width equals causal+window.
+    window_right: int = -1
 
     def __post_init__(self) -> None:
         from rocke.core.codegen_policy import normalize_scheduler_strategy
@@ -138,27 +143,58 @@ class WmmaFmhaFwdSpec:
             raise ValueError(
                 f"head_size must be a multiple of 16, got {self.head_size}"
             )
+        if self.v_head_size < 0 or self.v_head_size % 16 != 0:
+            raise ValueError(
+                f"v_head_size must be zero or a multiple of 16, got {self.v_head_size}"
+            )
+        if self.v_head_size == self.head_size:
+            raise ValueError("v_head_size must be 0 when it equals head_size")
+        if self.v_head_size and self.transposed_qk:
+            raise ValueError("v_head_size is not supported with transposed_qk")
         if self.value_tile_size and (
             self.value_tile_size < 16
             or self.value_tile_size % 16
-            or self.value_tile_size >= self.head_size
-            or self.head_size % self.value_tile_size
+            or self.value_tile_size >= self.v_dim
+            or self.v_dim % self.value_tile_size
             or self.transposed_qk
         ):
             raise ValueError(
-                "value_tile_size must be a proper multiple-of-16 head divisor on the standard WMMA path"
+                "value_tile_size must be a proper multiple-of-16 divisor of the V head on the standard WMMA path"
             )
         if self.mask_mode not in ("none", "causal"):
             raise ValueError(
                 f"WMMA FMHA supports mask_mode 'none'/'causal', got {self.mask_mode!r}"
             )
-        if self.causal_bottom_right and self.mask_mode != "causal":
-            raise ValueError("bottom-right alignment requires causal masking")
-        if self.sliding_window < 0 or (
-            self.sliding_window and self.mask_mode != "causal"
+        if self.window_right < -1:
+            raise ValueError("window_right must be -1 (off) or nonnegative")
+        if self.window_right >= 0 and (
+            self.mask_mode != "none" or self.transposed_qk or self.causal_tile_skip
         ):
             raise ValueError(
-                "sliding-window attention requires a nonnegative width and causal masking"
+                "window_right requires mask_mode 'none' on the standard "
+                "(non-transposed) path without causal_tile_skip"
+            )
+        if self.causal_bottom_right and not (
+            self.mask_mode == "causal" or self.window_right >= 0
+        ):
+            raise ValueError(
+                "bottom-right alignment requires causal masking or a local window"
+            )
+        if self.causal_tile_skip and (
+            self.mask_mode != "causal" or self.sliding_window or self.transposed_qk
+        ):
+            raise ValueError(
+                "causal_tile_skip requires causal masking without a sliding "
+                "window on the standard (non-transposed) path"
+            )
+        if self.sliding_window < 0 or (
+            self.sliding_window
+            and self.mask_mode != "causal"
+            and self.window_right < 0
+        ):
+            raise ValueError(
+                "sliding-window attention requires a nonnegative width and causal "
+                "masking or a right window bound"
             )
         if self.layout not in ("dense", "ragged", "paged"):
             raise ValueError(f"unsupported attention layout {self.layout!r}")
@@ -185,6 +221,7 @@ class WmmaFmhaFwdSpec:
                 or self.kv_tail
                 or self.v_lds_stage
                 or self.sliding_window
+                or self.window_right >= 0
                 or self.use_softcap
                 or self.use_sinks
                 or self.use_alibi
@@ -208,8 +245,12 @@ class WmmaFmhaFwdSpec:
         return self.num_kv_heads or self.num_query_heads
 
     @property
+    def v_dim(self) -> int:
+        return self.v_head_size or self.head_size
+
+    @property
     def value_tiles(self) -> int:
-        return self.head_size // self.value_tile_size if self.value_tile_size else 1
+        return self.v_dim // self.value_tile_size if self.value_tile_size else 1
 
     @property
     def block_size(self) -> int:
@@ -229,9 +270,18 @@ class WmmaFmhaFwdSpec:
             f"HQ{self.num_query_heads}",
             f"HK{self.kv_heads}",
             "bf16" if self.dtype == "bf16" else "fp16",
-            "causal_br" if self.causal_bottom_right else self.mask_mode,
+            (
+                "causal_br"
+                if self.causal_bottom_right and self.mask_mode == "causal"
+                else self.mask_mode
+            ),
             "vlds" if self.v_lds_stage else "vgather",
             f"sw{self.sliding_window}" if self.sliding_window else "",
+            (
+                f"wr{self.window_right}{'_br' if self.causal_bottom_right else ''}"
+                if self.window_right >= 0
+                else ""
+            ),
             self.layout if self.layout != "dense" else "",
             f"bs{self.page_block_size}" if self.layout == "paged" else "",
             f"kv{self.kv_dtype}" if self.kv_dtype else "",
@@ -243,6 +293,7 @@ class WmmaFmhaFwdSpec:
                 else ""
             ),
             f"dv{self.value_tile_size}" if self.value_tile_size else "",
+            f"vh{self.v_head_size}" if self.v_head_size else "",
             flags={
                 "qtail": self.query_tail or self.layout != "dense",
                 "kvtail": self.kv_tail or self.layout != "dense",
@@ -250,6 +301,7 @@ class WmmaFmhaFwdSpec:
                 "sinks": self.use_sinks,
                 "alibi": self.use_alibi,
                 "qqbias": self.use_qq_bias,
+                "cskip": self.causal_tile_skip,
             },
         )
 
@@ -262,6 +314,8 @@ def is_valid_spec(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> Tuple[bool, s
         return False, "transposed QK requires gfx1151"
     if spec.value_tile_size and arch != "gfx1151":
         return False, "output-column tiling requires gfx1151"
+    if spec.v_head_size and arch != "gfx1151":
+        return False, "a distinct V head size requires gfx1151"
 
     try:
         target = ArchTarget.from_gfx(arch)
@@ -285,7 +339,7 @@ def is_valid_spec(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> Tuple[bool, s
     # One 16-bit P-staging tile, plus an optional 16-bit V tile.
     bytes_lds = _BLOCK_M * _BLOCK_K * 2
     if spec.v_lds_stage:
-        bytes_lds += _BLOCK_M * (spec.value_tile_size or spec.head_size) * 2
+        bytes_lds += _BLOCK_M * (spec.value_tile_size or spec.v_dim) * 2
     if not target.fits_lds(bytes_lds):
         return False, (
             f"LDS budget {bytes_lds} > {target.lds_capacity_bytes} cap on {arch}"
@@ -447,21 +501,34 @@ def _score_features(b, spec, params, head, context):
     ), sink
 
 
-def _window_tiles(b, width, query_start, query_length, key_length, context, tile):
-    if not width:
+def _window_tiles(
+    b,
+    width,
+    query_start,
+    query_length,
+    key_length,
+    context,
+    tile,
+    causal_skip=False,
+    right=-1,
+):
+    if not width and not causal_skip and right < 0:
         return None, None
     zero = b.const_i32(0)
     one = b.const_i32(1)
     last = b.const_i32(15)
-    lower = b.sub(b.add(query_start, context), b.const_i32(width - 1))
-    lower = b.select(b.cmp_lt(lower, zero), zero, lower)
+    if width:
+        lower = b.sub(b.add(query_start, context), b.const_i32(width - 1))
+        lower = b.select(b.cmp_lt(lower, zero), zero, lower)
     q_last = b.add(query_start, last)
     q_limit = b.sub(query_length, one)
     q_last = b.select(b.cmp_gt(q_last, q_limit), q_limit, q_last)
     upper = b.add(b.add(q_last, context), one)
+    if right > 0:
+        upper = b.add(upper, b.const_i32(right))
     upper = b.select(b.cmp_gt(upper, key_length), key_length, upper)
     upper = b.select(b.cmp_lt(upper, zero), zero, upper)
-    start = b.div(lower, tile)
+    start = b.div(lower, tile) if width else None
     stop = b.div(b.add(upper, last), tile)
     return start, stop
 
@@ -590,6 +657,8 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
         or spec.dtype == "bf16"
         or spec.kv_tail
         or spec.sliding_window
+        or spec.window_right >= 0
+        or spec.causal_tile_skip
         or spec.use_softcap
         or spec.use_sinks
         or spec.use_alibi
@@ -606,6 +675,8 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
         seqlen_k,
         context,
         c16,
+        causal_skip=spec.causal_tile_skip,
+        right=spec.window_right,
     )
     k_row, v_row = (None, None)
     if spec.layout == "paged":
@@ -683,6 +754,8 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
         wmma_kv_tail=spec.kv_tail or spec.layout != "dense",
         wmma_value_tile_size=spec.value_tile_size,
         wmma_value_offset=value_offset,
+        wmma_v_head_size=spec.v_head_size,
+        wmma_window_right=spec.window_right,
         extra_score_transform=score_transform,
         sink_log2=sink,
         k_tile_start=tile_start,

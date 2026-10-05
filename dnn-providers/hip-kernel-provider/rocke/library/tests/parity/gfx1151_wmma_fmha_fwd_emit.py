@@ -4,7 +4,7 @@
 #
 # tests/parity/gfx1151_wmma_fmha_fwd_emit.py -- Python reference emitter for the
 # gfx1151 (RDNA3.5 / Strix Halo) WMMA FMHA forward instance parity harness.
-# Selects one of 119 sampled configurations by argv[1] (0..118), builds it
+# Selects one of 131 sampled configurations by argv[1] (0..130), builds it
 # via build_wmma_fmha_fwd(arch='gfx1151') and prints
 # lower_kernel_to_llvm(kernel, arch='gfx1151') to stdout so it can be
 # byte-compared with the C emitter gfx1151_wmma_fmha_fwd_emit.c.
@@ -14,7 +14,65 @@ from kernels.gfx1151.wmma_fmha_fwd import WmmaFmhaFwdSpec, build_wmma_fmha_fwd
 from _emit_common import run_emit
 
 
+_V_HEAD_CASES = (
+    # head_size, v_head_size, value_tile_size, mask_mode, v_lds_stage
+    (128, 64, 0, "none", False),
+    (64, 128, 0, "causal", True),
+    (192, 128, 0, "none", True),
+    (128, 256, 64, "none", False),
+)
+
+
+_WINDOW_RIGHT_CASES = (
+    # head_size, sliding_window, window_right, bottom_right (also enables tails + V LDS)
+    (64, 0, 16, False),
+    (64, 128, 16, False),
+    (128, 64, 0, True),
+    (64, 0, 32, True),
+)
+
+
 def _spec(idx: int) -> WmmaFmhaFwdSpec:
+    if 127 <= idx < 131:
+        head, left, right, bottom_right = _WINDOW_RIGHT_CASES[idx - 127]
+        return WmmaFmhaFwdSpec(
+            head_size=head,
+            num_query_heads=8,
+            num_kv_heads=2,
+            mask_mode="none",
+            sliding_window=left,
+            window_right=right,
+            causal_bottom_right=bottom_right,
+            query_tail=bottom_right,
+            kv_tail=bottom_right,
+            v_lds_stage=bottom_right,
+        )
+    if 123 <= idx < 127:
+        head, v_head, tile, mask, vlds = _V_HEAD_CASES[idx - 123]
+        return WmmaFmhaFwdSpec(
+            head_size=head,
+            num_query_heads=8,
+            num_kv_heads=2,
+            mask_mode=mask,
+            v_lds_stage=vlds,
+            v_head_size=v_head,
+            value_tile_size=tile,
+        )
+    if 119 <= idx < 123:
+        # Standard-path causal tile skip: top-left / bottom-right x D64 / D128.
+        variant = idx - 119
+        bottom_right = bool(variant % 2)
+        return WmmaFmhaFwdSpec(
+            head_size=64 if variant < 2 else 128,
+            num_query_heads=8,
+            num_kv_heads=2,
+            mask_mode="causal",
+            causal_bottom_right=bottom_right,
+            query_tail=bottom_right,
+            kv_tail=bottom_right,
+            v_lds_stage=bottom_right,
+            causal_tile_skip=True,
+        )
     if 99 <= idx < 115:
         variant = idx - 99
         vlds = bool(variant % 2)
@@ -205,7 +263,7 @@ def main() -> int:
     return run_emit(
         _spec,
         build_wmma_fmha_fwd,
-        usage="usage: gfx1151_wmma_fmha_fwd_emit.py <config_index 0..118>\n",
+        usage="usage: gfx1151_wmma_fmha_fwd_emit.py <config_index 0..130>\n",
         arch="gfx1151",
     )
 

@@ -70,12 +70,27 @@ static bool wmma_valid_kv_dtype(const rocke_wmma_fmha_fwd_spec_t* spec)
            && (spec->kv_dtype[0] == '\0' || strcmp(spec->kv_dtype, "fp8e4m3") == 0);
 }
 
+/* WmmaFmhaFwdSpec.v_dim: the V/output head width (v_head_size or head_size). */
+static int wmma_v_dim(const rocke_wmma_fmha_fwd_spec_t* spec)
+{
+    return spec->v_head_size != 0 ? spec->v_head_size : spec->head_size;
+}
+
+static bool wmma_valid_v_head(const rocke_wmma_fmha_fwd_spec_t* spec)
+{
+    return spec->v_head_size == 0
+           || (spec->v_head_size > 0 && spec->v_head_size % 16 == 0
+               && spec->v_head_size != spec->head_size && !spec->transposed_qk);
+}
+
 static bool wmma_valid_value_tile(const rocke_wmma_fmha_fwd_spec_t* spec)
 {
     int tile = spec->value_tile_size;
-    return tile == 0
-           || (tile >= 16 && tile % 16 == 0 && tile < spec->head_size && spec->head_size % tile == 0
-               && !spec->transposed_qk);
+    int v_dim = wmma_v_dim(spec);
+    return wmma_valid_v_head(spec)
+           && (tile == 0
+               || (tile >= 16 && tile % 16 == 0 && tile < v_dim && v_dim % tile == 0
+                   && !spec->transposed_qk));
 }
 
 /* WmmaFmhaFwdSpec.kv_heads property: num_kv_heads or num_query_heads. */
@@ -127,6 +142,9 @@ rocke_wmma_fmha_fwd_spec_t rocke_wmma_fmha_fwd_spec_default(void)
     s.num_waves = 1;
     s.scheduler_strategy = NULL;
     s.value_tile_size = 0;
+    s.causal_tile_skip = false;
+    s.v_head_size = 0;
+    s.window_right = -1;
     return s;
 }
 
@@ -143,8 +161,8 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
     const char* name;
     const char* mask;
     char h[32], hq[32], hk[32], window[32], page[32], block_n[32], waves[32], scheduler[32],
-        value_tile[32];
-    const char* parts[15];
+        value_tile[32], v_head[32], right_window[40];
+    const char* parts[17];
     const char* dtype = wmma_dtype(spec);
 
     if(spec == NULL || out == NULL || dtype == NULL || !wmma_valid_layout(spec)
@@ -169,7 +187,8 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
     parts[2] = hq;
     parts[3] = hk;
     parts[4] = strcmp(dtype, "bf16") == 0 ? "bf16" : "fp16";
-    parts[5] = spec->causal_bottom_right ? "causal_br" : mask;
+    parts[5] = spec->causal_bottom_right && spec->mask_mode == ROCKE_FMHA_MASK_CAUSAL ? "causal_br"
+                                                                                     : mask;
     parts[6] = spec->v_lds_stage ? "vlds" : "vgather";
 
     size_t num_parts = 7;
@@ -177,6 +196,15 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
     {
         snprintf(window, sizeof(window), "sw%d", spec->sliding_window);
         parts[num_parts++] = window;
+    }
+    if(spec->window_right >= 0)
+    {
+        snprintf(right_window,
+                 sizeof(right_window),
+                 "wr%d%s",
+                 spec->window_right,
+                 spec->causal_bottom_right ? "_br" : "");
+        parts[num_parts++] = right_window;
     }
     const bool packed = strcmp(spec->layout, "dense") != 0;
     if(packed)
@@ -208,15 +236,21 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
         snprintf(value_tile, sizeof(value_tile), "dv%d", spec->value_tile_size);
         parts[num_parts++] = value_tile;
     }
-    const char* flag_names[] = {"qtail", "kvtail", "softcap", "sinks", "alibi", "qqbias"};
+    if(spec->v_head_size != 0)
+    {
+        snprintf(v_head, sizeof(v_head), "vh%d", spec->v_head_size);
+        parts[num_parts++] = v_head;
+    }
+    const char* flag_names[] = {"qtail", "kvtail", "softcap", "sinks", "alibi", "qqbias", "cskip"};
     const int flag_on[] = {spec->query_tail || packed,
                            spec->kv_tail || packed,
                            spec->use_softcap,
                            spec->use_sinks,
                            spec->use_alibi,
-                           spec->use_qq_bias};
+                           spec->use_qq_bias,
+                           spec->causal_tile_skip};
     return rocke_kernel_name_join(
-        name, parts, num_parts, flag_names, flag_on, 6, out, out_cap, NULL);
+        name, parts, num_parts, flag_names, flag_on, 7, out, out_cap, NULL);
 }
 
 /* --------------------------------------------------------------------------- *
@@ -257,9 +291,10 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
     {
         arch = WMMA_FMHA_DEFAULT_ARCH;
     }
-    if(!wmma_valid_value_tile(spec) || (spec->value_tile_size != 0 && strcmp(arch, "gfx1151") != 0))
+    if(!wmma_valid_value_tile(spec)
+       || ((spec->value_tile_size != 0 || spec->v_head_size != 0) && strcmp(arch, "gfx1151") != 0))
     {
-        wmma_set_reason(reason, reason_cap, "invalid gfx1151 output-column tile");
+        wmma_set_reason(reason, reason_cap, "invalid gfx1151 output-column tile or V head size");
         return false;
     }
     const char* dtype = wmma_dtype(spec);
@@ -278,17 +313,47 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
         wmma_set_reason(reason, reason_cap, "WMMA FMHA supports none/causal masking");
         return false;
     }
-    if(spec->causal_bottom_right && spec->mask_mode != ROCKE_FMHA_MASK_CAUSAL)
+    if(spec->window_right < -1)
     {
-        wmma_set_reason(reason, reason_cap, "bottom-right alignment requires causal masking");
+        wmma_set_reason(reason, reason_cap, "window_right must be -1 (off) or nonnegative");
         return false;
     }
-    if(spec->sliding_window < 0
-       || (spec->sliding_window > 0 && spec->mask_mode != ROCKE_FMHA_MASK_CAUSAL))
+    if(spec->window_right >= 0
+       && (spec->mask_mode != ROCKE_FMHA_MASK_NONE || spec->transposed_qk
+           || spec->causal_tile_skip))
     {
         wmma_set_reason(reason,
                         reason_cap,
-                        "sliding-window attention requires a nonnegative width and causal masking");
+                        "window_right requires mask_mode none on the standard (non-transposed) "
+                        "path without causal_tile_skip");
+        return false;
+    }
+    if(spec->causal_bottom_right
+       && !(spec->mask_mode == ROCKE_FMHA_MASK_CAUSAL || spec->window_right >= 0))
+    {
+        wmma_set_reason(reason,
+                        reason_cap,
+                        "bottom-right alignment requires causal masking or a local window");
+        return false;
+    }
+    if(spec->sliding_window < 0
+       || (spec->sliding_window > 0 && spec->mask_mode != ROCKE_FMHA_MASK_CAUSAL
+           && spec->window_right < 0))
+    {
+        wmma_set_reason(reason,
+                        reason_cap,
+                        "sliding-window attention requires a nonnegative width and causal masking "
+                        "or a right window bound");
+        return false;
+    }
+    if(spec->causal_tile_skip
+       && (spec->mask_mode != ROCKE_FMHA_MASK_CAUSAL || spec->sliding_window > 0
+           || spec->transposed_qk))
+    {
+        wmma_set_reason(reason,
+                        reason_cap,
+                        "causal_tile_skip requires causal masking without a sliding window on the "
+                        "standard (non-transposed) path");
         return false;
     }
     if(!wmma_valid_layout(spec))
@@ -313,7 +378,8 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
             return false;
         }
         if(strcmp(spec->layout, "dense") != 0 || spec->kv_dtype[0] != '\0' || spec->query_tail
-           || spec->kv_tail || spec->v_lds_stage || spec->sliding_window || spec->use_softcap
+           || spec->kv_tail || spec->v_lds_stage || spec->sliding_window
+           || spec->window_right >= 0 || spec->use_softcap
            || spec->use_sinks || spec->use_alibi || spec->use_qq_bias)
         {
             wmma_set_reason(
@@ -396,7 +462,7 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
     bytes_lds = (long)ROCKE_WMMA_FMHA_FWD_BLOCK_M * ROCKE_WMMA_FMHA_FWD_BLOCK_K * 2;
     if(spec->v_lds_stage)
     {
-        int value_size = spec->value_tile_size != 0 ? spec->value_tile_size : spec->head_size;
+        int value_size = spec->value_tile_size != 0 ? spec->value_tile_size : wmma_v_dim(spec);
         bytes_lds += (long)ROCKE_WMMA_FMHA_FWD_BLOCK_M * value_size * 2;
     }
     if(!rocke_archtarget_fits_lds(target, bytes_lds))
@@ -642,7 +708,7 @@ static rocke_status_t
     if(spec->value_tile_size != 0)
     {
         rocke_value_t* batch_tile = batch;
-        rocke_value_t* tiles = rocke_b_const_i32(b, spec->head_size / spec->value_tile_size);
+        rocke_value_t* tiles = rocke_b_const_i32(b, wmma_v_dim(spec) / spec->value_tile_size);
         batch = rocke_b_div(b, batch_tile, tiles);
         rocke_value_t* value_tile = rocke_b_mod(b, batch_tile, tiles);
         value_offset = rocke_b_mul(b, value_tile, rocke_b_const_i32(b, spec->value_tile_size));
@@ -734,7 +800,9 @@ static rocke_status_t
         = spec->causal_bottom_right ? rocke_b_sub(b, seqlen_k, seqlen_q) : rocke_b_const_i32(b, 0);
     const bool score_features = spec->use_softcap || spec->use_alibi || spec->use_qq_bias;
     const bool strict = spec->causal_bottom_right || strcmp(p.dtype, "bf16") == 0 || spec->kv_tail
-                        || spec->sliding_window > 0 || score_features || spec->use_sinks || packed;
+                        || spec->sliding_window > 0 || spec->window_right >= 0
+                        || spec->causal_tile_skip || score_features
+                        || spec->use_sinks || packed;
     p.mask_neg_inf = strict ? rocke_b_const_f32(b, -INFINITY) : NULL;
     wmma_score_context features{};
     features.context = p.causal_ctx_offset;
@@ -771,22 +839,29 @@ static rocke_status_t
         p.extra_score_transform = wmma_score_transform;
         p.extra_score_transform_user = &features;
     }
-    if(spec->sliding_window > 0)
+    if(spec->sliding_window > 0 || spec->causal_tile_skip || spec->window_right >= 0)
     {
         rocke_value_t* zero = rocke_b_const_i32(b, 0);
         rocke_value_t* one = rocke_b_const_i32(b, 1);
         rocke_value_t* last = rocke_b_const_i32(b, 15);
-        rocke_value_t* start_pos = rocke_b_add(b, q_row0, p.causal_ctx_offset);
-        rocke_value_t* width = rocke_b_const_i32(b, spec->sliding_window - 1);
-        rocke_value_t* lower = rocke_b_sub(b, start_pos, width);
-        lower = rocke_b_select(b, rocke_b_cmp_lt(b, lower, zero), zero, lower);
+        rocke_value_t* lower = NULL;
+        if(spec->sliding_window > 0)
+        {
+            rocke_value_t* start_pos = rocke_b_add(b, q_row0, p.causal_ctx_offset);
+            rocke_value_t* width = rocke_b_const_i32(b, spec->sliding_window - 1);
+            lower = rocke_b_sub(b, start_pos, width);
+            lower = rocke_b_select(b, rocke_b_cmp_lt(b, lower, zero), zero, lower);
+        }
         rocke_value_t* q_last = rocke_b_add(b, q_row0, last);
         rocke_value_t* q_limit = rocke_b_sub(b, seqlen_q, one);
         q_last = rocke_b_select(b, rocke_b_cmp_gt(b, q_last, q_limit), q_limit, q_last);
         rocke_value_t* upper = rocke_b_add(b, rocke_b_add(b, q_last, p.causal_ctx_offset), one);
+        if(spec->window_right > 0)
+            upper = rocke_b_add(b, upper, rocke_b_const_i32(b, spec->window_right));
         upper = rocke_b_select(b, rocke_b_cmp_gt(b, upper, seqlen_k), seqlen_k, upper);
         upper = rocke_b_select(b, rocke_b_cmp_lt(b, upper, zero), zero, upper);
-        p.k_tile_start = rocke_b_div(b, lower, c16);
+        if(lower != NULL)
+            p.k_tile_start = rocke_b_div(b, lower, c16);
         p.k_tile_stop = rocke_b_div(b, rocke_b_add(b, upper, last), c16);
     }
     wmma_paged_row_context paged_k{}, paged_v{};
@@ -825,6 +900,9 @@ static rocke_status_t
     p.wmma_kv_tail = spec->kv_tail || packed;
     p.wmma_value_tile_size = spec->value_tile_size;
     p.wmma_value_offset = value_offset;
+    p.wmma_v_head_size = spec->v_head_size;
+    p.wmma_use_window_right = spec->window_right >= 0;
+    p.wmma_window_right = spec->window_right >= 0 ? spec->window_right : 0;
     if(spec->kv_dtype[0] != '\0')
     {
         p.kv_dtype = spec->kv_dtype;
@@ -904,7 +982,7 @@ rocke_status_t rocke_wmma_fmha_fwd_grid(const rocke_wmma_fmha_fwd_spec_t* spec,
     {
         return ROCKE_ERR_VALUE;
     }
-    int value_tiles = spec->value_tile_size != 0 ? spec->head_size / spec->value_tile_size : 1;
+    int value_tiles = spec->value_tile_size != 0 ? wmma_v_dim(spec) / spec->value_tile_size : 1;
     if(spec->value_tile_size != 0 && (batch < 0 || batch > 0x7FFFFFFF / value_tiles))
         return ROCKE_ERR_VALUE;
     out[0] = (seqlen_q + block_m - 1) / block_m;

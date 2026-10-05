@@ -92,6 +92,17 @@ class _DeviceTensor:
             n *= s
         return n
 
+    def __getitem__(self, key: slice) -> "_DeviceTensor":
+        """Leading-dim slice view, as torch tensors provide for per-batch launches."""
+        start, stop, step = key.indices(self._shape[0])
+        assert step == 1 and stop >= start
+        return _DeviceTensor(
+            _ptr=self._ptr + start * self._strides[0] * self.element_size(),
+            _shape=(stop - start,) + self._shape[1:],
+            _strides=self._strides,
+            _dtype=self._dtype,
+        )
+
 
 def _view(buffers, name: str) -> _DeviceTensor:
     array = buffers.arrays[name]
@@ -401,17 +412,69 @@ class TestMetadataSafety(unittest.TestCase):
             _dense_request(), _dense_spec(), tensors, **kwargs
         )
 
-    def test_rejects_dense_batch_stride_gap(self):
-        """A [B, S, H, D] tensor whose batch stride skips rows (e.g. a
-        slice of a larger allocation) must be rejected: the dense kernel
-        ABI folds the batch offset into ``batch * seqlen * stride_token``
-        with no separate batch-stride argument."""
+    def test_misaligned_dense_batch_stride_is_rejected(self):
+        """A batch stride that breaks 16-byte alignment of the per-batch
+        views is rejected (the dense kernel folds ``batch * seqlen *
+        stride_token`` itself; non-folded batches launch per batch)."""
         q = _fake_tensor((2, 32, 4, 64))
+        gapped_k = _fake_tensor(
+            (2, 32, 2, 64), strides=(32 * 2 * 64 + 1, 2 * 64, 64, 1)
+        )
+        with self.assertRaisesRegex(ValueError, "batch stride|strides must preserve"):
+            self._bind({"q": q, "k": gapped_k, "v": gapped_k, "out": q})
+
+    def test_gapped_dense_batch_stride_is_served_per_batch(self):
+        from dispatch.attention.bindings import (
+            _gfx1151_dense_needs_per_batch,
+            _gfx1151_validate_and_collect,
+        )
+
+        q = _fake_tensor((2, 32, 4, 64))
+        folded_k = _fake_tensor((2, 32, 2, 64))
         gapped_k = _fake_tensor(
             (2, 32, 2, 64), strides=(32 * 2 * 64 + 64, 2 * 64, 64, 1)
         )
-        with self.assertRaisesRegex(ValueError, "batch stride"):
-            self._bind({"q": q, "k": gapped_k, "v": gapped_k, "out": q})
+        # [B, H, S, D] storage viewed as [B, S, H, D].
+        permuted_k = _fake_tensor(
+            (2, 32, 2, 64), strides=(2 * 32 * 64, 64, 32 * 64, 1)
+        )
+        request, spec = _dense_request(), _dense_spec()
+        for k, expected in ((folded_k, False), (gapped_k, True), (permuted_k, True)):
+            tensors = {"q": q, "k": k, "v": k, "out": q}
+            _gfx1151_validate_and_collect(request, spec, tensors)
+            self.assertEqual(_gfx1151_dense_needs_per_batch(request, tensors), expected)
+
+    def test_overlapping_dense_out_batch_stride_is_rejected(self):
+        q = _fake_tensor((2, 32, 4, 64))
+        k = _fake_tensor((2, 32, 2, 64))
+        overlapping = _fake_tensor(
+            (2, 32, 4, 64), strides=(16 * 4 * 64, 4 * 64, 64, 1)
+        )
+        with self.assertRaisesRegex(ValueError, "out batch stride"):
+            self._bind({"q": q, "k": k, "v": k, "out": overlapping})
+
+    def test_unequal_head_dims_follow_v_dim(self):
+        from dispatch.attention.bindings import _gfx1151_validate_and_collect
+
+        request = _dense_request(hdim_q=64, hdim_v=128)
+        spec = _dense_spec(v_head_size=128)
+        q = _fake_tensor((2, 32, 4, 64))
+        k = _fake_tensor((2, 32, 2, 64))
+        v = _fake_tensor((2, 32, 2, 128))
+        out = _fake_tensor((2, 32, 4, 128))
+        values = _gfx1151_validate_and_collect(
+            request, spec, {"q": q, "k": k, "v": v, "out": out}
+        )
+        self.assertEqual(values["stride_o_token"], 4 * 128)
+        self.assertEqual(values["stride_v_token"], 2 * 128)
+        with self.assertRaisesRegex(ValueError, "out trailing dims"):
+            _gfx1151_validate_and_collect(
+                request, spec, {"q": q, "k": k, "v": v, "out": q}
+            )
+        with self.assertRaisesRegex(ValueError, "v trailing dims"):
+            _gfx1151_validate_and_collect(
+                request, spec, {"q": q, "k": k, "v": k, "out": out}
+            )
 
     def test_rejects_wrong_kv_dtype_for_fp8_spec(self):
         from dispatch.attention.bindings import bind_gfx1151_attention_torch
@@ -719,3 +782,271 @@ def test_dense_tail_profile_preserves_long_queries_and_empty_prefix(mask, seqlen
         np.testing.assert_array_equal(
             actual[:, :prefix], np.zeros_like(actual[:, :prefix])
         )
+
+
+# ---------------------------------------------------------------------
+# Self-contained numerics for features the frozen benchmark inputs cannot
+# express: a right window, unequal Q/V head dims, and a gapped batch stride.
+# ---------------------------------------------------------------------
+
+
+def _run_dense_direct(request, q, k, v, *, scale, kv_store=None):
+    """Launch one dense request through the public binder and return the fp32
+    output of shape ``[B, Sq, Hq, Dv]``.
+
+    ``kv_store`` optionally holds larger ``(k, v)`` allocations whose leading
+    ``[:, :Sk]`` slice is the logical K/V, so the batch stride has a gap."""
+    from benchmarks.gfx1151.attention.benchmark_sdpa import _host_bytes
+    from rocke.runtime.launcher import release_retained_for_stream
+    from rocke.runtime.torch_interop import resolve_stream
+
+    stream = resolve_stream(0)
+    rt = Runtime()
+    out = np.full(q.shape[:3] + (v.shape[-1],), np.nan, dtype=q.dtype)
+    k_mem, v_mem = kv_store if kv_store is not None else (k, v)
+    pointers = []
+    try:
+
+        def view(logical, backing):
+            ptr = rt.alloc(backing.nbytes)
+            pointers.append(ptr)
+            rt.memcpy_h2d(ptr, _host_bytes(backing), backing.nbytes)
+            return _DeviceTensor(
+                _ptr=ptr,
+                _shape=tuple(logical.shape),
+                _strides=tuple(s // backing.itemsize for s in backing.strides),
+                _dtype=str(backing.dtype),
+            )
+
+        tensors = {
+            "q": view(q, q),
+            "k": view(k, k_mem),
+            "v": view(v, v_mem),
+            "out": view(out, out),
+        }
+        binding = dispatch_attention(request).bind_torch(
+            tensors, softmax_scale=scale, stream=stream, fence=False
+        )
+        binding.launch()
+        rt.stream_sync(stream)
+        release_retained_for_stream(stream)
+        rt.memcpy_d2h(_host_bytes(out), pointers[-1], out.nbytes)
+        return out.astype(np.float32)
+    finally:
+        rt.sync()
+        release_retained_for_stream(stream)
+        for ptr in pointers:
+            rt.free(ptr)
+
+
+def _windowed_reference(q, k, v, *, scale, ctx, left, right):
+    """FP64 attention keeping ``k <= q + ctx + right`` (when ``right >= 0``) and
+    ``k > q + ctx - left`` (when ``left > 0``); ``ctx`` is the alignment offset."""
+    _, sq, hq, _ = q.shape
+    sk, hkv = k.shape[1], k.shape[2]
+    q64, k64, v64 = (x.astype(np.float64) for x in (q, k, v))
+    k64 = np.repeat(k64, hq // hkv, axis=2)
+    v64 = np.repeat(v64, hq // hkv, axis=2)
+    qi = np.arange(sq).reshape(sq, 1)
+    ki = np.arange(sk).reshape(1, sk)
+    keep = np.ones((sq, sk), dtype=bool)
+    if right >= 0:
+        keep &= ki <= qi + ctx + right
+    if left > 0:
+        keep &= ki > qi + ctx - left
+    scores = np.einsum("bqhd,bkhd->bhqk", q64 * scale, k64)
+    scores = np.where(keep.reshape(1, 1, sq, sk), scores, -np.inf)
+    p = np.exp(scores - scores.max(axis=-1, keepdims=True))
+    p /= p.sum(axis=-1, keepdims=True)
+    return np.einsum("bhqk,bkhd->bqhd", p, v64).astype(np.float32)
+
+
+def _random_qkv(seed, batch, sq, sk, hq, hkv, dq, dv):
+    rng = np.random.default_rng(seed)
+    return (
+        rng.standard_normal((batch, sq, hq, dq)).astype(np.float16),
+        rng.standard_normal((batch, sk, hkv, dq)).astype(np.float16),
+        rng.standard_normal((batch, sk, hkv, dv)).astype(np.float16),
+    )
+
+
+def _dense_direct_request(batch, sq, sk, hq, hkv, dq, dv, **extra):
+    return AttentionRequest(
+        batch=batch,
+        nhead_q=hq,
+        nhead_k=hkv,
+        seqlen_q=sq,
+        seqlen_k=sk,
+        hdim_q=dq,
+        hdim_v=dv,
+        arch="gfx1151",
+        dtype="fp16",
+        layout="dense",
+        **extra,
+    )
+
+
+@pytest.mark.gpu
+@_NEEDS_GPU
+@pytest.mark.parametrize(
+    "mask,sq,sk,left,right",
+    [
+        (AttentionMaskType.NO_MASK, 48, 64, 0, 16),
+        (AttentionMaskType.SLIDING_WINDOW, 33, 41, 24, 8),
+        (AttentionMaskType.BOTTOM_RIGHT_CAUSAL, 33, 49, 0, 16),
+        (AttentionMaskType.BOTTOM_RIGHT_CAUSAL, 40, 40, 20, 0),
+    ],
+)
+def test_dispatch_two_sided_local_window(mask, sq, sk, left, right):
+    hq, hkv, dim = 4, 2, 64
+    q, k, v = _random_qkv(201, 2, sq, sk, hq, hkv, dim, dim)
+    scale = 1.0 / np.sqrt(dim)
+    request = _dense_direct_request(
+        2, sq, sk, hq, hkv, dim, dim,
+        mask_type=mask, sliding_window=left, window_right=right,
+    )
+    ctx = sk - sq if mask == AttentionMaskType.BOTTOM_RIGHT_CAUSAL else 0
+    actual = _run_dense_direct(request, q, k, v, scale=scale)
+    expected = _windowed_reference(
+        q, k, v, scale=scale, ctx=ctx, left=left, right=right
+    )
+    np.testing.assert_allclose(actual, expected, rtol=0, atol=2e-2, equal_nan=False)
+
+
+@pytest.mark.gpu
+@_NEEDS_GPU
+@pytest.mark.parametrize("dq,dv", [(64, 128), (128, 64), (80, 48)])
+def test_dispatch_unequal_head_dims(dq, dv):
+    hq, hkv, sq, sk = 4, 2, 37, 53
+    q, k, v = _random_qkv(202, 2, sq, sk, hq, hkv, dq, dv)
+    scale = 1.0 / np.sqrt(dq)
+    request = _dense_direct_request(2, sq, sk, hq, hkv, dq, dv)
+    actual = _run_dense_direct(request, q, k, v, scale=scale)
+    expected = _windowed_reference(q, k, v, scale=scale, ctx=0, left=0, right=-1)
+    np.testing.assert_allclose(actual, expected, rtol=0, atol=2e-2, equal_nan=False)
+
+
+@pytest.mark.gpu
+@_NEEDS_GPU
+def test_dispatch_dense_gapped_batch_stride_is_served_per_batch():
+    batch, sq, sk, hq, hkv, dim, pad = 3, 32, 48, 4, 2, 64, 5
+    q, k, v = _random_qkv(203, batch, sq, sk, hq, hkv, dim, dim)
+    k_store = np.zeros((batch, sk + pad, hkv, dim), dtype=k.dtype)
+    v_store = np.zeros_like(k_store)
+    k_store[:, :sk], v_store[:, :sk] = k, v
+    scale = 1.0 / np.sqrt(dim)
+    request = _dense_direct_request(batch, sq, sk, hq, hkv, dim, dim)
+    actual = _run_dense_direct(
+        request, q, k, v, scale=scale, kv_store=(k_store, v_store)
+    )
+    expected = _windowed_reference(q, k, v, scale=scale, ctx=0, left=0, right=-1)
+    np.testing.assert_allclose(actual, expected, rtol=0, atol=2e-2, equal_nan=False)
+
+
+def _run_dense_views(request, q, k, v, *, scale, out_bhsd=False):
+    """Launch one dense request over numpy *views* of larger backing arrays and
+    return the fp32 output as ``[B, Sq, Hq, Dv]``.
+
+    Each of ``q``/``k``/``v`` is a ``[B, S, H, D]``-shaped view; its element
+    strides and byte offset into the root array are forwarded unchanged, so
+    permuted (BHSD-backed) and packed-QKV views reach the binder as-is."""
+    from benchmarks.gfx1151.attention.benchmark_sdpa import _host_bytes
+    from rocke.runtime.launcher import release_retained_for_stream
+    from rocke.runtime.torch_interop import resolve_stream
+
+    stream = resolve_stream(0)
+    rt = Runtime()
+    b, sq, hq = q.shape[:3]
+    dv = v.shape[-1]
+    if out_bhsd:
+        out_root = np.full((b, hq, sq, dv), np.nan, dtype=q.dtype)
+        out = out_root.transpose(0, 2, 1, 3)
+    else:
+        out_root = out = np.full((b, sq, hq, dv), np.nan, dtype=q.dtype)
+    uploaded = {}
+    try:
+
+        def root_of(a):
+            return a.base if a.base is not None else a
+
+        def device_view(a):
+            root = root_of(a)
+            if id(root) not in uploaded:
+                ptr = rt.alloc(root.nbytes)
+                rt.memcpy_h2d(ptr, _host_bytes(root), root.nbytes)
+                uploaded[id(root)] = ptr
+            offset = (
+                a.__array_interface__["data"][0]
+                - root.__array_interface__["data"][0]
+            )
+            return _DeviceTensor(
+                _ptr=uploaded[id(root)] + offset,
+                _shape=tuple(a.shape),
+                _strides=tuple(st // a.itemsize for st in a.strides),
+                _dtype=str(a.dtype),
+            )
+
+        tensors = {
+            "q": device_view(q),
+            "k": device_view(k),
+            "v": device_view(v),
+            "out": device_view(out),
+        }
+        binding = dispatch_attention(request).bind_torch(
+            tensors, softmax_scale=scale, stream=stream, fence=False
+        )
+        binding.launch()
+        rt.stream_sync(stream)
+        release_retained_for_stream(stream)
+        rt.memcpy_d2h(_host_bytes(out_root), uploaded[id(out_root)], out_root.nbytes)
+        return np.ascontiguousarray(out).astype(np.float32)
+    finally:
+        rt.sync()
+        release_retained_for_stream(stream)
+        for ptr in uploaded.values():
+            rt.free(ptr)
+
+
+@pytest.mark.gpu
+@_NEEDS_GPU
+@pytest.mark.parametrize("out_bhsd", [False, True])
+@pytest.mark.parametrize("batch", [1, 3])
+def test_dispatch_dense_bhsd_backed_views(batch, out_bhsd):
+    """BHSD-backed storage exposed as permuted ``[B, S, H, D]`` views."""
+    sq, sk, hq, hkv, dim = 40, 56, 4, 2, 64
+    q, k, v = _random_qkv(204, batch, sq, sk, hq, hkv, dim, dim)
+
+    def bhsd_backed(x):
+        root = np.ascontiguousarray(x.transpose(0, 2, 1, 3))
+        return root.transpose(0, 2, 1, 3)
+
+    scale = 1.0 / np.sqrt(dim)
+    request = _dense_direct_request(batch, sq, sk, hq, hkv, dim, dim)
+    actual = _run_dense_views(
+        request,
+        bhsd_backed(q),
+        bhsd_backed(k),
+        bhsd_backed(v),
+        scale=scale,
+        out_bhsd=out_bhsd,
+    )
+    expected = _windowed_reference(q, k, v, scale=scale, ctx=0, left=0, right=-1)
+    np.testing.assert_allclose(actual, expected, rtol=0, atol=2e-2, equal_nan=False)
+
+
+@pytest.mark.gpu
+@_NEEDS_GPU
+@pytest.mark.parametrize("batch", [1, 2])
+def test_dispatch_dense_packed_qkv_views(batch):
+    """Q/K/V as strided slices of one packed ``[B, S, Hq + 2*Hkv, D]`` buffer."""
+    s, hq, hkv, dim = 48, 4, 2, 64
+    q, k, v = _random_qkv(205, batch, s, s, hq, hkv, dim, dim)
+    packed = np.concatenate([q, k, v], axis=2)
+    pq = packed[:, :, :hq]
+    pk = packed[:, :, hq : hq + hkv]
+    pv = packed[:, :, hq + hkv :]
+    scale = 1.0 / np.sqrt(dim)
+    request = _dense_direct_request(batch, s, s, hq, hkv, dim, dim)
+    actual = _run_dense_views(request, pq, pk, pv, scale=scale)
+    expected = _windowed_reference(q, k, v, scale=scale, ctx=0, left=0, right=-1)
+    np.testing.assert_allclose(actual, expected, rtol=0, atol=2e-2, equal_nan=False)
