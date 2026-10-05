@@ -24,6 +24,9 @@ target_include_directories(hip_kernel_provider_tests PRIVATE
 # Ensure codegen runs before compiling the tests
 add_dependencies(hip_kernel_provider_tests asm_kernel_codegen)
 
+# AITER_ASM_SUBDIR is a name no build creates, so only TestAsmKernelPath's own temporary
+# directory beside the test executable can satisfy the module-relative lookup.
 target_compile_definitions(hip_kernel_provider_tests PRIVATE
     AITER_ASM_DIR="/test/default/asm/dir"
+    AITER_ASM_SUBDIR="hkp_test_asm_kernels_beside_module"
 )
