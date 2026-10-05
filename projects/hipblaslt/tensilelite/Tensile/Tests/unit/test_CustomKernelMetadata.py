@@ -1160,40 +1160,8 @@ def test_parse_tensile_yaml_skips_non_dict_and_nameless_entries(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "name,rows,maxK",
-    [("wvSpltK_f16_nn_m1", 1, None), ("wvSpltK_f16_nn_m2", 2, 16385)],
-)
-def test_wvspltk_shipped_family_predicates(name, rows, maxK):
-    """m1 and m2 pin their own M, and m2 also bounds K: it reads A only from
-    LDS, which holds M*K <= 32768 halves. B's leading dimension is a kernarg,
-    because library logic routes every NN problem with this M to them."""
-    ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
-    valid, msg = validateCustomKernelMetadata(name, ck_root)
-    assert valid, msg
-
-    config = getCustomKernelConfig(name, {}, ck_root)
-    assert config["AssertSizeEqual"] == {0: rows, 2: 1}
-    assert config["AssertSizeGreaterThan"] == {1: 8}
-    if maxK is None:
-        assert "AssertSizeLessThan" not in config
-    else:
-        assert config["AssertSizeLessThan"] == {3: maxK}
-        assert (maxK - 1) * rows == 32768
-
-    # A, C and D are indexed with no stride argument: unit stride, and a leading
-    # dimension equal to the M this kernel pins.
-    for key in ("AssertStrideAEqual", "AssertStrideCEqual", "AssertStrideDEqual"):
-        assert config[key] == {0: 1, 1: rows}, key
-    assert config["AssertStrideBEqual"] == {0: 1}
-    assert "StrideB0" in [a["semantic"] for a in config["CustomKernel"]["args"]]
-
-
-@pytest.mark.parametrize(
     "name",
     [
-        "wvSpltK_f16_nn_m1",
-        "wvSpltK_f16_nn_m2",
-        "wvSpltK_f16_nn_m4",
         "wvSpltK_bf16_tn_m1",
         "wvSpltK_bf16_tn_m2",
         "wvSpltK_bf16_tn_m4",
@@ -1214,40 +1182,6 @@ _UNIT_STRIDE_KEYS = (
     "AssertStrideCEqual",
     "AssertStrideDEqual",
 )
-
-
-def test_wvspltk_f16_nn_m4_serves_every_m_up_to_four():
-    """m4 reads M and the leading dimensions as kernargs, so it serves M <= 4 and
-    only unit strides are predicated. K is bounded for the full tile: A is read
-    only from LDS, which holds M*K <= 32768 halves."""
-    ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
-    valid, msg = validateCustomKernelMetadata("wvSpltK_f16_nn_m4", ck_root)
-    assert valid, msg
-
-    config = getCustomKernelConfig("wvSpltK_f16_nn_m4", {}, ck_root)
-    assert config["AssertSizeEqual"] == {2: 1}
-    assert config["AssertSizeLessThan"] == {0: 5, 3: 8193}
-    assert (config["AssertSizeLessThan"][0] - 1) * (config["AssertSizeLessThan"][3] - 1) == 32768
-    # M > 0: the kernel indexes the last real row of A as M - 1.
-    assert config["AssertSizeGreaterThan"] == {0: 0, 1: 8}
-    for key in _UNIT_STRIDE_KEYS:
-        assert config[key] == {0: 1}, key
-    assert [a["semantic"] for a in config["CustomKernel"]["args"]] == [
-        "SizeSum",
-        "SizeFree1",
-        "AddressB",
-        "AddressA",
-        "ComputeUnits",
-        "SizeFree0",
-        "StrideB0",
-        "StrideA0",
-        "AddressC",
-        "AddressD",
-        "Alpha",
-        "Beta",
-        "StrideC0",
-        "StrideD0",
-    ]
 
 
 @pytest.mark.parametrize(
@@ -1318,22 +1252,10 @@ _LOGIC_ROOT = os.path.normpath(
     )
 )
 
-_WVSPLTK_NN_RANGES = {
-    "wvSpltK_f16_nn_m1": [1, 1, 9, -1, 1, 1, 8, -1],
-    "wvSpltK_f16_nn_m2": [2, 2, 9, -1, 1, 1, 8, 4096],
-    "wvSpltK_f16_nn_m4": [3, 4, 9, -1, 1, 1, 8, 4096],
-}
-
 
 @pytest.mark.parametrize(
     "rel,plainRel,ranges",
     [
-        (
-            "aquavanjaram/gfx942/Range/aquavanjaram_Cijk_Ailk_Bljk_HHS_BH_UserArgs.yaml",
-            "aquavanjaram/gfx942/Equality/aquavanjaram_Cijk_Ailk_Bljk_HHS_BH_UserArgs.yaml",
-            _WVSPLTK_NN_RANGES,
-        ),
-        ("gfx950/gfx950/Range/gfx950_Cijk_Ailk_Bljk_HHS_BH_UserArgs.yaml", None, _WVSPLTK_NN_RANGES),
         (
             "gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml",
             "gfx950/gfx950/Equality/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml",
@@ -1348,10 +1270,11 @@ _WVSPLTK_NN_RANGES = {
 def test_wvspltk_range_logic(rel, plainRel, ranges):
     """hipBLASLt reaches the wvSpltK kernels through these Range files. A custom
     kernel takes the logic file's problem type, and these kernels support no bias,
-    activation or scale vector, so the type must be plain GEMM. Where plain-GEMM
-    logic ships, the file must match its header and type to share its placeholder.
-    Keys are [m_min, m_max, n_min, n_max, batch_min, batch_max, K_min, K_max], -1
-    unbounded, and each must sit inside its kernel's predicates."""
+    activation or scale vector, so the type must be plain GEMM. The file must
+    match the header and type of the shipped plain-GEMM logic to share its
+    placeholder. Keys are [m_min, m_max, n_min, n_max, batch_min, batch_max,
+    K_min, K_max], -1 unbounded, and each must sit inside its kernel's
+    predicates."""
     path = os.path.join(_LOGIC_ROOT, rel)
     if not os.path.exists(path):
         pytest.skip(f"tuning logic tree not present: {rel}")
@@ -1364,16 +1287,11 @@ def test_wvspltk_range_logic(rel, plainRel, ranges):
     for key in ("UseBias", "UseE", "UseScaleAlphaVec", "UseScaleCD", "GroupedGemm", "Gradient"):
         assert not pt.get(key), key
 
-    if plainRel is not None:
-        with open(os.path.join(_LOGIC_ROOT, plainRel)) as f:
-            plain = yaml.safe_load(f)
-        if isinstance(plain, list):  # legacy positional schema
-            plainHeader, plainPt = dict(zip(("ScheduleName", "ArchitectureName", "DeviceNames"), plain[1:4])), plain[4]
-        else:
-            plainHeader = {k: plain[k] for k in ("ScheduleName", "ArchitectureName", "CUCount", "DeviceNames")}
-            plainPt = plain["ProblemType"]
-        assert {k: doc[k] for k in plainHeader} == plainHeader
-        assert pt == plainPt
+    with open(os.path.join(_LOGIC_ROOT, plainRel)) as f:
+        plain = yaml.safe_load(f)
+    plainHeader = {k: plain[k] for k in ("ScheduleName", "ArchitectureName", "CUCount", "DeviceNames")}
+    assert {k: doc[k] for k in plainHeader} == plainHeader
+    assert pt == plain["ProblemType"]
 
     names = {s["SolutionIndex"]: s["CustomKernel"]["name"] for s in doc["Solutions"]}
     assert {names[index]: key for key, (index, _) in doc["ExactLogic"]} == ranges
@@ -1390,34 +1308,3 @@ def test_wvspltk_range_logic(rel, plainRel, ranges):
             if dim in config.get("AssertSizeLessThan", {}):
                 assert -1 < hi < config["AssertSizeLessThan"][dim], (name, dim)
         assert key[6] >= config["AssertSummationElementMultiple"], name
-
-
-def test_wvspltk_f16_nn_m1_shipped_config():
-    """The rocBLAS M=1 GEMV kernel must stay loadable with the CU-count interface."""
-    ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
-    valid, msg = validateCustomKernelMetadata("wvSpltK_f16_nn_m1", ck_root)
-    assert valid, msg
-
-    config = getCustomKernelConfig("wvSpltK_f16_nn_m1", {}, ck_root)
-    ck = config["CustomKernel"]
-    assert ck["grid"] == ["ComputeUnits", "One", "One"]
-    assert ck["threads"] == [64, 16, 1]
-    # M == 1 and batch == 1; the kernel takes no batch strides.
-    assert config["AssertSizeEqual"] == {0: 1, 2: 1}
-    # N > 8; the tail fixup underflows below one wave tile.
-    assert config["AssertSizeGreaterThan"] == {1: 8}
-    assert config["AssertSummationElementMultiple"] == 8
-    assert config["StaggerU"] == 0
-    # C is read (beta term) and D is written, so out-of-place calls are correct.
-    assert [a["semantic"] for a in ck["args"]] == [
-        "SizeSum",
-        "SizeFree1",
-        "AddressB",
-        "AddressA",
-        "AddressC",
-        "AddressD",
-        "Alpha",
-        "Beta",
-        "ComputeUnits",
-        "StrideB0",
-    ]
