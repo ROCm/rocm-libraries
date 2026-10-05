@@ -40,6 +40,7 @@
 #include <fdeep/fdeep.hpp>
 #include <miopen/filesystem.hpp>
 #include <miopen/env.hpp>
+#include <chrono>
 
 #include <any>
 #include <mutex>
