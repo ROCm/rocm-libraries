@@ -343,6 +343,50 @@ public:
             throw std::invalid_argument("Invalid value for " + name);
     }
 
+    void validate_balance(const std::string name) const
+    {
+        auto val = find(name);
+        if(val == end())
+            return;
+
+        char job = std::toupper(val->second.as<char>());
+        if(job != 'N' && job != 'P' && job != 'S' && job != 'B')
+            throw std::invalid_argument("Invalid value for " + name);
+    }
+
+    void validate_schur_job(const std::string name) const
+    {
+        auto val = find(name);
+        if(val == end())
+            return;
+
+        char job = std::toupper(val->second.as<char>());
+        if(job != 'E' && job != 'S')
+            throw std::invalid_argument("Invalid value for " + name);
+    }
+
+    void validate_schur_vectors(const std::string name) const
+    {
+        auto val = find(name);
+        if(val == end())
+            return;
+
+        char compz = std::toupper(val->second.as<char>());
+        if(compz != 'N' && compz != 'I' && compz != 'V')
+            throw std::invalid_argument("Invalid value for " + name);
+    }
+
+    void validate_eigenvectors(const std::string name) const
+    {
+        auto val = find(name);
+        if(val == end())
+            return;
+
+        char howmny = std::toupper(val->second.as<char>());
+        if(howmny != 'A' && howmny != 'B')
+            throw std::invalid_argument("Invalid value for " + name);
+    }
+
     void validate_consumed() const
     {
         if(!to_consume.empty())

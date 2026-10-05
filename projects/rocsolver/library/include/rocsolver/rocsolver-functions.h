@@ -19064,6 +19064,1885 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehrd_strided_batched(rocblas_handle 
 //! @}
 
 /*! @{
+    \brief GEBAL balances a general square matrix A.
+
+    \details
+    Balancing consists of two steps. First, a permutation matrix \f$P\f$ is found such that
+
+    \f[
+        P^T A P = \left[\begin{array}{ccc}
+                    T_1 & X & Y \\
+                    0 & B & Z \\
+                    0 & 0 & T_2
+                    \end{array}\right]
+    \f]
+
+    where \f$T_1\f$ and \f$T_2\f$ are upper triangular, and \f$B\f$ contains rows and columns
+    ``ilo`` to ``ihi`` (1-based). The diagonal entries of \f$T_1\f$ and \f$T_2\f$ are eigenvalues
+    of \f$A\f$ that have been isolated. Then, a diagonal matrix \f$D\f$ with entries that are
+    powers of two is found such that the rows and columns of \f$D^{-1} B D\f$ have norms as close
+    as possible. The balanced matrix is
+
+    \f[
+        A' = D^{-1} P^T A P D
+    \f]
+
+    The permutation and scaling factors are recorded in scale: for \f$j < ilo\f$ or \f$j > ihi\f$,
+    the j-th entry of scale (with 1-based j) is the (1-based) index of the row and column that was
+    interchanged with row and column j, and for \f$ilo \leq j \leq ihi\f$, it is the j-th diagonal
+    entry of \f$D\f$. The permutations are applied in the order n, n-1, ..., ihi+1, followed by
+    1, 2, ..., ilo-1.
+
+    The results (A, ilo, ihi and scale) are the same as those of the LAPACK routine
+    (version 3.12), except for rounding in the computation of the row and column norms, and in
+    the presence of NaN: if a row or column norm is NaN during the scaling, the balancing stops
+    (the permutations and the scaling factors found so far are applied, and ilo, ihi and scale
+    describe them), where LAPACK returns an error (info = -3).
+
+    For n >= 256 (and a job other than rocsolver_balance_none), several kernels are launched per
+    matrix, and the host synchronizes with the stream after the permutation step and after each
+    sweep of the scaling step.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    job         #rocsolver_balance.
+                Specifies the operations to perform. If rocsolver_balance_none, A is not changed,
+                ilo = 1, ihi = n and scale[j] = 1 for all j. If rocsolver_balance_permute, only the
+                permutation is computed. If rocsolver_balance_scale, only the scaling is computed.
+                If rocsolver_balance_both, both are computed.
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The number of rows and columns of the matrix A.
+    @param[inout]
+    A           pointer to type. Array on the GPU of dimension lda*n.
+                On entry, the matrix A to be balanced.
+                On exit, the balanced matrix.
+    @param[in]
+    lda         rocblas_int. lda >= max(1, n).
+                Specifies the leading dimension of A.
+    @param[out]
+    ilo         pointer to rocblas_int on the GPU.
+                The 1-based index of the first row and column of the submatrix B.
+    @param[out]
+    ihi         pointer to rocblas_int on the GPU.
+                The 1-based index of the last row and column of the submatrix B.
+                If job is rocsolver_balance_none or rocsolver_balance_scale, ilo = 1 and ihi = n.
+                If n = 0, ilo = 1 and ihi = 0.
+    @param[out]
+    scale       pointer to real type. Array on the GPU of dimension n.
+                The permutations and scaling factors applied to A.
+    ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_sgebal(rocblas_handle handle,
+                                                 const rocsolver_balance job,
+                                                 const rocblas_int n,
+                                                 float* A,
+                                                 const rocblas_int lda,
+                                                 rocblas_int* ilo,
+                                                 rocblas_int* ihi,
+                                                 float* scale);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dgebal(rocblas_handle handle,
+                                                 const rocsolver_balance job,
+                                                 const rocblas_int n,
+                                                 double* A,
+                                                 const rocblas_int lda,
+                                                 rocblas_int* ilo,
+                                                 rocblas_int* ihi,
+                                                 double* scale);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cgebal(rocblas_handle handle,
+                                                 const rocsolver_balance job,
+                                                 const rocblas_int n,
+                                                 rocblas_float_complex* A,
+                                                 const rocblas_int lda,
+                                                 rocblas_int* ilo,
+                                                 rocblas_int* ihi,
+                                                 float* scale);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zgebal(rocblas_handle handle,
+                                                 const rocsolver_balance job,
+                                                 const rocblas_int n,
+                                                 rocblas_double_complex* A,
+                                                 const rocblas_int lda,
+                                                 rocblas_int* ilo,
+                                                 rocblas_int* ihi,
+                                                 double* scale);
+//! @}
+
+/*! @{
+    \brief GEBAL_BATCHED balances a batch of general square matrices A_l.
+
+    \details
+    Balancing consists of two steps. First, a permutation matrix \f$P\f$ is found such that
+
+    \f[
+        P^T A_l P = \left[\begin{array}{ccc}
+                    T_1 & X & Y \\
+                    0 & B & Z \\
+                    0 & 0 & T_2
+                    \end{array}\right]
+    \f]
+
+    where \f$T_1\f$ and \f$T_2\f$ are upper triangular, and \f$B\f$ contains rows and columns
+    ``ilo`` to ``ihi`` (1-based). The diagonal entries of \f$T_1\f$ and \f$T_2\f$ are eigenvalues
+    of \f$A_l\f$ that have been isolated. Then, a diagonal matrix \f$D\f$ with entries that are
+    powers of two is found such that the rows and columns of \f$D^{-1} B D\f$ have norms as close
+    as possible. The balanced matrix is
+
+    \f[
+        A_l' = D^{-1} P^T A_l P D
+    \f]
+
+    The permutation and scaling factors are recorded in scale: for \f$j < ilo\f$ or \f$j > ihi\f$,
+    the j-th entry of scale (with 1-based j) is the (1-based) index of the row and column that was
+    interchanged with row and column j, and for \f$ilo \leq j \leq ihi\f$, it is the j-th diagonal
+    entry of \f$D\f$. The permutations are applied in the order n, n-1, ..., ihi+1, followed by
+    1, 2, ..., ilo-1.
+
+    The results (A, ilo, ihi and scale) are the same as those of the LAPACK routine
+    (version 3.12), except for rounding in the computation of the row and column norms, and in
+    the presence of NaN: if a row or column norm is NaN during the scaling, the balancing stops
+    (the permutations and the scaling factors found so far are applied, and ilo, ihi and scale
+    describe them), where LAPACK returns an error (info = -3).
+
+    For n >= 256 (and a job other than rocsolver_balance_none), several kernels are launched per
+    matrix, and the host synchronizes with the stream after the permutation step and after each
+    sweep of the scaling step.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    job         #rocsolver_balance.
+                Specifies the operations to perform. If rocsolver_balance_none, A is not changed,
+                ilo = 1, ihi = n and scale[j] = 1 for all j. If rocsolver_balance_permute, only the
+                permutation is computed. If rocsolver_balance_scale, only the scaling is computed.
+                If rocsolver_balance_both, both are computed.
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The number of rows and columns of all the matrices A_l in the batch.
+    @param[inout]
+    A           array of pointers to type. Each pointer points to an array on the GPU of dimension lda*n.
+                On entry, the matrices A_l to be balanced.
+                On exit, the balanced matrices.
+    @param[in]
+    lda         rocblas_int. lda >= max(1, n).
+                Specifies the leading dimension of matrices A_l.
+    @param[out]
+    ilo         pointer to rocblas_int. Array of batch_count integers on the GPU.
+                ilo[l] is the 1-based index of the first row and column of the submatrix B_l.
+    @param[out]
+    ihi         pointer to rocblas_int. Array of batch_count integers on the GPU.
+                ihi[l] is the 1-based index of the last row and column of the submatrix B_l.
+                If job is rocsolver_balance_none or rocsolver_balance_scale, ilo[l] = 1 and
+                ihi[l] = n. If n = 0, ilo[l] = 1 and ihi[l] = 0.
+    @param[out]
+    scale       pointer to real type. Array on the GPU (the size depends on the value of strideS).
+                The permutations and scaling factors applied to A_l.
+    @param[in]
+    strideS     rocblas_stride.
+                Stride from the start of one vector scale_l to the next one scale_(l+1).
+                There is no restriction for the value of strideS. Normal use case is strideS >= n.
+    @param[in]
+    batch_count rocblas_int. batch_count >= 0.
+                Number of matrices in the batch.
+    ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_sgebal_batched(rocblas_handle handle,
+                                                         const rocsolver_balance job,
+                                                         const rocblas_int n,
+                                                         float* const A[],
+                                                         const rocblas_int lda,
+                                                         rocblas_int* ilo,
+                                                         rocblas_int* ihi,
+                                                         float* scale,
+                                                         const rocblas_stride strideS,
+                                                         const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dgebal_batched(rocblas_handle handle,
+                                                         const rocsolver_balance job,
+                                                         const rocblas_int n,
+                                                         double* const A[],
+                                                         const rocblas_int lda,
+                                                         rocblas_int* ilo,
+                                                         rocblas_int* ihi,
+                                                         double* scale,
+                                                         const rocblas_stride strideS,
+                                                         const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cgebal_batched(rocblas_handle handle,
+                                                         const rocsolver_balance job,
+                                                         const rocblas_int n,
+                                                         rocblas_float_complex* const A[],
+                                                         const rocblas_int lda,
+                                                         rocblas_int* ilo,
+                                                         rocblas_int* ihi,
+                                                         float* scale,
+                                                         const rocblas_stride strideS,
+                                                         const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zgebal_batched(rocblas_handle handle,
+                                                         const rocsolver_balance job,
+                                                         const rocblas_int n,
+                                                         rocblas_double_complex* const A[],
+                                                         const rocblas_int lda,
+                                                         rocblas_int* ilo,
+                                                         rocblas_int* ihi,
+                                                         double* scale,
+                                                         const rocblas_stride strideS,
+                                                         const rocblas_int batch_count);
+//! @}
+
+/*! @{
+    \brief GEBAL_STRIDED_BATCHED balances a batch of general square matrices A_l.
+
+    \details
+    Balancing consists of two steps. First, a permutation matrix \f$P\f$ is found such that
+
+    \f[
+        P^T A_l P = \left[\begin{array}{ccc}
+                    T_1 & X & Y \\
+                    0 & B & Z \\
+                    0 & 0 & T_2
+                    \end{array}\right]
+    \f]
+
+    where \f$T_1\f$ and \f$T_2\f$ are upper triangular, and \f$B\f$ contains rows and columns
+    ``ilo`` to ``ihi`` (1-based). The diagonal entries of \f$T_1\f$ and \f$T_2\f$ are eigenvalues
+    of \f$A_l\f$ that have been isolated. Then, a diagonal matrix \f$D\f$ with entries that are
+    powers of two is found such that the rows and columns of \f$D^{-1} B D\f$ have norms as close
+    as possible. The balanced matrix is
+
+    \f[
+        A_l' = D^{-1} P^T A_l P D
+    \f]
+
+    The permutation and scaling factors are recorded in scale: for \f$j < ilo\f$ or \f$j > ihi\f$,
+    the j-th entry of scale (with 1-based j) is the (1-based) index of the row and column that was
+    interchanged with row and column j, and for \f$ilo \leq j \leq ihi\f$, it is the j-th diagonal
+    entry of \f$D\f$. The permutations are applied in the order n, n-1, ..., ihi+1, followed by
+    1, 2, ..., ilo-1.
+
+    The results (A, ilo, ihi and scale) are the same as those of the LAPACK routine
+    (version 3.12), except for rounding in the computation of the row and column norms, and in
+    the presence of NaN: if a row or column norm is NaN during the scaling, the balancing stops
+    (the permutations and the scaling factors found so far are applied, and ilo, ihi and scale
+    describe them), where LAPACK returns an error (info = -3).
+
+    For n >= 256 (and a job other than rocsolver_balance_none), several kernels are launched per
+    matrix, and the host synchronizes with the stream after the permutation step and after each
+    sweep of the scaling step.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    job         #rocsolver_balance.
+                Specifies the operations to perform. If rocsolver_balance_none, A is not changed,
+                ilo = 1, ihi = n and scale[j] = 1 for all j. If rocsolver_balance_permute, only the
+                permutation is computed. If rocsolver_balance_scale, only the scaling is computed.
+                If rocsolver_balance_both, both are computed.
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The number of rows and columns of all the matrices A_l in the batch.
+    @param[inout]
+    A           pointer to type. Array on the GPU (the size depends on the value of strideA).
+                On entry, the matrices A_l to be balanced.
+                On exit, the balanced matrices.
+    @param[in]
+    lda         rocblas_int. lda >= max(1, n).
+                Specifies the leading dimension of matrices A_l.
+    @param[in]
+    strideA     rocblas_stride.
+                Stride from the start of one matrix A_l to the next one A_(l+1).
+                There is no restriction for the value of strideA. Normal use case is strideA >= lda*n.
+    @param[out]
+    ilo         pointer to rocblas_int. Array of batch_count integers on the GPU.
+                ilo[l] is the 1-based index of the first row and column of the submatrix B_l.
+    @param[out]
+    ihi         pointer to rocblas_int. Array of batch_count integers on the GPU.
+                ihi[l] is the 1-based index of the last row and column of the submatrix B_l.
+                If job is rocsolver_balance_none or rocsolver_balance_scale, ilo[l] = 1 and
+                ihi[l] = n. If n = 0, ilo[l] = 1 and ihi[l] = 0.
+    @param[out]
+    scale       pointer to real type. Array on the GPU (the size depends on the value of strideS).
+                The permutations and scaling factors applied to A_l.
+    @param[in]
+    strideS     rocblas_stride.
+                Stride from the start of one vector scale_l to the next one scale_(l+1).
+                There is no restriction for the value of strideS. Normal use case is strideS >= n.
+    @param[in]
+    batch_count rocblas_int. batch_count >= 0.
+                Number of matrices in the batch.
+    ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_sgebal_strided_batched(rocblas_handle handle,
+                                                                 const rocsolver_balance job,
+                                                                 const rocblas_int n,
+                                                                 float* A,
+                                                                 const rocblas_int lda,
+                                                                 const rocblas_stride strideA,
+                                                                 rocblas_int* ilo,
+                                                                 rocblas_int* ihi,
+                                                                 float* scale,
+                                                                 const rocblas_stride strideS,
+                                                                 const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dgebal_strided_batched(rocblas_handle handle,
+                                                                 const rocsolver_balance job,
+                                                                 const rocblas_int n,
+                                                                 double* A,
+                                                                 const rocblas_int lda,
+                                                                 const rocblas_stride strideA,
+                                                                 rocblas_int* ilo,
+                                                                 rocblas_int* ihi,
+                                                                 double* scale,
+                                                                 const rocblas_stride strideS,
+                                                                 const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cgebal_strided_batched(rocblas_handle handle,
+                                                                 const rocsolver_balance job,
+                                                                 const rocblas_int n,
+                                                                 rocblas_float_complex* A,
+                                                                 const rocblas_int lda,
+                                                                 const rocblas_stride strideA,
+                                                                 rocblas_int* ilo,
+                                                                 rocblas_int* ihi,
+                                                                 float* scale,
+                                                                 const rocblas_stride strideS,
+                                                                 const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zgebal_strided_batched(rocblas_handle handle,
+                                                                 const rocsolver_balance job,
+                                                                 const rocblas_int n,
+                                                                 rocblas_double_complex* A,
+                                                                 const rocblas_int lda,
+                                                                 const rocblas_stride strideA,
+                                                                 rocblas_int* ilo,
+                                                                 rocblas_int* ihi,
+                                                                 double* scale,
+                                                                 const rocblas_stride strideS,
+                                                                 const rocblas_int batch_count);
+//! @}
+
+/*! @{
+    \brief GEBAK forms the eigenvectors of a general matrix from those of the matrix
+    balanced by \ref rocsolver_sgebal "GEBAL".
+
+    \details
+    Given the permutation matrix \f$P\f$ and the diagonal scaling matrix \f$D\f$ computed by
+    \ref rocsolver_sgebal "GEBAL", the eigenvectors of the balanced matrix are transformed into
+    eigenvectors of the original matrix: right eigenvectors are computed as \f$P D V\f$, and left
+    eigenvectors as \f$P D^{-1} V\f$.
+
+    The values of ilo, ihi and scale are read from device memory and are not validated;
+    they must be those returned by GEBAL.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    job         #rocsolver_balance.
+                Specifies the type of backward transformation. It must be the same value
+                passed to GEBAL. If rocsolver_balance_none, V is not changed. If
+                rocsolver_balance_permute, only the permutation is undone. If
+                rocsolver_balance_scale, only the scaling is undone. If rocsolver_balance_both,
+                both are undone.
+    @param[in]
+    side        rocblas_side.
+                If rocblas_side_right, V contains right eigenvectors. If rocblas_side_left,
+                V contains left eigenvectors. (rocblas_side_both is not supported.)
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The number of rows of the matrix V.
+    @param[in]
+    ilo         pointer to rocblas_int on the GPU.
+                The value of ilo returned by GEBAL.
+    @param[in]
+    ihi         pointer to rocblas_int on the GPU.
+                The value of ihi returned by GEBAL.
+    @param[in]
+    scale       pointer to real type. Array on the GPU of dimension n.
+                The permutations and scaling factors returned by GEBAL.
+    @param[in]
+    m           rocblas_int. m >= 0.
+                The number of columns of the matrix V.
+    @param[inout]
+    V           pointer to type. Array on the GPU of dimension ldv*m.
+                On entry, the matrix of eigenvectors to be transformed.
+                On exit, the transformed eigenvectors.
+    @param[in]
+    ldv         rocblas_int. ldv >= max(1, n).
+                Specifies the leading dimension of V.
+    ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_sgebak(rocblas_handle handle,
+                                                 const rocsolver_balance job,
+                                                 const rocblas_side side,
+                                                 const rocblas_int n,
+                                                 const rocblas_int* ilo,
+                                                 const rocblas_int* ihi,
+                                                 const float* scale,
+                                                 const rocblas_int m,
+                                                 float* V,
+                                                 const rocblas_int ldv);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dgebak(rocblas_handle handle,
+                                                 const rocsolver_balance job,
+                                                 const rocblas_side side,
+                                                 const rocblas_int n,
+                                                 const rocblas_int* ilo,
+                                                 const rocblas_int* ihi,
+                                                 const double* scale,
+                                                 const rocblas_int m,
+                                                 double* V,
+                                                 const rocblas_int ldv);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cgebak(rocblas_handle handle,
+                                                 const rocsolver_balance job,
+                                                 const rocblas_side side,
+                                                 const rocblas_int n,
+                                                 const rocblas_int* ilo,
+                                                 const rocblas_int* ihi,
+                                                 const float* scale,
+                                                 const rocblas_int m,
+                                                 rocblas_float_complex* V,
+                                                 const rocblas_int ldv);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zgebak(rocblas_handle handle,
+                                                 const rocsolver_balance job,
+                                                 const rocblas_side side,
+                                                 const rocblas_int n,
+                                                 const rocblas_int* ilo,
+                                                 const rocblas_int* ihi,
+                                                 const double* scale,
+                                                 const rocblas_int m,
+                                                 rocblas_double_complex* V,
+                                                 const rocblas_int ldv);
+//! @}
+
+/*! @{
+    \brief GEBAK_BATCHED forms the eigenvectors of a batch of general matrices from those of the
+    matrices balanced by \ref rocsolver_sgebal_batched "GEBAL_BATCHED".
+
+    \details
+    Given the permutation matrix \f$P\f$ and the diagonal scaling matrix \f$D\f$ computed by
+    \ref rocsolver_sgebal "GEBAL", the eigenvectors of the balanced matrix are transformed into
+    eigenvectors of the original matrix: right eigenvectors are computed as \f$P D V\f$, and left
+    eigenvectors as \f$P D^{-1} V\f$.
+
+    The values of ilo, ihi and scale are read from device memory and are not validated;
+    they must be those returned by GEBAL_BATCHED.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    job         #rocsolver_balance.
+                Specifies the type of backward transformation. It must be the same value
+                passed to GEBAL. If rocsolver_balance_none, V is not changed. If
+                rocsolver_balance_permute, only the permutation is undone. If
+                rocsolver_balance_scale, only the scaling is undone. If rocsolver_balance_both,
+                both are undone.
+    @param[in]
+    side        rocblas_side.
+                If rocblas_side_right, V contains right eigenvectors. If rocblas_side_left,
+                V contains left eigenvectors. (rocblas_side_both is not supported.)
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The number of rows of the matrices V_l.
+    @param[in]
+    ilo         pointer to rocblas_int. Array of batch_count integers on the GPU.
+                The values of ilo returned by GEBAL_BATCHED.
+    @param[in]
+    ihi         pointer to rocblas_int. Array of batch_count integers on the GPU.
+                The values of ihi returned by GEBAL_BATCHED.
+    @param[in]
+    scale       pointer to real type. Array on the GPU (the size depends on the value of strideS).
+                The permutations and scaling factors returned by GEBAL_BATCHED.
+    @param[in]
+    strideS     rocblas_stride.
+                Stride from the start of one vector scale_l to the next one scale_(l+1).
+                There is no restriction for the value of strideS. Normal use case is strideS >= n.
+    @param[in]
+    m           rocblas_int. m >= 0.
+                The number of columns of all the matrices V_l in the batch.
+    @param[inout]
+    V           array of pointers to type. Each pointer points to an array on the GPU of dimension ldv*m.
+                On entry, the matrices of eigenvectors to be transformed.
+                On exit, the transformed eigenvectors.
+    @param[in]
+    ldv         rocblas_int. ldv >= max(1, n).
+                Specifies the leading dimension of matrices V_l.
+    @param[in]
+    batch_count rocblas_int. batch_count >= 0.
+                Number of matrices in the batch.
+    ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_sgebak_batched(rocblas_handle handle,
+                                                         const rocsolver_balance job,
+                                                         const rocblas_side side,
+                                                         const rocblas_int n,
+                                                         const rocblas_int* ilo,
+                                                         const rocblas_int* ihi,
+                                                         const float* scale,
+                                                         const rocblas_stride strideS,
+                                                         const rocblas_int m,
+                                                         float* const V[],
+                                                         const rocblas_int ldv,
+                                                         const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dgebak_batched(rocblas_handle handle,
+                                                         const rocsolver_balance job,
+                                                         const rocblas_side side,
+                                                         const rocblas_int n,
+                                                         const rocblas_int* ilo,
+                                                         const rocblas_int* ihi,
+                                                         const double* scale,
+                                                         const rocblas_stride strideS,
+                                                         const rocblas_int m,
+                                                         double* const V[],
+                                                         const rocblas_int ldv,
+                                                         const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cgebak_batched(rocblas_handle handle,
+                                                         const rocsolver_balance job,
+                                                         const rocblas_side side,
+                                                         const rocblas_int n,
+                                                         const rocblas_int* ilo,
+                                                         const rocblas_int* ihi,
+                                                         const float* scale,
+                                                         const rocblas_stride strideS,
+                                                         const rocblas_int m,
+                                                         rocblas_float_complex* const V[],
+                                                         const rocblas_int ldv,
+                                                         const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zgebak_batched(rocblas_handle handle,
+                                                         const rocsolver_balance job,
+                                                         const rocblas_side side,
+                                                         const rocblas_int n,
+                                                         const rocblas_int* ilo,
+                                                         const rocblas_int* ihi,
+                                                         const double* scale,
+                                                         const rocblas_stride strideS,
+                                                         const rocblas_int m,
+                                                         rocblas_double_complex* const V[],
+                                                         const rocblas_int ldv,
+                                                         const rocblas_int batch_count);
+//! @}
+
+/*! @{
+    \brief GEBAK_STRIDED_BATCHED forms the eigenvectors of a batch of general matrices from those of
+    the matrices balanced by \ref rocsolver_sgebal_strided_batched "GEBAL_STRIDED_BATCHED".
+
+    \details
+    Given the permutation matrix \f$P\f$ and the diagonal scaling matrix \f$D\f$ computed by
+    \ref rocsolver_sgebal "GEBAL", the eigenvectors of the balanced matrix are transformed into
+    eigenvectors of the original matrix: right eigenvectors are computed as \f$P D V\f$, and left
+    eigenvectors as \f$P D^{-1} V\f$.
+
+    The values of ilo, ihi and scale are read from device memory and are not validated;
+    they must be those returned by GEBAL_STRIDED_BATCHED.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    job         #rocsolver_balance.
+                Specifies the type of backward transformation. It must be the same value
+                passed to GEBAL. If rocsolver_balance_none, V is not changed. If
+                rocsolver_balance_permute, only the permutation is undone. If
+                rocsolver_balance_scale, only the scaling is undone. If rocsolver_balance_both,
+                both are undone.
+    @param[in]
+    side        rocblas_side.
+                If rocblas_side_right, V contains right eigenvectors. If rocblas_side_left,
+                V contains left eigenvectors. (rocblas_side_both is not supported.)
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The number of rows of the matrices V_l.
+    @param[in]
+    ilo         pointer to rocblas_int. Array of batch_count integers on the GPU.
+                The values of ilo returned by GEBAL_STRIDED_BATCHED.
+    @param[in]
+    ihi         pointer to rocblas_int. Array of batch_count integers on the GPU.
+                The values of ihi returned by GEBAL_STRIDED_BATCHED.
+    @param[in]
+    scale       pointer to real type. Array on the GPU (the size depends on the value of strideS).
+                The permutations and scaling factors returned by GEBAL_STRIDED_BATCHED.
+    @param[in]
+    strideS     rocblas_stride.
+                Stride from the start of one vector scale_l to the next one scale_(l+1).
+                There is no restriction for the value of strideS. Normal use case is strideS >= n.
+    @param[in]
+    m           rocblas_int. m >= 0.
+                The number of columns of all the matrices V_l in the batch.
+    @param[inout]
+    V           pointer to type. Array on the GPU (the size depends on the value of strideV).
+                On entry, the matrices of eigenvectors to be transformed.
+                On exit, the transformed eigenvectors.
+    @param[in]
+    ldv         rocblas_int. ldv >= max(1, n).
+                Specifies the leading dimension of matrices V_l.
+    @param[in]
+    strideV     rocblas_stride.
+                Stride from the start of one matrix V_l to the next one V_(l+1).
+                There is no restriction for the value of strideV. Normal use case is strideV >= ldv*m.
+    @param[in]
+    batch_count rocblas_int. batch_count >= 0.
+                Number of matrices in the batch.
+    ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_sgebak_strided_batched(rocblas_handle handle,
+                                                                 const rocsolver_balance job,
+                                                                 const rocblas_side side,
+                                                                 const rocblas_int n,
+                                                                 const rocblas_int* ilo,
+                                                                 const rocblas_int* ihi,
+                                                                 const float* scale,
+                                                                 const rocblas_stride strideS,
+                                                                 const rocblas_int m,
+                                                                 float* V,
+                                                                 const rocblas_int ldv,
+                                                                 const rocblas_stride strideV,
+                                                                 const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dgebak_strided_batched(rocblas_handle handle,
+                                                                 const rocsolver_balance job,
+                                                                 const rocblas_side side,
+                                                                 const rocblas_int n,
+                                                                 const rocblas_int* ilo,
+                                                                 const rocblas_int* ihi,
+                                                                 const double* scale,
+                                                                 const rocblas_stride strideS,
+                                                                 const rocblas_int m,
+                                                                 double* V,
+                                                                 const rocblas_int ldv,
+                                                                 const rocblas_stride strideV,
+                                                                 const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cgebak_strided_batched(rocblas_handle handle,
+                                                                 const rocsolver_balance job,
+                                                                 const rocblas_side side,
+                                                                 const rocblas_int n,
+                                                                 const rocblas_int* ilo,
+                                                                 const rocblas_int* ihi,
+                                                                 const float* scale,
+                                                                 const rocblas_stride strideS,
+                                                                 const rocblas_int m,
+                                                                 rocblas_float_complex* V,
+                                                                 const rocblas_int ldv,
+                                                                 const rocblas_stride strideV,
+                                                                 const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zgebak_strided_batched(rocblas_handle handle,
+                                                                 const rocsolver_balance job,
+                                                                 const rocblas_side side,
+                                                                 const rocblas_int n,
+                                                                 const rocblas_int* ilo,
+                                                                 const rocblas_int* ihi,
+                                                                 const double* scale,
+                                                                 const rocblas_stride strideS,
+                                                                 const rocblas_int m,
+                                                                 rocblas_double_complex* V,
+                                                                 const rocblas_int ldv,
+                                                                 const rocblas_stride strideV,
+                                                                 const rocblas_int batch_count);
+//! @}
+
+/*! @{
+    \brief HSEQR computes the eigenvalues of a complex upper Hessenberg matrix H and, optionally,
+    its Schur form and Schur vectors.
+
+    \details
+    The Schur factorization is given by
+
+    \f[
+        H = Z^{}_{} T^{} Z^H
+    \f]
+
+    where \f$T\f$ is upper triangular (the Schur form) and \f$Z\f$ is unitary (the Schur
+    vectors). The diagonal entries of \f$T\f$ are the eigenvalues of \f$H\f$.
+
+    It is assumed that \f$H\f$ is already upper triangular in rows and columns 1:ilo-1 and
+    ihi+1:n, as returned by \ref rocsolver_cgebal "GEBAL". If the matrix was reduced to Hessenberg
+    form as \f$A = Q H Q^H\f$ (see \ref rocsolver_cgehrd "GEHRD" and UNGHR),
+    the Schur vectors of A can be obtained by passing Q on entry in Z with
+    compz = rocsolver_schur_vectors_update.
+
+    \note
+    Matrices with n <= 75 are processed with the single-shift QR algorithm of LAPACK's ZLAHQR,
+    and larger ones with the multishift QR algorithm with aggressive early deflation of ZLAQR0,
+    as in LAPACK. With rocsolver_set_alg_mode(handle, rocsolver_function_hseqr,
+    rocsolver_alg_mode_hybrid), the Schur form of the deflation windows of the latter (a small,
+    latency-bound computation) is computed on the host; the rest of the algorithm runs on the
+    GPU.
+
+    \note
+    For n > 75, the multishift algorithm is driven from the host: it reads a small status
+    array back in each iteration (a synchronization of the stream) and runs some matrix-matrix
+    products on an internal stream, so that HSEQR cannot be captured in a HIP graph.
+    The active block H(ilo:ihi, ilo:ihi) splits into irreducible diagonal blocks at its
+    subdiagonal entries that are exactly zero. A 1x1 block deflates at once, as in LAPACK:
+    its diagonal entry is its eigenvalue, even if it is a NaN or infinite. If the Hessenberg
+    part of a larger block contains a NaN or an infinite entry, the QR algorithm cannot
+    converge on it (LAPACK iterates until its iteration limit instead): with ibad the last
+    row of the lowest such block, HSEQR processes the rows ibad+1:ihi as usual and returns
+    info = ibad (unless that computation fails first), with the entries ilo:ibad of W set
+    to NaN. The entries outside these diagonal blocks do not affect the computation.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    job         #rocsolver_schur_job.
+                If rocsolver_schur_eigenvalues, only the eigenvalues are computed. If
+                rocsolver_schur_form, the Schur form T is also computed.
+    @param[in]
+    compz       #rocsolver_schur_vectors.
+                If rocsolver_schur_vectors_none, Z is not referenced. If
+                rocsolver_schur_vectors_initialize, Z is initialized to the identity and the Schur
+                vectors of H are returned. If rocsolver_schur_vectors_update, Z must contain a unitary
+                matrix Q on entry, and Q*Z is returned.
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The order of the matrix H.
+    @param[in]
+    ilo         pointer to rocblas_int on the GPU.
+    @param[in]
+    ihi         pointer to rocblas_int on the GPU.
+                1 <= ilo <= ihi <= n if n > 0, as returned by GEBAL (ilo = 1 and ihi = n if
+                GEBAL was not called). The values are read from device memory and are not
+                validated; invalid values are clamped to this range.
+    @param[inout]
+    H           pointer to type. Array on the GPU of dimension ldh*n.
+                On entry, the upper Hessenberg matrix H. On exit, if job = rocsolver_schur_form and
+                info = 0, the Schur form T. Otherwise, the contents of H are unspecified.
+    @param[in]
+    ldh         rocblas_int. ldh >= max(1, n).
+                Specifies the leading dimension of H.
+    @param[out]
+    W           pointer to type. Array on the GPU of dimension n.
+                The computed eigenvalues. If job = rocsolver_schur_form, they are stored in the same
+                order as on the diagonal of T.
+    @param[inout]
+    Z           pointer to type. Array on the GPU of dimension ldz*n.
+                If compz = rocsolver_schur_vectors_update, on entry the unitary matrix Q. On exit, the
+                Schur vectors Z (or Q*Z). Not referenced if compz = rocsolver_schur_vectors_none.
+    @param[in]
+    ldz         rocblas_int. ldz >= 1, and ldz >= n if compz is not rocsolver_schur_vectors_none.
+                Specifies the leading dimension of Z.
+    @param[out]
+    info        pointer to a rocblas_int on the GPU.
+                If info = 0, successful exit. If info = i > 0, the algorithm failed to compute all
+                the eigenvalues: the entries 1:ilo-1 and i+1:n of W contain those that have been
+                computed (as in LAPACK).
+    ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_chseqr(rocblas_handle handle,
+                                                 const rocsolver_schur_job job,
+                                                 const rocsolver_schur_vectors compz,
+                                                 const rocblas_int n,
+                                                 const rocblas_int* ilo,
+                                                 const rocblas_int* ihi,
+                                                 rocblas_float_complex* H,
+                                                 const rocblas_int ldh,
+                                                 rocblas_float_complex* W,
+                                                 rocblas_float_complex* Z,
+                                                 const rocblas_int ldz,
+                                                 rocblas_int* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zhseqr(rocblas_handle handle,
+                                                 const rocsolver_schur_job job,
+                                                 const rocsolver_schur_vectors compz,
+                                                 const rocblas_int n,
+                                                 const rocblas_int* ilo,
+                                                 const rocblas_int* ihi,
+                                                 rocblas_double_complex* H,
+                                                 const rocblas_int ldh,
+                                                 rocblas_double_complex* W,
+                                                 rocblas_double_complex* Z,
+                                                 const rocblas_int ldz,
+                                                 rocblas_int* info);
+//! @}
+
+/*! @{
+    \brief HSEQR_BATCHED computes the eigenvalues of a batch of complex upper Hessenberg matrices
+    H_l and, optionally, their Schur forms and Schur vectors.
+
+    \details
+    The Schur factorization is given by
+
+    \f[
+        H_l = Z_l^{}_{} T_l^{} Z_l^H
+    \f]
+
+    where \f$T_l\f$ is upper triangular (the Schur form) and \f$Z_l\f$ is unitary (the Schur
+    vectors). The diagonal entries of \f$T_l\f$ are the eigenvalues of \f$H_l\f$.
+
+    It is assumed that \f$H_l\f$ is already upper triangular in rows and columns 1:ilo-1 and
+    ihi+1:n, as returned by \ref rocsolver_cgebal "GEBAL". If the matrix was reduced to Hessenberg
+    form as \f$A = Q H Q^H\f$ (see \ref rocsolver_cgehrd "GEHRD" and UNGHR),
+    the Schur vectors of A can be obtained by passing Q on entry in Z with
+    compz = rocsolver_schur_vectors_update.
+
+    \note
+    Matrices with n <= 75 are processed with the single-shift QR algorithm of LAPACK's ZLAHQR,
+    and larger ones with the multishift QR algorithm with aggressive early deflation of ZLAQR0,
+    as in LAPACK. With rocsolver_set_alg_mode(handle, rocsolver_function_hseqr,
+    rocsolver_alg_mode_hybrid), the Schur form of the deflation windows of the latter (a small,
+    latency-bound computation) is computed on the host; the rest of the algorithm runs on the
+    GPU.
+
+    \note
+    For n > 75, the multishift algorithm is driven from the host: it reads a small status
+    array back in each iteration (a synchronization of the stream) and runs some matrix-matrix
+    products on an internal stream, so that HSEQR cannot be captured in a HIP graph.
+    The active block H(ilo:ihi, ilo:ihi) splits into irreducible diagonal blocks at its
+    subdiagonal entries that are exactly zero. A 1x1 block deflates at once, as in LAPACK:
+    its diagonal entry is its eigenvalue, even if it is a NaN or infinite. If the Hessenberg
+    part of a larger block contains a NaN or an infinite entry, the QR algorithm cannot
+    converge on it (LAPACK iterates until its iteration limit instead): with ibad the last
+    row of the lowest such block, HSEQR processes the rows ibad+1:ihi as usual and returns
+    info = ibad (unless that computation fails first), with the entries ilo:ibad of W set
+    to NaN. The entries outside these diagonal blocks do not affect the computation.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    job         #rocsolver_schur_job.
+                If rocsolver_schur_eigenvalues, only the eigenvalues are computed. If
+                rocsolver_schur_form, the Schur forms T_l are also computed.
+    @param[in]
+    compz       #rocsolver_schur_vectors.
+                If rocsolver_schur_vectors_none, Z is not referenced. If
+                rocsolver_schur_vectors_initialize, Z_l is initialized to the identity and the Schur
+                vectors of H_l are returned. If rocsolver_schur_vectors_update, Z_l must contain a unitary
+                matrix Q_l on entry, and Q_l*Z_l is returned.
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The order of the matrix H_l.
+    @param[in]
+    ilo         pointer to rocblas_int. Array of batch_count integers on the GPU.
+    @param[in]
+    ihi         pointer to rocblas_int. Array of batch_count integers on the GPU.
+                1 <= ilo[l] <= ihi[l] <= n if n > 0, as returned by GEBAL_BATCHED. The values are
+                read from device memory and are not validated; invalid values are clamped to this range.
+    @param[inout]
+    H           array of pointers to type. Each pointer points to an array on the GPU of dimension ldh*n.
+                On entry, the upper Hessenberg matrices H_l. On exit, if job = rocsolver_schur_form and
+                info[l] = 0, the Schur forms T_l. Otherwise, the contents of H_l are unspecified.
+    @param[in]
+    ldh         rocblas_int. ldh >= max(1, n).
+                Specifies the leading dimension of matrices H_l.
+    @param[out]
+    W           pointer to type. Array on the GPU (the size depends on the value of strideW).
+                The computed eigenvalues of each matrix.
+    @param[in]
+    strideW     rocblas_stride.
+                Stride from the start of one vector W_l to the next one W_(l+1).
+                There is no restriction for the value of strideW. Normal use case is strideW >= n.
+    @param[inout]
+    Z           array of pointers to type. Each pointer points to an array on the GPU of dimension ldz*n.
+                If compz = rocsolver_schur_vectors_update, on entry the unitary matrices Q_l. On exit,
+                the Schur vectors Z_l (or Q_l*Z_l). Not referenced if compz = rocsolver_schur_vectors_none.
+    @param[in]
+    ldz         rocblas_int. ldz >= 1, and ldz >= n if compz is not rocsolver_schur_vectors_none.
+                Specifies the leading dimension of matrices Z_l.
+    @param[out]
+    info        pointer to rocblas_int. Array of batch_count integers on the GPU.
+                If info[l] = 0, successful exit for matrix H_l. If info[l] = i > 0, the algorithm
+                failed to compute all the eigenvalues of H_l: the entries 1:ilo[l]-1 and i+1:n of W_l
+                contain those that have been computed (as in LAPACK).
+    @param[in]
+    batch_count rocblas_int. batch_count >= 0.
+                Number of matrices in the batch.
+    ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_chseqr_batched(rocblas_handle handle,
+                                                         const rocsolver_schur_job job,
+                                                         const rocsolver_schur_vectors compz,
+                                                         const rocblas_int n,
+                                                         const rocblas_int* ilo,
+                                                         const rocblas_int* ihi,
+                                                         rocblas_float_complex* const H[],
+                                                         const rocblas_int ldh,
+                                                         rocblas_float_complex* W,
+                                                         const rocblas_stride strideW,
+                                                         rocblas_float_complex* const Z[],
+                                                         const rocblas_int ldz,
+                                                         rocblas_int* info,
+                                                         const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zhseqr_batched(rocblas_handle handle,
+                                                         const rocsolver_schur_job job,
+                                                         const rocsolver_schur_vectors compz,
+                                                         const rocblas_int n,
+                                                         const rocblas_int* ilo,
+                                                         const rocblas_int* ihi,
+                                                         rocblas_double_complex* const H[],
+                                                         const rocblas_int ldh,
+                                                         rocblas_double_complex* W,
+                                                         const rocblas_stride strideW,
+                                                         rocblas_double_complex* const Z[],
+                                                         const rocblas_int ldz,
+                                                         rocblas_int* info,
+                                                         const rocblas_int batch_count);
+//! @}
+
+/*! @{
+    \brief HSEQR_STRIDED_BATCHED computes the eigenvalues of a batch of complex upper Hessenberg matrices
+    H_l and, optionally, their Schur forms and Schur vectors.
+
+    \details
+    The Schur factorization is given by
+
+    \f[
+        H_l = Z_l^{}_{} T_l^{} Z_l^H
+    \f]
+
+    where \f$T_l\f$ is upper triangular (the Schur form) and \f$Z_l\f$ is unitary (the Schur
+    vectors). The diagonal entries of \f$T_l\f$ are the eigenvalues of \f$H_l\f$.
+
+    It is assumed that \f$H_l\f$ is already upper triangular in rows and columns 1:ilo-1 and
+    ihi+1:n, as returned by \ref rocsolver_cgebal "GEBAL". If the matrix was reduced to Hessenberg
+    form as \f$A = Q H Q^H\f$ (see \ref rocsolver_cgehrd "GEHRD" and UNGHR),
+    the Schur vectors of A can be obtained by passing Q on entry in Z with
+    compz = rocsolver_schur_vectors_update.
+
+    \note
+    Matrices with n <= 75 are processed with the single-shift QR algorithm of LAPACK's ZLAHQR,
+    and larger ones with the multishift QR algorithm with aggressive early deflation of ZLAQR0,
+    as in LAPACK. With rocsolver_set_alg_mode(handle, rocsolver_function_hseqr,
+    rocsolver_alg_mode_hybrid), the Schur form of the deflation windows of the latter (a small,
+    latency-bound computation) is computed on the host; the rest of the algorithm runs on the
+    GPU.
+
+    \note
+    For n > 75, the multishift algorithm is driven from the host: it reads a small status
+    array back in each iteration (a synchronization of the stream) and runs some matrix-matrix
+    products on an internal stream, so that HSEQR cannot be captured in a HIP graph.
+    The active block H(ilo:ihi, ilo:ihi) splits into irreducible diagonal blocks at its
+    subdiagonal entries that are exactly zero. A 1x1 block deflates at once, as in LAPACK:
+    its diagonal entry is its eigenvalue, even if it is a NaN or infinite. If the Hessenberg
+    part of a larger block contains a NaN or an infinite entry, the QR algorithm cannot
+    converge on it (LAPACK iterates until its iteration limit instead): with ibad the last
+    row of the lowest such block, HSEQR processes the rows ibad+1:ihi as usual and returns
+    info = ibad (unless that computation fails first), with the entries ilo:ibad of W set
+    to NaN. The entries outside these diagonal blocks do not affect the computation.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    job         #rocsolver_schur_job.
+                If rocsolver_schur_eigenvalues, only the eigenvalues are computed. If
+                rocsolver_schur_form, the Schur forms T_l are also computed.
+    @param[in]
+    compz       #rocsolver_schur_vectors.
+                If rocsolver_schur_vectors_none, Z is not referenced. If
+                rocsolver_schur_vectors_initialize, Z_l is initialized to the identity and the Schur
+                vectors of H_l are returned. If rocsolver_schur_vectors_update, Z_l must contain a unitary
+                matrix Q_l on entry, and Q_l*Z_l is returned.
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The order of the matrix H_l.
+    @param[in]
+    ilo         pointer to rocblas_int. Array of batch_count integers on the GPU.
+    @param[in]
+    ihi         pointer to rocblas_int. Array of batch_count integers on the GPU.
+                1 <= ilo[l] <= ihi[l] <= n if n > 0, as returned by GEBAL_STRIDED_BATCHED. The values are
+                read from device memory and are not validated; invalid values are clamped to this range.
+    @param[inout]
+    H           pointer to type. Array on the GPU (the size depends on the value of strideH).
+                On entry, the upper Hessenberg matrices H_l. On exit, if job = rocsolver_schur_form and
+                info[l] = 0, the Schur forms T_l. Otherwise, the contents of H_l are unspecified.
+    @param[in]
+    ldh         rocblas_int. ldh >= max(1, n).
+                Specifies the leading dimension of matrices H_l.
+    @param[in]
+    strideH     rocblas_stride.
+                Stride from the start of one matrix H_l to the next one H_(l+1).
+                There is no restriction for the value of strideH. Normal use case is strideH >= ldh*n.
+    @param[out]
+    W           pointer to type. Array on the GPU (the size depends on the value of strideW).
+                The computed eigenvalues of each matrix.
+    @param[in]
+    strideW     rocblas_stride.
+                Stride from the start of one vector W_l to the next one W_(l+1).
+                There is no restriction for the value of strideW. Normal use case is strideW >= n.
+    @param[inout]
+    Z           pointer to type. Array on the GPU (the size depends on the value of strideZ).
+                If compz = rocsolver_schur_vectors_update, on entry the unitary matrices Q_l. On exit,
+                the Schur vectors Z_l (or Q_l*Z_l). Not referenced if compz = rocsolver_schur_vectors_none.
+    @param[in]
+    ldz         rocblas_int. ldz >= 1, and ldz >= n if compz is not rocsolver_schur_vectors_none.
+                Specifies the leading dimension of matrices Z_l.
+    @param[in]
+    strideZ     rocblas_stride.
+                Stride from the start of one matrix Z_l to the next one Z_(l+1).
+                There is no restriction for the value of strideZ. Normal use case is strideZ >= ldz*n.
+    @param[out]
+    info        pointer to rocblas_int. Array of batch_count integers on the GPU.
+                If info[l] = 0, successful exit for matrix H_l. If info[l] = i > 0, the algorithm
+                failed to compute all the eigenvalues of H_l: the entries 1:ilo[l]-1 and i+1:n of W_l
+                contain those that have been computed (as in LAPACK).
+    @param[in]
+    batch_count rocblas_int. batch_count >= 0.
+                Number of matrices in the batch.
+    ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_chseqr_strided_batched(rocblas_handle handle,
+                                                                 const rocsolver_schur_job job,
+                                                                 const rocsolver_schur_vectors compz,
+                                                                 const rocblas_int n,
+                                                                 const rocblas_int* ilo,
+                                                                 const rocblas_int* ihi,
+                                                                 rocblas_float_complex* H,
+                                                                 const rocblas_int ldh,
+                                                                 const rocblas_stride strideH,
+                                                                 rocblas_float_complex* W,
+                                                                 const rocblas_stride strideW,
+                                                                 rocblas_float_complex* Z,
+                                                                 const rocblas_int ldz,
+                                                                 const rocblas_stride strideZ,
+                                                                 rocblas_int* info,
+                                                                 const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zhseqr_strided_batched(rocblas_handle handle,
+                                                                 const rocsolver_schur_job job,
+                                                                 const rocsolver_schur_vectors compz,
+                                                                 const rocblas_int n,
+                                                                 const rocblas_int* ilo,
+                                                                 const rocblas_int* ihi,
+                                                                 rocblas_double_complex* H,
+                                                                 const rocblas_int ldh,
+                                                                 const rocblas_stride strideH,
+                                                                 rocblas_double_complex* W,
+                                                                 const rocblas_stride strideW,
+                                                                 rocblas_double_complex* Z,
+                                                                 const rocblas_int ldz,
+                                                                 const rocblas_stride strideZ,
+                                                                 rocblas_int* info,
+                                                                 const rocblas_int batch_count);
+//! @}
+
+/*! @{
+    \brief TREXC reorders the Schur factorization of a complex general matrix.
+
+    \details
+    Given the Schur factorization \f$A = Q^{}_{} T^{} Q^H\f$, where \f$T\f$ is upper triangular
+    (see \ref rocsolver_chseqr "HSEQR"), the diagonal entry of \f$T\f$ at row ifst is moved to row ilst by a
+    unitary similarity transformation \f$T \leftarrow Z^H T Z\f$, and, optionally, the Schur vectors are
+    updated as \f$Q \leftarrow Q Z\f$. \f$Z\f$ is a product of plane rotations, each of which swaps two
+    adjacent diagonal entries of \f$T\f$ (as in LAPACK's ZTREXC).
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    compq       #rocsolver_schur_vectors.
+                If rocsolver_schur_vectors_update, the Schur vectors in Q are updated. If
+                rocsolver_schur_vectors_none, Q is not referenced. (rocsolver_schur_vectors_initialize is
+                not supported.)
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The order of the matrix T.
+    @param[inout]
+    T           pointer to type. Array on the GPU of dimension ldt*n.
+                On entry, the upper triangular matrix T. On exit, the reordered matrix.
+    @param[in]
+    ldt         rocblas_int. ldt >= max(1, n).
+                Specifies the leading dimension of T.
+    @param[inout]
+    Q           pointer to type. Array on the GPU of dimension ldq*n.
+                On entry, the matrix Q of Schur vectors. On exit, Q*Z.
+                Not referenced if compq = rocsolver_schur_vectors_none.
+    @param[in]
+    ldq         rocblas_int. ldq >= 1, and ldq >= n if compq = rocsolver_schur_vectors_update.
+                Specifies the leading dimension of Q.
+    @param[in]
+    ifst        rocblas_int. 1 <= ifst <= n if n > 0.
+                The row of the diagonal entry to be moved.
+    @param[in]
+    ilst        rocblas_int. 1 <= ilst <= n if n > 0.
+                The row to which the diagonal entry is moved.
+    ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_ctrexc(rocblas_handle handle,
+                                                 const rocsolver_schur_vectors compq,
+                                                 const rocblas_int n,
+                                                 rocblas_float_complex* T,
+                                                 const rocblas_int ldt,
+                                                 rocblas_float_complex* Q,
+                                                 const rocblas_int ldq,
+                                                 const rocblas_int ifst,
+                                                 const rocblas_int ilst);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_ztrexc(rocblas_handle handle,
+                                                 const rocsolver_schur_vectors compq,
+                                                 const rocblas_int n,
+                                                 rocblas_double_complex* T,
+                                                 const rocblas_int ldt,
+                                                 rocblas_double_complex* Q,
+                                                 const rocblas_int ldq,
+                                                 const rocblas_int ifst,
+                                                 const rocblas_int ilst);
+//! @}
+
+/*! @{
+    \brief TREXC_BATCHED reorders the Schur factorizations of a batch of complex general matrices.
+
+    \details
+    Given the Schur factorization \f$A_l = Q_l^{}_{} T_l^{} Q_l^H\f$, where \f$T_l\f$ is upper triangular
+    (see \ref rocsolver_chseqr "HSEQR"), the diagonal entry of \f$T_l\f$ at row ifst is moved to row ilst by a
+    unitary similarity transformation \f$T_l \leftarrow Z_l^H T_l Z_l\f$, and, optionally, the Schur vectors are
+    updated as \f$Q_l \leftarrow Q_l Z_l\f$. \f$Z_l\f$ is a product of plane rotations, each of which swaps two
+    adjacent diagonal entries of \f$T_l\f$ (as in LAPACK's ZTREXC).
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    compq       #rocsolver_schur_vectors.
+                If rocsolver_schur_vectors_update, the Schur vectors in Q are updated. If
+                rocsolver_schur_vectors_none, Q is not referenced. (rocsolver_schur_vectors_initialize is
+                not supported.)
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The order of the matrix T_l.
+    @param[inout]
+    T           array of pointers to type. Each pointer points to an array on the GPU of dimension ldt*n.
+                On entry, the upper triangular matrices T_l. On exit, the reordered matrices.
+    @param[in]
+    ldt         rocblas_int. ldt >= max(1, n).
+                Specifies the leading dimension of matrices T_l.
+    @param[inout]
+    Q           array of pointers to type. Each pointer points to an array on the GPU of dimension ldq*n.
+                On entry, the matrices Q_l of Schur vectors. On exit, Q_l*Z_l.
+                Not referenced if compq = rocsolver_schur_vectors_none.
+    @param[in]
+    ldq         rocblas_int. ldq >= 1, and ldq >= n if compq = rocsolver_schur_vectors_update.
+                Specifies the leading dimension of matrices Q_l.
+    @param[in]
+    ifst        rocblas_int. 1 <= ifst <= n if n > 0.
+                The row of the diagonal entry to be moved.
+    @param[in]
+    ilst        rocblas_int. 1 <= ilst <= n if n > 0.
+                The row to which the diagonal entry is moved.
+    @param[in]
+    batch_count rocblas_int. batch_count >= 0.
+                Number of matrices in the batch.
+    ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_ctrexc_batched(rocblas_handle handle,
+                                                         const rocsolver_schur_vectors compq,
+                                                         const rocblas_int n,
+                                                         rocblas_float_complex* const T[],
+                                                         const rocblas_int ldt,
+                                                         rocblas_float_complex* const Q[],
+                                                         const rocblas_int ldq,
+                                                         const rocblas_int ifst,
+                                                         const rocblas_int ilst,
+                                                         const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_ztrexc_batched(rocblas_handle handle,
+                                                         const rocsolver_schur_vectors compq,
+                                                         const rocblas_int n,
+                                                         rocblas_double_complex* const T[],
+                                                         const rocblas_int ldt,
+                                                         rocblas_double_complex* const Q[],
+                                                         const rocblas_int ldq,
+                                                         const rocblas_int ifst,
+                                                         const rocblas_int ilst,
+                                                         const rocblas_int batch_count);
+//! @}
+
+/*! @{
+    \brief TREXC_STRIDED_BATCHED reorders the Schur factorizations of a batch of complex general matrices.
+
+    \details
+    Given the Schur factorization \f$A_l = Q_l^{}_{} T_l^{} Q_l^H\f$, where \f$T_l\f$ is upper triangular
+    (see \ref rocsolver_chseqr "HSEQR"), the diagonal entry of \f$T_l\f$ at row ifst is moved to row ilst by a
+    unitary similarity transformation \f$T_l \leftarrow Z_l^H T_l Z_l\f$, and, optionally, the Schur vectors are
+    updated as \f$Q_l \leftarrow Q_l Z_l\f$. \f$Z_l\f$ is a product of plane rotations, each of which swaps two
+    adjacent diagonal entries of \f$T_l\f$ (as in LAPACK's ZTREXC).
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    compq       #rocsolver_schur_vectors.
+                If rocsolver_schur_vectors_update, the Schur vectors in Q are updated. If
+                rocsolver_schur_vectors_none, Q is not referenced. (rocsolver_schur_vectors_initialize is
+                not supported.)
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The order of the matrix T_l.
+    @param[inout]
+    T           pointer to type. Array on the GPU (the size depends on the value of strideT).
+                On entry, the upper triangular matrices T_l. On exit, the reordered matrices.
+    @param[in]
+    ldt         rocblas_int. ldt >= max(1, n).
+                Specifies the leading dimension of matrices T_l.
+    @param[in]
+    strideT     rocblas_stride.
+                Stride from the start of one matrix T_l to the next one T_(l+1).
+                There is no restriction for the value of strideT. Normal use case is strideT >= ldt*n.
+    @param[inout]
+    Q           pointer to type. Array on the GPU (the size depends on the value of strideQ).
+                On entry, the matrices Q_l of Schur vectors. On exit, Q_l*Z_l.
+                Not referenced if compq = rocsolver_schur_vectors_none.
+    @param[in]
+    ldq         rocblas_int. ldq >= 1, and ldq >= n if compq = rocsolver_schur_vectors_update.
+                Specifies the leading dimension of matrices Q_l.
+    @param[in]
+    strideQ     rocblas_stride.
+                Stride from the start of one matrix Q_l to the next one Q_(l+1).
+                There is no restriction for the value of strideQ. Normal use case is strideQ >= ldq*n.
+    @param[in]
+    ifst        rocblas_int. 1 <= ifst <= n if n > 0.
+                The row of the diagonal entry to be moved.
+    @param[in]
+    ilst        rocblas_int. 1 <= ilst <= n if n > 0.
+                The row to which the diagonal entry is moved.
+    @param[in]
+    batch_count rocblas_int. batch_count >= 0.
+                Number of matrices in the batch.
+    ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_ctrexc_strided_batched(rocblas_handle handle,
+                                                                 const rocsolver_schur_vectors compq,
+                                                                 const rocblas_int n,
+                                                                 rocblas_float_complex* T,
+                                                                 const rocblas_int ldt,
+                                                                 const rocblas_stride strideT,
+                                                                 rocblas_float_complex* Q,
+                                                                 const rocblas_int ldq,
+                                                                 const rocblas_stride strideQ,
+                                                                 const rocblas_int ifst,
+                                                                 const rocblas_int ilst,
+                                                                 const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_ztrexc_strided_batched(rocblas_handle handle,
+                                                                 const rocsolver_schur_vectors compq,
+                                                                 const rocblas_int n,
+                                                                 rocblas_double_complex* T,
+                                                                 const rocblas_int ldt,
+                                                                 const rocblas_stride strideT,
+                                                                 rocblas_double_complex* Q,
+                                                                 const rocblas_int ldq,
+                                                                 const rocblas_stride strideQ,
+                                                                 const rocblas_int ifst,
+                                                                 const rocblas_int ilst,
+                                                                 const rocblas_int batch_count);
+//! @}
+
+/*! @{
+    \brief TREVC3 computes the eigenvectors of a complex upper triangular matrix.
+
+    \details
+    The right eigenvector \f$x_j\f$ and the left eigenvector \f$y_j\f$ of the upper triangular
+    matrix \f$T\f$ corresponding to its eigenvalue \f$\lambda_j = T[j,j]\f$ satisfy
+
+    \f[
+        T^{} x_j = \lambda_j x_j, \quad y_j^H T^{} = \lambda_j y_j^H,
+    \f]
+
+    where the entries of \f$x_j\f$ below row j, and those of \f$y_j\f$ above row j, are zero.
+    They are computed by back substitution, with small pivots perturbed and growth controlled
+    by scaling, as in LAPACK's ZTREVC3. If \f$T\f$ is the Schur form of a matrix
+    \f$A = Q^{} T^{} Q^H\f$ (see \ref rocsolver_chseqr "HSEQR") and \f$Q\f$ is given in VR
+    and/or VL, the back-transformed vectors \f$Q x_j\f$ and \f$Q y_j\f$ are the eigenvectors of
+    \f$A\f$. Each vector is normalized so that its component of largest magnitude, measured
+    as \f$|\text{Re}(z)| + |\text{Im}(z)|\f$, has magnitude 1.
+
+    \note
+    The selection of a subset of the eigenvectors (HOWMNY = 'S' in LAPACK) is not supported.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    side        rocblas_side.
+                Specifies whether the right eigenvectors (rocblas_side_right), the left eigenvectors
+                (rocblas_side_left) or both (rocblas_side_both) are computed.
+    @param[in]
+    howmny      #rocsolver_eigenvectors.
+                If rocsolver_eigenvectors_all, the eigenvectors of T are computed. If
+                rocsolver_eigenvectors_backtransform, they are multiplied by the matrices given on
+                entry in VL and/or VR.
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The order of the matrix T.
+    @param[in]
+    T           pointer to type. Array on the GPU of dimension ldt*n.
+                The upper triangular matrix T. It is not modified.
+    @param[in]
+    ldt         rocblas_int. ldt >= max(1, n).
+                Specifies the leading dimension of T.
+    @param[inout]
+    VL          pointer to type. Array on the GPU of dimension ldvl*n.
+                On entry, if howmny = rocsolver_eigenvectors_backtransform, the matrix Q (for
+                example, the Schur vectors computed by HSEQR). On exit, the left eigenvectors: column j
+                of VL is y_j, or Q y_j if back-transformed. Not referenced if the left
+                eigenvectors are not computed.
+    @param[in]
+    ldvl        rocblas_int. ldvl >= 1, and ldvl >= n if the left eigenvectors are computed.
+                Specifies the leading dimension of VL.
+    @param[inout]
+    VR          pointer to type. Array on the GPU of dimension ldvr*n.
+                On entry, if howmny = rocsolver_eigenvectors_backtransform, the matrix Q (for
+                example, the Schur vectors computed by HSEQR). On exit, the right eigenvectors: column j
+                of VR is x_j, or Q x_j if back-transformed. Not referenced if the right
+                eigenvectors are not computed.
+    @param[in]
+    ldvr        rocblas_int. ldvr >= 1, and ldvr >= n if the right eigenvectors are computed.
+                Specifies the leading dimension of VR.
+    ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_ctrevc3(rocblas_handle handle,
+                                                  const rocblas_side side,
+                                                  const rocsolver_eigenvectors howmny,
+                                                  const rocblas_int n,
+                                                  rocblas_float_complex* T,
+                                                  const rocblas_int ldt,
+                                                  rocblas_float_complex* VL,
+                                                  const rocblas_int ldvl,
+                                                  rocblas_float_complex* VR,
+                                                  const rocblas_int ldvr);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_ztrevc3(rocblas_handle handle,
+                                                  const rocblas_side side,
+                                                  const rocsolver_eigenvectors howmny,
+                                                  const rocblas_int n,
+                                                  rocblas_double_complex* T,
+                                                  const rocblas_int ldt,
+                                                  rocblas_double_complex* VL,
+                                                  const rocblas_int ldvl,
+                                                  rocblas_double_complex* VR,
+                                                  const rocblas_int ldvr);
+//! @}
+
+/*! @{
+    \brief TREVC3_BATCHED computes the eigenvectors of a batch of complex upper triangular matrices.
+
+    \details
+    The right eigenvector \f$x_j\f$ and the left eigenvector \f$y_j\f$ of the upper triangular
+    matrix \f$T_l\f$ corresponding to its eigenvalue \f$\lambda_j = T_l[j,j]\f$ satisfy
+
+    \f[
+        T_l^{} x_j = \lambda_j x_j, \quad y_j^H T_l^{} = \lambda_j y_j^H,
+    \f]
+
+    where the entries of \f$x_j\f$ below row j, and those of \f$y_j\f$ above row j, are zero.
+    They are computed by back substitution, with small pivots perturbed and growth controlled
+    by scaling, as in LAPACK's ZTREVC3. If \f$T_l\f$ is the Schur form of a matrix
+    \f$A_l = Q_l^{} T_l^{} Q_l^H\f$ (see \ref rocsolver_chseqr "HSEQR") and \f$Q_l\f$ is given in VR
+    and/or VL, the back-transformed vectors \f$Q_l x_j\f$ and \f$Q_l y_j\f$ are the eigenvectors of
+    \f$A_l\f$. Each vector is normalized so that its component of largest magnitude, measured
+    as \f$|\text{Re}(z)| + |\text{Im}(z)|\f$, has magnitude 1.
+
+    \note
+    The selection of a subset of the eigenvectors (HOWMNY = 'S' in LAPACK) is not supported.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    side        rocblas_side.
+                Specifies whether the right eigenvectors (rocblas_side_right), the left eigenvectors
+                (rocblas_side_left) or both (rocblas_side_both) are computed.
+    @param[in]
+    howmny      #rocsolver_eigenvectors.
+                If rocsolver_eigenvectors_all, the eigenvectors of T_l are computed. If
+                rocsolver_eigenvectors_backtransform, they are multiplied by the matrices given on
+                entry in VL_l and/or VR_l.
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The order of the matrix T_l.
+    @param[in]
+    T           array of pointers to type. Each pointer points to an array on the GPU of dimension ldt*n.
+                The upper triangular matrices T_l. They are not modified.
+    @param[in]
+    ldt         rocblas_int. ldt >= max(1, n).
+                Specifies the leading dimension of matrices T_l.
+    @param[inout]
+    VL          array of pointers to type. Each pointer points to an array on the GPU of dimension ldvl*n.
+                On entry, if howmny = rocsolver_eigenvectors_backtransform, the matrix Q_l (for
+                example, the Schur vectors computed by HSEQR). On exit, the left eigenvectors: column j
+                of VL_l is y_j, or Q_l y_j if back-transformed. Not referenced if the left
+                eigenvectors are not computed.
+    @param[in]
+    ldvl        rocblas_int. ldvl >= 1, and ldvl >= n if the left eigenvectors are computed.
+                Specifies the leading dimension of matrices VL_l.
+    @param[inout]
+    VR          array of pointers to type. Each pointer points to an array on the GPU of dimension ldvr*n.
+                On entry, if howmny = rocsolver_eigenvectors_backtransform, the matrix Q_l (for
+                example, the Schur vectors computed by HSEQR). On exit, the right eigenvectors: column j
+                of VR_l is x_j, or Q_l x_j if back-transformed. Not referenced if the right
+                eigenvectors are not computed.
+    @param[in]
+    ldvr        rocblas_int. ldvr >= 1, and ldvr >= n if the right eigenvectors are computed.
+                Specifies the leading dimension of matrices VR_l.
+    @param[in]
+    batch_count rocblas_int. batch_count >= 0.
+                Number of matrices in the batch.
+    ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_ctrevc3_batched(rocblas_handle handle,
+                                                          const rocblas_side side,
+                                                          const rocsolver_eigenvectors howmny,
+                                                          const rocblas_int n,
+                                                          rocblas_float_complex* const T[],
+                                                          const rocblas_int ldt,
+                                                          rocblas_float_complex* const VL[],
+                                                          const rocblas_int ldvl,
+                                                          rocblas_float_complex* const VR[],
+                                                          const rocblas_int ldvr,
+                                                          const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_ztrevc3_batched(rocblas_handle handle,
+                                                          const rocblas_side side,
+                                                          const rocsolver_eigenvectors howmny,
+                                                          const rocblas_int n,
+                                                          rocblas_double_complex* const T[],
+                                                          const rocblas_int ldt,
+                                                          rocblas_double_complex* const VL[],
+                                                          const rocblas_int ldvl,
+                                                          rocblas_double_complex* const VR[],
+                                                          const rocblas_int ldvr,
+                                                          const rocblas_int batch_count);
+//! @}
+
+/*! @{
+    \brief TREVC3_STRIDED_BATCHED computes the eigenvectors of a batch of complex upper triangular matrices.
+
+    \details
+    The right eigenvector \f$x_j\f$ and the left eigenvector \f$y_j\f$ of the upper triangular
+    matrix \f$T_l\f$ corresponding to its eigenvalue \f$\lambda_j = T_l[j,j]\f$ satisfy
+
+    \f[
+        T_l^{} x_j = \lambda_j x_j, \quad y_j^H T_l^{} = \lambda_j y_j^H,
+    \f]
+
+    where the entries of \f$x_j\f$ below row j, and those of \f$y_j\f$ above row j, are zero.
+    They are computed by back substitution, with small pivots perturbed and growth controlled
+    by scaling, as in LAPACK's ZTREVC3. If \f$T_l\f$ is the Schur form of a matrix
+    \f$A_l = Q_l^{} T_l^{} Q_l^H\f$ (see \ref rocsolver_chseqr "HSEQR") and \f$Q_l\f$ is given in VR
+    and/or VL, the back-transformed vectors \f$Q_l x_j\f$ and \f$Q_l y_j\f$ are the eigenvectors of
+    \f$A_l\f$. Each vector is normalized so that its component of largest magnitude, measured
+    as \f$|\text{Re}(z)| + |\text{Im}(z)|\f$, has magnitude 1.
+
+    \note
+    The selection of a subset of the eigenvectors (HOWMNY = 'S' in LAPACK) is not supported.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    side        rocblas_side.
+                Specifies whether the right eigenvectors (rocblas_side_right), the left eigenvectors
+                (rocblas_side_left) or both (rocblas_side_both) are computed.
+    @param[in]
+    howmny      #rocsolver_eigenvectors.
+                If rocsolver_eigenvectors_all, the eigenvectors of T_l are computed. If
+                rocsolver_eigenvectors_backtransform, they are multiplied by the matrices given on
+                entry in VL_l and/or VR_l.
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The order of the matrix T_l.
+    @param[in]
+    T           pointer to type. Array on the GPU (the size depends on the value of strideT).
+                The upper triangular matrices T_l. They are not modified.
+    @param[in]
+    ldt         rocblas_int. ldt >= max(1, n).
+                Specifies the leading dimension of matrices T_l.
+    @param[in]
+    strideT     rocblas_stride.
+                Stride from the start of one matrix T_l to the next one T_(l+1).
+                There is no restriction for the value of strideT. Normal use case is strideT >= ldt*n.
+    @param[inout]
+    VL          pointer to type. Array on the GPU (the size depends on the value of strideVL).
+                On entry, if howmny = rocsolver_eigenvectors_backtransform, the matrix Q_l (for
+                example, the Schur vectors computed by HSEQR). On exit, the left eigenvectors: column j
+                of VL_l is y_j, or Q_l y_j if back-transformed. Not referenced if the left
+                eigenvectors are not computed.
+    @param[in]
+    ldvl        rocblas_int. ldvl >= 1, and ldvl >= n if the left eigenvectors are computed.
+                Specifies the leading dimension of matrices VL_l.
+    @param[in]
+    strideVL    rocblas_stride.
+                Stride from the start of one matrix VL_l to the next one VL_(l+1).
+                There is no restriction for the value of strideVL. Normal use case is strideVL >= ldvl*n.
+    @param[inout]
+    VR          pointer to type. Array on the GPU (the size depends on the value of strideVR).
+                On entry, if howmny = rocsolver_eigenvectors_backtransform, the matrix Q_l (for
+                example, the Schur vectors computed by HSEQR). On exit, the right eigenvectors: column j
+                of VR_l is x_j, or Q_l x_j if back-transformed. Not referenced if the right
+                eigenvectors are not computed.
+    @param[in]
+    ldvr        rocblas_int. ldvr >= 1, and ldvr >= n if the right eigenvectors are computed.
+                Specifies the leading dimension of matrices VR_l.
+    @param[in]
+    strideVR    rocblas_stride.
+                Stride from the start of one matrix VR_l to the next one VR_(l+1).
+                There is no restriction for the value of strideVR. Normal use case is strideVR >= ldvr*n.
+    @param[in]
+    batch_count rocblas_int. batch_count >= 0.
+                Number of matrices in the batch.
+    ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_ctrevc3_strided_batched(rocblas_handle handle,
+                                                                  const rocblas_side side,
+                                                                  const rocsolver_eigenvectors howmny,
+                                                                  const rocblas_int n,
+                                                                  rocblas_float_complex* T,
+                                                                  const rocblas_int ldt,
+                                                                  const rocblas_stride strideT,
+                                                                  rocblas_float_complex* VL,
+                                                                  const rocblas_int ldvl,
+                                                                  const rocblas_stride strideVL,
+                                                                  rocblas_float_complex* VR,
+                                                                  const rocblas_int ldvr,
+                                                                  const rocblas_stride strideVR,
+                                                                  const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_ztrevc3_strided_batched(rocblas_handle handle,
+                                                                  const rocblas_side side,
+                                                                  const rocsolver_eigenvectors howmny,
+                                                                  const rocblas_int n,
+                                                                  rocblas_double_complex* T,
+                                                                  const rocblas_int ldt,
+                                                                  const rocblas_stride strideT,
+                                                                  rocblas_double_complex* VL,
+                                                                  const rocblas_int ldvl,
+                                                                  const rocblas_stride strideVL,
+                                                                  rocblas_double_complex* VR,
+                                                                  const rocblas_int ldvr,
+                                                                  const rocblas_stride strideVR,
+                                                                  const rocblas_int batch_count);
+//! @}
+
+/*! @{
+    \brief GEEV computes the eigenvalues and, optionally, the eigenvectors of a complex general matrix.
+
+    \details
+    The eigenvalues \f$\lambda_j\f$ of \f$A\f$ are returned in W. Optionally, the right
+    eigenvectors \f$v_j\f$ and/or the left eigenvectors \f$u_j\f$ are computed:
+
+    \f[
+        A^{} v_j = \lambda_j v_j, \quad u_j^H A^{} = \lambda_j u_j^H.
+    \f]
+
+    As in LAPACK's ZGEEV, the matrix is scaled if its entries are too large or too small, balanced
+    (see \ref rocsolver_cgebal "GEBAL"), reduced to upper Hessenberg form (see \ref rocsolver_cgehrd "GEHRD"),
+    and its Schur factorization is computed (see \ref rocsolver_chseqr "HSEQR"). The eigenvectors
+    are computed from the Schur form (see \ref rocsolver_ctrevc3 "TREVC3"), transformed back
+    (see \ref rocsolver_cgebak "GEBAK"), and normalized to have Euclidean norm 1 and their component
+    of largest modulus real.
+
+    \note
+    If the algorithm alg_mode of rocsolver_function_hseqr (or rocsolver_function_geev) is set to
+    rocsolver_alg_mode_hybrid, the Schur factorization uses the hybrid mode of HSEQR.
+
+    \note
+    GEEV reads the balancing ranges back to the host (to reduce together the matrices with the
+    same range), so that it synchronizes the stream and cannot be captured in a HIP graph.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    jobvl       #rocblas_evect.
+                If rocblas_evect_original, the left eigenvectors are computed. If rocblas_evect_none,
+                they are not computed. (rocblas_evect_tridiagonal is not supported.)
+    @param[in]
+    jobvr       #rocblas_evect.
+                If rocblas_evect_original, the right eigenvectors are computed. If rocblas_evect_none,
+                they are not computed. (rocblas_evect_tridiagonal is not supported.)
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The order of the matrix A.
+    @param[inout]
+    A           pointer to type. Array on the GPU of dimension lda*n.
+                On entry, the matrix A. On exit, its contents are destroyed.
+    @param[in]
+    lda         rocblas_int. lda >= max(1, n).
+                Specifies the leading dimension of A.
+    @param[out]
+    W           pointer to type. Array on the GPU of dimension n.
+                The eigenvalues of A. If info = i > 0, only the eigenvalues i+1:n (and those
+                isolated by the balancing, if any) have been computed.
+    @param[out]
+    VL          pointer to type. Array on the GPU of dimension ldvl*n.
+                If jobvl = rocblas_evect_original, the left eigenvectors: column j of VL is u_j. If
+                info > 0, the contents of VL are undefined. Not referenced if jobvl = rocblas_evect_none.
+    @param[in]
+    ldvl        rocblas_int. ldvl >= 1, and ldvl >= n if jobvl = rocblas_evect_original.
+                Specifies the leading dimension of VL.
+    @param[out]
+    VR          pointer to type. Array on the GPU of dimension ldvr*n.
+                If jobvr = rocblas_evect_original, the right eigenvectors: column j of VR is v_j. If
+                info > 0, the contents of VR are undefined. Not referenced if jobvr = rocblas_evect_none.
+    @param[in]
+    ldvr        rocblas_int. ldvr >= 1, and ldvr >= n if jobvr = rocblas_evect_original.
+                Specifies the leading dimension of VR.
+    @param[out]
+    info        pointer to a rocblas_int on the GPU.
+                If info = 0, successful exit. If info = i > 0, the QR algorithm failed to compute all the
+                eigenvalues; the eigenvalues i+1:n have converged.
+    ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cgeev(rocblas_handle handle,
+                                                const rocblas_evect jobvl,
+                                                const rocblas_evect jobvr,
+                                                const rocblas_int n,
+                                                rocblas_float_complex* A,
+                                                const rocblas_int lda,
+                                                rocblas_float_complex* W,
+                                                rocblas_float_complex* VL,
+                                                const rocblas_int ldvl,
+                                                rocblas_float_complex* VR,
+                                                const rocblas_int ldvr,
+                                                rocblas_int* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zgeev(rocblas_handle handle,
+                                                const rocblas_evect jobvl,
+                                                const rocblas_evect jobvr,
+                                                const rocblas_int n,
+                                                rocblas_double_complex* A,
+                                                const rocblas_int lda,
+                                                rocblas_double_complex* W,
+                                                rocblas_double_complex* VL,
+                                                const rocblas_int ldvl,
+                                                rocblas_double_complex* VR,
+                                                const rocblas_int ldvr,
+                                                rocblas_int* info);
+//! @}
+
+/*! @{
+    \brief GEEV_BATCHED computes the eigenvalues and, optionally, the eigenvectors of a batch of complex general matrices.
+
+    \details
+    The eigenvalues \f$\lambda_j\f$ of \f$A_l\f$ are returned in W_l. Optionally, the right
+    eigenvectors \f$v_j\f$ and/or the left eigenvectors \f$u_j\f$ are computed:
+
+    \f[
+        A_l^{} v_j = \lambda_j v_j, \quad u_j^H A_l^{} = \lambda_j u_j^H.
+    \f]
+
+    As in LAPACK's ZGEEV, the matrix is scaled if its entries are too large or too small, balanced
+    (see \ref rocsolver_cgebal "GEBAL"), reduced to upper Hessenberg form (see \ref rocsolver_cgehrd "GEHRD"),
+    and its Schur factorization is computed (see \ref rocsolver_chseqr "HSEQR"). The eigenvectors
+    are computed from the Schur form (see \ref rocsolver_ctrevc3 "TREVC3"), transformed back
+    (see \ref rocsolver_cgebak "GEBAK"), and normalized to have Euclidean norm 1 and their component
+    of largest modulus real.
+
+    \note
+    If the algorithm alg_mode of rocsolver_function_hseqr (or rocsolver_function_geev) is set to
+    rocsolver_alg_mode_hybrid, the Schur factorization uses the hybrid mode of HSEQR.
+
+    \note
+    GEEV reads the balancing ranges back to the host (to reduce together the matrices with the
+    same range), so that it synchronizes the stream and cannot be captured in a HIP graph.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    jobvl       #rocblas_evect.
+                If rocblas_evect_original, the left eigenvectors are computed. If rocblas_evect_none,
+                they are not computed. (rocblas_evect_tridiagonal is not supported.)
+    @param[in]
+    jobvr       #rocblas_evect.
+                If rocblas_evect_original, the right eigenvectors are computed. If rocblas_evect_none,
+                they are not computed. (rocblas_evect_tridiagonal is not supported.)
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The order of the matrix A_l.
+    @param[inout]
+    A           array of pointers to type. Each pointer points to an array on the GPU of dimension lda*n.
+                On entry, the matrices A_l. On exit, their contents are destroyed.
+    @param[in]
+    lda         rocblas_int. lda >= max(1, n).
+                Specifies the leading dimension of matrices A_l.
+    @param[out]
+    W           pointer to type. Array on the GPU (the size depends on the value of strideW).
+                The eigenvalues of matrices A_l. If info_l = i > 0, only the eigenvalues i+1:n (and those
+                isolated by the balancing, if any) have been computed.
+    @param[in]
+    strideW     rocblas_stride.
+                Stride from the start of one vector W_l to the next one W_(l+1).
+                There is no restriction for the value of strideW. Normal use case is strideW >= n.
+    @param[out]
+    VL          array of pointers to type. Each pointer points to an array on the GPU of dimension ldvl*n.
+                If jobvl = rocblas_evect_original, the left eigenvectors: column j of VL_l is u_j. If
+                info_l > 0, the contents of VL_l are undefined. Not referenced if jobvl = rocblas_evect_none.
+    @param[in]
+    ldvl        rocblas_int. ldvl >= 1, and ldvl >= n if jobvl = rocblas_evect_original.
+                Specifies the leading dimension of matrices VL_l.
+    @param[out]
+    VR          array of pointers to type. Each pointer points to an array on the GPU of dimension ldvr*n.
+                If jobvr = rocblas_evect_original, the right eigenvectors: column j of VR_l is v_j. If
+                info_l > 0, the contents of VR_l are undefined. Not referenced if jobvr = rocblas_evect_none.
+    @param[in]
+    ldvr        rocblas_int. ldvr >= 1, and ldvr >= n if jobvr = rocblas_evect_original.
+                Specifies the leading dimension of matrices VR_l.
+    @param[out]
+    info        pointer to rocblas_int. Array of batch_count integers on the GPU.
+                If info_l = 0, successful exit for A_l. If info_l = i > 0, the QR algorithm failed to
+                compute all the eigenvalues of A_l; the eigenvalues i+1:n have converged.
+    @param[in]
+    batch_count rocblas_int. batch_count >= 0.
+                Number of matrices in the batch.
+    ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cgeev_batched(rocblas_handle handle,
+                                                        const rocblas_evect jobvl,
+                                                        const rocblas_evect jobvr,
+                                                        const rocblas_int n,
+                                                        rocblas_float_complex* const A[],
+                                                        const rocblas_int lda,
+                                                        rocblas_float_complex* W,
+                                                        const rocblas_stride strideW,
+                                                        rocblas_float_complex* const VL[],
+                                                        const rocblas_int ldvl,
+                                                        rocblas_float_complex* const VR[],
+                                                        const rocblas_int ldvr,
+                                                        rocblas_int* info,
+                                                        const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zgeev_batched(rocblas_handle handle,
+                                                        const rocblas_evect jobvl,
+                                                        const rocblas_evect jobvr,
+                                                        const rocblas_int n,
+                                                        rocblas_double_complex* const A[],
+                                                        const rocblas_int lda,
+                                                        rocblas_double_complex* W,
+                                                        const rocblas_stride strideW,
+                                                        rocblas_double_complex* const VL[],
+                                                        const rocblas_int ldvl,
+                                                        rocblas_double_complex* const VR[],
+                                                        const rocblas_int ldvr,
+                                                        rocblas_int* info,
+                                                        const rocblas_int batch_count);
+//! @}
+
+/*! @{
+    \brief GEEV_STRIDED_BATCHED computes the eigenvalues and, optionally, the eigenvectors of a batch of complex general matrices.
+
+    \details
+    The eigenvalues \f$\lambda_j\f$ of \f$A_l\f$ are returned in W_l. Optionally, the right
+    eigenvectors \f$v_j\f$ and/or the left eigenvectors \f$u_j\f$ are computed:
+
+    \f[
+        A_l^{} v_j = \lambda_j v_j, \quad u_j^H A_l^{} = \lambda_j u_j^H.
+    \f]
+
+    As in LAPACK's ZGEEV, the matrix is scaled if its entries are too large or too small, balanced
+    (see \ref rocsolver_cgebal "GEBAL"), reduced to upper Hessenberg form (see \ref rocsolver_cgehrd "GEHRD"),
+    and its Schur factorization is computed (see \ref rocsolver_chseqr "HSEQR"). The eigenvectors
+    are computed from the Schur form (see \ref rocsolver_ctrevc3 "TREVC3"), transformed back
+    (see \ref rocsolver_cgebak "GEBAK"), and normalized to have Euclidean norm 1 and their component
+    of largest modulus real.
+
+    \note
+    If the algorithm alg_mode of rocsolver_function_hseqr (or rocsolver_function_geev) is set to
+    rocsolver_alg_mode_hybrid, the Schur factorization uses the hybrid mode of HSEQR.
+
+    \note
+    GEEV reads the balancing ranges back to the host (to reduce together the matrices with the
+    same range), so that it synchronizes the stream and cannot be captured in a HIP graph.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    jobvl       #rocblas_evect.
+                If rocblas_evect_original, the left eigenvectors are computed. If rocblas_evect_none,
+                they are not computed. (rocblas_evect_tridiagonal is not supported.)
+    @param[in]
+    jobvr       #rocblas_evect.
+                If rocblas_evect_original, the right eigenvectors are computed. If rocblas_evect_none,
+                they are not computed. (rocblas_evect_tridiagonal is not supported.)
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The order of the matrix A_l.
+    @param[inout]
+    A           pointer to type. Array on the GPU (the size depends on the value of strideA).
+                On entry, the matrices A_l. On exit, their contents are destroyed.
+    @param[in]
+    lda         rocblas_int. lda >= max(1, n).
+                Specifies the leading dimension of matrices A_l.
+    @param[in]
+    strideA     rocblas_stride.
+                Stride from the start of one matrix A_l to the next one A_(l+1).
+                There is no restriction for the value of strideA. Normal use case is strideA >= lda*n.
+    @param[out]
+    W           pointer to type. Array on the GPU (the size depends on the value of strideW).
+                The eigenvalues of matrices A_l. If info_l = i > 0, only the eigenvalues i+1:n (and those
+                isolated by the balancing, if any) have been computed.
+    @param[in]
+    strideW     rocblas_stride.
+                Stride from the start of one vector W_l to the next one W_(l+1).
+                There is no restriction for the value of strideW. Normal use case is strideW >= n.
+    @param[out]
+    VL          pointer to type. Array on the GPU (the size depends on the value of strideVL).
+                If jobvl = rocblas_evect_original, the left eigenvectors: column j of VL_l is u_j. If
+                info_l > 0, the contents of VL_l are undefined. Not referenced if jobvl = rocblas_evect_none.
+    @param[in]
+    ldvl        rocblas_int. ldvl >= 1, and ldvl >= n if jobvl = rocblas_evect_original.
+                Specifies the leading dimension of matrices VL_l.
+    @param[in]
+    strideVL    rocblas_stride.
+                Stride from the start of one matrix VL_l to the next one VL_(l+1).
+                There is no restriction for the value of strideVL. Normal use case is strideVL >= ldvl*n.
+    @param[out]
+    VR          pointer to type. Array on the GPU (the size depends on the value of strideVR).
+                If jobvr = rocblas_evect_original, the right eigenvectors: column j of VR_l is v_j. If
+                info_l > 0, the contents of VR_l are undefined. Not referenced if jobvr = rocblas_evect_none.
+    @param[in]
+    ldvr        rocblas_int. ldvr >= 1, and ldvr >= n if jobvr = rocblas_evect_original.
+                Specifies the leading dimension of matrices VR_l.
+    @param[in]
+    strideVR    rocblas_stride.
+                Stride from the start of one matrix VR_l to the next one VR_(l+1).
+                There is no restriction for the value of strideVR. Normal use case is strideVR >= ldvr*n.
+    @param[out]
+    info        pointer to rocblas_int. Array of batch_count integers on the GPU.
+                If info_l = 0, successful exit for A_l. If info_l = i > 0, the QR algorithm failed to
+                compute all the eigenvalues of A_l; the eigenvalues i+1:n have converged.
+    @param[in]
+    batch_count rocblas_int. batch_count >= 0.
+                Number of matrices in the batch.
+    ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cgeev_strided_batched(rocblas_handle handle,
+                                                                const rocblas_evect jobvl,
+                                                                const rocblas_evect jobvr,
+                                                                const rocblas_int n,
+                                                                rocblas_float_complex* A,
+                                                                const rocblas_int lda,
+                                                                const rocblas_stride strideA,
+                                                                rocblas_float_complex* W,
+                                                                const rocblas_stride strideW,
+                                                                rocblas_float_complex* VL,
+                                                                const rocblas_int ldvl,
+                                                                const rocblas_stride strideVL,
+                                                                rocblas_float_complex* VR,
+                                                                const rocblas_int ldvr,
+                                                                const rocblas_stride strideVR,
+                                                                rocblas_int* info,
+                                                                const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zgeev_strided_batched(rocblas_handle handle,
+                                                                const rocblas_evect jobvl,
+                                                                const rocblas_evect jobvr,
+                                                                const rocblas_int n,
+                                                                rocblas_double_complex* A,
+                                                                const rocblas_int lda,
+                                                                const rocblas_stride strideA,
+                                                                rocblas_double_complex* W,
+                                                                const rocblas_stride strideW,
+                                                                rocblas_double_complex* VL,
+                                                                const rocblas_int ldvl,
+                                                                const rocblas_stride strideVL,
+                                                                rocblas_double_complex* VR,
+                                                                const rocblas_int ldvr,
+                                                                const rocblas_stride strideVR,
+                                                                rocblas_int* info,
+                                                                const rocblas_int batch_count);
+//! @}
+
+/*! @{
     \brief The SYEV functions compute the eigenvalues and optionally the eigenvectors of a real symmetric
     matrix ``A``.
 

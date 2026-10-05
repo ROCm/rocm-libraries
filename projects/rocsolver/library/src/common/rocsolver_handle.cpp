@@ -93,6 +93,14 @@ try
             return rocblas_status_success;
         }
         break;
+    case rocsolver_function_geev:
+    case rocsolver_function_hseqr:
+        if(mode == rocsolver_alg_mode_gpu || mode == rocsolver_alg_mode_hybrid)
+        {
+            handle_data->hseqr_mode = mode;
+            return rocblas_status_success;
+        }
+        break;
     case rocsolver_function_sytrd_hetrd:
         if(mode == rocsolver_alg_mode_1stage || mode == rocsolver_alg_mode_2stage
            || mode == rocsolver_alg_mode_auto)
@@ -145,6 +153,10 @@ try
             *mode = handle_data->sterf_mode;
         else
             *mode = rocsolver_alg_mode_mixed;
+        break;
+    case rocsolver_function_geev:
+    case rocsolver_function_hseqr:
+        *mode = handle_data ? handle_data->hseqr_mode : rocsolver_alg_mode_gpu;
         break;
     case rocsolver_function_sytrd_hetrd:
         *mode = handle_data ? handle_data->sytrd_hetrd_mode : rocsolver_alg_mode_1stage;

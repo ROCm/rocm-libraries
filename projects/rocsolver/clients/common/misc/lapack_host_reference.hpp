@@ -505,6 +505,16 @@ void cpu_orgtr_ungtr(rocblas_fill uplo,
                      rocblas_int size_w);
 
 template <typename T>
+void cpu_orghr_unghr(rocblas_int n,
+                     rocblas_int ilo,
+                     rocblas_int ihi,
+                     T* A,
+                     rocblas_int lda,
+                     T* tau,
+                     T* work,
+                     rocblas_int size_w);
+
+template <typename T>
 void cpu_orm2r_unm2r(rocblas_side side,
                      rocblas_operation trans,
                      rocblas_int m,
@@ -644,6 +654,79 @@ void cpu_gehrd(rocblas_int n,
                T* ipiv,
                T* work,
                rocblas_int lwork);
+
+template <typename T, typename S>
+void cpu_gebal(rocsolver_balance job,
+               rocblas_int n,
+               T* A,
+               rocblas_int lda,
+               rocblas_int* ilo,
+               rocblas_int* ihi,
+               S* scale,
+               rocblas_int* info);
+
+template <typename T, typename S>
+void cpu_gebak(rocsolver_balance job,
+               rocblas_side side,
+               rocblas_int n,
+               rocblas_int ilo,
+               rocblas_int ihi,
+               S* scale,
+               rocblas_int m,
+               T* V,
+               rocblas_int ldv,
+               rocblas_int* info);
+
+template <typename T>
+void cpu_hseqr(rocsolver_schur_job job,
+               rocsolver_schur_vectors compz,
+               rocblas_int n,
+               rocblas_int ilo,
+               rocblas_int ihi,
+               T* H,
+               rocblas_int ldh,
+               T* W,
+               T* Z,
+               rocblas_int ldz,
+               T* work,
+               rocblas_int lwork,
+               rocblas_int* info);
+
+template <typename T>
+void cpu_trexc(rocsolver_schur_vectors compq,
+               rocblas_int n,
+               T* A,
+               rocblas_int ldt,
+               T* Q,
+               rocblas_int ldq,
+               rocblas_int ifst,
+               rocblas_int ilst,
+               rocblas_int* info);
+
+template <typename T>
+void cpu_trevc3(rocblas_side side,
+                rocsolver_eigenvectors howmny,
+                rocblas_int n,
+                T* A,
+                rocblas_int ldt,
+                T* VL,
+                rocblas_int ldvl,
+                T* VR,
+                rocblas_int ldvr,
+                rocblas_int* info);
+
+template <typename T>
+void cpu_geev(rocblas_evect jobvl,
+              rocblas_evect jobvr,
+              rocblas_int n,
+              T* A,
+              rocblas_int lda,
+              T* W,
+              T* VL,
+              rocblas_int ldvl,
+              T* VR,
+              rocblas_int ldvr,
+              rocblas_int* info);
 
 template <typename T, typename S>
 void cpu_sbev_hbev(rocblas_evect evect,
