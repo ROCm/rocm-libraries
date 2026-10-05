@@ -667,3 +667,28 @@ retained six-word payload for generated DataParallel kernels. Generated DP uses
 two scheduling words and a tile cursor; prebuilt version-zero layouts retain
 their recorded argument contract. ABI, emitted-control-flow, and numerical
 tests carry the evidence for this change.
+
+## D45 — Accept basename identity changes from the LDSTrInstA/LDSTrInstB split
+
+**ADR:** [`adr/0029-ldstrinst-ab-split-basename-identity-change.md`](adr/0029-ldstrinst-ab-split-basename-identity-change.md)
+
+**Decision:** Accept the `basename`-only golden changes on stable
+architectures (gfx90a, gfx942) and other targets (gfx950, gfx1250) that
+result from splitting the single `LDSTrInst` parameter into per-tensor
+`LDSTrInstA`/`LDSTrInstB` fields that now feed the solution naming hash.
+These targets have no LDSTr hardware, so `err` codes and emitted assembly
+are unchanged; only the recorded hash text differs.
+
+## D46 — Refresh LDSTrInstA/LDSTrInstB results after rebasing onto develop
+
+**ADR:** [`adr/0030-refresh-ldstrinst-ab-results-after-develop-rebase.md`](adr/0030-refresh-ldstrinst-ab-results-after-develop-rebase.md)
+
+**Decision:** Re-record exactly the 82 failing saved-result nodes (54 files)
+surfaced by running the full characterization suite after rebasing this
+branch onto a newer `develop` tip and rebuilding `rocisa` in-tree: 45
+`_codegen` goldens whose basenames had a real merge conflict with develop's
+own independent regenerations, plus 3 previously-unaffected families
+(`LibraryIO`, `SolutionClass`, `ValidParameters`) that pin the full
+derived-parameter-state dict/roster and had not yet recorded the two new
+`LDSTrInstA`/`LDSTrInstB` keys. Only basenames and/or those two new dict
+entries changed; kernel counts and `err` codes are unchanged.
