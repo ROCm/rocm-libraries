@@ -44,7 +44,7 @@ ROCSOLVER_KERNEL void org2l_init_ident(const rocblas_int m,
                                        const rocblas_int n,
                                        const rocblas_int k,
                                        U A,
-                                       const rocblas_int shiftA,
+                                       const rocblas_stride shiftA,
                                        const rocblas_int lda,
                                        const rocblas_stride strideA)
 {
@@ -58,13 +58,13 @@ ROCSOLVER_KERNEL void org2l_init_ident(const rocblas_int m,
 
         if(i == m - n + j)
             // ones along the (m-n)th subdiagonal
-            Ap[i + j * lda] = 1.0;
+            Ap[idx2D(i, j, lda)] = 1.0;
         else if(i > m - n + j)
             // zero the lower triangular factor L
-            Ap[i + j * lda] = 0.0;
+            Ap[idx2D(i, j, lda)] = 0.0;
         else if(j < n - k)
             // zero the left part of the matrix, leaving k Householder vectors
-            Ap[i + j * lda] = 0.0;
+            Ap[idx2D(i, j, lda)] = 0.0;
     }
 }
 
@@ -125,7 +125,7 @@ rocblas_status rocsolver_org2l_ung2l_template(rocblas_handle handle,
                                               const rocblas_int n,
                                               const rocblas_int k,
                                               U A,
-                                              const rocblas_int shiftA,
+                                              const rocblas_stride shiftA,
                                               const rocblas_int lda,
                                               const rocblas_stride strideA,
                                               T* ipiv,

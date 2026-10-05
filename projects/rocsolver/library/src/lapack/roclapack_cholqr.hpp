@@ -105,12 +105,12 @@ ROCSOLVER_KERNEL void cholqr_cleannr_w_kernel(const I m,
                 if(i < nr && j < nr)
                 {
                     if((i > j && upper) || (i < j && !upper))
-                        W[i + j * ldw] = 0;
+                        W[idx2D(i, j, ldw)] = 0;
                 }
                 else
                 {
                     T val = (i == j) ? 1 : 0;
-                    W[i + j * ldw] = val;
+                    W[idx2D(i, j, ldw)] = val;
                 }
             }
         }
@@ -150,7 +150,7 @@ ROCSOLVER_KERNEL void cholqr_cleannr_q_kernel(const I m,
     {
         T* W = load_ptr_batch(WA, b, shiftW, strideW);
         T* Q = load_ptr_batch(QA, b, shiftQ, strideQ);
-        T* A = AA + b * m * n;
+        T* A = AA + rocblas_stride(b) * m * n;
         I end = infoA[b];
         I nr = nrA[b];
 
@@ -176,13 +176,13 @@ ROCSOLVER_KERNEL void cholqr_cleannr_q_kernel(const I m,
             for(auto i = i_start; i < i_end; i += i_inc)
             {
                 // restore columns of A
-                Q[i + j * ldq] = A[i + j * m];
+                Q[idx2D(i, j, ldq)] = A[i + j * m];
 
                 // clean R
                 if(i < mn && j < mn)
                 {
                     T val = (i == j) ? 1 : 0;
-                    W[i + j * ldw] = val;
+                    W[idx2D(i, j, ldw)] = val;
                 }
             }
         }

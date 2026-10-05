@@ -181,15 +181,15 @@ void geblttrf_npvt_initData(const rocblas_handle handle,
                     for(rocblas_int k = 0; k < nblocks; k++)
                     {
                         if(i == j)
-                            hB[b][i + j * ldb + k * ldb * nb] += 400;
+                            hB[b][i + rocblas_stride(j) * ldb + rocblas_stride(k) * ldb * nb] += 400;
                         else
-                            hB[b][i + j * ldb + k * ldb * nb] -= 4;
+                            hB[b][i + rocblas_stride(j) * ldb + rocblas_stride(k) * ldb * nb] -= 4;
                     }
 
                     for(rocblas_int k = 0; k < nblocks - 1; k++)
                     {
-                        hA[b][i + j * lda + k * lda * nb] -= 4;
-                        hC[b][i + j * ldc + k * ldc * nb] -= 4;
+                        hA[b][i + rocblas_stride(j) * lda + rocblas_stride(k) * lda * nb] -= 4;
+                        hC[b][i + rocblas_stride(j) * ldc + rocblas_stride(k) * ldc * nb] -= 4;
                     }
                 }
             }
@@ -206,11 +206,11 @@ void geblttrf_npvt_initData(const rocblas_handle handle,
                 for(rocblas_int i = 0; i < nb; i++)
                 {
                     // zero the jj-th column
-                    hB[b][i + j * ldb + k * ldb * nb] = 0;
+                    hB[b][i + rocblas_stride(j) * ldb + rocblas_stride(k) * ldb * nb] = 0;
                     if(k < nblocks - 1)
-                        hA[b][i + j * lda + k * lda * nb] = 0;
+                        hA[b][i + rocblas_stride(j) * lda + rocblas_stride(k) * lda * nb] = 0;
                     if(k > 0)
-                        hC[b][i + j * ldc + (k - 1) * ldc * nb] = 0;
+                        hC[b][i + rocblas_stride(j) * ldc + rocblas_stride(k - 1) * ldc * nb] = 0;
                 }
 
                 jj = n / 2 + b;
@@ -220,11 +220,11 @@ void geblttrf_npvt_initData(const rocblas_handle handle,
                 for(rocblas_int i = 0; i < nb; i++)
                 {
                     // zero the jj-th column
-                    hB[b][i + j * ldb + k * ldb * nb] = 0;
+                    hB[b][i + rocblas_stride(j) * ldb + rocblas_stride(k) * ldb * nb] = 0;
                     if(k < nblocks - 1)
-                        hA[b][i + j * lda + k * lda * nb] = 0;
+                        hA[b][i + rocblas_stride(j) * lda + rocblas_stride(k) * lda * nb] = 0;
                     if(k > 0)
-                        hC[b][i + j * ldc + (k - 1) * ldc * nb] = 0;
+                        hC[b][i + rocblas_stride(j) * ldc + rocblas_stride(k - 1) * ldc * nb] = 0;
                 }
 
                 jj = n - 1 + b;
@@ -234,11 +234,11 @@ void geblttrf_npvt_initData(const rocblas_handle handle,
                 for(rocblas_int i = 0; i < nb; i++)
                 {
                     // zero the jj-th column
-                    hB[b][i + j * ldb + k * ldb * nb] = 0;
+                    hB[b][i + rocblas_stride(j) * ldb + rocblas_stride(k) * ldb * nb] = 0;
                     if(k < nblocks - 1)
-                        hA[b][i + j * lda + k * lda * nb] = 0;
+                        hA[b][i + rocblas_stride(j) * lda + rocblas_stride(k) * lda * nb] = 0;
                     if(k > 0)
-                        hC[b][i + j * ldc + (k - 1) * ldc * nb] = 0;
+                        hC[b][i + rocblas_stride(j) * ldc + rocblas_stride(k - 1) * ldc * nb] = 0;
                 }
             }
         }
@@ -329,15 +329,16 @@ void geblttrf_npvt_getError(const rocblas_handle handle,
                     for(rocblas_int j = 0; j < nb; j++)
                     {
                         if(i <= j)
-                            L[i + j * n + k * (n + 1) * nb] = hBRes[b][i + j * ldb + k * ldb * nb];
+                            L[i + j * n + k * (n + 1) * nb]
+                                = hBRes[b][i + rocblas_stride(j) * ldb + rocblas_stride(k) * ldb * nb];
                         else
                             L[i + j * n + k * (n + 1) * nb] = 0;
                     }
                 }
 
                 cpu_trmm(rocblas_side_left, rocblas_fill_lower, rocblas_operation_none,
-                         rocblas_diagonal_unit, nb, nb, T(1), hBRes[b] + k * ldb * nb, ldb,
-                         L.data() + k * (n + 1) * nb, n);
+                         rocblas_diagonal_unit, nb, nb, T(1), hBRes[b] + rocblas_stride(k) * ldb * nb,
+                         ldb, L.data() + k * (n + 1) * nb, n);
             }
 
             // move blocks A, updated C, and I into full matrices L and U
@@ -350,9 +351,9 @@ void geblttrf_npvt_getError(const rocblas_handle handle,
                         for(rocblas_int j = 0; j < nb; j++)
                         {
                             U[i + (j + nb) * n + k * (n + 1) * nb]
-                                = hCRes[b][i + j * ldc + k * ldc * nb];
+                                = hCRes[b][i + rocblas_stride(j) * ldc + rocblas_stride(k) * ldc * nb];
                             L[(i + nb) + j * n + k * (n + 1) * nb]
-                                = hA[b][i + j * lda + k * lda * nb];
+                                = hA[b][i + rocblas_stride(j) * lda + rocblas_stride(k) * lda * nb];
                         }
                     }
 
@@ -371,14 +372,15 @@ void geblttrf_npvt_getError(const rocblas_handle handle,
                 {
                     for(rocblas_int j = 0; j < nb; j++)
                     {
-                        M[i + j * n + k * (n + 1) * nb] = hB[b][i + j * ldb + k * ldb * nb];
+                        M[i + j * n + k * (n + 1) * nb]
+                            = hB[b][i + rocblas_stride(j) * ldb + rocblas_stride(k) * ldb * nb];
 
                         if(k < nblocks - 1)
                         {
                             M[(i + nb) + j * n + k * (n + 1) * nb]
-                                = hA[b][i + j * lda + k * lda * nb];
+                                = hA[b][i + rocblas_stride(j) * lda + rocblas_stride(k) * lda * nb];
                             M[i + (j + nb) * n + k * (n + 1) * nb]
-                                = hC[b][i + j * ldc + k * ldc * nb];
+                                = hC[b][i + rocblas_stride(j) * ldc + rocblas_stride(k) * ldc * nb];
                         }
                     }
                 }
@@ -479,9 +481,9 @@ void testing_geblttrf_npvt(Arguments& argus)
     rocblas_int lda = argus.get<rocblas_int>("lda", nb);
     rocblas_int ldb = argus.get<rocblas_int>("ldb", nb);
     rocblas_int ldc = argus.get<rocblas_int>("ldc", nb);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * nb * nblocks);
-    rocblas_stride stB = argus.get<rocblas_stride>("strideB", ldb * nb * nblocks);
-    rocblas_stride stC = argus.get<rocblas_stride>("strideC", ldc * nb * nblocks);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * nb * nblocks);
+    rocblas_stride stB = argus.get<rocblas_stride>("strideB", rocblas_stride(ldb) * nb * nblocks);
+    rocblas_stride stC = argus.get<rocblas_stride>("strideC", rocblas_stride(ldc) * nb * nblocks);
 
     rocblas_int bc = argus.batch_count;
     rocblas_int hot_calls = argus.iters;

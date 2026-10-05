@@ -352,9 +352,9 @@ void stedc_random_initData(const rocblas_handle handle,
             for(rocblas_int i = 0; i < n; i++)
             {
                 if(i == j)
-                    hC[0][i + j * ldc] = 1;
+                    hC[0][i + rocblas_stride(j) * ldc] = 1;
                 else
-                    hC[0][i + j * ldc] = 0;
+                    hC[0][i + rocblas_stride(j) * ldc] = 0;
             }
         }
     }
@@ -485,9 +485,9 @@ void stedc_default_initData(const rocblas_handle handle,
             for(rocblas_int i = 0; i < n; i++)
             {
                 if(i == j)
-                    hC[0][i + j * ldc] = 1;
+                    hC[0][i + rocblas_stride(j) * ldc] = 1;
                 else
-                    hC[0][i + j * ldc] = 0;
+                    hC[0][i + rocblas_stride(j) * ldc] = 0;
             }
         }
     }
@@ -629,11 +629,11 @@ void stedc_getError(const rocblas_handle handle,
             for(rocblas_int j = i; j < n; j++)
             {
                 if(i == j)
-                    hA[0][i + j * lda] = hD[0][i];
+                    hA[0][i + rocblas_stride(j) * lda] = hD[0][i];
                 else if(i + 1 == j)
-                    hA[0][i + j * lda] = hE[0][i];
+                    hA[0][i + rocblas_stride(j) * lda] = hE[0][i];
                 else
-                    hA[0][i + j * lda] = 0;
+                    hA[0][i + rocblas_stride(j) * lda] = 0;
             }
         }
     }

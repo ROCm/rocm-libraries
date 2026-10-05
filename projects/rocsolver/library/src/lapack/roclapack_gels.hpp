@@ -47,7 +47,7 @@ ROCSOLVER_KERNEL void gels_set_zero(const rocblas_int k1,
                                     const rocblas_int k2,
                                     const rocblas_int nrhs,
                                     U B,
-                                    const rocblas_int shiftB,
+                                    const rocblas_stride shiftB,
                                     const rocblas_int ldb,
                                     const rocblas_stride strideB,
                                     const rocblas_int* info)
@@ -60,7 +60,7 @@ ROCSOLVER_KERNEL void gels_set_zero(const rocblas_int k1,
     {
         T* Bp = load_ptr_batch<T>(B, b, shiftB, strideB);
 
-        Bp[(i + k1) + j * ldb] = 0;
+        Bp[idx2D((i + k1), j, ldb)] = 0;
     }
 }
 
@@ -181,11 +181,11 @@ rocblas_status rocsolver_gels_template(rocblas_handle handle,
                                        const rocblas_int n,
                                        const rocblas_int nrhs,
                                        U A,
-                                       const rocblas_int shiftA,
+                                       const rocblas_stride shiftA,
                                        const rocblas_int lda,
                                        const rocblas_stride strideA,
                                        U B,
-                                       const rocblas_int shiftB,
+                                       const rocblas_stride shiftB,
                                        const rocblas_int ldb,
                                        const rocblas_stride strideB,
                                        rocblas_int* info,

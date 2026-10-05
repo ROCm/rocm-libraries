@@ -43,7 +43,7 @@ template <typename T, typename U>
 ROCSOLVER_KERNEL void copymatA1(const rocblas_int ldw,
                                 const rocblas_int order,
                                 U A,
-                                const rocblas_int shiftA,
+                                const rocblas_stride shiftA,
                                 const rocblas_int lda,
                                 const rocblas_stride strideA,
                                 T* tmptr)
@@ -60,7 +60,7 @@ ROCSOLVER_KERNEL void copymatA1(const rocblas_int ldw,
         T const* __restrict const Ap = load_ptr_batch<T>(A, b, shiftA, strideA);
         T* __restrict const Wp = tmptr + b * strideW;
 
-        Wp[i + j * ldw] = Ap[i + j * lda];
+        Wp[idx2D(i, j, ldw)] = Ap[idx2D(i, j, lda)];
     }
 }
 
@@ -68,7 +68,7 @@ template <typename T, typename U>
 ROCSOLVER_KERNEL void addmatA1(const rocblas_int ldw,
                                const rocblas_int order,
                                U A,
-                               const rocblas_int shiftA,
+                               const rocblas_stride shiftA,
                                const rocblas_int lda,
                                const rocblas_stride strideA,
                                T* tmptr)
@@ -85,7 +85,7 @@ ROCSOLVER_KERNEL void addmatA1(const rocblas_int ldw,
         T* __restrict const Ap = load_ptr_batch<T>(A, b, shiftA, strideA);
         T const* __restrict const Wp = tmptr + b * strideW;
 
-        Ap[i + j * lda] -= Wp[i + j * ldw];
+        Ap[idx2D(i, j, lda)] -= Wp[idx2D(i, j, ldw)];
     }
 }
 
@@ -181,15 +181,15 @@ rocblas_status rocsolver_larfb_template(rocblas_handle handle,
                                         const rocblas_int n,
                                         const rocblas_int k,
                                         U V,
-                                        const rocblas_int shiftV,
+                                        const rocblas_stride shiftV,
                                         const rocblas_int ldv,
                                         const rocblas_stride strideV,
                                         T* F,
-                                        const rocblas_int shiftF,
+                                        const rocblas_stride shiftF,
                                         const rocblas_int ldf,
                                         const rocblas_stride strideF,
                                         U A,
-                                        const rocblas_int shiftA,
+                                        const rocblas_stride shiftA,
                                         const rocblas_int lda,
                                         const rocblas_stride strideA,
                                         const rocblas_int batch_count,
@@ -227,7 +227,7 @@ rocblas_status rocsolver_larfb_template(rocblas_handle handle,
     rocblas_operation transp;
     rocblas_fill uploV, uploT;
     rocblas_int order, ldw;
-    rocblas_int shift1, shift2;
+    rocblas_stride shift1, shift2;
     size_t offsetA1, offsetA2;
     size_t offsetV1, offsetV2;
 
@@ -448,15 +448,15 @@ rocblas_status rocsolver_larfb_inverse_template(rocblas_handle handle,
                                                 const rocblas_int n,
                                                 const rocblas_int k,
                                                 U V,
-                                                const rocblas_int shiftV,
+                                                const rocblas_stride shiftV,
                                                 const rocblas_int ldv,
                                                 const rocblas_stride strideV,
                                                 T* F,
-                                                const rocblas_int shiftF,
+                                                const rocblas_stride shiftF,
                                                 const rocblas_int ldf,
                                                 const rocblas_stride strideF,
                                                 U A,
-                                                const rocblas_int shiftA,
+                                                const rocblas_stride shiftA,
                                                 const rocblas_int lda,
                                                 const rocblas_stride strideA,
                                                 const rocblas_int batch_count,
@@ -500,7 +500,7 @@ rocblas_status rocsolver_larfb_inverse_template(rocblas_handle handle,
     rocblas_operation transp;
     rocblas_fill uploV, uploT;
     rocblas_int order, ldw;
-    rocblas_int shift1, shift2;
+    rocblas_stride shift1, shift2;
     size_t offsetA1, offsetA2;
     size_t offsetV1, offsetV2;
 

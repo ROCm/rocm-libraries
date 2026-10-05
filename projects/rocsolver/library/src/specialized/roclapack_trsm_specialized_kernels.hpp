@@ -228,8 +228,8 @@ ROCSOLVER_KERNEL void unit_forward_substitution_kernel(const I nx,
 
     if(y < ny)
     {
-        I ida = x * lda1;
-        I idb = x * ldb1 + y * ldb2;
+        const int64_t ida = int64_t(x) * lda1;
+        const int64_t idb = idx2D(x, y, ldb1, ldb2);
 
         // read data
         c = B[idb];
@@ -242,7 +242,7 @@ ROCSOLVER_KERNEL void unit_forward_substitution_kernel(const I nx,
                 b[ty] = c;
             __syncthreads();
 
-            c -= (x > k) ? A[ida + k * lda2] * b[ty] : 0;
+            c -= (x > k) ? A[idx2D(ida, k, lda2)] * b[ty] : 0;
         }
 
         // move results back to global
@@ -280,8 +280,8 @@ ROCSOLVER_KERNEL void conj_unit_forward_substitution_kernel(const I nx,
 
     if(y < ny)
     {
-        I ida = x * lda1;
-        I idb = x * ldb1 + y * ldb2;
+        const int64_t ida = int64_t(x) * lda1;
+        const int64_t idb = idx2D(x, y, ldb1, ldb2);
 
         // read data
         c = B[idb];
@@ -294,7 +294,7 @@ ROCSOLVER_KERNEL void conj_unit_forward_substitution_kernel(const I nx,
                 b[ty] = c;
             __syncthreads();
 
-            c -= (x > k) ? conj(A[ida + k * lda2]) * b[ty] : 0;
+            c -= (x > k) ? conj(A[idx2D(ida, k, lda2)]) * b[ty] : 0;
         }
 
         // move results back to global
@@ -332,8 +332,8 @@ ROCSOLVER_KERNEL void nonunit_forward_substitution_kernel(const I nx,
 
     if(y < ny)
     {
-        I ida = x * lda1;
-        I idb = x * ldb1 + y * ldb2;
+        const int64_t ida = int64_t(x) * lda1;
+        const int64_t idb = idx2D(x, y, ldb1, ldb2);
 
         // read data
         c = B[idb];
@@ -349,7 +349,7 @@ ROCSOLVER_KERNEL void nonunit_forward_substitution_kernel(const I nx,
             }
             __syncthreads();
 
-            c -= (x > k) ? A[ida + k * lda2] * b[ty] : 0;
+            c -= (x > k) ? A[idx2D(ida, k, lda2)] * b[ty] : 0;
         }
         if(x == nx - 1)
             c = c / A[x * (lda1 + lda2)];
@@ -389,8 +389,8 @@ ROCSOLVER_KERNEL void conj_nonunit_forward_substitution_kernel(const I nx,
 
     if(y < ny)
     {
-        I ida = x * lda1;
-        I idb = x * ldb1 + y * ldb2;
+        const int64_t ida = int64_t(x) * lda1;
+        const int64_t idb = idx2D(x, y, ldb1, ldb2);
 
         // read data
         c = B[idb];
@@ -406,7 +406,7 @@ ROCSOLVER_KERNEL void conj_nonunit_forward_substitution_kernel(const I nx,
             }
             __syncthreads();
 
-            c -= (x > k) ? conj(A[ida + k * lda2]) * b[ty] : 0;
+            c -= (x > k) ? conj(A[idx2D(ida, k, lda2)]) * b[ty] : 0;
         }
         if(x == nx - 1)
             c = c / conj(A[x * (lda1 + lda2)]);
@@ -469,8 +469,8 @@ ROCSOLVER_KERNEL void unit_backward_substitution_kernel(const I nx,
 
     if(y < ny)
     {
-        I ida = x * lda1;
-        I idb = x * ldb1 + y * ldb2;
+        const int64_t ida = int64_t(x) * lda1;
+        const int64_t idb = idx2D(x, y, ldb1, ldb2);
 
         // read data
         c = B[idb];
@@ -483,7 +483,7 @@ ROCSOLVER_KERNEL void unit_backward_substitution_kernel(const I nx,
                 b[ty] = c;
             __syncthreads();
 
-            c -= (x < k) ? A[ida + k * lda2] * b[ty] : 0;
+            c -= (x < k) ? A[idx2D(ida, k, lda2)] * b[ty] : 0;
         }
 
         // move results back to global
@@ -521,8 +521,8 @@ ROCSOLVER_KERNEL void conj_unit_backward_substitution_kernel(const I nx,
 
     if(y < ny)
     {
-        I ida = x * lda1;
-        I idb = x * ldb1 + y * ldb2;
+        const int64_t ida = int64_t(x) * lda1;
+        const int64_t idb = idx2D(x, y, ldb1, ldb2);
 
         // read data
         c = B[idb];
@@ -535,7 +535,7 @@ ROCSOLVER_KERNEL void conj_unit_backward_substitution_kernel(const I nx,
                 b[ty] = c;
             __syncthreads();
 
-            c -= (x < k) ? conj(A[ida + k * lda2]) * b[ty] : 0;
+            c -= (x < k) ? conj(A[idx2D(ida, k, lda2)]) * b[ty] : 0;
         }
 
         // move results back to global
@@ -573,8 +573,8 @@ ROCSOLVER_KERNEL void nonunit_backward_substitution_kernel(const I nx,
 
     if(y < ny)
     {
-        I ida = x * lda1;
-        I idb = x * ldb1 + y * ldb2;
+        const int64_t ida = int64_t(x) * lda1;
+        const int64_t idb = idx2D(x, y, ldb1, ldb2);
 
         // read data
         c = B[idb];
@@ -590,7 +590,7 @@ ROCSOLVER_KERNEL void nonunit_backward_substitution_kernel(const I nx,
             }
             __syncthreads();
 
-            c -= (x < k) ? A[ida + k * lda2] * b[ty] : 0;
+            c -= (x < k) ? A[idx2D(ida, k, lda2)] * b[ty] : 0;
         }
         if(x == 0)
             c = c / A[x * (lda1 + lda2)];
@@ -630,8 +630,8 @@ ROCSOLVER_KERNEL void conj_nonunit_backward_substitution_kernel(const I nx,
 
     if(y < ny)
     {
-        I ida = x * lda1;
-        I idb = x * ldb1 + y * ldb2;
+        const int64_t ida = int64_t(x) * lda1;
+        const int64_t idb = idx2D(x, y, ldb1, ldb2);
 
         // read data
         c = B[idb];
@@ -647,7 +647,7 @@ ROCSOLVER_KERNEL void conj_nonunit_backward_substitution_kernel(const I nx,
             }
             __syncthreads();
 
-            c -= (x < k) ? conj(A[ida + k * lda2]) * b[ty] : 0;
+            c -= (x < k) ? conj(A[idx2D(ida, k, lda2)]) * b[ty] : 0;
         }
         if(x == 0)
             c = c / conj(A[x * (lda1 + lda2)]);

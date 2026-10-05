@@ -149,7 +149,7 @@ void testing_hbrand(Arguments& argus)
     {
         // --- diagonal entry: must be real and in (-1, 1) ---
         {
-            T val = Aband[idiag + j * ldab];
+            T val = Aband[idiag + rocblas_stride(j) * ldab];
             S re = std::real(val);
             S im = std::imag(val);
 
@@ -184,7 +184,7 @@ void testing_hbrand(Arguments& argus)
             // Lower band is the source; verify it as randomly filled.
             for(rocblas_int k = 1; k <= nsub; ++k)
             {
-                T val = Aband[idiag + k + j * ldab];
+                T val = Aband[idiag + k + rocblas_stride(j) * ldab];
                 S re = std::real(val);
                 S im = std::imag(val);
                 expect_in_range(re, im, "lower band");
@@ -193,8 +193,8 @@ void testing_hbrand(Arguments& argus)
             // Upper band (k=1..min(ku-1, nsup)) is a conjugate copy of lower.
             for(rocblas_int k = 1; k < ku && k <= nsup; ++k)
             {
-                T lower = Aband[idiag + k + j * ldab];
-                T upper = Aband[idiag - k + (j + k) * ldab];
+                T lower = Aband[idiag + k + rocblas_stride(j) * ldab];
+                T upper = Aband[idiag - k + rocblas_stride(j + k) * ldab];
                 EXPECT_EQ(upper, sconj(lower))
                     << "upper not conj of lower at subdiag k=" << k << " col j=" << j;
             }
@@ -204,7 +204,7 @@ void testing_hbrand(Arguments& argus)
             // Upper band is the source; verify it as randomly filled.
             for(rocblas_int k = 1; k <= nsup; ++k)
             {
-                T val = Aband[idiag - k + (j + k) * ldab];
+                T val = Aband[idiag - k + rocblas_stride(j + k) * ldab];
                 S re = std::real(val);
                 S im = std::imag(val);
                 expect_in_range(re, im, "upper band");
@@ -213,8 +213,8 @@ void testing_hbrand(Arguments& argus)
             // Lower band (k=1..min(kl-1, nsub)) is a conjugate copy of upper.
             for(rocblas_int k = 1; k < kl && k <= nsub; ++k)
             {
-                T upper = Aband[idiag - k + (j + k) * ldab];
-                T lower = Aband[idiag + k + j * ldab];
+                T upper = Aband[idiag - k + rocblas_stride(j + k) * ldab];
+                T lower = Aband[idiag + k + rocblas_stride(j) * ldab];
                 EXPECT_EQ(lower, sconj(upper))
                     << "lower not conj of upper at subdiag k=" << k << " col j=" << j;
             }
@@ -226,7 +226,7 @@ void testing_hbrand(Arguments& argus)
         {
             for(rocblas_int row = 0; row < ku - j; ++row)
             {
-                EXPECT_TRUE(std::isnan(std::real(Aband[row + j * ldab])))
+                EXPECT_TRUE(std::isnan(std::real(Aband[row + rocblas_stride(j) * ldab])))
                     << "upper out-of-band not nan at row=" << row << " col j=" << j;
             }
         }
@@ -238,7 +238,7 @@ void testing_hbrand(Arguments& argus)
             rocblas_int j_from_end = n - 1 - j; // 0-based distance from last col
             for(rocblas_int k = j_from_end; k < kl; ++k)
             {
-                EXPECT_TRUE(std::isnan(std::real(Aband[idiag + 1 + k + j * ldab])))
+                EXPECT_TRUE(std::isnan(std::real(Aband[idiag + 1 + k + rocblas_stride(j) * ldab])))
                     << "lower out-of-band not nan at subdiag k+1=" << k + 1 << " col j=" << j;
             }
         }
@@ -249,7 +249,7 @@ void testing_hbrand(Arguments& argus)
     {
         for(rocblas_int i = 0; i < ldab; ++i)
         {
-            EXPECT_EQ(Aband[i + j * ldab], flag)
+            EXPECT_EQ(Aband[i + rocblas_stride(j) * ldab], flag)
                 << "padding col modified at (" << i << "," << j << ")";
         }
     }

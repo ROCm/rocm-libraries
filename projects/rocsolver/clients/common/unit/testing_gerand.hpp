@@ -135,7 +135,7 @@ void testing_gerand(Arguments& argus)
     {
         for(rocblas_int i = 0; i < m; ++i)
         {
-            T val = A[i + j * lda];
+            T val = A[i + rocblas_stride(j) * lda];
             S re = std::real(val);
             S im = std::imag(val);
 
@@ -145,7 +145,8 @@ void testing_gerand(Arguments& argus)
         // padding rows (i > m) must be untouched
         for(rocblas_int i = m; i < lda; ++i)
         {
-            EXPECT_EQ(A[i + j * lda], flag) << "padding row modified at (" << i << "," << j << ")";
+            EXPECT_EQ(A[i + rocblas_stride(j) * lda], flag)
+                << "padding row modified at (" << i << "," << j << ")";
         }
     }
 
@@ -154,7 +155,8 @@ void testing_gerand(Arguments& argus)
     {
         for(rocblas_int i = 0; i < lda; ++i)
         {
-            EXPECT_EQ(A[i + j * lda], flag) << "padding col modified at (" << i << "," << j << ")";
+            EXPECT_EQ(A[i + rocblas_stride(j) * lda], flag)
+                << "padding col modified at (" << i << "," << j << ")";
         }
     }
 

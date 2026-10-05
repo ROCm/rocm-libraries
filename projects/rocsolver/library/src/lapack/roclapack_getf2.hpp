@@ -93,7 +93,7 @@ ROCSOLVER_KERNEL void getf2_check_singularity(const I n,
         // swap rows
         I exch = pivot_idx - 1;
         if(exch != j)
-            swap(A[j * inca + tid * lda], A[exch * inca + tid * lda]);
+            swap(A[idx2D(j, tid, inca, lda)], A[idx2D(exch, tid, inca, lda)]);
 
         if(tid == j)
         {
@@ -110,14 +110,14 @@ ROCSOLVER_KERNEL void getf2_check_singularity(const I n,
             }
 
             // update info (check singularity)
-            if(A[j * inca + j * lda] == 0)
+            if(A[idx2D(j, j, inca, lda)] == 0)
             {
                 pivot_val[id] = 1;
                 if(info[id] == 0)
                     info[id] = static_cast<INFO>(j + 1 + offset); // use Fortran 1-based indexing
             }
             else
-                pivot_val[id] = S(1) / A[j * inca + j * lda];
+                pivot_val[id] = S(1) / A[idx2D(j, j, inca, lda)];
         }
     }
 }
@@ -142,14 +142,14 @@ ROCSOLVER_KERNEL void getf2_npvt_check_singularity(const I j,
     T* A = load_ptr_batch<T>(AA, id, shiftA, strideA);
 
     // update info (check singularity)
-    if(A[j * inca + j * lda] == 0)
+    if(A[idx2D(j, j, inca, lda)] == 0)
     {
         pivot_val[id] = 1;
         if(info[id] == 0)
             info[id] = static_cast<INFO>(j + 1 + offset); // use Fortran 1-based indexing
     }
     else
-        pivot_val[id] = S(1) / A[j * inca + j * lda];
+        pivot_val[id] = S(1) / A[idx2D(j, j, inca, lda)];
 }
 
 /** This kernel executes an optimized reduction to find the index of the

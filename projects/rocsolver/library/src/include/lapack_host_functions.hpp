@@ -358,7 +358,7 @@ static void call_scal(I& n, S& a, T& x_in, I& incx)
     T* const x = &x_in;
     for(I i = 0; i < n; i++)
     {
-        auto const ip = i * incx;
+        auto const ip = int64_t(i) * incx;
         x[ip] *= a;
     }
 }
@@ -371,8 +371,8 @@ static void call_rot(I& n, T& x_in, I& incx, T& y_in, I& incy, S& c, S& s)
 
     for(I i = 0; i < n; i++)
     {
-        auto const ix = i * incx;
-        auto const iy = i * incy;
+        auto const ix = int64_t(i) * incx;
+        auto const iy = int64_t(i) * incy;
 
         auto const temp = c * x[ix] + s * y[iy];
         y[iy] = c * y[iy] - s * x[ix];

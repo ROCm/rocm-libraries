@@ -155,9 +155,9 @@ void ormtr_unmtr_initData(const rocblas_handle handle,
             for(int j = 0; j < nq; ++j)
             {
                 if(i == j)
-                    hA[0][i + j * lda] += 400;
+                    hA[0][i + rocblas_stride(j) * lda] += 400;
                 else
-                    hA[0][i + j * lda] -= 4;
+                    hA[0][i + rocblas_stride(j) * lda] -= 4;
             }
         }
 

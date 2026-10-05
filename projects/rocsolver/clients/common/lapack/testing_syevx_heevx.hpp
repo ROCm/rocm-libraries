@@ -224,20 +224,24 @@ void syevx_heevx_initData(const rocblas_handle handle,
                 for(rocblas_int j = i; j < n; j++)
                 {
                     if(i == j)
-                        hA[b][i + j * lda] = std::real(hA[b][i + j * lda]) + 10;
+                        hA[b][i + rocblas_stride(j) * lda]
+                            = std::real(hA[b][i + rocblas_stride(j) * lda]) + 10;
                     else
                     {
                         if(j == i + 1)
                         {
-                            hA[b][i + j * lda] = (hA[b][i + j * lda] - 5) / 10;
-                            hA[b][j + i * lda] = sconj(hA[b][i + j * lda]);
+                            hA[b][i + rocblas_stride(j) * lda]
+                                = (hA[b][i + rocblas_stride(j) * lda] - 5) / 10;
+                            hA[b][j + rocblas_stride(i) * lda]
+                                = sconj(hA[b][i + rocblas_stride(j) * lda]);
                         }
                         else
-                            hA[b][j + i * lda] = hA[b][i + j * lda] = 0;
+                            hA[b][j + rocblas_stride(i) * lda] = hA[b][i + rocblas_stride(j) * lda]
+                                = 0;
                     }
                 }
                 if(i == n / 4 || i == n / 2 || i == n - 1 || i == n / 7 || i == n / 5 || i == n / 3)
-                    hA[b][i + i * lda] *= -1;
+                    hA[b][i + rocblas_stride(i) * lda] *= -1;
             }
 #else
         // New matrix initialization
@@ -266,7 +270,8 @@ void syevx_heevx_initData(const rocblas_handle handle,
                 for(rocblas_int i = 0; i < n; i++)
                 {
                     for(rocblas_int j = 0; j < n; j++)
-                        A[b * lda * n + i + j * lda] = hA[b][i + j * lda];
+                        A[rocblas_stride(b) * lda * n + i + rocblas_stride(j) * lda]
+                            = hA[b][i + rocblas_stride(j) * lda];
                 }
             }
         }
@@ -330,7 +335,7 @@ void syevx_heevx_getError(const rocblas_handle handle,
     std::vector<T> work(lwork);
     std::vector<S> rwork(lrwork);
     std::vector<int> iwork(liwork);
-    std::vector<T> A(lda * n * bc);
+    std::vector<T> A(rocblas_stride(lda) * n * bc);
 
     // input data initialization
     syevx_heevx_initData<true, true, T>(handle, evect, n, dA, lda, bc, hA, A);
@@ -441,7 +446,7 @@ void syevx_heevx_getError(const rocblas_handle handle,
             *max_err = err > *max_err ? err : *max_err;
 
             // Create a thin wrapper of input matrix A (bc * lda * n), of size lda * n starting at b * lda * n
-            auto AWrap_b = HMat::Wrap(A.data() + b * lda * n, lda, n);
+            auto AWrap_b = HMat::Wrap(A.data() + rocblas_stride(b) * lda * n, lda, n);
 
             // Since `lda`, `ldz` and `n` can differ, we must extract submatrices of the correct size from
             // `A`, `hZRes` and `hWRes`.
@@ -585,9 +590,9 @@ void testing_syevx_heevx(Arguments& argus)
     rocblas_int n = argus.get<rocblas_int>("n");
     rocblas_int lda = argus.get<rocblas_int>("lda", n);
     rocblas_int ldz = argus.get<rocblas_int>("ldz", n);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
     rocblas_stride stW = argus.get<rocblas_stride>("strideW", n);
-    rocblas_stride stZ = argus.get<rocblas_stride>("strideZ", ldz * n);
+    rocblas_stride stZ = argus.get<rocblas_stride>("strideZ", rocblas_stride(ldz) * n);
     rocblas_stride stF = argus.get<rocblas_stride>("strideF", n);
 
     S vl = S(argus.get<double>("vl", 0));

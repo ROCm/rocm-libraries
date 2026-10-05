@@ -149,7 +149,7 @@ void laswp_getError(const rocblas_handle handle,
     {
         for(int j = 0; j < n; j++)
         {
-            diff = std::abs(hAr[0][i + j * lda] - hA[0][i + j * lda]);
+            diff = std::abs(hAr[0][i + rocblas_stride(j) * lda] - hA[0][i + rocblas_stride(j) * lda]);
             *max_err = diff > *max_err ? diff : *max_err;
         }
     }

@@ -117,9 +117,9 @@ void lasyf_initData(const rocblas_handle handle,
             for(rocblas_int j = 0; j < n; j++)
             {
                 if(i == j)
-                    hA[0][i + j * lda] += 400;
+                    hA[0][i + rocblas_stride(j) * lda] += 400;
                 else
-                    hA[0][i + j * lda] -= 4;
+                    hA[0][i + rocblas_stride(j) * lda] -= 4;
             }
         }
 
@@ -129,9 +129,9 @@ void lasyf_initData(const rocblas_handle handle,
         {
             for(rocblas_int j = 0; j < n; j++)
             {
-                tmp = hA[0][i + j * lda];
-                hA[0][i + j * lda] = hA[0][n - 1 - i + j * lda];
-                hA[0][n - 1 - i + j * lda] = tmp;
+                tmp = hA[0][i + rocblas_stride(j) * lda];
+                hA[0][i + rocblas_stride(j) * lda] = hA[0][n - 1 - i + rocblas_stride(j) * lda];
+                hA[0][n - 1 - i + rocblas_stride(j) * lda] = tmp;
             }
         }
 
@@ -145,22 +145,22 @@ void lasyf_initData(const rocblas_handle handle,
             j -= (j / n) * n;
             for(rocblas_int i = 0; i < n; i++)
             {
-                hA[0][i + j * lda] = 0;
-                hA[0][j + i * lda] = 0;
+                hA[0][i + rocblas_stride(j) * lda] = 0;
+                hA[0][j + rocblas_stride(i) * lda] = 0;
             }
             j = n / 2;
             j -= (j / n) * n;
             for(rocblas_int i = 0; i < n; i++)
             {
-                hA[0][i + j * lda] = 0;
-                hA[0][j + i * lda] = 0;
+                hA[0][i + rocblas_stride(j) * lda] = 0;
+                hA[0][j + rocblas_stride(i) * lda] = 0;
             }
             j = n - 1;
             j -= (j / n) * n;
             for(rocblas_int i = 0; i < n; i++)
             {
-                hA[0][i + j * lda] = 0;
-                hA[0][j + i * lda] = 0;
+                hA[0][i + rocblas_stride(j) * lda] = 0;
+                hA[0][j + rocblas_stride(i) * lda] = 0;
             }
         }
     }
@@ -194,7 +194,7 @@ void lasyf_getError(const rocblas_handle handle,
                     const bool singular)
 {
     int ldw = n;
-    int lwork = ldw * nb;
+    int lwork = rocblas_stride(ldw) * nb;
     std::vector<T> work(lwork);
 
     // input data initialization
@@ -280,7 +280,7 @@ void lasyf_getPerfData(const rocblas_handle handle,
                        const bool singular)
 {
     int ldw = n;
-    int lwork = ldw * nb;
+    int lwork = rocblas_stride(ldw) * nb;
     std::vector<T> work(lwork);
 
     if(!perf)
@@ -357,7 +357,7 @@ void testing_lasyf(Arguments& argus)
     }
 
     // determine sizes
-    size_t size_A = lda * n;
+    size_t size_A = rocblas_stride(lda) * n;
     size_t size_Ipiv = n;
     double max_error = 0, gpu_time_used = 0, cpu_time_used = 0;
 
