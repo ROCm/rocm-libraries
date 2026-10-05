@@ -43,6 +43,12 @@ Use ``-DROCFFT_CALLBACKS_ENABLED=off`` with CMake to prevent these calls on olde
 
    If rocFFT is built with this configuration, callbacks won't work correctly.
 
+The following CMake options control the Fortran bindings:
+
+*  ``-DBUILD_FORTRAN_BINDINGS``: Builds the Fortran bindings. Defaults to ``ON`` on Linux, ``OFF`` on Windows.
+*  ``-DBUILD_FORTRAN_CLIENTS``: Builds the Fortran binding tests when the clients are built. Defaults to ``ON``.
+*  ``-DFORTRAN_ARRAY_INTERFACES``: Selects the array interfaces. ``assumed-shape`` by default; ``none`` or ``assumed-rank``.
+
 rocFFT clients
 =============================
 
