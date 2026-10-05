@@ -135,6 +135,14 @@ if( NOT CMAKE_CXX_COMPILER MATCHES ".*nvc\\+\\+" )
   endif()
 endif()
 
+
+# tolerate comma as a value separator since the compiler does the
+# same
+string(REPLACE "," ";" GPU_TARGETS "${GPU_TARGETS}")
+# Filter out target flags as hipFFT builds generic code for each target.
+list(TRANSFORM GPU_TARGETS REPLACE ":[^;]+" "")
+list(REMOVE_DUPLICATES GPU_TARGETS)
+
 # Dependencies
 include(cmake/dependencies.cmake)
 
