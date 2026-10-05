@@ -48,16 +48,20 @@ namespace {
 constexpr Rpp32u kDstW = 24, kDstH = 18;
 
 // mean is in [0,255] intensity units (see resize_mirror_normalize_ref.hpp); {60, 80, 100} is what
-// the legacy harness passes. Identity/MirrorOnly use mean 0 / stdDev 1, which is the identity
-// normalize under ANY intensity-space reading, so those sets validate the resize + mirror + store
-// pipeline independently of that assumption. They pair it with nearest-neighbour, which copies a
-// texel verbatim, making the partial-ROI cases an exact bit-for-bit control.
+// the legacy harness passes. mean and stdDev are both per channel. Identity/MirrorOnly use mean 0 /
+// stdDev 1, which is the identity normalize under ANY intensity-space reading, so those sets
+// validate the resize + mirror + store pipeline independently of that assumption. They pair it with
+// nearest-neighbour, which copies a texel verbatim, making the partial-ROI cases an exact
+// bit-for-bit control.
 struct RmnParams {
     double mean[3];
-    double stdDev;
+    double stdDev[3];
     Rpp32u mirror;
     RpptInterpolationType interp;
     std::string tag;
+    // Destination width. Defaults to kDstW; a width that is not a multiple of 8 also runs the
+    // kernels' scalar tail.
+    Rpp32u dstW = kDstW;
     std::string name() const {
         return tag;
     }
@@ -67,7 +71,8 @@ double rmn_tolerance(DType dt, const TestConfig& cfg, const RmnParams& op) {
     // Scale 1 (partial ROI -> the same destination size) puts every source coordinate on an
     // integer, so with the identity normalize the whole pipeline is exact for every dtype.
     const bool exact = op.mean[0] == 0.0 && op.mean[1] == 0.0 && op.mean[2] == 0.0 &&
-                       op.stdDev == 1.0 && cfg.roi == Roi::Partial;
+                       op.stdDev[0] == 1.0 && op.stdDev[1] == 1.0 && op.stdDev[2] == 1.0 &&
+                       cfg.roi == Roi::Partial;
     if (exact) return 0.0;
     // Otherwise the only legitimate error is fp rounding of the bilinear blend and the divide.
     return kRoundingTolerance(dt);
@@ -78,7 +83,7 @@ void run_resize_mirror_normalize(const TestConfig& cfg, const RmnParams& op) {
     const Rpp32u c = static_cast<Rpp32u>(channels_of(cfg.layoutIn));
     const Rpp32u N = cfg.size.n;
     const TensorShape srcShape{N, c, cfg.size.h, cfg.size.w};
-    const TensorShape dstShape{N, static_cast<Rpp32u>(channels_of(cfg.layoutOut)), kDstH, kDstW};
+    const TensorShape dstShape{N, static_cast<Rpp32u>(channels_of(cfg.layoutOut)), kDstH, op.dstW};
     RpptDesc srcDesc = make_descriptor(srcShape, cfg.dtype, cfg.layoutIn);
     RpptDesc dstDesc = make_descriptor(dstShape, cfg.dtype, cfg.layoutOut);
     const std::size_t srcCount = element_count(srcDesc), dstCount = element_count(dstDesc);
@@ -94,15 +99,15 @@ void run_resize_mirror_normalize(const TestConfig& cfg, const RmnParams& op) {
     PinnedArray<Rpp32f> stdDev(cfg.backend, static_cast<std::size_t>(N) * c);
     PinnedArray<Rpp32u> mirror(cfg.backend, N);
     for (Rpp32u n = 0; n < N; ++n) {
-        dstSizes[n] = RpptImagePatch{kDstW, kDstH};
+        dstSizes[n] = RpptImagePatch{op.dstW, kDstH};
         mirror[n] = op.mirror;
         for (Rpp32u ch = 0; ch < c; ++ch) {
             mean[n * c + ch] = static_cast<Rpp32f>(op.mean[ch]);
-            stdDev[n * c + ch] = static_cast<Rpp32f>(op.stdDev);
+            stdDev[n * c + ch] = static_cast<Rpp32f>(op.stdDev[ch]);
         }
     }
 
-    // (1) Host golden model. The op writes the kDstW x kDstH region at the destination origin, so
+    // (1) Host golden model. The op writes the dstW x kDstH region at the destination origin, so
     // golden and the device buffer start from the same distinct pattern and only that region is
     // compared.
     std::vector<T> input(srcCount), dstInit(dstCount), golden(dstCount), actual(dstCount);
@@ -128,7 +133,7 @@ void run_resize_mirror_normalize(const TestConfig& cfg, const RmnParams& op) {
     dst.read(actual.data(), dstBytes);
 
     // (3) Compare the whole destination image (packed at the origin). A full-frame ROI over the
-    // destination descriptor walks exactly the written kDstW x kDstH region. The ROI handed to the
+    // destination descriptor walks exactly the written dstW x kDstH region. The ROI handed to the
     // op is not reused here: HIP rewrites that tensor from XYWH to LTRB in place.
     const std::vector<RpptROI> dstRoiVec = make_roi(dstDesc, Roi::Full);
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, dstRoiVec.data(), XYWH,
@@ -148,22 +153,25 @@ TEST_P(ResizeMirrorNormalizeTest, Correctness) {
     });
 }
 
-// Four sets, each isolating one more stage: the plain resize, the mirror, the mean subtraction, and
-// finally the stdDev divide on top of the mirror. MirrorOnly is the exact control -- under the
-// partial ROI the destination size equals the ROI, so the resize is scale 1, every source
-// coordinate is an integer and bilinear is exact.
-INSTANTIATE_TEST_SUITE_P(Image_Geometric, ResizeMirrorNormalizeTest,
-                         ::testing::ValuesIn(with_params<RmnParams>(
-                             make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                                          {{Layout::PKD3, Layout::PKD3},
-                                           {Layout::PLN3, Layout::PLN3},
-                                           {Layout::PLN1, Layout::PLN1},
-                                           {Layout::PKD3, Layout::PLN3},
-                                           {Layout::PLN3, Layout::PKD3}},
-                                          {Roi::Full, Roi::Partial},
-                                          {presets::kDefaultSize, presets::kTailWidthSize}),
-                             {RmnParams{{0.0, 0.0, 0.0}, 1.0, 0, NEAREST_NEIGHBOR, "IdentityNN"},
-                              RmnParams{{0.0, 0.0, 0.0}, 1.0, 1, BILINEAR, "MirrorOnly"},
-                              RmnParams{{60.0, 80.0, 100.0}, 1.0, 0, BILINEAR, "Mean"},
-                              RmnParams{{60.0, 80.0, 100.0}, 2.0, 1, BILINEAR, "MeanStdMirror"}})),
-                         op_config_name<RmnParams>);
+// The first four sets each isolate one more stage: the plain resize, the mirror, the mean
+// subtraction, and finally the stdDev divide on top of the mirror. MirrorOnly is the exact control
+// -- under the partial ROI the destination size equals the ROI, so the resize is scale 1, every
+// source coordinate is an integer and bilinear is exact. MeanPerChannelStd gives each channel a
+// distinct stdDev, so a kernel that reads another channel's stdDev shows up as a diff; its width of
+// 27 leaves a 3-column scalar tail, where the HOST U8 PKD3 kernel's swap lives.
+INSTANTIATE_TEST_SUITE_P(
+    Image_Geometric, ResizeMirrorNormalizeTest,
+    ::testing::ValuesIn(with_params<RmnParams>(
+        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                     {{Layout::PKD3, Layout::PKD3},
+                      {Layout::PLN3, Layout::PLN3},
+                      {Layout::PLN1, Layout::PLN1},
+                      {Layout::PKD3, Layout::PLN3},
+                      {Layout::PLN3, Layout::PKD3}},
+                     {Roi::Full, Roi::Partial}, {presets::kDefaultSize, presets::kTailWidthSize}),
+        {RmnParams{{0.0, 0.0, 0.0}, {1.0, 1.0, 1.0}, 0, NEAREST_NEIGHBOR, "IdentityNN"},
+         RmnParams{{0.0, 0.0, 0.0}, {1.0, 1.0, 1.0}, 1, BILINEAR, "MirrorOnly"},
+         RmnParams{{60.0, 80.0, 100.0}, {1.0, 1.0, 1.0}, 0, BILINEAR, "Mean"},
+         RmnParams{{60.0, 80.0, 100.0}, {2.0, 2.0, 2.0}, 1, BILINEAR, "MeanStdMirror"},
+         RmnParams{{60.0, 80.0, 100.0}, {1.0, 2.0, 4.0}, 0, BILINEAR, "MeanPerChannelStd", 27}})),
+    op_config_name<RmnParams>);
