@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -94,11 +94,13 @@ rocblas_status rocblas_internal_rot_launcher_64(rocblas_handle handle,
                     handle,
                     rocblas_int(n),
                     x_ptr,
-                    offset_x + n_base * incx_64,
+                    // The launcher shifts to the end of this chunk, so a negative
+                    // increment needs the offset of the chunk's last element.
+                    offset_x + (incx_64 < 0 ? -incx_64 * (n_64 - n - n_base) : n_base * incx_64),
                     incx_64,
                     stride_x,
                     y_ptr,
-                    offset_y + n_base * incy_64,
+                    offset_y + (incy_64 < 0 ? -incy_64 * (n_64 - n - n_base) : n_base * incy_64),
                     incy_64,
                     stride_y,
                     c_ptr,
@@ -126,11 +128,16 @@ rocblas_status rocblas_internal_rot_launcher_64(rocblas_handle handle,
             {
                 int32_t n = int32_t(std::min(n_64 - n_base, c_i64_grid_X_chunk));
 
-                int64_t shiftx = incx_64 < 0 ? -incx_64 * n_base : incx_64 * n_base;
-                int64_t shifty = incy_64 < 0 ? -incy_64 * n_base : incy_64 * n_base;
-
-                shiftx += offset_x;
-                shifty += offset_y;
+                // Same compensation as the branch above: the launcher shifts to
+                // the end of the chunk, so a negative increment needs the offset
+                // of the chunk's last element. This branch (an increment wider
+                // than 32 bits) needs a span above 2^59 elements to reach a second
+                // chunk, so it is not exercisable at allocatable sizes; it matches
+                // copy and swap so the two increment-width paths cannot drift.
+                int64_t shiftx
+                    = offset_x + (incx_64 < 0 ? -incx_64 * (n_64 - n - n_base) : n_base * incx_64);
+                int64_t shifty
+                    = offset_y + (incy_64 < 0 ? -incy_64 * (n_64 - n - n_base) : n_base * incy_64);
 
                 // new instantiation for 64bit incx/y
                 rocblas_status status

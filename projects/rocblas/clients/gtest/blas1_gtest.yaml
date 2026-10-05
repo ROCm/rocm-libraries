@@ -6,5 +6,6 @@ include: dot_gtest.yaml
 include: iamax_iamin_gtest.yaml
 include: nrm2_gtest.yaml
 include: rot_gtest.yaml
+include: rot_ilp64_chunk_gtest.yaml
 include: scal_gtest.yaml
 include: swap_gtest.yaml

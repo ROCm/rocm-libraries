@@ -70,6 +70,7 @@ set(yaml_test_files
     "${_CMAKE_CURRENT_SOURCE_DIR}/ostream_threadsafety_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/rocblas_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/rot_gtest.yaml"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/rot_ilp64_chunk_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/sbmv_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/scal_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/set_get_atomics_mode_gtest.yaml"

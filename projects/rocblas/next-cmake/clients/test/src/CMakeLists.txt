@@ -33,6 +33,7 @@ target_sources(
           "${_CMAKE_CURRENT_SOURCE_DIR}/../blas1/iamaxmin_gtest.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/../blas1/nrm2_gtest.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/../blas1/rot_gtest.cpp"
+          "${_CMAKE_CURRENT_SOURCE_DIR}/../blas1/rot_ilp64_chunk_gtest.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/../blas1/scal_gtest.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/../blas1/swap_gtest.cpp"
           # blas1_ex

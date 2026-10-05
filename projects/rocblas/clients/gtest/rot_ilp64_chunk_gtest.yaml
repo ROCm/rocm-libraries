@@ -1,0 +1,59 @@
+---
+include: rocblas_common.yaml
+
+# Covers rocblas_internal_rot_launcher_64 on the chunked X path with a negative
+# increment. Each row sets only the increment signs; the test fixes n at 2^31 and
+# the magnitude at 1, sizes the guard regions, and carries the full rationale (see
+# rot_ilp64_chunk_gtest.cpp, and rocblas_rot_kernels_64.cpp for the offset math).
+#
+# Footprint: 16 GiB for the all-positive control (no guard), 24 GiB for one
+# negative increment, 32 GiB for two. Rows skip rather than fail where the device
+# cannot supply the memory.
+#
+# Category is nightly by exception to the convention that a row at this scale is
+# stress (rot_ILP64, asum_ILP64, axpy_ILP64 all are). stress is wired to no lane:
+# no <run> in rtest.xml selects *stress*, ctest comprehensive and full are both
+# *quick*:*pre_checkin*:*nightly*, osdb and cqe are nightly, code coverage
+# excludes *stress* by name, and test_categories.yaml has its *stress* pattern
+# commented out. These rows are the only coverage of this path, so they go in a
+# lane that runs: no other row pairs a chunked n with a small negative increment.
+
+Tests:
+# Control: both increments positive, so the offsets reduce to n_base * inc. Guards
+# a change to the positive-increment path, which shares one conditional with the
+# negative one. Cheapest row (no guard region), so the last to skip on a small
+# device.
+- name: rot_ilp64_chunk_control_positive
+  category: nightly
+  arguments:
+    - { incx: 1, incy: 1 }
+  function:
+    - rot_ilp64_negative_inc_chunk: *single_precision
+  os_flags: [ LINUX ]
+
+- name: rot_ilp64_chunk_neg_incx
+  category: nightly
+  arguments:
+    - { incx: -1, incy: 1 }
+  function:
+    - rot_ilp64_negative_inc_chunk: *single_precision
+  os_flags: [ LINUX ]
+
+- name: rot_ilp64_chunk_neg_incy
+  category: nightly
+  arguments:
+    - { incx: 1, incy: -1 }
+  function:
+    - rot_ilp64_negative_inc_chunk: *single_precision
+  os_flags: [ LINUX ]
+
+# Largest footprint, so the first to skip on a smaller device. It is not the
+# only row for that reason.
+- name: rot_ilp64_chunk_neg_both
+  category: nightly
+  arguments:
+    - { incx: -1, incy: -1 }
+  function:
+    - rot_ilp64_negative_inc_chunk: *single_precision
+  os_flags: [ LINUX ]
+...
