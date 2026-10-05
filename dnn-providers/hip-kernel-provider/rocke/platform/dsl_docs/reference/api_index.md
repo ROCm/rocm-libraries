@@ -39,7 +39,8 @@ SoftwarePipeline
 
 # Manifests
 make_gemm_manifest, make_conv_manifest, make_attention_manifest
-attention_args_signature, conv_args_signature, gemm_args_signature
+attention_args_signature, gemm_args_signature
+# (conv signatures live next to the conv instances: kernels.common.conv_abi)
 write_artifact
 
 # Attention helpers
@@ -51,6 +52,8 @@ select_2d_config, select_3d_config, use_2d_kernel
 # Transforms (CK Tile coord-DAG)
 CoordVar, Indirect, PadDynamic, TensorDescriptor
 pass_through, pad, pad_dynamic, embed, merge, unmerge, indirect
+# (runtime-shape variants are imported from rocke.helpers.transforms:
+#  embed_dynamic, unmerge_magic_dynamic, DynamicTensorDescriptor)
 
 # Analysis / benchmark
 BenchmarkSummary, benchmark_manifest, summarize_runs

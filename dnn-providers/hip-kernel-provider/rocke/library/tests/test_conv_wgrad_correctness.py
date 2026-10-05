@@ -319,6 +319,7 @@ def _run_one(
     group_merge: int = 1,
     tile_m: "int | None" = None,
     tile_n: "int | None" = None,
+    unroll_k: bool = False,
 ) -> Tuple[bool, str]:
     """Build, compile, launch, and verify one wgrad kernel.
 
@@ -327,7 +328,8 @@ def _run_one(
     import torch
 
     from rocke import compile_kernel
-    from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_args import ConvArgs
+    from kernels.common.conv_abi import conv_args_signature
     from kernels.common.conv_implicit_gemm_wgrad import (
         build_implicit_gemm_conv_wgrad,
         is_valid_wgrad_spec,
@@ -347,10 +349,12 @@ def _run_one(
         warp_tile_mn=warp_tile_mn,
         tile_k=tile_k,
     )
-    if spec is not None and (group_merge > 1 or tile_m or tile_n):
+    if spec is not None and (group_merge > 1 or tile_m or tile_n or unroll_k):
         from dataclasses import replace as _dc_replace
 
         _over = {}
+        if unroll_k:
+            _over["unroll_k"] = True
         if tile_m:
             _over["tile_m"] = tile_m
         if tile_n:
@@ -368,7 +372,9 @@ def _run_one(
     try:
         kernel = build_implicit_gemm_conv_wgrad(spec, arch=arch)
     except ValueError as e:
-        return True, f"skip (build error): {e}"
+        # The validator admitted this spec, so a build error is a bug, not a
+        # configuration the arch lacks -- fail rather than skip.
+        return False, f"build error for a spec the validator admitted: {e}"
 
     try:
         artifact = compile_kernel(kernel, arch=arch)
@@ -397,7 +403,12 @@ def _run_one(
     rt.memcpy_h2d(X_dev, _u8(X_t), X_t.nbytes)
     rt.memset(dW_dev, 0, dW_t.nbytes)  # split-K atomic-add needs a zeroed dW
 
-    sig = conv_args_signature(dtype)
+    sig = conv_args_signature(
+        dtype,
+        direction="wgrad",
+        is_3d=spec.problem.is_3d,
+        two_stage=bool(getattr(spec, "two_stage", False)),
+    )
     try:
         launcher = KernelLauncher(
             hsaco=artifact.hsaco,
@@ -419,14 +430,21 @@ def _run_one(
     grid = (gx, gy, gz)
     block = (spec.block_size, 1, 1)
 
-    values = {
-        "A": dY_dev,
-        "B": X_dev,
-        "D": dW_dev,
-        "A_bytes": dY_t.nbytes,
-        "B_bytes": X_t.nbytes,
-        "D_bytes": dW_t.nbytes,
-    }
+    values = ConvArgs.from_problem(
+        spec.problem,
+        direction="wgrad",
+        tile_m=spec.tile_m,
+        tile_n=spec.tile_n,
+        tile_k=spec.tile_k,
+    ).to_launch_values(
+        int(dY_dev),
+        int(X_dev),
+        int(dW_dev),
+        dY_t.nbytes,
+        X_t.nbytes,
+        dW_t.nbytes,
+        split_k=max(1, spec.split_k),
+    )
     launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
 
     dW_cpu = torch.empty_like(dW_t)
@@ -1245,6 +1263,7 @@ def _run_two_stage_ts(spec, arch, rt, dY_t, X_t):
     import torch
     from kernels.common.conv_implicit_gemm_wgrad_two_stage import (
         build_implicit_gemm_conv_wgrad_two_stage,
+        wgrad_stage1_launch_values,
     )
     from kernels.common.conv_wgrad_workspace_reduce import (
         WgradReduceSpec,
@@ -1293,16 +1312,18 @@ def _run_two_stage_ts(spec, arch, rt, dY_t, X_t):
         )
         s1_block = (spec.block_size, 1, 1)
 
-        s1_vals = {
-            "A": dY_dev,
-            "B": X_dev,
-            "D": dW_dev,
-            "A_bytes": dY_t.nbytes,
-            "B_bytes": X_t.nbytes,
-            "D_bytes": dW_t.nbytes,
-            "ws_ptr": ws_dev,
-            "ws_bytes": ws_nbytes,
-        }
+        # Stage 1 is an AOT wgrad kernel: the shape travels as kernargs.
+        s1_vals = wgrad_stage1_launch_values(
+            spec,
+            dY_ptr=int(dY_dev),
+            X_ptr=int(X_dev),
+            dW_ptr=int(dW_dev),
+            dY_bytes=dY_t.nbytes,
+            X_bytes=X_t.nbytes,
+            dW_bytes=dW_t.nbytes,
+            ws_ptr=int(ws_dev),
+            ws_bytes=ws_nbytes,
+        )
         s2_vals = {
             "ws_ptr": ws_dev,
             "dw_ptr": dW_dev,
@@ -1926,12 +1947,11 @@ class TestWgradValidatorAgreement(unittest.TestCase):
         ok, _ = self._agree(self._spec(split_k=4, epilogue="default"))
         self.assertFalse(ok, "split_k atomic + 16-bit dW + default must be rejected")
 
-    def test_two_stage_does_not_exempt_runtime_degree(self):
-        # split_k == 0 is the runtime-degree atomic encoding; the builder's
-        # `is_two_stage = split_k > 1 and two_stage` never reaches the scratch
-        # epilogue there, so it still needs cshuffle.
+    def test_split_k_zero_rejected(self):
+        # The split degree is always a launch parameter; there is no separate
+        # "runtime degree" encoding, so 0 is not a valid spec value.
         ok, _ = self._agree(self._spec(split_k=0, two_stage=True, epilogue="default"))
-        self.assertFalse(ok, "split_k=0 is atomic regardless of two_stage")
+        self.assertFalse(ok, "split_k=0 is not a valid wgrad spec value")
 
     def test_two_stage_with_split_k_1_rejected_by_predicate(self):
         # validate() and the C++ both reject this; the public predicate used to
@@ -2095,6 +2115,65 @@ class TestWgradKOuterLdsBudget(unittest.TestCase):
         )
 
 
+@unittest.skipIf(_skip_reason(), _skip_reason())
+class TestWgradDoubleBufferedSplitKTail(unittest.TestCase):
+    """async_dma / unroll_k at split_k > 1 with an odd tile count per slice.
+
+    Both double-buffered K-loops compute two tiles per step, so with an odd
+    count the last step's second tile lies past the slice end. Under split-K
+    that tile is the *next* slice's first, and only the k_zero_fill redirect
+    keeps it out of this slice's partial sum -- a bug there double-counts
+    one tile per slice and shows up only in dW, never in the parity gate.
+    """
+
+    # wg_K = N*Ho*Wo; tile_k = 64.
+    # 640 = 2 slices x 5 full tiles; 600 = 2 slices of 5 tiles, the last one
+    # partial (the zero tail inside the slice as well as past it).
+    _CASES = (
+        _Shape(
+            "odd5_N10H8W8C64K64", N=10, Hi=8, Wi=8, C=64, K=64, Y=3, X=3, pH=1, pW=1
+        ),
+        _Shape(
+            "odd5_part_N6H10W10C64K64",
+            N=6,
+            Hi=10,
+            Wi=10,
+            C=64,
+            K=64,
+            Y=3,
+            X=3,
+            pH=1,
+            pW=1,
+        ),
+    )
+
+    def _sweep(self, **knobs) -> None:
+        # Both loops are MFMA-only (WMMA wgrad rejects async_dma and
+        # unroll_k). On MFMA every case must build and run: a skip (an
+        # invalid spec) is a failure, not a quiet pass.
+        if not _IS_MFMA:
+            self.skipTest(f"{knobs} wgrad is MFMA-only; running on {GPU_ARCH}")
+        for shape in self._CASES:
+            for dtype in _DTYPES:
+                with self.subTest(shape=shape.id, dtype=dtype):
+                    ok, why = _run_one(
+                        GPU_ARCH,
+                        shape,
+                        dtype,
+                        "mem",
+                        _KOUTER_EPILOGUE,
+                        split_k=2,
+                        **knobs,
+                    )
+                    _assert_case_ran(self, ok, f"{shape.id} {dtype} {knobs}: {why}")
+
+    def test_async_dma_odd_slice(self):
+        self._sweep(async_dma=True, lds_k_outer=True)
+
+    def test_unroll_k_odd_slice(self):
+        self._sweep(unroll_k=True)
+
+
 def _assert_case_ran(test, ok: bool, why: str) -> None:
     """Fail unless the case was actually built, launched and compared.
 
@@ -2134,6 +2213,14 @@ class TestWgradGroupMergeNumerics(unittest.TestCase):
         groups=64,
     )
 
+    # The subject of these cases is group merging, not the LDS layout: the
+    # K-outer staging only rides along because it is the layout the merged
+    # dispatch prefers where it exists. It is gated to _KOUTER_ARCHES, so
+    # pinning it True would turn every case below into a skip on gfx942 --
+    # which _assert_case_ran correctly reports as a failure rather than a
+    # green. Follow the arch instead and keep the merge coverage running.
+    _KOUTER = GPU_ARCH in _KOUTER_ARCHES
+
     def test_group_merge_without_two_stage(self):
         # The primary path: split_k=1, so dW is written straight from the tile
         # by the direct or CShuffle store. Both carry the block-diagonal mask
@@ -2148,7 +2235,7 @@ class TestWgradGroupMergeNumerics(unittest.TestCase):
                         "mem",
                         epilogue,
                         split_k=1,
-                        lds_k_outer=True,
+                        lds_k_outer=self._KOUTER,
                         warp_tile_mn=16,
                         tile_k=32,
                         tile_m=32,
@@ -2232,7 +2319,7 @@ class TestWgradGroupMergeNumerics(unittest.TestCase):
             "mem",
             "default",
             split_k=1,
-            lds_k_outer=True,
+            lds_k_outer=self._KOUTER,
             warp_tile_mn=16,
             tile_k=32,
             tile_m=32,
