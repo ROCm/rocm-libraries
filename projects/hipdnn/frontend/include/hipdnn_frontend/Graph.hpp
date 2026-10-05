@@ -1989,8 +1989,9 @@ private:
                     HIPDNN_FE_LOG_WARN(
                         "autotune: engine "
                         << result.engineName
-                        << ": stall watchdog fired or stalling was declined mid-sweep; "
-                           "discarding this pass and re-measuring every candidate unstalled.");
+                        << ": stall watchdog fired, stalling was declined, or stalled "
+                           "timing kept reading negative mid-sweep; discarding this pass and "
+                           "re-measuring every candidate unstalled.");
                     restartUnstalledRequested = true;
                     break;
                 }
