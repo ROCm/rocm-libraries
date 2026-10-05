@@ -1,0 +1,46 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --RepairMatrixCoexecPass --print-output
+#
+# The wait contract and segment boundaries survive the repair.
+#
+# Two things the repair must never change:
+#
+#   - a run of waits stays immediately before the matrix op it was attached to,
+#     with every immediate unchanged, because the immediate counts operations
+#     issued before it;
+#   - s_barrier has no LDS token, so hasSideEffect() makes it a segment boundary
+#     and no instruction moves across it.
+#
+# The v_add behind the barrier does move past the last matrix op. The barrier
+# spends the shadow of the matrix op before it, so in front of the last one the
+# v_add would only delay it; behind it, it is still behind the barrier.
+#
+# CHECK-LABEL: @repair_matrix_coexec_wait_contract
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK-NEXT: v_add_f32
+# CHECK-NEXT: v_add_f32
+# Both waits, still consecutive, still immediately before their anchor, and still
+# carrying the immediates they were given.
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-SAME: dlcnt = 7
+# CHECK-NEXT: s_wait_kmcnt
+# CHECK-SAME: kmcnt = 3
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# CHECK-NEXT: v_add_f32
+# The barrier is a boundary: the v_add behind it stays behind it.
+# CHECK-NEXT: s_barrier
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# CHECK-NEXT: v_add_f32
+
+st.func @repair_matrix_coexec_wait_contract() {
+^entry:
+  v[0:15] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[400:407], v[0:15]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v500 = "st.v_add_f32"(v600, v601) { issueCycles = 1, latencyCycles = 5 }
+  v501 = "st.v_add_f32"(v602, v603) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_wait_dscnt"(7) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 7, dscnt = -1, kmcnt = -1 } }
+  "st.s_wait_kmcnt"(3) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = -1, dscnt = -1, kmcnt = 3 } }
+  v[16:31] = "st.v_wmma_f32_16x16x32_bf16"(v[208:215], v[400:407], v[16:31]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v502 = "st.v_add_f32"(v604, v605) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_barrier"() { issueCycles = 1, latencyCycles = 1 }
+  v503 = "st.v_add_f32"(v606, v607) { issueCycles = 1, latencyCycles = 5 }
+  v[32:47] = "st.v_wmma_f32_16x16x32_bf16"(v[216:223], v[400:407], v[32:47]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+}

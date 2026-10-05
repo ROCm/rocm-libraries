@@ -872,6 +872,15 @@ inline bool isTranscendental(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_Transcendental);
 }
 
+// True when this instruction occupies one of a matrix op's co-issue slots.
+//
+// Only the VALU pipe can co-issue into a matrix op's latency shadow, and a
+// matrix op closes a window rather than filling one. Shared so that every place
+// asking "how full is this window" agrees on what counts.
+inline bool fillsCoexecSlot(const StinkyInstruction& inst) {
+    return (isVectorALU(inst) || isTranscendental(inst)) && !isMatrixInstruction(inst);
+}
+
 /// Check if instruction is a scalar ALU instruction (s_*)
 /// Excludes: control flow, memory operations, waitcnt, barrier, delay_alu
 inline bool isScalarALU(const StinkyInstruction& inst) {

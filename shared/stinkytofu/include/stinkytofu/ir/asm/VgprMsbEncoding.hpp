@@ -145,4 +145,39 @@ inline std::pair<int, bool> computeRequiredMsb(const StinkyInstruction* inst) {
     return {setVal, true};
 }
 
+/// The bank state InsertVgprMsbPass carries from one instruction to the next:
+/// the packed s_set_vgpr_msb immediate in effect, or one of these.
+struct VgprMsbState {
+    enum : int {
+        NOT_REQUIRED = -1,  ///< nothing set yet, or reset by a call
+        LABEL_BEGIN = -2,   ///< straight after a label
+    };
+};
+
+/// How many instructions InsertVgprMsbPass puts in front of \p inst when the
+/// bank state before it is \p state, which is advanced past \p inst: none, the
+/// s_set_vgpr_msb, or that and the s_nop the first switch after a label needs.
+///
+/// InsertVgprMsbPass decides through this, and passes that run before it use it
+/// to predict the switches it will insert.
+inline int vgprMsbInsertionsBefore(const StinkyInstruction& inst, int& state) {
+    if (inst.getUnifiedOpcode() == GFX::LABEL) {
+        state = VgprMsbState::LABEL_BEGIN;
+        return 0;
+    }
+    if (isPseudoInst(&inst)) return 0;
+    if (isCall(inst)) {
+        state = VgprMsbState::NOT_REQUIRED;
+        return 0;
+    }
+    const auto [required, hasVgpr] = computeRequiredMsb(&inst);
+    if (!hasVgpr || required == state) {
+        if (state == VgprMsbState::LABEL_BEGIN) state = VgprMsbState::NOT_REQUIRED;
+        return 0;
+    }
+    const int inserted = state == VgprMsbState::LABEL_BEGIN ? 2 : 1;
+    state = required;
+    return inserted;
+}
+
 }  // namespace stinkytofu

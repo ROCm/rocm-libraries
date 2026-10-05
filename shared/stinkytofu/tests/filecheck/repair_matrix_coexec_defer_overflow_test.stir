@@ -1,0 +1,37 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --debug-pass RepairMatrixCoexecPass --RepairMatrixCoexecPass --print-output 2>&1
+#
+# Work that does not fit in front of a matrix op moves past it, in order.
+#
+# The window has six free cycles: the shadow is eight, the matrix op issues in
+# the first and the last is taken by its LD_SCALE. Seven SALU ops and the wait
+# re-emitted in front of the anchor need eight, so two of them would delay the
+# anchor. The window after it is empty, so the last two go there instead, still
+# in their input order.
+#
+# CHECK: [MatrixCoexecReadyQueue] defer 2 past matrix
+# CHECK: [RepairMatrixCoexec] deferred 2, hoisted 0
+# CHECK-LABEL: @repair_matrix_coexec_defer_overflow
+# CHECK: v_wmma_scale_f32_16x16x128_f8f6f4
+# CHECK-NEXT: s10 = "st.s_mov_b32"
+# CHECK-NEXT: s11 = "st.s_mov_b32"
+# CHECK-NEXT: s12 = "st.s_mov_b32"
+# CHECK-NEXT: s13 = "st.s_mov_b32"
+# CHECK-NEXT: s14 = "st.s_mov_b32"
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-NEXT: v_wmma_scale_f32_16x16x128_f8f6f4
+# CHECK-NEXT: s15 = "st.s_mov_b32"
+# CHECK-NEXT: s16 = "st.s_mov_b32"
+
+st.func @repair_matrix_coexec_defer_overflow() {
+^entry:
+  v[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[200:215], v[0:7], v20, v21) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  s10 = "st.s_mov_b32"(s30) { issueCycles = 1, latencyCycles = 1 }
+  s11 = "st.s_mov_b32"(s31) { issueCycles = 1, latencyCycles = 1 }
+  s12 = "st.s_mov_b32"(s32) { issueCycles = 1, latencyCycles = 1 }
+  s13 = "st.s_mov_b32"(s33) { issueCycles = 1, latencyCycles = 1 }
+  s14 = "st.s_mov_b32"(s34) { issueCycles = 1, latencyCycles = 1 }
+  s15 = "st.s_mov_b32"(s35) { issueCycles = 1, latencyCycles = 1 }
+  s16 = "st.s_mov_b32"(s36) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_wait_dscnt"(0) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 0, dscnt = -1, kmcnt = -1 } }
+  v[8:15] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[116:131], v[200:215], v[8:15], v20, v21) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+}

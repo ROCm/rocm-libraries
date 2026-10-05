@@ -24,6 +24,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <ostream>
 #include <unordered_map>
 #include <vector>
 
@@ -147,7 +148,7 @@ struct RegionHideBudget {
 /// the scheduler, which asks the same question of its live window.
 ///
 /// Defined inline: the scheduler calls this once per window cycle from
-/// advanceTime(), computeValuAdvanceCycles() and freeCoIssueSpace(), so it must
+/// advanceTime(), computeValuAdvanceCycles() and freeCoexecSpace(), so it must
 /// not become a call.
 inline bool isBlockedWindowCycle(int pos, int latency, uint16_t blockedMask) {
     if (blockedMask == 0 || pos < 0 || pos >= latency) return false;
@@ -155,6 +156,42 @@ inline bool isBlockedWindowCycle(int pos, int latency, uint16_t blockedMask) {
     constexpr int kBlockedBits = static_cast<int>(sizeof(blockedMask) * 8);
     return fromEnd < kBlockedBits && ((blockedMask >> fromEnd) & 1u) != 0u;
 }
+
+/// How well a schedule fills the co-issue windows between its matrix ops.
+///
+/// Every field is a direct count over one instruction sequence, so the same
+/// numbers can be taken before and after any pass that reorders around matrix
+/// ops. `windows` counts the intervals between consecutive matrix ops, so it is
+/// one less than the number of matrix ops.
+struct MatrixCoexecOccupancy {
+    int matrixOps = 0;
+    int windows = 0;
+    /// Intervals with no instruction at all between two matrix ops.
+    ///
+    /// Not a failure count on its own: two independent matrix ops back to back
+    /// run at full matrix rate. Only a dependent pair stalls, which
+    /// dependentEmptyWindows counts.
+    int emptyWindows = 0;
+    /// Empty windows whose closing matrix op depends on the opening one
+    /// (wmmaToWmmaCoexecOverlap).
+    int dependentEmptyWindows = 0;
+    /// Issue cycles placed in windows, against what those windows expose.
+    int placedCycles = 0;
+    int issuableCycles = 0;
+    /// VALU-pipe fills, against the co-issue slots the windows offer.
+    int valuFills = 0;
+    int valuSlots = 0;
+};
+
+/// Measure \p instructions in program order. Waits and pseudo instructions
+/// count as placed work like anything else; only matrix ops delimit windows.
+STINKYTOFU_EXPORT MatrixCoexecOccupancy
+measureMatrixCoexecOccupancy(const std::vector<StinkyInstruction*>& instructions);
+
+/// One line per metric, for PASS_DEBUG output. \p label names the measurement
+/// point so a before and an after can be told apart in one log.
+STINKYTOFU_EXPORT void dumpMatrixCoexecOccupancy(const MatrixCoexecOccupancy& occupancy,
+                                                 const char* label, std::ostream& os);
 
 /// Analyse \p regionDag using the final barrier placement metadata computed by
 /// the scheduler. A barrier present in both estimators has separate Before and

@@ -4,11 +4,31 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
 #include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 
 namespace stinkytofu {
+
+struct StinkyInstruction;
+
+/// One producer->consumer pair under a write->read, cycle-counted rule of
+/// kCdna5HazardRules. Positions index the sequence that was measured.
+struct HazardGap {
+    int ruleIdx;
+    unsigned producer;
+    unsigned consumer;
+    /// Cycles strictly between the two: a matrix op counts its latency, anything
+    /// else its issue cycles.
+    int gap;
+};
+
+/// Every hazard pair in \p instructions, rule by rule and in consumer order. Each
+/// consumer pairs with the latest writer of its source registers, and only when
+/// that writer is a producer under the rule.
+STINKYTOFU_EXPORT std::vector<HazardGap> measureHazardGaps(
+    const std::vector<const StinkyInstruction*>& instructions);
 
 /// Scan each basic block for kCdna5HazardRules producer->consumer pairs and
 /// report the cycle gap between them (using real issueCycles/latencyCycles, not

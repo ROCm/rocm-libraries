@@ -1,0 +1,35 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --RepairMatrixCoexecPass --print-output
+#
+# A DS read does not move across a matrix instruction, even when no wait counts it.
+#
+# The counter chain only orders a memory op against the waits that count it, so
+# on its own it would let a DS read cross a matrix op whose wait carries no
+# dscnt. The scheduler placed these reads against the matrix ops that consume
+# them, so addMatrixMemoryOrderEdges keeps memory and matrix ops in input order
+# and only ALU work moves.
+#
+# Here the second matrix op is anchored by a kmcnt wait, which counts CK_KM and
+# not CK_DS. The VALU work behind the loads fits where it is, so it stays too.
+#
+# CHECK-LABEL: @repair_matrix_coexec_skeleton_order
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK-NEXT: s_wait_kmcnt
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# Both loads stay behind the matrix op they started behind.
+# CHECK-NEXT: ds_load_b128
+# CHECK-SAME: offset = 0
+# CHECK-NEXT: ds_load_b128
+# CHECK-SAME: offset = 16
+# CHECK-NEXT: v_add_f32
+# CHECK-NEXT: v_add_f32
+
+st.func @repair_matrix_coexec_skeleton_order() {
+^entry:
+  v[0:15] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[400:407], v[0:15]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_wait_kmcnt"(0) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = -1, dscnt = -1, kmcnt = 0 } }
+  v[16:31] = "st.v_wmma_f32_16x16x32_bf16"(v[208:215], v[400:407], v[16:31]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[100:103] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[104:107] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  v300 = "st.v_add_f32"(v301, v302) { issueCycles = 1, latencyCycles = 5 }
+  v303 = "st.v_add_f32"(v304, v305) { issueCycles = 1, latencyCycles = 5 }
+}

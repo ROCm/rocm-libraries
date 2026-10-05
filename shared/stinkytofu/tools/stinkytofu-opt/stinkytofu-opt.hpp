@@ -61,6 +61,7 @@
 #include "stinkytofu/transforms/asm/RemoveDscntPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveInstructionPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveWaitAluPass.hpp"
+#include "stinkytofu/transforms/asm/RepairMatrixCoexecPass.hpp"
 #include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
@@ -72,7 +73,6 @@
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
 #include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
-#include "stinkytofu/transforms/asm/WaitAwareScheduleRepairPass.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationRulesRegistry.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocatorRegistry.hpp"
 #include "stinkytofu/transforms/asm/ra/RegisterAllocationPass.hpp"
@@ -239,17 +239,6 @@ const std::vector<PassInfo> availablePasses = {
      [](const std::vector<std::string>& args) {
          return createGfx1250HazardPass(hasPassArg(args, "profile"));
      }},
-    {"WaitAwareScheduleRepairPass",
-     [](const std::vector<std::string>& args) {
-         constexpr int kDefaultSlotsToMovePastAnchor = 1;
-         const std::string prefix = "kSlotsToMovePastAnchor=";
-         for (const auto& arg : args) {
-             if (arg.starts_with(prefix))
-                 return createWaitAwareScheduleRepairPass(
-                     std::atoi(arg.substr(prefix.size()).c_str()));
-         }
-         return createWaitAwareScheduleRepairPass(kDefaultSlotsToMovePastAnchor);
-     }},
     // BuildUseDefChainPass accepts:
     //   includePseudo    — also build chains for pseudo registers (memtokens)
     //   noClearExisting  — keep any existing PHIs/chains
@@ -410,6 +399,7 @@ const std::vector<PassInfo> availablePasses = {
               hasPassArg(args, "xdlCountFromNextWmma")});
      }},
     {"InsertCoexecHazardPass", [](const auto&) { return createInsertCoexecHazardPass(); }},
+    {"RepairMatrixCoexecPass", [](const auto&) { return createRepairMatrixCoexecPass(); }},
     {"RegionClonePass",
      [](const auto&) {
          return createRegionClonePass({CloneSpec{"InitCIterWmma", "label_LoopBeginL"}});

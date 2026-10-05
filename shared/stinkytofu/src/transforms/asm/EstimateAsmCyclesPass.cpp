@@ -825,11 +825,11 @@ class EstimateAsmCyclesPassImpl : public Pass {
         }
         for (std::size_t idx = startIdx; idx < instructions.size(); ++idx) {
             StinkyInstruction* inst = instructions[idx];
-            bool isCoIssued =
+            bool isCoexecuted =
                 (!isMatrixInstruction(*inst) &&
                  canCoExecAtCurrentCycle(cycles, activeWmmaStartCycle, activeWmmaCoExecAdvance,
                                          activeWmmaValuSlots, isVectorALU(*inst)));
-            if (isCoIssued) {
+            if (isCoexecuted) {
                 // VALU is inserted into an "I" slot in active WMMA window, so this instruction does
                 // not advance the global cycle counter.
                 activeWmmaCoExecAdvance += std::max(1, inst->issueCycles);
