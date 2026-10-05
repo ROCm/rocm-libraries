@@ -113,27 +113,13 @@ function(add_gemm_test TEST_TARGET_PREFIX TEST_SOURCE)
 endfunction()
 
 # GEMM common test sources
+file(GLOB GemmInstantiationSources CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/instantiations/*.cpp")
+
 set(GemmCommonSources ${ROCWMMA_COMMON_TEST_SOURCES}
                       ${CMAKE_CURRENT_SOURCE_DIR}/gemm_kernel_base.cpp
                       ${CMAKE_CURRENT_SOURCE_DIR}/gemm_resource.cpp
-                      ${CMAKE_CURRENT_SOURCE_DIR}/instantiations/int8_int32_int32.cpp
-                      ${CMAKE_CURRENT_SOURCE_DIR}/instantiations/float8_float32_float32.cpp
-                      ${CMAKE_CURRENT_SOURCE_DIR}/instantiations/bfloat8_float32_float32.cpp
-                      ${CMAKE_CURRENT_SOURCE_DIR}/instantiations/float8_fnuz_float32_float32.cpp
-                      ${CMAKE_CURRENT_SOURCE_DIR}/instantiations/bfloat8_fnuz_float32_float32.cpp
-                      ${CMAKE_CURRENT_SOURCE_DIR}/instantiations/bfloat16_float32_float32.cpp
-                      ${CMAKE_CURRENT_SOURCE_DIR}/instantiations/float16_float32_float32.cpp
-                      ${CMAKE_CURRENT_SOURCE_DIR}/instantiations/hfloat16_float32_float32.cpp
-                      ${CMAKE_CURRENT_SOURCE_DIR}/instantiations/float32_float32_float32.cpp
-                      ${CMAKE_CURRENT_SOURCE_DIR}/instantiations/xfloat32_float32_float32.cpp
-                      ${CMAKE_CURRENT_SOURCE_DIR}/instantiations/float64_float64_float64.cpp
-                      ${CMAKE_CURRENT_SOURCE_DIR}/instantiations/int8_int8_int32.cpp
-                      ${CMAKE_CURRENT_SOURCE_DIR}/instantiations/bfloat16_bfloat16_bfloat16.cpp
-                      ${CMAKE_CURRENT_SOURCE_DIR}/instantiations/bfloat16_bfloat16_float32.cpp
-                      ${CMAKE_CURRENT_SOURCE_DIR}/instantiations/float16_float16_float16.cpp
-                      ${CMAKE_CURRENT_SOURCE_DIR}/instantiations/float16_float16_float32.cpp
-                      ${CMAKE_CURRENT_SOURCE_DIR}/instantiations/hfloat16_hfloat16_hfloat16.cpp
-                      ${CMAKE_CURRENT_SOURCE_DIR}/instantiations/hfloat16_hfloat16_float32.cpp)
+                      ${GemmInstantiationSources})
 
 # Tests for cooperative kernel classes
 add_subdirectory(gemm_PGR1_LB2_MP0_MB_CP)
