@@ -26,14 +26,11 @@
 
 #pragma once
 
+#include "ClientConfig.hpp"
 #include "RunListener.hpp"
 
 #include <cstddef>
 #include <string>
-
-#ifndef TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
-#define TENSILELITE_CLIENT_ENABLE_ROCPROFSDK 0
-#endif
 
 namespace TensileLite
 {
