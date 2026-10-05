@@ -22,6 +22,23 @@
 #   not folded into the tiers below, all of which run on single-GPU runners where
 #   every multi_gpu test would skip while the run still reported green.
 #
+#   The "*HostUnit*" pattern is different in kind: clients/tests/unit holds
+#   hand-written host-only gtest cases (no device, no data-driven parameters)
+#   registered as plain suites named HostUnit*. They are seconds-fast and cover
+#   pure helpers, so every tier runs them.
+#
+#   This file is what selects them in PR CI. Each shard runs
+#       ctest -L '^<tier>$' -LE ex_gpu --test-dir build/bin/hipblaslt ...
+#   against the installed tree, where the labels below pick the tier and the
+#   tier's patterns have been baked into the hipblaslt-test entry as a gtest
+#   filter. The standard tier therefore invoked
+#       hipblaslt-test --gtest_filter=*smoke*:*quick*:*pre_checkin*:*HostUnit*-*known_bug*
+#
+#   The HostUnit cases also carry a "smoke_" test-name prefix. That is redundant
+#   for the path above, since "*HostUnit*" already selects them in every tier,
+#   but it keeps them selected by test/therock/test_hipblaslt.py, which execs the
+#   binary directly with `--gtest_filter=*smoke*` on its quick tier.
+#
 # These tiers are TheRock ctest presets; they are NOT a port of hipBLASLt's
 # rocJenkins job filters (those are wired differently).
 #
@@ -37,6 +54,7 @@ test_categories:
     description: "Smoke surface for fast PR gating (target: ~5 min)"
     test_patterns:
       - "*smoke*"
+      - "*HostUnit*"
     exclude:
       - "*known_bug*"
     labels:
@@ -49,6 +67,7 @@ test_categories:
       - "*smoke*"
       - "*quick*"
       - "*pre_checkin*"
+      - "*HostUnit*"
     exclude:
       - "*known_bug*"
     labels:
@@ -63,6 +82,7 @@ test_categories:
       - "*quick*"
       - "*pre_checkin*"
       - "*nightly*"
+      - "*HostUnit*"
     exclude:
       - "*known_bug*"
     labels:
@@ -78,6 +98,7 @@ test_categories:
       - "*pre_checkin*"
       - "*nightly*"
       - "*HMM*"
+      - "*HostUnit*"
     exclude:
       - "*known_bug*"
     labels:
