@@ -9,6 +9,7 @@
 #include <unordered_map>
 
 #include <hip/hip_runtime.h>
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -28,6 +29,7 @@ using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace hipdnn_integration_tests::test_utils;
 using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
 using namespace hipdnn_test_sdk::utilities;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 
 TEST(TestGpuLayernormFwdPlanBuilder, PlanConstruction)
 {
@@ -323,11 +325,11 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
     Tensor<MeanInvVarianceType> cpuRstd(batchDims, batchStrides);
 
     constexpr unsigned int SEED = 42;
-    xTensor.fillWithRandomValues(static_cast<XType>(-1.0), static_cast<XType>(1.0), SEED);
-    scaleTensor.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-1.0), static_cast<ScaleBiasType>(1.0), SEED + 1);
-    biasTensor.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-1.0), static_cast<ScaleBiasType>(1.0), SEED + 2);
+    fillWithRandomValues(xTensor, static_cast<XType>(-1.0), static_cast<XType>(1.0), SEED);
+    fillWithRandomValues(
+        scaleTensor, static_cast<ScaleBiasType>(-1.0), static_cast<ScaleBiasType>(1.0), SEED + 1);
+    fillWithRandomValues(
+        biasTensor, static_cast<ScaleBiasType>(-1.0), static_cast<ScaleBiasType>(1.0), SEED + 2);
     epsilonTensor.fillWithValue(static_cast<ComputeType>(LAYERNORM_DEFAULT_EPSILON));
 
     Tensor<YType> gpuY(ioDims, ioStrides);
