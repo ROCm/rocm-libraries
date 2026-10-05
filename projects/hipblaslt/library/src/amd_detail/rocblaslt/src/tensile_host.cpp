@@ -4877,12 +4877,9 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
             }
         }
 
-        //workaround: findAllSolutions should get all solutions without duplications
-        bool duplicated_sol = false;
-        for(int j = 0; j < i; j++)
-            if(*(int*)(heuristicResults[j].algo.data) == solution->index)
-                duplicated_sol = true;
-        if(duplicated_sol)
+        //workaround: findAllSolutions should get all solutions without duplications.
+        //Sorting by index makes duplicates adjacent, so only the last kept entry can match.
+        if(i > 0 && *(int*)(heuristicResults[i - 1].algo.data) == solution->index)
         {
             ++duplicated_counts;
             continue;
