@@ -1,0 +1,99 @@
+name: "Component CI: TensileLite gtest"
+
+# Why this lane exists
+#
+# A pre-submit GATE for the TensileLite C++ host-library gtest suite
+# (tensilelite/tests/, target `tensilelite-tests`), built from source and run
+# CPU-only on the lightweight AWS scale pool. It moves the host-only slice of
+# that suite off the TheRock multi-arch GPU runner, where the `standard` tier ran
+# `ctest -L standard -LE ex_gpu` on a gfx942 GPU it never used.
+#
+# Distinct from the `unit`/`coverage` lanes (pytest); neither builds the C++ gtest.
+
+on:
+  workflow_call:
+    inputs:
+      docker_image:
+        type: string
+        required: true
+      linux_runner:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ${{ inputs.linux_runner }}
+    container:
+      image: ${{ inputs.docker_image }}
+    env:
+      ROCM_PATH: /opt/rocm
+    defaults:
+      run:
+        working-directory: projects/hipblaslt/tensilelite
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          sparse-checkout: |
+            .github
+            projects/hipblaslt
+            shared/origami
+            shared/rocroller
+            shared/mxdatagenerator
+            shared/stinkytofu
+            cmake
+          sparse-checkout-cone-mode: true
+
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm-linux
+        with:
+          amdgpu_family: gfx94X-dcgpu
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      # msgpack-cxx and GTest are build-time third-parties stripped from the dist; vendor them.
+      - name: Provide msgpack-cxx and GTest
+        run: |
+          set -e
+          curl -fsSL https://github.com/msgpack/msgpack-c/releases/download/cpp-7.0.0/msgpack-cxx-7.0.0.tar.gz | tar xz -C "$RUNNER_TEMP"
+          cmake -S "$RUNNER_TEMP/msgpack-cxx-7.0.0" -B "$RUNNER_TEMP/msgpack-build" -DMSGPACK_USE_BOOST=OFF -DMSGPACK_BUILD_TESTS=OFF
+          cmake --install "$RUNNER_TEMP/msgpack-build"
+          curl -fsSL https://github.com/google/googletest/archive/refs/tags/v1.15.2.tar.gz | tar xz -C "$RUNNER_TEMP"
+          cmake -S "$RUNNER_TEMP/googletest-1.15.2" -B "$RUNNER_TEMP/gtest-build" -DBUILD_GMOCK=ON -DINSTALL_GTEST=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+          cmake --build "$RUNNER_TEMP/gtest-build" --parallel --target install
+
+      - name: System build deps (zlib, python headers)
+        run: |
+          if command -v dnf >/dev/null 2>&1; then
+            dnf install -y zlib-devel python3-devel || true
+          elif command -v apt-get >/dev/null 2>&1; then
+            apt-get update -qq && apt-get install -y -qq zlib1g-dev python3-dev || true
+          fi
+
+      # `tensilelite` preset lives one dir up (-S ../); YAML=OFF forces msgpack.
+      - name: Build tensilelite-tests
+        env:
+          CMAKE_GENERATOR: Ninja
+        run: |
+          export CMAKE_PREFIX_PATH="/usr/local${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
+          cmake --preset tensilelite -S ../ -B build \
+            -DGPU_TARGETS=gfx942 \
+            -DCMAKE_C_COMPILER="${ROCM_PATH}/bin/amdclang" \
+            -DCMAKE_CXX_COMPILER="${ROCM_PATH}/bin/amdclang++" \
+            -DTENSILELITE_BUILD_TESTING=ON \
+            -DHIPBLASLT_ENABLE_YAML=OFF
+          cmake --build build --parallel --target tensilelite-tests cpu-gemm-driver
+
+      # No install: the label module (shared/ctest) is TheRock-only and a full
+      # install hits the unbuilt rocisa target; run ctest from the build tree.
+      - name: Run tensilelite gtest (host-only, CPU)
+        run: |
+          # Exclude cases needing a real HIP device (hard-assert deviceCount>0); no GPU here.
+          ctest --test-dir build/tensilelite/tests --output-on-failure \
+            -E 'QueryDeviceChipId|HipHardwarePopulatesPciChipId|PciChipIdEqualPredicate|HardwareSelectionWithPciChipId|FindAllSolutionsWithPciChipId|DataInitializationReferenceRecompute'
