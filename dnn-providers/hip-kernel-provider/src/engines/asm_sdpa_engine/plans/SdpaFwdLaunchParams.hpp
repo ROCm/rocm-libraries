@@ -22,8 +22,10 @@ struct SdpaFwdLaunchParams
 
 // Ports AITER's forward grid math. Causal masks halve the Q-tile grid via
 // ceiling division; the kernel load-balances the full Q range onto the
-// surviving workgroups. The hd192x128/gfx942 path swaps gridDimX/Y, uses
-// blockDimX=256, and forces tuneOpt=0.
+// surviving workgroups. Every hd192x128 kernel (gfx942 and gfx950) is built
+// for 256-wide blocks (.max_flat_workgroup_size 256); a 512-wide launch fails
+// with hipErrorLaunchFailure. The hd192x128/gfx942 path additionally swaps
+// gridDimX/Y and forces tuneOpt=0.
 inline SdpaFwdLaunchParams computeFwdLaunchParams(const SdpaFwdParams& params)
 {
     SdpaFwdLaunchParams lp{};
@@ -33,8 +35,8 @@ inline SdpaFwdLaunchParams computeFwdLaunchParams(const SdpaFwdParams& params)
         return lp; // zero guard — matches bwd KernelTiles::gridDim() pattern
     }
 
-    const bool isHd192x128Gfx942
-        = params.headDimQk == 192 && params.headDimV == 128 && params.archString == "gfx942";
+    const bool isHd192x128 = params.headDimQk == 192 && params.headDimV == 128;
+    const bool isHd192x128Gfx942 = isHd192x128 && params.archString == "gfx942";
     const bool masked = params.maskType != plan_utils::MaskType::NO_MASK;
 
     // tune_opt: default 5; downgrade to 3 when masked and either nhead is
@@ -63,16 +65,14 @@ inline SdpaFwdLaunchParams computeFwdLaunchParams(const SdpaFwdParams& params)
 
     unsigned int gridDimY = params.numHeadsQ;
 
-    // hd192x128/gfx942: swap X/Y and use 256-wide blocks.
+    // hd192x128/gfx942: swap X/Y.
     if(isHd192x128Gfx942)
     {
         std::swap(gridDimX, gridDimY);
-        lp.blockDimX = 256;
     }
-    else
-    {
-        lp.blockDimX = 512;
-    }
+
+    // AITER fmha_fwd_v3: bdx = (hdim_q == 192 && hdim_v == 128) ? 256 : 512.
+    lp.blockDimX = isHd192x128 ? 256 : 512;
 
     lp.gridDimX = gridDimX;
     lp.gridDimY = gridDimY;

@@ -173,6 +173,25 @@ TEST(TestSdpaFwdPlanGridMath, Hd192x128CausalSmallSeqCoversAllTiles)
     EXPECT_EQ(lp.blockDimX, 256U);
 }
 
+// Regression: the gfx950 hd192x128 kernel (fmha_fwd_hd192_hd128_bf16) has
+// .max_flat_workgroup_size 256, like gfx942's. A 512-wide launch returns
+// hipErrorLaunchFailure. Only gfx942 swaps the grid, so gfx950 keeps the
+// default (tiles, heads, batch) layout.
+TEST(TestSdpaFwdPlanGridMath, Hd192x128Gfx950Uses256WideBlocksWithoutSwap)
+{
+    auto p = makeHd192x128Params();
+    p.archString = "gfx950";
+    p.numHeadsQ = 4U;
+    p.seqLenQ = 256U;
+    // ceil(256/128) = 2 tiles, no swap.
+    auto lp = computeFwdLaunchParams(p);
+    EXPECT_EQ(lp.gridDimX, 2U); // tiles
+    EXPECT_EQ(lp.gridDimY, 4U); // numHeadsQ
+    EXPECT_EQ(lp.gridDimZ, 2U);
+    EXPECT_EQ(lp.blockDimX, 256U);
+    EXPECT_EQ(lp.tuneOpt, 5U);
+}
+
 // =============================================================================
 // tune_opt tests
 // =============================================================================
