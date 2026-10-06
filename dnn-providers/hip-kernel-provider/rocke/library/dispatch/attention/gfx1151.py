@@ -1,7 +1,14 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Executable gfx1151 WMMA attention selection for dense and packed layouts."""
+"""Executable RDNA WMMA attention selection for dense and packed layouts.
+
+One kernel set per RDNA generation: requests name ``gfx11-generic`` (code
+objects load on gfx1100-gfx1153) or ``gfx12-generic`` (gfx1200/gfx1201). A
+request may still name ``gfx1151`` or ``gfx1201`` to build processor-specific
+objects. The transposed-QK profile uses the gfx11 WMMA operand layout; gfx12
+targets run the standard path for those shapes.
+"""
 
 from __future__ import annotations
 
@@ -13,8 +20,10 @@ from kernels.gfx1151.wmma_fmha_fwd import (
     build_wmma_fmha_fwd,
     is_valid_spec as _wmma_fwd_is_valid,
     wmma_fmha_fwd_grid,
+    uses_gfx11_operand_layout,
     wmma_fmha_fwd_signature,
 )
+from rocke.core.arch import generic_arch_from_target_id
 from rocke.dispatch.core import (
     Capability,
     CandidateRegistry,
@@ -39,9 +48,10 @@ from .common import (
 # Callers compiled against any earlier header must be rebuilt.
 ATTENTION_GFX1151_ABI = "rocke-attention-gfx1151/v5"
 
-# Compute units of the reference gfx1151 part. The output-column tiling gate was
-# tuned at this size, so it is the fallback when no count is given or visible.
-_GFX1151_DEFAULT_NUM_CUS = 40
+# Compute units of the reference gfx1151 part, where the output-column tiling
+# gate was tuned. Used only when the request names no count and no device of the
+# request's family is visible (cross-compiles and AOT packaging).
+_DEFAULT_NUM_CUS = 40
 # Workgroups per CU the tiled-value path is expected to keep in flight; the
 # tiling gate admits a request while its query groups fit this many per CU
 # (``query_groups * 5 <= num_cus * 16``, i.e. 128 groups on the 40-CU part).
@@ -49,25 +59,32 @@ _TILED_VALUE_GROUPS_PER_16_CUS = 16
 _TILED_VALUE_GROUP_WEIGHT = 5
 
 
-def _resolve_gfx1151_num_cus(req: AttentionRequest) -> int:
-    """Compute units used by CU-aware gfx1151 selection."""
+def _resolve_num_cus(req: AttentionRequest) -> int:
+    """Compute units used by CU-aware selection.
+
+    The live count is used only when the visible device runs code objects of the
+    request's generic family, so a cross-compile never bakes in another part's
+    size.
+    """
     n = int(req.num_cus)
     if n > 0:
         return n
     try:
-        from rocke.runtime.hip_module import get_device_arch
+        from rocke.runtime.hip_module import get_device_target_id
 
-        if get_device_arch() == "gfx1151":
+        device = get_device_target_id()
+        family = generic_arch_from_target_id(req.arch)
+        if device and family and generic_arch_from_target_id(device) == family:
             live = _device_num_cus()
             if live and live > 0:
                 return 2 * int(live)
     except Exception:
         pass
-    return _GFX1151_DEFAULT_NUM_CUS
+    return _DEFAULT_NUM_CUS
 
 
 _WMMA_FWD_CAP = Capability(
-    arches=("gfx1151",),
+    arches=("gfx11-generic", "gfx1151", "gfx12-generic", "gfx1201"),
     dtypes=("fp16", "bf16"),
     shapes=(
         ShapeRange(frozenset({"hdim_q", "hdim_v"}), min=16, max=256, multiple_of=16),
@@ -127,6 +144,9 @@ def _wmma_fwd_spec(req: OperatorRequest) -> WmmaFmhaFwdSpec:
     seqlen_q = int(req.seqlen_q)
     seqlen_k = int(req.seqlen_k)
     equal_heads = int(req.hdim_q) == int(req.hdim_v)
+    # The transposed-QK body is a gfx11-layout kernel; the layout also decides
+    # whether staging FP8 V through LDS pays (gfx11) or not (gfx12).
+    gfx11_layout = uses_gfx11_operand_layout(req.arch, req.dtype.strip().lower())
     query_tail = layout != "dense" or bool(seqlen_q % 16)
     kv_tail = layout != "dense" or bool(seqlen_k % 16)
     windowed = (
@@ -136,7 +156,8 @@ def _wmma_fwd_spec(req: OperatorRequest) -> WmmaFmhaFwdSpec:
         or (req.window_right is not None and int(req.window_right) >= 0)
     )
     transposed = (
-        req.dtype.strip().lower() in ("fp16", "bf16")
+        gfx11_layout
+        and req.dtype.strip().lower() in ("fp16", "bf16")
         and layout == "dense"
         and equal_heads
         and int(req.hdim_q) in (64, 128)
@@ -159,6 +180,10 @@ def _wmma_fwd_spec(req: OperatorRequest) -> WmmaFmhaFwdSpec:
         )
     )
     wide = transposed and seqlen_q >= 512 and seqlen_q % 32 == 0 and seqlen_k % 64 == 0
+    # gfx11-generic objects schedule under the family's smaller register model;
+    # they prefer narrower K tiles in wide transposed launches and wider D256
+    # noncausal output-column tiles than processor-specific gfx1151 builds.
+    generic_target = generic_arch_from_target_id(req.arch) == req.arch
     tuned_small_head = (
         req.dtype.strip().lower() == "fp16"
         and int(req.hdim_q) == 64
@@ -184,30 +209,48 @@ def _wmma_fwd_spec(req: OperatorRequest) -> WmmaFmhaFwdSpec:
             or (layout == "dense" and (query_tail or kv_tail))
         )
     )
+    fp8 = bool(req.use_fp8)
+    head = int(req.hdim_q)
     query_groups = ((seqlen_q + 15) // 16) * int(req.nhead_q) * int(req.batch)
+    # Output-column tiling multiplies the CTAs of a launch too small to fill the
+    # device: D256 always, and D128 when FP8 KV decode keeps the softmax cheap.
     tiled_values = (
         layout == "dense"
-        and int(req.hdim_q) == 256
         and equal_heads
+        and ((head == 256 and not fp8) or (head == 128 and fp8))
         and seqlen_k >= 128
-        and query_groups * _TILED_VALUE_GROUP_WEIGHT
-        <= _resolve_gfx1151_num_cus(req) * _TILED_VALUE_GROUPS_PER_16_CUS
         and not (
             windowed
-            or req.use_fp8
             or req.use_softcap
             or req.use_sinks
             or req.use_alibi
             or req.use_qq_bias
             or req.use_attn_bias
         )
+        and query_groups * _TILED_VALUE_GROUP_WEIGHT
+        <= _resolve_num_cus(req) * _TILED_VALUE_GROUPS_PER_16_CUS
     )
     short_query = seqlen_q <= 16
     value_tile_size = 0
     if tiled_values:
         value_tile_size = (
-            32 if mask_type == AttentionMaskType.NO_MASK and not short_query else 64
+            32
+            if head == 128
+            or (
+                mask_type == AttentionMaskType.NO_MASK
+                and not short_query
+                and not (generic_target and gfx11_layout)
+            )
+            else 64
         )
+    # The max-ILP machine scheduler keeps more V gathers in flight on the
+    # standard path. FP8 KV (software decode) and noncausal output tiles keep
+    # the default scheduler.
+    max_ilp = (
+        not transposed
+        and not fp8
+        and not (tiled_values and mask_type == AttentionMaskType.NO_MASK)
+    )
     # Runtime windows already bound the loop; the transposed path bounds it at
     # the diagonal by construction.
     causal_tile_skip = (
@@ -230,9 +273,14 @@ def _wmma_fwd_spec(req: OperatorRequest) -> WmmaFmhaFwdSpec:
         ),
         causal_tile_skip=causal_tile_skip,
         v_lds_stage=tuned_small_head
-        or (tiled_values and (short_query or mask_type == AttentionMaskType.NO_MASK)),
+        or (
+            tiled_values
+            and head == 256
+            and (short_query or mask_type == AttentionMaskType.NO_MASK)
+        )
+        or (fp8 and gfx11_layout and not tiled_values),
         value_tile_size=value_tile_size,
-        scheduler_strategy="max-ilp" if tuned_small_head else None,
+        scheduler_strategy="max-ilp" if max_ilp else None,
         query_tail=query_tail,
         kv_tail=kv_tail,
         use_softcap=bool(req.use_softcap),
@@ -245,7 +293,7 @@ def _wmma_fwd_spec(req: OperatorRequest) -> WmmaFmhaFwdSpec:
         page_block_size=int(req.kv_block_size) if layout == "paged" else 0,
         kv_dtype="fp8e4m3" if bool(req.use_fp8) else "",
         transposed_qk=transposed,
-        block_n=64 if wide else 32,
+        block_n=64 if wide and not generic_target else 32,
         num_waves=2 if wide else 1,
     )
 

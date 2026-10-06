@@ -964,15 +964,18 @@ def mfma_attention_fwd_inner_body(
 # hard-codes the wave32 magic numbers and one body serves both RDNA generations.
 
 
-# Per-arch WMMA attention op_id. gfx11 (RDNA3/3.5) uses the cross-half-duplicated
-# ``wmma_f32_16x16x16_*`` atom; gfx12 (RDNA4) uses the split-K
-# ``wmma_gfx12_f32_16x16x16_*`` atom (mirrors ``_wmma_params`` in
+# Per-target WMMA attention op_id, chosen from the target's MMA catalog so every
+# gfx11 (RDNA3/3.5) or gfx12 (RDNA4) row, concrete or generic, resolves without
+# naming a processor. A catalog with the split-K ``wmma_gfx12_f32_16x16x16_*``
+# atom uses it; otherwise the cross-half-duplicated gfx11
+# ``wmma_f32_16x16x16_*`` atom is requested (mirrors ``_wmma_params`` in
 # ``instances/common/_matmul_nbits_large_n.py``). The op_id also selects the f16
 # vs bf16 intrinsic mangling, so it is keyed on the kernel dtype.
-def _wmma_attn_op_id(arch: str, dtype: str) -> str:
+def _wmma_attn_op_id(target, dtype: str) -> str:
     elem = "bf16" if dtype == "bf16" else "f16"
-    if arch == "gfx1201":
-        return f"wmma_gfx12_f32_16x16x16_{elem}"
+    gfx12 = f"wmma_gfx12_f32_16x16x16_{elem}"
+    if target.mma.by_op_id(gfx12) is not None:
+        return gfx12
     return f"wmma_f32_16x16x16_{elem}"
 
 
@@ -1057,7 +1060,7 @@ def _wmma_attention_fwd_inner_body(
     :func:`mfma_attention_fwd_inner_body`. The kernel must launch with
     ``block_size == wave_size`` (one wave32 per CTA).
     """
-    op_id = _wmma_attn_op_id(arch, dtype)
+    op_id = _wmma_attn_op_id(target, dtype)
     op = target.mma.by_op_id(op_id)
     if op is None or op.family != "wmma":
         raise ValueError(f"WMMA attention atom {op_id} absent on {arch}")

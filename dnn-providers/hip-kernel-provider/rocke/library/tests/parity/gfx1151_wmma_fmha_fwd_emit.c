@@ -2,15 +2,16 @@
  * SPDX-License-Identifier: MIT
  *
  * tests/parity/gfx1151_wmma_fmha_fwd_emit.c -- C-side emitter for the gfx1151
- * WMMA FMHA forward parity harness. Selects one of 136 configurations
- * by argv[1] (0..135), builds it exactly as the
+ * WMMA FMHA forward parity harness. Selects one of 143 configurations
+ * by argv[1] (0..142), builds it exactly as the
  * Python emitter gfx1151_wmma_fmha_fwd_emit.py does, and lowers to LLVM .ll
- * text at arch=gfx1151 (flavor AUTO) so the two outputs can be byte-compared.
+ * text (flavor AUTO) so the two outputs can be byte-compared. Configs 0..135
+ * use arch=gfx1151; 136..142 replay representative configs at gfx11-generic.
  *
  * Build flow (mirrors the Python build_wmma_fmha_fwd path):
  *   (1) rocke_ir_builder_init(b, spec.kernel_name())
- *   (2) rocke_build_wmma_fmha_fwd(b, &spec, "gfx1151")  -> KernelDef
- *   (3) rocke_lower_kernel_to_llvm(kernel, AUTO, "gfx1151", &ll)
+ *   (2) rocke_build_wmma_fmha_fwd(b, &spec, arch)  -> KernelDef
+ *   (3) rocke_lower_kernel_to_llvm(kernel, AUTO, arch, &ll)
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -250,24 +251,36 @@ static int make_spec(int idx, rocke_wmma_fmha_fwd_spec_t* spec)
     return 0;
 }
 
+/* Configs 136..142 replay these indices at gfx11-generic (mirrors the Python
+ * emitter's _GENERIC_REPLAY): the output must equal the replayed config's. */
+static const int k_generic_replay[] = {0, 70, 85, 115, 123, 128, 133};
+#define GENERIC_REPLAY_BASE 136
+#define GENERIC_REPLAY_COUNT ((int)(sizeof k_generic_replay / sizeof k_generic_replay[0]))
+
 int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..135>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..142>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);
     const char* mode = (argc > 2) ? argv[2] : "ll";
 
+    const char* arch = "gfx1151";
+    int spec_idx = idx;
+    if(idx >= GENERIC_REPLAY_BASE && idx < GENERIC_REPLAY_BASE + GENERIC_REPLAY_COUNT)
+    {
+        spec_idx = k_generic_replay[idx - GENERIC_REPLAY_BASE];
+        arch = "gfx11-generic";
+    }
+
     rocke_wmma_fmha_fwd_spec_t spec;
-    if(make_spec(idx, &spec) != 0)
+    if(make_spec(spec_idx, &spec) != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
     }
-
-    const char* arch = "gfx1151";
 
     /* Validate the spec (mirrors is_valid_spec). */
     char reason[256];

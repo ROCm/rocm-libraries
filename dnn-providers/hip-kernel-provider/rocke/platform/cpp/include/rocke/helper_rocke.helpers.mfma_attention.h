@@ -75,6 +75,15 @@ extern "C" {
 /* _WMMA_ATTN_OP_ID (Python module-level constant). */
 #define ROCKE_WMMA_ATTN_OP_ID "wmma_f32_16x16x16_f16"
 
+/* _wmma_attn_op_id(target, dtype): the split-K wmma_gfx12_f32_16x16x16_<elem>
+ * atom when the target catalog lists it, otherwise the gfx11
+ * wmma_f32_16x16x16_<elem> atom. elem is bf16 for dtype "bf16", else f16.
+ * Writes into out (always NUL-terminated when out_cap > 0) and returns out. */
+const char* rocke_wmma_attn_op_id(const rocke_arch_target_t* target,
+                                  const char* dtype,
+                                  char* out,
+                                  size_t out_cap);
+
 /* ------------------------------------------------------- _ir_type_for_dtype *
  *
  * Python:

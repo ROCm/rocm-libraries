@@ -4,10 +4,12 @@
 #
 # tests/parity/gfx1151_wmma_fmha_fwd_emit.py -- Python reference emitter for the
 # gfx1151 (RDNA3.5 / Strix Halo) WMMA FMHA forward instance parity harness.
-# Selects one of 136 sampled configurations by argv[1] (0..135), builds it
-# via build_wmma_fmha_fwd(arch='gfx1151') and prints
-# lower_kernel_to_llvm(kernel, arch='gfx1151') to stdout so it can be
-# byte-compared with the C emitter gfx1151_wmma_fmha_fwd_emit.c.
+# Selects one of 143 sampled configurations by argv[1] (0..142), builds it
+# via build_wmma_fmha_fwd(arch=<cfg arch>) and prints
+# lower_kernel_to_llvm(kernel, arch=<cfg arch>) to stdout so it can be
+# byte-compared with the C emitter gfx1151_wmma_fmha_fwd_emit.c. Configs 0..135
+# use gfx1151; 136..142 replay representative configs at gfx11-generic, whose
+# output must equal the replayed config's (one kernel set for every gfx11).
 from dataclasses import replace
 
 from kernels.gfx1151.wmma_fmha_fwd import WmmaFmhaFwdSpec, build_wmma_fmha_fwd
@@ -36,6 +38,16 @@ _ATTN_BIAS_CASES = (
     ("dense", 0, 128, "causal", True, True, "q", "saq", 0, "fp16"),
     ("dense", 0, 64, "none", False, False, "q", "", 0, "bf16"),
 )
+
+# Standard dense, transposed QK (D64 and D128 bottom-right), FP8 packed KV,
+# distinct V width, additive bias, and D256 output-column tiling.
+_GENERIC_REPLAY = (0, 70, 85, 115, 123, 128, 133)
+
+
+def _spec_and_arch(idx: int):
+    if 136 <= idx < 136 + len(_GENERIC_REPLAY):
+        return _spec(_GENERIC_REPLAY[idx - 136]), "gfx11-generic"
+    return _spec(idx), "gfx1151"
 
 
 def _spec(idx: int) -> WmmaFmhaFwdSpec:
@@ -257,10 +269,9 @@ def _spec(idx: int) -> WmmaFmhaFwdSpec:
 
 def main() -> int:
     return run_emit(
-        _spec,
+        _spec_and_arch,
         build_wmma_fmha_fwd,
-        usage="usage: gfx1151_wmma_fmha_fwd_emit.py <config_index 0..135>\n",
-        arch="gfx1151",
+        usage="usage: gfx1151_wmma_fmha_fwd_emit.py <config_index 0..142>\n",
     )
 
 

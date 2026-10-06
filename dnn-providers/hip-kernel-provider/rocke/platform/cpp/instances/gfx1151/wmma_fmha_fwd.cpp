@@ -258,10 +258,9 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
     {
         arch = WMMA_FMHA_DEFAULT_ARCH;
     }
-    if(!wmma_valid_value_tile(spec)
-       || ((spec->value_tile_size != 0 || spec->v_head_size != 0) && strcmp(arch, "gfx1151") != 0))
+    if(!wmma_valid_value_tile(spec))
     {
-        wmma_set_reason(reason, reason_cap, "invalid gfx1151 output-column tile or V head size");
+        wmma_set_reason(reason, reason_cap, "invalid output-column tile or V head size");
         return false;
     }
     const char* dtype = wmma_dtype(spec);
@@ -304,13 +303,13 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
     }
     if(spec->transposed_qk)
     {
-        if(strcmp(arch, "gfx1151") != 0 || (spec->head_size != 64 && spec->head_size != 128)
+        if((spec->head_size != 64 && spec->head_size != 128)
            || (spec->block_n != 32 && spec->block_n != 64)
            || (spec->num_waves != 1 && spec->num_waves != 2))
         {
             wmma_set_reason(reason,
                             reason_cap,
-                            "transposed QK requires gfx1151 FP16/BF16 D64/D128, block_n 32/64 "
+                            "transposed QK requires FP16/BF16 D64/D128, block_n 32/64 "
                             "and one or two waves");
             return false;
         }
@@ -341,11 +340,8 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
         return false;
     }
 
-    const bool bf16 = strcmp(dtype, "bf16") == 0;
-    const char* op_id
-        = strcmp(arch, "gfx1201") == 0
-              ? (bf16 ? "wmma_gfx12_f32_16x16x16_bf16" : "wmma_gfx12_f32_16x16x16_f16")
-              : (bf16 ? "wmma_f32_16x16x16_bf16" : "wmma_f32_16x16x16_f16");
+    char op_id[48];
+    rocke_wmma_attn_op_id(target, dtype, op_id, sizeof(op_id));
     op = rocke_archtarget_by_op_id(target, op_id);
     if(op == NULL || op->family == NULL || strcmp(op->family, "wmma") != 0)
     {
@@ -356,6 +352,13 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
                  op_id,
                  arch);
         wmma_set_reason(reason, reason_cap, buf);
+        return false;
+    }
+    /* The transposed-QK body relies on the gfx11 operand duplication across lane
+     * halves; gfx12 rows run the standard body only. */
+    if(spec->transposed_qk && strncmp(op_id, "wmma_gfx12_", 11) == 0)
+    {
+        wmma_set_reason(reason, reason_cap, "transposed QK requires the gfx11 WMMA operand layout");
         return false;
     }
 

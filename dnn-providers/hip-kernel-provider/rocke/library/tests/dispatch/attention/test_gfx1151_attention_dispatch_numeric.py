@@ -33,11 +33,15 @@ import numpy as np
 import pytest
 
 from dispatch.attention import AttentionMaskType, AttentionRequest, dispatch_attention
+from rocke.core.arch import generic_arch_from_target_id
 from rocke.runtime import hip_module
 from rocke.runtime.hip_module import Runtime, get_device_arch
 
+# Every gfx11 (gfx12) device dispatches one gfx11-generic (gfx12-generic) set.
+_ARCH = generic_arch_from_target_id(get_device_arch() or "")
 _NEEDS_GPU = pytest.mark.skipif(
-    get_device_arch() != "gfx1151", reason="needs a gfx1151 GPU"
+    _ARCH not in ("gfx11-generic", "gfx12-generic"),
+    reason="needs an RDNA3/3.5 (gfx11) or RDNA4 (gfx12) GPU",
 )
 
 
@@ -192,7 +196,7 @@ def _request_for(case) -> AttentionRequest:
         seqlen_k=seqlen_k,
         hdim_q=case.head_dim,
         hdim_v=case.head_dim,
-        arch="gfx1151",
+        arch=_ARCH,
         dtype=case.dtype,
         mask_type=_mask_ordinal(case.mask),
         use_sinks=case.sinks,
@@ -1015,7 +1019,7 @@ def _dense_direct_request(batch, sq, sk, hq, hkv, dq, dv, **extra):
         seqlen_k=sk,
         hdim_q=dq,
         hdim_v=dv,
-        arch="gfx1151",
+        arch=_ARCH,
         dtype="fp16",
         layout="dense",
         **extra,
@@ -1459,7 +1463,7 @@ def test_dispatch_ragged_lse_gqa(use_sinks):
         seqlen_k=max(k_lengths),
         hdim_q=dim,
         hdim_v=dim,
-        arch="gfx1151",
+        arch=_ARCH,
         dtype="fp16",
         layout="ragged",
         mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
@@ -1717,7 +1721,7 @@ def test_dispatch_ragged_attn_bias_uses_within_sequence_positions(bias_dtype, ca
         seqlen_k=mk,
         hdim_q=dim,
         hdim_v=dim,
-        arch="gfx1151",
+        arch=_ARCH,
         dtype="fp16",
         layout="ragged",
         mask_type=mask,
@@ -1808,7 +1812,7 @@ def test_dispatch_bhsd_head96_noncausal_window_with_lse():
             seqlen_k=sk,
             hdim_q=dim,
             hdim_v=dim,
-            arch="gfx1151",
+            arch=_ARCH,
             dtype="fp16",
             layout="dense",
             tensor_layout="bhsd",

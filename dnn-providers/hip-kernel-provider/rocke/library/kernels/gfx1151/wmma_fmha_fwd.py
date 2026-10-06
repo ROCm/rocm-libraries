@@ -1,17 +1,20 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""FP16/BF16 WMMA attention forward for gfx1151.
+"""FP16/BF16 WMMA attention forward for RDNA (gfx11 and gfx12) targets.
 
-RDNA has no MFMA, so the QK^T and PV matmuls are built around the gfx11
-``wmma_f32_16x16x16_f16`` / ``wmma_f32_16x16x16_bf16`` with a **wave32** mapping.
+RDNA has no MFMA, so the QK^T and PV matmuls are built around the
+``wmma_f32_16x16x16_f16`` / ``wmma_f32_16x16x16_bf16`` family with a **wave32**
+mapping: the gfx11 atom (operands duplicated across lane halves) or the gfx12
+split-K atom, whichever the target's MMA catalog lists. Generic processors
+(``gfx11-generic``, ``gfx12-generic``) build one code object per generation.
 
 The wave32 QK -> online-softmax -> PV loop lives in the common FMHA-forward inner
 bodies of :mod:`rocke.helpers.mfma_attention`
 (:func:`~rocke.helpers.mfma_attention.mfma_attention_fwd_inner_body`, and
-``wmma_swapqk_fwd_inner_body`` for the transposed-QK specialization). Those bodies
-read the lane layout from the per-arch MMA contract and emit the matmul through
-the target-neutral ``b.mma``. This module is a thin **adapter**: it owns the
-gfx1151 kernel ABI, the ``(ceil(seqlen_q / q_rows_per_cta), num_query_heads,
+``wmma_swapqk_fwd_inner_body`` for the gfx11-only transposed-QK specialization).
+Those bodies read the lane layout from the per-arch MMA contract and emit the
+matmul through the target-neutral ``b.mma``. This module is a thin **adapter**:
+it owns the kernel ABI, the ``(ceil(seqlen_q / q_rows_per_cta), num_query_heads,
 batch * value_tiles)`` grid decode, and the per-batch pointer arithmetic, and hands
 the rest to the common body.
 
@@ -64,17 +67,11 @@ __all__ = [
     "wmma_fmha_fwd_grid",
     "wmma_fmha_fwd_signature",
     "is_valid_spec",
+    "uses_gfx11_operand_layout",
 ]
 
 _BLOCK_M = 16  # Q rows per wave per CTA
 _BLOCK_K = 16  # K positions per K-tile (WMMA N dim of QK^T)
-
-
-def _wmma_op_id_for_arch(arch: str, dtype: str) -> str:
-    """Select the dtype-matched WMMA atom, including the gfx1201 split-K layout."""
-    elem = "bf16" if dtype == "bf16" else "f16"
-    prefix = "wmma_gfx12" if arch == "gfx1201" else "wmma"
-    return f"{prefix}_f32_16x16x16_{elem}"
 
 
 @dataclass(frozen=True)
@@ -262,22 +259,34 @@ class WmmaFmhaFwdSpec:
         )
 
 
-def is_valid_spec(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> Tuple[bool, str]:
-    """Return ``(ok, reason)`` for a dtype-matched WMMA atom on a wave32 target."""
-    from rocke.core.arch import ArchTarget
+def uses_gfx11_operand_layout(arch: str, dtype: str = "fp16") -> bool:
+    """True when ``arch`` multiplies with the gfx11 WMMA atom.
 
-    if spec.transposed_qk and arch != "gfx1151":
-        return False, "transposed QK requires gfx1151"
-    if spec.value_tile_size and arch != "gfx1151":
-        return False, "output-column tiling requires gfx1151"
-    if spec.v_head_size and arch != "gfx1151":
-        return False, "a distinct V head size requires gfx1151"
+    That atom duplicates the A/B operands across the two lane halves, which the
+    transposed-QK body relies on; gfx12 rows use the split-K atom instead.
+    """
+    from rocke.core.arch import ArchTarget
+    from rocke.helpers.mfma_attention import _wmma_attn_op_id
+
+    return not _wmma_attn_op_id(ArchTarget.from_gfx(arch), dtype).startswith(
+        "wmma_gfx12_"
+    )
+
+
+def is_valid_spec(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> Tuple[bool, str]:
+    """Return ``(ok, reason)`` for a dtype-matched WMMA atom on a wave32 target.
+
+    Every gfx11 or gfx12 catalog row qualifies, concrete or generic; the atom
+    comes from the row's MMA catalog rather than from the processor name.
+    """
+    from rocke.core.arch import ArchTarget
+    from rocke.helpers.mfma_attention import _wmma_attn_op_id
 
     try:
         target = ArchTarget.from_gfx(arch)
     except KeyError as e:
         return False, str(e)
-    op_id = _wmma_op_id_for_arch(arch, spec.dtype)
+    op_id = _wmma_attn_op_id(target, spec.dtype)
     op = target.mma.by_op_id(op_id)
     if op is None or op.family != "wmma":
         return False, (
@@ -285,6 +294,10 @@ def is_valid_spec(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> Tuple[bool, s
             f"(WMMA is an RDNA gfx11/gfx12 instruction; this kernel needs a "
             f"wave32 RDNA target)"
         )
+    # The transposed-QK body relies on the gfx11 operand duplication across
+    # lane halves; gfx12 rows run the standard body only.
+    if spec.transposed_qk and op_id.startswith("wmma_gfx12_"):
+        return False, "transposed QK requires the gfx11 WMMA operand layout"
     if target.wave_size != op.wave_size:
         return False, (
             f"arch wave size {target.wave_size} != WMMA atom wave size "

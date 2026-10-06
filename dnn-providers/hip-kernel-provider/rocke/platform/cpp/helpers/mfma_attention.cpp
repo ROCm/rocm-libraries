@@ -737,6 +737,18 @@ static rocke_value_t* load_wmma_fp8(rocke_ir_builder_t* b,
     return rocke_b_vec_pack(b, values, count, dtype);
 }
 
+const char* rocke_wmma_attn_op_id(const rocke_arch_target_t* target,
+                                  const char* dtype,
+                                  char* out,
+                                  size_t out_cap)
+{
+    const char* elem = (dtype != NULL && strcmp(dtype, "bf16") == 0) ? "bf16" : "f16";
+    snprintf(out, out_cap, "wmma_gfx12_f32_16x16x16_%s", elem);
+    if(target == NULL || rocke_mma_catalog_by_op_id(&target->mma, out) == NULL)
+        snprintf(out, out_cap, "wmma_f32_16x16x16_%s", elem);
+    return out;
+}
+
 rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
                                                    const rocke_mfma_attn_params_t* p,
                                                    bool v_lds_stage,
@@ -756,20 +768,12 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         return ROCKE_ERR_VALUE;
     }
 
-    /* Per-arch WMMA attention op_id (mirrors Python _wmma_attn_op_id): gfx11
-     * (RDNA3/3.5) uses the cross-half-duplicated wmma_f32_16x16x16_* atom; gfx12
-     * (RDNA4) uses the split-K wmma_gfx12_f32_16x16x16_* atom. The op_id also
-     * selects the f16 vs bf16 intrinsic mangling, so it is keyed on dtype. */
-    const char* elem = (strcmp(dtype, "bf16") == 0) ? "bf16" : "f16";
+    /* Per-target WMMA attention op_id from the catalog (mirrors Python
+     * _wmma_attn_op_id): gfx12 rows list the split-K atom, gfx11 rows the
+     * cross-half-duplicated one. The op_id also selects the f16 vs bf16
+     * intrinsic mangling, so it is keyed on dtype. */
     char op_id[48];
-    if(strcmp(arch, "gfx1201") == 0)
-    {
-        snprintf(op_id, sizeof(op_id), "wmma_gfx12_f32_16x16x16_%s", elem);
-    }
-    else
-    {
-        snprintf(op_id, sizeof(op_id), "wmma_f32_16x16x16_%s", elem);
-    }
+    rocke_wmma_attn_op_id(target, dtype, op_id, sizeof(op_id));
 
     const rocke_mma_op_t* op = rocke_mma_catalog_by_op_id(&target->mma, op_id);
     if(op == NULL || op->family == NULL || strcmp(op->family, "wmma") != 0)
