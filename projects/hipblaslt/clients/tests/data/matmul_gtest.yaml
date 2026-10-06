@@ -4082,15 +4082,17 @@ Tests:
   unit_check: 1
   fast_check: 1
 
-# ROCM-32139: the client CPU reference writes E with D's leading dimension, so when
-# lde differs from ldd unit_check fails a correct GPU result that fast_check
-# accepts. Quarantined in known_bugs.yaml.
+# E and D laid out differently (lde = M, and a padded lde), one batch and two, where
+# the CPU reference used to write E with D's leading dimension and batch stride
+# (ROCM-32139).
 - name: matmul_fast_check_aux_padded_ldd_ROCM32139
   category: pre_checkin
   function:
     matmul: *hpa_half_precision
   matrix_size:
     - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 151 }
+    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 151, lde: 140 }
+  batch_count: [1, 2]
   transA: N
   transB: T
   alpha: 2.0
@@ -4104,10 +4106,9 @@ Tests:
   fast_check: 1
 
 # fast_check-only copies of the cases above that are quarantined only because the
-# client CPU reference is wrong (ROCM-32062, ROCM-32139). fast_check passes the GPU
-# result there, so these keep its coverage while the reference is broken. The aux
-# copy also pads E (lde) so a kernel that writes E with D's leading dimension shows.
-# Runtime on gfx90a: 7 cases, about 1 s.
+# client CPU reference is wrong (ROCM-32062). fast_check passes the GPU result there,
+# so these keep its coverage while the reference is broken.
+# Runtime on gfx90a: 6 cases, about 1 s.
 - name: matmul_fast_check_only_epilogue_padded_lda
   category: pre_checkin
   function:
@@ -4158,24 +4159,6 @@ Tests:
   unit_check: 0
   fast_check: 1
   gpu_arch: '950'
-
-- name: matmul_fast_check_only_aux_padded_ldd_lde
-  category: pre_checkin
-  function:
-    matmul: *hpa_half_precision
-  matrix_size:
-    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 151, lde: 140 }
-  transA: N
-  transB: T
-  alpha: 2.0
-  beta: -2.0
-  bias_vector: 1
-  bias_type: f32_r
-  use_e: 1
-  activation_type: relu
-  initialization: integer_exact
-  unit_check: 0
-  fast_check: 1
 
 # amaxD has no cross-check case: gfx90a and gfx950 offer no amaxD solutions for
 # these types, and gfx942 offers it only with an fp8 output, which the integer
