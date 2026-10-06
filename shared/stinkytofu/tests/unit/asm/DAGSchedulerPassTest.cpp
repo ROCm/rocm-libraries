@@ -1793,6 +1793,24 @@ TEST_F(DAGSchedulerPassTest, DsIssueCapMode_PeriodicIsReportedAndHonorsSpan) {
 // Either mode caps a back-to-back ds_load run at dsReadPerCap while fillers are
 // left to run in the wait (a cap wait emits no instruction, so a tail of only
 // ds_loads is not a run), with the queue throttle out of the way (latency 1).
+// Periodic: when the next ds_load would open a new period right after a ds_load,
+// a free non-ds instruction goes first -- here the only one is a WMMA, which the
+// capped ds_load used to hold back by counting as pending fill work.
+TEST_F(DAGSchedulerPassTest, DsIssueCapPeriodic_NonDsSeparatesPeriods) {
+    for (int i = 0; i < 12; i++) createMovableDsLoad(i * 4, 80, i + 1);
+    for (int i = 0; i < 4; i++) createWmmaF32_16x16x16_bf16(200 + 8 * i, 300 + 8 * i);
+    runWithDsCapMode(PassFeatureConfig::DsIssueCapMode::Periodic, [](PassFeatureConfig& p) {
+        p.dagFeatures.dsReadPerCap = 4;
+        p.dagFeatures.dsIssueCapSpanCycles = 8;
+        p.dagFeatures.dsReadQueueDepth = 16;
+        p.dagFeatures.dsReadThrottleLatency = 1;
+    });
+    std::string shape;
+    for (const std::string& m : mnemonicSequence(*bb))
+        shape += m.find("wmma") != std::string::npos ? 'W' : (m == "ds_load_b128" ? 'd' : '?');
+    EXPECT_EQ(shape, "WddddWddddWddddW");
+}
+
 TEST_F(DAGSchedulerPassTest, DsIssueCapMode_BothModesBoundTheBurst) {
     for (auto mode : {PassFeatureConfig::DsIssueCapMode::Sliding,
                       PassFeatureConfig::DsIssueCapMode::Periodic}) {
