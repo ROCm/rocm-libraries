@@ -10,6 +10,11 @@ import sys
 import types
 from pathlib import Path
 
+from rocke.core.debug_manifest import (
+    DEBUG_DESCRIPTION_MAGIC,
+    debug_description_symbol,
+)
+
 
 class FakeGdbError(Exception):
     pass
@@ -117,6 +122,44 @@ def _load_with_fake_gdb(monkeypatch):
     fake.selected_frame = lambda: FakeFrame()
     fake.parameter = lambda name: False if name == "non-stop" else None
     fake.write = writes.append
+    description = {
+        "schema": "rocke-debug-description/v1",
+        "kernel": "demo_kernel",
+        "values": [
+            {
+                "dwarf": {"name": "acc", "type": "vec<f32x2>"},
+                "logical": _manifest()["values"][0]["logical"],
+            }
+        ],
+    }
+    encoded = json.dumps(description).encode("utf-8")
+    metadata = DEBUG_DESCRIPTION_MAGIC + len(encoded).to_bytes(8, "little") + encoded
+    metadata_address = 0x8000
+    metadata_symbol = debug_description_symbol("demo_kernel")
+
+    def execute(command, to_string=False):
+        assert to_string is True
+        if command == "info symbol 0x1234":
+            return "demo_kernel + 20 in section .text of memory://1\n"
+        if command == f"info address {metadata_symbol}":
+            return (
+                f'Symbol "{metadata_symbol}" is at 0x{metadata_address:x} '
+                "in a file compiled without debugging.\n"
+            )
+        if command == "info address acc":
+            return """Symbol "acc" is multi-location:
+  Range 0x1200-0x1300: a variable in $v2 [4-byte piece], and a variable in $v3 [4-byte piece]
+.
+"""
+        raise AssertionError(f"unexpected gdb command: {command}")
+
+    class Inferior:
+        def read_memory(self, address, size):
+            start = address - metadata_address
+            return memoryview(metadata[start : start + size])
+
+    fake.execute = execute
+    fake.selected_inferior = Inferior
     monkeypatch.setitem(sys.modules, "gdb", fake)
     tool = Path(__file__).resolve().parents[2] / "tools/rocke_debug.py"
     spec = importlib.util.spec_from_file_location("rocke_debug_with_fake_gdb", tool)
@@ -166,3 +209,27 @@ def test_print_command_collects_and_renders_without_snapshot_file(
     assert "1.0 2.0" in writes[0]
     assert "~3.0 ~4.0" in writes[0]
     assert list(tmp_path.iterdir()) == [manifest]
+
+
+def test_print_command_discovers_description_and_registers(monkeypatch):
+    commands, writes, reads = _load_with_fake_gdb(monkeypatch)
+
+    commands["rocke print"].invoke("", False)
+
+    assert reads == ["$pc", "$pc", "$exec", "$v2", "$v3"]
+    assert len(writes) == 1
+    assert "acc f32 [2x2] layout=test.acc status=available" in writes[0]
+    assert "1.0 2.0" in writes[0]
+    assert "~3.0 ~4.0" in writes[0]
+
+
+def test_print_command_can_show_logical_cell_sources(monkeypatch):
+    commands, writes, reads = _load_with_fake_gdb(monkeypatch)
+
+    commands["rocke print"].invoke("--show-sources", False)
+
+    assert reads == ["$pc", "$pc", "$exec", "$v2", "$v3"]
+    assert len(writes) == 1
+    assert "sources (lane/register):" in writes[0]
+    assert "0: L0/$v2 L0/$v3" in writes[0]
+    assert "1: ~L1/$v2 ~L1/$v3" in writes[0]
