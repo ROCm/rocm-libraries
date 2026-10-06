@@ -3150,3 +3150,61 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_PreservesInstructionCount) {
     runPassWithDsReadThrottle(/*queueDepth=*/2, /*throttleLatency=*/8);
     EXPECT_EQ(countStinkyInstructions(*body), beforeCount) << "throttle must not drop instructions";
 }
+
+// WMMA issue queue. Registers stay below v256 (one VGPR MSB bank).
+namespace {
+// "W" for a WMMA, "d" for a ds_load, "." for anything else.
+std::string wdShape(const std::vector<std::string>& seq) {
+    std::string s;
+    for (const std::string& m : seq) {
+        s += m.find("wmma") != std::string::npos ? 'W' : m.find("ds_load") == 0 ? 'd' : '.';
+    }
+    return s;
+}
+}  // namespace
+
+// Depth 1 / target 1 is the single-window model, whatever the queue fields say.
+TEST_F(DAGSchedulerPassTest, WmmaQueue_DepthOneIsTheDefault) {
+    std::vector<std::string> seqs[2];
+    for (int on = 0; on < 2; ++on) {
+        SetUp();
+        for (int i = 0; i < 6; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
+        for (int i = 0; i < 4; i++)
+            createVAddInBlock(bb, arch, 150 + 3 * i, 151 + 3 * i, 152 + 3 * i);
+        for (int i = 0; i < 6; i++) createWmmaF32_16x16x16_bf16(8 * i, 100 + 8 * i);
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsReadQueueDepth = 16;
+        pfc.dagFeatures.dsReadThrottleLatency = 1;
+        pfc.dagFeatures.dsReadPerCap = 100;
+        if (on) {
+            pfc.dagFeatures.wmmaQueueDepth = 1;
+            pfc.dagFeatures.wmmaQueueTarget = 4;  // clamped to the depth
+        }
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        seqs[on] = mnemonicSequence(*bb);
+    }
+    EXPECT_EQ(seqs[0], seqs[1]);
+}
+
+// Depth 4, target 2: ds_loads fill while at least two WMMAs are outstanding, and a WMMA
+// goes in once fewer are, so the queue never runs dry.
+TEST_F(DAGSchedulerPassTest, WmmaQueue_KeepsTheQueueFed) {
+    for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
+    for (int i = 0; i < 8; i++) createWmmaF32_16x16x16_bf16(8 * i, 100 + 8 * i);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.dsReadThrottleLatency = 1;
+    pfc.dagFeatures.dsReadPerCap = 100;
+    pfc.dagFeatures.wmmaQueueDepth = 4;
+    pfc.dagFeatures.wmmaQueueTarget = 2;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    EXPECT_EQ(wdShape(mnemonicSequence(*bb)), "WWddddddWddWWWWW");
+}

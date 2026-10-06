@@ -115,6 +115,14 @@ struct PassFeatureConfig {
         /// (CDNA5Config::dsIssueCapSpanCycles) where no matrix op sets one.
         int dsIssueCapSpanCycles = 0;
         int tensorLoadWmmaSpace = 0;
+        /// WMMA issue queue: max WMMAs outstanding in the matrix pipe (the pipe buffers
+        /// ~8 on gfx1250). A WMMA is appended whenever fewer are outstanding, instead
+        /// of waiting for the previous one to finish. 1 = the single-window model.
+        int wmmaQueueDepth = 1;
+        /// Outstanding WMMAs below which the next WMMA preempts ds/fillers, so the pipe
+        /// never runs dry; at or above it ds/fillers go first. Clamped to
+        /// [1, wmmaQueueDepth]; 1 = never preempt.
+        int wmmaQueueTarget = 1;
         /// Extra cycles kept between an after-barrier and the before-side
         /// ds_loads when exclusive overlap uses gap placement. Converted to
         /// WMMA windows by the region's matrix latency. 0 disables the extra

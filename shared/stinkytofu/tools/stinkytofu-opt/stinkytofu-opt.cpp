@@ -186,6 +186,7 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--tensor-load-wmma-space=") ||
                 arg.starts_with("--tensor-load-ds-load-gap-cycles=") ||
                 arg.starts_with("--barrier-half-slack=") ||
+                arg.starts_with("--wmma-queue-depth=") || arg.starts_with("--wmma-queue-target=") ||
                 arg.starts_with("--global-read-queue-depth=") ||
                 arg.starts_with("--global-read-drain-latency=") ||
                 arg.starts_with("--merge-barrier-threshold=") ||
@@ -551,6 +552,12 @@ int main(int argc, char** argv) {
         } else if (a.starts_with("--barrier-half-slack=")) {
             passFeatureConfig.dagFeatures.barrierHalfSlack =
                 std::stoi(a.substr(std::string("--barrier-half-slack=").size()));
+        } else if (a.starts_with("--wmma-queue-depth=")) {
+            passFeatureConfig.dagFeatures.wmmaQueueDepth =
+                std::stoi(a.substr(std::string("--wmma-queue-depth=").size()));
+        } else if (a.starts_with("--wmma-queue-target=")) {
+            passFeatureConfig.dagFeatures.wmmaQueueTarget =
+                std::stoi(a.substr(std::string("--wmma-queue-target=").size()));
         } else if (a.starts_with("--global-read-queue-depth=")) {
             passFeatureConfig.dagFeatures.globalReadQueueDepth = std::stoi(a.substr(26));
         } else if (a.starts_with("--global-read-drain-latency=")) {

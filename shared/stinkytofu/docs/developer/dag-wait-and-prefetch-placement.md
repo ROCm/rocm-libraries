@@ -62,6 +62,8 @@ All are `ModuleOptions`, settable from tensilelite. `stinkytofu-opt` flags set t
 | `DsSlotFirst` | true | `--ds-slot-first` | ds_load before fillers in a saturated ds stream |
 | `EvenSpreadFillers` | true | – | filler quota per window |
 | `WarGateWmmas` | -1 | `--war-gate-wmmas=N` | WMMA-src → ds_load overwrite gap; -1 = derived |
+| `WmmaQueueDepth` | 1 | `--wmma-queue-depth=N` | WMMAs outstanding in the matrix pipe (it buffers ~8); a WMMA is appended whenever fewer are outstanding. 1 = one WMMA at a time. > 1 also merges the waits of back-to-back WMMAs onto the first one |
+| `WmmaQueueTarget` | 1 | `--wmma-queue-target=N` | below N outstanding WMMAs the next WMMA goes before ds_loads and fillers; at or above, they go first. Clamped to [1, depth]; 1 = never preempt |
 
 ## Measured effect
 
