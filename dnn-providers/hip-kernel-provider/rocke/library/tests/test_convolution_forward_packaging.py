@@ -29,8 +29,13 @@ from builders.common.convolution_forward import (
 from dispatch.grouped_convolution import ConvGroupedRequest, dispatch_conv_grouped
 from rocke.core.ir import BF16, F16, I32, PtrType
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from kernels.common.conv_abi import (
+    conv_arg_names,
+    conv_desc_names,
+    conv_direct_arg_names,
+)
+from kernels.common.conv_args import ConvArgs
 from kernels.common.conv_direct_grouped import (
-    _DW_UNROLL_THRESH,
     DirectConvProblem,
     DirectDepthwiseSpatialSpec,
     DirectDepthwiseSpec,
@@ -58,6 +63,28 @@ def _request(**overrides) -> ConvGroupedRequest:
     }
     values.update(overrides)
     return ConvGroupedRequest(**values)
+
+
+def _assert_aot_abi(packaged, spec: Gfx950ConvFwdSpec, dtype: str) -> None:
+    """The packaged kernel declares rocKE's AOT ABI for its family, in order."""
+    abi = conv_direct_arg_names() if spec.is_direct else conv_arg_names()
+    assert [p.name for p in packaged.params] == conv_desc_names(abi)
+    assert [p.name for p in packaged.params][:6] == [
+        "A",
+        "B",
+        "D",
+        "A_bytes",
+        "B_bytes",
+        "D_bytes",
+    ]
+    element = F16 if dtype == "fp16" else BF16
+    assert [p.type for p in packaged.params] == [PtrType(element, "global")] * 3 + [
+        I32
+    ] * (len(abi) - 3)
+    assert all(p.attrs["align"] == 16 for p in packaged.params[:3])
+    signature = spec.launch_signature()
+    assert [arg["name"] for arg in signature] == conv_desc_names(abi)
+    assert set(spec.launch_values(0, 0, 0, 0, 0, 0)) == set(conv_desc_names(abi))
 
 
 def _original_problem(request: ConvGroupedRequest) -> ConvProblem:
@@ -97,7 +124,7 @@ def test_factory_preserves_dispatcher_defaults(dtype):
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize("tile_k", [64, 128])
 @pytest.mark.parametrize("llvm_flavor", ["llvm20", "llvm22"])
-def test_adapter_emits_original_llvm_and_six_argument_abi(dtype, tile_k, llvm_flavor):
+def test_adapter_emits_original_llvm_and_aot_abi(dtype, tile_k, llvm_flavor):
     request = _request(dtype=dtype)
     spec = gfx950_conv_fwd_spec_for_request(request, tile_k=tile_k)
     original_spec = dispatch_conv_grouped(request).spec.to_fwd_spec(
@@ -112,18 +139,7 @@ def test_adapter_emits_original_llvm_and_six_argument_abi(dtype, tile_k, llvm_fl
         packaged, arch="gfx950", llvm_flavor=llvm_flavor
     ) == _lower_kernel_to_llvm_python(original, arch="gfx950", llvm_flavor=llvm_flavor)
     assert packaged.name == spec.kernel_name()
-    assert [p.name for p in packaged.params] == [
-        "A",
-        "B",
-        "D",
-        "A_bytes",
-        "B_bytes",
-        "D_bytes",
-    ]
-    element = F16 if dtype == "fp16" else BF16
-    expected_types = [PtrType(element, "global")] * 3 + [I32] * 3
-    assert [p.type for p in packaged.params] == expected_types
-    assert all(p.attrs["align"] == 16 for p in packaged.params[:3])
+    _assert_aot_abi(packaged, spec, dtype)
     assert packaged.max_workgroup_size == 256
 
 
@@ -318,14 +334,7 @@ def test_depthwise_spec_emits_original_kernel(dtype, tile_k):
         packaged, arch="gfx950", llvm_flavor="llvm22"
     ) == _lower_kernel_to_llvm_python(original, arch="gfx950", llvm_flavor="llvm22")
     assert packaged.name == spec.kernel_name()
-    assert [p.name for p in packaged.params] == [
-        "A",
-        "B",
-        "D",
-        "A_bytes",
-        "B_bytes",
-        "D_bytes",
-    ]
+    _assert_aot_abi(packaged, spec, dtype)
     assert spec.grid()[2] == spec.groups == 32
     assert spec.block() == (256, 1, 1)
 
@@ -729,8 +738,7 @@ def test_direct_spec_round_trips_through_json():
 
 # Accepted direct shapes: (request overrides, block_w, block_waves). Covers the
 # masked lanes of a partial channel tile, stride 2 with odd and even extents,
-# filters whose padding is not (K-1)/2 but still covers every output row, and
-# both runtime H-loop paths.
+# large filters, and tall images.
 _DIRECT_ACCEPTED = [
     ({}, None, None),
     ({}, 4, 1),
@@ -739,22 +747,6 @@ _DIRECT_ACCEPTED = [
     (
         {"G": 96, "C": 96, "K": 96, "Hi": 16, "Wi": 18, "stride_h": 2, "stride_w": 2},
         4,
-        1,
-    ),
-    ({"Y": 4, "X": 4, "Hi": 16, "Wi": 16, "stride_h": 2, "stride_w": 2}, 4, 1),
-    ({"Y": 2, "X": 2, "pad_h": 0, "pad_w": 0, "stride_h": 2, "stride_w": 2}, 4, 1),
-    (
-        {
-            "Y": 3,
-            "X": 3,
-            "pad_h": 0,
-            "pad_w": 0,
-            "Hi": 9,
-            "Wi": 9,
-            "stride_h": 3,
-            "stride_w": 3,
-        },
-        0,
         1,
     ),
     (
@@ -803,19 +795,6 @@ def test_direct_accepted_shapes(overrides, block_w, block_waves):
         _dw_request(**overrides), block_w=block_w, block_waves=block_waves
     )
     assert supports_gfx950_conv_fwd(spec) == (True, "ok")
-
-
-def test_runtime_loop_shapes_take_rockes_runtime_h_loop():
-    # The catalog's runtime-loop arms must exceed rocKE's unroll threshold.
-    std = gfx950_conv_fwd_direct_spec_for_request(
-        _dw_request(G=64, C=64, K=64, Hi=70, Wi=40), block_w=32
-    )
-    assert (std.Hi + std.Y - 1) * std.block_w * std.Y * std.X > _DW_UNROLL_THRESH
-    spatial = gfx950_conv_fwd_direct_spec_for_request(
-        _dw_request(G=5, C=5, K=5, Hi=56, Wi=24, Y=17, X=17, pad_h=8, pad_w=8)
-    )
-    assert spatial.direct_variant == "spatial"
-    assert (spatial.Hi + spatial.Y - 1) * spatial.Y * spatial.X > _DW_UNROLL_THRESH
 
 
 # Shapes rocKE's direct kernels accept but compute wrong (pad above (K-1)/2
@@ -880,6 +859,32 @@ _DIRECT_DECLINED = [
     ({}, None, "block_waves must be"),
     ({"N": 65536, "Hi": 3, "Wi": 3, "G": 2, "C": 2, "K": 2}, 4, "grid z"),
     ({"N": 1, "Hi": 3, "Wi": 70000, "G": 2, "C": 2, "K": 2}, 1, "grid x"),
+    # Every row and column covered, but rocKE's own forward_padding_reason refuses
+    # anything except an odd filter with "same" padding.
+    (
+        {"Y": 4, "X": 4, "Hi": 16, "Wi": 16, "stride_h": 2, "stride_w": 2},
+        4,
+        "odd filter extents",
+    ),
+    (
+        {"Y": 2, "X": 2, "pad_h": 0, "pad_w": 0, "stride_h": 2, "stride_w": 2},
+        4,
+        "odd filter extents",
+    ),
+    (
+        {
+            "Y": 3,
+            "X": 3,
+            "pad_h": 0,
+            "pad_w": 0,
+            "Hi": 9,
+            "Wi": 9,
+            "stride_h": 3,
+            "stride_w": 3,
+        },
+        0,
+        "'same' padding",
+    ),
 ]
 
 
@@ -891,6 +896,54 @@ def test_direct_declines_outside_the_guarded_contract(overrides, block_w, reason
         gfx950_conv_fwd_direct_spec_for_request(
             request, block_w=block_w, block_waves=block_waves
         )
+
+
+def test_shapes_rocke_refuses_for_direct_stay_on_implicit_gemm():
+    for overrides, _, reason in _DIRECT_DECLINED[-3:]:
+        assert reason in ("odd filter extents", "'same' padding")
+        spec = gfx950_conv_fwd_spec_for_request(_dw_request(**overrides))
+        assert supports_gfx950_conv_fwd(spec) == (True, "ok")
+
+
+@pytest.mark.parametrize(
+    "request_",
+    [
+        _request(),
+        _request(G=4, C=32, K=64, stride_h=2, stride_w=2, Hi=15, Wi=19),
+        _request(N=3, Y=1, X=1, pad_h=0, pad_w=0, C=48, K=80),
+    ],
+)
+@pytest.mark.parametrize("tile_k", [None, 128])
+def test_implicit_gemm_launch_values_follow_the_packaged_grid(request_, tile_k):
+    # The kernel decodes its workgroup id against p_num_pid_m/n, so they must be the
+    # tile counts of the grid the native pack launches.
+    spec = gfx950_conv_fwd_spec_for_request(request_, tile_k=tile_k)
+    values = spec.launch_values(0, 0, 0, 1, 2, 3)
+    assert (values["p_num_pid_n"], values["p_num_pid_m"], spec.groups) == spec.grid()
+    expected = ConvArgs.from_problem(
+        spec.to_problem(), tile_m=spec.tile_m, tile_n=spec.tile_n
+    ).to_launch_values(0, 0, 0, 1, 2, 3)
+    assert values == expected
+    assert (values["A_bytes"], values["B_bytes"], values["D_bytes"]) == (1, 2, 3)
+
+
+def test_direct_launch_values_are_rockes_direct_conv_args():
+    spec = gfx950_conv_fwd_direct_spec_for_request(
+        _dw_request(G=96, C=96, K=96, Hi=16, Wi=18, stride_h=2, stride_w=2), block_w=4
+    )
+    values = spec.launch_values(0, 0, 0, 1, 2, 3)
+    assert values == ConvArgs.from_problem(spec.to_direct_problem()).to_launch_values(
+        0, 0, 0, 1, 2, 3
+    )
+    assert (values["p_Ho"], values["p_Wo"]) == (8, 9)
+
+
+def test_implicit_gemm_refuses_a_reduction_past_the_24_bit_limit():
+    spec = Gfx950ConvFwdSpec(N=1, Hi=8, Wi=8, C=1 << 17, K=8, Y=8, X=8)
+    ok, reason = supports_gfx950_conv_fwd(spec)
+    assert not ok and "2**23" in reason
+    ok, reason = supports_gfx950_conv_fwd(replace(spec, C=(1 << 17) - 8))
+    assert "2**23" not in reason
 
 
 def test_declined_direct_shapes_stay_on_implicit_gemm():
@@ -951,7 +1004,7 @@ def test_implicit_gemm_spec_must_leave_direct_fields_at_defaults(override):
         {"sH": 2, "sW": 2},
         {"pH": 0, "pW": 0, "Hi": 9, "Wi": 9, "Y": 1, "X": 1, "sH": 2, "sW": 2},
         {"Y": 5, "X": 5, "pH": 2, "pW": 2},
-        {"Y": 4, "X": 4, "sH": 2, "sW": 2, "Hi": 16, "Wi": 16},
+        {"Y": 7, "X": 7, "pH": 3, "pW": 3, "sH": 2, "sW": 2, "Hi": 16, "Wi": 16},
         {"block_w": 5},
         {"block_waves": 2},
         {"direct_variant": "spatial", "block_w": 0},
@@ -1049,18 +1102,7 @@ def test_direct_spec_emits_original_kernel(dtype, overrides, block_w, block_wave
         packaged, arch="gfx950", llvm_flavor="llvm22"
     ) == _lower_kernel_to_llvm_python(original, arch="gfx950", llvm_flavor="llvm22")
     assert packaged.name == spec.kernel_name()
-    assert [p.name for p in packaged.params] == [
-        "A",
-        "B",
-        "D",
-        "A_bytes",
-        "B_bytes",
-        "D_bytes",
-    ]
-    element = F16 if dtype == "fp16" else BF16
-    assert [p.type for p in packaged.params] == [PtrType(element, "global")] * 3 + [
-        I32
-    ] * 3
+    _assert_aot_abi(packaged, spec, dtype)
     assert packaged.max_workgroup_size == spec.block()[0]
 
 

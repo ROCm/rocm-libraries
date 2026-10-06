@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -63,6 +64,16 @@ struct MatchedProblem
     conv::Problem problem;
     conv::Geometry geometry;
     data_objects::DataType dtype;
+};
+
+/// The AOT problem block of one family's ABI, the arguments after the leading six.
+using ConvKernargs = std::variant<conv::ImplicitGemmKernargs, conv::DirectKernargs>;
+
+/// Everything a kernel needs at launch beyond the bound device pointers.
+struct ConvLaunch
+{
+    conv::LaunchGeometry geometry;
+    ConvKernargs kernargs;
 };
 
 const data_objects::TensorAttributes* findTensor(const MatchContext& context, int64_t uid)
@@ -247,8 +258,8 @@ const std::string* stringMetadata(const KernelDefinition& kernel, const char* fi
 constexpr std::array<const char*, 8> GEMM_TUNING_FIELDS{
     "tile_m", "tile_n", "tile_k", "warp_m", "warp_n", "warp_tile_m", "warp_tile_n", "warp_tile_k"};
 
-std::optional<conv::LaunchGeometry> implicitGemmLaunch(const MatchedProblem& matched,
-                                                       const KernelDefinition& kernel)
+std::optional<ConvLaunch> implicitGemmLaunch(const MatchedProblem& matched,
+                                             const KernelDefinition& kernel)
 {
     // The tuning values are whatever the build validated for this exact geometry: rocKE's
     // is_valid_spec_for_problem ran on every variant before it was compiled, and the
@@ -284,18 +295,27 @@ std::optional<conv::LaunchGeometry> implicitGemmLaunch(const MatchedProblem& mat
         }
         tuning[i] = *value;
     }
-    return conv::launchGeometry(
-        p, matched.geometry, tuning[0], tuning[1], tuning[3], tuning[4], 64);
+    const auto launch
+        = conv::launchGeometry(p, matched.geometry, tuning[0], tuning[1], tuning[3], tuning[4], 64);
+    // The kernel decodes its workgroup id against tile counts passed at launch, so they
+    // come from the same tile the grid did.
+    const auto kernargs
+        = launch ? conv::implicitGemmKernargs(p, matched.geometry, *launch) : std::nullopt;
+    if(!kernargs)
+    {
+        return std::nullopt;
+    }
+    return ConvLaunch{*launch, *kernargs};
 }
 
-/// Mirrors _direct_error in rocke/library/builders/common/convolution_forward.py. Two
-/// rocKE direct-kernel wrong-answer paths are guarded here, not fixed: see
-/// conv::directRowsCovered. Everything the guard declines stays on implicit GEMM.
-std::optional<conv::LaunchGeometry> directLaunch(const MatchedProblem& matched,
-                                                 const KernelDefinition& kernel,
-                                                 conv::DirectVariant variant,
-                                                 int64_t blockW,
-                                                 int64_t blockWaves)
+/// Mirrors _direct_error in rocke/library/builders/common/convolution_forward.py and the
+/// padding rule of rocKE's direct validators: see conv::directProblemSupported. Everything
+/// the guard declines stays on implicit GEMM.
+std::optional<ConvLaunch> directLaunch(const MatchedProblem& matched,
+                                       const KernelDefinition& kernel,
+                                       conv::DirectVariant variant,
+                                       int64_t blockW,
+                                       int64_t blockWaves)
 {
     const auto& p = matched.problem;
     if(!conv::directProblemSupported(p))
@@ -316,14 +336,18 @@ std::optional<conv::LaunchGeometry> directLaunch(const MatchedProblem& matched,
     {
         return std::nullopt;
     }
-    return conv::directLaunchGeometry(
+    const auto launch = conv::directLaunchGeometry(
         p, matched.geometry, variant, blockW, blockWaves, conv::DIRECT_WAVE_SIZE);
+    if(!launch)
+    {
+        return std::nullopt;
+    }
+    return ConvLaunch{*launch, conv::directKernargs(p, matched.geometry)};
 }
 
-/// The launch geometry when @p kernel is packaged code compiled for exactly this
-/// problem under a launch contract this pack reviewed; std::nullopt otherwise.
-std::optional<conv::LaunchGeometry> kernelFits(const MatchedProblem& matched,
-                                               const KernelDefinition& kernel)
+/// The launch when @p kernel is packaged code compiled for exactly this problem under a
+/// launch contract this pack reviewed; std::nullopt otherwise.
+std::optional<ConvLaunch> kernelFits(const MatchedProblem& matched, const KernelDefinition& kernel)
 {
     if(kernel.source.kind != KernelSourceKind::KPACK)
     {
@@ -469,27 +493,57 @@ void requireOutput(const MatchContext& context, const MatchedProblem& matched)
     }
 }
 
-/// The kernel ABI buildIngestorKernelCode verifies the loaded symbol against:
-/// build_implicit_gemm_conv emits (A*, B*, D*, A_bytes:i32, B_bytes:i32, D_bytes:i32), and
-/// build_direct_depthwise and build_direct_depthwise_spatial emit the same parameters.
-/// Names and offsets are unused for this comparison; see requireSignatureMatch.
-const std::vector<KernelArgument>& gfx950ConvFwdKernelSignature()
+/// The kernel ABI buildIngestorKernelCode verifies the loaded symbol against: rocKE's AOT
+/// conv kernels open with (A*, B*, D*, A_bytes:i32, B_bytes:i32, D_bytes:i32) and follow
+/// with @p names as i32s (rocke/library/kernels/common/conv_abi.py).
+///
+/// NAMES ARE LOAD-BEARING. Every problem argument is a by_value i32, so kind and size alone
+/// cannot tell p_Hi from p_Wi; a reordered list would launch with every argument past the
+/// first divergence shifted. requireSignatureMatch compares names whenever both sides
+/// carry one, and hkp_pack records the builder's parameter names.
+template <size_t Count>
+std::vector<KernelArgument> convFwdKernelSignature(const std::array<std::string_view, Count>& names)
 {
-    static const KernelArgument s_buffer{
-        "global_buffer", static_cast<uint32_t>(sizeof(void*)), 0, ""};
-    static const KernelArgument s_bytes{"by_value", static_cast<uint32_t>(sizeof(int32_t)), 0, ""};
-    static const std::vector<KernelArgument> s_signature{
-        s_buffer, s_buffer, s_buffer, s_bytes, s_bytes, s_bytes};
-    return s_signature;
+    constexpr auto POINTER_BYTES = static_cast<uint32_t>(sizeof(void*));
+    constexpr auto I32_BYTES = static_cast<uint32_t>(sizeof(int32_t));
+    std::vector<KernelArgument> signature;
+    uint32_t offset = 0;
+    for(const auto* name : {"A", "B", "D"})
+    {
+        signature.push_back({"global_buffer", POINTER_BYTES, offset, name});
+        offset += POINTER_BYTES;
+    }
+    for(const auto* name : {"A_bytes", "B_bytes", "D_bytes"})
+    {
+        signature.push_back({"by_value", I32_BYTES, offset, name});
+        offset += I32_BYTES;
+    }
+    for(const auto name : names)
+    {
+        signature.push_back({"by_value", I32_BYTES, offset, std::string(name)});
+        offset += I32_BYTES;
+    }
+    return signature;
+}
+
+const std::vector<KernelArgument>& kernelSignature(const ConvKernargs& kernargs)
+{
+    static const auto s_implicitGemm = convFwdKernelSignature(conv::IMPLICIT_GEMM_KERNARG_NAMES);
+    static const auto s_direct = convFwdKernelSignature(conv::DIRECT_KERNARG_NAMES);
+    return std::holds_alternative<conv::DirectKernargs>(kernargs) ? s_direct : s_implicitGemm;
 }
 
 class PreparedConvFwd : public PreparedDispatch
 {
 public:
-    PreparedConvFwd(IngestorKernelCode code, Binding binding, std::array<int32_t, 3> bytes)
+    PreparedConvFwd(IngestorKernelCode code,
+                    Binding binding,
+                    std::array<int32_t, 3> bytes,
+                    ConvKernargs kernargs)
         : _code(std::move(code))
         , _binding(binding)
         , _bytes(bytes)
+        , _kernargs(kernargs)
     {
     }
 
@@ -507,12 +561,17 @@ public:
     {
         return _bytes;
     }
+    const ConvKernargs& kernargs() const
+    {
+        return _kernargs;
+    }
 
 private:
     // Holds both the program/module and its kernel view; owns no MatchContext data.
     IngestorKernelCode _code;
     Binding _binding;
     std::array<int32_t, 3> _bytes;
+    ConvKernargs _kernargs;
 };
 
 class ConvFwdDispatchHandler : public IKernelDispatchHandler<Handle>
@@ -549,16 +608,16 @@ public:
         requireOutput(context, *matched);
 
         // This pack ships prebuilt code objects only; kernelFits already refused every
-        // other source kind. Both families take the same ABI, so one signature serves.
+        // other source kind. Each family has its own ABI, so the signature follows it.
         auto code
-            = buildIngestorKernelCode(_loader, context, kernel, gfx950ConvFwdKernelSignature());
+            = buildIngestorKernelCode(_loader, context, kernel, kernelSignature(launch->kernargs));
         // kernelFits computed this family's launch for this exact geometry before loading
         // the archive. Neither family uses dynamic LDS.
-        code.setBlockSize(launch->blockX, 1, 1);
-        code.setGridSize(launch->gridX, launch->gridY, launch->gridZ);
+        code.setBlockSize(launch->geometry.blockX, 1, 1);
+        code.setGridSize(launch->geometry.gridX, launch->geometry.gridY, launch->geometry.gridZ);
         code.setSharedMemBytes(0);
         return std::make_unique<PreparedConvFwd>(
-            std::move(code), matched->binding, matched->geometry.tensorBytes);
+            std::move(code), matched->binding, matched->geometry.tensorBytes, launch->kernargs);
     }
 
     void launch(const Handle& handle,
@@ -599,11 +658,26 @@ public:
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "gfx950_conv_fwd requires nonoverlapping input, filter, and output storage");
         }
-        // build_implicit_gemm_conv, conv_implicit_gemm.py, and both direct depthwise
-        // builders, conv_direct_grouped.py: A*, B*, D*, A_bytes:i32, B_bytes:i32,
-        // D_bytes:i32. These are storage byte sizes, not element counts.
-        convPrepared.kernelForStream(handle.getStream())
-            .launch(handle.getStream(), a.ptr, b.ptr, d.ptr, bytes[0], bytes[1], bytes[2]);
+        // A*, B*, D*, A_bytes:i32, B_bytes:i32, D_bytes:i32, then the family's AOT problem
+        // block in kernelSignature's order. The byte counts are storage sizes, not element
+        // counts.
+        const auto& kernel = convPrepared.kernelForStream(handle.getStream());
+        std::visit(
+            [&](const auto& kernargs) {
+                std::apply(
+                    [&](const auto&... values) {
+                        kernel.launch(handle.getStream(),
+                                      a.ptr,
+                                      b.ptr,
+                                      d.ptr,
+                                      bytes[0],
+                                      bytes[1],
+                                      bytes[2],
+                                      values...);
+                    },
+                    kernargs);
+            },
+            convPrepared.kernargs());
     }
 
 private:

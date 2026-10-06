@@ -213,10 +213,10 @@ launch_surface:
     guard: launchGeometry requires wave64 and bounds the thread count at warp_m * warp_n * 64; kernelFits admits the mem, compv3, compv4 and basic pipelines, which share that launch, and refuses wavelet.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvFwdGeometry.cpp
   - name: kernargs_and_execution
-    python_source: kernels/common/conv_implicit_gemm.py:build_implicit_gemm_conv
-    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdNative.cpp:launch
-    kmd_fields: [N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW, dtype, groups]
-    guard: prepare preserves tensor bindings and validated i32 byte counts; launch checks device pointers, 16-byte alignment and non-overlap, then passes A, B, D, A_bytes, B_bytes, D_bytes.
+    python_source: kernels/common/conv_abi.py:conv_arg_names
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdGeometry.hpp:implicitGemmKernargs
+    kmd_fields: [N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW, dtype, groups, tile_m, tile_n]
+    guard: prepare checks the loaded symbol's recorded argument names against conv_abi.py's forward list, then preserves tensor bindings, validated i32 byte counts and the 39 AOT problem arguments ConvArgs.to_launch_values computes (extents, packed strides, magic-division pairs, and num_pid_m/num_pid_n equal to the grid's tile counts); a reduction extent Y*X*C/groups at or above 2^23 is refused. launch checks device pointers, 16-byte alignment and non-overlap, then passes A, B, D, A_bytes, B_bytes, D_bytes and that block.
     test: dnn-providers/hip-kernel-provider/src/integration_tests/kernel_ingestor_engine/IntegrationGpuGfx950ConvFwd.cpp
   - name: pointer_nonalias
     python_source: kernels/common/conv_implicit_gemm.py:build_implicit_gemm_conv
@@ -248,6 +248,12 @@ launch_surface:
     kmd_fields: [Hi, Wi, Y, X, sH, sW, pH, pW]
     guard: rocKE's direct kernels write output row floor(p/s) only for input rows p < Hi, so a direct kernel is accepted only when floor((Hi-1)/s) == Ho-1 and floor((Wi-1)/s) == Wo-1; otherwise rows are left unwritten or the runtime H loop writes into the next image. Such graphs stay on implicit GEMM.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvFwdGeometry.cpp
+  - name: direct_padding
+    python_source: kernels/common/conv_direct_grouped.py:forward_padding_reason
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdGeometry.hpp:directPaddingSupported
+    kmd_fields: [Y, X, pH]
+    guard: rocKE's direct validators refuse any forward shape without odd filter extents and "same" padding pH == (Y-1)/2; the native guard declines the same graphs, which stay on implicit GEMM.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvFwdGeometry.cpp
   - name: direct_grid
     python_source: builders/common/convolution_forward.py:grid
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdGeometry.hpp:directLaunchGeometry
@@ -261,8 +267,8 @@ launch_surface:
     guard: The block is 64 * block_waves threads with block_waves in [1, 16]; the direct kernels use no LDS and no workspace, so prepare still requests zero dynamic shared memory.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvFwdGeometry.cpp
   - name: direct_kernargs_and_execution
-    python_source: kernels/common/conv_direct_grouped.py:build_direct_depthwise
-    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdNative.cpp:launch
+    python_source: kernels/common/conv_direct_grouped.py:emit_direct_params
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdGeometry.hpp:directKernargs
     kmd_fields: [N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW, dtype, groups, kernel_family, direct_variant]
-    guard: Both direct kernels (build_direct_depthwise and build_direct_depthwise_spatial) take the implicit-GEMM ABI unchanged (A, B, D, A_bytes, B_bytes, D_bytes) with the same byte counts, so launch is shared; the GPU tests force kernel_family=1 on every direct catalog shape, including both runtime H-loop paths with N=2.
+    guard: Both direct kernels (build_direct_depthwise and build_direct_depthwise_spatial) take rocKE's direct-conv ABI, the six leading implicit-GEMM arguments with the same byte counts then 14 i32s (N, Hi, Wi, Ho, Wo, groups, total C and K, packed NHWC and NHWK strides); prepare checks the recorded argument names against that list. The GPU tests force kernel_family=1 on every direct catalog shape with N=2.
     test: dnn-providers/hip-kernel-provider/src/integration_tests/kernel_ingestor_engine/IntegrationGpuGfx950ConvFwd.cpp

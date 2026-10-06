@@ -883,7 +883,6 @@ def run(args: argparse.Namespace, report: dict) -> dict:
     from dispatch.grouped_convolution import ConvGroupedRequest
     from rocke import compile_kernel
     from rocke.core.ir_print import print_ir
-    from rocke.helpers.manifest import conv_args_signature
     from kernels.common.conv_direct_grouped import (
         build_direct_depthwise,
         build_direct_depthwise_spatial,
@@ -1197,18 +1196,19 @@ def run(args: argparse.Namespace, report: dict) -> dict:
             launcher = KernelLauncher(
                 hsaco=artifact.hsaco,
                 kernel_name=artifact.kernel_name,
-                signature=conv_args_signature(args.dtype),
+                signature=spec.launch_signature(),
             )
             direct_output = torch.empty_like(output)
             direct_output.fill_(float("nan"))
-            values = {
-                "A": x,
-                "B": w,
-                "D": direct_output,
-                "A_bytes": x.numel() * x.element_size(),
-                "B_bytes": w.numel() * w.element_size(),
-                "D_bytes": direct_output.numel() * direct_output.element_size(),
-            }
+            # The AOT problem block after the six leading arguments, from rocKE's ConvArgs.
+            values = spec.launch_values(
+                x,
+                w,
+                direct_output,
+                x.numel() * x.element_size(),
+                w.numel() * w.element_size(),
+                direct_output.numel() * direct_output.element_size(),
+            )
             config = LaunchConfig(
                 grid=spec.grid(),
                 block=spec.block(),

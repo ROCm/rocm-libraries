@@ -291,16 +291,21 @@ TEST(TestGfx950ConvFwdGeometry,
 
 TEST(TestGfx950ConvFwdGeometry, DirectProblemGuardMatchesTheAdapter)
 {
-    // Expected values are _direct_error(spec) == "" in convolution_forward.py for the
-    // same problems; the tuning-side checks live in directLaunchGeometry.
+    // Expected values are supports_gfx950_conv_fwd's problem-side verdict in
+    // convolution_forward.py for the same problems: _direct_error plus rocKE's own
+    // forward_padding_reason. The tuning-side checks live in directLaunchGeometry.
     const std::vector<std::pair<Problem, bool>> cases{
         {{2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, true},
         {{2, 96, 96, 17, 17, 3, 3, 2, 2, 1, 1, 1, 1, 96}, true},
         {{2, 96, 96, 16, 18, 3, 3, 2, 2, 1, 1, 1, 1, 96}, true},
         {{2, 5, 5, 9, 9, 7, 7, 1, 1, 3, 3, 1, 1, 5}, true},
         {{2, 5, 5, 56, 24, 17, 17, 1, 1, 8, 8, 1, 1, 5}, true},
-        {{2, 24, 24, 8, 8, 4, 4, 2, 2, 1, 1, 1, 1, 24}, true},
         {{2, 1, 1, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1, 1}, true},
+        // Every row and column covered, but rocKE refuses an even filter or padding other
+        // than (KH - 1) / 2.
+        {{2, 24, 24, 8, 8, 4, 4, 2, 2, 1, 1, 1, 1, 24}, false},
+        {{2, 24, 24, 14, 14, 2, 2, 2, 2, 0, 0, 1, 1, 24}, false},
+        {{2, 24, 24, 9, 9, 3, 3, 3, 3, 0, 0, 1, 1, 24}, false},
         // pH != pW, even where each axis alone would be covered.
         {{2, 24, 24, 14, 14, 3, 1, 1, 1, 1, 0, 1, 1, 24}, false},
         {{2, 24, 24, 13, 13, 3, 3, 1, 1, 1, 0, 1, 1, 24}, false},
@@ -324,6 +329,106 @@ TEST(TestGfx950ConvFwdGeometry, DirectProblemGuardMatchesTheAdapter)
         SCOPED_TRACE(i);
         EXPECT_EQ(directProblemSupported(cases[i].first), cases[i].second);
     }
+}
+
+TEST(TestGfx950ConvFwdGeometry, MagicDivisionMatchesRockesCalculateMagicNumbers)
+{
+    // (divisor, multiplier as i32, shift) from calculate_magic_numbers and _magic_as_i32.
+    const std::vector<std::tuple<int64_t, int32_t, int32_t>> cases{
+        {1, 1, 0},
+        {2, 1, 1},
+        {3, 1431655766, 2},
+        {7, 613566757, 3},
+        {8, 1, 3},
+        {13, 991146300, 4},
+        {14, 613566757, 4},
+        {15, 286331154, 4},
+        {5, -1717986918, 3},
+        {1000, 103079216, 10},
+        {65535, 65538, 16},
+        {int64_t{1} << 30, 1, 30},
+        {std::numeric_limits<int32_t>::max(), 3, 31}};
+    for(const auto& [divisor, multiplier, shift] : cases)
+    {
+        SCOPED_TRACE(divisor);
+        const auto magic = magicDivision(divisor);
+        ASSERT_TRUE(magic);
+        EXPECT_EQ(magic->multiplier, multiplier);
+        EXPECT_EQ(magic->shift, shift);
+    }
+    EXPECT_FALSE(magicDivision(0));
+    EXPECT_FALSE(magicDivision(int64_t{1} << 31));
+
+    // The kernel's mul-hi sequence reproduces every quotient in the 31-bit range.
+    for(const int64_t divisor : {3, 7, 13, 15, 1000, 65535})
+    {
+        const auto magic = magicDivision(divisor);
+        ASSERT_TRUE(magic);
+        for(const uint32_t dividend : {0U, 1U, 999U, 65536U, 2147483647U})
+        {
+            const auto multiplier = static_cast<uint32_t>(magic->multiplier);
+            const auto high = static_cast<uint32_t>((uint64_t{dividend} * multiplier) >> 32);
+            EXPECT_EQ((uint64_t{high} + dividend) >> magic->shift, dividend / divisor);
+        }
+    }
+}
+
+TEST(TestGfx950ConvFwdGeometry, ImplicitGemmKernargsMatchRockesConvArgs)
+{
+    // Grouped, strided, padded and dilated, with distinct extents on every axis. Expected
+    // values are ConvArgs.from_problem(ConvProblem(...), tile_m=64, tile_n=16)
+    // .to_launch_values() in rocke/library/kernels/common/conv_args.py.
+    const Problem problem{2, 8, 12, 15, 19, 3, 5, 2, 1, 1, 2, 1, 2, 4};
+    const auto geometry = deriveGeometry(problem);
+    ASSERT_TRUE(geometry);
+    const auto launch = launchGeometry(problem, *geometry, 64, 16, 2, 2, 64);
+    ASSERT_TRUE(launch);
+    const auto kernargs = implicitGemmKernargs(problem, *geometry, *launch);
+    ASSERT_TRUE(kernargs);
+    const ImplicitGemmKernargs expected{
+        2,    15,  19, 8, 12, 3,         5,   2,           1,   1, 2,  1,  2,
+        4,    8,   15, 2, 3,  30,        240, 2280,        152, 8, 30, 10, 2,
+        1440, 180, 12, 1, 3,  286331154, 4,   -1717986918, 3,   1, 1,  4,  1};
+    for(size_t i = 0; i < expected.size(); ++i)
+    {
+        SCOPED_TRACE(IMPLICIT_GEMM_KERNARG_NAMES[i]);
+        EXPECT_EQ((*kernargs)[i], expected[i]);
+    }
+
+    // The tile counts the kernel decodes its workgroup id against are the grid's.
+    EXPECT_EQ(kernargs->at(37), static_cast<int32_t>(launch->gridY));
+    EXPECT_EQ(kernargs->at(38), static_cast<int32_t>(launch->gridX));
+    EXPECT_EQ(IMPLICIT_GEMM_KERNARG_NAMES[37], "p_num_pid_m");
+    EXPECT_EQ(IMPLICIT_GEMM_KERNARG_NAMES[38], "p_num_pid_n");
+}
+
+TEST(TestGfx950ConvFwdGeometry, ImplicitGemmKernargsRefuseA24BitReductionOverflow)
+{
+    // Y * X * C / groups must stay below 2^23 for the kernel's 24-bit address products.
+    Problem problem{1, 1 << 17, 8, 8, 8, 8, 8, 1, 1, 0, 0, 1, 1};
+    auto geometry = deriveGeometry(problem);
+    ASSERT_TRUE(geometry);
+    auto launch = launchGeometry(problem, *geometry, 64, 64, 2, 2, 64);
+    ASSERT_TRUE(launch);
+    EXPECT_FALSE(implicitGemmKernargs(problem, *geometry, *launch));
+
+    problem.c = (1 << 17) - 1;
+    geometry = deriveGeometry(problem);
+    ASSERT_TRUE(geometry);
+    launch = launchGeometry(problem, *geometry, 64, 64, 2, 2, 64);
+    ASSERT_TRUE(launch);
+    EXPECT_TRUE(implicitGemmKernargs(problem, *geometry, *launch));
+}
+
+TEST(TestGfx950ConvFwdGeometry, DirectKernargsMatchRockesConvArgs)
+{
+    // ConvArgs.from_problem(DirectConvProblem(N=2, H=14, W=13, groups=32, cpg=1, kpg=1,
+    // KH=3, KW=3, PAD=1, stride=2)).to_launch_values() in conv_args.py.
+    const Problem problem{2, 32, 32, 14, 13, 3, 3, 2, 2, 1, 1, 1, 1, 32};
+    const auto geometry = deriveGeometry(problem);
+    ASSERT_TRUE(geometry);
+    const DirectKernargs expected{2, 14, 13, 7, 7, 32, 32, 32, 5824, 416, 32, 1568, 224, 32};
+    EXPECT_EQ(directKernargs(problem, *geometry), expected);
 }
 
 TEST(TestGfx950ConvFwdGeometry, DirectStdGridTilesOutputColumnsChannelsAndImages)

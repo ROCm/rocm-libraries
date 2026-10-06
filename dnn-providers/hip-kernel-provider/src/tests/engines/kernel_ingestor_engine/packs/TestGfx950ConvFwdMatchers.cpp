@@ -875,6 +875,20 @@ TEST(TestGfx950ConvFwdKernelMatcher, DirectKernelsDeclineEveryGraphOutsideTheGua
              s.w = 15;
              s.x = 1;
          }},
+        // Row-covered on both axes, but rocKE refuses anything except an odd filter with
+        // "same" padding (forward_padding_reason).
+        {"even filter",
+         [](auto& s) {
+             s.h = s.w = 16;
+             s.y = s.x = 4;
+             s.sH = s.sW = 2;
+         }},
+        {"pad 0 stride 3",
+         [](auto& s) {
+             s.h = s.w = 9;
+             s.pH = s.pW = 0;
+             s.sH = s.sW = 3;
+         }},
         // Contract refusals. Apart from dilation, which the guard does not model, each
         // shape is row-covered on both axes.
         {"sH != sW",
