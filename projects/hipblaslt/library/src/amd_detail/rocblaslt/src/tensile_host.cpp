@@ -52,6 +52,8 @@
 #endif
 #include "include/rocroller_selected.hpp"
 
+#include <Tensile/Comparison.hpp>
+#include <Tensile/ContractionProblem_Detail.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/Contractions.hpp>
 #include <Tensile/DataTypes.hpp>
@@ -3695,6 +3697,41 @@ TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void> ge
     return &data->problem;
 }
 
+// The problem identity online tuning keys on, shared by the selection hook in
+// getSolutions() and the measurement hook in runContractionProblem().
+//
+// Neither of the library's existing keys can serve. ProblemOverride is what a
+// file row is written under and separates problems that differ only in
+// epilogue, bias or strides; it also costs forty-odd fields to build, which is
+// the whole per-call budget of the resolved path. std::hash of the Tensile
+// problem covers workspaceSize, which is the preference's ceiling while the
+// heuristic ranks solutions and the caller's own allocation by the time the
+// dispatch runs, so the two hooks would hash one problem to two values and
+// never meet.
+//
+// The fields below are the geometry and types the prediction model ranks on,
+// all of them rewritten from the caller's problem description by every
+// updateTensileProblem(), so they survive that window. The cost is that
+// problems differing only in epilogue, bias or strides share a key; what that
+// costs and why it is safe is PinnedWinner::m_tuningKey.
+inline size_t onlineTuningProblemKey(const TensileLite::ContractionProblemGemm& problem)
+{
+    const rocisa::DataType computeType = problem.f32XdlMathOp() == rocisa::DataType::XFloat32
+                                             ? rocisa::DataType::XFloat32
+                                             : problem.computeType();
+
+    return TensileLite::hash_combine(problem.transA(),
+                                     problem.transB(),
+                                     problem.a().dataType(),
+                                     problem.b().dataType(),
+                                     computeType,
+                                     problem.c().dataType(),
+                                     problem.freeSizeA(0),
+                                     problem.freeSizeB(0),
+                                     problem.boundSize(0),
+                                     problem.batchSize(0));
+}
+
 // Apply the GemmPreference-supplied StreamK tile scheduling mode onto every
 // contraction problem currently carried by gemmData. Called from
 // rocblaslt_algo_get_heuristic_cpp before solution ranking so the SK5
@@ -5612,8 +5649,16 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         const auto& tuning = TensileLite::TuningModeSingleton::getInstance();
         const bool  keyed  = tuning.reads() && !prob.grouped_gemm
                            && prob.batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
-        const bool tunes
-            = keyed && tuning.writes() && !streamIsCapturing(prob.stream) && !isFusedAllToAll(prob);
+        // Tune mode and no other, because what tunes gates is the blocking
+        // search: it waits on tuningLock() and benchmarks on library scratch
+        // while this call stands still. writes() is true for online too, since
+        // the two modes share one file, which is why the gate cannot be
+        // writes() -- online pays for its samples out of later dispatches of
+        // the same problem and must never stall this one. writes() stays the
+        // predicate for whether a winner is recorded, which is a different
+        // question from who searches here.
+        const bool tunes = keyed && tuning.mode() == TensileLite::TuningMode::Tune
+                           && !streamIsCapturing(prob.stream) && !isFusedAllToAll(prob);
 
         // A mode set without a path is otherwise reported by the heuristic
         // query, which a matmul-only caller never makes.
@@ -5672,6 +5717,21 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         int32_t             coldIterations     = ClientArguments.GetColdIterationsValue();
 
         int* solutionIndex = (int*)algo->data;
+
+        // Online tuning's measurement half, keyed on the same problem identity
+        // the selection hook in getSolutions() used -- the same data->problem,
+        // rewritten from the same prob, so the two meet.
+        //
+        // Nothing below this point waits on the GPU or takes a lock the caller
+        // can be queued behind. harvestPending() reads back the event pairs of
+        // launches that have already retired and leaves the rest outstanding;
+        // beginMeasurement() hands out a pair for this launch and reads nothing.
+        auto&        onlineTuner  = rocblaslt::OnlineTuner::getInstance();
+        const bool   onlineTuning = onlineTuner.enabled();
+        const size_t onlineKey    = onlineTuning ? onlineTuningProblemKey(data->problem) : 0;
+
+        if(onlineTuning)
+            onlineTuner.harvestPending(onlineKey);
 
         // Tune mode: a shape no entry serves is benchmarked at its first matmul,
         // through either entry point, since a call that passes no algo never
@@ -6169,9 +6229,36 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 }
                 isPreloaded = true;
             }
+            // Left null unless the tuner wants this dispatch sampled, which
+            // keeps the launch below identical to an untuned one. launchKernels
+            // records start before the first kernel and stop after the last, so
+            // a multi-kernel solution is bracketed as a whole, and the pair is
+            // read back on a later visit to this problem rather than here.
+            //
+            // Only a dispatch online itself chose is sampled. A launchIndex
+            // means the tuner named the kernel and replayed means the cache
+            // did, so what ran is not the candidate the rotation asked for, and
+            // timing it would credit one candidate with another's number. The
+            // two modes sharing a file is what makes this reachable: online
+            // replays a row the cache already holds for a shape, rather than
+            // measuring it again. Replay is asked separately because it now
+            // runs above selection and so leaves launchIndex at -1.
+            //
+            // Nor is a captured launch sampled: an event recorded into a
+            // capture can be neither queried nor read back, and the attempt
+            // would invalidate the caller's graph. Asked behind the same
+            // lock-free resolution load beginMeasurement() starts with, so a
+            // problem there is nothing left to learn about reaches no HIP call.
+            hipEvent_t measureStart = nullptr;
+            hipEvent_t measureStop  = nullptr;
+            if(onlineTuning && launchIndex < 0 && !replayed
+               && !onlineTuner.resolution(onlineKey) && !streamIsCapturing(prob.stream))
+                static_cast<void>(onlineTuner.beginMeasurement(
+                    onlineKey, solution->index, measureStart, measureStop));
+
             t_lastLaunchedIndex = solution->index;
-            status = hip2RocStatus(
-                adapter->launchKernels(kernels, prob.stream, nullptr, nullptr, isPreloaded));
+            status              = hip2RocStatus(adapter->launchKernels(
+                kernels, prob.stream, measureStart, measureStop, isPreloaded));
             if(prob.adaptive_launch)
                 prob.adaptive_launch->probed
                     = status == rocblaslt_status_success
@@ -7110,6 +7197,156 @@ inline bool isCustomKernelForPointerArray(TensileLite::ContractionProblemGemm co
            && !solution.customKernel.name.empty() && !solution.customKernel.generated;
 }
 
+// Move the candidate online tuning wants to sample next to the front of the
+// ranking, leaving the order of the rest alone.
+//
+// Candidates the caller's workspace cannot cover are withheld from the tuner:
+// they rank, but runContractionProblem refuses to dispatch them.
+inline void promoteOnlineTuningCandidate(
+    std::vector<std::shared_ptr<TensileLite::ContractionSolution>>& solutions,
+    const TensileLite::ContractionProblemGemm&                      tensile_prob,
+    const TensileLite::Hardware&                                    hardware,
+    const RocblasltContractionProblem&                              prob,
+    size_t                                                          problemKey)
+{
+    std::vector<int>    rankedSolutionIndices;
+    std::vector<size_t> rankedPositions;
+    rankedSolutionIndices.reserve(solutions.size());
+    rankedPositions.reserve(solutions.size());
+
+    for(size_t i = 0; i < solutions.size(); ++i)
+    {
+        if(solutions[i]->requiredWorkspaceSize(tensile_prob, hardware)
+           > tensile_prob.workspaceSize())
+            continue;
+
+        rankedSolutionIndices.push_back(solutions[i]->index);
+        rankedPositions.push_back(i);
+    }
+
+    auto&     tuner   = rocblaslt::OnlineTuner::getInstance();
+    const int promote = tuner.selectCandidate(problemKey, rankedSolutionIndices);
+    if(promote < 0)
+        return;
+
+    const size_t position = rankedPositions[promote];
+
+    // The call that resolves a problem is the last one to hold its ranking, so
+    // it is also the one that can tell the fast path where the winner sits --
+    // and the only one that can hand it the winner itself, which is what lets a
+    // later call skip the ranking altogether. selectCandidate() names the winner
+    // once the problem is resolved, which is also the only time resolution()
+    // answers, so the index compare holds wherever this runs; it is here so that
+    // what gets pinned is checkably the winner and not whatever was promoted.
+    if(const auto* resolved = tuner.resolution(problemKey))
+    {
+        resolved->setPosition(static_cast<int>(position));
+
+        if(!resolved->pinned() && solutions[position]->index == resolved->winner())
+            tuner.pinWinner(*resolved,
+                            solutions[position],
+                            std::hash<TensileLite::ContractionProblemGemm>{}(tensile_prob),
+                            solutions[position]->requiredWorkspaceSize(tensile_prob, hardware),
+                            RocblasltContractionProblem2ProblemOverride(prob));
+    }
+
+    const auto picked = solutions.begin() + position;
+    std::rotate(solutions.begin(), picked, picked + 1);
+}
+
+// Answer a resolved problem from the pinned winner alone, without asking the
+// library for a ranking to pick it out of.
+//
+// This is the only thing on the path that does not grow with topK(). Lowering
+// the fetch depth would not have done it: CachingLibrary caches one ranking per
+// problem with no depth in the key and returns it whole and by value, so once
+// exploration has grown that entry to topK() every later lookup copies topK()
+// shared_ptrs however few the caller asks for, and the resize back down
+// destroys them again. Not fetching is the only way to stop paying for it.
+//
+// What the fetch was still buying was the check that the winner is in the list
+// this problem ranked, and m_problem replaces it with a stronger one. It is the
+// key the solution library caches rankings at, so a problem matching it would
+// be handed the very ranking the winner was recorded in, and returning the
+// winner is exactly what fronting it in that ranking would have returned. A
+// problem that does not match is one the coarser resolution key covers but that
+// may rank differently, and it goes and asks, as it did before.
+//
+// Empty on anything less than that, which leaves the caller to fetch and to
+// answer the way it always has.
+inline std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
+    resolvedOnlineTuningAnswer(const TensileLite::ContractionProblemGemm& tensile_prob,
+                               const rocblaslt::OnlineTuner::Resolution&  resolved,
+                               int                                        requestedAlgoCount)
+{
+    // More than one wanted means the ranking is wanted, and the winner is only
+    // the head of it. Nothing to save, so nothing is attempted.
+    if(requestedAlgoCount != 1)
+        return {};
+
+    const rocblaslt::OnlineTuner::PinnedWinner* pinned = resolved.pinned();
+
+    if(!pinned
+       || pinned->m_problem != std::hash<TensileLite::ContractionProblemGemm>{}(tensile_prob))
+        return {};
+
+    // All that is left of the per-candidate workspace filter: the requirement is
+    // fixed once the problem and the solution are, and only the caller's own
+    // allocation still varies. A caller that cannot cover the winner is one the
+    // winner is withheld from, which is its ranking untouched.
+    if(pinned->m_requiredWorkspace > tensile_prob.workspaceSize())
+        return {};
+
+    return {pinned->m_solution};
+}
+
+// Front the pinned winner of an already-resolved problem, doing nothing that
+// grows with topK(): the recorded position names it outright, and the caller's
+// workspace is the only thing about it that can have changed since.
+//
+// Returns false when the recording does not describe this list, which leaves
+// the full path to answer and to record. That is not an edge case to tolerate
+// but the mechanism that keeps the choice honest: one problem key can cover
+// more than one ranking, so the winner is only ever fronted where it has been
+// seen, never asserted into a list it was not ranked in.
+inline bool promoteResolvedOnlineTuningWinner(
+    std::vector<std::shared_ptr<TensileLite::ContractionSolution>>& solutions,
+    const TensileLite::ContractionProblemGemm&                      tensile_prob,
+    const TensileLite::Hardware&                                    hardware,
+    const rocblaslt::OnlineTuner::Resolution&                       resolved)
+{
+    const int winner = resolved.winner();
+
+    // Resolved without pinning anything, because there was never more than one
+    // candidate to compare. The caller's own ranking is the answer.
+    if(winner < 0)
+        return true;
+
+    const int position = resolved.position();
+
+    if(position < 0 || position >= static_cast<int>(solutions.size())
+       || solutions[position]->index != winner)
+        return false;
+
+    // The filter the full path runs over every candidate, run over the one that
+    // matters. A caller whose workspace cannot cover the winner gets its ranking
+    // untouched, which is what withholding the winner from the tuner amounts to.
+    if(solutions[position]->requiredWorkspaceSize(tensile_prob, hardware)
+       > tensile_prob.workspaceSize())
+        return true;
+
+    const auto picked = solutions.begin() + position;
+    std::rotate(solutions.begin(), picked, picked + 1);
+
+    return true;
+}
+
+// onlineTuningProb is both the switch for online tuning at this call site and
+// the problem the file key is built from when a winner is pinned. Null means
+// this is not a lookup online may act on, which is every caller whose dispatch
+// does not come back through runContractionProblem's measurement hook: a
+// promoted candidate nothing times would spend the shape's visit budget for no
+// samples, and tune mode's own candidate enumeration is not a dispatch at all.
 template <typename T>
 inline auto getSolutions(
     const T& inputs,
@@ -7118,7 +7355,8 @@ inline auto getSolutions(
     const std::shared_ptr<TensileLite::Hardware>& hardware,
     TensileLite::ContractionProblemGemm&          tensile_prob,
     bool                                          enableEpilogue,
-    const int&                                    requestedAlgoCount)
+    const int&                                    requestedAlgoCount,
+    const RocblasltContractionProblem*            onlineTuningProb = nullptr)
 {
     // Cached from TENSILE_DB at first use; off by default, so the whole
     // diagnostic costs one predictable branch per lookup.
@@ -7127,7 +7365,35 @@ inline auto getSolutions(
     if(reportEmpty)
         TensileLite::uniformSummationOrderSelectionTallyReset();
 
-    auto solutions = library->findTopSolutions(tensile_prob, *hardware, requestedAlgoCount);
+    // Short-circuited on the pointer, so a site online does not serve never
+    // builds the tuner and never reads anything off it.
+    const bool onlineTuning
+        = onlineTuningProb != nullptr && rocblaslt::OnlineTuner::getInstance().enabled();
+
+    // Both hooks key on this, so computing it once here is what lets a resolved
+    // problem be recognised -- a masked index and a compare, no lock -- before
+    // any of the work that scales with topK() has been started.
+    const size_t problemKey = onlineTuning ? onlineTuningProblemKey(tensile_prob) : 0;
+
+    const rocblaslt::OnlineTuner::Resolution* resolved
+        = onlineTuning ? rocblaslt::OnlineTuner::getInstance().resolution(problemKey) : nullptr;
+
+    if(resolved)
+    {
+        auto answered = resolvedOnlineTuningAnswer(tensile_prob, *resolved, requestedAlgoCount);
+
+        if(!answered.empty())
+            return answered;
+    }
+
+    // Exploration rotates through the top K, and the caller may well have asked
+    // for one. CachingLibrary grows its entry in place on the deeper request, so
+    // only the first lookup of a problem pays for it.
+    const int fetchCount
+        = onlineTuning ? std::max(requestedAlgoCount, rocblaslt::OnlineTuner::getInstance().topK())
+                       : requestedAlgoCount;
+
+    auto solutions = library->findTopSolutions(tensile_prob, *hardware, fetchCount);
 
     // Library logic can rank a custom kernel ahead of the kernels it replaces. For
     // a pointer-array problem drop it and widen the search, so the caller still
@@ -7152,6 +7418,18 @@ inline auto getSolutions(
 
     if(reportEmpty && solutions.empty())
         reportNoSolutionFound(tensile_prob);
+
+    if(onlineTuning)
+    {
+        if(!resolved
+           || !promoteResolvedOnlineTuningWinner(solutions, tensile_prob, *hardware, *resolved))
+            promoteOnlineTuningCandidate(
+                solutions, tensile_prob, *hardware, *onlineTuningProb, problemKey);
+
+        // The extra candidates were for the tuner, not for the caller.
+        if(solutions.size() > static_cast<size_t>(requestedAlgoCount))
+            solutions.resize(requestedAlgoCount);
+    }
 
     return solutions;
 }
@@ -7359,8 +7637,14 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
 
     bool enableEpilogue = prob.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
 
-    auto solutions
-        = getSolutions(prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount);
+    // The one lookup online tuning acts on. Both callers leave the choice of
+    // kernel to the library -- hipblasLtMatmul with no algo, which dispatches
+    // the answer below immediately, and hipblasLtMatmulAlgoGetHeuristic, whose
+    // answer the caller hands back to hipblasLtMatmul -- and both therefore
+    // reach the measurement hook in runContractionProblem with the same problem
+    // this ranked.
+    auto solutions = getSolutions(
+        prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount, &prob);
 
     // when there is no solution for xfloat32, fallback comput_type to fp32
     if(solutions.size() == 0 && prob.compute_type == rocblaslt_compute_f32_fast_xf32)
@@ -7368,7 +7652,7 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
         log_api(__func__, "no xf32 solutions found, try to fallback fp32");
         data->problem.setF32XdlMathOp(rocisa::DataType::Float);
         solutions = getSolutions(
-            prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount);
+            prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount, &prob);
     }
 
     auto algoCount = min(static_cast<size_t>(requestedAlgoCount), solutions.size());
