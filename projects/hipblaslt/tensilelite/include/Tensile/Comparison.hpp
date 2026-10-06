@@ -26,7 +26,9 @@
 
 #pragma once
 
+#include <string>
 #include <type_traits>
+#include <vector>
 
 #include <tensilelitehost/export.h>
 
@@ -142,6 +144,75 @@ namespace TensileLite
     {
         return Comparison<T, U>::compare(lhs, rhs) >= 0;
     }
+
+    /**
+     * @brief Traits class which writes a value as bytes, for maps keyed by
+     * byte strings.
+     *
+     * Specializations must implement `append(key, value)` so that two values
+     * append equal bytes exactly when they compare equal. Integral and enum
+     * values are written as they are stored.
+     */
+    template <typename T>
+    struct CacheKey
+    {
+        enum
+        {
+            implemented = false
+        };
+    };
+
+    template <typename T>
+    inline void AppendCacheKey(std::string& key, T const& value)
+    {
+        if constexpr(CacheKey<T>::implemented)
+        {
+            CacheKey<T>::append(key, value);
+        }
+        else
+        {
+            static_assert(std::is_integral<T>::value || std::is_enum<T>::value,
+                          "CacheKey is not implemented for this type");
+            key.append(reinterpret_cast<char const*>(&value), sizeof(T));
+        }
+    }
+
+    template <typename... Ts>
+    inline void AppendCacheKeys(std::string& key, Ts const&... values)
+    {
+        (AppendCacheKey(key, values), ...);
+    }
+
+    template <>
+    struct CacheKey<std::string>
+    {
+        enum
+        {
+            implemented = true
+        };
+
+        static void append(std::string& key, std::string const& value)
+        {
+            AppendCacheKey(key, value.size());
+            key.append(value);
+        }
+    };
+
+    template <typename T>
+    struct CacheKey<std::vector<T>>
+    {
+        enum
+        {
+            implemented = true
+        };
+
+        static void append(std::string& key, std::vector<T> const& values)
+        {
+            AppendCacheKey(key, values.size());
+            for(auto const& v : values)
+                AppendCacheKey(key, v);
+        }
+    };
 
     /**
      * Combines a number of already-hashed values.

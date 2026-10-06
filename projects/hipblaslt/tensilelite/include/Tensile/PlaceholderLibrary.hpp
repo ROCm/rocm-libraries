@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <Tensile/CachingLibrary.hpp>
 #include <Tensile/Debug.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/SolutionLibrary.hpp>
@@ -185,7 +186,9 @@ namespace TensileLite
                 auto        newLibrary = LoadLibraryFile<MyProblem, MySolution>(path);
                 auto        mLibrary
                     = static_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
-                library = mLibrary->library;
+                // Results are cached by the master that reaches this placeholder;
+                // the shard's own cache would only hold the same entries again.
+                library = withoutCache(mLibrary->library);
 
                 // Indexed shards publish solutions later; stamp the name on
                 // the cache so it is applied as each one is parsed.
@@ -215,7 +218,7 @@ namespace TensileLite
                     }
                     // Adopting the tree the master loaded means adopting the
                     // cache the master already published; ours is dropped.
-                    library = (*indexLoadedLibraries)[filePrefix];
+                    library = withoutCache((*indexLoadedLibraries)[filePrefix]);
                     indexLoadedLibraries->erase(filePrefix);
 
                     // If the library is already loaded, just return it

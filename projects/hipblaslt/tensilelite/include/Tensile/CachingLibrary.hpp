@@ -28,6 +28,7 @@
 
 #include <atomic>
 #include <shared_mutex>
+#include <string>
 #include <unordered_map>
 
 #include <Tensile/ContractionProblem.hpp>
@@ -256,6 +257,13 @@ namespace TensileLite
                                                             Hardware const&  hardware,
                                                             int numSolutions) const override
         {
+            if constexpr(CacheKey<MyProblem>::implemented)
+            {
+                auto const* amdgpu = dynamic_cast<AMDGPU const*>(&hardware);
+                if(amdgpu == nullptr)
+                    return m_subLibrary->findTopSolutions(problem, hardware, numSolutions);
+                return findTopSolutionsByKey(problem, *amdgpu, numSolutions);
+            }
             try
             {
                 auto const&                amdgpu = dynamic_cast<AMDGPU const&>(hardware);
@@ -325,13 +333,81 @@ namespace TensileLite
             return m_subLibrary->findTopSolutionsGroupedGemm(problems, hardware, numSolutions);
         }
 
+        /// Upper bound on the problems whose findTopSolutions results are kept;
+        /// later problems are not cached.
+        static constexpr size_t TopSolutionsCapacity = size_t(1) << 14;
+
     private:
+        struct TopSolutions
+        {
+            SolutionVector<MySolution> solutions;
+            bool                       returnedAll = false;
+        };
+
+        SolutionVector<MySolution> findTopSolutionsByKey(MyProblem const& problem,
+                                                         AMDGPU const&    amdgpu,
+                                                         int              numSolutions) const
+        {
+            thread_local std::string key;
+            key.clear();
+            AppendCacheKeys(key, amdgpu, problem);
+
+            SolutionVector<MySolution> solutions;
+            bool                       returnedAll = false;
+            {
+                std::shared_lock<std::shared_timed_mutex> lock(m_topMutex);
+                auto                                      it = m_top.find(key);
+                if(it != m_top.end())
+                {
+                    solutions   = it->second.solutions;
+                    returnedAll = it->second.returnedAll;
+                }
+            }
+            lastFindTopRetAll = returnedAll;
+            if(solutions.size() >= numSolutions || returnedAll)
+                return solutions;
+
+            // The sub-library can reach another CachingLibrary on this thread,
+            // which reuses `key`.
+            std::string ownKey = key;
+            solutions          = m_subLibrary->findTopSolutions(problem, amdgpu, numSolutions);
+            if(solutions.size() != 0)
+            {
+                TopSolutions entry{solutions, m_subLibrary->lastFindTopAlreadyRetAll()};
+                std::lock_guard<std::shared_timed_mutex> lock(m_topMutex);
+                // Reserving the full capacity up front means the map never rehashes.
+                if(m_top.empty())
+                    m_top.reserve(TopSolutionsCapacity);
+                auto it = m_top.find(ownKey);
+                if(it != m_top.end())
+                    it->second = std::move(entry);
+                else if(m_top.size() < TopSolutionsCapacity)
+                    m_top.emplace(std::move(ownKey), std::move(entry));
+            }
+
+            // can't reach the requested number, means findTop already done its best
+            lastFindTopRetAll = (solutions.size() < numSolutions);
+            return solutions;
+        }
+
         std::shared_ptr<Library>  m_subLibrary;
         mutable Cache             m_cache;
         mutable Caches            m_caches;
         mutable CachesAllSolsFlag m_cachesAllSolutions;
         mutable CachesGroupedGemm m_cachesGroupedGemm;
         mutable std::atomic<bool> lastFindTopRetAll = false;
+
+        mutable std::shared_timed_mutex                       m_topMutex;
+        mutable std::unordered_map<std::string, TopSolutions> m_top;
     };
+
+    /// `library` without the CachingLibrary that wraps it, if any.
+    template <typename MyProblem, typename MySolution>
+    std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
+        withoutCache(std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> const& library)
+    {
+        auto cache = std::dynamic_pointer_cast<CachingLibrary<MyProblem, MySolution>>(library);
+        return cache ? cache->library() : library;
+    }
 
 } // namespace TensileLite

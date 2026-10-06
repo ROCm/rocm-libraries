@@ -172,6 +172,61 @@ namespace TensileLite
                                         rhs.getParams().uniformSummationOrder());
         }
     };
+
+    template <>
+    struct CacheKey<ContractionProblemGemm>
+    {
+        enum
+        {
+            implemented = true
+        };
+
+        // Must append every field Comparison<ContractionProblemGemm> compares.
+        static void append(std::string& key, ContractionProblemGemm const& problem)
+        {
+            AppendCacheKeys(key,
+                            problem.operationIdentifier(),
+                            problem.highPrecisionAccumulate(),
+                            problem.kernelLanguage(),
+                            problem.deterministicMode(),
+                            problem.a(),
+                            problem.b(),
+                            problem.c(),
+                            problem.d(),
+                            problem.e(),
+                            problem.computeInputTypeA(),
+                            problem.computeInputTypeB(),
+                            problem.workspaceSize(),
+                            problem.stridedBatched(),
+                            problem.groupedGemm(),
+                            problem.performanceMetric(),
+                            problem.activationType(),
+                            problem.activationComputeType(),
+                            problem.activationNoGuard(),
+                            problem.useGradient(),
+                            problem.useBias(),
+                            problem.biasSrc(),
+                            problem.useE(),
+                            problem.useGateResidual(),
+                            problem.useScaleAB(),
+                            problem.useScaleCD(),
+                            problem.useScaleAlphaVec(),
+                            problem.outputAmaxD(),
+                            problem.f32XdlMathOp(),
+                            problem.swizzleTensorA(),
+                            problem.swizzleTensorB(),
+                            problem.fusedGemmA2A(),
+                            problem.fusedA2AExtent(),
+                            problem.fusedA2AWorld(),
+                            problem.mxBlockA(),
+                            problem.mxBlockB(),
+                            problem.mxTypeA(),
+                            problem.mxTypeB(),
+                            problem.getParams().smCountTarget(),
+                            problem.getParams().streamKTileSchedulingMode(),
+                            problem.getParams().uniformSummationOrder());
+        }
+    };
 } // namespace TensileLite
 
 namespace std
