@@ -3067,15 +3067,18 @@ class KernelWriterAssembly(KernelWriter):
                                comment="WorkGroup2 = (cluster_z * nwg_z) + wg_z"))
             moduleRegInit.add(label_calculate_workgroup_done)
 
-        # Guard the compute site like the apply sites: find() returns None
-        # unless TDMInst==3 + HasTDM match, so Multicast with TDMInst in {1,2}
-        # or a non-TDM arch would otherwise None-deref here.
-        clusterComp = ClusterLoadTDM.find(self)
-        if kernel["Multicast"] and clusterComp:
-          # Same SGPR operands allocated above (wg_x=sTmp+1, wg_y=sTmp+2,
-          # nwg_x=sTmp+3, scratch=sTmp+4) are passed through.
-          moduleRegInit.add(clusterComp.computeMasks(
-              self, kernel, sgprWgX=sTmp+1, sgprWgY=sTmp+2, sgprNWgX=sTmp+3, sTmp=sTmp))
+            # Guard the compute site like the apply sites: find() returns None
+            # unless TDMInst==3 + HasTDM match, so Multicast with TDMInst in {1,2}
+            # or a non-TDM arch would otherwise None-deref here.
+            clusterComp = ClusterLoadTDM.find(self)
+            if kernel["Multicast"] and clusterComp:
+              # Same SGPR operands allocated above (wg_x=sTmp+1, wg_y=sTmp+2,
+              # nwg_x=sTmp+3, scratch=sTmp+4) are passed through. Must run inside
+              # the tmpSgprInfo scope: computeMasks allocates its own scratch, which
+              # would otherwise be handed the freed sTmp slots and clobber wg_x
+              # (e.g. the magic-number ceil-divide by a non-power-of-2 MacroTile1).
+              moduleRegInit.add(clusterComp.computeMasks(
+                  self, kernel, sgprWgX=sTmp+1, sgprWgY=sTmp+2, sgprNWgX=sTmp+3, sTmp=sTmp))
       # SrdD can be used as temp sgprs for a bit
       if self.states.doShadowInit and kernel["BufferStore"]:
         self.addSgprVarToPool("SrdD")
