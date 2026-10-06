@@ -62,7 +62,7 @@ TEST(TestGpuBatchnormBwdSignatureKey, CreateFromNodeWithoutSavedStatistics)
     EXPECT_EQ(key.meanVarianceDataType, key.scaleBiasDataType);
 }
 
-TEST(TestGpuBatchnormBwdSignatureKey, RegistersSupportedGpuComputeTypesOnly)
+TEST(TestGpuBatchnormBwdSignatureKey, RegistersSupportedComputeTypesOnly)
 {
     const auto builders = GpuBatchnormBwdSignatureKey::getPlanBuilders();
 
