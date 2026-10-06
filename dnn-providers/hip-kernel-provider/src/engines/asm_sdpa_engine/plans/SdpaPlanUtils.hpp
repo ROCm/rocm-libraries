@@ -72,7 +72,8 @@ struct DiagonalBand
 // alignment; causal_mask_bottom_right always resolves to BOTTOM_RIGHT, because
 // TOP_LEFT is the schema default and indistinguishable from an unset alignment.
 //
-// Setting both booleans throws HipdnnPluginException(INVALID_VALUE).
+// Setting both booleans, or a bound below -1, throws
+// HipdnnPluginException(INVALID_VALUE).
 template <typename SdpaAttrsT>
 DiagonalBand resolveDiagonalBand(const SdpaAttrsT& attrs)
 {
@@ -91,6 +92,14 @@ DiagonalBand resolveDiagonalBand(const SdpaAttrsT& attrs)
 
     const int64_t left = attrs.left_bound().has_value() ? attrs.left_bound().value() : -1;
     const int64_t right = attrs.right_bound().has_value() ? attrs.right_bound().value() : -1;
+
+    if(left < -1 || right < -1)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+            "SDPA: left_bound and right_bound must be >= -1 (got left_bound=" + std::to_string(left)
+                + ", right_bound=" + std::to_string(right) + ")");
+    }
 
     if(!causalDeprecated && !bottomRightDeprecated)
     {

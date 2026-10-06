@@ -2151,6 +2151,14 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesWhenDeprecatedBoolIsSetAlongsid
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesDeprecatedCausalWithRightBoundBelowMinusOne)
+{
+    GraphSpec spec;
+    spec.causalMaskDeprecated = true;
+    spec.rightBound = -5;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
 TEST(TestGfx950AttentionDenseGraphMatch, StillServesPlainDeprecatedCausalWithNoBound)
 {
     // The control: bound-wins must not over-fire and decline ordinary deprecated-causal.

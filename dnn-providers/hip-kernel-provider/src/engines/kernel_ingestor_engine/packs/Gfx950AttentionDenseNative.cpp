@@ -294,8 +294,8 @@ enum class MaskType : int
  * @brief Which mask the graph is asking for, or nullopt for one this engine lacks.
  *
  * Deprecated causal booleans are merged with the bounds and alignment by
- * asm_sdpa_engine::plan_utils::getMaskType. Both booleans set, or any band
- * other than unmasked or causal, is declined: the compiled kernel is
+ * asm_sdpa_engine::plan_utils::getMaskType. Both booleans set, invalid bounds,
+ * or any band other than unmasked or causal, is declined: the compiled kernel is
  * hard-causal with no right-bound field, and no shipped variant carries a
  * non-zero sliding_window.
  */
@@ -309,10 +309,9 @@ std::optional<MaskType> maskTypeFor(const data_objects::SdpaAttributes& attribut
     {
         planMask = getMaskType(attributes);
     }
-    catch(const hipdnn_plugin_sdk::HipdnnPluginException&)
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
     {
-        HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"}
-                               << "causal_mask and causal_mask_bottom_right are both set");
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"} << e.what());
         return std::nullopt;
     }
 
@@ -332,6 +331,8 @@ std::optional<MaskType> maskTypeFor(const data_objects::SdpaAttributes& attribut
                                   "shipped variant carries a sliding_window");
         return std::nullopt;
     default:
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"} << "mask type " << static_cast<int>(planMask)
+                                                << " is not supported");
         return std::nullopt;
     }
 }

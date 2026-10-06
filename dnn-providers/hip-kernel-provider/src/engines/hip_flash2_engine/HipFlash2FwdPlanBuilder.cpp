@@ -329,7 +329,7 @@ std::vector<data_objects::KnobT>
 }
 
 // ---------------------------------------------------------------------------
-// extractParams (private helper) -- Finding 1 fix: restored missing body
+// extractParams -- Finding 1 fix: restored missing body
 // ---------------------------------------------------------------------------
 Flash2FwdParams HipFlash2FwdPlanBuilder::extractParams(const Handle& /*handle*/,
                                                        const flatbuffer_utilities::IGraph& opGraph)

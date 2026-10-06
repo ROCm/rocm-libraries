@@ -15,6 +15,7 @@
 #include "engines/asm_sdpa_engine/plans/SdpaKernelUtils.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
+#include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
@@ -1029,17 +1030,6 @@ TEST_F(TestSdpaBwdPlanBuilder, AbsentAttnScaleValueIsOne)
     EXPECT_EQ(plan_utils::attnScaleOrDefault(attrs), 1.0f);
 }
 
-struct DeprecatedCausalMaskCase
-{
-    const char* name;
-    bool causalMask;
-    bool causalMaskBottomRight;
-    flatbuffers::Optional<int64_t> leftBound;
-    flatbuffers::Optional<int64_t> rightBound;
-    hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment alignment;
-    std::optional<plan_utils::MaskType> expected;
-};
-
 class TestSdpaBwdDeprecatedCausalMask : public ::testing::TestWithParam<DeprecatedCausalMaskCase>
 {
 };
@@ -1063,97 +1053,10 @@ TEST_P(TestSdpaBwdDeprecatedCausalMask, Classifies)
     EXPECT_EQ(maskType, param.expected.value());
 }
 
-constexpr auto ALIGN_TOP_LEFT = hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT;
-constexpr auto ALIGN_BOTTOM_RIGHT
-    = hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::BOTTOM_RIGHT;
-const flatbuffers::Optional<int64_t> NO_BOUND = flatbuffers::nullopt;
-
-// BottomRightAloneDefaultAlignment: TOP_LEFT is the schema default, so it must not
-// be read as contradicting causal_mask_bottom_right.
-INSTANTIATE_TEST_SUITE_P(
-    ,
-    TestSdpaBwdDeprecatedCausalMask,
-    ::testing::Values(
-        DeprecatedCausalMaskCase{"CausalAlone",
-                                 true,
-                                 false,
-                                 NO_BOUND,
-                                 NO_BOUND,
-                                 ALIGN_TOP_LEFT,
-                                 plan_utils::MaskType::TOP_LEFT_CAUSAL},
-        DeprecatedCausalMaskCase{"BottomRightAlone",
-                                 false,
-                                 true,
-                                 NO_BOUND,
-                                 NO_BOUND,
-                                 ALIGN_BOTTOM_RIGHT,
-                                 plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL},
-        DeprecatedCausalMaskCase{"BottomRightAloneDefaultAlignment",
-                                 false,
-                                 true,
-                                 NO_BOUND,
-                                 NO_BOUND,
-                                 ALIGN_TOP_LEFT,
-                                 plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL},
-        DeprecatedCausalMaskCase{
-            "BothDeprecated", true, true, NO_BOUND, NO_BOUND, ALIGN_TOP_LEFT, std::nullopt},
-        DeprecatedCausalMaskCase{"CausalWithBottomRightAlignment",
-                                 true,
-                                 false,
-                                 NO_BOUND,
-                                 NO_BOUND,
-                                 ALIGN_BOTTOM_RIGHT,
-                                 plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL},
-        DeprecatedCausalMaskCase{"CausalWithConsistentBounds",
-                                 true,
-                                 false,
-                                 -1,
-                                 0,
-                                 ALIGN_TOP_LEFT,
-                                 plan_utils::MaskType::TOP_LEFT_CAUSAL},
-        DeprecatedCausalMaskCase{"CausalWithLeftBoundOnly",
-                                 true,
-                                 false,
-                                 64,
-                                 NO_BOUND,
-                                 ALIGN_TOP_LEFT,
-                                 plan_utils::MaskType::SLIDING_WINDOW},
-        DeprecatedCausalMaskCase{"CausalWithRightBoundOnly",
-                                 true,
-                                 false,
-                                 NO_BOUND,
-                                 0,
-                                 ALIGN_TOP_LEFT,
-                                 plan_utils::MaskType::TOP_LEFT_CAUSAL},
-        DeprecatedCausalMaskCase{"CausalWithUnboundedRight",
-                                 true,
-                                 false,
-                                 NO_BOUND,
-                                 -1,
-                                 ALIGN_TOP_LEFT,
-                                 plan_utils::MaskType::TOP_LEFT_CAUSAL},
-        DeprecatedCausalMaskCase{"CausalWithPositiveRightBound",
-                                 true,
-                                 false,
-                                 NO_BOUND,
-                                 16,
-                                 ALIGN_TOP_LEFT,
-                                 plan_utils::MaskType::SLIDING_WINDOW},
-        DeprecatedCausalMaskCase{"BottomRightWithConsistentBounds",
-                                 false,
-                                 true,
-                                 -1,
-                                 0,
-                                 ALIGN_BOTTOM_RIGHT,
-                                 plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL},
-        DeprecatedCausalMaskCase{"BottomRightWithRightBoundOnly",
-                                 false,
-                                 true,
-                                 NO_BOUND,
-                                 64,
-                                 ALIGN_BOTTOM_RIGHT,
-                                 plan_utils::MaskType::SLIDING_WINDOW}),
-    [](const ::testing::TestParamInfo<DeprecatedCausalMaskCase>& info) { return info.param.name; });
+INSTANTIATE_TEST_SUITE_P(,
+                         TestSdpaBwdDeprecatedCausalMask,
+                         ::testing::ValuesIn(deprecatedCausalMaskCases()),
+                         deprecatedCausalMaskCaseName);
 
 // The backward sliding-window path hands the resolved band to the kernel, so a
 // deprecated boolean must contribute its causal right bound to the window.
