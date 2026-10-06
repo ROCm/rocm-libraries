@@ -222,8 +222,8 @@ an error. Keep all buffers alive until the supplied stream completes.
 
 A row with no allowed real keys writes exact-zero output and `LSE=-inf`.
 A finite attention sink contributes only to the denominator; an otherwise empty
-row writes zero output and `LSE=sink`. Nonempty attention retains the existing
-scaled-Q input-dtype rounding.
+row writes zero output and `LSE=sink`. Nonempty rows write the same `O` bits as
+the LSE-off kernel.
 
 This opt-in covers the existing legal gfx950 dense modes: ordinary/persistent,
 fp16/bf16, D64/D128, head sharing, supported masks/windows, fixed ragged, paged,

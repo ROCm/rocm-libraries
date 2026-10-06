@@ -861,21 +861,10 @@ def _tolerance(dtype):
     return 2e-2 if dtype == "fp16" else 4e-2
 
 
-def _lse_test_scale(dtype, head_size):
-    """Softmax scale for the random-input LSE tests.
-
-    FP16 keeps the nondefault 0.5 so the tests prove the kernel honors ``scale``.
-    BF16 uses the standard ``1/sqrt(head_size)``: at 0.5 the existing dense kernel
-    (unchanged by LSE, LSE-off included) rounds ``Q * scale * log2(e)`` to BF16 and
-    exceeds the 4e-2 O/LSE tolerance. That pre-existing limit is tracked separately.
-    """
-    return 0.5 if dtype == "fp16" else 1.0 / math.sqrt(head_size)
-
-
 def _lse_reference(q, k, v, scale, *, causal, window=0):
     """Independent FP32 O and natural-log LSE, including truly empty rows.
 
-    Scores use unrounded FP32 Q/K, not the emitter's input-dtype scaled Q.
+    Scores use FP32 Q/K with the softmax scale applied in FP32.
     """
     sq, hq = q.shape[1:3]
     skv, hkv = k.shape[1:3]
@@ -984,7 +973,7 @@ class TestDenseLseNumericGfx942:
         hq, hkv = heads
         spec = _lse_spec(dtype, d, hq, hkv, persistent, causal=causal, batch=2)
         tdt = getattr(torch, _TORCH_DT[dtype])
-        scale = _lse_test_scale(dtype, d)
+        scale = 0.5
         torch.manual_seed(11)
         q = torch.randn(2, 512, hq, d, device="cuda", dtype=tdt)
         k = torch.randn(2, 512, hkv, d, device=q.device, dtype=tdt)
@@ -1003,7 +992,7 @@ class TestDenseLseNumericGfx942:
     def test_sliding_window_lse(self, dtype, d, persistent):
         spec = _lse_spec(dtype, d, 8, 2, persistent, sliding_window=128)
         tdt = getattr(torch, _TORCH_DT[dtype])
-        scale = _lse_test_scale(dtype, d)
+        scale = 0.5
         torch.manual_seed(13)
         q = torch.randn(1, 512, 8, d, device="cuda", dtype=tdt)
         k = torch.randn(1, 512, 2, d, device=q.device, dtype=tdt)
@@ -1043,7 +1032,7 @@ class TestDenseLseNumericGfx942:
             emit_lse=True,
         )
         assert spec.o_store_width == width
-        scale = _lse_test_scale("bf16", 128)
+        scale = 0.5
         torch.manual_seed(17)
         q = torch.randn(1, 256, 4, 128, device="cuda", dtype=torch.bfloat16)
         k = torch.randn(1, 64, 1, 128, device=q.device, dtype=q.dtype)
@@ -1189,7 +1178,7 @@ class TestDenseLseNumericGfx942:
         }
         # Own every potentially affected slot. Always restore prior entries.
         old_entries = {key: _DENSE_LAUNCHER_CACHE.pop(key, None) for key in keys}
-        scale = _lse_test_scale("bf16", 128)
+        scale = 0.5
         launchers = []
         try:
             for index, spec in enumerate(specs):

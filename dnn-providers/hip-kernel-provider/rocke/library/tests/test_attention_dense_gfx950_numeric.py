@@ -962,21 +962,10 @@ class TestWideDmaFeatures:
         ), f"{spec_id} {dtype} {_name}: max_abs={max_abs:.3e}"
 
 
-def _lse_test_scale(dtype, head_size):
-    """Softmax scale for the random-input LSE tests.
-
-    FP16 keeps the nondefault 0.5 so the tests prove the kernel honors ``scale``.
-    BF16 uses the standard ``1/sqrt(head_size)``: at 0.5 the existing dense kernel
-    (unchanged by LSE, LSE-off included) rounds ``Q * scale * log2(e)`` to BF16 and
-    exceeds the 4e-2 O/LSE tolerance. That pre-existing limit is tracked separately.
-    """
-    return 0.5 if dtype == "fp16" else 1.0 / math.sqrt(head_size)
-
-
 def _lse_reference(q, k, v, scale, *, causal, diagonal=0, window=0, sinks=None):
     """Independent FP32 O and natural-log LSE, including truly empty rows.
 
-    Scores use unrounded FP32 Q/K, not the emitter's input-dtype scaled Q.
+    Scores use FP32 Q/K with the softmax scale applied in FP32.
     A sink adds denominator mass but contributes no value vector.
     """
     batch, sq, hq, _ = q.shape
@@ -1034,7 +1023,7 @@ class TestDenseLseNumeric:
             emit_lse=True,
         )
         tdt = getattr(torch, _TORCH_DT[dtype])
-        scale = _lse_test_scale(dtype, head_size)
+        scale = 0.5
         torch.manual_seed(11)
         q = torch.randn(2, 512, hq, head_size, device="cuda", dtype=tdt)
         k = torch.randn(2, 512, hkv, head_size, device=q.device, dtype=tdt)
@@ -1092,7 +1081,7 @@ class TestDenseLseNumeric:
             o_store_width=width,
             emit_lse=True,
         )
-        scale = _lse_test_scale("bf16", 128)
+        scale = 0.5
         torch.manual_seed(17)
         q = torch.randn(1, 256, 4, 128, device="cuda", dtype=torch.bfloat16)
         k = torch.randn(1, 64, 1, 128, device=q.device, dtype=q.dtype)
@@ -1338,7 +1327,7 @@ class TestDenseLseNumeric:
             else None
         )
         launch_k, launch_v = k, v
-        scale = _lse_test_scale(dtype, spec.head_size)
+        scale = 0.5
         metadata = {}
         if spec.paged:
             page_ids = torch.arange(31, -1, -1, device=q.device, dtype=torch.int32)
@@ -1426,7 +1415,7 @@ class TestDenseLseNumeric:
             dtype=torch.float32,
         )
         lse = storage[:count].view(q_offsets[-1], 4, 1)
-        scale = _lse_test_scale(dtype, spec.head_size)
+        scale = 0.5
         cu_q = torch.tensor(q_offsets, device=q.device, dtype=torch.int32)
         cu_k = torch.tensor(k_offsets, device=q.device, dtype=torch.int32)
         returned = run_attention_dense_torch(
@@ -1688,7 +1677,7 @@ class TestDenseLseNumeric:
         owned_keys = set(enabled_keys + disabled_keys)
         old_entries = {key: _DENSE_LAUNCHER_CACHE.pop(key, None) for key in owned_keys}
         launchers = []
-        scale = _lse_test_scale("bf16", specs[0].head_size)
+        scale = 0.5
         try:
             for index, spec in enumerate(specs):
                 torch.manual_seed(29 + index)
