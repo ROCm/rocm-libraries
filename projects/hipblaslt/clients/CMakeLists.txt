@@ -278,8 +278,8 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     # The online tuner's bookkeeping, tested the same way and for the same
     # reason: no device, no solution library and no test hooks. It is compiled
     # in rather than linked because it belongs to hipblaslt itself, and it
-    # brings its own main, which has to set the tuner's environment before the
-    # singleton reads it.
+    # brings its own main along with the onlineTunerConfig() the tuner is built
+    # from, which the library maps off the tuning mode and is not linked here.
     add_executable(hipblaslt-test-online-tuner
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/src/online_tuner_test.cpp"
         "${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/OnlineTuner.cpp")

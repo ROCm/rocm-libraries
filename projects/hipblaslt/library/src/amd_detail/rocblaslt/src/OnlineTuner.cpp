@@ -5,8 +5,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdlib>
-#include <cstring>
 #include <iomanip>
 #include <iostream>
 #include <mutex>
@@ -16,8 +14,6 @@ namespace rocblaslt
 {
     namespace
     {
-        constexpr int c_defaultRepeats = 3;
-
         // Slack over the candidates * repeats launches exploration needs. A
         // caller is free to ignore the rotation selectCandidate() asks for, so
         // without a ceiling a problem could stay in the exploring state, and on
@@ -25,40 +21,6 @@ namespace rocblaslt
         constexpr int c_visitBudgetFactor = 8;
 
         constexpr const char* c_tracePrefix = "[hipblaslt-online-tune]";
-
-        int envInt(const char* name, int defaultValue)
-        {
-            const char* env = std::getenv(name);
-            if(!env)
-                return defaultValue;
-
-            return static_cast<int>(std::strtol(env, nullptr, 0));
-        }
-
-        // An unrecognised value keeps the default rather than failing the
-        // process, which is why the winner line reports the statistic it
-        // actually scored with: that trace field, not the environment, is what
-        // an A/B arm should be identified by.
-        OnlineTuner::Statistic envStatistic(const char*            name,
-                                            OnlineTuner::Statistic defaultValue)
-        {
-            const char* env = std::getenv(name);
-            if(!env)
-                return defaultValue;
-
-            if(!std::strcmp(env, "min"))
-                return OnlineTuner::Statistic::Min;
-
-            if(!std::strcmp(env, "median"))
-                return OnlineTuner::Statistic::Median;
-
-            return defaultValue;
-        }
-
-        const char* statisticName(OnlineTuner::Statistic statistic)
-        {
-            return statistic == OnlineTuner::Statistic::Min ? "min" : "median";
-        }
 
         int positionOf(const std::vector<int>& rankedSolutionIndices, int solutionIndex)
         {
@@ -70,17 +32,6 @@ namespace rocblaslt
                     return static_cast<int>(i);
 
             return -1;
-        }
-
-        float median(std::vector<float> samples)
-        {
-            std::sort(samples.begin(), samples.end());
-
-            const size_t count = samples.size();
-            if(count % 2)
-                return samples[count / 2];
-
-            return 0.5f * (samples[count / 2 - 1] + samples[count / 2]);
         }
 
         float minimum(const std::vector<float>& samples)
@@ -97,16 +48,22 @@ namespace rocblaslt
         }
     }
 
+    // Pulled from the link rather than read here, so that the knobs the tuning
+    // stack already owns are the only ones there are; see onlineTunerConfig().
+    // Read once, like the tuning mode itself, so a knob set after the first
+    // lookup has no effect.
     OnlineTuner::OnlineTuner()
     {
-        const int topK = envInt("HIPBLASLT_ORIGAMI_ONLINE_TUNE_TOP_K", 0);
+        const OnlineTunerConfig config = onlineTunerConfig();
 
-        m_topK = topK > 0 ? topK : 0;
-        m_repeats
-            = std::max(envInt("HIPBLASLT_ORIGAMI_ONLINE_TUNE_REPEATS", c_defaultRepeats), 1);
-        m_verbose   = std::getenv("HIPBLASLT_ORIGAMI_ONLINE_TUNE_VERBOSE") != nullptr;
-        m_statistic = envStatistic("HIPBLASLT_ORIGAMI_ONLINE_TUNE_STAT", Statistic::Median);
-        m_enabled   = m_topK >= 2;
+        m_topK      = std::max(config.topK, 0);
+        m_repeats   = std::max(config.repeats, 1);
+        m_coldCalls = std::max(config.coldCalls, 0);
+        m_verbose   = config.verbose;
+
+        // One candidate is nothing to choose between, so a depth below two is
+        // the feature switched off however the mode is set.
+        m_enabled = config.enabled && m_topK >= 2;
     }
 
     // The pooled events are deliberately not destroyed. This is a function-local
@@ -133,7 +90,19 @@ namespace rocblaslt
 
         ProblemState& state = m_problems[problemKey];
         if(state.m_candidates.empty())
+        {
+            // No candidate list yet, so this problem is still inside its cold
+            // visits: the caller's own ordering is left alone and nothing is
+            // offered an event pair, which is what makes exploration start on a
+            // device this problem has already warmed.
+            if(state.m_coldCalls < m_coldCalls)
+            {
+                ++state.m_coldCalls;
+                return -1;
+            }
+
             registerProblem(problemKey, state, rankedSolutionIndices);
+        }
 
         if(!state.m_resolved)
         {
@@ -324,7 +293,8 @@ namespace rocblaslt
         if(m_verbose)
         {
             std::ostringstream msg = traceLine("register", problemKey);
-            msg << " candidates=" << count << " repeats=" << m_repeats << " sols=";
+            msg << " candidates=" << count << " repeats=" << m_repeats
+                << " cold=" << state.m_coldCalls << " sols=";
             for(size_t i = 0; i < count; ++i)
                 msg << (i ? "," : "") << state.m_candidates[i];
             msg << "\n";
@@ -375,15 +345,14 @@ namespace rocblaslt
     }
 
     // GPU timing noise is one-sided: contention, clock excursions and cache
-    // state make a launch slower than the kernel's floor, never faster. Min
-    // therefore estimates what the candidate can achieve and median estimates
-    // what it typically achieves under whatever else the machine is doing.
+    // state make a launch slower than the kernel's floor, never faster, so the
+    // smallest of a candidate's samples is its best estimate with the rest of
+    // the machine taken out. Not a knob: a measurement shared with whatever
+    // else the device is doing has no typical value worth reporting, and the
+    // alternative was measured not to help winner stability either way.
     float OnlineTuner::score(const std::vector<float>& samples) const
     {
-        if(m_statistic == Statistic::Min)
-            return minimum(samples);
-
-        return median(samples);
+        return minimum(samples);
     }
 
     void OnlineTuner::resolve(size_t problemKey, ProblemState& state)
@@ -418,9 +387,8 @@ namespace rocblaslt
             std::ostringstream msg = traceLine("winner", problemKey);
             msg << " cand=" << winnerIndex << " sol=" << winner << " us=" << winnerScore
                 << " samples=" << samples << " calls=" << state.m_calls
-                << " declined=" << state.m_declined
-                << " gaveup=" << (state.m_gaveUp ? 1 : 0)
-                << " stat=" << statisticName(m_statistic) << "\n";
+                << " declined=" << state.m_declined << " gaveup=" << (state.m_gaveUp ? 1 : 0)
+                << "\n";
             std::cerr << msg.str();
         }
     }
@@ -460,7 +428,7 @@ namespace rocblaslt
     // an empty record and both fill it. The load inside the lock is the
     // authoritative one; a caller is free to check pinned() first to stay off
     // the lock entirely, which is what the steady state does.
-    void OnlineTuner::pinWinner(const Resolution& resolved,
+    void OnlineTuner::pinWinner(const Resolution&                                        resolved,
                                 const std::shared_ptr<TensileLite::ContractionSolution>& solution,
                                 size_t                                                   problem,
                                 size_t requiredWorkspace)

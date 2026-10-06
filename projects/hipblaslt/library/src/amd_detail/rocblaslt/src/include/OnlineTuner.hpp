@@ -23,13 +23,54 @@ namespace TensileLite
 namespace rocblaslt
 {
     /**
+ * @brief The tuner's knobs, as whoever links it supplies them.
+ *
+ * The tuner reads no environment of its own. Inside hipBLASLt these come from
+ * HIPBLASLT_TUNING_MODE and the HIPBLASLT_TUNING_* search settings, read
+ * through the same secure accessor the rest of the tuning stack uses, which is
+ * only reachable from the library and not from here.
+ */
+    struct OnlineTunerConfig
+    {
+        // Off unless the link says otherwise, so the feature stays off by
+        // default and every entry point costs one branch on a member flag.
+        bool enabled = false;
+
+        // Ranked-prefix depth. Below two there is nothing to choose between,
+        // and the tuner stays off however the mode is set.
+        int topK = 0;
+
+        // Timed launches per candidate.
+        int repeats = 1;
+
+        // Visits of a problem that dispatch the ranking's own pick and are
+        // sampled by nothing, so exploration begins on a device the problem has
+        // already warmed. Counted in visits, not in launches: each one is a
+        // whole call that goes untouched.
+        int coldCalls = 0;
+
+        bool verbose = false;
+    };
+
+    /**
+ * @brief The configuration the tuner is built with.
+ *
+ * Defined by whoever links the tuner rather than read here, because the
+ * mapping needs the tuning mode and TuningPolicy, which live where the secure
+ * environment accessor does. Called once, from the singleton's constructor,
+ * which is the first use of the tuner and so is after everything it reads can
+ * be constructed.
+ */
+    OnlineTunerConfig onlineTunerConfig();
+
+    /**
  * @brief Explore-then-cache kernel selection on top of the Origami ranking.
  *
  * The first topK() * repeats() times a problem is seen, each of the top-K
  * ranked candidates is dispatched in turn and timed on the GPU; once every
  * candidate has been sampled the measured winner is pinned for every later
- * call with that problem. statistic() decides how a candidate's repeats are
- * reduced to the one score the winner is chosen on.
+ * call with that problem. A candidate's repeats are reduced to one score by
+ * taking the smallest of them.
  *
  * Timing is deferred-read. beginMeasurement() hands back an event pair for the
  * caller to wrap the launch with, and the elapsed time is only read on a later
@@ -39,26 +80,12 @@ namespace rocblaslt
  * at dispatch rate rather than at queue-drain rate. No entry point here ever
  * waits on the GPU.
  *
- * Every entry point is a branch on a member flag when
- * HIPBLASLT_ORIGAMI_ONLINE_TUNE_TOP_K is unset, so the feature costs nothing
- * when it is off.
+ * Every entry point is a branch on a member flag when the configuration does
+ * not switch the tuner on, so the feature costs nothing when it is off.
  */
     class OnlineTuner
     {
     public:
-        /**
-     * @brief How a candidate's repeated samples are reduced to one score.
-     *
-     * Median reports the typical time under whatever interference the run
-     * carries; Min reports the best time the candidate was seen to achieve.
-     * Selected by HIPBLASLT_ORIGAMI_ONLINE_TUNE_STAT.
-     */
-        enum class Statistic : uint8_t
-        {
-            Median = 0,
-            Min    = 1
-        };
-
         /**
      * @brief The winner itself, for a caller that would otherwise have to ask
      * the library for a ranked list only to pick one entry out of it.
@@ -164,9 +191,9 @@ namespace rocblaslt
             return m_repeats;
         }
 
-        Statistic statistic() const
+        int coldCalls() const
         {
-            return m_statistic;
+            return m_coldCalls;
         }
 
         /**
@@ -297,17 +324,24 @@ namespace rocblaslt
         // budget: no further launch is measured, but m_pending is still drained
         // before a winner is picked, so samples already paid for are not thrown
         // away. m_declined counts launches refused because the cap was full.
+        //
+        // m_coldCalls counts the visits spent before the candidate list was
+        // registered at all, which is the only state a problem still inside
+        // coldCalls() carries. It is deliberately not m_calls: the visit budget
+        // bounds how long exploration may run, and a problem that has not
+        // started exploring must not be able to exhaust it.
         struct ProblemState
         {
             std::vector<int>                m_candidates;
             std::vector<std::vector<float>> m_samples;
             std::vector<int>                m_issued;
             std::vector<PendingMeasurement> m_pending;
-            int                             m_calls    = 0;
-            int                             m_declined = 0;
-            int                             m_winner   = -1;
-            bool                            m_gaveUp   = false;
-            bool                            m_resolved = false;
+            int                             m_coldCalls = 0;
+            int                             m_calls     = 0;
+            int                             m_declined  = 0;
+            int                             m_winner    = -1;
+            bool                            m_gaveUp    = false;
+            bool                            m_resolved  = false;
         };
 
         OnlineTuner();
@@ -336,11 +370,11 @@ namespace rocblaslt
         void  recycleEvents(hipEvent_t start, hipEvent_t stop);
         void  retireEvents(hipEvent_t start, hipEvent_t stop);
 
-        bool      m_enabled   = false;
-        int       m_topK      = 0;
-        int       m_repeats   = 0;
-        bool      m_verbose   = false;
-        Statistic m_statistic = Statistic::Median;
+        bool m_enabled   = false;
+        int  m_topK      = 0;
+        int  m_repeats   = 0;
+        int  m_coldCalls = 0;
+        bool m_verbose   = false;
 
         std::unordered_map<size_t, ProblemState> m_problems;
         std::vector<EventPair>                   m_pairs;

@@ -97,6 +97,14 @@ running in a secure execution context (set-user-ID, set-group-ID, or another cre
 such as file capabilities) ignores every variable in this section, so tuning stays off. For more
 information, see :doc:`Use hipBLASLt offline tuning <../how-to/how-to-use-hipblaslt-offline-tuning>`.
 
+``online`` mode never blocks a call. It spends its measurements on the caller's own dispatches:
+for the first ``HIPBLASLT_TUNING_COLD_ITERS`` visits of a problem it launches the ranked first
+choice untouched, then dispatches each of the top ``HIPBLASLT_TUNING_MAX_CANDIDATES`` in turn
+``HIPBLASLT_TUNING_HOT_ITERS`` times, timing each with a HIP event pair that is read back on a
+later visit to the same problem, and pins the fastest for every call after that. It only does so
+where the library chooses the kernel, so an explicitly supplied algorithm is never overridden, and
+it leaves a shape the cache file already serves to the cache.
+
 ``cache`` and ``tune`` mode write a few notices without any logging variable, because tuning can
 block the first call on a new shape for minutes and a silent pause looks like a hang. The notices are
 bounded: one line naming the mode and what loaded, one start and one result per shape that is
@@ -131,40 +139,47 @@ go depends on logging:
 
     * - | ``HIPBLASLT_TUNING_ALL_KERNELS``
         | Selects exhaustive or ranked-prefix candidate enumeration.
+        | Not read in ``online`` mode, which always uses a ranked prefix.
       - | 1: Enumerate every candidate (default)
         | 0: Use a ranked prefix
 
     * - | ``HIPBLASLT_TUNING_MAX_CANDIDATES``
         | Limits the ranked prefix when exhaustive enumeration is disabled.
-      - | Positive integer (default: 128)
+      - | Positive integer (``tune`` default: 128, ``online`` default: 5)
+        | Below 2 switches ``online`` mode off
 
     * - | ``HIPBLASLT_TUNING_COLD_ITERS``
-        | Sets untimed warm-up launches per candidate.
-      - | Non-negative integer (default: 1000)
+        | Sets untimed warm-up launches per candidate in ``tune`` mode, and untimed first visits
+          per problem in ``online`` mode.
+      - | Non-negative integer (``tune`` default: 1000, ``online`` default: 32)
         | 0 disables warm-up
 
     * - | ``HIPBLASLT_TUNING_HOT_ITERS``
         | Sets timed launches per candidate.
-      - | Positive integer (default: 1000)
+      - | Positive integer (``tune`` default: 1000, ``online`` default: 3)
 
     * - | ``HIPBLASLT_TUNING_ROTATING_MB``
         | Sets the target rotating-buffer footprint.
+        | Not read in ``online`` mode, which measures the caller's own buffers.
       - | MiB (default: 512)
         | 0 disables rotation
 
     * - | ``HIPBLASLT_TUNING_FLUSH_ICACHE``
         | Invalidates the instruction cache between timed launches, matching the bench client.
+        | Not read in ``online`` mode, which does not launch between the caller's own dispatches.
       - | 1: Flush (default); costs about 5% of tuning time
         | 0: Do not flush; winners become less reproducible
 
     * - | ``HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE``
         | Sets a soft wall-clock limit on one shape's search, checked between candidates.
+        | Not read in ``online`` mode, which never blocks a call and so has no stall to bound.
       - | Milliseconds (default: 300000, five minutes; 0 is unlimited)
         | A truncated search records its best candidate as incomplete
         | A single candidate can overrun the limit
 
     * - | ``HIPBLASLT_TUNING_SCRATCH_MAX_BYTES``
         | Caps library-owned tuning scratch per device.
+        | Not read in ``online`` mode, which owns no scratch.
       - | Bytes (default: 1 GiB)
 
 Origami with Stream-K configuration

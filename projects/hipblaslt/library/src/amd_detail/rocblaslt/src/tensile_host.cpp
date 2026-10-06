@@ -34,6 +34,7 @@
  *****************************************************************************/
 
 #include "Debug.hpp"
+#include "OnlineTuner.hpp"
 #include "include/check_numerics_matrix.hpp"
 #include "rocblaslt-types.h"
 #include "rocblaslt_arch_revision.hpp"
@@ -3902,6 +3903,48 @@ namespace
         }
 
         /**
+         * The same three knobs as read for online mode, which spends them on
+         * the caller's own dispatches instead of on a search of its own.
+         *
+         * The units are what make the defaults differ, not a different opinion
+         * about how carefully to measure. Here a candidate costs the shape one
+         * visit per timed launch and a visit is a call the application was
+         * going to make anyway, so the prefix is the five the prediction model
+         * is worth second-guessing within and the repeats are the three the
+         * score needs to have a disturbed sample to discard. tune's 128 x 1000
+         * is minutes of GPU work, which is why it blocks for them.
+         */
+        static int onlineCandidateCap()
+        {
+            return std::max(1, envInt("HIPBLASLT_TUNING_MAX_CANDIDATES", 5));
+        }
+        static int onlineHotIterations()
+        {
+            return std::max(1, envInt("HIPBLASLT_TUNING_HOT_ITERS", 3));
+        }
+        /**
+         * Visits of a shape that dispatch the ranking's own pick and are
+         * sampled by nothing.
+         *
+         * tune's 1000 would be wrong by three orders of magnitude: there a cold
+         * iteration is one untimed launch inside a search the caller is already
+         * blocked on, here it is a whole call that goes by unexplored, so 1000
+         * would silence the feature on everything but a shape seen thousands of
+         * times. 32 covers the transients that are a property of the first
+         * touch rather than of the kernel -- code-object load, clock ramp -- and
+         * leaves exploration to finish inside the first few dozen visits.
+         *
+         * The per-candidate share of that warm-up is already handled without
+         * it: candidates are issued round-robin and scored on their smallest
+         * sample, so one slow first launch per candidate is discarded. This is
+         * the device's warm-up, not the kernel's.
+         */
+        static int onlineColdIterations()
+        {
+            return std::max(0, envInt("HIPBLASLT_TUNING_COLD_ITERS", 32));
+        }
+
+        /**
          * Invalidate the instruction cache between timed launches, as the bench
          * client does when tuning.
          *
@@ -5405,6 +5448,55 @@ size_t tuningCandidatesForTest(const RocblasltContractionProblem& prob,
         indexes[i] = (*found)[i];
     return found->size();
 }
+
+namespace rocblaslt
+{
+    /**
+     * Online tuning's knobs, mapped off the tuning mode and TuningPolicy.
+     *
+     * The declaration lives in OnlineTuner.hpp and the definition here, because
+     * this is where the mode singleton and the secure environment accessor are:
+     * the tuner reads nothing itself, so there is exactly one set of knobs and
+     * one set of security rules for all four modes.
+     *
+     * Called once, from the tuner singleton's constructor, which runs on the
+     * first lookup and therefore after the mode singleton can be built. That
+     * ordering is why the mapping is pulled rather than pushed; a push would
+     * have to happen somewhere that is guaranteed to run before the first
+     * selection, and no such place exists on the matmul path.
+     *
+     * MAX_CANDIDATES, HOT_ITERS and COLD_ITERS are the same three variables
+     * tune mode reads, at defaults that suit a search spread over a live
+     * workload rather than one blocking search. ALL_KERNELS is not read at all:
+     * online reorders a ranking it was handed, so it is always a ranked prefix.
+     * BUDGET_MS_PER_SHAPE, ROTATING_MB, FLUSH_ICACHE and SCRATCH_MAX_BYTES have
+     * no counterpart here -- online measures the caller's own dispatch on the
+     * caller's own buffers, so there is no scratch to cap and no stall to bound.
+     */
+    OnlineTunerConfig onlineTunerConfig()
+    {
+        const auto& tuning = TensileLite::TuningModeSingleton::getInstance();
+
+        OnlineTunerConfig config;
+
+        // A mode with no cache file does nothing, the same rule reads() and
+        // writes() apply, so online without a path stays off rather than
+        // exploring for a winner it could never record.
+        config.enabled
+            = tuning.mode() == TensileLite::TuningMode::Online && !tuning.cachePath().empty();
+
+        config.topK      = TuningPolicy::onlineCandidateCap();
+        config.repeats   = TuningPolicy::onlineHotIterations();
+        config.coldCalls = TuningPolicy::onlineColdIterations();
+
+        // The per-candidate trace is a diagnostic, so it rides the logging
+        // level the rest of the tuning lifecycle reports at rather than a
+        // variable of its own.
+        config.verbose = (get_logger_layer_mode() & rocblaslt_layer_mode_log_info) != 0;
+
+        return config;
+    }
+} // namespace rocblaslt
 
 static bool readsStreamKFlags(const TensileLite::ContractionSolution& solution)
 {

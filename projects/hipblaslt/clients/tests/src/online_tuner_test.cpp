@@ -11,22 +11,16 @@
 
 #include <gtest/gtest.h>
 
-#include <cstdlib>
 #include <memory>
 #include <vector>
-
-#ifdef WIN32
-static int setenv(const char* name, const char* value, int)
-{
-    return _putenv_s(name, value);
-}
-#endif
 
 using rocblaslt::OnlineTuner;
 
 namespace
 {
-    // What main() puts in the environment before the singleton reads it.
+    // What this test's own onlineTunerConfig() hands the singleton. The library
+    // maps these off the tuning mode and TuningPolicy, neither of which is
+    // linked here, so supplying them is also what keeps this test host-only.
     constexpr int kTopK    = 3;
     constexpr int kRepeats = 2;
 
@@ -61,11 +55,15 @@ namespace
         return -1;
     }
 
-    TEST(OnlineTuner, ConfigurationComesFromTheEnvironment)
+    TEST(OnlineTuner, ConfigurationComesFromTheLink)
     {
         EXPECT_TRUE(tuner().enabled());
         EXPECT_EQ(tuner().topK(), kTopK);
         EXPECT_EQ(tuner().repeats(), kRepeats);
+
+        // No cold visits, so every test below registers its problem on the
+        // first offer.
+        EXPECT_EQ(tuner().coldCalls(), 0);
     }
 
     TEST(OnlineTuner, AProblemNobodyHasOfferedHasNoResolution)
@@ -179,13 +177,21 @@ namespace
     }
 } // namespace
 
+// The configuration the tuner is built with, which inside hipBLASLt comes from
+// the tuning mode and TuningPolicy. Supplied here instead, so these tests pin
+// the bookkeeping to known values and the tuner stays linkable without the
+// library, a device or an environment.
+rocblaslt::OnlineTunerConfig rocblaslt::onlineTunerConfig()
+{
+    OnlineTunerConfig config;
+    config.enabled = true;
+    config.topK    = kTopK;
+    config.repeats = kRepeats;
+    return config;
+}
+
 int main(int argc, char** argv)
 {
-    // The tuner reads its configuration once, when the singleton is first
-    // touched, so this has to happen before any test runs.
-    setenv("HIPBLASLT_ORIGAMI_ONLINE_TUNE_TOP_K", "3", 1);
-    setenv("HIPBLASLT_ORIGAMI_ONLINE_TUNE_REPEATS", "2", 1);
-
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
