@@ -312,7 +312,7 @@ if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
         endif()
     elseif(HIPBLASLT_ENABLE_THEROCK)
         find_package(mxDataGenerator CONFIG REQUIRED)
-    else()
+    elseif(EXISTS "${ROCM_LIBRARIES_ROOT}/shared/mxdatagenerator/CMakeLists.txt")
         block()
             set(CMAKE_SKIP_INSTALL_RULES ON)
             add_subdirectory(
@@ -320,6 +320,8 @@ if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
                 "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator"
                 EXCLUDE_FROM_ALL)
         endblock()
+    else()
+        find_package(mxDataGenerator CONFIG REQUIRED)
     endif()
 endif()
 
