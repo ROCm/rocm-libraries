@@ -434,6 +434,31 @@ TEST(TestProblemSpace, HeldPointsDoNotWallTheSearchOffFromTheRestOfTheRegion)
     }
 }
 
+TEST(TestProblemSpace, ACorpusExcludingAnEarlierOneStillReachesItsCount)
+{
+    // `--exclude-corpus`: the earlier corpus took the small shapes, where log-uniform footholds
+    // land. Those configurations are valid and held, as CorpusGen holds them, so the walk
+    // starts on them and moves past them to shapes no corpus has yet.
+    ExplorationRequest request;
+    request.pointsPerCombination = 10;
+    request.numericCeiling = 256;
+    request.corpusTarget = 60;
+    request.seed = 17;
+
+    const ProblemOracle inEarlierCorpus = [](const ProblemPoint& point) {
+        return std::get<int64_t>(point.at("M")) <= 64 && std::get<int64_t>(point.at("N")) <= 64;
+    };
+    const auto corpus = exploreProblemSpace(
+        twoDimsAndADtype(), request, servesOnlyFp16(256, 256, nullptr), inEarlierCorpus);
+
+    EXPECT_GE(corpus.problems().size(), 60U);
+    EXPECT_TRUE(corpus.shortfall.empty());
+    for(const auto& point : corpus.problems())
+    {
+        EXPECT_FALSE(inEarlierCorpus(point)) << "returned a point of the excluded corpus";
+    }
+}
+
 TEST(TestProblemSpace, AllOfAdmitsOnlyWhatEveryEngineServes)
 {
     // Coverage overlaps on one band of M; the cross-engine corpus is that band.
