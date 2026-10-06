@@ -640,9 +640,11 @@ rocsparse_status rocsparse_destroy_hyb_mat(rocsparse_hyb_mat hyb);
  *
  *  \note
  *  The returned array pointers are borrowed: they remain owned by \p hyb and
- *  stay valid until \p hyb is destroyed with \ref rocsparse_destroy_hyb_mat or
- *  the corresponding array is replaced with \ref rocsparse_hyb_mat_set_info.
- *  The caller must not free them.
+ *  stay valid until \p hyb is destroyed with \ref rocsparse_destroy_hyb_mat,
+ *  the corresponding array is replaced with \ref rocsparse_hyb_mat_set_info,
+ *  or \p rocsparse_csr2hyb is called on the same \p hyb. That conversion
+ *  releases the arrays \p hyb holds with \p hipFreeAsync, which invalidates
+ *  these pointers. The caller must not free them.
  *
  *  @param[in]
  *  hyb         the hybrid matrix structure.
@@ -653,7 +655,8 @@ rocsparse_status rocsparse_destroy_hyb_mat(rocsparse_hyb_mat hyb);
  *  @param[out]
  *  partition   the \p HYB partitioning type.
  *  @param[out]
- *  ell_nnz     number of non-zero elements of the ELL part.
+ *  ell_nnz     stored ELL entry count, including structural padding. It equals
+ *              \p m times \p ell_width.
  *  @param[out]
  *  ell_width   width of the ELL part.
  *  @param[out]
@@ -697,19 +700,31 @@ rocsparse_status rocsparse_hyb_mat_get_info(const rocsparse_hyb_mat  hyb,
  *  and is intended for test and internal use, so that callers never need to
  *  reinterpret the opaque \ref rocsparse_hyb_mat as a raw struct. Any of the
  *  input pointers may be \p nullptr, in which case the corresponding field is
- *  left untouched. All arguments are validated before \p hyb is modified, so
- *  on error \p hyb is left unchanged.
+ *  left untouched. Arguments are validated before \p hyb is modified.
+ *  Ownership of the arrays passed in is transferred to \p hyb only when this
+ *  function returns \ref rocsparse_status_success. On error those arrays are
+ *  not adopted. A failure before any replaced array is released leaves \p hyb
+ *  unchanged, including when synchronizing the device or releasing an array
+ *  fails. If a later release fails after another replaced array was already
+ *  released, the released arrays are cleared to null so they are not freed
+ *  again.
  *
  *  \note
- *  Ownership of the arrays passed in \p ell_col_ind, \p ell_val, \p coo_row_ind,
- *  \p coo_col_ind and \p coo_val is transferred to \p hyb. They must have been
- *  allocated with \p hipMalloc, must not be freed by the caller, and must be
- *  distinct allocations; they are released by \ref rocsparse_destroy_hyb_mat.
- *  An array previously held by \p hyb that is replaced by a different pointer
- *  (and is not kept in another field) is released by this function; passing the
- *  pointer \p hyb already holds is a no-op. A \p nullptr value (as opposed to a
- *  \p nullptr argument) releases the previously held array and leaves the field
- *  empty.
+ *  On success, ownership of \p ell_col_ind, \p ell_val, \p coo_row_ind,
+ *  \p coo_col_ind and \p coo_val is transferred to \p hyb. Those arrays must
+ *  have been allocated with \p hipMallocAsync, the allocator used by
+ *  \p rocsparse_csr2hyb, must not be freed by the caller, and must be distinct.
+ *  \ref rocsparse_destroy_hyb_mat releases them. An array previously held by
+ *  \p hyb that is replaced by a different pointer (and is not kept in another
+ *  field) is released with \p hipFree after \p hipDeviceSynchronize, because
+ *  freeing a \p hipMallocAsync allocation is asynchronous. Passing the pointer
+ *  \p hyb already holds does not release it. A \p nullptr value (as opposed to
+ *  a \p nullptr argument) releases the held array when the resulting entry
+ *  count is zero. A null array with a positive count is rejected. A zero count
+ *  ignores a non-null array, which is not read.
+ *  Pointers adopted by this function are not tracked by the library
+ *  memory-statistics allocator. With that tracking enabled, releasing an
+ *  adopted pointer is not supported.
  *
  *  @param[inout]
  *  hyb         the hybrid matrix structure.
@@ -720,31 +735,50 @@ rocsparse_status rocsparse_hyb_mat_get_info(const rocsparse_hyb_mat  hyb,
  *  @param[in]
  *  partition   the \p HYB partitioning type.
  *  @param[in]
- *  ell_nnz     number of non-zero elements of the ELL part. It must be
- *              non-negative and representable by the internal ELL non-zero count.
+ *  ell_nnz     stored ELL entry count, including structural padding. It must
+ *              be non-negative, representable by the internal ELL entry count,
+ *              and equal to \p m times \p ell_width.
  *  @param[in]
- *  ell_width   width of the ELL part.
+ *  ell_width   width of the ELL part. It must be less than or equal to \p n.
  *  @param[in]
- *  ell_col_ind column indices of the ELL part (\p hipMalloc'd, ownership transferred).
+ *  ell_col_ind column indices of the ELL part (\p hipMallocAsync allocation,
+ *              ownership transferred on success).
  *  @param[in]
- *  ell_val     values of the ELL part (\p hipMalloc'd, ownership transferred).
+ *  ell_val     values of the ELL part (\p hipMallocAsync allocation, ownership
+ *              transferred on success).
  *  @param[in]
  *  coo_nnz     number of non-zero elements of the COO part.
  *  @param[in]
- *  coo_row_ind row indices of the COO part (\p hipMalloc'd, ownership transferred).
+ *  coo_row_ind row indices of the COO part (\p hipMallocAsync allocation,
+ *              ownership transferred on success).
  *  @param[in]
- *  coo_col_ind column indices of the COO part (\p hipMalloc'd, ownership transferred).
+ *  coo_col_ind column indices of the COO part (\p hipMallocAsync allocation,
+ *              ownership transferred on success).
  *  @param[in]
- *  coo_val     values of the COO part (\p hipMalloc'd, ownership transferred).
+ *  coo_val     values of the COO part (\p hipMallocAsync allocation, ownership
+ *              transferred on success).
  *  @param[in]
  *  data_type   data type of the values stored in \p ell_val and \p coo_val.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
- *  \retval rocsparse_status_invalid_pointer \p hyb pointer is invalid.
+ *  \retval rocsparse_status_invalid_pointer \p hyb is invalid, two of the
+ *          arrays are the same non-null pointer, an ELL or COO array is null
+ *          while its entry count is positive, or releasing a replaced array
+ *          reports an invalid device pointer.
  *  \retval rocsparse_status_invalid_size \p m, \p n, \p ell_nnz, \p ell_width or
- *          \p coo_nnz is negative, or \p ell_nnz does not fit the internal ELL
- *          non-zero count.
+ *          \p coo_nnz is negative, \p ell_nnz does not fit the internal ELL
+ *          entry count, \p ell_nnz is not \p m times \p ell_width, or
+ *          \p ell_width is greater than \p n.
  *  \retval rocsparse_status_invalid_value \p partition or \p data_type is invalid.
+ *  \retval rocsparse_status_not_implemented \p data_type is not
+ *          \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r,
+ *          \ref rocsparse_datatype_f32_c, or \ref rocsparse_datatype_f64_c.
+ *  \retval rocsparse_status_invalid_handle the device is invalid while
+ *          synchronizing or releasing a replaced array.
+ *  \retval rocsparse_status_memory_error the HIP runtime reported a memory
+ *          error while synchronizing or releasing a replaced array.
+ *  \retval rocsparse_status_internal_error a HIP error occurred while
+ *          synchronizing the device or releasing a replaced array.
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_hyb_mat_set_info(rocsparse_hyb_mat              hyb,

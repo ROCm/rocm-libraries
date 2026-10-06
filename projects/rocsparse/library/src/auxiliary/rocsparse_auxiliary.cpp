@@ -1464,7 +1464,7 @@ catch(...)
 
 /********************************************************************************
  * \brief Set the internal fields of a HYB matrix, without exposing its layout.
- * Ownership of the array pointers is transferred to the HYB matrix.
+ * Ownership of the array pointers is transferred to the HYB matrix on success.
  *******************************************************************************/
 rocsparse_status rocsparse_hyb_mat_set_info(rocsparse_hyb_mat              hyb,
                                             const rocsparse_int*           m,
@@ -1485,7 +1485,8 @@ try
 
     ROCSPARSE_CHECKARG_POINTER(0, hyb);
 
-    // Validate everything before modifying hyb, so that an error leaves it unchanged.
+    // Validate everything before modifying hyb. Ownership of the incoming
+    // arrays is transferred only when this function returns success.
     if(m != nullptr)
     {
         ROCSPARSE_CHECKARG_SIZE(1, *m);
@@ -1518,10 +1519,25 @@ try
     if(data_type != nullptr)
     {
         ROCSPARSE_CHECKARG_ENUM(12, *data_type);
+        // HYB kernels and check_matrix_hyb implement only these four types.
+        const bool hyb_datatype_supported = (*data_type == rocsparse_datatype_f32_r)
+                                            || (*data_type == rocsparse_datatype_f64_r)
+                                            || (*data_type == rocsparse_datatype_f32_c)
+                                            || (*data_type == rocsparse_datatype_f64_c);
+        ROCSPARSE_CHECKARG(
+            12, data_type, (!hyb_datatype_supported), rocsparse_status_not_implemented);
     }
 
-    void* const old_arrays[]
-        = {hyb->ell_col_ind, hyb->ell_val, hyb->coo_row_ind, hyb->coo_col_ind, hyb->coo_val};
+    const rocsparse_int           merged_m = (m != nullptr) ? *m : hyb->m;
+    const rocsparse_int           merged_n = (n != nullptr) ? *n : hyb->n;
+    const rocsparse_hyb_partition merged_partition
+        = (partition != nullptr) ? *partition : hyb->partition;
+    const int64_t merged_ell_nnz
+        = (ell_nnz != nullptr) ? *ell_nnz : static_cast<int64_t>(hyb->ell_nnz);
+    const rocsparse_int merged_ell_width = (ell_width != nullptr) ? *ell_width : hyb->ell_width;
+    const rocsparse_int merged_coo_nnz   = (coo_nnz != nullptr) ? *coo_nnz : hyb->coo_nnz;
+    const rocsparse_datatype merged_data_type
+        = (data_type != nullptr) ? *data_type : hyb->data_type_T;
 
     rocsparse_int* new_ell_col_ind = (ell_col_ind != nullptr) ? *ell_col_ind : hyb->ell_col_ind;
     void*          new_ell_val     = (ell_val != nullptr) ? *ell_val : hyb->ell_val;
@@ -1529,12 +1545,160 @@ try
     rocsparse_int* new_coo_col_ind = (coo_col_ind != nullptr) ? *coo_col_ind : hyb->coo_col_ind;
     void*          new_coo_val     = (coo_val != nullptr) ? *coo_val : hyb->coo_val;
 
+    // Reject a merged matrix that hybmv, hyb2csr, or copy_hyb_mat would index past.
+    // ell_nnz counts stored ELL entries, including padding: m * ell_width.
+    ROCSPARSE_CHECKARG(1, m, (merged_m < 0), rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG(2, n, (merged_n < 0), rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG(4, ell_nnz, (merged_ell_nnz < 0), rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG(5, ell_width, (merged_ell_width < 0), rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG(8, coo_nnz, (merged_coo_nnz < 0), rocsparse_status_invalid_size);
+
+    int64_t ell_stored = 0;
+    if(merged_m != 0 && merged_ell_width != 0)
+    {
+        ROCSPARSE_CHECKARG(
+            4,
+            ell_nnz,
+            (static_cast<int64_t>(merged_m)
+             > (std::numeric_limits<int64_t>::max() / static_cast<int64_t>(merged_ell_width))),
+            rocsparse_status_invalid_size);
+        ell_stored = static_cast<int64_t>(merged_m) * static_cast<int64_t>(merged_ell_width);
+    }
+    ROCSPARSE_CHECKARG(4, ell_nnz, (merged_ell_nnz != ell_stored), rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG(5, ell_width, (merged_ell_width > merged_n), rocsparse_status_invalid_size);
+
+    // A positive count requires its arrays. A zero count ignores a non-null
+    // pointer, matching hybmv, which does not read that part.
+    ROCSPARSE_CHECKARG(
+        6,
+        ell_col_ind,
+        (merged_ell_nnz > 0 && (new_ell_col_ind == nullptr || new_ell_val == nullptr)),
+        rocsparse_status_invalid_pointer);
+    ROCSPARSE_CHECKARG(
+        9,
+        coo_row_ind,
+        (merged_coo_nnz > 0
+         && (new_coo_row_ind == nullptr || new_coo_col_ind == nullptr || new_coo_val == nullptr)),
+        rocsparse_status_invalid_pointer);
+
     const void* const new_arrays[]
         = {new_ell_col_ind, new_ell_val, new_coo_row_ind, new_coo_col_ind, new_coo_val};
 
-    // Release every previously held array that is not kept by any field. An array
-    // moved to another field, or passed again unchanged, must not be freed.
-    bool synchronized = false;
+    for(int i = 0; i < 5; ++i)
+    {
+        if(new_arrays[i] == nullptr)
+        {
+            continue;
+        }
+        for(int j = i + 1; j < 5; ++j)
+        {
+            ROCSPARSE_CHECKARG(
+                6, ell_col_ind, (new_arrays[i] == new_arrays[j]), rocsparse_status_invalid_pointer);
+        }
+    }
+
+    void* const old_arrays[]
+        = {hyb->ell_col_ind, hyb->ell_val, hyb->coo_row_ind, hyb->coo_col_ind, hyb->coo_val};
+
+    bool release = false;
+    for(void* old_array : old_arrays)
+    {
+        if(old_array != nullptr
+           && std::find(std::begin(new_arrays), std::end(new_arrays), old_array)
+                  == std::end(new_arrays))
+        {
+            release = true;
+            break;
+        }
+    }
+
+    // Synchronize before installing the new fields. A failure here has not
+    // modified hyb and has not released anything.
+    if(release)
+    {
+        // hipFree may be asynchronous since HIP 7.0 for hipMallocAsync allocations
+        // (see rocsparse_destroy_hyb_mat).
+        const hipError_t sync_status = rocsparse_hipDeviceSynchronize();
+        if(sync_status != hipSuccess)
+        {
+            return rocsparse::get_rocsparse_status_for_hip_status(sync_status);
+        }
+    }
+
+    const rocsparse_int           saved_m           = hyb->m;
+    const rocsparse_int           saved_n           = hyb->n;
+    const rocsparse_hyb_partition saved_partition   = hyb->partition;
+    const rocsparse_int           saved_ell_nnz     = hyb->ell_nnz;
+    const rocsparse_int           saved_ell_width   = hyb->ell_width;
+    const rocsparse_int           saved_coo_nnz     = hyb->coo_nnz;
+    const rocsparse_datatype      saved_data_type   = hyb->data_type_T;
+    rocsparse_int* const          saved_ell_col_ind = hyb->ell_col_ind;
+    void* const                   saved_ell_val     = hyb->ell_val;
+    rocsparse_int* const          saved_coo_row_ind = hyb->coo_row_ind;
+    rocsparse_int* const          saved_coo_col_ind = hyb->coo_col_ind;
+    void* const                   saved_coo_val     = hyb->coo_val;
+
+    auto restore_hyb = [&]() {
+        hyb->m           = saved_m;
+        hyb->n           = saved_n;
+        hyb->partition   = saved_partition;
+        hyb->ell_nnz     = saved_ell_nnz;
+        hyb->ell_width   = saved_ell_width;
+        hyb->coo_nnz     = saved_coo_nnz;
+        hyb->data_type_T = saved_data_type;
+        hyb->ell_col_ind = saved_ell_col_ind;
+        hyb->ell_val     = saved_ell_val;
+        hyb->coo_row_ind = saved_coo_row_ind;
+        hyb->coo_col_ind = saved_coo_col_ind;
+        hyb->coo_val     = saved_coo_val;
+    };
+
+    // Install the new fields before releasing the arrays they replace, so a
+    // failed release cannot leave hyb pointing at memory that was freed.
+    hyb->m           = merged_m;
+    hyb->n           = merged_n;
+    hyb->partition   = merged_partition;
+    hyb->ell_nnz     = static_cast<decltype(hyb->ell_nnz)>(merged_ell_nnz);
+    hyb->ell_width   = merged_ell_width;
+    hyb->coo_nnz     = merged_coo_nnz;
+    hyb->data_type_T = merged_data_type;
+    hyb->ell_col_ind = new_ell_col_ind;
+    hyb->ell_val     = new_ell_val;
+    hyb->coo_row_ind = new_coo_row_ind;
+    hyb->coo_col_ind = new_coo_col_ind;
+    hyb->coo_val     = new_coo_val;
+
+    void* released[5] = {};
+    int   nreleased   = 0;
+
+    auto undo_release = [&](int count) {
+        restore_hyb();
+        for(int k = 0; k < count; ++k)
+        {
+            void* pointer = released[k];
+            if(static_cast<void*>(hyb->ell_col_ind) == pointer)
+            {
+                hyb->ell_col_ind = nullptr;
+            }
+            if(hyb->ell_val == pointer)
+            {
+                hyb->ell_val = nullptr;
+            }
+            if(static_cast<void*>(hyb->coo_row_ind) == pointer)
+            {
+                hyb->coo_row_ind = nullptr;
+            }
+            if(static_cast<void*>(hyb->coo_col_ind) == pointer)
+            {
+                hyb->coo_col_ind = nullptr;
+            }
+            if(hyb->coo_val == pointer)
+            {
+                hyb->coo_val = nullptr;
+            }
+        }
+    };
+
     for(void* old_array : old_arrays)
     {
         if(old_array == nullptr
@@ -1544,49 +1708,41 @@ try
             continue;
         }
 
-        if(!synchronized)
+        bool already_released = false;
+        for(int k = 0; k < nreleased; ++k)
         {
-            // hipFree may be asynchronous since HIP 7.0 (see rocsparse_destroy_hyb_mat).
-            RETURN_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
-            synchronized = true;
+            if(released[k] == old_array)
+            {
+                already_released = true;
+                break;
+            }
         }
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(old_array));
-    }
+        if(already_released)
+        {
+            continue;
+        }
 
-    if(m != nullptr)
-    {
-        hyb->m = *m;
+        hipError_t free_status = hipSuccess;
+        try
+        {
+            free_status = rocsparse_hipFree(old_array);
+        }
+        catch(...)
+        {
+            // Memstat throws after the allocation is freed when the pointer was
+            // not allocated through the library. Drop it so destroy cannot
+            // free it again, and do not adopt the caller's arrays.
+            released[nreleased++] = old_array;
+            undo_release(nreleased);
+            throw;
+        }
+        if(free_status != hipSuccess)
+        {
+            undo_release(nreleased);
+            return rocsparse::get_rocsparse_status_for_hip_status(free_status);
+        }
+        released[nreleased++] = old_array;
     }
-    if(n != nullptr)
-    {
-        hyb->n = *n;
-    }
-    if(partition != nullptr)
-    {
-        hyb->partition = *partition;
-    }
-    if(ell_nnz != nullptr)
-    {
-        hyb->ell_nnz = static_cast<decltype(hyb->ell_nnz)>(*ell_nnz);
-    }
-    if(ell_width != nullptr)
-    {
-        hyb->ell_width = *ell_width;
-    }
-    if(coo_nnz != nullptr)
-    {
-        hyb->coo_nnz = *coo_nnz;
-    }
-    if(data_type != nullptr)
-    {
-        hyb->data_type_T = *data_type;
-    }
-
-    hyb->ell_col_ind = new_ell_col_ind;
-    hyb->ell_val     = new_ell_val;
-    hyb->coo_row_ind = new_coo_row_ind;
-    hyb->coo_col_ind = new_coo_col_ind;
-    hyb->coo_val     = new_coo_val;
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
