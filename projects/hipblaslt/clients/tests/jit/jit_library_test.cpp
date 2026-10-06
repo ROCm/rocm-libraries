@@ -111,19 +111,14 @@ namespace
         return {std::move(result), {0}};
     }
 
-    hj::CacheKey testKey(const std::string& backendVersion = "1")
+    // The lazy master and mapping the library writes for an ISA.
+    std::string lazyMaster(const std::string& arch)
     {
-        hj::CacheKey key;
-        key.targetId       = "gfx950:sramecc+:xnack-";
-        key.isa            = "gfx950";
-        key.libraryArch    = "gfx950";
-        key.wavefrontSize  = 64;
-        key.backendId      = "test";
-        key.backendVersion = backendVersion;
-        key.comgr          = "3.0:/opt/rocm/lib/libamd_comgr.so:1:2";
-        key.rocmPath       = "/opt/rocm";
-        key.environment    = {{"LLVM_PATH", "/opt/rocm/llvm"}};
-        return key;
+        return "TensileLibrary_lazy_" + arch + ".dat";
+    }
+    std::string lazyMapping(const std::string& arch)
+    {
+        return "TensileLiteLibrary_lazy_" + arch + "_Mapping.dat";
     }
 
     // The plain bundle's ProblemType: FP16 NN with FP32 compute and HPA.
@@ -161,9 +156,9 @@ namespace
     }
 
     // Loads a key directory with the calls TensileHost makes and no JIT code.
-    std::shared_ptr<hj::GemmMaster> stock(const fs::path& directory)
+    std::shared_ptr<hj::GemmMaster> stock(const fs::path& directory, const std::string& arch)
     {
-        const auto path   = (directory / "TensileLibrary_lazy_gfx950.dat").string();
+        const auto path   = (directory / lazyMaster(arch)).string();
         auto       master = std::dynamic_pointer_cast<hj::GemmMaster>(
             TensileLite::LoadLibraryFilePreload<ContractionProblemGemm>(path, {}));
         require(master && master->initLibraryMapping(path), "The stock loader cannot read " + path);
@@ -171,13 +166,14 @@ namespace
     }
 
     // Every master row is mapped, and every mapped index loads with its code object.
-    void consistent(const fs::path& directory, const TensileLite::Hardware& hardware)
+    void consistent(const fs::path&              directory,
+                    const TensileLite::Hardware& hardware,
+                    const std::string&           arch)
     {
         std::vector<std::string> rows;
-        ok(hj::msgpack_io::readMasterPrefixes(read(directory / "TensileLibrary_lazy_gfx950.dat"),
-                                              rows),
+        ok(hj::msgpack_io::readMasterPrefixes(read(directory / lazyMaster(arch)), rows),
            "master rows");
-        const auto               master = stock(directory);
+        const auto               master = stock(directory, arch);
         std::set<std::string>    mapped;
         for(const auto& [index, prefix] : master->libraryMapping)
         {
@@ -232,7 +228,8 @@ namespace
     {
         fs::path            scratch;
         Entry               entry;
-        TensileLite::AMDGPU hardware{TensileLite::AMDGPU::Processor::gfx950, 256, "gfx950"};
+        std::string         arch; // processor name of device 0, such as "gfx942"
+        TensileLite::AMDGPU hardware{};
 
         fs::path fresh(const std::string& name) const
         {
@@ -266,23 +263,43 @@ namespace
         return indices;
     }
 
-    void keys(const Context&)
+    // gfx90a, gfx942 and gfx950, and the committed plain bundles, are wave64.
+    // The target id is the device processor with the sramecc+/xnack- feature spelling.
+    hj::CacheKey testKey(const Context& ctx, const std::string& backendVersion = "1")
     {
-        const auto key = testKey();
+        hj::CacheKey key;
+        key.targetId       = ctx.arch + ":sramecc+:xnack-";
+        key.isa            = ctx.arch;
+        key.libraryArch    = ctx.arch;
+        key.wavefrontSize  = 64;
+        key.backendId      = "test";
+        key.backendVersion = backendVersion;
+        key.comgr          = "3.0:/opt/rocm/lib/libamd_comgr.so:1:2";
+        key.rocmPath       = "/opt/rocm";
+        key.environment    = {{"LLVM_PATH", "/opt/rocm/llvm"}};
+        return key;
+    }
+
+    void keys(const Context& ctx)
+    {
+        const auto key = testKey(ctx);
         require(key.canonicalJson()
-                    == R"({"backend":{"id":"test","version":"1"},"code_object_version":4,)"
-                       R"("comgr":"3.0:/opt/rocm/lib/libamd_comgr.so:1:2",)"
-                       R"("compiler_environment":{"LLVM_PATH":"/opt/rocm/llvm"},)"
-                       R"("rocm_path":"/opt/rocm","schema":1,"target":{"isa":"gfx950",)"
-                       R"("library_arch":"gfx950","target_id":"gfx950:sramecc+:xnack-",)"
-                       R"("wavefront_size":64}})",
+                    == std::string(R"({"backend":{"id":"test","version":"1"},"code_object_version":4,)")
+                           + R"("comgr":"3.0:/opt/rocm/lib/libamd_comgr.so:1:2",)"
+                           + R"("compiler_environment":{"LLVM_PATH":"/opt/rocm/llvm"},)"
+                           + R"("rocm_path":"/opt/rocm","schema":1,"target":{"isa":")" + ctx.arch
+                           + R"(","library_arch":")" + ctx.arch + R"(","target_id":")" + ctx.arch
+                           + R"(:sramecc+:xnack-","wavefront_size":64}})",
                 "Unexpected cache key " + key.canonicalJson());
         const auto name = key.directoryName();
-        require(name.size() == 23 && name.rfind("gfx950-", 0) == 0, "Unexpected directory " + name);
+        require(name.size() == ctx.arch.size() + 17 && name.rfind(ctx.arch + "-", 0) == 0,
+                "Unexpected directory " + name);
+        // An ISA different from the device, so this field still changes the key.
+        const auto otherIsa = ctx.arch == "gfx942" ? "gfx950" : "gfx942";
         const std::vector<std::function<void(hj::CacheKey&)>> changes{
-            [](auto& k) { k.targetId = "gfx950:sramecc-:xnack-"; },
-            [](auto& k) { k.isa = "gfx942"; },
-            [](auto& k) { k.libraryArch = "gfx950v1"; },
+            [&](auto& k) { k.targetId = ctx.arch + ":sramecc-:xnack-"; },
+            [&](auto& k) { k.isa = otherIsa; },
+            [](auto& k) { k.libraryArch += "v1"; },
             [](auto& k) { k.wavefrontSize = 32; },
             [](auto& k) { k.backendId = "other"; },
             [](auto& k) { k.backendVersion = "2"; },
@@ -357,7 +374,7 @@ namespace
         const auto attempt = [&](const fs::path& root) {
             hj::JitLibrary       library(root);
             std::vector<int32_t> indices;
-            return library.lookup(testKey(), 0, gemm(256), ctx.hardware, 1, {}, indices);
+            return library.lookup(testKey(ctx), 0, gemm(256), ctx.hardware, 1, {}, indices);
         };
         for(unsigned rejected : {0777u, 0770u, 0720u, 0702u})
         {
@@ -377,7 +394,7 @@ namespace
             require(::chmod(root.c_str(), accepted) == 0, "chmod failed");
             ok(attempt(root), "private root");
             require(mode(root / "v1") == 0700
-                        && mode(root / "v1" / testKey().directoryName()) == 0700,
+                        && mode(root / "v1" / testKey(ctx).directoryName()) == 0700,
                     "Library directories are not private");
         }
         const auto missing = base / "missing" / "nested";
@@ -389,7 +406,7 @@ namespace
         std::ofstream(base / "file") << "not a directory";
         require(!attempt(base / "file").ok(), "A file root was accepted");
 
-        const auto shared = base / "mode-700" / "v1" / testKey().directoryName();
+        const auto shared = base / "mode-700" / "v1" / testKey(ctx).directoryName();
         require(::chmod(shared.c_str(), 0770) == 0, "chmod failed");
         require(!attempt(base / "mode-700").ok(), "A group-writable key directory was accepted");
         require(::chmod(shared.c_str(), 0700) == 0
@@ -404,7 +421,7 @@ namespace
     {
         const auto     root = ctx.fresh("round-trip");
         hj::JitLibrary library(root);
-        const auto     key     = testKey();
+        const auto     key     = testKey(ctx);
         const auto     problem = gemm(256);
         require(ctx.find(library, key, problem).empty(), "An empty library returned solutions");
         const auto indices = publish(library, key, problem, {ctx.entry});
@@ -417,8 +434,8 @@ namespace
         for(const auto& entry : fs::directory_iterator(directory))
             names.insert(entry.path().filename().string());
         require(names
-                    == std::set<std::string>{"TensileLibrary_lazy_gfx950.dat",
-                                             "TensileLiteLibrary_lazy_gfx950_Mapping.dat",
+                    == std::set<std::string>{lazyMaster(ctx.arch),
+                                             lazyMapping(ctx.arch),
                                              "cache-key.json",
                                              "staging",
                                              prefix + ".co",
@@ -438,7 +455,7 @@ namespace
         ok(hj::msgpack_io::readAllocator(read(root / "v1" / "allocator.dat"), next), "allocator");
         require(next == base + 1, "The allocator did not advance");
 
-        const auto master = stock(directory);
+        const auto master = stock(directory, ctx.arch);
         require(master->libraryMapping == std::map<int, std::string>{{base, prefix}},
                 "Unexpected index mapping");
         const auto best = master->findBestSolution(problem, ctx.hardware);
@@ -483,7 +500,7 @@ namespace
     {
         const auto     root = ctx.fresh("order");
         hj::JitLibrary library(root);
-        const auto     key     = testKey();
+        const auto     key     = testKey(ctx);
         const auto     problem = gemm(256);
         const auto     a = renamed(ctx.entry, "_A"), b = renamed(ctx.entry, "_B"),
                    c    = renamed(ctx.entry, "_C");
@@ -528,7 +545,7 @@ namespace
             thread.join();
         for(size_t i = 0; i < seen.size(); ++i)
             require(seen[i] == base + 4, "Concurrent thread " + std::to_string(i) + ": " + errors[i]);
-        consistent(library.directory(key), ctx.hardware);
+        consistent(library.directory(key), ctx.hardware, ctx.arch);
 
         // A published name whose entry holds another kernel is a hash collision.
         const auto directory = library.directory(key);
@@ -543,7 +560,7 @@ namespace
         const auto     renamedIndex = publish(reopened, key, gemm(2048), {a})[0];
         require(renamedIndex == base + 6 && fs::exists(directory / (prefix + "_1.dat")),
                 "A hash collision reused another kernel's entry");
-        consistent(directory, ctx.hardware);
+        consistent(directory, ctx.hardware, ctx.arch);
         std::cout << "PASS deduplication, collisions, publication order, top-N and exclusions\n";
     }
 
@@ -552,27 +569,27 @@ namespace
         const auto root = ctx.fresh("mismatch");
         {
             hj::JitLibrary library(root);
-            publish(library, testKey("1"), gemm(256), {ctx.entry});
+            publish(library, testKey(ctx, "1"), gemm(256), {ctx.entry});
         }
-        const auto directory = hj::JitLibrary(root).directory(testKey("1"));
+        const auto directory = hj::JitLibrary(root).directory(testKey(ctx, "1"));
         const auto snapshot  = tree(directory);
         {
             hj::JitLibrary library(root);
-            require(ctx.find(library, testKey("2"), gemm(256)).empty(),
+            require(ctx.find(library, testKey(ctx, "2"), gemm(256)).empty(),
                     "Another backend version reused an entry");
-            require(publish(library, testKey("2"), gemm(256), {ctx.entry})
+            require(publish(library, testKey(ctx, "2"), gemm(256), {ctx.entry})
                         == std::vector<int32_t>{base + 1},
                     "Indices are not unique across keys");
             const std::vector<std::function<void(hj::CacheKey&)>> changes{
                 [](auto& k) { k.comgr = "3.1"; },
                 [](auto& k) { k.rocmPath = "/opt/rocm-other"; },
                 [](auto& k) { k.environment["AMD_COMGR_DRIVER_OPTIONS_APPEND"] = "-O0"; },
-                [](auto& k) { k.targetId = "gfx950:sramecc-:xnack-"; },
+                [&](auto& k) { k.targetId = ctx.arch + ":sramecc-:xnack-"; },
                 [](auto& k) { k.codeObjectVersion = 5; },
             };
             for(const auto& change : changes)
             {
-                auto changed = testKey("1");
+                auto changed = testKey(ctx, "1");
                 change(changed);
                 require(ctx.find(library, changed, gemm(256)).empty(),
                         "A mismatched key reused an entry");
@@ -581,20 +598,20 @@ namespace
         require(tree(directory) == snapshot, "Another key changed this key's directory");
 
         std::ofstream(directory / "cache-key.json", std::ios::trunc) << "{}";
-        fs::create_directories(root / "v2" / "gfx950-0000000000000000");
+        fs::create_directories(root / "v2" / (ctx.arch + "-0000000000000000"));
         std::ofstream(root / "v2" / "allocator.dat") << "not a library";
         const auto tampered = tree(root);
         {
             hj::JitLibrary       library(root);
             std::vector<int32_t> indices;
-            auto status = library.lookup(testKey("1"), 0, gemm(256), ctx.hardware, 1, {}, indices);
+            auto status = library.lookup(testKey(ctx, "1"), 0, gemm(256), ctx.hardware, 1, {}, indices);
             require(!status.ok() && indices.empty() && status.stage == hj::Stage::Lookup
                         && status.message.find("cache key") != std::string::npos,
                     "A tampered cache key was accepted: " + status.message);
-            status = library.publish(testKey("1"), 0, gemm(256), {built(ctx.entry)}, indices);
+            status = library.publish(testKey(ctx, "1"), 0, gemm(256), {built(ctx.entry)}, indices);
             require(!status.ok() && status.stage == hj::Stage::Publish,
                     "Publishing into a tampered directory was accepted");
-            require(ctx.find(library, testKey("2"), gemm(256)) == std::vector<int32_t>{base + 1},
+            require(ctx.find(library, testKey(ctx, "2"), gemm(256)) == std::vector<int32_t>{base + 1},
                     "A tampered directory affected another key");
         }
         require(tree(root) == tampered, "A mismatched directory was modified or deleted");
@@ -606,7 +623,7 @@ namespace
     {
         const auto     root = ctx.fresh("allocator");
         hj::JitLibrary library(root);
-        const auto     key = testKey();
+        const auto     key = testKey(ctx);
         publish(library, key, gemm(256), {ctx.entry});
         const auto           directory = library.directory(key);
         std::vector<uint8_t> bytes;
@@ -655,7 +672,7 @@ namespace
                {Step::Mapping, "mapping"},
                {Step::Master, "master"},
                {Step::Unlocked, "unlocked"}};
-        const auto key = testKey();
+        const auto key = testKey(ctx);
         for(const auto& [step, name] : steps)
         {
             const auto root = ctx.fresh(std::string("crash-") + name);
@@ -684,7 +701,7 @@ namespace
                     std::string("The publisher did not stop after ") + name);
 
             const auto directory = hj::JitLibrary(root).directory(key);
-            consistent(directory, ctx.hardware);
+            consistent(directory, ctx.hardware, ctx.arch);
             hj::JitLibrary library(root);
             require(ctx.find(library, key, gemm(256)) == std::vector<int32_t>{base},
                     std::string("A crash after ") + name + " lost a published entry");
@@ -701,7 +718,7 @@ namespace
                     std::string("Republishing after ") + name + " is not found");
             require(publish(library, key, gemm(1024), {ctx.entry})[0] == expected + 1,
                     std::string("The lock was not released after ") + name);
-            consistent(directory, ctx.hardware);
+            consistent(directory, ctx.hardware, ctx.arch);
         }
         std::cout << "PASS a publisher killed after every step leaves a consistent library that "
                      "the next publisher completes\n";
@@ -710,7 +727,7 @@ namespace
     void refresh(const Context& ctx)
     {
         const auto     root = ctx.fresh("refresh");
-        const auto     key  = testKey();
+        const auto     key  = testKey(ctx);
         hj::JitLibrary reader(root), writer(root);
         require(ctx.find(reader, key, gemm(256)).empty(), "An empty library returned solutions");
         const auto first = publish(writer, key, gemm(256), {ctx.entry});
@@ -726,9 +743,9 @@ namespace
         require(old.master->getSolutionByIndex(ctx.hardware, first[0]) != nullptr,
                 "A superseded snapshot lost its solution");
 
-        const auto deviceKey = [](std::string comgr) {
-            return [comgr](int, hj::CacheKey& k) {
-                k       = testKey("");
+        const auto deviceKey = [&ctx](std::string comgr) {
+            return [&ctx, comgr](int, hj::CacheKey& k) {
+                k       = testKey(ctx, "");
                 k.comgr = comgr.empty() ? k.comgr : comgr;
                 return hj::Status{};
             };
@@ -746,7 +763,7 @@ namespace
     void fusedA2A(const Context& ctx)
     {
         const auto root  = ctx.fresh("fused-a2a");
-        const auto key   = testKey();
+        const auto key   = testKey(ctx);
         auto       fused = gemm(256);
         fused.setFusedGemmA2A(true);
         fused.setFusedA2AExtent(256);
@@ -791,7 +808,7 @@ namespace
     void concurrency(const Context& ctx, int writers, int perWriter)
     {
         const auto root = ctx.fresh("concurrency");
-        const auto key  = testKey();
+        const auto key  = testKey(ctx);
         const auto done = ctx.scratch / "concurrency-writers-done";
         fs::remove(done);
         int start[2];
@@ -854,8 +871,8 @@ namespace
                     require(library.solutionByIndex(0, ctx.hardware, found[0], why) != nullptr,
                             "A reader could not load a found entry: " + why.message);
                 }
-                if(fs::exists(root / "v1" / key.directoryName() / "TensileLibrary_lazy_gfx950.dat"))
-                    consistent(root / "v1" / key.directoryName(), ctx.hardware);
+                if(fs::exists(root / "v1" / key.directoryName() / lazyMaster(ctx.arch)))
+                    consistent(root / "v1" / key.directoryName(), ctx.hardware, ctx.arch);
             }
             require(std::find(seen.begin(), seen.end(), -1) == seen.end(),
                     "The reader never saw every shared entry");
@@ -903,7 +920,7 @@ namespace
         for(const auto& [j, indices] : sharedIndices)
             require(indices.size() == 1, "Writers got different indices for one entry");
         const auto directory = root / "v1" / key.directoryName();
-        const auto master    = stock(directory);
+        const auto master    = stock(directory, ctx.arch);
         std::set<int32_t> mapped;
         for(const auto& [index, prefix] : master->libraryMapping)
             mapped.insert(index);
@@ -913,7 +930,7 @@ namespace
         require(next == base + static_cast<int64_t>(all.size()) && *all.rbegin() == next - 1,
                 "Deduplicated entries consumed indices");
         require(fs::is_empty(directory / "staging"), "Publishers left temporary files");
-        consistent(directory, ctx.hardware);
+        consistent(directory, ctx.hardware, ctx.arch);
         hj::JitLibrary library(root);
         for(int j = 0; j < perWriter; ++j)
         {
@@ -941,7 +958,7 @@ int main(int argc, char** argv)
     if((argc != 3 && argc != 7) || (argc == 7 && (writers < 1 || perWriter < 1)))
     {
         std::cerr << "Usage: " << argv[0]
-                  << " PLAIN_BUNDLE SCRATCH [--writers N --per-writer M]\n";
+                  << " BUNDLES SCRATCH [--writers N --per-writer M]\n";
         return 2;
     }
     try
@@ -950,7 +967,22 @@ int main(int argc, char** argv)
         ctx.scratch = fs::absolute(argv[2]);
         fs::remove_all(ctx.scratch);
         fs::create_directories(ctx.scratch);
-        ctx.entry.bytes    = artifacts::readSourceBundle(fs::u8path(argv[1])).library;
+
+        int             device = 0;
+        hipDeviceProp_t properties{};
+        require(hipGetDevice(&device) == hipSuccess
+                    && hipGetDeviceProperties(&properties, device) == hipSuccess,
+                "Cannot query the current HIP device");
+        const std::string gcnArchName = properties.gcnArchName;
+        ctx.arch                      = gcnArchName.substr(0, gcnArchName.find(':'));
+        const auto processor          = TensileLite::AMDGPU::toProcessor(ctx.arch);
+        require(TensileLite::AMDGPU::toString(processor) == ctx.arch,
+                "No TensileLite processor for " + ctx.arch);
+        ctx.hardware = TensileLite::AMDGPU(processor, 256, ctx.arch);
+        const auto plain
+            = hipblaslt_jit_test::deviceBundles(fs::u8path(argv[1]), gcnArchName) / "plain";
+        require(fs::is_directory(plain), "No plain bundle for " + ctx.arch);
+        ctx.entry.bytes = artifacts::readSourceBundle(plain).library;
         const auto library = std::dynamic_pointer_cast<hj::GemmMaster>(
             TensileLite::LoadLibraryData<ContractionProblemGemm>(ctx.entry.bytes));
         require(library && library->solutions.count(0), "The replay has no solution 0");
@@ -961,6 +993,12 @@ int main(int argc, char** argv)
             replayed.problemPredicate->debugEval(gemm(256), std::cerr);
             throw std::runtime_error("The test problem does not match the replayed solution");
         }
+        if(!(*replayed.hardwarePredicate)(ctx.hardware))
+        {
+            replayed.hardwarePredicate->debugEval(ctx.hardware, std::cerr);
+            throw std::runtime_error("The " + ctx.arch + " plain solution rejects this device");
+        }
+        std::cout << "PASS " << ctx.arch << " plain bundle matches the test problem\n";
         if(writers)
             concurrency(ctx, writers, perWriter);
         else

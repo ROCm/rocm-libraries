@@ -187,8 +187,9 @@ cmake -S "$project_root/projects/hipblaslt" -B "$project_build" \
 cmake --build "$project_build" --parallel
 ```
 
-The [JIT test guide](clients/tests/jit/README.md) lists the test targets and the
-validation commands.
+`GPU_TARGETS` is `gfx90a`, `gfx942` or `gfx950`. The command above uses
+`gfx950`. The [JIT test guide](clients/tests/jit/README.md) lists the test
+targets and the validation commands.
 
 ### Algorithm lifetime and failures
 

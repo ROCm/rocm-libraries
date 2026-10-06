@@ -100,9 +100,9 @@ hipblaslt_jit_test(jit-loader jit-gpu hipblaslt-jit-loader-test
     "${hipblaslt_jit_bundles}" "${hipblaslt_jit_scratch}/loader")
 set_tests_properties(jit-loader PROPERTIES FIXTURES_REQUIRED jit-bundles)
 
-# Compiles the JIT solution library directly. It reads the gfx950 plain entry
-# and loads no code, but TensileLite queries the current device when it reads
-# an entry.
+# Compiles the JIT solution library directly. It reads the plain entry of the
+# current device's architecture and loads no code, but TensileLite queries the
+# current device when it reads an entry.
 find_package(Threads REQUIRED)
 add_executable(hipblaslt-jit-library-test
     jit_library_test.cpp
@@ -119,9 +119,9 @@ target_link_libraries(hipblaslt-jit-library-test PRIVATE
     roc::hipblaslt roc::tensilelite-host ${hipblaslt_msgpack_target} amd_comgr
     hip::device Threads::Threads)
 hipblaslt_jit_test(jit-library jit-gpu hipblaslt-jit-library-test
-    "${hipblaslt_jit_bundles}/gfx950/plain" "${hipblaslt_jit_scratch}/library")
+    "${hipblaslt_jit_bundles}" "${hipblaslt_jit_scratch}/library")
 hipblaslt_jit_test(jit-library-concurrency jit-gpu hipblaslt-jit-library-test
-    "${hipblaslt_jit_bundles}/gfx950/plain" "${hipblaslt_jit_scratch}/library-concurrency"
+    "${hipblaslt_jit_bundles}" "${hipblaslt_jit_scratch}/library-concurrency"
     --writers 8 --per-writer 4)
 set_tests_properties(jit-library jit-library-concurrency PROPERTIES
     FIXTURES_REQUIRED jit-bundles)
