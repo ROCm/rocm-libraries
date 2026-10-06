@@ -2600,14 +2600,20 @@ void testing_matmul_with_bias(const Arguments& arg,
                        + (size_scaleAVec[i] + size_scaleBVec[i]) * num_batches[i])
                           * sizeAlpha)
                    * size_t(block_count);
-            // fast_check's contiguous copies of the A, B and C regions.
-            hostBytes += size_t(A_row[i] * A_col[i] * num_batches[i]) * realDataTypeSize(TiA)
-                         + size_t(B_row[i] * B_col[i] * num_batches[i]) * realDataTypeSize(TiB)
+            // MX keeps both a float reference and a float copy for fast_check.
+            // Other inputs keep only the compact copy in their original type.
+            const bool mxA = isBlockScaling(arg.scaleA), mxB = isBlockScaling(arg.scaleB);
+            hostBytes += size_t(A_row[i] * A_col[i] * num_batches[i])
+                             * (mxA ? 2 * sizeof(float) : realDataTypeSize(TiA))
+                         + size_t(B_row[i] * B_col[i] * num_batches[i])
+                               * (mxB ? 2 * sizeof(float) : realDataTypeSize(TiB))
                          + size_t(M[i] * N[i] * num_batches[i]) * sizeTo;
-            // The host buffers: operands, the reference and epilogue copies of D, bias, E and the
-            // scale vectors, counted as the device counts them, which is at least their size.
-            if(!fast_check_only)
-                hostBytes += size_A[i] * realDataTypeSize(TiA) + size_B[i] * realDataTypeSize(TiB);
+            // The host buffers: MX generation also retains its packed host operands,
+            // even in fast_check_only mode. Count the remaining buffers as before.
+            if(!fast_check_only || mxA)
+                hostBytes += size_A[i] * realDataTypeSize(TiA);
+            if(!fast_check_only || mxB)
+                hostBytes += size_B[i] * realDataTypeSize(TiB);
             if(!fast_check_only || arg.c_equal_d)
                 hostBytes += size_C[i] * sizeTo;
             hostBytes += size_D_copy[i] * (2 * sizeTo + 3 * sizeAlpha)
