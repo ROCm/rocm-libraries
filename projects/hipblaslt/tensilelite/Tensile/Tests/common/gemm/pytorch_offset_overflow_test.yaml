@@ -21,7 +21,7 @@ GlobalParameters:
   CMakeBuildType: Release
   PrintLevel: 1
   EnqueuesPerSync: 1
-  SyncsPerBenchmark: 1
+  SyncsPerBenchmark: 0
   NumElementsToValidate: -1  # Validate all elements
   BoundsCheck: 1             # Enable bounds checking to catch corruption
   ValidationMaxToPrint: 10
