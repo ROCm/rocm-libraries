@@ -17,6 +17,8 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 ### Resolved issues
 * Fixed wrong smoothed aggregation prolongation operators from the deprecated `LocalMatrix::AMGSmoothedAggregation()` on wave32 devices for rows with 64 or more entries.
 * Fixed the host fallback of the Ruge-Stueben AMG extended+i interpolation operator when a row exceeds the LDS capacity.
+* Fixed `LocalMatrix::ItLUSolve()` and `LocalMatrix::ItLLSolve()` on the accelerator limiting the iterations of the second triangular solve to the number of iterations performed by the first one.
+* Fixed a heap corruption in `GlobalMatrix::CoarsenOperator()`, used by the pairwise AMG with MPI, when a process sends its coarse boundary to more than one neighboring process.
 * Fixed `LocalMatrix::Sort()` on the accelerator ignoring errors when creating the identity permutation for CSR and COO matrices.
 * Fixed wrong coarse operators of the AMG preconditioners with MPI on wave32 (RDNA) hardware, caused by `LocalMatrix::CompressAdd()` on the accelerator.
 * Fixed a crash in `LocalMatrix::CompressAdd()` on the accelerator when a row of the interior part exceeds the supported number of entries and the computation falls back to the host.
