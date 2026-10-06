@@ -387,12 +387,21 @@ def main(argv: list[str]) -> int:
         help="JSON Lines file to append one record per run to (default: %(default)s)",
     )
     args = parser.parse_args(argv)
+    args.test_bin = args.test_bin.resolve()
+    if not args.test_bin.is_file() or not os.access(args.test_bin, os.X_OK):
+        parser.error("--test-bin must name an executable file")
     for name in ("load_settle_seconds", "load_ready_seconds"):
         if getattr(args, name) < 0:
             parser.error(f"--{name.replace('_', '-')} must not be negative")
     if args.timeout <= 0 or args.runs < 1:
         parser.error("--timeout must be positive and --runs at least 1")
     for load in args.load:
+        try:
+            command = load_command(load, args.test_bin, Path(), args.load_ready_seconds)
+        except ValueError as error:
+            parser.error(str(error))
+        if load != "none" and not command:
+            parser.error("command: requires a nonempty load command")
         if load.startswith("cotenant:"):
             cus = load.split(":", 1)[1]
             if not cus.isdigit() or int(cus) < 1:

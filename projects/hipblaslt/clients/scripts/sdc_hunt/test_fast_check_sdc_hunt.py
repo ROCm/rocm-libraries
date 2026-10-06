@@ -4,6 +4,9 @@
 """CPU-only tests: python -m unittest discover -s clients/scripts/sdc_hunt."""
 
 import os
+import io
+import json
+from unittest import mock
 from pathlib import Path
 import signal
 import subprocess
@@ -30,7 +33,8 @@ class ProcessTests(unittest.TestCase):
                 "time.sleep(120)"
             )
             leader = subprocess.Popen(
-                [sys.executable, "-c", parent, child, str(ready)], start_new_session=True
+                [sys.executable, "-c", parent, child, str(ready)],
+                start_new_session=True,
             )
             try:
                 deadline = time.monotonic() + 5
@@ -56,6 +60,59 @@ class ProcessTests(unittest.TestCase):
                 except ProcessLookupError:
                     pass
                 leader.wait(timeout=5)
+
+
+class CliTests(unittest.TestCase):
+    def setUp(self):
+        for sig in (signal.SIGTERM, signal.SIGHUP):
+            self.addCleanup(signal.signal, sig, signal.getsignal(sig))
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.binary = self.root / "fake-test"
+        self.binary.write_text("#!/bin/sh\nprintf '[  PASSED  ] 1 test.\\n'\n")
+        self.binary.chmod(0o755)
+        self.args = [
+            "--test-bin",
+            str(self.binary),
+            "--results",
+            str(self.root / "results.jsonl"),
+        ]
+        self.environment = mock.patch.object(
+            hunt, "environment_record", side_effect=lambda *_: {"cwsr_enable": None}
+        )
+        self.environment.start()
+        self.addCleanup(self.environment.stop)
+
+    def invoke(self, args):
+        with mock.patch("sys.stdout", new_callable=io.StringIO):
+            return hunt.main(args)
+
+    def test_relative_binary_in_current_directory(self):
+        previous = Path.cwd()
+        try:
+            os.chdir(self.root)
+            args = self.args.copy()
+            args[1] = "./fake-test"
+            self.assertEqual(self.invoke(args), 0)
+        finally:
+            os.chdir(previous)
+
+    def test_empty_command_is_not_an_uncontended_pass(self):
+        with mock.patch("sys.stderr", new_callable=io.StringIO):
+            with self.assertRaises(SystemExit) as raised:
+                self.invoke(self.args + ["--load", "command:"])
+        self.assertEqual(raised.exception.code, 2)
+
+    def test_empty_and_skipped_runs_fail(self):
+        for output, extra in [
+            ("", []),
+            ("[  PASSED  ] 1 test.\n[  SKIPPED ] 1 test.\n", ["--fail-on-skip"]),
+        ]:
+            self.binary.write_text(
+                "#!/bin/sh\ncat <<'OUTPUT'\n" + output + "\nOUTPUT\n"
+            )
+            self.assertEqual(self.invoke(self.args + extra), 1)
 
 
 class ParserTests(unittest.TestCase):
