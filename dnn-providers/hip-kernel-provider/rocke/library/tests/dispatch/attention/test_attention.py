@@ -24,7 +24,7 @@ from dispatch.attention.common import ATTENTION_FEATURES
 _GFX950_DENSE_FEATURES = {"band", "causal", "sinks", "sliding_window"}
 _GFX950_DENSE_GRID_FEATURES = _GFX950_DENSE_FEATURES | {"causal_bottom_right"}
 EXPECTED_FEATURES = {
-    "attention_gfx942_dense": {"causal", "sliding_window"},
+    "attention_gfx942_dense": {"band", "causal", "sliding_window"},
     "attention_gfx950_dense": set(_GFX950_DENSE_FEATURES),
     "attention_gfx950_dense_grid_default": set(_GFX950_DENSE_GRID_FEATURES),
     "attention_gfx950_dense_persist_default": set(_GFX950_DENSE_FEATURES),
@@ -34,6 +34,7 @@ EXPECTED_FEATURES = {
     "attention_d256_decode": {"causal", "causal_bottom_right"},
     "attention_gfx1250_wmma": {"causal"},
     "attention_gfx942_dense_pipe": {
+        "band",
         "causal",
         "causal_bottom_right",
         "sinks",

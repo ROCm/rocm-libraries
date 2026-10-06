@@ -30,16 +30,15 @@ from .common import (
     ATTENTION_FEATURES,
     UNIFIED_BLOCK_SIZES,
     UNIFIED_HEAD_SIZES,
-    AttentionMaskType,
     AttentionRequest,
     AttentionSpec,
     FAMILY,
-    _parse_attention_mask_type,
     _problem,
     _request_errors,
     _resolve_dense_waves_per_eu,
     _selector_matches,
 )
+from .gfx950 import _dense_band, _is_ragged
 
 # block_n (KV tile) the dense candidate ships; 64 is the resource-efficient peak
 # (see AttentionDenseSpec.block_n).
@@ -86,8 +85,6 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
             return False, why
         if problem.select_path() != "2d":
             return False, "problem routes to 3D, not 2D"
-        if not problem.default_mask:
-            return False, "gfx942 tiled 2D implements only bottom-right causal"
         from kernels.common.attention_unified import _enable_gfx942_fp16_flash
 
         if not _enable_gfx942_fp16_flash(problem):
@@ -108,6 +105,9 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
             num_query_heads=problem.num_query_heads,
             num_kv_heads=problem.num_kv_heads,
             name="rocke_attention_gfx942_dense_pipe",
+            causal_top_left=problem.causal_top_left,
+            right_bound=problem.right_bound,
+            sliding_window=problem.sliding_window,
         )
 
     candidate = KernelCandidate(
@@ -125,8 +125,9 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
                 ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
             ),
             # ``_enable_gfx942_fp16_flash`` is the real narrowing; fp8 is
-            # unsupported, but the unified body already shifts causal masking.
-            supports_features=ATTENTION_FEATURES - {"fp8", "band"},
+            # unsupported. The tiled 2D body it builds computes the whole band
+            # (top-left / bottom-right, window, right bound).
+            supports_features=ATTENTION_FEATURES - {"fp8"},
         ),
         _supports=support,
         select_spec=select,
@@ -144,7 +145,7 @@ def _dense_spec(req: OperatorRequest):
     The gfx942 twin of :func:`dispatch.attention.gfx950._dense_spec`. Same shape
     logic -- persistent ("auto") turns on the grid-stride variant once there is
     enough work to fill the persistent grid (``nqb*Hq*B >= num_persistent``, the
-    large-Sq prefill regime), and non-tile-multiple self-attention lengths take the
+    large-Sq prefill regime), and non-tile-multiple lengths take the
     on-chip ragged path (no host pad) -- but a different tuning, which is the whole
     reason the two are separate functions rather than one with an arch branch:
 
@@ -181,18 +182,18 @@ def _dense_spec(req: OperatorRequest):
             f"gfx942 dense spec factory requires arch='gfx942', got {req.arch!r}"
         )
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
-    mask_type = _parse_attention_mask_type(req.mask_type)
-    causal = mask_type != AttentionMaskType.NO_MASK
-    causal_bottom_right = (
-        mask_type == AttentionMaskType.BOTTOM_RIGHT_CAUSAL and sq != sk
-    )
+    # The same band reading as the gfx950 dense factory: full attention, left-only /
+    # two-sided windows and lookahead on the top-left diagonal; at bottom-right
+    # alignment with seqlen_q != seqlen_k only the plain causal mask (a window or
+    # lookahead there raises, so ``admits`` rejects it with the reason).
+    causal, right_bound, causal_bottom_right = _dense_band(req)
     bm = int(DENSE_TILE_GEOMETRIES["default"]["block_m"])
     bn = _DENSE_BLOCK_N
     head_size = int(req.hdim_q)
     dtype = req.dtype.lower()
-    # on-chip ragged padding for ragged self-attention lengths (seqlen_q==seqlen_kv,
-    # not a 256/block_n multiple). Cross-attention ragged is left to the validator.
-    ragged = (sq == sk) and ((sq % bm != 0) or (sk % bn != 0))
+    # on-chip ragged padding for lengths that are not tile multiples (any mask,
+    # including cross-attention seqlen_q != seqlen_kv), as on gfx950.
+    ragged = _is_ragged(sq, sk, bm, bn)
     nqb = (sq + bm - 1) // bm
     work = nqb * int(req.nhead_q) * int(req.batch)
     np = int(req.dense_num_persistent)
@@ -229,6 +230,8 @@ def _dense_spec(req: OperatorRequest):
         waves_per_eu=_resolve_dense_waves_per_eu(
             req, _tuned_waves_per_eu(head_size, dtype)
         ),
+        # Set only for a lookahead, so every pre-existing spec is unchanged.
+        **({"right_bound": right_bound} if right_bound else {}),
     )
 
 
@@ -243,7 +246,7 @@ def dense_spec_for_request(req: AttentionRequest):
 
 
 def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
-    """Dense flash-attn prefill on gfx942 (bf16/fp16, causal/full).
+    """Dense flash-attn prefill on gfx942 (bf16/fp16, causal/full/band).
 
     OPT-IN ONLY (mirrors the gfx950 sibling): matches solely when the request names
     ``algorithm="attention_dense"`` / ``spec_id="gfx942_attention_dense"``, so it
@@ -267,8 +270,8 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
     ``builders/gfx942/attention/prefill/README.md``.
 
     Scope is delegated entirely to ``supports_attention_dense``, which rejects every
-    spec the builder cannot emit (varlen / ragged / sinks are later follow-ups;
-    plus block_n, LDS-budget and 32-bit-extent limits). That keeps ``admits`` and
+    spec the builder cannot emit (varlen / sinks / a moving bottom-right diagonal
+    are later follow-ups; plus block_n, LDS-budget and 32-bit-extent limits). That keeps ``admits`` and
     ``build`` in agreement, so an out-of-scope request falls through to another
     candidate instead of being selected and then failing to build.
     """
@@ -351,12 +354,13 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         capability=Capability(
             arches=("gfx942",),
             dtypes=("bf16", "fp16"),
-            # Dense: causal + sliding-window; no sinks or moving bottom-right
-            # diagonal. The latter is a distinct request feature, absent here.
-            # Head size stays out -- D64/D128 coverage is
+            # Dense: the band (full, causal, windows, lookahead on the top-left
+            # diagonal), as the gfx950 dense candidates; no sinks or moving
+            # bottom-right diagonal. The latter is a distinct request feature,
+            # absent here. Head size stays out -- D64/D128 coverage is
             # ``supports_attention_dense``'s call, and it reads the built spec
             # (LDS budget, block_n divisibility), which a ShapeRange cannot.
-            supports_features=frozenset({"causal", "sliding_window"}),
+            supports_features=frozenset({"causal", "sliding_window", "band"}),
         ),
         _supports=support,
         select_spec=select,

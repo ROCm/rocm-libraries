@@ -107,11 +107,13 @@ def resolve_tile_policy(block_size: int, policy: str) -> int:
 
 
 def _mask_fields(problem: UnifiedAttentionProblem, arch: str) -> dict:
-    """Mask spec fields; only the gfx950 tiled specs declare them."""
+    """Mask spec fields; only the gfx950 and gfx942 tiled specs declare them."""
     if problem.default_mask:
         return {}
-    if arch != "gfx950":
-        raise ValueError(f"non-default attention mask is gfx950-only, got {arch}")
+    if arch not in ("gfx950", "gfx942"):
+        raise ValueError(
+            f"non-default attention mask is gfx950/gfx942-only, got {arch}"
+        )
     fields: dict = {}
     if problem.causal_top_left:
         fields["causal_top_left"] = True

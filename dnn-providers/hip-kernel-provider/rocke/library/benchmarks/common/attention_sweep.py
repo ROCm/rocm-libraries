@@ -88,7 +88,7 @@ def run_sweep(
         fp8_fnuz=bool(problem.fp8_fnuz),
         # The paged unified kernels (and this harness' reference) are bottom-right
         # causal; AttentionRequest defaults to NO_MASK, which now means full
-        # attention on gfx950 and rejects a sliding window.
+        # attention on gfx950 and gfx942 and rejects a sliding window.
         mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
     )
 

@@ -249,7 +249,6 @@ def test_kernel_name_pins_the_two_shipped_cache_collisions():
 _UNBUILDABLE_SPEC_FIELDS = frozenset(
     {
         "varlen",
-        "ragged",
         "paged",
         "block_size",
         "num_kv_blocks",
@@ -283,7 +282,7 @@ _SPEC_PERTURBATIONS = {
     "causal_bottom_right": (),  # unbuildable on gfx942
     "dtype": ("bf16", "fp16"),
     "sliding_window": (64, 128),  # multiples of block_n=64; base is causal
-    "ragged": (),  # unbuildable
+    "ragged": (True, False),  # aligned base + ragged: bounded Q load, guarded store
     "varlen": (),  # unbuildable
     "paged": (),  # unbuildable (not yet supported)
     "block_size": (),  # unbuildable (paged-only, paged not supported)
@@ -311,6 +310,9 @@ _PRIVATE_PERTURBATIONS = {
     "use_v_swizzle": (False, True),
     "use_exp2_fast": (False, True),
     "iglp": (True, False),
+    # Lookahead keys past the diagonal (causal bases only; the dataclass rejects it
+    # with causal=False).
+    "right_bound": (64, 128),
 }
 
 _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
@@ -526,7 +528,6 @@ def test_supports_rejects_non_gfx942():
         # (persistent P4; sliding_window via start_tile prune + window mask). See
         # the persistent build/decode tests and the SWA coverage below.
         (dict(varlen=True), "varlen"),
-        (dict(seqlen_q=1000, seqlen_kv=1000, ragged=True), "ragged"),
         (dict(use_sinks=True), "sinks"),
     ],
 )
@@ -580,14 +581,15 @@ def test_supports_rejects_block_n_larger_than_the_query_tile():
     assert not ok and "block_n" in why
 
 
-def test_supports_rejects_sliding_window_past_seqlen_kv():
-    """SWA + causal where the last query block's window starts past seqlen_kv:
-    start_tile >= n_up -> zero-trip KV loop -> l == 0 -> rcp(0) -> NaN. Same class
-    as the block_n zero-trip guards above."""
-    ok, why = supports_attention_dense(
-        _spec(seqlen_q=1024, seqlen_kv=256, sliding_window=128), arch="gfx942"
-    )
-    assert not ok and "sliding_window" in why
+def test_sliding_window_past_seqlen_kv_is_accepted_with_the_empty_row_guard():
+    """SWA where the last query block's window starts past seqlen_kv: its KV loop is
+    zero-trip and its rows see no key. That used to be rejected (0 * rcp(0) = NaN);
+    the builder now stores 0 for such rows (the gfx950 / SDPA contract), so it is
+    accepted and the guard is emitted."""
+    spec = _spec(seqlen_q=1024, seqlen_kv=256, sliding_window=128)
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert ok, why
+    assert _lower(build_attention_dense(spec, arch="gfx942")).count("fcmp ogt") == 1
 
 
 def test_supports_accepts_sliding_window_in_range():
@@ -596,6 +598,149 @@ def test_supports_accepts_sliding_window_in_range():
         _spec(seqlen_q=2048, seqlen_kv=2048, sliding_window=128), arch="gfx942"
     )
     assert ok, why
+
+
+# --------------------------------------------------------------------------- #
+# the attention band: (left = sliding_window, right = right_bound) on the top-left
+# diagonal, ragged / cross-attention lengths, and the empty-row zero output. Same
+# fields, names and rejections as the gfx950 dense sibling.
+# --------------------------------------------------------------------------- #
+#   (sq, skv, window, right, ragged); right: -1 = unbounded (causal=False), 0 =
+#   causal, R > 0 = lookahead.
+_BAND_CASES = [
+    pytest.param(1024, 512, 128, 0, False, id="causal-w128-1024x512-empty"),
+    pytest.param(512, 1024, 128, 0, False, id="causal-w128-512x1024"),
+    pytest.param(1024, 1024, 128, -1, False, id="left-only-w128-1024x1024"),
+    pytest.param(1024, 512, 128, -1, False, id="left-only-w128-1024x512-empty"),
+    pytest.param(1024, 1024, 128, 64, False, id="two-sided-w128-r64-1024x1024"),
+    pytest.param(512, 1024, 192, 128, False, id="two-sided-w192-r128-512x1024"),
+    pytest.param(1024, 1024, 0, 100, False, id="lookahead-r100-1024x1024"),
+    pytest.param(1024, 512, 0, 300, False, id="lookahead-r300-1024x512"),
+    pytest.param(512, 1024, 0, -1, False, id="full-512x1024"),
+    pytest.param(1000, 1050, 0, -1, True, id="full-ragged-1000x1050"),
+    pytest.param(1050, 1000, 0, -1, True, id="full-ragged-1050x1000"),
+    pytest.param(300, 1234, 0, -1, True, id="full-ragged-300x1234"),
+    pytest.param(1000, 1050, 0, 0, True, id="causal-ragged-1000x1050"),
+    pytest.param(1050, 1000, 0, 0, True, id="causal-ragged-1050x1000"),
+    pytest.param(1050, 1000, 0, 64, True, id="lookahead-ragged-1050x1000"),
+]
+
+
+def _band_spec(sq, skv, window, right, ragged, **kw):
+    return _spec(
+        seqlen_q=sq,
+        seqlen_kv=skv,
+        num_query_heads=16,
+        num_kv_heads=4,
+        causal=right >= 0,
+        right_bound=max(right, 0),
+        sliding_window=window,
+        ragged=ragged,
+        **kw,
+    )
+
+
+@pytest.mark.parametrize("persistent", [False, True], ids=["default", "persist"])
+@pytest.mark.parametrize("sq,skv,window,right,ragged", _BAND_CASES)
+def test_band_matrix_is_supported_and_builds(
+    sq, skv, window, right, ragged, persistent
+):
+    spec = _band_spec(
+        sq, skv, window, right, ragged, persistent=persistent, num_persistent=304
+    )
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert ok, why
+    kd = build_attention_dense(spec, arch="gfx942")
+    name = gfx942_kernel_name(spec)
+    assert kd.name == name
+    assert ("_causal_" in name) == (right >= 0)
+    assert ("_full_" in name) == (right < 0)
+    assert (f"_rb{right}_" in name) == (right > 0)
+    assert (f"_swa{window}_" in name) == (window > 0)
+    assert ("_ragged_" in name) == ragged
+    if ragged and not persistent:
+        assert attention_dense_grid(spec)[0] == -(-sq // spec.block_m)
+
+
+@pytest.mark.parametrize(
+    "kw,match",
+    [
+        (dict(right_bound=-1), "right_bound must be >= 0"),
+        (dict(right_bound=64, causal=False), "requires causal=True"),
+        (
+            dict(seqlen_q=1000, seqlen_kv=1000, ragged=True, sliding_window=128),
+            "ragged is not supported with sliding_window",
+        ),
+        (
+            dict(seqlen_q=2048, seqlen_kv=4096, causal_bottom_right=True),
+            "causal_bottom_right",
+        ),
+    ],
+)
+def test_band_rejections_match_gfx950(kw, match):
+    """Illegal bands fail at construction with the gfx950 sibling's reasons; the
+    moving bottom-right diagonal stays rejected on gfx942."""
+    with pytest.raises(ValueError, match=match):
+        _spec(**kw)
+
+
+def test_band_names_are_distinct_and_default_name_is_unchanged():
+    names = {
+        "causal": gfx942_kernel_name(_band_spec(2048, 2048, 0, 0, False)),
+        "full": gfx942_kernel_name(_band_spec(2048, 2048, 0, -1, False)),
+        "causal_window": gfx942_kernel_name(_band_spec(2048, 2048, 256, 0, False)),
+        "left_only": gfx942_kernel_name(_band_spec(2048, 2048, 256, -1, False)),
+        "two_sided": gfx942_kernel_name(_band_spec(2048, 2048, 256, 64, False)),
+        "lookahead": gfx942_kernel_name(_band_spec(2048, 2048, 0, 64, False)),
+    }
+    assert len(set(names.values())) == len(names), names
+    assert "_rb" not in names["causal"]
+    # Explicit right_bound=0 is the default spec: same name, same IR.
+    assert _spec(right_bound=0) == _spec()
+    assert gfx942_kernel_name(_spec(right_bound=0)) == gfx942_kernel_name(_spec())
+
+
+def test_right_bound_moves_the_ir():
+    assert _ir_body_sha(_spec(right_bound=64)) != _ir_body_sha(_spec())
+
+
+@pytest.mark.parametrize(
+    "kw,guards",
+    [
+        (dict(seqlen_q=1024, seqlen_kv=1024, sliding_window=128), 0),
+        (dict(seqlen_q=1024, seqlen_kv=960, sliding_window=128), 0),  # 1023 < 1087
+        (dict(seqlen_q=1024, seqlen_kv=896, sliding_window=128), 1),  # q=1023 is empty
+        (dict(seqlen_q=1024, seqlen_kv=768, sliding_window=128), 1),
+        (dict(seqlen_q=1024, seqlen_kv=512, sliding_window=128, causal=False), 1),
+        (dict(seqlen_q=1024, seqlen_kv=512, right_bound=64), 0),
+        (dict(seqlen_q=1024, seqlen_kv=512, causal=False), 0),
+    ],
+)
+def test_empty_row_guard_is_emitted_only_when_a_row_can_see_no_key(kw, guards):
+    """Rows with no visible key exist only with a window and seqlen_q > seqlen_kv +
+    window - 1. Only there is the zero-output select emitted, so every other kernel's
+    IR is untouched by it."""
+    kd = build_attention_dense(_spec(**kw), arch="gfx942")
+    assert _lower(kd).count("fcmp ogt") == guards
+
+
+@pytest.mark.parametrize(
+    "sq,skv,causal,kbound",
+    [
+        (1000, 1050, True, False),  # causal drops every padded key
+        (1050, 1000, True, True),  # rows q >= seqlen_kv reach the padded keys
+        (1000, 1050, False, True),  # no upper bound: padded keys need the mask
+    ],
+)
+def test_ragged_key_pad_mask_and_store_guard(sq, skv, causal, kbound):
+    import re
+
+    spec = _spec(seqlen_q=sq, seqlen_kv=skv, causal=causal, ragged=True)
+    ir = _lower(build_attention_dense(spec, arch="gfx942"))
+    n_kmask = len(re.findall(rf"icmp slt i32 %\S+, {skv}\b", ir))
+    n_store = len(re.findall(rf"icmp slt i32 %\S+, {sq}\b", ir))
+    assert n_kmask == (32 if kbound else 0)  # N_SUB (2) x 16 score registers
+    assert n_store == 1  # one guarded O store per work item
 
 
 def test_supports_rejects_over_budget_lds():
@@ -744,7 +889,12 @@ def test_gfx942_auto_decode_cannot_leak_to_gqa_pair():
 #     hazard. Gating it would make the config unsweepable.
 #   iglp: a compile-time scheduler directive (llvm.amdgcn.iglp.opt) that leaves no
 #     runtime instruction and is legal on every config.
-_TUNING_FIELDS_WITHOUT_A_REJECTED_REGION = frozenset({"use_exp2_fast", "iglp"})
+#   right_bound: every illegal value (negative, or > 0 with causal=False / varlen /
+#     paged) is rejected by the dataclass at construction, before supports() runs;
+#     every constructible value builds. Covered by the band rejection tests below.
+_TUNING_FIELDS_WITHOUT_A_REJECTED_REGION = frozenset(
+    {"use_exp2_fast", "iglp", "right_bound"}
+)
 
 # Rows are kwargs for a single :class:`Gfx942AttentionDenseSpec` -- there is one spec
 # and one builder signature, so the shared and gfx942-private knobs go in the same
@@ -772,8 +922,13 @@ _CONTRACT_GRID = [
     dict(block_n=512, seqlen_kv=2048),
     dict(persistent=True, num_persistent=228),
     dict(varlen=True),
-    dict(seqlen_q=1000, seqlen_kv=1000, ragged=True),
+    dict(seqlen_q=1000, seqlen_kv=1000, ragged=True),  # accepted: on-chip ragged
+    dict(seqlen_q=1000, seqlen_kv=1050, ragged=True, causal=False),  # cross-attention
     dict(sliding_window=64),  # accepted: SWA on the default grid
+    dict(sliding_window=128, causal=False),  # accepted: left-only band
+    # --- band: right_bound (lookahead) ---
+    dict(right_bound=64),  # accepted: lookahead
+    dict(right_bound=64, sliding_window=128, persistent=True, num_persistent=304),
     dict(
         sliding_window=128, persistent=True, num_persistent=304
     ),  # accepted: SWA persistent
@@ -919,7 +1074,7 @@ def test_grid_covers_every_query_row_and_head():
         nqb, ghq, gb = attention_dense_grid(s)
         assert (
             nqb * _BLOCK_M == sq
-        ), "grid must tile seqlen_q exactly (ragged is rejected)"
+        ), "grid must tile an aligned seqlen_q exactly"
         assert (ghq, gb) == (hq, batch)
 
 

@@ -178,6 +178,12 @@ typedef struct rocke_attention_tiled_2d_spec
     const char* kv_cache_policy; /* "stream" */
     bool use_global_load_lds_k; /* False */
     bool use_q_major_grid; /* False */
+    /* Causal diagonal alignment (gfx942 body only). false = bottom-right
+     * (context_len = seq_len - q_len), true = top-left (context_len = 0); every
+     * bound derived from context_len follows, ALiBi/qq_bias offsets included.
+     * Tagged "tl" right after "qqb" in kernel_name. right_bound is Python-only
+     * (no C field); the binding rejects a non-zero one. */
+    bool causal_top_left; /* False */
 } rocke_attention_tiled_2d_spec_t;
 
 /* Materialise every defaulted field (the dataclass defaults). The required

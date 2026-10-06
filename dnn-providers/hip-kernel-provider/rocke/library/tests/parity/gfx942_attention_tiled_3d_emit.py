@@ -79,6 +79,41 @@ _CONFIGS = {
         use_qq_bias=False,
         kv_storage_dtype=None,
     ),
+    # Top-left causal (seqlen_q != seqlen_k): context_len = 0, so the causal
+    # limit, KV-loop bound, sliding window and ALiBi + qq_bias offsets follow it.
+    5: dict(
+        head_size=128,
+        block_size=16,
+        num_query_heads=16,
+        num_kv_heads=4,
+        dtype="bf16",
+        num_segments=8,
+        use_sinks=False,
+        sliding_window=1024,
+        has_softcap=False,
+        use_alibi=True,
+        use_qq_bias=True,
+        kv_storage_dtype=None,
+        causal_top_left=True,
+    ),
+    # cfg5 + use_invariant_hoist: the hoisted per-row causal limit
+    # (hoist_causal_lim = context_len + qp_r) on the top-left diagonal.
+    6: dict(
+        head_size=128,
+        block_size=16,
+        num_query_heads=16,
+        num_kv_heads=4,
+        dtype="bf16",
+        num_segments=8,
+        use_sinks=False,
+        sliding_window=1024,
+        has_softcap=False,
+        use_alibi=True,
+        use_qq_bias=True,
+        kv_storage_dtype=None,
+        use_invariant_hoist=True,
+        causal_top_left=True,
+    ),
 }
 
 

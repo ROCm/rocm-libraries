@@ -432,7 +432,13 @@ void rocke_gfx942_attention_tiled_3d_emit_prologue(rocke_gfx942_attention_tiled_
         B, rocke_b_div(B, ctx->cu_q_start, rocke_b_const_i32(B, BLOCK_Q)), ctx->seq_idx);
     ctx->q_block_local_idx = rocke_b_sub(B, ctx->q_block_global_idx, ctx->q_block_start_idx);
     ctx->seq_len = rocke_b_global_load_i32(B, ctx->seq_lens, ctx->seq_idx, 0);
-    ctx->context_len = rocke_b_sub(B, ctx->seq_len, ctx->cur_batch_q_len);
+    /* context_len = const_i32(0) if spec.causal_top_left else seq_len - q_len.
+     * Top-left zeroes the diagonal offset itself, so the causal limit, the
+     * KV-loop bound, the sliding window and the ALiBi / qq_bias offsets all
+     * follow it (same as the gfx950 tiled 3D kernel). */
+    ctx->context_len = ctx->spec->causal_top_left
+                           ? rocke_b_const_i32(B, 0)
+                           : rocke_b_sub(B, ctx->seq_len, ctx->cur_batch_q_len);
 
     /* qb_start_pos = q_block_local_idx * BLOCK_Q (line 352) */
     ctx->qb_start_pos = rocke_b_mul(B, ctx->q_block_local_idx, rocke_b_const_i32(B, BLOCK_Q));

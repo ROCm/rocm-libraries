@@ -190,6 +190,10 @@ typedef struct rocke_unified_attention_3d_tiled_spec
      * kernel's use_i64_kv_addr. Default false => byte-identical small-cache
      * build. */
     bool use_i64_kv_addr; /* False */
+    /* Top-left causal alignment (gfx942 tiled 3D only): the causal limit, the
+     * KV-loop prefix bound and the sliding window use offset 0 instead of
+     * context_len. ALiBi / qq_bias keep context_len. Name tag "tl" (last). */
+    int causal_top_left; /* 0 (False) */
 } rocke_unified_attention_3d_tiled_spec_t;
 
 rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_default(void);

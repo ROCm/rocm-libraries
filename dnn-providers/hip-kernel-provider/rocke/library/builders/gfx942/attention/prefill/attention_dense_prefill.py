@@ -186,6 +186,15 @@ def add_dense_tuning_args(ap: argparse.ArgumentParser) -> None:
         help="sliding_window (0=off; multiple of block_n). Supported: KV-loop "
         "prune + window mask.",
     )
+    ap.add_argument(
+        "--right-bound",
+        dest="right_bound",
+        type=int,
+        default=None,
+        help="attention-band right bound (-1 = unbounded, 0 = causal, R > 0 = R keys "
+        "of lookahead); when set the request is NO_MASK + this band (the cuDNN "
+        "vocabulary) and overrides the causal flag; default = the causal flag",
+    )
 
 
 def dense_request(
@@ -209,6 +218,11 @@ def dense_request(
     (0 = full causal), so dispatch ships the SWA-pruned spec.
     """
     req_kwargs = {}
+    mask_type = 1 if causal else 0
+    if getattr(args, "right_bound", None) is not None:
+        # The band comes from (sliding_window, right_bound) under NO_MASK.
+        mask_type = 0
+        req_kwargs["right_bound"] = int(args.right_bound)
     if getattr(args, "persistent", None) is not None:
         req_kwargs["dense_persistent"] = args.persistent
     if getattr(args, "num_persistent", None) is not None:
@@ -224,7 +238,7 @@ def dense_request(
         hdim_q=int(head_size),
         hdim_v=int(head_size),
         arch=_ARCH,
-        mask_type=1 if causal else 0,
+        mask_type=mask_type,
         dtype=str(dtype).lower(),
         sliding_window=int(sliding_window),
         # Opt-in selector: this is the candidate whose spec we are measuring.

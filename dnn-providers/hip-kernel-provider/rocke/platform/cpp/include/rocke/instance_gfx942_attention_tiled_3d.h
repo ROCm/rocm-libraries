@@ -159,6 +159,10 @@ typedef struct rocke_unified_attention_3d_tiled_spec
      * the per-block byte base into a 64-bit buffer base). Kept byte-identical
      * with the gfx950 header (the two share this struct). */
     bool use_i64_kv_addr; /* False */
+    /* Top-left causal (gfx942 tiled 3D only): context_len = 0, so the causal
+     * limit, the KV-loop prefix bound, the sliding window and the ALiBi /
+     * qq_bias offsets all use the unshifted diagonal. Name tag "tl" (last). */
+    int causal_top_left; /* 0 (False) */
 } rocke_unified_attention_3d_tiled_spec_t;
 
 /* Materialise every defaulted field. Required fields are zero/NULL-init; the

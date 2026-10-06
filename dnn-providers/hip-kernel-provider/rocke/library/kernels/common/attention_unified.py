@@ -147,7 +147,7 @@ class UnifiedAttentionProblem:
     # implemented, hence the default), True = top-left (``context_len = 0``); at
     # ``q_len == kv_len`` they coincide. The defaults are the existing causal body.
     # Anything else (top-left, a right bound other than 0) is implemented on gfx950
-    # (tiled 2D/3D) and in the scalar kernels; other arches reject it.
+    # and gfx942 (tiled 2D/3D) and in the scalar kernels; other arches reject it.
     causal_top_left: bool = False
     right_bound: int = 0
 
@@ -497,8 +497,10 @@ def _reject_mask_semantics(
 def _reject_mask_on_arch(
     problem: UnifiedAttentionProblem, arch: str
 ) -> Optional[Tuple[bool, str]]:
-    """Only gfx950's tiled kernels implement non-default masks (see the fields)."""
-    if not problem.default_mask and arch != "gfx950":
+    """Only gfx950's and gfx942's tiled kernels implement non-default masks (see the
+    fields). On gfx942 the 4-warp GQA cohorts decline ``right_bound != 0`` in
+    ``_gfx942_4warp_eligible``, so such a problem builds the generic tiled 2D spec."""
+    if not problem.default_mask and arch not in ("gfx950", "gfx942"):
         return False, (
             f"{arch} tiled attention does not implement {_mask_label(problem)} masks"
         )
@@ -958,7 +960,7 @@ class _TiledRoute:
 
 
 def _gfx942_4warp_eligible(problem: "UnifiedAttentionProblem") -> bool:
-    """Shared eligibility gate for the gfx942 4-warp GQA cohorts -- the eight
+    """Shared eligibility gate for the gfx942 4-warp GQA cohorts -- the nine
     clauses common to ``_d256_gfx942_fast`` and ``_d128_gfx942_swa_fast``.
     Extracting them here dedupes the two AND-walls; each cohort predicate adds
     only its distinctive clauses (head_size / dtype / sliding_window /
@@ -971,6 +973,9 @@ def _gfx942_4warp_eligible(problem: "UnifiedAttentionProblem") -> bool:
         and not problem.use_alibi
         and not problem.use_qq_bias
         and problem.max_seqlen_q > 1
+        # The 4-warp builder implements top-left but not a right bound other than
+        # 0 (lookahead / unbounded); those fall to the generic tiled 2D spec.
+        and problem.right_bound == 0
         # The natural-QK builder uses i32 paged element addressing (like the
         # shipped default builder). Exclude caches > 2 GiB, which need the i64
         # path -- they fall back to the correct default builder.

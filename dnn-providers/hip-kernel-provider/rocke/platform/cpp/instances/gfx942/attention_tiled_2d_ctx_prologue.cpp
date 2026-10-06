@@ -442,7 +442,11 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
         b, rocke_b_div(b, ctx->cu_q_start, rocke_b_const_i32(b, BLOCK_Q)), ctx->seq_idx);
     ctx->q_block_local_idx = rocke_b_sub(b, ctx->q_block_global_idx, ctx->q_block_start_idx);
     ctx->seq_len = rocke_b_global_load_i32(b, ctx->seq_lens, ctx->seq_idx, 0);
-    ctx->context_len = rocke_b_sub(b, ctx->seq_len, ctx->cur_batch_q_len);
+    /* Top-left causal pins context_len = 0 (no sub emitted), so every bound
+     * derived from it (causal limit, KV-loop prefix, sliding window, ALiBi /
+     * qq_bias offsets) follows -- the gfx950 semantics. */
+    ctx->context_len = spec->causal_top_left ? rocke_b_const_i32(b, 0)
+                                             : rocke_b_sub(b, ctx->seq_len, ctx->cur_batch_q_len);
 
     ctx->qb_start_pos = rocke_b_mul(b, ctx->q_block_local_idx, rocke_b_const_i32(b, BLOCK_Q));
     {

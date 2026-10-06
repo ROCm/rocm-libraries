@@ -1185,7 +1185,11 @@ def _run_prod(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
     code path as the production provider.
     """
     import torch
-    from dispatch.attention import AttentionRequest, dispatch_attention
+    from dispatch.attention import (
+        AttentionMaskType,
+        AttentionRequest,
+        dispatch_attention,
+    )
     from kernels import run_unified_attention_torch
     from rocke.runtime import synchronize_and_release, time_launches
 
@@ -1203,6 +1207,10 @@ def _run_prod(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
         sliding_window=sw,
         kv_block_size=shape.block_size,
         num_cus=bench.num_cus,
+        # The paged unified kernels (and this harness' reference) are bottom-right
+        # causal; AttentionRequest defaults to NO_MASK, which now means full
+        # attention on gfx950 and gfx942 and rejects a sliding window.
+        mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
     )
 
     # Force path when caller requests a specific one (e.g. backend="3d").

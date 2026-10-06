@@ -230,7 +230,7 @@ typedef struct rocke_gfx942_attention_tiled_3d_build_ctx
     rocke_value_t* q_block_start_idx; /* cu_q_start//BLOCK_Q + seq_idx             */
     rocke_value_t* q_block_local_idx; /* q_block_global_idx - q_block_start_idx    */
     rocke_value_t* seq_len; /* seq_lens[seq_idx]                         */
-    rocke_value_t* context_len; /* seq_len - cur_batch_q_len                 */
+    rocke_value_t* context_len; /* seq_len - cur_batch_q_len; const 0 if top-left */
     rocke_value_t* qb_start_pos; /* q_block_local_idx * BLOCK_Q               */
     rocke_value_t* tps; /* tiles_per_segment = cdiv(seq_len,NUM_SEG*T)*/
     rocke_value_t* seg_start_tile_pos; /* seg_idx*tps*T                            */

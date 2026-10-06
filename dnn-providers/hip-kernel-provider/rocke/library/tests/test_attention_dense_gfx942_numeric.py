@@ -88,9 +88,44 @@ _SWA_COHORT = [
     ("bf16", 64, 16, 4, True, 128),
 ]
 
+# Top-left causal at seqlen_q != seqlen_kv. gfx942 dense masks ``ktok <= query_tok``
+# (top-left, torch ``is_causal=True``), so a cross-length request must match the
+# SDPA ``is_causal=True`` oracle -- which is itself top-left (``tril`` with diagonal
+# 0) at any Sq/Sk. Both directions: Sq<Sk (each row sees only its own prefix, not
+# the Sk-Sq extra keys a bottom-right mask would add) and Sq>Sk (rows i >= Sk see
+# every key; no row is fully masked under top-left). Sq % 256 == 0 and Sk % 64 == 0
+# keep the shape inside ``supports_attention_dense`` (non-ragged cross-length).
+# Rows: (dtype, head_size, num_query_heads, num_kv_heads, persistent, causal, sq, sk).
+_TL_CROSS_COHORT = [
+    (dt, d, 16, 4, persistent, True, sq, sk)
+    for dt in ("bf16", "fp16")
+    for d in (64, 128)
+    for persistent in (False, True)
+    for sq, sk in ((512, 1024), (1024, 512))
+]
+
+# Sliding window under top-left at Sq < Sk: keep k for query q iff q - W < k <= q.
+# Sq > Sk (rows q >= Sk + W - 1 see no key and must output zeros) is covered by the
+# band matrix (TestDenseBandNumeric) below, whose oracle checks the zero rows.
+# Rows: (dtype, head_size, num_query_heads, num_kv_heads, persistent, sliding_window, sq, sk).
+_SWA_TL_CROSS_COHORT = [
+    ("bf16", 128, 16, 4, False, 128, 512, 1024),
+    ("fp16", 128, 16, 4, True, 256, 512, 1024),
+]
+
 
 def _spec(
-    dtype, d, hq, hkv, persistent, *, causal=True, batch=1, sq=512, sliding_window=0
+    dtype,
+    d,
+    hq,
+    hkv,
+    persistent,
+    *,
+    causal=True,
+    batch=1,
+    sq=512,
+    sk=None,
+    sliding_window=0,
 ):
     """The SHIPPED gfx942 dense spec for a cohort row, built through the dispatch
     factory (``dispatch.attention.gfx942._dense_spec``) rather than hand-rolled.
@@ -111,6 +146,10 @@ def _spec(
     ``test_attention_dense_gfx942_golden.py::mk_dispatch`` uses for its D64 cases)
     also means a future gfx942 tuning change is picked up here with no edit.
 
+    ``sk`` defaults to ``sq`` (self-attention); pass it for a cross-length row. The
+    request is always top-left (``mask_type=1``), the only alignment gfx942 dense
+    implements.
+
     Only ``dense_persistent`` is pinned rather than left on "auto": the cohort asserts
     BOTH grid variants at one fixed Sq, where "auto" would pick a single one. Every
     other lever -- block_n, the D64 K row-group pad, persist_decode, ragged -- is
@@ -127,7 +166,7 @@ def _spec(
             nhead_q=hq,
             nhead_k=hkv,
             seqlen_q=sq,
-            seqlen_k=sq,
+            seqlen_k=sq if sk is None else sk,
             hdim_q=d,
             hdim_v=d,
             arch="gfx942",
@@ -142,24 +181,27 @@ def _spec(
 
 @requires_gfx942_gpu
 @pytest.mark.gpu
-@pytest.mark.parametrize("dtype,d,hq,hkv,persistent,causal", _COHORT)
-def test_dense_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent, causal):
+@pytest.mark.parametrize(
+    "dtype,d,hq,hkv,persistent,causal,sq,sk",
+    [row + (512, 512) for row in _COHORT] + _TL_CROSS_COHORT,
+)
+def test_dense_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent, causal, sq, sk):
     import torch
     import torch.nn.functional as F
 
     tol = 2e-2 if dtype == "fp16" else 4e-2
     tdt = getattr(torch, _TORCH_DT[dtype])
-    B, S = 1, 512
+    B, S, Sk = 1, sq, sk
     scale = 1.0 / math.sqrt(d)
     torch.manual_seed(0)
 
-    # run_attention_dense_torch ABI: q/out [B,S,Hq,D], k/v [B,S,Hkv,D], dense.
+    # run_attention_dense_torch ABI: q/out [B,Sq,Hq,D], k/v [B,Sk,Hkv,D], dense.
     q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
-    k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
-    v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+    k = torch.randn(B, Sk, hkv, d, device="cuda", dtype=tdt)
+    v = torch.randn(B, Sk, hkv, d, device="cuda", dtype=tdt)
     out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
 
-    spec = _spec(dtype, d, hq, hkv, persistent, causal=causal, batch=B, sq=S)
+    spec = _spec(dtype, d, hq, hkv, persistent, causal=causal, batch=B, sq=S, sk=Sk)
     run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
     torch.cuda.synchronize()
 
@@ -171,7 +213,8 @@ def test_dense_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent, causal):
     # axis is exactly what ``enable_gqa`` does internally, and it is the mapping the
     # kernel itself uses (hkv = hq // gqa), so the asserted reference is unchanged.
     # rep == 1 (the MHA row) makes it a plain copy, matching the old
-    # ``enable_gqa=(hkv != hq)`` no-op.
+    # ``enable_gqa=(hkv != hq)`` no-op. ``is_causal=True`` is top-left (tril with
+    # diagonal 0) at every Sq/Sk, which is the mask the kernel applies.
     rep = hq // hkv
     qf = q.transpose(1, 2).float()
     kf = k.transpose(1, 2).float().repeat_interleave(rep, dim=1)
@@ -184,7 +227,7 @@ def test_dense_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent, causal):
 
     max_abs = (ref - out.float()).abs().max().item()
     assert max_abs < tol, (
-        f"{dtype} D{d} GQA{hq}/{hkv} {'causal' if causal else 'full'} "
+        f"{dtype} D{d} GQA{hq}/{hkv} Sq{S}/Sk{Sk} {'causal' if causal else 'full'} "
         f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
     )
 
@@ -206,7 +249,7 @@ def _launcher_for(spec):
 @requires_gfx942_gpu
 @pytest.mark.gpu
 def test_one_binary_serves_every_shape():
-    """One compiled artifact, two shapes, correct numerics at both.
+    """One compiled artifact, three shapes (one cross-length), correct numerics at each.
 
     The cohort above runs many shapes, but it stopped discriminating the moment
     batch/seqlen_q/seqlen_kv became runtime kernel params: it passes identically
@@ -239,18 +282,21 @@ def test_one_binary_serves_every_shape():
     tdt = getattr(torch, _TORCH_DT[dtype])
     scale = 1.0 / math.sqrt(d)
 
-    shapes = ((1, 512), (4, 1024))
+    # (batch, seqlen_q, seqlen_kv). The third shape is cross-length top-left
+    # (Sq < Sk): seqlen_kv is a runtime param too, so it must reuse the same binary.
+    shapes = ((1, 512, 512), (4, 1024, 1024), (2, 512, 1024))
     specs = [
-        _as_gfx942_spec(_spec(dtype, d, hq, hkv, False, batch=b, sq=s))
-        for b, s in shapes
+        _as_gfx942_spec(_spec(dtype, d, hq, hkv, False, batch=b, sq=s, sk=sk))
+        for b, s, sk in shapes
     ]
 
     # Preconditions: genuinely different shapes, on the runtime path, and sharing
     # one key -- otherwise the reuse assertion below is vacuous.
     assert specs[0].runtime_shape, "cohort row is not on the runtime-shape path"
     assert (specs[0].batch, specs[0].seqlen_q) != (specs[1].batch, specs[1].seqlen_q)
+    assert specs[2].seqlen_q != specs[2].seqlen_kv
     keys = [attention_dense_cache_key(s, arch="gfx942") for s in specs]
-    assert keys[0] == keys[1], f"shapes {shapes} did not share a cache key"
+    assert len(set(keys)) == 1, f"shapes {shapes} did not share a cache key"
 
     # Own the cache state: evicting first makes the "exactly one new entry"
     # assertion independent of which tests ran before this one.
@@ -259,11 +305,11 @@ def test_one_binary_serves_every_shape():
 
     rep = hq // hkv
     launchers = []
-    for (B, S), spec in zip(shapes, specs):
+    for (B, S, Sk), spec in zip(shapes, specs):
         torch.manual_seed(0)
         q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
-        k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
-        v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+        k = torch.randn(B, Sk, hkv, d, device="cuda", dtype=tdt)
+        v = torch.randn(B, Sk, hkv, d, device="cuda", dtype=tdt)
         out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
 
         run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
@@ -278,27 +324,32 @@ def test_one_binary_serves_every_shape():
             scale=scale,
         ).transpose(1, 2)
         max_abs = (ref - out.float()).abs().max().item()
-        assert max_abs < tol, f"B={B} S={S}: max_abs={max_abs:.3e} >= {tol}"
+        assert max_abs < tol, f"B={B} Sq={S} Sk={Sk}: max_abs={max_abs:.3e} >= {tol}"
 
     assert launchers[0] is not None, (
         "no launcher cached after a successful run; _DENSE_LAUNCHER_CACHE is no "
         "longer keyed by attention_dense_cache_key and this test is blind"
     )
-    assert launchers[0] is launchers[1], (
+    assert all(lau is launchers[0] for lau in launchers), (
         f"shapes {shapes} share a cache key but were served by DIFFERENT launcher "
         "objects -- the runtime-shape kernel recompiled per shape, so the AOT "
         "instance count still scales with the shape space"
     )
     assert set(_DENSE_LAUNCHER_CACHE) - before == {keys[0]}, (
-        "two shapes on the runtime path added more than one cache entry: "
+        "the shapes on the runtime path added more than one cache entry: "
         f"{sorted(set(_DENSE_LAUNCHER_CACHE) - before)}"
     )
 
 
 @requires_gfx942_gpu
 @pytest.mark.gpu
-@pytest.mark.parametrize("dtype,d,hq,hkv,persistent,sliding_window", _SWA_COHORT)
-def test_dense_swa_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent, sliding_window):
+@pytest.mark.parametrize(
+    "dtype,d,hq,hkv,persistent,sliding_window,sq,sk",
+    [row + (512, 512) for row in _SWA_COHORT] + _SWA_TL_CROSS_COHORT,
+)
+def test_dense_swa_numeric_vs_fp32_sdpa(
+    dtype, d, hq, hkv, persistent, sliding_window, sq, sk
+):
     """Sliding-window (SWA) numeric parity, standalone (no sinks), both grids.
 
     The band is the same one the gfx950 sibling masks (``_sink_reference``: causal
@@ -313,13 +364,13 @@ def test_dense_swa_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent, sliding_w
 
     tol = 2e-2 if dtype == "fp16" else 4e-2
     tdt = getattr(torch, _TORCH_DT[dtype])
-    B, S = 1, 512
+    B, S, Sk = 1, sq, sk
     scale = 1.0 / math.sqrt(d)
     torch.manual_seed(0)
 
     q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
-    k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
-    v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+    k = torch.randn(B, Sk, hkv, d, device="cuda", dtype=tdt)
+    v = torch.randn(B, Sk, hkv, d, device="cuda", dtype=tdt)
     out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
 
     spec = _spec(
@@ -331,14 +382,16 @@ def test_dense_swa_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent, sliding_w
         causal=True,
         batch=B,
         sq=S,
+        sk=Sk,
         sliding_window=sliding_window,
     )
     run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
     torch.cuda.synchronize()
 
     qi = torch.arange(S, device="cuda").view(-1, 1)
-    ki = torch.arange(S, device="cuda").view(1, -1)
-    keep = (ki <= qi) & (ki > qi - sliding_window)  # [S, S] bool, True = attend
+    ki = torch.arange(Sk, device="cuda").view(1, -1)
+    # [Sq, Sk] bool, True = attend; top-left diagonal (k <= q) at any Sq/Sk.
+    keep = (ki <= qi) & (ki > qi - sliding_window)
     rep = hq // hkv
     qf = q.transpose(1, 2).float()
     kf = k.transpose(1, 2).float().repeat_interleave(rep, dim=1)
@@ -351,7 +404,7 @@ def test_dense_swa_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent, sliding_w
 
     max_abs = (ref - out.float()).abs().max().item()
     assert max_abs < tol, (
-        f"{dtype} D{d} GQA{hq}/{hkv} swa{sliding_window} "
+        f"{dtype} D{d} GQA{hq}/{hkv} Sq{S}/Sk{Sk} swa{sliding_window} "
         f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
     )
 
@@ -443,6 +496,218 @@ def test_exp2_fast_matches_plain_exp2(dtype, d, hq, hkv, persistent):
         f"{dtype} D{d} {'persist' if persistent else 'default'}: exp2_fast "
         f"diverged from plain exp2 (max_abs={max_abs:.3e})"
     )
+
+
+# --------------------------------------------------------------------------- #
+# The attention band, ragged lengths and cross-attention -- the gfx942 mirror of
+# ``test_attention_dense_gfx950_numeric.py``'s TestDenseTopLeftCrossLengthNumeric /
+# TestDenseBandNumeric, at the same shapes (gfx942 dense has no sinks, so the sinks
+# row is dropped).
+# --------------------------------------------------------------------------- #
+_BAND_TOL = 4e-2  # bf16 vs the fp32 reference, as the cohorts above
+
+# Cross-length top-left (unshifted diagonal), sq < sk and sq > sk, ragged and aligned.
+# For sq > sk the ragged padded keys sit below the diagonal of every row with
+# q >= Skv, so correctness depends on the key-pad mask.
+#   (sq, skv, batch, ragged)
+_TOP_LEFT_CASES = [
+    pytest.param(1000, 1050, 1, True, id="ragged-1000x1050"),
+    pytest.param(1050, 1000, 1, True, id="ragged-1050x1000"),
+    pytest.param(197, 400, 1, True, id="ragged-197x400"),
+    pytest.param(400, 197, 1, True, id="ragged-400x197"),
+    pytest.param(1234, 300, 1, True, id="ragged-1234x300"),
+    pytest.param(1050, 1000, 2, True, id="ragged-1050x1000-batch2"),
+    pytest.param(1000, 1000, 2, True, id="ragged-self-1000-batch2"),
+    pytest.param(512, 1024, 1, False, id="aligned-512x1024"),
+    pytest.param(1024, 512, 1, False, id="aligned-1024x512"),
+]
+
+# The cuDNN band ``(left = sliding_window, right = right_bound)`` on the top-left
+# diagonal: key ``k`` is visible to query ``q`` iff ``q - k < left`` (when set) and
+# ``k <= q + right`` (right = -1 is unbounded, 0 causal, R > 0 lookahead). A row whose
+# band holds no key must output zeros.
+#   (sq, skv, window, right, persistent, ragged)
+_BAND_CASES = [
+    # causal window x cross-length, with empty rows
+    pytest.param(1024, 512, 128, 0, False, False, id="causal-w128-1024x512-empty"),
+    pytest.param(1024, 256, 128, 0, False, False, id="causal-w128-1024x256-empty"),
+    pytest.param(
+        1024, 512, 128, 0, True, False, id="persist-causal-w128-1024x512-empty"
+    ),
+    pytest.param(512, 1024, 128, 0, False, False, id="causal-w128-512x1024"),
+    pytest.param(1024, 1024, 128, 0, False, False, id="causal-w128-1024x1024"),
+    # non-causal (left-only) windows
+    pytest.param(1024, 1024, 128, -1, False, False, id="left-only-w128-1024x1024"),
+    pytest.param(512, 1024, 128, -1, False, False, id="left-only-w128-512x1024"),
+    pytest.param(1024, 512, 128, -1, False, False, id="left-only-w128-1024x512-empty"),
+    pytest.param(1024, 512, 128, -1, True, False, id="persist-left-only-w128-1024x512"),
+    pytest.param(
+        1024, 1024, 256, -1, True, False, id="persist-left-only-w256-1024x1024"
+    ),
+    # two-sided windows and lookahead
+    pytest.param(1024, 1024, 128, 64, False, False, id="two-sided-w128-r64-1024x1024"),
+    pytest.param(512, 1024, 192, 128, False, False, id="two-sided-w192-r128-512x1024"),
+    pytest.param(
+        1024, 512, 128, 64, True, False, id="persist-two-sided-w128-r64-1024x512"
+    ),
+    pytest.param(1024, 1024, 0, 100, False, False, id="lookahead-r100-1024x1024"),
+    pytest.param(
+        1024, 1024, 0, 100, True, False, id="persist-lookahead-r100-1024x1024"
+    ),
+    pytest.param(512, 1024, 0, 7, False, False, id="lookahead-r7-512x1024"),
+    pytest.param(1024, 512, 0, 300, False, False, id="lookahead-r300-1024x512"),
+    # full attention, aligned and ragged cross-length (cross-attention)
+    pytest.param(512, 1024, 0, -1, False, False, id="full-512x1024"),
+    pytest.param(1000, 1050, 0, -1, False, True, id="full-ragged-1000x1050"),
+    pytest.param(1050, 1000, 0, -1, False, True, id="full-ragged-1050x1000"),
+    pytest.param(300, 1234, 0, -1, True, True, id="persist-full-ragged-300x1234"),
+    # lookahead on ragged cross-length (key padding can sit inside q + right)
+    pytest.param(1000, 1050, 0, 64, False, True, id="lookahead-ragged-1000x1050"),
+    pytest.param(1050, 1000, 0, 64, False, True, id="lookahead-ragged-1050x1000"),
+    pytest.param(1050, 1000, 0, 64, True, True, id="persist-lookahead-ragged-1050x1000"),
+]
+
+
+def _band_direct_spec(
+    sq, skv, window, right, persistent, ragged, *, batch=1, head_size=128
+):
+    from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
+
+    return Gfx942AttentionDenseSpec(
+        batch=batch,
+        seqlen_q=sq,
+        seqlen_kv=skv,
+        num_query_heads=4,
+        num_kv_heads=1,
+        head_size=head_size,
+        causal=right >= 0,
+        right_bound=max(right, 0),
+        dtype="bf16",
+        sliding_window=window,
+        persistent=persistent,
+        num_persistent=304,
+        ragged=ragged,
+    )
+
+
+def _band_reference(q, k, v, scale, window, right):
+    """fp32 reference for the band; also returns the rows that see no key."""
+    import torch
+
+    sq, skv = q.shape[1], k.shape[1]
+    qi = torch.arange(sq, device=q.device)[:, None]
+    ki = torch.arange(skv, device=q.device)[None, :]
+    allowed = torch.ones(sq, skv, dtype=torch.bool, device=q.device)
+    if right >= 0:
+        allowed &= ki <= qi + right
+    if window:
+        allowed &= qi - ki < window
+    scores = torch.einsum("bqhd,bkd->bhqk", q.float(), k[:, :, 0].float()) * scale
+    scores = scores.masked_fill(~allowed[None, None], float("-inf"))
+    empty = ~allowed.any(dim=1)
+    probs = torch.softmax(scores, dim=-1)
+    probs[:, :, empty, :] = 0.0
+    ref = torch.einsum("bhqk,bkd->bqhd", probs, v[:, :, 0].float())
+    return ref, empty
+
+
+def _check_band(out, ref, empty, label):
+    import torch
+
+    assert not torch.isnan(out).any(), f"{label}: NaN in output"
+    err = (out.float() - ref)[:, ~empty].abs().max().item()
+    assert err < _BAND_TOL, f"{label}: max_abs={err:.3e} >= {_BAND_TOL}"
+    if empty.any():
+        worst = out.float()[:, empty].abs().max().item()
+        assert worst == 0.0, f"{label}: {int(empty.sum())} empty rows not zero: {worst}"
+
+
+def _run_band(spec, window, right, seed):
+    import torch
+
+    torch.manual_seed(seed)
+    b, sq, skv, d = spec.batch, spec.seqlen_q, spec.seqlen_kv, spec.head_size
+    q = torch.randn(b, sq, 4, d, device="cuda", dtype=torch.bfloat16)
+    k = torch.randn(b, skv, 1, d, device="cuda", dtype=torch.bfloat16)
+    v = torch.randn(b, skv, 1, d, device="cuda", dtype=torch.bfloat16)
+    # Poison the output so a row the kernel never writes cannot pass as zero.
+    out = torch.full_like(q, float("nan"))
+    scale = 1.0 / math.sqrt(d)
+    run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+    torch.cuda.synchronize()
+    return out, _band_reference(q, k, v, scale, window, right)
+
+
+class TestDenseTopLeftCrossLengthNumeric:
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("persistent", [False, True], ids=["default", "persist"])
+    @pytest.mark.parametrize("sq,skv,batch,ragged", _TOP_LEFT_CASES)
+    def test_jit_matches_top_left(self, sq, skv, batch, ragged, persistent):
+        spec = _band_direct_spec(sq, skv, 0, 0, persistent, ragged, batch=batch)
+        out, (ref, empty) = _run_band(spec, 0, 0, seed=0)
+        _check_band(out, ref, empty, spec.kernel_name())
+
+
+class TestDenseBandNumeric:
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("sq,skv,window,right,persistent,ragged", _BAND_CASES)
+    def test_jit_matches_band(self, sq, skv, window, right, persistent, ragged):
+        spec = _band_direct_spec(sq, skv, window, right, persistent, ragged)
+        out, (ref, empty) = _run_band(spec, window, right, seed=0)
+        _check_band(out, ref, empty, spec.kernel_name())
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "sq,skv,window,right,persistent,ragged",
+        [
+            pytest.param(1024, 512, 128, -1, False, False, id="d64-left-only-empty"),
+            pytest.param(1050, 1000, 0, 64, True, True, id="d64-persist-lookahead"),
+            pytest.param(300, 1234, 0, -1, False, True, id="d64-full-ragged"),
+        ],
+    )
+    def test_jit_matches_band_d64(self, sq, skv, window, right, persistent, ragged):
+        """D64 takes the packed two-rows-per-DMA K/V path: the ragged tail and the
+        band masks go through a different loader than D128."""
+        spec = _band_direct_spec(
+            sq, skv, window, right, persistent, ragged, head_size=64
+        )
+        out, (ref, empty) = _run_band(spec, window, right, seed=2)
+        _check_band(out, ref, empty, spec.kernel_name())
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("sq,skv,window,right,persistent,ragged", _BAND_CASES)
+    def test_dispatched_request_matches_band(
+        self, sq, skv, window, right, persistent, ragged
+    ):
+        """The same bands through ``AttentionRequest`` -> dispatch -> dense spec."""
+        from dispatch.attention import AttentionRequest
+        from dispatch.attention.gfx942 import dense_spec_for_request
+
+        req = AttentionRequest(
+            batch=1,
+            nhead_q=4,
+            nhead_k=1,
+            seqlen_q=sq,
+            seqlen_k=skv,
+            hdim_q=128,
+            hdim_v=128,
+            arch="gfx942",
+            dtype="bf16",
+            mask_type=0,  # NO_MASK: the band comes from (sliding_window, right_bound)
+            sliding_window=window,
+            right_bound=right,
+            algorithm="attention_dense",
+            dense_persistent="on" if persistent else "off",
+        )
+        spec = dense_spec_for_request(req)
+        assert spec.causal == (right >= 0) and spec.right_bound == max(right, 0)
+        assert spec.ragged == ragged and spec.persistent == persistent
+        out, (ref, empty) = _run_band(spec, window, right, seed=1)
+        _check_band(out, ref, empty, spec.kernel_name())
 
 
 if __name__ == "__main__":

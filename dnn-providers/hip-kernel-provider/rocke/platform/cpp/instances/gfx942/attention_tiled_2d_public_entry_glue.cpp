@@ -585,6 +585,7 @@ static rocke_status_t
             s->has_softcap ? "softcap" : "",
             s->use_alibi ? "alibi" : "",
             s->use_qq_bias ? "qqb" : "",
+            s->causal_top_left ? "tl" : "",
             w_buf,
             wpe_buf,
             mw_buf,

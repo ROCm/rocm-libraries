@@ -222,6 +222,24 @@ routing labels go on `ATTENTION_ROUTE_REGISTRY`, and anything with `build` and
 `bind_torch` also goes on `ATTENTION_EXECUTION_REGISTRY`. Set `opt_in=True` on
 sweep-only candidates so `algorithm="auto"` cannot select them.
 
+## Attention band
+
+`AttentionRequest` carries the cuDNN / hipDNN band as `sliding_window` (left),
+`right_bound` (-1 unbounded, 0 causal, R > 0 lookahead) and `diagonal_alignment`;
+[`_attention_band()`](common.py) maps it to the
+`(causal_top_left, right_bound)` pair on `UnifiedAttentionProblem`. On gfx950 and
+gfx942 the unified tiled 2D/3D kernels compute the whole band: `NO_MASK` is full
+attention, and top-left / lookahead / non-causal windows are distinct kernel
+bodies (name tokens `tl`, `rbu`, `rb<R>`). The default mask keeps every name,
+cache key and IR byte-identical. On gfx942 the 4-warp GQA cohorts keep top-left
+but decline `right_bound != 0`, which then builds the generic tiled 2D spec;
+`dense_pipe` serves the band through the same tiled 2D body, and the opt-in
+gfx942 `attention_dense` candidate serves it on the top-left diagonal, as on
+gfx950 (a moving bottom-right diagonal is still rejected there).
+
+Known gap: gfx1250's tiled kernels are causal-only. `NO_MASK` is still served by
+its existing causal body, and any other band is rejected with a reason.
+
 ## Current production boundary
 
 The generic unified runtime still resolves final architecture-tuned geometry in

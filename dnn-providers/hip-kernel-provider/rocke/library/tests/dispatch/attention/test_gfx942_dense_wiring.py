@@ -152,16 +152,17 @@ class TestGfx942DenseSupportGates(unittest.TestCase):
             self.assertIn("capability", why)
             self.assertIn("sinks", why)
 
-    def test_rejects_ragged_sequence_length(self):
-        """_dense_spec sets ragged=True for any non-256-multiple self-attention
-        length -- most real serving shapes. The kernel must decline, not
-        select-then-fail. Capability cannot see this one: it is a property of the
-        BUILT spec, so it stays in the predicate."""
+    def test_admits_ragged_sequence_length(self):
+        """_dense_spec sets ragged=True for any non-tile-multiple length -- most real
+        serving shapes, self- or cross-attention -- and the body serves it on chip
+        (bounds-checked Q load, key-pad mask, guarded store), as on gfx950."""
         with _Gfx942Arch():
-            ok, why = _candidate().admits(_req(seqlen_q=1000, seqlen_k=1000))
-            self.assertFalse(ok)
-            self.assertNotIn("capability", why)
-            self.assertIn("ragged", why)
+            for sq, sk in ((1000, 1000), (1000, 1500)):
+                with self.subTest(seqlen_q=sq, seqlen_k=sk):
+                    req = _req(seqlen_q=sq, seqlen_k=sk, mask_type=0)
+                    self.assertTrue(_dense_spec(req).ragged)
+                    ok, why = _candidate().admits(req)
+                    self.assertTrue(ok, why)
 
 
 class TestGfx942BottomRightSafety(unittest.TestCase):
@@ -373,12 +374,60 @@ class TestGfx942SlidingWindow(unittest.TestCase):
     def test_sliding_window_in_supports_features(self):
         self.assertIn("sliding_window", _candidate().capability.supports_features)
 
-    def test_sliding_window_requires_causal(self):
-        """sliding_window without causal is rejected by _dense_spec (spec validates it)."""
+    def test_no_mask_window_is_a_left_only_band(self):
+        """NO_MASK + sliding_window is the cuDNN left-only (non-causal) band."""
         with _Gfx942Arch():
-            ok, why = _candidate().admits(_req(sliding_window=128, mask_type=0))
+            req = _req(sliding_window=128, mask_type=0)
+            ok, why = _candidate().admits(req)
+            self.assertTrue(ok, why)
+            spec = _dense_spec(req)
+            self.assertFalse(spec.causal)
+            self.assertEqual(spec.sliding_window, 128)
+
+
+class TestGfx942DenseBand(unittest.TestCase):
+    """The (left, right) band on the top-left diagonal, as the gfx950 dense body."""
+
+    def test_lookahead_and_two_sided_window(self):
+        with _Gfx942Arch():
+            for kw, right in (
+                (dict(mask_type=0, right_bound=16), 16),
+                (dict(mask_type=0, sliding_window=256, right_bound=64), 64),
+            ):
+                with self.subTest(**kw):
+                    req = _req(**kw)
+                    ok, why = _candidate().admits(req)
+                    self.assertTrue(ok, why)
+                    spec = _dense_spec(req)
+                    self.assertTrue(spec.causal)
+                    self.assertEqual(spec.right_bound, right)
+                    self.assertIn(f"rb{right}", spec.kernel_name())
+
+    def test_full_attention_cross_length(self):
+        with _Gfx942Arch():
+            req = _req(mask_type=0, seqlen_q=2048, seqlen_k=4096)
+            ok, why = _candidate().admits(req)
+            self.assertTrue(ok, why)
+            self.assertFalse(_dense_spec(req).causal)
+
+    def test_default_spec_is_unchanged(self):
+        with _Gfx942Arch():
+            spec = _dense_spec(_req())
+            self.assertEqual(spec.right_bound, 0)
+            self.assertNotIn("rb", spec.kernel_name().split("_"))
+
+    def test_bottom_right_window_is_rejected_with_a_reason(self):
+        with _Gfx942Arch():
+            ok, why = _candidate().admits(
+                _req(
+                    mask_type=0,
+                    sliding_window=256,
+                    diagonal_alignment=1,
+                    seqlen_k=4096,
+                )
+            )
             self.assertFalse(ok)
-            self.assertNotIn("capability", why)
+            self.assertIn("bottom-right alignment", why)
 
 
 if __name__ == "__main__":

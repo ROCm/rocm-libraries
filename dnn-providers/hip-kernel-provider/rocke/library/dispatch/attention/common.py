@@ -250,17 +250,17 @@ ATTENTION_DIM_VOCABULARY = (
 #     is a (non-causal) left-only band, exactly as in cuDNN. NO_MASK without bounds
 #     is full attention, the SDPA default. SLIDING_WINDOW names a band, so it needs
 #     at least one bound.
-# gfx950 implements the whole band in the unified kernels. The other arches' tiled
-# kernels are causal-only: they keep serving NO_MASK by their existing causal body
+# gfx950 and gfx942 implement the whole band in the unified kernels. gfx1250's tiled
+# kernels are causal-only: it keeps serving NO_MASK by its existing causal body
 # (KNOWN GAP -- it is the request default, so gating it would re-route every default
-# request to the scalar kernel) and reject any non-causal band.
+# request to the scalar kernel) and rejects any non-causal band.
 _BAND_NEEDS_BOUND_ERROR = (
     "mask_type SLIDING_WINDOW names a band: set sliding_window > 0 and/or "
     "right_bound >= 0 (or use NO_MASK for full attention)"
 )
-_BAND_GFX950_ONLY_ERROR = (
+_BAND_ARCH_ERROR = (
     "a non-causal attention band (right_bound != 0 with NO_MASK / SLIDING_WINDOW) "
-    "is implemented on gfx950 only"
+    "is implemented on gfx950 and gfx942 only"
 )
 
 # ``band``: a non-causal band -- a right bound other than 0 together with a window or
@@ -380,7 +380,7 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
 
 def _has_no_mask_kernel(arch: str) -> bool:
     """Arches whose unified kernels implement full attention (see ``mask_type``)."""
-    return arch.strip().lower() == "gfx950"
+    return arch.strip().lower() in ("gfx950", "gfx942")
 
 
 def _attention_band(req: AttentionRequest) -> Tuple[bool, int]:
@@ -420,7 +420,7 @@ def _attention_band(req: AttentionRequest) -> Tuple[bool, int]:
         if mask_type == AttentionMaskType.NO_MASK and right == -1:
             return False, 0  # KNOWN GAP: legacy causal body (see above)
         if right != 0:
-            raise ValueError(_BAND_GFX950_ONLY_ERROR)
+            raise ValueError(_BAND_ARCH_ERROR)
     if right < 0 and window <= 0:
         return False, -1  # full attention
     top_left = alignment == 0 and sq != sk

@@ -39,6 +39,11 @@ Run from the ``rocke/platform/`` root (needs torch + a gfx942 GPU):
         builders.gfx942.attention.prefill.parity_unified_attention \\
         --scenario default
 
+    # mask sets (top-left causal / no mask / cuDNN band), run through the
+    # production dispatcher (``--path auto|2d|3d``):
+    PYTHONPATH=python:../library python -m \\
+        builders.gfx942.attention.prefill.parity_unified_attention --set band
+
     # force the L4 (WG=64) fallback instead of the default wide4:
     HIPDNN_GFX942_FLASH_WIDE=0 PYTHONPATH=python:../library python -m \\
         builders.gfx942.attention.prefill.parity_unified_attention \\
@@ -53,7 +58,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 # Block size for the paged-KV mapping. The dense SDPA problems are mapped onto
 # one contiguous run of paged-KV blocks per sequence; block_size=64 matches the
@@ -77,11 +82,48 @@ class Shape:
     kv_heads: int  # Hkv
     batch: int  # B
     causal: bool
-    group: str  # "default" | "fmha" | "creative"
+    group: str  # "default" | "fmha" | "creative" | "topleft" | "nomask" | "band"
+    # The fields below default to the legacy uniform causal shape. The mask sets
+    # (``topleft`` / ``nomask`` / ``band``) set them and run through the production
+    # dispatcher (``run_unified_attention_torch``), mirroring the gfx950 harness.
+    # ``seq_lens``: per-sequence ``(q_len, kv_len)``; empty = ``batch`` copies of
+    # ``(seqlen_q, seqlen_k)``.
+    seq_lens: Tuple[Tuple[int, int], ...] = ()
+    block_size: int = BLOCK_SIZE
+    sliding_window: int = 0
+    softcap: float = 0.0
+    use_sinks: bool = False
+    use_alibi: bool = False
+    use_qq_bias: bool = False
+    qq_bias_stride_0: int = 0
+    # Band (see ``ref_paged_attn``): diagonal alignment and right bound
+    # (0 = causal, -1 = unbounded, R > 0 = lookahead); ``sliding_window`` is the left
+    # bound. Defaults are the paged bottom-right causal mask.
+    causal_top_left: bool = False
+    right_bound: int = 0
+    # "uniform" = the legacy +/-0.1 fill; "randn" makes a mask mix-up move the
+    # output by O(1), far above tolerance (the mask sets use it).
+    init: str = "uniform"
 
     @property
     def num_queries_per_kv(self) -> int:
         return self.heads // self.kv_heads
+
+    @property
+    def default_mask(self) -> bool:
+        return not self.causal_top_left and self.right_bound == 0
+
+    @property
+    def query_lens(self) -> List[int]:
+        if self.seq_lens:
+            return [q for q, _ in self.seq_lens]
+        return [self.seqlen_q] * self.batch
+
+    @property
+    def kv_lens(self) -> List[int]:
+        if self.seq_lens:
+            return [k for _, k in self.seq_lens]
+        return [self.seqlen_k] * self.batch
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +428,216 @@ def all_inline_scenarios() -> List[Shape]:
     return default_scenarios() + fmha_scenarios() + creative_scenarios()
 
 
+# ---------------------------------------------------------------------------
+# Mask sets (``--set topleft|nomask|band``), mirroring the gfx950 harness. These
+# carry varlen batches, sinks / softcap / ALiBi / QQ-bias and the cuDNN band, so
+# they run through the production dispatcher rather than the explicit spec above.
+# ---------------------------------------------------------------------------
+
+_MIXED = [(512, 512), (700, 200), (200, 700), (64, 64)]
+_Q_LT_KV = [(256, 1024), (100, 300), (1, 700)]
+_Q_GT_KV = [(1024, 256), (300, 100), (700, 1)]
+_DECODE = [(1, 1024), (1, 4096), (1, 33)]
+
+
+def _mask_shape(name: str, seq_lens, *, group: str, **kw) -> Shape:
+    base = dict(heads=16, kv_heads=2, head_size=128, block_size=16, dtype="fp16")
+    base.update(kw)
+    seq_lens = tuple((int(q), int(k)) for q, k in seq_lens)
+    return Shape(
+        name=name,
+        seqlen_q=max(q for q, _ in seq_lens),
+        seqlen_k=max(k for _, k in seq_lens),
+        batch=len(seq_lens),
+        causal=base.get("right_bound", 0) == 0,
+        group=group,
+        seq_lens=seq_lens,
+        init="randn",
+        **base,
+    )
+
+
+def topleft_scenarios() -> List[Shape]:
+    """Unshifted (top-left) causal cohort: query p attends keys <= p per sequence.
+
+    Mixes ``q < kv``, ``q > kv`` and ``q == kv`` sequences in one batch. The
+    ``q > kv`` rows past ``kv_len`` see every key, so the in-prefix bound (not
+    the causal bound) ends their KV loop.
+    """
+
+    def tl(name, seq_lens, **kw):
+        return _mask_shape(
+            f"tl_{name}", seq_lens, group="topleft", causal_top_left=True, **kw
+        )
+
+    return [
+        tl("q_lt_kv", _Q_LT_KV),
+        tl("q_gt_kv", _Q_GT_KV),
+        tl("mixed", _MIXED),
+        tl("mixed_bf16_b64", _MIXED, dtype="bf16", block_size=64),
+        tl(
+            "gqa64x8_prefill",
+            [(2048, 4096), (1500, 700)],
+            heads=64,
+            kv_heads=8,
+            dtype="bf16",
+        ),
+        tl("d64", _MIXED, head_size=64, heads=8, kv_heads=1),
+        tl(
+            "d256_bf16",
+            [(1024, 2048), (900, 300)],
+            head_size=256,
+            dtype="bf16",
+            heads=64,
+            kv_heads=8,
+        ),
+        tl("sinks", _MIXED, use_sinks=True),
+        tl("softcap", _MIXED, softcap=30.0),
+        tl("sliding_window", [(300, 1024), (500, 200), (256, 256)], sliding_window=64),
+        tl("alibi", _MIXED, use_alibi=True),
+        tl("qq_bias", _MIXED, use_qq_bias=True, qq_bias_stride_0=1024),
+        tl("decode_q1", _DECODE),
+        tl(
+            "d256_decode_q1",
+            [(1, 2048), (1, 4096), (1, 512)],
+            head_size=256,
+            dtype="bf16",
+        ),
+    ]
+
+
+def nomask_scenarios() -> List[Shape]:
+    """No-mask cohort (``right_bound=-1``): every query attends every key."""
+
+    def nm(name, seq_lens, **kw):
+        return _mask_shape(f"nm_{name}", seq_lens, group="nomask", right_bound=-1, **kw)
+
+    return [
+        nm("equal", [(512, 512), (257, 257), (64, 64)]),
+        nm("q_lt_kv", _Q_LT_KV),
+        nm("q_gt_kv", _Q_GT_KV),
+        nm("mixed", _MIXED),
+        nm("mixed_bf16_b64", _MIXED, dtype="bf16", block_size=64),
+        nm(
+            "gqa64x8_prefill",
+            [(2048, 4096), (1500, 700)],
+            heads=64,
+            kv_heads=8,
+            dtype="bf16",
+        ),
+        nm("d64", _MIXED, head_size=64, heads=8, kv_heads=1),
+        nm(
+            "d256_bf16",
+            [(1024, 2048), (900, 300)],
+            head_size=256,
+            dtype="bf16",
+            heads=64,
+            kv_heads=8,
+        ),
+        nm("sinks", _MIXED, use_sinks=True),
+        nm("softcap", _MIXED, softcap=30.0),
+        nm("decode_q1", _DECODE),
+        nm(
+            "d256_decode_q1",
+            [(1, 2048), (1, 4096), (1, 512)],
+            head_size=256,
+            dtype="bf16",
+        ),
+    ]
+
+
+def band_scenarios() -> List[Shape]:
+    """Non-causal sliding-window / lookahead bands: ``(sliding_window, right_bound)``
+    around the top-left or bottom-right diagonal, cuDNN-style.
+
+    ``right_bound=-1`` is a left-only window (the future is visible); ``R > 0`` a
+    two-sided window or a lookahead (``sliding_window == 0``). ``q > kv`` sequences
+    exercise empty-band rows (output 0).
+    """
+
+    def bd(name, seq_lens, *, tl, window=0, right=-1, **kw):
+        align = "tl" if tl else "br"
+        return _mask_shape(
+            f"bd_{align}_{name}",
+            seq_lens,
+            group="band",
+            causal_top_left=tl,
+            right_bound=right,
+            sliding_window=window,
+            **kw,
+        )
+
+    out: List[Shape] = []
+    for tl in (False, True):
+        out += [
+            bd("left_only_w64", _MIXED, tl=tl, window=64),
+            bd("two_sided_w64_r32", _MIXED, tl=tl, window=64, right=32),
+            bd("lookahead_r16", _MIXED, tl=tl, right=16),
+            bd("causal_w100", _MIXED, tl=tl, window=100, right=0),
+            bd("q_lt_kv_w128", _Q_LT_KV, tl=tl, window=128),
+            bd("q_gt_kv_w128_r8", _Q_GT_KV, tl=tl, window=128, right=8),
+            bd(
+                "bf16_b64_w96_r48",
+                _MIXED,
+                tl=tl,
+                window=96,
+                right=48,
+                dtype="bf16",
+                block_size=64,
+            ),
+            bd(
+                "gqa64x8_w256",
+                [(2048, 4096), (1500, 700)],
+                tl=tl,
+                window=256,
+                heads=64,
+                kv_heads=8,
+                dtype="bf16",
+            ),
+            bd(
+                "gqa64x8_r64",
+                [(2048, 4096), (1500, 700)],
+                tl=tl,
+                right=64,
+                heads=64,
+                kv_heads=8,
+                dtype="bf16",
+            ),
+            bd(
+                "d64_w64_r32",
+                _MIXED,
+                tl=tl,
+                window=64,
+                right=32,
+                head_size=64,
+                heads=8,
+                kv_heads=1,
+            ),
+            bd(
+                "d256_bf16_w128_r16",
+                [(1024, 2048), (900, 300)],
+                tl=tl,
+                window=128,
+                right=16,
+                head_size=256,
+                dtype="bf16",
+                heads=64,
+                kv_heads=8,
+            ),
+            bd("sinks_w64_r32", _MIXED, tl=tl, window=64, right=32, use_sinks=True),
+            bd("softcap_w64", _MIXED, tl=tl, window=64, softcap=30.0),
+            bd("decode_q1_r8", _DECODE, tl=tl, right=8),
+        ]
+    return out
+
+
+MASK_SETS = {
+    "topleft": topleft_scenarios,
+    "nomask": nomask_scenarios,
+    "band": band_scenarios,
+}
+
+
 def select_shapes(selectors: Optional[List[str]]) -> List[Shape]:
     """Resolve ``--scenario`` selectors to a concrete shape list.
 
@@ -435,7 +687,29 @@ def ref_paged_attn(
     kv_lens: List[int],
     block_tables,
     scale: float,
+    sliding_window: int = 0,
+    soft_cap: float = 0.0,
+    sinks=None,
+    alibi_slopes=None,
+    qq_bias=None,
+    top_left: bool = False,
+    right_bound: int = 0,
 ):
+    """fp32 paged reference (the gfx950 harness's ``ref_paged_attn`` semantics).
+
+    The mask is the cuDNN band ``(left = sliding_window, right = right_bound)``
+    around the diagonal ``d = query_pos + context_len``: key ``k`` is visible iff
+    ``d - k < sliding_window`` (when > 0) and ``k <= d + right_bound`` (``-1`` =
+    unbounded, ``0`` = causal). ``top_left=True`` replaces the bottom-right diagonal
+    (``context_len = kv_len - query_len``) with the unshifted one (``context_len =
+    0``); every ``context_len`` use below (mask, window, ALiBi, qq-bias) follows. Rows
+    left with no visible key are 0, not NaN -- the kernels' contract. ALiBi / QQ-bias
+    require ``right_bound == 0`` (defined on the causal diagonal).
+
+    ALiBi: ``S += alibi_slope[h] * (key_pos - context_len)``. QQ-bias:
+    ``S += qq_bias[q_local, k_local - context_len]`` over key positions inside the
+    query section (else 0). Both are added after scaling and softcap.
+    """
     import torch
 
     num_seqs = len(query_lens)
@@ -448,6 +722,7 @@ def ref_paged_attn(
     for i in range(num_seqs):
         query_len = query_lens[i]
         kv_len = int(kv_lens[i])
+        context_len = 0 if top_left else kv_len - query_len
         q = query[start_idx : start_idx + query_len]
         q = q * scale
         num_kv_blocks = (kv_len + block_size - 1) // block_size
@@ -469,20 +744,61 @@ def ref_paged_attn(
         # though the kernel under test is fine. A per-head-chunk loop keeps the
         # peak at chunk*Sq*Sk*4 with identical numerics.
         num_heads = q.shape[1]
-        # Build the causal mask directly as bool -- a float [q,k] tensor here
-        # would be 4x the bytes, working against this loop's peak-memory bound.
-        mask = torch.triu(
-            torch.ones(query_len, kv_len, dtype=torch.bool, device=q.device),
-            diagonal=kv_len - query_len + 1,
-        )
+        # Build the masks directly as bool -- a float [q,k] tensor here would be
+        # 4x the bytes, working against this loop's peak-memory bound.
+        ones = torch.ones(query_len, kv_len, dtype=torch.bool, device=q.device)
+        if right_bound >= 0:
+            mask = torch.triu(ones, diagonal=context_len + right_bound + 1)
+        else:
+            assert alibi_slopes is None and qq_bias is None
+            mask = torch.zeros_like(ones)
+        if sliding_window > 0:
+            mask |= ~torch.triu(ones, diagonal=context_len - sliding_window + 1)
+        del ones
+        # A row whose band holds no key has no defined softmax. The kernels'
+        # contract is an all-zero output row; zero exactly those rows (not a
+        # blanket nan_to_num, which would also hide a real NaN from a bad kernel).
+        empty_rows = mask.all(dim=-1)
+        qq_b = None
+        if qq_bias is not None:
+            # Vectorised ``qq_bias[q_local, k_local - context_len]`` over the
+            # in-range entries (else 0).
+            n0, n1 = qq_bias.shape
+            qi = torch.arange(query_len, device=q.device).view(-1, 1)
+            kr = (torch.arange(kv_len, device=q.device) - context_len).view(1, -1)
+            ok = (qi < n0) & (kr >= 0) & (kr < n1)
+            qq_b = torch.where(
+                ok,
+                qq_bias.float()[qi.clamp(max=n0 - 1), kr.clamp(0, n1 - 1)],
+                torch.zeros((), device=q.device),
+            )
         head_bytes = query_len * kv_len * 4
         chunk = max(1, min(num_heads, int(4 * 1024**3) // max(1, head_bytes)))
         out_chunks = []
         for h0 in range(0, num_heads, chunk):
             h1 = min(num_heads, h0 + chunk)
             attn = torch.einsum("qhd,khd->hqk", q[:, h0:h1], k[:, h0:h1]).float()
+            if soft_cap and soft_cap > 0:
+                attn = soft_cap * torch.tanh(attn / soft_cap)
+            if alibi_slopes is not None:
+                pos = (
+                    torch.arange(kv_len, device=q.device, dtype=torch.float32)
+                    - context_len
+                )
+                slopes = alibi_slopes[h0:h1].float().view(-1, 1, 1)
+                attn = attn + slopes * pos.view(1, 1, kv_len)
+            if qq_b is not None:
+                attn = attn + qq_b.view(1, query_len, kv_len)
             attn.masked_fill_(mask, float("-inf"))
-            attn = torch.softmax(attn, dim=-1).to(v.dtype)
+            if sinks is not None:
+                s_aux = sinks[h0:h1].float()[:, None, None].expand(-1, query_len, 1)
+                attn = torch.cat((attn, s_aux), dim=-1)
+            attn = torch.softmax(attn, dim=-1)
+            if empty_rows.any():
+                attn[:, empty_rows, :] = 0.0
+            attn = attn.to(v.dtype)
+            if sinks is not None:
+                attn = attn[..., :-1]
             out_chunks.append(torch.einsum("hqk,khd->qhd", attn, v[:, h0:h1]))
             del attn
         out = torch.cat(out_chunks, dim=1)
@@ -509,21 +825,41 @@ def make_inputs(s: Shape, seed: int = 0):
 
     torch.manual_seed(seed)
     dtype = torch.float16 if s.dtype == "fp16" else torch.bfloat16
-    query_lens = [s.seqlen_q] * s.batch
-    kv_lens_list = [s.seqlen_k] * s.batch
-    num_seqs = s.batch
+    query_lens = s.query_lens
+    kv_lens_list = s.kv_lens
+    num_seqs = len(query_lens)
     scale = s.head_size**-0.5
+    bs = s.block_size
 
-    max_blocks_per_seq = (s.seqlen_k + BLOCK_SIZE - 1) // BLOCK_SIZE
+    max_blocks_per_seq = (max(kv_lens_list) + bs - 1) // bs
     num_blocks = max_blocks_per_seq * num_seqs
 
     query = torch.empty(
         sum(query_lens), s.heads, s.head_size, dtype=dtype, device="cuda"
-    ).uniform_(-0.1, 0.1)
+    )
     key_cache = torch.empty(
-        num_blocks, BLOCK_SIZE, s.kv_heads, s.head_size, dtype=dtype, device="cuda"
-    ).uniform_(-0.1, 0.1)
-    value_cache = torch.empty_like(key_cache).uniform_(-0.1, 0.1)
+        num_blocks, bs, s.kv_heads, s.head_size, dtype=dtype, device="cuda"
+    )
+    value_cache = torch.empty_like(key_cache)
+    for t in (query, key_cache, value_cache):
+        if s.init == "randn":
+            t.normal_()
+        else:
+            t.uniform_(-0.1, 0.1)
+    sinks = torch.randn(s.heads, dtype=dtype, device="cuda") if s.use_sinks else None
+    # ALiBi slopes / QQ-bias exactly as the gfx950 harness builds them.
+    alibi_slopes = (
+        -torch.linspace(0.05, 0.5, s.heads, dtype=torch.float32, device="cuda")
+        if s.use_alibi
+        else None
+    )
+    qq_bias = None
+    if s.use_qq_bias:
+        n0 = max(max(query_lens), s.qq_bias_stride_0)
+        qq_bias = (
+            torch.randn(n0, s.qq_bias_stride_0, dtype=torch.float32, device="cuda")
+            * 0.1
+        )
 
     cu_q = torch.tensor([0] + query_lens, dtype=torch.int32, device="cuda").cumsum(
         dim=0, dtype=torch.int32
@@ -546,9 +882,100 @@ def make_inputs(s: Shape, seed: int = 0):
         "kv_lens_list": kv_lens_list,
         "block_tables": block_tables,
         "scale": scale,
+        "sinks": sinks,
+        "alibi_slopes": alibi_slopes,
+        "qq_bias": qq_bias,
         "max_query_len": max(query_lens),
         "max_kv_len": max(kv_lens_list),
     }
+
+
+def run_reference(s: Shape, data):
+    """fp32 reference for ``s`` on ``data`` (band, sinks, softcap, biases)."""
+    return ref_paged_attn(
+        query=data["query"],
+        key_cache=data["key_cache"],
+        value_cache=data["value_cache"],
+        query_lens=data["query_lens"],
+        kv_lens=data["kv_lens_list"],
+        block_tables=data["block_tables"],
+        scale=data["scale"],
+        sliding_window=s.sliding_window,
+        soft_cap=s.softcap,
+        sinks=data["sinks"],
+        alibi_slopes=data["alibi_slopes"],
+        qq_bias=data["qq_bias"],
+        top_left=s.causal_top_left,
+        right_bound=s.right_bound,
+    ).float()
+
+
+def problem_of(s: Shape, data, **overrides):
+    """The ``UnifiedAttentionProblem`` the production dispatcher sees for ``s``."""
+    from kernels import UnifiedAttentionProblem
+
+    kw = dict(
+        total_q=int(data["query"].shape[0]),
+        num_seqs=len(data["query_lens"]),
+        num_query_heads=s.heads,
+        num_kv_heads=s.kv_heads,
+        head_size=s.head_size,
+        block_size=s.block_size,
+        max_seqlen_q=data["max_query_len"],
+        max_seqlen_k=data["max_kv_len"],
+        dtype=s.dtype,
+        sliding_window=s.sliding_window,
+        softcap=float(s.softcap),
+        use_sinks=s.use_sinks,
+        use_alibi=s.use_alibi,
+        use_qq_bias=s.use_qq_bias,
+        num_cus=120,
+        causal_top_left=s.causal_top_left,
+        right_bound=s.right_bound,
+    )
+    kw.update(overrides)
+    return UnifiedAttentionProblem(**kw)
+
+
+def run_dispatch(s: Shape, data, *, backend: str = "auto", warmup=0, attempts=1):
+    """Launch ``s`` through ``run_unified_attention_torch`` (the production
+    selector) and return ``(output, ms)``. ``backend``: ``auto`` / ``2d`` /
+    ``3d`` / ``scalar``."""
+    import torch
+    from rocke.runtime import time_launches
+
+    from kernels import run_unified_attention_torch
+
+    q = data["query"]
+    out = torch.empty_like(q)
+    hip_stream = int(torch.cuda.current_stream().cuda_stream)
+    problem = problem_of(s, data)
+
+    def call_once():
+        run_unified_attention_torch(
+            problem=problem,
+            q=q,
+            k=data["key_cache"],
+            v=data["value_cache"],
+            out=out,
+            cu_seqlens_q=data["cu_q"],
+            seqused_k=data["kv_lens"],
+            softmax_scale=data["scale"],
+            block_table=data["block_tables"],
+            softcap=float(s.softcap),
+            sinks=data["sinks"],
+            alibi_slopes=data["alibi_slopes"],
+            qq_bias=data["qq_bias"],
+            qq_bias_stride_0=s.qq_bias_stride_0,
+            backend={"2d": "tiled"}.get(backend, backend),
+            stream=hip_stream,
+        )
+
+    # Host-inclusive timing (dispatcher overhead counted); correctness is the
+    # point of the mask sets.
+    ms = time_launches(call_once, warmup=warmup, iters=attempts, stream=hip_stream)
+    torch.cuda.synchronize()
+    return out, ms
 
 
 # ---------------------------------------------------------------------------
@@ -960,7 +1387,26 @@ def main() -> int:
         "--scenario",
         action="append",
         default=None,
-        help="group (default|fmha|creative|all) or exact shape name; repeatable",
+        help=(
+            "group (default|fmha|creative|all) or exact shape name; repeatable. "
+            "With --set, filters the set by exact shape name"
+        ),
+    )
+    parser.add_argument(
+        "--set",
+        choices=tuple(MASK_SETS),
+        default=None,
+        help=(
+            "run a mask scenario set (top-left causal / no mask / cuDNN band) "
+            "through the production dispatcher instead of --scenario's explicit "
+            "spec; mirrors the gfx950 harness's --set"
+        ),
+    )
+    parser.add_argument(
+        "--path",
+        choices=("auto", "2d", "3d"),
+        default="auto",
+        help="dispatcher path for --set runs (default: the production selector)",
     )
     parser.add_argument("--attempts", type=int, default=30)
     parser.add_argument("--warmup", type=int, default=10)
@@ -1014,7 +1460,15 @@ def main() -> int:
     if _q_major_grid_enabled():
         print("HIPDNN_GFX942_Q_MAJOR_GRID -> enabled")
 
-    shapes = select_shapes(args.scenario)
+    if args.set:
+        # With --set, --scenario filters the set by exact shape name.
+        shapes = [
+            x
+            for x in MASK_SETS[args.set]()
+            if not args.scenario or x.name in args.scenario
+        ]
+    else:
+        shapes = select_shapes(args.scenario)
     if not shapes:
         print(f"no shapes matched {args.scenario!r}", file=sys.stderr)
         return 2
@@ -1027,7 +1481,14 @@ def main() -> int:
         )
         print(
             f"\n=== {s.name}  dtype={s.dtype} D={s.head_size} "
-            f"Hq{s.heads}/Hkv{s.kv_heads} S{s.seqlen_q}x{s.seqlen_k} B{s.batch} ==="
+            f"Hq{s.heads}/Hkv{s.kv_heads} S{s.seqlen_q}x{s.seqlen_k} B{s.batch}"
+            + (
+                f" seqs={list(s.seq_lens)} tl={int(s.causal_top_left)} "
+                f"rb={s.right_bound} sw={s.sliding_window}"
+                if args.set
+                else ""
+            )
+            + " ==="
         )
         torch.cuda.synchronize()
         try:
@@ -1038,29 +1499,46 @@ def main() -> int:
             pass
         torch.cuda.empty_cache()
 
-        try:
-            launcher, spec, config = _build_kernel(s)
-        except NotImplementedError as e:
-            print(f"  SKIP (unsupported on gfx942): {e}")
-            results.append({"name": s.name, "status": "skip", "reason": str(e)})
-            continue
-
-        data = make_inputs(s)
+        if args.set:
+            # Mask sets: production dispatcher, no explicit spec. A dispatcher
+            # rejection (e.g. right_bound with ALiBi) is reported as SKIP with its
+            # reason; anything else propagates.
+            config = f"dispatch_{args.path}"
+            data = make_inputs(s)
+            try:
+                with torch.inference_mode():
+                    out, ms = run_dispatch(
+                        s,
+                        data,
+                        backend=args.path,
+                        warmup=args.warmup,
+                        attempts=args.attempts,
+                    )
+            except (NotImplementedError, ValueError) as e:
+                print(f"  SKIP (dispatcher refused): {e}")
+                results.append({"name": s.name, "status": "skip", "reason": str(e)})
+                continue
+            kernel = "(dispatcher)"
+        else:
+            try:
+                launcher, spec, config = _build_kernel(s)
+            except NotImplementedError as e:
+                print(f"  SKIP (unsupported on gfx942): {e}")
+                results.append({"name": s.name, "status": "skip", "reason": str(e)})
+                continue
+            data = make_inputs(s)
+            with torch.inference_mode():
+                out, ms = _run_rocke(
+                    s, data, launcher, spec, warmup=args.warmup, attempts=args.attempts
+                )
+            kernel = spec.kernel_name()
         with torch.inference_mode():
-            ref = ref_paged_attn(
-                query=data["query"],
-                key_cache=data["key_cache"],
-                value_cache=data["value_cache"],
-                query_lens=data["query_lens"],
-                kv_lens=data["kv_lens_list"],
-                block_tables=data["block_tables"],
-                scale=data["scale"],
-            ).float()
-            out, ms = _run_rocke(
-                s, data, launcher, spec, warmup=args.warmup, attempts=args.attempts
-            )
+            ref = run_reference(s, data)
             torch.cuda.synchronize()
+            nan = bool(torch.isnan(out.float()).any().item())
             diffs = compare(ref, out)
+        if nan:
+            diffs["max_abs"] = float("inf")
 
         ok = diffs["max_abs"] <= tol
         tag = "PASS" if ok else "FAIL"
@@ -1082,7 +1560,7 @@ def main() -> int:
         us = ms * 1e3
         tf = attention_tflops(s, ms)
         print(
-            f"  config={config:11s} kernel={spec.kernel_name()}\n"
+            f"  config={config:11s} kernel={kernel}\n"
             f"  {tag}  max_abs={diffs['max_abs']:.3e} (tol {tol:.0e})  "
             f"{us:9.2f} us  {tf:7.1f} TFLOPS"
         )
@@ -1095,7 +1573,7 @@ def main() -> int:
                 "max_abs": diffs["max_abs"],
                 "median_us": us,
                 "tflops": tf,
-                "kernel": spec.kernel_name(),
+                "kernel": kernel,
             }
         )
 

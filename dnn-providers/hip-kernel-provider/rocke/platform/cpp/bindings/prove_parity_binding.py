@@ -1505,6 +1505,7 @@ def _selector_parity_row(problem_dict, arch):
                 "use_i64_kv_addr",
                 "use_k_single_buffer",
                 "use_fp8_mfma_qk",
+                "causal_top_left",
             }
         }
     except Exception as e:  # noqa: BLE001

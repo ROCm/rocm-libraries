@@ -454,10 +454,12 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
                 if(cfg->USE_QQ_BIAS)
                 {
                     rocke_value_t* krp = rocke_b_sub(b, col_abs, ctx->context_len);
-                    rocke_value_t* krp_ok
-                        = rocke_b_land(b,
-                                       rocke_b_cmp_ge(b, krp, rocke_b_const_i32(b, 0)),
-                                       rocke_b_cmp_lt(b, krp, ctx->qq_bias_stride0_p));
+                    /* Sequence the two compares explicitly: C++ leaves function
+                     * argument evaluation order unspecified, and the Python
+                     * twin emits cmp_ge before cmp_lt. */
+                    rocke_value_t* krp_ge = rocke_b_cmp_ge(b, krp, rocke_b_const_i32(b, 0));
+                    rocke_value_t* krp_lt = rocke_b_cmp_lt(b, krp, ctx->qq_bias_stride0_p);
+                    rocke_value_t* krp_ok = rocke_b_land(b, krp_ge, krp_lt);
                     rocke_value_t* qq_ok = rocke_b_land(b, row_ok, krp_ok);
                     rocke_value_t* qp_safe
                         = rocke_b_select(b, row_ok, qp_r, rocke_b_const_i32(b, 0));
