@@ -11,7 +11,7 @@ verification computes neither CPU reference answers nor replacement budgets and
 requires no Torch. This is infrastructure for a bounded gfx942 forward cohort;
 the gfx942 baseline lock and DVC pointer identify its published bundle. The
 publication registry enables default provider installation alongside SDPA;
-explicit local source and lock overrides can select a replacement candidate.
+the offline CLI accepts explicit bundle and lock paths to verify replacement candidates.
 
 ## Coverage and execution
 
@@ -138,7 +138,7 @@ output, changed baseline output, and suppressed launch. Host checks need no GPU:
 
 ```bash
 python -m pytest library/tests/test_conv_reference_contract.py \
-  library/tests/test_reference_artifact.py -v
+  library/tests/test_reference_common.py -v
 ```
 
 ## Promotion and installed tests
@@ -158,8 +158,8 @@ After independent qualification and review:
 3. Track and publish that archive through DVC at
    `library/tests/reference_bundles/conv/gfx942.tar.gz.dvc`, following the repository's
    artifact publication process. Confirm a fresh download before CI enrollment.
-4. Add `gfx942` to the `conv` array in
-   `library/tests/reference_common/published_bundles.json`. Provider builds then
+4. Add `gfx942` to `ROCKE_PUBLISHED_CONV_ARCHITECTURES` in
+   `platform/cmake/PublishedGpuReferences.cmake`. Provider builds then
    install it alongside the other published bundles when
    `ROCKE_INSTALL_TEST_GPU_REFERENCES` is ON.
 
@@ -171,22 +171,17 @@ installed bundle is beneath
 test-only artifact packaging. The generic artifact contains the harness and trusted
 lock. Host checks register as `rocke_conv_reference_unit_pytest`; the GPU entry
 `rocke_conv_gpu_gfx942_pytest` registers only when reference installation is enabled and a
-published or explicitly staged local bundle passes validation. Both entries are
+published bundle passes validation. Both entries are
 in the provider category YAML.
 
-For testing a replacement candidate before publishing it, configure explicitly:
+Test a replacement candidate before publication with the offline CLI's `verify`
+command, passing explicit `--bundle` and `--lock` paths. CMake installs only the
+published archives and always validates them against their committed architecture
+locks. After publication, check the installed layout through the normal CMake path.
 
-```text
--DROCKE_INSTALL_TEST_GPU_REFERENCES=ON
--DROCKE_TEST_CONV_REFERENCE_INSTALL_SOURCE_gfx942=<qualified-bundle>
--DROCKE_TEST_CONV_REFERENCE_INSTALL_LOCK_gfx942=<reviewed-lock>
-```
-
-The explicit install lock is copied into the installed harness. Without that
-override, CMake requires the committed architecture lock. OFF ignores bundle and
-lock overrides and registers no pinned-reference GPU entries for any operation. Required tests fail on
-missing gfx942 hardware or a missing/corrupt bundle; other unenrolled architectures
-remain outside the cohort.
+`ROCKE_INSTALL_TEST_GPU_REFERENCES=OFF` registers no pinned-reference GPU entries
+for any operation. Required tests fail on missing gfx942 hardware or a
+missing/corrupt bundle; other unenrolled architectures remain outside the cohort.
 
 Shared numeric, digest, archive, snapshot, and interpreter-transport support lives
 in `library/tests/reference_common`. Both operations import that support directly. Existing frozen SDPA bundles remain self-contained; newly qualified bundles

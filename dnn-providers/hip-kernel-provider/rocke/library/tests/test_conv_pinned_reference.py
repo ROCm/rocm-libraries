@@ -18,7 +18,7 @@ from conv_reference.contract import checked_inputs
 from reference_common.numeric import decode, encode
 from conv_reference.architectures import ARCHITECTURES, get_architecture
 from reference_common.session import reuse_workers
-from conv_reference.paths import default_bundle_path
+from reference_common.paths import default_bundle_path
 
 
 @pytest.fixture(scope="module")
@@ -45,7 +45,7 @@ def reference_bundle():
     bundle = (
         Path(configured).resolve()
         if configured
-        else default_bundle_path(Path(__file__).parent, arch)
+        else default_bundle_path(Path(__file__).parent, arch, operation="conv")
     )
     if not bundle.is_dir():
         if os.environ.get("ROCKE_TEST_REQUIRE_CONV_GPU") == "1" or configured:

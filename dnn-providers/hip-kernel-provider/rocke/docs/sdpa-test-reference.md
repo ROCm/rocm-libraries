@@ -131,7 +131,7 @@ Run the CPU contract checks with:
 
 ```bash
 python -m pytest library/tests/test_sdpa_reference_contract.py \
-  library/tests/test_reference_artifact.py -v
+  library/tests/test_reference_common.py -v
 ```
 
 These check analytic SDPA results, bf16 interpretation, preservation of the
@@ -222,8 +222,8 @@ The existing TheRock CI flow builds and tests the installed provider artifact:
    architecture-specific baseline lock, then installs the test harness and bundle.
    `ROCKE_INSTALL_TEST_GPU_REFERENCES` defaults on for provider artifact builds
    and off in the rocm-libraries superbuild (`ROCM_LIBS_SUPERBUILD`). Setting it
-   to OFF disables reference installation and GPU-test registration even when
-   a bundle-directory override is cached; host checks remain installed.
+   to OFF disables reference installation and GPU-test registration; host checks
+   remain installed.
 3. TheRock's `ml-libs/artifact-hipkernelprovider.toml` collects the harness into the
    generic test artifact. Its `**/engines/test_arch_content/**` rule collects the
    bundle installed at
@@ -241,15 +241,10 @@ The existing TheRock CI flow builds and tests the installed provider artifact:
 This uses the existing workflows; no additional workflow is required. CI verifies
 an already qualified baseline and cannot generate or approve its own replacement.
 
-With reference installation enabled, an extracted bundle can override DVC archive staging:
-
-```text
--DROCKE_TEST_SDPA_REFERENCE_INSTALL_SOURCE_gfx942=<qualified-bundle-directory>
-```
-
-For a candidate with a different reviewed lock, also pass
-`-DROCKE_TEST_SDPA_REFERENCE_INSTALL_LOCK_gfx942=<reviewed-lock>`. A lock override
-requires the extracted-source override. These controls do not publish the candidate.
+CMake installs only published archives validated against their committed locks.
+For an unpublished candidate, use the offline CLI's `verify` command with explicit
+`--bundle` and `--lock` paths. Once its archive, pointer, lock, and publication
+entry are ready, validate installation through the normal CMake path.
 
 Run the installed GPU entry with:
 
@@ -273,16 +268,15 @@ Normal provider CI uses the defaults. The settings are:
 
 | Setting | Type | Purpose |
 |---|---|---|
-| `ROCKE_INSTALL_TEST_GPU_REFERENCES` | CMake Boolean | Install all published GPU reference bundles; OFF ignores source and lock overrides |
-| `ROCKE_TEST_SDPA_REFERENCE_INSTALL_SOURCE_<arch>` | CMake path | Install an extracted local bundle instead of staging its standard DVC archive |
-| `ROCKE_TEST_SDPA_REFERENCE_INSTALL_LOCK_<arch>` | CMake path | Explicit reviewed lock for an extracted local install-source override |
+| `ROCKE_INSTALL_TEST_GPU_REFERENCES` | CMake Boolean | Install all published GPU reference bundles and enroll their GPU tests |
 | `ROCKE_TEST_SDPA_REFERENCE_BUNDLE_<ARCH>` | Environment variable | Select the bundle pytest reads for one runtime environment |
 | `ROCKE_TEST_REQUIRE_SDPA_GPU` | Environment variable | Set to `1` by installed CTest to fail on missing required prerequisites |
 
-CMake uses lowercase architecture suffixes such as `gfx942`; runtime overrides
-use uppercase suffixes such as `GFX942`. A CMake variable does not set the runtime
-environment variable. With no overrides, CMake packages the standard archives for
-all operation/architecture pairs in `reference_common/published_bundles.json`, and pytest finds the installed target bundle.
+Runtime bundle overrides use uppercase architecture suffixes such as `GFX942`.
+They select the bundle pytest reads; they do not change what CMake installs.
+CMake packages the standard archives for all operation/architecture pairs in
+`platform/cmake/PublishedGpuReferences.cmake`, and pytest finds the installed target
+bundle by default.
 There is no separate architecture-selection option or unqualified bundle alias.
 Other detected, unenrolled GPU architectures remain outside the required cohort.
 

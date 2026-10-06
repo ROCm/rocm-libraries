@@ -267,8 +267,8 @@ and `library/tests/conv_reference/`, with shared support in `reference_common/`:
 | `cli.py` | Snapshot, qualification, and verification commands |
 | `../reference_common/artifact.py` | Common archive command with explicit operation |
 | `../reference_common/numeric.py` / `source.py` | Storage, digests, conservative budgets, and committed snapshots |
-| `paths.py` | Relocatable source and installed bundle lookup |
-| `../reference_common/published_bundles.json` | Published operation/architecture pairs installed by default; currently SDPA/gfx942 and convolution/gfx942 |
+| `../reference_common/paths.py` | Relocatable source and installed bundle lookup |
+| `platform/cmake/PublishedGpuReferences.cmake` | Published operation/architecture pairs installed by default; currently SDPA/gfx942 and convolution/gfx942 |
 | Provider CMake and category YAML | Staging, test registration, and normal provider CI selection |
 
 Workers are reused across cases to reduce process startup and runtime setup.
@@ -323,7 +323,7 @@ For gfx950 or gfx1151:
 3. Add the target to `registry.json` and create its independently reviewed
    `baseline_lock.json` through qualification. Qualification requires enrollment,
    so add qualification support first. The architecture registry alone does not
-   enable default installation; `reference_common/published_bundles.json` controls
+   enable default installation; `platform/cmake/PublishedGpuReferences.cmake` controls
    publication enrollment.
 4. Qualify on the actual target in the intended ROCm/container environment. Verify
    every case against the independent reference, authenticate repeated baseline
@@ -331,11 +331,12 @@ For gfx950 or gfx1151:
    output digests from gfx942 cannot be transferred to another architecture.
 5. Pack and publish `reference_bundles/sdpa/<arch>.tar.gz` through DVC. Review the
    pointer, lock, adapter, case mapping, and evidence together, then add the target
-   to the operation in `reference_common/published_bundles.json`. Every published
+   to `ROCKE_PUBLISHED_SDPA_ARCHITECTURES` in
+   `platform/cmake/PublishedGpuReferences.cmake`. Every published
    pair is installed when `ROCKE_INSTALL_TEST_GPU_REFERENCES` is ON;
-   TheRock splits the payloads by target. Use
-   `ROCKE_TEST_SDPA_REFERENCE_INSTALL_SOURCE_<arch>` to install an extracted
-   local bundle instead of staging that architecture's standard archive.
+   TheRock splits the payloads by target. CMake uses only the published archive
+   and committed lock. Verify unpublished candidates with the offline CLI using
+   explicit `--bundle` and `--lock` paths.
 6. Validate source and installed tests, then download and assemble the actual
    generic plus target-specific CI artifacts. Check bundle hashes, absence from
    release payloads, relocatable discovery, and required tests on that target.
