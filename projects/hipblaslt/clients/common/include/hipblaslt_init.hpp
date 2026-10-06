@@ -94,7 +94,7 @@ constexpr size_t kIntegerExactSparseKTerms = 16;
 // Returns false when name is not a pattern; the empty string is standard.
 bool parse_integer_exact_pattern(const char* name, IntegerExactPattern& pattern);
 
-// Selects the pattern for the integer_exact fills that follow. K is the GEMM's inner dimension,
+// Selects the pattern for the integer_exact fills on this thread. K is the GEMM's inner dimension,
 // and a_k_is_row says whether K runs along the rows of A as stored (A transposed).
 void set_integer_exact_pattern_state(IntegerExactPattern pattern, size_t K, bool a_k_is_row);
 

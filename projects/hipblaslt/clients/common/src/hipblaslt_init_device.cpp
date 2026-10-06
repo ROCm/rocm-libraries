@@ -85,7 +85,7 @@ namespace
     };
     IntegerExactPatternState& integer_exact_pattern_state()
     {
-        static IntegerExactPatternState state;
+        static thread_local IntegerExactPatternState state;
         return state;
     }
 }

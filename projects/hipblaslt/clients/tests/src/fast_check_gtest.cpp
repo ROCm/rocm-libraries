@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <cstring>
 #include <vector>
+#include <thread>
 
 namespace
 {
@@ -769,6 +770,33 @@ namespace
         EXPECT_GT(counts[0], 0);
         EXPECT_GT(counts[1], 0);
         EXPECT_GT(counts[2], 0);
+    }
+
+    // Test workers may finish while another thread is still filling its operands.
+    // A worker's scope cleanup must not reset another thread's selected pattern.
+    TEST(FastCheckDevice_pre_checkin, integer_exact_pattern_is_local_to_the_test_thread)
+    {
+        IntegerExactPatternScope scope;
+        set_integer_exact_pattern_state(IntegerExactPattern::ternary, 64, false);
+        std::thread worker([] {
+            IntegerExactPatternScope workerScope;
+            set_integer_exact_pattern_state(IntegerExactPattern::sparse_k, 128, true);
+        });
+        worker.join();
+
+        HipDeviceBuffer d(HIP_R_32F, 64 * 64);
+        ASSERT_TRUE(d.buf());
+        hipblaslt_init_device(ABC_dims::B,
+                              hipblaslt_initialization::integer_exact,
+                              false,
+                              d.buf(),
+                              64, 64, 64,
+                              HIP_R_32F, 0, 1);
+        std::vector<float> h(64 * 64);
+        ASSERT_EQ(hipMemcpy(h.data(), d.buf(), h.size() * sizeof(float), hipMemcpyDeviceToHost),
+                  hipSuccess);
+        for(float v : h)
+            ASSERT_TRUE(v == -1 || v == 0 || v == 1) << v;
     }
 
     // With overlapping batches (a stride shorter than one matrix), the sparse_k fill must stay
