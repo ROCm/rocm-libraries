@@ -1,0 +1,40 @@
+# hipblaslt-test-online-tuner categories for TheRock's ctest presets.
+#
+# The online tuner's bookkeeping, tested without a device. The whole binary
+# takes well under a second, so every tier runs all of it.
+
+test_categories:
+  quick:
+    description: "Online tuning bookkeeping (host-only)"
+    test_patterns:
+      - "*"
+    labels:
+      - "quick"
+      - "smoke"
+
+  standard:
+    description: "Online tuning bookkeeping (host-only)"
+    test_patterns:
+      - "*"
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "Online tuning bookkeeping (host-only)"
+    test_patterns:
+      - "*"
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Online tuning bookkeeping (host-only)"
+    test_patterns:
+      - "*"
+    labels:
+      - "full"
+      - "weekly"
+      - "hmm"
