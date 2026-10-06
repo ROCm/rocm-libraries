@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,12 +30,7 @@
 
 namespace rocsparse
 {
-    template <uint32_t BLOCK_SIZE,
-              uint32_t BLOCK_DIM,
-              bool     GRID_STRIDE,
-              typename T,
-              typename I,
-              typename J>
+    template <uint32_t BLOCK_SIZE, uint32_t BLOCK_DIM, typename T, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCK_SIZE)
     void bsr2csr_block_per_row_2_7_kernel(rocsparse_direction  direction,
                                           J                    mb,
@@ -102,19 +97,10 @@ namespace rocsparse
                 }
             }
 
-            if constexpr(!GRID_STRIDE)
-            {
-                break;
-            }
         }
     }
 
-    template <uint32_t BLOCK_SIZE,
-              uint32_t BLOCK_DIM,
-              bool     GRID_STRIDE,
-              typename T,
-              typename I,
-              typename J>
+    template <uint32_t BLOCK_SIZE, uint32_t BLOCK_DIM, typename T, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCK_SIZE)
     void bsr2csr_block_per_row_8_32_kernel(rocsparse_direction  direction,
                                            J                    mb,
@@ -174,20 +160,10 @@ namespace rocsparse
                 }
             }
 
-            if constexpr(!GRID_STRIDE)
-            {
-                break;
-            }
         }
     }
 
-    template <uint32_t BLOCK_SIZE,
-              uint32_t BLOCK_DIM,
-              uint32_t SUB_BLOCK_DIM,
-              bool     GRID_STRIDE,
-              typename T,
-              typename I,
-              typename J>
+    template <uint32_t BLOCK_SIZE, uint32_t BLOCK_DIM, uint32_t SUB_BLOCK_DIM, typename T, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCK_SIZE)
     void bsr2csr_block_per_row_33_256_kernel(rocsparse_direction  direction,
                                              J                    mb,
@@ -261,10 +237,6 @@ namespace rocsparse
                 }
             }
 
-            if constexpr(!GRID_STRIDE)
-            {
-                break;
-            }
         }
     }
 

@@ -23,23 +23,20 @@
  * ************************************************************************ */
 
 //
-// Forced-clamp tests for the csr2bsr_nnz, csr2bsr and bsr2csr block-row grids
-// (AISPARSE-703).
+// Forced-clamp tests for the csr2bsr_nnz, csr2bsr and bsr2csr block-row grids.
 //
-// FOCUS. Every block_dim > 1 launch of the three conversions sized grid.x from
-// the block-row count mb (or mb / rows-per-block for the wavefront kernels).
-// The fix clamps each with rocsparse::get_grid_size_x and grid-strides the
-// kernels over mb; bsr2csr additionally keeps a straight-line GRID_STRIDE =
-// false instantiation that it selects whenever the grid is not clamped. The
-// csr2bsr_nnz block-per-row kernel keeps its row count in shared memory, and a
-// looping block must reset it from thread 0 only, or another wave can zero it
-// before thread 0 stores the previous row's count.
+// Every block_dim > 1 launch clamps grid.x with rocsparse::get_grid_size_x and
+// grid-strides over the block rows. bsr2csr has one instantiation per kernel,
+// the same shape as csr2bsr. The csr2bsr_nnz block-per-row kernel keeps its row
+// count in shared memory, and a looping block must reset it from thread 0 only,
+// or another wave can zero it before thread 0 stores the previous row's count.
 //
-// WHY NOT TEST THE REAL THRESHOLD. The clamp binds at (2^32 - 1) / blockDim.x
-// blocks, about 16.7M block rows at 256 threads and 4.2M at 1024. These tests
-// shrink handle->properties.maxGridSize[0] with ScopedMaxGridSizeX to 1, 3 and 7
-// blocks instead, so a few hundred block rows take the clamped, looping path.
-// This is the AISPARSE-702 idiom.
+// The cases below shrink handle->properties.maxGridSize[0] with
+// ScopedMaxGridSizeX to 1, 3 and 7 blocks, so a few hundred block rows take the
+// clamped path. bsr2csr_real_threshold_block_dim_8 does not: rocsparse_sbsr2csr
+// with block_dim 8 (1024 threads) and mb = 2^22 + 1 crosses (2^32 - 1) / 1024
+// and has to clamp inside get_grid_size_x. bsr2csr targets are filled with 0xFF
+// before launch, so a kernel that skips block rows cannot pass on leftover bytes.
 //
 // WHAT MAKES EACH CASE LOAD-BEARING. block_dim <= 16 uses mb = 150: the
 // wavefront kernels cover 16 (block_dim <= 4) or 256 / wavefront size block
@@ -253,20 +250,28 @@ namespace
         else if(got.ind != want.ind)
         {
             size_t i = 0;
-            while(got.ind[i] == want.ind[i])
+            while(i < got.ind.size() && i < want.ind.size() && got.ind[i] == want.ind[i])
             {
                 ++i;
             }
-            msg << "column index " << i << " is " << got.ind[i] << ", want " << want.ind[i];
+            msg << "column index differs at " << i;
+            if(i < got.ind.size() && i < want.ind.size())
+            {
+                msg << ": " << got.ind[i] << ", want " << want.ind[i];
+            }
         }
         else if(got.val != want.val)
         {
             size_t i = 0;
-            while(got.val[i] == want.val[i])
+            while(i < got.val.size() && i < want.val.size() && got.val[i] == want.val[i])
             {
                 ++i;
             }
-            msg << "value " << i << " is " << got.val[i] << ", want " << want.val[i];
+            msg << "value differs at " << i;
+            if(i < got.val.size() && i < want.val.size())
+            {
+                msg << ": " << got.val[i] << ", want " << want.val[i];
+            }
         }
         return msg.str();
     }
@@ -362,6 +367,13 @@ namespace
             ADD_FAILURE() << "device allocation failed";
             return {};
         }
+        // Poison bsr2csr targets. A kernel that skips block rows must not pass
+        // on bytes left by the previous launch.
+        if(!to_bsr && hipMemset(t_ptr.ptr, 0xFF, t_ptr.n * sizeof(I)) != hipSuccess)
+        {
+            ADD_FAILURE() << "hipMemset of csr row pointer failed";
+            return {};
+        }
 
         ConversionDescrs descrs;
         if(create_descr<I, J, T>(
@@ -429,6 +441,12 @@ namespace
             t_ind.reset(new device_vector<J>(static_cast<size_t>(std::max<int64_t>(nnz, 1))));
             t_val.reset(new device_vector<T>(static_cast<size_t>(std::max<int64_t>(nnz * bs, 1))));
             if(t_ind->ptr == nullptr || t_val->ptr == nullptr)
+            {
+                status = rocsparse_status_memory_error;
+            }
+            else if(!to_bsr
+                    && (hipMemset(t_ind->ptr, 0xFF, t_ind->n * sizeof(J)) != hipSuccess
+                        || hipMemset(t_val->ptr, 0xFF, t_val->n * sizeof(T)) != hipSuccess))
             {
                 status = rocsparse_status_memory_error;
             }
@@ -555,6 +573,142 @@ namespace
                            check_bsr2csr<int64_t, int32_t, double>>(handle, block_dim);
     }
 
+
+    // 1024-thread bsr2csr crosses (2^32 - 1) / 1024 at mb = 2^22 + 1. Nonzero
+    // blocks sit on block rows 0, 4194303 and 4194304. The last two are past
+    // grid.x = 4194303, so they are right only when the kernel grid-strides.
+    void check_bsr2csr_real_threshold(rocsparse_handle handle)
+    {
+        constexpr rocsparse_int mb         = 4194305;
+        constexpr rocsparse_int nb         = 1;
+        constexpr rocsparse_int block_dim  = 8;
+        constexpr rocsparse_int bs         = block_dim * block_dim;
+        constexpr rocsparse_int nnz_blocks = 3;
+        const rocsparse_int     nz_rows[nnz_blocks] = {0, 4194303, 4194304};
+
+        std::vector<rocsparse_int> h_bsr_ptr(static_cast<size_t>(mb) + 1, 0);
+        rocsparse_int              acc = 0;
+        size_t                     nz  = 0;
+        for(rocsparse_int row = 0; row < mb; ++row)
+        {
+            h_bsr_ptr[static_cast<size_t>(row)] = acc;
+            if(nz < nnz_blocks && row == nz_rows[nz])
+            {
+                ++acc;
+                ++nz;
+            }
+        }
+        h_bsr_ptr[static_cast<size_t>(mb)] = acc;
+        ASSERT_EQ(acc, nnz_blocks);
+
+        std::vector<rocsparse_int> h_bsr_ind(nnz_blocks, 0);
+        std::vector<float>         h_bsr_val(static_cast<size_t>(nnz_blocks) * bs);
+        for(rocsparse_int b = 0; b < nnz_blocks; ++b)
+        {
+            for(rocsparse_int k = 0; k < bs; ++k)
+            {
+                h_bsr_val[static_cast<size_t>(b) * bs + k] = static_cast<float>(1000 * b + k + 1);
+            }
+        }
+
+        const rocsparse_int        m   = mb * block_dim;
+        const rocsparse_int        nnz = nnz_blocks * bs;
+        std::vector<rocsparse_int> want_ptr(static_cast<size_t>(m) + 1, 0);
+        rocsparse_int              running = 0;
+        for(rocsparse_int row = 0; row < mb; ++row)
+        {
+            const rocsparse_int blocks
+                = h_bsr_ptr[static_cast<size_t>(row) + 1] - h_bsr_ptr[static_cast<size_t>(row)];
+            for(rocsparse_int r = 0; r < block_dim; ++r)
+            {
+                running += blocks * block_dim;
+                want_ptr[static_cast<size_t>(row) * block_dim + static_cast<size_t>(r) + 1]
+                    = running;
+            }
+        }
+        ASSERT_EQ(running, nnz);
+
+        device_vector<rocsparse_int> bsr_ptr(h_bsr_ptr);
+        device_vector<rocsparse_int> bsr_ind(h_bsr_ind);
+        device_vector<float>         bsr_val(h_bsr_val);
+        device_vector<rocsparse_int> csr_ptr(static_cast<size_t>(m) + 1);
+        device_vector<rocsparse_int> csr_ind(static_cast<size_t>(nnz));
+        device_vector<float>         csr_val(static_cast<size_t>(nnz));
+        if(bsr_ptr.ptr == nullptr || bsr_ind.ptr == nullptr || bsr_val.ptr == nullptr
+           || csr_ptr.ptr == nullptr || csr_ind.ptr == nullptr || csr_val.ptr == nullptr)
+        {
+            ADD_FAILURE() << "device allocation failed";
+            return;
+        }
+        ASSERT_EQ(hipMemset(csr_ptr.ptr, 0xFF, csr_ptr.n * sizeof(rocsparse_int)), hipSuccess);
+        ASSERT_EQ(hipMemset(csr_ind.ptr, 0xFF, csr_ind.n * sizeof(rocsparse_int)), hipSuccess);
+        ASSERT_EQ(hipMemset(csr_val.ptr, 0xFF, csr_val.n * sizeof(float)), hipSuccess);
+
+        struct MatDescrs
+        {
+            rocsparse_mat_descr bsr = nullptr;
+            rocsparse_mat_descr csr = nullptr;
+
+            ~MatDescrs()
+            {
+                if(bsr != nullptr)
+                {
+                    (void)rocsparse_destroy_mat_descr(bsr);
+                }
+                if(csr != nullptr)
+                {
+                    (void)rocsparse_destroy_mat_descr(csr);
+                }
+            }
+        } descrs;
+
+        ASSERT_EQ(rocsparse_create_mat_descr(&descrs.bsr), rocsparse_status_success);
+        ASSERT_EQ(rocsparse_create_mat_descr(&descrs.csr), rocsparse_status_success);
+
+        ASSERT_EQ(rocsparse_sbsr2csr(handle,
+                                     rocsparse_direction_row,
+                                     mb,
+                                     nb,
+                                     descrs.bsr,
+                                     bsr_val,
+                                     bsr_ptr,
+                                     bsr_ind,
+                                     block_dim,
+                                     descrs.csr,
+                                     csr_val,
+                                     csr_ptr,
+                                     csr_ind),
+                  rocsparse_status_success);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        const std::vector<rocsparse_int> got_ptr = to_host(csr_ptr);
+        const std::vector<rocsparse_int> got_ind = to_host(csr_ind);
+        const std::vector<float>         got_val = to_host(csr_val);
+
+        ASSERT_EQ(got_ptr.size(), want_ptr.size());
+        for(size_t i = 0; i < want_ptr.size(); ++i)
+        {
+            if(got_ptr[i] != want_ptr[i])
+            {
+                ADD_FAILURE() << "csr_row_ptr[" << i << "] is " << got_ptr[i] << ", want "
+                              << want_ptr[i];
+                return;
+            }
+        }
+        ASSERT_EQ(got_ind.size(), static_cast<size_t>(nnz));
+        ASSERT_EQ(got_val.size(), static_cast<size_t>(nnz));
+        for(rocsparse_int k = 0; k < nnz; ++k)
+        {
+            if(got_ind[static_cast<size_t>(k)] != (k % block_dim)
+               || got_val[static_cast<size_t>(k)] != h_bsr_val[static_cast<size_t>(k)])
+            {
+                ADD_FAILURE() << "csr entry " << k << " ind " << got_ind[static_cast<size_t>(k)]
+                              << " val " << got_val[static_cast<size_t>(k)];
+                return;
+            }
+        }
+    }
+
     using BsrConversionGrids = HandleTest;
 }
 
@@ -652,4 +806,11 @@ TEST_F(BsrConversionGrids, bsr2csr_block_dim_64)
 TEST_F(BsrConversionGrids, bsr2csr_block_dim_128)
 {
     check_bsr2csr_all(handle, 128);
+}
+
+// Legacy int32 rocsparse_sbsr2csr, 1024 threads, mb past (2^32 - 1) / 1024.
+// Goes through get_grid_size_x with the device's real grid limit.
+TEST_F(BsrConversionGrids, bsr2csr_real_threshold_block_dim_8)
+{
+    check_bsr2csr_real_threshold(handle);
 }

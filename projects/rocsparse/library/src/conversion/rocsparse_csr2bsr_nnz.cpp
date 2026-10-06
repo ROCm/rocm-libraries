@@ -356,9 +356,16 @@ rocsparse_status rocsparse::csr2bsr_nnz_core(rocsparse_handle          handle,
         // Use a blocksize of 32 to handle each block row
         constexpr J block_size       = 32;
         J           rows_per_segment = (block_dim + block_size - 1) / block_size;
+        // phys in the kernel is hipBlockIdx_x, so the buffer only needs one
+        // segment per launched block.
+        const uint32_t grid_x = rocsparse::get_grid_size_x(handle, mb, block_size);
+        const int64_t  mb64   = static_cast<int64_t>(mb);
+        const int64_t  segments
+            = (static_cast<int64_t>(grid_x) < mb64) ? static_cast<int64_t>(grid_x) : mb64;
 
-        size_t buffer_size
-            = sizeof(I) * ((size_t(mb) * block_size * 2 * rows_per_segment - 1) / 256 + 1) * 256;
+        size_t buffer_size = sizeof(I)
+                             * ((size_t(segments) * block_size * 2 * rows_per_segment - 1) / 256 + 1)
+                             * 256;
 
         bool  temp_alloc       = false;
         void* temp_storage_ptr = nullptr;
@@ -377,7 +384,7 @@ rocsparse_status rocsparse::csr2bsr_nnz_core(rocsparse_handle          handle,
         I* temp1 = reinterpret_cast<I*>(temp_storage_ptr);
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((csr2bsr_nnz_65_inf_kernel<block_size, I, J>),
-                                           dim3(rocsparse::get_grid_size_x(handle, mb, block_size)),
+                                           dim3(grid_x),
                                            dim3(block_size),
                                            0,
                                            handle->stream,

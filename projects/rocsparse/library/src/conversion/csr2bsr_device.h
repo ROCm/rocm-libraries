@@ -325,17 +325,21 @@ namespace rocsparse
                       "BLOCKSIZE must be a power of two.");
         J lane_id = hipThreadIdx_x;
 
-        // temp arrays used as global scratch pad, partitioned by physical block index
-        // rather than by block row so that a clamped grid still gives each block its
-        // own slice.
-        J  phys = hipBlockIdx_x;
-        I* row_start
-            = temp1 + (2 * rows_per_segment * BLOCKSIZE * phys) + rows_per_segment * lane_id;
-        I* row_end = temp1 + (2 * rows_per_segment * BLOCKSIZE * phys)
-                     + rows_per_segment * BLOCKSIZE + rows_per_segment * lane_id;
-        J* csr_col_index
-            = temp2 + (rows_per_segment * BLOCKSIZE * phys) + rows_per_segment * lane_id;
-        T* csr_value = temp3 + (rows_per_segment * BLOCKSIZE * phys) + rows_per_segment * lane_id;
+        // One segment per physical block. The buffer holds min(mb, grid.x)
+        // segments and each block reuses its segment across grid-stride
+        // iterations. Indexing by block row stays in bounds only while the
+        // buffer is sized for every block row; the physical partition is what
+        // makes this smaller buffer valid.
+        const int64_t phys = hipBlockIdx_x;
+        const int64_t rows = static_cast<int64_t>(rows_per_segment);
+        const int64_t span = rows * static_cast<int64_t>(BLOCKSIZE);
+        const int64_t base = span * phys;
+        const int64_t lane = rows * static_cast<int64_t>(lane_id);
+
+        I* row_start     = temp1 + (2 * base + lane);
+        I* row_end       = temp1 + (2 * base + span + lane);
+        J* csr_col_index = temp2 + (base + lane);
+        T* csr_value     = temp3 + (base + lane);
 
         for(J block_id = hipBlockIdx_x; block_id < mb; block_id += hipGridDim_x)
         {
