@@ -36,10 +36,17 @@
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/UtilsOrigami.hpp>
 
+#ifdef TENSILELITE_HAS_TILEWRIGHT
+#include <Tensile/TilewrightRanker.hpp>
+#endif
+
 #include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
+    // Declared unconditionally so ProblemPredictionLibrary has the same layout in
+    // translation units built with and without TENSILELITE_HAS_TILEWRIGHT.
+    class TilewrightRanker;
 
     /**
      * \ingroup SolutionLibrary
@@ -54,6 +61,8 @@ namespace TensileLite
     {
         std::vector<std::pair<int, std::shared_ptr<MySolution>>> solution_list;
         std::vector<origami::config_t>                           origami_config_list;
+        // Pool position i of the ranker is solution_list[i].
+        std::shared_ptr<const TilewrightRanker> tilewright_ranker;
 
         mutable std::atomic<bool> lastFindTopRetAll = false;
 
@@ -140,11 +149,24 @@ namespace TensileLite
             return rv;
         }
 
+#ifdef TENSILELITE_HAS_TILEWRIGHT
+        // Looks up the stem of `logicFile` in the tilewright_index of its directory.
+        void loadTilewright(std::string const& logicFile)
+        {
+            tilewright_ranker = TilewrightRanker::load(logicFile, solution_list);
+        }
+#endif
+
         virtual SolutionVector<MySolution> findTopSolutions(MyProblem const& problem,
                                                             Hardware const&  hardware,
                                                             int numSolutions) const override
         {
             SolutionVector<MySolution> rv;
+            if(numSolutions == 0)
+            {
+                lastFindTopRetAll = false;
+                return rv;
+            }
             size_t                     m     = 1;
             size_t                     n     = 1;
             size_t                     k     = 1;
@@ -224,19 +246,51 @@ namespace TensileLite
                     .b_mx_block_size = 0, // MX Data types come from rocroller
                 };
 
-                auto prediction_result = origami::rank_configs(
-                    origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
-
-                for(const auto& r : prediction_result)
+#ifdef TENSILELITE_HAS_TILEWRIGHT
+                // Solutions tilewright already offered; origami ranks the rest.
+                std::vector<bool> offered;
+                if(tilewright_ranker)
                 {
-                    if(r.config.index >= solution_list.size())
+                    offered.assign(solution_list.size(), false);
+                    for(size_t position : tilewright_ranker->rank(
+                            problem, *(pAMDGPU->analyticalHardware), numSolutions))
                     {
-                        continue;
+                        if(position >= solution_list.size())
+                        {
+                            continue;
+                        }
+                        offered[position] = true;
+                        considerSolution(solution_list[position].second);
+                        if(rv.size() == numSolutions)
+                        {
+                            break;
+                        }
                     }
-                    considerSolution(solution_list[r.config.index].second);
-                    if(rv.size() == numSolutions)
+                }
+#endif
+
+                if(rv.size() != numSolutions)
+                {
+                    auto prediction_result = origami::rank_configs(
+                        origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
+
+                    for(const auto& r : prediction_result)
                     {
-                        break;
+                        if(r.config.index >= solution_list.size())
+                        {
+                            continue;
+                        }
+#ifdef TENSILELITE_HAS_TILEWRIGHT
+                        if(!offered.empty() && offered[r.config.index])
+                        {
+                            continue;
+                        }
+#endif
+                        considerSolution(solution_list[r.config.index].second);
+                        if(rv.size() == numSolutions)
+                        {
+                            break;
+                        }
                     }
                 }
             }
