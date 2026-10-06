@@ -349,11 +349,7 @@ Flash2FwdParams HipFlash2FwdPlanBuilder::extractParams(const Handle& /*handle*/,
     p.numHeadsK = static_cast<int>(k->dims()->Get(1));
     p.seqLenKv = static_cast<int>(k->dims()->Get(2));
 
-    p.attnScale = 0.0f;
-    if(attrs.attn_scale_value().has_value())
-    {
-        p.attnScale = attrs.attn_scale_value().value();
-    }
+    p.attnScale = attnScaleFor(attrs);
 
     p.causal = attrs.causal_mask();
 
