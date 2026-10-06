@@ -89,11 +89,15 @@ rocsparse_status rocsparse::hybmv_template(rocsparse_handle          handle,
                        (descr->storage_mode != rocsparse_storage_mode_sorted),
                        rocsparse_status_requires_sorted_storage);
 
+    // Adding the two counts as rocsparse_int is undefined when the sum overflows.
+    const int64_t ell_nnz_count = static_cast<int64_t>(hyb->ell_nnz);
+    const int64_t coo_nnz_count = static_cast<int64_t>(hyb->coo_nnz);
+
     // LCOV_EXCL_START
     // Check sizes
     ROCSPARSE_CHECKARG(4,
                        hyb,
-                       (hyb->m < 0 || hyb->n < 0 || hyb->ell_nnz + hyb->coo_nnz < 0),
+                       (hyb->m < 0 || hyb->n < 0 || ell_nnz_count < 0 || coo_nnz_count < 0),
                        rocsparse_status_invalid_size);
 
     // Check ELL-HYB structure
@@ -116,7 +120,7 @@ rocsparse_status rocsparse::hybmv_template(rocsparse_handle          handle,
     // LCOV_EXCL_STOP
 
     // Quick return if possible
-    if(hyb->m == 0 || hyb->n == 0 || hyb->ell_nnz + hyb->coo_nnz == 0)
+    if(hyb->m == 0 || hyb->n == 0 || (ell_nnz_count == 0 && coo_nnz_count == 0))
     {
         // matrix never accessed however still need to update y vector
         rocsparse_int ysize = (trans == rocsparse_operation_none) ? hyb->m : hyb->n;
