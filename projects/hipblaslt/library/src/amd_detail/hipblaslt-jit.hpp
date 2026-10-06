@@ -72,6 +72,7 @@ namespace hipblaslt_ext::experimental::jit
     // there. A hit does not generate. Returns an owned Solution for the first
     // published index. A capturing stream may return a hit and does not start a
     // build. Unsupported operation/backend pairs return NOT_SUPPORTED.
+    // getGemmAlgo turns the solution into a library index.
     HIPBLASLT_EXPORT hipblasStatus_t getJitAlgo(int            device,
                                                 const Request& request,
                                                 const Backend& backend,
@@ -109,12 +110,12 @@ namespace hipblaslt_ext::experimental::jit
                                                      Request&                request,
                                                      Diagnostics&            diagnostics);
 
-    // Adapt a GEMM solution to hipblasLtMatmul / hipblaslt_ext::Gemm. Other
-    // operation kinds return NOT_SUPPORTED. The resulting algorithm retains its
-    // modules until process exit; copies work only on their original device in
-    // this process. Never persist algorithm bytes or use them as prebuilt indices.
-    // Execution preserves existing handle, workspace and stream requirements;
-    // sharing a backend or solution does not relax those concurrency requirements.
+    // Adapt a GEMM solution to hipblasLtMatmul / hipblaslt_ext::Gemm. The
+    // algorithm is the solution's JIT library index, from 2^30, and any process
+    // that can read the library can run it. Other operation kinds return
+    // NOT_SUPPORTED. Execution preserves existing handle, workspace and stream
+    // requirements; sharing a backend or solution does not relax those
+    // concurrency requirements.
     HIPBLASLT_EXPORT hipblasStatus_t getGemmAlgo(const Solution&                   solution,
                                                  hipblasLtMatmulHeuristicResult_t& result,
                                                  Diagnostics&                      diagnostics);

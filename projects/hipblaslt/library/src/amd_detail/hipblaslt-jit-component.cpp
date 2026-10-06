@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "hipblaslt-jit-component.hpp"
+#include "hipblaslt-jit-library.hpp"
 #include <algorithm>
 #include <cerrno>
 #include <new>
@@ -16,6 +17,16 @@
 
 namespace hipblaslt_jit
 {
+    std::shared_ptr<const SolutionLoader> makeTensileLoader();
+
+    std::shared_ptr<const Jit> makeJit(std::shared_ptr<const Backend> backend)
+    {
+        const auto info  = backend->info();
+        auto       store = makeLibraryStore(JitLibrary::process(), info, jitCodeObjectVersion);
+        return std::make_shared<const Jit>(Jit::Components{
+            std::move(backend), makeComgrBuilder(), makeTensileLoader(), std::move(store)});
+    }
+
     namespace
     {
         namespace fs = std::filesystem;

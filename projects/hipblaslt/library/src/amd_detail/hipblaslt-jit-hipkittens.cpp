@@ -8,6 +8,7 @@
 #include "hipblaslt-jit-fs.hpp"
 #include "hipblaslt-jit-hash.hpp"
 #include "hipblaslt-jit-loader.hpp"
+#include "hipblaslt-jit-source-bundle.hpp"
 #include "hipblaslt-jit-problem-type.hpp"
 #include "rocblaslt-auxiliary.h"
 #include "rocblaslt_secure_env.hpp"
@@ -91,8 +92,7 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
                 const auto real = fs::canonical(path, error);
                 if(error || !fs::is_regular_file(real, error))
                     return unavailable(path.u8string() + " is missing");
-                const auto inside = real.lexically_relative(root);
-                if(inside.empty() || *inside.begin() == "..")
+                if(!hipblaslt_jit::source_bundle::pathStaysInside(root, real))
                     return unavailable(path.u8string() + " leaves " + found->u8string());
                 hipblaslt_jit::IncludeFile file;
                 // Templates include the files relative to include/.
@@ -154,9 +154,15 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
             {
                 if(variant.isa != target.isa)
                     continue;
-                const auto library = std::dynamic_pointer_cast<Master>(
-                    TensileLite::LoadLibraryData<TensileLite::ContractionProblemGemm>(
-                        bytes(variant.entry)));
+                std::shared_ptr<Master> library;
+                try
+                {
+                    library = hipblaslt_jit::loadGemmLibrary(bytes(variant.entry));
+                }
+                catch(const std::exception&)
+                {
+                    library.reset();
+                }
                 if(!library || library->solutions.size() != 1)
                     return {Status::Code::Failed,
                             Stage::Generate,
@@ -244,11 +250,8 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
                 diagnostics.message = status.message;
                 return HIPBLAS_STATUS_INVALID_VALUE;
             }
-            backend = jit::detail::BackendAccess::make(
-                std::make_shared<const hipblaslt_jit::Jit>(hipblaslt_jit::Jit::Components{
-                    std::make_shared<const HipKittensBackend>(std::move(headers)),
-                    hipblaslt_jit::makeComgrBuilder(),
-                    hipblaslt_jit::makeTensileLoader()}));
+            backend = jit::detail::BackendAccess::make(hipblaslt_jit::makeJit(
+                std::make_shared<const HipKittensBackend>(std::move(headers))));
             return HIPBLAS_STATUS_SUCCESS;
         }
         catch(const std::bad_alloc&)

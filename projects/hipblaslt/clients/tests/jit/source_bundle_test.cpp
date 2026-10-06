@@ -26,6 +26,12 @@ std::vector<std::string> names(const std::vector<a::SourceFile>& files)
 int main(int argc, char** argv)
 try
 {
+    require(hipblaslt_jit_test::endsWith("solution_WGM1", "_WGM1"), "a proper suffix");
+    require(hipblaslt_jit_test::endsWith("abc", "abc"), "a string ends with itself");
+    require(hipblaslt_jit_test::endsWith("abc", ""), "an empty suffix matches");
+    require(hipblaslt_jit_test::endsWith("", ""), "empty ends with empty");
+    require(!hipblaslt_jit_test::endsWith("ab", "abc"), "a longer suffix does not match");
+    require(!hipblaslt_jit_test::endsWith("", "a"), "empty does not end with a letter");
     require(argc == 2, "Usage: hipblaslt-jit-source-bundle-test SCRATCH");
     const auto root = fs::u8path(argv[1]);
     fs::remove_all(root);

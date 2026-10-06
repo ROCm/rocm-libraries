@@ -76,6 +76,7 @@ namespace jit = hipblaslt_ext::experimental::jit::detail;
 #include <algorithm>
 #include <cstring>
 #include <atomic>
+#include <cstring>
 #include <complex>
 #include <exception>
 #include <filesystem>
@@ -5303,6 +5304,43 @@ rocblaslt_status
     return rocblaslt_status_success;
 }
 
+// The GEMM predicate sequence shared by isSolutionSupported and a JIT bundle:
+// fallback flag, workspace size, hardware predicate, then softwarePredicate
+// under uniform summation order or problemPredicate && taskPredicate. Writes
+// the required workspace when the predicates match. hardwareFailed is set when
+// the hardware predicate is what rejects the solution. Does not compare the
+// workspace with the limit.
+static bool gemmSolutionPredicates(const TensileLite::ContractionSolution& solution,
+                                   TensileLite::ContractionProblemGemm&    problem,
+                                   const TensileLite::Hardware&             hardware,
+                                   size_t                                   workspaceLimit,
+                                   size_t&                                  requiredWorkspace,
+                                   bool&                                    hardwareFailed)
+{
+    hardwareFailed    = false;
+    requiredWorkspace = 0;
+    problem.setParams().setFallbackStatus(solution.isFallbackForHW(hardware));
+    problem.setWorkspaceSize(workspaceLimit);
+    TensileLite::Task task(hardware, problem, solution);
+    if(!(*solution.hardwarePredicate)(hardware))
+    {
+        hardwareFailed = true;
+        return false;
+    }
+    const bool softwareMatch
+        = problem.getParams().uniformSummationOrder()
+              ? TensileLite::softwarePredicate(TensileLite::SolutionLibrarySearchType::DEFAULT,
+                                               task,
+                                               hardware,
+                                               solution,
+                                               problem)
+              : (*solution.problemPredicate)(problem) && (*solution.taskPredicate)(task);
+    if(!softwareMatch)
+        return false;
+    requiredWorkspace = solution.requiredWorkspaceSize(problem, hardware);
+    return true;
+}
+
 template <typename MyProblem, typename Inputs, typename Tuning>
 rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
                                      MyProblem&             tensile_prob,
@@ -5363,8 +5401,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
         }
 
         // cu-fallback detection
-        bool isCUFallback = solution->isFallbackForHW(*hardware);
-        if(isCUFallback)
+        if(solution->isFallbackForHW(*hardware))
         {
             if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
             {
@@ -5374,45 +5411,32 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
                 log_info(__func__, msg.str());
             }
         }
-        // set this flag for SW predicate
-        tensile_prob.setParams().setFallbackStatus(isCUFallback);
-
-        tensile_prob.setWorkspaceSize(algo->max_workspace_bytes);
-        TensileLite::Task task(*hardware, tensile_prob, *solution);
-        if(!(*solution->hardwarePredicate)(*hardware))
-        {
-            if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
-            {
-                std::ostringstream msg;
-                msg << "Hardware match: " << solution->description();
-                solution->hardwarePredicate->debugEval(*hardware, msg);
-                msg << std::endl;
-                log_info(__func__, msg.str());
-            }
-            log_error(__func__, "Solution is not supported");
-            return rocblaslt_status_invalid_value;
-        }
         // Under USO, the same predicate findTopSolutions uses: problem, task,
         // StreamK dynamic-queue, uniform summation order (Synchronizer pointer
         // is checked only at launch, which throws if it is missing). With USO
         // off, selection must not widen: problemPredicate && taskPredicate only.
-        bool swMatch;
-        if(tensile_prob.getParams().uniformSummationOrder())
+        bool   hardwareFailed = false;
+        size_t required       = 0;
+        if(!gemmSolutionPredicates(*solution,
+                                   tensile_prob,
+                                   *hardware,
+                                   algo->max_workspace_bytes,
+                                   required,
+                                   hardwareFailed))
         {
-            swMatch = TensileLite::softwarePredicate(TensileLite::SolutionLibrarySearchType::DEFAULT,
-                                                     task,
-                                                     *hardware,
-                                                     *solution,
-                                                     tensile_prob);
-        }
-        else
-        {
-            swMatch = (*solution->problemPredicate)(tensile_prob)
-                      && (*solution->taskPredicate)(task);
-        }
-        if(!swMatch)
-        {
-            if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+            TensileLite::Task task(*hardware, tensile_prob, *solution);
+            if(hardwareFailed)
+            {
+                if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+                {
+                    std::ostringstream msg;
+                    msg << "Hardware match: " << solution->description();
+                    solution->hardwarePredicate->debugEval(*hardware, msg);
+                    msg << std::endl;
+                    log_info(__func__, msg.str());
+                }
+            }
+            else if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
             {
                 std::ostringstream msg;
                 msg << "Software match: " << solution->description();
@@ -5421,11 +5445,10 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
                 msg << std::endl;
                 log_info(__func__, msg.str());
             }
-
             log_error(__func__, "Solution is not supported");
             return rocblaslt_status_invalid_value;
         }
-        *workspaceSizeInBytes = solution->requiredWorkspaceSize(tensile_prob, *hardware);
+        *workspaceSizeInBytes = required;
     }
     else if constexpr(std::is_same<MyProblem, TensileLite::ContractionProblemGroupedGemm>::value)
     {
@@ -6126,28 +6149,20 @@ namespace hipblaslt_jit
         }
         auto        problem  = ConstructTensileProblem(request->problem);
         const auto& hardware = tensile->hardware;
-        problem.setWorkspaceSize(limit);
-        problem.setParams().setFallbackStatus(solution->isFallbackForHW(*hardware));
-        TensileLite::Task task(*hardware, problem, *solution);
-        const bool        sw
-            = problem.getParams().uniformSummationOrder()
-                  ? TensileLite::softwarePredicate(TensileLite::SolutionLibrarySearchType::DEFAULT,
-                                                   task,
-                                                   *hardware,
-                                                   *solution,
-                                                   problem)
-                  : (*solution->problemPredicate)(problem) && (*solution->taskPredicate)(task);
-        if(!(*solution->hardwarePredicate)(*hardware) || !sw)
+        bool        hardwareFailed = false;
+        if(!gemmSolutionPredicates(
+               *solution, problem, *hardware, limit, workspace, hardwareFailed))
         {
             std::ostringstream reason;
             reason << "TensileLite solution does not support the request: ";
+            TensileLite::Task task(*hardware, problem, *solution);
             solution->hardwarePredicate->debugEval(*hardware, reason);
             solution->problemPredicate->debugEval(problem, reason);
             solution->taskPredicate->debugEval(task, reason);
             diagnostics.message = reason.str();
+            workspace           = 0;
             return HIPBLAS_STATUS_NOT_SUPPORTED;
         }
-        workspace = solution->requiredWorkspaceSize(problem, *hardware);
         if(workspace > limit)
         {
             workspace           = 0;

@@ -14,6 +14,9 @@ set(hipblaslt_jit_bundles "${hipblaslt_jit_scratch}/bundles")
 
 # hipblaslt_jit_test(name label target args...) stages target and runs it.
 function(hipblaslt_jit_test name label test_target)
+    target_include_directories(${test_target} PRIVATE
+        "${hipblaslt_jit_source}" "${PROJECT_SOURCE_DIR}/library/include")
+    target_link_libraries(${test_target} PRIVATE hip::host roc::hipblaslt)
     target_compile_features(${test_target} PRIVATE cxx_std_17)
     set_target_properties(${test_target} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging")

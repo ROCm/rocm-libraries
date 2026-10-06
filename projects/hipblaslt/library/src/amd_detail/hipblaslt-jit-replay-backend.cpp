@@ -6,8 +6,6 @@
 #include "hipblaslt-jit-loader.hpp"
 #include "hipblaslt-jit-problem-type.hpp"
 #include "hipblaslt-jit-replay.hpp"
-#include <Tensile/Tensile.hpp>
-#include <algorithm>
 #include <stdexcept>
 #include <string_view>
 
@@ -18,12 +16,11 @@ namespace hipblaslt_ext::experimental::jit::replay
         namespace fs = std::filesystem;
         using hipblaslt_jit::Stage;
         using hipblaslt_jit::Status;
-        using Master = TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>;
 
         struct Replayed
         {
-            hipblaslt_jit::GeneratedSolution solution;
-            std::shared_ptr<Master>          library;
+            hipblaslt_jit::GeneratedSolution        solution;
+            std::shared_ptr<hipblaslt_jit::TensileLibrary> library;
         };
 
         class ReplayBackend final : public hipblaslt_jit::Backend
@@ -42,10 +39,9 @@ namespace hipblaslt_ext::experimental::jit::replay
                 for(const auto& path : options.replay)
                 {
                     Replayed replayed;
-                    replayed.solution = hipblaslt_jit::readTensileSourceBundle(fs::u8path(path));
-                    replayed.library  = std::dynamic_pointer_cast<Master>(
-                        TensileLite::LoadLibraryData<TensileLite::ContractionProblemGemm>(
-                            replayed.solution.entry));
+                    auto     read     = hipblaslt_jit::readTensileSourceBundle(fs::u8path(path));
+                    replayed.solution = std::move(read.solution);
+                    replayed.library  = std::move(read.library);
                     if(!replayed.library || replayed.library->solutions.empty())
                         throw std::invalid_argument("The bundle " + path
                                                     + " holds no GEMM solution");
@@ -80,8 +76,7 @@ namespace hipblaslt_ext::experimental::jit::replay
                             "The replay backend replays a GEMM solution"};
                 const auto problem  = hipblaslt_jit::lowerForJit(*gemm);
                 const auto excluded = [&](const std::string& kernel) {
-                    const auto& names = request.excludeKernels;
-                    return std::find(names.begin(), names.end(), kernel) != names.end();
+                    return hipblaslt_jit::excludedKernel(request.excludeKernels, kernel);
                 };
                 bool   targeted = false, solves = false;
                 size_t solving  = 0;
@@ -140,11 +135,7 @@ namespace hipblaslt_ext::experimental::jit::replay
         diagnostics = {"replay", ""};
         try
         {
-            backend = detail::BackendAccess::make(
-                std::make_shared<const hipblaslt_jit::Jit>(
-                    hipblaslt_jit::Jit::Components{makeBackend(options),
-                                                   hipblaslt_jit::makeComgrBuilder(),
-                                                   hipblaslt_jit::makeTensileLoader()}));
+            backend = detail::BackendAccess::make(hipblaslt_jit::makeJit(makeBackend(options)));
             return HIPBLAS_STATUS_SUCCESS;
         }
         catch(const std::bad_alloc&)

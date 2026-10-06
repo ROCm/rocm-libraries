@@ -19,6 +19,13 @@ namespace hipblaslt_jit::source_bundle
             throw std::runtime_error(message);
     }
 
+    // True when path, already canonical, stays inside canonical root.
+    inline bool pathStaysInside(const fs::path& root, const fs::path& path)
+    {
+        const auto inside = path.lexically_relative(root);
+        return !inside.empty() && *inside.begin() != "..";
+    }
+
     inline fs::path artifact(const fs::path& bundle, const std::string& name, bool mustExist = true)
     {
         auto relative = fs::u8path(name);
@@ -26,9 +33,8 @@ namespace hipblaslt_jit::source_bundle
                 "Artifact path must be relative");
         for(const auto& part : relative)
             require(part != "..", "Artifact path escapes bundle");
-        const auto path   = fs::weakly_canonical(bundle / relative);
-        const auto inside = path.lexically_relative(fs::canonical(bundle));
-        require(!inside.empty() && *inside.begin() != "..", "Artifact symlink escapes bundle");
+        const auto path = fs::weakly_canonical(bundle / relative);
+        require(pathStaysInside(fs::canonical(bundle), path), "Artifact symlink escapes bundle");
         if(mustExist)
             require(fs::is_regular_file(path), "Missing artifact: " + path.string());
         return path;

@@ -143,6 +143,19 @@ inline void heuristicResult_copy(rocblaslt_matmul_heuristic_result* heuristicRes
     heuristicResultsDest->workspaceSize            = required_workspace_size;
 }
 
+// False when either algorithm is a process-local JIT token: that token stores a
+// bundle-local index, which is not a TensileLite library index. Otherwise the
+// int in data, including a JIT library index.
+inline bool sameLibraryIndex(const rocblaslt_matmul_algo& left, const rocblaslt_matmul_algo& right)
+{
+#ifdef HIPBLASLT_ENABLE_JIT
+    if(hipblaslt_ext::experimental::detail::isJitAlgo(left)
+       || hipblaslt_ext::experimental::detail::isJitAlgo(right))
+        return false;
+#endif
+    return *reinterpret_cast<const int*>(left.data) == *reinterpret_cast<const int*>(right.data);
+}
+
 inline bool
     heuristicResult_check_duplicated(rocblaslt_matmul_heuristic_result* heuristicResultsArray,
                                      rocblaslt_matmul_heuristic_result* SolutionsResult,
@@ -156,14 +169,7 @@ inline bool
 
     for(int i = 0; i < AlgoCount; i++)
     {
-#ifdef HIPBLASLT_ENABLE_JIT
-        // A JIT algorithm stores its bundle-local index, not a TensileLite index.
-        if(hipblaslt_ext::experimental::detail::isJitAlgo(heuristicResultsArray[i].algo)
-           || hipblaslt_ext::experimental::detail::isJitAlgo(SolutionsResult->algo))
-            continue;
-#endif
-        if(*(int*)(heuristicResultsArray[i].algo.data)
-           == *(int*)(SolutionsResult->algo.data)) //solution index
+        if(sameLibraryIndex(heuristicResultsArray[i].algo, SolutionsResult->algo))
         {
             ++duplicated_counts;
             index = i;
@@ -660,35 +666,126 @@ namespace
         }
     }
 
-    // Copies provider solutions that are not already in have[0, filled).
-    int takeNewSolutions(rocblaslt_handle                                      handle,
-                         rocblaslt_matmul_heuristic_result*                    dest,
-                         int                                                   filled,
-                         int                                                   limit,
-                         const std::vector<rocblaslt_matmul_heuristic_result>& found,
-                         int                                                   foundCount)
+    // Index match, or, in fallback mode, the same kernel as a result already returned.
+    bool alreadyListed(rocblaslt_handle                         handle,
+                       const rocblaslt_matmul_heuristic_result* have,
+                       int                                      count,
+                       const rocblaslt_matmul_heuristic_result& candidate)
     {
-        for(int i = 0; i < foundCount && filled < limit; ++i)
+        if(have == nullptr || count <= 0)
+            return false;
+        for(int i = 0; i < count; ++i)
+            if(sameLibraryIndex(have[i].algo, candidate.algo))
+                return true;
+        return hipblaslt_jit::mode() == hipblaslt_jit::Mode::Fallback
+               && sameKernel(handle, have, count, candidate);
+    }
+
+    rocblaslt_status noteLibraryStatus(rocblaslt_status status, rocblaslt_status& libraryStatus);
+
+    // Mode Forced returns only JIT solutions. Mode Fallback merges Equality rows,
+    // then JIT, then the other providers. held is an override result the caller
+    // keeps in front of this ranking. best(rows, room) is that caller's
+    // getBestSolutions overload.
+    struct JitRank
+    {
+        bool                                           handled = false;
+        bool                                           forced  = false;
+        std::vector<rocblaslt_matmul_heuristic_result> results;
+        rocblaslt_status                               status = rocblaslt_status_success;
+    };
+
+    struct ProviderSelection
+    {
+        std::vector<rocblaslt_matmul_heuristic_result> results;
+        rocblaslt_status                               status = rocblaslt_status_success;
+    };
+
+    template <class Best>
+    JitRank rankJitHeuristic(rocblaslt_handle                          handle,
+                             const RocblasltContractionProblem*        problem,
+                             size_t                                     workspace,
+                             int                                        slots,
+                             const rocblaslt_matmul_heuristic_result*  held,
+                             int                                        heldCount,
+                             Best&&                                     best)
+    {
+        JitRank ranked;
+        if(hipblaslt_jit::mode() == hipblaslt_jit::Mode::Forced)
         {
-            if(sameKernel(handle, dest, filled, found[i]))
-                continue;
-            bool indexSeen = false;
-            if(!hipblaslt_ext::experimental::detail::isJitAlgo(found[i].algo))
+            ranked.handled = true;
+            ranked.forced  = true;
+            if(problem && slots > 0)
             {
-                const int index = *reinterpret_cast<const int*>(found[i].algo.data);
-                for(int j = 0; j < filled; ++j)
-                {
-                    if(hipblaslt_ext::experimental::detail::isJitAlgo(dest[j].algo))
-                        continue;
-                    if(*reinterpret_cast<const int*>(dest[j].algo.data) == index)
-                        indexSeen = true;
-                }
+                ranked.results.resize(slots);
+                const int count = hipblaslt_jit::appendJitHeuristic(
+                    handle, *problem, workspace, {}, ranked.results.data(), slots);
+                ranked.results.resize(count);
             }
-            if(indexSeen)
-                continue;
-            dest[filled++] = found[i];
+            return ranked;
         }
-        return filled;
+        if(!problem || hipblaslt_jit::mode() != hipblaslt_jit::Mode::Fallback
+           || skipJitHeuristic(handle, *problem))
+            return ranked;
+        if(!hipblaslt_jit::jitHeuristicLibrary())
+        {
+            hipblaslt_jit::warnJitHeuristicUnavailable();
+            return ranked;
+        }
+
+        ranked.handled = true;
+        if(heldCount < 0)
+            heldCount = 0;
+        rocblaslt_status libraryStatus = rocblaslt_status_success;
+        const auto       equality      = best(TensileLite::ProviderRows::EqualityOnly, slots);
+        noteLibraryStatus(equality.status, libraryStatus);
+        const bool libraryMissing = equality.status == rocblaslt_status_invalid_pointer;
+        int        filled         = static_cast<int>(equality.results.size());
+
+        std::vector<std::string> exclude;
+        if(held != nullptr && heldCount > 0)
+            collectKernels(handle, held, heldCount, exclude);
+        collectKernels(handle, equality.results.data(), filled, exclude);
+
+        std::vector<rocblaslt_matmul_heuristic_result> jit;
+        if(filled < slots)
+        {
+            const int room = slots - filled;
+            jit.resize(room);
+            const int count = hipblaslt_jit::appendJitHeuristic(
+                handle, *problem, workspace, exclude, jit.data(), room);
+            jit.resize(count);
+            filled += count;
+        }
+
+        std::vector<rocblaslt_matmul_heuristic_result> others;
+        if(!libraryMissing && filled < slots)
+        {
+            const auto found = best(TensileLite::ProviderRows::ExceptEquality, slots - filled);
+            noteLibraryStatus(found.status, libraryStatus);
+            std::vector<rocblaslt_matmul_heuristic_result> accepted;
+            if(held != nullptr && heldCount > 0)
+                accepted.assign(held, held + heldCount);
+            accepted.insert(accepted.end(), equality.results.begin(), equality.results.end());
+            accepted.insert(accepted.end(), jit.begin(), jit.end());
+            for(const auto& candidate : found.results)
+            {
+                if(static_cast<int>(accepted.size()) - heldCount >= slots)
+                    break;
+                if(sameKernel(handle, accepted.data(), static_cast<int>(accepted.size()), candidate))
+                    continue;
+                others.push_back(candidate);
+                accepted.push_back(candidate);
+            }
+        }
+
+        ranked.results = equality.results;
+        ranked.results.insert(ranked.results.end(), jit.begin(), jit.end());
+        ranked.results.insert(ranked.results.end(), others.begin(), others.end());
+        ranked.status = (ranked.results.empty() && libraryStatus != rocblaslt_status_success)
+                            ? libraryStatus
+                            : rocblaslt_status_success;
+        return ranked;
     }
 
     rocblaslt_status noteLibraryStatus(rocblaslt_status status, rocblaslt_status& libraryStatus)
@@ -2460,18 +2557,47 @@ rocblaslt_status
 #endif
 
 #ifdef HIPBLASLT_ENABLE_JIT
-        // Mode 2 returns before the override file: only the JIT library.
-        if(hipblaslt_jit::mode() == hipblaslt_jit::Mode::Forced)
+        auto providerRows = [&](TensileLite::ProviderRows rows, int room) {
+            ProviderSelection selection;
+            if(room > 0)
+            {
+                selection.results.resize(room);
+                int                            count = 0;
+                TensileLite::ProviderRowsScope scope(rows);
+                selection.status = getBestSolutions(prob,
+                                                    handle,
+                                                    tensile_data,
+                                                    room,
+                                                    selection.results.data(),
+                                                    &count,
+                                                    pref->max_workspace_bytes);
+                if(count < 0)
+                    count = 0;
+                if(count > room)
+                    count = room;
+                selection.results.resize(count);
+            }
+            return selection;
+        };
+        // Mode Forced returns before the override file: only the JIT library.
         {
-            *returnAlgoCount = hipblaslt_jit::appendJitHeuristic(handle,
-                                                                 prob,
-                                                                 pref->max_workspace_bytes,
-                                                                 {},
-                                                                 heuristicResultsArray,
-                                                                 requestedAlgoCount);
-            if(dummy_bias_address)
-                matmul_desc->bias = nullptr;
-            return rocblaslt_status_success;
+            const auto ranked = rankJitHeuristic(handle,
+                                                 &prob,
+                                                 pref->max_workspace_bytes,
+                                                 requestedAlgoCount,
+                                                 nullptr,
+                                                 0,
+                                                 providerRows);
+            if(ranked.forced)
+            {
+                const int count = static_cast<int>(ranked.results.size());
+                for(int i = 0; i < count; ++i)
+                    heuristicResultsArray[i] = ranked.results[i];
+                *returnAlgoCount = count;
+                if(dummy_bias_address)
+                    matmul_desc->bias = nullptr;
+                return ranked.status;
+            }
         }
 #endif
 
@@ -2498,73 +2624,23 @@ rocblaslt_status
         if(requestedAlgoCount > 0)
         {
 #ifdef HIPBLASLT_ENABLE_JIT
-            // Mode off returns here and getBestSolutions runs as it does without JIT.
-            const bool jitFallback = hipblaslt_jit::mode() == hipblaslt_jit::Mode::Fallback
-                                     && !skipJitHeuristic(handle, prob);
-            if(jitFallback && !hipblaslt_jit::jitHeuristicLibrary())
-                hipblaslt_jit::warnJitHeuristicUnavailable();
-            if(jitFallback && hipblaslt_jit::jitHeuristicLibrary())
+            // Mode off leaves this unset and getBestSolutions runs as it does without JIT.
+            const auto ranked = rankJitHeuristic(
+                handle,
+                &prob,
+                pref->max_workspace_bytes,
+                requestedAlgoCount,
+                override_success ? heuristicResultsArray : nullptr,
+                override_success ? 1 : 0,
+                providerRows);
+            if(ranked.handled)
             {
                 auto* dest = override_success ? &heuristicResultsArray[1] : heuristicResultsArray;
-                const int slots = requestedAlgoCount;
-                rocblaslt_status libraryStatus  = rocblaslt_status_success;
-                bool             libraryMissing = false;
-                int              filled         = 0;
-                {
-                    TensileLite::ProviderRowsScope scope(TensileLite::ProviderRows::EqualityOnly);
-                    int                            equalityCount = 0;
-                    const auto                     equalityStatus
-                        = getBestSolutions(prob,
-                                           handle,
-                                           tensile_data,
-                                           slots,
-                                           dest,
-                                           &equalityCount,
-                                           pref->max_workspace_bytes);
-                    noteLibraryStatus(equalityStatus, libraryStatus);
-                    filled         = equalityCount;
-                    libraryMissing = equalityStatus == rocblaslt_status_invalid_pointer;
-                }
-                if(filled < slots)
-                {
-                    std::vector<std::string> exclude;
-                    collectKernels(handle, heuristicResultsArray, (override_success ? 1 : 0) + filled,
-                                   exclude);
-                    filled += hipblaslt_jit::appendJitHeuristic(handle,
-                                                                prob,
-                                                                pref->max_workspace_bytes,
-                                                                exclude,
-                                                                dest + filled,
-                                                                slots - filled);
-                }
-                if(!libraryMissing && filled < slots)
-                {
-                    const int room = slots - filled;
-                    std::vector<rocblaslt_matmul_heuristic_result> others(room);
-                    int                                            othersCount = 0;
-                    {
-                        TensileLite::ProviderRowsScope scope(TensileLite::ProviderRows::ExceptEquality);
-                        noteLibraryStatus(getBestSolutions(prob,
-                                                           handle,
-                                                           tensile_data,
-                                                           room,
-                                                           others.data(),
-                                                           &othersCount,
-                                                           pref->max_workspace_bytes),
-                                          libraryStatus);
-                    }
-                    for(int i = 0; i < othersCount && filled < slots; ++i)
-                    {
-                        const int prefix = (override_success ? 1 : 0) + filled;
-                        if(sameKernel(handle, heuristicResultsArray, prefix, others[i]))
-                            continue;
-                        dest[filled++] = others[i];
-                    }
-                }
-                *returnAlgoCount = filled;
-                status = (filled == 0 && libraryStatus != rocblaslt_status_success)
-                             ? libraryStatus
-                             : rocblaslt_status_success;
+                const int count = static_cast<int>(ranked.results.size());
+                for(int i = 0; i < count; ++i)
+                    dest[i] = ranked.results[i];
+                *returnAlgoCount = count;
+                status           = ranked.status;
             }
             else
 #endif
@@ -2614,29 +2690,32 @@ rocblaslt_status
                == getAllSolutions(prob, handle, allSolutionsResults, pref->max_workspace_bytes))
             {
                 status = rocblaslt_status_success;
+#ifndef HIPBLASLT_ENABLE_JIT
                 int oriReturnAlgoCount = *returnAlgoCount;
+#endif
                 for(int i = 0;
                     *returnAlgoCount < requestedAlgoCount && i < allSolutionsResults.size();
                     i++)
                 {
                     size_t required_workspace_size = 0;
-                    if(heuristicResult_check_duplicated(heuristicResultsArray,
-                                                        &allSolutionsResults[i],
-                                                        oriReturnAlgoCount,
-                                                        false)
+                    if(
 #ifdef HIPBLASLT_ENABLE_JIT
-                       || (hipblaslt_jit::mode() == hipblaslt_jit::Mode::Fallback
-                           && sameKernel(handle,
-                                         heuristicResultsArray,
-                                         oriReturnAlgoCount,
-                                         allSolutionsResults[i]))
+                        alreadyListed(handle,
+                                      heuristicResultsArray,
+                                      *returnAlgoCount,
+                                      allSolutionsResults[i])
+#else
+                        heuristicResult_check_duplicated(heuristicResultsArray,
+                                                         &allSolutionsResults[i],
+                                                         oriReturnAlgoCount,
+                                                         false)
 #endif
-                       || rocblaslt_status_success
-                              != isSolutionSupported(handle,
-                                                     prob,
-                                                     tensile_data,
-                                                     &allSolutionsResults[i].algo,
-                                                     &required_workspace_size))
+                        || rocblaslt_status_success
+                               != isSolutionSupported(handle,
+                                                      prob,
+                                                      tensile_data,
+                                                      &allSolutionsResults[i].algo,
+                                                      &required_workspace_size))
                         continue;
 
                     //append sol to heuristpicResultsArray
@@ -2837,21 +2916,32 @@ rocblaslt_status
     try
     {
 #ifdef HIPBLASLT_ENABLE_JIT
-        if(hipblaslt_jit::mode() == hipblaslt_jit::Mode::Forced)
-        {
-            results.clear();
-            const auto* problem = gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM
-                                      ? savedGemmProblem(gemmData)
-                                      : nullptr;
-            if(problem)
+        const auto* problem = gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM
+                                  ? savedGemmProblem(gemmData)
+                                  : nullptr;
+        auto        providerRows = [&](TensileLite::ProviderRows rows, int room) {
+            ProviderSelection selection;
+            if(room > 0)
             {
-                std::vector<rocblaslt_matmul_heuristic_result> jit(requestedAlgoCount);
-                const int count = hipblaslt_jit::appendJitHeuristic(
-                    handle, *problem, maxWorkspaceBytes, {}, jit.data(), requestedAlgoCount);
-                jit.resize(count);
-                results = std::move(jit);
+                TensileLite::ProviderRowsScope scope(rows);
+                selection.status = getBestSolutions(
+                    handle, gemmType, gemmData, maxWorkspaceBytes, room, selection.results);
             }
-            return rocblaslt_status_success;
+            return selection;
+        };
+        {
+            const auto ranked = rankJitHeuristic(handle,
+                                                 problem,
+                                                 maxWorkspaceBytes,
+                                                 requestedAlgoCount,
+                                                 nullptr,
+                                                 0,
+                                                 providerRows);
+            if(ranked.forced)
+            {
+                results = ranked.results;
+                return ranked.status;
+            }
         }
 #endif
         OverrideSingleton&                             override = OverrideSingleton::getInstance();
@@ -2869,81 +2959,18 @@ rocblaslt_status
         if(requestedAlgoCount - override_result.size() > 0)
         {
 #ifdef HIPBLASLT_ENABLE_JIT
-            const auto* problem = gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM
-                                      ? savedGemmProblem(gemmData)
-                                      : nullptr;
-            const bool  jitFallback = problem
-                                     && hipblaslt_jit::mode() == hipblaslt_jit::Mode::Fallback
-                                     && !skipJitHeuristic(handle, *problem);
-            if(jitFallback && !hipblaslt_jit::jitHeuristicLibrary())
-                hipblaslt_jit::warnJitHeuristicUnavailable();
-            if(jitFallback && hipblaslt_jit::jitHeuristicLibrary())
+            const int  slots  = requestedAlgoCount - (override_success ? 1 : 0);
+            const auto ranked = rankJitHeuristic(handle,
+                                                 problem,
+                                                 maxWorkspaceBytes,
+                                                 slots,
+                                                 override_success ? override_result.data() : nullptr,
+                                                 override_success ? 1 : 0,
+                                                 providerRows);
+            if(ranked.handled)
             {
-                const int        slots = requestedAlgoCount - (override_success ? 1 : 0);
-                rocblaslt_status libraryStatus  = rocblaslt_status_success;
-                bool             libraryMissing = false;
-                std::vector<rocblaslt_matmul_heuristic_result> equality;
-                {
-                    TensileLite::ProviderRowsScope scope(TensileLite::ProviderRows::EqualityOnly);
-                    const auto                     equalityStatus
-                        = getBestSolutions(handle,
-                                           gemmType,
-                                           gemmData,
-                                           maxWorkspaceBytes,
-                                           slots,
-                                           equality);
-                    noteLibraryStatus(equalityStatus, libraryStatus);
-                    libraryMissing = equalityStatus == rocblaslt_status_invalid_pointer;
-                }
-                std::vector<std::string> exclude;
-                if(override_success)
-                    collectKernels(handle, override_result.data(), 1, exclude);
-                collectKernels(handle, equality.data(), static_cast<int>(equality.size()), exclude);
-                const int jitRoom = slots - static_cast<int>(equality.size());
-                std::vector<rocblaslt_matmul_heuristic_result> jit;
-                if(jitRoom > 0)
-                {
-                    jit.resize(jitRoom);
-                    const int count = hipblaslt_jit::appendJitHeuristic(
-                        handle, *problem, maxWorkspaceBytes, exclude, jit.data(), jitRoom);
-                    jit.resize(count);
-                }
-                const int othersRoom = slots - static_cast<int>(equality.size() + jit.size());
-                std::vector<rocblaslt_matmul_heuristic_result> others;
-                if(!libraryMissing && othersRoom > 0)
-                {
-                    TensileLite::ProviderRowsScope scope(TensileLite::ProviderRows::ExceptEquality);
-                    noteLibraryStatus(getBestSolutions(handle,
-                                                       gemmType,
-                                                       gemmData,
-                                                       maxWorkspaceBytes,
-                                                       othersRoom,
-                                                       others),
-                                      libraryStatus);
-                    std::vector<rocblaslt_matmul_heuristic_result> prefix = equality;
-                    prefix.insert(prefix.end(), jit.begin(), jit.end());
-                    std::vector<rocblaslt_matmul_heuristic_result> kept;
-                    for(const auto& candidate : others)
-                    {
-                        if(static_cast<int>(prefix.size() + kept.size()) >= slots)
-                            break;
-                        if(override_success
-                           && sameKernel(handle, override_result.data(), 1, candidate))
-                            continue;
-                        if(sameKernel(handle, prefix.data(), static_cast<int>(prefix.size()), candidate))
-                            continue;
-                        if(sameKernel(handle, kept.data(), static_cast<int>(kept.size()), candidate))
-                            continue;
-                        kept.push_back(candidate);
-                    }
-                    others.swap(kept);
-                }
-                results = std::move(equality);
-                results.insert(results.end(), jit.begin(), jit.end());
-                results.insert(results.end(), others.begin(), others.end());
-                status = (results.empty() && libraryStatus != rocblaslt_status_success)
-                             ? libraryStatus
-                             : rocblaslt_status_success;
+                results = ranked.results;
+                status  = ranked.status;
             }
             else
 #endif
@@ -2986,20 +3013,24 @@ rocblaslt_status
                    gemmData, handle, gemmType, allSolutionsResults, maxWorkspaceBytes))
             {
                 status = rocblaslt_status_success;
+#ifndef HIPBLASLT_ENABLE_JIT
                 int oriReturnAlgoCount = results.size();
+#endif
                 for(int i = 0;
                     results.size() < requestedAlgoCount && i < allSolutionsResults.size();
                     i++)
                 {
+#ifdef HIPBLASLT_ENABLE_JIT
+                    const bool duplicated_sol = alreadyListed(handle,
+                                                              results.data(),
+                                                              static_cast<int>(results.size()),
+                                                              allSolutionsResults[i]);
+                    if(duplicated_sol)
+                        ++duplicated_counts;
+#else
                     bool duplicated_sol = false;
                     for(int j = 0; j < oriReturnAlgoCount; j++)
                     {
-#ifdef HIPBLASLT_ENABLE_JIT
-                        if(hipblaslt_ext::experimental::detail::isJitAlgo(results[j].algo)
-                           || hipblaslt_ext::experimental::detail::isJitAlgo(
-                               allSolutionsResults[i].algo))
-                            continue;
-#endif
                         if(*(int*)(results[j].algo.data)
                            == *(int*)(allSolutionsResults[i].algo.data)) //solution index
                         {
@@ -3007,13 +3038,6 @@ rocblaslt_status
                             duplicated_sol = true;
                         }
                     }
-#ifdef HIPBLASLT_ENABLE_JIT
-                    if(hipblaslt_jit::mode() == hipblaslt_jit::Mode::Fallback
-                       && sameKernel(handle,
-                                     results.data(),
-                                     static_cast<int>(results.size()),
-                                     allSolutionsResults[i]))
-                        duplicated_sol = true;
 #endif
                     rocblaslt::RocTuningV2* tuning = nullptr;
                     if(duplicated_sol == true

@@ -5,8 +5,6 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 
-#include <cmath>
-#include <cstdlib>
 #include <iostream>
 #include <set>
 #include <string>
@@ -20,30 +18,14 @@
 namespace
 {
     using hipblaslt_jit_test::require;
+    using hipblaslt_jit_test::Device;
+    using hipblaslt_jit_test::endsWith;
 
-    void hip(hipError_t status, const char* expression)
-    {
-        require(status == hipSuccess, std::string(expression) + ": " + hipGetErrorString(status));
-    }
-#define HIP(expression) hip((expression), #expression)
+#define HIP(expression) hipblaslt_jit_test::checkHip((expression), #expression)
 
-    constexpr int M = 256, N = 128;
+    constexpr int M = hipblaslt_jit_test::Fp16Gemm::rows;
+    constexpr int N = hipblaslt_jit_test::Fp16Gemm::cols;
     constexpr uint64_t workspaceLimit = 64ull << 20;
-
-    struct Device
-    {
-        void* pointer{};
-        explicit Device(size_t bytes)
-        {
-            HIP(hipMalloc(&pointer, bytes));
-        }
-        ~Device()
-        {
-            static_cast<void>(hipFree(pointer));
-        }
-        Device(const Device&)            = delete;
-        Device& operator=(const Device&) = delete;
-    };
 
     struct Layouts
     {
@@ -82,12 +64,6 @@ namespace
     {
         // Heuristic results are JIT solution library indices, from 2^30.
         return hipblaslt_ext::getIndexFromAlgo(algo) >= (1 << 30);
-    }
-
-    bool endsWith(const std::string& text, const std::string& suffix)
-    {
-        return text.size() >= suffix.size()
-               && text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0;
     }
 
     Listed queryC(hipblasLtHandle_t            handle,
@@ -215,57 +191,21 @@ namespace
                     "a full Equality-size list did not end with another provider");
     }
 
-    std::vector<__half> fill(size_t count, int a, int b, int mod, float scale)
-    {
-        std::vector<__half> values(count);
-        for(size_t i = 0; i < count; ++i)
-            values[i] = __float2half(float(int(i * a + i / 7 * b) % mod - mod / 2) * scale);
-        return values;
-    }
-
-    void verify(int K, const std::vector<__half>& a, const std::vector<__half>& b,
-                const std::vector<__half>& c, const void* d, float alpha, float beta)
-    {
-        std::vector<__half> out(M * N);
-        HIP(hipMemcpy(out.data(), d, out.size() * sizeof(__half), hipMemcpyDeviceToHost));
-        for(int col = 0; col < N; ++col)
-            for(int row = 0; row < M; ++row)
-            {
-                float sum = 0;
-                for(int k = 0; k < K; ++k)
-                    sum += __half2float(a[row + k * M]) * __half2float(b[k + col * K]);
-                const auto i        = row + col * M;
-                const auto expected = __half2float(
-                    __float2half(alpha * sum + beta * __half2float(c[i])));
-                const auto actual = __half2float(out[i]);
-                require(std::isfinite(actual)
-                            && std::abs(actual - expected) <= 0.0005f + 0.001f * std::abs(expected),
-                        "D[" + std::to_string(i) + "] is " + std::to_string(actual)
-                            + ", expected " + std::to_string(expected));
-            }
-    }
-
     void runFirst(hipblasLtHandle_t handle, hipblasLtMatmulDesc_t desc, hipStream_t stream, int K,
                   const hipblasLtMatmulHeuristicResult_t& result)
     {
-        const auto hostA = fill(size_t(M) * K, 3, 5, 13, 1 / 8.0f);
-        const auto hostB = fill(size_t(K) * N, 7, 2, 11, 1 / 8.0f);
-        const auto hostC = fill(size_t(M) * N, 1, 3, 7, 1 / 4.0f);
-        Device     A(hostA.size() * 2), B(hostB.size() * 2), C(hostC.size() * 2), D(M * N * 2);
-        HIP(hipMemcpy(A.pointer, hostA.data(), hostA.size() * 2, hipMemcpyHostToDevice));
-        HIP(hipMemcpy(B.pointer, hostB.data(), hostB.size() * 2, hipMemcpyHostToDevice));
-        HIP(hipMemcpy(C.pointer, hostC.data(), hostC.size() * 2, hipMemcpyHostToDevice));
-        Layouts layouts(M, K, M, K, N, K);
-        Device  workspace(result.workspaceSize);
-        float   alpha = 1.25f, beta = 0.5f;
-        HIP(hipMemset(D.pointer, 0xff, M * N * 2));
-        require(hipblasLtMatmul(handle, desc, &alpha, A.pointer, layouts.a, B.pointer, layouts.b,
-                                &beta, C.pointer, layouts.c, D.pointer, layouts.d, &result.algo,
-                                workspace.pointer, result.workspaceSize, stream)
-                    == HIPBLAS_STATUS_SUCCESS,
-                "hipblasLtMatmul of the first heuristic result");
-        HIP(hipStreamSynchronize(stream));
-        verify(K, hostA, hostB, hostC, D.pointer, alpha, beta);
+        hipblaslt_jit_test::Fp16Gemm matrices(K);
+        Device                       workspace(result.workspaceSize);
+        float                        alpha = 1.25f, beta = 0.5f;
+        matrices.matmul(handle,
+                        desc,
+                        stream,
+                        &result.algo,
+                        workspace.pointer,
+                        result.workspaceSize,
+                        alpha,
+                        beta,
+                        "");
     }
 
     bool equalitySize(hipblasLtHandle_t handle, hipblasLtMatmulDesc_t desc, int m, int n, int k)

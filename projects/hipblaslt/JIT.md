@@ -32,19 +32,16 @@ pre-generated source bundles. No generator backend is implemented yet.
 when the library is built with JIT support and `HIPBLASLT_JIT` is `1` or `2`.
 Those queries, and `jit::getJitAlgo`, publish into the JIT solution library
 and reuse a hit, so a later process asking the same problem gets the same
-index and does not generate. Heuristic results are library indices from 2^30.
-`getIndexFromAlgo` returns that index. `jit::getGemmAlgo` still adapts an
-owned `Solution` to a process-local algorithm, and `getIndexFromAlgo` returns
--1 for that algorithm.
+index and does not generate. The algorithms are library indices from 2^30.
+`getIndexFromAlgo` returns that index.
 
 ## Current behavior
 
 ### Entry points
 
 The internal entry points, in `library/src/amd_detail/hipblaslt-jit.hpp`,
-generate through `Jit`, keep generated algorithms in one process-local
-registry, and return an algorithm for the existing C and C++ GEMM execution
-APIs:
+generate through `Jit`, publish into the JIT solution library, and return an
+algorithm for the existing C and C++ GEMM execution APIs:
 
 - A backend factory, such as `jit::replay::createBackend`, returns a `Backend`
   handle that owns a `Jit` configured with that backend.
@@ -52,8 +49,8 @@ APIs:
 - `jit::getJitAlgo` looks the solution up in the JIT solution library, publishes
   it when it is absent, and returns an owned `Solution` for the first index.
   A hit does not generate.
-- `jit::getGemmAlgo` adapts the solution to the algorithm that
-  `hipblasLtMatmul` and `Gemm` accept. That algorithm is process-local.
+- `jit::getGemmAlgo` adapts the solution to the library index that
+  `hipblasLtMatmul` and `Gemm` accept.
 - `jit::getLibraryAlgos` returns solution indices from the same lookup and
   publish, described under
   [persistent solution library](#persistent-solution-library).
@@ -72,15 +69,13 @@ The backend's configuration belongs to the options of its factory. The
 application owns its buffers and workspace. The request owns descriptor values
 and host scalars; it does not take ownership of device pointers. Compilation
 and support checks finish before graphics processing unit (GPU) work is
-submitted. A capturing stream may return a solution already in the library
-and does not start a build. A null stream and the legacy stream are not
-capturing. GEMM is the implemented operation.
+submitted. A capturing stream may return a solution already in the JIT
+solution library and does not start a build. A null stream and the legacy
+stream are not capturing. GEMM is the implemented operation.
 
 Internally, the GEMM request reuses `RocblasltContractionProblem` with owned
-scalar values. The generic `Solution` and private `CompiledSolution` retain
-the `Jit`, device target, request, workspace and bundle lifetime around the
-existing GEMM support and execution machinery. A matmul algorithm is an
-adaptation token, not a general owning executable object.
+scalar values. A matmul algorithm is a JIT solution library index from 2^30.
+`hipblasLtMatmul` runs that index the way it runs a prebuilt solution.
 
 ### Heuristic queries
 
@@ -214,19 +209,10 @@ result is a JIT solution library index, from 2^30, and it runs through the
 same launch path as a prebuilt index. Another process that queries the same
 problem receives that index.
 
-`jit::getGemmAlgo` still returns a process-local algorithm. It carries its
-solution's index, resolves to its bundle's library and adapter, and then runs
-through the same launch path as a prebuilt algorithm, including its
-synchronization storage. Registry synchronization protects algorithm lookup;
-it does not protect application buffers or make simultaneous calls on one
-`Gemm` object safe.
-
-Copies of a `getGemmAlgo` algorithm remain usable on its generating device
-within the same process, and its modules are retained until process exit.
-Reuse within one program invocation needs no recompilation. The opaque
-algorithm bytes that `getJitAlgo` and `getGemmAlgo` return are not a library
-index: `hipblaslt_ext::getIndexFromAlgo` returns -1 for them, and a different
-program invocation cannot use them. Save the bundle manifests for reproduction.
+`getJitAlgo` and `getGemmAlgo` return a JIT solution library index from 2^30.
+`hipblaslt_ext::getIndexFromAlgo` returns that index, and another process that
+can read the library runs it without generating. Save the bundle manifests
+for reproduction.
 
 An empty GEMM output (M=0 or N=0) returns `HIPBLAS_STATUS_NOT_SUPPORTED` from
 the request factory without compilation. K=0 can use a solution that
@@ -239,15 +225,16 @@ never benchmarks generated solutions. A failed build names the retained
 ### Persistent solution library
 
 The JIT solution library keeps generated solutions on disk so that later
-processes run them without generating again. It is the only cache.
-`jit::getLibraryAlgos`, `jit::getJitAlgo` and the heuristic queries share one
-lookup-then-publish helper: for one request it returns up to the requested
-number of solution indices, first the published solutions that match the
-request, in the order they were first published, then solutions that `Jit`
-generates with the supplied backend and publishes. A hit skips generation. Any
-process then passes an index to `hipblaslt_ext::getAlgosFromIndex`,
-`hipblasLtMatmul` and `Gemm` as it would a prebuilt index. Heuristic results
-are those indices.
+processes run them without generating again. It is the only cache. Every
+backend publishes what it builds. `jit::getLibraryAlgos`, `jit::getJitAlgo`
+and the heuristic queries share one lookup-then-publish helper: for one
+request it returns up to the requested number of solution indices, first the
+published solutions that match the request, in the order they were first
+published, then solutions that `Jit` generates with the supplied backend and
+publishes. A hit skips generation. Any process then passes an index to
+`hipblaslt_ext::getAlgosFromIndex`, `hipblasLtMatmul` and `Gemm` as it would a
+prebuilt index. Heuristic results are those indices. A second process gets
+the same index and does not generate.
 
 **Location and permissions.** The root is `HIPBLASLT_JIT_LIBRARY_PATH` or, when
 that is unset or empty, `/tmp/hipblaslt-jit-<uid>/` on Linux and
@@ -377,10 +364,12 @@ message.
 `hipblaslt-jit-loader.{hpp,cpp}` turns a built TensileLite entry into a loaded
 library of its solutions:
 
-- `readTensileSourceBundle` reads a source bundle into a `GeneratedSolution`:
-  the library entry, the main kernel names of its solutions, each `sources/*.s`
-  as an assembly unit, and each HIP source with the bundle's headers as a HIP
-  unit.
+- `readTensileSourceBundle` reads a source bundle into a `TensileSource`: a
+  `GeneratedSolution` (the library entry, the main kernel names of its
+  solutions, each `sources/*.s` as an assembly unit, and each HIP source with
+  the bundle's headers as a HIP unit) and the TensileLite library parsed from
+  that entry. `loadGemmLibrary` is that parse. A caller that needs the library
+  keeps the one `readTensileSourceBundle` returned.
 - `parseTensileBundle` reads a built solution's entry into a TensileLite
   `MasterSolutionLibrary` for the device's hardware. It requires local
   solutions 0 to N-1, each naming one of the built kernels and every built

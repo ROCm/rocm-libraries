@@ -100,9 +100,9 @@ try
                                                            properties.gcnArchName);
 
     const auto load = [&](const std::string& name, hj::BuiltSolution& built) {
-        const auto solution = hj::readTensileSourceBundle(bundles / name);
-        const auto status   = hj::makeComgrBuilder()->build(
-            solution, {properties.gcnArchName, hj::jitCodeObjectVersion, scratch}, built);
+        const auto read   = hj::readTensileSourceBundle(bundles / name);
+        const auto status = hj::makeComgrBuilder()->build(
+            read.solution, {properties.gcnArchName, hj::jitCodeObjectVersion, scratch}, built);
         require(status.ok(), std::string("The build for ") + properties.gcnArchName
                                  + " failed: " + status.message);
         auto bundle = hj::parseTensileBundle(built, hardware);

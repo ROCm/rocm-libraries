@@ -7,6 +7,7 @@
 // concurrent publishers in separate processes, and the rejection of fused GEMM
 // and all-to-all.
 
+#include "test_helpers.hpp"
 #include "hipblaslt-jit-fs.hpp"
 #include "hipblaslt-jit-library.hpp"
 #include "hipblaslt-jit-msgpack.hpp"
@@ -38,11 +39,8 @@ namespace
 {
     constexpr int32_t base = hj::jitIndexBase;
 
-    void require(bool condition, const std::string& message)
-    {
-        if(!condition)
-            throw std::runtime_error(message);
-    }
+    using hipblaslt_jit_test::require;
+
     void ok(const hj::Status& status, const std::string& what)
     {
         require(status.ok(), what + ": " + status.message);

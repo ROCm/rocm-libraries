@@ -3,6 +3,7 @@
 #pragma once
 
 #include "hipblaslt-jit-backend.hpp"
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <hip/hip_runtime_api.h>
@@ -19,6 +20,13 @@ namespace TensileLite
 // Compiled-in stages of JIT solution generation. This is not a plugin ABI.
 namespace hipblaslt_jit
 {
+    // True when kernel is one of names. Shared by the replay backend and the
+    // heuristic exclude list.
+    inline bool excludedKernel(const std::vector<std::string>& names, const std::string& kernel)
+    {
+        return std::find(names.begin(), names.end(), kernel) != names.end();
+    }
+
     enum class Stage
     {
         Configure,
@@ -253,6 +261,9 @@ namespace hipblaslt_jit
     private:
         Components m_components;
     };
+
+    // The comgr builder and the TensileLite loader around one backend.
+    std::shared_ptr<const Jit> makeJit(std::shared_ptr<const Backend> backend);
 }
 
 namespace hipblaslt_ext::experimental::jit::detail
@@ -263,6 +274,7 @@ namespace hipblaslt_ext::experimental::jit::detail
         std::shared_ptr<const OperationRequest>   request;
         std::shared_ptr<const hipblaslt_jit::Jit> jit;
         std::shared_ptr<const KernelBundle>       bundle;
+        int32_t                                   libraryIndex   = 0;
         uint64_t                                  process        = 0;
         size_t                                    workspaceLimit = 0;
         size_t                                    workspaceBytes = 0;

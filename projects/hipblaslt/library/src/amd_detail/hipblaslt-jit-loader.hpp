@@ -21,10 +21,22 @@ namespace hipblaslt_jit
         std::vector<std::string>                           kernels; // every main kernel
     };
 
+    // Loads a GEMM library entry. Throws unless it holds local solutions 0 to N-1.
+    std::shared_ptr<TensileLibrary> loadGemmLibrary(const std::vector<uint8_t>& entry);
+
+    // A source bundle and the library parsed from its entry. The library is the
+    // parse of solution.entry, so a caller keeps it instead of reading those
+    // bytes again.
+    struct TensileSource
+    {
+        GeneratedSolution               solution;
+        std::shared_ptr<TensileLibrary> library;
+    };
+
     // Reads a TensileLite source bundle by directory convention: its entry, every
     // sources/*.s as an assembly unit, and every HIP source as a HIP unit that
     // can include the bundle's headers.
-    GeneratedSolution readTensileSourceBundle(const std::filesystem::path& bundle);
+    TensileSource readTensileSourceBundle(const std::filesystem::path& bundle);
 
     // Reads the entry of a built solution for hardware and loads no code. Throws
     // unless the entry holds local solutions 0 to N-1 and the kernels they name
