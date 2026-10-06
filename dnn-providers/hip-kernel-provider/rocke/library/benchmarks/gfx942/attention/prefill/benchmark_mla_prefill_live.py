@@ -345,18 +345,43 @@ def _run_aiter_live(
 # ---------------------------------------------------------------------------
 
 
-def _build_rocke_kernel(shape: MLAShape, *, arch: str):
+def _build_rocke_kernel(
+    shape: MLAShape,
+    *,
+    arch: str,
+    absorbed_query: bool = False,
+    spec_overrides: dict | None = None,
+):
     """Build (compile to HSACO) the rocke MLA prefill kernel for ``shape``.
 
     Returns ``(DispatchResult, Artifact)`` where ``Artifact`` has ``.hsaco``
-    and ``.kernel_name`` attributes.
+    and ``.kernel_name`` attributes. ``absorbed_query`` swaps the dispatched
+    spec for its unfused twin (see ``MlaPrefillSpec.absorbed_query``) and
+    ``spec_overrides`` replaces further spec fields; the dispatcher itself
+    selects neither, so the result carries the swapped spec and its own
+    signature.
     """
+    import dataclasses
+
     from dispatch.mla import dispatch_mla
+    from kernels.mla.mla_prefill_gfx942 import (
+        build_mla_prefill_fwd,
+        mla_prefill_fwd_signature,
+    )
     from rocke import compile_kernel
 
     req = shape.to_request(arch=arch)
     result = dispatch_mla(req)
-    kernel_def = result.candidate.built(result.spec, arch)
+    if absorbed_query or spec_overrides:
+        spec = dataclasses.replace(
+            result.spec, absorbed_query=absorbed_query, **(spec_overrides or {})
+        )
+        result = dataclasses.replace(
+            result, spec=spec, signature=mla_prefill_fwd_signature(spec)
+        )
+        kernel_def = build_mla_prefill_fwd(spec, arch=arch)
+    else:
+        kernel_def = result.candidate.built(result.spec, arch)
     artifact = compile_kernel(kernel_def, arch=arch, capture_ir_text=False)
     return result, artifact
 
@@ -431,12 +456,75 @@ def _run_rocke_live(
 
     cfg = LaunchConfig(grid=result.grid, block=result.block, stream=hip_stream)
 
-    def call_once():
+    if not getattr(result.spec, "absorbed_query", False):
+
+        def call_once():
+            launcher(vals, config=cfg)
+
+        ms = time_launches(call_once, warmup=warmup, iters=iters, stream=hip_stream)
+        synchronize_and_release(hip_stream)
+        return out.clone(), ms, kernel_obj.kernel_name
+
+    # Unfused: both head projections run as batched GEMMs around the kernel,
+    # and the timed region covers all of them. Every operand is a strided view
+    # of the same buffers the fused kernel reads, laid out [head] x [token] for
+    # torch.bmm:
+    #   Qa[:, :, :r_kv] = Q_nope @ W_UK[:, :, :d_nope]ᵀ   (absorb)
+    #   Qa[:, :, r_kv:] = Q_rope                          (copy)
+    #   latent          = kernel(Qa, c_kv, k_rope)        (attention)
+    #   out             = latent @ W_UK[:, :, d_nope:]    (W_UV)
+    d_nope, r_kv = g.qk_nope_dim, g.kv_lora_rank
+    qa = torch.empty(
+        shape.total_q,
+        shape.num_query_heads,
+        r_kv + g.qk_rope_dim,
+        dtype=dtype,
+        device="cuda",
+    )
+    latent = torch.empty(
+        shape.total_q, shape.num_query_heads, r_kv, dtype=dtype, device="cuda"
+    )
+    q_nope_t = q[:, :, :d_nope].transpose(0, 1)
+    w_uk_nope_t = w_uk[:, :, :d_nope].transpose(1, 2)
+    w_uv = w_uk[:, :, d_nope:]
+    qa_nope_t = qa[:, :, :r_kv].transpose(0, 1)
+    latent_t = latent.transpose(0, 1)
+    out_t = out.transpose(0, 1)
+    vals.pop("q_ptr")
+    vals.pop("w_uk_ptr")
+    vals["qa_ptr"] = qa
+    vals["out_ptr"] = latent
+
+    def absorb():
+        torch.bmm(q_nope_t, w_uk_nope_t, out=qa_nope_t)
+        qa[:, :, r_kv:].copy_(q[:, :, d_nope:])
+
+    def attend():
         launcher(vals, config=cfg)
 
+    def project():
+        torch.bmm(latent_t, w_uv, out=out_t)
+
+    def call_once():
+        absorb()
+        attend()
+        project()
+
     ms = time_launches(call_once, warmup=warmup, iters=iters, stream=hip_stream)
+    # Per-stage split, timed the same way; the stages are not overlapped in
+    # call_once either, so they should roughly sum to ``ms``.
+    _UNFUSED_SPLIT.clear()
+    for name, fn in (("absorb", absorb), ("attend", attend), ("project", project)):
+        _UNFUSED_SPLIT[name] = time_launches(
+            fn, warmup=warmup, iters=iters, stream=hip_stream
+        )
+    call_once()
     synchronize_and_release(hip_stream)
     return out.clone(), ms, kernel_obj.kernel_name
+
+
+# Per-stage times of the last unfused run, in ms (see ``_run_rocke_live``).
+_UNFUSED_SPLIT: dict[str, float] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -503,7 +591,28 @@ def main(argv=None) -> int:
         action="store_true",
         help="skip the aiter mla_prefill_fwd baseline even if available",
     )
+    parser.add_argument(
+        "--absorbed-query",
+        action="store_true",
+        help="time the unfused path end to end: torch.bmm absorb + the "
+        "absorbed_query kernel + torch.bmm W_UV (rocke_ms covers all three)",
+    )
+    parser.add_argument(
+        "--spec-override",
+        action="append",
+        default=[],
+        metavar="KEY=VAL",
+        help="override a dispatched MlaPrefillSpec field (int/bool), repeatable",
+    )
     args = parser.parse_args(argv)
+    spec_overrides = {}
+    for kv in args.spec_override:
+        key, val = kv.split("=", 1)
+        spec_overrides[key] = (
+            val.lower() in ("1", "true")
+            if val.lower() in ("0", "1", "true", "false")
+            else int(val)
+        )
 
     if args.mode in ("resolve", "build"):
         shapes = filter_shapes(
@@ -568,7 +677,12 @@ def main(argv=None) -> int:
 
         # -- build rocke kernel (once per shape)
         try:
-            result, kernel_obj = _build_rocke_kernel(shape, arch=args.arch)
+            result, kernel_obj = _build_rocke_kernel(
+                shape,
+                arch=args.arch,
+                absorbed_query=args.absorbed_query,
+                spec_overrides=spec_overrides,
+            )
         except Exception as exc:  # noqa: BLE001
             print(f"{tag}  ROCKE BUILD FAIL: {exc!r}")
             traceback.print_exc()
@@ -642,6 +756,7 @@ def main(argv=None) -> int:
             "aiter_skip_reason": aiter_skip_reason if not aiter_ok else None,
             "speedup_rocke_vs_aiter": speedup_vs_aiter,
             "tflop": tflop,
+            "unfused_split_ms": dict(_UNFUSED_SPLIT) if args.absorbed_query else None,
             # FlyDSL: no MLA prefill kernel available (decode-only)
             "flydsl_ms": None,
             "flydsl_skip_reason": "no MLA prefill kernel in FlyDSL (decode-only as of Sep 2026)",

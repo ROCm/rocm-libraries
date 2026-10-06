@@ -268,6 +268,12 @@ class TestMlaPrefillHeadsPerWg(unittest.TestCase):
     def test_supported(self):
         self.assertEqual(supports_mla_prefill(_hpw_spec(), arch="gfx942"), (True, ""))
 
+    def test_eight_heads_admitted(self):
+        # k_rope is a quarter of the c_kv tile, so at 512 threads its staging
+        # narrows to 2-wide chunks rather than being refused.
+        spec = _hpw_spec(heads_per_wg=8, num_warps=8)
+        self.assertEqual(supports_mla_prefill(spec, arch="gfx942"), (True, ""))
+
     def test_lowers_with_the_predicted_pool(self):
         spec = _hpw_spec()
         kernel = build_mla_prefill_fwd(spec, arch="gfx942")
@@ -279,6 +285,43 @@ class TestMlaPrefillHeadsPerWg(unittest.TestCase):
         self.assertIn("[27264 x i8]", ir)
         self.assertNotIn("scratch", ir)
         self.assertNotIn("ds.read.tr", ir)
+
+
+class TestMlaPrefillAbsorbedQuery(unittest.TestCase):
+    """The unfused variant: absorbed query in, latent output out, no W_UK."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.spec = _hpw_spec(absorbed_query=True)
+        cls.kernel = build_mla_prefill_fwd(cls.spec, arch="gfx942")
+        cls.ir = lower_kernel_to_llvm(cls.kernel, arch="gfx942")
+
+    def test_default_stays_fused(self):
+        self.assertFalse(_hpw_spec().absorbed_query)
+        self.assertFalse(_hpw_spec().fwd_kernel_name().endswith("_aq"))
+        self.assertTrue(self.spec.fwd_kernel_name().endswith("_aq"))
+
+    def test_signature_drops_w_uk(self):
+        names = [a["name"] for a in mla_prefill_fwd_signature(self.spec)]
+        self.assertEqual(len(names), 12)
+        self.assertEqual(names[:3], ["out_ptr", "lse_ptr", "qa_ptr"])
+        self.assertNotIn("w_uk_ptr", names)
+        # The tail is the fused kernel's, unchanged.
+        fused = [a["name"] for a in mla_prefill_fwd_signature(_hpw_spec())]
+        self.assertEqual(names[3:], fused[3:5] + fused[6:])
+
+    def test_lds_is_the_loop_phase_only(self):
+        # kv_lds (18560 B) and the parked Q_rope (8704 B); no epilogue buffer.
+        self.assertIn(f"@smem_pool.{self.kernel.name}", self.ir)
+        self.assertIn("[27264 x i8]", self.ir)
+        self.assertNotIn("scratch", self.ir)
+
+    def test_one_head_layout_refused(self):
+        ok, reason = supports_mla_prefill(
+            _spec(num_heads=128, absorbed_query=True), arch="gfx942"
+        )
+        self.assertFalse(ok)
+        self.assertIn("absorbed_query", reason)
 
 
 if __name__ == "__main__":
