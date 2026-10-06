@@ -99,7 +99,7 @@ void testing_spsort_csr_bad_arg(const Arguments& arg)
 
     size_t buffer_size;
 
-    auto make_mat = [&]() {
+    auto make_mat = [&](rocsparse_datatype ttype = get_datatype<T>()) {
         return rocsparse_local_spmat(safe_size,
                                      safe_size,
                                      safe_size,
@@ -109,7 +109,7 @@ void testing_spsort_csr_bad_arg(const Arguments& arg)
                                      get_indextype<I>(),
                                      get_indextype<J>(),
                                      rocsparse_index_base_zero,
-                                     get_datatype<T>());
+                                     ttype);
     };
 
     // The direction is not needed, and is ignored if it is set.
@@ -201,6 +201,39 @@ void testing_spsort_csr_bad_arg(const Arguments& arg)
         expect_batch_status(2, 0, safe_size, 2, 0, safe_size, rocsparse_status_success);
         expect_batch_status(2, 0, safe_size, 2, safe_size + 1, safe_size, rocsparse_status_success);
         // clang-format on
+
+        CHECK_ROCSPARSE_ERROR(rocsparse_spsort_descr_destroy(handle, descr, nullptr));
+    }
+
+    // Unsupported data types.
+    {
+        rocsparse_spsort_descr descr;
+        CHECK_ROCSPARSE_ERROR(rocsparse_spsort_descr_create(handle, &descr, nullptr));
+        set_spsort_inputs(handle, descr, alg);
+
+        for(const rocsparse_datatype unsupported_ttype :
+            {rocsparse_datatype_u8_r, rocsparse_datatype_i32_r, rocsparse_datatype_u32_r})
+        {
+            rocsparse_local_spmat mat_A = make_mat(unsupported_ttype);
+            rocsparse_local_spmat mat_B = make_mat(unsupported_ttype);
+            EXPECT_ROCSPARSE_STATUS(rocsparse_spsort_buffer_size(handle,
+                                                                 descr,
+                                                                 mat_A,
+                                                                 mat_B,
+                                                                 rocsparse_spsort_stage_analysis,
+                                                                 &buffer_size,
+                                                                 nullptr),
+                                    rocsparse_status_invalid_value);
+            EXPECT_ROCSPARSE_STATUS(rocsparse_spsort(handle,
+                                                     descr,
+                                                     mat_A,
+                                                     mat_B,
+                                                     rocsparse_spsort_stage_analysis,
+                                                     0,
+                                                     nullptr,
+                                                     nullptr),
+                                    rocsparse_status_invalid_value);
+        }
 
         CHECK_ROCSPARSE_ERROR(rocsparse_spsort_descr_destroy(handle, descr, nullptr));
     }
