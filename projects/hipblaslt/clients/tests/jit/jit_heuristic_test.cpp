@@ -331,7 +331,8 @@ namespace
         const auto listed = queryC(handle, desc, pref, layouts, 1);
         require(listed.status == HIPBLAS_STATUS_SUCCESS && listed.results.size() == 1,
                 "second process query");
-        const int index = hipblaslt_ext::getIndexFromAlgo(listed.results.front().algo);
+        auto      algo  = listed.results.front().algo;
+        const int index = hipblaslt_ext::getIndexFromAlgo(algo);
         std::cout << "INDEX " << index << '\n' << std::flush;
         hipblasLtMatmulPreferenceDestroy(pref);
         hipblasLtMatmulDescDestroy(desc);
@@ -438,7 +439,8 @@ namespace
             checkPair("K=256", c256, cpp256, true, "_WGM1", handle);
             runFirst(handle, desc, stream, K, c512.results.front());
             std::cout << "PASS K=512 first result\n";
-            const int index = hipblaslt_ext::getIndexFromAlgo(c512.results.front().algo);
+            auto      algo  = c512.results.front().algo;
+            const int index = hipblaslt_ext::getIndexFromAlgo(algo);
             requireSameIndexInChild(root, index);
         }
         else
