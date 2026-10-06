@@ -47,7 +47,7 @@
 #ifdef HIPBLASLT_USE_ROCROLLER
 #include "rocroller_host.hpp"
 #endif
-#include "include/kfa_solution_selection.hpp"
+#include "include/rocroller_selected.hpp"
 
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/Contractions.hpp>
@@ -4953,7 +4953,7 @@ std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
     return solutions;
 }
 
-static const char* kfaTypeToken(hipDataType type)
+static const char* rocRollerTypeToken(hipDataType type)
 {
     if(static_cast<int>(type) == HIP_R_6F_E2M3)
         return "FP6";
@@ -4980,20 +4980,20 @@ static const char* kfaTypeToken(hipDataType type)
     }
 }
 
-static bool kfaKernelMatches(const std::string&                 kernel,
+static bool matchesRocRollerSelectedKernel(const std::string&                 kernel,
                              const RocblasltContractionProblem& prob,
-                             const KfaTile&                     tile)
+                             const RocRollerSelectedTile&                     tile)
 {
     if(tile.streamK || tile.nonTemporalA || tile.nonTemporalB)
         return false;
-    if(kfaTypeToken(prob.a_type)[0] == '\0' || kfaTypeToken(prob.c_type)[0] == '\0')
+    if(rocRollerTypeToken(prob.a_type)[0] == '\0' || rocRollerTypeToken(prob.c_type)[0] == '\0')
         return false;
 
     const char transA = prob.trans_a == HIPBLAS_OP_T ? 'T' : 'N';
     const char transB = prob.trans_b == HIPBLAS_OP_T ? 'T' : 'N';
     const std::string prefix = std::string("RR_GEMM_") + transA + transB + "_"
-                               + kfaTypeToken(prob.a_type) + "_" + kfaTypeToken(prob.b_type) + "_"
-                               + kfaTypeToken(prob.c_type) + "_" + kfaTypeToken(prob.d_type)
+                               + rocRollerTypeToken(prob.a_type) + "_" + rocRollerTypeToken(prob.b_type) + "_"
+                               + rocRollerTypeToken(prob.c_type) + "_" + rocRollerTypeToken(prob.d_type)
                                + "_Float_";
     if(kernel.find(prefix) == std::string::npos)
         return false;
@@ -5007,20 +5007,20 @@ static bool kfaKernelMatches(const std::string&                 kernel,
     return hasWgm == tile.workgroupMapping;
 }
 
-// rocRoller-off substitute for getRocRollerBestSolutions. Same rejects, same
-// rank order. A ranked tile is kept only when a checked-in kernel matches it.
+// rocRoller-off substitute for getRocRollerBestSolutions. Rank order comes from
+// chooseSolutionIndexParameters. A ranked tile is kept only when a checked-in kernel matches it.
 // No match yields an empty list, which the caller reports as not implemented.
 // Problems outside useRocRoller() never reach this function.
 static rocblaslt_status
-    getKfaBestSolutions(rocblaslt_handle                   handle,
+    getRocRollerSelectedSolutions(rocblaslt_handle                   handle,
                         const RocblasltContractionProblem& prob,
                         int                                requestedAlgoCount,
                         rocblaslt_matmul_heuristic_result  heuristicResultsArray[],
                         size_t                             maxWorkSpaceBytes,
                         int*                               returnAlgoCount)
 {
-    std::vector<KfaTile> ranked;
-    rocblaslt_status     status = rankKfaTiles(prob, ranked);
+    std::vector<RocRollerSelectedTile> ranked;
+    rocblaslt_status     status = rankRocRollerSelectedTiles(prob, ranked);
     if(status != rocblaslt_status_success)
         return status;
 
@@ -5036,7 +5036,7 @@ static rocblaslt_status
 
     std::vector<std::shared_ptr<TensileLite::ContractionSolution>> chosen;
     const int cap = requestedAlgoCount < 0 ? static_cast<int>(ranked.size()) : requestedAlgoCount;
-    for(const KfaTile& tile : ranked)
+    for(const RocRollerSelectedTile& tile : ranked)
     {
         if(static_cast<int>(chosen.size()) >= cap)
             break;
@@ -5052,8 +5052,8 @@ static rocblaslt_status
             {
                 if(!entry.second)
                     continue;
-                if(kfaKernelMatches(entry.second->KernelName(), prob, tile)
-                   || kfaKernelMatches(entry.second->name(), prob, tile))
+                if(matchesRocRollerSelectedKernel(entry.second->KernelName(), prob, tile)
+                   || matchesRocRollerSelectedKernel(entry.second->name(), prob, tile))
                 {
                     found = entry.second;
                     break;
@@ -5092,7 +5092,7 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                          returnAlgoCount);
 #else
     if(useRocRoller(handle, prob))
-        return getKfaBestSolutions(handle,
+        return getRocRollerSelectedSolutions(handle,
                                    prob,
                                    requestedAlgoCount,
                                    heuristicResultsArray,
@@ -5292,7 +5292,7 @@ rocblaslt_status getAllSolutions(RocblasltContractionProblem&                   
     {
         std::vector<rocblaslt_matmul_heuristic_result> ranked(160);
         int                                            count = 0;
-        rocblaslt_status                               status = getKfaBestSolutions(
+        rocblaslt_status                               status = getRocRollerSelectedSolutions(
             handle, prob, -1, ranked.data(), maxWorkSpaceBytes, &count);
         if(status != rocblaslt_status_success)
             return status;
