@@ -1075,6 +1075,38 @@ TEST(TestEngineFeatures, VariableLengthAttentionIsDataDependent)
     EXPECT_EQ(features(attentionGraph(sdpa)).at("graph.nodes[0].data_dependent"), false);
 }
 
+// Each operand whose contents decide the score count leaves the work unknown: a count from
+// the padded shapes would overstate it.
+TEST(TestEngineFeatures, AttentionWorkIsUnknownWhenOperandContentsDecideIt)
+{
+    EXPECT_TRUE(features(attentionGraph(attention())).contains("graph.flops"));
+
+    auto ragged = attentionGraph(attention());
+    ragged.tensors[0]->ragged_offset_tensor_uid = 5;
+
+    auto pagedAttributes = attention();
+    pagedAttributes.page_table_k_tensor_uid = 6;
+    pagedAttributes.page_table_v_tensor_uid = 7;
+    const auto paged = attentionGraph(pagedAttributes);
+
+    auto blockAttributes = attention();
+    blockAttributes.block_mask_tensor_uid = 8;
+    const auto blockSparse = attentionGraph(blockAttributes);
+
+    for(const auto& [name, graph] :
+        {std::pair<const char*, const GraphT*>{"ragged q", &ragged},
+         std::pair<const char*, const GraphT*>{"paged kv", &paged},
+         std::pair<const char*, const GraphT*>{"block mask", &blockSparse}})
+    {
+        SCOPED_TRACE(name);
+        const auto published = features(*graph);
+        EXPECT_EQ(published.at("graph.nodes[0].data_dependent"), true);
+        EXPECT_FALSE(published.contains("graph.nodes[0].flops"));
+        EXPECT_FALSE(published.contains("graph.flops"));
+        EXPECT_FALSE(published.contains("graph.flops_by_type.SdpaAttributes"));
+    }
+}
+
 TEST(TestEngineFeatures, RaggedOperandMakesWorkDataDependent)
 {
     auto graph = matmulBroadcastGraph();
@@ -1083,9 +1115,8 @@ TEST(TestEngineFeatures, RaggedOperandMakesWorkDataDependent)
     graph.tensors[0]->ragged_offset_tensor_uid = 4;
     const auto published = features(graph);
     EXPECT_EQ(published.at("graph.nodes[0].data_dependent"), true);
-    // Matmul's count ignores ragged contents, matching what shipped models were trained on.
-    EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(), 840.0);
-    // The graph's footprint follows the offsets' contents, not the padded dims.
+    // The offsets' contents, not the padded dims, decide both the work and the footprint.
+    EXPECT_FALSE(published.contains("graph.flops"));
     EXPECT_FALSE(published.contains("graph.logical_bytes"));
 }
 

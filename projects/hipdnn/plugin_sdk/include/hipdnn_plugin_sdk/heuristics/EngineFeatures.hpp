@@ -174,8 +174,9 @@ inline std::optional<double>
 }
 
 /// Dense attention's QK^T and PV multiply-adds over the score pairs its causal mask keeps.
-/// Refuses, for the fields forward and backward share, whatever makes the pair count
-/// depend on more than shapes and mask flags.
+/// Refuses, for the fields forward and backward share, what makes the pair count depend on
+/// more than shapes and mask flags; operands whose contents decide it (ragged offsets,
+/// sequence lengths, page tables, block masks) are refused by logicalFlops.
 template <typename TAttention>
 std::optional<double> attentionFlops(const Graph& graph, const TAttention& op)
 {
@@ -186,9 +187,8 @@ std::optional<double> attentionFlops(const Graph& graph, const TAttention& op)
     const auto* o = tensor(graph, op.o_tensor_uid());
     if(!dimensions(q, 4) || !dimensions(k, 4) || !dimensions(v, 4) || !dimensions(o, 4)
        || q->dims()->size() != 4 || k->dims()->size() != 4 || v->dims()->size() != 4
-       || o->dims()->size() != 4 || op.seq_len_q_tensor_uid() || op.seq_len_kv_tensor_uid()
-       || op.attn_mask_tensor_uid() || op.padding_mask() || op.alibi_mask()
-       || op.dropout_mask_tensor_uid() || op.dropout_scale_tensor_uid()
+       || o->dims()->size() != 4 || op.attn_mask_tensor_uid() || op.padding_mask()
+       || op.alibi_mask() || op.dropout_mask_tensor_uid() || op.dropout_scale_tensor_uid()
        || (op.dropout_probability() && *op.dropout_probability() != 0.0F)
        || (op.left_bound() && *op.left_bound() >= 0)
        || (op.right_bound() && *op.right_bound() != 0 && *op.right_bound() != -1))
@@ -439,20 +439,16 @@ std::optional<double> flopsOf(const Graph& graph, const TAttributes* op)
 
 /// Logical work of @p node, the same for every engine. Unknown, never 0, when a dimension
 /// is, when the type has no convention, or when @p dataDependent (operand contents such as
-/// routing offsets, ragged lengths or page tables decide the work).
+/// routing offsets, ragged lengths, page tables or block masks decide the work): a count
+/// from the padded shapes would overstate it by an amount the graph cannot say.
 inline std::optional<double> logicalFlops(const Graph& graph, const Node& node, bool dataDependent)
 {
     using hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
-    const auto type = node.attributes_type();
-    // Exempt from the data-dependence rule: shipped models were trained on these counts,
-    // and their own refusals already cover every annotated operand.
-    const bool predatesContentRule = type == NodeAttributes::MatmulAttributes
-                                     || type == NodeAttributes::ConvolutionFwdAttributes
-                                     || type == NodeAttributes::SdpaAttributes;
-    if(dataDependent && !predatesContentRule)
+    if(dataDependent)
     {
         return std::nullopt;
     }
+    const auto type = node.attributes_type();
     switch(type)
     {
     case NodeAttributes::MatmulAttributes:
