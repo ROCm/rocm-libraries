@@ -526,7 +526,10 @@ def test_supports_rejects_non_gfx942():
         # (persistent P4; sliding_window via start_tile prune + window mask). See
         # the persistent build/decode tests and the SWA coverage below.
         (dict(varlen=True), "varlen"),
-        (dict(seqlen_q=1000, seqlen_kv=1000, ragged=True), "ragged"),
+        (
+            dict(seqlen_q=1000, seqlen_kv=1000, ragged=True),
+            "seqlen_q 1000 is not a multiple of block_m 256",
+        ),
         (dict(use_sinks=True), "sinks"),
     ],
 )

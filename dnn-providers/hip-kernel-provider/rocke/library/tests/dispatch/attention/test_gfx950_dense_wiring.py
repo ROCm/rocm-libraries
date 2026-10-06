@@ -495,19 +495,19 @@ class TestDenseSlidingWindowWiring(unittest.TestCase):
         self.assertIn("swa128", kname)
         self.assertIn("persist", kname)
 
-    def test_sliding_window_with_ragged_shape_rejected_at_dispatch(self):
-        """Ragged and sliding_window rejected early in _dense_spec.
+    def test_sliding_window_with_partial_tile_rejected_at_dispatch(self):
+        """A partial-tile length with sliding_window is rejected early in _dense_spec.
 
         The requirement says 'explicit decision rather than letting the spec
         validator raise at dispatch time.' This test verifies _dense_spec()
         itself catches the constraint and raises a clear error.
         """
-        # Create a ragged-shaped request: seqlen_q=seqlen_k, not a multiple
-        # of the default block_m=256 / block_n=64 geometry.
+        # Self-attention length that is not a multiple of the default
+        # block_m=256 / block_n=64 geometry, combined with a sliding window.
         req = _gfx950_dense_req(
             seqlen_q=500,
             seqlen_k=500,
-            sliding_window=128,  # Conflict: ragged + window
+            sliding_window=128,
         )
 
         # _dense_spec should reject this at dispatch time with a clear error
@@ -515,8 +515,11 @@ class TestDenseSlidingWindowWiring(unittest.TestCase):
             dense_spec_for_request(req)
 
         err_msg = str(cm.exception)
-        self.assertIn("ragged", err_msg.lower())
-        self.assertIn("sliding_window", err_msg.lower())
+        # The graph is not ragged; the reason names the length, the tile and the window.
+        self.assertIn("seqlen_q 500 is not a multiple of block_m 256", err_msg)
+        self.assertIn("seqlen_kv 500 is not a multiple of block_n 64", err_msg)
+        self.assertIn("sliding_window", err_msg)
+        self.assertNotIn("ragged", err_msg)
 
     def test_sliding_window_without_ragged_accepted(self):
         """Sliding window works fine on non-ragged shapes (block-aligned seqlens)."""
@@ -1023,6 +1026,21 @@ class TestGfx950DenseVariants(unittest.TestCase):
             any(c.algorithm == "attention_dense" for c, _spec in combos),
             names,
         )
+
+
+class TestDenseFactoryRejectsUncarriedFields(unittest.TestCase):
+    """The public factory plus ``supports_attention_dense`` is the pair the
+    IngestorGenerator profile tools call, without ``Capability`` in front. The
+    dense spec has a single head size, so a separate ``hdim_v`` must make the
+    factory raise instead of building a plain dense spec."""
+
+    def test_zero_kv_heads_raises_value_error(self):
+        with self.assertRaisesRegex(ValueError, "nhead_k must be positive"):
+            dense_spec_for_request(_gfx950_dense_req(nhead_k=0))
+
+    def test_mismatched_value_head_size_raises(self):
+        with self.assertRaisesRegex(ValueError, "hdim_q == hdim_v"):
+            dense_spec_for_request(_gfx950_dense_req(hdim_q=128, hdim_v=64))
 
 
 if __name__ == "__main__":
