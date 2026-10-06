@@ -39,7 +39,7 @@ The catalog currently contains the following operation IDs.
   - f16: `wmma_f32_16x16x16_f16`
   - bf16: `wmma_f32_16x16x16_bf16`
   - integer: `wmma_i32_16x16x16_iu4`, `wmma_i32_16x16x16_iu8`
-- **`gfx1201` (wave32)**
+- **`gfx1201` and `gfx12-generic` (wave32)**
   - f16: `wmma_gfx12_f32_16x16x16_f16`
   - bf16: `wmma_gfx12_f32_16x16x16_bf16`
 - **`gfx1250` (wave32)**
