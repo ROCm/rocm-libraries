@@ -1774,6 +1774,14 @@ TEST_F(DAGSchedulerPassTest, DSWindowCap_SpanDefaultsToTheRegionsRealWmmaLatency
 // DsIssueCapMode: Sliding (default) and Periodic both enforce "at most
 // dsReadPerCap ds_loads per dsIssueCapSpanCycles"; they differ only in when an
 // issued ds_load stops counting.
+// Only 0 (sliding) and 1 (periodic) exist; anything else is rejected, not read as periodic.
+TEST_F(DAGSchedulerPassTest, DsIssueCapMode_RejectsAnUnknownValue) {
+    createMovableDsLoad(0, 80, 1);
+    createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/0);
+    EXPECT_DEATH(runWithDsCapMode(static_cast<PassFeatureConfig::DsIssueCapMode>(2)),
+                 "dsIssueCapMode must be 0 \\(sliding\\) or 1 \\(periodic\\); got 2");
+}
+
 TEST_F(DAGSchedulerPassTest, DsIssueCapMode_DefaultIsSliding) {
     createMovableDsLoad(0, 80, 1);
     createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/0);

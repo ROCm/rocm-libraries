@@ -2727,8 +2727,13 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     // scheduler's single RPO pass (a loop header is visited before its latch, so
     // sawLoopPred never goes true -- see restoreCrossBBStateFromLoop), so
     // carrying the cap window would be code with no effect until that is fixed.
-    dsIssueCap_ = DsIssueCap(getPassContext().getPassFeatureConfig().dagFeatures.dsIssueCapMode,
-                             dsReadPerCap());
+    const auto capMode = getPassContext().getPassFeatureConfig().dagFeatures.dsIssueCapMode;
+    if (capMode != PassFeatureConfig::DsIssueCapMode::Sliding &&
+        capMode != PassFeatureConfig::DsIssueCapMode::Periodic) {
+        report_fatal_error("dagFeatures.dsIssueCapMode must be 0 (sliding) or 1 (periodic); got " +
+                           std::to_string(static_cast<int>(capMode)) + ".");
+    }
+    dsIssueCap_ = DsIssueCap(capMode, dsReadPerCap());
     assert(dsIssueCap_.depth() > 0 && "rule (4) cap must have a positive depth");
     const int dsDepth = dsReadQueueDepth();
     const double dsThrottleInterval =

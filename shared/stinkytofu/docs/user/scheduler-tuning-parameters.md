@@ -91,9 +91,9 @@ DsReadThrottleLatency = max(72, (L / perWmma) * 16)        // L = first main-loo
 ```
 Without a usable main loop: `DsReadPerCap = 3`, `DsReadThrottleLatency = 72`.
 
-**Shared ds issue pipe:** when `HWModel::lds.wavesPerDsIssuePipe > 1`, the cap
-is clamped to `span / min(NumWaves, wavesPerDsIssuePipe)`. On gfx1250 it is
-currently 1 (disabled), so the clamp is inert.
+**Shared ds issue pipe:** when `HWModel::lds.wavesPerDsIssuePipe > 1`,
+the issue cost of each ds_load is multiplied by `min(NumWaves, wavesPerDsIssuePipe)`
+(the cap itself is unchanged). On gfx1250 it is currently 1, so this is inert.
 
 ## Global reads and tensor loads
 

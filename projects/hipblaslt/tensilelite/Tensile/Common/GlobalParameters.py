@@ -411,11 +411,11 @@ globalParameters["StinkyTofuTimePasses"] = False
 # StinkyTofu ds_load issue cap (gfx1250 DAG scheduler): at most DsReadPerCap ds_loads per
 # DsIssueCapSpanCycles. Mode 0 = sliding (each ds_load frees its slot that many cycles after
 # its own issue), 1 = periodic (a period opens at its first ds_load; all slots free together).
-# Span 0 = one WMMA batch window. See stinkytofu docs/user/scheduler-tuning-parameters.md.
+# Span 0 = one WMMA window. See stinkytofu docs/user/scheduler-tuning-parameters.md.
 globalParameters["StinkyTofuDsIssueCapMode"] = 0
 globalParameters["StinkyTofuDsIssueCapSpanCycles"] = 0
 # Extra StinkyTofu module options, applied last so they override KernelWriter's own values,
-# e.g. {WmmaBatchSize: 4, DsReadPerCap: 12}. Keys are StinkyAsmModule::ModuleOptions names;
+# e.g. {WmmaQueueDepth: 8, DsReadPerCap: 12}. Keys are StinkyAsmModule::ModuleOptions names;
 # see stinkytofu docs/user/scheduler-tuning-parameters.md.
 globalParameters["StinkyTofuModuleOptions"] = {}
 
