@@ -68,8 +68,10 @@ The backend's configuration belongs to the options of its factory. The
 application owns its buffers and workspace. The request owns descriptor values
 and host scalars; it does not take ownership of device pointers. Compilation
 and support checks finish before graphics processing unit (GPU) work is
-submitted; call the entry points before stream capture. GEMM is the
-implemented operation.
+submitted; call the entry points before stream capture. If the contraction
+problem's stream is capturing, generation does not start and a query that
+has nothing cached reports that generation was skipped. A null stream and
+the legacy stream are not capturing. GEMM is the implemented operation.
 
 Internally, the GEMM request reuses `RocblasltContractionProblem` with owned
 scalar values. The generic `Solution` and private `CompiledSolution` retain
@@ -90,10 +92,13 @@ once and leaves the mode off.
 | `1` | The override file, then the Equality provider rows, then the JIT library, then the other provider rows, then the `getAllSolutions` fill. Each source fills only the remaining request, and a kernel already returned is skipped. |
 | `2` | The JIT library only. The override file is not read. A problem the library does not solve returns success with no algorithms. |
 
-In a testing build the JIT library is the replay backend. `HIPBLASLT_JIT_TEST_REPLAY`
-is a whitespace-separated list of source-bundle directories, read once per
-process. A JIT build with no such source warns once: mode `1` leaves the query
-unchanged, and mode `2` returns no algorithms.
+The process JIT library is the replay backend when `HIPBLASLT_JIT_TEST_REPLAY`
+names source-bundle directories, a whitespace-separated list read once per
+process. When that variable is unset, a build with the HipKittens backend uses
+it instead. A JIT build with neither warns once: mode `1` leaves the query
+unchanged, and mode `2` returns no algorithms. Generation does not start while
+the contraction problem's stream is capturing, including for this library;
+solutions already cached for the problem are still returned.
 
 The algorithms are the same process-local algorithms the internal entry points
 return. `getIndexFromAlgo` returns -1 for them. Persistent indices come from
@@ -168,6 +173,13 @@ The implementations are:
   builder and loader as any other backend. Tests reach it through
   `jit::replay::createBackend` in `hipblaslt-jit-replay.hpp`, and every JIT
   build compiles it.
+- HipKittens backend: `hipblaslt-jit-hipkittens.cpp`, built when
+  `HIPBLASLT_JIT_ENABLE_HIPKITTENS` is on and `GPU_TARGETS` includes gfx950.
+  It compiles the gfx950 TN templates in `library/src/amd_detail/hipkittens`
+  with comgr's generic HIP path. The HipKittens headers are staged next to
+  the library; `HIPBLASLT_JIT_HIPKITTENS_PATH` overrides that directory.
+  `HIPBLASLT_JIT_TEST_REPLAY` still selects the replay backend. A build
+  without the option keeps replay as the only process backend.
 
 ### Build
 
@@ -187,7 +199,10 @@ cmake -S "$project_root/projects/hipblaslt" -B "$project_build" \
 cmake --build "$project_build" --parallel
 ```
 
-The [JIT test guide](clients/tests/jit/README.md) lists the test targets and the
+`HIPBLASLT_JIT_ENABLE_HIPKITTENS=ON` adds the gfx950 HipKittens backend. It
+needs a network fetch of the pinned HipKittens commit unless
+`FETCHCONTENT_SOURCE_DIR_HIPKITTENS` points at an unpacked archive. The
+[JIT test guide](clients/tests/jit/README.md) lists the test targets and the
 validation commands.
 
 ### Algorithm lifetime and failures

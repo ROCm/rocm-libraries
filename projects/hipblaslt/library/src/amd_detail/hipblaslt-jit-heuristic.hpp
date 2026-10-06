@@ -12,9 +12,10 @@
 // a JIT build.
 namespace hipblaslt_jit
 {
-    // True when this process has a JIT library to consult. A testing build's
-    // library is the replay backend of the bundles HIPBLASLT_JIT_TEST_REPLAY
-    // lists. A build without that source returns false.
+    // True when this process has a JIT library to consult. That library is the
+    // replay backend of the bundles HIPBLASLT_JIT_TEST_REPLAY lists, or, when
+    // that variable is unset, the HipKittens backend of a HipKittens build.
+    // A build with neither returns false.
     bool jitHeuristicLibrary();
 
     // One warning per process when a query would consult JIT and no library is
@@ -24,7 +25,9 @@ namespace hipblaslt_jit
     // Appends up to room JIT solutions for problem that need at most
     // workspaceLimit and whose kernels are not in excludeKernels. Results are
     // process-local algorithms. Returns how many were written. Zero when the
-    // library is absent, the problem is outside it, or room is zero.
+    // library is absent, the problem is outside it, or room is zero. Does not
+    // compile while problem.stream is capturing; a null or legacy stream is not
+    // capturing. Cached solutions are still returned.
     int appendJitHeuristic(rocblaslt_handle                          handle,
                            const RocblasltContractionProblem&        problem,
                            size_t                                    workspaceLimit,

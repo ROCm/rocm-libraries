@@ -31,6 +31,28 @@
 #include <unistd.h>
 #endif
 
+namespace
+{
+    // A null stream and the legacy stream are not capturing. Querying the null
+    // stream while another stream is capturing is an error, so only this stream
+    // is checked.
+    bool streamIsCapturing(hipStream_t stream)
+    {
+        if(stream == nullptr || stream == hipStreamLegacy)
+            return false;
+        hipStreamCaptureStatus status = hipStreamCaptureStatusNone;
+        if(hipStreamIsCapturing(stream, &status) != hipSuccess)
+            return false;
+        return status != hipStreamCaptureStatusNone;
+    }
+
+    std::string captureSkipMessage(size_t m, size_t n, size_t k)
+    {
+        return "JIT generation skipped during stream capture for GEMM M=" + std::to_string(m)
+               + " N=" + std::to_string(n) + " K=" + std::to_string(k);
+    }
+}
+
 namespace hipblaslt_jit
 {
     Status DeviceTarget::make(int device, DeviceTarget& target)
@@ -385,6 +407,13 @@ namespace hipblaslt_ext::experimental
                     return HIPBLAS_STATUS_INVALID_VALUE;
                 }
                 diagnostics.backend = jit->components().backend->info().name;
+                if(const auto* gemm = dynamic_cast<const detail::GemmRequest*>(operation.get());
+                   gemm && streamIsCapturing(gemm->problem.stream))
+                {
+                    diagnostics.message = captureSkipMessage(
+                        gemm->problem.m, gemm->problem.n, gemm->problem.k);
+                    return HIPBLAS_STATUS_NOT_SUPPORTED;
+                }
                 int current         = -1;
                 if(hipGetDevice(&current) != hipSuccess)
                     return HIPBLAS_STATUS_INTERNAL_ERROR;
@@ -488,7 +517,18 @@ namespace hipblaslt_ext::experimental
                     status = components.store->lookup(
                         *operation, target, count, workspaceLimit, {}, indices);
                 const auto found = indices.size();
-                if(status.ok() && found < count)
+                const auto* gemm = dynamic_cast<const detail::GemmRequest*>(operation.get());
+                const bool capturing = gemm && streamIsCapturing(gemm->problem.stream);
+                if(status.ok() && found < count && capturing)
+                {
+                    if(indices.empty())
+                    {
+                        diagnostics.message = captureSkipMessage(
+                            gemm->problem.m, gemm->problem.n, gemm->problem.k);
+                        return HIPBLAS_STATUS_NOT_SUPPORTED;
+                    }
+                }
+                else if(status.ok() && found < count)
                 {
                     std::vector<std::string> published;
                     for(auto index : indices)
@@ -590,6 +630,9 @@ namespace hipblaslt_ext::experimental
 
 namespace hipblaslt_jit
 {
+#ifdef HIPBLASLT_JIT_HIPKITTENS
+    std::shared_ptr<const Jit> makeHipKittensJit();
+#endif
     namespace
     {
         using GemmRequest = hipblaslt_ext::experimental::jit::detail::GemmRequest;
@@ -712,11 +755,27 @@ namespace hipblaslt_jit
             });
             return jit;
         }
+
+        // Replay when HIPBLASLT_JIT_TEST_REPLAY names bundles. Otherwise the
+        // HipKittens backend in a HipKittens build. Null when neither is available.
+        std::shared_ptr<const Jit> processJit()
+        {
+            if(auto replay = replayProcess())
+                return replay;
+#ifdef HIPBLASLT_JIT_HIPKITTENS
+            static std::once_flag             once;
+            static std::shared_ptr<const Jit> hipkittens;
+            std::call_once(once, [] { hipkittens = makeHipKittensJit(); });
+            return hipkittens;
+#else
+            return nullptr;
+#endif
+        }
     }
 
     bool jitHeuristicLibrary()
     {
-        return static_cast<bool>(replayProcess());
+        return static_cast<bool>(processJit());
     }
 
     void warnJitHeuristicUnavailable()
@@ -742,7 +801,7 @@ namespace hipblaslt_jit
     {
         if(room <= 0 || results == nullptr || handle == nullptr)
             return 0;
-        const auto jit = replayProcess();
+        const auto jit = processJit();
         if(!jit)
         {
             warnJitHeuristicUnavailable();
@@ -750,13 +809,12 @@ namespace hipblaslt_jit
         }
         try
         {
-            int current = -1;
-            if(hipGetDevice(&current) != hipSuccess || current != handle->device)
+            const bool capturing = streamIsCapturing(problem.stream);
+            int        current   = handle->device;
+            if(!capturing
+               && (hipGetDevice(&current) != hipSuccess || current != handle->device))
                 return 0;
             std::shared_ptr<const GemmRequest> owned = std::make_shared<GemmRequest>(problem);
-            DeviceTarget target;
-            if(!DeviceTarget::make(handle->device, target).ok() || !target.hardware)
-                return 0;
 
             static auto*                    cache = new std::map<std::string, CacheEntry>;
             static std::mutex               guard;
@@ -802,8 +860,20 @@ namespace hipblaslt_jit
                     if(!name.empty() && !named(exclude, name))
                         exclude.push_back(std::move(name));
                 }
-                const auto need    = static_cast<size_t>(room) - chosen.size();
-                auto       outcome = jit->generate(*owned, target, need, workspaceLimit, exclude);
+                const auto need = static_cast<size_t>(room) - chosen.size();
+                if(capturing)
+                {
+                    if(chosen.empty())
+                        std::cerr << "hipblaslt error: "
+                                  << captureSkipMessage(problem.m, problem.n, problem.k)
+                                  << std::endl;
+                }
+                else
+                {
+                DeviceTarget target;
+                if(!DeviceTarget::make(handle->device, target).ok() || !target.hardware)
+                    return 0;
+                auto outcome = jit->generate(*owned, target, need, workspaceLimit, exclude);
                 for(auto& bundle : outcome.bundles)
                 {
                     hipblaslt_ext::experimental::jit::Diagnostics diagnostics;
@@ -841,6 +911,7 @@ namespace hipblaslt_jit
                         continue;
                     std::cerr << "hipblaslt warning: JIT heuristic " << failure.message << std::endl;
                     break;
+                }
                 }
             }
 

@@ -78,6 +78,8 @@ namespace hipblaslt_jit
         std::vector<uint8_t>     entry;
         std::vector<std::string> kernelNames; // every main kernel the solutions name
         std::vector<BuildUnit>   units;
+        // Appended after the HIP defaults, so -std=c++20 overrides -std=c++17.
+        std::vector<std::string> hipFlags;
     };
 
     constexpr int jitCodeObjectVersion = 4;

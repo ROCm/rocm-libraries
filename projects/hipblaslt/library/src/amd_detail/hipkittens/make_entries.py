@@ -1,0 +1,182 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Writes the compiled-in resources of the JIT HipKittens backend.
+
+Each variant manifest becomes a one-solution TensileLite library (the entry the
+backend copies for each request) whose solution is the manifest's custom kernel,
+next to the variant's HIP template. The staged header manifest is compiled in
+too, so the backend can verify the headers it finds at run time.
+"""
+
+import argparse
+import contextlib
+import copy
+import io
+import json
+import sys
+from pathlib import Path
+
+import msgpack
+import yaml
+
+
+def cxxString(text):
+    return json.dumps(text)
+
+
+def cxxBytes(name, data):
+    rows = [", ".join(str(b) for b in data[i : i + 24]) for i in range(0, len(data), 24)]
+    body = ",\n            ".join(rows)
+    return f"        const unsigned char {name}[] = {{\n            {body}}};\n"
+
+
+def view(name):
+    return f"{{reinterpret_cast<const char*>({name}), sizeof({name})}}"
+
+
+# More columns than any matrix has.
+ALL_COLUMNS = 2**32 - 1
+
+
+
+def requirePositiveK(entry):
+    """The kernels do not serve K = 0, which hipBLASLt makes of alpha 0."""
+    term = {"type": "SizeGreaterThan", "index": 3, "value": 0}
+
+    def add(predicate):
+        if predicate.get("type") != "And" or not isinstance(predicate.get("value"), list):
+            raise RuntimeError("entry predicate is not an And")
+        predicate["value"].append(dict(term))
+
+    add(entry["solutions"][0]["problemPredicate"])
+    for row in entry["library"]["rows"]:
+        add(row["predicate"])
+
+
+def wholeMatrixLimits(entry):
+    """The kernels address each matrix from one buffer descriptor, not one per
+    macro tile, so TensileLite's buffer limit checks must span every column."""
+    terms = list(entry["solutions"][0]["problemPredicate"]["value"])
+    for row in entry["library"]["rows"]:
+        terms += row["predicate"]["value"]
+    found = set()
+    for term in terms:
+        if term["type"] == "BufferLoadOffsetLimitCheck":
+            term["value"].update(DUorMT0=ALL_COLUMNS, DUorMT1=ALL_COLUMNS)
+        elif term["type"] in ("BufferLoadOffsetLimitCheck_Beta", "BufferStoreOffsetLimitCheck"):
+            term["value"] = ALL_COLUMNS
+        else:
+            continue
+        found.add(term["type"])
+    if len(found) != 3:
+        raise RuntimeError(f"TensileLite wrote only the buffer limit checks {sorted(found)}")
+
+
+class TensileLite:
+    """The TensileLite state make_entries needs to describe a custom kernel."""
+
+    def __init__(self, compiler, architectures):
+        from Tensile.Common.Architectures import gfxToIsa
+        from Tensile.Common.Capabilities import makeIsaInfoMap
+        from Tensile.Common.GlobalParameters import (
+            assignGlobalParameters,
+            restoreDefaultGlobalParameters,
+        )
+        from Tensile.Toolchain.Component import Assembler
+        from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
+
+        cxx, _ = validateToolchain(compiler, ToolchainDefaults.HIP_CONFIG)
+        self.assembler = Assembler(cxx, "4")
+        self.isas = {arch: gfxToIsa(arch) for arch in architectures}
+        self.isaInfoMap = makeIsaInfoMap(list(self.isas.values()), cxx)
+        restoreDefaultGlobalParameters()
+        assignGlobalParameters(
+            {"CodeObjectVersion": "4", "LibraryFormat": "msgpack", "PrintLevel": 0},
+            self.isaInfoMap,
+        )
+
+    def entry(self, variant):
+        from Tensile.Common import state
+        from Tensile.SolutionLibrary import MasterSolutionLibrary
+        from Tensile.SolutionStructs.Solution import Solution
+
+        config = copy.deepcopy(variant["Solution"])
+        config["KernelLanguage"] = "Assembly"
+        config["ISA"] = self.isas[variant["Architecture"]]
+        config["CustomKernelName"] = config["CustomKernel"]["name"]
+        solution = Solution(config, False, True, False, self.assembler, self.isaInfoMap)
+        if not solution["Valid"]:
+            raise RuntimeError(f"TensileLite rejects {config['CustomKernelName']}")
+        library = MasterSolutionLibrary.BenchmarkingLibrary(
+            [solution], self.assembler, False, True, False, self.isaInfoMap
+        )
+        library.applyNaming(False)
+        entry = state(library)
+        if entry["solutions"][0]["kernelName"] != config["CustomKernelName"]:
+            raise RuntimeError(f"TensileLite renamed {config['CustomKernelName']}")
+        wholeMatrixLimits(entry)
+        requirePositiveK(entry)
+        return msgpack.packb(entry)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--compiler", required=True, help="the HIP compiler")
+    parser.add_argument("--headers", required=True, help="the staged header manifest.json")
+    parser.add_argument("--output", required=True, help="the C++ file to write")
+    parser.add_argument("variants", nargs="+", help="variant manifests")
+    args = parser.parse_args()
+
+    manifests = [(Path(path), yaml.safe_load(Path(path).read_text())) for path in args.variants]
+    log = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(log):
+            tensile = TensileLite(args.compiler, {m["Architecture"] for _, m in manifests})
+            entries = [tensile.entry(manifest) for _, manifest in manifests]
+    except Exception:
+        sys.stderr.write(log.getvalue())
+        raise
+
+    headerManifest = Path(args.headers).read_bytes()
+    headers = json.loads(headerManifest)["files"]
+
+    out = io.StringIO()
+    out.write("// Generated by make_entries.py; do not edit.\n")
+    out.write('#include "hipblaslt-jit-hipkittens.hpp"\n\n')
+    out.write("namespace hipblaslt_ext::experimental::jit::hipkittens::detail\n{\n")
+    out.write("    namespace\n    {\n")
+    out.write(cxxBytes("manifest", headerManifest))
+    for i, ((path, manifest), entry) in enumerate(zip(manifests, entries)):
+        source = (path.parent / manifest["Template"]).read_bytes()
+        out.write(cxxBytes(f"source{i}", source))
+        out.write(cxxBytes(f"entry{i}", entry))
+    out.write("    }\n\n")
+    out.write("    const Resources& resources()\n    {\n")
+    out.write("        static const Resources value{\n")
+    out.write(f"            {view('manifest')},\n            {{\n")
+    for header in headers:
+        out.write(
+            f"                {{{cxxString(header['path'])}, {header['size']}, "
+            f"{cxxString(header['sha256'])}}},\n"
+        )
+    out.write("            },\n            {\n")
+    for i, (path, manifest) in enumerate(manifests):
+        flags = ", ".join(cxxString(flag) for flag in manifest["HipFlags"])
+        used = manifest["Resources"]
+        out.write(
+            f"                {{{cxxString(path.stem)},\n"
+            f"                 {cxxString(manifest['Architecture'])},\n"
+            f"                 {cxxString(manifest['Solution']['CustomKernel']['name'])},\n"
+            f"                 {view(f'source{i}')},\n"
+            f"                 {view(f'entry{i}')},\n"
+            f"                 {{{flags}}},\n"
+            f"                 {{{used['KernargBytes']}, {used['LdsBytes']}, {used['Vgprs']}, "
+            f"{used['VgprSpills']}}}}},\n"
+        )
+    out.write("            }};\n        return value;\n    }\n}\n")
+
+    Path(args.output).write_text(out.getvalue())
+
+
+if __name__ == "__main__":
+    main()
