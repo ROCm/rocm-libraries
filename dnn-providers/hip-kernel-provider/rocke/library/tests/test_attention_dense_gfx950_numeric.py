@@ -1450,6 +1450,21 @@ class TestDenseLseNumeric:
         assert (out.float() - expected_out).abs().max().item() < _tolerance(dtype)
         assert (lse - expected_lse).abs().max().item() < _tolerance(dtype)
         assert torch.equal(storage[count:], torch.full_like(storage[count:], 12345.0))
+        # Packed varlen is the one mode where LSE changes the O store guard
+        # (stores only rows that exist), so pin the bits against LSE off.
+        off_out = torch.full_like(q, float("nan"))
+        run_attention_dense_torch(
+            spec=replace(spec, emit_lse=False),
+            q=q,
+            k=k,
+            v=v,
+            out=off_out,
+            scale=scale,
+            cu_seqlens_q=cu_q,
+            cu_seqlens_kv=cu_k,
+        )
+        torch.cuda.synchronize()
+        assert torch.equal(out.view(torch.int16), off_out.view(torch.int16))
 
     @pytest.mark.parametrize(
         "failure",
