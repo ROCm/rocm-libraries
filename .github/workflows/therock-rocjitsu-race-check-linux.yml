@@ -49,14 +49,9 @@ jobs:
       run:
         shell: bash
     env:
-      VENV_DIR: ${{ github.workspace }}/.venv
       ARTIFACT_RUN_ID: ${{ github.run_id }}
       OUTPUT_ARTIFACTS_DIR: ./build
-      ROCM_PATH: ${{ github.workspace }}/build
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
-      ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
-      ROCJITSU_BUILD_DIR: ${{ github.workspace }}/rocjitsu-build
-      RACE_REPORT_DIR: ${{ github.workspace }}/race-reports
     steps:
       # The job needs three inputs in one workspace:
       #   1. TheRock actions/scripts to fetch the exact artifacts from this run.
@@ -76,6 +71,16 @@ jobs:
           path: rocm-libraries
           sparse-checkout: .github/scripts
           sparse-checkout-cone-mode: true
+
+      # Resolve paths inside the container; github.workspace may name the host mount.
+      - name: Resolve race-check paths
+        run: |
+          printf '%s\n' \
+            "VENV_DIR=${PWD}/.venv" \
+            "ROCM_PATH=$(realpath -m "${OUTPUT_ARTIFACTS_DIR}")" \
+            "ROCJITSU_SOURCE_DIR=${PWD}/rocm-systems/emulation/rocjitsu" \
+            "ROCJITSU_BUILD_DIR=${PWD}/rocjitsu-build" \
+            "RACE_REPORT_DIR=${PWD}/race-reports" >> "${GITHUB_ENV}"
 
       - name: Checkout rocm-systems for rocjitsu
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -121,7 +126,7 @@ jobs:
       - name: Install GEMM sweep requirements
         run: |
           python ./build_tools/install_additional_requirements.py \
-            --requirements-files "share/hipblaslt/tensilelite/rocjitsu/requirements.txt"
+            --requirements-files "${ROCM_PATH}/share/hipblaslt/tensilelite/rocjitsu/requirements.txt"
 
       - name: Check race sweep tooling
         run: |
