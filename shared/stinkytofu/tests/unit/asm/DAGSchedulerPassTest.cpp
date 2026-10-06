@@ -1470,6 +1470,41 @@ TEST_F(DAGSchedulerPassTest, ParentValuUnlocksEarlierBlockedWmmaBeforeLaterReady
     EXPECT_LT(positionOf(*bb, perm20), positionOf(*bb, wmma3));
 }
 
+// MX128 splat v_perm per WMMA: each parent belongs in the issue window of the
+// WMMA just before its consumer. Once perm20 issues, wmma1 sits in wmmaQueue
+// waiting on perm20's latency and wmma2 becomes the nearest blocked WMMA, so
+// unlocking "the earliest blocked WMMA" pulls perm24 ahead of wmma1 and the
+// splat lives in a VGPR one window longer than needed.
+TEST_F(DAGSchedulerPassTest, ParentValuWaitsForPreviousWmmaToIssue) {
+    StinkyInstruction* wmma0 = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
+    ASSERT_NE(wmma0, nullptr);
+
+    StinkyInstruction* perm20 =
+        createVAddInBlock(bb, arch, /*destReg=*/20, /*src0Reg=*/21, /*src1Reg=*/22);
+    StinkyInstruction* wmma1 = createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/200);
+    ASSERT_NE(wmma1, nullptr);
+    wmma1->addSrcReg(StinkyRegister("v", 20, 1));
+
+    StinkyInstruction* perm24 =
+        createVAddInBlock(bb, arch, /*destReg=*/24, /*src0Reg=*/25, /*src1Reg=*/26);
+    StinkyInstruction* wmma2 = createWmmaScaleF8(/*destStart=*/300, /*src0Start=*/400);
+    ASSERT_NE(wmma2, nullptr);
+    wmma2->addSrcReg(StinkyRegister("v", 24, 1));
+
+    createMovableDsLoad(/*destReg=*/700, /*addrReg=*/80, /*ldsToken=*/1);
+    createMovableDsLoad(/*destReg=*/704, /*addrReg=*/80, /*ldsToken=*/2);
+
+    const int beforeCount = countStinkyInstructions(*bb);
+    runPassWithMxUnit1Scheduling();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
+
+    EXPECT_LT(positionOf(*bb, wmma0), positionOf(*bb, perm20));
+    EXPECT_LT(positionOf(*bb, perm20), positionOf(*bb, wmma1));
+    EXPECT_LT(positionOf(*bb, wmma1), positionOf(*bb, perm24))
+        << "wmma2's parent must wait for wmma1, the WMMA right before its consumer";
+    EXPECT_LT(positionOf(*bb, perm24), positionOf(*bb, wmma2));
+}
+
 // Next-iter / already-consumed ds_loads can get a better dsReadPriority than
 // the load that still unlocks a later WMMA (loop-head affinity via PHI). If
 // those preloads issue first they occupy the LDS queue and the later WMMA
@@ -1493,6 +1528,46 @@ TEST_F(DAGSchedulerPassTest, PendingWmmaDsLoadBeatsNextIterPreload) {
         << "the ds_load that unlocks a still-pending WMMA must issue before a "
            "preload that feeds no pending WMMA";
     EXPECT_LT(positionOf(*bb, needed), positionOf(*bb, wmma1));
+}
+
+// MX128 loop body under LockDsReadOrder. This trip's MXSA/MXSB loads feed one
+// WMMA through splat VALUs; the next trip's MXSA preload overwrites a register
+// an earlier WMMA still reads and waits on the LDS1 barrier. Ordering the
+// parent tier MXSA-before-MXSB chained the current MXSB behind that preload,
+// holding the WMMA back until after the barrier.
+TEST_F(DAGSchedulerPassTest, ParentTierDsLoadOrderFollowsWmmaConsumerNotKind) {
+    bb->addSuccessor(bb);
+
+    StinkyInstruction* mxsaCur = createMovableDsLoad(/*destReg=*/600, /*addrReg=*/80,
+                                                     /*ldsToken=*/0);
+    StinkyInstruction* mxsbCur = createMovableDsLoad(/*destReg=*/620, /*addrReg=*/81,
+                                                     /*ldsToken=*/0);
+
+    StinkyInstruction* wmmaHead = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
+    ASSERT_NE(wmmaHead, nullptr);
+    wmmaHead->addSrcReg(StinkyRegister("v", 652, 1));  // MXSB
+    wmmaHead->addSrcReg(StinkyRegister("v", 640, 1));  // MXSA, loop-carried preload
+
+    createVAddInBlock(bb, arch, /*destReg=*/610, /*src0Reg=*/600, /*src1Reg=*/600);
+    createVAddInBlock(bb, arch, /*destReg=*/611, /*src0Reg=*/620, /*src1Reg=*/620);
+    StinkyInstruction* wmmaCur = createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/200);
+    ASSERT_NE(wmmaCur, nullptr);
+    wmmaCur->addSrcReg(StinkyRegister("v", 611, 1));  // MXSB
+    wmmaCur->addSrcReg(StinkyRegister("v", 610, 1));  // MXSA
+
+    StinkyInstruction* wait = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1).second;
+    StinkyInstruction* mxsaNext = createMovableDsLoad(/*destReg=*/640, /*addrReg=*/80,
+                                                      /*ldsToken=*/1);
+
+    const int beforeCount = countStinkyInstructions(*bb);
+    runPassWithMxUnit1Scheduling();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
+
+    EXPECT_LT(positionOf(*bb, mxsaCur), positionOf(*bb, mxsbCur));
+    EXPECT_LT(positionOf(*bb, mxsbCur), positionOf(*bb, mxsaNext))
+        << "the MXSB load of this trip's WMMA must not be chained behind the next "
+           "trip's barrier-gated MXSA preload";
+    EXPECT_LT(positionOf(*bb, wait), positionOf(*bb, mxsaNext));
 }
 
 // MX128 loop body: two WMMAs on the same accumulator read their own buffers
@@ -1878,6 +1953,69 @@ TEST_F(DAGSchedulerPassTest, HiddenStallSaluFillsWmmaWindowBeforeNextWmma) {
                                 "window (each 1-cycle wait hidden by the "
                                 "in-flight WMMA), ahead of the independent "
                                 "WMMA #1";
+}
+
+// Before the region's first WMMA there is no co-issue window, but the WMMA
+// itself stalls on its parent VALU. A RAW-stalled SALU that finishes issuing
+// inside that stall is free, so it must go ahead of the WMMA instead of the WMMA
+// being forced first. When the SALU would delay the WMMA, the WMMA keeps going
+// first.
+static std::vector<StinkyInstruction*> buildFirstWmmaStallCase(BasicBlock* bb, GfxArchID arch,
+                                                               int parentLatency) {
+    StinkyInstruction* parent =
+        createVAddInBlock(bb, arch, /*destReg=*/10, /*src0Reg=*/11, /*src1Reg=*/12);
+    parent->issueCycles = 1;
+    parent->latencyCycles = parentLatency;
+
+    AsmIRBuilder builder(*bb, arch);
+    StinkyInstruction* producer = builder.create(getMCIDByUOp(GFX::s_add_u32, arch));
+    producer->addDestReg(StinkyRegister("s", 100, 1));
+    producer->addSrcReg(StinkyRegister("s", 0, 1));
+    producer->addSrcReg(StinkyRegister("s", 1, 1));
+    producer->issueCycles = 1;
+    producer->latencyCycles = 2;
+
+    StinkyInstruction* stalled = builder.create(getMCIDByUOp(GFX::s_add_u32, arch));
+    stalled->addDestReg(StinkyRegister("s", 101, 1));
+    stalled->addSrcReg(StinkyRegister("s", 100, 1));
+    stalled->addSrcReg(StinkyRegister("s", 1, 1));
+    stalled->issueCycles = 1;
+    stalled->latencyCycles = 1;
+    return {parent, producer, stalled};
+}
+
+TEST_F(DAGSchedulerPassTest, StalledSaluFillsFirstWmmaSourceStall) {
+    const std::vector<StinkyInstruction*> nodes =
+        buildFirstWmmaStallCase(bb, arch, /*parentLatency=*/5);
+    StinkyInstruction* wmma = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
+    ASSERT_NE(wmma, nullptr);
+    wmma->addSrcReg(StinkyRegister("v", 10, 1));
+
+    const int beforeCount = countStinkyInstructions(*bb);
+    runPassWithMxUnit1Scheduling();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
+
+    EXPECT_LT(positionOf(*bb, nodes[0]), positionOf(*bb, wmma));
+    EXPECT_LT(positionOf(*bb, nodes[1]), positionOf(*bb, wmma));
+    EXPECT_LT(positionOf(*bb, nodes[2]), positionOf(*bb, wmma))
+        << "a SALU whose 1-cycle RAW wait ends inside the first WMMA's own source "
+           "stall is free and must not be pushed behind a forced WMMA";
+}
+
+TEST_F(DAGSchedulerPassTest, StalledSaluDoesNotDelayFirstWmma) {
+    const std::vector<StinkyInstruction*> nodes =
+        buildFirstWmmaStallCase(bb, arch, /*parentLatency=*/2);
+    StinkyInstruction* wmma = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
+    ASSERT_NE(wmma, nullptr);
+    wmma->addSrcReg(StinkyRegister("v", 10, 1));
+
+    const int beforeCount = countStinkyInstructions(*bb);
+    runPassWithMxUnit1Scheduling();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
+
+    EXPECT_LT(positionOf(*bb, wmma), positionOf(*bb, nodes[2]))
+        << "a stalled SALU that cannot finish before the first WMMA's sources are "
+           "ready would delay it and must stay behind it";
 }
 
 // ---------------------------------------------------------------------------

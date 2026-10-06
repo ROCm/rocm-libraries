@@ -960,8 +960,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     DAGNode* pickFreeBest(const ReadySetByDAGid& queue, int* outWait = nullptr,
                           bool allowHiddenStall = false, const DAGNode* mustFeed = nullptr) const;
     std::pair<DAGNode*, int> findMostReadyWMMA() const;
-    // Earliest still-blocked matrix op a queued parent VALU feeds. nullptr if none.
-    DAGNode* earliestBlockedWmmaFedByReadyParent() const;
+    // Next matrix op in program order, if it is still blocked and a queued
+    // parent VALU feeds it. nullptr otherwise.
+    DAGNode* nextWmmaFedByReadyParent() const;
     // WMMA Phase B is about to issue, or the blocked WMMA currently being
     // unlocked by wmmaParentValuQueue. nullptr if neither exists.
     DAGNode* selectTargetWmma() const;
@@ -1013,6 +1014,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int outstandingWmmas() const;
     int soonestQueueEnd() const;
     int freeCoIssueSpace() const;
+    int preFirstWmmaStallShadow() const;
     DAGNode* popNonWmma(DAGNode* node, int pickKind);
 
     void restoreCrossBBStateFromLoop();
@@ -1170,6 +1172,14 @@ void CDNA5ReadyQueue::elapseDsPacingWait(int wait) {
         dsSchedulingBudgetUsed_ += wait - capWait;
         dsReadInflight_.advanceThrottle(wait - capWait);
     }
+}
+
+// Before the region's first WMMA there is no co-issue window, but the most-ready
+// WMMA still stalls on its own sources. Work that finishes issuing within that
+// stall does not delay the WMMA. 0 once a WMMA has issued or when it is ready.
+int CDNA5ReadyQueue::preFirstWmmaStallShadow() const {
+    if (wmmaIssuedCountThisRegion_ != 0 || wmmaQueue.empty()) return 0;
+    return std::max(0, findMostReadyWMMA().second);
 }
 
 // Advance the co-issue timeline and the elapse-time clock, and decay the RAW
@@ -1537,6 +1547,7 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
     // A stall is only hidden if the instruction can actually issue when it
     // expires, so the shadow stops at the first blocked cycle.
     const int coIssueSpace = freeCoIssueSpace();
+    const int preWmmaShadow = allowHiddenStall && coIssueSpace <= 0 ? preFirstWmmaStallShadow() : 0;
     DAGNode* best = nullptr;
     int bestElapse = INT_MIN;
     int bestWait = 0;
@@ -1546,10 +1557,12 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
         if (mustFeed && regionDag_ && !parentFeedsWmma(n, mustFeed)) continue;
         const int wait = std::max(getMaxSrcDataWait(n), getHazardWait(n));
         // Tolerate a wait only if it fits the WMMA latency shadow and the dest does
-        // not clobber a live WMMA src (then the stall is free).
-        if (wait > 0 && (!allowHiddenStall || coIssueSpace <= 0 || wait > coIssueSpace ||
-                         destOverlapsActiveWmmaSrc(n)))
-            continue;
+        // not clobber a live WMMA src, or if the node finishes issuing before the
+        // first WMMA's own source stall ends (then the stall is free).
+        const bool hiddenInWindow =
+            coIssueSpace > 0 && wait <= coIssueSpace && !destOverlapsActiveWmmaSrc(n);
+        const bool hiddenBeforeFirstWmma = wait + n->inst->issueCycles <= preWmmaShadow;
+        if (wait > 0 && (!allowHiddenStall || !(hiddenInWindow || hiddenBeforeFirstWmma))) continue;
         const int elapse = nodeElapseKey(n);
         // MSB bank affinity: a tiebreak BELOW the free/hazard tier and ABOVE elapse
         // — prefer a same-bank candidate to avoid an s_set_vgpr_msb switch. Inert
@@ -1654,30 +1667,31 @@ bool CDNA5ReadyQueue::dsFeedsIssuedOnlyWmma(const DAGNode* ds) const {
     return false;
 }
 
-// Earliest matrix op that a queued parent VALU still has to unlock, in program
+// The matrix op a queued parent VALU may unlock: only the next one in program
 // order. Ordering by DAG id rather than data-readiness is deliberate:
 // getMaxSrcDataWait only sees producers that have already issued and are still
 // counting down, so a later WMMA whose ds_loads are not out yet reports wait 0
 // and outranks an earlier one that is legitimately waiting on in-flight loads.
-// That inversion is what pulls a far-future WMMA's operand setup ahead of the
-// nearest one's.
-DAGNode* CDNA5ReadyQueue::earliestBlockedWmmaFedByReadyParent() const {
+// Restricting to the next one keeps each splat v_perm in the issue window of
+// the WMMA just before its consumer. Any earlier pending WMMA, even one only
+// waiting on its own parent's latency, would otherwise let the following
+// WMMA's parent issue a window early and hold its VGPR that much longer.
+DAGNode* CDNA5ReadyQueue::nextWmmaFedByReadyParent() const {
     if (!regionDag_ || wmmaParentValuQueue.empty()) return nullptr;
 
-    DAGNode* best = nullptr;
-    for (DAGNode* parent : wmmaParentValuQueue) {
-        if (parent->id >= regionDag_->graph.size()) continue;
-        for (unsigned succId : regionDag_->graph[parent->id]) {
-            if (succId >= regionDag_->nodes.size()) continue;
-            DAGNode* succ = const_cast<DAGNode*>(&regionDag_->nodes[succId]);
-            if (!isMatrixInstruction(*succ->inst)) continue;
-            // in-degree 0 means every predecessor already issued, so nothing in
-            // wmmaParentValuQueue feeds it and it needs no unlocking.
-            if (succ->inDegree == 0) continue;
-            if (best == nullptr || succ->id < best->id) best = succ;
+    DAGNode* next = nullptr;
+    for (const DAGNode& n : regionDag_->nodes) {
+        if (isMatrixInstruction(*n.inst) && wmmaStillPending(&n)) {
+            next = const_cast<DAGNode*>(&n);
+            break;
         }
     }
-    return best;
+    // in-degree 0 means every predecessor already issued, so nothing in
+    // wmmaParentValuQueue feeds it and it needs no unlocking.
+    if (next == nullptr || next->inDegree == 0) return nullptr;
+    for (DAGNode* parent : wmmaParentValuQueue)
+        if (parentFeedsWmma(parent, next)) return next;
+    return nullptr;
 }
 
 // Ready WMMA if one can issue; otherwise the blocked matrix op a ready parent
@@ -1686,11 +1700,11 @@ DAGNode* CDNA5ReadyQueue::selectTargetWmma() const {
     // Every WMMA in wmmaQueue has in-degree 0, so no queued parent VALU feeds
     // one: naming it the target makes pickFreeBest(mustFeed=...) match nothing
     // and leaves the unlock path dead for as long as any other WMMA is ready.
-    // Aim at the nearest still-blocked WMMA a queued parent can unlock --
+    // Aim at the next WMMA in program order when a queued parent unlocks it --
     // during the co-issue window so that parent rides the in-flight WMMA, and
     // after the window too so a later already-ready WMMA (C+32, wait 0) cannot
     // drain before an earlier one that only needs its v_perm (C+24).
-    DAGNode* blocked = earliestBlockedWmmaFedByReadyParent();
+    DAGNode* blocked = nextWmmaFedByReadyParent();
     if (coIssueCyclePos_ < activeWmmaLatency_ && blocked) return blocked;
     if (!wmmaQueue.empty()) {
         DAGNode* ready = findMostReadyWMMA().first;
@@ -2822,6 +2836,9 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     // Phase E — forced WMMA: pick the most-ready WMMA before barriers.
     if (isPromote(PromotePhase::ForcedWmma) && !wmmaQueue.empty()) {
         auto [bestWMMA, bestLatency] = findMostReadyWMMA();
+        PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase E forced WMMA dagId=" << bestWMMA->id
+                             << " bestLatency=" << bestLatency << " wmmaIssuedInRegion="
+                             << wmmaIssuedCountThisRegion_ << " clock=" << clock_ << "\n");
         // The queued WMMA can only start once its sources arrive: that stall elapses.
         if (wmmaQueueCover() > 0 && bestLatency > 0) advanceTime(bestLatency, TimeKind::Elapsed);
         DAGNode* node = pickOneFromWMMA(bestWMMA);
