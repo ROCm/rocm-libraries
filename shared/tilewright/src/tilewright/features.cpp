@@ -493,7 +493,14 @@ bool is_kernel_feasible(const Problem& p,
   if (M <= 256 && N <= 256 && K < 1024 && B != 1 && (MT_M < M || MT_N < N)) return false;
   // 2) Dot2 is only correct for M < 3.
   if (c.mi.m == 1 && c.mi.n == 1 && c.mi.k == 64 && M > 2) return false;
-  // 3) Non-temporal hints: on 128-byte-aligned K a skinny problem requires the
+  // 3) An operand whose free dimension is contiguous is read in global-read
+  //    vectors, so that dimension must hold one (TensileLite's
+  //    LeadingFree0/1SizesGreaterOrEqual; not emitted for Int8x4).
+  if (p.a_dtype != DataType::Int8x4) {
+    if (!a_trans && M < c.grvw_a) return false;
+    if (b_trans && N < c.grvw_b) return false;
+  }
+  // 4) Non-temporal hints: on 128-byte-aligned K a skinny problem requires the
   //    matching operand's non-temporal variant when the pool has one, and every
   //    other aligned problem rejects hinted kernels.
   const bool k_aligned  = (K % 1024) * a_bits % 1024 == 0;

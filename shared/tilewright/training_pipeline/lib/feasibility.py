@@ -120,6 +120,8 @@ def is_kernel_feasible(
     cache_hints_a: int,
     cache_hints_b: int,
     *,
+    grvw_a: int,
+    grvw_b: int,
     nt_a_available: bool,
     nt_b_available: bool,
 ) -> bool:
@@ -136,6 +138,13 @@ def is_kernel_feasible(
     # Dot2 kernels are only correct for M < 3.
     if MI_M == 1 and MI_N == 1 and MI_K == 64 and M > 2:
         return False
+    # A contiguous free dimension holds one global-read vector (TensileLite's
+    # LeadingFree0/1SizesGreaterOrEqual; not emitted for Int8x4).
+    if normalize_dtype_name(a_dtype) != "int8x4":
+        if not a_trans and M < int(grvw_a):
+            return False
+        if b_trans and N < int(grvw_b):
+            return False
     if (K * a_bits) % 1024 == 0 and (MT_K * a_bits) % 1024 == 0:
         if M <= MT_M * 2 and not b_trans and (N * b_bits) // max(M * a_bits, 1) > 5:
             if nt_b_available and chb != NON_TEMPORAL:
@@ -186,6 +195,8 @@ def passes_gates(
         config["mi_k"],
         config["cache_hints_a"],
         config["cache_hints_b"],
+        grvw_a=config["grvw_a"],
+        grvw_b=config["grvw_b"],
         nt_a_available=nt_a_available,
         nt_b_available=nt_b_available,
     )

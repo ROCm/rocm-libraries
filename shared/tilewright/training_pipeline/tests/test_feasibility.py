@@ -12,7 +12,7 @@ from lib.hardware import DeviceHardware, arch_constants
 from test_mlrec import random_bundle
 
 
-def cfg(mt=(128, 128, 64), mi=(16, 16, 32), cha=0, chb=0):
+def cfg(mt=(128, 128, 64), mi=(16, 16, 32), cha=0, chb=0, grvw=(8, 8)):
     return dict(
         mt_m=mt[0],
         mt_n=mt[1],
@@ -23,8 +23,8 @@ def cfg(mt=(128, 128, 64), mi=(16, 16, 32), cha=0, chb=0):
         occupancy=1,
         cache_hints_a=cha,
         cache_hints_b=chb,
-        grvw_a=8,
-        grvw_b=8,
+        grvw_a=grvw[0],
+        grvw_b=grvw[1],
         gwvw_d=4,
     )
 
@@ -55,6 +55,17 @@ def test_dot2_only_for_tiny_m():
     dot2 = cfg(mi=(1, 1, 64))
     assert ok(prob(2, 4096, 100), dot2)
     assert not ok(prob(3, 4096, 100), dot2)
+
+
+def test_contiguous_free_dimension_holds_one_global_read_vector():
+    wide_a, wide_b = cfg(grvw=(8, 1)), cfg(grvw=(1, 8))
+    assert not ok(prob(7, 64, 256, ta="N", tb="N"), wide_a)
+    assert ok(prob(8, 64, 256, ta="N", tb="N"), wide_a)
+    assert ok(prob(1, 64, 256, ta="T", tb="N"), wide_a)
+    assert not ok(prob(64, 7, 256, ta="T", tb="T"), wide_b)
+    assert ok(prob(64, 8, 256, ta="T", tb="T"), wide_b)
+    assert ok(prob(64, 1, 256, ta="T", tb="N"), wide_b)
+    assert ok(prob(4, 4, 256, ta="N", tb="T", dt="int8x4"), cfg(grvw=(8, 8)))
 
 
 def test_small_batched_problem_needs_one_tile():
@@ -135,6 +146,7 @@ def test_matches_engine_on_random_pools():
     rng = random.Random(3)
     dtypes = ["bfloat16", "half", "float", "xfloat32", "float8", "bfloat8"]
     dtypes += ["float8_fnuz", "float8bfloat8", "float4", "int8", "double", "float6"]
+    dtypes += ["int8x4"]
     partial = 0
     for _ in range(600):
         mode = rng.choice(["none", "a", "b", "both", "temporal"])
@@ -159,6 +171,7 @@ def test_matches_engine_on_random_pools():
                     ),
                     cha=cha,
                     chb=chb,
+                    grvw=(rng.choice([1, 2, 4, 8, 16]), rng.choice([1, 2, 4, 8, 16])),
                 )
             )
         a = rng.choice(dtypes)
