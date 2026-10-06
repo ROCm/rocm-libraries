@@ -5,6 +5,7 @@
     'CUCount': 228,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'AccumShuffle': 0,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -263,6 +264,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'AccumShuffle': 0,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -509,6 +511,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'AccumShuffle': 0,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -770,6 +773,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'AccumShuffle': 0,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -1048,6 +1052,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'AccumShuffle': 0,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -1306,6 +1311,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'AccumShuffle': 0,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -1578,6 +1584,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'AccumShuffle': 0,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -1839,6 +1846,7 @@
     'CUCount': 228,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'AccumShuffle': 0,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -2100,6 +2108,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'AccumShuffle': 0,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -2349,6 +2358,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'AccumShuffle': 0,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -2610,6 +2620,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'AccumShuffle': 0,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -2870,6 +2881,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'AccumShuffle': 0,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
