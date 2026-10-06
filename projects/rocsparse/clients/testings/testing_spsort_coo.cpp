@@ -228,6 +228,48 @@ void testing_spsort_coo_bad_arg(const Arguments& arg)
             expect_mismatch(safe_size, safe_size, safe_size, get_indextype<I>(), rocsparse_index_base_zero, other_ttype, rocsparse_status_invalid_value);
             // clang-format on
 
+            // Unsupported data types.
+            for(const rocsparse_datatype unsupported_ttype :
+                {rocsparse_datatype_u8_r, rocsparse_datatype_i32_r, rocsparse_datatype_u32_r})
+            {
+                rocsparse_local_spmat mat_A(safe_size,
+                                            safe_size,
+                                            safe_size,
+                                            d_coo_row_ind,
+                                            d_coo_col_ind,
+                                            d_coo_val,
+                                            get_indextype<I>(),
+                                            rocsparse_index_base_zero,
+                                            unsupported_ttype);
+                rocsparse_local_spmat mat_B(safe_size,
+                                            safe_size,
+                                            safe_size,
+                                            d_coo_row_ind,
+                                            d_coo_col_ind,
+                                            d_coo_val,
+                                            get_indextype<I>(),
+                                            rocsparse_index_base_zero,
+                                            unsupported_ttype);
+                EXPECT_ROCSPARSE_STATUS(
+                    rocsparse_spsort_buffer_size(handle,
+                                                 descr,
+                                                 mat_A,
+                                                 mat_B,
+                                                 rocsparse_spsort_stage_analysis,
+                                                 &buffer_size,
+                                                 nullptr),
+                    rocsparse_status_invalid_value);
+                EXPECT_ROCSPARSE_STATUS(rocsparse_spsort(handle,
+                                                         descr,
+                                                         mat_A,
+                                                         mat_B,
+                                                         rocsparse_spsort_stage_analysis,
+                                                         0,
+                                                         nullptr,
+                                                         nullptr),
+                                        rocsparse_status_invalid_value);
+            }
+
             rocsparse_local_spmat mat_B_csr(safe_size,
                                             safe_size,
                                             safe_size,
@@ -394,13 +436,13 @@ void testing_spsort_coo_bad_arg(const Arguments& arg)
         EXPECT_ROCSPARSE_STATUS(
             rocsparse_spsort_set_input(
                 handle, descr, rocsparse_spsort_input_alg, &alg, sizeof(alg), nullptr),
-            rocsparse_status_internal_error);
+            rocsparse_status_invalid_value);
 
         // The direction cannot be changed after analysis.
         EXPECT_ROCSPARSE_STATUS(
             rocsparse_spsort_set_input(
                 handle, descr, rocsparse_spsort_input_direction, &dir, sizeof(dir), nullptr),
-            rocsparse_status_internal_error);
+            rocsparse_status_invalid_value);
 
         CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
         CHECK_ROCSPARSE_ERROR(rocsparse_spsort_descr_destroy(handle, descr, nullptr));
