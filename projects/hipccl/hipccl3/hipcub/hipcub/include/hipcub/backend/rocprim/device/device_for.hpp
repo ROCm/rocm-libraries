@@ -39,6 +39,12 @@
 
 #include <type_traits>
 
+#include _HIPCUB_STD_INCLUDE(__mdspan/extents.h)
+BEGIN_HIPCUB_NAMESPACE
+template<class IndexType, size_t... Extents>
+using extents = _HIPCUB_STD::extents<IndexType, Extents...>;
+END_HIPCUB_NAMESPACE
+
 BEGIN_HIPCUB_NAMESPACE
 
 namespace detail
@@ -67,7 +73,7 @@ namespace for_each_in_extents
 template<class OpT, class IndexType, class ExtentsIndexType, size_t... Extents>
 struct OpWrapper
 {
-    using extents_type = ::hipcub::extents<ExtentsIndexType, Extents...>;
+    using extents_type = _HIPCUB_STD::extents<ExtentsIndexType, Extents...>;
     OpT op;
 
     template<class IndexSeqType>
@@ -311,11 +317,11 @@ HIPCUB_RUNTIME_FUNCTION
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t ForEachInExtents(void*   d_temp_storage,
                                        size_t& temp_storage_bytes,
-                                       const ::hipcub::extents<IndexType, Extents...>& extents,
-                                       OpT                                             op,
-                                       hipStream_t                                     stream = {})
+                                       const _HIPCUB_STD::extents<IndexType, Extents...>& extents,
+                                       OpT                                                op,
+                                       hipStream_t stream = {})
     {
-        // Index overlapping is checked by the `in_range` in the implementation in `::hipcub::extents`.
+        // Index overlapping is checked by the `in_range` in the implementation in `_HIPCUB_STD::extents`.
         // TODO: it's better to add a check here:
         // `static_assert(std::is_invocable::<OpT, IndexType, decltype(static_cast<extents_index_type>(Extents))...>::value,"check invocable.")`
         // But the `std::is_invocalble` does not work well here. Checked on a host environment with clang 19.1.0, and it works there. Since this
@@ -339,11 +345,11 @@ HIPCUB_RUNTIME_FUNCTION
      */
     template<class IndexType, size_t... Extents, typename OpT>
     HIPCUB_RUNTIME_FUNCTION
-    static hipError_t ForEachInExtents(const ::hipcub::extents<IndexType, Extents...>&,
+    static hipError_t ForEachInExtents(const _HIPCUB_STD::extents<IndexType, Extents...>&,
                                        OpT         op,
                                        hipStream_t stream = {})
     {
-        using ext_type       = ::hipcub::extents<IndexType, Extents...>;
+        using ext_type       = _HIPCUB_STD::extents<IndexType, Extents...>;
         using ext_index_type = typename ext_type::index_type;
         using wrapped_op_type
             = detail::for_each_in_extents::OpWrapper<OpT, IndexType, ext_index_type, Extents...>;
