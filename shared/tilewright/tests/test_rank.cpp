@@ -244,6 +244,39 @@ TEST_CASE("feasibility: Dot2 kernels only serve M < 3", "[feasibility]") {
   CHECK(scored(3) == std::vector<std::size_t>{1});
 }
 
+TEST_CASE("feasibility: a contiguous free dimension holds one global-read vector",
+          "[feasibility]") {
+  const tw::ModelPtr model = load_spec(grid_model());
+  const auto with_grvw     = [](std::size_t grvw_a, std::size_t grvw_b) {
+    tw::Config c = make_config(64, 64, 64);
+    c.grvw_a     = grvw_a;
+    c.grvw_b     = grvw_b;
+    return c;
+  };
+  const std::vector<tw::Config> pool = {with_grvw(1, 1), with_grvw(8, 1), with_grvw(1, 8)};
+  const auto scored                  = [&](std::size_t m,
+                          std::size_t n,
+                          tw::Transpose ta,
+                          tw::Transpose tb,
+                          tw::DataType dt = tw::DataType::BFloat16) {
+    return sorted(scored_indices(
+        tw::rank_configs(*model, make_problem(m, n, 256, 1, dt, ta, tb), test_hardware(), pool)));
+  };
+  using V               = std::vector<std::size_t>;
+  const tw::Transpose T = tw::Transpose::T, N = tw::Transpose::N;
+  // A non-transposed: M is contiguous and must hold grvw_a elements.
+  CHECK(scored(4, 4, N, N) == V{0, 2});
+  CHECK(scored(7, 4, N, N) == V{0, 2});
+  CHECK(scored(8, 4, N, N) == V{0, 1, 2});
+  // B transposed: N is contiguous and must hold grvw_b elements.
+  CHECK(scored(4, 4, T, T) == V{0, 1});
+  CHECK(scored(4, 8, T, T) == V{0, 1, 2});
+  CHECK(scored(4, 4, N, T) == V{0});
+  // TN reads both operands along K.
+  CHECK(scored(1, 1, T, N) == V{0, 1, 2});
+  CHECK(scored(4, 4, N, N, tw::DataType::Int8x4) == V{0, 1, 2});
+}
+
 TEST_CASE("feasibility: non-temporal hints, per-operand pool availability", "[feasibility]") {
   const tw::ModelPtr model = load_spec(grid_model());
   const auto scored        = [&](const tw::Problem& p, const std::vector<tw::Config>& pool) {

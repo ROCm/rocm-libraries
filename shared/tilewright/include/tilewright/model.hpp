@@ -77,10 +77,12 @@ bool supports(const Model& model,
 std::vector<std::string> attribute_names(const Model& model);
 
 // A caller's fixed pool of candidate kernels, ranked against one model.
-// Per-cell data that depends only on the pool (item embeddings, whitelist
-// membership) is computed on the first rank call that reaches the cell and
-// reused afterwards; configs the model's feature catalog cannot tell apart
-// share that data and their score. Safe to share between threads.
+// Per-cell data that depends only on the pool is computed once and reused:
+// whitelist membership and the item embeddings of whitelisted configs on the
+// first rank call that reaches the cell, the item embeddings of the other
+// configs on the first rank call that scores one of them. Configs the model's
+// feature catalog cannot tell apart share that data and their score. Safe to
+// share between threads.
 class CandidateSet {
  public:
   // Throws std::invalid_argument for a null model, or for a config with an

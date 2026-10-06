@@ -237,19 +237,45 @@ bool prior_before(double a, double b) {
 
 }  // namespace
 
-// Pool data a CandidateSet keeps for one cell, per view key.
+constexpr std::uint32_t kNoSlot = ~std::uint32_t{0};
+
+// Pool data a CandidateSet keeps for one cell, per view key. The item
+// embeddings of the cell's whitelisted keys exist from the first ranking that
+// reaches the cell; those of the other keys from the first ranking that scores
+// one of them.
 struct CellCache {
-  std::vector<float> item_emb;  // keys x embed_dim
-  std::vector<unsigned char> in_whitelist;
+  std::vector<std::size_t> whitelist_keys;  // ascending
+  std::vector<std::uint32_t> slot;          // per key: its row of whitelist_emb, or kNoSlot
+  std::vector<float> whitelist_emb;         // whitelist_keys x embed_dim
+  std::vector<float> other_emb;             // keys x embed_dim; rows of keys outside the whitelist
 };
+
+inline const float* cached_embedding(const CellCache& c, std::size_t key, std::size_t embed_dim) {
+  const std::uint32_t s = c.slot[key];
+  return s != kNoSlot ? &c.whitelist_emb[s * embed_dim] : &c.other_emb[key * embed_dim];
+}
 
 class CellCacheSource {
  public:
-  virtual ~CellCacheSource()                                                   = default;
-  virtual const CellCache& cache(std::size_t cell, const CellWeights& w) const = 0;
+  virtual ~CellCacheSource() = default;
+  // With `all_keys`, the embeddings of keys outside the whitelist are present.
+  virtual const CellCache& cache(std::size_t cell, const CellWeights& w, bool all_keys) const = 0;
 };
 
 namespace {
+
+// Working storage of rank_in_cell, kept per thread so that a ranking call
+// does not allocate once the buffers have grown to the pool's size.
+struct Scratch {
+  std::vector<unsigned char> feasibility, in_tier1, used;
+  std::vector<std::size_t> tier1, tier2, order, ranked, run;
+  std::vector<float> score, q_feat, i_feat, x_feat, norm, q_emb, i_emb, h0, h2;
+};
+
+Scratch& scratch() {
+  thread_local Scratch s;
+  return s;
+}
 
 // `prior` orders equal scores when non-null.
 std::vector<Result> rank_in_cell(const Model& model,
@@ -266,59 +292,95 @@ std::vector<Result> rank_in_cell(const Model& model,
   const FeatureCatalog& cat = *model.catalog;
   const Cell& cell          = model.cells[cell_index];
   const CellWeights& w      = model.weights(cell_index);
-  const CellCache* cache    = source != nullptr ? &source->cache(cell_index, w) : nullptr;
+  const CellCache* cache    = source != nullptr ? &source->cache(cell_index, w, false) : nullptr;
   const Kernels& k          = kernels();
+  Scratch& s                = scratch();
   const auto size_of        = [&](std::size_t key) {
     return keys.member_begin[key + 1] - keys.member_begin[key];
   };
 
-  std::vector<unsigned char> feasible(nk, 0);
-  for (std::size_t key = 0; key < nk; ++key) {
-    const Config& c = configs[keys.first[key]];
-    feasible[key]   = check_lds_capacity(hardware, c.mt, problem.a_dtype, problem.b_dtype) &&
-                    is_kernel_feasible(problem, c, keys.nt_a, keys.nt_b);
-  }
+  // Per key: 0 not yet evaluated, 1 infeasible, 2 feasible.
+  std::vector<unsigned char>& feasibility = s.feasibility;
+  feasibility.assign(nk, 0);
+  const auto feasible = [&](std::size_t key) {
+    unsigned char& f = feasibility[key];
+    if (f == 0) {
+      const Config& c = configs[keys.first[key]];
+      f               = check_lds_capacity(hardware, c.mt, problem.a_dtype, problem.b_dtype) &&
+                  is_kernel_feasible(problem, c, keys.nt_a, keys.nt_b)
+                            ? 2
+                            : 1;
+    }
+    return f == 2;
+  };
 
-  const bool have_whitelist = !cell.signatures.empty();
-  std::vector<unsigned char> in_tier1(nk, 0);
-  std::vector<std::size_t> tier1;
+  const bool have_whitelist            = !cell.signatures.empty();
+  std::vector<unsigned char>& in_tier1 = s.in_tier1;
+  std::vector<std::size_t>& tier1      = s.tier1;
+  in_tier1.assign(nk, 0);
+  tier1.clear();
   std::size_t tier1_configs = 0;
-  if (have_whitelist)
-    for (std::size_t key = 0; key < nk; ++key)
-      if (feasible[key] && (cache != nullptr ? cache->in_whitelist[key] != 0
-                                             : whitelisted(cell, configs[keys.first[key]]))) {
-        tier1.push_back(key);
-        in_tier1[key] = 1;
-        tier1_configs += size_of(key);
-      }
+  const auto add_tier1      = [&](std::size_t key) {
+    tier1.push_back(key);
+    in_tier1[key] = 1;
+    tier1_configs += size_of(key);
+  };
+  if (have_whitelist) {
+    if (cache != nullptr) {
+      for (std::size_t key : cache->whitelist_keys)
+        if (feasible(key)) add_tier1(key);
+    } else {
+      for (std::size_t key = 0; key < nk; ++key)
+        if (feasible(key) && whitelisted(cell, configs[keys.first[key]])) add_tier1(key);
+    }
+  }
   bool tier1_is_whitelist = have_whitelist;
   if (tier1.empty()) {
     tier1_is_whitelist = false;
     for (std::size_t key = 0; key < nk; ++key)
-      if (feasible[key]) {
+      if (feasible(key)) {
         tier1.push_back(key);
         tier1_configs += size_of(key);
       }
   }
   if (tier1.empty()) return all_unscored(n);
 
-  std::vector<std::size_t> tier2;
+  std::vector<std::size_t>& tier2 = s.tier2;
+  tier2.clear();
   if (tier1_is_whitelist && min_scored > tier1_configs)
     for (std::size_t key = 0; key < nk; ++key)
-      if (feasible[key] && !in_tier1[key]) tier2.push_back(key);
+      if (!in_tier1[key] && feasible(key)) tier2.push_back(key);
+  if (cache != nullptr && (!tier1_is_whitelist || !tier2.empty()))
+    cache = &source->cache(cell_index, w, true);
 
-  const HwView hw     = hw_view(model, hardware);
-  const std::size_t e = cell.embed_dim;
-  std::vector<float> q_feat(cat.query_dim), i_feat(cat.item_dim), x_feat(cat.inter_dim);
-  std::vector<float> norm(std::max(cat.query_dim, std::max(cat.item_dim, cat.inter_dim)));
-  std::vector<float> q_emb(e), i_emb(e);
-  std::vector<float> h0(cell.hidden_dim), h2(std::max(cell.hidden_dim, cell.inter_hidden));
+  const HwView hw            = hw_view(model, hardware);
+  const std::size_t e        = cell.embed_dim;
+  std::vector<float>& q_feat = s.q_feat;
+  std::vector<float>& i_feat = s.i_feat;
+  std::vector<float>& x_feat = s.x_feat;
+  std::vector<float>& norm   = s.norm;
+  std::vector<float>& q_emb  = s.q_emb;
+  std::vector<float>& i_emb  = s.i_emb;
+  std::vector<float>& h0     = s.h0;
+  std::vector<float>& h2     = s.h2;
+  q_feat.resize(cat.query_dim);
+  i_feat.resize(cat.item_dim);
+  x_feat.resize(cat.inter_dim);
+  norm.resize(std::max(cat.query_dim, std::max(cat.item_dim, cat.inter_dim)));
+  q_emb.resize(e);
+  i_emb.resize(e);
+  h0.resize(cell.hidden_dim);
+  h2.resize(std::max(cell.hidden_dim, cell.inter_hidden));
   cat.query(problem, hw, q_feat.data());
   query_embedding(
       k, cell, w, q_feat.data(), cat.query_dim, norm.data(), h0.data(), h2.data(), q_emb.data());
 
-  std::vector<float> score(nk, 0.0f);
-  std::vector<std::size_t> order, ranked, run;
+  std::vector<float>& score = s.score;
+  score.assign(nk, 0.0f);
+  std::vector<std::size_t>& order  = s.order;
+  std::vector<std::size_t>& ranked = s.ranked;
+  std::vector<std::size_t>& run    = s.run;
+  order.clear();
   order.reserve(tier1_configs);
   const auto rank_tier = [&](const std::vector<std::size_t>& tier) {
     ranked.clear();
@@ -326,7 +388,7 @@ std::vector<Result> rank_in_cell(const Model& model,
       const Config& c = configs[keys.first[key]];
       const float* ie = nullptr;
       if (cache != nullptr) {
-        ie = &cache->item_emb[key * e];
+        ie = cached_embedding(*cache, key, e);
       } else {
         cat.item(c, i_feat.data());
         item_embedding(
@@ -378,15 +440,16 @@ std::vector<Result> rank_in_cell(const Model& model,
     log_pick(
         problem, cell, configs[order.front()], score[keys.key_of[order.front()]], order.front(), n);
 
-  std::vector<Result> result;
-  result.reserve(n);
-  std::vector<unsigned char> used(n, 0);
+  std::vector<Result> result(n);
+  std::vector<unsigned char>& used = s.used;
+  used.assign(n, 0);
+  std::size_t pos = 0;
   for (std::size_t ci : order) {
-    used[ci] = 1;
-    result.push_back(Result{ci, static_cast<double>(score[keys.key_of[ci]]), true});
+    used[ci]      = 1;
+    result[pos++] = Result{ci, static_cast<double>(score[keys.key_of[ci]]), true};
   }
   for (std::size_t j = 0; j < n; ++j)
-    if (!used[j]) result.push_back(Result{j, 0.0, false});
+    if (!used[j]) result[pos++] = Result{j, 0.0, false};
   return result;
 }
 
@@ -501,8 +564,9 @@ std::vector<Result> rank_keys(const Model& model,
 
 struct CandidateSet::Impl final : detail::CellCacheSource {
   struct Slot {
-    std::once_flag once;
-    std::unique_ptr<const detail::CellCache> cache;
+    std::once_flag once;         // whitelist and its embeddings
+    std::once_flag once_others;  // embeddings of the other keys
+    std::unique_ptr<detail::CellCache> cache;
   };
 
   ModelPtr model;
@@ -510,33 +574,69 @@ struct CandidateSet::Impl final : detail::CellCacheSource {
   PoolOptions options;
   detail::PoolKeys keys;
   std::vector<float> item_features;  // keys x item_dim
-  std::unique_ptr<Slot[]> slots;     // one per model cell
+  // (signature, key) of every key, ascending.
+  std::vector<std::pair<detail::Signature, std::size_t>> signature_keys;
+  std::unique_ptr<Slot[]> slots;  // one per model cell
+
+  void embed(const detail::Cell& cell,
+             const detail::CellWeights& w,
+             std::size_t key,
+             std::vector<float>& hidden,
+             std::vector<float>& norm,
+             float* out) const {
+    const std::size_t i_dim = model->catalog->item_dim;
+    detail::item_embedding(detail::kernels(),
+                           cell,
+                           w,
+                           &item_features[key * i_dim],
+                           i_dim,
+                           norm.data(),
+                           hidden.data(),
+                           out);
+  }
 
   const detail::CellCache& cache(std::size_t cell_index,
-                                 const detail::CellWeights& w) const override {
-    Slot& slot = slots[cell_index];
+                                 const detail::CellWeights& w,
+                                 bool all_keys) const override {
+    Slot& slot               = slots[cell_index];
+    const detail::Cell& cell = model->cells[cell_index];
+    const std::size_t nk     = keys.first.size();
+    const std::size_t e      = cell.embed_dim;
     std::call_once(slot.once, [&] {
-      const detail::Cell& cell = model->cells[cell_index];
-      const detail::Kernels& k = detail::kernels();
-      const std::size_t nk     = keys.first.size();
-      const std::size_t i_dim  = model->catalog->item_dim;
-      auto built               = std::make_unique<detail::CellCache>();
-      built->item_emb.resize(nk * cell.embed_dim);
-      built->in_whitelist.resize(nk);
-      std::vector<float> hidden(cell.hidden_dim), norm(i_dim);
-      for (std::size_t key = 0; key < nk; ++key) {
-        detail::item_embedding(k,
-                               cell,
-                               w,
-                               &item_features[key * i_dim],
-                               i_dim,
-                               norm.data(),
-                               hidden.data(),
-                               &built->item_emb[key * cell.embed_dim]);
-        built->in_whitelist[key] = detail::whitelisted(cell, configs[keys.first[key]]) ? 1 : 0;
+      auto built              = std::make_unique<detail::CellCache>();
+      const auto by_signature = [](const std::pair<detail::Signature, std::size_t>& a,
+                                   const std::pair<detail::Signature, std::size_t>& b) {
+        return a.first < b.first;
+      };
+      for (const detail::Signature& sig : cell.signatures) {
+        const auto range = std::equal_range(signature_keys.begin(),
+                                            signature_keys.end(),
+                                            std::make_pair(sig, std::size_t{0}),
+                                            by_signature);
+        for (auto it = range.first; it != range.second; ++it)
+          built->whitelist_keys.push_back(it->second);
+      }
+      std::vector<std::size_t>& wl = built->whitelist_keys;
+      std::sort(wl.begin(), wl.end());
+      wl.erase(std::unique(wl.begin(), wl.end()), wl.end());
+      built->slot.assign(nk, detail::kNoSlot);
+      built->whitelist_emb.resize(wl.size() * e);
+      std::vector<float> hidden(cell.hidden_dim), norm(model->catalog->item_dim);
+      for (std::size_t i = 0; i < wl.size(); ++i) {
+        built->slot[wl[i]] = static_cast<std::uint32_t>(i);
+        embed(cell, w, wl[i], hidden, norm, &built->whitelist_emb[i * e]);
       }
       slot.cache = std::move(built);
     });
+    if (all_keys)
+      std::call_once(slot.once_others, [&] {
+        detail::CellCache& c = *slot.cache;
+        c.other_emb.resize(nk * e);
+        std::vector<float> hidden(cell.hidden_dim), norm(model->catalog->item_dim);
+        for (std::size_t key = 0; key < nk; ++key)
+          if (c.slot[key] == detail::kNoSlot)
+            embed(cell, w, key, hidden, norm, &c.other_emb[key * e]);
+      });
     return *slot.cache;
   }
 };
@@ -551,8 +651,13 @@ CandidateSet::CandidateSet(ModelPtr model, std::vector<Config> configs, PoolOpti
   impl_->configs                    = std::move(configs);
   const std::size_t nk              = impl_->keys.first.size();
   impl_->item_features.resize(nk * cat.item_dim);
-  for (std::size_t key = 0; key < nk; ++key)
-    cat.item(impl_->configs[impl_->keys.first[key]], &impl_->item_features[key * cat.item_dim]);
+  impl_->signature_keys.reserve(nk);
+  for (std::size_t key = 0; key < nk; ++key) {
+    const Config& c = impl_->configs[impl_->keys.first[key]];
+    cat.item(c, &impl_->item_features[key * cat.item_dim]);
+    impl_->signature_keys.emplace_back(detail::signature_of(c), key);
+  }
+  std::sort(impl_->signature_keys.begin(), impl_->signature_keys.end());
   impl_->slots = std::make_unique<Impl::Slot[]>(model->cells.size());
   impl_->model = std::move(model);
 }

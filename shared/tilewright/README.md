@@ -56,7 +56,11 @@ kernel is returned unscored.
    the device's LDS;
 2. a feasibility filter: a small batched problem (M, N ≤ 256, K < 1024,
    batch ≠ 1) must fit in one macro tile; Dot2 kernels (MI 1x1x64) only serve
-   M < 3; and hinted kernels (`cache_hints != 0`) are only used when K and the
+   M < 3; an operand whose free dimension is contiguous holds at least one
+   global-read vector along it (M ≥ `grvw_a` when A is not transposed,
+   N ≥ `grvw_b` when B is transposed, except for Int8x4 inputs), as
+   TensileLite's `LeadingFree0/1SizesGreaterOrEqual` predicates require; and
+   hinted kernels (`cache_hints != 0`) are only used when K and the
    kernel's `mt_k` are both 128-byte aligned in A's element size, where a skinny
    problem requires the non-temporal variant of its large operand
    (`cache_hints == 4`) when the pool contains such a variant for that operand,
@@ -207,9 +211,11 @@ if (!tilewright::supports(*model, context, hw)) { /* use another ranking */ }
   feature catalog reads the attributes it knows; the shipped catalog reads none.
 - `CandidateSet(model, configs, PoolOptions{tie_break})` holds a fixed pool and
   throws `std::invalid_argument` for a null model or a config with an empty or
-  duplicate attribute name. The item embeddings and whitelist membership of its
-  kernels are computed the first time a problem reaches a cell and reused
-  afterwards; it is safe to share between threads.
+  duplicate attribute name. Whitelist membership and the item embeddings of
+  the whitelisted kernels are computed the first time a problem reaches a
+  cell, the embeddings of the other kernels the first time a ranking of the
+  cell scores one of them, and all are reused afterwards; it is safe to share
+  between threads.
   `rank(problem, hardware, min_scored)` ranks for exclusive use of the device;
   `rank(problem, hardware, context, min_scored, prior)` ranks for `context`
   (every kernel unscored unless `supports(model, context, hardware)`) and, with
