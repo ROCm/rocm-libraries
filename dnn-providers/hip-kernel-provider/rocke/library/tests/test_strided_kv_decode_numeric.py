@@ -101,6 +101,8 @@ def test_strided_lds_admission_numeric(gpu, dtype, dim, block, tile):
     from kernels.common import attention_unified as au
 
     torch, arch = gpu
+    if arch == "gfx950" and tile is not None and tile < block:
+        pytest.skip("gfx950 tile_size_override is a multiple of block_size")
     request = AttentionRequest(
         batch=3,
         nhead_q=8,

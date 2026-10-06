@@ -163,6 +163,10 @@ typedef struct rocke_gfx950_attn_tiled_3d_config
     int kv_stride_tok_b; /* NUM_KV*HD*KV_BYTES */
     int kv_stride_h_b; /* HD*KV_BYTES */
     int bytes_per_buf; /* T*HD*2 */
+    int N_BLOCKS_PER_TILE; /* T // BS (multi-page tile when > 1) */
+    bool PAGE_IDS; /* N_BLOCKS_PER_TILE > 1: per-tile page-id loader (fp16/bf16 only) */
+    int tokens_per_call; /* KV_HALVES_PER_CALL // HD (PAGE_IDS only) */
+    int calls_per_block; /* BS // tokens_per_call (PAGE_IDS only) */
     int fp8_elems_per_chunk; /* 8 */
     int fp8_total_chunks; /* (T*HD)//8 */
     int fp8_chunks_per_thread; /* fp8_total_chunks // THREADS */
@@ -313,6 +317,9 @@ typedef struct rocke_gfx950_attention_tiled_3d_build_ctx
     rocke_value_t* V_lds_addr; /* smem_addr_of(V_lds)                       */
     rocke_value_t* zero_soff; /* const_i32(0)                              */
     rocke_value_t* seq_base; /* seq_idx * bt_stride_p                     */
+    rocke_value_t* seq_pages; /* cdiv(seq_len, BS): live pages (page-id guard)  */
+    rocke_value_t* lane_within_b; /* per-lane byte offset within a page (PAGE_IDS) */
+    rocke_value_t* first_page_ids[8]; /* tile_start's page ids (PAGE_IDS; N <= 8) */
     rocke_value_t*
         kv_block_bytes_c; /* const_i32(kv_stride_blk_b): 1-block buffer bound (i64 path) */
 
@@ -399,12 +406,21 @@ rocke_value_t* rocke_gfx950_attention_tiled_3d_mfma_16x16_c_row(
  * takes the tile-index + double-buffer-index Values. _issue_k/_issue_v dispatch
  * by KV mode (fp8 sync dequant vs 4-DWORD async). is_value selects K vs V via
  * the ctx K/V handles + the K/V scale (fp8 path). */
+/* page_ids: the tile's N_BLOCKS_PER_TILE wave-uniform page ids when cfg.PAGE_IDS
+ * (multi-page tile), else NULL. */
 void rocke_gfx950_attention_tiled_3d_issue_k_load(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
                                                   rocke_value_t* kv_tile_idx,
-                                                  rocke_value_t* buf_idx); /* lines 603-616 */
+                                                  rocke_value_t* buf_idx,
+                                                  rocke_value_t* const* page_ids);
 void rocke_gfx950_attention_tiled_3d_issue_v_load(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
                                                   rocke_value_t* kv_tile_idx,
-                                                  rocke_value_t* buf_idx); /* lines 618-631 */
+                                                  rocke_value_t* buf_idx,
+                                                  rocke_value_t* const* page_ids);
+/* _tile_page_ids(kv_tile_idx): the tile's page ids, one guarded block-table load
+ * each, made wave-uniform; writes cfg.N_BLOCKS_PER_TILE values to out. */
+void rocke_gfx950_attention_tiled_3d_tile_page_ids(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
+                                                   rocke_value_t* kv_tile_idx,
+                                                   rocke_value_t** out);
 /* _issue_fp8_dequant_loads(..., lds_token): is_value selects K/V + scale; sync
  * per-thread fp8 -> cvt_pk_f32_fp8x4 -> *scale (UNFUSED fmul) -> dtype -> LDS
  * via rocke_dequant_fp8x8_to_dtype. */
@@ -415,10 +431,12 @@ void rocke_gfx950_attention_tiled_3d_issue_fp8_dequant_loads(
     rocke_value_t* buf_idx); /* lines 645-701 */
 void rocke_gfx950_attention_tiled_3d_issue_k(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
                                              rocke_value_t* tile_idx,
-                                             rocke_value_t* buf_idx); /* lines 703-707 */
+                                             rocke_value_t* buf_idx,
+                                             rocke_value_t* const* page_ids);
 void rocke_gfx950_attention_tiled_3d_issue_v(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
                                              rocke_value_t* tile_idx,
-                                             rocke_value_t* buf_idx); /* lines 709-713 */
+                                             rocke_value_t* buf_idx,
+                                             rocke_value_t* const* page_ids);
 
 /* ============================================================ *
  * Segment-kernel phase functions (Python execution order)

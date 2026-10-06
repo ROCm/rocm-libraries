@@ -94,6 +94,22 @@ class TestExplicitAttentionBuilders(unittest.TestCase):
         self.assertEqual(segment.num_segments, 32)
         self.assertEqual(reduce.num_segments, 32)
 
+    def test_gfx950_3d_multipage_tile_policy(self):
+        decode = _problem(max_seqlen_q=1, total_q=4, num_seqs=4)
+        segment, _ = make_explicit_attention_3d_specs(
+            decode,
+            ExplicitAttention3DConfig(num_segments=16, tile_policy="2x"),
+            arch="gfx950",
+        )
+        self.assertEqual(segment.tile_size_override, 32)
+        self.assertEqual(segment.tile_size, 32)
+        with self.assertRaises(ValueError):
+            make_explicit_attention_3d_specs(
+                _problem(block_size=32, max_seqlen_q=1, total_q=4, num_seqs=4),
+                ExplicitAttention3DConfig(num_segments=16, tile_policy="8x"),
+                arch="gfx950",
+            )
+
     def test_3d_decode_grid_is_derived_from_the_problem(self):
         decode = _problem(max_seqlen_q=1, total_q=4, num_seqs=4)
         cfg = ExplicitAttention3DConfig(num_segments=32)

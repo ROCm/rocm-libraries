@@ -550,30 +550,26 @@ void rocke_gfx950_attention_tiled_3d_emit_async_infra(
     ctx->V_lds_addr = rocke_b_smem_addr_of(B, ctx->V_lds);
     ctx->zero_soff = rocke_b_const_i32(B, 0);
 
+    ctx->seq_pages = NULL;
+    ctx->lane_within_b = NULL;
+    ctx->paged_kv_desc = NULL;
     /* seq_base = seq_idx * bt_stride_p (line 592) */
     if(ctx->strided_kv)
     {
         return;
     }
     ctx->seq_base = rocke_b_mul(B, ctx->seq_idx, ctx->bt_stride_p);
-
-    /* paged_kv_desc = TensorDescriptor.naive("paged_kv_bytes",
-     *   lengths=[1<<24, T, NUM_KV, HD],
-     *   strides=[kv_stride_blk_b, kv_stride_tok_b, kv_stride_h_b, KV_BYTES],
-     *   coord_names=("physical_block","token","kv_head","dim")
-     * ).transform(
-     *   indirect("tile_idx", into="physical_block", table=block_tables,
-     *            base=seq_base),
-     *   unmerge("linear_half", into=("token","dim"), dims=(T, HD)),
-     * )  (lines 593-601) */
+    if(!CFG.PAGE_IDS)
     {
+        /* paged_kv_desc = naive("paged_kv_bytes", [1<<24, T, NUM_KV, HD], byte
+         * strides).transform(indirect("tile_idx" -> "physical_block",
+         * base=seq_base), unmerge("linear_half" -> ("token","dim"), (T, HD))) */
         const int lengths[4] = {1 << 24, T, NUM_KV, HD};
         const int strides[4]
             = {CFG.kv_stride_blk_b, CFG.kv_stride_tok_b, CFG.kv_stride_h_b, CFG.KV_BYTES};
         const char* coords[4] = {"physical_block", "token", "kv_head", "dim"};
         rocke_tensor_descriptor_t* base
             = rocke_tensor_descriptor_naive(B, "paged_kv_bytes", lengths, 4, strides, coords, 4);
-
         const rocke_transform_t* chain[2];
         const char* into_td[2] = {"token", "dim"};
         const int dims_td[2] = {T, HD};
@@ -581,6 +577,97 @@ void rocke_gfx950_attention_tiled_3d_emit_async_infra(
             B, "tile_idx", "physical_block", ctx->block_tables, ctx->seq_base, NULL, 0);
         chain[1] = rocke_unmerge(B, "linear_half", into_td, 2, dims_td);
         ctx->paged_kv_desc = rocke_tensor_descriptor_transform(B, base, chain, 2);
+    }
+    else
+    {
+        /* A sequence's last tile can reach past its last page; the table entries
+         * there are not the sequence's. Those pages reuse the tile's first page
+         * id (always live); the in_prefix mask discards their tokens. */
+        rocke_value_t* rounded = rocke_b_add(B, ctx->seq_len, rocke_b_const_i32(B, CFG.BS - 1));
+        ctx->seq_pages = rocke_b_div(B, rounded, rocke_b_const_i32(B, CFG.BS));
+    }
+
+    /* Page-id loader (multi-page): the per-lane part of the address is
+     * loop-invariant; the page base goes into soffset per tile. */
+    if(CFG.PAGE_IDS)
+    {
+        rocke_value_t* lane_tok = rocke_b_div(B, ctx->lane_half_base, rocke_b_const_i32(B, HD));
+        rocke_value_t* lane_dim = rocke_b_mod(B, ctx->lane_half_base, rocke_b_const_i32(B, HD));
+        rocke_value_t* tok_b = rocke_b_mul(B, lane_tok, rocke_b_const_i32(B, CFG.kv_stride_tok_b));
+        rocke_value_t* head_b
+            = rocke_b_mul(B, ctx->kv_head_idx, rocke_b_const_i32(B, CFG.kv_stride_h_b));
+        rocke_value_t* tok_head = rocke_b_add(B, tok_b, head_b);
+        rocke_value_t* dim_b = rocke_b_mul(B, lane_dim, rocke_b_const_i32(B, CFG.KV_BYTES));
+        ctx->lane_within_b = rocke_b_add(B, tok_head, dim_b);
+    }
+}
+
+/* _tile_page_ids(kv_tile_idx): one guarded block-table load per page of the
+ * tile, made wave-uniform. */
+void rocke_gfx950_attention_tiled_3d_tile_page_ids(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
+                                                   rocke_value_t* kv_tile_idx,
+                                                   rocke_value_t** out)
+{
+    const int NB = CFG.N_BLOCKS_PER_TILE;
+    int j;
+    /* A tile starts below seq_len, so its first page is always live. */
+    rocke_value_t* first_blk = rocke_b_mul(B, kv_tile_idx, rocke_b_const_i32(B, NB));
+    rocke_value_t* first_pid = rocke_b_global_load_i32(
+        B, ctx->block_tables, rocke_b_add(B, ctx->seq_base, first_blk), 0);
+    out[0] = rocke_b_to_sgpr_u32(B, first_pid);
+    for(j = 1; j < NB; ++j)
+    {
+        rocke_value_t* blk = rocke_b_add(B, first_blk, rocke_b_const_i32(B, j));
+        rocke_value_t* idx = rocke_b_add(B, ctx->seq_base, blk);
+        rocke_value_t* live = rocke_b_cmp_lt(B, blk, ctx->seq_pages);
+        rocke_value_t* pid = rocke_b_masked_global_load(
+            B, ctx->block_tables, idx, live, first_pid, rocke_i32(), 4);
+        out[j] = rocke_b_to_sgpr_u32(B, pid);
+    }
+}
+
+/* _issue_paged_tile(src, lds_base, buf_idx, page_ids): one async DMA call per
+ * 64 lanes x 8 halves; the call's page base goes into soffset (i32 path) or a
+ * per-page 64-bit buffer base (i64 path). */
+static void rocke__issue_paged_tile(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
+                                    bool is_value,
+                                    rocke_value_t* buf_idx,
+                                    rocke_value_t* const* page_ids)
+{
+    rocke_value_t* src = is_value ? ctx->value : ctx->key;
+    rocke_value_t* lds_base = is_value ? ctx->V_lds_addr : ctx->K_lds_addr;
+    rocke_value_t* src_rsrc = is_value ? ctx->value_rsrc : ctx->key_rsrc;
+    int call;
+
+    rocke_value_t* buf_off_i32 = rocke_b_mul(B, buf_idx, rocke_b_const_i32(B, CFG.bytes_per_buf));
+    rocke_value_t* buf_off_i64 = rocke_b_zext(B, buf_off_i32, rocke_i64());
+    rocke_value_t* buf_base = rocke_b_smem_ptr_add(B, lds_base, buf_off_i64);
+    for(call = 0; call < CFG.kv_calls_per_tile; ++call)
+    {
+        const int blk = call / CFG.calls_per_block;
+        const int tok0 = (call % CFG.calls_per_block) * CFG.tokens_per_call;
+        rocke_value_t* voff
+            = rocke_b_add(B, ctx->lane_within_b, rocke_b_const_i32(B, tok0 * CFG.kv_stride_tok_b));
+        rocke_value_t* call_rsrc;
+        rocke_value_t* soff;
+        if(CFG.I64_KV_ADDR)
+        {
+            rocke_value_t* pid_i64 = rocke_b_zext(B, page_ids[blk], rocke_i64());
+            rocke_value_t* base_i64
+                = rocke_b_mul(B, pid_i64, rocke_b_const_i64(B, (int64_t)CFG.kv_stride_blk_b));
+            call_rsrc = rocke_b_buffer_rsrc(
+                B, rocke_b_global_ptr_add(B, src, base_i64), ctx->kv_block_bytes_c);
+            soff = ctx->zero_soff;
+        }
+        else
+        {
+            call_rsrc = src_rsrc;
+            soff = rocke_b_mul(B, page_ids[blk], rocke_b_const_i32(B, CFG.kv_stride_blk_b));
+        }
+        rocke_value_t* dst = rocke_b_smem_ptr_add(
+            B, buf_base, rocke_b_const_i64(B, (int64_t)call * CFG.bytes_per_call));
+        rocke_b_async_buffer_load_lds_addr(
+            B, call_rsrc, dst, voff, soff, CFG.ASYNC_LDS_DWORDS, ROCKE_CACHE_ALL);
     }
 }
 
@@ -717,8 +804,14 @@ void rocke_gfx950_attention_tiled_3d_emit_q_to_lds(rocke_gfx950_attention_tiled_
 /* _issue_k_load(kv_tile_idx, buf_idx) -- lines 603-616. */
 void rocke_gfx950_attention_tiled_3d_issue_k_load(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
                                                   rocke_value_t* kv_tile_idx,
-                                                  rocke_value_t* buf_idx)
+                                                  rocke_value_t* buf_idx,
+                                                  rocke_value_t* const* page_ids)
 {
+    if(CFG.PAGE_IDS)
+    {
+        rocke__issue_paged_tile(ctx, false, buf_idx, page_ids);
+        return;
+    }
     const int KV_HALVES_PER_CALL = CFG.KV_HALVES_PER_CALL;
     const int kv_calls_per_tile = CFG.kv_calls_per_tile;
     const int bytes_per_call = CFG.bytes_per_call;
@@ -777,8 +870,14 @@ void rocke_gfx950_attention_tiled_3d_issue_k_load(rocke_gfx950_attention_tiled_3
 /* _issue_v_load(kv_tile_idx, buf_idx) -- lines 618-631. */
 void rocke_gfx950_attention_tiled_3d_issue_v_load(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
                                                   rocke_value_t* kv_tile_idx,
-                                                  rocke_value_t* buf_idx)
+                                                  rocke_value_t* buf_idx,
+                                                  rocke_value_t* const* page_ids)
 {
+    if(CFG.PAGE_IDS)
+    {
+        rocke__issue_paged_tile(ctx, true, buf_idx, page_ids);
+        return;
+    }
     const int KV_HALVES_PER_CALL = CFG.KV_HALVES_PER_CALL;
     const int kv_calls_per_tile = CFG.kv_calls_per_tile;
     const int bytes_per_call = CFG.bytes_per_call;
@@ -889,7 +988,8 @@ void rocke_gfx950_attention_tiled_3d_issue_fp8_dequant_loads(
 /* _issue_k(tile_idx, buf_idx) -- lines 703-707. */
 void rocke_gfx950_attention_tiled_3d_issue_k(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
                                              rocke_value_t* tile_idx,
-                                             rocke_value_t* buf_idx)
+                                             rocke_value_t* buf_idx,
+                                             rocke_value_t* const* page_ids)
 {
     if(CFG.KV_FP8)
     {
@@ -897,14 +997,15 @@ void rocke_gfx950_attention_tiled_3d_issue_k(rocke_gfx950_attention_tiled_3d_bui
     }
     else
     {
-        rocke_gfx950_attention_tiled_3d_issue_k_load(ctx, tile_idx, buf_idx);
+        rocke_gfx950_attention_tiled_3d_issue_k_load(ctx, tile_idx, buf_idx, page_ids);
     }
 }
 
 /* _issue_v(tile_idx, buf_idx) -- lines 709-713. */
 void rocke_gfx950_attention_tiled_3d_issue_v(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
                                              rocke_value_t* tile_idx,
-                                             rocke_value_t* buf_idx)
+                                             rocke_value_t* buf_idx,
+                                             rocke_value_t* const* page_ids)
 {
     if(CFG.KV_FP8)
     {
@@ -912,6 +1013,6 @@ void rocke_gfx950_attention_tiled_3d_issue_v(rocke_gfx950_attention_tiled_3d_bui
     }
     else
     {
-        rocke_gfx950_attention_tiled_3d_issue_v_load(ctx, tile_idx, buf_idx);
+        rocke_gfx950_attention_tiled_3d_issue_v_load(ctx, tile_idx, buf_idx, page_ids);
     }
 }

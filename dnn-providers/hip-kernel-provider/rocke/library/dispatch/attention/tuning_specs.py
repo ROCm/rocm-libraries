@@ -259,8 +259,10 @@ def make_explicit_attention_3d_specs(
         raise ValueError(f"waves_per_eu must be one of {WAVES_PER_EU}")
 
     tile = resolve_tile_policy(problem.block_size, config.tile_policy)
-    if arch == "gfx950" and tile != int(problem.block_size):
-        raise ValueError("gfx950 3D implements only tile_size == block_size")
+    if arch == "gfx950" and (tile % int(problem.block_size) or tile > 128):
+        raise ValueError(
+            "gfx950 3D implements tiles that are a multiple of block_size, up to 128"
+        )
     if arch == "gfx942" and tile not in (
         int(problem.block_size),
         max(1, int(problem.block_size) // 2),

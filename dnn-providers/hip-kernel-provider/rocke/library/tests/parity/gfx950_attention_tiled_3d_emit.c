@@ -140,6 +140,38 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->kv_storage_dtype = "fp8e4m3";
         s->use_decode_grid = true;
         break;
+    case 8:
+        /* Multi-page KV tile T=32 over 16-token pages (page-id loader), decode grid. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 128;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->num_segments = 8;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->has_tile_size_override = true;
+        s->tile_size_override = 32;
+        s->use_decode_grid = true;
+        break;
+    case 9:
+        /* Multi-page T=64 over 16-token pages with 64-bit paged-KV addressing. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->has_tile_size_override = true;
+        s->tile_size_override = 64;
+        s->use_i64_kv_addr = true;
+        break;
     default:
         return -1;
     }

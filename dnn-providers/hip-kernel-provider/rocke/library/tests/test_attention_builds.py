@@ -2632,6 +2632,52 @@ class TestAttentionHelpers(unittest.TestCase):
                 self.assertIn("bs_i", base_ll)
                 self.assertNotIn("bs_i", dg_ll)
 
+    def test_gfx950_3d_multipage_tile(self):
+        """``tile_size_override`` = k * block_size: one loop iteration stages a
+        k-page KV tile, with each page id loaded once per tile (wave-uniform)
+        and passed as the DMA soffset; invalid tiles are rejected."""
+        import re
+        from dataclasses import replace
+
+        from kernels.gfx950.attention_tiled_3d import (
+            UnifiedAttention3DTiledSpec,
+            build_unified_attention_3d_tiled,
+        )
+
+        spec = UnifiedAttention3DTiledSpec(
+            head_size=128,
+            block_size=16,
+            num_query_heads=32,
+            num_kv_heads=8,
+            dtype="fp16",
+            use_sinks=False,
+            sliding_window=0,
+            has_softcap=False,
+            num_segments=16,
+            num_seqs=16,
+            tile_size_override=32,
+        )
+        self.assertEqual(spec.tile_size, 32)
+        self.assertEqual(spec.n_blocks_per_tile, 2)
+        self.assertIn("_b16_t32_", spec.kernel_name())
+        ll = lower_kernel_to_llvm(build_unified_attention_3d_tiled(spec))
+        # LDS: Q [16,128] + K [2,32,128] + V [1,32,128] + P [16,32], fp16.
+        lds_bytes = 2 * (16 * 128 + 2 * 32 * 128 + 32 * 128 + 16 * 32)
+        self.assertIn(f"addrspace(3) global [{lds_bytes} x i8]", ll)
+        # The page-sized tile keeps the old name and IR.
+        page = replace(spec, tile_size_override=None)
+        self.assertIsNone(re.search(r"_t\d+_", page.kernel_name()))
+        for bad in (24, 8, 256):
+            with self.subTest(tile=bad), self.assertRaises(ValueError):
+                replace(spec, tile_size_override=bad)
+        # D256 at T128 needs more async calls per tile than vmcnt can count.
+        with self.assertRaises(ValueError):
+            replace(spec, head_size=256, tile_size_override=128)
+        # fp8 KV loads synchronously and keeps page-sized tiles.
+        with self.assertRaises(ValueError):
+            replace(spec, dtype="bf16", kv_storage_dtype="fp8e4m3")
+        replace(spec, tile_size_override=16, dtype="bf16", kv_storage_dtype="fp8e4m3")
+
     def test_3d_dispatch_derives_decode_grid(self):
         """Default dispatch turns the decode grid on for all-decode problems on
         gfx942/gfx950 and keys the kernel cache on it."""

@@ -151,7 +151,12 @@ void rocke_gfx950_attention_tiled_3d_emit_loop_init(
     rocke_gfx950_attention_tiled_3d_emit_async_infra(ctx);
 
     /* ---- first K load + cur_buf_init (lines 715-718) ---- */
-    rocke_gfx950_attention_tiled_3d_issue_k(ctx, ctx->tile_start, rocke_b_const_i32(b, 0));
+    if(cfg->PAGE_IDS)
+    {
+        rocke_gfx950_attention_tiled_3d_tile_page_ids(ctx, ctx->tile_start, ctx->first_page_ids);
+    }
+    rocke_gfx950_attention_tiled_3d_issue_k(
+        ctx, ctx->tile_start, rocke_b_const_i32(b, 0), cfg->PAGE_IDS ? ctx->first_page_ids : NULL);
     ctx->cur_buf_init = rocke_b_const_i32(b, 0);
 }
 
@@ -167,9 +172,11 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
     const rocke_type_t* f32 = rocke_f32();
     int r, n, k, reg;
 
-    /* iter_args: m0,l0,m1,l1,m2,l2,m3,l3, acc0..accN-1, cur_buf */
+    /* iter_args: m0,l0,m1,l1,m2,l2,m3,l3, acc0..accN-1, cur_buf
+     * (+ pid0..pid{NB-1}: the current tile's page ids when PAGE_IDS) */
     int num_ml = 8;
-    int num_iter = num_ml + cfg->PV_N_TILES + 1;
+    int num_pid = cfg->PAGE_IDS ? cfg->N_BLOCKS_PER_TILE : 0;
+    int num_iter = num_ml + cfg->PV_N_TILES + 1 + num_pid;
     rocke_iter_arg_t* iter_args
         = (rocke_iter_arg_t*)rocke_arena_alloc(&b->arena, (size_t)num_iter * sizeof(*iter_args));
     if(iter_args == NULL)
@@ -211,6 +218,17 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
         iter_args[ai].name = rocke_arena_strdup(&b->arena, "cur_buf");
         iter_args[ai].init = ctx->cur_buf_init;
         ai++;
+        for(n = 0; n < num_pid; n++)
+        {
+            buf[0] = 'p';
+            buf[1] = 'i';
+            buf[2] = 'd';
+            buf[3] = (char)('0' + n);
+            buf[4] = '\0';
+            iter_args[ai].name = rocke_arena_strdup(&b->arena, buf);
+            iter_args[ai].init = ctx->first_page_ids[n];
+            ai++;
+        }
     }
 
     /* LICM hoist: per-reg invariants constant across all KV tiles (Python lines
@@ -269,6 +287,8 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
         rocke_value_t* cur_buf;
         rocke_value_t* nxt_buf;
         rocke_value_t* v_buf;
+        rocke_value_t* cur_page_ids[8];
+        rocke_value_t* nxt_page_ids[8];
         rocke_value_t* tile_off;
         rocke_value_t* next_tile_iv_raw;
         rocke_value_t* in_range_next;
@@ -314,6 +334,10 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
         cur_buf = carry[8 + cfg->PV_N_TILES];
         nxt_buf = rocke_b_sub(b, rocke_b_const_i32(b, 1), cur_buf);
         v_buf = rocke_b_const_i32(b, 0);
+        for(n = 0; n < num_pid; n++)
+        {
+            cur_page_ids[n] = carry[9 + cfg->PV_N_TILES + n];
+        }
         tile_off = rocke_b_mul(b, kv_tile_iv, rocke_b_const_i32(b, cfg->T));
 
         next_tile_iv_raw = rocke_b_add(b, kv_tile_iv, rocke_b_const_i32(b, 1));
@@ -322,6 +346,12 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
 
         rocke_b_s_waitcnt(b, 0, 0, -1);
         rocke_b_sync(b);
+        /* Fetch the next tile's page ids before this tile's V and the next K
+         * are issued, so their wait overlaps the QK below. */
+        if(cfg->PAGE_IDS)
+        {
+            rocke_gfx950_attention_tiled_3d_tile_page_ids(ctx, safe_next_tile, nxt_page_ids);
+        }
 
         /* ---------------- QK (wide 16x16x32, K-step 32) ---------------- */
         for(k = 0; k < cfg->QK_K_ITERS; k++)
@@ -354,8 +384,10 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
             S_n[n] = acc_v;
         }
 
-        rocke_gfx950_attention_tiled_3d_issue_v(ctx, kv_tile_iv, v_buf);
-        rocke_gfx950_attention_tiled_3d_issue_k(ctx, safe_next_tile, nxt_buf);
+        rocke_gfx950_attention_tiled_3d_issue_v(
+            ctx, kv_tile_iv, v_buf, cfg->PAGE_IDS ? cur_page_ids : NULL);
+        rocke_gfx950_attention_tiled_3d_issue_k(
+            ctx, safe_next_tile, nxt_buf, cfg->PAGE_IDS ? nxt_page_ids : NULL);
 
         /* alibi_per_row: use hoisted slopes (NULL when USE_ALIBI is false). */
         for(reg = 0; reg < 4; reg++)
@@ -586,6 +618,10 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
                 yields[yi++] = new_acc[n];
             }
             yields[yi++] = nxt_buf;
+            for(n = 0; n < num_pid; n++)
+            {
+                yields[yi++] = nxt_page_ids[n];
+            }
             rocke_b_scf_yield(b, yields, yi);
         }
     }

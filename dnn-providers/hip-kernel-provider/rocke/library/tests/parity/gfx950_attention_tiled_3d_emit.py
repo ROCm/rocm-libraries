@@ -139,6 +139,36 @@ _CONFIGS = {
         kv_storage_dtype="fp8e4m3",
         use_decode_grid=True,
     ),
+    8: dict(
+        # Multi-page KV tile T=32 over 16-token pages (page-id loader), decode grid.
+        head_size=128,
+        block_size=16,
+        num_query_heads=128,
+        num_kv_heads=8,
+        dtype="fp16",
+        num_segments=8,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        tile_size_override=32,
+        use_decode_grid=True,
+    ),
+    9: dict(
+        # Multi-page T=64 over 16-token pages with 64-bit paged-KV addressing.
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        tile_size_override=64,
+        use_i64_kv_addr=True,
+    ),
 }
 
 
