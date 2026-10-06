@@ -34,9 +34,9 @@ Tests:
 - name: dnmat_copy_data
   category: quick
   function: dnmat_copy_data
-  precision: *single_double_precisions_complex_real
+  precision: *single_double_precisions
   M: [3, 4]
-  N: [4, 5]
+  N: [5, 7]
   alpha: [2, -2]
   alphai: [0]
   orderB: *all_rocsparse_order
@@ -50,7 +50,7 @@ Tests:
   category: pre_checkin
   function: dnmat_copy_data
   precision: *single_double_precisions_complex_real
-  alpha: [1,2,-4,8]
+  alpha: [1, -4]
   alphai: [0]
   M: [0, 16]
   N: [0, 32]
@@ -62,12 +62,28 @@ Tests:
   direction: *all_rocsparse_direction
 
 - name: dnmat_copy_data
+  category: pre_checkin
+  function: dnmat_copy_data
+  precision: *single_double_precisions
+  M: [2]
+  N: [2]
+  alpha: [2]
+  alphai: [0]
+  orderB: rocsparse_order_row
+  orderC: rocsparse_order_row
+  batch_count_C: [67890]
+  batch_count_B: [-1, 1]
+  batch_count_A: [-1, 1]
+  direction: *all_rocsparse_direction
+
+
+- name: dnmat_copy_data
   category: nightly
   function: dnmat_copy_data
   precision: *single_double_precisions_complex_real
-  M: [128]
-  N: [32, 64]
-  alpha: [-2,4,-8]
+  M: [128, 8192]
+  N: [32, 16386]
+  alpha: [-2, 4, -8]
   alphai: [0]
   orderB: *all_rocsparse_order
   orderC: *all_rocsparse_order
@@ -75,3 +91,5 @@ Tests:
   batch_count_C: [3, 32]
   batch_count_B: [-1, 1]
   batch_count_A: [-1, 1]
+
+

@@ -76,3 +76,18 @@ Tests:
   batch_count_C: [3, 32]
   batch_count_B: [-1, 1]
   batch_count_A: [-1, 1]
+
+- name: dnmat_transpose
+  category: pre_checkin
+  function: dnmat_transpose
+  precision: *single_double_precisions
+  alpha: [1]
+  alphai: [0]
+  M: [2]
+  N: [2]
+  orderB: *all_rocsparse_order
+  orderC: *all_rocsparse_order
+  batch_count_C: [67890]
+  batch_count_B: [-1, 1]
+  batch_count_A: [-1, 1]
+  direction: *all_rocsparse_direction

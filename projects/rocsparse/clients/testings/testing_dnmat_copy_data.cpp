@@ -248,9 +248,14 @@ void testing_dnmat_copy_data(const Arguments& arg)
     host_dense_vector<T> halphamem(alpha_batch_count);
     host_dense_vector<T> hbetamem(alpha_batch_count);
     halphamem[0] = arg.get_alpha<T>();
-    for(int64_t i = 1; i < alpha_batch_count; ++i)
+    for(int64_t i = 1; i < alpha_batch_count / 2; ++i)
     {
-        halphamem[i] = halphamem[i - 1] * static_cast<T>(2);
+        halphamem[i] = halphamem[0];
+    }
+
+    for(int64_t i = alpha_batch_count / 2; i < alpha_batch_count; ++i)
+    {
+        halphamem[i] = halphamem[0] * static_cast<T>(2);
     }
 
     for(int64_t i = 0; i < alpha_batch_count; ++i)
