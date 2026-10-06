@@ -140,6 +140,21 @@ namespace
         return lib;
     }
 
+    std::shared_ptr<ContractionProblemSelectionLibrary> buildAllMatchingKindsLibrary()
+    {
+        auto lib = buildMatchingRowsLibrary();
+
+        lib->rows.push_back(ContractionProblemSelectionLibrary::Row(
+            makeRowPredicate(std::make_shared<Predicates::Contraction::GridBasedMatching>()),
+            std::make_shared<StubTopLibrary>(makeSolution("gridbased", 4))));
+
+        lib->rows.push_back(ContractionProblemSelectionLibrary::Row(
+            makeRowPredicate(std::make_shared<Predicates::Contraction::FreeSizeMatching>()),
+            std::make_shared<StubTopLibrary>(makeSolution("freesize", 5))));
+
+        return lib;
+    }
+
     std::vector<std::string> solutionNames(SolutionVector<ContractionSolution> const& solutions)
     {
         std::vector<std::string> names;
@@ -217,4 +232,48 @@ TEST(ExactLogicLibraryTest, FindTopSolutionsForceStaticOverridesStreamKSchedulin
 
     EXPECT_EQ(solutionNames(lib->findTopSolutions(problem, device, 3)),
               (std::vector<std::string>{"equality", "range", "prediction"}));
+}
+
+TEST(ExactLogicLibraryTest, FindTopSolutionsKeepsGridBasedAndFreeSizeWhenStreamKSchedulingOn)
+{
+    auto lib     = buildAllMatchingKindsLibrary();
+    auto problem = dummyProblem();
+    problem.setParams().setStreamKTileSchedulingMode(1);
+    const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+
+    EXPECT_EQ(solutionNames(lib->findTopSolutions(problem, device, 5)),
+              (std::vector<std::string>{"prediction", "gridbased", "freesize"}));
+}
+
+TEST(ExactLogicLibraryTest, FindTopSolutionsKeepsGridBasedAndFreeSizeWhenStreamK5ForceDynamic)
+{
+    ScopedStreamK5ForceMode forceDynamic("1");
+
+    auto        lib     = buildAllMatchingKindsLibrary();
+    auto        problem = dummyProblem();
+    const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+
+    EXPECT_EQ(solutionNames(lib->findTopSolutions(problem, device, 5)),
+              (std::vector<std::string>{"prediction", "gridbased", "freesize"}));
+}
+
+TEST(ExactLogicLibraryTest, FindTopSolutionsReturnsOnlyPredictionWithPredictionLib)
+{
+    const char*       previous = std::getenv("TENSILE_PREDICTION_LIB");
+    const std::string saved    = previous ? previous : "";
+    setenv("TENSILE_PREDICTION_LIB", "1", 1);
+    Debug::Instance().reloadDebugBitsForTest();
+
+    auto        lib     = buildAllMatchingKindsLibrary();
+    auto        problem = dummyProblem();
+    const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    const auto  names   = solutionNames(lib->findTopSolutions(problem, device, 5));
+
+    if(previous)
+        setenv("TENSILE_PREDICTION_LIB", saved.c_str(), 1);
+    else
+        unsetenv("TENSILE_PREDICTION_LIB");
+    Debug::Instance().reloadDebugBitsForTest();
+
+    EXPECT_EQ(names, (std::vector<std::string>{"prediction"}));
 }
