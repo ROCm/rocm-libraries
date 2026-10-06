@@ -8,6 +8,7 @@
 #include <hipblaslt/hipblaslt-ext.hpp>
 
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -113,6 +114,33 @@ namespace
                       handle, desc, layout, layout, layout, layout, pref, 0, &result, &returned),
                   HIPBLAS_STATUS_INVALID_VALUE);
         EXPECT_EQ(returned, 0);
+    }
+
+    // Kernels take batch strides as 32-bit values, so a strided batch whose stride does not fit
+    // must get no algorithms, while the largest stride that fits still gets some.
+    TEST_F(AlgoErrors, smoke_HeuristicRefusesBatchStridesPast32Bits)
+    {
+        auto algosFor = [&](int64_t stride) {
+            hipblasLtMatrixLayout_t batched = nullptr;
+            EXPECT_EQ(hipblasLtMatrixLayoutCreate(&batched, kType, kSize, kSize, kSize),
+                      HIPBLAS_STATUS_SUCCESS);
+            const int32_t count = 2;
+            EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                          batched, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &count, sizeof(count)),
+                      HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(
+                hipblasLtMatrixLayoutSetAttribute(
+                    batched, HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &stride, sizeof(stride)),
+                HIPBLAS_STATUS_SUCCESS);
+            hipblasLtMatmulHeuristicResult_t result{};
+            int                              returned = 0;
+            static_cast<void>(hipblasLtMatmulAlgoGetHeuristic(
+                handle, desc, batched, batched, batched, batched, pref, 1, &result, &returned));
+            hipblasLtMatrixLayoutDestroy(batched);
+            return returned;
+        };
+        EXPECT_GT(algosFor(std::numeric_limits<uint32_t>::max()), 0);
+        EXPECT_EQ(algosFor(int64_t(1) << 32), 0);
     }
 
     TEST_F(AlgoErrors, smoke_MatmulRejectsUnknownIndex)
