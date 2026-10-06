@@ -3,9 +3,11 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/CachingLibrary.hpp>
@@ -85,6 +87,96 @@ namespace
         auto problem = dummyProblem();
         problem.setParams().setStreamKTileSchedulingMode(schedulingMode);
         return problem;
+    }
+
+    // findTopSolutions returns at most `available` solutions and counts its calls.
+    class TopCountingSubLibrary : public CountingSubLibrary
+    {
+    public:
+        int                       available = 4;
+        mutable std::atomic<int>  topCalls{0};
+        mutable std::atomic<bool> lastAll{false};
+
+        SolutionVector<ContractionSolution> findTopSolutions(ContractionProblemGemm const&,
+                                                             Hardware const&,
+                                                             int numSolutions) const override
+        {
+            int                                 call = ++topCalls;
+            SolutionVector<ContractionSolution> rv;
+            for(int i = 0; i < std::min(numSolutions, available); ++i)
+                rv.push_back(
+                    makeSolution("top_" + std::to_string(call) + "_" + std::to_string(i), i));
+            lastAll = static_cast<int>(rv.size()) < numSolutions;
+            return rv;
+        }
+
+        bool lastFindTopAlreadyRetAll() const override
+        {
+            return lastAll;
+        }
+    };
+
+    template <typename T>
+    std::string keyOf(T const& value)
+    {
+        std::string key;
+        AppendCacheKey(key, value);
+        return key;
+    }
+
+    // Problems that each differ from dummyProblem() in fields that
+    // Comparison<ContractionProblemGemm> compares.
+    std::vector<ContractionProblemGemm> problemVariants()
+    {
+        std::vector<ContractionProblemGemm> v;
+        auto                                add = [&](auto&& change) {
+            auto problem = dummyProblem();
+            change(problem);
+            v.push_back(problem);
+        };
+        auto gemm = [](bool transA, bool transB, size_t m, size_t n, size_t k, size_t lda) {
+            auto problem = ContractionProblemGemm::GEMM(
+                transA, transB, m, n, k, lda, 1024, 1024, 1.0, false, 1);
+            problem.setComputeInputTypeA(rocisa::DataType::Float);
+            problem.setComputeInputTypeB(rocisa::DataType::Float);
+            return problem;
+        };
+        v.push_back(gemm(false, false, 1024, 1024, 512, 1024));
+        v.push_back(gemm(true, false, 1024, 1024, 1024, 1024));
+        v.push_back(gemm(false, false, 1024, 1024, 1024, 2048));
+        v.push_back(gemm(false, false, 512, 1024, 1024, 1024));
+        add([](auto& p) { p.setHighPrecisionAccumulate(true); });
+        add([](auto& p) { p.setKernelLanguage(KernelLanguage::Assembly); });
+        add([](auto& p) { p.setDeterministicMode(true); });
+        add([](auto& p) { p.setComputeInputTypeA(rocisa::DataType::Half); });
+        add([](auto& p) { p.setComputeInputTypeB(rocisa::DataType::Half); });
+        add([](auto& p) { p.setWorkspaceSize(1 << 20); });
+        add([](auto& p) { p.setStridedBatched(!p.stridedBatched()); });
+        add([](auto& p) { p.setGroupedGemm(true); });
+        add([](auto& p) { p.setPerformanceMetric(PerformanceMetric::CUEfficiency); });
+        add([](auto& p) { p.setActivationType(ActivationType::Relu); });
+        add([](auto& p) { p.setActivationComputeType(rocisa::DataType::Half); });
+        add([](auto& p) { p.setActivationNoGuard(true); });
+        add([](auto& p) { p.setUseGradient(true); });
+        add([](auto& p) { p.setUseBias(1); });
+        add([](auto& p) { p.setUseE(true); });
+        add([](auto& p) { p.setUseGateResidual(true); });
+        add([](auto& p) { p.setUseScaleAB("Scalar"); });
+        add([](auto& p) { p.setUseScaleAB("Vector"); });
+        add([](auto& p) { p.setUseScaleAB("Scalar2"); });
+        add([](auto& p) { p.setUseScaleCD(true); });
+        add([](auto& p) { p.setUseScaleAlphaVec(1); });
+        add([](auto& p) { p.setOutputAmaxD(true); });
+        add([](auto& p) { p.setF32XdlMathOp(rocisa::DataType::XFloat32); });
+        add([](auto& p) { p.setSwizzleTensorA(true); });
+        add([](auto& p) { p.setSwizzleTensorB(true); });
+        add([](auto& p) { p.setFusedGemmA2A(true); });
+        add([](auto& p) { p.setFusedA2AExtent(7); });
+        add([](auto& p) { p.setFusedA2AWorld(8); });
+        add([](auto& p) { p.setParams().setSmCountTarget(64); });
+        add([](auto& p) { p.setParams().setStreamKTileSchedulingMode(1); });
+        add([](auto& p) { p.setParams().setUniformSummationOrder(true); });
+        return v;
     }
 } // namespace
 
@@ -204,4 +296,115 @@ TEST(CachingLibraryTest, SameSchedulingModeReusesCacheEntry)
     EXPECT_EQ(sub->callCount.load(), 1)
         << "Identical problem (same size and scheduling mode) must be served from cache";
     EXPECT_EQ(first->solutionName, second->solutionName);
+}
+
+// Byte keys of problems are equal exactly when the problems compare equal.
+TEST(CachingLibraryTest, ProblemCacheKeyEqualityMatchesComparison)
+{
+    auto problems = problemVariants();
+    problems.push_back(dummyProblem());
+    problems.push_back(dummyProblem());
+
+    for(size_t i = 0; i + 2 < problems.size(); ++i)
+        EXPECT_FALSE(problems[i] == problems.back())
+            << "variant " << i << " changes no compared field";
+
+    for(size_t i = 0; i < problems.size(); ++i)
+        for(size_t j = 0; j < problems.size(); ++j)
+            EXPECT_EQ(keyOf(problems[i]) == keyOf(problems[j]), problems[i] == problems[j])
+                << "problems " << i << " and " << j;
+}
+
+// Byte keys of devices are equal exactly when AMDGPU::operator== holds,
+// including a missing PCI chip id versus chip id 0.
+TEST(CachingLibraryTest, DeviceCacheKeyEqualityMatchesComparison)
+{
+    std::vector<AMDGPU> devices = {makeDevice(_MI350_CHIP_ID, _SPX_CU, "a"),
+                                   makeDevice(_MI350_CHIP_ID, _SPX_CU, "b"),
+                                   makeDevice(_MI350_CHIP_ID, _CPX_CU, "a"),
+                                   makeDevice(_MI355_CHIP_ID, _SPX_CU, "a"),
+                                   makeDevice(0, _SPX_CU, "a"),
+                                   AMDGPU(AMDGPU::Processor::gfx950, _SPX_CU, "a"),
+                                   AMDGPU(AMDGPU::Processor::gfx942, _SPX_CU, "a")};
+    for(size_t i = 0; i < devices.size(); ++i)
+        for(size_t j = 0; j < devices.size(); ++j)
+            EXPECT_EQ(keyOf(devices[i]) == keyOf(devices[j]), devices[i] == devices[j])
+                << "devices " << i << " and " << j;
+}
+
+// A repeat request is served from the cache unless it asks for more solutions
+// than were cached and the sub-library had not already returned all it has.
+TEST(CachingLibraryTest, FindTopSolutionsServesRepeatsFromCache)
+{
+    auto sub     = std::make_shared<TopCountingSubLibrary>();
+    auto caching = std::make_shared<CachingLibrary<ContractionProblemGemm>>(sub);
+
+    const AMDGPU device  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    auto         problem = dummyProblem();
+
+    auto first = caching->findTopSolutions(problem, device, 2);
+    ASSERT_EQ(first.size(), 2u);
+    EXPECT_EQ(caching->findTopSolutions(problem, device, 2), first);
+    EXPECT_EQ(caching->findTopSolutions(problem, device, 1), first);
+    EXPECT_EQ(sub->topCalls.load(), 1);
+    EXPECT_FALSE(caching->lastFindTopAlreadyRetAll());
+
+    EXPECT_EQ(caching->findTopSolutions(problem, device, 3).size(), 3u);
+    EXPECT_EQ(sub->topCalls.load(), 2);
+
+    auto all = caching->findTopSolutions(problem, device, 10);
+    EXPECT_EQ(all.size(), 4u);
+    EXPECT_EQ(sub->topCalls.load(), 3);
+    EXPECT_TRUE(caching->lastFindTopAlreadyRetAll());
+    EXPECT_EQ(caching->findTopSolutions(problem, device, 20), all);
+    EXPECT_EQ(sub->topCalls.load(), 3);
+    EXPECT_TRUE(caching->lastFindTopAlreadyRetAll());
+
+    EXPECT_EQ(caching->findTopSolutions(problemWithSmCountTarget(64), device, 2).size(), 2u);
+    EXPECT_EQ(
+        caching->findTopSolutions(problem, makeDevice(_MI350_CHIP_ID, _CPX_CU, "cpx"), 2).size(),
+        2u);
+    EXPECT_EQ(sub->topCalls.load(), 5);
+}
+
+// Empty results are not cached.
+TEST(CachingLibraryTest, FindTopSolutionsDoesNotCacheEmptyResults)
+{
+    auto sub       = std::make_shared<TopCountingSubLibrary>();
+    sub->available = 0;
+    auto caching   = std::make_shared<CachingLibrary<ContractionProblemGemm>>(sub);
+
+    const AMDGPU device  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    auto         problem = dummyProblem();
+    EXPECT_TRUE(caching->findTopSolutions(problem, device, 2).empty());
+    EXPECT_TRUE(caching->findTopSolutions(problem, device, 2).empty());
+    EXPECT_EQ(sub->topCalls.load(), 2);
+}
+
+// Once TopSolutionsCapacity problems are cached, further problems are passed
+// through and the cached ones are kept.
+TEST(CachingLibraryTest, FindTopSolutionsCacheIsBounded)
+{
+    using Caching = CachingLibrary<ContractionProblemGemm>;
+    auto sub      = std::make_shared<TopCountingSubLibrary>();
+    auto caching  = std::make_shared<Caching>(sub);
+
+    const AMDGPU device    = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    auto         problemAt = [](size_t i) {
+        auto problem = dummyProblem();
+        problem.setWorkspaceSize(i);
+        return problem;
+    };
+    for(size_t i = 0; i < Caching::TopSolutionsCapacity; ++i)
+        caching->findTopSolutions(problemAt(i), device, 1);
+    ASSERT_EQ(sub->topCalls.load(), static_cast<int>(Caching::TopSolutionsCapacity));
+
+    auto extra = problemAt(Caching::TopSolutionsCapacity);
+    caching->findTopSolutions(extra, device, 1);
+    caching->findTopSolutions(extra, device, 1);
+    EXPECT_EQ(sub->topCalls.load(), static_cast<int>(Caching::TopSolutionsCapacity) + 2);
+
+    caching->findTopSolutions(problemAt(0), device, 1);
+    caching->findTopSolutions(problemAt(Caching::TopSolutionsCapacity - 1), device, 1);
+    EXPECT_EQ(sub->topCalls.load(), static_cast<int>(Caching::TopSolutionsCapacity) + 2);
 }
