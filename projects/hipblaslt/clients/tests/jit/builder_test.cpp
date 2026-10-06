@@ -6,9 +6,12 @@
 #include "test_helpers.hpp"
 
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <regex>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -20,7 +23,110 @@ namespace
 {
     namespace fs = std::filesystem;
     namespace hj = hipblaslt_jit;
+    namespace co = hj::code_object;
     using hipblaslt_jit_test::require;
+
+    std::uint16_t le16(const unsigned char* p)
+    {
+        return static_cast<std::uint16_t>(p[0] | (p[1] << 8));
+    }
+
+    std::uint32_t le32(const unsigned char* p)
+    {
+        return static_cast<std::uint32_t>(le16(p)) | (static_cast<std::uint32_t>(le16(p + 2)) << 16);
+    }
+
+    std::uint64_t le64(const unsigned char* p)
+    {
+        return static_cast<std::uint64_t>(le32(p)) | (static_cast<std::uint64_t>(le32(p + 4)) << 32);
+    }
+
+    // One kernel. The note's .wavefront_size is the requested size. There is no
+    // .amdhsa_wavefront_size32 directive, so on a processor that has both sizes
+    // the assembler flag is what sets the kernel descriptor.
+    std::string waveKernel(int wave)
+    {
+        std::ostringstream source;
+        source
+            << ".amdgcn_target \"amdgcn-amd-amdhsa--gfx1030\"\n"
+               ".text\n.globl k\n.p2align 8\n.type k,@function\nk:\n  s_endpgm\n"
+               ".Lend:\n  .size k, .Lend-k\n\n.rodata\n.p2align 6\n.amdhsa_kernel k\n"
+               "  .amdhsa_next_free_vgpr 1\n  .amdhsa_next_free_sgpr 1\n.end_amdhsa_kernel\n\n"
+               ".amdgpu_metadata\n---\namdhsa.version:\n  - 1\n  - 1\namdhsa.kernels:\n"
+               "  - .name: k\n    .symbol: k.kd\n    .kernarg_segment_size: 0\n"
+               "    .kernarg_segment_align: 4\n    .group_segment_fixed_size: 0\n"
+               "    .private_segment_fixed_size: 0\n    .wavefront_size: "
+            << wave
+            << "\n    .sgpr_count: 1\n    .vgpr_count: 1\n    .max_flat_workgroup_size: 256\n"
+               "...\n.end_amdgpu_metadata\n";
+        return source.str();
+    }
+
+    // ENABLE_WAVEFRONT_SIZE32 is bit 10 of kernel_code_properties (byte 56).
+    std::uint32_t descriptorWavefront(const std::vector<char>& elf)
+    {
+        require(elf.size() >= 64, "The code object is too small to hold a kernel descriptor");
+        const auto* bytes = reinterpret_cast<const unsigned char*>(elf.data());
+        require(std::memcmp(bytes, "\x7f" "ELF", 4) == 0, "The code object is not an ELF file");
+        const auto shoff     = le64(bytes + 40);
+        const auto shentsize = le16(bytes + 58);
+        const auto shnum     = le16(bytes + 60);
+        const auto shstrndx  = le16(bytes + 62);
+        auto       at       = [&](std::uint64_t off, std::uint64_t size) {
+            require(off + size <= elf.size(), "An ELF header is outside the code object");
+            return bytes + off;
+        };
+        const auto shstr    = at(shoff + static_cast<std::uint64_t>(shstrndx) * shentsize, shentsize);
+        const auto strOff   = le64(shstr + 24);
+        const auto strSize  = le64(shstr + 32);
+        const auto strings  = at(strOff, strSize);
+        for(std::uint16_t i = 0; i < shnum; ++i)
+        {
+            const auto header  = at(shoff + static_cast<std::uint64_t>(i) * shentsize, shentsize);
+            const auto nameOff = le32(header);
+            require(nameOff < strSize, "A section name is outside the string table");
+            const auto* name = reinterpret_cast<const char*>(strings + nameOff);
+            const auto  end  = static_cast<std::uint64_t>(strSize - nameOff);
+            require(std::memchr(name, '\0', end) != nullptr, "A section name is not terminated");
+            if(std::strcmp(name, ".rodata") != 0)
+                continue;
+            const auto off  = le64(header + 24);
+            const auto size = le64(header + 32);
+            require(size >= 64, "The code object has no kernel descriptor");
+            const auto properties = le16(at(off + 56, 2));
+            constexpr std::uint16_t wave32 = 1u << 10;
+            return (properties & wave32) != 0 ? 32u : 64u;
+        }
+        require(false, "The code object has no .rodata");
+        return 0;
+    }
+
+    // gfx1030 has both wavefront sizes, so the flag the builder passes to comgr
+    // is visible in the descriptor. A gfx9 processor stays at 64 either way.
+    void wavefrontSizeMatchesRequest()
+    {
+        co::Options options;
+        options.codeObjectVersion = 4;
+        for(const int wave : {64, 32})
+        {
+            const auto target = co::Target::fromTargetId("gfx1030", wave);
+            const auto result = co::assemble({{"k.s", waveKernel(wave)}}, target, options);
+            require(result.ok(),
+                    "Assembling wavefront " + std::to_string(wave) + " failed: " + result.log);
+            const auto metadata = co::readMetadata(result.bytes);
+            require(metadata.ok(), "Cannot read the assembled code object: " + metadata.log);
+            require(metadata.metadata.wavefrontSizes.size() == 1
+                        && metadata.metadata.wavefrontSizes[0]
+                               == static_cast<std::uint32_t>(wave),
+                    "Metadata wavefront size for request " + std::to_string(wave) + " is "
+                        + (metadata.metadata.wavefrontSizes.empty()
+                               ? std::string("missing")
+                               : std::to_string(metadata.metadata.wavefrontSizes[0])));
+            require(descriptorWavefront(result.bytes) == static_cast<std::uint32_t>(wave),
+                    "The kernel descriptor wavefront size is not " + std::to_string(wave));
+        }
+        std::cout << "PASS wavefrontSizeMatchesRequest\n";
+    }
 
     const char* const kernelName = "hipblaslt_jit_builder_test_scale";
 
@@ -122,6 +228,7 @@ int main(int argc, char** argv)
 try
 {
     require(argc == 4, "Usage: hipblaslt-jit-builder-test BUNDLES KERNEL SCRATCH");
+    wavefrontSizeMatchesRequest();
     const auto bundles = fs::u8path(argv[1]);
     const auto source  = hipblaslt_jit_test::readFile(fs::u8path(argv[2]));
     const auto scratch = fs::u8path(argv[3]);

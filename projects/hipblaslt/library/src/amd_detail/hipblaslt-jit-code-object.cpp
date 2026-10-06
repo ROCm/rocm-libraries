@@ -619,6 +619,23 @@ namespace hipblaslt_jit::code_object
             return metadataString(value.get(), key);
         }
 
+        // amdhsa.kernels[].wavefront_size. The assembler copies the source note;
+        // 0 when the kernel does not record one.
+        std::uint32_t wavefrontSizeOf(amd_comgr_metadata_node_t node)
+        {
+            const auto text = stringField(node, ".wavefront_size", false);
+            if(text.empty())
+                return 0;
+            std::uint32_t value = 0;
+            for(char c : text)
+            {
+                if(c < '0' || c > '9')
+                    fail(Status::MetadataError, "metadata '.wavefront_size' is not a number");
+                value = value * 10u + static_cast<unsigned>(c - '0');
+            }
+            return value;
+        }
+
         template <typename F>
         void forEach(amd_comgr_metadata_node_t list, const char* key, F&& visit)
         {
@@ -700,6 +717,7 @@ namespace hipblaslt_jit::code_object
                 fail(Status::MetadataError, "missing metadata key 'amdhsa.kernels'");
             forEach(kernels.get(), "amdhsa.kernels", [&](amd_comgr_metadata_node_t node) {
                 md.kernelNames.push_back(stringField(node, ".name", true));
+                md.wavefrontSizes.push_back(wavefrontSizeOf(node));
             });
             result.status = Status::Success;
             return result;
