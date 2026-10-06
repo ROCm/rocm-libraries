@@ -3163,14 +3163,13 @@ std::string wdShape(const std::vector<std::string>& seq) {
 }
 }  // namespace
 
-// Depth 1 / target 1 is the single-window model, whatever the queue fields say.
+// Depth 1 is the single-window model: a WMMA waits for the previous one, and a target above
+// the depth is clamped, so the schedule is the same with or without the queue fields.
 TEST_F(DAGSchedulerPassTest, WmmaQueue_DepthOneIsTheDefault) {
-    std::vector<std::string> seqs[2];
+    std::string shapes[2];
     for (int on = 0; on < 2; ++on) {
         SetUp();
         for (int i = 0; i < 6; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
-        for (int i = 0; i < 4; i++)
-            createVAddInBlock(bb, arch, 150 + 3 * i, 151 + 3 * i, 152 + 3 * i);
         for (int i = 0; i < 6; i++) createWmmaF32_16x16x16_bf16(8 * i, 100 + 8 * i);
         PassContext ctx;
         ctx.setGemmTileConfig(config);
@@ -3181,13 +3180,36 @@ TEST_F(DAGSchedulerPassTest, WmmaQueue_DepthOneIsTheDefault) {
         pfc.dagFeatures.dsReadPerCap = 100;
         if (on) {
             pfc.dagFeatures.wmmaQueueDepth = 1;
-            pfc.dagFeatures.wmmaQueueTarget = 4;  // clamped to the depth
+            pfc.dagFeatures.wmmaQueueTarget = 4;
         }
         ctx.setPassFeatureConfig(pfc);
         pass->run(*func, ctx, am);
-        seqs[on] = mnemonicSequence(*bb);
+        shapes[on] = wdShape(mnemonicSequence(*bb));
     }
-    EXPECT_EQ(seqs[0], seqs[1]);
+    EXPECT_EQ(shapes[0], shapes[1]);
+    // While ds_loads are ready each WMMA window is filled, so the first two are not adjacent.
+    EXPECT_NE(shapes[0].substr(0, 2), "WW") << shapes[0];
+}
+
+// A long queue run (more than 64 cycles of pipe window) keeps every instruction and
+// issues all WMMAs: exercises the window compaction.
+TEST_F(DAGSchedulerPassTest, WmmaQueue_LongRunKeepsEveryInstruction) {
+    for (int i = 0; i < 24; i++) createWmmaF32_16x16x16_bf16(8 * (i % 12), 100 + 8 * i);
+    for (int i = 0; i < 12; i++) createMovableDsLoad(400 + i * 4, 80, i + 1);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.dsReadThrottleLatency = 1;
+    pfc.dagFeatures.dsReadPerCap = 100;
+    pfc.dagFeatures.wmmaQueueDepth = 8;
+    pfc.dagFeatures.wmmaQueueTarget = 2;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    const std::string shape = wdShape(mnemonicSequence(*bb));
+    EXPECT_EQ(std::count(shape.begin(), shape.end(), 'W'), 24) << shape;
+    EXPECT_EQ(std::count(shape.begin(), shape.end(), 'd'), 12) << shape;
 }
 
 // Depth 4, target 2: ds_loads fill while at least two WMMAs are outstanding, and a WMMA
