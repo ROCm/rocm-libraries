@@ -219,6 +219,7 @@ class GlobalWriteBatchWriter:
     self._subtileAllStoresEndLabel = None # end-of-all-stores label (N cbranch target)
     self._subtileCloadPrevD1 = -1         # sentinel: last d1 group seen in C load guard
     self._subtilePendingSrdDInc = None    # deferred SrdD incToNextRow (emitted after N-group label)
+    self._alphaPerElement = {}            # elementIdx -> alpha multiply emitted just before that element's pack
     self._align8NMaskBlockIdxN = -1       # last blockIdxN for which N mask was computed
     self.numBatches = numBatches
 
@@ -1425,13 +1426,19 @@ class GlobalWriteBatchWriter:
             elementIdx += 1
       else:
           regsPerScalar = self.parentWriter.states.bpeCinternal // self.parentWriter.states.bpr # register per scalar
+          interleaveAlpha = self._interleaveAlphaWithPack()
           for elementIdx in range(len(self.batchElements)):
+            elementAlpha = Module("alphaElement")
             for vi in range(self.gwvw):
               rh = replaceHolder(self.codeMulAlpha.popFirstItem(), self.ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi - self.parentWriter.states.c.startVgprValu)
               if (self.kernel["GlobalSplitU"] == 1) and (self.kernel["ProblemType"]["ComputeDataType"].isSingle() and self.kernel["ProblemType"]["DataType"].isInt8()):
                 srcRegName = rh.getParams()[2].getCompleteRegName()
-                module.add(VCvtI32toF32(dst=vgpr(srcRegName), src=vgpr(srcRegName), comment="Convert MI out reg to fp32"))
-              module.add(rh)
+                elementAlpha.add(VCvtI32toF32(dst=vgpr(srcRegName), src=vgpr(srcRegName), comment="Convert MI out reg to fp32"))
+              elementAlpha.add(rh)
+            if interleaveAlpha:
+              self._alphaPerElement[elementIdx] = elementAlpha
+            else:
+              module.add(elementAlpha)
 
   def _epilog(self, module: Module):
     # return registers to pool:
@@ -1813,6 +1820,7 @@ class GlobalWriteBatchWriter:
         module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprBF8Min), "0xc7600000", comment="BF8 Min value -57344 as float32" ))
 
     storeCode = Module("GroupLoadStore")
+    needStoreWaitAlu = False
     vlcntTotalIssued = self.loadsBetaIssued + self.loadsEIssued + self.loadsGateIssued
     dscntTotalIssued = self.localLoadsBiasIssued + self.loadsScaleAVecIssued + self.loadsScaleBVecIssued + self.loadsScaleAlphaVecIssued
     waitCnter = [vlcntTotalIssued, dscntTotalIssued]
@@ -1883,6 +1891,9 @@ class GlobalWriteBatchWriter:
           if self._subtilePendingSrdDInc is not None:
             module.add(self._subtilePendingSrdDInc)
             self._subtilePendingSrdDInc = None
+
+      if elementIdx in self._alphaPerElement:
+        module.add(self._alphaPerElement.pop(elementIdx))
 
       # apply in-bounds exec mask
       if self.edge and not self.kernel["BufferStore"]:
@@ -2283,7 +2294,10 @@ class GlobalWriteBatchWriter:
                           comment="Pack with neighbor"))
 
       if self.kernel["ExpertSchedulingMode"] > 0:
-        packModule.add(SWaitAlu(va_vdst=0, comment="wait for writes to complete"))
+        if self.kernel["GroupLoadStore"]:
+          needStoreWaitAlu = True
+        else:
+          packModule.add(SWaitAlu(va_vdst=0, comment="wait for writes to complete"))
 
       biasReductionModule = Module("biasReductionModule")
       if self.storeBiasD == 1:
@@ -2478,6 +2492,9 @@ class GlobalWriteBatchWriter:
     if self.kernel["ProblemType"]["StochasticRounding"]:
       self.parentWriter.vgprPool.checkIn(vgprRND)
 
+    if needStoreWaitAlu:
+      # One wait ahead of the grouped stores replaces the per-element wait after each pack.
+      module.add(SWaitAlu(va_vdst=0, comment="wait for writes to complete"))
     module.add(storeCode)
 
     if self.parentWriter.db["CheckStoreC"]>=0:
@@ -4273,6 +4290,13 @@ class GlobalWriteBatchWriter:
   def _storeSyncOpt(self, module: Module):
     module.add(SSleep(self.kernel["StoreSyncOpt"] - 1, "optimization: sync and wait"))
     module.add(SBarrier())
+
+  def _interleaveAlphaWithPack(self):
+    # Scaling each element right before its own pack lets the previous batch's grouped stores drain:
+    # the pack output overlays the element's first registers, and an up-front scale of all elements
+    # would overwrite the last store's source registers while that store is still waiting to read them.
+    return bool(self.kernel["GroupLoadStore"] and not self.edge and not self.beta and self.gwvw % 8 == 0
+                and self.kernel["ProblemType"]["DestDataType"].isFloat8())
 
   def _applyAlpha(self, kernel, gwvw, elementSumIdx, elementIdx, tmpS01, usePK=False):
     module = Module("applyAlpha")
