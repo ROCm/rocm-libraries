@@ -52,9 +52,17 @@ Known bugs:
   - { name: matmul_fast_check_threshold_tiles, function: matmul, known_bug_platforms: gfx950 }
   - { name: matmul_fast_check_threshold_tiles_streamk, function: matmul, known_bug_platforms: "gfx942, gfx950" }
   - { name: matmul_fast_check_threshold_custom_kernel_ROCM31258, function: matmul, known_bug_platforms: gfx950 }
-  # ROCM-32277: on gfx950 some persistent direct-to-LDS kernels (DTLA1_DTLB1) also
-  # fail the bf16 Stream-K batch case. REMOVE this entry in the PR that fixes
-  # ROCM-32277. Review by 2026-11-01.
+  # ROCM-32343: on gfx950 the custom-schedule MT256x160x64 bf16 kernels give wrong
+  # values in the TN every-solution cases. REMOVE these entries in the PR that fixes
+  # ROCM-32343. Review by 2026-11-01.
+  - { name: matmul_fast_check_every_solution_repeat, function: matmul, a_type: bf16_r, known_bug_platforms: gfx950 }
+  - { name: matmul_fast_check_streamk_every_solution_repeat, function: matmul, a_type: bf16_r, known_bug_platforms: gfx950 }
+  # ROCM-32344: on gfx950 the custom MT256x256x64 bf16 kernels give wrong values at
+  # K = 64. REMOVE this entry in the PR that fixes ROCM-32344. Review by 2026-11-01.
+  - { name: matmul_fast_check_short_k, function: matmul, a_type: bf16_r, transA: T, known_bug_platforms: gfx950 }
+  # ROCM-32152 and ROCM-32277: on gfx950 persistent direct-to-LDS kernels also fail the
+  # bf16 Stream-K batch case. REMOVE this entry in the PR that fixes them. Review by
+  # 2026-11-01.
   - { name: matmul_fast_check_streamk_batches, function: matmul, a_type: bf16_r, known_bug_platforms: gfx950 }
   # ROCM-32277: two f32 Stream-K solutions on gfx950 sometimes write wrong values in
   # the last partial M tile (rows 4096 to 4098 at M = 4099); the case fails about 1
