@@ -6,6 +6,7 @@
 import os
 import io
 import json
+import datetime
 from unittest import mock
 from pathlib import Path
 import signal
@@ -103,6 +104,21 @@ class CliTests(unittest.TestCase):
             with self.assertRaises(SystemExit) as raised:
                 self.invoke(self.args + ["--load", "command:"])
         self.assertEqual(raised.exception.code, 2)
+
+    def test_repeated_invocations_keep_distinct_failure_logs(self):
+        moment = datetime.datetime.now()
+        with mock.patch.object(hunt.datetime, "datetime") as clock:
+            clock.now.return_value = moment
+            for label in ("first", "second"):
+                self.binary.write_text("#!/bin/sh\nprintf '" + label + "\\n'\n")
+                self.assertEqual(self.invoke(self.args), 1)
+        records = [
+            json.loads(line)
+            for line in (self.root / "results.jsonl").read_text().splitlines()
+        ]
+        self.assertNotEqual(records[0]["log"], records[1]["log"])
+        self.assertEqual(Path(records[0]["log"]).read_text(), "first\n")
+        self.assertEqual(Path(records[1]["log"]).read_text(), "second\n")
 
     def test_empty_and_skipped_runs_fail(self):
         for output, extra in [

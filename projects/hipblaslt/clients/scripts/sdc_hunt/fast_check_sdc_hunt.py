@@ -37,6 +37,7 @@ import socket
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -411,7 +412,9 @@ def main(argv: list[str]) -> int:
     args.results = args.results.resolve()
     # Names this invocation's logs, so a later invocation appending to the same results file
     # does not overwrite them.
-    args.invocation = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+    args.invocation = (
+        datetime.datetime.now().strftime("%Y%m%dT%H%M%S") + "." + uuid.uuid4().hex
+    )
 
     any_failed = False
     combos = list(itertools.product(args.xnack, args.load))
