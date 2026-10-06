@@ -254,6 +254,8 @@ endfunction()
 # ---------------------------------------------------------------------------
 function(_hkp_filter_inputs out_var root files exclude_folders)
     set(_kept "")
+    set(_excluded "${exclude_folders}")
+    list(TRANSFORM _excluded TOLOWER)
     foreach(_file IN LISTS files)
         file(RELATIVE_PATH _rel "${root}" "${_file}")
         string(REPLACE "/" ";" _segments "${_rel}")
@@ -265,7 +267,8 @@ function(_hkp_filter_inputs out_var root files exclude_folders)
                 set(_drop TRUE)
             endif()
         endforeach()
-        if(_count GREATER 1 AND "${_first}" IN_LIST exclude_folders)
+        string(TOLOWER "${_first}" _first_lower)
+        if(_count GREATER 1 AND "${_first_lower}" IN_LIST _excluded)
             set(_drop TRUE)
         endif()
         if(NOT _drop)
@@ -346,6 +349,11 @@ function(hkp_wire_pack_target)
         OUT_ROOT ENABLE_ROCKE ROCKE_INTERP ROCKE_READY ROCKE_PYTHON_DIR
         ROCKE_COMGR_LIB ROCKE_WHEEL_STAMP PACK_JOBS)
     cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "EXCLUDE_FOLDERS")
+    if(ARG_UNPARSED_ARGUMENTS)
+        message(FATAL_ERROR
+            "hkp_wire_pack_target: unrecognised argument(s): "
+            "${ARG_UNPARSED_ARGUMENTS}")
+    endif()
     # Every keyword the call named, including one given an empty value: without
     # CMP0174 (CMake 3.31), PARSE_ARGV leaves such a keyword's ARG_* variable
     # undefined and out of ARG_KEYWORDS_MISSING_VALUES, so `ROCKE_INTERP ""` is
@@ -1312,7 +1320,7 @@ function(hkp_gfx950_attention_dense_available out_var)
 
     get_property(_probe_ok GLOBAL PROPERTY HKP_PACK_PROBE_OK_product)
     if(NOT _probe_ok)
-        set(${out_var} ${HIPKERNELPROVIDER_ENABLE_ROCKE} PARENT_SCOPE)
+        set(${out_var} "${HIPKERNELPROVIDER_ENABLE_ROCKE}" PARENT_SCOPE)
         return()
     endif()
 
@@ -1353,7 +1361,7 @@ function(hkp_product_offers_engine out_var engine)
 
     get_property(_probe_ok GLOBAL PROPERTY HKP_PACK_PROBE_OK_product)
     if(NOT _probe_ok)
-        set(${out_var} ${HIPKERNELPROVIDER_ENABLE_ROCKE} PARENT_SCOPE)
+        set(${out_var} "${HIPKERNELPROVIDER_ENABLE_ROCKE}" PARENT_SCOPE)
         return()
     endif()
 
@@ -1473,9 +1481,12 @@ function(_hkp_report_dormant reason name root arches exclude_folders disabled_ki
 
     set(_present "")
     if(exclude_folders)
+        set(_excluded "${exclude_folders}")
+        list(TRANSFORM _excluded TOLOWER)
         file(GLOB _children LIST_DIRECTORIES true RELATIVE "${root}" "${root}/*")
         foreach(_child IN LISTS _children)
-            if(IS_DIRECTORY "${root}/${_child}" AND "${_child}" IN_LIST exclude_folders)
+            string(TOLOWER "${_child}" _child_lower)
+            if(IS_DIRECTORY "${root}/${_child}" AND "${_child_lower}" IN_LIST _excluded)
                 list(APPEND _present "${_child}")
             endif()
         endforeach()
