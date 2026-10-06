@@ -141,8 +141,8 @@ dependences allow.
 | Pattern | Options |
 |---|---|
 | Default interleave `W ds ds ds W …` | none |
-| Queue kept fed, ds first while the queue is healthy | `WmmaQueueDepth=8, WmmaQueueTarget=2, DsReadPerCap=12` |
-| Same, ds at a fixed rate (queue throttle off) | `WmmaQueueDepth=8, WmmaQueueTarget=2, DsReadPerCap=12, DsReadQueueDepth=16, DsReadThrottleLatency=1` |
+| Queue kept fed, ds first while the queue is healthy (equal to the default on henry fp8) | `WmmaQueueDepth=8, WmmaQueueTarget=2, DsIssueCapMode=1, DsIssueCapSpanCycles=32, DsReadPerCap=8` |
+| ds at a fixed rate with the LDS queue model off (measured 0.7 to 3.7% slower: bursts stall the WMMA stream) | add `DsReadThrottleLatency=1` |
 | Fillers packed early instead of spread | `EvenSpreadFillers=false` |
 | Free ds order | `LockDsReadOrder=false` |
 | A ds_loads per fixed X-cycle period (e.g. 12 per 32) | `DsReadPerCap=12, DsIssueCapSpanCycles=32, DsIssueCapMode=1, DsReadQueueDepth=16, DsReadThrottleLatency=1` |
