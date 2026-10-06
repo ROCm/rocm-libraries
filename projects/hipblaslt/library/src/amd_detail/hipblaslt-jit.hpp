@@ -67,9 +67,11 @@ namespace hipblaslt_ext::experimental::jit
         std::string message;
     };
 
-    // Compile synchronously on the current HIP device (which must equal device).
-    // Call before stream capture. Unsupported operation/backend pairs return
-    // NOT_SUPPORTED. The solution lives in this process only.
+    // Look up the JIT solution library on the current HIP device (which must
+    // equal device) and publish with backend when the request is not already
+    // there. A hit does not generate. Returns an owned Solution for the first
+    // published index. A capturing stream may return a hit and does not start a
+    // build. Unsupported operation/backend pairs return NOT_SUPPORTED.
     HIPBLASLT_EXPORT hipblasStatus_t getJitAlgo(int            device,
                                                 const Request& request,
                                                 const Backend& backend,

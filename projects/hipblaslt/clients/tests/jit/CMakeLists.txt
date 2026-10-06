@@ -152,7 +152,7 @@ foreach(mode IN ITEMS off fallback forced)
         ${mode} "${hipblaslt_jit_bundles}")
     set_tests_properties(jit-heuristic-${mode} PROPERTIES
         FIXTURES_REQUIRED jit-bundles
-        ENVIRONMENT "HIPBLASLT_JIT=${hipblaslt_jit_mode_value}")
+        ENVIRONMENT "HIPBLASLT_JIT=${hipblaslt_jit_mode_value};HIPBLASLT_JIT_LIBRARY_PATH=${hipblaslt_jit_scratch}/heuristic-${mode}")
 endforeach()
 
 if(HIPBLASLT_JIT_BUILT_HIPKITTENS)
@@ -163,4 +163,7 @@ if(HIPBLASLT_JIT_BUILT_HIPKITTENS)
         "${hipblaslt_jit_source}/rocblaslt/src/include")
     target_link_libraries(hipblaslt-jit-hipkittens-test PRIVATE roc::hipblaslt hip::device)
     hipblaslt_jit_test(jit-hipkittens jit-gpu hipblaslt-jit-hipkittens-test)
+    # A private library so a leftover publish cannot turn the capture check into a hit.
+    set_tests_properties(jit-hipkittens PROPERTIES
+        ENVIRONMENT HIPBLASLT_JIT_LIBRARY_PATH=${hipblaslt_jit_scratch}/hipkittens)
 endif()

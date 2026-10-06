@@ -11,6 +11,8 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <sys/wait.h>
+#include <unistd.h>
 
 // Heuristic queries under HIPBLASLT_JIT. The mode is a process environment
 // variable, so each CTest entry runs one mode. The test lists the device's
@@ -78,7 +80,8 @@ namespace
 
     bool isJit(hipblasLtMatmulAlgo_t algo)
     {
-        return hipblaslt_ext::getIndexFromAlgo(algo) == -1;
+        // Heuristic results are JIT solution library indices, from 2^30.
+        return hipblaslt_ext::getIndexFromAlgo(algo) >= (1 << 30);
     }
 
     bool endsWith(const std::string& text, const std::string& suffix)
@@ -298,6 +301,78 @@ namespace
         requireUniqueKernels(handle, cpp);
     }
 
+    // A fresh process querying the same K=512 problem. Prints INDEX <n> and nothing else.
+    void reuse(const std::string& root)
+    {
+        int             device = -1;
+        hipDeviceProp_t properties{};
+        HIP(hipGetDevice(&device));
+        HIP(hipGetDeviceProperties(&properties, device));
+        const auto bundles = hipblaslt_jit_test::deviceBundles(root, properties.gcnArchName);
+        require(setenv("HIPBLASLT_JIT_TEST_REPLAY", (bundles / "plain-pair").u8string().c_str(), 1)
+                    == 0,
+                "setenv");
+
+        hipblasLtHandle_t           handle{};
+        hipblasLtMatmulDesc_t       desc{};
+        hipblasLtMatmulPreference_t pref{};
+        require(hipblasLtCreate(&handle) == HIPBLAS_STATUS_SUCCESS, "hipblasLtCreate");
+        require(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F)
+                    == HIPBLAS_STATUS_SUCCESS,
+                "hipblasLtMatmulDescCreate");
+        require(hipblasLtMatmulPreferenceCreate(&pref) == HIPBLAS_STATUS_SUCCESS, "preference");
+        require(hipblasLtMatmulPreferenceSetAttribute(pref,
+                                                      HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                                                      &workspaceLimit,
+                                                      sizeof(workspaceLimit))
+                    == HIPBLAS_STATUS_SUCCESS,
+                "workspace preference");
+        Layouts    layouts(M, 512, M, 512, N, 512);
+        const auto listed = queryC(handle, desc, pref, layouts, 1);
+        require(listed.status == HIPBLAS_STATUS_SUCCESS && listed.results.size() == 1,
+                "second process query");
+        const int index = hipblaslt_ext::getIndexFromAlgo(listed.results.front().algo);
+        std::cout << "INDEX " << index << '\n' << std::flush;
+        hipblasLtMatmulPreferenceDestroy(pref);
+        hipblasLtMatmulDescDestroy(desc);
+        hipblasLtDestroy(handle);
+    }
+
+    void requireSameIndexInChild(const std::string& root, int expected)
+    {
+        int pipes[2];
+        require(pipe(pipes) == 0, "pipe");
+        const auto child = fork();
+        require(child >= 0, "fork");
+        if(child == 0)
+        {
+            if(dup2(pipes[1], STDOUT_FILENO) < 0)
+                _exit(127);
+            close(pipes[0]);
+            close(pipes[1]);
+            execl("/proc/self/exe",
+                  "hipblaslt-jit-heuristic-test",
+                  "reuse",
+                  root.c_str(),
+                  nullptr);
+            _exit(127);
+        }
+        close(pipes[1]);
+        std::string output;
+        char        buffer[256];
+        ssize_t     count = 0;
+        while((count = read(pipes[0], buffer, sizeof(buffer))) > 0)
+            output.append(buffer, buffer + count);
+        close(pipes[0]);
+        int status = 0;
+        require(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0,
+                "The second process failed (wait status " + std::to_string(status) + ")");
+        require(output == "INDEX " + std::to_string(expected) + "\n",
+                "The second process reported '" + output + "', not index "
+                    + std::to_string(expected));
+        std::cout << "PASS a second process reused JIT library index " << expected << '\n';
+    }
+
     void test(const std::string& mode, const std::string& root)
     {
         int             device = -1;
@@ -363,6 +438,8 @@ namespace
             checkPair("K=256", c256, cpp256, true, "_WGM1", handle);
             runFirst(handle, desc, stream, K, c512.results.front());
             std::cout << "PASS K=512 first result\n";
+            const int index = hipblaslt_ext::getIndexFromAlgo(c512.results.front().algo);
+            requireSameIndexInChild(root, index);
         }
         else
         {
@@ -458,18 +535,22 @@ int main(int argc, char** argv)
 {
     if(argc < 2 || (std::string(argv[1]) != "ignored" && argc != 3))
     {
-        std::cerr << "Usage: " << argv[0] << " off|fallback|forced|ignored [BUNDLES]\n";
+        std::cerr << "Usage: " << argv[0] << " off|fallback|forced|ignored|reuse [BUNDLES]\n";
         return 2;
     }
     const std::string mode = argv[1];
-    if(mode != "off" && mode != "fallback" && mode != "forced" && mode != "ignored")
+    if(mode != "off" && mode != "fallback" && mode != "forced" && mode != "ignored"
+       && mode != "reuse")
     {
         std::cerr << "Unknown mode " << mode << '\n';
         return 2;
     }
     try
     {
-        test(mode, argc == 3 ? argv[2] : "");
+        if(mode == "reuse")
+            reuse(argv[2]);
+        else
+            test(mode, argc == 3 ? argv[2] : "");
     }
     catch(const std::exception& error)
     {

@@ -206,6 +206,6 @@ GEMM support. A build without that support does not consult them.
         | Any other value warns once and leaves JIT off
 
     * - | ``HIPBLASLT_JIT_TEST_REPLAY``
-        | Testing builds only. Whitespace-separated source-bundle directories that supply the JIT library. Read once per process.
-      - | Unset or empty: a JIT build has no library to consult. Mode 1 leaves heuristic queries unchanged, and mode 2 returns no algorithms
-        | One or more bundle directories: those bundles are replayed, built and loaded for a matching GEMM
+        | Testing builds only. Whitespace-separated source-bundle directories the process backend replays. Read once per process. The backend publishes into the JIT solution library, and a later query reuses the index.
+      - | Unset or empty: a JIT build has no backend to consult. Mode 1 leaves heuristic queries unchanged, and mode 2 returns no algorithms
+        | One or more bundle directories: those bundles are replayed for a matching GEMM, published, and reused on a later query

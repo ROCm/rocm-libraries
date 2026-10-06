@@ -59,7 +59,7 @@ The CTest tests are:
 | `jit-disabled` | The JIT headers are absent from the public include tree, `hipblaslt-ext.hpp` compiles without them, and the extension API links against the disabled library |
 | `jit-heuristic-off` | `HIPBLASLT_JIT=0`. Both heuristic queries for the plain-pair FP16 GEMM return no JIT algorithm |
 | `jit-heuristic-fallback` | `HIPBLASLT_JIT=1`. With no device library, every returned algorithm is JIT and the first result for K=512 matches the host. With a device library, an Equality size returns Equality algorithms, then JIT, then the others, with no repeated kernel, and an untuned size starts with JIT. Without such a library the ordering check prints `SKIP heuristic-provider-order: the build has no device library with an Equality size` |
-| `jit-heuristic-forced` | `HIPBLASLT_JIT=2`. Both queries return only JIT algorithms. K=512 selects the solution ending in `_K512_WGM8` and K=256 the one ending in `_WGM1`. A transposed A returns no algorithm. The first K=512 result matches the host |
+| `jit-heuristic-forced` | `HIPBLASLT_JIT=2`. Both queries return only JIT library indices. K=512 selects the solution ending in `_K512_WGM8` and K=256 the one ending in `_WGM1`. A transposed A returns no algorithm. The first K=512 result matches the host. A second process querying that problem gets the same index |
 | `jit-heuristic-ignored` | Built only with `HIPBLASLT_ENABLE_JIT=OFF`, with `HIPBLASLT_JIT=2`. The queries do not return JIT algorithms |
 | `jit-hipkittens` | Built only with `HIPBLASLT_JIT_ENABLE_HIPKITTENS` and gfx950. The compiled-in BF16 and FP16 variants, a capturing stream that returns no solution without compiling, a BF16 TN 256x256x128 GEMM whose D is 128, and M=128 rejected |
 
@@ -74,10 +74,12 @@ generation runs no generator, and solves FP16 problems with M=256, N=128 and
 K=512 or 256. `hipblaslt-jit-loader-test` takes the output directory and a
 scratch directory, and checks the same problems with the bundles of the same
 architecture. `hipblaslt-jit-source-bundle-test` takes a scratch directory.
-`hipblaslt-jit-heuristic-test` takes `off`, `fallback`, `forced` or `ignored`,
-and for the first three the bundle directory. CTest sets `HIPBLASLT_JIT`. The
-test sets `HIPBLASLT_JIT_TEST_REPLAY` to that directory's `plain-pair` before
-either heuristic query. `getIndexFromAlgo` is -1 for a JIT algorithm.
+`hipblaslt-jit-heuristic-test` takes `off`, `fallback`, `forced`, `ignored` or
+`reuse`, and for every mode except `ignored` the bundle directory. CTest sets
+`HIPBLASLT_JIT` and a private `HIPBLASLT_JIT_LIBRARY_PATH`. The test sets
+`HIPBLASLT_JIT_TEST_REPLAY` to that directory's `plain-pair` before either
+heuristic query. A JIT heuristic result is a solution library index from 2^30.
+`reuse` is the second process: it queries K=512 once and prints that index.
 
 With `--library` after the output directory, `hipblaslt-jit-end-to-end-test`
 runs the `jit-end-to-end-library` checks instead and starts its second process
