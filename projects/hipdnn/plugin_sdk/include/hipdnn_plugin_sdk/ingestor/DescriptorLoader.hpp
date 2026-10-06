@@ -1856,7 +1856,8 @@ struct EnvironmentDescriptorRoots
     std::vector<std::filesystem::path> additional;
 };
 
-/// @brief Reads @ref EnvironmentDescriptorRoots out of the current environment.
+/// @brief Reads @ref EnvironmentDescriptorRoots out of the current environment. Each call
+/// re-reads it and warns again about an unusable value, so call it once per discovery.
 inline EnvironmentDescriptorRoots environmentDescriptorRoots()
 {
     EnvironmentDescriptorRoots roots;

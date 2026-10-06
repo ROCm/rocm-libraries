@@ -112,7 +112,7 @@ std::string bytesHashOf(const std::string& path)
     return sha256(bytes.data(), bytes.size());
 }
 
-/// RFC 0019 §7.2: the adapter verifies a declared artifact digest before loading, so the check
+/// RFC 0019 §7.3: the adapter verifies a declared artifact digest before loading, so the check
 /// holds for every role that constructs through the factory.
 TEST(TestIngestorUhdAdapters, TheFactoryRefusesACustomLibraryWhoseDeclaredHashIsNotItsBytes)
 {
@@ -123,6 +123,12 @@ TEST(TestIngestorUhdAdapters, TheFactoryRefusesACustomLibraryWhoseDeclaredHashIs
     config.featuresSignature = {"$kernel.tile_m", "$kernel.split_k", "$q.seqlen"};
     config.featuresHash = FEATURES_HASH;
 
+#ifdef _WIN32
+    // A descriptor cannot name a Windows build of the library (RFC 0019 §7.3), so even the
+    // correct digest is refused.
+    config.modelHash = bytesHashOf(config.modelArtifactPath);
+    EXPECT_EQ(makeUhdAdapter(config), nullptr);
+#else
     // A well-formed digest of other bytes: a substituted library, not a malformed field.
     config.modelHash = sha256(std::string("a different library"));
     EXPECT_EQ(makeUhdAdapter(config), nullptr);
@@ -136,6 +142,7 @@ TEST(TestIngestorUhdAdapters, TheFactoryRefusesACustomLibraryWhoseDeclaredHashIs
     // §4.1 makes the artifact hash optional.
     config.modelHash.clear();
     EXPECT_NE(makeUhdAdapter(config), nullptr);
+#endif
 }
 
 /// A one-feature table scoring every value 1.0, written to @p path; returns its bytes' digest.

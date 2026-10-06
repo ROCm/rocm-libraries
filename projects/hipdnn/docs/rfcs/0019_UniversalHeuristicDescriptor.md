@@ -142,7 +142,7 @@ In JSON form:
 ```jsonc
 // The UED owns the heuristics + metadata schema; the KDP joins the engine and adds kernels.
 {
-  "schema": "hipdnn.ued/v1",
+  "version":  "1.0",
   "id":       "efc9eae4-…",              // engine identity
   "sort_kernel_catalog": {              // UHDs: rank this engine's kernels  <-- membership
     "gfx950":  ["ae896b07-…", "3d0c52e1-…"],   // e.g. a tflops ranker and a time ranker (Section 4.4)
@@ -154,7 +154,7 @@ In JSON form:
 }
 
 {
-  "schema": "hipdnn.kdp/v1",
+  "version":   "1.0",
   "arch":      ["gfx942"],
   "matchers":  ["968156a8-…"],      // shared matcher set (UMD ids)
   "engine":    "efc9eae4-…",        // UED: the engine these kernels join (carries the UHDs + KMD)
@@ -186,8 +186,9 @@ above:
 
 Only the first runs before applicability is settled; the other two run after it
 ([Section 10](#10-applicability-flow)). Each role is **independently optional**, and each value is an
-**arch → UHD ids** map resolved by exact `gcnArchName`, then a `default` entry, then unavailable
-([Section 8.3](#83-out-of-distribution-inputs)). Almost everything in this RFC
+**arch → UHD ids** map resolved by the longest arch key that prefixes the device's `gcnArchName` (a
+base id such as `gfx942` serves a device reporting `gfx942:sramecc+:xnack-`), then a `default` entry,
+then unavailable ([Section 8.3](#83-out-of-distribution-inputs)). Almost everything in this RFC
 concerns `sort_kernel_catalog`; where a statement is specific to another role it says so. `knobs` is
 authored, never derived from a model: of the three roles only `sort_kernel_catalog` may read `$kernel.*`,
 and every axis it reads must be both a KMD field and one of those knobs ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)).
@@ -522,16 +523,17 @@ Two header rules govern the split:
   provider does not implement produces a diagnosable "unsupported adapter" error rather than a parse
   failure, so a newer pack landing next to an older provider degrades predictably.
 
-Each `major.minor` is a standalone JSON Schema **file** in the repository; the inline copy below
-mirrors the authoritative `uhd/1.0.json`, and a CI check verifies the match. The schema targets
-**Draft 7**, matching [RFC 0020 §4.2](0020_UniversalEngineDescriptor.md#42-normative-schema), so one
-file drives both the build-time and runtime checks.
+The authoritative schema is the source-tree file `projects/hipdnn/plugin_sdk/schemas/uhd.schema.json`
+(one file per `major.minor`); the inline copy below mirrors it. It targets **Draft 7**, matching
+[RFC 0020 §4.2](0020_UniversalEngineDescriptor.md#42-normative-schema). The schema is not installed:
+the runtime enforces the same rules through its parser, and the packaging tests hold the two together
+(below).
 
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "uhd/1.0.json",
-  "title": "hipdnn.uhd version 1.0",
+  "$id": "https://rocm.docs.amd.com/projects/hipDNN/schemas/uhd.schema.json",
+  "title": "hipDNN Universal Heuristic Descriptor",
   "type": "object",
   "additionalProperties": false,
   "patternProperties": { "^(x-|_)": {} },
@@ -750,15 +752,13 @@ header rules describe: a missing or duplicated adapter body, a model adapter wit
 scalar `umd`, a `umd` entry carrying no revision, an unrecognised transform, a calibrated score naming
 no metric, an `objective` that contradicts its metric's direction, and an untruncated digest. Descriptors at earlier versions, such as the `0.1`
 packaging-test fixtures with placeholder ids, are rejected by the `version` constraint, which is the
-accept rule working as intended rather than a gap. The shipping descriptors predate `score.metric` and
-spell the same fact `score.units: "tflops"`; they migrate to `metric` with the implementation of
-[Section 4.4](#44-ranking-metrics), in one cutover rather than behind an accepted alias, and this
-validation claim is re-established against the migrated tree.
+accept rule working as intended rather than a gap.
 
-**OPEN — remaining schema work.** The block above covers the header and the adapter bodies as they exist
-today. Still outstanding: publishing it as the standalone per-version `uhd/1.0.json` file with the CI
-parity check RFC 0020 §4.2 describes, and extending it as each further adapter lands, so validation is
-generated rather than hand-written. *(See [Open Question 13](#operational).)*
+**Schema, packer and parser parity.** The hip-kernel-provider packaging tests
+(`descriptor-packaging/tests/test_hkp_pack_sidecars.py`) validate every in-tree UHD against
+`uhd.schema.json`, and for each admission rule check that the schema, the packer and the runtime parser
+accept and refuse the same document. A new adapter body or header rule lands in the schema file, the
+inline copy and those tests together. *(See [Open Question 13](#operational).)*
 
 ### 4.2 Adapter Summary
 
@@ -893,6 +893,8 @@ the model is trained to rank exactly that catalog. Kernel selection then proceed
    behind every admitted candidate, and step 5 orders those among themselves
    ([Section 8.3](#83-out-of-distribution-inputs)). A negative predicted time under `min` would
    otherwise win outright, and a model extrapolating below zero everywhere would still appear to rank.
+   A `native` scorer is held to the same rule: any non-finite value it returns — NaN or either
+   infinity — orders last and is reported as 0, so `+infinity` is never a "must pick" sentinel.
    Offline evaluation applies the same admission, so the regret it reports for a model is the regret
    the runtime incurs with it.
 5. **Tie-break deterministically.** On equal scores — or when no model ranks at all (steps 6 and 8) —
@@ -931,8 +933,10 @@ the model is trained to rank exactly that catalog. Kernel selection then proceed
    fallback: nothing else can build that plan, and substituting a different kernel silently would serve
    something other than what was authored, which is why step 7 rethrows it. **What is optional degrades;
    what is required raises.** Each heuristic failure mode resolves to a usable answer plus a diagnostic:
-   - **No model, or the scorer errors** → rank by `static_order` (priority + id). No ranking information
-     is available, and priority order is a valid answer. A benchmark record, where one exists, is
+   - **No model, or the scorer errors** → rank by `static_order` (priority + id). A scorer that throws,
+     a `native` function included, degrades the whole ranking to that declared order rather than
+     failing the request or mixing scored and unscored candidates. No ranking information is
+     available, and priority order is a valid answer. A benchmark record, where one exists, is
      consulted ahead of both ([step 9](#5-selection-flow)): a degraded model does not degrade a
      measurement.
    - **Broken feature contract** — `features_hash` disagrees, a `$kernel.*` reference is dangling, or the
@@ -980,12 +984,16 @@ the model is trained to rank exactly that catalog. Kernel selection then proceed
      model does, and the partial record is ignored rather than mixed in. Deciding coverage per filtered
      subset would let a pinned and an unpinned request take different order sources over the same
      candidates, which is the failure the commuting property exists to prevent.
-   - **The record is keyed by what would invalidate it** — the graph, the device, and the engine's
-     descriptor-set version ([Section 9.2](#92-loading-and-caching)). A measurement describes the
-     kernels that were installed when it was taken, so a changed engine version does not merely age the
-     record, it makes it a measurement of something else. Keying on the version is what makes that
-     judgement automatic rather than a comparison a reader has to remember to perform.
-   - **The store is capacity-bounded and evicts**, in memory and on disk
+   - **The record is keyed by what would invalidate it** — the graph, the device, the engine's UED
+     revision, and the identity of every ranker the engine can resolve (UHD id, model and feature
+     hashes) ([Section 9.2](#92-loading-and-caching)). A measurement describes the kernels that were
+     installed when it was taken, so a changed engine revision does not merely age the record, it
+     makes it a measurement of something else. Keying on the revision is what makes that judgement
+     automatic rather than a comparison a reader has to remember to perform. The key does not cover
+     kernel code objects: replacing one without changing its descriptor id keeps serving the old
+     record, so such a change requires a UED `revision` bump.
+   - **The in-memory store is capacity-bounded and evicts**; the on-disk store is append-only and is
+     invalidated as a whole, because a new revision or ranker writes to a new directory
      ([Section 9.2](#92-loading-and-caching)). A measured order that never expires is a cache that
      eventually describes a machine the process is no longer running on.
 
@@ -1161,8 +1169,10 @@ dispatch formula. One parser, validator, and interpreter serve all three.
 
 The operator set covers the computed features required here; no extension is needed:
 
-> `and or !` · `== != < <= > >=` · `in` · `all` · `+ - * / %` · `divisible value_or_default` ·
+> `and or !` · `== != < <= > >=` · `in` · `+ - * / %` · `divisible value_or_default` ·
 > `present not_present` · `if` · `ceil_div min max abs pow log2 rsqrt`
+
+JsonLogic's `all` is not supported.
 
 `present` and `not_present` test whether a binding exists at all, which a comparison cannot: a signature
 that must tolerate an optional tensor needs to distinguish "absent" from "zero" before it computes with
@@ -1175,9 +1185,10 @@ candidate would be work with a constant answer.
 
 Log-scale sizes, aspect ratios, tile/wave quantization, and intensity are all expressible with this set.
 Evaluation is a bounded interpreter: it fails closed on an unknown symbol, a type error, or an invalid
-operation, and uses checked-width integers. A computation outside this closed set (for example a bespoke
-occupancy model) uses a compiled scorer ([Section 7](#7-model-adapters)) rather than extending the
-interpreter.
+operation. Arithmetic is IEEE double precision, and a non-finite result (an overflow, a division by
+zero, a NaN) is refused as an evaluation error rather than propagated into a feature. A computation outside
+this closed set (for example a bespoke occupancy model) uses a compiled scorer
+([Section 7](#7-model-adapters)) rather than extending the interpreter.
 
 **Implementation status.** The shared implementation provides the arithmetic and comparison operators
 this RFC's features need (`+ - * /`, `min`, `max`, `ceil_div`, `abs`, `pow`, `log2`, `rsqrt`,
@@ -1281,7 +1292,7 @@ generalizes to any ranker (LightGBM, ONNX, a custom scorer):
    [Section 5](#5-selection-flow) step 8 path: the model is not used and the catalog ranks by `priority`,
    then `id`.
 3. **Signature → model.** The UHD carries `features_hash`; the model artifact embeds the hash it was
-   trained against (tree-table metadata, ONNX `metadata_props`, or a sidecar). At load the checker
+   trained against (tree-table metadata, ONNX `metadata_props`, or a sidecar). When the model loads the checker
    **recomputes the digest from the feature contract it actually loaded** and requires a three-way
    identity:
 
@@ -1331,7 +1342,9 @@ generalizes to any ranker (LightGBM, ONNX, a custom scorer):
 4. **Vector → input.** Each adapter verifies its artifact accepts the resolved vector: `tree_data`
    checks feature count, `onnx` checks input arity/shape.
 
-A failed check disables the model rather than failing the request. These run at load, so a violation
+A failed check disables the model rather than failing the request. Checks 2–4 run when the model is first
+needed ([Section 9.2](#92-loading-and-caching)), not when descriptors are discovered: discovery parses the
+UHD's JSON, and its model artifact is read and checked against the contract on first use. A violation
 means a mis-built or mismatched descriptor set, and the model's scores would be wrong rather than missing.
 The response is the one [Section 5](#5-selection-flow) step 8 defines: the model is not used, an error is
 logged, ranking falls back to `static_order`, and the engine reports its estimate as *invalid*. Because
@@ -1790,13 +1803,15 @@ length cannot be turned into an allocation.
 ### 7.3 Escape Hatch: `custom_library`
 
 For a model the in-tree walker does not cover, the engine ships its own compiled scorer as a loadable
-library, resolved through the platform's own dynamic loader on every supported host rather than through
-a POSIX-only path, and called through a small C ABI (`score(const double* feats, size_t n) -> double`).
+library, opened through the platform's own dynamic loader with the library's own directory searched first
+for its dependents, and called through a small C ABI (`score(const double* feats, size_t n) -> double`).
 That ABI is deliberately the same one a `native` scorer implements, so a single scorer implementation
 serves either delivery route and moving between them is a packaging decision rather than a rewrite.
 Treelite generates such a library from a tree model. Any model family is supported, under the
 author-native-code trust class of
-[RFC 0017 §12](0017_UniversalKernelDescriptor.md#12-packaging-and-delivery).
+[RFC 0017 §12](0017_UniversalKernelDescriptor.md#12-packaging-and-delivery). A descriptor names one
+library file and one digest, so it cannot carry per-platform builds; Windows therefore refuses
+`custom_library` models at load, like any model that fails to load.
 
 The constraint is on linkage, not compilation. Compiling a model *into* the provider makes it
 non-portable to third-party provider builds; a model may still be compiled (a Treelite `.so`) provided it
@@ -2077,22 +2092,26 @@ than per-feature range checks, so they cost little and catch the highest-impact 
   token an AOT signature may reference ([Section 6.1](#61-feature-sources)). The GFX name is already
   resolved for the pack-level arch gate and for selecting the arch-keyed heuristic
   ([Section 3.1](#31-descriptor-relationships)), so it costs nothing additional. An unseen architecture
-  withholds the engine estimate rather than supplying an unfounded one.
+  withholds the calibrated engine estimate rather than supplying an unfounded one; the model still
+  ranks the catalog, and a warning is logged once per heuristic and architecture.
 - **Categorical values** — a string outside the UHD's `categorical_encoding`
   ([Section 6.5](#65-categorical-encoding)) is an exact-lookup miss, and therefore free.
 - **Score range** — a recovered score that is not finite, or a physical score that is not positive
   ([Section 5](#5-selection-flow) step 4), is not a usable prediction. Such a
   candidate is distrusted **individually**: it orders last and is reported as 0, while the rest of the
-  ranking stands. One diagnostic per request carries the affected and total counts, so a model going
-  wrong everywhere reads differently from one candidate falling off the end of its trained region.
+  ranking stands. One diagnostic per heuristic, logged the first time it happens, carries that ranking's
+  affected and total counts, so a model going wrong everywhere reads differently from one candidate
+  falling off the end of its trained region.
 
 Carrying the arch set in the artifact rather than in the descriptor is deliberate: it is a property of
 the corpus a model was fitted to, not of the document that names the model, and keeping the two together
 means a model cannot be re-pointed at a new architecture by editing JSON. The same artifact-side slot
 keeps per-feature coverage metadata additive, so (b) remains available without a format break.
 
-Where the degradation is not per-candidate, it is the [Section 5](#5-selection-flow) one: fall back to
-`static_order`, log, and never fail. **OPEN:** See [Open Question 16](#operational).
+An unseen architecture is the one model-wide case that keeps the model's ranking: only the calibrated
+estimate, which other engines would compare against, is withheld. Every other model-wide degradation is
+the [Section 5](#5-selection-flow) step 8 one: fall back to `static_order`, log, and never fail.
+**OPEN:** See [Open Question 16](#operational).
 
 ---
 
@@ -2115,20 +2134,23 @@ Selection runs on the plan-build path, so its cost must be small and paid at mos
 
 ### 9.2 Loading and Caching
 
-- **Load on demand, and never before applicability.** Two rules govern loading:
+- **Load on demand, and never before applicability.** Descriptor discovery parses each UHD's JSON with
+  the rest of its descriptor set; it builds no model and evaluates nothing. Two rules govern loading
+  the model:
   1. The UHD is never consulted to decide applicability; that is the matcher's job
-     ([Section 10](#10-applicability-flow)). No UHD is loaded, parsed, or evaluated until the engine has
+     ([Section 10](#10-applicability-flow)). No model is loaded or evaluated until the engine has
      been found applicable for the graph.
   2. After that, it loads only when something asks for what it produces. There is no eager ranking and no
      speculative load. The demand triggers are a policy requesting an estimate in its ranking metric to rank
      engines, a **knob query** (the reported default is the UHD's top-ranked value,
      [Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)), and kernel selection. A
-     policy that ranks by explicit user choice or fixed criteria asks for none of these and loads no UHD.
+     policy that ranks by explicit user choice or fixed criteria asks for none of these and loads no model.
+     The first load is also when [Section 6.3](#63-contract-enforcement) checks 2–4 run.
 
   Ranking can be triggered for an engine that goes on to lose — a policy may ask every applicable engine
   for an estimate before picking one — so the model must be cheap to load and cheap to rank with. A
-  provider that never sees FMHA never parses the FMHA model, and a policy that never asks for estimates
-  never parses any.
+  provider that never sees FMHA never loads the FMHA model, and a policy that never asks for estimates
+  never loads any.
 - **Model cache — per engine.** After first load the parsed model / tree table / native handle is cached
   **on the engine**, matching the mechanism in the kernel-ingestor foundation
   ([PR #10606](https://github.com/ROCm/rocm-libraries/pull/10606)): lazily loaded, then held for the
@@ -3329,15 +3351,21 @@ dependency-gated and land only when a concrete need appears.
     the in-tree tree-walker must be fully first-party or may vendor a third-party evaluator; the
     latter was meant to gate the `custom_library` drop-in path.
 
-    **Current status: no trust gate exists.** The adapter is implemented and enabled in every build
-    with `HIPDNN_ENABLE_KERNEL_INGESTOR`, and that build flag is the only switch. Any `.uhd.json` the
-    loader accepts that names `adapter: custom_library` with a `library` and `symbol` reaches
-    `dlopen`/`LoadLibrary` (`AdapterFactory.hpp`, `CustomLibraryAdapter::load`), whether bound as
-    `sort_kernel_catalog` or `predict_engine`. The only checks are integrity checks the descriptor
+    **Current status: no trust gate exists.** The adapter is implemented and enabled in every Linux
+    build with `HIPDNN_ENABLE_KERNEL_INGESTOR`, and that build flag is the only switch (Windows refuses
+    it, [Section 7.3](#73-escape-hatch-custom_library)). Any `.uhd.json` the loader accepts that names
+    `adapter: custom_library` with a `library` and `symbol` reaches `dlopen` (`AdapterFactory.hpp`,
+    `CustomLibraryAdapter::load`), whether bound as
+    `sort_kernel_catalog` or `predict_engine`. The only check is an integrity check the descriptor
     itself supplies: an optional `custom_library.hash`, compared against the library bytes before the
-    open, and the `features_hash` comparison after it. Neither is a trust decision, since whoever
-    writes the descriptor also writes the hash. No signing, allow-list, or opt-in exists; the audit
-    this question asks for has not happened.
+    open. It is not a trust decision, since whoever writes the descriptor also writes the hash. The
+    library exports no feature contract: as for `native`, the feature count and `features_hash` the
+    adapter reports are the descriptor's own, so a scorer built for another feature order is accepted
+    and the descriptor's declaration is trusted. The digest is computed from the path and the library
+    is then opened by the same path, so bytes replaced between the two load unverified. Without a
+    declared `hash`, the identity is the digest of the bytes present at parse time; an artifact absent
+    then has an empty digest and loads unverified once deployed. No signing, allow-list, or opt-in
+    exists; the audit this question asks for has not happened.
     *(Impacts [Section 7](#7-model-adapters), [Section 9.1](#91-dependencies).)*
 
 12. **Enumerating the valid catalog — RESOLVED.** The generation path enumerates the applicable catalog
@@ -3353,11 +3381,13 @@ dependency-gated and land only when a concrete need appears.
     the UED knob ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)).
     *(Impacts [Section 13.2](#132-benchmarking-via-the-hipdnn-bench-cli), [Section 15](#15-phased-delivery) phase 5.)*
 
-13. **Publishing the schema file.** [Section 4.1](#41-field-reference-normative) now carries a normative Draft-7
-    block, validated against every shipping `version: "1.0"` descriptor. What remains is packaging it as
-    the standalone per-version `uhd/1.0.json` with the CI parity check
-    [RFC 0020 §4.2](0020_UniversalEngineDescriptor.md#42-normative-schema) defines, deciding where that
-    file lives relative to the UED's, and extending it as `table`, `onnx`, and `custom_library` land.
+13. **Publishing the schema file — RESOLVED for the source tree.** The schema ships as
+    `projects/hipdnn/plugin_sdk/schemas/uhd.schema.json`, mirrored by [Section 4.1](#41-field-reference-normative)'s
+    inline block, and the packaging tests check every in-tree UHD against it along with
+    schema/packer/parser parity for each admission rule. It is a source-tree file and is not
+    installed. What remains open is whether to install it beside the plugin SDK for out-of-tree
+    descriptor authors, and where it sits relative to the UED schema
+    ([RFC 0020 §4.2](0020_UniversalEngineDescriptor.md#42-normative-schema)).
     *(Impacts [Section 4](#4-uhd-schema).)*
 
 14. **CI validation of shipped descriptor sets.** Because a broken feature contract degrades rather
@@ -3375,13 +3405,13 @@ dependency-gated and land only when a concrete need appears.
     ([Section 7](#7-model-adapters)). Until then, the operator set recapped here is the working contract.
     *(Impacts [Section 6.2](#62-the-features_signature), [Section 7](#7-model-adapters).)*
 
-16. **Out-of-distribution detection — partially resolved.** Training-arch coverage now rides in the
+16. **Out-of-distribution detection — partially resolved.** Training-arch coverage rides in the
     model artifact and is checked at runtime: a model declares the architectures it was trained on, and
-    an unseen one withholds the estimate and degrades the ranking
+    on an unseen one the calibrated estimate is withheld while the model still ranks, with a warning
     ([Section 8.3](#83-out-of-distribution-inputs)). The per-candidate axis is resolved the same way
     [Section 5](#5-selection-flow) step 4 states — a candidate whose recovered score is non-finite, or
-    non-positive for a physical score, is distrusted individually, ordered last, and reported as 0, with one diagnostic
-    carrying the affected and total counts for the request. What remains open is the *continuous* case:
+    non-positive for a physical score, is distrusted individually, ordered last, and reported as 0, with
+    one diagnostic per heuristic carrying the affected and total counts. What remains open is the *continuous* case:
     whether per-feature training ranges ship alongside the arch list, and what a row outside them costs.
     Deciding that before more artifact fields land keeps it additive.
     *(Impacts [Section 8.3](#83-out-of-distribution-inputs), [Section 7.2](#72-default-tree_data).)*

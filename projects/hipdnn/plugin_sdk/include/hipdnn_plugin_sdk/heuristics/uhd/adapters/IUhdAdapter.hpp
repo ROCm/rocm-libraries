@@ -47,10 +47,14 @@ public:
         return -1;
     }
 
-    /// Expected number of features.
+    /// Number of features a row must carry. Artifact-backed adapters (`tree_data`, `table`)
+    /// read it from the artifact; `native` and `custom_library` report the descriptor's
+    /// signature length, so for them it attests nothing (RFC 0019 OQ11).
     virtual size_t expectedFeatureCount() const = 0;
 
-    /// Features hash this adapter was trained on (for contract validation).
+    /// Features hash the model was trained on. Artifact-backed adapters read it from the
+    /// artifact and refuse to load on a mismatch with the descriptor; `native` and
+    /// `custom_library` echo the descriptor's `features_hash`, which is trusted as declared.
     virtual const std::string& getFeaturesHash() const = 0;
 
     /// True if @p arch was seen in training or training_arches is empty.

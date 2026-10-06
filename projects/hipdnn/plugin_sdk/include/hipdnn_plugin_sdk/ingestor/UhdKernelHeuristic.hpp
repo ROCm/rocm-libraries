@@ -150,7 +150,7 @@ inline uhd::FeatureExtractionContext::ValueMap kernelVarsFrom(const KernelDefini
 
 } // namespace detail
 
-/// @brief The `$kernel.*` axes a feature signature reads.
+/// @brief The `$kernel.*` axes a feature signature reads; `$kernel.priority` is not one.
 ///
 /// RFC 0019 §6.3 check 2 requires this set to be a subset of `UED.knobs`, not equal to it:
 /// a knob the model ignores is only a warning.
@@ -170,13 +170,16 @@ inline std::unordered_set<std::string> kernelAxesOf(const uhd::FeatureExtractor&
 
 /// @brief Ranks an engine's kernels with a UHD model. Safe for concurrent selections.
 ///
-/// `$device.*` offers only DeviceProperties fields (no `device_id`, `total_global_mem`) and
-/// `$kernel.id` is unbound; referencing either degrades ranking to declared order.
+/// `$device.*` offers the fields DeviceFeatures.hpp publishes (`cu_count`,
+/// `multi_processor_count`, `warp_size`, `total_global_mem`, `memory_bus_width`,
+/// `memory_clock_rate`, `lds_size`, `peak_memory_bandwidth`); `device_id` and `$kernel.id`
+/// are unbound, and referencing either degrades ranking to declared order.
 class UhdKernelHeuristic : public IKernelHeuristic
 {
 public:
     /// Builds an instance with no model of its own that lazily resolves a per-(metric, arch)
-    /// model: exact arch, then `default`, within the metric (RFC 0019 §3.1, §8.3).
+    /// model: longest matching arch-key prefix, then `default`, within the metric (RFC 0019
+    /// §3.1, §8.3).
     /// @param byMetric Metric (`""` for the metric-less ranker) to arch key to descriptor.
     /// @param unavailable Metric to arch keys whose named model was refused: such a key never
     ///        falls back to the `default` key's model for the same metric.
@@ -382,7 +385,7 @@ public:
                                          const MatchContext& context) const override
     {
         // Only an empty catalog short-circuits. A sole candidate is still scored, since a 0
-        // score means "no measurement" (§5 step 7), not "only one candidate".
+        // score means "no measurement" (§5 step 4), not "only one candidate".
         if(catalog.entries.empty())
         {
             return {};
@@ -405,7 +408,7 @@ public:
             return choice.model->rankWith(catalog, context);
         }
 
-        // §8.3: no exact or `default` model; never borrow another architecture's model.
+        // §8.3: no matching or `default` model; never borrow another architecture's model.
         reportNoModelForArchOnce(arch, metric);
 
         // §12: degraded paths are traced too.
@@ -530,7 +533,7 @@ private:
             auto extractor = std::make_shared<const uhd::FeatureExtractor>(
                 config.featuresSignature, config.categoricalEncoding);
             // RFC 0019 §6.3 check 2: every axis the model ranks on must be an exposed knob;
-            // otherwise degrade to declared order (§5 step 7).
+            // otherwise degrade to declared order (§5 step 8).
             const auto axes = kernelAxesOf(*extractor);
             const std::unordered_set<std::string> exposed(knobs.begin(), knobs.end());
             const auto join = [](const auto& names) {
@@ -637,7 +640,7 @@ private:
     }
 
     /// The descriptor @p metric's own entries bind for @p arch, and its arch key, or null.
-    /// A refused entry (exact or `default`) never falls through to a model it would shadow.
+    /// A refused entry (matching or `default`) never falls through to a model it would shadow.
     const HeuristicDescriptor*
         boundFor(const std::string& metric, const std::string& arch, std::string& key) const
     {
@@ -737,7 +740,7 @@ private:
     {
         /// Higher wins; -infinity when there is no measurement, so it always sorts last.
         double ordering;
-        /// RFC 0019.13 §15.2's figure of merit; 0 when there is no measurement (§5 step 7).
+        /// RFC 0019.13 §15.2's figure of merit; 0 when there is no measurement (§5 step 4).
         double reported;
     };
 
@@ -760,13 +763,11 @@ private:
         {
             if(!_adapter->isTrainedForArch(context.deviceProperties.gcnArchName))
             {
-                // RFC 0019 §9.3: an unseen architecture is out-of-distribution, not refused.
-                HIPDNN_PLUGIN_LOG_WARN("uhd: " << _describedBy << " was not trained for '"
-                                               << context.deviceProperties.gcnArchName
-                                               << "'; ranking anyway");
+                // RFC 0019 §8.3: an unseen architecture is out-of-distribution, not refused.
+                reportUntrainedArchOnce(context.deviceProperties.gcnArchName);
             }
 
-            // RFC 0019 §6 step 2: problem/device slots are evaluated once per selection;
+            // RFC 0019 §5 step 2: problem/device slots are evaluated once per selection;
             // only kernel slots vary. §9.4 times the prefix and per-candidate tail apart.
             const auto prefixStart = Clock::now();
             auto ctx = detail::catalogProblemFeatures(context, catalog.bound);
@@ -859,7 +860,7 @@ private:
         }
         catch(const std::exception& e)
         {
-            // The whole ranking degrades, never a partial mix (RFC 0019 §5).
+            // The whole ranking degrades, never a partial mix (RFC 0019 §5 step 8).
             HIPDNN_PLUGIN_LOG_ERROR("uhd: " << _describedBy << " failed while ranking: " << e.what()
                                             << "; kernels rank by priority, then descriptor id");
             // RFC 0019 §12: trace the fallback too, with the same `declared_order` spelling
@@ -870,7 +871,7 @@ private:
                               << " candidates=" << catalog.entries.size()
                               << " uhd=" << _config.uhdId << " adapter=" << _config.adapterType
                               << " features_hash=" << _config.featuresHash);
-            // Scores are 0, RFC 0019 §5 step 7's "no measurement".
+            // Scores are 0, RFC 0019 §5 step 4's "no measurement".
             return detail::asScored(detail::declaredOrder(catalog.entries));
         }
     }
@@ -956,7 +957,7 @@ private:
     }
 
     /// The model's score in its metric's units, oriented so higher wins. An unusable value
-    /// (reachable from legal descriptors) reports 0, RFC 0019 §5 step 7's "no measurement".
+    /// (reachable from legal descriptors) reports 0, RFC 0019 §5 step 4's "no measurement".
     CandidateScore scoreCandidate(const std::vector<double>& row) const
     {
         return scoreFromRaw(_adapter->score(row));
@@ -967,7 +968,7 @@ private:
     {
         const double recovered = uhd::score_transform::applyInverse(raw, _config.scoreTransform);
 
-        // RFC 0019 §8.3: `recovered` must be finite and, when physical, strictly positive
+        // RFC 0019 §5 step 4: `recovered` must be finite and, when physical, strictly positive
         // (log1p's inverse can yield a finite negative). Checked here because only this layer
         // knows the score's units.
         if(!uhd::score_transform::isRankableScore(recovered, _positiveRequired))
@@ -1005,6 +1006,23 @@ private:
                     << "' and no default ranker or 'default' entry (it names: " << named.str()
                     << "); kernels rank by priority, then descriptor id. "
                        "Further occurrences are not logged.");
+    }
+
+    /// Reports ranking on an architecture outside the model's training set, once per
+    /// heuristic and architecture. calibratedRanking() withholds the estimate for it.
+    void reportUntrainedArchOnce(const std::string& arch) const
+    {
+        {
+            const std::lock_guard<std::mutex> lock(_untrainedArchMutex);
+            if(!_untrainedArchsReported.insert(arch).second)
+            {
+                return;
+            }
+        }
+        HIPDNN_PLUGIN_LOG_WARN("uhd: " << _describedBy << " was not trained for '" << arch
+                                       << "'; its calibrated estimate is withheld and it ranks "
+                                          "kernels anyway. Further occurrences for this "
+                                          "architecture are not logged.");
     }
 
     /// Reports a model predicting outside the range its target can occupy, once per heuristic.
@@ -1056,6 +1074,9 @@ private:
     mutable std::atomic<bool> _reportedScoreOutOfRange{false};
 
     mutable std::atomic<bool> _reportedNoModelForArch{false};
+    mutable std::mutex _untrainedArchMutex;
+    /// Architectures reportUntrainedArchOnce() has logged; guarded by _untrainedArchMutex.
+    mutable std::set<std::string> _untrainedArchsReported;
 
     mutable std::atomic<double> _lastOutOfRangeRaw{0.0};
     mutable std::atomic<double> _lastOutOfRangeRecovered{0.0};

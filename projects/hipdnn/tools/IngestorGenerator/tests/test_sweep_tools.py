@@ -1005,7 +1005,7 @@ class TestCorpusGraphIdentity:
         return _sweep_module().corpus_inventory(corpus, "none")
 
     def test_two_sources_sharing_a_graph_name_are_two_graphs(self, tmp_path):
-        """942:S6-10: hipkittens and pytorch both ship
+        """hipkittens and pytorch both ship
         bf16_b16_hq16_kv16_sq2048_skv2048_d128_noncausal."""
         shared = "bf16_b16_hq16_kv16_sq2048_skv2048_d128_noncausal"
         self.stage(

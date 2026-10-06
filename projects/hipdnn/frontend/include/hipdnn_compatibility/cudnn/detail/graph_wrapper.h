@@ -1829,11 +1829,13 @@ private:
         return {};
     }
 
+    // A and B select hipDNN's ModeA/ModeB prediction policies; OPENSOURCE has no hipDNN
+    // counterpart and runs fallback selection.
     static void warnUnhonoredHeuristicModes(const std::vector<HeurMode_t>& modes)
     {
         for(const auto mode : modes)
         {
-            if(mode != HeurMode_t::FALLBACK)
+            if(mode == HeurMode_t::OPENSOURCE)
             {
                 HIPDNN_FE_LOG_WARN("[cudnn_frontend] cuDNN heuristic mode "
                                    << hipdnn_frontend::to_string(mode)

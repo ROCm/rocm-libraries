@@ -509,7 +509,7 @@ TEST_F(TestPredictionPolicies, ConfigCannotEscapeItsEngineOrFinalizationLifetime
     const int64_t replacement = 2;
     _plugin->setEngineIds(_descriptor.get(), &replacement, 1);
     EXPECT_THROW(_plugin->getEngineConfig(_descriptor.get(), 1), hipdnn_backend::HipdnnException);
-    EXPECT_FALSE(_plugin->finalize(_descriptor.get())); // Legacy host: no prediction services.
+    EXPECT_FALSE(_plugin->finalize(_descriptor.get())); // A host without prediction services.
 }
 
 TEST(TestPredictionPolicyBoundary, RejectsMalformedOrForeignConfigFromPlugin)

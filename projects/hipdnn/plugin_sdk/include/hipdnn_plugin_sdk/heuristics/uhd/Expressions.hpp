@@ -127,12 +127,21 @@ private:
 class ExpressionSet
 {
 public:
-    /// Operator nesting bound per expression; tighter than the language's own limit.
+    /// Operators nested in one expression; tighter than the language's own limit. Argument
+    /// lists and array literals do not count.
     static constexpr size_t MAX_EXPRESSION_DEPTH = 64;
     /// JSON nodes read across the whole set, before anything is compiled.
     static constexpr size_t MAX_INPUT_NODES = 65536;
     static constexpr size_t MAX_EXPRESSIONS = 16384;
     static constexpr size_t MAX_STRING_BYTES = 65536;
+
+    /// @brief Checks @p expression against the bounds above, adding its JSON nodes to
+    ///        @p visited, which carries the count across one set.
+    /// @throws JsonLogicError when a bound is exceeded.
+    static void checkBounds(const nlohmann::json& expression, size_t& visited)
+    {
+        checkBounds(expression, 0, 0, visited);
+    }
 
     ExpressionSet() = default;
 
@@ -153,7 +162,7 @@ public:
                 // A null literal would compile to an expression that never resolves.
                 throw JsonLogicError("Unsupported descriptor expression type");
             }
-            checkBounds(expression, 0, visited);
+            checkBounds(expression, visited);
             const auto lowered = lower(expression);
             Entry entry;
             if(isReference(lowered))
@@ -285,10 +294,22 @@ private:
         std::unordered_set<std::string> variables;
     };
 
-    static void checkBounds(const nlohmann::json& node, size_t depth, size_t& visited)
+    static void countNode(size_t& visited)
     {
-        // Each operator adds two JSON levels (object + argument array).
-        if(depth > 2 * MAX_EXPRESSION_DEPTH + 2 || ++visited > MAX_INPUT_NODES)
+        if(++visited > MAX_INPUT_NODES)
+        {
+            throw JsonLogicError("Descriptor expression exceeds the depth or input-size bound");
+        }
+    }
+
+    /// @p operators counts the operators enclosing @p node. @p levels counts nesting as the
+    /// language does (an array literal is a level, an argument list is not), so this walk
+    /// recurses no deeper than compilation accepts.
+    static void
+        checkBounds(const nlohmann::json& node, size_t operators, size_t levels, size_t& visited)
+    {
+        countNode(visited);
+        if(operators > MAX_EXPRESSION_DEPTH || levels > jsonexpr::MAX_EXPRESSION_DEPTH)
         {
             throw JsonLogicError("Descriptor expression exceeds the depth or input-size bound");
         }
@@ -296,11 +317,27 @@ private:
         {
             throw JsonLogicError("Expression string exceeds size bound");
         }
-        if(node.is_array() || node.is_object())
+        if(node.is_object())
         {
-            for(const auto& child : node)
+            for(const auto& argument : node)
             {
-                checkBounds(child, depth + 1, visited);
+                if(!argument.is_array())
+                {
+                    checkBounds(argument, operators + 1, levels + 1, visited);
+                    continue;
+                }
+                countNode(visited);
+                for(const auto& element : argument)
+                {
+                    checkBounds(element, operators + 1, levels + 1, visited);
+                }
+            }
+        }
+        else if(node.is_array())
+        {
+            for(const auto& element : node)
+            {
+                checkBounds(element, operators, levels + 1, visited);
             }
         }
     }

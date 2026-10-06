@@ -139,7 +139,7 @@ enum class UhdAdapter
     NATIVE, ///< A scorer compiled into the engine, resolved by symbol.
     TREE_DATA, ///< GBDT tree table shipped as a data artifact. The default (§7.2).
     TABLE, ///< Bucketed lookup table shipped as a data artifact.
-    CUSTOM_LIBRARY, ///< An author-supplied `.so`, dlopened and called by symbol (§7.2).
+    CUSTOM_LIBRARY, ///< An author-supplied shared library, loaded and called by symbol (§7.3).
 };
 
 /// What a UHD's score measures, and whether it is comparable across engines (RFC 0019

@@ -30,10 +30,16 @@ inline std::filesystem::path testScorerLibrary()
     return testPluginDir() / hipdnn_data_sdk::utilities::getLibraryName("hipdnn_test_scorer_lib");
 }
 
+/// The test data directory: `HIPDNN_TEST_DATA_RELDIR` from the binary's directory.
+inline std::filesystem::path testDataDir()
+{
+    return hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / HIPDNN_TEST_DATA_RELDIR;
+}
+
 /// The committed `uhd_gen` output from ingestor/uhd/fixtures that the runtime reads.
 inline std::filesystem::path uhdGeneratedFixtureDir()
 {
-    return testPluginDir() / HIPDNN_UHD_GENERATED_FIXTURE_SUBDIR;
+    return testDataDir() / HIPDNN_UHD_GENERATED_FIXTURE_SUBDIR;
 }
 
 } // namespace hipdnn_plugin_sdk::test

@@ -339,6 +339,62 @@ TEST(TestKernelIngestorStateManager, RejectsATupleSharedByAnArchIndependentAndAP
                  std::invalid_argument);
 }
 
+/// A ranking or a candidate page names a kernel by id, so two definitions a gfx942 device
+/// would both see cannot share one, even with distinct tuples.
+TEST(TestKernelIngestorStateManager, RejectsAKernelIdDeclaredTwiceUnderOverlappingArch)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+
+    auto narrow = makePack({GRAPH_MATCHER_ID}, {"gfx942"});
+    narrow.kernels = {makeKernel(testId(0x96), "kernel_narrow", 64, "FLOAT")};
+    auto broad = makePack({GRAPH_MATCHER_ID}, {"gfx942", "gfx950"});
+    broad.id = testId(0x97);
+    broad.kernels = {makeKernel(testId(0x96), "kernel_broad", 256, "FLOAT")};
+
+    EXPECT_THROW(StateManager(makeSchema(),
+                              makeTestMatchers(),
+                              makeTestDispatches(),
+                              {narrow, broad},
+                              std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                              "test.graph"),
+                 std::invalid_argument);
+}
+
+/// Per-arch shards may reuse a kernel id: no device sees both definitions, and each device
+/// gets its own.
+TEST(TestKernelIngestorStateManager, AdmitsAKernelIdDeclaredOncePerDisjointArch)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+
+    auto first = makePack({GRAPH_MATCHER_ID}, {"gfx90a"});
+    first.kernels = {makeKernel(testId(0x96), "kernel_gfx90a", 64, "FLOAT")};
+    auto second = makePack({GRAPH_MATCHER_ID}, {"gfx942"});
+    second.id = testId(0x97);
+    second.kernels = {makeKernel(testId(0x96), "kernel_gfx942", 256, "FLOAT")};
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
+                               {first, second},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               "test.graph");
+
+    const TestGraph graph(makeGraphId(25));
+    const auto blockSizeOn = [&](int deviceId, const char* deviceArch) {
+        auto properties = testDeviceProperties();
+        properties.gcnArchName = deviceArch;
+        const auto definitions
+            = manager.unsortedDefinitions(MatchContext{graph, deviceId, properties});
+        EXPECT_EQ(definitions.size(), 1u) << deviceArch;
+        return definitions.empty() ? int64_t{0}
+                                   : std::get<int64_t>(definitions.front().metadata.at(BLOCK_SIZE));
+    };
+    EXPECT_EQ(blockSizeOn(0, "gfx90a:sramecc+:xnack-"), 64);
+    EXPECT_EQ(blockSizeOn(1, "gfx942:sramecc+"), 256);
+}
+
 TEST(TestKernelIngestorStateManager, APackIsPrunedWhenAnyOfItsCriteriaFails)
 {
     // A pack passes only if every criterion it lists passes: the first admits it, the

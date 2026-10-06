@@ -766,20 +766,6 @@ public:
                 result.uhd_id = modelId;
                 result.status = PredictionStatus::AVAILABLE;
                 result.reason.clear();
-                if(!result.binding_json.empty())
-                {
-                    auto binding = nlohmann::json::parse(result.binding_json);
-                    binding["role"] = "sort_kernel_catalog";
-                    if(modelId.empty())
-                    {
-                        binding.erase("uhd_id");
-                    }
-                    else
-                    {
-                        binding["uhd_id"] = modelId;
-                    }
-                    result.binding_json = binding.dump();
-                }
                 return;
             }
             catch(const HipdnnPluginException& error)

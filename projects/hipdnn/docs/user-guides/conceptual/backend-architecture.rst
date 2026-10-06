@@ -202,6 +202,7 @@ Handle destruction (implicit via RAII)
          -> Backend: hipdnnBackendFinalize(heuristic)
             -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()
             -> Prediction policy: query engine/configuration predictions in the metric
+               [only when ModeA or ModeB is reached in the policy order]
       -> detail::getEngineConfigs(configs, ids, heuristicDesc)
 
 ``HeuristicMode::A`` and ``HeuristicMode::B`` are policy requests, not backend modes.
@@ -223,7 +224,7 @@ Heuristic results carry the engine ID, the ranking metric and, for scored
 configurations, the owned knob tuple. Plan construction preserves those settings to
 execute the scored configuration. Graph-level selections use the chosen engine's
 normal selector, ranking its kernels by the same metric, with
-``global.benchmarking=0``. Existing engine cache behavior is unchanged.
+``global.benchmarking=0``. The engine cache behaves as it does for any other selection.
 
 
 ``create_execution_plan_ext()``

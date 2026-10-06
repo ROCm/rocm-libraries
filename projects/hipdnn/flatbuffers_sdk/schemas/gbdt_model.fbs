@@ -10,7 +10,7 @@ namespace hipdnn_flatbuffers_sdk.data_objects;
 ///
 /// Traversal: start at node 0, compare features[feature_indices[i]] against
 /// thresholds[i], go left (left_children[i]) if less-or-equal (or less, if
-/// decision_type at i is false) or if missing and default_left,
+/// decision_lte at i is false) or if missing and default_left,
 /// else right (right_children[i]). At a leaf, return leaf_values[i].
 table GbdtTree {
     /// Feature index to split on at each internal node.
@@ -31,9 +31,23 @@ table GbdtTree {
     /// Default direction for missing values: true = go left, false = go right.
     default_left: [bool];
 
-    /// Decision type per node: true = use <= (LightGBM default), false = use <.
+    /// Comparison per node: true = use <= (LightGBM default), false = use <.
     /// If absent, defaults to all true (<=) for LightGBM compatibility.
     decision_lte: [bool];
+}
+
+/// Layer 2 of a grouped model: the trees that rank candidates *within* one group.
+///
+/// A grouped model answers two questions -- which group, then which candidate inside it --
+/// which is one question more than a single tree ensemble can express. MIOpen is the case
+/// that needs it (many solvers, each with its own perf-configs), but nothing here names an
+/// engine: a group is whatever value the grouping feature takes.
+table GbdtGroup {
+    /// The grouping feature's value that selects this ensemble.
+    value: double;
+
+    /// Trees ranking candidates within this group. Same evaluation as GbdtModel.trees.
+    trees: [GbdtTree];
 }
 
 /// @brief GBDT (Gradient Boosted Decision Tree) model for the tree_data adapter.
@@ -49,20 +63,6 @@ table GbdtTree {
 /// dump_model() already folds it into leaf_values, so multiplying again double-counts
 /// it. A producer whose leaf values exclude the learning rate must scale them before
 /// serializing. See TreeDataAdapter::score, which implements this formula.
-/// Layer 2 of a grouped model: the trees that rank candidates *within* one group.
-///
-/// A grouped model answers two questions -- which group, then which candidate inside it --
-/// which is one question more than a single tree ensemble can express. MIOpen is the case
-/// that needs it (many solvers, each with its own perf-configs), but nothing here names an
-/// engine: a group is whatever value the grouping feature takes.
-table GbdtGroup {
-    /// The grouping feature's value that selects this ensemble.
-    value: double;
-
-    /// Trees ranking candidates within this group. Same evaluation as GbdtModel.trees.
-    trees: [GbdtTree];
-}
-
 table GbdtModel {
     /// Array of decision trees in the ensemble.
     trees: [GbdtTree];
@@ -86,18 +86,18 @@ table GbdtModel {
     num_training_samples: int64;
     training_objective: string; // "regression", "lambdarank", etc.
 
-    /// Model provenance (RFC 0019 §9.2, §13).
+    /// Model provenance (RFC 0019 §8.3, §13).
     /// GPU architectures the model was trained on (e.g., ["gfx942", "gfx1100"]).
-    /// Runtime compares $device.arch against this list; warns or degrades to
-    /// static_order if the device arch is unseen during training.
+    /// The runtime compares the device's architecture against this list; on an unseen
+    /// architecture it withholds the calibrated engine estimate and still ranks kernels
+    /// with the model, logging a warning.
     training_arches: [string];
 
     /// Semantic version of the model (e.g., "1.0.0").
     model_version: string;
 
     /// Index into the feature row of the value that names a candidate's group, or -1 for a
-    /// single-layer model. Appended, so every artifact written before this field reads as
-    /// -1 and evaluates exactly as it always did.
+    /// single-layer model. When absent, -1 identifies a single-layer model.
     group_by_feature_index: int32 = -1;
 
     /// Layer 2, one entry per group value. Empty for a single-layer model. `trees` above is

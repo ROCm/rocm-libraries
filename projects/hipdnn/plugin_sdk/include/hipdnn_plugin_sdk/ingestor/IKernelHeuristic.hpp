@@ -58,7 +58,7 @@ inline std::vector<KernelDefinition> declaredOrder(const std::vector<KernelDefin
     return ordered;
 }
 
-/// Declared order as (id, score) pairs, scoring 0 for "no measurement" (RFC 0019 §5 step 7).
+/// Declared order as (id, score) pairs, scoring 0 for "no measurement" (RFC 0019 §5 step 4).
 inline std::vector<ScoredKernel> asScored(const std::vector<KernelDefinition>& ordered)
 {
     std::vector<ScoredKernel> scored;
@@ -95,7 +95,7 @@ public:
     /// bytes (stable across runs).
     ///
     /// A non-finite score (NaN or either infinity) ranks last, after every finite score,
-    /// and is reported as 0 (RFC 0019 §5 step 7). `score()` is supplied by the pack, so its
+    /// and is reported as 0 (RFC 0019 §5 step 4). `score()` is supplied by the pack, so its
     /// value is outside this class's control; NaN compares false against everything, which
     /// is not a strict weak ordering and is undefined behaviour for stable_sort. In
     /// particular, +infinity is not a "must pick" sentinel: it ranks below every finite score.
@@ -145,7 +145,7 @@ public:
         {
             for(const auto& entry : catalog.entries)
             {
-                // A non-finite score sorts last and is reported as 0 (§5 step 7). The keys stay
+                // A non-finite score sorts last and is reported as 0 (§5 step 4). The keys stay
                 // separate because NaN in the comparator is undefined behaviour.
                 const double raw = score(context, catalog.bound, entry);
                 const bool usable = std::isfinite(raw);
@@ -156,7 +156,7 @@ public:
         }
         catch(const std::exception& e)
         {
-            // RFC 0019 §5 step 7: a throwing scorer degrades the whole ranking to declared
+            // RFC 0019 §5 step 8: a throwing scorer degrades the whole ranking to declared
             // order; it must not fail the request, and a partial ranking is neither order.
             reportScorerFailureOnce(e.what());
             return detail::asScored(detail::declaredOrder(catalog.entries));
@@ -265,7 +265,7 @@ public:
         , _sign(objective == "min" ? -1.0 : 1.0)
         , _transform(std::move(transform))
         // Under `min` a cost must be positive: a native scorer's 0 means "no measurement", and
-        // negated it would outrank every real cost. Otherwise §8.3's rule decides.
+        // negated it would outrank every real cost. Otherwise §5 step 4's rule decides.
         , _positiveRequired(objective == "min"
                             || uhd::score_transform::isPhysicalScore(metric, _transform))
     {
@@ -309,7 +309,7 @@ public:
         return "declared_order";
     }
 
-    /// Zero, which RFC 0019 §5 step 7 reports for "no measurement"; ordering is unaffected.
+    /// Zero, which RFC 0019 §5 step 4 reports for "no measurement"; ordering is unaffected.
     double score(const MatchContext& /*context*/,
                  const BoundTokens& /*bound*/,
                  const KernelDefinition& /*kernel*/) const override

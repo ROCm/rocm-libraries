@@ -3,7 +3,7 @@
 
 /**
  * @file TestCustomLibraryAdapter.cpp
- * @brief Tests for CustomLibraryAdapter (compiled scorer .so) per RFC 0019 §7.2.
+ * @brief Tests for CustomLibraryAdapter (compiled scorer library) per RFC 0019 §7.3.
  */
 
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/CustomLibraryAdapter.hpp>

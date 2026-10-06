@@ -7,6 +7,7 @@ This document describes the environment variables and runtime configuration opti
 - [Environment Variables](#environment-variables)
   - [Backend Library Discovery](#backend-library-discovery)
   - [Plugin Discovery](#plugin-discovery)
+  - [Kernel Ingestor Descriptors](#kernel-ingestor-descriptors)
   - [Heuristic Policy Selection](#heuristic-policy-selection)
   - [Benchmarking](#benchmarking)
   - [Caching](#caching)
@@ -101,6 +102,35 @@ export HIPDNN_HEURISTIC_PLUGIN_DIR=/opt/rocm/lib/hipdnn/plugins/heuristics
 - Each heuristic plugin must provide a unique policy ID and policy name
 - See the [Plugin Development Guide](PluginDevelopment.md) for details on creating heuristic plugins
 - Ignored in a secure execution environment, for the same reason as `HIPDNN_PLUGIN_DIR`
+
+### Kernel Ingestor Descriptors
+
+Providers built with `HIPDNN_ENABLE_KERNEL_INGESTOR` (the hip-kernel-provider) build engines from descriptor trees: JSON descriptors and the model artifacts they name. Each process reads these variables once, the first time the provider discovers its descriptors. The provider loads its own tree first and then any additional roots, in the order listed below. Within one root, two files that define the same descriptor id with different contents are both ignored. An additional root cannot replace what an earlier root defined: a file redefining an id already loaded is ignored with an error, and the earlier definition stands.
+
+#### HIPDNN_DESCRIPTOR_DIR
+
+Replaces the provider's own descriptor tree. This is the only variable that can remove shipped descriptors.
+
+| Value      | Description                                            |
+|------------|--------------------------------------------------------|
+| (unset)    | Uses the `arch_content/hip-kernel-provider` directory beside the loaded provider library, else the configure-time install location |
+| `<path>`   | Loads this directory instead of the provider's own tree |
+
+A value that is not an existing directory is ignored with a warning, and the default tree is used.
+
+#### HIPDNN_DESCRIPTOR_RUNTIME_DIR
+
+An additional descriptor root loaded after the provider's tree (or `HIPDNN_DESCRIPTOR_DIR`). It adds descriptors beside the shipped ones and never replaces them. A value that is not an existing directory is ignored with a warning.
+
+#### HIPDNN_DESCRIPTOR_PATH
+
+A list of additional descriptor roots, loaded in order after `HIPDNN_DESCRIPTOR_RUNTIME_DIR`. Entries are separated by `:` on Linux and `;` on Windows; empty entries are skipped. Like `HIPDNN_DESCRIPTOR_RUNTIME_DIR` it is additive. Entries are not checked for existence: an entry that is not installed on this machine contributes nothing, without a warning.
+
+**Example:**
+```bash
+export HIPDNN_DESCRIPTOR_RUNTIME_DIR=/opt/site/hipdnn-descriptors
+export HIPDNN_DESCRIPTOR_PATH=/opt/vendor-a/descriptors:/opt/vendor-b/descriptors
+```
 
 ### Heuristic Policy Selection
 

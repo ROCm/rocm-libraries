@@ -31,9 +31,10 @@ void registerNativeIngestorSymbols();
 std::filesystem::path descriptorSearchDirectory();
 
 /// Every directory discoverDescriptorSets() reads, in order: the tree above, then
-/// HIPDNN_DESCRIPTOR_RUNTIME_DIR when it names one. The runtime tree is additive rather
-/// than an override -- it can add descriptors beside the shipped ones, but a file
-/// redefining a shipped id is refused and the shipped definition stands.
+/// HIPDNN_DESCRIPTOR_RUNTIME_DIR when it names one, then each HIPDNN_DESCRIPTOR_PATH entry.
+/// Those are additive rather than an override -- they can add descriptors beside the
+/// shipped ones, but a file redefining a shipped id is refused and the shipped definition
+/// stands. Reads the environment once, so each unusable value is warned about once.
 std::vector<std::filesystem::path> descriptorSearchDirectories();
 
 /// Every descriptor file under those directories, parsed once. Shared with opaque engines

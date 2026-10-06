@@ -771,15 +771,15 @@ def test_standalone_ukd_shared_by_two_kdps_stored_once(
     p.write_text(json.dumps(doc), encoding="utf-8")
     # A second referencing KDP is a second CONSUMER: it resolves to its own engine
     # and KMD, so the UKD declares what it claims for that pair too. Every field of
-    # kmd-copy is matcher-only here -- a hip source compiles no specialization --
+    # the copy KMD is matcher-only here -- a hip source compiles no specialization --
     # but the claim is stated rather than inferred from silence.
     ukd_path = src / _STANDALONE_UKD_FILE
     ukd_doc = _read(ukd_path)
     consumers = ukd_doc["provenance"]["specialization_contract"]["consumers"]
     consumers.append(
         {
-            "engine_id": "ued-copy",
-            "kmd_id": "kmd-copy",
+            "engine_id": _read(src / "copy.ued.json")["id"],
+            "kmd_id": _read(src / "copy.kmd.json")["id"],
             "metadata_fields": [],
             "matcher_only_fields": ["block_size", "dtype"],
             "bindings": {},
@@ -1039,7 +1039,9 @@ def test_neg_duplicate_generic_ids(tmp_path, main_fixture):
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / "copy.kmd.json"
     doc = _read(p)
-    doc["id"] = "kmd-pointwise"  # already the id of pointwise.kmd.json
+    # pointwise.kmd.json's id in another letter case: the loader parses both
+    # spellings to the same UUID.
+    doc["id"] = _read(src / "pointwise.kmd.json")["id"].upper()
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="duplicate"):
         load_flat_input(src)
@@ -1052,7 +1054,7 @@ def test_neg_cross_type_id_reuse_rejected(tmp_path, main_fixture):
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / "pointwise.ued.json"
     doc = _read(p)
-    doc["id"] = "kmd-pointwise"  # a KMD id, different type
+    doc["id"] = _read(src / "pointwise.kmd.json")["id"]  # a KMD id, different type
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="duplicate"):
         load_flat_input(src)
@@ -1110,7 +1112,7 @@ def test_neg_ued_name_not_scoped(tmp_path, main_fixture):
 def test_scoped_ued_name_loads_clean(main_fixture):
     # The renamed fixture UED (test_fixture:pointwise) validates without error.
     flat = load_flat_input(main_fixture)
-    ued = next(d for d in flat.by_type("ued") if d.id == "ued-pointwise")
+    ued = next(d for d in flat.by_type("ued") if d.path.name == "pointwise.ued.json")
     assert ued.doc["name"] == "test_fixture:pointwise"
 
 

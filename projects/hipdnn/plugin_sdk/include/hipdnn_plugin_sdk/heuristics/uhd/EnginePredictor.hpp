@@ -36,6 +36,8 @@ struct Model
     std::shared_ptr<const IUhdAdapter> adapter;
     PredictionStatus status = PredictionStatus::INVALID;
     std::string reason;
+    /// The artifact is not deployed yet, so a later compile may succeed (RFC 0019 §5).
+    bool awaitingArtifact = false;
 };
 
 /// @brief Compile and validate the L1 model a resolved UED role names.
@@ -90,6 +92,7 @@ inline std::shared_ptr<const Model> model(const UhdConfig& config)
             {
                 loaded->status = PredictionStatus::UNAVAILABLE;
                 loaded->reason = "UHD model artifact is not deployed";
+                loaded->awaitingArtifact = true;
                 return loaded;
             }
             const auto size = std::filesystem::file_size(config.modelArtifactPath, error);
@@ -119,8 +122,9 @@ inline std::shared_ptr<const Model> model(const UhdConfig& config)
             loaded->reason = "grouped tree_data artifact cannot be bound to the predict_engine "
                              "role: grouped L1 models have no per-row contract";
         }
-        else if(loaded->adapter->expectedFeatureCount() != loaded->extractor->featureCount()
-                || loaded->adapter->getFeaturesHash() != config.featuresHash)
+        // Only tree_data reads its feature count from the artifact; native and custom_library
+        // adapters take it from the signature (RFC 0019 OQ11).
+        else if(loaded->adapter->expectedFeatureCount() != loaded->extractor->featureCount())
         {
             loaded->reason = "UHD model feature contract does not match its signature";
         }
@@ -178,12 +182,14 @@ inline void validateBinding(const UhdConfig& config,
 /// Description never loads or evaluates a model; binding/features JSON is emitted only
 /// for description. Missing coverage or a bad model never changes engine applicability.
 /// @param metric The requested metric; models of any other metric are never asked.
-/// @param config The bound model, or a default config when none is bound (description
-///               still names the binding to train against).
-/// @param compiled @p config compiled by prediction_detail::model(); null when nothing is
-///                 deployed. Read only when @p evaluate.
+/// @param config The bound model, or null when none is bound (description still names the
+///               binding to train against).
+/// @param compile Returns @p config compiled by prediction_detail::model(). Called only to
+///                evaluate a binding validateBinding accepts, so a refused binding never
+///                loads its artifact.
 /// @returns A physical value in @p metric's registered units only for AVAILABLE predictions.
-inline hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
+template <typename Compile>
+hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
     predictEngine(int64_t engineId,
                   const std::string& engineName,
                   const std::string& selectorRevision,
@@ -191,8 +197,8 @@ inline hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
                   const std::string& arch,
                   const FeatureExtractionContext& features,
                   bool evaluate,
-                  const UhdConfig& config,
-                  const std::shared_ptr<const prediction_detail::Model>& compiled)
+                  const UhdConfig* config,
+                  const Compile& compile)
 {
     using namespace prediction_detail;
     hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT result;
@@ -214,26 +220,27 @@ inline hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
                    // Always emitted: a description without trained_against
                    // cannot be turned into a UHD.
                    {"trained_against", {{"selector_revision", selectorRevision}}}};
-            if(!config.uhdId.empty())
+            if(config != nullptr && !config->uhdId.empty())
             {
-                binding["uhd_id"] = config.uhdId;
+                binding["uhd_id"] = config->uhdId;
+                result.uhd_id = config->uhdId;
             }
             // Descriptor-backed engines add their descriptor set to trained_against
             // (GenericEngine::getPrediction).
-            result.uhd_id = config.uhdId;
             result.binding_json = binding.dump();
             result.features_json = features.toJson().dump();
             result.reason = "engine prediction binding description";
             return result;
         }
-        if(!compiled)
+        if(config == nullptr)
         {
             result.reason = std::string("no ") + ENGINE_ROLE + " UHD for metric '" + metric
                             + "' on arch '" + targetArch + "'";
             return result;
         }
-        result.uhd_id = config.uhdId;
-        validateBinding(config, engineName, targetArch, metric);
+        result.uhd_id = config->uhdId;
+        validateBinding(*config, engineName, targetArch, metric);
+        const std::shared_ptr<const Model> compiled = compile();
         if(compiled->status != PredictionStatus::AVAILABLE)
         {
             result.status = compiled->status;
@@ -258,7 +265,7 @@ inline hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
             return result;
         }
         const double raw = compiled->adapter->score(row);
-        const double physical = score_transform::applyInverse(raw, config.scoreTransform);
+        const double physical = score_transform::applyInverse(raw, config->scoreTransform);
         // validateBinding proved the metric registered and equal to the model's.
         if(!std::isfinite(raw)
            || !hipdnn_data_sdk::utilities::isValidMetricValue(
@@ -346,13 +353,7 @@ public:
                 }
             }
         }
-        static const UhdConfig s_unbound;
         const bool evaluateModel = evaluate && refused == nullptr;
-        std::shared_ptr<const prediction_detail::Model> compiled;
-        if(evaluateModel && selected != nullptr)
-        {
-            compiled = compiledModel(metric, selectedArch, *selected);
-        }
         auto result = predictEngine(engineId,
                                     engineName,
                                     selectorRevision,
@@ -360,8 +361,8 @@ public:
                                     arch,
                                     features,
                                     evaluateModel,
-                                    selected != nullptr ? *selected : s_unbound,
-                                    compiled);
+                                    selected,
+                                    [&] { return compiledModel(metric, selectedArch, *selected); });
         if(refused != nullptr)
         {
             result.status = refused->status;
@@ -383,27 +384,30 @@ private:
         std::string reason;
     };
 
-    /// Caches only successful compiles, so an artifact still being deployed can recover
-    /// (RFC 0019 §5). Keyed by UUID (arch key if none), so one UUID bound under several
-    /// arches compiles once.
+    /// Caches every compile except one still awaiting its artifact, so a model being deployed
+    /// recovers (RFC 0019 §5) while a broken one is read, hashed and reported once. Compiles
+    /// outside the lock; concurrent first uses may both compile, and the first cached result
+    /// wins. Keyed by UUID (arch key if none), so one UUID bound under several arches
+    /// compiles once.
     std::shared_ptr<const prediction_detail::Model> compiledModel(const std::string& metric,
                                                                   const std::string& arch,
                                                                   const UhdConfig& config) const
     {
-        const std::lock_guard<std::mutex> lock(_modelMutex);
-        const auto key
-            = std::make_pair(metric, config.uhdId.empty() ? "arch:" + arch : config.uhdId);
-        if(const auto cached = _modelCache.find(key); cached != _modelCache.end())
+        auto key = std::make_pair(metric, config.uhdId.empty() ? "arch:" + arch : config.uhdId);
         {
-            return cached->second;
+            const std::lock_guard<std::mutex> lock(_modelMutex);
+            if(const auto cached = _modelCache.find(key); cached != _modelCache.end())
+            {
+                return cached->second;
+            }
         }
         auto compiled = prediction_detail::model(config);
-        if(compiled != nullptr
-           && compiled->status == hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::AVAILABLE)
+        if(compiled->awaitingArtifact)
         {
-            _modelCache.emplace(key, compiled);
+            return compiled;
         }
-        return compiled;
+        const std::lock_guard<std::mutex> lock(_modelMutex);
+        return _modelCache.emplace(std::move(key), std::move(compiled)).first->second;
     }
 
     std::map<std::string, std::map<std::string, UhdConfig>> _byMetric;

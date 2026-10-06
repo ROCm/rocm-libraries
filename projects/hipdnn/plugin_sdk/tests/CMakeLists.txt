@@ -115,8 +115,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     )
 
     # The committed uhd_gen output TestUhdGeneratedModel loads. Only what the runtime reads;
-    # the training inputs beside it stay in the source tree. Staged under the test plugin
-    # directory so it ships in the same artifact component as the scorer library.
+    # the training inputs beside it stay in the source tree.
     set(_uhd_fixture_subdir "uhd_generated_fixtures")
     set(_uhd_fixture_files
         tile_selector.uhd.json
@@ -127,7 +126,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(_uhd_fixture_outputs "")
     foreach(_file IN LISTS _uhd_fixture_files)
         set(_source "${CMAKE_CURRENT_SOURCE_DIR}/ingestor/uhd/fixtures/${_file}")
-        set(_staged "${HIPDNN_TEST_PLUGIN_DIR}/${_uhd_fixture_subdir}/${_file}")
+        set(_staged "${HIPDNN_TEST_DATA_DIR}/${_uhd_fixture_subdir}/${_file}")
         get_filename_component(_staged_dir "${_staged}" DIRECTORY)
         add_custom_command(
             OUTPUT "${_staged}"
@@ -141,18 +140,19 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
 
         get_filename_component(_subdir "${_file}" DIRECTORY)
         install(FILES "${_source}"
-                DESTINATION "${HIPDNN_TEST_PLUGIN_INSTALL_DIR}/${_uhd_fixture_subdir}/${_subdir}"
+                DESTINATION "${HIPDNN_TEST_DATA_INSTALL_DIR}/${_uhd_fixture_subdir}/${_subdir}"
         )
     endforeach()
     add_custom_target(
         hipdnn_plugin_sdk_test_uhd_fixtures
         DEPENDS ${_uhd_fixture_outputs}
-        COMMENT "Staging UHD test fixtures beside the test plugins"
+        COMMENT "Staging UHD test fixtures beside the test data"
     )
     add_dependencies(hipdnn_plugin_sdk_tests hipdnn_plugin_sdk_test_uhd_fixtures)
 
     target_compile_definitions(hipdnn_plugin_sdk_tests PRIVATE
         HIPDNN_TEST_PLUGIN_RELDIR="${HIPDNN_TEST_PLUGIN_RELDIR}"
+        HIPDNN_TEST_DATA_RELDIR="${HIPDNN_TEST_DATA_RELDIR}"
         HIPDNN_UHD_GENERATED_FIXTURE_SUBDIR="${_uhd_fixture_subdir}")
 endif()
 

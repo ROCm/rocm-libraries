@@ -578,7 +578,7 @@ TEST(TestIngestorKernelHeuristic, UnrankedRanksEveryKernelEqually)
 {
     // The fallback must contribute no ordering of its own: any score spread would
     // outrank priority, which is the one signal an engine without a model still has.
-    // 0 is RFC 0019 §5 step 7's "no measurement"; traceDecidedBy() tells a fallback apart from
+    // 0 is RFC 0019 §5 step 4's "no measurement"; traceDecidedBy() tells a fallback apart from
     // a model that scored zero.
     const TestGraph graph;
     const auto properties = testDeviceProperties();
@@ -601,7 +601,7 @@ TEST(TestIngestorKernelHeuristic, UnrankedRanksEveryKernelEqually)
     EXPECT_DOUBLE_EQ(ranked.front().score, 0.0) << "the fallback invented a figure of merit";
 }
 
-/// RFC 0019 §5 step 7: a throwing scorer degrades to static order and never fails the
+/// RFC 0019 §5 step 8: a throwing scorer degrades to static order and never fails the
 /// request. Mimics the native scorer reading a `block_size` the kernel does not declare.
 class ThrowingHeuristic : public IKernelHeuristic
 {

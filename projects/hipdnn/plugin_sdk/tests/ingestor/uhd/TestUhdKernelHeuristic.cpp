@@ -32,6 +32,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -61,6 +63,16 @@ const std::unordered_set<std::string> FIELDS = {"tile_m"};
 
 /// `split_k` as a knob must also be a KMD field (§3.2).
 const std::unordered_set<std::string> FIELDS_WITH_SPLIT_K = {"tile_m", "split_k"};
+
+/// A fresh directory under the system temp directory named after @p stem, so an aborted run
+/// leaves nothing behind that the next run collides with.
+std::filesystem::path uniqueDirectory(const std::string& stem)
+{
+    static std::atomic<size_t> s_counter{0};
+    static const auto s_session = std::chrono::steady_clock::now().time_since_epoch().count();
+    return std::filesystem::temp_directory_path()
+           / (stem + "_" + std::to_string(s_session) + "_" + std::to_string(s_counter++));
+}
 
 DescriptorId testId(uint8_t tag)
 {
@@ -336,7 +348,8 @@ TEST(TestIngestorUhdKernelHeuristic, ADescriptorWhoseInlineExpressionChangedIsRe
 {
     // §6.3 check 1: expression bodies are in the hash, so the swap is caught. tryCreate, not
     // makeKernelHeuristic: the factory degrades to declared order rather than returning null.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_inline_expression_changed");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_inline_expression_changed"));
     const auto fixture = writeFixture(dir.path(),
                                       preferLargeTiles(),
                                       "max",
@@ -359,7 +372,8 @@ TEST(TestIngestorUhdKernelHeuristic, ADescriptorWhoseInlineExpressionChangedIsRe
 TEST(TestIngestorUhdKernelHeuristic, AnExpressionCarryingDescriptorLoadsWhenItsHashAgrees)
 {
     // Control: the test above refuses the swap, not inline expressions as such.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_inline_expression_agrees");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_inline_expression_agrees"));
     const auto fixture = writeFixture(dir.path(),
                                       preferLargeTiles(),
                                       "max",
@@ -375,7 +389,8 @@ TEST(TestIngestorUhdKernelHeuristic, AnExpressionCarryingDescriptorLoadsWhenItsH
 
 TEST(TestIngestorUhdKernelHeuristic, RanksByTheModelRatherThanByPriority)
 {
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_happy");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_kernel_heuristic_happy"));
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
 
     const auto heuristic
@@ -395,7 +410,8 @@ TEST(TestIngestorUhdKernelHeuristic, RanksByTheModelRatherThanByPriority)
 TEST(TestIngestorUhdKernelHeuristic, TheProblemChangesTheRanking)
 {
     // The policy path binds no query variables, so this distinguishes the model path.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_problem");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_kernel_heuristic_problem"));
     const auto fixture = writeFixture(dir.path(), preferLargeTilesOnLongSequences());
 
     const auto heuristic
@@ -422,7 +438,8 @@ const std::vector<nlohmann::json> WORK_SIGNATURE = {"$kernel.tile_m", "$graph.fl
 TEST(TestIngestorUhdKernelHeuristic, TheGraphsLogicalWorkChangesTheRankingThroughTheLiveSelector)
 {
     // The winner follows `graph.flops`, which no matcher binds.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_graph_work");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_kernel_heuristic_graph_work"));
     const auto fixture = writeFixture(dir.path(),
                                       preferLargeTilesOnLongSequences(),
                                       "max",
@@ -454,7 +471,8 @@ TEST(TestIngestorUhdKernelHeuristic, TheGraphsLogicalWorkChangesTheRankingThroug
 TEST(TestIngestorUhdKernelHeuristic, AGraphMatchTokenCannotStandInForTheCanonicalWork)
 {
     // A matcher may publish new names, never a reserved one like `graph.flops`.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_reserved_token");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_kernel_heuristic_reserved_token"));
     const auto fixture = writeFixture(dir.path(),
                                       preferLargeTilesOnLongSequences(),
                                       "max",
@@ -485,8 +503,10 @@ TEST(TestIngestorUhdKernelHeuristic, AGraphMatchTokenCannotStandInForTheCanonica
 TEST(TestIngestorUhdKernelHeuristic, AMinimisingObjectiveReversesTheOrder)
 {
     // A `min` model declares the `time` metric, so it must be asked for a time ranking.
-    const hipdnn_test_sdk::utilities::ScopedDirectory maxDir("uhd_kernel_heuristic_max");
-    const hipdnn_test_sdk::utilities::ScopedDirectory minDir("uhd_kernel_heuristic_min");
+    const hipdnn_test_sdk::utilities::ScopedDirectory maxDir(
+        uniqueDirectory("uhd_kernel_heuristic_max"));
+    const hipdnn_test_sdk::utilities::ScopedDirectory minDir(
+        uniqueDirectory("uhd_kernel_heuristic_min"));
     const auto maxFixture = writeFixture(maxDir.path(), preferLargeTiles(), "max");
     const auto minFixture = writeFixture(minDir.path(), preferLargeTiles(), "min");
 
@@ -516,7 +536,8 @@ TEST(TestIngestorUhdKernelHeuristic, AMinimisingObjectiveReversesTheOrder)
 
 TEST(TestIngestorUhdKernelHeuristic, AnAbsentArtifactDegradesToDeclaredOrder)
 {
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_absent");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_kernel_heuristic_absent"));
 
     // KNOBS, so the model is refused for the missing artifact, not the §6.3 knob check.
     const auto heuristic
@@ -537,7 +558,8 @@ TEST(TestIngestorUhdKernelHeuristic, AnArtifactDeployedAfterAMissIsPickedUp)
     // RFC 0019 §5: a failed load is not cached, so a model still being deployed recovers.
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_late_deploy");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_kernel_heuristic_late_deploy"));
     const auto heuristic
         = makeKernelHeuristic(modelDescriptor(dir.path(), "model.bin"), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
@@ -564,7 +586,8 @@ TEST(TestIngestorUhdKernelHeuristic, AnArtifactDeployedAfterAMissIsPickedUp)
 TEST(TestIngestorUhdKernelHeuristic, AFeaturesHashMismatchDegradesToDeclaredOrder)
 {
     // RFC 0019 §6.3 check 1.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_hash");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_kernel_heuristic_hash"));
     const auto fixture
         = writeFixture(dir.path(), preferLargeTiles(), "max", "sha256:not_the_real_hash");
 
@@ -585,7 +608,8 @@ TEST(TestIngestorUhdKernelHeuristic, AKernelMissingAFeatureDegradesTheWholeRanki
 {
     // One kernel omits `tile_m`: the whole ranking falls back rather than mixing model and
     // fallback order.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_partial");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_kernel_heuristic_partial"));
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
 
     const auto heuristic
@@ -614,7 +638,8 @@ TEST(TestIngestorUhdKernelHeuristic, AListValuedTokenIsSkippedRatherThanFatal)
 {
     // MetadataValue admits vector<int64_t>, which the feature extractor does not; the binding
     // is skipped.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_list");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_kernel_heuristic_list"));
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
 
     const auto heuristic
@@ -637,7 +662,8 @@ TEST(TestIngestorUhdKernelHeuristic, AListValuedTokenIsSkippedRatherThanFatal)
 /// drops constant knobs, but the engine must still expose them.
 TEST(TestIngestorUhdKernelHeuristic, AKnobTheModelDoesNotReadIsWarnedAboutAndRanksAnyway)
 {
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_extra_knob");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_kernel_heuristic_extra_knob"));
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
     const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
@@ -658,7 +684,8 @@ TEST(TestIngestorUhdKernelHeuristic, AKnobTheModelDoesNotReadIsWarnedAboutAndRan
 TEST(TestIngestorUhdKernelHeuristic, AnAxisWithNoKnobIsRefused)
 {
     // The model ranks on tile_m while the engine exposes no knobs.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_no_knob");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_kernel_heuristic_no_knob"));
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
     const auto heuristic
         = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, {}, FIELDS);
@@ -675,7 +702,8 @@ TEST(TestIngestorUhdKernelHeuristic, AnAxisWithNoKnobIsRefused)
 /// kernel carries leaves the slot unbound, silently.
 TEST(TestIngestorUhdKernelHeuristic, AModelReadingAFieldTheKmdDoesNotDeclareIsRefusedAtLoad)
 {
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_undeclared_field");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_kernel_heuristic_undeclared_field"));
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
     const auto descriptor = modelDescriptor(dir.path(), fixture);
     const auto recorder
@@ -698,7 +726,8 @@ TEST(TestIngestorUhdKernelHeuristic, AModelReadingAFieldTheKmdDoesNotDeclareIsRe
 /// still score; the features hash cannot catch a width mismatch.
 TEST(TestIngestorUhdKernelHeuristic, AModelWhoseFeatureCountDisagreesWithItsSignatureIsRefused)
 {
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_width");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_kernel_heuristic_width"));
 
     // Not writeFixture, which derives num_features from the signature.
     hipdnn_test_sdk::utilities::GbdtModelTestBuilder model;
@@ -717,8 +746,10 @@ TEST(TestIngestorUhdKernelHeuristic, AModelWhoseFeatureCountDisagreesWithItsSign
 TEST(TestIngestorUhdKernelHeuristic, AnArchSpecificModelOutranksTheDefaultOne)
 {
     // The default prefers small tiles and gfx942 large, so the winner identifies the model.
-    const hipdnn_test_sdk::utilities::ScopedDirectory defaultDir("uhd_arch_specific_default");
-    const hipdnn_test_sdk::utilities::ScopedDirectory archDir("uhd_arch_specific_gfx942");
+    const hipdnn_test_sdk::utilities::ScopedDirectory defaultDir(
+        uniqueDirectory("uhd_arch_specific_default"));
+    const hipdnn_test_sdk::utilities::ScopedDirectory archDir(
+        uniqueDirectory("uhd_arch_specific_gfx942"));
     const auto fallback = writeFixture(defaultDir.path(), preferSmallTiles());
     const auto specific = writeFixture(archDir.path(), preferLargeTiles());
 
@@ -746,8 +777,10 @@ TEST(TestIngestorUhdKernelHeuristic, AnArchSpecificModelOutranksTheDefaultOne)
 TEST(TestIngestorUhdKernelHeuristic, AnUnnamedArchFallsBackToDefault)
 {
     // §8.3: an unnamed device takes `default`, which prefers small tiles.
-    const hipdnn_test_sdk::utilities::ScopedDirectory defaultDir("uhd_arch_fallback_default");
-    const hipdnn_test_sdk::utilities::ScopedDirectory archDir("uhd_arch_fallback_gfx942");
+    const hipdnn_test_sdk::utilities::ScopedDirectory defaultDir(
+        uniqueDirectory("uhd_arch_fallback_default"));
+    const hipdnn_test_sdk::utilities::ScopedDirectory archDir(
+        uniqueDirectory("uhd_arch_fallback_gfx942"));
     const auto fallback = writeFixture(defaultDir.path(), preferSmallTiles());
     const auto specific = writeFixture(archDir.path(), preferLargeTiles());
 
@@ -776,8 +809,10 @@ TEST(TestIngestorUhdKernelHeuristic, AnUnnamedArchFallsBackToDefault)
 TEST(TestIngestorUhdKernelHeuristic, ArchResolutionIsStableAcrossCalls)
 {
     // §9.2 caches what it loads; the cache must not change answers or cross architectures.
-    const hipdnn_test_sdk::utilities::ScopedDirectory defaultDir("uhd_arch_cached_default");
-    const hipdnn_test_sdk::utilities::ScopedDirectory archDir("uhd_arch_cached_gfx942");
+    const hipdnn_test_sdk::utilities::ScopedDirectory defaultDir(
+        uniqueDirectory("uhd_arch_cached_default"));
+    const hipdnn_test_sdk::utilities::ScopedDirectory archDir(
+        uniqueDirectory("uhd_arch_cached_gfx942"));
     const auto fallback = writeFixture(defaultDir.path(), preferSmallTiles());
     const auto specific = writeFixture(archDir.path(), preferLargeTiles());
 
@@ -814,7 +849,7 @@ TEST(TestIngestorUhdKernelHeuristic, ArchResolutionIsStableAcrossCalls)
 /// selection reads the top score as the engine's figure of merit.
 TEST(TestIngestorUhdKernelHeuristic, SelectionReturnsIdsWithScoresWinnerFirst)
 {
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_scored_form");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_scored_form"));
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
 
     const auto heuristic
@@ -843,8 +878,8 @@ TEST(TestIngestorUhdKernelHeuristic, SelectionReturnsIdsWithScoresWinnerFirst)
 
 TEST(TestIngestorUhdKernelHeuristic, ADegradedRankingReportsTheZeroTheRfcPrescribes)
 {
-    // RFC 0019 §5 step 7: declared order carries no model score, so it reports 0.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_scored_degraded");
+    // RFC 0019 §5 step 4: declared order carries no model score, so it reports 0.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_scored_degraded"));
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
 
     // An axis the UED does not expose degrades ranking (§6.3); an ignored knob would not.
@@ -866,7 +901,8 @@ TEST(TestIngestorUhdKernelHeuristic, AnObjectiveContradictingItsMetricIsRefusedA
 {
     // RFC 0019 §4.4: a registered metric fixes its direction and `objective` only restates
     // it. The refusal happens at parse, so this asserts on the document.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_objective_contradicts_metric");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_objective_contradicts_metric"));
     const auto fixture = writeFixture(dir.path(), preferLargeTiles(), "min");
     const auto path = dir.path() / "test.uhd.json";
 
@@ -896,7 +932,7 @@ TEST(TestIngestorUhdKernelHeuristic, ATransformTheRuntimeCannotInvertIsRefusedAt
 {
     // RFC 0019 §4, §11.3: an uninvertible transform would report values in the wrong units
     // while still ordering correctly, so the vocabulary is closed at parse.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_unknown_transform");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_unknown_transform"));
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
 
     auto document = uhdDocument(fixture.modelFileName, "max", /*calibrated=*/true);
@@ -920,7 +956,7 @@ TEST(TestIngestorUhdKernelHeuristic, ATransformTheRuntimeCannotInvertIsRefusedAt
 TEST(TestIngestorUhdKernelHeuristic, ACalibratedModelReportsItsTopScoreAsTheEngineEstimate)
 {
     // RFC 0019 §11.1: the estimate must be the score of the same kernel the ranking put first.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_engine_estimate");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_engine_estimate"));
     const auto fixture
         = writeFixture(dir.path(), preferLargeTiles(), "max", {}, /*calibrated=*/true);
 
@@ -949,7 +985,7 @@ TEST(TestIngestorUhdKernelHeuristic, ACalibratedModelReportsItsTopScoreAsTheEngi
 TEST(TestIngestorUhdKernelHeuristic, APerArchCalibratedModelEstimatesOnAnArchitectureItNames)
 {
     // §8.3 exact match with no `default`: the estimate must come from the per-arch model.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_estimate_per_arch");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_estimate_per_arch"));
     const auto onNine42
         = writeFixture(dir.path(), preferLargeTiles(), "max", {}, /*calibrated=*/true);
 
@@ -968,7 +1004,7 @@ TEST(TestIngestorUhdKernelHeuristic, APerArchCalibratedModelEstimatesOnAnArchite
     EXPECT_GT(engineEstimate(*heuristic, catalogAgainstPriority(2048), context), 0.0)
         << "an engine holding a calibrated model for this architecture declined to estimate";
 
-    // An architecture the UED does not name still reports §5 step 7's zero.
+    // An architecture the UED does not name still reports §5 step 4's zero.
     auto unnamed = gfx942();
     unnamed.gcnArchName = "gfx1100";
     EXPECT_DOUBLE_EQ(
@@ -980,8 +1016,10 @@ TEST(TestIngestorUhdKernelHeuristic, AnUncalibratedArchModelIsNotReportedAsCalib
 {
     // A calibrated `default` must not make the uncalibrated gfx942 model's score count as
     // calibrated (§11.3).
-    const hipdnn_test_sdk::utilities::ScopedDirectory defaultDir("uhd_estimate_mixed_default");
-    const hipdnn_test_sdk::utilities::ScopedDirectory archDir("uhd_estimate_mixed_gfx942");
+    const hipdnn_test_sdk::utilities::ScopedDirectory defaultDir(
+        uniqueDirectory("uhd_estimate_mixed_default"));
+    const hipdnn_test_sdk::utilities::ScopedDirectory archDir(
+        uniqueDirectory("uhd_estimate_mixed_gfx942"));
     const auto fallback
         = writeFixture(defaultDir.path(), preferSmallTiles(), "max", {}, /*calibrated=*/true);
     const auto specific
@@ -1011,7 +1049,7 @@ TEST(TestIngestorUhdKernelHeuristic, AnUncalibratedArchModelIsNotReportedAsCalib
         << "an uncalibrated model's score was reported as a calibrated value";
 
     // gfx1100 falls through to the calibrated `default`, but that model was trained for gfx942
-    // only: it still ranks (§9.3) but withholds the estimate (§5 step 8).
+    // only: it still ranks but withholds the estimate (§8.3).
     auto unnamed = gfx942();
     unnamed.gcnArchName = "gfx1100";
     const MatchContext unnamedContext{graph, 0, unnamed};
@@ -1023,8 +1061,8 @@ TEST(TestIngestorUhdKernelHeuristic, AnUncalibratedArchModelIsNotReportedAsCalib
 TEST(TestIngestorUhdKernelHeuristic, AnUncalibratedModelEstimatesZero)
 {
     // §11.3: an uncalibrated score is not on a cross-engine scale, so the estimate is 0
-    // (§5 step 7); it still ranks.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_no_estimate");
+    // (§5 step 4); it still ranks.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_no_estimate"));
     const auto fixture
         = writeFixture(dir.path(), preferLargeTiles(), "max", {}, /*calibrated=*/false);
 
@@ -1059,7 +1097,7 @@ TEST(TestIngestorUhdKernelHeuristic, AModelWhoseTransformGoesOutOfDomainDoesNotC
 {
     // `exp` inverts as log(raw), so a negative prediction yields NaN, which would break
     // std::stable_sort's strict weak ordering.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_out_of_domain");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_out_of_domain"));
     const auto fixture = writeFixture(dir.path(), preferNegativeScores(), "max", {}, false, "exp");
 
     const auto heuristic
@@ -1087,8 +1125,8 @@ TEST(TestIngestorUhdKernelHeuristic, AModelWhoseTransformGoesOutOfDomainDoesNotC
 TEST(TestIngestorUhdKernelHeuristic, ACalibratedModelCannotReportANegativeThroughput)
 {
     // expm1 of a negative log1p prediction is finite but negative, which a throughput cannot
-    // be (§11.3); it is bounded to §5 step 7's 0 so it cannot rank beneath "no measurement".
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_negative_tflops");
+    // be (§11.3); it is bounded to §5 step 4's 0 so it cannot rank beneath "no measurement".
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_negative_tflops"));
     const auto fixture
         = writeFixture(dir.path(), preferNegativeScores(), "max", {}, /*calibrated=*/true, "log1p");
 
@@ -1116,7 +1154,8 @@ TEST(TestIngestorUhdKernelHeuristic, AMinObjectiveScoresBelowZeroWithoutThatBein
 {
     // `objective: min` negates a cost, so negative *oriented* scores are normal; only a
     // negative recovered value is out of range.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_min_negative_oriented");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_min_negative_oriented"));
     const auto fixture
         = writeFixture(dir.path(), preferLargeTiles(), "min", {}, /*calibrated=*/false, "identity");
 
@@ -1137,8 +1176,9 @@ TEST(TestIngestorUhdKernelHeuristic, AMinObjectiveScoresBelowZeroWithoutThatBein
 TEST(TestIngestorUhdKernelHeuristic, AnUnmeasuredCandidateSortsLastUnderAMinObjectiveToo)
 {
     // The reported 0 for "no measurement" exceeds every oriented min score, so the ordering
-    // key must differ from the reported score (RFC 0019 §5 step 7).
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_min_unmeasured_last");
+    // key must differ from the reported score (RFC 0019 §5 step 4).
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_min_unmeasured_last"));
     const auto fixture = writeFixture(
         dir.path(), oneUsableOneOutOfRange(), "min", {}, /*calibrated=*/false, "identity");
 
@@ -1162,7 +1202,7 @@ TEST(TestIngestorUhdKernelHeuristic, AZeroCostPredictionDoesNotWinUnderAMinObjec
 {
     // RFC 0019 §8.3 accepts only a strictly positive prediction; a zero cost oriented for
     // `min` would be -0 and outrank every real candidate.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_min_zero_last");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_min_zero_last"));
     const auto fixture
         = writeFixture(dir.path(), oneUsableOneZero(), "min", {}, /*calibrated=*/false, "identity");
 
@@ -1184,7 +1224,7 @@ TEST(TestIngestorUhdKernelHeuristic, AMetriclessRankerOrdersOnSignedScores)
 {
     // RFC 0019 §8.3's positivity applies only to physical scores; a metric-less `identity`
     // ranker orders on its own scale, where -0.5 beats -2.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_metricless_signed");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_metricless_signed"));
     const auto fixture
         = writeFixture(dir.path(), preferNegativeScores(), "max", {}, /*calibrated=*/false);
     auto descriptor = modelDescriptor(dir.path(), fixture);
@@ -1204,7 +1244,8 @@ TEST(TestIngestorUhdKernelHeuristic, AMetriclessRankerOrdersOnSignedScores)
     EXPECT_DOUBLE_EQ(scored.back().score, -2.0);
 
     // Under log1p the inverse of a negative prediction is out of range again.
-    const hipdnn_test_sdk::utilities::ScopedDirectory logDir("uhd_metricless_log1p");
+    const hipdnn_test_sdk::utilities::ScopedDirectory logDir(
+        uniqueDirectory("uhd_metricless_log1p"));
     const auto logFixture = writeFixture(
         logDir.path(), preferNegativeScores(), "max", {}, /*calibrated=*/false, "log1p");
     auto logDescriptor = modelDescriptor(logDir.path(), logFixture);
@@ -1221,7 +1262,8 @@ TEST(TestIngestorUhdKernelHeuristic, AModelReadingAListFieldElementIsAdmittedOnT
 {
     // List elements bind as `tile[0]`, `tile[1]`, ... while the KMD and UED declare `tile`.
     const std::vector<nlohmann::json> signature = {"$kernel.tile[1]", "$attention.seqlen"};
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_indexed_kernel_field");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_indexed_kernel_field"));
     const auto fixture = writeFixture(
         dir.path(), preferLargeTiles(), "max", {}, /*calibrated=*/true, "identity", signature);
 
@@ -1247,14 +1289,42 @@ TEST(TestIngestorUhdKernelHeuristic, AModelReadingAListFieldElementIsAdmittedOnT
     EXPECT_DOUBLE_EQ(scored.front().score, 9.0);
 }
 
+/// RFC 0019 §6.1: `$kernel.priority` is bound for every candidate and is neither a KMD field
+/// nor a knob, so a model may weigh it, bare or inside an expression, with neither declaring it.
+TEST(TestIngestorUhdKernelHeuristic, AModelMayRankOnTheKernelsDeclaredPriority)
+{
+    const std::vector<nlohmann::json> signature
+        = {"$kernel.priority", nlohmann::json::parse(R"({"*": ["$kernel.priority", 2]})")};
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_kernel_priority"));
+    // Slot 0 at or below 96 scores 9.0: the lowest priority wins, the reverse of declared order.
+    const auto fixture = writeFixture(
+        dir.path(), preferSmallTiles(), "max", {}, /*calibrated=*/true, "identity", signature);
+    const auto heuristic
+        = UhdKernelHeuristic::tryCreate(modelDescriptor(dir.path(), fixture), "test", {}, {});
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+    const auto against = heuristic->rankScored(catalogAgainstPriority(2048), context);
+    ASSERT_EQ(against.size(), 2U);
+    EXPECT_EQ(against.front().kernelId, testId(0x02));
+    EXPECT_DOUBLE_EQ(against.front().score, 9.0);
+
+    const auto along = heuristic->rankScored(catalogAlongPriority(2048), context);
+    ASSERT_EQ(along.size(), 2U);
+    EXPECT_EQ(along.front().kernelId, testId(0x01));
+    EXPECT_DOUBLE_EQ(along.front().score, 9.0);
+}
+
 TEST(TestIngestorUhdKernelHeuristic, ANegativeThroughputIsReportedAsAnErrorNotSwallowed)
 {
     // RFC 0019 §12: a discarded score must be visible. ERROR, not WARN: the number is wrong,
-    // not merely out of distribution (§9.3).
+    // not merely out of distribution (§8.3).
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_negative_reported");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_negative_reported"));
     const auto fixture
         = writeFixture(dir.path(), preferNegativeScores(), "max", {}, /*calibrated=*/true, "log1p");
 
@@ -1285,7 +1355,8 @@ TEST(TestIngestorUhdKernelHeuristic, APartiallyAffectedRankingSaysTheModelStillD
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_partial_out_of_range");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_partial_out_of_range"));
     const auto fixture = writeFixture(
         dir.path(), oneUsableOneOutOfRange(), "max", {}, /*calibrated=*/true, "identity");
 
@@ -1310,8 +1381,10 @@ TEST(TestIngestorUhdKernelHeuristic, APartiallyAffectedRankingSaysTheModelStillD
 TEST(TestIngestorUhdKernelHeuristic, PerArchModelsRankWithoutADefaultEntry)
 {
     // RFC 0019 §8.3: exact gcnArchName comes first, so no `default` is needed for named arches.
-    const hipdnn_test_sdk::utilities::ScopedDirectory gfx942Dir("uhd_no_default_942");
-    const hipdnn_test_sdk::utilities::ScopedDirectory gfx950Dir("uhd_no_default_950");
+    const hipdnn_test_sdk::utilities::ScopedDirectory gfx942Dir(
+        uniqueDirectory("uhd_no_default_942"));
+    const hipdnn_test_sdk::utilities::ScopedDirectory gfx950Dir(
+        uniqueDirectory("uhd_no_default_950"));
     const auto onNine42 = writeFixture(gfx942Dir.path(), preferLargeTiles());
     const auto onNine50 = writeFixture(gfx950Dir.path(), preferSmallTiles());
 
@@ -1340,7 +1413,7 @@ TEST(TestIngestorUhdKernelHeuristic, AnArchNamedModelDoesNotRankAnArchitectureIt
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_wrong_arch_only");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_wrong_arch_only"));
     const auto onNine50 = writeFixture(dir.path(), preferLargeTiles());
 
     const std::map<std::string, HeuristicDescriptor> byArch{
@@ -1369,8 +1442,10 @@ TEST(TestIngestorUhdKernelHeuristic, AnArchNamedModelDoesNotRankAnArchitectureIt
 TEST(TestIngestorUhdKernelHeuristic, ADefaultStillCoversAnArchitectureNotNamedExplicitly)
 {
     // §8.3's second step: a declared `default` still covers unnamed architectures.
-    const hipdnn_test_sdk::utilities::ScopedDirectory defaultDir("uhd_default_covers");
-    const hipdnn_test_sdk::utilities::ScopedDirectory archDir("uhd_default_covers_950");
+    const hipdnn_test_sdk::utilities::ScopedDirectory defaultDir(
+        uniqueDirectory("uhd_default_covers"));
+    const hipdnn_test_sdk::utilities::ScopedDirectory archDir(
+        uniqueDirectory("uhd_default_covers_950"));
     const auto fallback = writeFixture(defaultDir.path(), preferLargeTiles());
     const auto specific = writeFixture(archDir.path(), preferSmallTiles());
 
@@ -1463,13 +1538,13 @@ std::shared_ptr<IKernelHeuristic> heuristicForCondition( // NOLINT(misc-use-inte
 TEST_P(TestIngestorUhdProvenance, TheRuntimeReportsWhichOfTheThreeDecided)
 {
     const auto condition = GetParam();
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir(std::string("uhd_prov_")
-                                                          + condition.name);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory(std::string("uhd_prov_") + condition.name));
 
     const auto heuristic = heuristicForCondition(condition.name, dir.path());
     ASSERT_NE(heuristic, nullptr) << "unhandled condition: " << condition.name;
 
-    // §5 step 7: every condition still ranks.
+    // §5 step 8: every condition still ranks.
     const testing::TestGraph graph;
     auto properties = gfx942();
     if(std::string(condition.name) == "arch_not_covered")
@@ -1633,7 +1708,7 @@ TEST(TestIngestorUhdKernelHeuristic, TheAxisSetReadsRfc0019sBareReferenceSpellin
 TEST(TestIngestorUhdKernelHeuristic, ABareReferenceSignatureStillSatisfiesTheKnobAxisCheck)
 {
     // A UED exposing exactly the knob its model ranks on must get its model.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_bare_signature");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_bare_signature"));
     const auto fixture = writeFixture(
         dir.path(), preferLargeTiles(), "max", {}, /*calibrated=*/true, "identity", SIGNATURE);
 
@@ -1658,7 +1733,7 @@ TEST(TestIngestorUhdEngineKnobContract, MakeEngineCarriesTheUedsKnobsIntoTheMode
 {
     // makeEngine moves the UED; the knobs must be read before the move or the exposed set is
     // empty.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_make_engine_knobs");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_make_engine_knobs"));
     const auto fixture = writeFixture(dir.path(),
                                       preferLargeTiles(),
                                       "max",
@@ -1674,7 +1749,8 @@ TEST(TestIngestorUhdEngineKnobContract, MakeEngineCarriesTheUedsKnobsIntoTheMode
 TEST(TestIngestorUhdEngineKnobContract, AnEngineRankingOnAnAxisItDoesNotExposeIsRefused)
 {
     // Control: the UED omits the knob the model ranks on (§6.3).
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_make_engine_knob_mismatch");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_make_engine_knob_mismatch"));
     const auto fixture = writeFixture(dir.path(),
                                       preferLargeTiles(),
                                       "max",
@@ -1690,7 +1766,8 @@ TEST(TestIngestorUhdEngineKnobContract, AnEngineRankingOnAnAxisItDoesNotExposeIs
 TEST(TestIngestorUhdEngineKnobContract, AnEngineExposingAKnobItsModelIgnoresStillRanks)
 {
     // Training drops a constant knob that the UED still exposes.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_make_engine_unread_knob");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_make_engine_unread_knob"));
     const auto fixture = writeFixture(dir.path(),
                                       preferLargeTiles(),
                                       "max",
@@ -1706,7 +1783,7 @@ TEST(TestIngestorUhdEngineKnobContract, AnEngineExposingAKnobItsModelIgnoresStil
 
 TEST(TestIngestorUhdKernelHeuristic, InlineFeaturesReachTheTreeScorer)
 {
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_inline_tree");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_inline_tree"));
     auto tree = preferSmallTiles();
     tree.thresholds[0] = 48.0;
     const std::vector<nlohmann::json> signature
@@ -1726,7 +1803,7 @@ TEST(TestIngestorUhdKernelHeuristic, InlineFeaturesReachTheTreeScorer)
 TEST(TestIngestorUhdKernelHeuristic, ASingleCandidateCarriesItsModelScore)
 {
     // RFC 0019.13 §15.2: each candidate carries its score, even when the catalog has only one.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_single_candidate");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_single_candidate"));
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
     const auto heuristic
         = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
@@ -1757,7 +1834,7 @@ TEST(TestIngestorUhdKernelHeuristic, ASingleCandidateCarriesItsModelScore)
 
 TEST(TestIngestorUhdKernelHeuristic, AnUnavailableExactArchitectureDoesNotUseDefault)
 {
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_blocked_exact");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_blocked_exact"));
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
     const auto fallback = modelDescriptor(dir.path(), fixture);
     const auto heuristic = makeKernelHeuristic(fallback,
@@ -1782,7 +1859,7 @@ TEST(TestIngestorUhdKernelHeuristic, AnUnavailableExactArchitectureDoesNotUseDef
 
 TEST(TestIngestorUhdKernelHeuristic, AFailedExactModelDoesNotUseDefault)
 {
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_failed_exact");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_failed_exact"));
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
     const auto fallback = modelDescriptor(dir.path(), fixture);
     const auto heuristic = makeKernelHeuristic(
@@ -1809,8 +1886,10 @@ TEST(TestIngestorUhdKernelHeuristic, ArchFallbackStaysInsideTheRequestedMetric)
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
-    const hipdnn_test_sdk::utilities::ScopedDirectory tflopsDir("uhd_metric_fallback_tflops");
-    const hipdnn_test_sdk::utilities::ScopedDirectory timeDir("uhd_metric_fallback_time");
+    const hipdnn_test_sdk::utilities::ScopedDirectory tflopsDir(
+        uniqueDirectory("uhd_metric_fallback_tflops"));
+    const hipdnn_test_sdk::utilities::ScopedDirectory timeDir(
+        uniqueDirectory("uhd_metric_fallback_time"));
     // tflops prefers the large tile; time (1 ms small, 9 ms large, `min`) prefers the small.
     // Distinct ids let the calibrated ranking's model id say which answered.
     auto throughput
@@ -1869,7 +1948,7 @@ TEST(TestIngestorUhdKernelHeuristic, ArchFallbackStaysInsideTheRequestedMetric)
 /// milliseconds, not the negated key `objective: min` sorts by internally.
 TEST(TestIngestorUhdKernelHeuristic, ACalibratedTimeModelReportsAscendingMilliseconds)
 {
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_time_calibrated");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_time_calibrated"));
     // As a time, preferLargeTiles makes the small tile fast (1) and the large slow (9).
     const auto fixture
         = writeFixture(dir.path(), preferLargeTiles(), "min", {}, /*calibrated=*/true, "identity");
@@ -1907,10 +1986,12 @@ TEST(TestIngestorUhdKernelHeuristic, TheDefaultRankerDecidesForAMetricWithNoRank
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
-    const hipdnn_test_sdk::utilities::ScopedDirectory tflopsDir("uhd_default_ranker_tflops");
+    const hipdnn_test_sdk::utilities::ScopedDirectory tflopsDir(
+        uniqueDirectory("uhd_default_ranker_tflops"));
     const hipdnn_test_sdk::utilities::ScopedDirectory metriclessDir(
-        "uhd_default_ranker_metricless");
-    const hipdnn_test_sdk::utilities::ScopedDirectory timeDir("uhd_default_ranker_time");
+        uniqueDirectory("uhd_default_ranker_metricless"));
+    const hipdnn_test_sdk::utilities::ScopedDirectory timeDir(
+        uniqueDirectory("uhd_default_ranker_time"));
     // tflops prefers the large tile, metric-less the small, each scoring 9; declared order puts
     // the large tile first with 0. Winner plus top score identify which decided.
     const auto throughput
@@ -2024,7 +2105,8 @@ Fixture writeGroupedFixture(const std::filesystem::path& dir, const std::string&
 TEST(TestIngestorUhdKernelHeuristicGrouped, EachCandidateReportsItsOwnGroup)
 {
     // §15.2: the runner-up may be built if the winner fails, so it needs its own group.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_grouped_per_candidate");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_grouped_per_candidate"));
     const auto fixture = writeGroupedFixture(dir.path());
     const auto heuristic
         = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
@@ -2047,7 +2129,7 @@ TEST(TestIngestorUhdKernelHeuristicGrouped, EachCandidateReportsItsOwnGroup)
 TEST(TestIngestorUhdKernelHeuristicGrouped, TheReportedGroupIsTheOneThatScored)
 {
     // The group must come from the row the model scored, not be re-derived from metadata.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_grouped_agrees");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_grouped_agrees"));
     const auto fixture = writeGroupedFixture(dir.path());
     const auto heuristic
         = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
@@ -2066,7 +2148,7 @@ TEST(TestIngestorUhdKernelHeuristicGrouped, TheReportedGroupIsTheOneThatScored)
 TEST(TestIngestorUhdKernelHeuristicGrouped, AMinObjectiveChoosesTheCheapestGroup)
 {
     // Layer 1 of a `min` model predicts a cost, so the cheapest group must be chosen.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_grouped_min");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_grouped_min"));
     const auto fixture = writeGroupedFixture(dir.path(), "min");
     const auto heuristic
         = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
@@ -2094,7 +2176,8 @@ TEST(TestIngestorUhdKernelHeuristicGrouped, ExcludingAGroupIsNotReportedAsATrain
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_grouped_not_a_defect");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_grouped_not_a_defect"));
     const auto fixture = writeGroupedFixture(dir.path());
     const auto heuristic
         = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
@@ -2117,7 +2200,7 @@ TEST(TestIngestorUhdKernelHeuristicGrouped, ExcludingAGroupIsNotReportedAsATrain
 TEST(TestIngestorUhdKernelHeuristicGrouped, TheGroupFeatureIsNamed)
 {
     // The name comes from the adapter's group slot, not the descriptor's first entry.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_grouped_named");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_grouped_named"));
     const auto fixture = writeGroupedFixture(dir.path());
     const auto heuristic
         = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
@@ -2131,7 +2214,8 @@ TEST(TestIngestorUhdKernelHeuristicGrouped, TheGroupFeatureIsNamed)
 TEST(TestIngestorUhdKernelHeuristicGrouped, ASingleLayerModelReportsNoGroup)
 {
     // NaN, because every real number is a legal group value.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_ungrouped_no_group");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_ungrouped_no_group"));
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
     const auto heuristic
         = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
@@ -2153,7 +2237,7 @@ TEST(TestIngestorUhdKernelHeuristicGrouped, ASingleLayerModelReportsNoGroup)
 TEST(TestIngestorUhdKernelHeuristicGrouped, ADegradedRankingReportsNoGroup)
 {
     // The fallback decided no group, so none may be reported.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_grouped_degraded");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_grouped_degraded"));
     const auto heuristic
         = makeKernelHeuristic(modelDescriptor(dir.path(), "not_written.bin"), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);

@@ -89,7 +89,7 @@ public:
     }
 
     /// Whether @p arch (bare target, feature suffixes ignored) was seen in training
-    /// (RFC 0019 §9.2). An empty list is unrestricted.
+    /// (RFC 0019 §8.3). An empty list is unrestricted.
     bool isTrainedForArch(const std::string& arch) const override;
 
 private:
@@ -164,7 +164,7 @@ private:
     std::string _transform;
     bool _positiveRequired;
 
-    // RFC 0019 §9.2: training arches for out-of-distribution detection.
+    // RFC 0019 §8.3: training arches for out-of-distribution detection.
     std::vector<std::string> _trainingArches;
 };
 

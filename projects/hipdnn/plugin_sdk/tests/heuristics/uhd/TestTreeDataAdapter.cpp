@@ -28,7 +28,6 @@ using hipdnn_plugin_sdk::uhd::TreeDataAdapter;
 namespace
 {
 
-/// Shared with TestUhdSelectionFlow so both suites build model artifacts the same way.
 using GbdtModelBuilder = hipdnn_test_sdk::utilities::GbdtModelTestBuilder;
 
 GbdtModelBuilder::TreeSpec makeLeafTree(double leafValue)
@@ -227,14 +226,15 @@ TEST_F(TestTreeDataAdapter, LoadFailsOnWrongFileIdentifier)
                       .addTree(makeLeafTree(1.0))
                       .build();
 
+    // The control: the untouched buffer loads.
+    ASSERT_NE(TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH), nullptr);
+
     // Bytes 4-7 hold the file identifier.
-    if(buffer.size() >= 8)
-    {
-        buffer[4] = 'X';
-        buffer[5] = 'X';
-        buffer[6] = 'X';
-        buffer[7] = 'X';
-    }
+    ASSERT_GE(buffer.size(), 8U);
+    buffer[4] = 'X';
+    buffer[5] = 'X';
+    buffer[6] = 'X';
+    buffer[7] = 'X';
 
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
 
@@ -413,7 +413,7 @@ TEST_F(TestTreeDataAdapter, ScoreAppliesBaseScore)
     EXPECT_DOUBLE_EQ(score, 105.0);
 }
 
-TEST_F(TestTreeDataAdapter, ScoreAppliesLearningRate)
+TEST_F(TestTreeDataAdapter, LearningRateIsMetadataOnly)
 {
     // LightGBM's dump_model() exports leaf values already scaled by learning_rate, so
     // score() must not apply it again.

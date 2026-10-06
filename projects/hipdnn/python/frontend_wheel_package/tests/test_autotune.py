@@ -513,6 +513,21 @@ def test_manual_plan_index_tuning_loop():
     assert buffers  # keep device allocations alive across the call
 
 
+def test_create_execution_plan_ext_takes_knob_settings():
+    """create_execution_plan_ext() accepts optional knob overrides from Python."""
+    graph = hipdnn.Graph()
+
+    # No graph is built, so both forms report an error; a missing or mistyped
+    # knob_settings parameter would raise TypeError instead.
+    assert graph.create_execution_plan_ext(0).is_bad()
+    assert graph.create_execution_plan_ext(
+        0, [hipdnn.KnobSetting("tile.size", 64)]
+    ).is_bad()
+    assert graph.create_execution_plan_ext(
+        0, knob_settings=[hipdnn.KnobSetting("tile.size", 64)]
+    ).is_bad()
+
+
 class _NullHandle:
     """Stand-in for a Handle whose get() yields a null pointer."""
 

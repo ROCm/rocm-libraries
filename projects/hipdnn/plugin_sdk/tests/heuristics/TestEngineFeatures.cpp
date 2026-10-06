@@ -780,7 +780,7 @@ std::string kind(const nlohmann::json& value)
     return value.type_name();
 }
 
-TEST(TestEngineFeatures, GenericOperandsKeepEveryPreviouslyPublishedFeature)
+TEST(TestEngineFeatures, GenericOperandsPublishEveryGoldenFeature)
 {
     const std::vector<std::pair<const char*, GraphT (*)()>> cases = {
         {GOLDEN_MATMUL_BROADCAST, matmulBroadcastGraph},
@@ -1149,7 +1149,7 @@ TEST(TestEngineFeatures, WorkOfLaterTypesIsUnknownWhenContentsDecideIt)
     EXPECT_FALSE(published.contains("graph.flops_by_type.PointwiseAttributes"));
 }
 
-TEST(TestEngineFeatures, WorkModelKeepsEveryPreviouslyPublishedCount)
+TEST(TestEngineFeatures, WorkModelMatchesEveryGoldenCount)
 {
     // Shipped models read these values; changing any requires bumping
     // FEATURE_SEMANTICS_REVISION.

@@ -207,11 +207,12 @@ public:
     }
 
     /// The KMD field a `$kernel.*` reference reads (index stripped: `tile[0]` -> `tile`),
-    /// or nullopt for any other reference.
+    /// or nullopt for any other reference. `$kernel.priority` is the kernel's declared
+    /// priority, bound for every candidate, not a KMD field or knob (RFC 0019 §6.1).
     static std::optional<std::string> kernelFieldOf(const std::string& reference)
     {
         constexpr std::string_view PREFIX = "$kernel.";
-        if(reference.rfind(PREFIX, 0) != 0)
+        if(reference.rfind(PREFIX, 0) != 0 || reference == "$kernel.priority")
         {
             return std::nullopt;
         }
@@ -298,13 +299,9 @@ private:
         return result;
     }
 
-    static void validateLiterals(const nlohmann::json& node, size_t depth, size_t& visited)
+    /// @p node has passed ExpressionSet::checkBounds, which bounds this recursion.
+    static void validateLiterals(const nlohmann::json& node)
     {
-        if(depth > 2 * ExpressionSet::MAX_EXPRESSION_DEPTH + 2
-           || ++visited > ExpressionSet::MAX_INPUT_NODES)
-        {
-            throw JsonLogicError("features_signature exceeds depth or size bound");
-        }
         if(node.is_number())
         {
             const double value = node.get<double>();
@@ -318,7 +315,7 @@ private:
         {
             for(const auto& child : node)
             {
-                validateLiterals(child, depth + 1, visited);
+                validateLiterals(child);
             }
         }
     }
@@ -335,7 +332,8 @@ private:
                 throw JsonLogicError(
                     "Feature entry must be a bare reference or an inline expression object");
             }
-            validateLiterals(entry, 0, visited);
+            ExpressionSet::checkBounds(entry, visited);
+            validateLiterals(entry);
         }
     }
 

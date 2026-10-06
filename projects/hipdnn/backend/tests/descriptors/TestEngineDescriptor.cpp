@@ -1106,6 +1106,13 @@ TEST_F(TestEngineDescriptor, CandidatePageBoundsRejectNonProgressingOrUnboundedR
                 HIPDNN_ATTR_ENGINE_CANDIDATE_LIMIT_EXT, HIPDNN_TYPE_INT64, 1, &limit),
             HIPDNN_STATUS_BAD_PARAM);
     }
+    // The values just inside those bounds are accepted.
+    for(const int64_t limit : {int64_t{1}, int64_t{10000}})
+    {
+        EXPECT_NO_THROW(engine->setAttribute(
+            HIPDNN_ATTR_ENGINE_CANDIDATE_LIMIT_EXT, HIPDNN_TYPE_INT64, 1, &limit))
+            << limit;
+    }
     const int64_t offset = -1;
     ASSERT_THROW_HIPDNN_STATUS(
         engine->setAttribute(

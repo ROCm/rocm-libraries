@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/EnginePredictor.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/GbdtModelTestBuilder.hpp>
@@ -91,12 +92,10 @@ protected:
                                                                     const std::string& arch
                                                                     = "gfx942") const
     {
-        std::shared_ptr<const Model> compiled;
-        if(evaluate)
-        {
-            compiled = prediction_detail::model(cfg);
-        }
-        return predictWith(cfg, compiled, evaluate, arch);
+        return predictEngine(
+            17, "test:opaque", "selector-1", "tflops", arch, _features, evaluate, &cfg, [&] {
+                return prediction_detail::model(cfg);
+            });
     }
 
     hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
@@ -107,7 +106,9 @@ protected:
                     const std::string& metric = "tflops") const
     {
         return predictEngine(
-            17, "test:opaque", "selector-1", metric, arch, _features, evaluate, cfg, compiled);
+            17, "test:opaque", "selector-1", metric, arch, _features, evaluate, &cfg, [&] {
+                return compiled;
+            });
     }
 
     /// A calibrated time model (objective `min`) on the same scorer.
@@ -162,8 +163,13 @@ TEST_F(TestEnginePredictor, NativeCustomAndTreeRecoverTheSamePhysicalThroughput)
     custom.modelArtifactPath = hipdnn_plugin_sdk::test::testScorerLibrary().string();
     custom.customLibrarySymbol = "testLinearScorer";
     const auto customResult = predict(custom);
+#ifdef _WIN32
+    // A descriptor cannot name a Windows build of the library (RFC 0019 §7.3).
+    EXPECT_EQ(customResult.status, PredictionStatus::INVALID);
+#else
     ASSERT_EQ(customResult.status, PredictionStatus::AVAILABLE);
     EXPECT_NEAR(customResult.value, nativeResult.value, 1e-12);
+#endif
 
     auto tree = native;
     tree.adapterType = "tree_data";
@@ -178,7 +184,7 @@ TEST_F(TestEnginePredictor, NativeCustomAndTreeRecoverTheSamePhysicalThroughput)
     EXPECT_NEAR(treeResult.value, nativeResult.value, 1e-12);
 }
 
-/// RFC 0019 §7.2: the adapter verifies the digest; the engine role must still see the refusal.
+/// RFC 0019 §7.3: the adapter verifies the digest; the engine role must still see the refusal.
 TEST_F(TestEnginePredictor, ACustomLibraryWhoseDeclaredHashIsNotItsBytesYieldsNoEstimate)
 {
     auto custom = config(document());
@@ -193,6 +199,75 @@ TEST_F(TestEnginePredictor, ACustomLibraryWhoseDeclaredHashIsNotItsBytesYieldsNo
     EXPECT_DOUBLE_EQ(result.value, 0.0);
     // A refusal still names the metric it was asked in.
     EXPECT_EQ(result.metric, "tflops");
+}
+
+/// validateBinding runs before the artifact is opened: opening runs the library's initialisers,
+/// which a model that can never be used must not get to do.
+TEST_F(TestEnginePredictor, ABindingRefusedForItsScoreNeverLoadsItsLibrary)
+{
+    // A private copy, so another test's load of the shared scorer library is not observed.
+    const auto library
+        = _directory.path() / hipdnn_data_sdk::utilities::getLibraryName("refused_scorer");
+    ASSERT_TRUE(std::filesystem::copy_file(hipdnn_plugin_sdk::test::testScorerLibrary(), library));
+    const auto isLoaded = [&]() {
+        const auto handle = hipdnn_data_sdk::utilities::openLoadedLibrary(library);
+        if(handle == nullptr)
+        {
+            return false;
+        }
+        hipdnn_data_sdk::utilities::closeLibrary(handle);
+        return true;
+    };
+    auto custom = config(document());
+    custom.adapterType = "custom_library";
+    custom.modelArtifactPath = library.string();
+    custom.customLibrarySymbol = "testLinearScorer";
+    custom.scoreCalibrated = false;
+    const auto ask = [&](const EngineModelBinding& binding) {
+        return binding.predict(
+            17, "test:opaque", "selector-1", "tflops", "gfx942", _features, true);
+    };
+
+    EngineModelBinding refused;
+    refused.bind("tflops", "default", custom);
+    EXPECT_EQ(ask(refused).status, PredictionStatus::INVALID);
+    EXPECT_FALSE(isLoaded());
+
+#ifndef _WIN32
+    // Control: an accepted binding's cached model holds the library open, so the probe sees it.
+    custom.scoreCalibrated = true;
+    EngineModelBinding accepted;
+    accepted.bind("tflops", "default", custom);
+    ASSERT_EQ(ask(accepted).status, PredictionStatus::AVAILABLE);
+    EXPECT_TRUE(isLoaded());
+#endif
+}
+
+/// A model that fails its contract is read and reported once; one whose artifact is not
+/// deployed yet is compiled again on the next query (RFC 0019 §5). Both are parsed before
+/// any bytes exist, so no content digest pins the artifact.
+TEST_F(TestEnginePredictor, ABrokenModelIsCompiledOnceAndAnUndeployedOneIsRetried)
+{
+    const auto ask = [&](const EngineModelBinding& binding) {
+        return binding.predict(
+            17, "test:opaque", "selector-1", "tflops", "gfx942", _features, true);
+    };
+
+    EngineModelBinding broken;
+    broken.bind("tflops", "default", config(treeDocument("broken.fb")));
+    std::ofstream(artifactPath("broken.fb"), std::ios::binary) << "not a model";
+    EXPECT_EQ(ask(broken).status, PredictionStatus::INVALID);
+    // Valid bytes now: only a recompile could see them.
+    ASSERT_TRUE(treeModel(42.0).buildToFile(artifactPath("broken.fb")));
+    EXPECT_EQ(ask(broken).status, PredictionStatus::INVALID);
+
+    EngineModelBinding pending;
+    pending.bind("tflops", "default", config(treeDocument("pending.fb")));
+    EXPECT_EQ(ask(pending).status, PredictionStatus::UNAVAILABLE);
+    ASSERT_TRUE(treeModel(42.0).buildToFile(artifactPath("pending.fb")));
+    const auto deployed = ask(pending);
+    ASSERT_EQ(deployed.status, PredictionStatus::AVAILABLE) << deployed.reason;
+    EXPECT_NEAR(deployed.value, 42.0, 1e-12);
 }
 
 TEST_F(TestEnginePredictor, DescriptionPublishesBindingWithoutLoadingOrScoring)
@@ -221,14 +296,19 @@ TEST_F(TestEnginePredictor, DescriptionPublishesBindingWithoutLoadingOrScoring)
 /// gets collected.
 TEST_F(TestEnginePredictor, EngineWithNoResolvedRoleDescribesItsBindingAndDeclinesToScore)
 {
-    const UhdConfig unbound;
-    const auto evaluated = predictWith(unbound, nullptr);
+    const auto unbound = [&](bool evaluate) {
+        return predictEngine(
+            17, "test:opaque", "selector-1", "tflops", "gfx942", _features, evaluate, nullptr, [] {
+                return std::shared_ptr<const Model>();
+            });
+    };
+    const auto evaluated = unbound(true);
     EXPECT_EQ(evaluated.status, PredictionStatus::UNAVAILABLE);
     EXPECT_EQ(evaluated.reason, "no predict_engine UHD for metric 'tflops' on arch 'gfx942'");
     EXPECT_TRUE(evaluated.binding_json.empty());
     EXPECT_EQ(scorerCalls, 0U);
 
-    const auto description = predictWith(unbound, nullptr, false);
+    const auto description = unbound(false);
     const auto binding = nlohmann::json::parse(description.binding_json);
     EXPECT_EQ(binding.at("engine"), "test:opaque");
     EXPECT_EQ(binding.at("arch"), "gfx942");

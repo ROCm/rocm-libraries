@@ -269,7 +269,7 @@ struct TableModel FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TableEntry>> *>(VT_ENTRIES);
   }
   /// GPU architectures this model was trained/benchmarked on (e.g. ["gfx942", "gfx950"]).
-  /// Used for out-of-distribution detection (RFC 0019 §9.3).
+  /// Used for out-of-distribution detection (RFC 0019 §8.3).
   const ::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>> *training_arches() const {
     return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>> *>(VT_TRAINING_ARCHES);
   }

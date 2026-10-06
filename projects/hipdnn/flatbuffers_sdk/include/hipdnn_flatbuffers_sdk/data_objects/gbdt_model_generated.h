@@ -53,7 +53,7 @@ struct GbdtTreeT : public ::flatbuffers::NativeTable {
 ///
 /// Traversal: start at node 0, compare features[feature_indices[i]] against
 /// thresholds[i], go left (left_children[i]) if less-or-equal (or less, if
-/// decision_type at i is false) or if missing and default_left,
+/// decision_lte at i is false) or if missing and default_left,
 /// else right (right_children[i]). At a leaf, return leaf_values[i].
 struct GbdtTree FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef GbdtTreeT NativeTableType;
@@ -109,7 +109,7 @@ struct GbdtTree FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   ::flatbuffers::Vector<uint8_t> *mutable_default_left() {
     return GetPointer<::flatbuffers::Vector<uint8_t> *>(VT_DEFAULT_LEFT);
   }
-  /// Decision type per node: true = use <= (LightGBM default), false = use <.
+  /// Comparison per node: true = use <= (LightGBM default), false = use <.
   /// If absent, defaults to all true (<=) for LightGBM compatibility.
   const ::flatbuffers::Vector<uint8_t> *decision_lte() const {
     return GetPointer<const ::flatbuffers::Vector<uint8_t> *>(VT_DECISION_LTE);
@@ -235,19 +235,6 @@ struct GbdtGroupT : public ::flatbuffers::NativeTable {
   GbdtGroupT &operator=(GbdtGroupT o) FLATBUFFERS_NOEXCEPT;
 };
 
-/// @brief GBDT (Gradient Boosted Decision Tree) model for the tree_data adapter.
-///
-/// This is the model artifact format for UHD's default shipping path. The model
-/// is exported from LightGBM or XGBoost training and converted to this FlatBuffer
-/// format at build time.
-///
-/// Prediction: sum leaf_values from all trees after traversal, then add base_score:
-///     score = base_score + sum(leaf_values)
-///
-/// learning_rate is metadata only and must NOT be applied here. LightGBM's
-/// dump_model() already folds it into leaf_values, so multiplying again double-counts
-/// it. A producer whose leaf values exclude the learning rate must scale them before
-/// serializing. See TreeDataAdapter::score, which implements this formula.
 /// Layer 2 of a grouped model: the trees that rank candidates *within* one group.
 ///
 /// A grouped model answers two questions -- which group, then which candidate inside it --
@@ -353,6 +340,19 @@ struct GbdtModelT : public ::flatbuffers::NativeTable {
   GbdtModelT &operator=(GbdtModelT o) FLATBUFFERS_NOEXCEPT;
 };
 
+/// @brief GBDT (Gradient Boosted Decision Tree) model for the tree_data adapter.
+///
+/// This is the model artifact format for UHD's default shipping path. The model
+/// is exported from LightGBM or XGBoost training and converted to this FlatBuffer
+/// format at build time.
+///
+/// Prediction: sum leaf_values from all trees after traversal, then add base_score:
+///     score = base_score + sum(leaf_values)
+///
+/// learning_rate is metadata only and must NOT be applied here. LightGBM's
+/// dump_model() already folds it into leaf_values, so multiplying again double-counts
+/// it. A producer whose leaf values exclude the learning rate must scale them before
+/// serializing. See TreeDataAdapter::score, which implements this formula.
 struct GbdtModel FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef GbdtModelT NativeTableType;
   typedef GbdtModelBuilder Builder;
@@ -432,10 +432,11 @@ struct GbdtModel FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   ::flatbuffers::String *mutable_training_objective() {
     return GetPointer<::flatbuffers::String *>(VT_TRAINING_OBJECTIVE);
   }
-  /// Model provenance (RFC 0019 §9.2, §13).
+  /// Model provenance (RFC 0019 §8.3, §13).
   /// GPU architectures the model was trained on (e.g., ["gfx942", "gfx1100"]).
-  /// Runtime compares $device.arch against this list; warns or degrades to
-  /// static_order if the device arch is unseen during training.
+  /// The runtime compares the device's architecture against this list; on an unseen
+  /// architecture it withholds the calibrated engine estimate and still ranks kernels
+  /// with the model, logging a warning.
   const ::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>> *training_arches() const {
     return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>> *>(VT_TRAINING_ARCHES);
   }
@@ -450,8 +451,7 @@ struct GbdtModel FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     return GetPointer<::flatbuffers::String *>(VT_MODEL_VERSION);
   }
   /// Index into the feature row of the value that names a candidate's group, or -1 for a
-  /// single-layer model. Appended, so every artifact written before this field reads as
-  /// -1 and evaluates exactly as it always did.
+  /// single-layer model. When absent, -1 identifies a single-layer model.
   int32_t group_by_feature_index() const {
     return GetField<int32_t>(VT_GROUP_BY_FEATURE_INDEX, -1);
   }

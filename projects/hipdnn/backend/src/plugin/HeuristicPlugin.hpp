@@ -67,7 +67,8 @@ struct HeuristicPluginFunctionTable
                                                      size_t*)
         = nullptr;
 
-    // Optional prediction-aware ABI (0.1.0); absence preserves legacy behavior.
+    // Optional prediction-aware ABI (0.1.0). Without FinalizeWithHost the policy finalizes
+    // without host prediction services; without GetEngineConfig it returns engine ids only.
     decltype(&hipdnnHeuristicPolicyFinalizeWithHost) policyFinalizeWithHost = nullptr;
     decltype(&hipdnnHeuristicPolicyGetEngineConfig) policyGetEngineConfig = nullptr;
 };

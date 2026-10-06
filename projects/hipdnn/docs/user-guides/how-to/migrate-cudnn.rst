@@ -73,7 +73,7 @@ Troubleshooting
 ===============
 
 Prediction modes return no ranking
----------------------------------
+----------------------------------
 
 Mode A ranks engines by their graph-level UHD prediction. Mode B prefers a
 calibrated configuration prediction and falls back to the graph-level prediction

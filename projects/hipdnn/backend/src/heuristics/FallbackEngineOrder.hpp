@@ -23,7 +23,7 @@ inline constexpr const char* FALLBACK_ORDERING_ENV = "HIPDNN_HEUR_FALLBACK_ENGIN
 
 /// Parse HIPDNN_HEUR_FALLBACK_ENGINE_ORDER (comma-separated engine names or IDs) into a
 /// list of engine IDs in the order the user wrote them. Empty / unset env →
-/// empty vector (caller falls back to the legacy sortEngineIds ordering).
+/// empty vector (caller falls back to the built-in sortEngineIds ordering).
 /// Blank tokens are skipped.
 ///
 /// engineNameOrIdToId accepts every spelling hipdnn_list_engines prints: a declared

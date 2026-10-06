@@ -49,7 +49,7 @@ table TableModel {
     entries:[TableEntry];
 
     /// GPU architectures this model was trained/benchmarked on (e.g. ["gfx942", "gfx950"]).
-    /// Used for out-of-distribution detection (RFC 0019 §9.3).
+    /// Used for out-of-distribution detection (RFC 0019 §8.3).
     training_arches:[string];
 
     /// Model version string for provenance tracking (RFC 0019 §13).

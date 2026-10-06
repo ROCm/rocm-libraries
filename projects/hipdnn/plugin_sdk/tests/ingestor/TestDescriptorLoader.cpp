@@ -848,12 +848,13 @@ TEST(TestDescriptorLoader, ReadsAScoringRoleAsAListOfDistinctIds)
         << recorder.getRecordedLogsAsString();
 }
 
-/// The retired L1 role key is refused as unknown, not loaded with its model silently unbound.
-TEST(TestDescriptorLoader, RejectsAnEngineSpellingTheRetiredPredictionRole)
+/// A metric-suffixed L1 role key (`predict_engine_tflops`) is refused as unknown, not loaded
+/// with its model silently unbound.
+TEST(TestDescriptorLoader, RejectsAnEngineSpellingAMetricSuffixedPredictionRole)
 {
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("retired_role"));
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("suffixed_role"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
 
     auto broken = makeSetDocuments('2', "test:broken");

@@ -32,10 +32,13 @@ cuDNN cannot use it.
 ## Heuristic modes
 
 The shim accepts every cuDNN frontend `HeurMode_t` value, including `A`, `B`,
-`FALLBACK`, and `OPENSOURCE`. hipDNN does not currently expose matching cuDNN
-heuristic modes, so non-`FALLBACK` modes are accepted but are not honored as
-cuDNN heuristics. The shim logs a warning and forwards selection to hipDNN's
-fallback/default engine-selection path.
+`FALLBACK`, and `OPENSOURCE`. `A` and `B` select hipDNN's `SelectionHeuristic::ModeA`
+and `SelectionHeuristic::ModeB` prediction policies, which rank engines by trained
+UHD models rather than by cuDNN's heuristics; when no applicable engine has a usable
+prediction they decline and static engine selection runs. `OPENSOURCE` has no hipDNN
+counterpart: the shim logs a warning and uses hipDNN's fallback/default
+engine-selection path. See the [Porting Guide](./PortingGuide.md) for how the
+prediction policies behave when no model is installed.
 
 Impact: plan choice and performance may differ from cuDNN for the same requested
 heuristic mode.

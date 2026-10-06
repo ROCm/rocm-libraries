@@ -24,13 +24,6 @@
 #include <unordered_map>
 #include <vector>
 
-// Forward declare FlatBuffer types
-namespace hipdnn_flatbuffers_sdk::data_objects
-{
-struct TableModel;
-struct FeatureBucket;
-} // namespace hipdnn_flatbuffers_sdk::data_objects
-
 namespace hipdnn_plugin_sdk::uhd
 {
 

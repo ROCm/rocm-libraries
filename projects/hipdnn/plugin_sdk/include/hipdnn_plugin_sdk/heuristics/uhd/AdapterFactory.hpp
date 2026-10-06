@@ -60,6 +60,12 @@ inline std::shared_ptr<IUhdAdapter> makeUhdAdapter(const UhdConfig& cfg)
 
     else if(cfg.adapterType == "custom_library")
     {
+#ifdef _WIN32
+        // A descriptor names one library file and one digest, so it cannot name a Windows
+        // build beside the Linux one (RFC 0019 §7.3).
+        HIPDNN_SDK_LOG_ERROR("uhd: custom_library models are not supported on Windows; "
+                             << cfg.modelArtifactPath << " is not loaded");
+#else
         if(!cfg.modelArtifactPath.empty() && !cfg.customLibrarySymbol.empty())
         {
             return CustomLibraryAdapter::load(cfg.modelArtifactPath,
@@ -70,6 +76,7 @@ inline std::shared_ptr<IUhdAdapter> makeUhdAdapter(const UhdConfig& cfg)
         }
         HIPDNN_SDK_LOG_ERROR("uhd: custom_library needs both a model artifact path and a "
                              "symbol name; scorer unavailable");
+#endif
     }
 
     return nullptr;

@@ -9,6 +9,7 @@
  * actionAfterAdding() to improve coverage of HeuristicPluginManager.hpp
  */
 
+#include "BuiltInHeuristicPolicies.hpp"
 #include "HipdnnException.hpp"
 #include "PlatformUtils.hpp"
 #include "TestPluginConstants.hpp"
@@ -18,7 +19,6 @@
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
 #include <hipdnn_plugin_sdk/heuristic_api_version.h>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <set>
@@ -35,27 +35,8 @@ constexpr const char* DUPLICATE_POLICY_ID_B_PLUGIN = "test_duplicate_policy_id_b
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::plugin;
-
-/// Policy IDs the backend built-ins serve; a manager registers them in its constructor.
-static std::set<int64_t> builtInPolicyIds()
-{
-    using hipdnn_data_sdk::utilities::policyNameToId;
-    return {policyNameToId("SelectionHeuristic::Config"),
-            policyNameToId("SelectionHeuristic::StaticOrdering"),
-            policyNameToId(hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME),
-            policyNameToId(hipdnn_data_sdk::utilities::MODE_B_POLICY_NAME)};
-}
-
-static std::set<int64_t> registeredPolicyIds(const HeuristicPluginManager& manager)
-{
-    std::set<int64_t> ids;
-    for(const auto& plugin : manager.getPlugins())
-    {
-        const auto pluginIds = plugin->getAllPolicyIds();
-        ids.insert(pluginIds.begin(), pluginIds.end());
-    }
-    return ids;
-}
+using hipdnn_backend::test_utilities::builtInPolicyIds;
+using hipdnn_backend::test_utilities::registeredPolicyIds;
 using namespace hipdnn_backend::plugin_constants;
 
 class TestHeuristicPluginManagerValidationPaths : public ::testing::Test

@@ -236,6 +236,27 @@ Both surfaces retain the resolved ID whether or not it selected anything. That I
 
 A policy is handed bare engine IDs through ``hipdnnHeuristicPolicySetEngineIds`` and no handle, so the ``HIPDNN_HEUR_FALLBACK_ENGINE_ORDER`` environment variable and the engine override rules in the heuristic config file turn an operator's string into an ID without the resolver. They can do so exactly: a declared name hashes to the engine's ID, and an engine that declares none is displayed as its ID in hexadecimal, which both surfaces also parse. Either spelling can be pasted from the enumeration.
 
+.. _optional-prediction-exports:
+
+Optional prediction exports
+===========================
+
+hipDNN looks each of the following entry points up when the plugin loads. Every one is optional: a plugin that doesn't export it, or that answers ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE``, is treated as not supporting the feature, which is different from supporting it and returning nothing. The declarations and full contracts are in ``EnginePluginApi.h`` and ``HeuristicsPluginApi.h``.
+
+Engine plugins (engine plugin API 1.5.0)
+----------------------------------------
+
+- ``hipdnnEnginePluginEnumerateCandidates`` returns one page of the engine's matched catalog in the ``candidate_page`` of a serialized ``EngineDetails``. Explicit knob settings in the engine config restrict the catalog. ``offset`` is zero-based and must not exceed the total count; ``limit`` must be in ``[1, 10000]``. Candidate IDs are non-empty and unique, and their order is stable across calls and independent of ranking. An empty page means the engine has no candidates. Free a successful response with ``hipdnnEnginePluginDestroyEngineDetails``.
+- ``hipdnnEnginePluginGetPrediction`` describes (``evaluate`` = 0) or evaluates (``evaluate`` = 1) a UHD prediction for an engine (``HIPDNN_ENGINE_PREDICTION_ENGINE``, tuning off) or for one exact configuration (``HIPDNN_ENGINE_PREDICTION_CONFIGURATION``, complete knob settings). It must not benchmark, tune, or run GPU work, and a missing prediction never changes applicability. The result's metric is always the engine config's ranking metric (``tflops`` when empty); an engine with no model for that metric reports ``UNAVAILABLE``, and an unregistered metric is ``HIPDNN_PLUGIN_STATUS_BAD_PARAM``. Free the serialized ``EnginePrediction`` with ``hipdnnEnginePluginDestroyEngineDetails``; it is left empty on failure.
+
+Plugins built on ``EnginePluginImpl.inl`` export both entry points. The ``IEngine`` defaults report enumeration as ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`` and every prediction as ``UNAVAILABLE``; override ``enumerateCandidates`` and ``getPrediction`` to provide them.
+
+Heuristic plugins (heuristic plugin API 0.1.0)
+----------------------------------------------
+
+- ``hipdnnHeuristicPolicyFinalizeWithHost`` is called instead of ``hipdnnHeuristicPolicyFinalize`` when exported. It receives a ``hipdnnHeuristicHostCallbacks_t`` table whose ``get_prediction`` callback returns verified ``EnginePrediction`` buffers for the input candidate engine IDs only, in the units of ``ranking_metric``. The table, its strings, and every returned buffer are borrowed for the duration of the call: don't retain or free them, and don't call back after returning. Check ``version`` and ``struct_size`` before reading fields; a version 1 table has no ``ranking_metric`` and means ``tflops``. A ``NULL`` host means predictions are unavailable. A prediction-ranking policy orders by ``ranking_metric`` in that metric's direction and declines (``out_applied`` = 0) when no candidate has a usable prediction.
+- ``hipdnnHeuristicPolicyGetEngineConfig`` returns the exact serialized ``EngineConfig`` chosen for an engine ID the policy returned, after a successful finalize. Its ``engine_id`` must match that engine and it must keep every knob setting that was scored. The buffer stays owned by the policy descriptor until the descriptor's next mutation or destruction; the host doesn't free it. ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`` means the policy has no configuration for that engine.
+
 Create a kernel engine plugin
 =============================
 
@@ -661,4 +682,4 @@ To verify your plugin has proper symbol visibility:
 
 If you see many internal symbols exported, your visibility settings are incorrect.
 
-``hipdnnEnginePluginGetEngineName`` is present whether or not your container implements ``getEngineName``. See :ref:`engine-names`.
+``hipdnnEnginePluginGetEngineName`` is present whether or not your container implements ``getEngineName``. See :ref:`engine-names`. The same holds for ``hipdnnEnginePluginEnumerateCandidates`` and ``hipdnnEnginePluginGetPrediction``; see :ref:`optional-prediction-exports`.

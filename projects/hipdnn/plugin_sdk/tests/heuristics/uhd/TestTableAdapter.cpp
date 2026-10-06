@@ -61,7 +61,7 @@ public:
         return *this;
     }
 
-    std::vector<uint8_t> build()
+    std::vector<uint8_t> build(const char* fileIdentifier = fb::TableModelIdentifier())
     {
         flatbuffers::FlatBufferBuilder builder;
 
@@ -95,7 +95,7 @@ public:
         auto model = fb::CreateTableModel(
             builder, _numFeatures, hashOffset, bucketsVec, entriesVec, archesVec);
 
-        builder.Finish(model, fb::TableModelIdentifier());
+        builder.Finish(model, fileIdentifier);
 
         return {builder.GetBufferPointer(), builder.GetBufferPointer() + builder.GetSize()};
     }
@@ -371,14 +371,17 @@ TEST_F(TestTableAdapter, LoadFromBufferTooSmall)
 
 TEST_F(TestTableAdapter, LoadFromBufferWrongIdentifier)
 {
-    flatbuffers::FlatBufferBuilder builder;
-    auto hashOffset = builder.CreateString(TEST_HASH);
-    auto model = fb::CreateTableModel(builder, 1, hashOffset);
-    builder.FinishSizePrefixed(model, "BAAD");
+    TableModelBuilder model;
+    model.setNumFeatures(2)
+        .setFeaturesHash(TEST_HASH)
+        .addBucket(0, {5.0})
+        .addBucket(1, {10.0})
+        .addEntry({0, 0}, 1.0);
 
-    std::vector<uint8_t> buffer(builder.GetBufferPointer(),
-                                builder.GetBufferPointer() + builder.GetSize());
+    // The control: the same model under the table identifier loads.
+    auto good = model.build();
+    ASSERT_NE(TableAdapter::loadFromBuffer(good.data(), good.size(), TEST_HASH), nullptr);
 
-    auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
-    EXPECT_EQ(adapter, nullptr);
+    auto bad = model.build("BAAD");
+    EXPECT_EQ(TableAdapter::loadFromBuffer(bad.data(), bad.size(), TEST_HASH), nullptr);
 }

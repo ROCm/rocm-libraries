@@ -22,19 +22,22 @@
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
-std::filesystem::path descriptorSearchDirectory()
+namespace
+{
+
+/// descriptorSearchDirectory() given the already-read HIPDNN_DESCRIPTOR_DIR, so one
+/// discovery reads (and warns about) the environment once.
+std::filesystem::path providerDescriptorTree(std::filesystem::path replacement)
 {
     // 1. HIPDNN_DESCRIPTOR_DIR. The SDK reader already drops a value that is not a real
     //    directory (stale build paths are common), so empty means fall through.
-    if(const auto replacement
-       = hipdnn_plugin_sdk::ingestor::environmentDescriptorRoots().replacement;
-       !replacement.empty())
+    if(!replacement.empty())
     {
         return replacement;
     }
 
     // 2. Where this plugin was actually loaded from.
-    //    Measuring from the loaded module is correct wherever it lands. Keyed on this
+    //    Measuring from the loaded module is correct wherever it lands. Keyed on a
     //    function's own address rather than a symbol name, since a name lookup can resolve
     //    to a different module when every provider exports the same plugin entry points.
     try
@@ -61,13 +64,25 @@ std::filesystem::path descriptorSearchDirectory()
     return HIPKERNELPROVIDER_DESCRIPTOR_INSTALL_DIR;
 }
 
+} // namespace
+
+std::filesystem::path descriptorSearchDirectory()
+{
+    return providerDescriptorTree(
+        hipdnn_plugin_sdk::ingestor::environmentDescriptorRoots().replacement);
+}
+
 std::vector<std::filesystem::path> descriptorSearchDirectories()
 {
-    std::vector<std::filesystem::path> roots{descriptorSearchDirectory()};
+    auto environment = hipdnn_plugin_sdk::ingestor::environmentDescriptorRoots();
+
+    std::vector<std::filesystem::path> roots;
+    roots.reserve(1 + environment.additional.size());
+    roots.push_back(providerDescriptorTree(std::move(environment.replacement)));
 
     // Additive, where HIPDNN_DESCRIPTOR_DIR above replaces: this is where descriptors are
     // dropped in beside a shipped install rather than instead of it.
-    for(auto& additional : hipdnn_plugin_sdk::ingestor::environmentDescriptorRoots().additional)
+    for(auto& additional : environment.additional)
     {
         roots.push_back(std::move(additional));
     }

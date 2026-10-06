@@ -90,8 +90,8 @@ typedef struct hipdnnHeuristicPolicyDescriptor_opaque* hipdnnHeuristicPolicyDesc
  * the duration of hipdnnHeuristicPolicyFinalizeWithHost: do not retain them, call back
  * asynchronously, or free them. Only input candidate engine IDs may be queried. Every
  * returned prediction is in ranking_metric's registered units (RFC 0019 §11.2).
- * Check version and struct_size before reading fields; version 1 has no ranking_metric
- * and means "tflops".
+ * Check version and struct_size before reading fields. Version 1 is the same table ending
+ * after get_prediction, without ranking_metric; a policy given it ranks by "tflops".
  */
 typedef struct
 {

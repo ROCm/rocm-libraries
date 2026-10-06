@@ -25,12 +25,14 @@
 
 #include <hipdnn_data_sdk/logging/LogLevel.hpp>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_plugin_sdk/NativeRegistry.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/EnginePredictor.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/NativeScorerRegistry.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
@@ -55,7 +57,8 @@
  * Every UHD bound through a role map, for every architecture and metric, is also admitted
  * as the runtime admits that role: KMD fields and `features_hash` must match, kernel-scoped
  * models load through `UhdKernelHeuristic::tryCreate`, and `predict_engine` models pass
- * the L1 guards. No native scorer is ever executed.
+ * the L1 guards. A model the loader withheld is reported invalid without being loaded.
+ * Model artifacts, `custom_library` scorers included, are loaded; no scorer is called.
  */
 
 namespace
@@ -381,8 +384,9 @@ void bindSample(hipdnn_plugin_sdk::uhd::FeatureExtractionContext& context,
     }
 }
 
-/// The recorded samples for @p engine on @p arch, or one null entry -- extraction against
-/// only the signature's static values -- when there are none.
+/// The recorded samples for @p engine whose device @p arch serves (runtime prefix matching;
+/// `default` serves every device), or one null entry -- extraction against only the
+/// signature's static values -- when there are none.
 std::vector<const nlohmann::json*> relevantSamples(const nlohmann::json& samples,
                                                    const std::string& engine,
                                                    const std::string& arch)
@@ -390,7 +394,11 @@ std::vector<const nlohmann::json*> relevantSamples(const nlohmann::json& samples
     std::vector<const nlohmann::json*> relevant;
     for(const auto& sample : samples)
     {
-        if(sample.at("engine") == engine && (arch == "default" || sample.at("arch") == arch))
+        if(sample.at("engine") == engine
+           && (arch == "default"
+               || hipdnn_plugin_sdk::archMatches(sample.at("arch").get<std::string>(),
+                                                 arch,
+                                                 hipdnn_plugin_sdk::ArchMatchMode::PREFIX)))
         {
             relevant.push_back(&sample);
         }
@@ -400,6 +408,28 @@ std::vector<const nlohmann::json*> relevantSamples(const nlohmann::json& samples
         relevant.push_back(nullptr);
     }
     return relevant;
+}
+
+/// The loader's resolved binding of @p id for (@p metric, @p arch) in @p byMetric, after
+/// its pre-flight pruning. Throws when the loader withheld the model, which it has already
+/// logged.
+const HeuristicDescriptor&
+    loaderBinding(const std::map<std::string, std::map<std::string, HeuristicDescriptor>>& byMetric,
+                  const char* role,
+                  const std::string& metric,
+                  const std::string& arch,
+                  const DescriptorId& id)
+{
+    if(const auto models = byMetric.find(metric); models != byMetric.end())
+    {
+        if(const auto entry = models->second.find(arch);
+           entry != models->second.end() && entry->second.id == id)
+        {
+            return entry->second;
+        }
+    }
+    throw std::invalid_argument(std::string("The loader did not bind this model to ") + role
+                                + "; see loader diagnostics");
 }
 
 /// `predict_engine`: the L1 admission GenericEngine applies (`validateBinding`, `model`),
@@ -412,23 +442,9 @@ size_t checkEngineModel(const DescriptorSet& set,
                         const nlohmann::json& samples)
 {
     namespace prediction = hipdnn_plugin_sdk::uhd::prediction_detail;
-    // The loader's resolved binding; a model it withheld has already logged why.
-    const HeuristicDescriptor* bound = nullptr;
-    if(const auto byMetric = set.enginePredictionsByMetric.find(model.score.metric);
-       byMetric != set.enginePredictionsByMetric.end())
-    {
-        if(const auto entry = byMetric->second.find(arch);
-           entry != byMetric->second.end() && entry->second.id == id)
-        {
-            bound = &entry->second;
-        }
-    }
-    if(bound == nullptr)
-    {
-        throw std::invalid_argument(
-            "The loader did not bind this model to predict_engine; see loader diagnostics");
-    }
-    const auto config = UhdKernelHeuristic::configFrom(*bound);
+    const auto& bound = loaderBinding(
+        set.enginePredictionsByMetric, prediction::ENGINE_ROLE, model.score.metric, arch, id);
+    const auto config = UhdKernelHeuristic::configFrom(bound);
     prediction::validateBinding(config, set.engine.name, arch, model.score.metric);
     const auto compiled = prediction::model(config);
     if(compiled->status != prediction::PredictionStatus::AVAILABLE)
@@ -459,15 +475,23 @@ size_t checkEngineModel(const DescriptorSet& set,
 /// every candidate kernel the model would rank.
 /// @returns The feature rows extracted.
 size_t checkKernelModel(const DescriptorSet& set,
+                        const char* role,
                         const std::string& arch,
+                        const DescriptorId& id,
                         const HeuristicDescriptor& model,
                         const hipdnn_plugin_sdk::uhd::FeatureExtractor& extractor,
                         const std::unordered_set<std::string>& fields,
                         const nlohmann::json& samples)
 {
+    // A ranker the loader pruned is never loaded, as at runtime. predict_applicable_kernels
+    // has no consumer and so no resolved binding; its model is loaded as authored.
+    const auto& loadable
+        = std::string_view(role) == "sort_kernel_catalog"
+              ? loaderBinding(set.heuristicsByMetric, role, model.score.metric, arch, id)
+              : model;
     // Force every artifact through the real loader, including non-default
-    // architectures. No score function registered above is ever executed.
-    if(!UhdKernelHeuristic::tryCreate(model, set.engine.name, set.engine.knobs, fields))
+    // architectures. No score function registered above is ever called.
+    if(!UhdKernelHeuristic::tryCreate(loadable, set.engine.name, set.engine.knobs, fields))
     {
         throw std::invalid_argument("Model load failed; see runtime diagnostics");
     }
@@ -486,8 +510,7 @@ size_t checkKernelModel(const DescriptorSet& set,
         const auto target = sample == nullptr ? arch : sample->at("arch").get<std::string>();
         for(const auto& pack : set.packs)
         {
-            if(target != "default" && !pack.arch.empty()
-               && std::find(pack.arch.begin(), pack.arch.end(), target) == pack.arch.end())
+            if(target != "default" && !archSupports(pack.arch, target))
             {
                 continue;
             }
@@ -563,9 +586,10 @@ nlohmann::json validateModels(const DescriptorCatalog& catalog,
                           = std::string_view(role)
                                     == hipdnn_plugin_sdk::uhd::prediction_detail::ENGINE_ROLE
                                 ? checkEngineModel(set, arch, id, *model, samples)
-                                : checkKernelModel(set, arch, *model, extractor, fields, samples);
+                                : checkKernelModel(
+                                      set, role, arch, id, *model, extractor, fields, samples);
                       check["feature_rows_checked"] = evaluated;
-                      check["native_execution"] = "not_exercised";
+                      check["scorer_execution"] = "loaded_not_called";
                       check["success"] = true;
                   }
                   catch(const std::exception& error)

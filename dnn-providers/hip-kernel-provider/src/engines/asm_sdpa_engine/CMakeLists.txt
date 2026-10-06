@@ -99,7 +99,7 @@ message(STATUS "hip-kernel-provider: asm_sdpa forward selector revision ${_fwd_r
 # ============================================================================
 #
 # The runtime loads kernels exclusively from .kpack archives (AsmKpackArchive).
-# Loose .co files are no longer installed or loaded. Packing failures are fatal.
+# Loose .co files are neither installed nor loaded. Packing failures are fatal.
 
 include(KpackPython)
 

@@ -246,21 +246,14 @@ public:
     }
 
     /// Matching only, in descriptor-ID order, independent of heuristic/winner state, so a
-    /// page walk keeps its order when another caller benchmarks the catalog.
+    /// page walk keeps its order when another caller benchmarks the catalog. Ids are unique
+    /// within one device's catalog (validateAndIndexPacks).
     Catalog enumerableCatalog(const MatchContext& context) const
     {
         auto catalog = catalogFor(context);
         std::sort(catalog.entries.begin(),
                   catalog.entries.end(),
                   [](const auto& lhs, const auto& rhs) { return lhs.kernelId < rhs.kernelId; });
-        for(size_t i = 1; i < catalog.entries.size(); ++i)
-        {
-            if(catalog.entries[i - 1].kernelId == catalog.entries[i].kernelId)
-            {
-                throw std::invalid_argument("Ambiguous candidate id '"
-                                            + toString(catalog.entries[i].kernelId) + "'");
-            }
-        }
         return catalog;
     }
 
@@ -560,6 +553,22 @@ private:
         // one device. Keyed by the tuple (an ordered map, so it already orders) rather
         // than scanned, which would be quadratic.
         std::map<MetadataValues, std::vector<std::vector<std::string>>> archesClaimingTuple;
+        // Rankings and enumeration name a candidate by kernel id, so an id is unique per
+        // overlapping-arch group too.
+        std::map<DescriptorId, std::vector<std::vector<std::string>>> archesClaimingId;
+        // Records @p arch unless a claimant already reaches one of its devices.
+        const auto claim = [](std::vector<std::vector<std::string>>& claimants,
+                              const std::vector<std::string>& arch) {
+            const bool taken
+                = std::any_of(claimants.begin(), claimants.end(), [&arch](const auto& claimed) {
+                      return archOverlaps(claimed, arch);
+                  });
+            if(!taken)
+            {
+                claimants.push_back(arch);
+            }
+            return !taken;
+        };
 
         _definitions.reserve(_packs.size());
         for(const auto& pack : _packs)
@@ -606,21 +615,21 @@ private:
                 std::vector<std::string> kernelArch = kernel.arch.empty() ? pack.arch : kernel.arch;
                 // try_emplace, not operator[], only because misc-const-correctness
                 // misreads the operator[] form here and demands a const map.
-                std::vector<std::vector<std::string>>& claimants
-                    = archesClaimingTuple.try_emplace(key).first->second;
-                for(const auto& claimed : claimants)
+                if(!claim(archesClaimingId.try_emplace(kernel.id).first->second, kernelArch))
                 {
-                    if(archOverlaps(claimed, kernelArch))
-                    {
-                        throw std::invalid_argument(
-                            "kernel '" + toString(kernel.id)
-                            + "' duplicates the metadata tuple of another kernel under schema '"
-                            + _schema.name
-                            + "' on an arch both reach; the tuple is the catalog key "
-                            + "and must be unique per device");
-                    }
+                    throw std::invalid_argument(
+                        "kernel '" + toString(kernel.id)
+                        + "' is declared twice on an arch both declarations reach; a kernel id "
+                        + "names one candidate and must be unique per device");
                 }
-                claimants.push_back(kernelArch);
+                if(!claim(archesClaimingTuple.try_emplace(key).first->second, kernelArch))
+                {
+                    throw std::invalid_argument(
+                        "kernel '" + toString(kernel.id)
+                        + "' duplicates the metadata tuple of another kernel under schema '"
+                        + _schema.name + "' on an arch both reach; the tuple is the catalog key "
+                        + "and must be unique per device");
+                }
 
                 packDefinitions.push_back(KernelDefinition{kernel.id,
                                                            pack.id,
