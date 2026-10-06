@@ -186,8 +186,8 @@ ResolvedSchedulingKnobs HeuristicSchedulingKnobPolicy::propose(const SchedulingF
     out.dsReadThrottleLatency = std::max(throttleFloor, computedThrottle);
     out.dsReadThrottleLatencySource = SchedulingKnobSource::Policy;
 
-    // Diagnostic only. Logged by logResolvedSchedulingKnobs; not folded into
-    // dsReadThrottleLatency above.
+    // Latency-budget estimate. resolveSchedulingKnobs adopts it when it is
+    // greater than dsReadThrottleLatency and the user did not set the knob.
     out.optimisticDsReadThrottleLatency =
         estimateOptimisticDsReadThrottle(
             features.stats.sumWmmaLatencyCycles, features.unrollLoopCopies, firstWmmaLatency,
@@ -247,9 +247,14 @@ ResolvedSchedulingKnobs resolveSchedulingKnobs(const SchedulingFeatures& feature
         out.clusterBarrierRule3SignalLeadCyclesSource = SchedulingKnobSource::StaticDefault;
     }
 
-    // Diagnostic. Stays -1 when propose() did not run.
+    // Diagnostic field. Stays -1 when propose() did not run. A larger estimate
+    // replaces the policy or static throttle; an explicit user value stays.
     if (!features.stats.degenerate()) {
         out.optimisticDsReadThrottleLatency = proposed.optimisticDsReadThrottleLatency;
+    }
+    if (out.dsReadThrottleLatencySource != SchedulingKnobSource::User &&
+        out.optimisticDsReadThrottleLatency > out.dsReadThrottleLatency) {
+        out.dsReadThrottleLatency = out.optimisticDsReadThrottleLatency;
     }
 
     return out;
@@ -301,7 +306,8 @@ void logResolvedSchedulingKnobs(std::ostream& os, std::string_view moduleName,
        << schedulingKnobSourceName(resolved.clusterBarrierRule3SignalLeadCyclesSource) << ")";
     // optimisticDsReadThrottleLatency is this logger's heuristic recompute.
     // policyOptimisticDsReadThrottleLatency is whatever propose() stored.
-    // A custom policy can disagree; applyResolvedSchedulingKnobs ignores both.
+    // A custom policy can disagree. The applied knob is dsReadThrottleLatency,
+    // which resolveSchedulingKnobs may already have raised to this estimate.
     const OptimisticDsReadThrottle optimistic =
         estimateOptimisticDsReadThrottle(features, hwModelForArch(features.arch));
     const int policyOptimistic = resolved.optimisticDsReadThrottleLatency;

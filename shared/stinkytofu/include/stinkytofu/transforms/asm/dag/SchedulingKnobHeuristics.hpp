@@ -89,9 +89,9 @@ struct ResolvedSchedulingKnobs {
     SchedulingKnobSource clusterBarrierRule3SignalLeadCyclesSource =
         SchedulingKnobSource::StaticDefault;
 
-    /// Latency-budget throttle estimate. Diagnostic only: `applyResolvedSchedulingKnobs`
-    /// does not copy it, and it is not combined with `dsReadThrottleLatency`.
-    /// -1 = not computed (degenerate main loop).
+    /// Latency-budget throttle estimate. -1 = not computed (degenerate main loop).
+    /// When this is greater than `dsReadThrottleLatency` and the user did not
+    /// set that knob, `resolveSchedulingKnobs` copies this value onto it.
     int optimisticDsReadThrottleLatency = -1;
 };
 

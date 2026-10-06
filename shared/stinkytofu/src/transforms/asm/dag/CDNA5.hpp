@@ -1963,6 +1963,27 @@ int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
     return computeDsLoadWmmaWindowsNeeded(dsLoadCount, dsLoadBudgetConfig());
 }
 
+// Back-to-back drain assumes ds_loads issue with no extra gap. Throttle at or
+// below this spacing does not overlap that wait, so the barrier drain is left
+// unchanged. Wider spacing is subtracted once per ds_load past the queue depth.
+constexpr double kDrainNeutralThrottleCyclesPerDs = 4.0;
+
+// Residual cycles from the last ds_load to data-back. burstDrainLatency is the
+// back-to-back estimate. When throttle/queueDepth exceeds the constant above,
+// each overflow ds_load subtracts one throttle interval. The result is not
+// lower than lastDsLoadLatency.
+int drainLatencyAfterThrottle(int burstDrainLatency, int lastDsLoadLatency, int dsLoadCount,
+                              int queueDepth, int throttleLatency) {
+    if (queueDepth <= 0 || throttleLatency <= 0 || dsLoadCount <= queueDepth)
+        return burstDrainLatency;
+    const double interval = static_cast<double>(throttleLatency) / static_cast<double>(queueDepth);
+    if (interval <= kDrainNeutralThrottleCyclesPerDs) return burstDrainLatency;
+    const int overflow = dsLoadCount - queueDepth;
+    const double reduced =
+        static_cast<double>(burstDrainLatency) - static_cast<double>(overflow) * interval;
+    return std::max(lastDsLoadLatency, static_cast<int>(std::lround(reduced)));
+}
+
 // Compute forceBarrierAfterNthWmma_ for this region from register dependencies.
 //
 //  Step 1a — collect all movable barriers with their PSEUDO src token sets.
@@ -1976,9 +1997,11 @@ int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
 //            latencyWmmaBudget = (latency / wmmaIssueConfig.latency) + 1.
 //            wmmaWindowsNeeded is derived from matching ds_read count and DS
 //            per-WMMA cap. latency = dsReadDrainLatency when it is configured
-//            (> 0), else computeDynamicDrainLatencyForLoads(hw, matchingLoads,
-//            numWaves) over every matching ds_read (last-load latency,
-//            count-weighted average throughput, max maxDrain over the burst).
+//            (> 0), else the back-to-back drain from
+//            computeDynamicDrainLatencyForLoads, shortened by
+//            drainLatencyAfterThrottle when throttle/queueDepth exceeds
+//            kDrainNeutralThrottleCyclesPerDs. The floor is the last ds_load's
+//            own latency.
 std::unordered_map<StinkyInstruction*, CDNA5ReadyQueue::BarrierAfterOutput>
 CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
                                                IRList::iterator regionEnd) {
@@ -2049,14 +2072,19 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
         // (default 0) means "use dynamic drain latency," derived from all matching
         // ds_loads via computeDynamicDrainLatencyForLoads (last-load latency,
         // count-weighted average throughput, max maxDrain over the burst), keyed
-        // by this pass context's NumWaves.
+        // by this pass context's NumWaves. Throttle wider than 4 cycles/ds then
+        // shortens that burst drain; see drainLatencyAfterThrottle.
         const int configuredDrainLatency = dsReadDrainLatency();
         const int numWaves = static_cast<int>(getPassContext().getGemmTileConfig().NumWaves);
         const int matchingDsLoadCount = static_cast<int>(matchingDsLoads.size());
+        const int burstDrainLatency =
+            computeDynamicDrainLatencyForLoads(hw_, matchingDsLoads, numWaves);
         const int latencyForAfterThreshold =
             configuredDrainLatency > 0
                 ? configuredDrainLatency
-                : computeDynamicDrainLatencyForLoads(hw_, matchingDsLoads, numWaves);
+                : drainLatencyAfterThrottle(burstDrainLatency, matchingDsLoads.back().latency,
+                                            matchingDsLoadCount, dsReadQueueDepth(),
+                                            dsReadThrottleLatency());
         const int latencyWmmaBudget = (latencyForAfterThreshold / wmmaIssueConfig.latency) + 1;
         const int wmmaWindowsNeeded = computeWmmaWindowsNeeded(matchingDsLoadCount);
         const int overlapOrWindowBase = std::max(lastOverlap, wmmaWindowsNeeded);
