@@ -700,14 +700,35 @@ static rocke_status_t
         value_offset = rocke_b_mul(b, value_tile, rocke_b_const_i32(b, spec->value_tile_size));
     }
 
+    rocke_value_t* q_step
+        = spec->transposed_qk ? rocke_b_const_i32(b, ROCKE_WMMA_FMHA_FWD_BLOCK_M * spec->num_waves)
+                              : c16;
+    if(strcmp(spec->layout, "dense") == 0)
+    {
+        /* Head-interleaved K/V (BSHD-like strides): decode heads fastest so the
+         * CTAs in flight read whole token rows together. Mirrors the Python
+         * op order exactly. */
+        rocke_value_t* one = rocke_b_const_i32(b, 1);
+        rocke_value_t* step_minus_one = rocke_b_sub(b, q_step, one);
+        rocke_value_t* rounded = rocke_b_add(b, rocke_b_get_param(b, "seqlen_q"), step_minus_one);
+        rocke_value_t* q_tiles = rocke_b_div(b, rounded, q_step);
+        rocke_value_t* head_offset = rocke_b_mul(b, head, q_tiles);
+        rocke_value_t* linear = rocke_b_add(b, q_tile, head_offset);
+        rocke_value_t* kv_span = rocke_b_mul(
+            b, rocke_b_get_param(b, "stride_k_head"), rocke_b_get_param(b, "num_kv_heads"));
+        rocke_value_t* interleaved
+            = rocke_b_cmp_ge(b, rocke_b_get_param(b, "stride_k_token"), kv_span);
+        rocke_value_t* heads = rocke_b_get_param(b, "num_query_heads");
+        rocke_value_t* head_fast = rocke_b_mod(b, linear, heads);
+        head = rocke_b_select(b, interleaved, head_fast, head);
+        rocke_value_t* tile_fast = rocke_b_div(b, linear, heads);
+        q_tile = rocke_b_select(b, interleaved, tile_fast, q_tile);
+    }
     rocke_value_t* group_size = rocke_b_div(
         b, rocke_b_get_param(b, "num_query_heads"), rocke_b_get_param(b, "num_kv_heads"));
     rocke_value_t* kv_head = rocke_b_div(b, head, group_size);
     rocke_value_t* seqlen_q = rocke_b_get_param(b, "seqlen_q");
     rocke_value_t* seqlen_k = rocke_b_get_param(b, "seqlen_k");
-    rocke_value_t* q_step
-        = spec->transposed_qk ? rocke_b_const_i32(b, ROCKE_WMMA_FMHA_FWD_BLOCK_M * spec->num_waves)
-                              : c16;
     rocke_value_t* q_row0 = rocke_b_mul(b, q_tile, q_step);
 
     rocke_value_t* Q = rocke_b_get_param(b, "Q");

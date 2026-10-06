@@ -641,12 +641,26 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
         value_tile = b.mod(batch_tile, tiles)
         value_offset = b.mul(value_tile, b.const_i32(spec.value_tile_size))
 
+    q_step = b.const_i32(spec.q_rows_per_cta) if spec.transposed_qk else c16
+    if spec.layout == "dense":
+        # Head-interleaved K/V (BSHD-like strides): decode heads fastest so the
+        # CTAs in flight read whole token rows together, instead of one head's
+        # rows spaced a full token apart (lost cache reuse and translation
+        # locality at long sequence lengths). Contiguous heads keep the
+        # q-tile-fastest order. The grid itself is unchanged.
+        q_tiles = b.div(b.add(p["seqlen_q"], b.sub(q_step, b.const_i32(1))), q_step)
+        linear = b.add(q_tile, b.mul(head, q_tiles))
+        interleaved = b.cmp_ge(
+            p["stride_k_token"], b.mul(p["stride_k_head"], p["num_kv_heads"])
+        )
+        heads = p["num_query_heads"]
+        head = b.select(interleaved, b.mod(linear, heads), head)
+        q_tile = b.select(interleaved, b.div(linear, heads), q_tile)
     # Runtime GQA: one AOT object serves every integral Hq/Hkv ratio.
     group_size = b.div(p["num_query_heads"], p["num_kv_heads"])
     kv_head = b.div(head, group_size)
     seqlen_q = p["seqlen_q"]
     seqlen_k = p["seqlen_k"]
-    q_step = b.const_i32(spec.q_rows_per_cta) if spec.transposed_qk else c16
     q_row0 = b.mul(q_tile, q_step)
 
     Q, K, V, O, LSE = p["Q"], p["K"], p["V"], p["O"], p["LSE"]
