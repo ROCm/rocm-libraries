@@ -359,6 +359,29 @@ TEST(TestGfx1151WmmaAttentionMatchers, ScorePrefersFastTransposedKernel)
               scorer(context, BoundTokens{}, makeKernel(standard)));
 }
 
+TEST(TestGfx1151WmmaAttentionMatchers, ScorePrefersNarrowTransposedGeometryForLongSequences)
+{
+    registerNativeIngestorSymbols();
+    const auto scorer
+        = hipdnn_plugin_sdk::ingestor::ScoreRegistry::resolve(std::string(SCORE_SYMBOL));
+    GraphSpec longSequence;
+    longSequence.queryLength = 1024;
+    longSequence.kvLength = 1024;
+    auto builder = buildSdpaGraph(longSequence);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    KernelSpec narrow;
+    narrow.transposedQk = 1;
+    KernelSpec wide = narrow;
+    wide.blockN = 64;
+    wide.numWaves = 2;
+    EXPECT_GT(scorer(context, BoundTokens{}, makeKernel(narrow)),
+              scorer(context, BoundTokens{}, makeKernel(wide)));
+}
+
 } // namespace
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
 

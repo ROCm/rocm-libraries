@@ -165,6 +165,79 @@ class TestExpansion:
         assert len(_load(tmp_path, raw).packs[0].kernels) == 1
 
 
+class TestArchAndTarget:
+    """A group-level arch restricts what it expands to; a pack-level target reaches
+    every kernel's kernel_source."""
+
+    def _two_arch_config(self, **group_overrides) -> dict:
+        raw = _config(
+            arch=["gfx1151", "gfx1201"],
+            variants=[_group(**group_overrides)],
+        )
+        raw["packs"][0]["kernel_defaults"]["target"] = "generic"
+        return raw
+
+    def test_group_arch_is_each_kernels_arch(self, tmp_path):
+        kernels = (
+            _load(tmp_path, self._two_arch_config(arch=["gfx1151"])).packs[0].kernels
+        )
+        assert kernels and all(k.arch == ["gfx1151"] for k in kernels)
+
+    def test_a_group_without_arch_inherits_the_pack(self, tmp_path):
+        kernels = _load(tmp_path, self._two_arch_config()).packs[0].kernels
+        assert all(k.arch == [] for k in kernels)
+
+    def test_group_arch_must_stay_within_the_pack(self, tmp_path):
+        with pytest.raises(ConfigError, match="reaches past the pack's arch"):
+            _load(tmp_path, self._two_arch_config(arch=["gfx1100"]))
+
+    def test_group_arch_must_be_a_list(self, tmp_path):
+        with pytest.raises(ConfigError):
+            _load(tmp_path, self._two_arch_config(arch="gfx1151"))
+
+    def test_pack_target_reaches_every_kernel(self, tmp_path):
+        kernels = _load(tmp_path, self._two_arch_config()).packs[0].kernels
+        assert {k.kernel_source.target for k in kernels} == {"generic"}
+        assert all(
+            k.kernel_source.as_document()["target"] == "generic" for k in kernels
+        )
+
+    def test_a_kernel_without_target_emits_none(self, tmp_path):
+        kernels = _kernels(tmp_path)
+        assert all("target" not in k.kernel_source.as_document() for k in kernels)
+
+    @pytest.mark.parametrize("target", ["Generic", "gfx11-generic", "", None, 1])
+    def test_an_unknown_target_is_rejected(self, tmp_path, target):
+        raw = self._two_arch_config()
+        raw["packs"][0]["kernel_defaults"]["target"] = target
+        with pytest.raises(ConfigError, match="kernel_source.target"):
+            _load(tmp_path, raw)
+
+    def test_target_on_a_non_rocke_kind_is_rejected(self, tmp_path):
+        raw = _config(
+            kernel_defaults={},
+            kernels=[
+                {
+                    "name": "hip.kernel",
+                    "kernel_source": {
+                        "kind": "hip",
+                        "source": "k.hip",
+                        "entry": "k",
+                        "target": "generic",
+                    },
+                    "metadata": {
+                        "dtype": "BF16",
+                        "block_m": 256,
+                        "seqlen_q": 1,
+                        "use_exp2_fast": 0,
+                    },
+                }
+            ],
+        )
+        with pytest.raises(ConfigError, match=r"\['target'\], which kind 'hip'"):
+            _load(tmp_path, raw)
+
+
 class TestTriState:
     """The spec decides the binary (ABSENT means the kernel's policy resolves it at
     build time), the metadata is what the matcher compares, and the KMD `default_value`

@@ -4,6 +4,13 @@
 # query/KV head counts, diagonal-window bounds, LSE selection and all dense
 # tensor strides are launch arguments. The AOT catalog therefore varies only
 # dtype, head dimension, mask class and algorithm geometry.
+#
+# Every kernel compiles for its shard's LLVM generic processor (target:
+# generic): each RDNA3/3.5 shard ships gfx11-generic objects and each RDNA4
+# shard gfx12-generic ones, so one kernel set serves the whole family. The
+# transposed-QK (wmma_swapqk) kernels rely on the gfx11 WMMA operand layout and
+# are restricted to the gfx11 shards. Kernel names keep their historical
+# .gfx1151 suffix.
 
 dialect: packaged
 authored_subpath: rocKE/gfx1151_wmma_attention
@@ -63,11 +70,12 @@ kernel_source_kind: rocke
 workspace_policy: none
 packs:
 - name: gfx1151_wmma_attention
-  arch: [gfx1151]
+  arch: [gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201]
   kernel_defaults:
     kind: rocke
     source: kernels/gfx1151/wmma_fmha_fwd.py
     builder: build_wmma_fmha_fwd
+    target: generic
   variants:
   - name: wmma_generic.{dtype}_d{head_size}_{mask_mode}.gfx1151
     metadata: [dtype, head_size, mask_mode, transposed_qk, query_tail, kv_tail, block_n, num_waves]
@@ -89,7 +97,7 @@ packs:
       transposed_qk: false
       block_n: 32
       num_waves: 1
-      scheduler_strategy: null
+      scheduler_strategy: max-ilp
       value_tile_size: 0
       causal_tile_skip: false
       v_head_size: 0
@@ -110,6 +118,7 @@ packs:
     - {dtype: fp16, head_size: 256, knobs: masks}
     - {dtype: bf16, head_size: 256, knobs: masks}
   - name: wmma_swapqk.{dtype}_d{head_size}_{mask_mode}_bn{block_n}_w{num_waves}.gfx1151
+    arch: [gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153]
     metadata: [dtype, head_size, mask_mode, transposed_qk, query_tail, kv_tail, block_n, num_waves]
     vocabulary:
       dtype: {bf16: BF16, fp16: FP16}

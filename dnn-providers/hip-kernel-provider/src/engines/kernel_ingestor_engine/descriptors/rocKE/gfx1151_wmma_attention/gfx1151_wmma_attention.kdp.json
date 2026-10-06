@@ -70,6 +70,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 64,
           "dtype": "fp16",
@@ -88,7 +89,7 @@
           "transposed_qk": false,
           "block_n": 32,
           "num_waves": 1,
-          "scheduler_strategy": null,
+          "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
@@ -116,6 +117,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 64,
           "dtype": "fp16",
@@ -134,7 +136,7 @@
           "transposed_qk": false,
           "block_n": 32,
           "num_waves": 1,
-          "scheduler_strategy": null,
+          "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
@@ -162,6 +164,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 64,
           "dtype": "fp16",
@@ -180,7 +183,7 @@
           "transposed_qk": false,
           "block_n": 32,
           "num_waves": 1,
-          "scheduler_strategy": null,
+          "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
@@ -208,6 +211,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 64,
           "dtype": "bf16",
@@ -226,7 +230,7 @@
           "transposed_qk": false,
           "block_n": 32,
           "num_waves": 1,
-          "scheduler_strategy": null,
+          "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
@@ -254,6 +258,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 64,
           "dtype": "bf16",
@@ -272,7 +277,7 @@
           "transposed_qk": false,
           "block_n": 32,
           "num_waves": 1,
-          "scheduler_strategy": null,
+          "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
@@ -300,6 +305,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 64,
           "dtype": "bf16",
@@ -318,7 +324,7 @@
           "transposed_qk": false,
           "block_n": 32,
           "num_waves": 1,
-          "scheduler_strategy": null,
+          "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
@@ -346,6 +352,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 96,
           "dtype": "fp16",
@@ -364,7 +371,7 @@
           "transposed_qk": false,
           "block_n": 32,
           "num_waves": 1,
-          "scheduler_strategy": null,
+          "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
@@ -392,6 +399,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 96,
           "dtype": "fp16",
@@ -410,7 +418,7 @@
           "transposed_qk": false,
           "block_n": 32,
           "num_waves": 1,
-          "scheduler_strategy": null,
+          "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
@@ -438,6 +446,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 96,
           "dtype": "fp16",
@@ -456,7 +465,7 @@
           "transposed_qk": false,
           "block_n": 32,
           "num_waves": 1,
-          "scheduler_strategy": null,
+          "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
@@ -484,6 +493,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 96,
           "dtype": "bf16",
@@ -502,7 +512,7 @@
           "transposed_qk": false,
           "block_n": 32,
           "num_waves": 1,
-          "scheduler_strategy": null,
+          "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
@@ -530,6 +540,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 96,
           "dtype": "bf16",
@@ -548,7 +559,7 @@
           "transposed_qk": false,
           "block_n": 32,
           "num_waves": 1,
-          "scheduler_strategy": null,
+          "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
@@ -576,6 +587,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 96,
           "dtype": "bf16",
@@ -594,7 +606,7 @@
           "transposed_qk": false,
           "block_n": 32,
           "num_waves": 1,
-          "scheduler_strategy": null,
+          "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
@@ -622,6 +634,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 128,
           "dtype": "fp16",
@@ -640,7 +653,7 @@
           "transposed_qk": false,
           "block_n": 32,
           "num_waves": 1,
-          "scheduler_strategy": null,
+          "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
@@ -668,6 +681,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 128,
           "dtype": "fp16",
@@ -686,7 +700,7 @@
           "transposed_qk": false,
           "block_n": 32,
           "num_waves": 1,
-          "scheduler_strategy": null,
+          "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
@@ -714,6 +728,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 128,
           "dtype": "fp16",
@@ -732,7 +747,7 @@
           "transposed_qk": false,
           "block_n": 32,
           "num_waves": 1,
-          "scheduler_strategy": null,
+          "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
@@ -760,6 +775,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 128,
           "dtype": "bf16",
@@ -778,7 +794,7 @@
           "transposed_qk": false,
           "block_n": 32,
           "num_waves": 1,
-          "scheduler_strategy": null,
+          "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
@@ -806,6 +822,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 128,
           "dtype": "bf16",
@@ -824,7 +841,7 @@
           "transposed_qk": false,
           "block_n": 32,
           "num_waves": 1,
-          "scheduler_strategy": null,
+          "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
@@ -852,6 +869,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 128,
           "dtype": "bf16",
@@ -870,7 +888,7 @@
           "transposed_qk": false,
           "block_n": 32,
           "num_waves": 1,
-          "scheduler_strategy": null,
+          "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
@@ -898,6 +916,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 256,
           "dtype": "fp16",
@@ -916,7 +935,7 @@
           "transposed_qk": false,
           "block_n": 32,
           "num_waves": 1,
-          "scheduler_strategy": null,
+          "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
@@ -944,6 +963,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 256,
           "dtype": "fp16",
@@ -962,7 +982,7 @@
           "transposed_qk": false,
           "block_n": 32,
           "num_waves": 1,
-          "scheduler_strategy": null,
+          "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
@@ -990,6 +1010,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 256,
           "dtype": "fp16",
@@ -1008,7 +1029,7 @@
           "transposed_qk": false,
           "block_n": 32,
           "num_waves": 1,
-          "scheduler_strategy": null,
+          "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
@@ -1036,6 +1057,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 256,
           "dtype": "bf16",
@@ -1054,7 +1076,7 @@
           "transposed_qk": false,
           "block_n": 32,
           "num_waves": 1,
-          "scheduler_strategy": null,
+          "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
@@ -1082,6 +1104,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 256,
           "dtype": "bf16",
@@ -1100,7 +1123,7 @@
           "transposed_qk": false,
           "block_n": 32,
           "num_waves": 1,
-          "scheduler_strategy": null,
+          "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
@@ -1128,6 +1151,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 256,
           "dtype": "bf16",
@@ -1146,7 +1170,7 @@
           "transposed_qk": false,
           "block_n": 32,
           "num_waves": 1,
-          "scheduler_strategy": null,
+          "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
@@ -1174,6 +1198,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 64,
           "dtype": "fp16",
@@ -1210,7 +1235,17 @@
         "block_n": 32,
         "num_waves": 1
       },
-      "priority": 0
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
     },
     {
       "version": "1.0",
@@ -1220,6 +1255,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 64,
           "dtype": "fp16",
@@ -1256,7 +1292,17 @@
         "block_n": 32,
         "num_waves": 1
       },
-      "priority": 0
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
     },
     {
       "version": "1.0",
@@ -1266,6 +1312,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 64,
           "dtype": "fp16",
@@ -1302,7 +1349,17 @@
         "block_n": 64,
         "num_waves": 2
       },
-      "priority": 0
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
     },
     {
       "version": "1.0",
@@ -1312,6 +1369,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 64,
           "dtype": "fp16",
@@ -1348,7 +1406,17 @@
         "block_n": 64,
         "num_waves": 2
       },
-      "priority": 0
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
     },
     {
       "version": "1.0",
@@ -1358,6 +1426,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 64,
           "dtype": "bf16",
@@ -1394,7 +1463,17 @@
         "block_n": 32,
         "num_waves": 1
       },
-      "priority": 0
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
     },
     {
       "version": "1.0",
@@ -1404,6 +1483,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 64,
           "dtype": "bf16",
@@ -1440,7 +1520,17 @@
         "block_n": 32,
         "num_waves": 1
       },
-      "priority": 0
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
     },
     {
       "version": "1.0",
@@ -1450,6 +1540,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 64,
           "dtype": "bf16",
@@ -1486,7 +1577,17 @@
         "block_n": 64,
         "num_waves": 2
       },
-      "priority": 0
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
     },
     {
       "version": "1.0",
@@ -1496,6 +1597,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 64,
           "dtype": "bf16",
@@ -1532,7 +1634,17 @@
         "block_n": 64,
         "num_waves": 2
       },
-      "priority": 0
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
     },
     {
       "version": "1.0",
@@ -1542,6 +1654,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 128,
           "dtype": "fp16",
@@ -1578,7 +1691,17 @@
         "block_n": 32,
         "num_waves": 1
       },
-      "priority": 0
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
     },
     {
       "version": "1.0",
@@ -1588,6 +1711,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 128,
           "dtype": "fp16",
@@ -1624,7 +1748,17 @@
         "block_n": 32,
         "num_waves": 1
       },
-      "priority": 0
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
     },
     {
       "version": "1.0",
@@ -1634,6 +1768,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 128,
           "dtype": "fp16",
@@ -1670,7 +1805,17 @@
         "block_n": 64,
         "num_waves": 2
       },
-      "priority": 0
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
     },
     {
       "version": "1.0",
@@ -1680,6 +1825,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 128,
           "dtype": "fp16",
@@ -1716,7 +1862,17 @@
         "block_n": 64,
         "num_waves": 2
       },
-      "priority": 0
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
     },
     {
       "version": "1.0",
@@ -1726,6 +1882,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 128,
           "dtype": "bf16",
@@ -1762,7 +1919,17 @@
         "block_n": 32,
         "num_waves": 1
       },
-      "priority": 0
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
     },
     {
       "version": "1.0",
@@ -1772,6 +1939,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 128,
           "dtype": "bf16",
@@ -1808,7 +1976,17 @@
         "block_n": 32,
         "num_waves": 1
       },
-      "priority": 0
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
     },
     {
       "version": "1.0",
@@ -1818,6 +1996,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 128,
           "dtype": "bf16",
@@ -1854,7 +2033,17 @@
         "block_n": 64,
         "num_waves": 2
       },
-      "priority": 0
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
     },
     {
       "version": "1.0",
@@ -1864,6 +2053,7 @@
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
         "spec": {
           "head_size": 128,
           "dtype": "bf16",
@@ -1900,10 +2090,29 @@
         "block_n": 64,
         "num_waves": 2
       },
-      "priority": 0
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
     }
   ],
   "arch": [
-    "gfx1151"
+    "gfx1100",
+    "gfx1101",
+    "gfx1102",
+    "gfx1103",
+    "gfx1150",
+    "gfx1151",
+    "gfx1152",
+    "gfx1153",
+    "gfx1200",
+    "gfx1201"
   ]
 }

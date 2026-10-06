@@ -438,6 +438,12 @@ producing two kernels with the same name. A slot is a spec field, an `md_<field>
 mirror, the arm's `{tag}`, or `{ordinal}`. A shape sets its serial with `ordinal:`;
 each arm shifts it with `ordinal_offset:`.
 
+**Arch restriction.** A group may carry its own `arch`, emitted as each expanded kernel's
+UKD `arch` exactly like a hand-authored kernel's: it must be a subset of the pack's, and an
+absent one inherits the pack's. Use it for kernels only some of the pack's architectures
+can run -- `configs/gfx1151_wmma_attention.yaml` restricts its transposed-QK group to the
+gfx11 shards of a gfx11+gfx12 pack.
+
 Expansion runs at load time (`codegen/config_loader.py`), so `generate.py`, the emitters and
 the dedup pass see ordinary kernel dicts. `tools/dispatch_parity.py` emits this form
 directly; `tools/factorise_config.py` converts an enumerated config, re-expanding its own
@@ -495,6 +501,13 @@ packs:
         priority: 0
         arch: []                   # optional; must be a subset of the pack's arch
 ```
+
+A packaged `rocke` `kernel_source` (or the pack's `kernel_defaults`, which every kernel
+inherits) may set `target: native | generic`, the processor `hkp_pack` compiles each shard
+for: `native` (the default when absent) is the shard arch, `generic` its LLVM generic
+processor (`gfx11-generic`, `gfx12-generic`), so one kernel set serves the whole family.
+Any other value is a `ConfigError`; the key is rejected for every other kind. See the
+[packaging reference](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md).
 
 ## The five pre-mint config-loader checks
 

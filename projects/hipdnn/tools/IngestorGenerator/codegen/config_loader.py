@@ -39,6 +39,7 @@ from .models import (
     KMD_FIELD_TYPES,
     KNOWN_ARCH_BASE_IDS,
     PATH_STEM_PATTERN,
+    ROCKE_TARGETS,
     WORKSPACE_POLICIES,
     EngineSpec,
     GraphMatchSpec,
@@ -295,6 +296,14 @@ def load_config(path: Path) -> IngestorConfig:
                 (authored_source, authored_where),
             ):
                 _check_kernel_source_keys(source_keys, ks_raw["kind"], source_where)
+            if "target" in ks_raw and ks_raw["target"] not in ROCKE_TARGETS:
+                raise ConfigError(
+                    f"pack '{pack_raw['name']}' kernel '{kernel_raw['name']}' "
+                    f"kernel_source.target is {ks_raw['target']!r}, which hkp_pack "
+                    f"does not compile for. Known targets: {list(ROCKE_TARGETS)} "
+                    f"('native' builds for the shard arch, 'generic' for its LLVM "
+                    f"generic processor)."
+                )
             kernels.append(
                 KernelSpec(
                     name=kernel_raw["name"],
@@ -307,6 +316,7 @@ def load_config(path: Path) -> IngestorConfig:
                         build=dict(ks_raw.get("build", {})),
                         builder=ks_raw.get("builder", ""),
                         spec=dict(ks_raw.get("spec", {})),
+                        target=ks_raw.get("target", ""),
                         file=ks_raw.get("file", ""),
                         symbol=ks_raw.get("symbol", ""),
                     ),
@@ -655,6 +665,10 @@ def _expand_one_variant_group(
                 f"instead of failing here."
             )
 
+    # A group-level arch restricts every kernel the group expands to, the same
+    # as a hand-authored kernel's own `arch`: it must stay within the pack's,
+    # and an absent one inherits the pack's.
+    group_arch = _unique_arch(group.get("arch", []), f"{where} arch")
     expanded = []
     for index, shape in enumerate(group["shapes"]):
         shape_where = f"{where} shapes[{index}]"
@@ -695,21 +709,22 @@ def _expand_one_variant_group(
             },
         }
         for arm in knob_sets[set_name]:
-            expanded.append(
-                _expand_one_arm(
-                    arm,
-                    shape_spec,
-                    resolved,
-                    ordinal,
-                    name_template,
-                    metadata_fields,
-                    vocabulary,
-                    policy_knobs,
-                    spec_order,
-                    shape_where,
-                    kmd_field_names,
-                )
+            kernel = _expand_one_arm(
+                arm,
+                shape_spec,
+                resolved,
+                ordinal,
+                name_template,
+                metadata_fields,
+                vocabulary,
+                policy_knobs,
+                spec_order,
+                shape_where,
+                kmd_field_names,
             )
+            if group_arch:
+                kernel["arch"] = list(group_arch)
+            expanded.append(kernel)
     return expanded
 
 
@@ -962,6 +977,7 @@ _KNOWN_PACK = frozenset(
 _KNOWN_VARIANT_GROUP = frozenset(
     {
         "name",
+        "arch",
         "metadata",
         "knob_sets",
         "shapes",
@@ -985,6 +1001,7 @@ _REQUIRED_KERNEL_SOURCE_FIELDS: dict = {
 #: for that kind, and nothing requires them.
 _OPTIONAL_KERNEL_SOURCE_FIELDS: dict = {
     KERNEL_SOURCE_KIND_HIP: ("build",),
+    KERNEL_SOURCE_KIND_ROCKE: ("target",),
 }
 #: A ``kernel_source``'s closed key set, per kind. Only the AUTHORED kinds appear:
 #: the others are rejected by `_check_kernel_source_kind_implemented` with a reason.

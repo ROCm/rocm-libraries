@@ -547,20 +547,14 @@ bool kernelMatches(const MatchContext& context,
     return true;
 }
 
-double scoreKernel(const MatchContext& context,
+double scoreKernel(const MatchContext& /*context*/,
                    const BoundTokens& /*bound*/,
                    const KernelDefinition& kernel)
 {
-    const auto* attributes = sdpaNode(context);
-    const auto* q
-        = attributes == nullptr ? nullptr : findTensor(context, attributes->q_tensor_uid());
-    const auto* k
-        = attributes == nullptr ? nullptr : findTensor(context, attributes->k_tensor_uid());
     const auto transposed = integerMetadata(kernel, TRANSPOSED_QK_FIELD);
     const auto blockN = integerMetadata(kernel, BLOCK_N_FIELD);
     const auto numWaves = integerMetadata(kernel, NUM_WAVES_FIELD);
-    if(q == nullptr || k == nullptr || !transposed.has_value() || !blockN.has_value()
-       || !numWaves.has_value())
+    if(!transposed.has_value() || !blockN.has_value() || !numWaves.has_value())
     {
         return 0.0;
     }
@@ -568,11 +562,11 @@ double scoreKernel(const MatchContext& context,
     {
         return 10.0;
     }
-    const int64_t sq = q->dims()->Get(SEQ_AXIS);
-    const int64_t sk = k->dims()->Get(SEQ_AXIS);
-    const bool wantWide = sq >= 512 && sq % 32 == 0 && sk % 64 == 0;
-    const bool isWide = *blockN == 64 && *numWaves == 2;
-    return wantWide == isWide ? 100.0 : 50.0;
+    // The shipped objects are gfx11-generic builds, whose 32-key single-wave
+    // transposed kernels outrun the 64-key two-wave geometry at every measured
+    // sequence length.
+    const bool narrow = *blockN == 32 && *numWaves == 1;
+    return narrow ? 100.0 : 50.0;
 }
 
 std::vector<KernelArgument> kernelSignature()
