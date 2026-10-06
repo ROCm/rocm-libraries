@@ -10,7 +10,7 @@ refuses any solution declaring ``SupportCustomStaggerU: False`` with a non-zero
 ``StaggerU``.  These tests pin that metadata against the instructions the kernels
 execute, so a later admission path cannot trust a lying declaration.
 
-Reading the ``.s`` files cannot do it: 98 of the 119 shipped custom kernels are
+Reading the ``.s`` files cannot do it: most shipped custom kernels are
 pre-assembled ``.long`` blobs with no readable mnemonics, and every kernel that
 declares a non-zero StaggerU -- exactly the set the gate's safety argument turns
 on -- is among them.  So each kernel is assembled for its own ``.amdgcn_target``
@@ -70,9 +70,9 @@ _PROBE_KERNEL = '.amdgcn_target "amdgcn-amd-amdhsa--gfx942"\n.text\ns_endpgm\n'
 
 KERNEL_NAMES = getAllCustomKernelNames()
 
-# Assembling and disassembling all 119 kernels is a few seconds of wall time
-# spread over a thread pool, so no separate slow marker: this stays in the unit
-# suite where a change to a custom kernel will actually run it.
+# Assembling and disassembling the shipped custom kernels is a few seconds of
+# wall time spread over a thread pool, so no separate slow marker: this stays
+# in the unit suite where a change to a custom kernel will actually run it.
 MAX_WORKERS = min(32, (os.cpu_count() or 4) * 2)
 
 # Tensile emits the directive in column 0, but kernels that reach CustomKernels/ from
@@ -493,11 +493,15 @@ STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
     }
 )
 
-# The shipped population, as reconciled against the disassembly.  Pinned so that
-# adding or retuning a custom kernel forces the reconciliation to be redone
-# rather than shifting the ground truth underneath the gate.
+# Population the uniform-summation gate was reviewed against. Only kernels that
+# declare a non-zero StaggerU, or omit the key and inherit the default of 32,
+# are pinned. Kernels that declare StaggerU: 0 are still disassembled by the
+# per-kernel checks above, but they are not counted: a new one does not change
+# this census. It either does not stagger, which is what the declaration says,
+# or it does and test_kernels_that_stagger_despite_declaring_zero_are_the_known_ones
+# requires it to be named. External toolchains (aiter, ck, rocroller, triton,
+# wave) ship kernels in that declared-zero set.
 EXPECTED_CENSUS = {
-    "kernels": 129,
     # Explicit non-zero StaggerU: 24 at 8 and 4 at 4.
     "declaredNonZero": 28,
     # Of those, the ones with no packed unpack at all: StaggerU is a literal
@@ -505,18 +509,17 @@ EXPECTED_CENSUS = {
     # SupportCustomStaggerU: False and why the gate refuses them.
     "declaredNonZeroWithLiteralStagger": 24,
     "declaredNonZeroReadingPackedArgument": 4,
-    # Includes the nine kernels built outside Tensile (aiter, ck, rocblas,
-    # rocroller, triton, wave), which declare StaggerU: 0 because they do not
-    # implement the in-loop wrap at all; the disassembly confirms none of them
-    # staggers.
-    "declaredZero": 69,
     # No StaggerU key at all, so they inherit the default of 32.
     "undeclared": 32,
 }
 
 
 def test_shipped_population_matches_the_reconciled_ground_truth():
-    """The census the gate's safety argument was reviewed against."""
+    """The census the gate's safety argument was reviewed against.
+
+    Kernels that declare StaggerU: 0 are outside this census. Adding one does
+    not require editing EXPECTED_CENSUS.
+    """
     codes = analyzeAllKernels()
     metadata = readAllMetadata()
     declaredNonZero = [
@@ -525,7 +528,6 @@ def test_shipped_population_matches_the_reconciled_ground_truth():
         if meta.declaredStaggerU is not None and meta.declaredStaggerU != 0
     ]
     census = {
-        "kernels": len(KERNEL_NAMES),
         "declaredNonZero": len(declaredNonZero),
         "declaredNonZeroWithLiteralStagger": sum(
             1 for name in declaredNonZero if not codes[name].decodesPackedArgument
@@ -533,13 +535,13 @@ def test_shipped_population_matches_the_reconciled_ground_truth():
         "declaredNonZeroReadingPackedArgument": sum(
             1 for name in declaredNonZero if codes[name].decodesPackedArgument
         ),
-        "declaredZero": sum(1 for meta in metadata.values() if meta.declaredStaggerU == 0),
         "undeclared": sum(1 for meta in metadata.values() if meta.declaredStaggerU is None),
     }
     assert census == EXPECTED_CENSUS, (
-        f"the shipped custom-kernel population no longer matches the set the uniform "
-        f"summation order gate was reviewed against: {census} != {EXPECTED_CENSUS}. "
-        f"Re-reconcile the new kernels against the disassembly and update EXPECTED_CENSUS"
+        f"the custom kernels that participate in StaggerU no longer match the set the "
+        f"uniform summation order gate was reviewed against: {census} != {EXPECTED_CENSUS}. "
+        f"Re-reconcile kernels that declare a non-zero StaggerU or omit the key. "
+        f"Kernels that declare StaggerU: 0 are not part of this census"
     )
     assert all(codes[name].staggers for name in declaredNonZero), (
         "every kernel declaring a non-zero StaggerU used to contain the in-loop wrap; "
