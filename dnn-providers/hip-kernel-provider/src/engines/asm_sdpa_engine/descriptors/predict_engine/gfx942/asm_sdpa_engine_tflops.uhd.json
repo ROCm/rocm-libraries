@@ -1,30 +1,38 @@
 {
   "version": "1.0",
   "id": "5f2a7c14-9d3b-4e86-b0a1-6c4f21d8e370",
-  "name": "ASM_SDPA_ENGINE throughput (gfx942, 148 collection(s))",
+  "name": "ASM_SDPA_ENGINE (gfx942, 200 contribution(s))",
   "adapter": "tree_data",
   "features_signature": [
+    "$graph.arithmetic_intensity",
     "$graph.flops",
+    "$graph.flops_by_type.SdpaAttributes",
+    "$graph.logical_bytes",
     "$graph.nodes[0].diagonal_alignment",
     "$graph.nodes[0].flops",
+    "$graph.nodes[0].generate_stats",
     "$graph.nodes[0].k.dims[0]",
     "$graph.nodes[0].k.dims[1]",
     "$graph.nodes[0].k.dims[2]",
+    "$graph.nodes[0].k.numel",
     "$graph.nodes[0].k.strides[0]",
     "$graph.nodes[0].k.strides[2]",
     "$graph.nodes[0].o.dims[0]",
     "$graph.nodes[0].o.dims[1]",
     "$graph.nodes[0].o.dims[2]",
+    "$graph.nodes[0].o.numel",
     "$graph.nodes[0].o.strides[0]",
     "$graph.nodes[0].o.strides[2]",
     "$graph.nodes[0].q.dims[0]",
     "$graph.nodes[0].q.dims[1]",
     "$graph.nodes[0].q.dims[2]",
+    "$graph.nodes[0].q.numel",
     "$graph.nodes[0].q.strides[0]",
     "$graph.nodes[0].q.strides[2]",
     "$graph.nodes[0].v.dims[0]",
     "$graph.nodes[0].v.dims[1]",
     "$graph.nodes[0].v.dims[2]",
+    "$graph.nodes[0].v.numel",
     "$graph.nodes[0].v.strides[0]",
     "$graph.nodes[0].v.strides[2]",
     "$graph.tensor_count",
@@ -49,9 +57,9 @@
     "$graph.tensors[3].strides[0]",
     "$graph.tensors[3].strides[2]"
   ],
-  "features_hash": "sha256:035269b9bb4c5a88",
+  "features_hash": "sha256:8533cc4b23249b09",
   "trained_against": {
-    "selector_revision": "hip-kernel-provider/asm-sdpa-fwd/e0fd843161b6c577",
+    "selector_revision": "hip-kernel-provider/asm-sdpa-fwd/bb4f9d59d2c03d52",
     "feature_semantics_revision": 1
   },
   "objective": "max",
@@ -62,6 +70,6 @@
   },
   "tree_data": {
     "artifact": "asm_sdpa_engine_tflops.bin",
-    "hash": "ee12c01627f28148ff34ee9334a8c381b425f11820ed11db64d6b87570ab58b7"
+    "hash": "8366fdd95c67ec879022d00b42a6ad03794de88416407696828f2f7bd4e4d039"
   }
 }
