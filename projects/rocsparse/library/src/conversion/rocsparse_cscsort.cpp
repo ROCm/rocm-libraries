@@ -105,7 +105,6 @@ catch(...)
 // LCOV_EXCL_STOP
 
 rocsparse_status rocsparse::cscsort_buffer_size(rocsparse_handle            handle,
-                                                rocsparse_cscsort_alg       alg,
                                                 rocsparse_const_spmat_descr source,
                                                 rocsparse_const_spmat_descr target,
                                                 size_t*                     buffer_size_in_bytes)
@@ -118,7 +117,6 @@ rocsparse_status rocsparse::cscsort_buffer_size(rocsparse_handle            hand
 }
 
 rocsparse_status rocsparse::cscsort(rocsparse_handle            handle,
-                                    rocsparse_cscsort_alg       alg,
                                     rocsparse_const_spmat_descr source,
                                     rocsparse_spmat_descr       target,
                                     size_t                      buffer_size_in_bytes,

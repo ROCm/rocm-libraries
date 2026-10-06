@@ -237,12 +237,8 @@ namespace rocsparse
             }
             case rocsparse_format_csc:
             {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsort(handle,
-                                                             rocsparse_cscsort_alg_default,
-                                                             source,
-                                                             target,
-                                                             buffer_size_in_bytes,
-                                                             buffer));
+                RETURN_IF_ROCSPARSE_ERROR(
+                    rocsparse::cscsort(handle, source, target, buffer_size_in_bytes, buffer));
                 return rocsparse_status_success;
             }
 

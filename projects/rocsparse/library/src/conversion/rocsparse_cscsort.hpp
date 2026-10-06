@@ -28,13 +28,7 @@
 
 namespace rocsparse
 {
-    typedef enum rocsparse_cscsort_alg_
-    {
-        rocsparse_cscsort_alg_default = 0
-    } rocsparse_cscsort_alg;
-
     rocsparse_status cscsort_buffer_size(rocsparse_handle            handle,
-                                         rocsparse_cscsort_alg       alg,
                                          rocsparse_const_spmat_descr source,
                                          rocsparse_const_spmat_descr target,
                                          size_t*                     buffer_size_in_bytes);
@@ -46,7 +40,6 @@ namespace rocsparse
     // sorted in place, or not overlap it at all. The batches must be uniform: they all share the
     // sparsity pattern of the first batch, and only their values differ.
     rocsparse_status cscsort(rocsparse_handle            handle,
-                             rocsparse_cscsort_alg       alg,
                              rocsparse_const_spmat_descr source,
                              rocsparse_spmat_descr       target,
                              size_t                      buffer_size_in_bytes,
