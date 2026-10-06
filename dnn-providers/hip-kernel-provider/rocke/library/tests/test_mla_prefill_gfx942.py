@@ -258,7 +258,7 @@ class TestMlaPrefillHeadsPerWg(unittest.TestCase):
     def test_one_wave_per_head(self):
         ok, reason = supports_mla_prefill(_hpw_spec(num_warps=8), arch="gfx942")
         self.assertFalse(ok)
-        self.assertIn("one wave per head", reason)
+        self.assertIn("one wave per (head, query tile)", reason)
 
     def test_one_m_tile(self):
         ok, reason = supports_mla_prefill(_hpw_spec(block_q=32), arch="gfx942")
@@ -267,6 +267,26 @@ class TestMlaPrefillHeadsPerWg(unittest.TestCase):
 
     def test_supported(self):
         self.assertEqual(supports_mla_prefill(_hpw_spec(), arch="gfx942"), (True, ""))
+
+    def test_query_tiles_per_head(self):
+        # One head x four 16-query tiles: one wave per tile, block_q = 64.
+        spec = _hpw_spec(heads_per_wg=1, q_tiles_per_wg=4, block_q=64)
+        self.assertEqual(supports_mla_prefill(spec, arch="gfx942"), (True, ""))
+        self.assertIn("_qpw4", spec.fwd_kernel_name())
+        self.assertEqual(mla_prefill_fwd_grid(spec, num_q_blocks=7), (7, 128, 1))
+        ok, reason = supports_mla_prefill(
+            _hpw_spec(heads_per_wg=1, q_tiles_per_wg=4, block_q=16), arch="gfx942"
+        )
+        self.assertFalse(ok)
+        self.assertIn("block_q=64", reason)
+
+    def test_xcd_reorder_is_one_wave_per_head_only(self):
+        with self.assertRaisesRegex(ValueError, "num_xcds"):
+            _spec(num_xcds=-1)
+        ok, reason = supports_mla_prefill(_spec(num_xcds=6), arch="gfx942")
+        self.assertFalse(ok)
+        self.assertIn("num_xcds", reason)
+        self.assertIn("_x6", _hpw_spec(num_xcds=6).fwd_kernel_name())
 
     def test_eight_heads_admitted(self):
         # k_rope is a quarter of the c_kv tile, so at 512 threads its staging

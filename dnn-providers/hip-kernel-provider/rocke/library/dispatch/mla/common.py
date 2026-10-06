@@ -82,6 +82,10 @@ class MLARequest(OperatorRequest):
     kv_lora_rank: int = 512
     page_block_size: int = 16
     causal: bool = True
+    # Device CU count; 0 resolves the live device's when the build box is the
+    # requested arch (see ``dispatch.mla.gfx942._resolve_num_xcds``). It only
+    # picks the XCD-aware workgroup order, so a wrong value costs speed.
+    num_cus: int = 0
     op: str = "mla_prefill_fwd"
     dtype: str = "bf16"
     algorithm: str = "auto"

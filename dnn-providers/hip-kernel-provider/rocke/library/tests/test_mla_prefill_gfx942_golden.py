@@ -88,6 +88,9 @@ def _cases():
                     num_seqs=2,
                     max_seqlen_k=96,
                     arch=_ARCH,
+                    # MI300A, pinned: the XCD count would otherwise come from
+                    # the host's device and make the fixture host-dependent.
+                    num_cus=228,
                 )
             )
             return result.candidate.built(result.spec, _ARCH)
@@ -210,10 +213,16 @@ def test_dispatch_case_tracks_the_shipped_spec():
                 num_seqs=2,
                 max_seqlen_k=96,
                 arch=_ARCH,
+                num_cus=228,
             )
         )
         assert result.spec == MlaPrefillSpec(
-            num_heads=num_heads, heads_per_wg=4, num_warps=4, block_q=16
+            num_heads=num_heads,
+            heads_per_wg=2,
+            q_tiles_per_wg=2,
+            num_warps=4,
+            block_q=32,
+            num_xcds=6,
         )
 
 

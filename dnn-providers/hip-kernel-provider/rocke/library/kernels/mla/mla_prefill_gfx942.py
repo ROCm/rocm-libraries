@@ -102,6 +102,7 @@ from rocke.helpers.attention import (
     safe_inv_l as _safe_inv_l,
 )
 from rocke.helpers.distribution import make_static_tile_distribution
+from rocke.helpers.grid import chiplet_transform_chunked_dynamic as _chiplet_chunked
 from rocke.helpers.spec import SignatureBuilder
 
 __all__ = [  # noqa: RUF022  -- ordered spec -> gate -> launch geometry -> build
@@ -235,6 +236,12 @@ HPW_ABSORB_PREFETCH = 4
 # max settles after the first few key tiles, so most tiles skip the rescale.
 HPW_LAZY_TAU = 8.0
 
+# Consecutive workgroups of the head-major order handed to one XCD at a time
+# when ``MlaPrefillSpec.num_xcds`` is set. Small enough that an XCD's resident
+# set still spans several q-block ranges -- which share key tiles across head
+# groups in L2 -- and large enough that it holds only a few heads' weights.
+XCD_CHUNK = 16
+
 # v columns of W_UV staged per epilogue round in the one-wave-per-head layout.
 # Each round holds a 64-row latent block for every head: 32 columns keep that
 # at 17408 B, under the loop phase's pool.
@@ -344,15 +351,29 @@ class MlaPrefillSpec:
     # into LDS once and read by all of them, and each wave runs its own head's
     # score, softmax and latent PV end to end -- no split-K partials and no
     # cross-wave combine. The query absorb and the W_UV projection then stay
-    # inside the wave as well. Requires ``num_warps == heads_per_wg``.
+    # inside the wave as well. Requires
+    # ``num_warps == heads_per_wg * q_tiles_per_wg``.
     heads_per_wg: int = 1
+    # Query row tiles per workgroup in the one-wave-per-head layout: the
+    # workgroup holds heads_per_wg heads x q_tiles_per_wg tiles of 16 queries,
+    # one wave per (head, tile), so block_q == 16 * q_tiles_per_wg and
+    # num_warps == heads_per_wg * q_tiles_per_wg. Waves sharing a head share its
+    # W_UK / W_UV fetches, which cuts the per-row weight traffic.
+    q_tiles_per_wg: int = 1
+    # XCDs the device deals workgroups across (6 on MI300A, 8 on MI300X); 0
+    # keeps launch order. One-wave-per-head layout only. In launch order each
+    # XCD's resident workgroups span every head group, so its L2 holds all of
+    # their W_UK / W_UV; with the XCD count the kernel reorders workgroups so
+    # an XCD walks a few heads at a time. A wrong count costs speed only.
+    num_xcds: int = 0
     # Unfused head projections. False (the default) is the fused kernel: it
     # takes the projected query and ``W_UK`` and applies both head projections
     # itself. True takes the absorbed query ``Qa = [Q_nope @ W_UK_nopeᵀ |
     # Q_rope]`` (``[total_q, H, r_kv + d_rope]``) and writes the normalized
     # latent output (``[total_q, H, r_kv]``) plus the LSE; the caller runs both
     # projections as batched GEMMs. One-wave-per-head layout only
-    # (``heads_per_wg > 1``). See :func:`mla_prefill_fwd_signature`.
+    # (``heads_per_wg > 1`` or ``q_tiles_per_wg > 1``). See
+    # :func:`mla_prefill_fwd_signature`.
     absorbed_query: bool = False
 
     def __post_init__(self) -> None:
@@ -392,6 +413,12 @@ class MlaPrefillSpec:
         if self.heads_per_wg not in (1, 2, 4, 8):
             raise ValueError(
                 f"heads_per_wg must be one of 1/2/4/8, got {self.heads_per_wg}"
+            )
+        if self.num_xcds < 0:
+            raise ValueError(f"num_xcds must be >= 0, got {self.num_xcds}")
+        if self.q_tiles_per_wg not in (1, 2, 4, 8):
+            raise ValueError(
+                f"q_tiles_per_wg must be one of 1/2/4/8, got {self.q_tiles_per_wg}"
             )
         if self.num_heads % self.heads_per_wg != 0:
             raise ValueError(
@@ -440,6 +467,8 @@ class MlaPrefillSpec:
             f"_rt{self.r_kv_tile}"
             f"_w{self.num_warps}"
             + (f"_hpw{self.heads_per_wg}" if self.heads_per_wg != 1 else "")
+            + (f"_qpw{self.q_tiles_per_wg}" if self.q_tiles_per_wg != 1 else "")
+            + (f"_x{self.num_xcds}" if self.num_xcds else "")
             + f"_{self.dtype}"
             + ("_aq" if self.absorbed_query else "")
         )
@@ -470,18 +499,18 @@ def _fwd_lds_bytes(spec: MlaPrefillSpec) -> int:
     """
     elem = 2  # bf16
     qa_cols = spec.r_kv + spec.d_rope
-    if spec.heads_per_wg > 1:
+    if _one_wave_per_head(spec):
         # One wave per head: the loop holds the shared kv_lds plus every
-        # head's parked Q_rope, and the epilogue one 64-row latent block of
+        # wave's parked Q_rope, and the epilogue one 64-row latent block of
         # W_UV for every head, which pools onto them.
         kv_lds = elem * spec.block_k * (qa_cols + WT_PAD)
-        qr_lds = elem * spec.heads_per_wg * spec.block_q * (spec.d_rope + WT_PAD)
+        qr_lds = elem * spec.num_warps * MFMA_M * (spec.d_rope + WT_PAD)
         # With absorbed_query there is no epilogue buffer: the latent goes
         # straight from registers to global.
         wt_all = (
             0
             if spec.absorbed_query
-            else elem * spec.heads_per_wg * EPI_VQ * (64 + WT_PAD)
+            else elem * spec.heads_per_wg * EPI_VQ * spec.q_tiles_per_wg * (64 + WT_PAD)
         )
         return -(-max(kv_lds + qr_lds, wt_all) // 16) * 16
     m_tiles = max(1, spec.block_q // MFMA_M)
@@ -535,12 +564,17 @@ def supports_mla_prefill(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, str]
         return False, f"r_kv_tile must be a multiple of {MFMA_K}, got {spec.r_kv_tile}"
     # MFMA_K == MFMA_N == 16 here, so the checks above already cover every
     # K-dimension requirement; there is nothing extra to demand for the K axis.
-    if spec.heads_per_wg > 1:
+    if _one_wave_per_head(spec):
         return _supports_heads_per_wg(spec)
     if spec.absorbed_query:
         return False, (
             "absorbed_query is implemented for the one-wave-per-head layout "
             f"only, got heads_per_wg={spec.heads_per_wg}"
+        )
+    if spec.num_xcds:
+        return False, (
+            "num_xcds is implemented for the one-wave-per-head layout only, "
+            f"got heads_per_wg={spec.heads_per_wg}"
         )
     #
     # Each of the three GEMMs whose n-axis is split across waves needs that
@@ -625,40 +659,48 @@ def supports_mla_prefill(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, str]
     return True, ""
 
 
+def _one_wave_per_head(spec: MlaPrefillSpec) -> bool:
+    """True for the one-wave-per-head layout (:func:`_build_mla_prefill_fwd_heads`)."""
+    return spec.heads_per_wg > 1 or spec.q_tiles_per_wg > 1
+
+
 def _supports_heads_per_wg(spec: MlaPrefillSpec) -> tuple[bool, str]:
-    """Admission for the one-wave-per-head layout (``heads_per_wg > 1``).
+    """Admission for the one-wave-per-head layout (:func:`_one_wave_per_head`).
 
     No GEMM axis is split across waves -- each wave owns one head end to end --
     so the only cross-wave work is the cooperative key-tile staging and the
     cooperative W_UV staging in the epilogue.
     """
-    if spec.num_warps != spec.heads_per_wg:
+    qpw = spec.q_tiles_per_wg
+    if spec.num_warps != spec.heads_per_wg * qpw:
         return False, (
-            f"heads_per_wg={spec.heads_per_wg} runs one wave per head, so "
-            f"num_warps must equal it, got num_warps={spec.num_warps}"
+            f"heads_per_wg={spec.heads_per_wg} x q_tiles_per_wg={qpw} runs one "
+            f"wave per (head, query tile), so num_warps must be their product, "
+            f"got num_warps={spec.num_warps}"
         )
-    # A wave holds its head's whole latent accumulator, (block_q / 16) *
-    # (r_kv / 16) f32x4 fragments: 128 VGPRs at one M tile. Two M tiles make
-    # that 256 on their own and the kernel spills, so one M tile it is.
-    if spec.block_q != MFMA_M:
+    # A wave holds its head's whole latent accumulator for 16 rows: 128 VGPRs.
+    # Two M tiles per wave make that 256 on their own and the kernel spills,
+    # so a wave owns exactly one 16-row tile.
+    if spec.block_q != MFMA_M * qpw:
         return False, (
-            f"heads_per_wg={spec.heads_per_wg} needs block_q={MFMA_M}: a wave "
-            f"holds a whole head's latent accumulator, got block_q={spec.block_q}"
+            f"the one-wave-per-head layout needs block_q={MFMA_M * qpw} "
+            f"(16 rows per wave x q_tiles_per_wg={qpw}), got block_q={spec.block_q}"
         )
     # The PV gathers four latent tiles per read and the epilogue stages W_UV
     # in 64-row latent blocks and EPI_VQ-wide v windows.
     if spec.r_kv % 64 != 0:
         return False, f"heads_per_wg > 1 needs r_kv a multiple of 64, got {spec.r_kv}"
-    if spec.d_v % EPI_VQ != 0:
+    if spec.d_v % (EPI_VQ * qpw) != 0:
         return False, (
-            f"heads_per_wg > 1 needs d_v a multiple of {EPI_VQ}, got {spec.d_v}"
+            f"the one-wave-per-head layout needs d_v a multiple of "
+            f"{EPI_VQ * qpw}, got {spec.d_v}"
         )
     threads = spec.threads
     kr_w = 4 if (spec.block_k * spec.d_rope) % (threads * 4) == 0 else 2
     stages = {
         "c_kv tile": (spec.block_k * spec.r_kv, C_STAGE_W),
         "k_rope tile": (spec.block_k * spec.d_rope, kr_w),
-        "W_UV epilogue block": (spec.heads_per_wg * 64 * EPI_VQ, 32),
+        "W_UV epilogue block": (spec.heads_per_wg * 64 * EPI_VQ * qpw, 32),
     }
     for name, (count, width) in stages.items():
         if count % (threads * width) != 0:
@@ -1367,7 +1409,7 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
     predicated.
     """
     require_mla_prefill(spec, arch=arch)
-    if spec.heads_per_wg > 1:
+    if _one_wave_per_head(spec):
         return _build_mla_prefill_fwd_heads(spec)
 
     dtype = BF16
@@ -2245,7 +2287,12 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
       wants ``r`` contiguous and global memory has ``v`` contiguous.
     """
     dtype = BF16
-    BQ = spec.block_q
+    # One wave owns 16 query rows of one head; a workgroup holds
+    # heads_per_wg heads x q_tiles_per_wg such row tiles.
+    BQ = MFMA_M
+    QPW = spec.q_tiles_per_wg
+    BQ_WG = spec.block_q
+    EVQ = EPI_VQ * QPW
     BK = spec.block_k
     D_NOPE = spec.d_nope
     D_ROPE = spec.d_rope
@@ -2315,9 +2362,28 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
     # ---- prologue: identify (sequence, query tile, head group) --------------
     # Same reversed, heaviest-first block walk as the one-head kernel.
     total_q = b.global_load_i32(cu_q, num_seqs_p)
-    num_q_blocks = b.add(b.div(total_q, b.const_i32(BQ)), num_seqs_p)
-    q_block_global_idx = b.sub(b.sub(num_q_blocks, b.const_i32(1)), b.block_id_x())
-    head_grp = b.block_id_y()
+    num_q_blocks = b.add(b.div(total_q, b.const_i32(BQ_WG)), num_seqs_p)
+    if spec.num_xcds > 1:
+        # Chiplet-aware order: the dispatcher deals workgroups round-robin
+        # across XCDs, so in launch order every XCD would see every head group
+        # and its L2 would hold all of their weights. Remapped, each XCD walks
+        # XCD_CHUNK-long runs of a head-group-major order.
+        n_grp = b.const_i32(H // HPW)
+        hw_id = b.add(b.block_id_x(), b.mul(b.block_id_y(), num_q_blocks))
+        logical = _chiplet_chunked(
+            b,
+            hw_id,
+            num_wgs=b.mul(num_q_blocks, n_grp),
+            num_xcds=spec.num_xcds,
+            chunk_size=XCD_CHUNK,
+        )
+        head_grp = b.div(logical, num_q_blocks)
+        q_block_global_idx = b.sub(
+            b.sub(num_q_blocks, b.const_i32(1)), b.mod(logical, num_q_blocks)
+        )
+    else:
+        q_block_global_idx = b.sub(b.sub(num_q_blocks, b.const_i32(1)), b.block_id_x())
+        head_grp = b.block_id_y()
     tid = b.thread_id_x()
     lane = b.mod(tid, b.const_i32(WAVE_SIZE))
     wave = b.div(tid, b.const_i32(WAVE_SIZE))
@@ -2325,26 +2391,35 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
     lane_kq = b.mul(b.div(lane, b.const_i32(16)), b.const_i32(4))
     # The wave's head. Wave-uniform, so it goes to an SGPR and every per-head
     # address below is scalar math.
-    head = b.readfirstlane(b.add(b.mul(head_grp, b.const_i32(HPW)), wave))
+    head_local = wave if QPW == 1 else b.div(wave, b.const_i32(QPW))
+    head = b.readfirstlane(b.add(b.mul(head_grp, b.const_i32(HPW)), head_local))
 
     seq_idx = _binary_search_seq_idx(
         b,
         cu_q,
         q_block_global_idx,
         num_seqs_p,
-        block_q=BQ,
+        block_q=BQ_WG,
         iterations=spec.binary_search_iters,
     )
     cu_q_start = b.global_load_i32(cu_q, seq_idx)
     cu_q_stop = b.global_load_i32(cu_q, b.add(seq_idx, b.const_i32(1)))
     s_q = b.sub(cu_q_stop, cu_q_start)
 
-    q_block_start_idx = b.add(b.div(cu_q_start, b.const_i32(BQ)), seq_idx)
+    q_block_start_idx = b.add(b.div(cu_q_start, b.const_i32(BQ_WG)), seq_idx)
     q_block_local_idx = b.sub(q_block_global_idx, q_block_start_idx)
-    qb_start = b.mul(q_block_local_idx, b.const_i32(BQ))
+    qb_start_wg = b.mul(q_block_local_idx, b.const_i32(BQ_WG))
 
-    with b.scf_if(b.cmp_ge(qb_start, s_q)):
+    with b.scf_if(b.cmp_ge(qb_start_wg, s_q)):
         b.ret()
+    # The wave's own rows. A wave whose rows all lie past S_q still runs the
+    # loop -- the staging and barriers are workgroup-wide -- on rows clamped
+    # onto the last token, and its stores are masked off.
+    if QPW == 1:
+        qb_start = qb_start_wg
+    else:
+        q_sub = b.readfirstlane(b.mod(wave, b.const_i32(QPW)))
+        qb_start = b.add(qb_start_wg, b.mul(q_sub, b.const_i32(BQ)))
 
     cu_k_start = b.global_load_i32(cu_k, seq_idx)
     cu_k_stop = b.global_load_i32(cu_k, b.add(seq_idx, b.const_i32(1)))
@@ -2352,8 +2427,8 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
     context_off = b.sub(s_k, s_q)
 
     q_end = b.select(
-        b.cmp_lt(b.add(qb_start, b.const_i32(BQ)), s_q),
-        b.add(qb_start, b.const_i32(BQ)),
+        b.cmp_lt(b.add(qb_start_wg, b.const_i32(BQ_WG)), s_q),
+        b.add(qb_start_wg, b.const_i32(BQ_WG)),
         s_q,
     )
     k_end = b.add(q_end, context_off)
@@ -2467,7 +2542,9 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
     # registers: the eight VGPRs it would pin are what keeps the kernel inside
     # 256. Each lane reads back exactly what it wrote, so no barrier is
     # involved. Allocated here, before kv_lds, and live through the loop.
-    qr_lds = b.smem_alloc(dtype, [HPW * BQ, D_ROPE + WT_PAD], name_hint="qr_lds")
+    qr_lds = b.smem_alloc(
+        dtype, [spec.num_warps * BQ, D_ROPE + WT_PAD], name_hint="qr_lds"
+    )
     qr_row = b.add(b.mul(wave, b.const_i32(BQ)), lane_row)
     for j in range(ROPE_K_ITERS):
         for mt in range(M_TILES):
@@ -2777,7 +2854,9 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
         flat_acc = [accs[mt][t] for mt in range(M_TILES) for t in range(N_R_TILES)]
         b.scf_yield(*new_ms, *new_ls, *flat_acc, *staged_next, pg_after)
 
-    n_full = b.div(b.add(qb_start, b.add(context_off, b.const_i32(1))), b.const_i32(BK))
+    n_full = b.div(
+        b.add(qb_start_wg, b.add(context_off, b.const_i32(1))), b.const_i32(BK)
+    )
     k_whole = b.div(s_k, b.const_i32(BK))
     n_full = b.select(b.cmp_lt(n_full, k_whole), n_full, k_whole)
     n_full = b.select(b.cmp_gt(n_full, b.const_i32(0)), n_full, b.const_i32(0))
@@ -2856,15 +2935,15 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
         # transposes the 4 x 8 block in registers into eight 8 B stores. Allocated
         # after the loop so it pools onto the loop's buffers; each round's opening
         # barrier fences their last readers.
-        wt_lds = b.smem_alloc(dtype, [HPW * EPI_VQ, 64 + WT_PAD], name_hint="wt_lds")
+        wt_lds = b.smem_alloc(dtype, [HPW * EVQ, 64 + WT_PAD], name_hint="wt_lds")
         out_acc = [
             [b.zero_vec_f32(4) for _ in range(N_V_TILES)] for _ in range(M_TILES)
         ]
         acc_bf = [[None] * N_R_TILES for _ in range(M_TILES)]
         grp_base = b.mul(b.mul(head_grp, b.const_i32(HPW * R_KV)), b.const_i32(W_COLS))
-        per_head = 16 * (EPI_VQ // 8)
+        per_head = 16 * (EVQ // 8)
         stagers = []
-        for j in range((HPW * 64 * EPI_VQ) // (THREADS * 32)):
+        for j in range((HPW * 64 * EVQ) // (THREADS * 32)):
             c = b.add(tid, b.const_i32(j * THREADS))
             hh = b.div(c, b.const_i32(per_head))
             rem = b.mod(c, b.const_i32(per_head))
@@ -2885,22 +2964,22 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
                     _shift(b, D_NOPE, n0),
                 ),
             )
-            row0 = b.add(b.mul(hh, b.const_i32(EPI_VQ)), n0)
+            row0 = b.add(b.mul(hh, b.const_i32(EVQ)), n0)
             p_col = b.add(b.mul(g, b.const_i32(16)), b.mul(e, b.const_i32(4)))
             stagers.append((src, row0, p_col))
         a_rows = [
-            b.add(b.mul(wave, b.const_i32(EPI_VQ)), _shift(b, vl * MFMA_N, lane_row))
-            for vl in range(EPI_VQ // MFMA_N)
+            b.add(b.mul(head_local, b.const_i32(EVQ)), _shift(b, vl * MFMA_N, lane_row))
+            for vl in range(EVQ // MFMA_N)
         ]
         a_cols = [_shift(b, 4 * e, b.mul(lane_kq, b.const_i32(4))) for e in range(4)]
         for w in range(N_R_TILES // 4):
-            for vq in range(D_V // EPI_VQ):
+            for vq in range(D_V // EVQ):
                 b.sync()
                 for src, row0, p_col in stagers:
                     rows8 = [
                         b.global_load_vN(
                             w_uk,
-                            _shift(b, (64 * w + 4 * i) * W_COLS + vq * EPI_VQ, src),
+                            _shift(b, (64 * w + 4 * i) * W_COLS + vq * EVQ, src),
                             dtype,
                             8,
                         )
@@ -2919,11 +2998,11 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
                     for mt in range(M_TILES):
                         if acc_bf[mt][t] is None:
                             acc_bf[mt][t] = b.vec_trunc_f32_to_bf16(accs[mt][t])
-                    for vl in range(EPI_VQ // MFMA_N):
+                    for vl in range(EVQ // MFMA_N):
                         a_v = b.smem_load_vN(
                             wt_lds, a_rows[vl], a_cols[e], dtype=dtype, n=4
                         )
-                        vt = vq * (EPI_VQ // MFMA_N) + vl
+                        vt = vq * (EVQ // MFMA_N) + vl
                         for mt in range(M_TILES):
                             out_acc[mt][vt] = _mfma_16x16x16(
                                 b, dtype, a_v, acc_bf[mt][t], out_acc[mt][vt]
