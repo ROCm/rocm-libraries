@@ -1063,6 +1063,28 @@ def test_dispatch_two_sided_local_window(mask, sq, sk, left, right):
 
 @pytest.mark.gpu
 @_NEEDS_GPU
+@pytest.mark.parametrize(
+    "mask", [AttentionMaskType.TOP_LEFT_CAUSAL, AttentionMaskType.BOTTOM_RIGHT_CAUSAL]
+)
+def test_dispatch_causal_mask_with_window_left(mask):
+    """cuDNN-style causal sliding window: a causal mask plus an explicit left
+    bound keeps keys in ``[q + ctx - window_left, q + ctx]``."""
+    batch, sq, sk, hq, hkv, dim, window_left = 2, 37, 53, 4, 2, 64, 9
+    q, k, v = _random_qkv(211, batch, sq, sk, hq, hkv, dim, dim)
+    scale = 1.0 / np.sqrt(dim)
+    request = _dense_direct_request(
+        batch, sq, sk, hq, hkv, dim, dim, mask_type=mask, window_left=window_left
+    )
+    ctx = sk - sq if mask == AttentionMaskType.BOTTOM_RIGHT_CAUSAL else 0
+    actual = _run_dense_direct(request, q, k, v, scale=scale)
+    expected = _windowed_reference(
+        q, k, v, scale=scale, ctx=ctx, left=window_left + 1, right=0
+    )
+    np.testing.assert_allclose(actual, expected, rtol=0, atol=2e-2, equal_nan=False)
+
+
+@pytest.mark.gpu
+@_NEEDS_GPU
 @pytest.mark.parametrize("dq,dv", [(64, 128), (128, 64), (80, 48)])
 def test_dispatch_unequal_head_dims(dq, dv):
     hq, hkv, sq, sk = 4, 2, 37, 53
