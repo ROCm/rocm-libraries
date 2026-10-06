@@ -642,7 +642,7 @@ private:
             R"(\s*(\d+|\*))"           // Size limit digits
             R"((?:\s*([^:\s]+|))\s*:)" // Size limit units (optional, captures empty string if not provided)
             R"(\s*([^:]+?)\s*:)"       // Build types
-            R"(\s*(".+")\s*$)"         // Skip message
+            R"(\s*\"(.+)\"\s*$)"         // Skip message
         );
 
         if (!std::regex_match(line, match, line_regex))

@@ -235,13 +235,6 @@ install(
 set(TEST_CONTROL_FILE_NAME "control.txt")
 
 # Copy control file from source to build directory if it has changed.
-# Set up the dependencies to cause this check happen every time a target is built.
-# add_custom_target(copy_control_file_changes
-#   ALL
-#   COMMAND ${CMAKE_COMMAND} -E copy_if_different "${TEST_CONTROL_FILE_SOURCE_PATH}/${TEST_CONTROL_FILE_NAME}" "${TEST_CONTROL_FILE_BUILD_PATH}/${TEST_CONTROL_FILE_NAME}"
-# )
-# add_dependencies(hipcub copy_control_file_changes)
-
 add_custom_target(copy_control_file_changes
   ALL
   COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/test/${TEST_CONTROL_FILE_NAME}" "${CMAKE_CURRENT_BINARY_DIR}/${TEST_CONTROL_FILE_NAME}"
