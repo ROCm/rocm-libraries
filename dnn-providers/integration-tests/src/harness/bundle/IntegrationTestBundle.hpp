@@ -24,6 +24,7 @@
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 
 #include "harness/bundle/BundleDiscovery.hpp"
+#include "harness/bundle/SweepManifestCache.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
@@ -74,11 +75,18 @@ struct IntegrationTestBundle
 // Why a load did NOT produce a bundle. These are authoring failures in the
 // bundle or sweep case. A valid graph-only bundle is still a loaded bundle and is
 // skipped later only if the harness cannot fill inputs.
+//
+// UNVALIDATABLE_GOLDEN_DATA is deliberately separate from MISSING_METADATA: it is
+// the one load failure that gets louder as the checkout gets more complete. Golden
+// blobs are on disk but nothing describes how they were produced, so the bundle
+// would be dropped at exactly the moment its data became available. Callers
+// (classifyBundle()) turn that one red; the rest stay log-and-skip.
 enum class LoadError
 {
     MALFORMED_JSON, // graph/template/sweep JSON is unreadable or syntactically invalid
     INVALID_GRAPH_SCHEMA, // expanded graph JSON cannot build a valid graph flatbuffer
-    MISSING_METADATA, // direct golden bundle is missing valid .meta.json metadata
+    MISSING_METADATA, // metadata absent, and no golden data that would need validating
+    UNVALIDATABLE_GOLDEN_DATA, // golden blobs present but their metadata is missing/invalid
     TENSOR_LOAD_FAILED, // a present tensor blob is unreadable, wrong-sized, or unsupported
     INVALID_SWEEP_CASE // sweep case id, placeholders, metadata, or golden path are invalid
 };
@@ -97,6 +105,9 @@ inline const char* toString(LoadError error)
         return "graph JSON is not a valid graph";
     case LoadError::MISSING_METADATA:
         return "missing or invalid .meta.json companion";
+    case LoadError::UNVALIDATABLE_GOLDEN_DATA:
+        return "golden tensor .bin files are present but their metadata is missing or invalid, "
+               "so the data cannot be validated";
     case LoadError::TENSOR_LOAD_FAILED:
         return "tensor .bin present but failed to load";
     case LoadError::INVALID_SWEEP_CASE:
@@ -666,26 +677,6 @@ inline void applyTensorPatches(nlohmann::json& expandedGraph, const nlohmann::js
     }
 }
 
-inline const nlohmann::json* findSweepCase(const nlohmann::json& sweepJson,
-                                           const std::string& caseId)
-{
-    if(!sweepJson.contains("cases") || !sweepJson.at("cases").is_array())
-    {
-        return nullptr;
-    }
-
-    for(const auto& caseJson : sweepJson.at("cases"))
-    {
-        if(caseJson.is_object() && caseJson.contains("id") && caseJson.at("id").is_string()
-           && caseJson.at("id").get<std::string>() == caseId)
-        {
-            return &caseJson;
-        }
-    }
-
-    return nullptr;
-}
-
 inline std::optional<std::filesystem::path>
     resolveSweepGoldenDirectory(const std::filesystem::path& sweepPath,
                                 const nlohmann::json& caseJson)
@@ -716,7 +707,7 @@ inline std::optional<std::filesystem::path>
 //
 //   * graph .json not parseable            -> LoadError::MALFORMED_JSON
 //   * parseable but not a valid graph      -> LoadError::INVALID_GRAPH_SCHEMA
-//   * golden outputs present, no metadata  -> LoadError::MISSING_METADATA
+//   * golden outputs present, no metadata  -> LoadError::UNVALIDATABLE_GOLDEN_DATA
 //   * no golden outputs, no metadata       -> bundle with empty metadata
 //   * valid graph, input blobs absent      -> bundle with tensors == nullopt
 //   * present blob fails to load           -> LoadError::TENSOR_LOAD_FAILED
@@ -771,7 +762,7 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
     {
         if(goldenOutputsPresent)
         {
-            return LoadError::MISSING_METADATA;
+            return LoadError::UNVALIDATABLE_GOLDEN_DATA;
         }
         metadata.emplace();
     }
@@ -788,29 +779,30 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
 
 // Load either a direct bundle or one logical template-sweep case.
 //
-// Sweep cases parse graph.template.json plus sweep.json, locate the discovered
-// case id, expand `${case...}` placeholders, load inline metadata, and resolve an
-// optional golden directory. Sweep authoring errors are reported as
+// Sweep cases take graph.template.json plus sweep.json from `sweeps`, locate the
+// discovered case id, expand `${case...}` placeholders, load inline metadata, and
+// resolve an optional golden directory. Sweep authoring errors are reported as
 // INVALID_SWEEP_CASE; an expanded graph that still fails schema conversion is
 // INVALID_GRAPH_SCHEMA. As with the direct-bundle overload, a
 // RuntimePassByValueInvariantError from buildGraphBuffer() is the one
 // exception that propagates uncaught rather than being folded into
 // INVALID_GRAPH_SCHEMA.
-inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
+inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
+                                            SweepManifestCache& sweeps)
 {
     if(!discovered.isTemplateSweepCase())
     {
         return loadIntegrationTestBundle(discovered.jsonPath);
     }
 
-    const auto templateJson = detail::parseJsonFile(discovered.sweep->templatePath);
-    const auto sweepJson = detail::parseJsonFile(discovered.jsonPath);
-    if(!templateJson.has_value() || !sweepJson.has_value())
+    const auto& sweep = sweeps.get(discovered);
+    const auto& templateJson = sweep.templateJson;
+    if(!templateJson.has_value() || !sweep.manifest.has_value())
     {
         return LoadError::MALFORMED_JSON;
     }
 
-    const auto* caseJson = detail::findSweepCase(*sweepJson, discovered.sweep->caseId);
+    const auto* caseJson = sweep.manifest->findCase(discovered.sweep->caseId);
     if(caseJson == nullptr)
     {
         return LoadError::INVALID_SWEEP_CASE;
@@ -854,19 +846,31 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
         }
     }
 
+    // Golden blobs without metadata cannot be validated, so that combination is
+    // UNVALIDATABLE_GOLDEN_DATA and hard-fails downstream (see LoadError). Mirrors
+    // the direct-bundle path above, including the "unparseable is as bad as absent"
+    // rule: a typo in the metadata block must not quietly delete the case.
+    const bool goldenOutputsPresent
+        = goldenDirectory.has_value() && !bundle.outputTensorUids.empty()
+          && detail::blobsPresentFor(bundle.outputTensorUids, [&](int64_t uid) {
+                 return *goldenDirectory / ("tensor" + std::to_string(uid) + ".bin");
+             });
+
     // Every sweep case must carry a metadata block. Metadata (arch lock,
     // ROCm/GPU version, seed, VRAM guard) is what validates golden data and
     // anchors the case, so an absent block is MISSING_METADATA and a present
     // but unparseable block is an authoring error (INVALID_SWEEP_CASE).
     if(!caseJson->contains("metadata") || caseJson->at("metadata").is_null())
     {
-        return LoadError::MISSING_METADATA;
+        return goldenOutputsPresent ? LoadError::UNVALIDATABLE_GOLDEN_DATA
+                                    : LoadError::MISSING_METADATA;
     }
     auto metadata = hipdnn_integration_tests::parseBundleMetadataJson(
         caseJson->at("metadata"), discovered.diagnosticPath().string());
     if(!metadata.has_value())
     {
-        return LoadError::INVALID_SWEEP_CASE;
+        return goldenOutputsPresent ? LoadError::UNVALIDATABLE_GOLDEN_DATA
+                                    : LoadError::INVALID_SWEEP_CASE;
     }
     bundle.metadata = std::move(*metadata);
 
@@ -884,6 +888,14 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
     }
 
     return bundle;
+}
+
+// Loads one bundle on its own. A pass over many sweep cases should share one
+// SweepManifestCache instead, so each manifest is parsed once.
+inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
+{
+    SweepManifestCache sweeps;
+    return loadIntegrationTestBundle(discovered, sweeps);
 }
 
 } // namespace hipdnn_integration_tests::bundle

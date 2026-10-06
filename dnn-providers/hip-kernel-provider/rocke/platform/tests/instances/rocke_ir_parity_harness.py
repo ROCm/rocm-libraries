@@ -1095,6 +1095,7 @@ def build_direct_depthwise_col(
     PAD=1,
     stride=1,
     *,
+    block_h=16,
     block_w=4,
     block_waves=1,
     dtype="fp16",
@@ -1121,6 +1122,7 @@ def build_direct_depthwise_col(
         spec = DirectDepthwiseColSpec(
             problem=p,
             name=name,
+            block_h=block_h,
             block_w=block_w,
             block_waves=block_waves,
             dtype=dtype,
@@ -3050,9 +3052,9 @@ def cases():
     # these hashes are what turns that claim into a check.
     #
     # Each case pins one axis the emitter branches on: the static tap grid
-    # (KH, PAD, stride), the two *_tile_exact guard elisions, the accumulator
-    # band width (block_w), the channel tiling (block_waves), and the element
-    # type.  Review the IR diff before re-blessing any of them.
+    # (KH, PAD, stride), the accumulator band (block_h x block_w), the channel
+    # tiling (block_waves), and the element type.  Review the IR diff before
+    # re-blessing any of them.
     add(
         "conv_direct",
         "conv_direct/gfx950/dw_col_s1_fp16",
@@ -3088,6 +3090,7 @@ def cases():
             KW=3,
             PAD=1,
             stride=2,
+            block_h=2,
             block_w=4,
             block_waves=1,
             dtype="bf16",
@@ -3108,6 +3111,7 @@ def cases():
             KW=31,
             PAD=15,
             stride=1,
+            block_h=4,
             block_w=4,
             block_waves=1,
             dtype="fp16",
@@ -3195,8 +3199,8 @@ def cases():
             dtype="bf16",
         ),
     )
-    # PAD > (KH-1)/2: padded-input overhang, where n_iters = (Ho-1)*stride + KH
-    # runs past H.  Unreachable at the PAD/KH pairs the cases above use.
+    # PAD > (KH-1)/2: padded-input overhang, where the last row tile's input
+    # rows run past H.  Unreachable at the PAD/KH pairs the cases above use.
     add(
         "conv_direct",
         "conv_direct/gfx950/dw_col_s2_pad2_ovh",
@@ -3212,6 +3216,7 @@ def cases():
             KW=3,
             PAD=2,
             stride=2,
+            block_h=2,
             block_w=2,
             block_waves=1,
             dtype="fp16",

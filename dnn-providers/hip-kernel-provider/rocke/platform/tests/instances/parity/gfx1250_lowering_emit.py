@@ -250,6 +250,8 @@ CONFIGS = [
     (_wmma_k64("bf8", "bf8"), "gfx1250"),
     (_wmma_scaled("fp8", "fp8", "scale"), "gfx1250"),
     (_wmma_scaled("fp8", "fp8", "scale16"), "gfx1250"),
+    (_wmma_scaled("fp4", "fp4", "scale"), "gfx1250"),
+    (_wmma_scaled("fp4", "fp4", "scale16"), "gfx1250"),
     (_tr16_b128(F16), "gfx1250"),
     (_tr16_b128(F16), "gfx950"),
     (_tr16_b128(BF16), "gfx1250"),
@@ -265,6 +267,15 @@ CONFIGS = [
     (_global_tr16(I16), "gfx1250"),
     (build_tensor_transfers, "gfx1250"),
 ]
+
+
+# Matrix pairs with E8M0 scales; retain the original config indices above.
+_SCALED_PAIRS = [("fp6", "fp6"), ("bf6", "bf6")]
+CONFIGS.extend(
+    (_wmma_scaled(a, b, mode), "gfx1250")
+    for mode in ("scale", "scale16")
+    for a, b in _SCALED_PAIRS
+)
 
 
 # Homogeneous BF8 belongs to the eight-bit example contract.

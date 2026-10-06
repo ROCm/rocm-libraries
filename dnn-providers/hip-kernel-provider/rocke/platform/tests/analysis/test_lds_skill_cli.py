@@ -15,6 +15,7 @@ import sys
 import pytest
 
 import rocke
+from rocke.analysis.lds.registry import registered_targets
 from rocke.assets import dsl_docs_dir
 
 
@@ -98,7 +99,10 @@ def test_skill_cli_rejects_unregistered_target_without_fallback(tmp_path: Path):
 
     assert completed.returncode == 2
     assert "unsupported LDS target 'gfx9999'" in completed.stderr
-    assert "registered targets: gfx90a" in completed.stderr
+    expected_targets = ", ".join(registered_targets())
+    assert completed.stderr.rstrip().endswith(
+        f"; registered targets: {expected_targets}"
+    )
     assert completed.stdout == ""
 
 

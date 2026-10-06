@@ -71,6 +71,28 @@ Tunable parameters:
 
 Launch grid: `(ceil(W / block_w), ceil(groups / block_ch), N)`.
 
+### cpg = 1 — Column-streamed depthwise (`DirectDepthwiseColSpec`)
+
+Same work as `DirectDepthwiseSpec` with the loop order flipped: the `KW` filter
+columns are a runtime loop, and the input rows and `KH` filter rows of one
+output-row tile are unrolled.  Only one filter column is live at a time, so the
+per-lane register cost is `block_h * block_w + KH` rather than
+`KH * KW + KH * block_w`.  That makes it the variant for large filters, and it
+takes any `stride >= 1`, any `PAD < min(KH, KW)` (with `Ho <= H`), and
+fp16/bf16 through its own `dtype` field.
+
+Tunable parameters:
+- `block_h` — output rows per block (default 16; swept: 8, 16, 32).  The row
+  loop is unrolled at build time, so this is the AOT capability; the image
+  height is a kernarg.
+- `block_w` — output W positions per block (default 1; swept: 1 to 32).
+- `block_waves` — waves per workgroup (default 1; swept: 1, 2, 4).
+
+Pairs whose band exceeds the arch's live-f32 budget (3/8 of the VGPR file) are
+rejected by `is_valid_depthwise_col_spec`.
+
+Launch grid: `(ceil(Wo / block_w), ceil(groups / block_ch), N * ceil(Ho / block_h))`.
+
 ### cpg = 4 — `DirectConv4cSpec`
 
 Uses sixteen independent `mfma_f32_4x4x4_f16` calls per `(y, x)` step to
@@ -334,6 +356,14 @@ if ok:
 
 ## Launch Grid
 
+Every direct kernel is AOT: the batch, the spatial extents, the group count and
+the activation strides are kernargs (`conv_direct_arg_names(direction=...)`),
+so one binary serves any image. Take the grid from
+`direct_launch_geometry(spec)` and the kernarg values from
+`ConvArgs.from_problem(problem, direction=...).to_launch_values(...)` rather
+than re-deriving them at the call site; the formulas below document what those
+helpers compute.
+
 ### Grouped variants
 
 ```
@@ -348,6 +378,15 @@ g_tiles = groups // block_groups
 
 ```
 grid  = (ceil(W / block_w), ceil(groups / block_ch), N)
+block = (spec.threads_per_block, 1, 1)
+```
+
+The column-streamed variant tiles output rows too; the kernel decodes
+`block_id_z = n * ceil(Ho / block_h) + h_tile`, deriving the tile count from
+the `p_Ho` kernarg:
+
+```
+grid  = (ceil(Wo / block_w), ceil(groups / block_ch), N * ceil(Ho / block_h))
 block = (spec.threads_per_block, 1, 1)
 ```
 
@@ -379,6 +418,10 @@ The `y` extent is `spec.n_ho_blocks()`, which is sized on the **input** height
 — the row loop walks `hi`, and `Ho == H` only when `2 * PAD == KH - 1`.  A wave
 whose `wo_tile` lands past `n_wo_tiles` runs the loop but has its epilogue
 atomics suppressed, so an over-provisioned `z` extent is safe.
+
+`n_wo_tiles = ceil(Wo / mfma_k)` and `n_q_blocks = ceil(n_wo_tiles / waves_q)`
+are computed in-kernel from the `p_Wo` kernarg, with the same ceilings
+`spec.n_q_blocks()` uses for the host-side `z` extent.
 
 ---
 

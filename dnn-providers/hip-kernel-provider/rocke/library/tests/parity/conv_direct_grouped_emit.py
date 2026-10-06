@@ -443,9 +443,9 @@ def _spec(idx: int):
             "gfx950",
         )
     if idx == 32:
-        # column-streamed depthwise, stride=1 fp16, both tile guards elided
-        # (groups % block_ch == 0 and Wo % block_w == 0): addr() must emit a
-        # bare mul with no select at all.
+        # column-streamed depthwise, stride=1 fp16, default 16-row tile. Exact
+        # channel and W tiles, but the guards bound against kernargs (AOT), so
+        # they are emitted all the same.
         p = DirectConvProblem(
             N=2, H=8, W=8, groups=128, cpg=1, kpg=1, KH=3, KW=3, PAD=1, stride=1
         )
@@ -455,18 +455,21 @@ def _spec(idx: int):
             "gfx950",
         )
     if idx == 33:
-        # col stride=2 bf16 with BOTH guards live (groups=70 % 64, Wo=5 % 4)
+        # col stride=2 bf16 with partial channel and W tiles (groups=70 % 64,
+        # Wo=5 % 4) and two-row tiles, so Ho=5 needs a partial last row tile.
         p = DirectConvProblem(
             N=1, H=9, W=9, groups=70, cpg=1, kpg=1, KH=3, KW=3, PAD=1, stride=2
         )
         return (
             "dwcol",
-            DirectDepthwiseColSpec(problem=p, block_w=4, block_waves=1, dtype="bf16"),
+            DirectDepthwiseColSpec(
+                problem=p, block_h=2, block_w=4, block_waves=1, dtype="bf16"
+            ),
             "gfx950",
         )
     if idx == 34:
         # col stride=3: exercises the (y - r) % stride tap pruning at a stride
-        # no other case reaches; ch guard elided, w guard live.
+        # no other case reaches.
         p = DirectConvProblem(
             N=1, H=16, W=16, groups=64, cpg=1, kpg=1, KH=3, KW=3, PAD=1, stride=3
         )
@@ -477,13 +480,16 @@ def _spec(idx: int):
         )
     if idx == 35:
         # col with a large filter (31x31): the regime the variant exists for --
-        # KW rides the runtime loop so only KH weights are live.
+        # KW rides the runtime loop so only KH weights are live. A 4-row tile
+        # still unrolls (4-1)+31 input rows.
         p = DirectConvProblem(
             N=1, H=8, W=8, groups=64, cpg=1, kpg=1, KH=31, KW=31, PAD=15, stride=1
         )
         return (
             "dwcol",
-            DirectDepthwiseColSpec(problem=p, block_w=4, block_waves=1, dtype="fp16"),
+            DirectDepthwiseColSpec(
+                problem=p, block_h=4, block_w=4, block_waves=1, dtype="fp16"
+            ),
             "gfx950",
         )
     if idx == 36:
@@ -507,13 +513,15 @@ def _spec(idx: int):
             "gfx950",
         )
     if idx == 38:
-        # col stride=2 with valid padding (PAD=0), both guards elided
+        # col stride=2 with valid padding (PAD=0) and an odd 3-row tile
         p = DirectConvProblem(
             N=1, H=13, W=13, groups=64, cpg=1, kpg=1, KH=3, KW=3, PAD=0, stride=2
         )
         return (
             "dwcol",
-            DirectDepthwiseColSpec(problem=p, block_w=6, block_waves=1, dtype="fp16"),
+            DirectDepthwiseColSpec(
+                problem=p, block_h=3, block_w=6, block_waves=1, dtype="fp16"
+            ),
             "gfx950",
         )
     if idx == 39:
@@ -527,14 +535,17 @@ def _spec(idx: int):
             "gfx950",
         )
     if idx == 40:
-        # dwcol PAD-overhang: PAD=2 > (KH-1)/2=1 with stride=2.
-        # n_iters = (Ho-1)*stride + KH formula is cross-verified by the C/Python byte-identity gate.
+        # dwcol PAD-overhang: PAD=2 > (KH-1)/2=1 with stride=2 and two-row
+        # tiles. n_iters = (block_h-1)*stride + KH is cross-verified by the
+        # C/Python byte-identity gate.
         p = DirectConvProblem(
             N=1, H=10, W=10, groups=64, cpg=1, kpg=1, KH=3, KW=3, PAD=2, stride=2
         )
         return (
             "dwcol",
-            DirectDepthwiseColSpec(problem=p, block_w=4, block_waves=1, dtype="fp16"),
+            DirectDepthwiseColSpec(
+                problem=p, block_h=2, block_w=4, block_waves=1, dtype="fp16"
+            ),
             "gfx950",
         )
     raise SystemExit(f"unknown config index {idx}")

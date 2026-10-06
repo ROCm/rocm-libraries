@@ -351,11 +351,14 @@ bool rocke_direct_depthwise_is_valid_spec(const rocke_direct_depthwise_spec_t* s
  *      wave_size: int = 64
  *      dtype: str = "fp16"
  *      max_live_f32: Optional[int] = None
+ *      block_h: int = 16
  *
- *  Loop order s (runtime scf.for over KW) -> y (unrolled input rows) -> r
- *  (unrolled over KH), so live f32 per lane is Ho*block_w + KH -- linear in KH
- *  and independent of KW, unlike the preload sibling's KH*KW + KH*block_w.
- *  Grid: (ceil(Wo / block_w), ceil(groups / block_ch), N).
+ *  Loop order s (runtime scf.for over KW) -> y (unrolled input rows of one
+ *  block_h-row output tile) -> r (unrolled over KH), so live f32 per lane is
+ *  block_h*block_w + KH -- linear in KH and independent of KW, unlike the
+ *  preload sibling's KH*KW + KH*block_w.  AOT: block_h is the build-time
+ *  capability, the image extents are kernargs.
+ *  Grid: (ceil(Wo / block_w), ceil(groups / block_ch), N * ceil(Ho / block_h)).
  * ===================================================================== */
 typedef struct rocke_direct_depthwise_col_spec
 {
@@ -370,22 +373,21 @@ typedef struct rocke_direct_depthwise_col_spec
      * >0 = tighten via min(max_live_f32, arch_budget).
      * <0 = invalid; is_valid_spec() will reject it. */
     int max_live_f32;
+    int block_h; /* default 16; output rows per block (the unrolled row tile) */
 } rocke_direct_depthwise_col_spec_t;
 
 rocke_direct_depthwise_col_spec_t rocke_direct_depthwise_col_spec_default(void);
 /* @property threads_per_block / block_ch -> block_waves * wave_size */
 int rocke_direct_depthwise_col_threads_per_block(const rocke_direct_depthwise_col_spec_t* spec);
 int rocke_direct_depthwise_col_block_ch(const rocke_direct_depthwise_col_spec_t* spec);
-/* @property live_f32 -> problem.Ho * block_w + problem.KH */
+/* @property n_iters -> (block_h - 1) * problem.stride + problem.KH */
+int rocke_direct_depthwise_col_n_iters(const rocke_direct_depthwise_col_spec_t* spec);
+/* @property live_f32 -> block_h * block_w + problem.KH */
 int rocke_direct_depthwise_col_live_f32(const rocke_direct_depthwise_col_spec_t* spec);
 /* resolve_max_live_f32(arch) -> min(spec.max_live_f32, vgprs * 3 // 8) when the
  * override is set, else the budget. Returns 0 on unknown arch. */
 int rocke_direct_depthwise_col_resolve_max_live_f32(const rocke_direct_depthwise_col_spec_t* spec,
                                                     const char* arch);
-/* @property ch_tile_exact / w_tile_exact -- when true the matching bounds guard
- * is elided from the emitted IR entirely (not merely made constant-true). */
-bool rocke_direct_depthwise_col_ch_tile_exact(const rocke_direct_depthwise_col_spec_t* spec);
-bool rocke_direct_depthwise_col_w_tile_exact(const rocke_direct_depthwise_col_spec_t* spec);
 /* dtype_tag() -> the IR scalar name ("f16"/"bf16") when the dtype string
  * resolves, else the string with non-alphanumerics replaced by '_'. */
 rocke_status_t rocke_direct_depthwise_col_dtype_tag(const rocke_direct_depthwise_col_spec_t* spec,
@@ -525,8 +527,8 @@ bool rocke_direct_depthwise_dgrad_is_valid_spec(const rocke_direct_depthwise_dgr
  *  global_atomic_add, so the caller must zero it before launch.
  *
  *  ABI note: D is a `ptr<f32, global>` here (the other five variants take
- *  `ptr<f16, global>`), so rocke_direct_conv_signature() does NOT describe this
- *  kernel.
+ *  `ptr<f16, global>`); the argument names and order are still those of
+ *  rocke_conv_direct_arg_names().
  * ===================================================================== */
 typedef struct rocke_direct_conv_wgrad_spec
 {
@@ -652,7 +654,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_new(rocke_ir_builder_t* b,
 
 /* build_direct_depthwise_col(spec, arch). Column-streamed depthwise kernel
  * (cpg=kpg=1). The KW axis is a runtime scf.for whose iter_args carry the
- * Ho x block_w accumulator band, so register pressure is independent of KW. */
+ * block_h x block_w accumulator band, so register pressure is independent of
+ * KW. AOT: takes the direct-conv kernarg block of rocke_conv_direct_arg_names. */
 rocke_kernel_def_t* rocke_build_direct_depthwise_col(rocke_ir_builder_t* b,
                                                      const rocke_direct_depthwise_col_spec_t* spec,
                                                      const char* arch);
@@ -692,29 +695,9 @@ rocke_kernel_def_t* rocke_build_direct_conv_wgrad_new(rocke_ir_builder_t* b,
                                                       const rocke_direct_conv_wgrad_spec_t* spec,
                                                       const char* arch);
 
-/* ===================================================================== *
- *  SIGNATURE (manifest)  --  all kernels share the 6-entry ABI:
- *    ptr A:{dtype}, ptr B:{dtype}, ptr D:{dtype}, scalar A_bytes:i32,
- *    B_bytes:i32, D_bytes:i32.
- *  The depthwise_col kernel keeps that shape, but its three pointer element
- *  types follow spec->dtype ("fp16" / "bf16") rather than problem.dtype.
- * ===================================================================== */
-
-/* Writes the 6 manifest entries into out[] (capacity out_cap) and sets
- * *out_count = 6. Strings live in `arena`. Returns ROCKE_OK or ROCKE_ERR_VALUE
- * (NULL args / out_cap < 6). One signature serves both 16c and 4c (fp16 only). */
-rocke_status_t rocke_direct_conv_signature(struct rocke_arena* arena,
-                                           struct rocke_sig_entry* out,
-                                           size_t out_cap,
-                                           size_t* out_count);
-
-/* Dtype-aware variant. `dtype` is "f16" (alias "fp16") or "bf16".
- * NULL `dtype` defaults to "f16". */
-rocke_status_t rocke_direct_conv_signature_for_dtype(struct rocke_arena* arena,
-                                                     const char* dtype,
-                                                     struct rocke_sig_entry* out,
-                                                     size_t out_cap,
-                                                     size_t* out_count);
+/* Launch signature: every direct kernel takes the AOT argument list of
+ * rocke_conv_direct_arg_names() (instance_conv_abi.h); there is no
+ * per-family signature builder. */
 
 /* ===================================================================== *
  *  CONVENIENCE: build -> lower to LLVM .ll text.

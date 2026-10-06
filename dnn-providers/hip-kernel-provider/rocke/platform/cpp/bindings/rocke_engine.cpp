@@ -52,6 +52,7 @@ extern "C" {
 #include "rocke/instance_mfma_gemm.h"
 #include "rocke/instance_mx_gemm.h"
 #include "rocke/instance_streamk_gemm.h"
+#include "rocke/instance_tf32_mma_probe.h"
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
 #include "rocke/lower_llvm.h"
@@ -2169,7 +2170,7 @@ rocke_implicit_gemm_conv_wgrad_spec_t conv_wgrad_build_spec(const py::dict& d,
     s.wave_size = dict_int(d, "wave_size", s.wave_size);
     s.split_k = dict_int(d, "split_k", s.split_k);
     s.two_stage = dict_bool(d, "two_stage", s.two_stage);
-    s.force_deterministic = dict_bool(d, "force_deterministic", s.force_deterministic);
+    s.ws_replicas = dict_int(d, "ws_replicas", s.ws_replicas);
     {
         std::string v;
         if(dict_str(d, "name", v))
@@ -2241,6 +2242,11 @@ rocke_wgrad_reduce_spec_t conv_wgrad_reduce_build_spec(const py::dict& d,
     s.wg_M = dict_int(d, "wg_M", s.wg_M);
     s.wg_N = dict_int(d, "wg_N", s.wg_N);
     s.groups = dict_int(d, "groups", s.groups);
+    /* Must track the Stage 1 spec's ws_replicas: folding fewer slabs than
+     * Stage 1 wrote drops part of the sum, folding more reads past the
+     * scratch. Defaulting here instead of parsing would silently do one or the
+     * other for every non-default Stage 1 count. */
+    s.ws_replicas = dict_int(d, "ws_replicas", s.ws_replicas);
     {
         std::string v;
         if(dict_str(d, "dtype_d", v))
@@ -3512,6 +3518,25 @@ PYBIND11_MODULE(rocke_engine, m)
         []() { return std::string(rocke_engine_version()); },
         "Human-readable engine version of this module.");
 
+    m.def(
+        "tf32_mma_probe_serialize_ir",
+        [](int shape, const std::string& preparation) {
+            rocke_ir_builder_t b;
+            rocke_kernel_def_t* kernel = rocke_build_tf32_mma_probe(&b, shape, preparation.c_str());
+            char* text = nullptr;
+            rocke_status_t status
+                = kernel ? rocke_ir_serialize(kernel, &text) : rocke_ir_builder_status(&b);
+            std::string error = rocke_ir_builder_error(&b);
+            std::string result = text ? text : "";
+            free(text);
+            rocke_ir_builder_free(&b);
+            if(status != ROCKE_OK)
+                throw std::runtime_error(error);
+            return result;
+        },
+        py::arg("m") = 16,
+        py::arg("preparation") = "raw");
+
     /* ---- family-agnostic lower-from-serialized-IR ----
      * The keystone of the ROCKE_BACKEND=cpp default for Python-authored
      * kernels: a Python front end serializes any KernelDef to ck.dsl.ir/v1
@@ -3738,9 +3763,9 @@ PYBIND11_MODULE(rocke_engine, m)
             return rocke_wgrad_conv_workspace_bytes(&s);
         },
         py::arg("spec"),
-        "Return workspace bytes for the two-stage deterministic wgrad path.\n"
-        "Formula: groups * split_k * wg_M * wg_N * 4 (always f32).\n"
-        "Returns 0 when two_stage=false and force_deterministic=false, or split_k <= 1.");
+        "Return workspace bytes for the two-stage wgrad path.\n"
+        "Formula: groups * ws_replicas * wg_M * wg_N * 4 (always f32).\n"
+        "Returns 0 when two_stage=false, or split_k <= 1.");
 
     /* ---- attention families (separate TU; shared fmha/tiled struct tags) ---- */
     register_attention(m);

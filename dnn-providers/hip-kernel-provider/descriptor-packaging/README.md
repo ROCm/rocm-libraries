@@ -44,6 +44,21 @@ stamps the shard architecture and records provenance. A root of only passthrough
 therefore produces descriptors and **no** archive, and a shard with no compiled variant
 holds no `kpack/`. Descriptors but no archive is legal; no descriptors never is.
 
+`hsaco` names a prebuilt code object: `kernel_source: {kind: "hsaco", file, symbol}`.
+`file` resolves relative to the descriptor that names it, must stay inside the root, and
+has no root-relative fallback — the same rule as a `hip` `source`. No compile runs: the
+bytes are packed as-is into the arch's kpack, the kernel signature is read from the
+object's AMDGPU metadata as for a compiled object, and the UKD ships as `kind: kpack`.
+The toc key derives from the file's resolved root-relative path, so one file serving
+several symbols is one archive entry, and one key claimed by two different files is a
+hard error. The packer does not check the object's format or target processor. An
+`hsaco` UKD must list the arch(es) its object runs on in `arch` (a generic-target
+object lists every arch it runs on); an absent or empty `arch` is rejected. The author's own load test on the target arch
+is the only check; no in-tree load test covers `hsaco`. The shipped provenance records
+`origin_kind: "hsaco"`, the root-relative `file`, its `sha256` and the `symbol`, and makes no
+toolchain claim. As for `hip`, the specialization contract must declare
+`metadata_fields: []`: no compiler ran whose specialization a binding could observe.
+
 ## Compiler-bound specialization agreement
 
 Packaging consumes UKD `provenance.specialization_contract` as data. It binds no
@@ -114,7 +129,7 @@ not equivalence of arbitrary machine code or correctness of native dispatch.
 ## Packed `kernel_source`
 
 The runtime consumes packed per-architecture descriptors with source kind KPACK, not
-unlowered rocKE/HIP authoring descriptors. A packed `kernel_source` carries **five
+unlowered rocKE, HIP or hsaco authoring descriptors. A packed `kernel_source` carries **five
 mandatory keys**:
 
 ```json
@@ -154,7 +169,7 @@ target, in `src/tests/CMakeLists.txt` beside `hkp_verify_embedded_sources()`:
 
 ```cmake
 hkp_register_census_tests(
-    TARGET hip_kernel_provider_tests
+    TARGET hip_kernel_provider_census_tests
     PACK_NAME unit
     SUITES TestPointwisePacks
     EXPECTED_CASES
@@ -169,13 +184,28 @@ hkp_register_census_tests(
 )
 ```
 
+`TARGET` is the census binary, `hip_kernel_provider_census_tests`. The `Test<Name>Packs`
+suites are compiled into it and not into `hip_kernel_provider_tests`: every census case
+needs a descriptor shard and the census environment, which an ordinary unit run must not
+require.
+
 `PACK_NAME` selects the wired pack target whose `OUT_ROOT` and recorded arch list the
-entries address. Per declared suite and per arch in that list, CMake registers
-`hip-kernel-provider-hkp-census-<arch>-<suite>`, invoking `hip_kernel_provider_tests
---gtest_filter=<suite>.*` directly, without Python, with
+entries address. `ARCHES` optionally narrows that list: omitted, the suites register at
+every arch the pack target was wired for; given, at the intersection of the named arches
+with that list; naming the keyword with no arch is fatal. A suite whose fixtures cover the
+whole root, like `TestPointwisePacks` above, omits it. A suite stating the inventory of a
+bundle that emits for specific arches names them — the gfx950 dense-attention census
+passes `ARCHES gfx950` — so a build packing other arches registers nothing for it rather
+than asserting that inventory against a shard that never held it.
+
+Per declared suite and per eligible arch, CMake registers
+`hip-kernel-provider-hkp-census-<arch>-<suite>`, invoking
+`hip_kernel_provider_census_tests --gtest_filter=<suite>.*` directly, without Python, with
 `HIPDNN_TEST_CENSUS_SUITE=<suite>`, `HIPDNN_TEST_EXPECTED_ARCH=<arch>` and
 `HIPDNN_DESCRIPTOR_DIR=<OUT_ROOT>/<arch>` — its own shard, not a shared stage tree. Each
-entry is an independent process labeled `unit_test;hip-kernel-provider;host`.
+entry is an independent process labeled `unit_test;hip-kernel-provider;host`, plus the
+tier labels `HKP_PACK_CTEST_CATEGORIES_YAML` assigns it; the installed twin carries the
+same labels as the build-tree entry.
 
 ```bash
 ctest --test-dir <build>/dnn-providers/hip-kernel-provider \

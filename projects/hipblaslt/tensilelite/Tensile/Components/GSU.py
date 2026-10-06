@@ -375,7 +375,9 @@ class GSUOn(GSU):
             module.add(gsuwgmrrLabelEnd)
         writer.vgprPool.checkIn(tmpVgpr)
         module.add(SMovB32(dst=sgpr("GSULog2BpeC"), src=log2(int(writer.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters()))))
-        module.add(SMovB32(dst=sgpr("GSULog2BpeD"), src=log2(writer.states.bpeCinternal)))
+        # bpeCexternal is the fp32 internal size for a staging workspace, but
+        # stays at the BF16 dest size when the atomics target D directly.
+        module.add(SMovB32(dst=sgpr("GSULog2BpeD"), src=log2(writer.states.bpeCexternal if writer.states.useAtomicPkAddBF16 else writer.states.bpeCinternal)))
 
         module.add(SBranch(gsuLabelEnd.getLabelName()))
         module.add(gsuLabel)

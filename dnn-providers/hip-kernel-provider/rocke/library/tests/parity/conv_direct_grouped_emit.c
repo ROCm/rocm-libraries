@@ -546,9 +546,9 @@ static int make_cfg(int idx,
         *arch = "gfx950";
         return 0;
     case 32:
-        /* column-streamed depthwise, stride=1 fp16, both tile guards elided
-         * (groups % block_ch == 0 and Wo % block_w == 0): addr() must emit a
-         * bare mul with no select at all. */
+        /* column-streamed depthwise, stride=1 fp16, default 16-row tile. Exact
+         * channel and W tiles, but the guards bound against kernargs (AOT), so
+         * they are emitted all the same. */
         p.N = 2;
         p.H = 8;
         p.W = 8;
@@ -564,7 +564,8 @@ static int make_cfg(int idx,
         *arch = "gfx950";
         return 0;
     case 33:
-        /* col stride=2 bf16 with BOTH guards live (groups=70 % 64, Wo=5 % 4) */
+        /* col stride=2 bf16 with partial channel and W tiles (groups=70 % 64,
+         * Wo=5 % 4) and two-row tiles, so Ho=5 needs a partial last row tile. */
         p.N = 1;
         p.H = 9;
         p.W = 9;
@@ -574,6 +575,7 @@ static int make_cfg(int idx,
         p.stride = 2;
         *sdwc = rocke_direct_depthwise_col_spec_default();
         sdwc->problem = p;
+        sdwc->block_h = 2;
         sdwc->block_w = 4;
         sdwc->block_waves = 1;
         sdwc->dtype = "bf16";
@@ -582,7 +584,7 @@ static int make_cfg(int idx,
         return 0;
     case 34:
         /* col stride=3: exercises the (y - r) % stride tap pruning at a stride
-         * no other case reaches; ch guard elided, w guard live. */
+         * no other case reaches. */
         p.N = 1;
         p.H = 16;
         p.W = 16;
@@ -600,7 +602,8 @@ static int make_cfg(int idx,
         return 0;
     case 35:
         /* col with a large filter (31x31): the regime the variant exists for --
-         * KW rides the runtime loop so only KH weights are live. */
+         * KW rides the runtime loop so only KH weights are live. A 4-row tile
+         * still unrolls (4-1)+31 input rows. */
         p.N = 1;
         p.H = 8;
         p.W = 8;
@@ -612,6 +615,7 @@ static int make_cfg(int idx,
         p.PAD = 15;
         *sdwc = rocke_direct_depthwise_col_spec_default();
         sdwc->problem = p;
+        sdwc->block_h = 4;
         sdwc->block_w = 4;
         sdwc->block_waves = 1;
         sdwc->dtype = "fp16";
@@ -657,7 +661,7 @@ static int make_cfg(int idx,
         *arch = "gfx950";
         return 0;
     case 38:
-        /* col stride=2 with valid padding (PAD=0), both guards elided */
+        /* col stride=2 with valid padding (PAD=0) and an odd 3-row tile */
         p.N = 1;
         p.H = 13;
         p.W = 13;
@@ -668,6 +672,7 @@ static int make_cfg(int idx,
         p.stride = 2;
         *sdwc = rocke_direct_depthwise_col_spec_default();
         sdwc->problem = p;
+        sdwc->block_h = 3;
         sdwc->block_w = 6;
         sdwc->block_waves = 1;
         sdwc->dtype = "fp16";
@@ -691,8 +696,8 @@ static int make_cfg(int idx,
         *arch = "gfx950";
         return 0;
     case 40:
-        /* dwcol PAD-overhang: PAD=2 > (KH-1)/2=1 with stride=2.
-         * Cross-verifies the n_iters = (Ho-1)*stride + KH formula. */
+        /* dwcol PAD-overhang: PAD=2 > (KH-1)/2=1 with stride=2 and two-row
+         * tiles. Cross-verifies the n_iters = (block_h-1)*stride + KH formula. */
         p.N = 1;
         p.H = 10;
         p.W = 10;
@@ -705,6 +710,7 @@ static int make_cfg(int idx,
         p.stride = 2;
         *sdwc = rocke_direct_depthwise_col_spec_default();
         sdwc->problem = p;
+        sdwc->block_h = 2;
         sdwc->block_w = 4;
         sdwc->block_waves = 1;
         sdwc->dtype = "fp16";

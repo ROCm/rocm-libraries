@@ -68,7 +68,7 @@ def make_config(
 
     # Select the following type names
     # TODO: derive this from alg name maybe?
-    type_names = ["key_type", "value_type", "data_type", "flag_type", "input_type", "output_type"]
+    type_names = ["key_type", "value_type", "data_type", "flag_type", "input_type", "output_type", "channels", "active_channels"]
     # Only select relevant types
     type_info = {k: type_data[k] for k in type_names if k in type_data}
 

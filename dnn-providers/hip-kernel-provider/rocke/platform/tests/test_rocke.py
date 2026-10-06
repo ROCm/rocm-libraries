@@ -57,6 +57,7 @@ from rocke import (
     select_3d_config,
     use_2d_kernel,
 )
+from rocke.core.backend import _cpp_strict, resolve_backend
 from rocke.helpers import (
     AsyncTileLoader,
     CoalescedTileLoader,
@@ -1612,28 +1613,41 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
         self.assertIs(_datalayout_kind_from_ir(legacy), LlvmDatalayoutKind.P8_PLAIN)
         self.assertIsNone(_datalayout_kind_from_ir("define void @k() {}"))
 
-    def test_llvm23_datalayout_is_llvm22_plus_me_mangling(self):
+    def test_llvm23_datalayout_is_llvm22_plus_me_and_p10_p15(self):
         """llvm23 is no longer an alias of llvm22: it is the llvm22 layout with
         the ELF ``m:e`` symbol-mangling spec spliced in after the leading
-        endianness field.
+        endianness field AND address spaces ``p10``-``p15`` (upstream
+        ``5bf967cb132b``) spliced in after ``p9``.
 
-        The toolchain drift guard proves this only on a ROCm 7.13+ host with
-        hipcc; this pins the same contract on the bare CI gate, so an accidental
-        re-alias (or a stray edit to either constant) fails here with a precise
-        message instead of surfacing as an opaque byte-identity golden diff.
+        The toolchain drift guard needs a host with hipcc; this pins the same
+        contract on the bare CI gate, so an accidental re-alias (or a stray edit
+        to either constant) fails here with a precise message instead of
+        surfacing as an opaque byte-identity golden diff.
         """
         from rocke.core.lower_llvm import _DATALAYOUT_LLVM22, _DATALAYOUT_LLVM23
+
+        p10_p15 = "-p10:32:32-p11:32:32-p12:32:32-p13:32:32-p14:32:32-p15:32:32"
 
         self.assertNotEqual(
             _DATALAYOUT_LLVM23,
             _DATALAYOUT_LLVM22,
-            "llvm23 is no longer an alias of llvm22 (it adds the m:e spec)",
+            "llvm23 is no longer an alias of llvm22 (it adds m:e and p10-p15)",
+        )
+        # Name the p10-p15 block on its own: dropping it is the regression that
+        # breaks codegen on a clang that enforces the supplied module DataLayout,
+        # and a bare string-equality failure would not say which field went.
+        self.assertIn(
+            "-p9:192:256:256:32" + p10_p15 + "-i64:64",
+            _DATALAYOUT_LLVM23,
+            "llvm23 datalayout must carry address spaces p10-p15 between p9 and i64",
         )
         self.assertEqual(
             _DATALAYOUT_LLVM23,
-            _DATALAYOUT_LLVM22.replace("e-", "e-m:e-", 1),
+            _DATALAYOUT_LLVM22.replace("e-", "e-m:e-", 1).replace(
+                "-i64:64", p10_p15 + "-i64:64", 1
+            ),
             "llvm23 datalayout must be the llvm22 layout plus the m:e "
-            "symbol-mangling spec",
+            "symbol-mangling spec and address spaces p10-p15",
         )
 
     def test_flavor_for_rocm_clamps_at_both_ends(self):
@@ -3632,7 +3646,15 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         b = self._builder("av_lds")
         p = b.param("p", PtrType(I32, "lds"), align=16)
         b.av_load_b128(p)
-        with self.assertRaises(ValueError):
+        # Permissive C++ mode falls back even when the native engine rejects IR.
+        error_type = (
+            RuntimeError if resolve_backend() == "cpp" and _cpp_strict() else ValueError
+        )
+        with self.assertRaisesRegex(
+            error_type,
+            r"av_load_b128: pointer operand is ptr addrspace\(3\), "
+            r"but the intrinsic accepts only ptr, ptr addrspace\(1\)",
+        ):
             lower_kernel_to_llvm(b.kernel)
 
     def test_av_store_b128_requires_v4i32_data(self):
@@ -3731,7 +3753,14 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         b = self._builder("sprefetch_lds")
         p = b.param("p", PtrType(I32, "lds"), align=4)
         b.s_prefetch_inst(p, b.const_i32(64))
-        with self.assertRaises(ValueError):
+        error_type = (
+            RuntimeError if resolve_backend() == "cpp" and _cpp_strict() else ValueError
+        )
+        with self.assertRaisesRegex(
+            error_type,
+            r"s_prefetch_inst: pointer operand is ptr addrspace\(3\), "
+            r"but the intrinsic accepts only ptr, ptr addrspace\(1\), ptr addrspace\(4\)",
+        ):
             lower_kernel_to_llvm(b.kernel)
 
     # ---- async buffer / global -> LDS ----
@@ -3820,6 +3849,34 @@ class TestNewTargetIntrinsics(unittest.TestCase):
             b.global_load_async_to_lds(
                 src, b.const_i32(0), lds, [b.const_i32(0)], width_bytes=2
             )
+
+
+@pytest.mark.parametrize("strict", ["0", "1"])
+@pytest.mark.parametrize("op", ["av_load_b128", "s_prefetch_inst"])
+def test_lds_rejection_without_cpp_binding(monkeypatch, strict, op):
+    """Exercise installed CI's missing-binding path even in a native dev build."""
+    import sys
+
+    from rocke.core.backend import BackendError
+
+    monkeypatch.setenv("ROCKE_BACKEND", "cpp")
+    monkeypatch.setenv("ROCKE_CPP_STRICT", strict)
+    monkeypatch.setitem(sys.modules, "rocke_engine", None)
+    b = IRBuilder("missing_binding_lds")
+    p = b.param("p", PtrType(I32, "lds"), align=16)
+    if op == "av_load_b128":
+        b.av_load_b128(p)
+    else:
+        b.s_prefetch_inst(p, b.const_i32(64))
+    if strict == "1":
+        error_type, message = BackendError, "rocke_engine.*not importable"
+    else:
+        error_type, message = (
+            ValueError,
+            rf"{op}: pointer operand is ptr addrspace\(3\)",
+        )
+    with pytest.raises(error_type, match=message):
+        lower_kernel_to_llvm(b.kernel, llvm_flavor="llvm23", arch="gfx1250")
 
 
 class TestBothBackendDifferentialGate(unittest.TestCase):
@@ -6716,6 +6773,7 @@ class TestLibDiscoveryOrder(unittest.TestCase):
                 self.assertFalse(rc._torch_comgr_is_stale())
 
     def test_stale_comgr_demotion_fires_through_a_symlinked_root(self):
+        import os
         import sys
         import types
         from unittest import mock
@@ -6727,10 +6785,14 @@ class TestLibDiscoveryOrder(unittest.TestCase):
 
         with mock.patch.dict(sys.modules, {"torch": torch_stub}):
             with mock.patch.object(
-                rc, "_rocm_root_libdirs", return_value=["/opt/rocm/lib"]
+                rc,
+                "_rocm_root_libdirs",
+                return_value=[os.path.normpath("/opt/rocm/lib")],
             ):
                 with mock.patch.object(
-                    rc.os.path, "realpath", return_value="/opt/rocm-7.2.3/lib"
+                    rc.os.path,
+                    "realpath",
+                    return_value=os.path.normpath("/opt/rocm-7.2.3/lib"),
                 ):
                     self.assertEqual(rc._newest_rocm_root_version(), (7, 2))
                     self.assertTrue(rc._torch_comgr_is_stale())

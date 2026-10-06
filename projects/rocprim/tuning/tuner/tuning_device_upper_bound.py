@@ -39,4 +39,3 @@ class UpperBoundTuner(Tuner):
 
 if __name__ == "__main__":
     UpperBoundTuner.cli()
-    

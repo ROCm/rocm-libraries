@@ -215,10 +215,11 @@ class TestArchShapeCheck:
             warnings_out = _check_arch_shape(config)
         assert len(warnings_out) == 1
 
-    def test_recognized_arch_produces_no_warning(self):
+    @pytest.mark.parametrize("arch", ["gfx942", "gfx1250", "gfx1250-strict"])
+    def test_recognized_arch_produces_no_warning(self, arch):
         from codegen.config_loader import _check_arch_shape
 
-        pack = make_pack(arch=["gfx942"])
+        pack = make_pack(arch=[arch])
         config = make_minimal_config(packs=[pack])
         warnings_out = _check_arch_shape(config)
         assert warnings_out == []
@@ -261,6 +262,15 @@ class TestKernelSourceKindRejection:
         from codegen.config_loader import _check_kernel_source_kind_implemented
 
         config = make_minimal_config(kernel_source_kind="rocke")
+        with pytest.raises(ConfigError, match="belongs to dialect 'packaged'"):
+            _check_kernel_source_kind_implemented(config)
+
+    def test_hsaco_under_direct_load_names_the_right_dialect(self):
+        """'hsaco' is a packaged kind: hkp_pack packs it, the direct-load reader never
+        sees it."""
+        from codegen.config_loader import _check_kernel_source_kind_implemented
+
+        config = make_minimal_config(kernel_source_kind="hsaco")
         with pytest.raises(ConfigError, match="belongs to dialect 'packaged'"):
             _check_kernel_source_kind_implemented(config)
 
@@ -1196,13 +1206,66 @@ class TestRepeatedYamlKeys:
 
 class TestShippedExampleConfigsLoad:
     """Every config under `configs/` is a worked example a reader copies, so a retired
-    key they still set would make each copy a config the loader refuses."""
+    key they still set would make each copy a config the loader refuses.
 
-    def test_every_shipped_config_loads(self, configs_dir):
-        paths = sorted(configs_dir.glob("*.yaml"))
-        assert len(paths) == 5
+    `configs/` holds TWO schemas. `*.profile.yaml` is a dispatch profile: it names the
+    dispatcher, request class and predicate the tools import, and carries none of the
+    keys `load_config` requires. Selecting it by extension alone feeds the wrong schema
+    into the generator loader, so it is selected out here and checked through the loader
+    that owns it.
+    """
+
+    @staticmethod
+    def _generator_configs(configs_dir):
+        return sorted(
+            path
+            for path in configs_dir.glob("*.yaml")
+            if not path.name.endswith(".profile.yaml")
+        )
+
+    def test_every_shipped_generator_config_loads(self, configs_dir):
+        paths = self._generator_configs(configs_dir)
+        assert paths, f"no generator configs found under {configs_dir}"
         for path in paths:
             assert load_config(path).engine.name
+
+    def test_every_shipped_dispatch_profile_loads_through_its_own_loader(
+        self, configs_dir
+    ):
+        """The profiles are shipped worked examples too, so leaving them unchecked
+        would just move the gap rather than close it."""
+        # Imported here rather than at module scope: this suite is about
+        # codegen.config_loader, and `tools/` is not otherwise on its path.
+        import sys
+        from pathlib import Path
+
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import dispatch_parity
+
+        paths = sorted(configs_dir.glob("*.profile.yaml"))
+        assert paths, f"no dispatch profiles found under {configs_dir}"
+        for path in paths:
+            profile = dispatch_parity._load_profile(str(path))
+            # The blocks every profile tool dereferences; `_required` is the tool's
+            # own check, so this cannot drift from what the tools demand.
+            for scope, keys in (
+                ("dispatch", ("module", "function")),
+                ("request", ("module", "class")),
+                ("predicate", ("module", "function")),
+            ):
+                dispatch_parity._required(profile[scope], scope, *keys)
+            assert profile["provider_root"], path
+
+    def test_a_dispatch_profile_is_not_a_generator_config(self, configs_dir):
+        """The control for the selection above: if `load_config` ever accepted a
+        profile, the split would be silently unnecessary and the next reader would
+        re-merge it."""
+        profiles = sorted(configs_dir.glob("*.profile.yaml"))
+        assert profiles, f"no dispatch profiles found under {configs_dir}"
+        assert not [p for p in self._generator_configs(configs_dir) if p in profiles]
+        for path in profiles:
+            with pytest.raises(ConfigError):
+                load_config(path)
 
 
 class TestBehaviorNotesVocabulary:
@@ -2659,3 +2722,100 @@ class TestExpandedKernelsAreKeyChecked:
         raw = self._axes_raw()
         raw["packs"][0]["kernel_template"]["kernel_source"]["spec"] = {"seqlen_q": 256}
         assert self._load(tmp_path, raw) is not None
+
+
+class TestHsacoKernelSource:
+    """A packaged ``hsaco`` kernel names a prebuilt code object by ``file`` and
+    ``symbol``; hkp_pack packs it as-is, so no builder object exists to check."""
+
+    @staticmethod
+    def _raw(**kernel_source):
+        source = {
+            "kind": "hsaco",
+            "file": "HsacoFixture.co",
+            "symbol": "HsacoFixtureAdd",
+        }
+        source.update(kernel_source)
+        return {
+            "dialect": "packaged",
+            "kernel_source_kind": "hsaco",
+            "engine": {"name": "hipkernel:Test", "knobs": ["block_size"]},
+            "kmd_fields": [{"name": "block_size", "type": "int", "default_value": 64}],
+            "specialization": {
+                "metadata_fields": [],
+                "matcher_only_fields": ["block_size"],
+                "bindings": {},
+                "vocabulary": {},
+            },
+            "packs": [
+                {
+                    "name": "p",
+                    "arch": ["gfx942"],
+                    "kernels": [
+                        {
+                            "name": "k1",
+                            "kernel_source": source,
+                            "arch": ["gfx942"],
+                            "metadata": {"block_size": 64},
+                        }
+                    ],
+                }
+            ],
+        }
+
+    @staticmethod
+    def _load(tmp_path, raw):
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        return load_config(path)
+
+    def test_a_packaged_hsaco_config_carries_file_and_symbol(self, tmp_path):
+        config = self._load(tmp_path, self._raw())
+        ks = config.packs[0].kernels[0].kernel_source
+        assert (ks.kind, ks.file, ks.symbol) == (
+            "hsaco",
+            "HsacoFixture.co",
+            "HsacoFixtureAdd",
+        )
+
+    def test_a_kernel_and_pack_without_arch_is_refused(self, tmp_path):
+        from codegen.config_loader import _check_kernel_source_fields
+
+        raw = self._raw()
+        del raw["packs"][0]["kernels"][0]["arch"]
+        config = self._load(tmp_path, raw)
+        config.packs[0].arch = []
+        with pytest.raises(ConfigError, match="neither the kernel nor its pack"):
+            _check_kernel_source_fields(config)
+
+    def test_a_kernel_inherits_its_packs_arch_into_the_descriptor(self, tmp_path):
+        from codegen.generator import build_kdp, mint_ids
+
+        raw = self._raw()
+        del raw["packs"][0]["kernels"][0]["arch"]
+        config = self._load(tmp_path, raw)
+        kdp = build_kdp(config, config.packs[0], mint_ids(config))
+        assert kdp["kernelDescriptors"][0]["arch"] == ["gfx942"]
+
+    def test_a_missing_symbol_is_refused(self, tmp_path):
+        raw = self._raw()
+        del raw["packs"][0]["kernels"][0]["kernel_source"]["symbol"]
+        with pytest.raises(ConfigError, match="requires file, symbol"):
+            self._load(tmp_path, raw)
+
+    def test_another_kinds_key_is_refused_by_the_closed_key_set(self, tmp_path):
+        raw = self._raw(source="HsacoFixture.cpp")
+        with pytest.raises(ConfigError, match=r"\['source'\], which kind 'hsaco'"):
+            self._load(tmp_path, raw)
+
+    def test_specialized_metadata_fields_are_refused(self, tmp_path):
+        """A prebuilt object hydrates no builder, so a binding reads nothing back."""
+        raw = self._raw()
+        raw["specialization"] = {
+            "metadata_fields": ["block_size"],
+            "matcher_only_fields": [],
+            "bindings": {"block_size": {"field": "block_size"}},
+            "vocabulary": {},
+        }
+        with pytest.raises(ConfigError, match="compiled specialization"):
+            self._load(tmp_path, raw)

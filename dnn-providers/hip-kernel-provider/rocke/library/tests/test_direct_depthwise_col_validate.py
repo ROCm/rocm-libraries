@@ -53,12 +53,20 @@ _BASE_PROBLEM = dict(
 
 
 def _spec(
-    *, block_w=1, block_waves=1, dtype="fp16", max_live_f32=None, wave_size=64, **pkw
+    *,
+    block_h=16,
+    block_w=1,
+    block_waves=1,
+    dtype="fp16",
+    max_live_f32=None,
+    wave_size=64,
+    **pkw,
 ):
     problem = DirectConvProblem(**{**_BASE_PROBLEM, **pkw})
     return DirectDepthwiseColSpec(
         problem=problem,
         name="validate_dwcol",
+        block_h=block_h,
         block_w=block_w,
         block_waves=block_waves,
         dtype=dtype,
@@ -84,6 +92,8 @@ _REJECTIONS = [
     ("dtype_empty", dict(dtype=""), ["''"], _ARCH),
     ("dtype_none", dict(dtype=None), ["None"], _ARCH),
     # --- block geometry ----------------------------------------------------
+    ("block_h_zero", dict(block_h=0), ["block_h", "0"], _ARCH),
+    ("block_h_negative", dict(block_h=-2), ["block_h", "-2"], _ARCH),
     ("block_w_zero", dict(block_w=0), ["block_w", "0"], _ARCH),
     ("block_w_negative", dict(block_w=-2), ["block_w", "-2"], _ARCH),
     # block_w larger than Wo wastes masked loads with no output contribution.
@@ -98,11 +108,11 @@ _REJECTIONS = [
         _ARCH,
     ),
     # --- register pressure -------------------------------------------------
-    # Ho*block_w + KH = 64*4 + 3 = 259 f32 live per lane, past the 192 that
-    # gfx950's 512-VGPR file affords at 3/8 occupancy budget.
+    # block_h*block_w + KH = 64*4 + 3 = 259 f32 live per lane, past the 192
+    # that gfx950's 512-VGPR file affords at 3/8 occupancy budget.
     (
         "live_f32_over_budget",
-        dict(H=64, W=64, block_w=4),
+        dict(block_h=64, block_w=4),
         ["259", "192"],
         _ARCH,
     ),
@@ -115,11 +125,11 @@ _REJECTIONS = [
         _ARCH,
     ),
     # --- degenerate geometry ----------------------------------------------
-    # KH=1 with PAD=1 grows the output past the input; the accumulator band is
-    # sized on Ho and the kernel has no rows to read for the overhang.
+    # KH=1 with PAD=1 grows the output past the input, a configuration the
+    # kernel has no use case for at stride 1.
     ("ho_exceeds_h", dict(H=8, W=8, KH=1, KW=1), ["Ho=10", "H=8"], _ARCH),
-    # Filter larger than the padded input: Ho/Wo go non-positive and the
-    # builder would otherwise emit a kernel with an empty accumulator band.
+    # Filter larger than the padded input: Ho/Wo go non-positive, so the
+    # launch grid would be empty.
     ("ho_non_positive", dict(H=4, W=4, KH=9, KW=9, PAD=0), ["Ho=-4"], _ARCH),
     ("wo_non_positive", dict(H=16, W=4, KH=3, KW=9, PAD=0), ["Wo=-4"], _ARCH),
     # --- problem geometry --------------------------------------------------
@@ -131,8 +141,7 @@ _REJECTIONS = [
     ("kh_zero", dict(KH=0), ["KH=0"], _ARCH),
     ("kw_zero", dict(KW=0), ["KW=0"], _ARCH),
     # PAD at/past the filter extent makes the first output row read nothing but
-    # padding. At stride > 1 the Ho <= H check no longer bounds PAD, so without
-    # this the host-side n_iters = (Ho-1)*stride + KH loop is unbounded.
+    # padding. At stride > 1 the Ho <= H check no longer bounds PAD.
     (
         "pad_at_filter_extent",
         dict(KH=3, KW=3, PAD=3, stride=2),
@@ -207,12 +216,13 @@ def test_col_spec_accepted_across_dtype_and_stride(dtype, stride):
     assert kernel.name == spec.kernel_name()
 
 
-def test_col_kernel_names_separate_dtype_and_stride():
+def test_col_kernel_names_separate_dtype_stride_and_row_tile():
     """The cache key must distinguish variants that emit different code."""
     names = {
-        (dt, s): _spec(dtype=dt, stride=s).kernel_name()
+        (dt, s, bh): _spec(dtype=dt, stride=s, block_h=bh).kernel_name()
         for dt in ("fp16", "bf16")
         for s in (1, 2, 3)
+        for bh in (8, 16)
     }
     assert len(set(names.values())) == len(names), names
 
@@ -270,13 +280,28 @@ def test_preload_spec_rejects_oversized_filter():
         build_direct_depthwise(spec, arch=_ARCH)
 
 
-def test_preload_spec_accepts_filter_at_the_ceiling():
-    """The gate must be a ceiling, not an off-by-one that rejects the boundary."""
-    # 10x20 = 200 taps, exactly _DW_MAX_PRELOAD_TAPS.
-    spec = _preload_spec(H=14, W=28, KH=10, KW=20, PAD=0)
-    assert spec.problem.KH * spec.problem.KW == _DW_MAX_PRELOAD_TAPS
+def test_preload_spec_accepts_filter_at_the_ceiling(monkeypatch):
+    """The gate must be a ceiling, not an off-by-one that rejects the boundary.
+
+    Forward depthwise only takes odd filters with "same" padding, so no
+    reachable filter has exactly ``_DW_MAX_PRELOAD_TAPS`` = 200 taps (an odd
+    product). The boundary is pinned by moving the ceiling onto a reachable
+    tap count instead: 13x15 = 195 taps.
+    """
+    import kernels.common.conv_direct_grouped as dc
+
+    spec = _preload_spec(H=14, W=28, KH=13, KW=15, PAD=6)
+    taps = spec.problem.KH * spec.problem.KW
+    assert taps <= _DW_MAX_PRELOAD_TAPS
     ok, reason = is_valid_depthwise_spec(spec, _ARCH)
     assert ok, reason
+
+    monkeypatch.setattr(dc, "_DW_MAX_PRELOAD_TAPS", taps)
+    ok, reason = is_valid_depthwise_spec(spec, _ARCH)
+    assert ok, reason
+    monkeypatch.setattr(dc, "_DW_MAX_PRELOAD_TAPS", taps - 1)
+    ok, reason = is_valid_depthwise_spec(spec, _ARCH)
+    assert not ok and str(taps) in reason
 
 
 def test_preload_spec_rejects_non_depthwise_and_unknown_arch():

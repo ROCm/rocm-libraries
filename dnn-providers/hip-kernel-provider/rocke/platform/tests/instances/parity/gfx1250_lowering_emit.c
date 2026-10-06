@@ -170,6 +170,16 @@ static void build_wmma_scale16_bf8(rocke_ir_builder_t* b)
     wmma_scaled(b, true, "bf8e5m2");
 }
 
+static void build_wmma_scale_fp4(rocke_ir_builder_t* b)
+{
+    wmma_scaled(b, false, "fp4e2m1");
+}
+
+static void build_wmma_scale16_fp4(rocke_ir_builder_t* b)
+{
+    wmma_scaled(b, true, "fp4e2m1");
+}
+
 /* ds_read_b128_tr_b16. gfx950 has one type-agnostic opcode returning
  * <8 x i16> that the handler reinterprets; gfx1250 has per-element-type
  * opcodes (.v8f16 / .v8bf16) that land in the right type with no reinterpret. */
@@ -383,6 +393,8 @@ typedef struct config
 {
     build_fn_t build;
     const char* arch;
+    const char* dtype;
+    bool scale16;
 } config_t;
 
 /* Each gfx1250 config that tests a *choice* of encoding is followed by its
@@ -397,6 +409,8 @@ static const config_t CONFIGS[] = {
     {build_wmma_k64_bf8_bf8, "gfx1250"},
     {build_wmma_scale, "gfx1250"},
     {build_wmma_scale16, "gfx1250"},
+    {build_wmma_scale_fp4, "gfx1250"},
+    {build_wmma_scale16_fp4, "gfx1250"},
     {build_tr16_f16, "gfx1250"},
     {build_tr16_f16, "gfx950"},
     {build_tr16_bf16, "gfx1250"},
@@ -411,6 +425,10 @@ static const config_t CONFIGS[] = {
     {build_global_tr16_bf16, "gfx1250"},
     {build_global_tr16_i16, "gfx1250"},
     {build_tensor_transfers, "gfx1250"},
+    {NULL, "gfx1250", "fp6", false},
+    {NULL, "gfx1250", "bf6", false},
+    {NULL, "gfx1250", "fp6", true},
+    {NULL, "gfx1250", "bf6", true},
     {build_wmma_scale_bf8, "gfx1250"},
     {build_wmma_scale16_bf8, "gfx1250"},
     {build_scale_coordinates_k32, "gfx1250"},
@@ -449,7 +467,14 @@ int main(int argc, char** argv)
     }
     /* Python: b.kernel.attrs["max_workgroup_size"] = 64 */
     rocke_attr_set_int(&b, &b.kernel->attrs, "max_workgroup_size", 64);
-    CONFIGS[idx].build(&b);
+    if(CONFIGS[idx].build)
+    {
+        CONFIGS[idx].build(&b);
+    }
+    else
+    {
+        wmma_scaled(&b, CONFIGS[idx].scale16, CONFIGS[idx].dtype);
+    }
 
     if(!rocke_ir_builder_ok(&b))
     {

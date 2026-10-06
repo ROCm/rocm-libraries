@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,7 +35,7 @@ using namespace std;
 
 typedef std::tuple<vector<int>, printable_char> stedc_tuple;
 
-// each size_range vector is a {N, ldc}
+// each size_range vector is a {N, ldc, singular}
 
 // each op_range vector is a {e}
 
@@ -47,18 +47,21 @@ const vector<printable_char> op_range = {'N', 'I', 'V'};
 // for checkin_lapack tests
 const vector<vector<int>> matrix_size_range = {
     // quick return
-    {0, 1},
+    {0, 1, 0},
     // invalid
-    {-1, 1},
+    {-1, 1, 0},
     // invalid for case evect != N
-    {2, 1},
+    {2, 1, 0},
     // normal (valid) samples
-    {12, 12},
-    {20, 30},
-    {35, 40}};
+    {12, 12, 0},
+    {20, 30, 0},
+    {35, 40, 0},
+    {40, 40, 3}};
 
 // for daily_lapack tests
-const vector<vector<int>> large_matrix_size_range = {{192, 192}, {250, 250}, {256, 270}, {300, 300}};
+const vector<vector<int>> large_matrix_size_range
+    = {{192, 192, 0}, {250, 250, 0}, {256, 270, 0}, {300, 300, 0},
+       {300, 300, 1}, {310, 310, 2}, {350, 350, 3}};
 
 Arguments stedc_setup_arguments(stedc_tuple tup)
 {
@@ -69,6 +72,7 @@ Arguments stedc_setup_arguments(stedc_tuple tup)
 
     arg.set<rocblas_int>("n", size[0]);
     arg.set<rocblas_int>("ldc", size[1]);
+    arg.singular = size[2];
 
     arg.set<char>("evect", op);
 

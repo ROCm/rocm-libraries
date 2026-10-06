@@ -24,8 +24,9 @@
 #include "BundleFixtureFiles.hpp"
 #include "HarnessTestSupport.hpp"
 #include "harness/ReferenceCapabilityError.hpp"
-#include "harness/bundle/BundleReferenceValidationHarness.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
+#include "harness/reference-validation/BundleReferenceValidationHarness.hpp"
+#include "harness/reference-validation/ReferenceOpCoverage.hpp"
 #include "mocks/MockReferenceExecutors.hpp"
 
 using namespace hipdnn_integration_tests;
@@ -88,12 +89,38 @@ protected:
         }
     }
 
-    // Gives a harness a bundle that has golden data. The harness itself is built by
-    // each case: ::testing::Test is non-copyable, so it cannot be handed back.
+    // Gives a harness a bundle that has golden data and no expected gap: these cases
+    // exercise the ordinary path, not the known-gap one. The harness itself is built
+    // by each case: ::testing::Test is non-copyable, so it cannot be handed back.
     void setGoldenBundle(BundleReferenceValidationHarness& harness)
     {
         harness.setBundle(fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true),
-                          _tempDir / "Bundle");
+                          _tempDir / "Bundle",
+                          /*expectedGap=*/std::nullopt);
+    }
+
+    // Same, but expecting the reference to decline under `gap`.
+    void setGoldenBundleExpecting(BundleReferenceValidationHarness& harness,
+                                  const KnownReferenceGap& gap)
+    {
+        harness.setBundle(fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true),
+                          _tempDir / "Bundle",
+                          gap);
+    }
+
+    // The first GPU entry in the table, or empty once every gap has been closed.
+    // Taken from the live table rather than hardcoded so these cases follow the list
+    // instead of pinning one bundle name that is expected to be deleted.
+    static std::optional<KnownReferenceGap> aKnownGpuGap()
+    {
+        for(const auto& gap : knownReferenceGaps())
+        {
+            if(gap.reference == ReferenceExecutorType::GPU)
+            {
+                return gap;
+            }
+        }
+        return std::nullopt;
     }
 };
 
@@ -107,7 +134,7 @@ TEST_F(TestBundleReferenceValidationHarness, SetUpFailsForABundleRegisteredWithN
     auto bundle = fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/false);
     BundleReferenceValidationHarness harness(
         ReferenceExecutorType::CPU, /*requiresDevice=*/false, executors());
-    harness.setBundle(bundle, _tempDir / "Bundle");
+    harness.setBundle(bundle, _tempDir / "Bundle", /*expectedGap=*/std::nullopt);
 
     ::testing::TestPartResultArray results;
     driveSetUp(harness, &results);
@@ -127,7 +154,7 @@ TEST_F(TestBundleReferenceValidationHarness, SetUpFailsForABundleRegisteredWithN
 
     BundleReferenceValidationHarness harness(
         ReferenceExecutorType::CPU, /*requiresDevice=*/false, executors());
-    harness.setBundle(bundle, "no-tensor-data-bundle");
+    harness.setBundle(bundle, "no-tensor-data-bundle", /*expectedGap=*/std::nullopt);
 
     ::testing::TestPartResultArray results;
     driveSetUp(harness, &results);
@@ -161,7 +188,7 @@ TEST_F(TestBundleReferenceValidationHarness,
     auto bundle = fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true);
     BundleReferenceValidationHarness harness(
         ReferenceExecutorType::GPU, /*requiresDevice=*/true, executors());
-    harness.setBundle(bundle, _tempDir / "Bundle");
+    harness.setBundle(bundle, _tempDir / "Bundle", /*expectedGap=*/std::nullopt);
 
     // Driven through TestBody() directly rather than SetUp()+TestBody(): SetUp()'s
     // SKIP_IF_NO_DEVICES() gate is keyed off the registration flag alone and would
@@ -199,7 +226,7 @@ TEST_F(TestBundleReferenceValidationHarness,
     auto bundle = fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true);
     BundleReferenceValidationHarness harness(
         ReferenceExecutorType::GPU, /*requiresDevice=*/true, executors());
-    harness.setBundle(bundle, _tempDir / "Bundle");
+    harness.setBundle(bundle, _tempDir / "Bundle", /*expectedGap=*/std::nullopt);
 
     // Not driven through SetUp(): same seam as above. The guard at the top of this
     // test already confirmed a device is present for this process.
@@ -238,6 +265,89 @@ TEST_F(TestBundleReferenceValidationHarness, InapplicableReferenceFailsRatherTha
     EXPECT_NE(testing_support::allMessages(results).find("is required to support this graph"),
               std::string::npos)
         << testing_support::allMessages(results);
+}
+
+// A bundle on the known-gap list still runs; it just expects the reference to
+// decline. That keeps the gap counted and named instead of skipped, and keeps the
+// suite green while the missing shapes are implemented elsewhere.
+TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleThatIsDeclinedPasses)
+{
+    const auto gap = aKnownGpuGap();
+    if(!gap.has_value())
+    {
+        GTEST_SKIP() << "knownReferenceGaps() has no GPU entries left — nothing to exercise.";
+    }
+
+    ON_CALL(_gpuExecutor, isApplicable(::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(false));
+    EXPECT_CALL(_gpuExecutor, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    setGoldenBundleExpecting(harness, *gap);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results)) << testing_support::allMessages(results);
+}
+
+// A reference may decline by throwing ReferenceCapabilityError instead of returning
+// false. That is the same answer, so a listed gap declined that way must pass too,
+// not fail as an escaped exception.
+TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleDeclinedByThrowingPasses)
+{
+    const auto gap = aKnownGpuGap();
+    if(!gap.has_value())
+    {
+        GTEST_SKIP() << "knownReferenceGaps() has no GPU entries left — nothing to exercise.";
+    }
+
+    ON_CALL(_gpuExecutor, isApplicable(::testing::_, ::testing::_))
+        .WillByDefault([](void*, size_t) -> bool {
+            throw ReferenceCapabilityError("stub: no plan for this shape");
+        });
+    EXPECT_CALL(_gpuExecutor, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    setGoldenBundleExpecting(harness, *gap);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results)) << testing_support::allMessages(results);
+}
+
+// The self-retiring half, and the reason this is an expected-failure list rather
+// than a skip list: the moment the reference can run a listed graph, the entry is
+// stale and the run goes red until someone deletes it. A skip list would instead
+// go quiet exactly when the gap closed, and the bundle would stay unverified.
+TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleThatGainsSupportFails)
+{
+    const auto gap = aKnownGpuGap();
+    if(!gap.has_value())
+    {
+        GTEST_SKIP() << "knownReferenceGaps() has no GPU entries left — nothing to exercise.";
+    }
+
+    ON_CALL(_gpuExecutor, isApplicable(::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(true));
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    setGoldenBundleExpecting(harness, *gap);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
+    const auto messages = testing_support::allMessages(results);
+    EXPECT_NE(messages.find("now reports this graph applicable"), std::string::npos) << messages;
+    EXPECT_NE(messages.find(std::string(gap->bundleId)), std::string::npos) << messages;
 }
 
 // Same contract by the other route: the reference accepts the graph up front and

@@ -172,9 +172,9 @@ Each test entry includes a `category`:
 | `quick` | Fast checks and quick return unit testing |
 | `pre_checkin` | PR validation breadth |
 | `nightly` | Extended breadth to larger problems |
+| `HMM` | Heterogeneous / managed-memory cases (`HMM: true`); requires `RUN_TEST_ON_THREADS_STREAMS` plus HMM constructors in `testing_*.hpp`; not in default PR filters |
 | `stress` | Large allocations / edge cases; may need `ROCBLAS_CLIENT_RAM_GB_LIMIT` |
 | `multi_gpu` | Repeat the case across `devices`; requires `RUN_TEST_ON_THREADS_STREAMS` |
-| `HMM` | Managed-memory allocations (`HMM: true`); requires `RUN_TEST_ON_THREADS_STREAMS` plus HMM constructors in `testing_*.hpp` |
 | `known_bug` | Tracked failures; excluded from normal runs via `-*known_bug*` |
 
 Entries matching `known_bugs.yaml` are automatically reclassified. Suite YAML files `include` each other and `rocblas_common.yaml`; the root `rocblas_gtest.yaml` aggregates all suites for code generation.
@@ -234,7 +234,8 @@ ctest -L <label>                 (build tree or install tree)
 | `standard` | Pre-checkin / PR (~2 hr) | `ctest_standard` → `*quick*:*pre_checkin*-*known_bug*` |
 | `comprehensive` | Extended / nightly (~2 hr) | `ctest_comprehensive` → `*nightly*-*known_bug*` |
 | `full` | Stress / weekly (~8 hr) | `ctest_full` → quick + pre_checkin + nightly |
-| `ffm-quick`, `ffm-full` | FFM simulation pipelines | FFM-specific YAML / filters |
+| `ffm-quick` | FFM PR simulation (< 2 hr) | `ctest_ffm-quick` → `rocblas_smoke.yaml` |
+| `ffm-full` | FFM nightly simulation (2 hr) | `ctest_ffm-full` → `rocblas_smoke.yaml` plus `rocblas_extras.yaml` `*regression*` |
 
 Each category carries CTest **labels** (for `-L` filtering), a **timeout** from `execution_settings.category_timeouts`, and optional **exclude** patterns (always including `*known_bug*`).
 
@@ -247,6 +248,17 @@ cd build/release
 ctest -N -L quick
 ctest -L standard -V
 ```
+
+`/usr/bin/ctest -N -L ffm-full` (CMake 3.30.2), after configuring `test_categories.yaml` with the rtest driver, lists one suite:
+
+```
+Test #2: rocblas-test_ffm-full_suite
+Test command: /usr/bin/python3 "rocblas_rtest.py" "-t" "ctest_ffm-full"
+Labels: ffm-full
+TIMEOUT "7200"
+```
+
+That set is `ctest_ffm-full` in `rtest.xml`: `FFM-full-smoke` (`rocblas_smoke.yaml`), then `FFM-full-regression` (`rocblas_extras.yaml` `*regression*`).
 
 **Install-tree CTest (TheRock / packaged builds).** An install-time `CTestTestfile.cmake` is generated with relative paths to the staged binary. Layout after install:
 
@@ -384,6 +396,8 @@ APIs, logging, and bad-argument cases. Results are compared to host reference BL
 | `standard` / pre-checkin | `*quick*:*pre_checkin*` | Up to ~2 hours |
 | `comprehensive` / nightly | `*quick*:*pre_checkin*:*nightly*` | TBD Hours |
 | `full` / stress | Includes stress and large-memory cases | Up to ~8 hours (CTest timeout) |
+| `ffm-quick` | `rocblas_smoke.yaml` | CTest timeout 2 hours |
+| `ffm-full` | `rocblas_smoke.yaml` plus `rocblas_extras.yaml` `*regression*` | CTest timeout 2 hours |
 | `known_bug` | Quarantined failures | Excluded via `-*known_bug*` |
 
 `rocblas_rtest.py` offers more test set flexibility as defined in `rocblas_rtest.xml`.
@@ -391,9 +405,9 @@ APIs, logging, and bad-argument cases. Results are compared to host reference BL
 **What requires GPU hardware.** Essentially all client integration tests.
 
 **What runs on PRs.** PR pipelines run standard pre-checkin-class sets (via Math CI, or
-TheRock using `rocblas_rtest.py` / CTest `standard`). Comprehensive can be run in Math CI with a label.
-Stress (Math CI) runs weekly, on demand, or via label. Math CI currently exceeds most capabilities
-and flexibility of that offered by TheRock CI runners.
+TheRock using `rocblas_rtest.py` / CTest `standard`). HMM and stress suites are outside that
+default set — apply the GitHub labels in [CI Label Suggestions](#ci-label-suggestions).
+Math CI currently exceeds most capabilities and flexibility of that offered by TheRock CI runners.
 
 **Parallel runner.** `scripts/utilities/run_tests/run_tests.py` splits long runs for simulation or
 recovery scenarios; see [Parallel runner](#parallel-runner-simulation--long-runs).
@@ -450,6 +464,22 @@ protection and may not be fully documented in this repository.
 | **Trusted gate** | Build; standard/pre-checkin client tests on supported PR hardware; formatting |
 | **Quality gate** | Longer comprehensive and stress tiers require Math CI label |
 | **Unstable / flaky** | Should be quarantined in `known_bugs.yaml` or fixed — not an accepted end state |
+
+### CI Label Suggestions
+
+Default PR jobs do not run HMM or stress client tests. Add GitHub PR labels so Math CI
+schedules the matching longer job. Reviewers (including Copilot) should comment when a
+change of this kind lands without the label.
+
+**Table: `CI Label Suggestions`**
+
+| If these tests change | Add this PR label |
+| --- | --- |
+| HMM (`category: HMM`, `HMM: true`, or `*HMM*` filters) | `ci:extended` |
+| Stress (`category: stress` or `*stress*` filters) | `ci:weekly` |
+
+If both HMM and stress tests change, apply both labels. These labels are Math CI
+controls; TheRock PR lanes do not currently substitute for them.
 
 ### Flaky Test Policy
 
@@ -531,6 +561,8 @@ Document unsupported combinations explicitly during release planning rather than
 
 ## Coverage Expectations by Change Type
 
+**Table: `Coverage Expectations by Change Type`**
+
 | Change type | Expected validation |
 | --- | --- |
 | New BLAS routine | `testing_*.hpp`, `*_gtest.cpp`, `*_gtest.yaml`, CMake registration |
@@ -583,6 +615,8 @@ When changing rocBLAS:
 4. Update this document if you change tiers, CTest, or quarantine policy.
 
 ### Choosing the Right Test Type
+
+**List: `Choosing the Right Test Type`**
 
 - **Bug fix** — regression test failing before the fix.
 - **GPU numerical BLAS behavior** — integration case in `*_gtest.yaml` + `testing_*.hpp`.

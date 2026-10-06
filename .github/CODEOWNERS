@@ -182,8 +182,7 @@
 /projects/hipsparselt/docs/                         @ROCm/hipsparselt-reviewers @ROCm/hipsparselt-docs-reviewers
 /projects/hipsparselt/library/include/              @ROCm/hipsparselt-reviewers @ROCm/hipsparselt-docs-reviewers
 
-/projects/miopen/**/*.md                            @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
-/projects/miopen/**/*.rst                           @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
+/projects/miopen/CHANGELOG.md                       @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
 /projects/miopen/**/.readthedocs.yaml               @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
 /projects/miopen/docs/                              @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
 
