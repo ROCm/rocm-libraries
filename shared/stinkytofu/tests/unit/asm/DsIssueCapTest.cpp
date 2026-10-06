@@ -84,3 +84,14 @@ TEST(DsIssueCap, PeriodicBurstsStartExactlyOnePeriodApart) {
 TEST(DsIssueCap, DefaultModeIsSliding) {
     EXPECT_EQ(DsIssueCap().mode(), Mode::Sliding);
 }
+
+// The budget model sizes ds work per batch window; the cap is "cap per span", so one
+// window gets cap * window / span (the default span is the window: unchanged).
+TEST(DsIssueCapBudget, CapPerBudgetWindowScalesWithSpan) {
+    EXPECT_EQ(dsCapPerBudgetWindow(12, 32, 32), 12);  // batch 4, span 32
+    EXPECT_EQ(dsCapPerBudgetWindow(12, 16, 32), 6);   // batch 2, span 32
+    EXPECT_EQ(dsCapPerBudgetWindow(12, 8, 32), 3);    // auto's nominal one-WMMA window
+    EXPECT_EQ(dsCapPerBudgetWindow(3, 8, 8), 3);      // default span: cap unchanged
+    EXPECT_EQ(dsCapPerBudgetWindow(1, 8, 32), 1);     // never below 1
+    EXPECT_EQ(dsCapPerBudgetWindow(12, 8, 0), 12);    // no span: unchanged
+}
