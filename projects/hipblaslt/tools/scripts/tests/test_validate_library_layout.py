@@ -280,3 +280,47 @@ def test_a_v0_subtree_holding_strict_files_is_rejected(tmp_path):
         f"filename in the gfx1250v0 subtree is not named for gfx1250: "
         f"{(v0_dir / 'TensileLibrary_HH_HH_gfx1250-strict.co').resolve()}"
     ]
+
+
+# --------------------------------------------------------------------------- #
+# tilewright models sit next to the library they rank for. The runtime finds them
+# through tilewright_index by library stem, so a model is named for the
+# architecture it was trained on -- one gfx1250v0 model serves several subtrees.
+# --------------------------------------------------------------------------- #
+_TILEWRIGHT_MODEL = "gfx1250v0_Cijk_Alik_Bljk_F8BS_MXAE8B32_MXBE8B32_BH_Bias_HA_S_SAV_UserArgs.tilewright.bin"
+
+
+def _add_tilewright_models(arch_dir: Path) -> None:
+    (arch_dir / "tilewright_index").write_bytes(b"x")
+    (arch_dir / _TILEWRIGHT_MODEL).write_bytes(b"x")
+
+
+def test_tilewright_models_are_accepted_in_every_kind_of_subtree(tmp_path):
+    for subtree in (
+        _make_arch_dir(tmp_path, "gfx1250"),
+        _make_v0_dir(tmp_path),
+        _make_stepping_dir(tmp_path),
+    ):
+        _add_tilewright_models(subtree)
+
+    assert validate_library_layout.validate(tmp_path) == []
+
+
+def test_tilewright_models_do_not_stand_in_for_the_tensile_library(tmp_path):
+    _make_arch_dir(tmp_path, "gfx1250")
+    v0_dir = tmp_path / "lib" / "hipblaslt" / "library" / "gfx1250v0"
+    v0_dir.mkdir(parents=True)
+    _add_tilewright_models(v0_dir)
+
+    violations = validate_library_layout.validate(tmp_path)
+    assert any(
+        "missing TensileLibrary master/lazy file for gfx1250 " in v for v in violations
+    ), violations
+
+
+def test_only_tilewright_file_names_are_exempt(tmp_path):
+    arch_dir = _make_arch_dir(tmp_path, "gfx1250")
+    (arch_dir / "gfx1250v0_model.bin").write_bytes(b"x")
+
+    violations = validate_library_layout.validate(tmp_path)
+    assert any("gfx1250v0_model.bin" in v for v in violations), violations

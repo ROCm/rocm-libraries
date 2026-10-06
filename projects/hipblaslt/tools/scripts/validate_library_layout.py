@@ -42,6 +42,11 @@ PER_ARCH_REQUIRED = {
     "gfx950": ("rr_custom_kernels_gfx950.co",),
 }
 
+# tilewright models are found through the subtree's tilewright_index by library
+# stem, so their names carry the architecture a model was trained for, not the
+# subtree's.
+_TILEWRIGHT_FILE_RE = re.compile(r"^(?:tilewright_index|.+\.tilewright\.bin)$")
+
 FORBIDDEN_FLAT_ROOT_BASENAMES = (
     "TensileLibrary.dat",
     "TensileLibrary.dat.zlib",
@@ -228,7 +233,7 @@ def validate(install_root: Path) -> List[str]:
                 )
 
         for fname in entries:
-            if fname == "metadata.yaml":
+            if fname == "metadata.yaml" or _TILEWRIGHT_FILE_RE.match(fname):
                 continue
             if not _filename_arch_matches_dir(fname, name):
                 if revision_of:
