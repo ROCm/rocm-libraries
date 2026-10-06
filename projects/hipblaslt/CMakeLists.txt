@@ -310,8 +310,16 @@ if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
         if(NOT TARGET roc::mxDataGeneratorPreSwizzle)
             message(FATAL_ERROR "The ROCm libraries superbuild must provide the roc::mxDataGeneratorPreSwizzle target before configuring hipBLASLt.")
         endif()
-    else()
+    elseif(HIPBLASLT_ENABLE_THEROCK)
         find_package(mxDataGenerator CONFIG REQUIRED)
+    else()
+        block()
+            set(CMAKE_SKIP_INSTALL_RULES ON)
+            add_subdirectory(
+                "${ROCM_LIBRARIES_ROOT}/shared/mxdatagenerator"
+                "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator"
+                EXCLUDE_FROM_ALL)
+        endblock()
     endif()
 endif()
 
