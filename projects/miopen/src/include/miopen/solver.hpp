@@ -122,6 +122,42 @@ private:
     }
 };
 
+/// How far off the pace a solver expects to be for a given problem on a given device --
+/// and, at the worst level, whether a single launch is safe to *benchmark* at all.
+///
+/// Some solvers are deliberately applicable far outside the region where they are a
+/// sensible choice, because something has to stay applicable everywhere. Find times every
+/// applicable solver by executing it, so those solvers cost real time merely by being
+/// candidates. This enum lets a solver say so, and lets the framework rank the answers.
+///
+/// The levels are ordered: lower is better, and the framework benchmarks the best level
+/// that has any applicable member and skips the rest. Consequences worth stating, since
+/// the whole policy follows from that one rule:
+///   * Any Normal candidate present -> behaviour is exactly as if this did not exist.
+///   * No Normal, several Slow -> all the Slow ones are benchmarked and the least slow
+///     wins on measurement, which is the best available answer.
+///   * Only ExceedsLaunchBudget left -> it is benchmarked, because the alternative is
+///     failing a convolution that MIOpen promises to serve. A huge sole-naive shape may
+///     then still trip the watchdog: an honest "extend coverage here" signal we
+///     deliberately do not mask.
+/// The level that must never be crossed implicitly is Slow -> ExceedsLaunchBudget: a
+/// merely wasteful solver is always preferable to one that may reset the display driver.
+enum class SolverSpeedClass
+{
+    /// A normal candidate. Nothing to defer for.
+    Normal = 0,
+    /// Applicable, and safe to launch, but expected to be far off the pace for this
+    /// problem -- e.g. explicit GEMM in shapes where im2col expansion and per-batch BLAS
+    /// calls dominate. Benchmarking one wastes Find time; it does not endanger the device.
+    Slow = 1,
+    /// A *single* launch is estimated to outlast the OS GPU watchdog, i.e. benchmarking
+    /// this solver risks a TDR / driver reset -- e.g. the un-tiled naive kernel on a large
+    /// problem. Bounding how long Find *waits* cannot avert that: the dispatch has already
+    /// happened and the kernel keeps occupying the GPU after the wait is abandoned, which
+    /// is exactly what the watchdog measures. Only a pre-launch gate works.
+    ExceedsLaunchBudget = 2,
+};
+
 #ifdef _WIN32
 // Suppress -Wundefined-func-template warning for Windows
 #pragma GCC diagnostic push
@@ -152,8 +188,12 @@ struct SolverInterface : SolverBase
     /// Returns the workspace size required by the solver for the given Problem
     virtual size_t GetWorkspaceSize(const Context&, const Problem&) const { return 0; };
 
-    /// Returns true if the solver is expected to be slow for the given problem.
-    virtual bool IsSlow(const Context&, const Problem&) const { return false; };
+    /// Returns how far off the pace this solver expects to be for the given problem, and
+    /// whether a single launch is safe to benchmark. @see SolverSpeedClass.
+    virtual SolverSpeedClass GetSpeedClass(const Context&, const Problem&) const
+    {
+        return SolverSpeedClass::Normal;
+    };
 };
 
 /// Common interface for non-tunable solvers

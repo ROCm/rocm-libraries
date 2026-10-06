@@ -146,9 +146,11 @@ float GemmWrwBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
 #endif
 }
 
-bool GemmWrw1x1_stride1::IsSlow(const ExecutionContext& context,
-                                const ProblemDescription& problem) const
+SolverSpeedClass GemmWrw1x1_stride1::GetSpeedClass(const ExecutionContext& context,
+                                                   const ProblemDescription& problem) const
 {
+    // Slow, never ExceedsLaunchBudget: explicit GEMM runs in bounded per-batch chunks, so
+    // it is wasteful to benchmark here, not a watchdog risk. @see SolverSpeedClass
     const std::string& arch        = context.GetStream().GetDeviceName();
     const std::set<std::string> mi = {"gfx942", "gfx955"};
     const bool is_mi               = mi.find(arch) != mi.end();
@@ -177,17 +179,17 @@ bool GemmWrw1x1_stride1::IsSlow(const ExecutionContext& context,
         // Threshold: batch > 16 AND cpg < 1400
         // Performance: FPR=3-15%, TPR=73-87%, Score=1.65-1.79
         if(b > 16 && channels_per_group < 1400)
-            return true;
+            return SolverSpeedClass::Slow;
     }
     else if(is_mi)
     {
         // SPB-ONLY: Batch fragmentation detection
         // SPB < 48.0: Each batch item has < 48 pixels of spatial work
         if(spatial_per_batch < 48.0)
-            return true;
+            return SolverSpeedClass::Slow;
     }
 
-    return false;
+    return SolverSpeedClass::Normal;
 }
 
 #if MIOPEN_USE_GEMM
@@ -490,9 +492,11 @@ size_t GemmWrwUniversal::GetWorkspaceSize(const ExecutionContext& context,
 #endif
 }
 
-bool GemmWrwUniversal::IsSlow(const ExecutionContext& context,
-                              const ProblemDescription& problem) const
+SolverSpeedClass GemmWrwUniversal::GetSpeedClass(const ExecutionContext& context,
+                                                 const ProblemDescription& problem) const
 {
+    // Slow, never ExceedsLaunchBudget: explicit GEMM runs in bounded per-batch chunks, so
+    // it is wasteful to benchmark here, not a watchdog risk. @see SolverSpeedClass
     const std::string& arch        = context.GetStream().GetDeviceName();
     const std::set<std::string> mi = {"gfx942", "gfx955"};
     const bool is_mi               = mi.find(arch) != mi.end();
@@ -514,17 +518,17 @@ bool GemmWrwUniversal::IsSlow(const ExecutionContext& context,
         // SPB < 100: Low spatial-per-batch = batch fragmentation
         // Performance: FPR=19-27%, TPR=72-92%, Score=1.49-1.66
         if(spatial_per_batch < 100)
-            return true;
+            return SolverSpeedClass::Slow;
     }
     else if(is_mi)
     {
         // SPB-ONLY: Batch fragmentation detection
         // SPB < 48.0: Each batch item has < 48 pixels of spatial work
         if(spatial_per_batch < 48.0)
-            return true;
+            return SolverSpeedClass::Slow;
     }
 
-    return false;
+    return SolverSpeedClass::Normal;
 }
 
 bool GemmWrwUniversal::IsApplicable(const ExecutionContext& context,

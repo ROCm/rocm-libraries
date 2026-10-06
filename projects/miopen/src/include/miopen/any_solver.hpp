@@ -90,6 +90,15 @@ struct AnySolver
         assert(ptr_value != nullptr);
         return ptr_value->GetWti(ctx, problem);
     };
+    /// How far off the pace this solver expects to be here -- see SolverSpeedClass.
+    /// Exposed through the type-erased interface so the immediate-mode fallback, which
+    /// only holds solver::Id, can apply the same last-resort policy Find applies.
+    SolverSpeedClass GetSpeedClass(const ExecutionContext& ctx,
+                                   const miopen::conv::ProblemDescription& problem) const
+    {
+        assert(ptr_value != nullptr);
+        return ptr_value->GetSpeedClass(ctx, problem);
+    };
     const std::type_info& Type() const
     {
         assert(ptr_value != nullptr);
@@ -192,23 +201,26 @@ struct AnySolver
         virtual bool IsDynamic() const                                              = 0;
         virtual float GetWti(const ExecutionContext& ctx,
                              const miopen::conv::ProblemDescription& problem) const = 0;
-        virtual const std::type_info& Type() const                                  = 0;
-        virtual std::string GetSolverDbId() const                                   = 0;
+        virtual SolverSpeedClass
+        GetSpeedClass(const ExecutionContext& ctx,
+                      const miopen::conv::ProblemDescription& problem) const = 0;
+        virtual const std::type_info& Type() const                           = 0;
+        virtual std::string GetSolverDbId() const                            = 0;
         virtual ConvSolution FindSolution(const ExecutionContext& ctx,
                                           const miopen::conv::ProblemDescription& problem,
                                           PerformanceDb& db,
                                           const miopen::AnyInvokeParams& invoke_ctx,
-                                          const std::string& perf_cfg) const        = 0;
+                                          const std::string& perf_cfg) const = 0;
         virtual ConvSolution FindSolution(const ExecutionContext& ctx,
                                           const miopen::conv::ProblemDescription& problem,
                                           std::function<PerformanceDb&()>& db_getter,
                                           const miopen::AnyInvokeParams& invoke_ctx,
-                                          const std::string& perf_cfg) const        = 0;
+                                          const std::string& perf_cfg) const = 0;
         virtual ConvSolution FindSolution(const ExecutionContext& ctx,
                                           const miopen::conv::ProblemDescription& problem,
                                           DbGetter& db_getter,
                                           const miopen::AnyInvokeParams& invoke_ctx,
-                                          const std::string& perf_cfg) const        = 0;
+                                          const std::string& perf_cfg) const = 0;
         virtual std::string
         GenericSearch(const ExecutionContext& ctx,
                       const miopen::conv::ProblemDescription& problem,
@@ -412,6 +424,12 @@ struct AnySolver
                      const miopen::conv::ProblemDescription& problem) const override
         {
             return value.GetWti(ctx, problem);
+        }
+        SolverSpeedClass
+        GetSpeedClass(const ExecutionContext& ctx,
+                      const miopen::conv::ProblemDescription& problem) const override
+        {
+            return value.GetSpeedClass(ctx, problem);
         }
 
         ConvSolution FindSolution(const ExecutionContext& ctx,
