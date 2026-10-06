@@ -4,9 +4,13 @@
 #include "solution_selection.hpp"
 #include "analytical_utils.hpp"
 #include "kernel_type.hpp"
-#include "runtime_args_selection.hpp"
+#include "utility.hpp"
 
 #include "origami/origami.hpp"
+
+#include <array>
+#include <bit>
+#include <map>
 
 #include <sstream>
 
@@ -208,6 +212,107 @@ size_t maxNumberSolutions()
     return possibleTileSizes.size();
 }
 
+rocRoller::DataType hipDataType_to_rocRoller_type(hipDataType type)
+{
+    if(static_cast<int>(type) == HIP_R_6F_E2M3)
+        return rocRoller::DataType::FP6;
+    if(static_cast<int>(type) == HIP_R_6F_E3M2)
+        return rocRoller::DataType::BF6;
+    if(static_cast<int>(type) == HIP_R_4F_E2M1)
+        return rocRoller::DataType::FP4;
+
+    switch(type)
+    {
+    case HIP_R_16F:
+        return rocRoller::DataType::Half;
+    case HIP_R_32F:
+        return rocRoller::DataType::Float;
+    case HIP_R_16BF:
+        return rocRoller::DataType::BFloat16;
+    case HIP_R_8F_E4M3_FNUZ:
+    case HIP_R_8F_E4M3:
+        return rocRoller::DataType::FP8;
+    case HIP_R_8F_E5M2_FNUZ:
+    case HIP_R_8F_E5M2:
+        return rocRoller::DataType::BF8;
+    default:
+        return rocRoller::DataType::None;
+    }
+}
+
+rocRoller::DataType rocblaslt_compute_type_to_rocRoller_type(rocblaslt_compute_type type)
+{
+    switch(type)
+    {
+    case rocblaslt_compute_f16:
+        return rocRoller::DataType::Half;
+    case rocblaslt_compute_f32:
+    case rocblaslt_compute_f32_fast_xf32:
+    case rocblaslt_compute_f32_fast_f16:
+    case rocblaslt_compute_f32_fast_bf16:
+    case rocblaslt_compute_f32_fast_f8_fnuz:
+    case rocblaslt_compute_f32_fast_bf8_fnuz:
+    case rocblaslt_compute_f32_fast_f8bf8_fnuz:
+    case rocblaslt_compute_f32_fast_bf8f8_fnuz:
+    case rocblaslt_compute_f32_fast_f8:
+    case rocblaslt_compute_f32_fast_bf8:
+    case rocblaslt_compute_f32_fast_f8bf8:
+    case rocblaslt_compute_f32_fast_bf8f8:
+        return rocRoller::DataType::Float;
+    case rocblaslt_compute_f64:
+        return rocRoller::DataType::Double;
+    case rocblaslt_compute_i32:
+        return rocRoller::DataType::Int32;
+    default:
+        return rocRoller::DataType::None;
+    }
+}
+
+namespace
+{
+rocRoller::DataType scaleDataType(RocblasltContractionProblem::ScalingFormat)
+{
+    return rocRoller::DataType::E8M0;
+}
+} // namespace
+
+KernelType genKernelType(const RocblasltContractionProblem& prob)
+{
+    KernelType kernelType;
+
+    kernelType.typeA    = hipDataType_to_rocRoller_type(prob.a_type);
+    kernelType.typeB    = hipDataType_to_rocRoller_type(prob.b_type);
+    kernelType.typeC    = hipDataType_to_rocRoller_type(prob.c_type);
+    kernelType.typeD    = hipDataType_to_rocRoller_type(prob.d_type);
+    kernelType.typeAcc  = rocblaslt_compute_type_to_rocRoller_type(prob.compute_type);
+    kernelType.transA   = prob.trans_a == HIPBLAS_OP_T;
+    kernelType.transB   = prob.trans_b == HIPBLAS_OP_T;
+    kernelType.swizzleA = prob.swizzleA;
+    kernelType.swizzleB = prob.swizzleB;
+
+    if(isBlockScaling(prob.scaleAType))
+    {
+        kernelType.scaleTypeA.mode           = rocRoller::Operations::ScaleMode::Separate;
+        kernelType.scaleTypeA.blockRowSize   = blockSize(prob.scaleAType);
+        kernelType.scaleTypeA.blockColSize   = 1;
+        kernelType.scaleTypeA.type           = scaleDataType(prob.scaleAType);
+        kernelType.scaleTypeA.preSwizzleTile = preSwizzleSizeForScale(prob.scaleAType);
+        kernelType.scaleTypeA.preTile        = preTileSizeForScaleA(prob.scaleAType);
+    }
+
+    if(isBlockScaling(prob.scaleBType))
+    {
+        kernelType.scaleTypeB.mode           = rocRoller::Operations::ScaleMode::Separate;
+        kernelType.scaleTypeB.blockRowSize   = 1;
+        kernelType.scaleTypeB.blockColSize   = blockSize(prob.scaleBType);
+        kernelType.scaleTypeB.type           = scaleDataType(prob.scaleBType);
+        kernelType.scaleTypeB.preSwizzleTile = preSwizzleSizeForScale(prob.scaleBType);
+        kernelType.scaleTypeB.preTile        = preTileSizeForScaleB(prob.scaleBType);
+    }
+
+    return kernelType;
+}
+
 std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
     const KernelType& kernelType, const RocblasltContractionProblem& prob, int requestedAlgoCount)
 {
@@ -216,8 +321,32 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
 
     std::vector<origami::config_t> origami_config_list = getTileListForKernelType(kernelType);
 
-    size_t elementSizeA_bits = rocRoller::DataTypeInfo::Get(kernelType.typeA).elementBits;
-    size_t elementSizeB_bits = rocRoller::DataTypeInfo::Get(kernelType.typeB).elementBits;
+    // Scalar widths, matching DataTypeInfo::Get().elementBits for the types this
+    // ranker sees. Inlined so this file does not link the rocRoller library.
+    auto elementBits = [](rocRoller::DataType type) -> size_t {
+        switch(type)
+        {
+        case rocRoller::DataType::FP4:
+            return 4;
+        case rocRoller::DataType::FP6:
+        case rocRoller::DataType::BF6:
+            return 6;
+        case rocRoller::DataType::FP8:
+        case rocRoller::DataType::BF8:
+            return 8;
+        case rocRoller::DataType::Half:
+        case rocRoller::DataType::BFloat16:
+            return 16;
+        case rocRoller::DataType::Float:
+            return 32;
+        case rocRoller::DataType::Double:
+            return 64;
+        default:
+            return 0;
+        }
+    };
+    size_t elementSizeA_bits = elementBits(kernelType.typeA);
+    size_t elementSizeB_bits = elementBits(kernelType.typeB);
 
     const origami::hardware_t analytical_hardware = origami::hardware_t::get_hardware_for_device(0);
 
