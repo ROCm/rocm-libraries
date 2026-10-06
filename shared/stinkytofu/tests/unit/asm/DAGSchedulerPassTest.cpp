@@ -1778,7 +1778,13 @@ TEST_F(DAGSchedulerPassTest, DSWindowCap_SpanDefaultsToTheRegionsRealWmmaLatency
 TEST_F(DAGSchedulerPassTest, DsIssueCapMode_RejectsAnUnknownValue) {
     createMovableDsLoad(0, 80, 1);
     createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/0);
-    EXPECT_DEATH(runWithDsCapMode(static_cast<PassFeatureConfig::DsIssueCapMode>(2)),
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsIssueCapMode = static_cast<PassFeatureConfig::DsIssueCapMode>(2);
+    ctx.setPassFeatureConfig(pfc);
+    EXPECT_DEATH(pass->run(*func, ctx, am),
                  "dsIssueCapMode must be 0 \\(sliding\\) or 1 \\(periodic\\); got 2");
 }
 
