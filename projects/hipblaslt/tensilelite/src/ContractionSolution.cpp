@@ -3633,38 +3633,38 @@ namespace TensileLite
                 // rocRoller workgroup mapping. libdivide branchfree magics of
                 // the WGM integer, numTilesN, the tail, and the main block,
                 // plus the two signed quotients. Not Tensile magicNumber().
-                case CustomArgSemantic::WorkgroupMapping:
-                    rv.args.appendCustomType("WorkgroupMapping", wgmKernarg().workgroupMapping, arg.type);
+                case CustomArgSemantic::RR_WorkgroupMapping:
+                    rv.args.appendCustomType("RR_WorkgroupMapping", wgmKernarg().workgroupMapping, arg.type);
                     break;
-                case CustomArgSemantic::MagicMultipleWgm:
-                    rv.args.appendCustomType("MagicMultipleWgm", wgmKernarg().magicMultipleWgm, arg.type);
+                case CustomArgSemantic::RR_MagicMultipleWgm:
+                    rv.args.appendCustomType("RR_MagicMultipleWgm", wgmKernarg().magicMultipleWgm, arg.type);
                     break;
-                case CustomArgSemantic::MagicShiftAndSignWgm:
-                    rv.args.appendCustomType("MagicShiftAndSignWgm", wgmKernarg().magicShiftAndSignWgm, arg.type);
+                case CustomArgSemantic::RR_MagicShiftAndSignWgm:
+                    rv.args.appendCustomType("RR_MagicShiftAndSignWgm", wgmKernarg().magicShiftAndSignWgm, arg.type);
                     break;
-                case CustomArgSemantic::MagicMultipleNumTilesN:
-                    rv.args.appendCustomType("MagicMultipleNumTilesN", wgmKernarg().magicMultipleNumTilesN, arg.type);
+                case CustomArgSemantic::RR_MagicMultipleNumTilesN:
+                    rv.args.appendCustomType("RR_MagicMultipleNumTilesN", wgmKernarg().magicMultipleNumTilesN, arg.type);
                     break;
-                case CustomArgSemantic::MagicShiftAndSignNumTilesN:
-                    rv.args.appendCustomType("MagicShiftAndSignNumTilesN", wgmKernarg().magicShiftAndSignNumTilesN, arg.type);
+                case CustomArgSemantic::RR_MagicShiftAndSignNumTilesN:
+                    rv.args.appendCustomType("RR_MagicShiftAndSignNumTilesN", wgmKernarg().magicShiftAndSignNumTilesN, arg.type);
                     break;
-                case CustomArgSemantic::QuotientTilesMByWgm:
-                    rv.args.appendCustomType("QuotientTilesMByWgm", wgmKernarg().quotientTilesMByWgm, arg.type);
+                case CustomArgSemantic::RR_QuotientTilesMByWgm:
+                    rv.args.appendCustomType("RR_QuotientTilesMByWgm", wgmKernarg().quotientTilesMByWgm, arg.type);
                     break;
-                case CustomArgSemantic::MagicMultipleWgmTail:
-                    rv.args.appendCustomType("MagicMultipleWgmTail", wgmKernarg().magicMultipleWgmTail, arg.type);
+                case CustomArgSemantic::RR_MagicMultipleWgmTail:
+                    rv.args.appendCustomType("RR_MagicMultipleWgmTail", wgmKernarg().magicMultipleWgmTail, arg.type);
                     break;
-                case CustomArgSemantic::MagicShiftAndSignWgmTail:
-                    rv.args.appendCustomType("MagicShiftAndSignWgmTail", wgmKernarg().magicShiftAndSignWgmTail, arg.type);
+                case CustomArgSemantic::RR_MagicShiftAndSignWgmTail:
+                    rv.args.appendCustomType("RR_MagicShiftAndSignWgmTail", wgmKernarg().magicShiftAndSignWgmTail, arg.type);
                     break;
-                case CustomArgSemantic::QuotientTilesByBlock:
-                    rv.args.appendCustomType("QuotientTilesByBlock", wgmKernarg().quotientTilesByBlock, arg.type);
+                case CustomArgSemantic::RR_QuotientTilesByBlock:
+                    rv.args.appendCustomType("RR_QuotientTilesByBlock", wgmKernarg().quotientTilesByBlock, arg.type);
                     break;
-                case CustomArgSemantic::MagicMultipleWgmMainBlock:
-                    rv.args.appendCustomType("MagicMultipleWgmMainBlock", wgmKernarg().magicMultipleWgmMainBlock, arg.type);
+                case CustomArgSemantic::RR_MagicMultipleWgmMainBlock:
+                    rv.args.appendCustomType("RR_MagicMultipleWgmMainBlock", wgmKernarg().magicMultipleWgmMainBlock, arg.type);
                     break;
-                case CustomArgSemantic::MagicShiftAndSignWgmMainBlock:
-                    rv.args.appendCustomType("MagicShiftAndSignWgmMainBlock", wgmKernarg().magicShiftAndSignWgmMainBlock, arg.type);
+                case CustomArgSemantic::RR_MagicShiftAndSignWgmMainBlock:
+                    rv.args.appendCustomType("RR_MagicShiftAndSignWgmMainBlock", wgmKernarg().magicShiftAndSignWgmMainBlock, arg.type);
                     break;
 
                 default:

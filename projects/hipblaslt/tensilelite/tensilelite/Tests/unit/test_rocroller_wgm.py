@@ -253,7 +253,7 @@ def test_wgm_expression_classifier_reads_the_tree_not_the_suffix():
         ".size": 4,
         ".value_kind": "by_value",
     }
-    assert classify_wgm_expression({"type": "CommandArgument", "name": "WGM"}) == "WorkgroupMapping"
+    assert classify_wgm_expression({"type": "CommandArgument", "name": "WGM"}) == "RR_WorkgroupMapping"
     meta = {
         ".name": "MagicMultiple_22",
         ".size": 4,
@@ -261,4 +261,4 @@ def test_wgm_expression_classifier_reads_the_tree_not_the_suffix():
         ".variableType": {"dataType": "Int32"},
         ".expression": {"type": "MagicMultiple", "arg": wgm},
     }
-    assert _metadataArgToCustomArg(meta) == {"type": "int32", "semantic": "MagicMultipleWgm"}
+    assert _metadataArgToCustomArg(meta) == {"type": "int32", "semantic": "RR_MagicMultipleWgm"}

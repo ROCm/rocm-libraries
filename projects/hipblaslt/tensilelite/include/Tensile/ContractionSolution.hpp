@@ -166,18 +166,19 @@ namespace TensileLite
         X_MACRO(StrideScaleA2) \
         X_MACRO(StrideScaleB2) \
         X_MACRO(StrideMetadata2) \
-        /* rocRoller workgroup-mapping kernargs. Custom-kernel launch only. */ \
-        X_MACRO(WorkgroupMapping) \
-        X_MACRO(MagicMultipleWgm) \
-        X_MACRO(MagicShiftAndSignWgm) \
-        X_MACRO(MagicMultipleNumTilesN) \
-        X_MACRO(MagicShiftAndSignNumTilesN) \
-        X_MACRO(QuotientTilesMByWgm) \
-        X_MACRO(MagicMultipleWgmTail) \
-        X_MACRO(MagicShiftAndSignWgmTail) \
-        X_MACRO(QuotientTilesByBlock) \
-        X_MACRO(MagicMultipleWgmMainBlock) \
-        X_MACRO(MagicShiftAndSignWgmMainBlock)
+        /* rocRoller libdivide workgroup-mapping kernargs. The RR_ prefix keeps
+           them distinct from another generator's WorkgroupMapping. */ \
+        X_MACRO(RR_WorkgroupMapping) \
+        X_MACRO(RR_MagicMultipleWgm) \
+        X_MACRO(RR_MagicShiftAndSignWgm) \
+        X_MACRO(RR_MagicMultipleNumTilesN) \
+        X_MACRO(RR_MagicShiftAndSignNumTilesN) \
+        X_MACRO(RR_QuotientTilesMByWgm) \
+        X_MACRO(RR_MagicMultipleWgmTail) \
+        X_MACRO(RR_MagicShiftAndSignWgmTail) \
+        X_MACRO(RR_QuotientTilesByBlock) \
+        X_MACRO(RR_MagicMultipleWgmMainBlock) \
+        X_MACRO(RR_MagicShiftAndSignWgmMainBlock)
 
     enum class CustomArgSemantic
     {

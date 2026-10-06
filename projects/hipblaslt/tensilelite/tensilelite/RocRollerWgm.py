@@ -35,17 +35,17 @@ _CA_N = "Tensor_2_size_1"
 
 # Order of the eleven hoisted arguments, stable across the gfx950 WGM kernels.
 WGM_ROLE_ORDER = (
-    "QuotientTilesByBlock",
-    "MagicMultipleWgmMainBlock",
-    "MagicMultipleWgm",
-    "WorkgroupMapping",
-    "MagicMultipleWgmTail",
-    "MagicShiftAndSignWgm",
-    "MagicMultipleNumTilesN",
-    "MagicShiftAndSignNumTilesN",
-    "MagicShiftAndSignWgmTail",
-    "MagicShiftAndSignWgmMainBlock",
-    "QuotientTilesMByWgm",
+    "RR_QuotientTilesByBlock",
+    "RR_MagicMultipleWgmMainBlock",
+    "RR_MagicMultipleWgm",
+    "RR_WorkgroupMapping",
+    "RR_MagicMultipleWgmTail",
+    "RR_MagicShiftAndSignWgm",
+    "RR_MagicMultipleNumTilesN",
+    "RR_MagicShiftAndSignNumTilesN",
+    "RR_MagicShiftAndSignWgmTail",
+    "RR_MagicShiftAndSignWgmMainBlock",
+    "RR_QuotientTilesMByWgm",
 )
 
 # hipBLASLt rocRoller::DEFAULT_WGM. Every shipped expression reads the WGM
@@ -309,17 +309,17 @@ def evaluate_wgm(m, n, tile_m, tile_n, wgm=DEFAULT_WGM):
     q_m = magic_div_s32(nt_m, w)
     tail = s32(nt_m - _mul_s32(q_m, w))
     return {
-        "QuotientTilesByBlock": q_block,
-        "MagicMultipleWgmMainBlock": magic_multiple_s32(main),
-        "MagicMultipleWgm": magic_multiple_s32(w),
-        "WorkgroupMapping": w,
-        "MagicMultipleWgmTail": magic_multiple_s32(tail),
-        "MagicShiftAndSignWgm": magic_shift_and_sign_s32(w),
-        "MagicMultipleNumTilesN": magic_multiple_s32(nt_n),
-        "MagicShiftAndSignNumTilesN": magic_shift_and_sign_s32(nt_n),
-        "MagicShiftAndSignWgmTail": magic_shift_and_sign_s32(tail),
-        "MagicShiftAndSignWgmMainBlock": magic_shift_and_sign_s32(main),
-        "QuotientTilesMByWgm": q_m,
+        "RR_QuotientTilesByBlock": q_block,
+        "RR_MagicMultipleWgmMainBlock": magic_multiple_s32(main),
+        "RR_MagicMultipleWgm": magic_multiple_s32(w),
+        "RR_WorkgroupMapping": w,
+        "RR_MagicMultipleWgmTail": magic_multiple_s32(tail),
+        "RR_MagicShiftAndSignWgm": magic_shift_and_sign_s32(w),
+        "RR_MagicMultipleNumTilesN": magic_multiple_s32(nt_n),
+        "RR_MagicShiftAndSignNumTilesN": magic_shift_and_sign_s32(nt_n),
+        "RR_MagicShiftAndSignWgmTail": magic_shift_and_sign_s32(tail),
+        "RR_MagicShiftAndSignWgmMainBlock": magic_shift_and_sign_s32(main),
+        "RR_QuotientTilesMByWgm": q_m,
     }
 
 
@@ -362,19 +362,19 @@ def classify_wgm_expression(expr):
     root = expr.get("type")
     names = _command_argument_names(expr)
     if root == "CommandArgument" and expr.get("name") == _CA_WGM:
-        return "WorkgroupMapping"
+        return "RR_WorkgroupMapping"
     suffix = _role_suffix(names)
     if suffix is None:
         return None
     if root == "MagicMultiple":
-        return "MagicMultiple" + suffix
+        return "RR_MagicMultiple" + suffix
     if root == "MagicShiftAndSign":
-        return "MagicShiftAndSign" + suffix
+        return "RR_MagicShiftAndSign" + suffix
     if root == "Subtract":
         if suffix == "WgmTail":
-            return "QuotientTilesMByWgm"
+            return "RR_QuotientTilesMByWgm"
         if suffix == "WgmMainBlock":
-            return "QuotientTilesByBlock"
+            return "RR_QuotientTilesByBlock"
     return None
 
 
@@ -397,7 +397,7 @@ def custom_arg_for_metadata(meta_arg):
     if semantic is not None:
         arg_type = _variable_arg_type(meta_arg)
         if arg_type is None:
-            arg_type = "uint32" if semantic.startswith("MagicShiftAndSign") else "int32"
+            arg_type = "uint32" if semantic.startswith("RR_MagicShiftAndSign") else "int32"
         return {"type": arg_type, "semantic": semantic}
     if expr.get("type") == "CommandArgument":
         mapped = DIRECT_COMMAND_ARGUMENT.get(expr.get("name"))
