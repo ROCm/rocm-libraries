@@ -66,6 +66,9 @@ exclude: |
     projects/miopen/src/conv/heuristics/lgbm_models/.*|
     projects/miopen/src/conv/heuristics/lgbm_pcfg_models/.*|
     projects/miopen/src/kernels/lgbm_.*\.(json|txt|bin)|
+    # tilewright model files: machine-generated binaries that exceed
+    # check-added-large-files.
+    shared/tilewright/weights/.*\.tilewright\.bin$|
     # RPP exclusion list - raw test data with no early NUL byte, which pre-commit would
     # otherwise treat as text and corrupt. Matched by extension so new data stays covered.
     projects/rpp/.*\.(bin|rgb|yuv)$
