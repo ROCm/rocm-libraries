@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -129,9 +130,10 @@ namespace hipblaslt_jit::code_object
 
     struct CodeObjectMetadata
     {
-        std::string              isaName; // from comgr
-        int                      codeObjectVersion = 0; // from the ELF ABI version
-        std::vector<std::string> kernelNames; // amdhsa.kernels[].name
+        std::string                isaName; // from comgr
+        int                        codeObjectVersion = 0; // from the ELF ABI version
+        std::vector<std::string>   kernelNames; // amdhsa.kernels[].name
+        std::vector<std::uint32_t> wavefrontSizes; // parallel to kernelNames; 0 if absent
     };
 
     struct MetadataResult
