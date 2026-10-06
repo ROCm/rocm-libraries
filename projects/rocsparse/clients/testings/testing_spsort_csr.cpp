@@ -67,7 +67,7 @@ namespace
             const int64_t end   = A.ptr[i + 1] - A.base;
             for(int64_t k = start; k < end; ++k)
             {
-                const int64_t j = start + rand() % (end - start);
+                const int64_t j = random_generator<int64_t>(start, end - 1);
                 std::swap(A.ind[k], A.ind[j]);
                 std::swap(A.val[k], A.val[j]);
             }
@@ -313,7 +313,6 @@ void testing_spsort_csr(const Arguments& arg)
     std::fill(hA_ind.data(), hA_ind.data() + size_A, static_cast<J>(-1));
     std::fill(hA_val.data(), hA_val.data() + size_A, static_cast<T>(-1));
 
-    rocsparse_seedrand();
     host_shuffle_csr(hA_single);
     for(int64_t batch = 0; batch < batch_count_B; ++batch)
     {
@@ -476,8 +475,9 @@ void testing_spsort_csr(const Arguments& arg)
                                                dbuffer,
                                                nullptr);
 
-        const double gbyte_count = batch_count_B * spsort_csr_gbyte_count<I, J, T>(M, nnz);
-        const double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);
+        const double gbyte_count
+            = spsort_csr_gbyte_count<I, J, T>(M, nnz, batch_count_B, offsets_batch_stride_B == 0);
+        const double gpu_gbyte = get_gpu_gbyte(gpu_time_used, gbyte_count);
 
         display_timing_info(display_key_t::M,
                             M,
