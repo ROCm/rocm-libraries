@@ -530,6 +530,14 @@ if(ROCSOLVER_ENABLE_HESSENBERG)
   target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_HESSENBERG)
 endif()
 
+
+
+if(ROCSOLVER_LARFG_USE_KERNEL)
+  target_compile_definitions(rocsolver PRIVATE ROCSOLVER_LARFG_USE_KERNEL)
+endif()
+
+
+
 target_compile_definitions(rocsolver PRIVATE
   ROCM_USE_FLOAT16
   ROCBLAS_INTERNAL_API

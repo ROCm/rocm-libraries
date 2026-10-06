@@ -28,6 +28,8 @@
 #pragma once
 
 #include "asan_helpers.hpp"
+#include <limits>
+#include <type_traits>
 
 /*! \file
     \brief ideal_sizes.hpp gathers all constants that can be tuned for performance.
@@ -62,7 +64,18 @@
 #endif
 
 #ifndef LARFG_SSKER_MAX_N
-#define LARFG_SSKER_MAX_N 2048
+#if !defined(ROCSOLVER_LARFG_USE_KERNEL) || !ROCSOLVER_LARFG_USE_KERNEL
+#define LARFG_SSKER_MAX_N                                   \
+    (std::is_same_v<T, float>                       ? 27136 \
+         : std::is_same_v<T, double>                ? 20992 \
+         : std::is_same_v<T, rocblas_float_complex> ? 18944 \
+                                                    : 12800)
+// #define LARFG_SSKER_MAX_N (std::is_same_v<T, float> ? 11264 : \
+//                         std::is_same_v<T, double> ? 7424 : \
+//                         std::is_same_v<T, rocblas_float_complex> ? 10240 : 6144)
+#else
+#define LARFG_SSKER_MAX_N (std::numeric_limits<int64_t>::max())
+#endif // ROCSOLVER_LARFG_USE_KERNEL
 #endif
 
 /******************************* larft ****************************************

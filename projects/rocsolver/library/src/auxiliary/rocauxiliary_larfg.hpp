@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     November 2017
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -264,16 +264,19 @@ rocblas_status rocsolver_larfg_template(rocblas_handle handle,
     }
 
     // if n is small, use small-size kernel
-    if(true)
+    if(n <= LARFG_SSKER_MAX_N)
     {
         // TODO: Some architectures have failures in sygvx with small-size kernels enabled, more investigation needed
         const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
         if(props->warpSize >= 64)
         {
+            // std::cout << "running larfg w kernels..." << std::endl;
             return larfg_run_small(handle, n, alpha, shifta, stridex, beta, shiftb, strideb, x,
                                    shiftx, incx, stridex, tau, strideP, batch_count);
         }
     }
+
+    // std::cout << "running larfg w blas..." << std::endl;
 
     // everything must be executed with scalars on the device
     rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_device);
