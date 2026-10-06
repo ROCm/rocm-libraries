@@ -648,14 +648,11 @@ inline constexpr auto ceiling_div(const T a, const U b)
 
 #if defined(__HIP_PLATFORM_AMD__)
 
-template<typename IndexType, std::size_t... Dims>
-using extents = ::hipcub::extents<IndexType, Dims...>;
-
 template<typename Extents>
 struct extents_size;
 
 template<typename IndexType, std::size_t... Dims>
-struct extents_size<extents<IndexType, Dims...>>
+struct extents_size<_HIPCUB_STD::extents<IndexType, Dims...>>
 {
     static constexpr std::size_t value = (Dims * ... * 1);
 };
