@@ -101,6 +101,7 @@
     X(TDMLoadWaveSync, bool)                      \
     X(PrefetchGlobalRead, int)                    \
     X(PrefetchLocalRead, int)                     \
+    X(UnrollLoopCopies, int)                      \
     X(RemoveInstructions, std::string)            \
     X(CloneList, std::vector<CloneSpec>)          \
     X(DsReadQueueDepth, int)                      \
@@ -114,19 +115,28 @@
 // Keep transition disabled by default to preserve legacy full-throttle pacing:
 // entries=0 skips the transition range, and factor=1.0 is the full interval.
 //
-// Scheduling knobs below default to -1 (= unset), except LockDsReadOrder,
-// which defaults on. Gfx1250Backend resolves unset knobs via
-// SchedulingKnobHeuristics before DAG scheduling / cluster-barrier
-// insertion (user value wins; degenerate main-loop IR falls back to today's
-// static HW/CDNA5/Rule3 defaults). See SchedulingKnobHeuristics.hpp.
-#define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)                          \
-    X(LockDsReadOrder, bool, true)                                    \
-    X(DsReadThrottleTransitionFactor, double, 1.0)                    \
-    X(DsReadThrottleTransitionEntries, int, 0)                        \
-    X(DsReadThrottleLatency, int, -1)                                 \
-    X(DsReadPerCap, int, -1)                                          \
-    X(DsReadPerWmma, int, -1) /* deprecated alias for DsReadPerCap */ \
-    X(ClusterBarrierRule3SignalLeadCycles, int, -1)
+// Scheduling knobs below default to -1 (= unset), except LockDsReadOrder, EvenSpreadFillers,
+// DsSlotFirst, WaitAluHoldStrictCount, PrefetchLeadWmmas and PrefetchLeadMinStageWmmas, which
+// have fixed defaults and
+// are not resolved by the heuristics. Gfx1250Backend resolves unset
+// knobs via SchedulingKnobHeuristics before DAG scheduling / cluster-barrier insertion (user value
+// wins; degenerate main-loop IR falls back to today's static HW/CDNA5/Rule3 defaults). See
+// SchedulingKnobHeuristics.hpp.
+#define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)                                                    \
+    X(LockDsReadOrder, bool, true)                                                              \
+    X(EvenSpreadFillers, bool, true)                                                            \
+    X(DsSlotFirst, bool, true)            /* saturated ds stream: ds_load before fillers */     \
+    X(WaitAluHoldStrictCount, int, 2)     /* hold s_wait_alu count <= N to next barrier wait */ \
+    X(WarGateWmmas, int, -1)              /* WMMA src -> ds_load overwrite gap; -1 = derived */ \
+    X(PrefetchLeadWmmas, int, 25)         /* 0 = prefetch issues when ready */                  \
+    X(PrefetchLeadMinStageWmmas, int, 64) /* shorter stages run with no lead */                 \
+    X(DsReadThrottleTransitionFactor, double, 1.0)                                              \
+    X(DsReadThrottleTransitionEntries, int, 0)                                                  \
+    X(DsReadThrottleLatency, int, -1)                                                           \
+    X(DsReadPerCap, int, -1)                                                                    \
+    X(DsReadPerWmma, int, -1) /* deprecated alias for DsReadPerCap */                           \
+    X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                             \
+    X(TensorLoadDsLoadGapCycles, int, 64)
 
 namespace stinkytofu {
 /**

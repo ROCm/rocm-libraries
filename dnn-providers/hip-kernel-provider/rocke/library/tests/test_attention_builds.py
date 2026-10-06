@@ -2729,11 +2729,13 @@ class TestAttentionDenseWavesPerEu(unittest.TestCase):
                 )
 
         # Sanity: the two waves_per_eu variants are otherwise indistinguishable,
-        # so the split above is attributable to waves_per_eu alone.
+        # so the split above is attributable to waves_per_eu alone. The name
+        # tags a non-default waves_per_eu (2 keeps the shipped symbol), so the
+        # names differ by exactly that tag.
         self.assertEqual(
             specs[1].kernel_name(),
-            specs[2].kernel_name(),
-            "kernel_name() differed unexpectedly — test setup error",
+            specs[2].kernel_name() + "_wpe1",
+            "kernel_name() differed beyond the waves_per_eu tag — test setup error",
         )
 
     def test_waves_per_eu_cache_isolation_artifacts(self):

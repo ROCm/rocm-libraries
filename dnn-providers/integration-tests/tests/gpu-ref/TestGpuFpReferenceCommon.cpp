@@ -28,6 +28,9 @@ TEST(TestFillTensorWithRandomValues, FloatValuesAreWithinRange)
     Tensor<float> tensor({10, 10, 100, 100});
     gpu_fp_reference_tensor::fillWithRandomValues(tensor, -1.0f, 10.0f, 42);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    tensor.memory().hostData();
+
     const auto* data = static_cast<const float*>(tensor.rawHostData());
     const auto count = tensor.elementSpace();
     for(size_t i = 0; i < count; ++i)
@@ -47,6 +50,9 @@ TEST(TestFillTensorWithRandomValues, DoubleValuesAreWithinRange)
 
     Tensor<double> tensor({10, 10, 100, 100});
     gpu_fp_reference_tensor::fillWithRandomValues(tensor, -1.0, 10.0, 42);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    tensor.memory().hostData();
 
     const auto* data = static_cast<const double*>(tensor.rawHostData());
     const auto count = tensor.elementSpace();
@@ -69,6 +75,9 @@ TEST(TestFillTensorWithRandomValues, HalfValuesAreWithinRange)
     gpu_fp_reference_tensor::fillWithRandomValues<HalfType>(
         tensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(10.0f), 42);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    tensor.memory().hostData();
+
     const auto* data = static_cast<const HalfType*>(tensor.rawHostData());
     const auto count = tensor.elementSpace();
     for(size_t i = 0; i < count; ++i)
@@ -89,6 +98,9 @@ TEST(TestFillTensorWithRandomValues, BFloat16ValuesAreWithinRange)
     Tensor<BFloat16Type> tensor({10, 10, 100, 100});
     gpu_fp_reference_tensor::fillWithRandomValues<BFloat16Type>(
         tensor, static_cast<BFloat16Type>(-1.0f), static_cast<BFloat16Type>(10.0f), 42);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    tensor.memory().hostData();
 
     const auto* data = static_cast<const BFloat16Type*>(tensor.rawHostData());
     const auto count = tensor.elementSpace();
@@ -113,6 +125,9 @@ TEST(TestFillTensorWithRandomValues, FloatMeanAndVariance)
 
     Tensor<float> tensor({10, 10, 100, 100});
     gpu_fp_reference_tensor::fillWithRandomValues(tensor, 2.0f, 20.0f, 42);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    tensor.memory().hostData();
 
     const auto* data = static_cast<const float*>(tensor.rawHostData());
     const auto count = tensor.elementSpace();
@@ -142,6 +157,9 @@ TEST(TestFillTensorWithRandomValues, HalfMeanAndVariance)
     gpu_fp_reference_tensor::fillWithRandomValues<HalfType>(
         tensor, static_cast<HalfType>(2.0f), static_cast<HalfType>(20.0f), 42);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    tensor.memory().hostData();
+
     const auto* data = static_cast<const HalfType*>(tensor.rawHostData());
     const auto count = tensor.elementSpace();
 
@@ -169,6 +187,9 @@ TEST(TestFillTensorWithRandomValues, BFloat16MeanAndVariance)
     Tensor<BFloat16Type> tensor({10, 10, 100, 100});
     gpu_fp_reference_tensor::fillWithRandomValues<BFloat16Type>(
         tensor, static_cast<BFloat16Type>(2.0f), static_cast<BFloat16Type>(20.0f), 42);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    tensor.memory().hostData();
 
     const auto* data = static_cast<const BFloat16Type*>(tensor.rawHostData());
     const auto count = tensor.elementSpace();
@@ -204,6 +225,10 @@ TEST(TestFillTensorWithRandomValues, SameSeedProducesSameValues)
     gpu_fp_reference_tensor::fillWithRandomValues(tensor1, 5.0f, 100.0f, 42);
     gpu_fp_reference_tensor::fillWithRandomValues(tensor2, 5.0f, 100.0f, 42);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    tensor1.memory().hostData();
+    tensor2.memory().hostData();
+
     const auto* data1 = static_cast<const float*>(tensor1.rawHostData());
     const auto* data2 = static_cast<const float*>(tensor2.rawHostData());
     const auto count = tensor1.elementSpace();
@@ -224,6 +249,10 @@ TEST(TestFillTensorWithRandomValues, DifferentSeedsProduceDifferentValues)
 
     gpu_fp_reference_tensor::fillWithRandomValues(tensor1, 5.0f, 100.0f, 42);
     gpu_fp_reference_tensor::fillWithRandomValues(tensor2, 5.0f, 100.0f, 43);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    tensor1.memory().hostData();
+    tensor2.memory().hostData();
 
     const auto* data1 = static_cast<const float*>(tensor1.rawHostData());
     const auto* data2 = static_cast<const float*>(tensor2.rawHostData());
@@ -252,6 +281,9 @@ TEST(TestFillTensorWithRandomValues, FloatStridedTensor)
 
     Tensor<float> tensor({10, 10, 100, 100}, {100, 1000, 10000, 1}); // Strided tensor
     gpu_fp_reference_tensor::fillWithRandomValues(tensor, 2.0f, 50.0f, 42);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    tensor.memory().hostData();
 
     const auto* data = static_cast<const float*>(tensor.rawHostData());
     const auto count = tensor.elementSpace();
@@ -292,6 +324,9 @@ TEST(TestFillTensorWithRandomValues, HalfStridedTensor)
     gpu_fp_reference_tensor::fillWithRandomValues<HalfType>(
         tensor, static_cast<HalfType>(1.0f), static_cast<HalfType>(10.0f), 42);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    tensor.memory().hostData();
+
     const auto* data = static_cast<const HalfType*>(tensor.rawHostData());
     const auto count = tensor.elementSpace();
 
@@ -330,6 +365,9 @@ TEST(TestFillTensorWithRandomValues, BFloat16StridedTensor)
     Tensor<BFloat16Type> tensor({100, 1, 10, 100}, {1000, 1, 10, 100}); // Strided tensor
     gpu_fp_reference_tensor::fillWithRandomValues<BFloat16Type>(
         tensor, static_cast<BFloat16Type>(3.0f), static_cast<BFloat16Type>(10.0f), 42);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    tensor.memory().hostData();
 
     const auto* data = static_cast<const BFloat16Type*>(tensor.rawHostData());
     const auto count = tensor.elementSpace();
@@ -373,6 +411,9 @@ TEST(TestFillTensorWithRandomValues, ConstantTensor)
     Tensor<float> tensor({10, 10, 100, 100});
     gpu_fp_reference_tensor::fillWithRandomValues(tensor, 5.0f, 5.0f, 42);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    tensor.memory().hostData();
+
     const auto* data = static_cast<const float*>(tensor.rawHostData());
     const auto count = tensor.elementSpace();
 
@@ -390,6 +431,9 @@ TEST(TestFillTensorWithRandomValues, SingleElementTensor)
     Tensor<float> tensor({1, 1, 1, 1});
     gpu_fp_reference_tensor::fillWithRandomValues(tensor, -10.0f, 10.0f, 42);
 
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    tensor.memory().hostData();
+
     const auto* data = static_cast<const float*>(tensor.rawHostData());
     EXPECT_EQ(tensor.elementSpace(), 1);
     EXPECT_GE(data[0], -10.0f);
@@ -404,6 +448,9 @@ TEST(TestFillTensorWithRandomValues, TensorSizeNotMultipleOfBlockSize)
     constexpr size_t TENSOR_SIZE = 256 * 10000 + 123; // Not a multiple of BLOCK_SIZE (256)
     Tensor<float> tensor({1, 1, 1, TENSOR_SIZE});
     gpu_fp_reference_tensor::fillWithRandomValues(tensor, 3.0f, 10.0f, 42);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    tensor.memory().hostData();
 
     const auto* data = static_cast<const float*>(tensor.rawHostData());
     const auto count = tensor.elementSpace();
