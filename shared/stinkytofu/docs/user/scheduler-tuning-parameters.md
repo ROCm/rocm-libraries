@@ -9,7 +9,7 @@ For the placement mechanisms behind the prefetch and filler knobs, see
 
 | Entry point | How |
 |---|---|
-| TensileLite | add the key to `stinky_module_options` in `Tensile/KernelWriter.py` (passed to `rocisa.toStinkyTofuModule(..., options=...)`) |
+| TensileLite | `GlobalParameters: StinkyTofuModuleOptions: {WmmaBatchSize: 4, DsReadPerCap: 12}` in the yaml (any module option, applied last), or add the key to `stinky_module_options` in `Tensile/KernelWriter.py` |
 | `stinkytofu-opt` | the `--flag=N` listed per parameter |
 | C++ pass pipeline | `PassFeatureConfig::dagFeatures.<field>` |
 

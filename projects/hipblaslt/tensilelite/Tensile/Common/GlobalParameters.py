@@ -414,6 +414,10 @@ globalParameters["StinkyTofuTimePasses"] = False
 # Span 0 = one WMMA batch window. See stinkytofu docs/user/scheduler-tuning-parameters.md.
 globalParameters["StinkyTofuDsIssueCapMode"] = 0
 globalParameters["StinkyTofuDsIssueCapSpanCycles"] = 0
+# Extra StinkyTofu module options, applied last so they override KernelWriter's own values,
+# e.g. {WmmaBatchSize: 4, DsReadPerCap: 12}. Keys are StinkyAsmModule::ModuleOptions names;
+# see stinkytofu docs/user/scheduler-tuning-parameters.md.
+globalParameters["StinkyTofuModuleOptions"] = {}
 
 # Directory for StinkyTofu per-kernel instruction-cost output files (empty = disabled).
 # When set, each kernel's StinkyTofu module writes its cost file here via

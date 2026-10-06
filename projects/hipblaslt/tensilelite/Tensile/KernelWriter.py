@@ -7231,6 +7231,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       stinky_module_options["DsIssueCapSpanCycles"] =         int(globalParameters.get("StinkyTofuDsIssueCapSpanCycles") or 0)
       if self.states.localReadSideOrder[0] == "B":
         stinky_module_options["DsReadOrder"] = 0  # Preserve selected B-then-A emission.
+      # Tuning overrides from GlobalParameters win over the values above.
+      stinky_module_options.update(globalParameters.get("StinkyTofuModuleOptions") or {})
 
       print2(f"StinkyTofu module options: {stinky_module_options}")
       # Convert rocisa module to stinkytofu with signature
