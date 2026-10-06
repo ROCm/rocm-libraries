@@ -51,3 +51,30 @@ hipblaslt_jit_test(jit-builder jit-cpu hipblaslt-jit-builder-test
     "${hipblaslt_jit_bundles}" "${CMAKE_CURRENT_SOURCE_DIR}/builder_test_kernel.hip"
     "${hipblaslt_jit_scratch}/builder")
 set_tests_properties(jit-builder PROPERTIES FIXTURES_REQUIRED jit-bundles)
+
+# The GPU tests run the bundles of the device's architecture, so they need a GPU
+# target with committed bundles. A YAML build cannot read the MsgPack entries.
+set(hipblaslt_jit_gpu OFF)
+foreach(target IN LISTS GPU_TARGETS)
+    string(REGEX REPLACE ":.*" "" architecture "${target}")
+    if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/data/${architecture}")
+        set(hipblaslt_jit_gpu ON)
+    endif()
+endforeach()
+if(NOT hipblaslt_jit_gpu OR HIPBLASLT_ENABLE_YAML)
+    return()
+endif()
+
+# Compiles the comgr builder and the TensileLite loader directly.
+add_executable(hipblaslt-jit-loader-test
+    loader_test.cpp
+    "${hipblaslt_jit_source}/hipblaslt-jit-builder.cpp"
+    "${hipblaslt_jit_source}/hipblaslt-jit-code-object.cpp"
+    "${hipblaslt_jit_source}/hipblaslt-jit-loader.cpp")
+target_include_directories(hipblaslt-jit-loader-test PRIVATE
+    "${hipblaslt_jit_source}" "${hipblaslt_jit_source}/rocblaslt/src/include")
+target_link_libraries(hipblaslt-jit-loader-test PRIVATE
+    roc::hipblaslt roc::tensilelite-host amd_comgr hip::device)
+hipblaslt_jit_test(jit-loader jit-gpu hipblaslt-jit-loader-test
+    "${hipblaslt_jit_bundles}" "${hipblaslt_jit_scratch}/loader")
+set_tests_properties(jit-loader PROPERTIES FIXTURES_REQUIRED jit-bundles)

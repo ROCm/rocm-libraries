@@ -16,7 +16,8 @@ if(HIPBLASLT_ENABLE_JIT)
     target_link_libraries(hipblaslt PRIVATE amd_comgr)
     target_sources(hipblaslt PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-code-object.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-builder.cpp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-builder.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-loader.cpp")
 endif()
 
 if(HIPBLASLT_BUILD_TESTING)
