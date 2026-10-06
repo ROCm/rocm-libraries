@@ -30,6 +30,7 @@
 #include "rocsparse_csrsort.hpp"
 #include "rocsparse_gcreate_identity_permutation.hpp"
 #include "rocsparse_primitives.hpp"
+#include "rocsparse_valset.hpp"
 
 namespace rocsparse
 {
@@ -42,9 +43,8 @@ namespace rocsparse
 
     static bool csrsort_is_supported(rocsparse_indextype ptr_type, rocsparse_indextype ind_type)
     {
-        return (ptr_type == rocsparse_indextype_i32 && ind_type == rocsparse_indextype_i32)
-               || (ptr_type == rocsparse_indextype_i64 && ind_type == rocsparse_indextype_i32)
-               || (ptr_type == rocsparse_indextype_i64 && ind_type == rocsparse_indextype_i64);
+        return (ptr_type == rocsparse_indextype_i32 || ptr_type == rocsparse_indextype_i64)
+               && (ind_type == rocsparse_indextype_i32 || ind_type == rocsparse_indextype_i64);
     }
 
     template <typename I, typename J>
@@ -84,6 +84,12 @@ namespace rocsparse
         if(ptr_type == rocsparse_indextype_i32 && ind_type == rocsparse_indextype_i32)
         {
             RETURN_IF_ROCSPARSE_ERROR((csrsort_rocprim_buffer_size_template<int32_t, int32_t>(
+                handle, m, nnz, startbit, endbit, with_perm, buffer_size)));
+            return rocsparse_status_success;
+        }
+        if(ptr_type == rocsparse_indextype_i32 && ind_type == rocsparse_indextype_i64)
+        {
+            RETURN_IF_ROCSPARSE_ERROR((csrsort_rocprim_buffer_size_template<int32_t, int64_t>(
                 handle, m, nnz, startbit, endbit, with_perm, buffer_size)));
             return rocsparse_status_success;
         }
@@ -192,6 +198,22 @@ namespace rocsparse
         if(ptr_type == rocsparse_indextype_i32 && ind_type == rocsparse_indextype_i32)
         {
             RETURN_IF_ROCSPARSE_ERROR((csrsort_rocprim_sort_template<int32_t, int32_t>(handle,
+                                                                                       m,
+                                                                                       nnz,
+                                                                                       offsets,
+                                                                                       ind,
+                                                                                       tmp_ind,
+                                                                                       perm,
+                                                                                       tmp_perm,
+                                                                                       startbit,
+                                                                                       endbit,
+                                                                                       buffer_size,
+                                                                                       buffer)));
+            return rocsparse_status_success;
+        }
+        if(ptr_type == rocsparse_indextype_i32 && ind_type == rocsparse_indextype_i64)
+        {
+            RETURN_IF_ROCSPARSE_ERROR((csrsort_rocprim_sort_template<int32_t, int64_t>(handle,
                                                                                        m,
                                                                                        nnz,
                                                                                        offsets,
@@ -639,11 +661,23 @@ rocsparse_status rocsparse::csxsort(rocsparse_handle            handle,
     // into every batch of target.
 
     // The index sort works in place, so the offsets and indices of source are first copied into
-    // target. A matrix without rows may have a null offsets array.
-    if(m > 0 && ptr_target != ptr_source)
+    // target. A matrix without rows may have a null offsets array, in which case the single
+    // offset of target is set to the index base.
+    if(ptr_target != nullptr && ptr_target != ptr_source)
     {
-        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
-            ptr_target, ptr_source, ptr_size * (m + 1), hipMemcpyDeviceToDevice, handle->stream));
+        if(ptr_source != nullptr)
+        {
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(ptr_target,
+                                                         ptr_source,
+                                                         ptr_size * (m + 1),
+                                                         hipMemcpyDeviceToDevice,
+                                                         handle->stream));
+        }
+        else
+        {
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::valset(handle, 1, static_cast<int64_t>(idx_base), ptr_type, ptr_target));
+        }
     }
     if(ind_target != ind_source)
     {
@@ -667,15 +701,18 @@ rocsparse_status rocsparse::csxsort(rocsparse_handle            handle,
                                                          sort_buffer_size,
                                                          sort_buffer));
 
-    // The batches run one after the other on the handle stream, so they share the buffer.
+    // A strided batched CSR or CSC matrix stores its indices with the same batch stride as its
+    // values, so every batch of target has its own indices, which receive the sorted indices of
+    // the first batch. Its offsets are copied too, unless their batch stride is zero and all
+    // batches share them. The batches run one after the other on the handle stream, so they
+    // share the buffer.
     for(int64_t batch = 0; batch < target->batch_count; ++batch)
     {
         if(batch > 0)
         {
-            // The offsets of the target are shared by all its batches when their stride is zero.
-            char* batch_ptr_target = ptr_target + batch * ptr_stride_target;
-            if(m > 0 && batch_ptr_target != ptr_target)
+            if(ptr_target != nullptr && ptr_stride_target != 0)
             {
+                char* batch_ptr_target = ptr_target + batch * ptr_stride_target;
                 RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(batch_ptr_target,
                                                              ptr_target,
                                                              ptr_size * (m + 1),
@@ -719,7 +756,6 @@ rocsparse_status rocsparse::csxsort(rocsparse_handle            handle,
 }
 
 rocsparse_status rocsparse::csrsort_buffer_size(rocsparse_handle            handle,
-                                                rocsparse_csrsort_alg       alg,
                                                 rocsparse_const_spmat_descr source,
                                                 rocsparse_const_spmat_descr target,
                                                 size_t*                     buffer_size_in_bytes)
@@ -732,7 +768,6 @@ rocsparse_status rocsparse::csrsort_buffer_size(rocsparse_handle            hand
 }
 
 rocsparse_status rocsparse::csrsort(rocsparse_handle            handle,
-                                    rocsparse_csrsort_alg       alg,
                                     rocsparse_const_spmat_descr source,
                                     rocsparse_spmat_descr       target,
                                     size_t                      buffer_size_in_bytes,

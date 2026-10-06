@@ -136,4 +136,6 @@ INSTANTIATE(int32_t, int32_t, int32_t);
 INSTANTIATE(int64_t, int64_t, int64_t);
 INSTANTIATE(int32_t, int64_t, const int64_t);
 INSTANTIATE(int32_t, int64_t, int64_t);
+INSTANTIATE(int64_t, int32_t, const int32_t);
+INSTANTIATE(int64_t, int32_t, int32_t);
 #undef INSTANTIATE

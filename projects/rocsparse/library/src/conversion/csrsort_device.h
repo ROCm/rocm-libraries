@@ -33,7 +33,7 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrsort_shift_kernel(I size, const I* in, I* out)
     {
-        const int64_t gid = int64_t(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+        const int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
 
         if(gid >= size)
         {
