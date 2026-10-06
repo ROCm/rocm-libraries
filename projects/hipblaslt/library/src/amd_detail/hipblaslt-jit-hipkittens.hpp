@@ -53,7 +53,7 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
             KernelResources          resources;
         };
 
-        // Written at build time by hipkittens/make_entries.py.
+        // Written at build time by hipkittens/write_entries.cpp.
         struct Resources
         {
             std::string_view        manifest; // the header directory's manifest.json

@@ -1,9 +1,10 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# One HipKittens GEMM variant of the JIT HipKittens backend. make_entries.py
-# turns Solution into the one-solution library entry that the backend copies
-# for each request; the backend compiles Template with HipFlags.
+# Human-written description of one HipKittens GEMM variant. The build does not
+# read this file and does not pass it to TensileLite. write_entries.cpp describes
+# this variant and writes its one-solution library entry; the backend compiles
+# Template with HipFlags.
 Template: gemm_tn_256x256x64_gfx950.hip
 Architecture: gfx950
 HipFlags: [-std=c++20, -DKITTENS_CDNA4, -DHK_FP16, -w]

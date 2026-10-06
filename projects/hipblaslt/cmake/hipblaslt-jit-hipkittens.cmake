@@ -12,9 +12,6 @@ option(HIPBLASLT_JIT_ENABLE_HIPKITTENS "Build the JIT HipKittens backend (develo
 if(NOT HIPBLASLT_JIT_ENABLE_HIPKITTENS)
     return()
 endif()
-if(NOT TARGET _rocisa)
-    message(FATAL_ERROR "HIPBLASLT_JIT_ENABLE_HIPKITTENS requires the local _rocisa target")
-endif()
 
 set(_hk_gfx950 OFF)
 foreach(_hk_target IN LISTS GPU_TARGETS)
@@ -88,28 +85,23 @@ rocm_install(FILES "${hipkittens_SOURCE_DIR}/LICENSE"
     DESTINATION "${CMAKE_INSTALL_DOCDIR}/third-party/hipkittens"
     COMPONENT runtime)
 
-# The compiled-in resources: header manifest, kernel templates and their entries.
+# The compiled-in resources: header manifest, the HIP template and the
+# one-solution entries write_entries.cpp describes. TensileLite is not invoked.
 set(_hk_source "${PROJECT_SOURCE_DIR}/library/src/amd_detail")
 set(_hk_variant_dir "${_hk_source}/hipkittens")
-set(_hk_variants "${_hk_variant_dir}/gemm_bf16_tn_256x256x64_gfx950.yaml"
-                 "${_hk_variant_dir}/gemm_f16_tn_256x256x64_gfx950.yaml")
 set(_hk_resources "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-jit-hipkittens-resources.cpp")
-if(WIN32)
-    set(_hk_pythonpath "$<TARGET_FILE_DIR:_rocisa>/..;${PROJECT_SOURCE_DIR}/tensilelite")
-else()
-    set(_hk_pythonpath "$<TARGET_FILE_DIR:_rocisa>/..:${PROJECT_SOURCE_DIR}/tensilelite")
-endif()
+add_executable(hipblaslt-hipkittens-write-entries "${_hk_variant_dir}/write_entries.cpp")
+target_compile_features(hipblaslt-hipkittens-write-entries PRIVATE cxx_std_17)
 add_custom_command(
     OUTPUT "${_hk_resources}"
-    COMMAND "${CMAKE_COMMAND}" -E env "PYTHONPATH=${_hk_pythonpath}"
-            "${Python_EXECUTABLE}" "${_hk_variant_dir}/make_entries.py"
-            --compiler "${CMAKE_CXX_COMPILER}"
+    COMMAND $<TARGET_FILE:hipblaslt-hipkittens-write-entries>
             --headers "${_hk_stage}/manifest.json"
+            --source "${_hk_variant_dir}/gemm_tn_256x256x64_gfx950.hip"
             --output "${_hk_resources}"
-            ${_hk_variants}
-    DEPENDS "${_hk_variant_dir}/make_entries.py" "${_hk_variant_dir}/gemm_tn_256x256x64_gfx950.hip"
-            ${_hk_variants} "${_hk_stage}/manifest.json" _rocisa
-    COMMENT "Generating the JIT HipKittens entries"
+    DEPENDS hipblaslt-hipkittens-write-entries
+            "${_hk_variant_dir}/gemm_tn_256x256x64_gfx950.hip"
+            "${_hk_stage}/manifest.json"
+    COMMENT "Writing the JIT HipKittens entries"
     VERBATIM)
 # hipblaslt is defined in another directory, which gets no rule for the output.
 add_custom_target(hipblaslt-hipkittens-resources DEPENDS "${_hk_resources}")
