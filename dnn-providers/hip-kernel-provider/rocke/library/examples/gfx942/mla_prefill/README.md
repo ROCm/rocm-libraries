@@ -37,6 +37,14 @@
   - [Diagnosis](#diagnosis)
   - [Kept — four heads per workgroup](#kept--four-heads-per-workgroup)
   - [Measured and not stacked](#measured-and-not-stacked)
+- [Fifth pass — porting aiter's loop techniques](#fifth-pass--porting-aiters-loop-techniques)
+  - [Diagnosis against aiter](#diagnosis-against-aiter)
+  - [Capturing the fifth-pass traces](#capturing-the-fifth-pass-traces)
+  - [Kept — software-pipelined score reads](#kept--software-pipelined-score-reads)
+  - [Kept — lazy softmax rescale](#kept--lazy-softmax-rescale)
+  - [Kept — the smaller pipelining levers](#kept--the-smaller-pipelining-levers)
+  - [Opt-in — unfused head projections](#opt-in--unfused-head-projections)
+  - [Measured and not kept in the fifth pass](#measured-and-not-kept-in-the-fifth-pass)
 - [Method](#method)
 - [What remains unproven](#what-remains-unproven)
 
@@ -175,6 +183,14 @@ One lever per step. Full 8-case parity after each. Keep or revert, never stack.
 | 31 | Four heads per workgroup, one wave per head (`heads_per_wg = 4`, `block_q = 16`), selected by dispatch | **Kept** | each staged key tile feeds four heads; no score split or partial combine; absorbed query never touches LDS; still two workgroups per CU; large gain on every shape |
 | 32 | Permuted-row PV gather on the four-heads path | **Kept** | one `ds_read_b64` of a key row feeds four PV tiles instead of sixteen scalar reads; large gain on every shape |
 | 33 | Occupancy guard tests | **Kept** | CPU tests fail if the shipped or the fallback layout leaves two workgroups per CU |
+| 34 | Score reads software-pipelined eight k-steps ahead, fenced every four (`HPW_SCORE_PREFETCH`, `HPW_SCORE_FENCE_EVERY`) | **Kept** | `lgkmcnt` waits, the loop's largest stall class, shrank on the trace; VGPR stays at the two-workgroup line, no spill; gain on every long shape |
+| 35 | Next tile's staging loads issued after the score GEMM | **Kept** | frees the staging registers for the score read-ahead; required by lever 34 |
+| 36 | Lazy softmax rescale (`HPW_LAZY_TAU`) | **Kept** | the 64 packed multiplies of the accumulator rescale run only on tiles where some row's max moved; gain on every long shape |
+| 37 | First PV read group issued before the softmax (`HPW_PV_PREFETCH`) | **Kept** | hides that group's latency behind the softmax; two groups ahead spills |
+| 38 | Finite-only bf16 rounding of P | **Kept** | two integer ops per element instead of the NaN-preserving five; P is never NaN |
+| 39 | W_UK absorb loads four r-tiles ahead (`HPW_ABSORB_PREFETCH`) | **Kept** | the prologue no longer exposes one global round trip per r-tile; small gain on short shapes |
+| 40 | `absorbed_query` on the four-heads path | **Opt-in** | no prologue absorb, no `W_UV` epilogue; kernel-only gain on long shapes, end to end it depends on the batched GEMMs |
+| 41 | Eight heads per workgroup (`heads_per_wg = 8`) | Not selected | parity-verified and admissible (k_rope staging narrows to 2-wide chunks); faster on some shapes, slower on others, no clean dispatch rule |
 
 ### Kept — wt_lds bank-conflict pad
 
@@ -658,6 +674,109 @@ dispatch selects.
 - **Other knob re-sweeps** (`SCORE_SGB_GROUP`, `WT_PAD`, `r_kv_tile = 64`): neutral,
   slower or inadmissible.
 
+## Fifth pass — porting aiter's loop techniques
+
+Levers 34–41 port techniques visible in aiter's gfx942 absorb-mode kernel
+(`mla_pfl_bf16_a16w16_causal_subQ128_mqa128`) onto the four-heads path, guided by
+side-by-side WaveScope ATT traces. Each kept lever was gated on the full 8-case
+parity; the stack was then timed against the previous kept state on both model
+families of the benchmark shape file and re-traced.
+
+### Diagnosis against aiter
+
+- **aiter is pipe-bound, rocke was wait-bound.** aiter's waves spend most of
+  their cycles issuing; rocke's spent most of theirs waiting, and inside the
+  k-loop the largest single cost was `s_waitcnt lgkmcnt` on LDS reads.
+- **Why the reads were not run ahead.** The loop sits at the 256-VGPR line that
+  keeps two workgroups per CU. The backend scheduler had no registers to run
+  reads ahead into, so it issued each `ds_read` right before the MFMA that
+  consumed it — and the 36-step score is one serial MFMA chain, so every read's
+  latency landed on the critical path. `sched_group_barrier` hints did not
+  change that; the scheduler cannot hoist past a register shortage.
+- **What aiter does instead:** reads well ahead of the MFMAs, interleaved one
+  for one, with 512 registers at one workgroup per CU.
+
+### Capturing the fifth-pass traces
+
+The same capture as the second pass, through WaveScope's ATT decode:
+
+```bash
+ROCKE_DEBUG_LOC=1 ROCKE_COMGR_LIB=/opt/rocm/lib/libamd_comgr.so.3 \
+rocprofv3 --att --att-library-path /opt/rocm/lib --att-target-cu 1 \
+  --att-shader-engine-mask 0x1 --kernel-include-regex mla_prefill_fwd \
+  --kernel-iteration-range "[1]" -d <out> -- \
+  "$PY" -m benchmarks.gfx942.attention.prefill.benchmark_mla_prefill_live \
+  --shapes <one-shape.json> --mode time --no-aiter --warmup 1 --iterations 2
+```
+
+Per-tile costs were attributed by source line (`ROCKE_DEBUG_LOC=1`), splitting the
+k-tile body from the prologue and epilogue. One traced dispatch varies from
+capture to capture; capture more than once before reading a delta.
+
+### Kept — software-pipelined score reads
+
+The loop is emitted already pipelined: the `kv_lds` / `qr_lds` reads of score
+k-step `kk + 8` are emitted before the MFMA of k-step `kk`, and a
+`sched_barrier(0)` every four k-steps stops the scheduler from sinking them back
+to their uses. Fencing every step also works but keeps each 8 B read separate;
+every four steps lets adjacent k-steps merge into `ds_read2_b64`. The registers
+come from moving the next tile's staging loads after the score GEMM (lever 35):
+issued before it, their eighteen VGPRs are live across the score.
+
+### Kept — lazy softmax rescale
+
+The running max only moves when a row's new max exceeds the max in use by more
+than `HPW_LAZY_TAU` (log2 units); otherwise the stale max is kept and P may reach
+`2**HPW_LAZY_TAU`, which bf16 P, the f32 accumulator and the row sum hold without
+loss. The final `1/l` and the LSE use the same max, so the result is unchanged.
+The accumulator rescale then runs only when some lane of the wave moved its max.
+`scf.if` cannot carry loop state out of a branch, so the conditional rescale is a
+zero- or one-trip `scf.for` on a wave-uniform `wave_any` count, carrying the
+accumulator as its iteration arguments. In causal prefill the max settles after
+the first few key tiles, so most tiles skip it.
+
+### Kept — the smaller pipelining levers
+
+- **PV read-ahead (37).** The first PV read group is issued before the softmax
+  and each later group one group ahead of its MFMAs, fenced per group.
+- **P rounding (38).** gfx942 has no f32→bf16 convert and `fptrunc` lowers to a
+  NaN-preserving sequence; P is finite, so round-to-nearest-even is two integer
+  ops and a `v_perm_b32` per pair.
+- **Absorb read-ahead (39).** The prologue's W_UK loads run four r-tiles ahead of
+  the absorb MFMAs, where registers are not yet scarce.
+
+### Opt-in — unfused head projections
+
+`MlaPrefillSpec(absorbed_query=True)` on the four-heads layout takes the absorbed
+query `[total_q, H, r_kv + d_rope]` and writes the normalized latent
+`[total_q, H, r_kv]` plus the LSE. The absorbed query is read straight into the
+score B fragments; the latent is stored straight from the permuted `accᵀ`
+registers, four consecutive `r` per 8 B store. The verifier (`--absorbed-query`)
+composes it with `torch.bmm` absorb and `W_UV` against the same oracle, and the
+live benchmark times the composition and its per-stage split. Most of the
+removed prologue and epilogue already overlapped the other workgroup's loop, so
+the kernel-only gain is concentrated on long shapes. Dispatch keeps the fused
+kernel until the provider API carries the absorbed query.
+
+On a node where torch's hipBLASLt path stalls, set
+`TORCH_BLAS_PREFER_HIPBLASLT=0` before any run that goes through `torch.bmm`.
+
+### Measured and not kept in the fifth pass
+
+- **Two independent score accumulator chains**: slower; the dependency was not
+  the bottleneck, the read latency was.
+- **Staging loads after the softmax or after PV**: after PV exposes the load
+  latency at the next barrier; after the softmax is no better than after the
+  score.
+- **`SCORE_SGB_GROUP` re-sweep on the four-heads path**: within noise, which is
+  what showed the hint could not overcome the register shortage.
+- **AGPR accumulators** with the lazy rescale: past 256 registers, one workgroup
+  per CU, and the AGPR copies return; much slower.
+- **W_UV epilogue read-ahead**: barely moves short shapes and spills three
+  long-lived values to scratch.
+- **Double-buffered `kv_lds` at eight heads per workgroup** (one barrier per
+  tile): the dynamic slot offset spills in the prologue. Not pursued further.
+
 ## Method
 
 Per lever, in order, with no deviation:
@@ -695,8 +814,9 @@ They are not deliverables and their output does not belong in this repository.
   replaced. No test reaches a cache that large.
 - **Untried next levers.** The `s512` shapes, where per-workgroup fixed cost
   dominates, are furthest from aiter; the unfused projections address that
-  directly but need an API change. The four-heads loop still spends a packed
-  multiply per accumulator register per tile on the online-softmax rescale; a
-  lazy rescale would need loop-carried state out of a branch, which `scf.if`
-  cannot carry. `iglp_opt` and the grouped gather have only been timed on the
-  single-head path.
+  directly but need an API change. `iglp_opt` and the grouped gather have only
+  been timed on the single-head path. aiter's remaining structural advantages —
+  32 rows per wave at 512 registers, asynchronous direct-to-LDS key tiles several
+  tiles deep, and 64 KB of LDS at one workgroup per CU — need a one-workgroup-
+  per-CU redesign rather than a lever on this layout.
+- **Fifth-pass timing ran on a 228-CU MI300A only.**

@@ -70,6 +70,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import dataclasses
 import math
 import struct
 import sys
@@ -560,6 +561,8 @@ def run_full_on_device(spec: MlaPrefillSpec, p: Problem, q: np.ndarray, *, arch:
     ``out`` comes back decoded from its bf16 storage into fp32 so the caller can
     compare it against the fp32 oracle without a second dtype convention.
     """
+    if spec.absorbed_query:
+        return _run_unfused_on_device(spec, p, q, arch=arch)
     build = _resolve_fwd_entry()
     rt, fn = _load(spec, build(spec, arch=arch), arch=arch)
     g = _launch_geometry(spec, p)
@@ -589,6 +592,91 @@ def run_full_on_device(spec: MlaPrefillSpec, p: Problem, q: np.ndarray, *, arch:
     for dev in bufs.values():
         rt.free(dev)
     return out, lse
+
+
+def _torch_bmm_bf16(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """``a @ b`` per batch on the device via ``torch.bmm`` in bf16, back as fp32.
+
+    The unfused path's two head projections are batched GEMMs outside the
+    kernel; running them through ``torch.bmm`` on the same device checks the
+    real composition rather than a host model of it.
+    """
+    import torch
+
+    ta = torch.from_numpy(np.ascontiguousarray(a, dtype=np.float32))
+    tb = torch.from_numpy(np.ascontiguousarray(b, dtype=np.float32))
+    ta = ta.to(device="cuda", dtype=torch.bfloat16)
+    tb = tb.to(device="cuda", dtype=torch.bfloat16)
+    return torch.bmm(ta, tb).float().cpu().numpy()
+
+
+def _run_unfused_on_device(
+    spec: MlaPrefillSpec, p: Problem, q: np.ndarray, *, arch: str
+):
+    """``bmm`` absorb, then the ``absorbed_query`` kernel, then ``bmm`` W_UV.
+
+    Returns ``(out fp32, lse fp32)`` like :func:`run_full_on_device`, so the same
+    comparison against the oracle applies to the composed path.
+    """
+    build = _resolve_fwd_entry()
+    rt, fn = _load(spec, build(spec, arch=arch), arch=arch)
+    g = _launch_geometry(spec, p)
+    d_nope, r_kv = spec.d_nope, spec.r_kv
+
+    # Qa_nope[h] = Q_nope[h] @ W_UK[h, :, :d_nope]ᵀ, bf16 out of an fp32 GEMM.
+    q_bf = _bf16(q)
+    qa_nope = _torch_bmm_bf16(
+        q_bf[:, :, :d_nope].transpose(1, 0, 2),
+        p.w_uk[:, :, :d_nope].transpose(0, 2, 1),
+    ).transpose(1, 0, 2)
+    qa = np.concatenate([qa_nope, q_bf[:, :, d_nope:]], axis=-1)
+
+    host_lat_bits = np.full(
+        (g["total_q"], spec.num_heads, r_kv), _BF16_NAN_BITS, dtype=np.uint16
+    )
+    host_lse = np.full((g["total_q"], spec.num_heads), np.nan, dtype=np.float32)
+    bufs = _upload(
+        rt,
+        (
+            ("out", host_lat_bits),
+            ("lse", host_lse),
+            ("qa", _bf16_bits(qa)),
+            ("c_kv", _bf16_bits(p.c_kv)),
+            ("k_rope", _bf16_bits(p.k_rope)),
+            ("cu_q", p.cu_seqlens_q.astype(np.int32)),
+            ("cu_k", p.cu_seqlens_k.astype(np.int32)),
+            ("bt", p.block_table.astype(np.int32)),
+        ),
+    )
+    # 12-argument pack: mla_prefill_fwd_signature with absorbed_query.
+    args = struct.pack(
+        "<" + "Q" * 8 + "f" + "i" * 3,
+        bufs["out"],
+        bufs["lse"],
+        bufs["qa"],
+        bufs["c_kv"],
+        bufs["k_rope"],
+        bufs["cu_q"],
+        bufs["cu_k"],
+        bufs["bt"],
+        float(p.scale),
+        g["n_seqs"],
+        g["bt_stride"],
+        g["max_k"],
+    )
+    rt.launch(fn, _fwd_grid(spec, g), mla_prefill_block(spec), args)
+    rt.sync()
+    latent = _bf16_from_bits(_download(rt, bufs["out"], host_lat_bits))
+    lse = _download(rt, bufs["lse"], host_lse)
+    for dev in bufs.values():
+        rt.free(dev)
+
+    # out[h] = latent[h] @ W_UV[h], W_UV = W_UK[h, :, d_nope:]. A NaN in the
+    # latent (an unwritten slot) propagates to its whole output row.
+    out = _torch_bmm_bf16(latent.transpose(1, 0, 2), p.w_uk[:, :, d_nope:]).transpose(
+        1, 0, 2
+    )
+    return np.ascontiguousarray(out), lse
 
 
 # --------------------------------------------------------------------------
@@ -795,6 +883,7 @@ def run_case(
     seed: int,
     tol: float,
     dry_run: bool,
+    absorbed_query: bool = False,
 ) -> bool:
     """One (shape, heads) case end to end. Returns True on pass."""
     # The score probe is single-tile (block_q == 16); the forward kernel runs
@@ -805,6 +894,8 @@ def run_case(
         spec = MlaPrefillSpec(num_heads=heads, block_q=16)
     else:
         spec = _dispatched_spec(heads, q_lens, k_lens, arch)
+        if absorbed_query:
+            spec = dataclasses.replace(spec, absorbed_query=True)
     # --dry-run reports problem geometry, which is arch-independent, so it stays
     # runnable on a host with no device.
     if not dry_run:
@@ -863,7 +954,19 @@ def main(argv=None) -> int:
     ap.add_argument(
         "--list-scenarios", action="store_true", help="print the table and exit"
     )
+    ap.add_argument(
+        "--absorbed-query",
+        action="store_true",
+        help="--mode full only: verify the unfused path -- torch.bmm absorb, the "
+        "absorbed_query kernel, torch.bmm W_UV -- against the same oracle",
+    )
     args = ap.parse_args(argv)
+    if args.absorbed_query and not args.dry_run:
+        if args.mode != "full":
+            ap.error("--absorbed-query needs --mode full")
+        # Bind torch (and its bundled comgr) before the first kernel compile,
+        # as the live benchmark does.
+        import torch  # noqa: F401
 
     if args.list_scenarios:
         for name, sc in SCENARIOS.items():
@@ -907,6 +1010,7 @@ def main(argv=None) -> int:
                     seed=args.seed,
                     tol=args.tol,
                     dry_run=args.dry_run,
+                    absorbed_query=args.absorbed_query,
                 ),
             )
         )
