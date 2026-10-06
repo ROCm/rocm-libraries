@@ -62,6 +62,7 @@
   dict({
     'keys': list([
       '1LDSBuffer',
+      'AccumShuffle',
       'ActivationAlt',
       'ActivationFuncCall',
       'ActivationFused',
