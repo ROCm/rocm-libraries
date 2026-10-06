@@ -59,7 +59,7 @@ target_sources(tensilelite-tests
 # which is only defined when MSGPACK is the active serialization format
 # (see tensilelite/src/Tensile.cpp). The test also writes msgpack mapping
 # files directly via <msgpack.hpp>, so it has no meaning in YAML builds.
-if(NOT HIPBLASLT_ENABLE_YAML)
+if(NOT TENSILELITE_ENABLE_YAML)
     target_sources(tensilelite-tests
         PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/MasterSolutionLibraryMapping_test.cpp"
@@ -70,7 +70,7 @@ if(NOT HIPBLASLT_ENABLE_YAML)
     )
 endif()
 
-if(HIPBLASLT_ENABLE_YAML)
+if(TENSILELITE_ENABLE_YAML)
     target_include_directories(tensilelite-tests PRIVATE ${LLVM_INCLUDE_DIRS})
     target_link_libraries(tensilelite-tests PRIVATE LLVMObjectYAML)
 endif()
@@ -134,7 +134,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
         # call it here too; enable_testing() is idempotent.
         enable_testing()
         message(STATUS "tensilelite-tests: YAML-based test categorization")
-        file(MAKE_DIRECTORY "${TENSILELITE_OUTER_BINARY_DIR}/staging")
+        file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
 
         # Install-time CTestTestfile for TheRock: relative paths so ctest can run from installed location.
         set(TENSILELITE_TESTS_CTEST_INSTALL_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
@@ -147,7 +147,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
         apply_test_category_labels(
             tensilelite-tests
             "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
-            "${TENSILELITE_OUTER_BINARY_DIR}/staging"
+            "${PROJECT_BINARY_DIR}/staging"
             "${TENSILELITE_TESTS_CTEST_INSTALL_FILE}"
             INSTALL_EXECUTABLE "./tensilelite-tests"
         )

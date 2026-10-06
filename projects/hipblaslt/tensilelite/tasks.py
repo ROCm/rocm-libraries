@@ -374,7 +374,7 @@ def build_coverage(
         "-DTENSILELITE_ENABLE_COVERAGE=ON",
         "-DROCISA_ENABLE_COVERAGE=ON",
         "-DTENSILELITE_BUILD_TESTING=ON",
-        "-DHIPBLASLT_ENABLE_YAML=OFF",  # Use msgpack, LLVM headers may not be available
+        "-DTENSILELITE_ENABLE_YAML=OFF",  # Use msgpack, LLVM headers may not be available
     ]
 
     if shutil.which("ccache"):
