@@ -820,8 +820,8 @@ public:
     bool IsRootPlanR2CTransform() const;
     bool IsRootPlanC2RTransform() const;
 
-    // Return the transform type of the root plan
-    rocfft_transform_type GetRootPlanTransformType() const;
+    // Return the transform type of the root plan.
+    virtual rocfft_transform_type GetRootPlanTransformType() const;
 
     // Return ancestor node of 'this' that is partial-pass, or
     // nullptr if there is no such ancestor

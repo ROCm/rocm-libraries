@@ -12,9 +12,10 @@ Documentation for rocFFT is available at
   bricks used non-contiguous data layouts.
 * Fixed a memory leak when `rocfft_plan_create` fails.
 
-### Added
+### Optimized
 
-* Added support for c2r partial-pass 3D-FFTs.
+* Improved performance of unit-strided, interleaved, complex-to-real FFTs for the following lengths:
+  * (216,104,100)
 
 ## rocFFT 1.0.40 for ROCm 10.1
 
