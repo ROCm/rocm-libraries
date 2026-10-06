@@ -748,8 +748,8 @@ def _make_writer(kernel):
 def build_kernel(cfg, with_prefetch=False):
     """Build a kernel computing GL2 addresses for all of cfg.tensors at once.
 
-    with_prefetch also emits each stage's issueLoad, for assembling only: the
-    dummy base buffer does not back the whole footprint.
+    with_prefetch also emits each stage's issueLoad and a final clearIncrement,
+    for assembling only: the dummy base buffer does not back the whole footprint.
 
     The kernel emits cfg.n_inc+1 "stages": stage 0 is the start address after
     the loop-counter-guarded skipPGR, and each later stage calls incrementAddr
@@ -1046,6 +1046,9 @@ def build_kernel(cfg, with_prefetch=False):
             export_tensor(t, tp, region)
             layout.append((t, num_loads, stage, region))
             region += cfg.num_threads * num_loads
+    if with_prefetch:
+        for t, tp in tps:
+            epi.add(comp.clearIncrement(w, kernel, tp))
     epi.add(TextBlock("  s_wait_storecnt 0x0\n"))
     n_out = region
 
