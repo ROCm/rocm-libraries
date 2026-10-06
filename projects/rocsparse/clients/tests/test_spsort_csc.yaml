@@ -93,6 +93,11 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [nos1]
 
+- name: spsort_csc_extra
+  category: quick
+  function: spsort_csc_extra
+  precision: *single_precision
+
 # pre_checkin
 - name: spsort_csc_bad_arg
   category: pre_checkin
