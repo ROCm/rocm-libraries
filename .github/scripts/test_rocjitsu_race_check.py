@@ -6,13 +6,99 @@
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 
 import yaml
 
 
+def workflow_steps():
+    workflow = (
+        Path(__file__).parents[1] / "workflows/therock-rocjitsu-race-check-linux.yml"
+    )
+    return yaml.safe_load(workflow.read_text())["jobs"]["rocjitsu-race-check-linux"][
+        "steps"
+    ]
+
+
 class RaceCheckTests(unittest.TestCase):
+    def test_container_paths_and_installed_requirements(self):
+        for output in ("./build", "artifact tree", "absolute"):
+            with self.subTest(output=output), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp).resolve()
+                artifact = root / output
+                requirements = (
+                    artifact / "share/hipblaslt/tensilelite/rocjitsu/requirements.txt"
+                )
+                requirements.parent.mkdir(parents=True)
+                requirements.write_text("msgpack\nPyYAML\n")
+                installer = root / "build_tools/install_additional_requirements.py"
+                installer.parent.mkdir()
+                # TheRock passes the path straight to uv from its checkout root.
+                # Read that file here without downloading or installing packages.
+                installer.write_text(
+                    "from pathlib import Path\nimport sys\n"
+                    "assert sys.argv[1] == '--requirements-files'\n"
+                    "print(Path(sys.argv[2]).read_text(), end='')\n"
+                )
+                env = {
+                    **os.environ,
+                    "PATH": str(Path(sys.executable).parent)
+                    + os.pathsep
+                    + os.environ["PATH"],
+                    "OUTPUT_ARTIFACTS_DIR": (
+                        str(artifact) if output == "absolute" else output
+                    ),
+                    "GITHUB_ENV": str(root / "github-env"),
+                    # GitHub's workspace context can still name the host mount.
+                    **{
+                        name: "/host/workspace/" + name.lower()
+                        for name in (
+                            "VENV_DIR",
+                            "ROCM_PATH",
+                            "ROCJITSU_SOURCE_DIR",
+                            "ROCJITSU_BUILD_DIR",
+                            "RACE_REPORT_DIR",
+                        )
+                    },
+                }
+                installed = None
+                for step in workflow_steps():
+                    if step["name"] not in {
+                        "Resolve race-check paths",
+                        "Install GEMM sweep requirements",
+                    }:
+                        continue
+                    result = subprocess.run(
+                        ["bash", "-euo", "pipefail", "-c", step["run"]],
+                        cwd=root,
+                        env=env,
+                        text=True,
+                        capture_output=True,
+                        timeout=10,
+                    )
+                    self.assertEqual(
+                        result.returncode, 0, result.stdout + result.stderr
+                    )
+                    exports = Path(env["GITHUB_ENV"])
+                    if exports.exists():
+                        env.update(
+                            line.split("=", 1)
+                            for line in exports.read_text().splitlines()
+                        )
+                    if step["name"] == "Install GEMM sweep requirements":
+                        installed = result.stdout
+                self.assertEqual(installed, requirements.read_text())
+                self.assertEqual(Path(env["ROCM_PATH"]), artifact)
+                for name, relative in (
+                    ("VENV_DIR", ".venv"),
+                    ("ROCJITSU_SOURCE_DIR", "rocm-systems/emulation/rocjitsu"),
+                    ("ROCJITSU_BUILD_DIR", "rocjitsu-build"),
+                    ("RACE_REPORT_DIR", "race-reports"),
+                ):
+                    self.assertEqual(Path(env[name]), root / relative)
+
     def test_driver_runs_both_sweeps_and_propagates_each_failure(self):
         driver = Path(__file__).with_name("run_rocjitsu_hipblaslt_race_check.sh")
         # Exercise the real post-setup stage sequence with lightweight workloads.
@@ -78,15 +164,10 @@ python3() { printf 'ARG: %s\n' "$@"; if [[ "$3" == tensile ]]; then return "$TEN
                 self.assertIn("ARG: reports/sweep-bench", result.stdout)
 
     def test_ci_publishes_partial_and_missing_reports(self):
-        workflow = (
-            Path(__file__).parents[1]
-            / "workflows/therock-rocjitsu-race-check-linux.yml"
-        )
-        steps = yaml.safe_load(workflow.read_text())["jobs"][
-            "rocjitsu-race-check-linux"
-        ]["steps"]
         publish = next(
-            s for s in steps if s["name"] == "Publish sampled solution results"
+            s
+            for s in workflow_steps()
+            if s["name"] == "Publish sampled solution results"
         )
         self.assertEqual(publish["if"], "${{ always() }}")
         with tempfile.TemporaryDirectory() as tmp:
