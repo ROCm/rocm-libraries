@@ -296,6 +296,24 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->tile_size_override = 16;
         s->use_wave_page_id_load = true;
         break;
+    case 18:
+        /* Top-left causal (seqlen_q != seqlen_k): context_len = 0, so the
+         * causal limit, KV-loop bound, sliding window and ALiBi + qq_bias
+         * offsets follow it. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 4;
+        s->dtype = "bf16";
+        s->num_segments = 8;
+        s->use_sinks = false;
+        s->sliding_window = 1024;
+        s->has_softcap = false;
+        s->use_alibi = true;
+        s->use_qq_bias = true;
+        s->kv_storage_dtype = NULL;
+        s->causal_top_left = 1;
+        break;
     default:
         return -1;
     }

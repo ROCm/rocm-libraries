@@ -305,6 +305,17 @@ rocke_kernel_def_t* rocke_build_unified_attention_2d_fastkv_register_p(
                 b, ROCKE_ERR_VALUE, "fastKV register-P experiment does not support FP8 KV cache");
             return NULL;
         }
+        /* causal_top_left lives on the shared C spec struct (the gfx942 tiled 2D
+         * knob) but the gfx950 Python spec has no such field. This builder funnels
+         * into the gfx942 scalar body, which WOULD honour it, so reject explicitly. */
+        if(spec->causal_top_left)
+        {
+            rocke__fastkv_regp_set_err(
+                b,
+                ROCKE_ERR_VALUE,
+                "fastKV register-P experiment does not support causal_top_left");
+            return NULL;
+        }
 
         /* return build_unified_attention_2d_tiled(_FastKvRegisterPProxy(spec), arch)
          *

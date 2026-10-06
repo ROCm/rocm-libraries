@@ -484,6 +484,16 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
                         "kv_ring_depth!=2 (deep prefetch ring) not yet ported to "
                         "the gfx950 C twin");
     }
+    if(spec->causal_top_left)
+    {
+        /* causal_top_left is a gfx942-only knob on the shared spec struct; the
+         * gfx950 Python spec has no such field, so reject rather than silently
+         * emit a bottom-right causal kernel. */
+        rocke_g950_fail(b,
+                        ROCKE_ERR_NOTIMPL,
+                        "causal_top_left is only implemented for gfx942 tiled 2D/3D "
+                        "unified attention");
+    }
     if(spec->use_q_reread)
     {
         rocke_g950_fail(b,

@@ -107,6 +107,64 @@ _CONFIGS = {
         use_k_single_buffer=False,
         use_agpr_alloc_zero=True,
     ),
+    # cfg7: cfg5 + causal_top_left (top-left diagonal: context_len = const 0, so
+    # every bound derived from it follows). Pins the C-twin "tl" variant on the
+    # transposed-x8 D128 geometry.
+    7: dict(
+        head_size=128,
+        block_size=32,
+        num_query_heads=8,
+        num_kv_heads=1,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_warps=2,
+        block_m_per_warp=32,
+        tile_size=32,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+        use_k_single_buffer=False,
+        causal_top_left=True,
+    ),
+    # cfg8: cfg0 + causal_top_left + ALiBi. Covers the sliding-window range
+    # sites (first/last allowed key) on the top-left diagonal, and proves the
+    # ALiBi position offset follows the top-left context_len (= 0).
+    8: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=32,
+        dtype="bf16",
+        use_sinks=True,
+        sliding_window=2048,
+        has_softcap=False,
+        use_alibi=True,
+        causal_top_left=True,
+    ),
+    # cfg9: cfg7 + transposed scalar_state + mask_once. Covers the per-iter
+    # transposed causal limit (st_causal_lim_iter = context_len + st_qp_iter)
+    # on the top-left diagonal. use_transposed_invariant_hoist is left off:
+    # the gfx942 C twin does not port that path (pre-existing, not TL).
+    9: dict(
+        head_size=128,
+        block_size=32,
+        num_query_heads=8,
+        num_kv_heads=1,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_warps=2,
+        block_m_per_warp=32,
+        tile_size=32,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+        use_k_single_buffer=False,
+        use_transposed_scalar_state=True,
+        use_transposed_mask_once=True,
+        causal_top_left=True,
+    ),
 }
 
 
