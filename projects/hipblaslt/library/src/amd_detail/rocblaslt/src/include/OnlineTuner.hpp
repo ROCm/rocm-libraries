@@ -12,9 +12,15 @@
 #include <unordered_map>
 #include <vector>
 
+// The tuning file's problem key, so a pinned winner can carry the key a cache
+// row is written under. Nothing in that header touches a device, the solution
+// library or the logger, which is why including it leaves the tuner compilable
+// and testable on its own.
+#include "TuningCacheStore.hpp"
+
 // Carried through a shared_ptr and never dereferenced here, so the declaration
-// is all this needs. Keeping the Tensile headers out is what lets the tuner be
-// compiled and tested on its own.
+// is all this needs. Keeping the solution library's headers out is what lets
+// the tuner be compiled and tested without one.
 namespace TensileLite
 {
     class ContractionSolution;
@@ -102,12 +108,31 @@ namespace rocblaslt
      * winner, which depends only on the solution and the problem and so is
      * fixed alongside them. Only the caller's own allocation still varies, and
      * comparing against it is all that remains of the filter.
+     *
+     * m_tuningKey is the same problem again, in the key the tuning file is
+     * written and replayed under. It is here and not on the Resolution for the
+     * reason the two keys differ at all: resolution() is keyed on the fields
+     * the prediction model ranks on, which deliberately merges problems that
+     * differ in epilogue, bias, strides or scaling, while a file row
+     * deliberately separates exactly those. One resolution key can therefore
+     * cover several distinct file keys, and this is the one that belongs to the
+     * problem this record describes -- the problem whose ranking held the
+     * winner where it was recorded, whose hash m_problem is, and whose
+     * workspace answer m_requiredWorkspace is. A record is written once and
+     * never overwritten, so a merged sibling is served the winner at run time
+     * wherever its own ranking confirms it, but is never the key a row is
+     * written under, because nothing measured it.
+     *
+     * Built at pin time and nowhere else: it costs a pass over forty-odd fields
+     * and a cached device query, which is affordable once per resolved problem
+     * and would not be affordable per call.
      */
         struct PinnedWinner
         {
             std::shared_ptr<TensileLite::ContractionSolution> m_solution;
             size_t                                            m_problem           = 0;
             size_t                                            m_requiredWorkspace = 0;
+            TensileLite::ProblemOverride                      m_tuningKey;
         };
 
         /**
@@ -231,11 +256,15 @@ namespace rocblaslt
      * offered for, and is handed back unexamined through pinned(). Calling this
      * cannot change which kernel is chosen for any problem: a caller that does
      * not recognise what comes back has lost nothing but the shortcut.
+     *
+     * tuningKey is that same problem in the tuning file's key, carried for
+     * whoever records the winner; see PinnedWinner::m_tuningKey.
      */
         void pinWinner(const Resolution&                                        resolved,
                        const std::shared_ptr<TensileLite::ContractionSolution>& solution,
                        size_t                                                   problem,
-                       size_t                                                   requiredWorkspace);
+                       size_t                                                   requiredWorkspace,
+                       const TensileLite::ProblemOverride&                      tuningKey);
 
         /**
      * @brief Pick which of the ranked candidates should run next.

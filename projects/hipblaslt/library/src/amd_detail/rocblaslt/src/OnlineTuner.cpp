@@ -431,7 +431,8 @@ namespace rocblaslt
     void OnlineTuner::pinWinner(const Resolution&                                        resolved,
                                 const std::shared_ptr<TensileLite::ContractionSolution>& solution,
                                 size_t                                                   problem,
-                                size_t requiredWorkspace)
+                                size_t                              requiredWorkspace,
+                                const TensileLite::ProblemOverride& tuningKey)
     {
         if(!solution)
             return;
@@ -446,6 +447,7 @@ namespace rocblaslt
         entry->m_solution          = solution;
         entry->m_problem           = problem;
         entry->m_requiredWorkspace = requiredWorkspace;
+        entry->m_tuningKey         = tuningKey;
 
         const PinnedWinner* published = entry.get();
         m_winnerPool.push_back(std::move(entry));

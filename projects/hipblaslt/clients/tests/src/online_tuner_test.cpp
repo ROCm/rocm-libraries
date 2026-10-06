@@ -157,7 +157,7 @@ namespace
         EXPECT_EQ(resolved->position(), -1);
 
         const std::shared_ptr<TensileLite::ContractionSolution> nothing;
-        tuner().pinWinner(*resolved, nothing, key, 0);
+        tuner().pinWinner(*resolved, nothing, key, 0, TensileLite::ProblemOverride{});
         EXPECT_EQ(resolved->pinned(), nullptr) << "a caller with nothing to offer pinned something";
 
         resolved->setPosition(2);
