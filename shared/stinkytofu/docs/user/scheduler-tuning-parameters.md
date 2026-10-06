@@ -9,7 +9,7 @@ For the placement mechanisms behind the prefetch and filler knobs, see
 
 | Entry point | How |
 |---|---|
-| TensileLite | `GlobalParameters: StinkyTofuModuleOptions: {WmmaBatchSize: 4, DsReadPerCap: 12}` in the yaml (any module option, applied last), or add the key to `stinky_module_options` in `Tensile/KernelWriter.py` |
+| TensileLite | `GlobalParameters: StinkyTofuModuleOptions: {WmmaQueueDepth: 8, WmmaQueueTarget: 2, DsReadPerCap: 12}` in the yaml (any module option, applied last), or add the key to `stinky_module_options` in `Tensile/KernelWriter.py` |
 | `stinkytofu-opt` | the `--flag=N` listed per parameter |
 | C++ pass pipeline | `PassFeatureConfig::dagFeatures.<field>` |
 
@@ -39,33 +39,39 @@ Each parameter resolves independently, first match wins:
   `latencyCycles`, `I` = its `issueCycles`; `{I, L} = {1, 8}` for most gfx1250
   WMMAs). VALU may co-issue only in the window's `coIssueWindow` slots, and
   nothing may issue in a scale WMMA's blocked (LD_SCALE) slot.
-- **Batch window**: with `WmmaBatchSize = N`, up to N independent WMMAs issue
-  back-to-back and open one window of `N*L` cycles (8, 16, 24, 32, 40 for
-  N = 1..5). Back-to-back WMMAs queue in the matrix pipe (each starts at
-  `max(issue, previous start + L)`), so each still takes its full L. With
-  N = 1 a batch window is a WMMA window.
+- **WMMA queue**: the matrix pipe buffers about 8 WMMAs (measured on gfx1250 with
+  `DISABLE_XDL_ARB_STALL` set), so a WMMA can issue while earlier ones are still
+  outstanding. Queued WMMAs run one after another in the pipe, each taking its full
+  `L`, and the pipe window is their segments end to end. With depth 1 a WMMA waits for
+  the previous one to finish: the single-window model.
 - **WMMA clock**: knobs measured "in WMMAs" count issued WMMAs, so they do not
-  change meaning with batching.
+  change meaning with the queue.
 
-## WMMA batch
+## WMMA queue
 
 | Module option | Default | CLI | Meaning |
 |---|---|---|---|
-| `WmmaBatchSize` | 0 → arch default 1 | `--wmma-batch-size=N` | Max independent, data-ready WMMAs issued back-to-back as one batch. A WMMA reading a batch member's D, or needing a different VGPR MSB bank (an `s_set_vgpr_msb` would split the batch), cannot join; any non-WMMA pick closes the batch. 1 = no batching. |
+| `WmmaQueueDepth` | 1 | `--wmma-queue-depth=N` | Max WMMAs outstanding in the pipe. A WMMA is appended whenever fewer than N are outstanding; it waits only when the queue is full. 1 = one WMMA at a time (the original schedule). |
+| `WmmaQueueTarget` | 1 | `--wmma-queue-target=N` | Clamped to [1, depth]. Below N outstanding, the next WMMA goes before ds_loads and fillers, so the queue never runs dry. At or above N, ds_loads and fillers go first. 1 = never preempt. |
 
-With N > 1, window-based mechanisms follow the batch window: the ds_load cap
-span, the ds budget window, the filler quota and co-issue slots, the
-global-read allowance, and counts expressed in windows. A WMMA still advances
-the timeline by L, so cycle-to-WMMA conversions (barrier thresholds) do not
-change. The knob heuristic does **not** scale with N: when you batch, set
-`DsReadPerCap` explicitly.
+```
+while outstanding >= depth: wait for the oldest WMMA to finish
+append the WMMA to the pipe window
+preempt = target > 1 && outstanding < target        // WMMA before ds/fillers
+```
+
+Depth 1 / target 1 reproduces the original schedule exactly. A higher target keeps the
+pipe busier but delays ds_loads; a lower one issues ds_loads sooner but lets the queue
+drain. With depth > 1 the wait pass also merges the waits of back-to-back WMMAs onto the
+first one, so the run stays back-to-back. The knob heuristic does **not** scale with the
+queue: when you raise the depth, set `DsReadPerCap` explicitly.
 
 ## ds_load issue
 
 | Module option | Default | CLI | Meaning |
 |---|---|---|---|
 | `DsReadPerCap` | -1 → heuristic | `--ds-read-per-cap=N` | Ceiling A: at most N ds_loads per `DsIssueCapSpanCycles` cycles (how the span expires is set by `DsIssueCapMode`). It is a wait, not a veto. Must be > 0 when set. Alias: `DsReadPerWmma` (deprecated). |
-| `DsIssueCapSpanCycles` | 0 → one batch window | `--ds-issue-cap-span-cycles=N` | The span X `DsReadPerCap` applies over. The pair is the cap: neither means anything alone. TensileLite: global parameter `StinkyTofuDsIssueCapSpanCycles`. |
+| `DsIssueCapSpanCycles` | 0 → one WMMA window | `--ds-issue-cap-span-cycles=N` | The span X `DsReadPerCap` applies over. The pair is the cap: neither means anything alone. TensileLite: global parameter `StinkyTofuDsIssueCapSpanCycles`. |
 | `DsIssueCapMode` | 0 (`Sliding`) | `--ds-issue-cap-mode=sliding\|periodic` | How the cap expires. `0` / `sliding`: each ds_load frees its slot X cycles after its own issue (keeps the LDS return queue from running busy). `1` / `periodic`: a period opens at its first ds_load and all slots free X cycles later, so the cap is exactly A per X-cycle period. Tight back-to-back bursts behave the same in both modes. TensileLite: global parameter `StinkyTofuDsIssueCapMode`. |
 | `DsReadQueueDepth` | 0 → HW 16 | `--ds-read-queue-depth=N` | In-flight ds_load credits modeled for the LDS return queue. |
 | `DsReadThrottleLatency` | -1 → heuristic | `--ds-read-throttle-latency=N` | Lifetime of one credit. A saturated queue issues one ds_load per `DsReadThrottleLatency / DsReadQueueDepth` cycles. |
@@ -98,14 +104,13 @@ currently 1 (disabled), so the clamp is inert.
 | `TensorLoadWmmaSpace` | 0 (off) | `--tensor-load-wmma-space=N` | Extra WMMAs between exclusive after/before barrier groups: after-thresholds move N/2 WMMAs earlier, before-thresholds ceil(N/2) later. |
 | `TensorLoadDsLoadGapCycles` | 64 | `--tensor-load-ds-load-gap-cycles=N` | Extra gap, in cycles, between an after-barrier and the before-side ds_loads on the gap-placement path. Rounded up to whole WMMAs. 0 = off. |
 
-Per batch window, at most `globalReadPerWmma` (arch default 1) × the WMMAs in
-the window tensor_loads issue while other work is ready; not a module option.
+Per WMMA window, at most `globalReadPerWmma` (arch default 1) tensor_loads issue while other work is ready; not a module option.
 
 ## Fillers and prefetches
 
 | Module option | Default | CLI | Meaning |
 |---|---|---|---|
-| `EvenSpreadFillers` | true | – | Each WMMA is owed `ceil(fillers / WMMAs)` SALU/VALU fillers; a window closes once its quota (× WMMAs in the batch) is met. |
+| `EvenSpreadFillers` | true | – | Each WMMA is owed `ceil(fillers / WMMAs)` SALU/VALU fillers; a window closes once its quota is met. |
 | `PrefetchLeadWmmas` | 25 (KernelWriter sets 4 without HalfPLR; 25 sub-byte A, else 40) | `--prefetch-lead-wmmas=N` | A global prefetch is held until N WMMAs before its tensor_load. Below 8 = single-stage grouping; 0 = off. |
 | `PrefetchLeadMinStageWmmas` | 64 | `--prefetch-lead-min-stage-wmmas=N` | Blocks whose stages are shorter than N WMMAs run with no prefetch lead. |
 | `WaitAluHoldStrictCount` | 2 (only with `EnableESM2`) | `--wait-alu-hold-strict-count=N` | A filler that would get an `s_wait_alu` of count ≤ N is held until the two windows before the next `s_barrier_wait`. < 0 = off. |
@@ -122,7 +127,7 @@ the window tensor_loads issue while other work is ready; not a module option.
 
 | Source | Value (gfx1250) |
 |---|---|
-| `CDNA5Config` | `dsReadPerCap = 3`, `globalReadPerWmma = 1`, `tensorLoadWmmaSpace = 0`, `dsIssueCapSpanCycles = 8` (fallback WMMA latency where a region has none), `warGateWmmas = 0` (derive), `wmmaBatchSize = 1` |
+| `CDNA5Config` | `dsReadPerCap = 3`, `globalReadPerWmma = 1`, `tensorLoadWmmaSpace = 0`, `dsIssueCapSpanCycles = 8` (fallback WMMA latency where a region has none), `warGateWmmas = 0` (derive) |
 | `HWModel::lds` | `readQueueDepth = 16`, `readThrottleLatency = 72`, `readDrainLatency = 0` (dynamic), `wavesPerDsIssuePipe = 1` |
 
 gfx1250v0 uses the same scheduling defaults.
@@ -136,9 +141,8 @@ dependences allow.
 | Pattern | Options |
 |---|---|
 | Default interleave `W ds ds ds W …` | none |
-| Fixed batch `W×5 ds×12 fillers` | `WmmaBatchSize=5, DsReadPerCap=12, DsReadQueueDepth=16, DsReadThrottleLatency=1` |
-| Batch, ds paced by the LDS queue model | `WmmaBatchSize=5, DsReadPerCap=12` |
-| Batch, uncapped ds bursts | `WmmaBatchSize=5, DsReadPerCap=1000, DsReadThrottleLatency=1` |
+| Queue kept fed, ds first while the queue is healthy | `WmmaQueueDepth=8, WmmaQueueTarget=2, DsReadPerCap=12` |
+| Same, ds at a fixed rate (queue throttle off) | `WmmaQueueDepth=8, WmmaQueueTarget=2, DsReadPerCap=12, DsReadQueueDepth=16, DsReadThrottleLatency=1` |
 | Fillers packed early instead of spread | `EvenSpreadFillers=false` |
 | Free ds order | `LockDsReadOrder=false` |
 | A ds_loads per fixed X-cycle period (e.g. 12 per 32) | `DsReadPerCap=12, DsIssueCapSpanCycles=32, DsIssueCapMode=1, DsReadQueueDepth=16, DsReadThrottleLatency=1` |

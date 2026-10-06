@@ -30,7 +30,7 @@
 namespace stinkytofu {
 
 // The ds cap is `cap` per `span` cycles; the hide-budget model sizes ds work per budget
-// window (one WMMA batch window). The cap that fits one budget window is cap * window /
+// window (one WMMA window). The cap that fits one budget window is cap * window /
 // span, rounded up and at least 1. The default span is the window, which gives `cap`.
 inline int dsCapPerBudgetWindow(int cap, int window, int span) {
     if (span <= 0 || window <= 0) return cap;

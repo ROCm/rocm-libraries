@@ -52,7 +52,8 @@ takes them last, so a hold can delay work but never strand it.
 
 ## Knobs
 
-All are `ModuleOptions`, settable from tensilelite. `stinkytofu-opt` flags set the matching
+All are `ModuleOptions`, settable from tensilelite. The full list of scheduler tuning values
+is in [Scheduler tuning parameters](../user/scheduler-tuning-parameters.md). `stinkytofu-opt` flags set the matching
 `dagFeatures` field (default off there).
 
 | ModuleOption | default | stinkytofu-opt flag | meaning |

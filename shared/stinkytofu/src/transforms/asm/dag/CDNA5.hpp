@@ -1929,9 +1929,10 @@ DAGNode* CDNA5ReadyQueue::extractForcedBarrier() {
 // entries use the scaled throttle interval and later entries use the full one.
 DsLoadBudgetConfig CDNA5ReadyQueue::dsLoadBudgetConfig() const {
     DsLoadBudgetConfig config;
-    // The budget windows are batch windows, but the cap is "cap per span": scale it.
-    config.dsReadPerCap =
-        dsCapPerBudgetWindow(dsReadPerCap(), regionBatchWindow(), dsIssueCapSpan());
+    // The budget windows are one WMMA window, but the cap is "cap per span": scale it.
+    const int budgetWindow =
+        wmmaIssueConfig.latency > 0 ? wmmaIssueConfig.latency : config_.dsIssueCapSpanCycles;
+    config.dsReadPerCap = dsCapPerBudgetWindow(dsReadPerCap(), budgetWindow, dsIssueCapSpan());
     config.dsReadQueueDepth = dsReadQueueDepth();
     config.dsReadThrottleLatency = dsReadThrottleLatency();
     config.dsReadThrottleTransitionFactor = dsReadThrottleTransitionFactor();
