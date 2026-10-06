@@ -128,6 +128,19 @@ namespace
         std::cout << "PASS wavefrontSizeMatchesRequest\n";
     }
 
+    // An empty source name is rejected before comgr runs.
+    void emptySourceNameIsInvalidArgument()
+    {
+        const auto target = co::Target::fromTargetId("gfx1030");
+        const auto result = co::assemble({{"", "s_endpgm\n"}}, target, {});
+        require(result.status == co::Status::InvalidArgument,
+                "An empty source name returned " + std::string(co::toString(result.status))
+                    + ", not an invalid argument: " + result.log);
+        require(result.status != co::Status::ComgrError,
+                "An empty source name was reported as a comgr error");
+        std::cout << "PASS emptySourceNameIsInvalidArgument\n";
+    }
+
     const char* const kernelName = "hipblaslt_jit_builder_test_scale";
 
     // The string value of key in the manifest's object named owner.
@@ -229,6 +242,7 @@ try
 {
     require(argc == 4, "Usage: hipblaslt-jit-builder-test BUNDLES KERNEL SCRATCH");
     wavefrontSizeMatchesRequest();
+    emptySourceNameIsInvalidArgument();
     const auto bundles = fs::u8path(argv[1]);
     const auto source  = hipblaslt_jit_test::readFile(fs::u8path(argv[2]));
     const auto scratch = fs::u8path(argv[3]);
