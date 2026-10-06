@@ -290,12 +290,6 @@ def bench_options(job):
         **{f"{x}_type": BENCH_TYPES[p[f"{x}Type"]] for x in "abcd"},
         "compute_type": "c_i32_r" if p["computeType"] == "Int32" else "c_f32_r",
         "scale_type": BENCH_TYPES[p["computeType"]],
-        "compute_input_typeA": BENCH_TYPES[
-            p.get("computeInputTypeA", p.get("computeInputType", p["aType"]))
-        ],
-        "compute_input_typeB": BENCH_TYPES[
-            p.get("computeInputTypeB", p.get("computeInputType", p["bType"]))
-        ],
         "alpha": 1,
         "beta": 0,
         "initialization": "rand_int",
@@ -324,6 +318,16 @@ def bench_options(job):
         "skip_slow_solution_ratio": 0.0,
         "adaptive": False,
     }
+    # Bench's compute-input overrides support floating-point types only.
+    # Integer GEMMs derive their input computation from compute_type.
+    if p["computeType"] != "Int32":
+        for tensor in "AB":
+            row[f"compute_input_type{tensor}"] = BENCH_TYPES[
+                p.get(
+                    f"computeInputType{tensor}",
+                    p.get("computeInputType", p[f"{tensor.lower()}Type"]),
+                )
+            ]
     if p.get("f32XdlMathOp") == "XFloat32":
         row["compute_type"] = "c_xf32_r"
     return [

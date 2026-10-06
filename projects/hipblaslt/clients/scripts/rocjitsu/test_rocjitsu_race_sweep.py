@@ -269,6 +269,29 @@ class SweepTests(unittest.TestCase):
             )
         )
 
+    def test_integer_bench_inputs_use_native_compute_type(self):
+        # Bench accepts INT8 storage, but rejects an explicit INT8 compute-input
+        # override. Its unset default selects the integer path from compute_type.
+        for output_type, bench_type in (("Int8", "i8_r"), ("Int32", "i32_r")):
+            with self.subTest(output_type=output_type):
+                j = job()
+                j["problem_type"].update(
+                    aType="Int8",
+                    bType="Int8",
+                    cType=output_type,
+                    dType=output_type,
+                    computeType="Int32",
+                    computeInputTypeA="Int8",
+                    computeInputTypeB="Int8",
+                )
+                for row in sweep.bench_options(j):
+                    self.assertEqual(row["a_type"], "i8_r")
+                    self.assertEqual(row["b_type"], "i8_r")
+                    self.assertEqual(row["d_type"], bench_type)
+                    self.assertEqual(row["compute_type"], "c_i32_r")
+                    self.assertNotIn("compute_input_typeA", row)
+                    self.assertNotIn("compute_input_typeB", row)
+
     def test_duplicate_artifact_indices_fail_before_execution(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
