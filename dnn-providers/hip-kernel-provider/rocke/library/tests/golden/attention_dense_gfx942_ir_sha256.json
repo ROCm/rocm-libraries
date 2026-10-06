@@ -42,9 +42,19 @@
           "bytes": 98392,
           "sha256": "305409b65503241921220ccaa73b350d1011a727c352ae41e8f1ead88ed54fef"
         },
+        "attention_dense_gfx942/dispatch_lse_d128_bf16_causal": {
+          "bytes": 177730,
+          "sha256": "668d0c2f7bc07908c02f3fe28f2be4106ccbba8c55465fa55197a8215ef27361"
+        },
         "attention_dense_gfx942/dispatch_swa_d128_bf16_w128": {
           "bytes": 175001,
           "sha256": "443e2dc10e981be13c5946a9594db674ff39af026386dda7b6538373ae1ea418"
+        },
+        "attention_dense_gfx942/lse_d128_bf16_causal": {
+          "error": "AttentionDenseSpec.__init__() got an unexpected keyword argument 'emit_lse'"
+        },
+        "attention_dense_gfx942/lse_persist_empty_window_d128_bf16": {
+          "error": "AttentionDenseSpec.__init__() got an unexpected keyword argument 'emit_lse'"
         },
         "attention_dense_gfx942/persist_d128_bf16_intl": {
           "bytes": 173617,
@@ -126,9 +136,19 @@
           "bytes": 98488,
           "sha256": "930b02fedbb935624accd81ff1fe561c6597a28ca11cf615becb9784d7522439"
         },
+        "attention_dense_gfx942/dispatch_lse_d128_bf16_causal": {
+          "bytes": 177826,
+          "sha256": "3139ee9810441f13d7e25a740824cabe719a51a781734bebe7eca5cabc5d7ff7"
+        },
         "attention_dense_gfx942/dispatch_swa_d128_bf16_w128": {
           "bytes": 175097,
           "sha256": "831246c3f5a0e5f0509f926405cab8b5f30e29df9e6a7c6d5da46bc45db399f6"
+        },
+        "attention_dense_gfx942/lse_d128_bf16_causal": {
+          "error": "AttentionDenseSpec.__init__() got an unexpected keyword argument 'emit_lse'"
+        },
+        "attention_dense_gfx942/lse_persist_empty_window_d128_bf16": {
+          "error": "AttentionDenseSpec.__init__() got an unexpected keyword argument 'emit_lse'"
         },
         "attention_dense_gfx942/persist_d128_bf16_intl": {
           "bytes": 173713,

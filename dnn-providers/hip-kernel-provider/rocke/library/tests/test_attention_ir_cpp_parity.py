@@ -9,7 +9,9 @@ The IR-sha256 golden for these kernels lives in the platform parity harness
 ``rocke_golden_static`` CTest entry. That golden pins the *Python* lowering only.
 This file adds the other half for the same case set: the C++ engine
 (``rocke_engine``) must lower each of those kernels to byte-identical IR.
-Focused LSE-enabled dense cases extend that gate without changing the golden.
+The harness also pins representative ``emit_lse`` cases in that golden (gfx942 LSE
+cases live in ``tests/golden/attention_dense_gfx942_ir_sha256.json``); the extra
+LSE-enabled dense cases declared below widen only the cross-engine check.
 
 The original cases are read back from the harness rather than redeclared.
 Importing the harness is the allowed ``library -> platform`` direction (the
