@@ -198,6 +198,14 @@ static int make_cfg_raw(int idx, rocke_implicit_gemm_conv_spec_t* spec, const ch
         spec->unroll_k = true;
         *arch = "gfx950";
         return 0;
+    case 20:
+        /* Grouped conv + cshuffle with kpg=12: the auto-derived store width must
+         * divide K/groups (here 4), or the vector store straddles a group's slab. */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 48, 48, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 4;
+        spec->epilogue = "cshuffle";
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }

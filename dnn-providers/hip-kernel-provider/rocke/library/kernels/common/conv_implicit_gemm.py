@@ -1634,11 +1634,19 @@ def _build_implicit_gemm_conv_impl(
     def _emit_fwd_epilogue(final_accs_in):
         """Store the accumulators through ``d_addr`` with runtime bounds."""
         if spec.epilogue == "cshuffle":
+            # The store width must divide K/groups: a vector that straddles the
+            # end of a group's output slab fails the bounds check whole and is
+            # never written. Same default as the C++ engine's
+            # rocke_conv_emit_cshuffle_epilogue.
+            if spec.vector_size_c is not None:
+                max_store_vec = spec.vector_size_c
+            else:
+                _, _, max_store_vec = ImplicitGemmConvSpec.default_vector_sizes(
+                    p.cpg, p.kpg, spec.data.dtype_d
+                )
             cshuffle_kwargs = {
                 "out_dtype": spec.data.dtype_d,
-                "max_store_vec": (
-                    spec.vector_size_c if spec.vector_size_c is not None else 8
-                ),
+                "max_store_vec": max_store_vec,
                 "no_alias": spec.cshuffle_no_alias,
             }
             if op.family == "wmma":

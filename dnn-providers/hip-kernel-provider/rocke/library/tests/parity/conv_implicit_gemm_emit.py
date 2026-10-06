@@ -409,6 +409,26 @@ def _spec_raw(idx: int):
             ),
             "gfx950",
         )
+    if idx == 20:
+        # Grouped conv + cshuffle with kpg=12: the auto-derived store width must
+        # divide K/groups (here 4), or the vector store straddles a group's slab.
+        p = _cp(N=2, Hi=14, Wi=14, C=48, K=48, fy=3, fx=3, pH=1, pW=1, groups=4)
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle",
+            ),
+            "gfx950",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 
