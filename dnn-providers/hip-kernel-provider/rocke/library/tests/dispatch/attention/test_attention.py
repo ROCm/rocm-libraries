@@ -62,7 +62,8 @@ EXPECTED_FEATURES = {
         "causal_bottom_right",
         "sliding_window",
     },
-    "attention_gfx942_dense": {"causal", "lse", "sinks", "sliding_window"},
+    # gfx942 dense serves the same band as the gfx950 persistent bodies.
+    "attention_gfx942_dense": set(_GFX950_DENSE_FEATURES),
     "attention_gfx950_dense_grid": set(_GFX950_DENSE_GRID_FEATURES),
     "attention_gfx950_dense_qbminor": set(_GFX950_DENSE_GRID_FEATURES),
     "attention_gfx950_dense_persist": set(_GFX950_DENSE_FEATURES),
@@ -78,8 +79,10 @@ EXPECTED_FEATURES = {
         for kind in ("prefill", "decode")
     },
     "attention_gfx942_dense_pipe": {
+        "band",
         "causal",
         "causal_bottom_right",
+        "full_attention",
         "sinks",
         "sliding_window",
     },
