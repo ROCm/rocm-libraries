@@ -281,7 +281,8 @@ def stop(process: subprocess.Popen) -> None:
             break
         try:
             process.wait(timeout=wait)
-            break
+            # The leader may exit while descendants remain in the process group.
+            # Still send SIGKILL to any survivors on the next iteration.
         except subprocess.TimeoutExpired:
             continue
 
