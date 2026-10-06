@@ -14,22 +14,30 @@ Grouped convolution (including depthwise) is supported: the filter is
 ``[K, Y, X, C/groups]``, each group owns a contiguous ``C/groups`` input and
 ``K/groups`` output channel slab, and the group rides on grid z. Grouped
 pointwise (1x1, stride 1, no padding) is declined because the kernel's flat
-pointwise shortcut does not select the group's slabs. The ABI is
-``(A, B, D, A_bytes:i32, B_bytes:i32, D_bytes:i32)``; pointers must be 16-byte
-aligned and non-aliasing. Forward needs no workspace.
+pointwise shortcut does not select the group's slabs. Forward needs no
+workspace; pointers must be 16-byte aligned and non-aliasing.
+
+The kernels are rocKE's AOT builds: the ABI is ``(A, B, D, A_bytes:i32,
+B_bytes:i32, D_bytes:i32)`` followed by the problem block of
+``kernels.common.conv_abi`` (extents, strides, magic divisors and tile counts as
+i32 kernel arguments). Each packaged kernel is still built for, and matched to,
+one exact problem: the builder keys code shape decisions (pointwise, grouping,
+load widths) on it. :meth:`Gfx950ConvFwdSpec.launch_signature` and
+:meth:`Gfx950ConvFwdSpec.launch_values` give the launch through rocKE's own
+``ConvArgs``; the native pack mirrors them.
 
 A second kernel family, rocKE's direct depthwise kernels
 (``kernels.common.conv_direct_grouped``), packages through the same flat spec
 when ``kernel_family`` is ``KERNEL_FAMILY_DIRECT_DEPTHWISE``. They serve pure
 depthwise (``groups == C == K``) with one stride, one padding and no dilation,
-take the same six-argument ABI with no LDS and no workspace, and launch over
-their own grid. Their implicit-GEMM tuning fields hold fixed placeholders
-(``tile_k`` is 0, so a forced ``tile_k`` of 64 or 128 never selects one).
-Two shapes the direct kernels accept compute wrong answers, so they are
-declined here rather than fixed: padding that leaves output rows or columns
-the input stream never reaches, and padding that makes the runtime H loop
-write past the last output row into the next image. :func:`_direct_error`
-accepts only shapes where the last input row feeds the last output row.
+take the direct-conv ABI (the same six leading arguments, then a shorter
+problem block), use no LDS and no workspace, and launch over their own grid.
+Their implicit-GEMM tuning fields hold fixed placeholders (``tile_k`` is 0, so
+a forced ``tile_k`` of 64 or 128 never selects one). rocKE itself refuses any
+forward direct shape without an odd filter and "same" padding, because the row
+stream then writes wrong rows. :func:`_direct_error` additionally requires the
+last input column to feed the last output column, which a rectangular filter
+can break.
 """
 
 from __future__ import annotations
@@ -42,6 +50,8 @@ from dispatch.grouped_convolution import ConvGroupedRequest, dispatch_conv_group
 from rocke.core.ir import KernelDef
 from kernels.common import conv_direct_grouped as _direct
 from kernels.common import conv_implicit_gemm as _conv
+from kernels.common.conv_abi import conv_args_signature, conv_direct_args_signature
+from kernels.common.conv_args import MUL24_REDUCTION_LIMIT, ConvArgs
 
 _ARCH = "gfx950"
 _INT32_MAX = (1 << 31) - 1
@@ -277,6 +287,36 @@ class Gfx950ConvFwdSpec:
             return self.block_waves * self.wave_size, 1, 1
         return self.warp_m * self.warp_n * self.wave_size, 1, 1
 
+    def _conv_args(self) -> ConvArgs:
+        if self.is_direct:
+            return ConvArgs.from_problem(self.to_direct_problem())
+        return ConvArgs.from_problem(
+            self.to_problem(), tile_m=self.tile_m, tile_n=self.tile_n
+        )
+
+    def launch_signature(self) -> list[dict]:
+        """The kernel's launch signature in ``kernels.common.conv_abi`` order."""
+        if self.is_direct:
+            return conv_direct_args_signature(self.dtype)
+        return conv_args_signature(self.dtype)
+
+    def launch_values(
+        self,
+        a_ptr: int,
+        b_ptr: int,
+        d_ptr: int,
+        a_bytes: int,
+        b_bytes: int,
+        d_bytes: int,
+    ) -> dict[str, int]:
+        """Every kernel argument, keyed by :meth:`launch_signature`'s names.
+
+        Computed by rocKE's ``ConvArgs``, which checks the result against the ABI.
+        """
+        return self._conv_args().to_launch_values(
+            a_ptr, b_ptr, d_ptr, a_bytes, b_bytes, d_bytes
+        )
+
 
 def _problem_error(spec: Gfx950ConvFwdSpec) -> str:
     for name in ("N", "Hi", "Wi", "C", "K", "Y", "X", "sH", "sW", "dH", "dW"):
@@ -351,7 +391,9 @@ def _direct_error(spec: Gfx950ConvFwdSpec) -> str:
     """Integration guard for the direct depthwise family; "" when accepted.
 
     Runs after :func:`_problem_error`, so geometry is already positive and
-    byte counts fit the ABI.
+    byte counts fit the ABI. rocKE's validators, which :func:`_direct_valid`
+    runs afterwards, also refuse every shape without an odd filter and
+    "same" padding; the coverage rule here still guards the width.
     """
     if not (spec.groups == spec.C == spec.K):
         return (
@@ -475,6 +517,12 @@ def supports_gfx950_conv_fwd(
         )
     if spec.epilogue not in ("default", "cshuffle"):
         return False, "epilogue must be 'default' or 'cshuffle'"
+    # ConvArgs refuses this at launch; refuse it before a kernel is built instead.
+    if spec.Y * spec.X * (spec.C // spec.groups) >= MUL24_REDUCTION_LIMIT:
+        return False, (
+            "the reduction extent Y*X*C/groups must stay below 2**23 for the "
+            "kernel's 24-bit address products"
+        )
     try:
         instance = spec.to_instance_spec()
         instance.validate()

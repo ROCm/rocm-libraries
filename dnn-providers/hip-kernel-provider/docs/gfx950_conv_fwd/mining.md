@@ -53,14 +53,16 @@ when `kernel_family` is 1. rocKE has no dispatcher for them;
 |---|---|---|
 | Group structure | Pure depthwise, `groups == C == K` | Adapter `_direct_error`; native matcher. |
 | Stride, padding, dilation | One stride and one padding for both axes; no dilation | Adapter and native matcher; the builder takes a single `stride` and `PAD`. |
-| Row and column coverage | `floor((in - 1) / stride) == out - 1` on both axes | Adapter `_direct_rows_covered`; native `directRowsCovered`. Guards rocKE bugs instead of fixing them. |
+| Filter and padding | Odd filter extents and "same" padding `PAD == (KH - 1) / 2` | rocKE's own `forward_padding_reason`, run by its spec validators; native `directPaddingSupported`. |
+| Row and column coverage | `floor((in - 1) / stride) == out - 1` on both axes | Adapter `_direct_rows_covered`; native `directRowsCovered`. Still needed for the width of a rectangular filter, which rocKE's padding rule does not check. |
 | Tuning | `block_waves` 1 to 16; standard `block_w > 0`; spatial only below 64 channels with `block_w` 0 | Adapter, then rocKE's own spec validators; native `directLaunchGeometry`. |
 | Grid bounds | All axes at most 65535; grid z is N | Adapter and native geometry. |
 | Placeholders | Implicit-GEMM tuning fields fixed (`tile_k=0`, `pipeline`/`epilogue` `none`) | Adapter and native matcher require them exactly. |
 | Workspace and LDS | Zero | The kernels take no scratch argument and use no LDS. |
 
-The ABI is the implicit-GEMM one: the same six arguments in the same order,
-with the same byte counts. The standard grid is
+The ABI is rocKE's direct-conv one: the same six leading arguments as implicit
+GEMM, with the same byte counts, followed by the direct problem block (see
+[Launch contract](#launch-contract)). The standard grid is
 `(ceil(Wo/block_w), ceil(groups/(64*block_waves)), N)` and the spatial grid
 `(ceil(Wo/(block_waves*(64/groups))), 1, N)`; both use a block of
 `64*block_waves` threads. These match rocKE's
@@ -73,10 +75,8 @@ fields are left out of an implicit-GEMM spec's digest while they hold their
 defaults, so implicit-GEMM symbols and code objects are unchanged by them.
 Direct kernels are lowered with rocKE's Python backend, which `hkp_pack` pins;
 the C++ lowering slows down sharply as the unrolled kernel grows with
-`block_w`. When the fully unrolled kernel would exceed rocKE's size threshold
-(`_DW_UNROLL_THRESH`; the size grows with the input height and the filter
-area, and for the standard kernel with `block_w`), rocKE switches to a runtime row loop; the catalog covers that
-path for both variants.
+`block_w`. Both variants stream input rows through a runtime loop over `Hi`;
+the filter taps and output columns of a block stay unrolled.
 
 ## Default tuning and initial candidate pair
 
@@ -92,7 +92,15 @@ spec prevents distinct compiled kernels from sharing a symbol.
 
 ## Launch contract
 
-Arguments, in declaration order:
+The kernels are rocKE's AOT builds, which take the problem as kernel arguments.
+The order is defined once in `rocke/library/kernels/common/conv_abi.py` and the
+values by `ConvArgs.to_launch_values` in `conv_args.py`; the adapter exposes
+both as `Gfx950ConvFwdSpec.launch_signature` / `launch_values`. Each packaged
+kernel is still built for one exact problem, because the builder makes
+code-shape decisions (pointwise, grouping, load widths) from it, so the matcher
+still requires every geometry field.
+
+Both families open with, in declaration order:
 
 1. Input A pointer.
 2. Filter B pointer.
@@ -100,6 +108,23 @@ Arguments, in declaration order:
 4. `A_bytes` (`i32`): `2*N*Hi*Wi*C`.
 5. `B_bytes` (`i32`): `2*K*Y*X*(C/groups)`.
 6. `D_bytes` (`i32`): `2*N*Ho*Wo*K`.
+
+Implicit GEMM follows with 39 `i32`s: the extents and attributes `N` through
+`dW`, `groups`, `Ho`, `Wo`, `C/groups`, `K/groups`; the GEMM extents
+`K_gemm = Y*X*C/groups` and `M = N*Ho*Wo`; the packed NHWC, KYXC and NHWK
+strides; magic-division pairs for `Ho`, `Wo`, `X` and `C/groups`; and the tile
+counts `num_pid_m`, `num_pid_n`, which must be the grid's. `K_gemm` must stay
+below `2^23` for the kernel's 24-bit address products.
+
+The direct kernels follow with 14 `i32`s: `N`, `Hi`, `Wi`, `Ho`, `Wo`,
+`groups`, total `C` and `K`, then the NHWC and NHWK strides. Filter size,
+stride and padding are compiled in.
+
+The native pack computes the same values (`implicitGemmKernargs`,
+`directKernargs`, `magicDivision` in `Gfx950ConvFwdGeometry.hpp`) and checks
+the loaded symbol's recorded argument names against them before any launch,
+because the packing is positional and every problem argument has the same kind
+and size.
 
 Grid is `(ceil((K/groups)/tile_n), ceil(N*Ho*Wo/tile_m), groups)` and block is
 `(warp_m*warp_n*wave_size,1,1)`. Dynamic shared memory is zero; static LDS is
