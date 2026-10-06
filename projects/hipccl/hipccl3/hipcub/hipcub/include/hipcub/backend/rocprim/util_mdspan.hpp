@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2024, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2025-2026, Advanced Micro Devices, Inc.  All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -149,6 +149,47 @@ struct extents_sub_size<StartRank, ExtentsType, typename std::enable_if<StartRan
 {
     constexpr static size_t value
         = extents_sub_size<StartRank - 1, typename extents_remove_first<ExtentsType>::type>::value;
+};
+
+/**
+ * \brief Helper template, returns the size of the sub extents of
+ * `ExtentsType` for the ranks range [`StartRank`, `EndRank`).
+ */
+template<size_t StartRank, size_t EndRank, class ExtentsType, class Enable = void>
+struct extents_sub_range_size
+{};
+
+template<size_t StartRank, size_t EndRank, class ExtentsType>
+struct extents_sub_range_size<StartRank,
+                              EndRank,
+                              ExtentsType,
+                              typename std::enable_if<(StartRank == EndRank)>::type>
+{
+    static constexpr size_t value = 1;
+};
+
+template<size_t EndRank, class IndexType, size_t First, size_t... Last>
+struct extents_sub_range_size<0,
+                              EndRank,
+                              _HIPCUB_STD::extents<IndexType, First, Last...>,
+                              typename std::enable_if<(EndRank > 0)>::type>
+{
+    static constexpr size_t value
+        = First
+          * extents_sub_range_size<0, EndRank - 1, _HIPCUB_STD::extents<IndexType, Last...>>::value;
+};
+
+template<size_t StartRank, size_t EndRank, class IndexType, size_t First, size_t... Last>
+struct extents_sub_range_size<
+    StartRank,
+    EndRank,
+    _HIPCUB_STD::extents<IndexType, First, Last...>,
+    typename std::enable_if<(StartRank != EndRank) && (StartRank > 0)>::type>
+{
+    static constexpr size_t value
+        = extents_sub_range_size<StartRank - 1,
+                                 EndRank - 1,
+                                 _HIPCUB_STD::extents<IndexType, Last...>>::value;
 };
 
 /** @} */ // end group UtilModule

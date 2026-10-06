@@ -186,6 +186,33 @@ HIPCUB_RUNTIME_FUNCTION
     {
         return hipCUDAErrorTohipError(cub::DeviceFor::ForEachInExtents(extents, op, stream));
     }
+
+    HIPCUB_TEMPLATE(class LayoutMapping, typename OpType)
+    HIPCUB_REQUIRES(_HIPCUB_STD::__is_cuda_std_layout_left_or_right_mapping_v<LayoutMapping>)
+    [[nodiscard]]
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t
+        ForEachInLayout(const LayoutMapping& layout_mapping, OpType op, cudaStream_t stream = {})
+    {
+        return hipCUDAErrorTohipError(cub::DeviceFor::ForEachInLayout(layout_mapping, op, stream));
+    }
+
+    HIPCUB_TEMPLATE(class LayoutMapping, typename OpType)
+    HIPCUB_REQUIRES(_HIPCUB_STD::__is_cuda_std_layout_left_or_right_mapping_v<LayoutMapping>)
+    [[nodiscard]]
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t ForEachInLayout(void*                d_temp_storage,
+                                      size_t&              temp_storage_bytes,
+                                      const LayoutMapping& layout_mapping,
+                                      OpType               op,
+                                      cudaStream_t         stream = {})
+    {
+        return hipCUDAErrorTohipError(cub::DeviceFor::ForEachInLayout(d_temp_storage,
+                                                                      temp_storage_bytes,
+                                                                      layout_mapping,
+                                                                      op,
+                                                                      stream));
+    }
 };
 
 END_HIPCUB_NAMESPACE
