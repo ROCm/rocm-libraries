@@ -1,0 +1,81 @@
+# bf16 GEMM (bf16 output, fp32 compute), TT layout, on gfx950.
+# README.md documents every key.
+config_id: gfx950_bbs_tt_int4
+arch: gfx950
+
+hipblaslt:
+  a_type: bf16_r
+  b_type: bf16_r
+  c_type: bf16_r
+  d_type: bf16_r
+  scale_type: f32_r
+  compute_type: c_f32_r
+  transA: T
+  transB: T
+  library_stem: TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bjlk_Cijk_Dijk_ID75a0_gfx950
+
+runtime:
+  devices: [0, 1, 2, 3, 4, 5, 6, 7]
+  rocm_libraries_root: ${TILEWRIGHT_BENCH_ROOT}
+
+seed:
+  target_per_cell: 400
+  shapes_per_cell: 150
+  seed: 42
+  n_strata: 2
+
+probe:
+  first_line_iters: 10
+  first_line_cold_iters: 10
+  other_lines_iters: 1
+  other_lines_cold_iters: 0
+  duration_us: 2000
+  skip_ratio_mode: sigmoid
+  skip_ratio_min: 0.05
+  skip_ratio_max: 0.95
+  skip_ratio_center_us: 30
+  skip_ratio_k: 1.5
+
+bench:
+  blocks_per_gpu: 50
+
+train:
+  workers: 48
+  threads_per_worker: 0
+  epochs: 200
+  device: cpu
+  eval_sample_frac: 1.0
+  smart_k: 15
+  smart_k_max: 25
+  smart_k_min: 5
+  smart_k_saturation_eps: 0.005
+  min_cell_gemms: 30
+
+validate:
+  sel_eff_threshold: 0.95
+  min_cell_gemms: 20
+  split_floor: 0.83
+  split_min_improvement: 0.02
+  split_after_attempts: 1
+  max_split_depth: 6
+  structural_split_min_octaves: 0.0
+
+full:
+  total_rounds: 8
+
+deploy:
+  target_sel_eff: 0.95
+  on_final_round: true
+  stop_when_target_reached: false
+  weight_dtype: int4
+  rocm_libraries_to_deploy: ${TILEWRIGHT_DEPLOY_ROOT}
+  apply_patch: true
+  build_after_apply: true
+  build_jobs: null
+
+stage07:
+  parity_sample_trained: 1000
+  bench_yamls: []
+
+stage08:
+  datasets: []
