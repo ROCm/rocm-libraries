@@ -10,6 +10,7 @@ import datetime
 from unittest import mock
 from pathlib import Path
 import signal
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -119,6 +120,26 @@ class CliTests(unittest.TestCase):
         self.assertNotEqual(records[0]["log"], records[1]["log"])
         self.assertEqual(Path(records[0]["log"]).read_text(), "first\n")
         self.assertEqual(Path(records[1]["log"]).read_text(), "second\n")
+
+    def test_long_load_command_keeps_logs_and_full_metadata(self):
+        load = "command:" + shlex.join(
+            [sys.executable, "-c", "import time; time.sleep(120) # " + "x" * 300]
+        )
+        self.binary.write_text("#!/bin/sh\nprintf 'failure evidence\\n'\nexit 1\n")
+        with mock.patch.object(
+            hunt,
+            "environment_record",
+            side_effect=lambda _xnack, command: {"cwsr_enable": None, "load": command},
+        ):
+            self.assertEqual(
+                self.invoke(self.args + ["--load", load, "--load-settle-seconds", "0"]),
+                1,
+            )
+        record = json.loads((self.root / "results.jsonl").read_text())
+        self.assertEqual(record["load"], load)
+        self.assertTrue(record["load_ran_throughout"])
+        self.assertEqual(Path(record["log"]).read_text(), "failure evidence\n")
+        self.assertTrue(Path(record["load_log"]).is_file())
 
     def test_empty_and_skipped_runs_fail(self):
         for output, extra in [

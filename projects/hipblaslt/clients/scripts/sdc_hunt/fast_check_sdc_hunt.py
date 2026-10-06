@@ -187,9 +187,10 @@ def run_once(args: argparse.Namespace, xnack: str, load: str, index: int) -> dic
     cmd = [str(args.test_bin), f"--gtest_filter={args.filter}"]
     record = environment_record(xnack, load)
     record.update({"run": index, "command": shlex.join(cmd)})
-    stem = (
-        f"{args.invocation}.run{index}_{xnack}_{re.sub(r'[^A-Za-z0-9._-]+', '-', load)}"
-    )
+    # The invocation and run number provide uniqueness. Keep arbitrary command arguments
+    # in the record, since putting them in a filename can exceed the filesystem's limit.
+    load_name = load.split(":", 1)[0]
+    stem = f"{args.invocation}.run{index}_{xnack}_{load_name}"
 
     background, load_log, problem = None, None, None
     cotenant_log = args.results.with_suffix(f".{stem}.cotenant.log")
