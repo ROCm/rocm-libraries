@@ -6015,6 +6015,10 @@ def _build_gfx942_4warp_gqa_lean(
     )
     klen_t = b.div(b.add(klen, b.const_i32(BN - 1)), b.const_i32(BN))
     kvend = b.select(b.cmp_lt(causal_t, klen_t), causal_t, klen_t)
+    # The last q-block of a sequence is partial when qlen % 128 != 0; its rows
+    # past qlen are never stored, but their Q loads must stay inside the sequence
+    # (the last sequence's tail would read past the end of the query tensor).
+    q_last = b.sub(cu_q_stop, b.const_i32(1))
     loop = b.scf_for_iter(b.const_i32(0), kvend, b.const_i32(1), iters, iv_name="kv")
     with loop as (kv, carry):
         m_old = carry[0]
@@ -6043,6 +6047,7 @@ def _build_gfx942_4warp_gqa_lean(
                 b.mul(b.const_i32(h), b.const_i32(K)), b.mul(ld.k_blk, b.const_i32(APL))
             )
             q_tok = b.add(b.add(qstart, wq), ld.n_in_atom)
+            q_tok = b.select(b.cmp_lt(q_tok, q_last), q_tok, q_last)
             q_off, _ = q_desc.offset(b, token=q_tok, head=qhead, dim=koff)
             q = b.global_load_vN(Q, q_off, dtype, BPL, align=BPL * 2)
             for kt in range(NKEYT):
@@ -6126,6 +6131,16 @@ def _build_gfx942_4warp_gqa_lean(
     l_f = loop.results[1]
     accs_f = loop.results[2:]
     recip = b.rcp_fast(l_f)
+    # A row whose causal band [0, min(d, klen - 1)] holds no key (bottom-right
+    # d = klen - qlen + row < 0 at Sq > Sk) must output exactly 0. Such a row either
+    # ran no KV tile (l == 0, so acc * rcp(0) is NaN) or saw only finite-ninf masked
+    # scores (p == 1, a uniform average of masked V). Zero its reciprocal instead.
+    # Each lane's output column (the query row) is the same for every slot.
+    _, _c0 = at.lane_to_output(b, lane, 0)
+    _d = b.add(context_off, b.add(qbase, b.add(wq, _c0)))
+    _klast = b.sub(klen, b.const_i32(1))
+    _hi = b.select(b.cmp_lt(_d, _klast), _d, _klast)
+    recip = b.select(b.cmp_lt(_hi, b.const_i32(0)), zf, recip)
     for nt in range(NDdim):
         for i in range(CPL):
             r, c = at.lane_to_output(b, lane, i)
@@ -6145,6 +6160,11 @@ def build_gfx942_4warp_gqa(
     arch: str = "gfx942",
 ) -> KernelDef:
     """Emit the gfx942 4-warp GQA D256 paged-attention ``KernelDef``."""
+    if spec.right_bound != 0:
+        raise ValueError(
+            "the gfx942 4-warp GQA body is causal-only: right_bound != 0 "
+            f"(got {spec.right_bound}) is not supported"
+        )
     from ..common.attention_arch import require_tiled_attention_arch
 
     require_tiled_attention_arch(arch)
@@ -6168,11 +6188,6 @@ def build_gfx942_4warp_gqa(
     HKV = spec.num_kv_heads
     GQAG = spec.num_queries_per_kv
     BS = spec.block_size
-    if spec.right_bound != 0:
-        raise ValueError(
-            "the gfx942 4-warp GQA body is causal-only: right_bound != 0 "
-            f"(got {spec.right_bound}) is not supported"
-        )
     HD128 = HD == 128
     # Double-buffer prefetch pipeline (BN=32 LDS-staged K/V + swizzle) is D128 AND bs<=32.
     # bs64 forces BN>=64 (1 block/tile min); BN=64 double-buffer overflows 64KB LDS, so
@@ -6386,6 +6401,10 @@ def build_gfx942_4warp_gqa(
         return b.select(b.cmp_lt(hi, x), hi, x)
 
     _a = _clamp(int_start, kvstart, kvend)
+    # Partial last q-block: rows past qlen are never stored, but their Q loads
+    # must stay inside the sequence (else the last sequence reads past the end of
+    # the query tensor). Clamp the load token to the sequence's last row.
+    q_last = b.sub(cu_q_stop, b.const_i32(1))
     _bnd = _clamp(int_end, _a, kvend)
 
     def swz(
@@ -6517,12 +6536,14 @@ def build_gfx942_4warp_gqa(
                 # geometry); head BASE strides by GQAG (the GQA group).
                 _m = b.add(wq, ld.n_in_atom)
                 _tok = b.add(qstart, b.div(_m, b.const_i32(FOLD_HEADS)))
+                _tok = b.select(b.cmp_lt(_tok, q_last), _tok, q_last)
                 _hd = b.add(
                     b.mul(kvh, b.const_i32(GQAG)), b.mod(_m, b.const_i32(FOLD_HEADS))
                 )
                 q_off, _ = q_desc.offset(b, token=_tok, head=_hd, dim=koff)
             else:
                 q_tok = b.add(b.add(qstart, wq), ld.n_in_atom)
+                q_tok = b.select(b.cmp_lt(q_tok, q_last), q_tok, q_last)
                 q_off, _ = q_desc.offset(b, token=q_tok, head=qhead, dim=koff)
             q = b.global_load_vN(Q, q_off, dtype, BPL, align=BPL * 2)
             for kt in range(NKEYT):
@@ -6676,6 +6697,24 @@ def build_gfx942_4warp_gqa(
     l_f = l3.results[1]
     accs_f = l3.results[2:]
     recip = b.rcp_fast(l_f)
+    if window > 0:
+        # A row whose band [max(0, d - window + 1), min(d, klen - 1)] holds no key
+        # (bottom-right d < 0 at Sq > Sk; top-left d >= klen + window - 1) must
+        # output exactly 0. Such a row either ran no KV tile (l == 0, so acc *
+        # rcp(0) is NaN) or saw only finite-ninf masked scores (p == 1, so a
+        # uniform average of masked V). Zero its reciprocal instead. Each lane's
+        # output column (the query row) is the same for every accumulator slot.
+        _, _c0 = at.lane_to_output(b, lane, 0)
+        if _FOLD:
+            _row = b.add(qbase, b.div(b.add(wq, _c0), b.const_i32(FOLD_HEADS)))
+        else:
+            _row = b.add(qbase, b.add(wq, _c0))
+        _d = b.add(context_off, _row)
+        _lo = b.sub(_d, b.const_i32(window - 1))
+        _lo = b.select(b.cmp_gt(_lo, b.const_i32(0)), _lo, b.const_i32(0))
+        _klast = b.sub(klen, b.const_i32(1))
+        _hi = b.select(b.cmp_lt(_d, _klast), _d, _klast)
+        recip = b.select(b.cmp_lt(_hi, _lo), zf, recip)
     for nt in range(NDdim):
         for i in range(CPL):
             r, c = at.lane_to_output(b, lane, i)
