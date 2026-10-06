@@ -17,9 +17,8 @@
 # group 2, in FP16/BF16. kernel_family=1 forces them. Their implicit-GEMM fields
 # hold placeholders: tile_k is 0, so forcing tile_k=64/128 selects only implicit
 # GEMM (a known quirk: tile_k=0 is advertised on these graphs and also selects
-# only direct kernels; see docs/gfx950_conv_fwd/README.md). The 70x40 3x3 block_w=32 arms
-# and the 56x24 17x17 spatial arm take rocKE's runtime H loop
-# (_DW_UNROLL_THRESH); the other direct arms are fully unrolled.
+# only direct kernels; see docs/gfx950_conv_fwd/README.md). Every direct arm
+# streams input rows through rocKE's runtime H loop.
 # Requests: gfx950_conv_fwd.requests.json; each request's _catalog_tile_k
 # records the implicit-GEMM arms and _catalog_direct the direct arms admitted
 # to this catalog.

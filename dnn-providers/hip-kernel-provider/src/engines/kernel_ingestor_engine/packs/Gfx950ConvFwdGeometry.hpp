@@ -177,6 +177,195 @@ inline std::optional<LaunchGeometry> launchGeometry(const Problem& problem,
                           static_cast<unsigned int>(warpM * warpN * waveSize)};
 }
 
+/// One (multiplier, shift) pair of rocKE's calculate_magic_numbers in
+/// rocke/platform/python/rocke/helpers/transforms.py, a port of CK Tile's
+/// magic_division32_bit_range. The kernel reads the multiplier with an unsigned mul-hi,
+/// so it is passed as the i32 with the same bit pattern (conv_args._magic_as_i32).
+struct MagicDivision
+{
+    int32_t multiplier;
+    int32_t shift;
+};
+
+inline std::optional<MagicDivision> magicDivision(int64_t divisor)
+{
+    if(divisor < 1 || divisor > std::numeric_limits<int32_t>::max())
+    {
+        return std::nullopt;
+    }
+    int32_t shift = 0;
+    while((int64_t{1} << shift) < divisor)
+    {
+        ++shift;
+    }
+    // 2^shift - divisor < divisor <= 2^31, so the shifted value fits in 63 bits and the
+    // quotient plus one stays below 2^32.
+    const auto d = static_cast<uint64_t>(divisor);
+    const uint64_t multiplier = ((((uint64_t{1} << shift) - d) << 32) / d) + 1;
+    return MagicDivision{static_cast<int32_t>(static_cast<uint32_t>(multiplier)), shift};
+}
+
+/// The forward implicit-GEMM kernels decode the reduction index with 24-bit multiplies;
+/// rocKE's ConvArgs refuses a reduction extent Y * X * C / groups at or above this
+/// (conv_args.MUL24_REDUCTION_LIMIT).
+constexpr int64_t MUL24_REDUCTION_LIMIT = int64_t{1} << 23;
+
+/// The AOT problem block that follows (A*, B*, D*, A_bytes, B_bytes, D_bytes) in the 2D
+/// forward implicit-GEMM ABI, in order: _fwd_arg_names in
+/// rocke/library/kernels/common/conv_abi.py. The kernel packs these positionally, so the
+/// names exist to be compared against the packaged symbol's recorded arguments.
+constexpr std::array<std::string_view, 39> IMPLICIT_GEMM_KERNARG_NAMES{"p_N",
+                                                                       "p_Hi",
+                                                                       "p_Wi",
+                                                                       "p_C",
+                                                                       "p_K",
+                                                                       "p_Y",
+                                                                       "p_X",
+                                                                       "p_sH",
+                                                                       "p_sW",
+                                                                       "p_pH",
+                                                                       "p_pW",
+                                                                       "p_dH",
+                                                                       "p_dW",
+                                                                       "p_groups",
+                                                                       "p_Ho",
+                                                                       "p_Wo",
+                                                                       "p_cpg",
+                                                                       "p_kpg",
+                                                                       "p_K_gemm",
+                                                                       "p_M",
+                                                                       "p_A_stride_n",
+                                                                       "p_A_stride_hi",
+                                                                       "p_A_stride_wi",
+                                                                       "p_B_stride_k",
+                                                                       "p_B_stride_y",
+                                                                       "p_B_stride_x",
+                                                                       "p_D_stride_n",
+                                                                       "p_D_stride_ho",
+                                                                       "p_D_stride_wo",
+                                                                       "p_magic_m_Ho_mult",
+                                                                       "p_magic_m_Ho_shift",
+                                                                       "p_magic_m_Wo_mult",
+                                                                       "p_magic_m_Wo_shift",
+                                                                       "p_magic_k_X_mult",
+                                                                       "p_magic_k_X_shift",
+                                                                       "p_magic_k_cpg_mult",
+                                                                       "p_magic_k_cpg_shift",
+                                                                       "p_num_pid_m",
+                                                                       "p_num_pid_n"};
+
+using ImplicitGemmKernargs = std::array<int32_t, IMPLICIT_GEMM_KERNARG_NAMES.size()>;
+
+/// The values for IMPLICIT_GEMM_KERNARG_NAMES. Mirrors ConvArgs.to_launch_values in
+/// rocke/library/kernels/common/conv_args.py for a 2D forward problem: packed NHWC, KYXC
+/// with C / groups channels, and NHWK strides in elements, one magic pair per unmerge
+/// divisor, and the tile counts @p launch was derived from. std::nullopt when the
+/// reduction extent breaks the kernel's 24-bit address products.
+inline std::optional<ImplicitGemmKernargs> implicitGemmKernargs(const Problem& problem,
+                                                                const Geometry& geometry,
+                                                                const LaunchGeometry& launch)
+{
+    const auto cpg = problem.c / problem.groups;
+    const auto kpg = problem.k / problem.groups;
+    // B's byte count bounds this product, so it cannot overflow.
+    const auto kGemm = problem.y * problem.x * cpg;
+    if(kGemm >= MUL24_REDUCTION_LIMIT)
+    {
+        return std::nullopt;
+    }
+    const auto ho = magicDivision(geometry.ho);
+    const auto wo = magicDivision(geometry.wo);
+    const auto x = magicDivision(problem.x);
+    const auto c = magicDivision(cpg);
+    if(!ho || !wo || !x || !c)
+    {
+        return std::nullopt;
+    }
+    // Every value below is an extent, attribute, or a stride or product bounded by a
+    // tensor's element count, all of which deriveGeometry kept within i32.
+    const auto i32 = [](int64_t value) { return static_cast<int32_t>(value); };
+    return ImplicitGemmKernargs{i32(problem.n),
+                                i32(problem.hi),
+                                i32(problem.wi),
+                                i32(problem.c),
+                                i32(problem.k),
+                                i32(problem.y),
+                                i32(problem.x),
+                                i32(problem.strideH),
+                                i32(problem.strideW),
+                                i32(problem.padH),
+                                i32(problem.padW),
+                                i32(problem.dilationH),
+                                i32(problem.dilationW),
+                                i32(problem.groups),
+                                i32(geometry.ho),
+                                i32(geometry.wo),
+                                i32(cpg),
+                                i32(kpg),
+                                i32(kGemm),
+                                i32(geometry.gemmM),
+                                i32(problem.hi * problem.wi * problem.c),
+                                i32(problem.wi * problem.c),
+                                i32(problem.c),
+                                i32(kGemm),
+                                i32(problem.x * cpg),
+                                i32(cpg),
+                                i32(geometry.ho * geometry.wo * problem.k),
+                                i32(geometry.wo * problem.k),
+                                i32(problem.k),
+                                ho->multiplier,
+                                ho->shift,
+                                wo->multiplier,
+                                wo->shift,
+                                x->multiplier,
+                                x->shift,
+                                c->multiplier,
+                                c->shift,
+                                static_cast<int32_t>(launch.gridY),
+                                static_cast<int32_t>(launch.gridX)};
+}
+
+/// The runtime block that follows the six leading arguments in the forward direct-conv
+/// ABI, in order: conv_direct_arg_names(direction="fwd") in conv_abi.py. Filter extents,
+/// stride and padding are compiled into the direct kernels, so they are not arguments.
+constexpr std::array<std::string_view, 14> DIRECT_KERNARG_NAMES{"p_N",
+                                                                "p_Hi",
+                                                                "p_Wi",
+                                                                "p_Ho",
+                                                                "p_Wo",
+                                                                "p_groups",
+                                                                "p_total_c",
+                                                                "p_total_k",
+                                                                "p_A_stride_n",
+                                                                "p_A_stride_hi",
+                                                                "p_A_stride_wi",
+                                                                "p_D_stride_n",
+                                                                "p_D_stride_ho",
+                                                                "p_D_stride_wo"};
+
+using DirectKernargs = std::array<int32_t, DIRECT_KERNARG_NAMES.size()>;
+
+/// The values for DIRECT_KERNARG_NAMES; mirrors ConvArgs.to_launch_values for a
+/// DirectConvProblem. Every value is bounded as in implicitGemmKernargs.
+inline DirectKernargs directKernargs(const Problem& problem, const Geometry& geometry)
+{
+    const auto i32 = [](int64_t value) { return static_cast<int32_t>(value); };
+    return DirectKernargs{i32(problem.n),
+                          i32(problem.hi),
+                          i32(problem.wi),
+                          i32(geometry.ho),
+                          i32(geometry.wo),
+                          i32(problem.groups),
+                          i32(problem.c),
+                          i32(problem.k),
+                          i32(problem.hi * problem.wi * problem.c),
+                          i32(problem.wi * problem.c),
+                          i32(problem.c),
+                          i32(geometry.ho * geometry.wo * problem.k),
+                          i32(geometry.wo * problem.k),
+                          i32(problem.k)};
+}
+
 /// The kernel_family metadata value, also the engine knob that forces a family.
 /// Mirrors KERNEL_FAMILY_* in rocke/library/builders/common/convolution_forward.py.
 enum class KernelFamily : int64_t
@@ -257,15 +446,24 @@ inline bool directRowsCovered(const Problem& problem)
            && directRowsCovered(problem.wi, problem.padW, problem.x, problem.strideW);
 }
 
-/// The problem-side half of _direct_error in convolution_forward.py: pure depthwise
-/// (cpg == kpg == 1), one compiled stride and padding (the kernels read neither sW nor
-/// pW), no dilation, and both axes covered by the input stream. Everything this declines
-/// stays on implicit GEMM.
+/// Mirrors forward_padding_reason in rocke/library/kernels/common/conv_direct_grouped.py,
+/// which rocKE's direct depthwise validators apply: odd filter extents and "same" padding
+/// (KH - 1) / 2. rocKE refuses every other forward shape before building it.
+inline bool directPaddingSupported(const Problem& problem)
+{
+    return problem.y % 2 == 1 && problem.x % 2 == 1 && problem.padH == (problem.y - 1) / 2;
+}
+
+/// The problem-side half of _direct_error in convolution_forward.py, plus rocKE's own
+/// padding rule: pure depthwise (cpg == kpg == 1), one compiled stride and padding (the
+/// kernels read neither sW nor pW), no dilation, "same" padding, and both axes covered by
+/// the input stream. Everything this declines stays on implicit GEMM.
 inline bool directProblemSupported(const Problem& problem)
 {
     return problem.groups == problem.c && problem.c == problem.k
            && problem.strideH == problem.strideW && problem.padH == problem.padW
-           && problem.dilationH == 1 && problem.dilationW == 1 && directRowsCovered(problem);
+           && problem.dilationH == 1 && problem.dilationW == 1 && directPaddingSupported(problem)
+           && directRowsCovered(problem);
 }
 
 /// Grid and block for a direct depthwise kernel. Mirrors Gfx950ConvFwdSpec.grid()/block()

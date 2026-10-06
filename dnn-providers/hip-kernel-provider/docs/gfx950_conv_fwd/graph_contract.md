@@ -135,11 +135,13 @@ only implicit-GEMM kernels match it:
   channel multiplier);
 - `stride[0] == stride[1]`, `pre_padding[0] == pre_padding[1]` (padding is
   already symmetric), and dilation 1 on both axes;
+- odd filter extents and "same" padding `pad == (Y - 1) / 2`, which rocKE's
+  own direct validators require;
 - row and column coverage: `floor((Hi - 1) / stride) == Ho - 1`, and the same
   for `Wi` and `Wo`. rocKE's direct kernels emit output row `p / stride` as
   they stream input row `p` (for `p` divisible by the stride), so other
-  paddings leave output rows unproduced or, on the runtime row loop, write past
-  the last output row into the next image;
+  paddings leave output rows unproduced or write past the last output row into
+  the next image;
 - grid axes at most 65535, including grid z, which is N.
 
 Launch geometry, block `(64 * block_waves, 1, 1)`, no LDS and no workspace:
