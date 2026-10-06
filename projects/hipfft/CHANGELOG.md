@@ -5,6 +5,16 @@ Documentation for hipFFT is available at
 
 ## (Unreleased) hipFFT 1.0.27
 
+### Resolved issues
+
+* Plan creation now reports `HIPFFT_SETUP_FAILED` when rocFFT library initialization fails,
+  instead of continuing with an uninitialized backend. hipFFTW plan creation reports the same
+  failure as a plan of `NULL`.
+* `hipfftGetProperty` now reports failures from the internal version query instead of returning
+  `HIPFFT_SUCCESS` with an uninitialized value.
+* hipFFTW plan execution no longer ignores rocFFT execution failures. The failure is logged when
+  `HIPFFTW_LOG_EXCEPTIONS` is set, and the contents of the output are unspecified.
+
 ## hipFFT 1.0.26 for ROCm 10.1
 
 ### Added

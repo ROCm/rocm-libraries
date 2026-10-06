@@ -85,25 +85,36 @@ int merge_solutions(const std::string& base_filename,
     // don't use anything from solutions.cpp
     rocfft_setenv("ROCFFT_USE_EMPTY_SOL_MAP", "1");
 
-    rocfft_setup();
+    if(rocfft_setup() != rocfft_status_success)
+    {
+        std::cerr << "rocfft_setup failed" << std::endl;
+        return EXIT_FAILURE;
+    }
 
     // create tuning parameters
     TuningBenchmarker* offline_tuner = nullptr;
-    rocfft_get_offline_tuner_handle((void**)(&offline_tuner));
+    if(rocfft_get_offline_tuner_handle((void**)(&offline_tuner)) != rocfft_status_success)
+    {
+        std::cerr << "rocfft_get_offline_tuner_handle failed" << std::endl;
+        if(rocfft_cleanup() != rocfft_status_success)
+            std::cerr << "rocfft_cleanup failed" << std::endl;
+        return EXIT_FAILURE;
+    }
 
     // Manupulating the solution map from tuner...
     bool merge_result
         = offline_tuner->MergingSolutionsMaps(base_filename, new_filename, probKey, out_filename);
 
-    rocfft_cleanup();
-
     if(!merge_result)
-    {
         std::cout << "Merge Solutions Failed" << std::endl;
+
+    if(rocfft_cleanup() != rocfft_status_success)
+    {
+        std::cerr << "rocfft_cleanup failed" << std::endl;
         return EXIT_FAILURE;
     }
 
-    return EXIT_SUCCESS;
+    return merge_result ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 int offline_tune_problems(rocfft_params& params, int verbose, int ntrial)
@@ -111,7 +122,11 @@ int offline_tune_problems(rocfft_params& params, int verbose, int ntrial)
     // don't use anything from solutions.cpp
     rocfft_setenv("ROCFFT_USE_EMPTY_SOL_MAP", "1");
 
-    rocfft_setup();
+    if(rocfft_setup() != rocfft_status_success)
+    {
+        std::cerr << "rocfft_setup failed" << std::endl;
+        return EXIT_FAILURE;
+    }
 
     params.validate();
 
@@ -124,7 +139,13 @@ int offline_tune_problems(rocfft_params& params, int verbose, int ntrial)
 
     // create tuning parameters
     TuningBenchmarker* offline_tuner = nullptr;
-    rocfft_get_offline_tuner_handle((void**)(&offline_tuner));
+    if(rocfft_get_offline_tuner_handle((void**)(&offline_tuner)) != rocfft_status_success)
+    {
+        std::cerr << "rocfft_get_offline_tuner_handle failed" << std::endl;
+        if(rocfft_cleanup() != rocfft_status_success)
+            std::cerr << "rocfft_cleanup failed" << std::endl;
+        return EXIT_FAILURE;
+    }
 
     // first time call create_plan is actually generating a bunch of combination of configs
     offline_tuner->SetInitStep(0);
@@ -211,7 +232,8 @@ int offline_tune_problems(rocfft_params& params, int verbose, int ntrial)
         std::cout << "[Result]: This fft problem hasn't been supported yet. (Prime number or "
                      "2D-Single)"
                   << std::endl;
-        rocfft_cleanup();
+        if(rocfft_cleanup() != rocfft_status_success)
+            std::cerr << "rocfft_cleanup failed" << std::endl;
         return EXIT_FAILURE;
     }
 
@@ -384,7 +406,11 @@ int offline_tune_problems(rocfft_params& params, int verbose, int ntrial)
     std::cout << "[Result]: GPU Time: " << overall_best_time << std::endl;
     std::cout << "[Result]: GFLOPS: " << best_gflops << std::endl;
 
-    rocfft_cleanup();
+    if(rocfft_cleanup() != rocfft_status_success)
+    {
+        std::cerr << "rocfft_cleanup failed" << std::endl;
+        return EXIT_FAILURE;
+    }
 
     return EXIT_SUCCESS;
 }
@@ -415,7 +441,11 @@ int main(int argc, char* argv[])
     app.add_flag("-v, --version", "Print queryable version information from the rocfft library")
         ->each([](const std::string& val) {
             char v[256];
-            rocfft_get_version_string(v, 256);
+            if(rocfft_get_version_string(v, 256) != rocfft_status_success)
+            {
+                std::cerr << "rocfft_get_version_string failed" << std::endl;
+                std::exit(EXIT_FAILURE);
+            }
             std::cout << "version " << v << std::endl;
             return EXIT_SUCCESS;
         });

@@ -628,7 +628,7 @@ bool solution_map::read_solution_map_data(const fs::path& sol_map_in_path, bool 
         }
     }
 
-    if(solution_map_text.back() == ']')
+    if(!solution_map_text.empty() && solution_map_text.back() == ']')
         solution_map_text.resize(solution_map_text.size() - 1);
 
     ProbSolMap& dst_map = (primary_map) ? primary_sol_map : temp_working_map;
