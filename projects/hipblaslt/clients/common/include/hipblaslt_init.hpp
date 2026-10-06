@@ -77,8 +77,9 @@ bool ulp_positive_init();
 // Value patterns for integer_exact A, B and C (the integer_exact_pattern test argument).
 //   standard: A and C in {0, 1, 2}; B in {-2, ..., 2}, signs in a checkerboard.
 //   ternary:  A, B and C in {-1, 0, 1}.
-//   sparse_k: as standard, except that each row of A is zero at all but one K index in each
-//             of kIntegerExactSparseKTerms equal stretches of K, and at the last K index. The
+//   sparse_k: as standard, except that each row of A has values in {1, 2} at one K index in each
+//             of kIntegerExactSparseKTerms equal stretches of K and at the last K index, and is
+//             zero elsewhere. The
 //             kept offset changes from stretch to stretch and from row to row, so with at least
 //             K / kIntegerExactSparseKTerms rows every K index is nonzero in some row, and a wrong
 //             read of B anywhere along K changes D. Partial sums stay small whatever K is.

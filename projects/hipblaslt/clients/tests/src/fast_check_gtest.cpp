@@ -732,7 +732,7 @@ namespace
                     EXPECT_TRUE(v == 0 || v == 1 || v == 2) << "k=" << k << " m=" << m;
                     if(!keep)
                         EXPECT_EQ(v, 0.f) << "k=" << k << " m=" << m << " k_is_row=" << k_is_row;
-                    if(keep)
+                    if(v != 0)
                         covered[k] = true;
                 }
                 EXPECT_TRUE(integer_exact_sparse_k_kept(K - 1, K, m));

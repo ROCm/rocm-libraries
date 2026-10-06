@@ -1065,7 +1065,7 @@ void hipblaslt_init_device(ABC_dims                 abc,
                                auto i        = in_batch - j * lda;
                                return integer_exact_sparse_k_kept(
                                           k_is_row ? i : j, K, k_is_row ? j : i)
-                                          ? small_int_positive<T>(idx)
+                                          ? T(float(1 + pseudo_random_device(idx) % 2))
                                           : T(0);
                            });
             }
