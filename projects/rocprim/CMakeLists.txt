@@ -331,3 +331,5 @@ if(BUILD_CODE_COVERAGE AND ROCPRIM_PROJECT_IS_TOP_LEVEL)
     DEPENDS coverage_summary
   )
 endif()
+
+# Test change for CI - comment only
