@@ -654,8 +654,8 @@ TEST_F(TestEnginePredictor, AModelHashMustBeALowercaseSha256Digest)
         return static_cast<char>(std::toupper(c));
     });
     ASSERT_NE(uppercase, digest);
-    for(const auto& malformed :
-        std::vector<std::string>{uppercase, "sha256:" + digest, digest.substr(1), digest + "0"})
+    for(const auto& malformed : std::vector<std::string>{
+            uppercase, "sha256:" + digest, digest.substr(1), digest + "0", digest + "\n"})
     {
         doc["tree_data"]["hash"] = malformed;
         EXPECT_THROW(config(doc), std::invalid_argument) << malformed;
@@ -678,14 +678,13 @@ TEST_F(TestEnginePredictor, ACustomLibraryMustDeclareItsHash)
     EXPECT_THROW(config(doc), std::invalid_argument);
 }
 
-/// RFC 0019 §4.1: a model file ships inside its descriptor's directory. A path that is absolute
-/// in any platform's spelling, or that climbs out once normalised, is refused at load.
+/// Portable asset names use '/' only and cannot contain parent segments. This admission
+/// rule must agree with the schema and packer before the host interprets the path.
 TEST_F(TestEnginePredictor, AModelPathMustNameAFileInsideTheDescriptorDirectory)
 {
-    const auto expected = std::filesystem::absolute(_directory.path() / "models" / "model.fb")
-                              .lexically_normal()
-                              .string();
-    for(const auto* inside : {"models/model.fb", "scratch/../models/model.fb", "./models/model.fb"})
+    const auto expected
+        = std::filesystem::weakly_canonical(_directory.path() / "models" / "model.fb").string();
+    for(const auto* inside : {"models/model.fb", "./models/model.fb", "models//model.fb"})
     {
         EXPECT_EQ(config(treeDocument(inside)).modelArtifactPath, expected) << inside;
     }
@@ -700,6 +699,13 @@ TEST_F(TestEnginePredictor, AModelPathMustNameAFileInsideTheDescriptorDirectory)
            "../model.fb",
            R"(..\model.fb)",
            "models/../../model.fb",
+           R"(a\b/../../outside.so)",
+           R"(models\model.fb)",
+           "scratch/../models/model.fb",
+           "models/model.fb:stream",
+           std::string("model\0.fb", 9),
+           "models/",
+           "models/.",
            "models/..",
            "."};
     for(const auto& path : outside)
@@ -711,10 +717,39 @@ TEST_F(TestEnginePredictor, AModelPathMustNameAFileInsideTheDescriptorDirectory)
     auto custom = document();
     custom["adapter"] = "custom_library";
     custom.erase("native");
-    custom["custom_library"] = {{"library", "../scorer.so"},
+    custom["custom_library"] = {{"library", R"(a\b/../../outside.so)"},
                                 {"symbol", "testLinearScorer"},
                                 {"hash", sha256(std::string("library bytes"))}};
     EXPECT_THROW(config(custom), std::invalid_argument);
+}
+
+TEST_F(TestEnginePredictor, ArtifactSymlinksMustStayInsideTheirDescriptorDirectory)
+{
+    const auto path = artifactPath("inside.fb");
+    ASSERT_TRUE(treeModel(42.0).buildToFile(path));
+    const auto link = _directory.path() / "linked.fb";
+    std::error_code error;
+    std::filesystem::create_symlink("inside.fb", link, error);
+    if(error)
+    {
+        GTEST_SKIP() << "cannot create symlinks: " << error.message();
+    }
+    const auto inside = predict(config(treeDocument("linked.fb")));
+    ASSERT_EQ(inside.status, PredictionStatus::AVAILABLE) << inside.reason;
+    EXPECT_NEAR(inside.value, 42.0, 1e-12);
+
+    // The same target is outside a nested descriptor's directory, even though it is
+    // inside the catalog root. A prefix-matching sibling directory must not count either.
+    const auto nested = _directory.path() / "nested";
+    const auto sibling = _directory.path() / "nested-sibling";
+    std::filesystem::create_directory(nested);
+    std::filesystem::create_directory(sibling);
+    std::filesystem::create_symlink("../inside.fb", nested / "linked.fb");
+    EXPECT_THROW(parseUhdConfig(treeDocument("linked.fb"), nested / "model.uhd.json"),
+                 std::invalid_argument);
+    std::filesystem::create_directory_symlink("../nested-sibling", nested / "models");
+    EXPECT_THROW(parseUhdConfig(treeDocument("models/absent.fb"), nested / "model.uhd.json"),
+                 std::invalid_argument);
 }
 
 TEST_F(TestEnginePredictor, ParserRejectsDuplicateKeysAndOversizedNesting)

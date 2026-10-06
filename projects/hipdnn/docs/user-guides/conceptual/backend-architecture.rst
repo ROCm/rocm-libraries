@@ -181,9 +181,17 @@ Handle destruction (implicit via RAII)
          -> Backend: hipdnnBackendSetAttribute(engine, GRAPH, graphDesc)
          -> Backend: hipdnnBackendSetAttribute(engine, ENGINE_ID, engineId)
          -> Backend: hipdnnBackendFinalize(engine)
-            -> Plugin: hipdnnEnginePluginGetEngineDetails(handle, engineId, graph, details*)
       -> detail::unpackKnobsFromDescriptors(engineDesc, knobs)
          -> Backend: hipdnnBackendGetAttribute(engine, KNOB_INFO, ...)
+            -> Plugin: hipdnnEnginePluginGetEngineDetails(handle, engineId, graph, details*)
+
+Engine finalization checks applicability, not plugin metadata. The first engine-name,
+knob-info, or behavior-note read fetches and validates ``EngineDetails``; count-only
+queries also trigger this load. Retrieval or validation errors are therefore returned
+by ``hipdnnBackendGetAttribute()``, even after successful finalization. Callers that
+need eager metadata validation can issue a metadata query immediately after finalizing.
+Successful metadata loads are cached; a failed load can be retried without exposing
+partial metadata.
 
 ``get_ranked_engine_ids()``
 ---------------------------
@@ -298,9 +306,10 @@ Engine descriptor (``HIPDNN_BACKEND_ENGINE_DESCRIPTOR``)
 --------------------------------------------------------
 
 - Represents a backend engine.
-- Contains engine ID, and a set of behavioral notes and configurable settings.
+- Binds the engine ID to an operation graph; finalization validates applicability.
 - Retrieved from engine config descriptor.
 - Exposes the engine name through the read-only ``HIPDNN_ATTR_ENGINE_NAME_EXT`` attribute (``HIPDNN_TYPE_CHAR``).
+- Loads name, knob-info, and behavior-note metadata on the first corresponding attribute query.
 
 Execution plan descriptor (``HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR``)
 ------------------------------------------------------------------------

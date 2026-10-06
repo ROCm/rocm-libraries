@@ -1983,11 +1983,8 @@ inline std::string provenanceError(const HeuristicDescriptor& model,
     }
     if(!relevant.empty())
     {
-        // Extra matchers are not a provenance break; their inputs still pass the normal
-        // feature/coverage guards.
-        HIPDNN_PLUGIN_LOG_WARN("descriptor loader: engine '"
-                               << engine->name << "' heuristic '" << model.name << "' arch='"
-                               << arch << "' has additional matchers outside training provenance");
+        return "arch-relevant UMD is missing from training provenance: "
+               + toString(*relevant.begin());
     }
     return {};
 }
@@ -2026,17 +2023,17 @@ inline bool usableModel(const std::string& engineName,
         std::error_code error;
         const auto resolved
             = std::filesystem::weakly_canonical(model.baseDir / model.modelArtifactPath, error);
-        const auto boundary = std::filesystem::weakly_canonical(
-            model.treeRoot.empty() ? model.baseDir : model.treeRoot, error);
+        const auto boundary = std::filesystem::weakly_canonical(model.baseDir, error);
         const auto relative = resolved.lexically_relative(boundary);
-        if(error || relative.empty() || relative.is_absolute()
+        if(error || relative.empty() || relative == "." || relative.is_absolute()
            || (!relative.empty() && *relative.begin() == ".."))
         {
             HIPDNN_PLUGIN_LOG_ERROR(
                 "descriptor loader: engine '"
                 << engineName << "' arch='" << arch << "' model=" << toString(model.id)
-                << " artifact '" << model.modelArtifactPath << "' is outside the descriptor tree '"
-                << boundary.string() << "'; disabling model, preserving engine");
+                << " artifact '" << model.modelArtifactPath
+                << "' is outside its descriptor directory '" << boundary.string()
+                << "'; disabling model, preserving engine");
             usable = false;
         }
         else if(!std::filesystem::is_regular_file(resolved, error))

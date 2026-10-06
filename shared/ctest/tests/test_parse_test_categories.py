@@ -1,8 +1,10 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import json
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -599,6 +601,67 @@ class TestCliIntegration(unittest.TestCase):
             result.stdout, "gfx110X", {"rocblas-test_quick_gfx110X_suite": None}
         )
         self.assertNotIn("DISABLED", install_contents)
+
+
+class TestCmakeIntegration(unittest.TestCase):
+    def test_explicit_test_names_remain_one_parser_argument(self):
+        cmake = shutil.which("cmake")
+        ctest = shutil.which("ctest")
+        if not cmake or not ctest:
+            self.skipTest("CMake and CTest are required for category integration")
+
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            build = source / "build"
+            (source / "categories.yaml").write_text(
+                "test_categories:\n  quick:\n    test_patterns:\n      - 'validator_.*'\n",
+                encoding="utf-8",
+            )
+            module = (_CTEST_DIR / "TestCategories.cmake").as_posix()
+            (source / "CMakeLists.txt").write_text(
+                f"""cmake_minimum_required(VERSION 3.20)
+project(CategoryIntegration NONE)
+enable_testing()
+include("{module}")
+foreach(name validator_one validator_two validator_unlisted)
+    add_test(NAME ${{name}} COMMAND "${{CMAKE_COMMAND}}" -E true)
+endforeach()
+apply_ctest_category_labels(
+    "${{CMAKE_CURRENT_SOURCE_DIR}}/categories.yaml"
+    EXPLICIT_TESTS validator_one validator_two
+)
+""",
+                encoding="utf-8",
+            )
+            configured = subprocess.run(
+                [
+                    cmake,
+                    "-S",
+                    str(source),
+                    "-B",
+                    str(build),
+                    f"-DPython3_EXECUTABLE={sys.executable}",
+                    f"-DROCM_LIBRARIES_ROOT={_CTEST_DIR.parent.parent}",
+                ],
+                capture_output=True,
+                cwd=source,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                configured.returncode, 0, configured.stdout + configured.stderr
+            )
+            selected = subprocess.run(
+                [ctest, "--test-dir", str(build), "--show-only=json-v1", "-L", "quick"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(selected.returncode, 0, selected.stderr)
+            self.assertEqual(
+                {test["name"] for test in json.loads(selected.stdout)["tests"]},
+                {"validator_one", "validator_two"},
+            )
 
 
 if __name__ == "__main__":

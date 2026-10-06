@@ -91,44 +91,49 @@ inline bool isSha256Digest(std::string_view value)
            });
 }
 
-/// Whether @p value names a file inside the descriptor's own directory (subdirectories
-/// allowed). Refuses a leading `/` or `\` (root, UNC) and a drive prefix such as `C:`, and
-/// any path whose lexically normalised form climbs above that directory or names the
-/// directory itself. Both separators count on every platform, so a descriptor resolves the
-/// same way wherever it is loaded.
+/// Portable descriptor-relative asset names use '/' on every platform. Reject parent
+/// segments and native-only spellings before passing the same spelling to filesystem::path.
+/// In particular, '\' is a filename character on Linux, not a directory separator.
 inline bool isContainedRelativePath(std::string_view value)
 {
-    const auto letter = [](char c) { return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'); };
-    if(value.empty() || value.front() == '/' || value.front() == '\\'
-       || (value.size() >= 2 && letter(value[0]) && value[1] == ':'))
+    if(value.empty() || value.front() == '/' || value.find_first_of("\\:") != std::string_view::npos
+       || value.find('\0') != std::string_view::npos)
     {
         return false;
     }
-    size_t depth = 0;
     size_t start = 0;
     while(true)
     {
-        // npos - start still exceeds the remainder, so the last segment runs to the end.
-        const auto end = value.find_first_of("/\\", start);
+        const auto end = value.find('/', start);
         const auto segment = value.substr(start, end - start);
         if(segment == "..")
         {
-            if(depth == 0)
-            {
-                return false;
-            }
-            --depth;
-        }
-        else if(!segment.empty() && segment != ".")
-        {
-            ++depth;
+            return false;
         }
         if(end == std::string_view::npos)
         {
-            return depth > 0;
+            return !segment.empty() && segment != ".";
         }
         start = end + 1;
     }
+}
+
+/// Resolve existing symlinks too, including a symlinked ancestor of a missing asset.
+/// This is an admission-time containment check, not protection from later filesystem
+/// mutation; deployment must keep descriptors and artifacts immutable while in use.
+inline std::filesystem::path containedArtifactPath(const std::filesystem::path& descriptor,
+                                                   const std::string& relativePath)
+{
+    const auto directory
+        = std::filesystem::weakly_canonical(std::filesystem::absolute(descriptor).parent_path());
+    const auto resolved = std::filesystem::weakly_canonical(directory / relativePath);
+    const auto relative = resolved.lexically_relative(directory);
+    if(relative.empty() || relative == "." || relative.is_absolute() || *relative.begin() == "..")
+    {
+        fail("model path must remain inside the descriptor's directory after resolving symlinks: "
+             + relativePath + " in " + descriptor.string());
+    }
+    return resolved;
 }
 
 inline void bounds(const nlohmann::json& value, size_t depth, size_t& count, size_t& bytes)
@@ -567,13 +572,11 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
             fail("key '" + pathKey + "' must be a relative path inside the descriptor's "
                  + "directory, got '" + relativePath + "' in " + where);
         }
-        result.modelArtifactPath = std::filesystem::absolute(path.parent_path() / relativePath)
-                                       .lexically_normal()
-                                       .string();
-        // Model identity is its content digest (versions the winner cache). A library is
-        // loaded as code, so it must declare the digest of the bytes it was built as. Any
-        // other artifact without a declared hash is digested as deployed now, and the
-        // adapter verifies it later; empty when not yet deployed (RFC 0019 §5).
+        result.modelArtifactPath = containedArtifactPath(path, relativePath).string();
+        // Model identity is its content digest (versions the winner cache). A library must
+        // declare its expected bytes, but a descriptor-supplied digest is not authentication:
+        // whoever can replace both files can replace the digest too. Other artifacts without
+        // a declared hash are digested now and verified by the adapter later; empty when absent.
         if(custom || body.contains("hash"))
         {
             result.modelHash = text(body, "hash", where);

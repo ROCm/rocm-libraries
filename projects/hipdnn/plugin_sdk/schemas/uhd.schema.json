@@ -7,8 +7,8 @@
   "patternProperties": {"^(x-|_)": {}},
   "required": ["version", "id", "name", "adapter"],
   "definitions": {
-    "uuid": {"type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"},
-    "revision": {"type": "string", "pattern": "^[0-9]{1,9}\\.[0-9]{1,9}$"},
+    "uuid": {"type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?![\\s\\S])"},
+    "revision": {"type": "string", "pattern": "^[0-9]{1,9}\\.[0-9]{1,9}(?![\\s\\S])"},
     "dependency": {
       "type": "object",
       "additionalProperties": false,
@@ -22,13 +22,13 @@
     "sha256": {
       "description": "SHA-256 of the named file: 64 lowercase hexadecimal digits, no prefix.",
       "type": "string",
-      "pattern": "^[0-9a-f]{64}$"
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
     },
     "relative_path": {
-      "description": "A file inside the descriptor's directory: no root, UNC or drive prefix and no '..' segment. The loader also refuses any path that normalises outside the directory.",
+      "description": "A portable '/'-separated file inside the descriptor's directory: no root, backslash, colon, NUL or '..' segment; the final segment names a file. Runtime and packer also reject symlinks escaping that directory at admission (not a concurrent filesystem-mutation boundary).",
       "type": "string",
       "minLength": 1,
-      "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?![\\s\\S]*(?:^|[/\\\\])\\.\\.(?:[/\\\\]|$))"
+      "pattern": "^(?!/)(?![\\s\\S]*[\\\\:\\u0000])(?![\\s\\S]*(?:^|/)\\.\\.(?:/|(?![\\s\\S])))(?![\\s\\S]*(?:^|/)(?:\\.|)(?![\\s\\S]))"
     },
     "artifact": {
       "type": "object",
@@ -57,7 +57,7 @@
         ]
       }
     },
-    "features_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{16}$"},
+    "features_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{16}(?![\\s\\S])"},
     "categorical_encoding": {
       "type": "object",
       "propertyNames": {"pattern": "^\\$"},

@@ -1098,6 +1098,41 @@ GbdtModelBuilder groupedBuilder()
 }
 } // namespace
 
+TEST(TestTreeDataAdapterGrouped, GroupIdentitiesMustBeFiniteAndUnique)
+{
+    // NaN cannot be matched; duplicates would silently choose one of two different
+    // ensembles based on artifact order. Signed zero names the same group too.
+    for(const double value : {std::numeric_limits<double>::quiet_NaN(),
+                              std::numeric_limits<double>::infinity(),
+                              -std::numeric_limits<double>::infinity(),
+                              0.0,
+                              -0.0})
+    {
+        const auto buffer = groupedBuilder().addGroup(value, {makeLeafTree(999.0)}).build();
+        EXPECT_EQ(TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "sha256:grouped"),
+                  nullptr);
+    }
+}
+
+TEST(TestTreeDataAdapterGrouped, NonfiniteGroupRowsCannotDisplaceAValidGroup)
+{
+    const auto buffer = groupedBuilder().build();
+    const auto adapter
+        = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "sha256:grouped");
+    ASSERT_NE(adapter, nullptr);
+    const auto infinity = std::numeric_limits<double>::infinity();
+    // +infinity would otherwise have the higher layer-one score, displacing group zero.
+    const auto scores = adapter->scoreBatch({{infinity, 0.0},
+                                             {0.0, 0.0},
+                                             {-infinity, 0.0},
+                                             {std::numeric_limits<double>::quiet_NaN(), 0.0}});
+    ASSERT_EQ(scores.size(), 4u);
+    EXPECT_DOUBLE_EQ(scores[1], 100.0);
+    EXPECT_EQ(scores[0], -infinity);
+    EXPECT_EQ(scores[2], -infinity);
+    EXPECT_EQ(scores[3], -infinity);
+}
+
 TEST(TestTreeDataAdapterGrouped, RowsOutsideTheChosenGroupAreUnusable)
 {
     const auto buffer = groupedBuilder().build();

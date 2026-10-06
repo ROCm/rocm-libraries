@@ -141,11 +141,11 @@ class TestResolution:
         """The runtime opens the name the UHD spells, not the link's target."""
         root = tmp_path / "src"
         _write_json(root / "pack" / "heuristic.uhd.json", _model_uhd("model.bin"))
-        real = root / "store" / "real.bin"
+        real = root / "pack" / "store" / "real.bin"
         real.parent.mkdir(parents=True)
         real.write_bytes(b"linked")
         try:
-            (root / "pack" / "model.bin").symlink_to(Path("..") / "store" / "real.bin")
+            (root / "pack" / "model.bin").symlink_to(Path("store") / "real.bin")
         except (OSError, NotImplementedError) as exc:
             pytest.skip(f"cannot create a symlink here: {exc}")
         flat = load_flat_input(root, log=lambda *_: None)
@@ -161,12 +161,12 @@ class TestResolution:
         )
 
         assert (inter_dir / "pack" / "model.bin").read_bytes() == b"linked"
-        assert not (inter_dir / "store" / "real.bin").exists()
+        assert not (inter_dir / "pack" / "store" / "real.bin").exists()
 
 
 class TestRejection:
     def test_missing_artifact_is_an_error_not_a_warning(self, tmp_path: Path):
-        """The runtime drops an engine missing its artifact, so fail at pack time."""
+        """Do not package a model whose named bytes are missing."""
         root = tmp_path / "src"
         _write_json(root / "pack" / "heuristic.uhd.json", _model_uhd("absent.bin"))
 
@@ -210,7 +210,20 @@ class TestRejection:
         root = tmp_path / "src"
         _write_json(root / "pack" / "heuristic.uhd.json", _model_uhd("model\0.bin"))
 
-        with pytest.raises(HkpPackError, match="NUL"):
+        with pytest.raises(HkpPackError):
+            load_flat_input(root, log=lambda *_: None)
+
+    def test_symlink_to_another_descriptor_folder_is_rejected(self, tmp_path: Path):
+        root = tmp_path / "src"
+        _write_json(root / "pack" / "heuristic.uhd.json", _model_uhd("model.bin"))
+        target = root / "pack-sibling" / "model.bin"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"outside descriptor directory")
+        try:
+            (root / "pack" / "model.bin").symlink_to(target)
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"cannot create a symlink here: {exc}")
+        with pytest.raises(HkpPackError):
             load_flat_input(root, log=lambda *_: None)
 
     @pytest.mark.parametrize("folder", ["kpack", "KPack"])
@@ -627,6 +640,11 @@ def _delete(*path):
         ),
         pytest.param(
             _bounded_uhd,
+            _set("tree_data", "hash", _LIBRARY_HASH + "\n"),
+            id="hash_trailing_newline",
+        ),
+        pytest.param(
+            _bounded_uhd,
             _set("tree_data", "hash", _LIBRARY_HASH.upper()),
             id="hash_uppercase",
         ),
@@ -674,6 +692,36 @@ def _delete(*path):
             _custom_library_uhd,
             _set("custom_library", "library", "../lib/model.so"),
             id="library_parent",
+        ),
+        pytest.param(
+            _custom_library_uhd,
+            _set("custom_library", "library", r"a\b/../../outside.so"),
+            id="library_mixed_separator_escape",
+        ),
+        pytest.param(
+            _bounded_uhd,
+            _set("tree_data", "artifact", r"models\model.bin"),
+            id="artifact_nonportable_separator",
+        ),
+        pytest.param(
+            _bounded_uhd,
+            _set("tree_data", "artifact", "scratch/../models/model.bin"),
+            id="artifact_parent_segment",
+        ),
+        pytest.param(
+            _bounded_uhd,
+            _set("tree_data", "artifact", "model\0.bin"),
+            id="artifact_nul",
+        ),
+        pytest.param(
+            _bounded_uhd,
+            _set("tree_data", "artifact", "model.bin:stream"),
+            id="artifact_alternate_stream",
+        ),
+        pytest.param(
+            _bounded_uhd,
+            _set("tree_data", "artifact", "models/."),
+            id="artifact_names_directory",
         ),
     ],
 )

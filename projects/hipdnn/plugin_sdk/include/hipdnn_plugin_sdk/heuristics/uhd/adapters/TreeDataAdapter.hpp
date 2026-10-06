@@ -19,6 +19,7 @@
 #include <hipdnn_plugin_sdk/heuristics/uhd/Sha256.hpp>
 #include <limits>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -304,11 +305,13 @@ inline std::unique_ptr<TreeDataAdapter>
             return nullptr;
         }
         groups.reserve(model->groups()->size());
+        std::set<double> groupValues;
         for(const auto* group : *model->groups())
         {
-            if(group == nullptr)
+            if(group == nullptr || !std::isfinite(group->value())
+               || !groupValues.insert(group->value()).second)
             {
-                HIPDNN_SDK_LOG_ERROR("TreeDataAdapter: null group");
+                HIPDNN_SDK_LOG_ERROR("TreeDataAdapter: group values must be finite and unique");
                 return nullptr;
             }
             std::vector<uint32_t> groupRoots;
@@ -534,8 +537,8 @@ inline std::vector<double>
     bool chosen = false;
     for(const auto& row : batch)
     {
-        // No group value: NaN matches no group and would make the tie-break order-dependent.
-        if(slot >= row.size() || std::isnan(row[slot]))
+        // Nonfinite group values cannot name an admitted group.
+        if(slot >= row.size() || !std::isfinite(row[slot]))
         {
             continue;
         }

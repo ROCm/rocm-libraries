@@ -632,6 +632,28 @@ TEST(TestDescriptorLoader, ArchScopedMatcherProvenanceStillRefusesWhatTheBoundAr
     }
 }
 
+TEST(TestDescriptorLoader, AnUnrecordedMatcherRefusesOnlyTheArchitectureThatUsesIt)
+{
+    const auto modelId = testUuid('1', 'c');
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("umd_unrecorded"));
+    auto documents = twoArchPackDocuments("test:umd_unrecorded", modelId);
+    auto& recorded = documents.back().body["trained_against"]["umd"];
+    const auto missingId = testUuid('1', ROLE_KERNEL_MATCHER);
+    recorded.erase(std::remove_if(recorded.begin(),
+                                  recorded.end(),
+                                  [&](const auto& entry) { return entry.at("id") == missingId; }),
+                   recorded.end());
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& bound = sets.front().enginePredictionsByMetric.at("tflops");
+    EXPECT_EQ(bound.count("gfx942"), 0u);
+    EXPECT_EQ(bound.count("gfx950"), 1u);
+    EXPECT_EQ(sets.front().unavailableEnginePredictionArches.at("tflops"),
+              std::set<std::string>{"gfx942"});
+}
+
 TEST(TestDescriptorLoader, AModelTrainedAgainstAnotherMetadataIdentityCannotRank)
 {
     const ScopedSymbols symbols;

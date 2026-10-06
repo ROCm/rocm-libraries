@@ -686,7 +686,7 @@ def _validate_trained_against(value, where):
 def _validate_uhd(desc, source_root):
     """Mirror the canonical Draft7 header, then resolve artifact sidecars safely.
 
-    A missing model artifact is a hard error: the runtime drops the whole engine.
+    Packaging requires artifacts to exist; runtime may retain an unavailable model binding.
     """
     doc = desc.doc
     where = f"UHD {desc.path.name}"
@@ -838,23 +838,15 @@ def _validate_uhd(desc, source_root):
 
 
 def _validate_contained_path(payload, where):
-    """Refuse a model path that does not name a file inside the descriptor's directory.
-
-    Mirrors UhdParser isContainedRelativePath: no leading `/` or `\\` (root, UNC),
-    no drive prefix, and the lexically normalised path may neither climb above the
-    directory nor name the directory itself. Both separators count on every
-    platform, so a descriptor resolves the same way wherever it is loaded.
-    """
-    depth = 0
-    if payload[:1] not in ("/", "\\") and not re.match(r"[A-Za-z]:", payload):
-        for segment in re.split(r"[/\\]", payload):
-            if segment == "..":
-                depth -= 1
-                if depth < 0:
-                    break
-            elif segment not in ("", "."):
-                depth += 1
-    if depth <= 0:
+    """Mirror UhdParser's portable '/'-separated descriptor-relative asset names."""
+    segments = payload.split("/")
+    if (
+        not payload
+        or payload.startswith("/")
+        or any(char in payload for char in ("\\", ":", "\0"))
+        or ".." in segments
+        or segments[-1] in ("", ".")
+    ):
         raise HkpPackError(
             f"{where} {payload!r} must be a relative path inside the descriptor's directory"
         )
@@ -872,16 +864,13 @@ def _resolve_sidecar(desc, source_root, payload):
     containment and to read the bytes, so a link is staged under its own name.
     """
     where = f"UHD {desc.path.name}"
-    if "\0" in payload:
-        raise HkpPackError(
-            f"{where} payload path contains a NUL character: {payload!r}"
-        )
     dest = Path(os.path.normpath(Path(desc.rel_dir) / payload))
     try:
         root = Path(source_root).resolve()
         resolved = (root / dest).resolve()
-        # Only a symlink can reach outside the root once the path is contained.
-        escapes = not resolved.is_relative_to(root)
+        directory = (root / desc.rel_dir).resolve()
+        # Symlinks must remain inside the descriptor's directory, not merely the source root.
+        escapes = not resolved.is_relative_to(directory)
         found = resolved.is_file()
     except (OSError, ValueError) as exc:
         raise HkpPackError(
@@ -890,7 +879,7 @@ def _resolve_sidecar(desc, source_root, payload):
 
     if escapes:
         raise HkpPackError(
-            f"{where} payload escapes the source root: {payload} "
+            f"{where} payload escapes the descriptor's directory: {payload} "
             f"(from {Path(desc.rel_dir).as_posix()}, resolved to {resolved})"
         )
     # Same rule, and same case-insensitivity, as an authored descriptor folder.

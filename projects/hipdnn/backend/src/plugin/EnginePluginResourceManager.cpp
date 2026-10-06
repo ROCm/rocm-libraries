@@ -13,6 +13,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <limits>
 #include <mutex>
+#include <nlohmann/json.hpp>
 #include <numeric>
 #include <string>
 #include <string_view>
@@ -657,6 +658,25 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
     };
     const auto handle = it->second;
     const auto plugin = _handleToPlugin.at(handle);
+    const auto annotateBuild = [&](fb::EnginePredictionT& prediction) {
+        if(evaluate)
+        {
+            return true;
+        }
+        auto binding = prediction.binding_json.empty()
+                           ? nlohmann::json::object()
+                           : nlohmann::json::parse(prediction.binding_json, nullptr, false);
+        if(!binding.is_object())
+        {
+            return false;
+        }
+        // Diagnostic identity of the loaded binary, not a model compatibility key.
+        binding["provider_build"] = {{"name", std::string(plugin->name())},
+                                     {"version", std::string(plugin->version())},
+                                     {"api_version", std::string(plugin->apiVersion())}};
+        prediction.binding_json = binding.dump();
+        return true;
+    };
     hipdnnPluginConstData_t data{nullptr, 0};
     const auto release = [plugin, handle](hipdnnPluginConstData_t* owned) {
         if(owned->ptr != nullptr)
@@ -682,6 +702,10 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
         if(!plugin->getPrediction(handle, &engineConfig, &opGraph, kind, evaluate, &data))
         {
             result.reason = "Engine does not expose this prediction capability";
+            if(!annotateBuild(result))
+            {
+                return invalid("Prediction binding must be a JSON object");
+            }
             return result;
         }
     }
@@ -756,6 +780,10 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
         }
     }
     response->UnPackTo(&result);
+    if(!annotateBuild(result))
+    {
+        return invalid("Prediction binding must be a JSON object");
+    }
     if(result.status != fb::PredictionStatus::AVAILABLE)
     {
         result.value = 0.0;
