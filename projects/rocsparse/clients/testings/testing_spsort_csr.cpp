@@ -81,6 +81,31 @@ namespace
         CHECK_ROCSPARSE_ERROR(rocsparse_spsort_set_input(
             handle, descr, rocsparse_spsort_input_alg, &alg, sizeof(alg), nullptr));
     }
+
+    // Runs the analysis and compute stages of the sort of source into target.
+    void run_spsort(rocsparse_handle            handle,
+                    rocsparse_const_spmat_descr source,
+                    rocsparse_spmat_descr       target)
+    {
+        rocsparse_spsort_descr descr;
+        CHECK_ROCSPARSE_ERROR(rocsparse_spsort_descr_create(handle, &descr, nullptr));
+        set_spsort_inputs(handle, descr, rocsparse_spsort_alg_default);
+
+        for(const rocsparse_spsort_stage stage :
+            {rocsparse_spsort_stage_analysis, rocsparse_spsort_stage_compute})
+        {
+            size_t buffer_size = 0;
+            CHECK_ROCSPARSE_ERROR(rocsparse_spsort_buffer_size(
+                handle, descr, source, target, stage, &buffer_size, nullptr));
+            void* dbuffer = nullptr;
+            CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
+            CHECK_ROCSPARSE_ERROR(rocsparse_spsort(
+                handle, descr, source, target, stage, buffer_size, dbuffer, nullptr));
+            CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
+        }
+
+        CHECK_ROCSPARSE_ERROR(rocsparse_spsort_descr_destroy(handle, descr, nullptr));
+    }
 }
 
 template <typename I, typename J, typename T>
@@ -262,8 +287,10 @@ void testing_spsort_csr(const Arguments& arg)
     // A matrix without rows has no row pointer.
     const int64_t offsets_size = (M > 0) ? static_cast<int64_t>(M) + 1 : 0;
 
-    // A is padded between batches to check that its strides are honoured, B is packed.
-    const int64_t offsets_batch_stride_A        = (batch_count_A > 1) ? offsets_size + 2 : 0;
+    // A is padded between batches to check that its strides are honoured, B is packed. Without
+    // a row pointer there is nothing to pad.
+    const int64_t offsets_batch_stride_A
+        = (batch_count_A > 1 && offsets_size > 0) ? offsets_size + 2 : 0;
     const int64_t offsets_batch_stride_B        = (batch_count_B > 1) ? offsets_size : 0;
     const int64_t columns_values_batch_stride_A = (batch_count_A > 1) ? nnz + 3 : 0;
     const int64_t columns_values_batch_stride_B = (batch_count_B > 1) ? nnz : 0;
@@ -488,4 +515,103 @@ INSTANTIATE(int64_t, int64_t, float);
 INSTANTIATE(int64_t, int64_t, double);
 INSTANTIATE(int64_t, int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, int64_t, rocsparse_double_complex);
-void testing_spsort_csr_extra(const Arguments& arg) {}
+void testing_spsort_csr_extra(const Arguments& arg)
+{
+    rocsparse_local_handle handle(arg);
+
+    // 32-bit offsets with 64-bit column indices, which the test dispatch does not cover.
+    {
+        const int64_t m   = 3;
+        const int64_t n   = 6;
+        const int64_t nnz = 7;
+
+        const host_vector<int32_t> hptr      = {1, 4, 4, 8};
+        const host_vector<int64_t> hind      = {6, 2, 4, 5, 1, 3, 2};
+        const host_vector<float>   hval      = {1, 2, 3, 4, 5, 6, 7};
+        const host_vector<int64_t> hind_gold = {2, 4, 6, 1, 2, 3, 5};
+        const host_vector<float>   hval_gold = {2, 3, 1, 5, 7, 6, 4};
+
+        for(const bool in_place : {false, true})
+        {
+            device_vector<int32_t> dA_ptr(hptr);
+            device_vector<int64_t> dA_ind(hind);
+            device_vector<float>   dA_val(hval);
+            device_vector<int32_t> dB_ptr(m + 1);
+            device_vector<int64_t> dB_ind(nnz);
+            device_vector<float>   dB_val(nnz);
+
+            rocsparse_local_spmat matA(m,
+                                       n,
+                                       nnz,
+                                       dA_ptr,
+                                       dA_ind,
+                                       dA_val,
+                                       rocsparse_indextype_i32,
+                                       rocsparse_indextype_i64,
+                                       rocsparse_index_base_one,
+                                       rocsparse_datatype_f32_r);
+            rocsparse_local_spmat matB(m,
+                                       n,
+                                       nnz,
+                                       dB_ptr,
+                                       dB_ind,
+                                       dB_val,
+                                       rocsparse_indextype_i32,
+                                       rocsparse_indextype_i64,
+                                       rocsparse_index_base_one,
+                                       rocsparse_datatype_f32_r);
+
+            run_spsort(handle, matA, in_place ? matA : matB);
+
+            host_vector<int32_t> hptr_result(m + 1);
+            host_vector<int64_t> hind_result(nnz);
+            host_vector<float>   hval_result(nnz);
+            hptr_result.transfer_from(in_place ? dA_ptr : dB_ptr);
+            hind_result.transfer_from(in_place ? dA_ind : dB_ind);
+            hval_result.transfer_from(in_place ? dA_val : dB_val);
+            hptr.unit_check(hptr_result);
+            hind_gold.unit_check(hind_result);
+            hval_gold.unit_check(hval_result);
+        }
+    }
+
+    // A matrix without rows: the single offset of the target is the index base, whether the
+    // source has an offsets array or not.
+    for(const rocsparse_index_base base : {rocsparse_index_base_zero, rocsparse_index_base_one})
+    {
+        for(const bool source_has_offsets : {false, true})
+        {
+            const host_vector<int32_t> hptr_gold = {static_cast<int32_t>(base)};
+
+            device_vector<int32_t> dA_ptr(hptr_gold);
+            device_vector<int32_t> dB_ptr(host_vector<int32_t>{-1});
+
+            rocsparse_local_spmat matA(0,
+                                       5,
+                                       0,
+                                       source_has_offsets ? (void*)dA_ptr : nullptr,
+                                       nullptr,
+                                       nullptr,
+                                       rocsparse_indextype_i32,
+                                       rocsparse_indextype_i32,
+                                       base,
+                                       rocsparse_datatype_f32_r);
+            rocsparse_local_spmat matB(0,
+                                       5,
+                                       0,
+                                       dB_ptr,
+                                       nullptr,
+                                       nullptr,
+                                       rocsparse_indextype_i32,
+                                       rocsparse_indextype_i32,
+                                       base,
+                                       rocsparse_datatype_f32_r);
+
+            run_spsort(handle, matA, matB);
+
+            host_vector<int32_t> hptr_result(1);
+            hptr_result.transfer_from(dB_ptr);
+            hptr_gold.unit_check(hptr_result);
+        }
+    }
+}
