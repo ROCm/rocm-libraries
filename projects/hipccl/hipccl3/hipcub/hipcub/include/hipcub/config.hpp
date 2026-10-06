@@ -233,17 +233,31 @@ END_HIPCUB_NAMESPACE
 #endif // HIPCUB_ROCPRIM_API
 
 /// \brief Wrapper macro for C++20 'requires'.
+#define HIPCUB_REQUIRES(...) _CCCL_REQUIRES(__VA_ARGS__)
+
+/// \brief Wrapper macro for `template`.
 ///
-/// Currently, HIP's backend does not support C++20, so the HIPCUB_REQUIRES is just
-/// a wrapper around the 'std::enable_if' construction that enforces the requirement.
-#ifndef HIPCUB_REQUIRES
-    #if defined(__HIP_PLATFORM_NVIDIA__)
-        #include <cuda/std/__concepts/concept_macros.h>
-        #define HIPCUB_REQUIRES(...) _CCCL_REQUIRES(__VA_ARGS__)
-    #else
-        #define HIPCUB_REQUIRES(...) typename std::enable_if<(__VA_ARGS__)>::type* = nullptr
-    #endif
-#endif // HIPCUB_REQUIRES
+/// Works together with `HIPCUB_REQUIRES`, such that if concepts are not
+/// supported the implementation of requires falls back to `enable_if`
+/// and templates.
+/// E.g. this code:
+/// \code{.cpp}
+/// HIPCUB_TEMPLATE(class T)
+/// HIPCUB_REQUIRES(_HIPCUB_STD::some_concept<T>)
+/// void some_function() {}
+/// \endcode
+/// would be preprocessed into
+/// \code{.cpp}
+/// template<class T> requires _HIPCUB_STD::some_concept<T>
+/// void some_function() {}
+/// \endcode
+/// if concepts are supported, or into something equivalent to
+/// \code{.cpp}
+/// template<class T, typename std::enable_if<(_HIPCUB_STD::some_concept<T>)>::type* = nullptr>
+/// void some_function() {}
+/// \endcode
+/// if they are not.
+#define HIPCUB_TEMPLATE(...) _CCCL_TEMPLATE(__VA_ARGS__)
 
 #ifndef HIPCUB_TRAIT
     #if defined(__HIP_PLATFORM_NVIDIA__)
