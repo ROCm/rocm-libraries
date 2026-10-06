@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 """Correctness tests for direct grouped convolution across cpg variants.
 
-Covers all four grouped variants (cpg = 4, 8, 16, 32) and the depthwise
-variant (cpg = 1).  Each test builds a kernel, compiles it, launches it on
+Covers all four grouped variants (cpg = 4, 8, 16, 32), the depthwise
+variant (cpg = 1), and the non-grouped (groups == 1) ``DirectNongroupedConvSpec``.  Each test builds a kernel, compiles it, launches it on
 GPU, and compares the output against a float32 reference produced by
 torch.nn.functional.conv2d.
 
@@ -22,7 +22,7 @@ from __future__ import annotations
 import ctypes
 import importlib.util
 import unittest
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import List, Tuple
 
 from rocke.runtime.hip_module import get_device_arch
@@ -980,6 +980,461 @@ class TestDirectConvBf16Correctness(unittest.TestCase):
         for s in _BF16_DGRAD_SHAPES:
             with self.subTest(shape=s.id):
                 self._run_dgrad(s)
+
+
+# ---------------------------------------------------------------------------
+# Non-grouped (groups == 1) direct conv
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _NgCase:
+    """One non-grouped correctness case: shape plus the geometry to build."""
+
+    id: str
+    N: int
+    H: int
+    W: int
+    C: int
+    K: int
+    KH: int = 3
+    KW: int = 3
+    PAD: int = 1
+    stride: int = 1
+    dtype: str = "bf16"
+    tile_h: int = 8
+    tile_w: int = 32
+    tile_k: int = 64
+    ck: int = 32
+    waves_m: int = 2
+    waves_n: int = 2
+    atom: str = "32x32x16"
+    # Schedule / pipeline knobs (DirectNongroupedConvSpec defaults).
+    double_buffer: bool = False
+    iglp: "int | None" = None
+    waves_per_eu: "int | None" = None
+    chiplet_swizzle: bool = True
+    swizzle_wgm: int = 8
+
+
+# Each case pins down one branch of the addressing: exact vs partial output
+# tiles, K not covering tile_k, the 16-wide atom used for widths that are not a
+# multiple of 32, stride 2, a 1x1 filter, and the fp16 operand path. The
+# second group pins the pipeline/schedule knobs: ping-pong LDS, iglp, the
+# occupancy hint, the grid decode with and without the chiplet swizzle, and a
+# grid large enough (> num_xcds * chiplet_chunk = 512 WGs) that the chiplet
+# remap is not the identity, with a partial tail block past the last full one.
+_NG_CASES: List[_NgCase] = [
+    _NgCase("ng_exact", N=1, H=16, W=32, C=64, K=64),
+    _NgCase("ng_partial_w", N=2, H=16, W=40, C=64, K=64),
+    _NgCase("ng_partial_h", N=1, H=20, W=32, C=64, K=64, tile_h=16, waves_n=4),
+    _NgCase("ng_partial_k", N=1, H=16, W=32, C=64, K=96),
+    _NgCase("ng_multi_colblock", N=1, H=16, W=64, C=64, K=64, tile_w=64),
+    _NgCase("ng_stride2", N=1, H=32, W=64, C=64, K=64, stride=2),
+    _NgCase("ng_pointwise", N=1, H=16, W=32, C=64, K=64, KH=1, KW=1, PAD=0),
+    _NgCase("ng_fp16", N=1, H=16, W=32, C=64, K=64, dtype="fp16"),
+    _NgCase(
+        "ng_atom16",
+        N=2,
+        H=20,
+        W=40,
+        C=64,
+        K=64,
+        tile_w=48,
+        tile_k=32,
+        waves_m=1,
+        atom="16x16x32",
+    ),
+    _NgCase(
+        "ng_atom16x16",
+        N=1,
+        H=16,
+        W=32,
+        C=64,
+        K=64,
+        tile_w=16,
+        tile_k=32,
+        ck=16,
+        waves_m=1,
+        atom="16x16x16",
+    ),
+    _NgCase("ng_32x32x8", N=1, H=16, W=32, C=64, K=64, ck=16, atom="32x32x8"),
+    _NgCase("ng_5x5", N=1, H=16, W=32, C=64, K=96, KH=5, KW=5, PAD=2),
+    _NgCase("ng_double_buffer", N=2, H=16, W=40, C=128, K=64, double_buffer=True),
+    _NgCase(
+        "ng_double_buffer_s2_fp16",
+        N=1,
+        H=32,
+        W=64,
+        C=64,
+        K=64,
+        stride=2,
+        ck=16,
+        dtype="fp16",
+        double_buffer=True,
+        iglp=1,
+    ),
+    _NgCase("ng_iglp0_we3", N=1, H=16, W=32, C=128, K=64, iglp=0, waves_per_eu=3),
+    _NgCase("ng_no_swizzle", N=2, H=16, W=64, C=64, K=128, chiplet_swizzle=False),
+    _NgCase("ng_wgm1", N=2, H=16, W=64, C=64, K=192, swizzle_wgm=1),
+    _NgCase(
+        "ng_chiplet_remap",
+        N=9,
+        H=64,
+        W=64,
+        C=32,
+        K=256,
+        iglp=0,
+    ),
+]
+
+
+# The cases are written for gfx950. gfx942 has neither wide-K atom for
+# fp16/bf16 and a 64 KiB LDS, so there each case falls back to the narrower-K
+# atom of the same tile size and then shrinks ck (and, failing that, tile_h)
+# until the staged tiles fit. The addressing branch a case pins down depends on
+# its shape, stride and filter -- not on ck -- so it still gets a numeric check
+# instead of a skip. On gfx950 every case is used as written.
+_NG_ATOM_FALLBACK = {"32x32x16": "32x32x8", "16x16x32": "16x16x16"}
+
+
+def _fit_nongrouped_to_arch(spec, arch: str):
+    """``spec`` with its atom / ck / tile_h narrowed until ``arch`` can run it."""
+    from kernels.common.conv_direct_nongrouped import _ATOMS, _X_LOAD_VEC
+    from rocke.core.arch import ArchTarget
+
+    target = ArchTarget.from_gfx(arch)
+    ab = "bf16" if spec.problem.dtype == "bf16" else "f16"
+    t, k, _ = _ATOMS[spec.atom]
+    if not target.mma.has_shape(a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=t, n=t, k=k):
+        spec = replace(spec, atom=_NG_ATOM_FALLBACK.get(spec.atom, spec.atom))
+    min_ck = max(spec.atom_k, _X_LOAD_VEC)
+    while not target.fits_lds(spec.lds_bytes) and spec.ck // 2 >= min_ck:
+        spec = replace(spec, ck=spec.ck // 2)
+    while (
+        not target.fits_lds(spec.lds_bytes)
+        and spec.tile_h > spec.waves_n
+        and (spec.tile_h // 2) % spec.waves_n == 0
+    ):
+        spec = replace(spec, tile_h=spec.tile_h // 2)
+    return spec
+
+
+def _run_nongrouped_one(arch: str, case: _NgCase) -> Tuple[bool, str]:
+    """Build, compile, launch, and verify one non-grouped direct-conv kernel."""
+    from kernels.common.conv_direct_grouped import DirectConvProblem
+    from kernels.common.conv_direct_nongrouped import DirectNongroupedConvSpec
+
+    p = DirectConvProblem(
+        N=case.N,
+        H=case.H,
+        W=case.W,
+        groups=1,
+        cpg=case.C,
+        kpg=case.K,
+        KH=case.KH,
+        KW=case.KW,
+        PAD=case.PAD,
+        stride=case.stride,
+        dtype=case.dtype,
+    )
+    spec = DirectNongroupedConvSpec(
+        problem=p,
+        tile_h=case.tile_h,
+        tile_w=case.tile_w,
+        tile_k=case.tile_k,
+        ck=case.ck,
+        waves_m=case.waves_m,
+        waves_n=case.waves_n,
+        atom=case.atom,
+        double_buffer=case.double_buffer,
+        iglp=case.iglp,
+        waves_per_eu=case.waves_per_eu,
+        chiplet_swizzle=case.chiplet_swizzle,
+        swizzle_wgm=case.swizzle_wgm,
+    )
+    return _run_nongrouped_spec(arch, _fit_nongrouped_to_arch(spec, arch), case.id)
+
+
+def _run_nongrouped_spec(
+    arch: str, spec, case_id: str, artifact=None
+) -> Tuple[bool, str]:
+    """Compile, launch and verify one ``DirectNongroupedConvSpec`` against conv2d.
+
+    ``artifact`` reuses a binary compiled for another spec with the same
+    capabilities and tile; the shape of ``spec.problem`` then only reaches the
+    kernel through its kernargs.
+    """
+    import torch
+
+    from rocke import compile_kernel
+    from kernels.common.conv_abi import conv_direct_args_signature
+    from kernels.common.conv_args import ConvArgs
+    from kernels.common.conv_direct_nongrouped import (
+        build_direct_conv_nongrouped,
+        is_valid_nongrouped_spec,
+    )
+    from rocke.runtime import synchronize_and_release
+    from rocke.runtime.hip_module import HipError, Runtime
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+    p = spec.problem
+    ok, why = is_valid_nongrouped_spec(spec, arch=arch)
+    if not ok:
+        return False, f"skip {why}"
+
+    if artifact is None:
+        try:
+            artifact = compile_kernel(
+                build_direct_conv_nongrouped(spec, arch=arch), arch=arch
+            )
+        except Exception as e:  # noqa: BLE001
+            return False, f"build/compile failed: {e}"
+
+    td = torch.bfloat16 if p.dtype == "bf16" else torch.float16
+    torch.manual_seed(0)
+    A_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=td).uniform_(-1.0, 1.0)
+    B_t = torch.empty(p.total_k, p.KH, p.KW, p.cpg, dtype=td).uniform_(-1.0, 1.0)
+    D_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=td)
+    ref = _conv_ref_grouped(A_t, B_t, p)
+
+    rt = Runtime()
+    A_dev = rt.alloc(A_t.nbytes)
+    B_dev = rt.alloc(B_t.nbytes)
+    D_dev = rt.alloc(D_t.nbytes)
+    rt.memcpy_h2d(A_dev, _u8(A_t), A_t.nbytes)
+    rt.memcpy_h2d(B_dev, _u8(B_t), B_t.nbytes)
+    rt.memset(D_dev, 0, D_t.nbytes)
+
+    try:
+        launcher = KernelLauncher(
+            hsaco=artifact.hsaco,
+            kernel_name=artifact.kernel_name,
+            signature=conv_direct_args_signature(p.dtype),
+        )
+    except HipError as e:
+        rt.free(A_dev)
+        rt.free(B_dev)
+        rt.free(D_dev)
+        return False, f"kernel load failed: {e}"
+
+    launcher(
+        ConvArgs.from_problem(p).to_launch_values(
+            int(A_dev),
+            int(B_dev),
+            int(D_dev),
+            A_t.nbytes,
+            B_t.nbytes,
+            D_t.nbytes,
+        ),
+        config=LaunchConfig(
+            grid=spec.grid(), block=(spec.threads_per_block, 1, 1), fence=True
+        ),
+    )
+
+    D_cpu = torch.empty_like(D_t)
+    rt.memcpy_d2h(_u8(D_cpu), D_dev, D_t.nbytes)
+    rt.free(A_dev)
+    rt.free(B_dev)
+    rt.free(D_dev)
+    synchronize_and_release(0)
+
+    diff = (D_cpu.float() - ref.float().cpu()).abs()
+    rel_err = float(diff.max() / ref.abs().max().clamp(min=1.0))
+    tol = _TOL_BF16 if p.dtype == "bf16" else _TOL
+    if rel_err >= tol:
+        return False, f"rel_err={rel_err:.3e} > tol={tol:.1e}"
+    print(f"  PASS  {case_id}  {arch}  rel_err={rel_err:.2e}", flush=True)
+    return True, ""
+
+
+@unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "no GPU")
+class TestDirectConvNongroupedCorrectness(unittest.TestCase):
+    """Correctness sweep for the non-grouped (groups == 1) direct-conv family."""
+
+    def test_nongrouped(self):
+        for case in _NG_CASES:
+            with self.subTest(case=case.id):
+                passed, reason = _run_nongrouped_one(GPU_ARCH, case)
+                if reason.startswith("skip"):
+                    self.skipTest(reason)
+                self.assertTrue(passed, f"FAIL {case.id} on {GPU_ARCH}: {reason}")
+
+    def test_sweep_candidates(self):
+        """An evenly spaced sample of what ``nongrouped_specs`` hands the
+        benchmark. The winner of a sweep is whichever config is fastest, so
+        every candidate the sweep can pick has to be correct -- not just the
+        hand-picked geometries above. Wo=48 exercises both the exact-width
+        16-wide atom and the padded 32-wide one."""
+        from kernels.common.conv_direct_grouped import DirectConvProblem
+        from kernels.common.conv_direct_nongrouped import nongrouped_specs
+
+        p = DirectConvProblem(N=2, H=16, W=48, groups=1, cpg=64, kpg=128, dtype="bf16")
+        specs = nongrouped_specs(p, arch=GPU_ARCH)
+        self.assertGreater(len(specs), 0)
+        for spec in specs[:: max(1, len(specs) // 8)]:
+            name = spec.kernel_name()
+            with self.subTest(spec=name):
+                passed, reason = _run_nongrouped_spec(GPU_ARCH, spec, name)
+                self.assertTrue(passed, f"FAIL {name} on {GPU_ARCH}: {reason}")
+
+    def test_one_binary_serves_every_shape(self):
+        """AOT: a kernel compiled once runs any shape with its capabilities.
+
+        The binary is built against a probe problem, then launched on shapes
+        that differ in batch, both spatial extents (exact and partial tiles,
+        so the runtime tile counts and bounds checks change) and both channel
+        counts (so the runtime channel-loop trip count and the K mask change).
+        """
+        from rocke import compile_kernel
+        from kernels.common.conv_direct_grouped import DirectConvProblem
+        from kernels.common.conv_direct_nongrouped import (
+            DirectNongroupedConvSpec,
+            build_direct_conv_nongrouped,
+        )
+
+        def _p(N, H, W, C, K):
+            return DirectConvProblem(
+                N=N, H=H, W=W, groups=1, cpg=C, kpg=K, dtype="bf16"
+            )
+
+        spec = _fit_nongrouped_to_arch(
+            DirectNongroupedConvSpec(
+                problem=_p(1, 16, 32, 64, 64),
+                tile_h=8,
+                tile_w=32,
+                tile_k=64,
+                ck=32,
+                waves_m=2,
+                waves_n=2,
+                iglp=0,
+            ),
+            GPU_ARCH,
+        )
+        artifact = compile_kernel(
+            build_direct_conv_nongrouped(spec, arch=GPU_ARCH), arch=GPU_ARCH
+        )
+        for shape in [
+            (1, 16, 32, 64, 64),
+            (3, 20, 40, 128, 96),
+            (2, 33, 17, 256, 192),
+            (9, 64, 64, 32, 256),
+        ]:
+            case = replace(spec, problem=_p(*shape))
+            with self.subTest(shape=shape):
+                passed, reason = _run_nongrouped_spec(
+                    GPU_ARCH, case, f"aot_{shape}", artifact=artifact
+                )
+                self.assertTrue(passed, f"FAIL {shape} on {GPU_ARCH}: {reason}")
+
+
+class TestDirectConvNongroupedValidation(unittest.TestCase):
+    """Non-grouped validation that does not require a GPU."""
+
+    @staticmethod
+    def _problem(**kw):
+        from kernels.common.conv_direct_grouped import DirectConvProblem
+
+        base = dict(N=1, H=32, W=32, groups=1, cpg=64, kpg=64, dtype="bf16")
+        base.update(kw)
+        return DirectConvProblem(**base)
+
+    def test_grouped_problem_rejected(self):
+        from kernels.common.conv_direct_nongrouped import DirectNongroupedConvSpec
+
+        p = self._problem(groups=4, cpg=16, kpg=16)
+        with self.assertRaises(ValueError):
+            DirectNongroupedConvSpec(problem=p).validate()
+
+    def test_oversized_accumulator_rejected(self):
+        """A tile needing more than 256 accumulator registers must not build.
+
+        Left unguarded this is not just slow: a 2048-register tile hangs the
+        backend scheduler rather than failing, which stalls a whole sweep.
+        """
+        from kernels.common.conv_direct_nongrouped import DirectNongroupedConvSpec
+
+        spec = DirectNongroupedConvSpec(
+            problem=self._problem(),
+            tile_h=16,
+            tile_w=64,
+            tile_k=128,
+            ck=16,
+            waves_m=1,
+            waves_n=1,
+        )
+        self.assertGreater(spec.acc_vgprs, 256)
+        with self.assertRaises(ValueError):
+            spec.validate()
+
+    def test_flattened_grid_overflow_rejected(self):
+        """The 1-D grid (and the kernel's i32 workgroup count) must fit i32."""
+        from kernels.common.conv_direct_nongrouped import DirectNongroupedConvSpec
+
+        # 1 x 4 spatial tiles x 16 channel tiles per image, 2**25 images.
+        spec = DirectNongroupedConvSpec(
+            problem=self._problem(N=1 << 25, cpg=64, kpg=512),
+            tile_h=8,
+            tile_w=32,
+            tile_k=32,
+            ck=32,
+            waves_m=1,
+            waves_n=2,
+        )
+        self.assertGreater(spec.grid()[0], (1 << 31) - 1)
+        with self.assertRaisesRegex(ValueError, "flattened grid"):
+            spec.validate()
+
+    def test_is_valid_never_raises(self):
+        """``is_valid_nongrouped_spec`` reports, it does not raise -- including
+        when the arch-table queries past ``validate()`` fail."""
+        from unittest import mock
+
+        from kernels.common.conv_direct_nongrouped import (
+            DirectNongroupedConvSpec,
+            is_valid_nongrouped_spec,
+        )
+        from rocke.core.arch import ArchTarget
+
+        spec = DirectNongroupedConvSpec(
+            problem=self._problem(), tile_h=8, tile_k=64, ck=32, waves_n=2
+        )
+        self.assertTrue(is_valid_nongrouped_spec(spec)[0])
+
+        real = ArchTarget.from_gfx("gfx950")
+        broken = mock.MagicMock(wraps=real)
+        broken.mma.has_shape.side_effect = KeyError("no mma table")
+        with mock.patch.object(ArchTarget, "from_gfx", return_value=broken):
+            ok, why = is_valid_nongrouped_spec(spec)
+        self.assertFalse(ok)
+        self.assertIn("no mma table", why)
+
+        ok, why = is_valid_nongrouped_spec(spec, arch="gfx_nonexistent")
+        self.assertFalse(ok)
+
+    def test_tile_w_candidates_cover_exactly(self):
+        """Candidate widths must tile Wo without wasted columns when possible."""
+        from kernels.common.conv_direct_nongrouped import tile_w_candidates
+
+        for wo, at in ((96, 32), (160, 32), (112, 16), (208, 16)):
+            for tw in tile_w_candidates(wo, at):
+                self.assertEqual(wo % tw, 0, f"Wo={wo} atom={at} tw={tw}")
+        # 40 is not a multiple of 32, so the 32-wide atom falls back to its
+        # least-wasteful width rather than returning nothing.
+        self.assertEqual(tile_w_candidates(40, 32), [32])
+
+    def test_specs_are_unique_and_valid(self):
+        from kernels.common.conv_direct_nongrouped import (
+            is_valid_nongrouped_spec,
+            nongrouped_specs,
+        )
+
+        specs = nongrouped_specs(self._problem(H=64, W=64, cpg=256, kpg=256))
+        self.assertGreater(len(specs), 0)
+        names = [s.kernel_name() for s in specs]
+        self.assertEqual(len(names), len(set(names)))
+        for s in specs:
+            self.assertTrue(is_valid_nongrouped_spec(s)[0])
 
 
 class TestDirectConvValidation(unittest.TestCase):

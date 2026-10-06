@@ -9,6 +9,8 @@ GPU is touched.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from benchmarks.common import direct_kernel_sweep as dks
@@ -91,7 +93,47 @@ def test_group_count_is_runtime(cache, groups):
     """Any group count is served; only tiles that do not divide it drop out."""
     plans, rejected = dks.direct_plans(cache, _problem(groups=groups), "fwd", _ARCH)
     assert plans
-    assert all("block_groups" in why for _, why in rejected)
+    assert all(
+        "block_groups" in why
+        for ident, why in rejected
+        if ident.algorithm != "direct_nongrouped"
+    )
+
+
+def _nongrouped(plans):
+    return [p for p in plans if p.identity.algorithm == "direct_nongrouped"]
+
+
+@pytest.mark.parametrize(
+    "C,K,H,W", [(64, 64, 56, 56), (640, 640, 64, 64), (96, 352, 28, 48)]
+)
+def test_nongrouped_channels_are_runtime(cache, C, K, H, W):
+    """One non-grouped binary per tile serves any C/K it divides."""
+    problem = _problem(groups=1, cpg=C, kpg=K, H=H, W=W)
+    plans = _nongrouped(dks.direct_plans(cache, problem, "fwd", _ARCH)[0])
+    assert plans
+    assert all(p.identity.cpg == 0 and p.identity.kpg == 0 for p in plans)
+    # Only the widths a sweep for this Wo would try are offered.
+    from kernels.common.conv_direct_nongrouped import tile_w_candidates
+
+    for plan in plans:
+        spec = dks.make_spec(
+            "direct_nongrouped", problem, json.loads(plan.identity.knobs)
+        )
+        assert spec.tile_w in tile_w_candidates(problem.Wo, spec.atom_tile)
+        (step,) = plan.steps
+        assert step.grid == spec.grid()
+
+
+def test_nongrouped_only_serves_one_group(cache):
+    plans, rejected = dks.direct_plans(cache, _problem(groups=16), "fwd", _ARCH)
+    assert not _nongrouped(plans)
+    assert all(i.algorithm != "direct_nongrouped" for i, _ in rejected)
+    # Grouped forward has no stride-2 kernel; the non-grouped one does.
+    plans, _ = dks.direct_plans(
+        cache, _problem(groups=1, cpg=64, kpg=64, stride=2), "fwd", _ARCH
+    )
+    assert plans and _variants(plans) == {"direct_nongrouped"}
 
 
 def test_capabilities_outside_the_list_are_not_served(cache):
@@ -118,6 +160,7 @@ def test_dgrad_stride1_offers_mfma_pipeline_and_scalar(cache):
     "direction,problem",
     [
         ("fwd", _problem()),
+        ("fwd", _problem(groups=1, cpg=128, kpg=96)),
         ("fwd", _problem(groups=64, cpg=1, kpg=1, KH=7, KW=7, PAD=3, stride=2)),
         ("dgrad", _problem(groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=0, stride=2)),
         ("dgrad", _problem(cpg=8, kpg=8, stride=2)),

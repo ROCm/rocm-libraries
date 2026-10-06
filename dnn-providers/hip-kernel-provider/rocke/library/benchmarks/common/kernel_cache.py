@@ -748,6 +748,9 @@ class KernelCache:
             if actual is not None and int(actual) != baked:
                 return False, f"{field}={baked} but problem has {actual}"
 
+        # 0 means runtime here, for direct conv too: the non-grouped direct
+        # kernel takes its channel counts as kernargs (cpg == 0 is never a
+        # real shape, unlike PAD == 0 above).
         if identity.cpg and identity.cpg != cpg:
             return False, f"kernel baked cpg={identity.cpg}, problem has {cpg}"
         if identity.kpg and identity.kpg != kpg:

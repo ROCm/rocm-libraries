@@ -59,6 +59,9 @@ The fixed-`cpg` variants in the table require `kpg = cpg`.  The generic
 positive multiple of 4.  If neither fits, use the implicit-GEMM kernel
 ([`conv_implicit_gemm.py`](conv_implicit_gemm.py)).
 
+For `groups == 1` these variants degenerate to one wave per output row; use the
+non-grouped direct conv instead ([`README_conv_direct_nongrouped.md`](README_conv_direct_nongrouped.md)).
+
 ### cpg = 1 — Depthwise (`DirectDepthwiseSpec`)
 
 Each output channel is computed independently using scalar FMA.  The kernel
@@ -429,6 +432,7 @@ For a backward-weights pass on gfx942 use the implicit-GEMM wgrad kernel
 | Depthwise (`cpg = 1`, `stride = 1`) | Direct-conv depthwise |
 | Backward-weights, gfx950, `cpg` and `kpg` ≥ 16, `stride = 1` | Direct-conv wgrad |
 | Backward-weights, anything else | Implicit-GEMM wgrad |
+| Non-grouped (`groups = 1`), `stride ≤ 2` | Sweep `conv_direct_nongrouped` and implicit-GEMM, keep the faster ([`README_conv_direct_nongrouped.md`](README_conv_direct_nongrouped.md)) |
 
 ---
 

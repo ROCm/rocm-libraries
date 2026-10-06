@@ -537,6 +537,49 @@ def test_direct_conv_abi_and_shape_invariance(label, channels, direction, build)
     assert _names(signature) == expected, f"{label}: launch signature"
 
 
+@pytest.mark.parametrize(
+    "stride,knobs",
+    [
+        (1, dict()),
+        (2, dict(ck=16, double_buffer=True, chiplet_swizzle=False, iglp=None)),
+        (1, dict(tile_w=48, tile_k=32, waves_m=1, atom="16x16x32")),
+    ],
+    ids=["base", "s2_db_noswizzle", "atom16"],
+)
+def test_direct_nongrouped_abi_and_shape_invariance(stride, knobs):
+    """The non-grouped kernel bakes neither the extents nor the channel counts.
+
+    Unlike the grouped variants, ``C`` and ``K`` are kernargs too, so they vary
+    here alongside the batch and the image -- including image sizes that leave
+    partial tiles and channel counts that leave a partial channel tile.
+    """
+    from kernels.common.conv_direct_grouped import DirectConvProblem
+    from kernels.common.conv_direct_nongrouped import (
+        DirectNongroupedConvSpec,
+        build_direct_conv_nongrouped,
+    )
+
+    base = dict(tile_h=8, tile_w=32, tile_k=64, ck=32, waves_m=2, waves_n=2, iglp=0)
+    fingerprints = set()
+    kernel = None
+    for N, H, W, C, K in [
+        (2, 16, 32, 64, 128),
+        (3, 29, 37, 128, 96),
+        (1, 64, 64, 640, 640),
+    ]:
+        problem = DirectConvProblem(
+            N=N, H=H, W=W, groups=1, cpg=C, kpg=K, stride=stride, dtype="bf16"
+        )
+        spec = DirectNongroupedConvSpec(problem=problem, **{**base, **knobs})
+        kernel = build_direct_conv_nongrouped(spec, arch=_ARCH)
+        fingerprints.add(_op_signature(kernel))
+
+    assert len(fingerprints) == 1, "non-grouped IR depends on the problem shape"
+    expected = [n for n, _ in conv_direct_arg_names(direction="fwd")]
+    assert [p.name for p in kernel.params] == expected
+    assert _names(conv_direct_args_signature("bf16")) == expected
+
+
 @pytest.mark.parametrize("fold_k32", [False, True])
 def test_direct_dgrad_weight_transforms_are_shape_invariant(fold_k32):
     """The MFMA dgrad's weight transforms are cached once per filter/channels.

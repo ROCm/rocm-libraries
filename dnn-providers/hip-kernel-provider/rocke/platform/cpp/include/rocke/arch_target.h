@@ -341,6 +341,12 @@ int rocke_arch_max_threads_per_block(const rocke_arch_target_t* t);
  * (excluding the terminating NULL). */
 const char* const* rocke_known_arches(int* count);
 
+/* Write str(KeyError) of ArchTarget.from_gfx's miss for `gfx` into out:
+ *   "unknown gfx target '<gfx>'; known: ['gfx...', ...]. Add a row to arch_specs.json."
+ * wrapped in double quotes, exactly as Python's is_valid_spec(...) reports
+ * `return False, str(e)`. Truncates to out_cap; NULL/zero out is a no-op. */
+void rocke_set_unknown_arch_reason(char* out, size_t out_cap, const char* gfx);
+
 /* Target identity helpers mirror rocke.core.arch.target. They do not validate
  * compiler support or query a GPU. Inputs and output buffers must not overlap.
  * Each writes at most out_cap - 1 bytes plus a NUL and returns out; a small
