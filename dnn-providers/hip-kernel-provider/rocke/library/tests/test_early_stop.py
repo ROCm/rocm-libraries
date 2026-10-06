@@ -118,3 +118,31 @@ def test_all_stopped_against_a_seed_says_so(monkeypatch):
     assert stop.measure(slow, warmup=3, iters=10) is None
     assert "all 1 early-stopped" in stop.summary()
     assert "1.000 ms" in stop.summary()
+
+
+def test_failed_kernels_neither_prune_nor_record(monkeypatch, tmp_path):
+    """A kernel that failed --verify is timed but cannot become the best: a
+    wrong-but-fast one would otherwise prune every correct kernel, here and in
+    the sweep seeded from the record."""
+    import json
+    from argparse import Namespace
+
+    from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+    wrong, ok, slow = object(), object(), object()
+    _fake_timer(monkeypatch, {wrong: 0.1, ok: 2.0, slow: 9.0})
+    problem = ConvProblem(N=2, Hi=16, Wi=16, C=32, K=32, Y=3, X=3, pH=1, pW=1)
+    record = tmp_path / "best.json"
+
+    es = _reset_handoff(monkeypatch)
+    args = Namespace(early_stop=5.0, early_stop_after=1, early_stop_record=str(record))
+    stop = es.EarlyStop.for_case(args, problem, "fp16", "fwd")
+    assert stop.measure(wrong, warmup=3, iters=10, passed=False) == 0.1
+    assert stop.best_ms is None and stop.n_measured == 0
+    assert not record.exists()
+    # The failed kernel did not count towards `after` either: this one is the
+    # first eligible kernel and is measured in full.
+    assert stop.measure(slow, warmup=3, iters=10, passed=True) == 9.0
+    assert stop.measure(ok, warmup=3, iters=10) == 2.0
+    assert stop.best_ms == 2.0
+    assert list(json.loads(record.read_text()).values()) == [2.0]

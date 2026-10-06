@@ -100,6 +100,30 @@ def test_group_count_is_runtime(cache, groups):
     )
 
 
+@pytest.mark.parametrize("stride", [1, 2])
+@pytest.mark.parametrize("groups", [3, 9])
+def test_small_group_depthwise_offers_spatial(cache, groups, stride):
+    """A depthwise problem with fewer groups than a wave gets the spatial
+    kernel, launched for its own group count: the binary was compiled on the
+    groups=8 probe, but each wave covers ``wave_size // groups`` columns of
+    the real problem."""
+    # At W=226 every grid differs from the one the groups=8 probe would get.
+    problem = _problem(H=8, W=226, groups=groups, cpg=1, kpg=1, stride=stride)
+    plans, _ = dks.direct_plans(cache, problem, "fwd", _ARCH)
+    spatial = [p for p in plans if p.identity.algorithm == "direct_depthwise_spatial"]
+    assert {json.loads(p.identity.knobs)["block_waves"] for p in spatial} == set(
+        dks.DW_BLOCK_WAVES
+    )
+    for plan in spatial:
+        waves = json.loads(plan.identity.knobs)["block_waves"]
+        block_w = waves * (plan.identity.wave_size // groups)
+        (step,) = plan.steps
+        assert step.grid == (-(-problem.Wo // block_w), 1, problem.N)
+        assert step.block == (waves * plan.identity.wave_size, 1, 1)
+        probe_w = waves * (plan.identity.wave_size // 8)
+        assert step.grid[0] != -(-problem.Wo // probe_w)
+
+
 def _nongrouped(plans):
     return [p for p in plans if p.identity.algorithm == "direct_nongrouped"]
 
@@ -123,6 +147,45 @@ def test_nongrouped_channels_are_runtime(cache, C, K, H, W):
         assert spec.tile_w in tile_w_candidates(problem.Wo, spec.atom_tile)
         (step,) = plan.steps
         assert step.grid == spec.grid()
+
+
+def test_nongrouped_grid_skips_spilling_tiles(jobs):
+    """Tiles that would spill are not cached, and the cut leaves both atoms and
+    both strides covered."""
+    from kernels.common.conv_direct_nongrouped import (
+        DirectNongroupedConvSpec,
+        nongrouped_register_reason,
+    )
+
+    built = [j for j in jobs if j.identity.algorithm == "direct_nongrouped"]
+    assert built
+    for job in built:
+        caps = dks.DirectCaps(**job.caps)
+        spec = dks.make_spec(
+            "direct_nongrouped",
+            dks.probe_problem(caps, dks.DIRECT_DTYPE, "direct_nongrouped"),
+            job.spec_kwargs,
+        )
+        assert nongrouped_register_reason(spec, _ARCH) is None, spec.kernel_name()
+    assert {json.loads(j.identity.knobs)["atom"] for j in built} == {
+        "32x32x16",
+        "16x16x32",
+    }
+    assert {j.identity.stride_h for j in built} == {1, 2}
+
+    # A tile filling the whole accumulator file is rejected however few waves
+    # share the SIMD: it spilled in every such build on gfx950.
+    full = DirectNongroupedConvSpec(
+        problem=_problem(groups=1, cpg=64, kpg=256),
+        tile_h=8,
+        tile_w=32,
+        tile_k=256,
+        ck=16,
+        waves_m=2,
+        waves_n=2,
+    )
+    assert full.acc_vgprs == 256
+    assert "accumulator file" in nongrouped_register_reason(full, _ARCH)
 
 
 def test_nongrouped_only_serves_one_group(cache):

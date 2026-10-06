@@ -6,7 +6,9 @@ A sweep times thousands of kernels for one problem, and most of the clock goes
 to the timed loops of kernels that were never going to rank. The warmup
 launches run anyway, so they are timed too: a kernel whose warmup is already
 ``factor`` times slower than the best kernel measured so far is reported and
-skipped instead of being timed.
+skipped instead of being timed. A kernel that failed verification is still
+timed but never becomes the best: a wrong-but-fast kernel would otherwise prune
+every correct one, here and, through the record file, in a seeded sweep.
 
 The best time can also come from another run: ``--early-stop-record FILE``
 keeps each case's best time in FILE (rewritten whenever one improves, so a run
@@ -120,6 +122,8 @@ class EarlyStop:
     more than ``factor`` times the best result so far, returns ``None`` without
     running the timed loop. The first ``after`` kernels of a sweep are always
     measured in full, so the best result is established before it is used.
+    A kernel measured with ``passed=False`` (it failed verification) neither
+    counts towards ``after`` nor updates the best result or the record file.
     """
 
     def __init__(
@@ -160,6 +164,7 @@ class EarlyStop:
         warmup: int,
         iters: int,
         stream: int = 0,
+        passed: Optional[bool] = None,
     ) -> Optional[float]:
         from rocke.runtime import time_launches
 
@@ -179,6 +184,8 @@ class EarlyStop:
             ms = time_launches(fn, warmup=0, iters=iters, stream=stream)
         else:
             ms = time_launches(fn, warmup=warmup, iters=iters, stream=stream)
+        if passed is False:
+            return ms
         self.n_measured += 1
         if self.best_ms is None or ms < self.best_ms:
             self.best_ms = ms

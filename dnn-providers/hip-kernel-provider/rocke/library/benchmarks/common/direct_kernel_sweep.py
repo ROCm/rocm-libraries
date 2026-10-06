@@ -312,6 +312,17 @@ def _uses_coalesced_weights(knobs: dict) -> bool:
     return knobs["waves_k"] > 1 or knobs["runtime_k_loop"]
 
 
+def _nongrouped_spills(spec, arch: str) -> bool:
+    """Would this non-grouped kernel spill registers? Such a binary pays scratch
+    traffic every channel chunk and is the slowest to compile, so it is not
+    cached.
+    Its register footprint is fixed by the baked capabilities and the tile, not
+    by the probe shape, so one answer holds for every problem it would serve."""
+    from kernels.common.conv_direct_nongrouped import nongrouped_register_reason
+
+    return nongrouped_register_reason(spec, arch) is not None
+
+
 def validate_spec(variant: str, spec, arch: str) -> Tuple[bool, str]:
     """``(ok, reason)`` for ``spec`` on ``arch``, from the kernel's own validator."""
     from kernels.common import conv_direct_grouped as dc
@@ -521,6 +532,8 @@ def _caps_jobs(
             continue
         spec = make_spec(variant, probe, knobs)
         if not validate_spec(variant, spec, arch)[0]:
+            continue
+        if variant == "direct_nongrouped" and _nongrouped_spills(spec, arch):
             continue
         cell = [
             _job(

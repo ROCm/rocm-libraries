@@ -70,6 +70,7 @@ grid: see :mod:`benchmarks.common.direct_kernel_sweep`.
 
 from __future__ import annotations
 
+import gc
 import itertools
 import time
 from concurrent.futures import (
@@ -1291,7 +1292,10 @@ def compile_jobs(
     """
     digest = current_emitter_digest()
     comgr_id = current_comgr_id()
-    index = cache.index()
+    # Only the directions these jobs live in: a shared cache can hold ~10^6
+    # entries of other families, and every one parsed here is resident in the
+    # process the compile workers fork from.
+    index = cache.index({j.identity.direction for j in all_jobs})
 
     def _up_to_date(job) -> bool:
         meta = index.get(job.identity.stable_hash())
@@ -1400,6 +1404,13 @@ def compile_jobs(
         # emit ran (and submitting them all takes seconds by itself). With
         # the window a compile waits behind at most ~2*jobs emits.
         window = 2 * jobs
+        # Forked workers share this process's heap copy-on-write, but a
+        # garbage collection in a worker writes to every tracked object's
+        # header and so copies every page holding one: with a large cache
+        # index resident, each of the 64 workers grew a private copy of it
+        # (GBs apiece) and the run was OOM-killed. Frozen objects are left
+        # alone by the collector.
+        gc.freeze()
         emit_iter = iter(emit_payloads)
         # Work handed over from a pool that broke (see below).
         carry: List[Tuple[str, tuple]] = []

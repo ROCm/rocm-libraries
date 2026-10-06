@@ -70,7 +70,6 @@ class _Shape:
 
     For fprop ``cpg`` must equal ``kpg`` (both symmetric). For dgrad they may
     differ; ``kpg=0`` (the default) means kpg == cpg (symmetric).
-    ``stride`` must be 1 for depthwise fprop.
     """
 
     id: str
@@ -114,6 +113,48 @@ _SHAPES: List[_Shape] = [
     # groups=8 satisfies DirectConv16cSpec/DirectConvSpec default block_groups=8
     _Shape("4c_N2H14W14_g8_s2", N=2, H=14, W=14, groups=8, cpg=4, stride=2),
     _Shape("16c_N2H14W14_g8_s2", N=2, H=14, W=14, groups=8, cpg=16, stride=2),
+    # Depthwise 7x7 "same": the FMA loop runs (H + KH - 1) // KH row groups and
+    # the load-free flush loop the rest up to (H + PAD + KH - 1) // KH, so the
+    # 3x3 case above (5 and 5) never enters the flush. H=14 gives 2 and 3, the
+    # non-multiple H=13 2 and 3, the small H=5 1 and 2 -- each shifts the
+    # accumulator slots the flush drains.
+    _Shape("dw_k7_N2H14W14_g64", N=2, H=14, W=14, groups=64, cpg=1, KH=7, KW=7, PAD=3),
+    _Shape(
+        "dw_k7s2_N2H14W14_g64",
+        N=2,
+        H=14,
+        W=14,
+        groups=64,
+        cpg=1,
+        KH=7,
+        KW=7,
+        PAD=3,
+        stride=2,
+    ),
+    _Shape(
+        "dw_k7s2_N2H13W11_g64",
+        N=2,
+        H=13,
+        W=11,
+        groups=64,
+        cpg=1,
+        KH=7,
+        KW=7,
+        PAD=3,
+        stride=2,
+    ),
+    _Shape(
+        "dw_k7s2_N1H5W9_g64",
+        N=1,
+        H=5,
+        W=9,
+        groups=64,
+        cpg=1,
+        KH=7,
+        KW=7,
+        PAD=3,
+        stride=2,
+    ),
 ]
 
 
@@ -124,6 +165,22 @@ _SPATIAL_SHAPES: List[_Shape] = [
     _Shape("sp_dw_N2H14W14_g3", N=2, H=14, W=14, groups=3, cpg=1),
     _Shape("sp_dw_N2H14W14_g64", N=2, H=14, W=14, groups=64, cpg=1),
     _Shape("sp_dw_N2H14W14_g3_s2", N=2, H=14, W=14, groups=3, cpg=1, stride=2),
+    # 7x7: the kernel prefetches PF = min(KH, ceil(16 / KW)) = 3 rows, fewer
+    # than KH, so the row window rotates within a filter's rows -- the 3x3
+    # cases above (PF = KH) never do.
+    _Shape("sp_dw_k7_N2H14W14_g9", N=2, H=14, W=14, groups=9, cpg=1, KH=7, KW=7, PAD=3),
+    _Shape(
+        "sp_dw_k7s2_N2H13W11_g3",
+        N=2,
+        H=13,
+        W=11,
+        groups=3,
+        cpg=1,
+        KH=7,
+        KW=7,
+        PAD=3,
+        stride=2,
+    ),
 ]
 
 
@@ -275,12 +332,17 @@ def _run_grouped_one(arch: str, shape: _Shape, dtype: str = "fp16") -> Tuple[boo
     return True, ""
 
 
-def _run_depthwise_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
-    """Build, compile, launch, and verify one depthwise direct-conv kernel.
+def _run_depthwise_one(
+    arch: str, shape: _Shape, dtype: str = "fp16", spatial: bool = False
+) -> Tuple[bool, str]:
+    """Build, compile, launch, and verify one depthwise forward kernel.
 
-    Uses ``DirectDepthwiseSpec`` (cpg = kpg = 1).  Stride must be 1.
+    ``DirectDepthwiseSpec`` (one channel per lane) by default,
+    ``DirectDepthwiseSpatialSpec`` (lanes split over channels and output
+    columns, groups <= wave_size) with ``spatial``. cpg = kpg = 1.
 
-    Returns ``(passed, reason)``.
+    Returns ``(passed, reason)``.  ``reason`` starts with ``"skip "`` when a
+    spatial shape is architecturally unsupported.
     """
     import torch
 
@@ -290,8 +352,11 @@ def _run_depthwise_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
     from kernels.common.conv_direct_grouped import (
         direct_launch_geometry,
         DirectConvProblem,
+        DirectDepthwiseSpatialSpec,
         DirectDepthwiseSpec,
         build_direct_depthwise,
+        build_direct_depthwise_spatial,
+        is_valid_depthwise_spatial_spec,
         is_valid_depthwise_spec,
     )
     from rocke.runtime import synchronize_and_release
@@ -311,142 +376,26 @@ def _run_depthwise_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
         KW=shape.KW,
         PAD=shape.PAD,
         stride=shape.stride,
+        dtype=dtype,
     )
 
-    spec = DirectDepthwiseSpec(
-        problem=p,
-        name=f"test_direct_dw_{shape.id}",
-    )
-
-    ok, reason = is_valid_depthwise_spec(spec, arch=arch)
-    if not ok:
-        return False, f"invalid spec (shapes should be pre-validated): {reason}"
-
-    try:
-        kernel = build_direct_depthwise(spec, arch=arch)
-    except ValueError as e:
-        return False, f"build failed (shapes should be pre-validated): {e}"
-
-    try:
-        artifact = compile_kernel(kernel, arch=arch)
-    except Exception as e:
-        return False, f"compile failed: {e}"
-
-    torch.manual_seed(0)
-    total_c = shape.groups
-    total_k = shape.groups
-    A_t = torch.empty(p.N, p.H, p.W, total_c, dtype=torch.float16).uniform_(-1.0, 1.0)
-    B_t = torch.empty(total_k, p.KH, p.KW, 1, dtype=torch.float16).uniform_(-1.0, 1.0)
-    D_t = torch.empty(p.N, p.H, p.W, total_k, dtype=torch.float16)
-
-    ref = _conv_ref_grouped(A_t, B_t, p)
-
-    rt = Runtime()
-    A_dev = rt.alloc(A_t.nbytes)
-    B_dev = rt.alloc(B_t.nbytes)
-    D_dev = rt.alloc(D_t.nbytes)
-    rt.memcpy_h2d(A_dev, _u8(A_t), A_t.nbytes)
-    rt.memcpy_h2d(B_dev, _u8(B_t), B_t.nbytes)
-    rt.memset(D_dev, 0, D_t.nbytes)
-
-    sig = conv_direct_args_signature("fp16")
-    _direct_args = ConvArgs.from_problem(p)
-    try:
-        launcher = KernelLauncher(
-            hsaco=artifact.hsaco,
-            kernel_name=artifact.kernel_name,
-            signature=sig,
+    if spatial:
+        spec = DirectDepthwiseSpatialSpec(
+            problem=p, name=f"test_direct_sp_dw_{shape.id}"
         )
-    except HipError as e:
-        rt.free(A_dev)
-        rt.free(B_dev)
-        rt.free(D_dev)
-        return False, f"kernel load failed: {e}"
-
-    grid, block = direct_launch_geometry(spec)
-
-    values = _direct_args.to_launch_values(
-        int(A_dev),
-        int(B_dev),
-        int(D_dev),
-        A_t.nbytes,
-        B_t.nbytes,
-        D_t.nbytes,
-    )
-    launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
-
-    D_cpu = torch.empty_like(D_t)
-    rt.memcpy_d2h(_u8(D_cpu), D_dev, D_t.nbytes)
-    rt.free(A_dev)
-    rt.free(B_dev)
-    rt.free(D_dev)
-    synchronize_and_release(0)
-
-    out_f32 = D_cpu.float()
-    ref_f32 = ref.float().cpu()
-    abs_diff = (out_f32 - ref_f32).abs()
-    ref_scale = ref_f32.abs().max().clamp(min=1.0)
-    rel_err = float(abs_diff.max() / ref_scale)
-    passed = rel_err < _TOL
-    if not passed:
-        return False, f"rel_err={rel_err:.3e} > tol={_TOL:.1e}"
-    print(
-        f"  PASS  {shape.id}  {arch}  rel_err={rel_err:.2e}",
-        flush=True,
-    )
-    return True, ""
-
-
-def _run_depthwise_spatial_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
-    """Build, compile, launch, and verify one depthwise-spatial kernel.
-
-    Uses ``DirectDepthwiseSpatialSpec`` (cpg = kpg = 1, groups <= wave_size).
-
-    Returns ``(passed, reason)``.  ``reason`` starts with ``"skip "`` when
-    the combination is architecturally unsupported.
-    """
-    import torch
-
-    from rocke import compile_kernel
-    from kernels.common.conv_args import ConvArgs
-    from kernels.common.conv_abi import conv_direct_args_signature
-    from kernels.common.conv_direct_grouped import (
-        direct_launch_geometry,
-        DirectConvProblem,
-        DirectDepthwiseSpatialSpec,
-        build_direct_depthwise_spatial,
-        is_valid_depthwise_spatial_spec,
-    )
-    from rocke.runtime import synchronize_and_release
-    from rocke.runtime.hip_module import HipError, Runtime
-    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
-
-    assert shape.cpg == 1, "spatial depthwise path requires cpg=1"
-
-    p = DirectConvProblem(
-        N=shape.N,
-        H=shape.H,
-        W=shape.W,
-        groups=shape.groups,
-        cpg=1,
-        kpg=1,
-        KH=shape.KH,
-        KW=shape.KW,
-        PAD=shape.PAD,
-        stride=shape.stride,
-    )
-
-    spec = DirectDepthwiseSpatialSpec(
-        problem=p,
-        name=f"test_direct_sp_dw_{shape.id}",
-    )
-
-    ok, reason = is_valid_depthwise_spatial_spec(spec, arch=arch)
-    if not ok:
-        return False, f"skip {reason}"
+        ok, reason = is_valid_depthwise_spatial_spec(spec, arch=arch)
+        if not ok:
+            return False, f"skip {reason}"
+        build = build_direct_depthwise_spatial
+    else:
+        spec = DirectDepthwiseSpec(problem=p, name=f"test_direct_dw_{shape.id}")
+        ok, reason = is_valid_depthwise_spec(spec, arch=arch)
+        if not ok:
+            return False, f"invalid spec (shapes should be pre-validated): {reason}"
+        build = build_direct_depthwise
 
     try:
-        kernel = build_direct_depthwise_spatial(spec, arch=arch)
+        kernel = build(spec, arch=arch)
     except ValueError as e:
         return False, f"build failed: {e}"
 
@@ -458,9 +407,10 @@ def _run_depthwise_spatial_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
     torch.manual_seed(0)
     total_c = shape.groups
     total_k = shape.groups
-    A_t = torch.empty(p.N, p.H, p.W, total_c, dtype=torch.float16).uniform_(-1.0, 1.0)
-    B_t = torch.empty(total_k, p.KH, p.KW, 1, dtype=torch.float16).uniform_(-1.0, 1.0)
-    D_t = torch.empty(p.N, p.Ho, p.Wo, total_k, dtype=torch.float16)
+    _td = torch.bfloat16 if dtype == "bf16" else torch.float16
+    A_t = torch.empty(p.N, p.H, p.W, total_c, dtype=_td).uniform_(-1.0, 1.0)
+    B_t = torch.empty(total_k, p.KH, p.KW, 1, dtype=_td).uniform_(-1.0, 1.0)
+    D_t = torch.empty(p.N, p.Ho, p.Wo, total_k, dtype=_td)
 
     ref = _conv_ref_grouped(A_t, B_t, p)
 
@@ -472,7 +422,7 @@ def _run_depthwise_spatial_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
     rt.memcpy_h2d(B_dev, _u8(B_t), B_t.nbytes)
     rt.memset(D_dev, 0, D_t.nbytes)
 
-    sig = conv_direct_args_signature("fp16")
+    sig = conv_direct_args_signature(dtype)
     _direct_args = ConvArgs.from_problem(p)
     try:
         launcher = KernelLauncher(
@@ -510,11 +460,11 @@ def _run_depthwise_spatial_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
     abs_diff = (out_f32 - ref_f32).abs()
     ref_scale = ref_f32.abs().max().clamp(min=1.0)
     rel_err = float(abs_diff.max() / ref_scale)
-    passed = rel_err < _TOL
-    if not passed:
-        return False, f"rel_err={rel_err:.3e} > tol={_TOL:.1e}"
+    tol = _TOL_BF16 if dtype == "bf16" else _TOL
+    if not rel_err < tol:
+        return False, f"rel_err={rel_err:.3e} > tol={tol:.1e}"
     print(
-        f"  PASS  {shape.id}  {arch}  rel_err={rel_err:.2e}",
+        f"  PASS  {shape.id}  {arch}  {dtype}  rel_err={rel_err:.2e}",
         flush=True,
     )
     return True, ""
@@ -578,7 +528,7 @@ class TestDirectConvCorrectness(unittest.TestCase):
                     self._run_depthwise(s)
 
     def _run_depthwise_spatial(self, shape: _Shape) -> None:
-        passed, reason = _run_depthwise_spatial_one(GPU_ARCH, shape)
+        passed, reason = _run_depthwise_one(GPU_ARCH, shape, spatial=True)
         if reason.startswith("skip"):
             self.skipTest(reason)
         self.assertTrue(
@@ -638,6 +588,44 @@ _DW_DGRAD_SHAPES: List[_Shape] = [
         PAD=4,
         stride=2,
     ),
+]
+
+# Ho-streaming depthwise dgrad (DirectDepthwiseDgradStreamSpec). Each loop
+# iteration consumes KH dY rows with the next KH prefetched, and a dX row is
+# flushed from its circular slot once its last (ho, r) pair is in, so the
+# cases cover: stride 1 and 2, a filter taller than the remaining dY rows
+# (7x7 on Ho=7), a height that is not a multiple of KH, non-"same" padding,
+# and a multi-wave block.
+_DW_DGRAD_STREAM_SHAPES: List[_Shape] = [
+    _Shape("dw_dgrad_stream_s1_N2H14W14_g64", N=2, H=14, W=14, groups=64, cpg=1),
+    _Shape(
+        "dw_dgrad_stream_s2_N2H14W14_g64", N=2, H=14, W=14, groups=64, cpg=1, stride=2
+    ),
+    _Shape(
+        "dw_dgrad_stream_k7s2_N2H13W11_g64",
+        N=2,
+        H=13,
+        W=11,
+        groups=64,
+        cpg=1,
+        KH=7,
+        KW=7,
+        PAD=3,
+        stride=2,
+    ),
+    _Shape(
+        "dw_dgrad_stream_k5p4_s2_N2H14W14_g64",
+        N=2,
+        H=14,
+        W=14,
+        groups=64,
+        cpg=1,
+        KH=5,
+        KW=5,
+        PAD=4,
+        stride=2,
+    ),
+    _Shape("dw_dgrad_stream_k3p0_N2H9W9_g96", N=2, H=9, W=9, groups=96, cpg=1, PAD=0),
 ]
 
 
@@ -776,8 +764,20 @@ def _run_dgrad_one(arch: str, shape: _Shape, dtype: str = "fp16") -> Tuple[bool,
     return True, ""
 
 
-def _run_dw_dgrad_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
-    """Build, compile, launch, and verify the direct depthwise dgrad kernel."""
+def _run_dw_dgrad_one(
+    arch: str,
+    shape: _Shape,
+    dtype: str = "fp16",
+    streaming: bool = False,
+    block_waves: int = 1,
+) -> Tuple[bool, str]:
+    """Build, compile, launch, and verify a direct depthwise dgrad kernel.
+
+    ``DirectDepthwiseDgradSpec`` by default; with ``streaming`` the ho-streaming
+    ``DirectDepthwiseDgradStreamSpec`` the AOT cache and the benchmark sweep
+    build, whose prefetched dY row window and circular dX accumulator slots
+    are only exercised by running it.
+    """
     import torch
 
     from rocke import compile_kernel
@@ -787,7 +787,9 @@ def _run_dw_dgrad_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
         direct_launch_geometry,
         DirectConvProblem,
         DirectDepthwiseDgradSpec,
+        DirectDepthwiseDgradStreamSpec,
         build_direct_depthwise_dgrad,
+        build_direct_depthwise_dgrad_streaming,
     )
     from rocke.runtime import synchronize_and_release
     from rocke.runtime.hip_module import HipError, Runtime
@@ -804,11 +806,23 @@ def _run_dw_dgrad_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
         KW=shape.KW,
         PAD=shape.PAD,
         stride=shape.stride,
+        dtype=dtype,
     )
-    spec = DirectDepthwiseDgradSpec(problem=p, name=f"test_dw_dgrad_{shape.id}")
+    if streaming:
+        spec = DirectDepthwiseDgradStreamSpec(
+            problem=p,
+            name=f"test_dw_dgrad_stream_{shape.id}",
+            block_waves=block_waves,
+        )
+        build = build_direct_depthwise_dgrad_streaming
+    else:
+        spec = DirectDepthwiseDgradSpec(
+            problem=p, name=f"test_dw_dgrad_{shape.id}", block_waves=block_waves
+        )
+        build = build_direct_depthwise_dgrad
 
     try:
-        kernel = build_direct_depthwise_dgrad(spec, arch=arch)
+        kernel = build(spec, arch=arch)
     except ValueError as e:
         return False, f"build failed: {e}"
 
@@ -819,10 +833,11 @@ def _run_dw_dgrad_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
 
     torch.manual_seed(42)
     total_c = shape.groups  # cpg=kpg=1
+    _td = torch.bfloat16 if dtype == "bf16" else torch.float16
 
-    dY = torch.empty(p.N, p.Ho, p.Wo, total_c, dtype=torch.float16).uniform_(-0.5, 0.5)
-    W = torch.empty(total_c, p.KH, p.KW, 1, dtype=torch.float16).uniform_(-0.5, 0.5)
-    dX = torch.zeros(p.N, p.H, p.W, total_c, dtype=torch.float16)
+    dY = torch.empty(p.N, p.Ho, p.Wo, total_c, dtype=_td).uniform_(-0.5, 0.5)
+    W = torch.empty(total_c, p.KH, p.KW, 1, dtype=_td).uniform_(-0.5, 0.5)
+    dX = torch.zeros(p.N, p.H, p.W, total_c, dtype=_td)
 
     dY_nchw = dY.permute(0, 3, 1, 2).float()
     W_nchw = W.permute(0, 3, 1, 2).float()
@@ -846,7 +861,7 @@ def _run_dw_dgrad_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
     rt.memcpy_h2d(W_dev, _u8(W), W.nbytes)
     rt.memset(dX_dev, 0, dX.nbytes)
 
-    sig = conv_direct_args_signature("fp16", direction="dgrad")
+    sig = conv_direct_args_signature(dtype, direction="dgrad")
     _direct_args = ConvArgs.from_problem(p, direction="dgrad")
     try:
         launcher = KernelLauncher(
@@ -884,9 +899,10 @@ def _run_dw_dgrad_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
     abs_diff = (out_f32 - ref_f32).abs()
     ref_scale = ref_f32.abs().max().clamp(min=1.0)
     rel_err = float(abs_diff.max() / ref_scale)
-    if not (rel_err < _TOL):
-        return False, f"rel_err={rel_err:.3e} > tol={_TOL:.1e}"
-    print(f"  PASS  {shape.id}  {arch}  rel_err={rel_err:.2e}", flush=True)
+    tol = _TOL_BF16 if dtype == "bf16" else _TOL
+    if not (rel_err < tol):
+        return False, f"rel_err={rel_err:.3e} > tol={tol:.1e}"
+    print(f"  PASS  {shape.id}  {arch}  {dtype}  rel_err={rel_err:.2e}", flush=True)
     return True, ""
 
 
@@ -915,6 +931,18 @@ class TestDirectConvDgradWgradCorrectness(unittest.TestCase):
         for s in _DW_DGRAD_SHAPES:
             with self.subTest(shape=s.id):
                 self._run_dw_dgrad(s)
+
+    def test_dw_dgrad_streaming(self):
+        for s in _DW_DGRAD_STREAM_SHAPES:
+            for waves in (1, 2):
+                with self.subTest(shape=s.id, block_waves=waves):
+                    passed, reason = _run_dw_dgrad_one(
+                        GPU_ARCH, s, streaming=True, block_waves=waves
+                    )
+                    self.assertTrue(
+                        passed,
+                        f"FAIL dw_dgrad_stream {s.id} bw{waves}wv on {GPU_ARCH}: {reason}",
+                    )
 
 
 # ---------------------------------------------------------------------------
@@ -980,6 +1008,38 @@ class TestDirectConvBf16Correctness(unittest.TestCase):
         for s in _BF16_DGRAD_SHAPES:
             with self.subTest(shape=s.id):
                 self._run_dgrad(s)
+
+    def test_bf16_depthwise(self):
+        for s in _SHAPES:
+            if s.cpg == 1:
+                with self.subTest(shape=s.id):
+                    passed, reason = _run_depthwise_one(GPU_ARCH, s, dtype="bf16")
+                    self.assertTrue(
+                        passed, f"FAIL bf16 depthwise {s.id} on {GPU_ARCH}: {reason}"
+                    )
+
+    def test_bf16_depthwise_spatial(self):
+        for s in _SPATIAL_SHAPES:
+            with self.subTest(shape=s.id):
+                passed, reason = _run_depthwise_one(
+                    GPU_ARCH, s, dtype="bf16", spatial=True
+                )
+                if reason.startswith("skip"):
+                    self.skipTest(reason)
+                self.assertTrue(
+                    passed,
+                    f"FAIL bf16 depthwise spatial {s.id} on {GPU_ARCH}: {reason}",
+                )
+
+    def test_bf16_dw_dgrad_streaming(self):
+        for s in _DW_DGRAD_STREAM_SHAPES:
+            with self.subTest(shape=s.id):
+                passed, reason = _run_dw_dgrad_one(
+                    GPU_ARCH, s, dtype="bf16", streaming=True
+                )
+                self.assertTrue(
+                    passed, f"FAIL bf16 dw_dgrad_stream {s.id} on {GPU_ARCH}: {reason}"
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -1451,6 +1511,43 @@ class TestDirectConvValidation(unittest.TestCase):
         spec = DirectConv4cSpec(problem=p)
         with self.assertRaises(ValueError):
             spec.validate()
+
+    def test_depthwise_filter_limit(self):
+        """Both depthwise forward variants accept filters up to 32x32 and reject
+        larger ones, as the C++ validators do: its builders keep the weights in
+        tables of ``ROCKE_DCONV_DW_MAX_K{H,W}`` entries."""
+        from kernels.common.conv_direct_grouped import (
+            DirectConvProblem,
+            DirectDepthwiseSpatialSpec,
+            DirectDepthwiseSpec,
+            is_valid_depthwise_spatial_spec,
+            is_valid_depthwise_spec,
+        )
+
+        cases = (
+            (DirectDepthwiseSpec, is_valid_depthwise_spec, 64),
+            (DirectDepthwiseSpatialSpec, is_valid_depthwise_spatial_spec, 3),
+        )
+        for spec_cls, is_valid, groups in cases:
+            # 31 is the largest odd extent under the cap (forward needs odd).
+            for kh, kw in ((31, 31), (33, 33), (33, 3), (3, 33)):
+                p = DirectConvProblem(
+                    N=1,
+                    H=40,
+                    W=40,
+                    groups=groups,
+                    cpg=1,
+                    kpg=1,
+                    KH=kh,
+                    KW=kw,
+                    PAD=(kh - 1) // 2,
+                )
+                with self.subTest(spec=spec_cls.__name__, KH=kh, KW=kw):
+                    ok, why = is_valid(spec_cls(problem=p), "gfx950")
+                    fits = kh <= 32 and kw <= 32
+                    self.assertEqual(ok, fits, why)
+                    if not fits:
+                        self.assertIn("must be in 1..32", why)
 
 
 # ---------------------------------------------------------------------------

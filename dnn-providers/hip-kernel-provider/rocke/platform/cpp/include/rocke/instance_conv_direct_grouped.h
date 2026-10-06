@@ -487,6 +487,13 @@ typedef struct rocke_direct_conv_wgrad_spec
 #define ROCKE_DCONV_WGRAD_MAX_KH 8
 #define ROCKE_DCONV_WGRAD_MAX_KW 8
 
+/* Largest filter the depthwise forward variants (regular and spatial) accept.
+ * Their builders hold the KH x KW weights in fixed-size register tables sized
+ * by these, so both validators enforce the cap (Python: _DW_MAX_KH /
+ * _DW_MAX_KW) and a validated spec always builds. */
+#define ROCKE_DCONV_DW_MAX_KH 32
+#define ROCKE_DCONV_DW_MAX_KW 32
+
 rocke_direct_conv_wgrad_spec_t rocke_direct_conv_wgrad_spec_default(void);
 
 /* @property block_k -> waves_k * wave_tile_k. */

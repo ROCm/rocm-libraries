@@ -2358,6 +2358,7 @@ def _run_sweep(
             warmup=args.warmup,
             iters=args.iters,
             stream=stream,
+            passed=kernel_passed,
         )
         if ms is None:
             _stop.report(artifact.kernel_name)
@@ -2850,8 +2851,9 @@ def _run_wgrad_sweep(
 
             cfg = LaunchConfig(grid=grid, block=block, stream=stream)
 
+            kernel_passed = None
             if args.verify or args.dump_fail:
-                stopped, _ = _verify_kernel(
+                stopped, kernel_passed = _verify_kernel(
                     rt=rt,
                     launcher=launcher,
                     values=values,
@@ -2893,6 +2895,7 @@ def _run_wgrad_sweep(
                 warmup=args.warmup,
                 iters=args.iters,
                 stream=stream,
+                passed=kernel_passed,
             )
             if ms is None:
                 _stop.report(f"{artifact.kernel_name} spk{_launch_sk}")
@@ -3110,8 +3113,9 @@ def _run_wgrad_sweep(
                     _s1(_v1, config=_c1)
                     _s2(_v2, config=_c2)
 
+                kernel_passed = None
                 if args.verify or args.dump_fail:
-                    stopped, _ = _verify_kernel(
+                    stopped, kernel_passed = _verify_kernel(
                         rt=rt2,
                         launch_fn=_launch_two_stage,
                         out_dev=dW_dev2,
@@ -3138,6 +3142,7 @@ def _run_wgrad_sweep(
                     warmup=args.warmup,
                     iters=args.iters,
                     stream=0,
+                    passed=kernel_passed,
                 )
                 if ms is None:
                     _stop.report(f"{s1_art.kernel_name} spk{_launch_sk}")
@@ -3447,8 +3452,9 @@ def _run_dgrad_sweep(
 
         _zero_init = spec.needs_atomic
 
+        kernel_passed = None
         if args.verify or args.dump_fail:
-            stopped, _ = _verify_kernel(
+            stopped, kernel_passed = _verify_kernel(
                 rt=rt,
                 launcher=launcher,
                 values=values,
@@ -3482,7 +3488,11 @@ def _run_dgrad_sweep(
             timed_fn = launcher.bind(values, config=cfg)
 
         ms = _stop.measure(
-            timed_fn, warmup=args.warmup, iters=args.iters, stream=stream
+            timed_fn,
+            warmup=args.warmup,
+            iters=args.iters,
+            stream=stream,
+            passed=kernel_passed,
         )
         if ms is None:
             _stop.report(artifact.kernel_name)

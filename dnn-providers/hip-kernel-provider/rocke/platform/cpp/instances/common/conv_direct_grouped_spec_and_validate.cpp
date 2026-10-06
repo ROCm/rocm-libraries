@@ -1195,6 +1195,24 @@ bool rocke_direct_depthwise_is_valid_spec(const rocke_direct_depthwise_spec_t* s
         }
         return false;
     }
+    if(p->KH < 1 || p->KH > ROCKE_DCONV_DW_MAX_KH)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(
+                reason, reason_cap, "KH must be in 1..%d (got %d)", ROCKE_DCONV_DW_MAX_KH, p->KH);
+        }
+        return false;
+    }
+    if(p->KW < 1 || p->KW > ROCKE_DCONV_DW_MAX_KW)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(
+                reason, reason_cap, "KW must be in 1..%d (got %d)", ROCKE_DCONV_DW_MAX_KW, p->KW);
+        }
+        return false;
+    }
     block_ch = rocke_direct_depthwise_block_ch(spec);
     (void)block_ch;
     if(reason && reason_cap > 0)
@@ -1314,6 +1332,24 @@ bool rocke_direct_depthwise_spatial_is_valid_spec(const rocke_direct_depthwise_s
                      "cpg and kpg must both be 1 (got cpg=%d, kpg=%d)",
                      p->cpg,
                      p->kpg);
+        }
+        return false;
+    }
+    if(p->KH < 1 || p->KH > ROCKE_DCONV_DW_MAX_KH)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(
+                reason, reason_cap, "KH must be in 1..%d (got %d)", ROCKE_DCONV_DW_MAX_KH, p->KH);
+        }
+        return false;
+    }
+    if(p->KW < 1 || p->KW > ROCKE_DCONV_DW_MAX_KW)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(
+                reason, reason_cap, "KW must be in 1..%d (got %d)", ROCKE_DCONV_DW_MAX_KW, p->KW);
         }
         return false;
     }

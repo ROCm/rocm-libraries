@@ -443,6 +443,79 @@ def is_valid_nongrouped_spec(
 
 
 # ---------------------------------------------------------------------------
+# Register budget
+# ---------------------------------------------------------------------------
+
+# SIMDs per CU on CDNA: a block's waves are spread over them, so a block of
+# more than four waves puts several on one SIMD and they split its registers.
+_SIMDS_PER_CU = 4
+# Share of a wave's register budget the estimate of nongrouped_live_regs may
+# fill. The estimate counts only the big arrays; addresses, loop state and the
+# scheduler's temporaries take the rest. Calibrated on the gfx950 AOT grid
+# (both strides, waves_per_eu unset): past 0.8 configs start to spill, below it
+# none do.
+_REG_BUDGET_FILL = 0.8
+
+
+def nongrouped_live_regs(spec: DirectNongroupedConvSpec) -> int:
+    """Estimated registers per lane live across the channel loop.
+
+    The accumulators, the prefetched staging loads carried to the next
+    iteration, and the operand fragments of one ``(k_atom, s)`` step: the
+    activation fragments of every input row of the wave window (all ``KH`` tap
+    rows reuse them) and one weight fragment per channel tile.
+    """
+    p = spec.problem
+    threads = spec.threads_per_block
+    x_vecs = spec.lds_in_h * spec.lds_in_w * (spec.ck // _X_LOAD_VEC)
+    w_slots = p.KH * p.KW * spec.m_tiles_total * spec.k_atoms * spec.wave_size
+    x_passes = -(-x_vecs // threads)
+    w_passes = -(-w_slots // threads)
+    frag_regs = spec.frag // 2
+    prefetch = x_passes * (_X_LOAD_VEC // 2) + w_passes * frag_regs
+    in_rows = (spec.rows_per_wave - 1) * p.stride + p.KH
+    b_frags = in_rows * spec.n_col_blocks * frag_regs
+    a_frags = spec.m_tiles_per_wave * frag_regs
+    return spec.acc_vgprs + prefetch + b_frags + a_frags
+
+
+def nongrouped_register_reason(
+    spec: DirectNongroupedConvSpec, arch: str = "gfx950"
+) -> "str | None":
+    """Why ``spec`` would spill registers on ``arch``, or None if it fits.
+
+    Not a validity rule -- a spilling kernel is still correct -- but a spilled
+    MFMA loop is slow and takes the backend scheduler a minute or more to
+    compile, so a sweep should not spend a build on it. Two limits:
+
+    * the accumulators must leave room in the accumulator register file: a tile
+      that fills all of it spills even with plenty of the unified budget left;
+    * :func:`nongrouped_live_regs` must fit ``_REG_BUDGET_FILL`` of the
+      registers one wave gets when the block's waves share the SIMDs.
+
+    ``waves_per_eu`` is not modelled: the backend treats it as a hint and
+    mostly overrides it, so it neither predicts nor prevents a spill.
+    """
+    from rocke.core.arch import ArchTarget
+
+    limits = ArchTarget.from_gfx(arch).limits
+    if spec.acc_vgprs >= limits.agprs:
+        return (
+            f"{spec.acc_vgprs} accumulator registers fill the {limits.agprs}-entry "
+            f"accumulator file"
+        )
+    waves = spec.threads_per_block // spec.wave_size
+    budget = limits.vgprs // -(-waves // _SIMDS_PER_CU)
+    live = nongrouped_live_regs(spec)
+    if live > _REG_BUDGET_FILL * budget:
+        return (
+            f"~{live} live registers per lane exceed {_REG_BUDGET_FILL:.0%} of the "
+            f"{budget} a wave gets with {waves} waves per block"
+        )
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Candidate generation
 # ---------------------------------------------------------------------------
 

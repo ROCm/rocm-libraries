@@ -41,7 +41,8 @@ The ``--top`` / ``--warmup`` / ``--iters`` / ``--jobs`` / ``--verify`` /
 ``--early-stop-after`` flags are forwarded to both scripts.
 
 Early stopping carries over from one script to the other: direct conv runs
-first and records each case's best time, and the implicit-GEMM sweep starts
+first and records each case's best time (a kernel that fails ``--verify`` is
+never recorded), and the implicit-GEMM sweep starts
 each case from that time instead of from nothing -- so from its first kernel it
 skips any that cannot come within ``--early-stop`` times the direct result.
 ``--no-seed-from-direct`` turns that off.  ``--dtype`` / ``--direction`` default to fp16 / fwd for explicit shapes;
@@ -308,7 +309,7 @@ def main() -> int:
         "--top",
         type=int,
         default=10,
-        help="top-N results to show per benchmark (default: 5)",
+        help="top-N results to show per benchmark (default: 10)",
     )
     parser.add_argument(
         "--warmup", type=int, default=3, help="warmup iterations (default: 3)"

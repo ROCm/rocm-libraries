@@ -5787,6 +5787,22 @@ class DirectDepthwiseSpec:
             )
 
 
+# The C++ engine holds the KH x KW depthwise weights (regular and spatial
+# forward) in fixed-size register tables sized by ``ROCKE_DCONV_DW_MAX_K{H,W}``
+# (``platform/cpp/include/rocke/instance_conv_direct_grouped.h``): both engines'
+# validators reject above it, so a spec that validates builds in either.
+_DW_MAX_KH = 32
+_DW_MAX_KW = 32
+
+
+def _depthwise_filter_reason(p: "DirectConvProblem") -> Optional[str]:
+    if p.KH < 1 or p.KH > _DW_MAX_KH:
+        return f"KH must be in 1..{_DW_MAX_KH} (got {p.KH})"
+    if p.KW < 1 or p.KW > _DW_MAX_KW:
+        return f"KW must be in 1..{_DW_MAX_KW} (got {p.KW})"
+    return None
+
+
 def is_valid_depthwise_spec(
     spec: "DirectDepthwiseSpec", arch: str = "gfx950"
 ) -> Tuple[bool, str]:
@@ -5813,6 +5829,9 @@ def is_valid_depthwise_spec(
         return False, why
     if p.cpg != 1 or p.kpg != 1:
         return False, f"cpg and kpg must both be 1 (got cpg={p.cpg}, kpg={p.kpg})"
+    why = _depthwise_filter_reason(p)
+    if why is not None:
+        return False, why
     return True, "ok"
 
 
@@ -6217,6 +6236,9 @@ def is_valid_depthwise_spatial_spec(
         return False, why
     if p.cpg != 1 or p.kpg != 1:
         return False, f"cpg and kpg must both be 1 (got cpg={p.cpg}, kpg={p.kpg})"
+    why = _depthwise_filter_reason(p)
+    if why is not None:
+        return False, why
     if p.groups > spec.wave_size:
         return False, f"groups {p.groups} > wave_size {spec.wave_size}"
     if spec.n_w_per_wave == 0:

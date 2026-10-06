@@ -288,6 +288,16 @@ the AOT kernel cache builds (variant `direct_nongrouped` in
 offers a problem the binaries whose width `tile_w_candidates(Wo, atom_tile)`
 would pick and whose spec validates on the real shape.
 
+The AOT grid also drops tiles that would spill registers
+(`nongrouped_register_reason`): accumulators that fill the 256-entry
+accumulator file, or an estimated live set (`nongrouped_live_regs`:
+accumulators, carried prefetch, one step's operand fragments) above 80% of the
+registers a wave gets once the block's waves share the SIMDs. On the gfx950
+grid this cuts 924 kernels to 658 and, with `waves_per_eu` unset, leaves no
+spilling binary; the spilling ones were also the slowest to compile (up to
+~90 s each). It is a heuristic, not a validity rule: the per-shape
+`nongrouped_specs` sweep still offers those tiles.
+
 ## Tests and gates
 
 | Gate | What it proves | Command |

@@ -672,6 +672,7 @@ def _run_depthwise_sweep(
             warmup=args.warmup,
             iters=args.iters,
             stream=stream,
+            passed=kernel_passed,
         )
         if ms is None:
             _stop.report(artifact.kernel_name)
@@ -882,6 +883,7 @@ def _run_sweep(
             warmup=args.warmup,
             iters=args.iters,
             stream=stream,
+            passed=kernel_passed,
         )
         if ms is None:
             _stop.report(artifact.kernel_name)
@@ -1095,6 +1097,7 @@ def _run_nongrouped_sweep(
             warmup=args.warmup,
             iters=args.iters,
             stream=stream,
+            passed=kernel_passed,
         )
         if ms is None:
             _stop.report(artifact.kernel_name)
@@ -1346,6 +1349,7 @@ def _run_wgrad_sweep(
             warmup=args.warmup,
             iters=args.iters,
             stream=0,
+            passed=kernel_passed,
         )
         if ms is None:
             _stop.report(artifact.kernel_name)
@@ -1924,6 +1928,7 @@ def _run_dgrad_sweep(
                 warmup=args.warmup,
                 iters=args.iters,
                 stream=0,
+                passed=kernel_passed,
             )
         else:
             cfg = LaunchConfig(grid=grid, block=block_dim)
@@ -1932,6 +1937,7 @@ def _run_dgrad_sweep(
                 warmup=args.warmup,
                 iters=args.iters,
                 stream=0,
+                passed=kernel_passed,
             )
         if ms is None:
             _stop.report(label)
@@ -2205,7 +2211,11 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
 
                 try:
                     ms = _stop.measure(
-                        run, warmup=args.warmup, iters=args.iters, stream=0
+                        run,
+                        warmup=args.warmup,
+                        iters=args.iters,
+                        stream=0,
+                        passed=passed,
                     )
                 except (HipError, RuntimeError) as e:
                     print(f"  [skip] {plan.label}: {e}", flush=True)
