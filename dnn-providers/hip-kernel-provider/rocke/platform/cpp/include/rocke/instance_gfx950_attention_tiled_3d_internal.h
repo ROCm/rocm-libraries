@@ -9,7 +9,7 @@
  *   build_unified_attention_reduce_tiled   lines 985-1164  (reduce kernel)
  *   _mfma_16x16_c_row(b, lane, reg)        lines 81-96     (C-accum row decode)
  *   plus the closured load issuers threaded inside the segment body:
- *     _issue_k_load / _issue_v_load        lines 603-631   (4-DWORD async DMA)
+ *     _issue_paged_tile / _tile_page_ids             (4-DWORD async DMA, page ids)
  *     _issue_fp8_dequant_loads             lines 645-701   (fp8 -> dtype -> LDS)
  *     _issue_k / _issue_v                  lines 703-713   (dispatch by KV mode)
  *
@@ -19,7 +19,7 @@
  * grid ids / binary-search seq-idx / cu_q bounds / kv geometry / SSA constants /
  * LDS allocs / paged-KV descriptor / TransposeLdsReader bind, (c) closes over a
  * pile of geometry + the K/V LDS bases + the paged-KV descriptor inside the load
- * issuers (_issue_k_load / _issue_v_load / _issue_fp8_dequant_loads + the
+ * issuers (_issue_paged_tile / _issue_fp8_dequant_loads + the
  * _issue_k/_issue_v dispatchers), (d) runs the online-softmax scf.for over
  * [tile_start, tile_end) threading those closures + the bound PV transpose
  * reader, and (e) emits the early-out neutral-fill block + the guarded
@@ -164,7 +164,7 @@ typedef struct rocke_gfx950_attn_tiled_3d_config
     int kv_stride_h_b; /* HD*KV_BYTES */
     int bytes_per_buf; /* T*HD*2 */
     int N_BLOCKS_PER_TILE; /* T // BS (multi-page tile when > 1) */
-    bool PAGE_IDS; /* N_BLOCKS_PER_TILE > 1: per-tile page-id loader (fp16/bf16 only) */
+    bool PAGE_IDS; /* !KV_FP8: per-tile page-id loader (fp8 keeps the descriptor) */
     int tokens_per_call; /* KV_HALVES_PER_CALL // HD (PAGE_IDS only) */
     int calls_per_block; /* BS // tokens_per_call (PAGE_IDS only) */
     int fp8_elems_per_chunk; /* 8 */
@@ -406,16 +406,8 @@ rocke_value_t* rocke_gfx950_attention_tiled_3d_mfma_16x16_c_row(
  * takes the tile-index + double-buffer-index Values. _issue_k/_issue_v dispatch
  * by KV mode (fp8 sync dequant vs 4-DWORD async). is_value selects K vs V via
  * the ctx K/V handles + the K/V scale (fp8 path). */
-/* page_ids: the tile's N_BLOCKS_PER_TILE wave-uniform page ids when cfg.PAGE_IDS
- * (multi-page tile), else NULL. */
-void rocke_gfx950_attention_tiled_3d_issue_k_load(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
-                                                  rocke_value_t* kv_tile_idx,
-                                                  rocke_value_t* buf_idx,
-                                                  rocke_value_t* const* page_ids);
-void rocke_gfx950_attention_tiled_3d_issue_v_load(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
-                                                  rocke_value_t* kv_tile_idx,
-                                                  rocke_value_t* buf_idx,
-                                                  rocke_value_t* const* page_ids);
+/* page_ids: the tile's N_BLOCKS_PER_TILE wave-uniform page ids (cfg.PAGE_IDS,
+ * fp16/bf16), else NULL (fp8 sync loader). */
 /* _tile_page_ids(kv_tile_idx): the tile's page ids, one guarded block-table load
  * each, made wave-uniform; writes cfg.N_BLOCKS_PER_TILE values to out. */
 void rocke_gfx950_attention_tiled_3d_tile_page_ids(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,

@@ -730,7 +730,7 @@ bool rocke_gfx950_attn_tiled_3d_config_from_spec(
             b, ROCKE_ERR_VALUE, "attn_tiled_3d: T/BS=%d outside [1,8]", out->N_BLOCKS_PER_TILE);
         return false;
     }
-    out->PAGE_IDS = out->N_BLOCKS_PER_TILE > 1;
+    out->PAGE_IDS = !out->KV_FP8;
     out->tokens_per_call = out->KV_HALVES_PER_CALL / out->HD;
     out->calls_per_block = 0;
     if(out->PAGE_IDS)
@@ -1000,7 +1000,7 @@ static rocke_kernel_def_t* build_segment_gfx950(rocke_ir_builder_t* b,
 
         ctx.strided_kv = strided_kv;
         /* Strided KV has no page table: it keeps the per-call strided offsets
-         * (Python: PAGE_IDS = N_BLOCKS_PER_TILE > 1 and kv_layout == "paged"). */
+         * (Python: PAGE_IDS = not KV_FP8 and kv_layout == "paged"). */
         if(strided_kv)
         {
             ctx.cfg.PAGE_IDS = false;
