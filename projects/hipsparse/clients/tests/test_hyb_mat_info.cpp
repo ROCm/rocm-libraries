@@ -23,7 +23,7 @@
 
 #include "testing_hyb_mat_info.hpp"
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if(!defined(CUDART_VERSION))
 TEST(hyb_mat_info_bad_arg, hyb_mat_info)
 {
     testing_hyb_mat_info_bad_arg();

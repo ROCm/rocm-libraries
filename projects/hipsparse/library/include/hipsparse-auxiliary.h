@@ -278,13 +278,14 @@ hipsparseStatus_t hipsparseDestroyHybMat(hipsparseHybMat_t hybA);
  *  \brief Get the internal fields of a \p HYB matrix structure.
  *
  *  \details
- *  \p hipsparseHybMatGetInfo exposes the internal fields of a \p HYB matrix
- *  structure through a backend-agnostic API, for use by test/introspection
- *  code that would otherwise need to reinterpret the opaque \p hipsparseHybMat_t
- *  as a raw struct (which is unsafe: on the rocSPARSE backend it depends on the
- *  internal layout of \p _rocsparse_hyb_mat, and there is no equivalent public
- *  struct on the cuSPARSE backend either). Any of the output pointers may be
- *  \p nullptr if that field is not needed.
+ *  \p hipsparseHybMatGetInfo returns the fields of a \p HYB matrix. Any of the
+ *  output pointers may be \p nullptr if that field is not needed. The cuSPARSE
+ *  backend returns \ref HIPSPARSE_STATUS_NOT_SUPPORTED, because cuSPARSE has no
+ *  public accessor for its opaque HYB matrix.
+ *
+ *  This routine is tagged deprecated for the CUDA backend, like the other HYB
+ *  routines, because it has no cuSPARSE equivalent and HYB storage was removed
+ *  in CUDA 11. That deprecation does not apply to the ROCm backend.
  *
  *  \note
  *  The returned array pointers are borrowed: they remain owned by \p hyb and
@@ -293,7 +294,14 @@ hipsparseStatus_t hipsparseDestroyHybMat(hipsparseHybMat_t hybA);
  *  must not free them.
  *
  *  \note
- *  On the cuSPARSE backend, \p data_type is not available and must be \p nullptr.
+ *  Only \p ell_nnz is \p int64_t. \p m, \p n, \p ell_width and \p coo_nnz remain
+ *  \p int, matching the counts stored in the HYB matrix. \p ell_nnz is
+ *  \p int64_t so a count that does not fit the stored ELL non-zero count can be
+ *  passed to \ref hipsparseHybMatSetInfo and rejected instead of truncated.
+ *
+ *  \deprecated
+ *  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be
+ *  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
  *
  *  @param[in]
  *  hyb         the hybrid matrix structure.
@@ -324,8 +332,10 @@ hipsparseStatus_t hipsparseDestroyHybMat(hipsparseHybMat_t hybA);
  *
  *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p hyb is invalid.
- *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p data_type is requested on the cuSPARSE
- *          backend, or the stored data type has no \p hipDataType equivalent.
+ *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED the cuSPARSE backend does not support
+ *          this routine, or the stored value type has no \p hipDataType equivalent.
+ *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred, including a
+ *          stored partition with no \ref hipsparseHybPartition_t equivalent.
  */
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT
@@ -347,12 +357,23 @@ hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t  hyb,
  *  \brief Set the internal fields of a \p HYB matrix structure.
  *
  *  \details
- *  \p hipsparseHybMatSetInfo is the counterpart to \ref hipsparseHybMatGetInfo,
- *  intended for test/internal use so that callers never need to reinterpret the
- *  opaque \p hipsparseHybMat_t as a raw struct. Any of the input pointers may be
- *  \p nullptr, in which case the corresponding field is left untouched. All
- *  arguments are validated before \p hyb is modified, so on error \p hyb is left
- *  unchanged.
+ *  \p hipsparseHybMatSetInfo is the counterpart to \ref hipsparseHybMatGetInfo.
+ *  Any of the input pointers may be \p nullptr, in which case the corresponding
+ *  field is left untouched. The cuSPARSE backend returns
+ *  \ref HIPSPARSE_STATUS_NOT_SUPPORTED, because cuSPARSE has no public accessor
+ *  for its opaque HYB matrix.
+ *
+ *  This routine is tagged deprecated for the CUDA backend, like the other HYB
+ *  routines, because it has no cuSPARSE equivalent and HYB storage was removed
+ *  in CUDA 11. That deprecation does not apply to the ROCm backend.
+ *
+ *  The rocSPARSE backend rejects a negative \p m, \p n, \p ell_nnz, \p ell_width
+ *  or \p coo_nnz, an \p ell_nnz that does not fit the stored ELL non-zero count,
+ *  and an invalid \p partition or \p data_type. Those checks run before \p hyb
+ *  is modified, so a validation error leaves \p hyb unchanged. Array lengths are
+ *  not checked against those sizes, and this routine does not add a second
+ *  consistency check. Two non-null array arguments that refer to the same
+ *  pointer are rejected before the rocSPARSE call.
  *
  *  \note
  *  Ownership of the arrays passed in \p ell_col_ind, \p ell_val, \p coo_row_ind,
@@ -366,7 +387,14 @@ hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t  hyb,
  *  empty.
  *
  *  \note
- *  On the cuSPARSE backend, \p data_type is not available and must be \p nullptr.
+ *  Only \p ell_nnz is \p int64_t. \p m, \p n, \p ell_width and \p coo_nnz remain
+ *  \p int, matching the counts stored in the HYB matrix. \p ell_nnz is
+ *  \p int64_t so a count that does not fit the stored ELL non-zero count can be
+ *  rejected instead of truncated.
+ *
+ *  \deprecated
+ *  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be
+ *  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
  *
  *  @param[inout]
  *  hyb         the hybrid matrix structure.
@@ -378,7 +406,7 @@ hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t  hyb,
  *  partition   the \p HYB partitioning type.
  *  @param[in]
  *  ell_nnz     number of non-zero elements of the ELL part. It must be
- *              non-negative and representable by the backend's ELL non-zero count.
+ *              non-negative and fit the stored ELL non-zero count.
  *  @param[in]
  *  ell_width   width of the ELL part.
  *  @param[in]
@@ -397,9 +425,16 @@ hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t  hyb,
  *  data_type   data type of the values stored in \p ell_val and \p coo_val.
  *
  *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
- *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p hyb is invalid, a size is negative or
- *          out of range, or \p partition or \p data_type is invalid.
- *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p data_type is set on the cuSPARSE backend.
+ *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p hyb is invalid, a size is negative,
+ *          \p ell_nnz does not fit the stored ELL non-zero count, \p partition or
+ *          \p data_type is invalid, or two non-null array arguments alias the
+ *          same pointer.
+ *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED the cuSPARSE backend does not support
+ *          this routine.
+ *  \retval HIPSPARSE_STATUS_ALLOC_FAILED the rocSPARSE backend reported a memory
+ *          error while releasing a replaced array.
+ *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR releasing a replaced array failed, or
+ *          the rocSPARSE backend reported an internal error.
  */
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT

@@ -36,6 +36,7 @@
 
 #include <algorithm>
 #include <hipsparse.h>
+#include <limits>
 #include <string>
 
 using namespace hipsparse;
@@ -235,6 +236,14 @@ void testing_hyb2csr(Arguments argus)
                                                      nullptr,
                                                      nullptr));
 
+        // hyb2csr_gbyte_count takes ell_nnz as int. Do not narrow a count that does not fit.
+        if(h_ell_nnz < 0 || h_ell_nnz > static_cast<int64_t>(std::numeric_limits<int>::max()))
+        {
+            int fits     = 0;
+            int expected = 1;
+            unit_check_general(1, 1, 1, &expected, &fits);
+            return;
+        }
         double gbyte_count = hyb2csr_gbyte_count<T>(m, nnz, static_cast<int>(h_ell_nnz), h_coo_nnz);
         double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);
 

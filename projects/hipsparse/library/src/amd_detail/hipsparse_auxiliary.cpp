@@ -221,6 +221,23 @@ hipsparseStatus_t hipsparseDestroyHybMat(hipsparseHybMat_t hybA)
         rocsparse_destroy_hyb_mat((rocsparse_hyb_mat)hybA));
 }
 
+static bool hipsparse_hyb_array_alias(const void* ptr, const void** seen, int* nseen)
+{
+    if(ptr == nullptr)
+    {
+        return false;
+    }
+    for(int i = 0; i < *nseen; ++i)
+    {
+        if(seen[i] == ptr)
+        {
+            return true;
+        }
+    }
+    seen[(*nseen)++] = ptr;
+    return false;
+}
+
 hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t  hyb,
                                          int*                     m,
                                          int*                     n,
@@ -235,29 +252,65 @@ hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t  hyb,
                                          const void**             coo_val,
                                          hipDataType*             data_type)
 {
-    rocsparse_hyb_partition rocsparse_partition;
-    rocsparse_int           rocsparse_m;
-    rocsparse_int           rocsparse_n;
-    rocsparse_int           rocsparse_ell_width;
-    rocsparse_int           rocsparse_coo_nnz;
-    rocsparse_datatype      rocsparse_data_type;
-    hipsparseStatus_t       status = hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_hyb_mat_get_info((rocsparse_hyb_mat)hyb,
-                                   m != nullptr ? &rocsparse_m : nullptr,
-                                   n != nullptr ? &rocsparse_n : nullptr,
-                                   &rocsparse_partition,
-                                   ell_nnz,
-                                   ell_width != nullptr ? &rocsparse_ell_width : nullptr,
-                                   (const rocsparse_int**)ell_col_ind,
-                                   ell_val,
-                                   coo_nnz != nullptr ? &rocsparse_coo_nnz : nullptr,
-                                   (const rocsparse_int**)coo_row_ind,
-                                   (const rocsparse_int**)coo_col_ind,
-                                   coo_val,
-                                   &rocsparse_data_type));
+    // Read into locals first. Conversions below can fail, and a failure must
+    // not leave the caller's outputs partially written.
+    rocsparse_hyb_partition rocsparse_partition   = rocsparse_hyb_partition_auto;
+    rocsparse_int           rocsparse_m           = 0;
+    rocsparse_int           rocsparse_n           = 0;
+    int64_t                 rocsparse_ell_nnz     = 0;
+    rocsparse_int           rocsparse_ell_width   = 0;
+    const rocsparse_int*    rocsparse_ell_col_ind = nullptr;
+    const void*             rocsparse_ell_val     = nullptr;
+    rocsparse_int           rocsparse_coo_nnz     = 0;
+    const rocsparse_int*    rocsparse_coo_row_ind = nullptr;
+    const rocsparse_int*    rocsparse_coo_col_ind = nullptr;
+    const void*             rocsparse_coo_val     = nullptr;
+    rocsparse_datatype      rocsparse_data_type   = rocsparse_datatype_f32_r;
+
+    hipsparseStatus_t status
+        = hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_hyb_mat_get_info((rocsparse_hyb_mat)hyb,
+                                                                           &rocsparse_m,
+                                                                           &rocsparse_n,
+                                                                           &rocsparse_partition,
+                                                                           &rocsparse_ell_nnz,
+                                                                           &rocsparse_ell_width,
+                                                                           &rocsparse_ell_col_ind,
+                                                                           &rocsparse_ell_val,
+                                                                           &rocsparse_coo_nnz,
+                                                                           &rocsparse_coo_row_ind,
+                                                                           &rocsparse_coo_col_ind,
+                                                                           &rocsparse_coo_val,
+                                                                           &rocsparse_data_type));
     if(status != HIPSPARSE_STATUS_SUCCESS)
     {
         return status;
+    }
+
+    hipsparseHybPartition_t hip_partition = HIPSPARSE_HYB_PARTITION_AUTO;
+    if(partition != nullptr)
+    {
+        try
+        {
+            hip_partition = hipsparse::HCCHybPartToHIPHybPart(rocsparse_partition);
+        }
+        catch(...)
+        {
+            return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        }
+    }
+
+    hipDataType hip_data_type = HIP_R_32F;
+    if(data_type != nullptr)
+    {
+        try
+        {
+            // The HYB may hold a rocSPARSE data type with no hipDataType equivalent.
+            hip_data_type = hipsparse::HCCDataTypeToHIPDataType(rocsparse_data_type);
+        }
+        catch(...)
+        {
+            return HIPSPARSE_STATUS_NOT_SUPPORTED;
+        }
     }
 
     if(m != nullptr)
@@ -270,27 +323,43 @@ hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t  hyb,
     }
     if(partition != nullptr)
     {
-        *partition = hipsparse::HCCHybPartToHIPHybPart(rocsparse_partition);
+        *partition = hip_partition;
+    }
+    if(ell_nnz != nullptr)
+    {
+        *ell_nnz = rocsparse_ell_nnz;
     }
     if(ell_width != nullptr)
     {
         *ell_width = rocsparse_ell_width;
     }
+    if(ell_col_ind != nullptr)
+    {
+        *ell_col_ind = (const int*)rocsparse_ell_col_ind;
+    }
+    if(ell_val != nullptr)
+    {
+        *ell_val = rocsparse_ell_val;
+    }
     if(coo_nnz != nullptr)
     {
         *coo_nnz = rocsparse_coo_nnz;
     }
+    if(coo_row_ind != nullptr)
+    {
+        *coo_row_ind = (const int*)rocsparse_coo_row_ind;
+    }
+    if(coo_col_ind != nullptr)
+    {
+        *coo_col_ind = (const int*)rocsparse_coo_col_ind;
+    }
+    if(coo_val != nullptr)
+    {
+        *coo_val = rocsparse_coo_val;
+    }
     if(data_type != nullptr)
     {
-        // The HYB may hold a rocSPARSE data type with no hipDataType equivalent.
-        try
-        {
-            *data_type = hipsparse::HCCDataTypeToHIPDataType(rocsparse_data_type);
-        }
-        catch(...)
-        {
-            return HIPSPARSE_STATUS_NOT_SUPPORTED;
-        }
+        *data_type = hip_data_type;
     }
     return HIPSPARSE_STATUS_SUCCESS;
 }
@@ -309,6 +378,25 @@ hipsparseStatus_t hipsparseHybMatSetInfo(hipsparseHybMat_t              hyb,
                                          void* const*                   coo_val,
                                          const hipDataType*             data_type)
 {
+    // Two non-null array arguments that alias one allocation would be freed
+    // twice when hyb is destroyed. Reject that before calling rocSPARSE.
+    // rocSPARSE set_info checks negative sizes, that ell_nnz fits the stored
+    // ELL non-zero count, and that the enums are valid. It does not check that
+    // the arrays are long enough for those sizes; do not add a second policy.
+    const void* seen[5];
+    int         nseen = 0;
+    if((ell_col_ind != nullptr
+        && hipsparse_hyb_array_alias(static_cast<const void*>(*ell_col_ind), seen, &nseen))
+       || (ell_val != nullptr && hipsparse_hyb_array_alias(*ell_val, seen, &nseen))
+       || (coo_row_ind != nullptr
+           && hipsparse_hyb_array_alias(static_cast<const void*>(*coo_row_ind), seen, &nseen))
+       || (coo_col_ind != nullptr
+           && hipsparse_hyb_array_alias(static_cast<const void*>(*coo_col_ind), seen, &nseen))
+       || (coo_val != nullptr && hipsparse_hyb_array_alias(*coo_val, seen, &nseen)))
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
     const rocsparse_int rocsparse_m         = (m != nullptr) ? *m : 0;
     const rocsparse_int rocsparse_n         = (n != nullptr) ? *n : 0;
     const rocsparse_int rocsparse_ell_width = (ell_width != nullptr) ? *ell_width : 0;

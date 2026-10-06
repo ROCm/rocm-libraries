@@ -36,6 +36,7 @@
 #include "utility.hpp"
 
 #include <hipsparse.h>
+#include <limits>
 #include <string>
 
 using namespace hipsparse;
@@ -282,6 +283,14 @@ void testing_hybmv(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * m, hipMemcpyDeviceToHost));
 
         // CPU
+        // host_hybmv takes ell_nnz as int. Do not narrow a count that does not fit.
+        if(ell_nnz < 0 || ell_nnz > static_cast<int64_t>(std::numeric_limits<int>::max()))
+        {
+            int fits     = 0;
+            int expected = 1;
+            unit_check_general(1, 1, 1, &expected, &fits);
+            return;
+        }
         host_hybmv(m,
                    n,
                    h_alpha,
