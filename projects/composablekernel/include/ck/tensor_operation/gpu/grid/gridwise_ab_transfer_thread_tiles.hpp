@@ -155,27 +155,9 @@ struct ABTransferThreadTiles
         {
             // bank conflict when writting the data into LDS, but don't worry, we have whole entire
             // loop to hide it in v4. it may give you some benefit from less valu in compute address
-            if constexpr(!UseLdsTranspose)
-            {
-                return make_naive_tensor_descriptor(
-                    make_tuple(ABK0Number, Number<MNPerBlock>{}, ABK1Number),
-                    make_tuple(Number<MNPerBlock + 1>{} * ABK1Number, ABK1Number, I1));
-            }
-            else
-            {
-                constexpr index_t MN1    = MNPerWmma / 2;
-                constexpr auto base_desc = make_naive_tensor_descriptor(
-                    make_tuple(Number<MNPerBlock / MN1>{}, Number<KPerBlock>{}, Number<MN1>{}),
-                    make_tuple(Number<KPerBlock + 1>{} * Number<MN1>{}, Number<MN1>{}, I1));
-
-                return transform_tensor_descriptor(
-                    base_desc,
-                    make_tuple(
-                        make_merge_transform(make_tuple(Number<MNPerBlock / MN1>{}, Number<MN1>{})),
-                        make_unmerge_transform(make_tuple(ABK0Number, ABK1Number))),
-                    make_tuple(Sequence<0, 2>{}, Sequence<1>{}),
-                    make_tuple(Sequence<1>{}, Sequence<0, 2>{}));
-            }
+            return make_naive_tensor_descriptor(
+                make_tuple(ABK0Number, Number<MNPerBlock>{}, ABK1Number),
+                make_tuple(Number<MNPerBlock + 1>{} * ABK1Number, ABK1Number, I1));
         }
         // xor tensor transformation request more unnecessary vgpr usage, would cause register spill
         // in some cases.
@@ -219,7 +201,6 @@ struct ABTransferThreadTiles
         }
         else
         {
-            static_assert(!UseLdsTranspose, "UseLdsTranspose is not supported for swizzled layout");
             // kfold and mpair dimension is not always required.
             // more dimension in merge_transform increase the difficulty of generating immarg offset
             // for compiler.
@@ -515,7 +496,40 @@ struct ABTransferThreadTiles
 
     __host__ __device__ static constexpr auto GetBlockDescriptor()
     {
-        return GetBlockDescriptorImpl(get_device_arch());
+        if constexpr(UseLdsTranspose)
+        {
+            static_assert(UseBlockPaddingAB, "LDS Transpose only supports LDS padding for now");
+            constexpr index_t MN1      = MNPerWmma / 2;
+            constexpr auto PaddingSize = 16 / sizeof(LDSTypeAB);
+            constexpr auto base_desc   = make_naive_tensor_descriptor(
+                make_tuple(Number<MNPerBlock / MN1>{}, Number<KPerBlock>{}, Number<MN1>{}),
+                make_tuple(Number<MN1>{}, Number<MNPerBlock + PaddingSize>{}, I1));
+
+            return transform_tensor_descriptor(
+                base_desc,
+                make_tuple(
+                    make_merge_transform(make_tuple(Number<MNPerBlock / MN1>{}, Number<MN1>{})),
+                    make_unmerge_transform(make_tuple(ABK0Number, ABK1Number))),
+                make_tuple(Sequence<0, 2>{}, Sequence<1>{}),
+                make_tuple(Sequence<1>{}, Sequence<0, 2>{}));
+
+            // constexpr index_t MN1    = MNPerWmma / 2;
+            // constexpr auto base_desc = make_naive_tensor_descriptor(
+            //     make_tuple(Number<MNPerBlock / MN1>{}, Number<KPerBlock>{}, Number<MN1>{}),
+            //     make_tuple(Number<KPerBlock + 1>{} * Number<MN1>{}, Number<MN1>{}, I1));
+
+            // return transform_tensor_descriptor(
+            //     base_desc,
+            //     make_tuple(
+            //         make_merge_transform(make_tuple(Number<MNPerBlock / MN1>{}, Number<MN1>{})),
+            //         make_unmerge_transform(make_tuple(ABK0Number, ABK1Number))),
+            //     make_tuple(Sequence<0, 2>{}, Sequence<1>{}),
+            //     make_tuple(Sequence<1>{}, Sequence<0, 2>{}));
+        }
+        else
+        {
+            return GetBlockDescriptorImpl(get_device_arch());
+        }
     }
 
     template <typename GridDescriptor,

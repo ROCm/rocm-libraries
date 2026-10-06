@@ -164,7 +164,8 @@ template <ck::index_t NDimSpatial,
           typename ComputeTypeA                       = InDataType,
           typename ComputeTypeB                       = ComputeTypeA,
           index_t TransposeTransferSrcScalarPerVector = 1,
-          index_t TransposeTransferDstScalarPerVector = 1>
+          index_t TransposeTransferDstScalarPerVector = 1,
+          bool UseLdsTranspose                        = false>
 struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
     : public DeviceGroupedConvBwdWeight<NDimSpatial,
                                         InLayout,
@@ -412,7 +413,9 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
         false, // permuteA
         false, // permuteB
         false, // IsBPreShuffled
-        true>; // ForceThreadTileTransfer
+        true,  // ForceThreadTileTransfer
+        false, // IsFusedKernel
+        UseLdsTranspose>;
 
     using Block2TileMapElementwise = BlockToCTileMap_M00_N0_M01Adapt<MPerBlock, NPerBlock>;
 
@@ -879,45 +882,14 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
             const auto Run = [&](const auto& kernel) {
                 if(stream_config.flush_cache)
                 {
-                    typename GridwiseGemm::Argument gemm_arg_ = gemm_arg;
-
-                    std::array<std::size_t, GridwiseGemm::NumATensor> size_as_buffers;
-                    size_as_buffers[0] = arg.a_grid_desc_k0_m_k1_.GetElementSpaceSize() *
-                                         sizeof(ADataType) / GridwiseGemm::APackedSize;
-
-                    std::array<std::size_t, GridwiseGemm::NumBTensor> size_bs_buffers;
-                    size_bs_buffers[0] = arg.b_grid_desc_k0_n_k1_.GetElementSpaceSize() *
-                                         sizeof(BDataType) / GridwiseGemm::BPackedSize;
-
-                    std::array<std::size_t, GridwiseGemm::NumDTensor> size_ds_buffers;
-
-                    ck::utility::RotatingMemWrapperMultiABD<typename GridwiseGemm::Argument,
-                                                            Tuple<ADataType>,
-                                                            Tuple<BDataType>,
-                                                            Tuple<>>
-                        rotating_mem(gemm_arg_,
-                                     stream_config.rotating_count,
-                                     size_as_buffers,
-                                     size_bs_buffers,
-                                     size_ds_buffers);
-                    rotating_mem.Print();
-
-                    auto run_flush_cache = [&]() {
-                        // flush icache
-                        ck::utility::flush_icache();
-                        // rotating mem
-                        rotating_mem.Next();
-                        clear_workspace();
-                    };
-
-                    ave_time += ck::utility::launch_and_time_kernel_with_preprocess<false>(
+                    ave_time += launch_and_time_kernel_with_preprocess_flush_cache(
                         stream_config,
-                        run_flush_cache,
+                        clear_workspace,
                         kernel,
                         dim3(gdx, gdy, gdz),
                         dim3(BlockSize),
                         0,
-                        gemm_arg_,
+                        gemm_arg,
                         arg.a_grid_desc_k0_m_k1_,
                         arg.b_grid_desc_k0_n_k1_,
                         arg.c_grid_desc_mblock_mperblock_nblock_nperblock_,
@@ -1733,6 +1705,10 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
                 << "TransposeTransferDstScalarPerVector: " << TransposeTransferDstScalarPerVector;
             }
 
+        if constexpr(UseLdsTranspose)
+        {
+            str << ", LdsTranspose";
+        }
             
             str << ">";
         // clang-format on
