@@ -902,9 +902,10 @@ constexpr double
 }
 
 template <typename I, typename J, typename T>
-constexpr double spsort_csc_gbyte_count(int64_t n, int64_t nnz)
+constexpr double
+    spsort_csc_gbyte_count(int64_t n, int64_t nnz, int64_t batch_count, bool shared_offsets)
 {
-    return spsort_csr_gbyte_count<I, J, T>(n, nnz);
+    return spsort_csr_gbyte_count<I, J, T>(n, nnz, batch_count, shared_offsets);
 }
 
 /*
