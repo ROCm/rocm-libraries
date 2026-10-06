@@ -367,13 +367,14 @@ hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t  hyb,
  *  routines, because it has no cuSPARSE equivalent and HYB storage was removed
  *  in CUDA 11. That deprecation does not apply to the ROCm backend.
  *
- *  The rocSPARSE backend rejects a negative \p m, \p n, \p ell_nnz, \p ell_width
- *  or \p coo_nnz, an \p ell_nnz that does not fit the stored ELL non-zero count,
- *  and an invalid \p partition or \p data_type. Those checks run before \p hyb
- *  is modified, so a validation error leaves \p hyb unchanged. Array lengths are
- *  not checked against those sizes, and this routine does not add a second
- *  consistency check. Two non-null array arguments that refer to the same
- *  pointer are rejected before the rocSPARSE call.
+ *  The rocSPARSE backend rejects a negative size, an \p ell_nnz that does not
+ *  fit the stored ELL count, a merged matrix whose \p ell_nnz is not
+ *  <tt>m * ell_width</tt> or whose \p ell_width exceeds \p n, a positive ELL or
+ *  COO count whose arrays are null, and an invalid \p partition or
+ *  \p data_type. Those checks run before \p hyb is modified, so a validation
+ *  error leaves \p hyb unchanged. Allocation lengths are not checked. Two
+ *  non-null array arguments that refer to the same pointer are rejected before
+ *  the rocSPARSE call.
  *
  *  \note
  *  Ownership of the arrays passed in \p ell_col_ind, \p ell_val, \p coo_row_ind,
@@ -382,9 +383,9 @@ hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t  hyb,
  *  distinct allocations; they are released by \ref hipsparseDestroyHybMat.
  *  An array previously held by \p hyb that is replaced by a different pointer
  *  (and is not kept in another field) is released by this function; passing the
- *  pointer \p hyb already holds is a no-op. A \p nullptr value (as opposed to a
- *  \p nullptr argument) releases the previously held array and leaves the field
- *  empty.
+ *  pointer \p hyb already holds is a no-op. A \p nullptr value releases the
+ *  previously held array only when the merged ELL or COO count no longer
+ *  requires it. Nulling one array while its count stays positive is rejected.
  *
  *  \note
  *  Only \p ell_nnz is \p int64_t. \p m, \p n, \p ell_width and \p coo_nnz remain
@@ -426,9 +427,10 @@ hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t  hyb,
  *
  *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p hyb is invalid, a size is negative,
- *          \p ell_nnz does not fit the stored ELL non-zero count, \p partition or
- *          \p data_type is invalid, or two non-null array arguments alias the
- *          same pointer.
+ *          \p ell_nnz does not fit the stored ELL count or is not
+ *          <tt>m * ell_width</tt>, \p ell_width exceeds \p n, a positive count
+ *          has a null array, \p partition or \p data_type is invalid, or two
+ *          non-null array arguments alias the same pointer.
  *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED the cuSPARSE backend does not support
  *          this routine.
  *  \retval HIPSPARSE_STATUS_ALLOC_FAILED the rocSPARSE backend reported a memory

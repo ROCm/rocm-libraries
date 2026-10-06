@@ -415,7 +415,8 @@ void testing_hyb_mat_info_bad_arg(void)
     actual_ptr   = reinterpret_cast<size_t>(got_coo_val);
     unit_check_general(1, 1, 1, &expected_ptr, &actual_ptr);
 
-    // Passing a nullptr value releases the array and leaves the field empty.
+    // Nulling ell_val while ell_nnz stays positive is rejected, and the
+    // field is unchanged.
     void* released_ell_val = nullptr;
     status                 = hipsparseHybMatSetInfo(hyb,
                                     nullptr,
@@ -430,11 +431,8 @@ void testing_hyb_mat_info_bad_arg(void)
                                     nullptr,
                                     nullptr,
                                     nullptr);
-    verify_hipsparse_status_success(status, "Success");
-    if(status != HIPSPARSE_STATUS_SUCCESS)
-    {
-        return;
-    }
+    verify_hipsparse_status_invalid_value(
+        status, "Error: ell_val is null while ell_nnz is positive");
     verify_hipsparse_status_success(hipsparseHybMatGetInfo(hyb,
                                                            nullptr,
                                                            nullptr,
@@ -449,15 +447,18 @@ void testing_hyb_mat_info_bad_arg(void)
                                                            nullptr,
                                                            nullptr),
                                     "Success");
-    expected_ptr = 0;
+    expected_ptr = reinterpret_cast<size_t>(set_ell_val);
     actual_ptr   = reinterpret_cast<size_t>(got_ell_val);
     unit_check_general(1, 1, 1, &expected_ptr, &actual_ptr);
 
-    // Move the COO row array into the ELL column field. The previous ELL
-    // column array is released by SetInfo; the moved pointer is not.
-    int* moved_col    = set_coo_row;
-    int* released_row = nullptr;
-    status            = hipsparseHybMatSetInfo(hyb,
+    // Move the COO row array into the ELL column field. coo_nnz must drop to
+    // zero in the same call, because a positive COO count cannot have a null
+    // row pointer. The previous ELL column array is released; the moved
+    // pointer is not.
+    const int released_coo_nnz = 0;
+    int*      moved_col        = set_coo_row;
+    int*      released_row     = nullptr;
+    status                     = hipsparseHybMatSetInfo(hyb,
                                     nullptr,
                                     nullptr,
                                     nullptr,
@@ -465,7 +466,7 @@ void testing_hyb_mat_info_bad_arg(void)
                                     nullptr,
                                     &moved_col,
                                     nullptr,
-                                    nullptr,
+                                    &released_coo_nnz,
                                     &released_row,
                                     nullptr,
                                     nullptr,
@@ -534,6 +535,47 @@ void testing_hyb_mat_info_bad_arg(void)
                                                            nullptr,
                                                            nullptr),
                                     "Success");
+
+    // Releasing the ELL arrays requires the merged count to be zero.
+    const int64_t zero_ell_nnz   = 0;
+    const int     zero_ell_width = 0;
+    int*          clear_ell_col  = nullptr;
+    void*         clear_ell_val  = nullptr;
+    status                       = hipsparseHybMatSetInfo(hyb,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    &zero_ell_nnz,
+                                    &zero_ell_width,
+                                    &clear_ell_col,
+                                    &clear_ell_val,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr);
+    verify_hipsparse_status_success(status, "Success");
+    if(status != HIPSPARSE_STATUS_SUCCESS)
+    {
+        return;
+    }
+    verify_hipsparse_status_success(hipsparseHybMatGetInfo(hyb,
+                                                           nullptr,
+                                                           nullptr,
+                                                           nullptr,
+                                                           nullptr,
+                                                           nullptr,
+                                                           nullptr,
+                                                           &got_ell_val,
+                                                           nullptr,
+                                                           nullptr,
+                                                           nullptr,
+                                                           nullptr,
+                                                           nullptr),
+                                    "Success");
+    expected_ptr = 0;
+    actual_ptr   = reinterpret_cast<size_t>(got_ell_val);
+    unit_check_general(1, 1, 1, &expected_ptr, &actual_ptr);
 #endif
 }
 
