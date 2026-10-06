@@ -439,6 +439,7 @@ namespace rocsparse
     }
 
     static rocsparse_status coosort_buffer_size_compute(rocsparse_handle    handle,
+                                                        rocsparse_direction dir,
                                                         int64_t             m,
                                                         int64_t             n,
                                                         int64_t             nnz,
@@ -460,18 +461,14 @@ namespace rocsparse
             return rocsparse_status_success;
         }
 
-        // Use the maximum rocPRIM buffer size chosen between sorting by row or by column
-        size_t buffer_size_by_row = std::numeric_limits<size_t>::max();
-        size_t buffer_size_by_col = std::numeric_limits<size_t>::max();
+        const bool by_row       = (dir == rocsparse_direction_row);
+        size_t     rocprim_size = std::numeric_limits<size_t>::max();
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosort_rocprim_buffer_size(
-            handle, idx_type, m, n, nnz, &buffer_size_by_row));
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosort_rocprim_buffer_size(
-            handle, idx_type, n, m, nnz, &buffer_size_by_col));
+            handle, idx_type, by_row ? m : n, by_row ? n : m, nnz, &rocprim_size));
 
         const size_t idx_size = rocsparse::indextype_sizeof(idx_type);
 
-        *buffer_size_in_bytes
-            = rocsparse::align_size<char>(rocsparse::max(buffer_size_by_row, buffer_size_by_col));
+        *buffer_size_in_bytes = rocsparse::align_size<char>(rocprim_size);
 
         // rocPRIM does not support in-place sorting, so we need additional buffer
         // for all temporary arrays: two arrays of nnz indices, the workspace of the segments,
@@ -482,6 +479,33 @@ namespace rocsparse
         *buffer_size_in_bytes += rocsparse::align_size<char>(idx_size * (nnz + 1));
         *buffer_size_in_bytes += rocsparse::align_size<char>(idx_size * (rocsparse::max(m, n) + 1));
 
+        return rocsparse_status_success;
+    }
+
+    // The legacy buffer size query does not know the direction, so the buffer must be large
+    // enough to sort either by row or by column.
+    static rocsparse_status coosort_legacy_buffer_size(
+        rocsparse_handle handle, int64_t m, int64_t n, int64_t nnz, size_t* buffer_size_in_bytes)
+    {
+        size_t buffer_size_by_row = std::numeric_limits<size_t>::max();
+        size_t buffer_size_by_col = std::numeric_limits<size_t>::max();
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::coosort_buffer_size_compute(handle,
+                                                   rocsparse_direction_row,
+                                                   m,
+                                                   n,
+                                                   nnz,
+                                                   rocsparse::get_indextype<rocsparse_int>(),
+                                                   &buffer_size_by_row));
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::coosort_buffer_size_compute(handle,
+                                                   rocsparse_direction_column,
+                                                   m,
+                                                   n,
+                                                   nnz,
+                                                   rocsparse::get_indextype<rocsparse_int>(),
+                                                   &buffer_size_by_col));
+        *buffer_size_in_bytes = rocsparse::max(buffer_size_by_row, buffer_size_by_col);
         return rocsparse_status_success;
     }
 
@@ -504,7 +528,7 @@ namespace rocsparse
 
         size_t required_buffer_size = std::numeric_limits<size_t>::max();
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosort_buffer_size_compute(
-            handle, m, n, nnz, idx_type, &required_buffer_size));
+            handle, dir, m, n, nnz, idx_type, &required_buffer_size));
         if(buffer_size_in_bytes < required_buffer_size)
         {
             RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
@@ -663,8 +687,8 @@ try
     ROCSPARSE_CHECKARG_ARRAY(5, nnz, coo_col_ind);
     ROCSPARSE_CHECKARG_POINTER(6, buffer_size);
 
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosort_buffer_size_compute(
-        handle, m, n, nnz, rocsparse::get_indextype<rocsparse_int>(), buffer_size));
+    RETURN_IF_ROCSPARSE_ERROR(
+        rocsparse::coosort_legacy_buffer_size(handle, m, n, nnz, buffer_size));
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -760,8 +784,8 @@ try
     // The legacy API does not take the size of temp_buffer, which is assumed to be the size
     // returned by rocsparse_coosort_buffer_size.
     size_t buffer_size = std::numeric_limits<size_t>::max();
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosort_buffer_size_compute(
-        handle, m, n, nnz, rocsparse::get_indextype<rocsparse_int>(), &buffer_size));
+    RETURN_IF_ROCSPARSE_ERROR(
+        rocsparse::coosort_legacy_buffer_size(handle, m, n, nnz, &buffer_size));
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosort_compute(handle,
                                                          rocsparse_direction_row,
@@ -871,8 +895,8 @@ try
     // The legacy API does not take the size of temp_buffer, which is assumed to be the size
     // returned by rocsparse_coosort_buffer_size.
     size_t buffer_size = std::numeric_limits<size_t>::max();
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosort_buffer_size_compute(
-        handle, m, n, nnz, rocsparse::get_indextype<rocsparse_int>(), &buffer_size));
+    RETURN_IF_ROCSPARSE_ERROR(
+        rocsparse::coosort_legacy_buffer_size(handle, m, n, nnz, &buffer_size));
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosort_compute(handle,
                                                          rocsparse_direction_column,
@@ -907,7 +931,6 @@ namespace rocsparse
 }
 
 rocsparse_status rocsparse::coosort_buffer_size(rocsparse_handle            handle,
-                                                rocsparse_coosort_alg       alg,
                                                 rocsparse_direction         dir,
                                                 rocsparse_const_spmat_descr source,
                                                 rocsparse_const_spmat_descr target,
@@ -919,7 +942,7 @@ rocsparse_status rocsparse::coosort_buffer_size(rocsparse_handle            hand
 
     size_t sort_buffer_size = std::numeric_limits<std::size_t>::max();
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosort_buffer_size_compute(
-        handle, target->rows, target->cols, nnz, target->row_type, &sort_buffer_size));
+        handle, dir, target->rows, target->cols, nnz, target->row_type, &sort_buffer_size));
 
     // Values sorted in place are gathered into scratch space first, since the gather cannot
     // write over its own input.
@@ -935,7 +958,6 @@ rocsparse_status rocsparse::coosort_buffer_size(rocsparse_handle            hand
 }
 
 rocsparse_status rocsparse::coosort(rocsparse_handle            handle,
-                                    rocsparse_coosort_alg       alg,
                                     rocsparse_direction         dir,
                                     rocsparse_const_spmat_descr source,
                                     rocsparse_spmat_descr       target,
@@ -946,7 +968,7 @@ rocsparse_status rocsparse::coosort(rocsparse_handle            handle,
 
     size_t required_buffer_size = std::numeric_limits<std::size_t>::max();
     RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::coosort_buffer_size(handle, alg, dir, source, target, &required_buffer_size));
+        rocsparse::coosort_buffer_size(handle, dir, source, target, &required_buffer_size));
     if(buffer_size_in_bytes < required_buffer_size)
     {
         RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(

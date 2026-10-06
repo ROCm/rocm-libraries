@@ -171,7 +171,7 @@ try
         case rocsparse_spsort_stage_compute:
         {
             RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
-                rocsparse_status_internal_error,
+                rocsparse_status_invalid_value,
                 "The field 'rocsparse_spsort_input_alg' must be set before the stage "
                 "'rocsparse_spsort_stage_analysis' is executed.");
         }
@@ -193,7 +193,7 @@ try
         case rocsparse_spsort_stage_compute:
         {
             RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
-                rocsparse_status_internal_error,
+                rocsparse_status_invalid_value,
                 "The field 'rocsparse_spsort_input_direction' must be set before the stage "
                 "'rocsparse_spsort_stage_analysis' is executed.");
         }

@@ -30,6 +30,31 @@
 
 namespace rocsparse
 {
+    // The values are reordered with gthr, which only supports these data types.
+    static bool spsort_is_supported_datatype(rocsparse_datatype data_type)
+    {
+        switch(data_type)
+        {
+        case rocsparse_datatype_i8_r:
+        case rocsparse_datatype_f16_r:
+        case rocsparse_datatype_bf16_r:
+        case rocsparse_datatype_f32_r:
+        case rocsparse_datatype_f64_r:
+        case rocsparse_datatype_f32_c:
+        case rocsparse_datatype_f64_c:
+        {
+            return true;
+        }
+        case rocsparse_datatype_u8_r:
+        case rocsparse_datatype_i32_r:
+        case rocsparse_datatype_u32_r:
+        {
+            return false;
+        }
+        }
+        return false;
+    }
+
     static bool spsort_has_zero_batch_strides(rocsparse_const_spmat_descr mat)
     {
         switch(mat->format)
@@ -95,6 +120,10 @@ rocsparse_status rocsparse::spsort_check_arguments(rocsparse_spsort_descr      d
                        (target->row_type != source->row_type || target->col_type != source->col_type
                         || target->data_type != source->data_type
                         || target->idx_base != source->idx_base),
+                       rocsparse_status_invalid_value);
+    ROCSPARSE_CHECKARG(2,
+                       source,
+                       !spsort_is_supported_datatype(source->data_type),
                        rocsparse_status_invalid_value);
 
     // The batch count is given by the target. The source either has the same batch count, or is a
@@ -179,13 +208,8 @@ namespace rocsparse
             {
             case rocsparse_format_coo:
             {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosort(handle,
-                                                             rocsparse_coosort_alg_default,
-                                                             dir,
-                                                             source,
-                                                             target,
-                                                             buffer_size_in_bytes,
-                                                             buffer));
+                RETURN_IF_ROCSPARSE_ERROR(
+                    rocsparse::coosort(handle, dir, source, target, buffer_size_in_bytes, buffer));
                 return rocsparse_status_success;
             }
 

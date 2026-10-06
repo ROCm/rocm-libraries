@@ -69,13 +69,8 @@ namespace rocsparse
             {
             case rocsparse_format_coo:
             {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::coosort_buffer_size(handle,
-                                                   rocsparse_coosort_alg_default,
-                                                   descr->get_direction(),
-                                                   source,
-                                                   target,
-                                                   buffer_size_in_bytes));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosort_buffer_size(
+                    handle, descr->get_direction(), source, target, buffer_size_in_bytes));
                 return rocsparse_status_success;
             }
             case rocsparse_format_csr:
