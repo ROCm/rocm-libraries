@@ -14434,7 +14434,7 @@ class KernelWriterAssembly(KernelWriter):
     # StreamK: compile-time check (kernel["StreamK"] != 0)
     # GSU: runtime check (GSU split factor > 1 from gemmcount kernel parameter)
     # Use BufferOOB for workspace, BufferLimit (stride-based) for regular GEMM
-    if kernel["StreamK"] != 0:
+    if kernel.get("StreamK", 0) != 0:
       # StreamK always uses workspace buffers
       module.addComment1("StreamK: use BufferOOB for workspace buffers")
       module.add(SMovB32(dst=sgpr("SrdTD+2"), src="BufferOOB"))
@@ -14801,7 +14801,7 @@ class KernelWriterAssembly(KernelWriter):
     # GSU: runtime check (GSU split factor > 1 from gemmcount kernel parameter)
     # Use BufferOOB for workspace, BufferLimit (stride-based) for regular GEMM
     if ch in ["C", "D"]:
-      if kernel["StreamK"] != 0:
+      if kernel.get("StreamK", 0) != 0:
         # StreamK always uses workspace buffers
         module.addComment1("StreamK: use BufferOOB for %s workspace buffer" % ch)
         module.add(SMovB32(dst=sgpr("Srd%s+2"%ch), src="BufferOOB"))
