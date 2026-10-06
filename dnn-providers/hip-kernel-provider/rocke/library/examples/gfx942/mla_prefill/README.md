@@ -45,6 +45,11 @@
   - [Kept — the smaller pipelining levers](#kept--the-smaller-pipelining-levers)
   - [Opt-in — unfused head projections](#opt-in--unfused-head-projections)
   - [Measured and not kept in the fifth pass](#measured-and-not-kept-in-the-fifth-pass)
+- [Sixth pass — projection weight traffic](#sixth-pass--projection-weight-traffic)
+  - [Diagnosis](#diagnosis-1)
+  - [Kept — two heads x two query tiles per workgroup](#kept--two-heads-x-two-query-tiles-per-workgroup)
+  - [Kept — XCD-aware workgroup order](#kept--xcd-aware-workgroup-order)
+  - [Measured and not kept in the sixth pass](#measured-and-not-kept-in-the-sixth-pass)
 - [Method](#method)
 - [What remains unproven](#what-remains-unproven)
 
@@ -191,6 +196,9 @@ One lever per step. Full 8-case parity after each. Keep or revert, never stack.
 | 39 | W_UK absorb loads four r-tiles ahead (`HPW_ABSORB_PREFETCH`) | **Kept** | the prologue no longer exposes one global round trip per r-tile; small gain on short shapes |
 | 40 | `absorbed_query` on the four-heads path | **Opt-in** | no prologue absorb, no `W_UV` epilogue; kernel-only gain on long shapes, end to end it depends on the batched GEMMs |
 | 41 | Eight heads per workgroup (`heads_per_wg = 8`) | Not selected | parity-verified and admissible (k_rope staging narrows to 2-wide chunks); faster on some shapes, slower on others, no clean dispatch rule |
+| 42 | Query tiles per head (`q_tiles_per_wg`), shipped as two heads x two tiles | **Kept** | each head's W_UK / W_UV fetch and epilogue staging serve two waves; half the epilogue rounds; registers and LDS unchanged; L2 misses fell sharply; large gain on short full-prompt shapes, neutral to small on chunked |
+| 43 | XCD-aware workgroup order (`num_xcds`, from the device CU count) | **Kept** | each XCD walks short runs of a head-major order, so its L2 holds a few heads' weights; gain on short shapes |
+| 44 | One head x four query tiles per workgroup | Not selected | lowest weight traffic, but a large regression on some chunked shapes that is not explained |
 
 ### Kept — wt_lds bank-conflict pad
 
@@ -777,6 +785,71 @@ On a node where torch's hipBLASLt path stalls, set
 - **Double-buffered `kv_lds` at eight heads per workgroup** (one barrier per
   tile): the dynamic slot offset spills in the prologue. Not pursued further.
 
+## Sixth pass — projection weight traffic
+
+Levers 42–44. Once the loop was pipelined, the remaining gap to aiter's kernel
+sat almost entirely outside the k-loop: the per-workgroup query absorb and
+`W_UV` projection, which aiter leaves to separate GEMMs. Timing the
+`absorbed_query` variant against aiter's kernel (both without projections) put
+the loops close to each other.
+
+### Diagnosis
+
+- **Counters (`TCP_TCC_READ_REQ`, `TCC_HIT`/`TCC_MISS`, `TCC_EA0_RDREQ`).** The
+  fused kernel issues far more L2 reads than the `absorbed_query` variant, and
+  far more L2 misses. The extra traffic is W_UK / W_UV, refetched by every
+  workgroup. L2 bandwidth use stays low, so the cost is miss latency in the
+  prologue and epilogue, not bandwidth.
+- **Weight bytes per output row depend on how many query rows of one head a
+  workgroup holds, not on how many heads.** Four heads x 16 queries and eight
+  heads x 16 queries both pay one head's weights per 16 rows, which is why
+  `heads_per_wg = 8` (lever 41) did not help.
+- **Device kernel time, not harness time.** The live harness times each call
+  with events and carries a per-call host floor that hides short shapes. The
+  fifth and sixth passes compare device kernel time from `torch.profiler`, the
+  same method used for the aiter lane.
+
+### Kept — two heads x two query tiles per workgroup
+
+`MlaPrefillSpec.q_tiles_per_wg` lets a workgroup hold `heads_per_wg` heads x
+`q_tiles_per_wg` tiles of 16 queries, one wave per (head, tile), with
+`block_q = 16 * q_tiles_per_wg`. Each wave's code is unchanged; what changes:
+
+- the loop bounds are workgroup-wide (main loop to the first tile's causal
+  bound, masked tail to the last tile's), because staging and barriers are
+  shared; per-element masks stay per wave;
+- a wave whose rows all lie past `S_q` still runs the loop on clamped rows,
+  with its stores masked off, rather than returning;
+- the epilogue stages `EPI_VQ * q_tiles_per_wg` columns of `W_UV` per round
+  for each head, so the rounds and barriers drop by `q_tiles_per_wg`.
+
+Registers and LDS are identical to four heads x one tile, so two workgroups
+per CU hold. Dispatch ships two heads x two tiles.
+
+### Kept — XCD-aware workgroup order
+
+The dispatcher deals workgroups round-robin across XCDs, so in launch order
+every XCD's resident workgroups span every head group and each L2 holds all of
+their weights. With `MlaPrefillSpec.num_xcds` set, the kernel reorders
+workgroups so each XCD walks `XCD_CHUNK`-long runs of a head-major order. Long
+runs cut weight traffic further but cost the cross-head-group reuse of key
+tiles on long sequences; short runs keep both. Dispatch derives the XCD count
+from the device CU count (38 CUs per CDNA3 XCD; the request's `num_cus`, else
+the live device when the build box is the requested arch) and keeps launch
+order for anything else. A wrong count costs speed, never correctness. The
+golden fixture pins a 228-CU device so it does not depend on the host.
+
+### Measured and not kept in the sixth pass
+
+- **One head x four query tiles**: the lowest weight traffic and the fastest
+  short shapes, but a large regression on chunked shapes with three 64-row
+  blocks per head that was not explained. Not selected.
+- **Larger XCD runs**: faster short shapes, slower long full-prompt shapes.
+- **Accumulators in AGPRs at 32 rows per wave** (the Option 3 route): a
+  compile-only probe found LLVM spills whenever the accumulators are IR values
+  and a rescale exists; only an inline-asm MFMA into fixed AGPRs passes, and
+  only on llvm22. Not attempted on the kernel.
+
 ## Method
 
 Per lever, in order, with no deviation:
@@ -819,4 +892,6 @@ They are not deliverables and their output does not belong in this repository.
   32 rows per wave at 512 registers, asynchronous direct-to-LDS key tiles several
   tiles deep, and 64 KB of LDS at one workgroup per CU — need a one-workgroup-
   per-CU redesign rather than a lever on this layout.
-- **Fifth-pass timing ran on a 228-CU MI300A only.**
+- **Fifth- and sixth-pass timing ran on a 228-CU MI300A only.** The 8-XCD
+  order for a 304-CU MI300X is derived, not measured.
+- **The one-head x four-tile regression on chunked shapes is unexplained.**

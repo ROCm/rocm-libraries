@@ -41,6 +41,8 @@ def _req(**overrides) -> MLARequest:
         num_seqs=2,
         max_seqlen_k=96,
         arch="gfx942",
+        # Pinned so the XCD-aware order does not depend on the test host.
+        num_cus=228,
     )
     base.update(overrides)
     return MLARequest(**base)
@@ -255,19 +257,30 @@ class TestDispatchResult(unittest.TestCase):
         self.assertEqual(spec.r_kv, 512)
 
     def test_layout_selection(self):
-        # Dispatch makes exactly one choice: four heads per workgroup at
-        # block_q 16 when the head count divides by four, else the single-head
-        # spec defaults. Every other lever stays at its default.
-        spec = dispatch_mla(_req()).spec
-        self.assertEqual(spec.heads_per_wg, 4)
-        self.assertEqual(spec.num_warps, 4)
-        self.assertEqual(spec.block_q, 16)
-        self.assertEqual(spec.block_k, 16)
-        self.assertEqual(spec.r_kv_tile, 32)
-        fallback = dispatch_mla(_req(num_heads=6)).spec
+        # Dispatch makes one layout choice: two heads x two 16-query tiles per
+        # workgroup, one wave per (head, tile), when the head count is even,
+        # else the single-head spec defaults. Every other lever stays at its
+        # default.
+        for heads in (128, 64, 6):
+            with self.subTest(heads=heads):
+                spec = dispatch_mla(_req(num_heads=heads)).spec
+                self.assertEqual(spec.heads_per_wg, 2)
+                self.assertEqual(spec.q_tiles_per_wg, 2)
+                self.assertEqual(spec.num_warps, 4)
+                self.assertEqual(spec.block_q, 32)
+                self.assertEqual(spec.block_k, 16)
+                self.assertEqual(spec.r_kv_tile, 32)
+        fallback = dispatch_mla(_req(num_heads=5)).spec
         self.assertEqual(fallback.heads_per_wg, 1)
-        self.assertEqual(fallback.block_q, 32)
-        self.assertEqual(fallback.num_warps, 4)
+        self.assertEqual(fallback.q_tiles_per_wg, 1)
+        self.assertEqual(fallback.num_xcds, 0)
+
+    def test_xcd_count_from_cu_count(self):
+        # 38 CUs per CDNA3 XCD: MI300A (228) has 6, MI300X (304) 8. Anything
+        # else -- one XCD, a partitioned or unknown part -- keeps launch order.
+        for cus, xcds in ((228, 6), (304, 8), (38, 0), (100, 0)):
+            with self.subTest(cus=cus):
+                self.assertEqual(dispatch_mla(_req(num_cus=cus)).spec.num_xcds, xcds)
 
     def test_block_is_the_workgroup_the_spec_declares(self):
         result = dispatch_mla(_req())

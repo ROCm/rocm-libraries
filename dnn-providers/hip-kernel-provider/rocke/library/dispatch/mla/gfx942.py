@@ -41,20 +41,53 @@ from .common import (
 )
 
 
-# Heads per workgroup in the shipped layout (one wave per head).
-_HEADS_PER_WG = 4
+# Shipped one-wave-per-head layout: a workgroup holds _HEADS_PER_WG heads x
+# _Q_TILES_PER_WG tiles of 16 queries, one wave per (head, tile).
+_HEADS_PER_WG = 2
+_Q_TILES_PER_WG = 2
+
+# CUs per XCD on CDNA3 (MI300A has 6 XCDs, MI300X 8).
+_CUS_PER_XCD = 38
+
+
+def _resolve_num_xcds(req: MLARequest) -> int:
+    """XCD count for the workgroup reorder, or 0 to keep launch order.
+
+    Taken from ``req.num_cus`` when the caller sets it, else from the live
+    device -- but only when the build box is the requested arch, so a
+    cross-compile never bakes another part's count into the kernel. A CU count
+    that is not a whole number of CDNA3 XCDs (a partitioned device, an
+    unknown part) keeps launch order; a single XCD needs no reorder.
+    """
+    n = int(req.num_cus)
+    if n <= 0:
+        try:
+            from rocke.runtime.hip_module import get_device_arch, get_device_num_cus
+
+            if (get_device_arch() or "").split(":")[0] == req.arch.split(":")[0]:
+                n = int(get_device_num_cus() or 0)
+        except Exception:
+            n = 0
+    if n <= 0 or n % _CUS_PER_XCD:
+        return 0
+    xcds = n // _CUS_PER_XCD
+    return xcds if xcds > 1 else 0
 
 
 def _spec_for(req: MLARequest) -> MlaPrefillSpec:
     """Build the spec dispatch ships for ``req``.
 
-    One measured layout choice and nothing else: when the head count divides
-    by ``_HEADS_PER_WG``, the workgroup takes four heads at ``block_q = 16``,
-    one wave per head, staging each key tile once for all four. It measured
-    faster than the single-head default on every DeepSeek-V3 and Kimi-K2 shape
-    in the benchmark set. Otherwise -- or if admission refuses it -- the
-    remaining levers stay at their :class:`MlaPrefillSpec` defaults, the
-    single-head layout. Nothing else is tuned per request.
+    The one-wave-per-head layout with two heads x two 16-query tiles per
+    workgroup: each pair of waves shares its head's W_UK / W_UV fetches and
+    epilogue staging, halving the per-row weight traffic of four heads x one
+    tile, and each staged key tile still feeds 64 query rows. (One head x four
+    tiles cuts the weights further but measured a large regression on some
+    chunked shapes.) The
+    workgroup order is made XCD-aware when the device's XCD count is known
+    (:func:`_resolve_num_xcds`). If the head count does not divide or
+    admission refuses the layout, the remaining levers stay at their
+    :class:`MlaPrefillSpec` defaults, the single-head layout. Nothing else is
+    tuned per request.
     """
     base = MlaPrefillSpec(
         num_heads=req.num_heads,
@@ -68,7 +101,12 @@ def _spec_for(req: MLARequest) -> MlaPrefillSpec:
     )
     if req.num_heads % _HEADS_PER_WG == 0:
         packed = dataclasses.replace(
-            base, heads_per_wg=_HEADS_PER_WG, num_warps=_HEADS_PER_WG, block_q=16
+            base,
+            heads_per_wg=_HEADS_PER_WG,
+            q_tiles_per_wg=_Q_TILES_PER_WG,
+            num_warps=_HEADS_PER_WG * _Q_TILES_PER_WG,
+            block_q=16 * _Q_TILES_PER_WG,
+            num_xcds=_resolve_num_xcds(req),
         )
         if supports_mla_prefill(packed, arch=req.arch)[0]:
             return packed
