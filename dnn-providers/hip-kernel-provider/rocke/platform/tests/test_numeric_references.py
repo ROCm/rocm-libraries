@@ -166,9 +166,7 @@ class TestDenseAttentionReference(unittest.TestCase):
         base = dense_attention_reference(Q, K, V, causal=True)
         np.testing.assert_array_equal(
             base,
-            dense_attention_reference(
-                Q, K, V, causal=True, seqlen_q=Sq, seqlen_kv=Sk
-            ),
+            dense_attention_reference(Q, K, V, causal=True, seqlen_q=Sq, seqlen_kv=Sk),
         )
 
     def test_out_dtype_none_is_fp32_else_casts(self):
