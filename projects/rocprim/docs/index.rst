@@ -38,6 +38,7 @@ The rocPRIM project is located in https://github.com/ROCm/rocm-libraries/tree/de
     * :ref:`glossary`
     * :doc:`rocPRIM precision support <./reference/data-type-support>`
     * :ref:`reference`
+
       * :ref:`Iterators <iterators>` 
       * :ref:`Intrinsics <intrinsics>` 
       * :ref:`Utility types <types>`
