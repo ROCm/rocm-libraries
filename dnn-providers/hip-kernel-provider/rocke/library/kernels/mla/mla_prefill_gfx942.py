@@ -85,7 +85,16 @@ import math
 from dataclasses import dataclass
 from typing import Tuple
 
-from rocke.core.ir import BF16, F32, I32, IRBuilder, KernelDef, PtrType, Value
+from rocke.core.ir import (
+    BF16,
+    F32,
+    I32,
+    IRBuilder,
+    KernelDef,
+    PtrType,
+    Value,
+    VectorType,
+)
 from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
     binary_search_seq_idx as _binary_search_seq_idx,
@@ -194,6 +203,37 @@ SCORE_SGB_GROUP = 9
 # Without them the kernel fits 256 VGPRs, two waves per SIMD. At block_q == 32
 # the accumulator alone is 256 VGPRs and the kernel spills either way.
 HPW_AGPR_ALLOC = (0, 0)
+
+# Software pipelining of the one-wave-per-head k-loop. The loop sits at the
+# 256-VGPR line that keeps two workgroups per CU, so the backend scheduler
+# cannot find registers to run LDS reads ahead on its own: left alone it waits
+# on every read just before the MFMA that consumes it. The loop is therefore
+# emitted already pipelined, with ``sched_barrier`` fences that stop the
+# scheduler from sinking the reads back down to their uses.
+#
+# Score k-steps whose ``kv_lds`` / ``qr_lds`` reads are issued ahead of the
+# current k-step's MFMA.
+HPW_SCORE_PREFETCH = 8
+# k-steps between fences. Fencing every step keeps each 8 B read separate;
+# a coarser fence lets adjacent k-steps merge into one ``ds_read2_b64``.
+HPW_SCORE_FENCE_EVERY = 4
+# PV read groups (four 8 B reads feeding four MFMAs) issued ahead. The first
+# group is issued before the softmax, so its latency hides behind the
+# softmax's VALU and cross-lane reduction. Two groups ahead spills.
+HPW_PV_PREFETCH = 1
+# Query-absorb r-tiles whose W_UK loads are issued ahead of the current
+# r-tile's MFMAs, so the prologue does not expose one global round trip per
+# r-tile.
+HPW_ABSORB_PREFETCH = 4
+
+# Lazy softmax rescale, in log2 units. The running max only moves -- and the
+# 128-register latent accumulator is only rescaled -- when a row's new max
+# exceeds the max in use by more than this. Otherwise the stale max is kept
+# and probabilities may reach 2**HPW_LAZY_TAU, which bf16 P and the f32
+# accumulator and row sum hold without loss; the final 1/l normalisation and
+# the LSE use the same max, so the result is unchanged. In causal prefill the
+# max settles after the first few key tiles, so most tiles skip the rescale.
+HPW_LAZY_TAU = 8.0
 
 # v columns of W_UV staged per epilogue round in the one-wave-per-head layout.
 # Each round holds a 64-row latent block for every head: 32 columns keep that
@@ -306,6 +346,14 @@ class MlaPrefillSpec:
     # cross-wave combine. The query absorb and the W_UV projection then stay
     # inside the wave as well. Requires ``num_warps == heads_per_wg``.
     heads_per_wg: int = 1
+    # Unfused head projections. False (the default) is the fused kernel: it
+    # takes the projected query and ``W_UK`` and applies both head projections
+    # itself. True takes the absorbed query ``Qa = [Q_nope @ W_UK_nopeᵀ |
+    # Q_rope]`` (``[total_q, H, r_kv + d_rope]``) and writes the normalized
+    # latent output (``[total_q, H, r_kv]``) plus the LSE; the caller runs both
+    # projections as batched GEMMs. One-wave-per-head layout only
+    # (``heads_per_wg > 1``). See :func:`mla_prefill_fwd_signature`.
+    absorbed_query: bool = False
 
     def __post_init__(self) -> None:
         """Reject specs that are impossible on *any* arch.
@@ -393,6 +441,7 @@ class MlaPrefillSpec:
             f"_w{self.num_warps}"
             + (f"_hpw{self.heads_per_wg}" if self.heads_per_wg != 1 else "")
             + f"_{self.dtype}"
+            + ("_aq" if self.absorbed_query else "")
         )
 
 
@@ -427,7 +476,13 @@ def _fwd_lds_bytes(spec: MlaPrefillSpec) -> int:
         # W_UV for every head, which pools onto them.
         kv_lds = elem * spec.block_k * (qa_cols + WT_PAD)
         qr_lds = elem * spec.heads_per_wg * spec.block_q * (spec.d_rope + WT_PAD)
-        wt_all = elem * spec.heads_per_wg * EPI_VQ * (64 + WT_PAD)
+        # With absorbed_query there is no epilogue buffer: the latent goes
+        # straight from registers to global.
+        wt_all = (
+            0
+            if spec.absorbed_query
+            else elem * spec.heads_per_wg * EPI_VQ * (64 + WT_PAD)
+        )
         return -(-max(kv_lds + qr_lds, wt_all) // 16) * 16
     m_tiles = max(1, spec.block_q // MFMA_M)
     wq_lds = elem * spec.r_kv_tile * (spec.d_nope + V8_PAD)
@@ -482,6 +537,11 @@ def supports_mla_prefill(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, str]
     # K-dimension requirement; there is nothing extra to demand for the K axis.
     if spec.heads_per_wg > 1:
         return _supports_heads_per_wg(spec)
+    if spec.absorbed_query:
+        return False, (
+            "absorbed_query is implemented for the one-wave-per-head layout "
+            f"only, got heads_per_wg={spec.heads_per_wg}"
+        )
     #
     # Each of the three GEMMs whose n-axis is split across waves needs that
     # split to be exact -- a wave owns [w * per_wave, (w+1) * per_wave) with no
@@ -594,9 +654,10 @@ def _supports_heads_per_wg(spec: MlaPrefillSpec) -> tuple[bool, str]:
             f"heads_per_wg > 1 needs d_v a multiple of {EPI_VQ}, got {spec.d_v}"
         )
     threads = spec.threads
+    kr_w = 4 if (spec.block_k * spec.d_rope) % (threads * 4) == 0 else 2
     stages = {
         "c_kv tile": (spec.block_k * spec.r_kv, C_STAGE_W),
-        "k_rope tile": (spec.block_k * spec.d_rope, 4),
+        "k_rope tile": (spec.block_k * spec.d_rope, kr_w),
         "W_UV epilogue block": (spec.heads_per_wg * 64 * EPI_VQ, 32),
     }
     for name, (count, width) in stages.items():
@@ -986,8 +1047,30 @@ def mla_prefill_fwd_signature(spec: MlaPrefillSpec):
     ``max_k`` is unused by this kernel (``out``/``lse`` are indexed by packed
     token, not by key) but stays declared so the forward kernel and the probe
     share one 13-argument pack.
+
+    With ``spec.absorbed_query`` the pack has 12 arguments: there is no
+    ``w_uk_ptr``, ``qa_ptr`` replaces ``q_ptr`` and holds the absorbed query
+    ``[total_q, H, r_kv + d_rope]``, and ``out_ptr`` receives the normalized
+    latent output ``[total_q, H, r_kv]`` -- ``W_UV`` is applied by the caller.
     """
     io_dtype = "bf16" if spec.dtype == "bf16" else "f16"
+    if spec.absorbed_query:
+        return (
+            SignatureBuilder()
+            .ptr("out_ptr", io_dtype)
+            .ptr("lse_ptr", "f32")
+            .ptr("qa_ptr", io_dtype)
+            .ptr("c_kv_ptr", io_dtype)
+            .ptr("k_rope_ptr", io_dtype)
+            .ptr("cu_seqlens_q_ptr", "i32")
+            .ptr("cu_seqlens_k_ptr", "i32")
+            .ptr("block_table_ptr", "i32")
+            .scalar("scale", "f32")
+            .scalar("num_seqs", "i32")
+            .scalar("block_table_stride", "i32")
+            .scalar("max_k", "i32")
+            .build()
+        )
     return (
         SignatureBuilder()
         .ptr("out_ptr", io_dtype)
@@ -2112,6 +2195,23 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
     return b.kernel
 
 
+def _bf16x4_rne_finite(b: IRBuilder, vals) -> Value:
+    """Four finite f32 -> ``<4 x bf16>``, round-to-nearest-even, no NaN path.
+
+    gfx942 has no f32 -> bf16 convert, and ``fptrunc`` lowers to five VALU per
+    element because it must preserve NaN. Softmax probabilities are finite,
+    so the rounding is two integer ops per element and one ``v_perm`` per pair.
+    """
+    rounded = []
+    for v in vals:
+        bits = b.bitcast(v, I32)
+        lsb = b.land(b.lshr(bits, b.const_i32(16)), b.const_i32(1))
+        rounded.append(b.add(b.add(bits, b.const_i32(0x7FFF)), lsb))
+    sel = b.const_i32(0x07060302)  # high halves: [lo = src1, hi = src0]
+    words = [b.perm_b32(rounded[2 * j + 1], rounded[2 * j], sel) for j in range(2)]
+    return b.vec_bitcast(b.vec_pack(words, I32), VectorType(BF16, 4))
+
+
 def _pick4(b: IRBuilder, xs, e: int, dtype) -> Value:
     """Element ``e`` of each of four vectors, packed into one four-wide vector."""
     return b.vec_pack([b.vec_extract(x, e) for x in xs], dtype)
@@ -2181,8 +2281,15 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
     lse = b.param(
         "lse_ptr", PtrType(F32, "global"), noalias=True, writeonly=True, align=16
     )
+    # Unfused: the query arrives absorbed (qa_ptr, QA_COLS wide), there is no
+    # W_UK, and out_ptr receives the normalized latent output (R_KV wide).
+    UNFUSED = spec.absorbed_query
     q_ptr = b.param(
-        "q_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+        "qa_ptr" if UNFUSED else "q_ptr",
+        PtrType(dtype, "global"),
+        noalias=True,
+        readonly=True,
+        align=16,
     )
     c_kv = b.param(
         "c_kv_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
@@ -2190,9 +2297,11 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
     k_rope = b.param(
         "k_rope_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
     )
-    w_uk = b.param(
-        "w_uk_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
-    )
+    w_uk = None
+    if not UNFUSED:
+        w_uk = b.param(
+            "w_uk_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+        )
     cu_q = b.param("cu_seqlens_q_ptr", PtrType(I32, "global"), readonly=True, align=4)
     cu_k = b.param("cu_seqlens_k_ptr", PtrType(I32, "global"), readonly=True, align=4)
     block_table = b.param(
@@ -2265,7 +2374,32 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
     q_last_row = b.sub(s_q, b.const_i32(1))
     q_frags = []
     rope_frags = []
-    for mt in range(M_TILES):
+    # Unfused: Qa is read in exactly the score B layout -- four columns at
+    # 16 t + lane_kq for query lane % 16 -- so there is no absorb at all.
+    q_cols = QA_COLS if UNFUSED else HDQK
+    rope_col0 = R_KV if UNFUSED else D_NOPE
+    qa_frags = [[None] * M_TILES for _ in range(N_R_TILES)]
+    for mt in range(M_TILES if UNFUSED else 0):
+        q_local = b.add(qb_start, _shift(b, mt * MFMA_M, lane_row))
+        q_local = b.select(b.cmp_lt(q_local, s_q), q_local, q_last_row)
+        token = b.add(cu_q_start, q_local)
+        q_base = b.add(
+            b.mul(b.add(b.mul(token, b.const_i32(H)), head), b.const_i32(q_cols)),
+            lane_kq,
+        )
+        for t in range(N_R_TILES):
+            qa_frags[t][mt] = b.global_load_vN(
+                q_ptr, _shift(b, t * MFMA_K, q_base), dtype, 4
+            )
+        rope_frags.append(
+            [
+                b.global_load_vN(
+                    q_ptr, _shift(b, rope_col0 + j * MFMA_K, q_base), dtype, 4
+                )
+                for j in range(ROPE_K_ITERS)
+            ]
+        )
+    for mt in range(0 if UNFUSED else M_TILES):
         q_local = b.add(qb_start, _shift(b, mt * MFMA_M, lane_row))
         q_local = b.select(b.cmp_lt(q_local, s_q), q_local, q_last_row)
         token = b.add(cu_q_start, q_local)
@@ -2296,18 +2430,32 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
     # The C fragment holds r = 16 t + lane_kq + reg for query lane % 16 -- the
     # score GEMM's B layout for k-step t -- so it is used as is. Q_rope rides
     # in the last D_ROPE / 16 k-steps of the same reduction.
-    w_head_base = b.mul(b.mul(head, b.const_i32(R_KV)), b.const_i32(W_COLS))
-    w_lane = b.add(
-        b.add(w_head_base, b.mul(lane_row, b.const_i32(W_COLS))),
-        b.add(lane_kq, lane_kq),
-    )
-    qa_frags = [[None] * M_TILES for _ in range(N_R_TILES)]
-    for t in range(N_R_TILES):
+    if not UNFUSED:
+        w_head_base = b.mul(b.mul(head, b.const_i32(R_KV)), b.const_i32(W_COLS))
+        w_lane = b.add(
+            b.add(w_head_base, b.mul(lane_row, b.const_i32(W_COLS))),
+            b.add(lane_kq, lane_kq),
+        )
+
+    def _absorb_loads(t):
         w_row = _shift(b, t * MFMA_N * W_COLS, w_lane)
+        return [
+            b.global_load_vN(w_uk, _shift(b, pp * 2 * MFMA_K, w_row), dtype, 8)
+            for pp in range(NOPE_K_ITERS // 2)
+        ]
+
+    # The W_UK loads run HPW_ABSORB_PREFETCH r-tiles ahead of the MFMAs.
+    n_absorb = 0 if UNFUSED else N_R_TILES
+    absorb_pre = {
+        t: _absorb_loads(t) for t in range(min(HPW_ABSORB_PREFETCH, n_absorb))
+    }
+    for t in range(n_absorb):
         acc = [b.zero_vec_f32(4) for _ in range(M_TILES)]
+        if t + HPW_ABSORB_PREFETCH < n_absorb:
+            absorb_pre[t + HPW_ABSORB_PREFETCH] = _absorb_loads(t + HPW_ABSORB_PREFETCH)
+        v8s = absorb_pre.pop(t)
         a_vs = []
-        for pp in range(NOPE_K_ITERS // 2):
-            v8 = b.global_load_vN(w_uk, _shift(b, pp * 2 * MFMA_K, w_row), dtype, 8)
+        for v8 in v8s:
             a_vs += [_half4(b, v8, h, dtype) for h in range(2)]
         for kk in range(NOPE_K_ITERS):
             a_v = a_vs[kk]
@@ -2349,8 +2497,11 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
 
     c_chunks = (BK * R_KV) // (THREADS * C_STAGE_W)
     c_chunks_per_row = R_KV // C_STAGE_W
-    kr_chunks = (BK * D_ROPE) // (THREADS * 4)
-    kr_chunks_per_row = D_ROPE // 4
+    # k_rope is a quarter of the c_kv tile; at eight waves a 4-wide chunk per
+    # thread would over-cover it, so the chunk narrows to 2.
+    KR_W = 4 if (BK * D_ROPE) % (THREADS * 4) == 0 else 2
+    kr_chunks = (BK * D_ROPE) // (THREADS * KR_W)
+    kr_chunks_per_row = D_ROPE // KR_W
 
     # Chunk j of a thread is chunk 0 shifted by a whole number of rows
     # (THREADS is a multiple of the chunks per row, checked below), so every
@@ -2367,7 +2518,7 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
     c_r0 = b.mul(b.mod(tid, b.const_i32(c_chunks_per_row)), b.const_i32(C_STAGE_W))
     c_voff = b.mul(b.add(b.mul(c_m0, b.const_i32(R_KV)), c_r0), b.const_i32(2))
     kr_m0 = b.div(tid, b.const_i32(kr_chunks_per_row))
-    kr_d0 = b.mul(b.mod(tid, b.const_i32(kr_chunks_per_row)), b.const_i32(4))
+    kr_d0 = b.mul(b.mod(tid, b.const_i32(kr_chunks_per_row)), b.const_i32(KR_W))
     kr_voff = b.mul(b.add(b.mul(kr_m0, b.const_i32(D_ROPE)), kr_d0), b.const_i32(2))
 
     def _load_page(tile, *, guard=None):
@@ -2396,7 +2547,7 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
                 kr_voff,
                 _shift(b, j * KR_ROWS_PER_CHUNK * D_ROPE * 2, kr_soff),
                 dtype,
-                4,
+                KR_W,
             )
             for j in range(kr_chunks)
         ]
@@ -2409,7 +2560,7 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
         kr_col = b.add(kr_d0, b.const_i32(R_KV))
         for j in range(kr_chunks):
             m = _shift(b, j * KR_ROWS_PER_CHUNK, kr_m0)
-            b.smem_store_vN(kv_lds, [m, kr_col], staged[c_chunks + j], 4)
+            b.smem_store_vN(kv_lds, [m, kr_col], staged[c_chunks + j], KR_W)
 
     has_tiles = b.cmp_gt(n_k_tiles, b.const_i32(0))
     prologue = _stage_loads(_load_page(b.const_i32(0), guard=has_tiles))
@@ -2435,7 +2586,6 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
         _stage_store(staged)
         b.sync()
 
-        staged_next = _stage_loads(pg_next)
         nxt2 = b.add(k_tile, b.const_i32(2))
         nxt2 = b.select(
             b.cmp_lt(nxt2, n_k_tiles), nxt2, b.sub(n_k_tiles, b.const_i32(1))
@@ -2443,8 +2593,12 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
         pg_after = _load_page(nxt2)
 
         # ---- Sᵀ = [C | K_rope] · Qaᵀ, the wave's whole K reduction ------------
+        # Software-pipelined (see HPW_SCORE_PREFETCH): k-step kk + D's LDS
+        # reads are emitted before k-step kk's MFMA, and the fences keep the
+        # scheduler from sinking them back.
         s_acc = [[b.zero_vec_f32(4) for _ in range(K_TILES)] for _ in range(M_TILES)]
-        for kk in range(SCORE_K_ITERS):
+
+        def _score_operands(kk):
             col = _shift(b, kk * MFMA_K, lane_kq)
             if kk < N_R_TILES:
                 q_vs = qa_frags[kk]
@@ -2459,17 +2613,65 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
                     )
                     for mt in range(M_TILES)
                 ]
-            for kt in range(K_TILES):
-                b_v = b.smem_load_vN(
+            b_vs = [
+                b.smem_load_vN(
                     kv_lds, _shift(b, kt * MFMA_N, lane_row), col, dtype=dtype, n=4
                 )
+                for kt in range(K_TILES)
+            ]
+            return q_vs, b_vs
+
+        score_pre = {
+            kk: _score_operands(kk)
+            for kk in range(min(HPW_SCORE_PREFETCH, SCORE_K_ITERS))
+        }
+        for kk in range(SCORE_K_ITERS):
+            if kk + HPW_SCORE_PREFETCH < SCORE_K_ITERS:
+                score_pre[kk + HPW_SCORE_PREFETCH] = _score_operands(
+                    kk + HPW_SCORE_PREFETCH
+                )
+            q_vs, b_vs = score_pre.pop(kk)
+            for kt in range(K_TILES):
                 for mt in range(M_TILES):
                     s_acc[mt][kt] = _mfma_16x16x16(
-                        b, dtype, b_v, q_vs[mt], s_acc[mt][kt]
+                        b, dtype, b_vs[kt], q_vs[mt], s_acc[mt][kt]
                     )
-            if SCORE_K_ITERS % SCORE_SGB_GROUP == 0 and (kk + 1) % SCORE_SGB_GROUP == 0:
-                b.sched_group_barrier(_SGB_DS_READ, SCORE_SGB_GROUP * K_TILES, 0)
-                b.sched_group_barrier(_SGB_MFMA, SCORE_SGB_GROUP * M_TILES * K_TILES, 0)
+            if (kk + 1) % HPW_SCORE_FENCE_EVERY == 0:
+                b.sched_barrier(0)
+
+        # The next tile's staging loads go out only now: issued before the
+        # score, their registers would be live across it and crowd out the
+        # score read-ahead.
+        staged_next = _stage_loads(pg_next)
+
+        # ---- PV read groups ---------------------------------------------------
+        # The A operand wants four consecutive keys of one latent column, and
+        # kv_lds holds keys as rows. The latent rows of an MFMA tile are free
+        # to permute (the epilogue reads W_UV through the same permutation), so
+        # row m of tile 4 w + e is r = 64 w + 4 m + e: one 8 B read of a key
+        # row then hands a lane its element of four tiles, and four reads (one
+        # per key of the lane's k-group) feed four MFMAs -- instead of sixteen
+        # scalar reads. The first HPW_PV_PREFETCH groups are read here, ahead
+        # of the softmax, which hides their latency behind it.
+        pv_groups = [(kt, w) for kt in range(K_TILES) for w in range(N_R_TILES // 4)]
+
+        def _pv_reads(kt, w):
+            a_col = _shift(b, kt * MFMA_N, lane_kq)
+            return [
+                b.smem_load_vN(
+                    kv_lds,
+                    _shift(b, i, a_col),
+                    _shift(b, 64 * w, lane_row4),
+                    dtype=dtype,
+                    n=4,
+                )
+                for i in range(4)
+            ]
+
+        pv_pre = {
+            gi: _pv_reads(*pv_groups[gi])
+            for gi in range(min(HPW_PV_PREFETCH, len(pv_groups)))
+        }
 
         # ---- online softmax, one query per lane (as in the one-head kernel) ---
         if masked:
@@ -2504,6 +2706,10 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
             for v in s_v[1:]:
                 local_max = b.fmax(local_max, v)
             m_new = b.fmax(ms[mt], _query_reduce(b, local_max, combine="max"))
+            # Lazy rescale (HPW_LAZY_TAU): keep the max in use unless the new
+            # one is far enough above it.
+            need = b.fcmp("ogt", m_new, b.fadd(ms[mt], b.const_f32(HPW_LAZY_TAU)))
+            m_new = b.select(need, m_new, ms[mt])
             alpha = b.exp2_fast(b.fsub(ms[mt], m_new))
             if masked:
                 p_v = [
@@ -2521,46 +2727,52 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
                     b.fmul(ls[mt], alpha), _query_reduce(b, local_sum, combine="sum")
                 )
             )
-            for t in range(N_R_TILES):
-                for r in range(C_PER_LANE):
-                    old = b.vec_extract(accs[mt][t], r)
-                    accs[mt][t] = b.vec_insert(accs[mt][t], b.fmul(old, alpha), r)
+            # The accumulator rescale runs only when some lane of the wave moved
+            # its max: a zero- or one-trip loop on a wave-uniform count, which
+            # carries the accumulator through as its iteration arguments. Lanes
+            # that did not move have alpha == 1.
+            any_need = b.wave_any(b.select(need, b.const_i32(1), b.const_i32(0)))
+            rs_loop = b.scf_for_iter(
+                b.const_i32(0),
+                b.select(
+                    b.cmp_ne(any_need, b.const_i32(0)),
+                    b.const_i32(1),
+                    b.const_i32(0),
+                ),
+                b.const_i32(1),
+                iter_args=[
+                    (f"rs{int(masked)}{mt}_{t}", accs[mt][t]) for t in range(N_R_TILES)
+                ],
+                iv_name=f"rescale{int(masked)}{mt}",
+            )
+            with rs_loop as (_, rs_state):
+                scaled = []
+                for t in range(N_R_TILES):
+                    v = rs_state[t]
+                    for r in range(C_PER_LANE):
+                        v = b.vec_insert(v, b.fmul(b.vec_extract(v, r), alpha), r)
+                    scaled.append(v)
+                b.scf_yield(*scaled)
+            accs[mt] = list(rs_loop.results)
             for kt in range(K_TILES):
-                p_frags[mt][kt] = b.vec_trunc_f32_to_bf16(
-                    b.vec_pack(p_v[kt * C_PER_LANE : (kt + 1) * C_PER_LANE], F32)
+                p_frags[mt][kt] = _bf16x4_rne_finite(
+                    b, p_v[kt * C_PER_LANE : (kt + 1) * C_PER_LANE]
                 )
 
         # ---- accᵀ += Cᵀ · Pᵀ over every latent tile -------------------------
-        # The A operand wants four consecutive keys of one latent column, and
-        # kv_lds holds keys as rows. The latent rows of an MFMA tile are free
-        # to permute (the epilogue reads W_UV through the same permutation), so
-        # row m of tile 4 w + e is r = 64 w + 4 m + e: one 8 B read of a key
-        # row then hands a lane its element of four tiles, and four reads (one
-        # per key of the lane's k-group) feed four MFMAs -- instead of sixteen
-        # scalar reads.
-        for kt in range(K_TILES):
-            a_col = _shift(b, kt * MFMA_N, lane_kq)
-            for w in range(N_R_TILES // 4):
-                xs = [
-                    b.smem_load_vN(
-                        kv_lds,
-                        _shift(b, i, a_col),
-                        _shift(b, 64 * w, lane_row4),
-                        dtype=dtype,
-                        n=4,
+        for gi, (kt, w) in enumerate(pv_groups):
+            if gi + HPW_PV_PREFETCH < len(pv_groups):
+                pv_pre[gi + HPW_PV_PREFETCH] = _pv_reads(
+                    *pv_groups[gi + HPW_PV_PREFETCH]
+                )
+            xs = pv_pre.pop(gi)
+            for e in range(4):
+                c_t = _pick4(b, xs, e, dtype)
+                for mt in range(M_TILES):
+                    accs[mt][4 * w + e] = _mfma_16x16x16(
+                        b, dtype, c_t, p_frags[mt][kt], accs[mt][4 * w + e]
                     )
-                    for i in range(4)
-                ]
-                for e in range(4):
-                    c_t = _pick4(b, xs, e, dtype)
-                    for mt in range(M_TILES):
-                        accs[mt][4 * w + e] = _mfma_16x16x16(
-                            b, dtype, c_t, p_frags[mt][kt], accs[mt][4 * w + e]
-                        )
-                # Keep the reads one group ahead of their MFMAs rather than
-                # hoisting all of them: the latter spills.
-                b.sched_group_barrier(_SGB_DS_READ, 2, 0)
-                b.sched_group_barrier(_SGB_MFMA, 4 * M_TILES, 0)
+            b.sched_barrier(0)
 
         flat_acc = [accs[mt][t] for mt in range(M_TILES) for t in range(N_R_TILES)]
         b.scf_yield(*new_ms, *new_ls, *flat_acc, *staged_next, pg_after)
@@ -2598,109 +2810,143 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
     ]
     inv = [_safe_inv_l(b, ls[mt]) for mt in range(M_TILES)]
 
-    # outᵀ = W_UVᵀ · accᵀ. accᵀ tile t is already the B fragment for its
-    # latent k-step; only the A side needs LDS, because MFMA reads W_UVᵀ with r
-    # contiguous and global memory has v contiguous.
-    #
-    # With the PV's row permutation, tile 4 w + e holds r = 64 w + 16 g +
-    # 4 reg + e in lane group g, so a lane's W_UVᵀ fragment for that k-step is
-    # the four r of one 16-row block that share r % 4 == e. Each round stages
-    # a 64-row latent block w and a VQ-wide v window for every head (row =
-    # head-in-group * VQ + v), with block column p = 16 g + 4 e + i holding
-    # r = 64 w + 16 g + 4 i + e, so the fragment is one contiguous 8 B read.
-    # A staging thread loads those four W_UV rows (stride 4) for eight v and
-    # transposes the 4 x 8 block in registers into eight 8 B stores. Allocated
-    # after the loop so it pools onto the loop's buffers; each round's opening
-    # barrier fences their last readers.
-    wt_lds = b.smem_alloc(dtype, [HPW * EPI_VQ, 64 + WT_PAD], name_hint="wt_lds")
-    out_acc = [[b.zero_vec_f32(4) for _ in range(N_V_TILES)] for _ in range(M_TILES)]
-    acc_bf = [[None] * N_R_TILES for _ in range(M_TILES)]
-    grp_base = b.mul(b.mul(head_grp, b.const_i32(HPW * R_KV)), b.const_i32(W_COLS))
-    per_head = 16 * (EPI_VQ // 8)
-    stagers = []
-    for j in range((HPW * 64 * EPI_VQ) // (THREADS * 32)):
-        c = b.add(tid, b.const_i32(j * THREADS))
-        hh = b.div(c, b.const_i32(per_head))
-        rem = b.mod(c, b.const_i32(per_head))
-        g = b.div(b.mod(rem, b.const_i32(16)), b.const_i32(4))
-        e = b.mod(rem, b.const_i32(4))
-        n0 = b.mul(b.div(rem, b.const_i32(16)), b.const_i32(8))
-        # W_UK[head_grp * HPW + hh, 16 g + 4 i + e (+ 64 w), D_NOPE + n0 (+ vq)]
-        src = b.add(
-            grp_base,
-            b.add(
-                b.mul(
-                    b.add(
-                        b.mul(hh, b.const_i32(R_KV)),
-                        b.add(b.mul(g, b.const_i32(16)), e),
-                    ),
-                    b.const_i32(W_COLS),
-                ),
-                _shift(b, D_NOPE, n0),
-            ),
-        )
-        row0 = b.add(b.mul(hh, b.const_i32(EPI_VQ)), n0)
-        p_col = b.add(b.mul(g, b.const_i32(16)), b.mul(e, b.const_i32(4)))
-        stagers.append((src, row0, p_col))
-    a_rows = [
-        b.add(b.mul(wave, b.const_i32(EPI_VQ)), _shift(b, vl * MFMA_N, lane_row))
-        for vl in range(EPI_VQ // MFMA_N)
-    ]
-    a_cols = [_shift(b, 4 * e, b.mul(lane_kq, b.const_i32(4))) for e in range(4)]
-    for w in range(N_R_TILES // 4):
-        for vq in range(D_V // EPI_VQ):
-            b.sync()
-            for src, row0, p_col in stagers:
-                rows8 = [
-                    b.global_load_vN(
-                        w_uk,
-                        _shift(b, (64 * w + 4 * i) * W_COLS + vq * EPI_VQ, src),
-                        dtype,
-                        8,
-                    )
-                    for i in range(4)
-                ]
-                for e8 in range(8):
-                    b.smem_store_vN(
-                        wt_lds,
-                        [_shift(b, e8, row0), p_col],
-                        b.vec_pack([b.vec_extract(r8, e8) for r8 in rows8], dtype),
-                        4,
-                    )
-            b.sync()
-            for e in range(4):
-                t = 4 * w + e
-                for mt in range(M_TILES):
-                    if acc_bf[mt][t] is None:
-                        acc_bf[mt][t] = b.vec_trunc_f32_to_bf16(accs[mt][t])
-                for vl in range(EPI_VQ // MFMA_N):
-                    a_v = b.smem_load_vN(
-                        wt_lds, a_rows[vl], a_cols[e], dtype=dtype, n=4
-                    )
-                    vt = vq * (EPI_VQ // MFMA_N) + vl
-                    for mt in range(M_TILES):
-                        out_acc[mt][vt] = _mfma_16x16x16(
-                            b, dtype, a_v, acc_bf[mt][t], out_acc[mt][vt]
-                        )
-
-    for vt in range(N_V_TILES):
-        col = _shift(b, vt * MFMA_N, lane_kq)
+    if UNFUSED:
+        # The normalized latent goes straight from registers to global. With
+        # the PV's row permutation, register reg of tile 4 w + e holds
+        # r = 64 w + 16 g + 4 reg + e in lane group g, so the four tiles of one
+        # w hand a lane four consecutive r: one 8 B store per (w, reg).
+        r_lane = b.mul(lane_kq, b.const_i32(4))
         for mt in range(M_TILES):
             q_local = b.add(qb_start, _shift(b, mt * MFMA_M, lane_row))
-            vals = b.vec_pack(
-                [
-                    b.fmul(b.vec_extract(out_acc[mt][vt], r), inv[mt])
-                    for r in range(C_PER_LANE)
-                ],
-                F32,
-            )
             with b.scf_if(b.cmp_lt(q_local, s_q)):
                 token = b.add(cu_q_start, q_local)
-                idx = b.add(b.mul(token, b.const_i32(H * D_V)), col)
-                idx = b.add(idx, b.mul(head, b.const_i32(D_V)))
-                b.global_store_vN(
-                    out, idx, b.vec_trunc_f32_to_bf16(vals), C_PER_LANE, align=8
+                row = b.mul(
+                    b.add(b.mul(token, b.const_i32(H)), head), b.const_i32(R_KV)
                 )
+                row = b.add(row, r_lane)
+                for w in range(N_R_TILES // 4):
+                    for reg in range(C_PER_LANE):
+                        vals = b.vec_pack(
+                            [
+                                b.fmul(b.vec_extract(accs[mt][4 * w + e], reg), inv[mt])
+                                for e in range(4)
+                            ],
+                            F32,
+                        )
+                        b.global_store_vN(
+                            out,
+                            _shift(b, 64 * w + 4 * reg, row),
+                            b.vec_trunc_f32_to_bf16(vals),
+                            4,
+                            align=8,
+                        )
+
+    if not UNFUSED:
+        # outᵀ = W_UVᵀ · accᵀ. accᵀ tile t is already the B fragment for its
+        # latent k-step; only the A side needs LDS, because MFMA reads W_UVᵀ with r
+        # contiguous and global memory has v contiguous.
+        #
+        # With the PV's row permutation, tile 4 w + e holds r = 64 w + 16 g +
+        # 4 reg + e in lane group g, so a lane's W_UVᵀ fragment for that k-step is
+        # the four r of one 16-row block that share r % 4 == e. Each round stages
+        # a 64-row latent block w and a VQ-wide v window for every head (row =
+        # head-in-group * VQ + v), with block column p = 16 g + 4 e + i holding
+        # r = 64 w + 16 g + 4 i + e, so the fragment is one contiguous 8 B read.
+        # A staging thread loads those four W_UV rows (stride 4) for eight v and
+        # transposes the 4 x 8 block in registers into eight 8 B stores. Allocated
+        # after the loop so it pools onto the loop's buffers; each round's opening
+        # barrier fences their last readers.
+        wt_lds = b.smem_alloc(dtype, [HPW * EPI_VQ, 64 + WT_PAD], name_hint="wt_lds")
+        out_acc = [
+            [b.zero_vec_f32(4) for _ in range(N_V_TILES)] for _ in range(M_TILES)
+        ]
+        acc_bf = [[None] * N_R_TILES for _ in range(M_TILES)]
+        grp_base = b.mul(b.mul(head_grp, b.const_i32(HPW * R_KV)), b.const_i32(W_COLS))
+        per_head = 16 * (EPI_VQ // 8)
+        stagers = []
+        for j in range((HPW * 64 * EPI_VQ) // (THREADS * 32)):
+            c = b.add(tid, b.const_i32(j * THREADS))
+            hh = b.div(c, b.const_i32(per_head))
+            rem = b.mod(c, b.const_i32(per_head))
+            g = b.div(b.mod(rem, b.const_i32(16)), b.const_i32(4))
+            e = b.mod(rem, b.const_i32(4))
+            n0 = b.mul(b.div(rem, b.const_i32(16)), b.const_i32(8))
+            # W_UK[head_grp * HPW + hh, 16 g + 4 i + e (+ 64 w), D_NOPE + n0 (+ vq)]
+            src = b.add(
+                grp_base,
+                b.add(
+                    b.mul(
+                        b.add(
+                            b.mul(hh, b.const_i32(R_KV)),
+                            b.add(b.mul(g, b.const_i32(16)), e),
+                        ),
+                        b.const_i32(W_COLS),
+                    ),
+                    _shift(b, D_NOPE, n0),
+                ),
+            )
+            row0 = b.add(b.mul(hh, b.const_i32(EPI_VQ)), n0)
+            p_col = b.add(b.mul(g, b.const_i32(16)), b.mul(e, b.const_i32(4)))
+            stagers.append((src, row0, p_col))
+        a_rows = [
+            b.add(b.mul(wave, b.const_i32(EPI_VQ)), _shift(b, vl * MFMA_N, lane_row))
+            for vl in range(EPI_VQ // MFMA_N)
+        ]
+        a_cols = [_shift(b, 4 * e, b.mul(lane_kq, b.const_i32(4))) for e in range(4)]
+        for w in range(N_R_TILES // 4):
+            for vq in range(D_V // EPI_VQ):
+                b.sync()
+                for src, row0, p_col in stagers:
+                    rows8 = [
+                        b.global_load_vN(
+                            w_uk,
+                            _shift(b, (64 * w + 4 * i) * W_COLS + vq * EPI_VQ, src),
+                            dtype,
+                            8,
+                        )
+                        for i in range(4)
+                    ]
+                    for e8 in range(8):
+                        b.smem_store_vN(
+                            wt_lds,
+                            [_shift(b, e8, row0), p_col],
+                            b.vec_pack([b.vec_extract(r8, e8) for r8 in rows8], dtype),
+                            4,
+                        )
+                b.sync()
+                for e in range(4):
+                    t = 4 * w + e
+                    for mt in range(M_TILES):
+                        if acc_bf[mt][t] is None:
+                            acc_bf[mt][t] = b.vec_trunc_f32_to_bf16(accs[mt][t])
+                    for vl in range(EPI_VQ // MFMA_N):
+                        a_v = b.smem_load_vN(
+                            wt_lds, a_rows[vl], a_cols[e], dtype=dtype, n=4
+                        )
+                        vt = vq * (EPI_VQ // MFMA_N) + vl
+                        for mt in range(M_TILES):
+                            out_acc[mt][vt] = _mfma_16x16x16(
+                                b, dtype, a_v, acc_bf[mt][t], out_acc[mt][vt]
+                            )
+
+        for vt in range(N_V_TILES):
+            col = _shift(b, vt * MFMA_N, lane_kq)
+            for mt in range(M_TILES):
+                q_local = b.add(qb_start, _shift(b, mt * MFMA_M, lane_row))
+                vals = b.vec_pack(
+                    [
+                        b.fmul(b.vec_extract(out_acc[mt][vt], r), inv[mt])
+                        for r in range(C_PER_LANE)
+                    ],
+                    F32,
+                )
+                with b.scf_if(b.cmp_lt(q_local, s_q)):
+                    token = b.add(cu_q_start, q_local)
+                    idx = b.add(b.mul(token, b.const_i32(H * D_V)), col)
+                    idx = b.add(idx, b.mul(head, b.const_i32(D_V)))
+                    b.global_store_vN(
+                        out, idx, b.vec_trunc_f32_to_bf16(vals), C_PER_LANE, align=8
+                    )
 
     # One writer per (query, head): the wave's first 16-lane group.
     with b.scf_if(b.cmp_lt(lane, b.const_i32(16))):
