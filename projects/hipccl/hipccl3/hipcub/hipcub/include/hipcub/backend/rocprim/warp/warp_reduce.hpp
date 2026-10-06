@@ -75,8 +75,8 @@ public:
         return input;
     }
 
-    template<typename InputT,
-             HIPCUB_REQUIRES(HIPCUB_TRAIT(detail::is_fixed_size_random_access_range, InputT))>
+    HIPCUB_TEMPLATE(typename InputT)
+    HIPCUB_REQUIRES(HIPCUB_TRAIT(detail::is_fixed_size_random_access_range, InputT))
     HIPCUB_DEVICE
     inline T Sum(const InputT& input)
     {
@@ -99,8 +99,8 @@ public:
         return input;
     }
 
-    template<typename InputT,
-             HIPCUB_REQUIRES(HIPCUB_TRAIT(detail::is_fixed_size_random_access_range, InputT))>
+    HIPCUB_TEMPLATE(typename InputT)
+    HIPCUB_REQUIRES(HIPCUB_TRAIT(detail::is_fixed_size_random_access_range, InputT))
     HIPCUB_DEVICE
     inline T Max(const InputT& input)
     {
@@ -123,8 +123,8 @@ public:
         return input;
     }
 
-    template<typename InputT,
-             HIPCUB_REQUIRES(HIPCUB_TRAIT(detail::is_fixed_size_random_access_range, InputT))>
+    HIPCUB_TEMPLATE(typename InputT)
+    HIPCUB_REQUIRES(HIPCUB_TRAIT(detail::is_fixed_size_random_access_range, InputT))
     HIPCUB_DEVICE
     inline T Min(const InputT& input)
     {
@@ -156,9 +156,8 @@ public:
         return input;
     }
 
-    template<typename InputT,
-             typename ReduceOp,
-             HIPCUB_REQUIRES(HIPCUB_TRAIT(detail::is_fixed_size_random_access_range, InputT))>
+    HIPCUB_TEMPLATE(typename InputT, typename ReduceOp)
+    HIPCUB_REQUIRES(HIPCUB_TRAIT(detail::is_fixed_size_random_access_range, InputT))
     HIPCUB_DEVICE
     inline T Reduce(const InputT& input, ReduceOp reduce_op)
     {
@@ -225,8 +224,8 @@ public:
         return input;
     }
 
-    template<typename InputT,
-             HIPCUB_REQUIRES(HIPCUB_TRAIT(detail::is_fixed_size_random_access_range, InputT))>
+    HIPCUB_TEMPLATE(typename InputT)
+    HIPCUB_REQUIRES(HIPCUB_TRAIT(detail::is_fixed_size_random_access_range, InputT))
     HIPCUB_DEVICE
     inline T Sum(const InputT& input)
     {
@@ -246,8 +245,8 @@ public:
         return input;
     }
 
-    template<typename InputT,
-             HIPCUB_REQUIRES(HIPCUB_TRAIT(detail::is_fixed_size_random_access_range, InputT))>
+    HIPCUB_TEMPLATE(typename InputT)
+    HIPCUB_REQUIRES(HIPCUB_TRAIT(detail::is_fixed_size_random_access_range, InputT))
     HIPCUB_DEVICE
     inline T Max(const InputT& input)
     {
@@ -267,8 +266,8 @@ public:
         return input;
     }
 
-    template<typename InputT,
-             HIPCUB_REQUIRES(HIPCUB_TRAIT(detail::is_fixed_size_random_access_range, InputT))>
+    HIPCUB_TEMPLATE(typename InputT)
+    HIPCUB_REQUIRES(HIPCUB_TRAIT(detail::is_fixed_size_random_access_range, InputT))
     HIPCUB_DEVICE
     inline T Min(const InputT& input)
     {
@@ -296,9 +295,8 @@ public:
         return input;
     }
 
-    template<typename InputT,
-             typename ReduceOp,
-             HIPCUB_REQUIRES(HIPCUB_TRAIT(detail::is_fixed_size_random_access_range, InputT))>
+    HIPCUB_TEMPLATE(typename InputT, typename ReduceOp)
+    HIPCUB_REQUIRES(HIPCUB_TRAIT(detail::is_fixed_size_random_access_range, InputT))
     HIPCUB_DEVICE
     inline T Reduce(const InputT& input, ReduceOp reduce_op)
     {
