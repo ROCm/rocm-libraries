@@ -147,7 +147,8 @@ struct ABTransferThreadTiles
         }
     }
 
-    __host__ __device__ static constexpr auto GetBlockDescriptor()
+    template <typename DeviceArch>
+    __host__ __device__ static constexpr auto GetBlockDescriptorImpl(DeviceArch)
     {
         // A matrix in LDS memory, dst of blockwise copy
         if constexpr(UseBlockPaddingAB)
@@ -304,6 +305,217 @@ struct ABTransferThreadTiles
 
             return ab_lds_block_desc_abk0_mn_abk1;
         }
+    }
+
+    template <>
+    __device__ constexpr auto GetBlockDescriptorImpl<gfx125_t>(gfx125_t)
+    {
+        constexpr index_t KPerBlockInByte = KPerBlock * sizeof(LDSTypeAB) / ABPackedSize;
+        constexpr index_t LdsSize         = get_n_lds_banks(gfx125_t{}) * 4 / KPerBlockInByte;
+        constexpr bool EnableLdsLayer     = ABBlockTransferThreadClusterLengths_ABK0_MN_ABK1{}[0] *
+                                            ABBlockTransferThreadClusterLengths_ABK0_MN_ABK1{}[1] *
+                                            ABBlockTransferThreadClusterLengths_ABK0_MN_ABK1{}[2] ==
+                                        BlockSize;
+        constexpr index_t MNLdsLayer = (EnableLdsLayer == false) || (LdsSize < 1) ? 1 : LdsSize;
+        constexpr index_t MNPerThread =
+            MNPerBlock / ABBlockTransferThreadClusterLengths_ABK0_MN_ABK1{}[1];
+        constexpr index_t MNPerThreadLayer = [&]() {
+            if constexpr(MNPerThread == 1)
+            {
+                return 1;
+            }
+            // Disable MNPerThreadLayer if it is non-power two.
+            else if constexpr(math::next_power_of_two<MNPerThread>() != MNPerThread)
+            {
+                return 1;
+            }
+            else
+            {
+                return (MNPerThread >= 16) ? 4 : MNPerThread;
+            }
+        }();
+
+        static_assert(MNLdsLayer == 1 || MNPerBlock % (MNLdsLayer * MNPerThreadLayer) == 0);
+        // A matrix in LDS memory, dst of blockwise copy
+        if constexpr(UseBlockPaddingAB)
+        {
+            // 16 is the byte size of ds_load_b128 and ds_write_b128.
+            constexpr auto PaddingSize = 16 / sizeof(LDSTypeAB);
+            if constexpr(MNLdsLayer == 1)
+            {
+                return make_naive_tensor_descriptor(
+                    make_tuple(ABK0Number, Number<MNPerBlock>{}, ABK1Number),
+                    make_tuple(ABK1Number, Number<KPerBlock + PaddingSize>{}, I1));
+            }
+            else
+            {
+                constexpr auto ab_lds_block_desc_abk0_mn_unmerge_abk1 =
+                    make_naive_tensor_descriptor(
+                        make_tuple(ABK0Number,
+                                   Number<MNPerBlock / MNLdsLayer / MNPerThreadLayer>{},
+                                   Number<MNPerThreadLayer>{},
+                                   Number<MNLdsLayer>{},
+                                   ABK1Number),
+                        make_tuple(
+                            ABK1Number,
+                            Number<(KPerBlock * MNLdsLayer + PaddingSize) * MNPerThreadLayer>{},
+                            Number<KPerBlock * MNLdsLayer + PaddingSize>{},
+                            Number<KPerBlock>{},
+                            I1));
+
+                return transform_tensor_descriptor(
+                    ab_lds_block_desc_abk0_mn_unmerge_abk1,
+                    make_tuple(make_pass_through_transform(ABK0Number),
+                               make_merge_transform_v3_division_mod(
+                                   make_tuple(Number<MNPerBlock / MNLdsLayer / MNPerThreadLayer>{},
+                                              Number<MNLdsLayer>{},
+                                              Number<MNPerThreadLayer>{})),
+                               make_pass_through_transform(ABK1Number)),
+                    make_tuple(Sequence<0>{}, Sequence<1, 3, 2>{}, Sequence<4>{}),
+                    make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}));
+            }
+        }
+        // xor tensor transformation request more unnecessary vgpr usage, would cause register spill
+        // in some cases.
+        else if constexpr(is_same<ABMajorLayout, ABLayout>::value)
+        {
+            constexpr auto ab_lds_block_desc = make_naive_tensor_descriptor(
+                make_tuple(ABK0Number * Number<MNLdsLayer>{},
+                           Number<MNPerBlock / MNLdsLayer>{},
+                           ABK1Number),
+                make_tuple(ABK1Number, Number<KPerBlock * MNLdsLayer>{}, I1));
+
+            constexpr auto ab_lds_block_desc_permuted = transform_tensor_descriptor(
+                ab_lds_block_desc,
+                make_tuple(
+                    make_xor_with_modulo_transform(make_tuple(Number<MNPerBlock / MNLdsLayer>{},
+                                                              Number<ABK0Number * MNLdsLayer>{})),
+                    make_pass_through_transform(ABK1Number)),
+                make_tuple(Sequence<1, 0>{}, Sequence<2>{}),
+                make_tuple(Sequence<1, 0>{}, Sequence<2>{}));
+            if constexpr(MNLdsLayer == 1)
+            {
+                return ab_lds_block_desc_permuted;
+            }
+            else
+            {
+                constexpr auto ab_lds_block_desc_abk0_mnldslayer_mn_abk1 =
+                    transform_tensor_descriptor(
+                        ab_lds_block_desc_permuted,
+                        make_tuple(
+                            make_unmerge_transform(make_tuple(Number<MNLdsLayer>{}, ABK0Number)),
+                            make_unmerge_transform(
+                                make_tuple(Number<MNPerBlock / MNLdsLayer / MNPerThreadLayer>{},
+                                           Number<MNPerThreadLayer>{})),
+                            make_pass_through_transform(ABK1Number)),
+                        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}),
+                        make_tuple(Sequence<2, 0>{}, Sequence<1, 3>{}, Sequence<4>{}));
+
+                constexpr auto ab_lds_block_desc_abk0_mn_abk1 = transform_tensor_descriptor(
+                    ab_lds_block_desc_abk0_mnldslayer_mn_abk1,
+                    make_tuple(make_pass_through_transform(ABK0Number),
+                               make_merge_transform_v3_division_mod(
+                                   make_tuple(Number<MNPerBlock / MNLdsLayer / MNPerThreadLayer>{},
+                                              Number<MNLdsLayer>{},
+                                              Number<MNPerThreadLayer>{})),
+                               make_pass_through_transform(ABK1Number)),
+                    make_tuple(Sequence<0>{}, Sequence<1, 2, 3>{}, Sequence<4>{}),
+                    make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}));
+
+                return ab_lds_block_desc_abk0_mn_abk1;
+            }
+        }
+        else
+        {
+            constexpr auto LdsBankSize = get_n_lds_banks(gfx125_t{}) * 4;
+            constexpr auto MN0         = ABBlockTransferThreadClusterLengths_ABK0_MN_ABK1{}.At(I1);
+            constexpr auto MN1         = MNPerBlock / MN0;
+
+            constexpr auto KThreadWrite = ABBlockTransferThreadClusterLengths_ABK0_MN_ABK1{}.At(I0);
+            constexpr auto K0PerThreadWrite = ABK0Number / KThreadWrite;
+            constexpr auto KThreadRead      = 32 / MNPerWmma;
+            constexpr auto K0PerThreadRead  = ABK0Number / KThreadRead;
+
+            constexpr auto kfold = (ABK1Number * MN0 * sizeof(LDSTypeAB) > LdsBankSize)
+                                       ? 1
+                                       : LdsBankSize / (ABK1Number * MN0 * sizeof(LDSTypeAB));
+            constexpr auto KThreadReadPerm =
+                (kfold * K0PerThreadWrite / K0PerThreadRead) > 1
+                    ? KThreadRead / (kfold * K0PerThreadWrite / K0PerThreadRead)
+                    : KThreadRead;
+
+            // 1<=mpair<=n0
+            constexpr auto mpair =
+                (ABK1Number * MNPerWmma * sizeof(LDSTypeAB) > (2 * LdsBankSize))
+                    ? 1
+                    : (((2 * LdsBankSize) / (ABK1Number * MNPerWmma * sizeof(LDSTypeAB))) > MN0
+                           ? MN0
+                           : (2 * LdsBankSize) / (ABK1Number * MNPerWmma * sizeof(LDSTypeAB)));
+
+            constexpr auto ab_lds_block_desc = make_naive_tensor_descriptor_packed(
+                make_tuple(Number<KThreadWrite / kfold / KThreadReadPerm>{},
+                           Number<K0PerThreadWrite>{},
+                           Number<KThreadReadPerm * MN1>{},
+                           Number<kfold * MN0 / mpair>{},
+                           Number<mpair>{},
+                           ABK1Number));
+
+            constexpr auto ab_lds_block_desc_permuted = transform_tensor_descriptor(
+                ab_lds_block_desc,
+                make_tuple(
+                    make_pass_through_transform(Number<KThreadWrite / kfold / KThreadReadPerm>{}),
+                    make_pass_through_transform(Number<K0PerThreadWrite>{}),
+                    make_xor_with_modulo_transform(
+                        make_tuple(Number<KThreadReadPerm * MN1>{}, Number<kfold * MN0 / mpair>{})),
+                    make_pass_through_transform(Number<mpair>{}),
+                    make_pass_through_transform(ABK1Number)),
+                make_tuple(
+                    Sequence<0>{}, Sequence<1>{}, Sequence<2, 3>{}, Sequence<4>{}, Sequence<5>{}),
+                make_tuple(
+                    Sequence<0>{}, Sequence<1>{}, Sequence<2, 3>{}, Sequence<4>{}, Sequence<5>{}));
+
+            constexpr auto ab_lds_block_desc_unmerged = transform_tensor_descriptor(
+                ab_lds_block_desc_permuted,
+                make_tuple(
+                    make_pass_through_transform(Number<KThreadWrite / kfold / KThreadReadPerm>{}),
+                    make_pass_through_transform(Number<K0PerThreadWrite>{}),
+                    make_unmerge_transform(make_tuple(Number<KThreadReadPerm>{}, Number<MN1>{})),
+                    make_unmerge_transform(make_tuple(Number<kfold>{}, Number<MN0 / mpair>{})),
+                    make_pass_through_transform(Number<mpair>{}),
+                    make_pass_through_transform(ABK1Number)),
+                make_tuple(Sequence<0>{},
+                           Sequence<1>{},
+                           Sequence<2>{},
+                           Sequence<3>{},
+                           Sequence<4>{},
+                           Sequence<5>{}),
+                make_tuple(Sequence<1>{},
+                           Sequence<2>{},
+                           Sequence<0, 3>{},
+                           Sequence<4, 5>{},
+                           Sequence<6>{},
+                           Sequence<7>{}));
+
+            constexpr auto ab_lds_block_desc_abk0_mn_abk1 = transform_tensor_descriptor(
+                ab_lds_block_desc_unmerged,
+                make_tuple(make_merge_transform_v3_division_mod(
+                               make_tuple(Number<KThreadReadPerm>{},
+                                          Number<KThreadWrite / kfold / KThreadReadPerm>{},
+                                          Number<kfold>{},
+                                          Number<K0PerThreadWrite>{})),
+                           make_merge_transform_v3_division_mod(
+                               make_tuple(Number<MN0 / mpair>{}, Number<mpair>{}, Number<MN1>{})),
+                           make_pass_through_transform(ABK1Number)),
+                make_tuple(Sequence<0, 1, 4, 2>{}, Sequence<5, 6, 3>{}, Sequence<7>{}),
+                make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}));
+
+            return ab_lds_block_desc_abk0_mn_abk1;
+        }
+    }
+
+    __host__ __device__ static constexpr auto GetBlockDescriptor()
+    {
+        return GetBlockDescriptorImpl(get_device_arch());
     }
 
     template <typename GridDescriptor,

@@ -55,7 +55,7 @@ template <typename GridwiseGemm,
           TailNumber TailNum       = TailNumber::Full>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
+__launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 #endif
     kernel_grouped_conv_bwd_weight_wmma_cshuffle_two_stage(
         typename GridwiseGemm::Argument karg,
@@ -87,7 +87,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
                                    CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
                                    decltype(block_2_ctile_map_),
                                    ComputePtrOffsetOfBatch,
-                                   ComputePtrOffsetOfBatch, // placeholder
+                                   Tuple<>, // placeholder
                                    NumGroupsToMerge,
                                    HasMainKBlockLoop,
                                    CGlobalMemoryDataOperation,
@@ -101,7 +101,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
             c_grid_desc_mblock_mperblock_nblock_nperblock,
             block_2_ctile_map_,
             compute_ptr_offset_of_batch,
-            ComputePtrOffsetOfBatch{}, // placeholder
+            Tuple<>(), // placeholder
             num_k_per_block,
             karg,
             epilogue_args);
