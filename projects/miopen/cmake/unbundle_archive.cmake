@@ -111,6 +111,10 @@ foreach(obj IN LISTS obj_files)
     endforeach()
 
     if(NOT matched_target)
+        # No device code for this architecture, e.g. a CK instance compiled only for
+        # gfx1250. Its host code still defines symbols other objects reference, so keep the
+        # object unchanged rather than dropping it; its device code is never launched here.
+        list(APPEND thin_objs "${obj}")
         continue()
     endif()
 
@@ -179,28 +183,14 @@ foreach(obj IN LISTS obj_files)
     # --update-section preserves relocations (.hipFatBinSegment references
     # .hip_fatbin) and works on both ELF and COFF, but requires the new
     # content to be no larger than the original section.
-    # For multi-arch bundles this holds: we removed device code blobs.
-    # For single-arch bundles, re-encoding adds overhead that can make the
-    # thin fatbin larger than the original. In that case the object already
-    # contains only our target arch, so use it unchanged.
+    # When the bundle holds only a few device targets, re-encoding can make the
+    # thin fatbin larger than the original (e.g. a CK instance compiled only for
+    # gfx1250 and gfx1250-strict). The original already contains our target arch,
+    # so use it unchanged.
     file(SIZE "${fatbin_file}" _orig_fatbin_size)
     file(SIZE "${thin_fatbin}" _thin_fatbin_size)
 
     if(_thin_fatbin_size GREATER _orig_fatbin_size)
-        # Count device targets (those containing "gfx"). If more than one,
-        # the thin fatbin should have been smaller — something is wrong.
-        set(_num_device_targets 0)
-        foreach(_t IN LISTS all_targets)
-            if(_t MATCHES "gfx")
-                math(EXPR _num_device_targets "${_num_device_targets} + 1")
-            endif()
-        endforeach()
-        if(NOT _num_device_targets EQUAL 1)
-            message(FATAL_ERROR
-                "Thin fatbin for ${obj_name} is larger than original "
-                "(${_thin_fatbin_size} > ${_orig_fatbin_size}) but bundle "
-                "has ${_num_device_targets} device targets")
-        endif()
         list(APPEND thin_objs "${obj}")
         continue()
     endif()

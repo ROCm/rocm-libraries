@@ -8,6 +8,7 @@
 #include <ostream>
 #endif
 
+#include "ck/host_utility/device_prop.hpp"
 #include "ck/tensor_description/multi_index_transform_helper.hpp"
 #include "ck/tensor_description/tensor_descriptor.hpp"
 #include "ck/tensor_description/tensor_descriptor_helper.hpp"
@@ -26,6 +27,7 @@
 #include "ck/tensor_operation/gpu/thread/threadwise_tensor_slice_transfer.hpp"
 #include "ck/utility/common_header.hpp"
 #include "ck/utility/env.hpp"
+#include "ck/tensor_operation/gpu/grid/epilogue_cshuffle_v3_wmma.hpp"
 
 namespace ck {
 
@@ -846,6 +848,30 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
         return true;
     }
 
+    __host__ static index_t GetSharedMemoryNumberOfByteOnHost()
+    {
+        using EpilogueCShuffle = EpilogueCShuffle<
+            DsDataType,
+            EDataType,
+            AccDataType,
+            CShuffleDataType,
+            MPerBlock,
+            NPerBlock,
+            MPerWmma,
+            NPerWmma,
+            MRepeat,
+            NRepeat,
+            CShuffleMRepeatPerShuffle,
+            CShuffleNRepeatPerShuffle,
+            CDEShuffleBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,
+            CDEShuffleBlockTransferScalarPerVectors,
+            CDEElementwiseOperation,
+            ThisThreadBlock,
+            BlockwiseGemmPipe>;
+
+        return GetSharedMemoryNumberOfByte<EpilogueCShuffle>();
+    }
+
     // block_id to matrix tile idx (m0, n0) mapping are controlled by {M01, N01}
     template <typename Argument>
     __host__ static constexpr bool CheckValidity(const Argument& karg,
@@ -854,6 +880,19 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
         static_assert((MPerBlock % (MPerWmma * MRepeat) == 0) &&
                           (NPerBlock % (NPerWmma * NRepeat)) == 0,
                       "Invalid tuning param!");
+
+        constexpr index_t ldsBufferCount =
+            BlkGemmPipelineVer == BlockGemmPipelineVersion::v4 ? 2 : 1;
+        if(GetSharedMemoryNumberOfByteOnHost() * ldsBufferCount > get_lds_size())
+        {
+            if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+            {
+                std::cout << "Instance tile too large for LDS size of target device! In "
+                          << __FILE__ << ":" << __LINE__ << ", in function: " << __func__
+                          << std::endl;
+            }
+            return false;
+        }
 
         if constexpr(!(GemmSpec == tensor_operation::device::GemmSpecialization::MPadding ||
                        GemmSpec == tensor_operation::device::GemmSpecialization::MNPadding ||
@@ -1089,7 +1128,7 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
     }
 
     template <typename Epilogue>
-    __device__ static constexpr index_t GetSharedMemoryNumberOfByte()
+    __host__ __device__ static constexpr index_t GetSharedMemoryNumberOfByte()
     {
         // LDS allocation for A and B: be careful of alignment
         constexpr auto a_block_desc_ak0_m_ak1 = ATransfer::GetBlockDescriptor();

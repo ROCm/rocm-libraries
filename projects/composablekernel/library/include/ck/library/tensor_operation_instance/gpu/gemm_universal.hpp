@@ -486,7 +486,7 @@ struct DeviceOperationInstanceFactory<
                 add_device_gemm_xdl_universal_bf16_bf16_bf16_mk_nk_mn_mem_v2_kpadding_instances(
                     op_ptrs);
 
-#ifdef CK_USE_GFX1250
+#ifdef CK_HAS_GFX1250_INSTANCES
                 add_device_gemm_xdl_universal_bf16_bf16_bf16_mk_nk_mn_v3_prefetch_instances(
                     op_ptrs);
                 add_device_gemm_xdl_universal_bf16_bf16_bf16_mk_nk_mn_v3_no_prefetch_instances(

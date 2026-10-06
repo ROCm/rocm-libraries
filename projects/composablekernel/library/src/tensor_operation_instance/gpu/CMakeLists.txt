@@ -116,6 +116,13 @@ function(add_instance_library INSTANCE_NAME)
             message(DEBUG "removing grouped_conv3d_fwd_wmma fp8/bf8 instance ${source} ")
             list(REMOVE_ITEM ARGN "${source}")
         endif()
+        # Do not build gfx1250-exclusive instances unless gfx1250 is on the target list.
+        # These instances are tuned for the 320 KB LDS of gfx1250; their tiles exceed the
+        # 64 KB LDS budget of every other WMMA target.
+        if(NOT INST_TARGETS MATCHES "gfx1250" AND source_name MATCHES "_gfx1250")
+            message(DEBUG "removing gfx1250-only instance ${source} ")
+            list(REMOVE_ITEM ARGN "${source}")
+        endif()
         # Do not build gemm_universal_preshuffle_f8 for any targets except gfx94, gfx95 and gfx12
         if(NOT (INST_TARGETS MATCHES "gfx94|gfx95|gfx12") AND (source_name MATCHES "gemm_universal_preshuffle") AND source_name MATCHES "_f8_" )
             message(DEBUG "removing gemm_universal_preshuffle_f8 instance ${source} ")
@@ -182,6 +189,18 @@ function(add_instance_library INSTANCE_NAME)
                 list(FILTER INST_TARGETS INCLUDE REGEX "gfx12")
             endif()
             set(offload_targets)
+            # gfx1250-exclusive instances must never be offloaded to another architecture: their
+            # LDS footprint (up to 197104 B) is legal only on the 320 KB LDS of gfx1250, and
+            # emitting them for a 64 KB target is a hard ld.lld failure.
+            # hip::device has already put an --offload-arch on the command line for every
+            # GPU_TARGETS entry (or auto-detected / cached arch), and --offload-arch is additive,
+            # so restricting INST_TARGETS alone cannot narrow the set. Clear it first.
+            # Only these sources are restricted this way; every other source keeps the arch set
+            # it has always had.
+            if(source_name MATCHES "_gfx1250")
+                list(FILTER INST_TARGETS INCLUDE REGEX "gfx1250")
+                string(APPEND offload_targets "--no-offload-arch=all ")
+            endif()
             foreach(target IN LISTS INST_TARGETS)
                 string(APPEND offload_targets "--offload-arch=${target} ")
             endforeach()

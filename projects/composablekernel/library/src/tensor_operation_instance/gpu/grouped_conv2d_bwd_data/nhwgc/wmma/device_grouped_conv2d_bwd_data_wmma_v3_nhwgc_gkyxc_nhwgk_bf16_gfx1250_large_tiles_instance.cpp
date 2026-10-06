@@ -3,13 +3,14 @@
 
 #include "ck/library/tensor_operation_instance/add_device_operation_instance.hpp"
 #include "ck/library/tensor_operation_instance/gpu/grouped_conv_bwd_data/device_grouped_conv_bwd_data_wmma_v3_instances.hpp"
+#include "ck/host_utility/device_prop.hpp"
 
 namespace ck {
 namespace tensor_operation {
 namespace device {
 namespace instance {
 
-void add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_large_tiles_instances(
+void add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_gfx1250_large_tiles_instances(
     std::vector<std::unique_ptr<DeviceGroupedConvBwdDataMultipleD<2,
                                                                   NHWGK,
                                                                   GKYXC,
@@ -23,24 +24,31 @@ void add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_large_til
                                                                   PassThrough,
                                                                   PassThrough>>>& instances)
 {
+    // These instances exist only for gfx1250; register nothing on any other device.
+    if(!ck::is_gfx125_supported())
+    {
+        return;
+    }
     // 1. Default
     add_device_operation_instances(
         instances,
-        device_grouped_conv_bwd_data_wmma_v3_bf16_large_tiles_instances<2,
-                                                                        NHWGK,
-                                                                        GKYXC,
-                                                                        Empty_Tuple,
-                                                                        NHWGC,
-                                                                        ConvBwdDataDefault>{});
+        device_grouped_conv_bwd_data_wmma_v3_bf16_gfx1250_large_tiles_instances<
+            2,
+            NHWGK,
+            GKYXC,
+            Empty_Tuple,
+            NHWGC,
+            ConvBwdDataDefault>{});
     // 2. Filter1x1Stride1Pad0
-    add_device_operation_instances(instances,
-                                   device_grouped_conv_bwd_data_wmma_v3_bf16_large_tiles_instances<
-                                       2,
-                                       NHWGK,
-                                       GKYXC,
-                                       Empty_Tuple,
-                                       NHWGC,
-                                       ConvBwdDataFilter1x1Stride1Pad0>{});
+    add_device_operation_instances(
+        instances,
+        device_grouped_conv_bwd_data_wmma_v3_bf16_gfx1250_large_tiles_instances<
+            2,
+            NHWGK,
+            GKYXC,
+            Empty_Tuple,
+            NHWGC,
+            ConvBwdDataFilter1x1Stride1Pad0>{});
 }
 
 } // namespace instance
