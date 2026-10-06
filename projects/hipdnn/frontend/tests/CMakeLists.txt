@@ -118,8 +118,10 @@ add_executable(
 
 target_compile_options(hipdnn_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
+# detail/EngineQueries.hpp decodes FlatBuffers pages; the frontend itself does not link the SDK.
 target_link_libraries(
     hipdnn_frontend_tests GTest::gtest GTest::gmock hip::host Threads::Threads hipdnn_test_sdk
+    hipdnn_flatbuffers_sdk
 )
 clang_tidy_check(hipdnn_frontend_tests)
 
