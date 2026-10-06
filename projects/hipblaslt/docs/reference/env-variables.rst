@@ -122,11 +122,12 @@ go depends on logging:
       - | ``off``: Disable runtime tuning (default)
         | ``cache``: Replay valid entries from the cache file
         | ``tune``: Benchmark uncached supported problems and append winners
+        | ``online``: Time top ranked candidates on live calls and pin the winner
 
     * - | ``HIPBLASLT_TUNING_CACHE_PATH``
         | Specifies the runtime cache file.
       - | Path to a tuning file
-        | Required for ``cache`` and ``tune`` modes
+        | Required for ``cache``, ``tune``, and ``online`` modes
 
     * - | ``HIPBLASLT_TUNING_ALL_KERNELS``
         | Selects exhaustive or ranked-prefix candidate enumeration.

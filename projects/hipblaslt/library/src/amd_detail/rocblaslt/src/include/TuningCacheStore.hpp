@@ -31,9 +31,10 @@ namespace TensileLite
 {
     enum class TuningMode : uint32_t
     {
-        Off   = 0,
-        Cache = 1,
-        Tune  = 2,
+        Off    = 0,
+        Cache  = 1,
+        Tune   = 2,
+        Online = 3,
     };
 
     /**
@@ -60,9 +61,11 @@ namespace TensileLite
         {
             return mode != TuningMode::Off && !cachePath.empty();
         }
+        // Online pins the winners it measures into the same file tune
+        // writes, so the two modes share one cache and both write to it.
         bool writes() const
         {
-            return mode == TuningMode::Tune && !cachePath.empty();
+            return (mode == TuningMode::Tune || mode == TuningMode::Online) && !cachePath.empty();
         }
     };
 

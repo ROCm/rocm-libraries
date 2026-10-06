@@ -296,7 +296,9 @@ namespace TensileLite
             break;
         }
 
-        const char* modeName = tuning.mode() == TuningMode::Tune ? "tune" : "cache";
+        const char* modeName = tuning.mode() == TuningMode::Tune     ? "tune"
+                               : tuning.mode() == TuningMode::Online ? "online"
+                                                                     : "cache";
 
         std::ostringstream msg;
         msg << "mode=" << modeName << " path=" << tuning.cachePath() << " load=" << statusName

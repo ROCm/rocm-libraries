@@ -947,20 +947,32 @@ namespace
         EXPECT_TRUE(privileged.suppressedForSecurity);
     }
 
-    // An unknown mode is off, only tune writes, and a mode with no path does
-    // nothing.
+    // An unknown mode is off, cache only reads, tune and online both write
+    // the one cache file they share, and a mode with no path does nothing.
     TEST_F(TuningStore, ModeNeedsAKnownValueAndAPath)
     {
-        setenv("HIPBLASLT_TUNING_MODE", "online", 1);
+        setenv("HIPBLASLT_TUNING_MODE", "not-a-mode", 1);
         setenv("HIPBLASLT_TUNING_CACHE_PATH", "tuning.txt", 1);
         EXPECT_EQ(TuningModeConfig::fromEnvironment(false).mode, TuningMode::Off);
 
         setenv("HIPBLASLT_TUNING_MODE", "cache", 1);
         const auto cache = TuningModeConfig::fromEnvironment(false);
+        EXPECT_EQ(cache.mode, TuningMode::Cache);
         EXPECT_TRUE(cache.reads());
         EXPECT_FALSE(cache.writes());
 
+        setenv("HIPBLASLT_TUNING_MODE", "online", 1);
+        const auto online = TuningModeConfig::fromEnvironment(false);
+        EXPECT_EQ(online.mode, TuningMode::Online);
+        EXPECT_TRUE(online.reads());
+        EXPECT_TRUE(online.writes());
+
         setenv("HIPBLASLT_TUNING_MODE", "tune", 1);
+        const auto tune = TuningModeConfig::fromEnvironment(false);
+        EXPECT_EQ(tune.mode, TuningMode::Tune);
+        EXPECT_TRUE(tune.reads());
+        EXPECT_TRUE(tune.writes());
+
         unsetenv("HIPBLASLT_TUNING_CACHE_PATH");
         const auto noPath = TuningModeConfig::fromEnvironment(false);
         EXPECT_EQ(noPath.mode, TuningMode::Tune);

@@ -27,6 +27,8 @@ namespace TensileLite
                 config.mode = TuningMode::Cache;
             else if(value == "tune")
                 config.mode = TuningMode::Tune;
+            else if(value == "online")
+                config.mode = TuningMode::Online;
         }
 
         if(const char* path
