@@ -1950,8 +1950,20 @@ FastCheckResult fast_check_bias_gradient(const FastCheckProblem& p,
     const View           opB = batch_view(p.B, 0, p.transB); // K x N
     std::vector<int64_t> expected(size_t(source == 'a' ? p.M : p.N), 0);
     for(size_t x = 0; x < expected.size(); x++)
+    {
+        double bound = 0;
         for(int64_t k = 0; k < p.K; k++)
-            expected[x] += int64_t(source == 'a' ? opA.at(int64_t(x), k) : opB.at(k, int64_t(x)));
+        {
+            const double value = source == 'a' ? opA.at(int64_t(x), k) : opB.at(k, int64_t(x));
+            bound += std::fabs(value);
+            // The GEMM bound includes the other operand, which may be zero.
+            // Bound this reduction separately before accumulating into int64_t.
+            if(!is_exact_integer(value) || !(bound < exact_limit(p.compute_type)))
+                return {false, "the bias gradient cannot be checked exactly: its inputs must be "
+                               "integers and every partial sum must fit the compute type\n"};
+            expected[x] += int64_t(value);
+        }
+    }
 
     FastCheckResult    result;
     std::ostringstream msg;

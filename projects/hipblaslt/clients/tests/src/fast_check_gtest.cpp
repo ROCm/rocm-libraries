@@ -474,6 +474,29 @@ namespace
         }
     }
 
+    // A zero other operand makes the GEMM bound zero, but does not bound a
+    // bias-gradient reduction. 2^24 + 1 - 2^24 is order-dependent in f32.
+    TEST(FastCheck_pre_checkin, bias_gradient_refuses_inexact_partial_sums)
+    {
+        const float values[] = {0x1p24f, 1.f, -0x1p24f};
+        const float zeros[] = {0.f, 0.f, 0.f};
+        const float exact_sum = 1.f;
+        for(char source : {'a', 'b'})
+        {
+            FastCheckProblem p;
+            p.M = p.N = 1;
+            p.K = 3;
+            p.A = {source == 'a' ? values : zeros, HIP_R_32F, 1, 3, 1, 3};
+            p.B = {source == 'b' ? values : zeros, HIP_R_32F, 3, 1, 3, 3};
+            p.beta = 0;
+            ASSERT_TRUE(fast_check_expected(p).status.passed);
+            auto res = fast_check_bias_gradient(p, source, &exact_sum, HIP_R_32F);
+            EXPECT_FALSE(res.passed);
+            EXPECT_NE(res.message.find("cannot be checked exactly"), std::string::npos)
+                << res.message;
+        }
+    }
+
     // The bound must be the largest sum over K of |a| times the largest |b| in that row of B, and
     // a configuration must be refused once the bound reaches the range the compute type holds
     // exactly (2^11 for f16), and accepted below it.

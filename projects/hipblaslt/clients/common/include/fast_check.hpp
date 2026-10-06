@@ -196,7 +196,8 @@ double fast_check_amax_device(const FastCheckMatrix& d,
 
 // Checks the bias gradient a GEMM writes for one batch, exactly from the inputs: source 'a'
 // (BGRADA) sums each row of op(A) over K, and 'b' (BGRADB) each column of op(B). bias holds the
-// kernel's output on the host, in bias_type.
+// kernel's output on the host, in bias_type. Refuses non-integer inputs or a reduction whose
+// absolute-sum bound reaches the compute type's exact integer limit.
 FastCheckResult fast_check_bias_gradient(const FastCheckProblem& problem,
                                          char                    source,
                                          const void*             bias,
