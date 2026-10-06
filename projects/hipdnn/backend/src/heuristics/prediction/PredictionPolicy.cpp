@@ -457,12 +457,41 @@ hipdnnPluginStatus_t policyFinalizeWithHost(hipdnnHeuristicPolicyDescriptor_t de
         {
             return HIPDNN_PLUGIN_STATUS_NOT_INITIALIZED;
         }
+        // Ties and the unscored tail follow the static rules (HIPDNN_HEUR_FALLBACK_ENGINE_ORDER,
+        // then vendor precedence), never arrival order (RFC 0019 §11.2). A set env is a
+        // shortlist, as under StaticOrdering: unlisted engines are neither scored nor ranked.
+        std::vector<int64_t> staticOrder = desc.engineIds;
+        hipdnn_data_sdk::utilities::sortEngineIds(staticOrder);
+        const auto envOrder = parseFallbackOrderingEnv();
+        if(!envOrder.empty())
+        {
+            staticOrder = applyFallbackOrdering(staticOrder, envOrder);
+            if(staticOrder.empty())
+            {
+                PREDICTION_BUILTIN_LOG(HIPDNN_SEV_WARN,
+                                       "%s declined: %s listed no candidate engine",
+                                       desc.modeB ? MODE_B_POLICY_NAME : MODE_A_POLICY_NAME,
+                                       FALLBACK_ORDERING_ENV);
+                desc.ranked.clear();
+                return HIPDNN_PLUGIN_STATUS_SUCCESS;
+            }
+        }
+        std::unordered_map<int64_t, std::size_t> staticRank;
+        staticRank.reserve(staticOrder.size());
+        for(std::size_t rank = 0; rank < staticOrder.size(); ++rank)
+        {
+            staticRank.emplace(staticOrder[rank], rank);
+        }
         // RFC 0019 §11.2: ModeA ranks by L1 alone and never evaluates L2; ModeB uses each
         // engine's L2 and falls back to L1.
-        desc.ranked.reserve(desc.engineIds.size());
+        desc.ranked.reserve(staticRank.size());
         bool available = false;
         for(const auto id : desc.engineIds)
         {
+            if(staticRank.count(id) == 0U)
+            {
+                continue;
+            }
             RankedEngine row{id, false, 0, {}};
             const EnginePrediction* estimate = nullptr;
             if(desc.modeB)
@@ -507,27 +536,7 @@ hipdnnPluginStatus_t policyFinalizeWithHost(hipdnnHeuristicPolicyDescriptor_t de
             desc.ranked.clear();
             return HIPDNN_PLUGIN_STATUS_SUCCESS;
         }
-        // Scored engines first, best-first in the metric's direction; ties and the unscored tail
-        // follow the static rules (HIPDNN_HEUR_FALLBACK_ENGINE_ORDER, then vendor precedence),
-        // never arrival order (RFC 0019 §11.2).
-        std::vector<int64_t> builtInOrder = desc.engineIds;
-        hipdnn_data_sdk::utilities::sortEngineIds(builtInOrder);
-        std::vector<int64_t> staticOrder
-            = applyFallbackOrdering(builtInOrder, parseFallbackOrderingEnv());
-        const std::unordered_set<int64_t> listed(staticOrder.begin(), staticOrder.end());
-        for(const auto id : builtInOrder)
-        {
-            if(listed.count(id) == 0U)
-            {
-                staticOrder.push_back(id);
-            }
-        }
-        std::unordered_map<int64_t, std::size_t> staticRank;
-        staticRank.reserve(staticOrder.size());
-        for(std::size_t rank = 0; rank < staticOrder.size(); ++rank)
-        {
-            staticRank.emplace(staticOrder[rank], rank);
-        }
+        // Scored engines first, best-first in the metric's direction, then by static rank.
         std::sort(desc.ranked.begin(),
                   desc.ranked.end(),
                   [&](const RankedEngine& left, const RankedEngine& right) {

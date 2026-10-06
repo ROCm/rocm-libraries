@@ -43,6 +43,7 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <hipdnn_plugin_sdk/engine_api_version.h>
@@ -181,12 +182,12 @@ TEST_F(TestEnginePredictionTransport, AnswerInAnotherMetricIsInvalid)
     EXPECT_EQ(result.metric, "tflops");
 }
 
-// Zero is a legal (worst) throughput but never a legal time.
+// Zero is never a legal value: a 0 throughput means "no measurement" on the kernel path.
 TEST_F(TestEnginePredictionTransport, AvailableValueIsValidatedByTheRequestedMetric)
 {
     namespace fb = hipdnn_flatbuffers_sdk::data_objects;
     _prediction.value = 0.0;
-    EXPECT_EQ(query().status, fb::PredictionStatus::AVAILABLE);
+    EXPECT_EQ(query().status, fb::PredictionStatus::INVALID);
 
     _config.ranking_metric = "time";
     _prediction.metric = "time";
@@ -4731,4 +4732,56 @@ TEST(TestEnginePluginResourceManager, CodegenFixturePredictionsThroughResourceMa
     EXPECT_EQ(failed.status, fb::PredictionStatus::INVALID);
     EXPECT_THAT(failed.reason, HasSubstr("Engine prediction failed"));
     EXPECT_THAT(failed.reason, HasSubstr("valid graph"));
+}
+
+// A page missing a schema-required string is refused at the plugin boundary, and the
+// plugin's allocation is still released.
+TEST_F(TestEnginePredictionTransport, CandidatePageMissingARequiredFieldIsAPluginError)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    // Hand-built: the generated builder asserts that required fields are present.
+    const auto candidatePage = [](bool withGraphId) {
+        flatbuffers::FlatBufferBuilder builder;
+        const auto graphId = builder.CreateString("graph");
+        const auto deviceId = builder.CreateString("device");
+        const auto deviceArch = builder.CreateString("gfx942");
+        const auto features = builder.CreateString("{}");
+        const auto start = builder.StartTable();
+        if(withGraphId)
+        {
+            builder.AddOffset(fb::EngineCandidatePage::VT_GRAPH_ID, graphId);
+        }
+        builder.AddOffset(fb::EngineCandidatePage::VT_DEVICE_ID, deviceId);
+        builder.AddOffset(fb::EngineCandidatePage::VT_DEVICE_ARCH, deviceArch);
+        builder.AddOffset(fb::EngineCandidatePage::VT_PROBLEM_FEATURES, features);
+        builder.AddOffset(fb::EngineCandidatePage::VT_DEVICE_FEATURES, features);
+        const flatbuffers::Offset<fb::EngineCandidatePage> page(builder.EndTable(start));
+        builder.Finish(fb::CreateEngineDetails(builder, 100, 0, 0, 0, page));
+        return builder.Release();
+    };
+    flatbuffers::DetachedBuffer response;
+    ON_CALL(*_plugin, enumerateCandidates(_handle, _, _, 0, 10, _))
+        .WillByDefault([&response](hipdnnEnginePluginHandle_t,
+                                   const hipdnnPluginConstData_t*,
+                                   const hipdnnPluginConstData_t*,
+                                   uint64_t,
+                                   uint64_t,
+                                   hipdnnPluginConstData_t* out) {
+            *out = {response.data(), response.size()};
+        });
+    EXPECT_CALL(*_plugin, destroyEngineDetails(_handle, _)).Times(2);
+    MockGraphDescriptor graph;
+    EXPECT_CALL(graph, getSerializedGraph())
+        .WillRepeatedly(Return(hipdnnPluginConstData_t{nullptr, 0}));
+    const hipdnnPluginConstData_t engineConfig{nullptr, 0};
+
+    // Control: the complete page is accepted, so the refusal below is the missing field.
+    response = candidatePage(/*withGraphId=*/true);
+    EXPECT_EQ(_resources->enumerateCandidates(100, engineConfig, &graph, 0, 10),
+              std::vector<uint8_t>(response.data(), response.data() + response.size()));
+
+    response = candidatePage(/*withGraphId=*/false);
+    std::ignore = thrownMessage(
+        [&] { std::ignore = _resources->enumerateCandidates(100, engineConfig, &graph, 0, 10); },
+        HIPDNN_STATUS_PLUGIN_ERROR);
 }

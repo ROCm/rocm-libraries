@@ -1354,7 +1354,7 @@ std::string readRankingMetric(const EngineHeuristicDescriptor& heur)
 } // namespace
 
 // The metric resolves before candidates are gathered, so finalizing with no applicable
-// engine is enough to observe it.
+// engine is enough to observe it. An unregistered environment value is ignored.
 TEST_F(TestEngineHeuristicDescriptor, RankingMetricResolvesEnvThenAttributeThenDefault)
 {
     EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
@@ -1377,21 +1377,15 @@ TEST_F(TestEngineHeuristicDescriptor, RankingMetricResolvesEnvThenAttributeThenD
     EXPECT_EQ(finalizeWith("", "time"), "time");
     EXPECT_EQ(finalizeWith("time", nullptr), "time");
     EXPECT_EQ(finalizeWith("tflops", "time"), "tflops");
+    EXPECT_EQ(finalizeWith("flops", nullptr), "tflops");
+    EXPECT_EQ(finalizeWith("flops", "time"), "time");
 }
 
-// Refused at set for the attribute, at finalize for the environment (RFC 0019 §4.4).
-TEST_F(TestEngineHeuristicDescriptor, UnregisteredRankingMetricIsRejected)
+// Refused at set (RFC 0019 §4.4).
+TEST_F(TestEngineHeuristicDescriptor, UnregisteredRankingMetricAttributeIsRejected)
 {
     auto heur = getEngineHeuristicDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(setRankingMetric(*heur, "flops"), HIPDNN_STATUS_BAD_PARAM);
-
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
-        "HIPDNN_HEUR_RANKING_METRIC", "flops");
-    setGraph();
-    setHeuristicMode();
-    EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
-        .WillRepeatedly(Return(std::vector<int64_t>{}));
-    ASSERT_THROW_HIPDNN_STATUS(heur->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
 // With or without a policy-supplied configuration (RFC 0019 §11.4).

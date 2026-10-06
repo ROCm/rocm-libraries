@@ -167,8 +167,8 @@ When set, it overrides the metric an application requested with
 unset or empty, that request applies, and ``tflops`` when there is none. It is read
 each time an engine heuristic descriptor is finalized, and applies only to heuristic
 selection: a prediction or engine configuration that names its own metric is
-unaffected. A value that is not a registered metric fails heuristic finalization with
-``HIPDNN_STATUS_BAD_PARAM`` rather than falling back to another metric. An engine with
+unaffected. A value that is not a registered metric is logged as an error and ignored,
+as if the variable were unset. An engine with
 no model for the selected metric is ranked after the engines that have one.
 
 .. code:: bash

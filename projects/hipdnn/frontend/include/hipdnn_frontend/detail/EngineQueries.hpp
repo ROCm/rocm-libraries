@@ -426,6 +426,8 @@ inline Error getEngineCandidates(hipdnnBackendDescriptor_t graphDesc,
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR, "Invalid candidate page buffer"};
     }
+    // The schema marks the identity and feature strings (required), so a verified buffer has
+    // them; only the optional engine name and descriptor id can be absent.
     const auto* details = GetEngineDetails(data.ptr);
     const auto* source = details->candidate_page();
     if(details->engine_id() != engineId || source == nullptr)
@@ -460,8 +462,7 @@ inline Error getEngineCandidates(hipdnnBackendDescriptor_t graphDesc,
             {
                 hipdnn_frontend::EngineCandidate candidate;
                 candidate.id = entry->id()->str();
-                if(candidate.id.empty() || !ids.insert(candidate.id).second
-                   || (!decoded.candidates.empty() && decoded.candidates.back().id >= candidate.id))
+                if(candidate.id.empty() || !ids.insert(candidate.id).second)
                 {
                     return {ErrorCode::HIPDNN_BACKEND_ERROR, "Ambiguous candidate identity"};
                 }

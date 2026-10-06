@@ -148,7 +148,8 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
  *
  * Explicit knob settings in engine_config restrict the catalog. offset is zero-based and
  * must not exceed total_count; limit must be in [1, 10000]. Candidate order is stable and
- * independent of ranking. An absent export or NOT_APPLICABLE means unsupported, not empty.
+ * independent of ranking; candidate ids are non-empty and unique. An absent export or
+ * NOT_APPLICABLE means unsupported, not empty.
  * Free a successful response with DestroyEngineDetails.
  */
 HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t

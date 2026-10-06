@@ -349,11 +349,17 @@ TEST_F(TestEnginePredictor, BindingSelectsByMetricAndFallsBackWithinIt)
     EXPECT_EQ(ask("tflops", "gfx942").status, PredictionStatus::AVAILABLE);
 }
 
-/// RFC 0019 §11.4: a time must be strictly positive, while a throughput of 0 is merely worst.
+/// RFC 0019 §11.4: a value must be strictly positive in every metric; a 0 throughput is
+/// what kernel rankings write for "no measurement", so it is not a worst-case estimate.
 TEST_F(TestEnginePredictor, ValidityIsTheRequestedMetrics)
 {
-    const auto cfg = timeConfig();
     _features.bind("graph.work", 0.0);
+    const auto tflops = config(document());
+    const auto zeroThroughput = predictWith(tflops, prediction_detail::model(tflops));
+    EXPECT_EQ(zeroThroughput.status, PredictionStatus::INVALID);
+    EXPECT_EQ(zeroThroughput.metric, "tflops");
+
+    const auto cfg = timeConfig();
     const auto zero = predictWith(cfg, prediction_detail::model(cfg), true, "gfx942", "time");
     EXPECT_EQ(zero.status, PredictionStatus::INVALID);
     EXPECT_EQ(zero.metric, "time");
@@ -378,6 +384,23 @@ TEST_F(TestEnginePredictor, DescriptorProvenanceIsRequiredWholeAndAdmitsNoEngine
     doc = document();
     doc["engine"] = "test:opaque";
     EXPECT_THROW(config(doc), std::invalid_argument);
+}
+
+/// RFC 0019 §4.1: `provenance` is a root-only block; extension keys stay allowed everywhere.
+TEST_F(TestEnginePredictor, ProvenanceIsAcceptedOnlyAtTheRoot)
+{
+    const nlohmann::json notes = {{"author", "tests"}};
+    auto doc = document();
+    doc["provenance"] = notes;
+    doc["score"]["x-notes"] = notes;
+    EXPECT_NO_THROW(config(doc));
+
+    for(const auto& pointer : {"/score", "/native", "/trained_against", "/trained_against/ued"})
+    {
+        doc = document();
+        doc[nlohmann::json::json_pointer(pointer)]["provenance"] = notes;
+        EXPECT_THROW(config(doc), std::invalid_argument) << pointer;
+    }
 }
 
 TEST_F(TestEnginePredictor, KernelReferenceInUnselectedBranchIsNotAnEngineModel)

@@ -540,7 +540,7 @@ file drives both the build-time and runtime checks.
   "definitions": {
     "guid":     { "type": "string",
                   "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
-    "revision": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
+    "revision": { "type": "string", "pattern": "^[0-9]{1,9}\\.[0-9]{1,9}$" },
     "descriptor_ref": {
       "description": "Which descriptor, and which content revision of it (section 8.1).",
       "type": "object", "additionalProperties": false,
@@ -580,10 +580,10 @@ file drives both the build-time and runtime checks.
     "categorical_encoding": {
       "description": "Per-field value->code maps for string-valued features (section 6.5).",
       "type": "object",
-      "propertyNames": { "pattern": "^\\$." },
+      "propertyNames": { "pattern": "^\\$" },
       "additionalProperties": {
         "type": "object",
-        "additionalProperties": { "type": "integer" },
+        "additionalProperties": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
         "minProperties": 1
       }
     },
@@ -611,7 +611,7 @@ file drives both the build-time and runtime checks.
         "selector_revision": { "type": "string", "minLength": 1 },
         "feature_semantics_revision": {
           "description": "Revision of the published feature semantics; absent means 1 (section 6.9).",
-          "type": "integer", "minimum": 1 }
+          "type": "integer", "minimum": 1, "maximum": 9223372036854775807 }
       }
     },
     "objective": { "enum": ["max", "min"] },
@@ -641,7 +641,7 @@ file drives both the build-time and runtime checks.
                         "properties": { "library": { "type": "string", "minLength": 1 },
                                         "symbol":  { "type": "string", "minLength": 1 },
                                         "hash":    { "type": "string", "minLength": 1 },
-                                        "config":  { "type": "object" } } }
+                                        "config":  { "type": "object", "maxProperties": 0 } } }
   },
 
   "allOf": [
@@ -2528,8 +2528,9 @@ set. The per-engine and per-configuration prediction queries carry the metric th
 (configuration). The engine answers from its UHD for that metric at that level, for the device's
 architecture, or reports the metric unavailable; it never answers in a different metric. The answer
 carries the **metric name and value** rather than a field named for one metric, and the host checks
-that the returned metric is the requested one — a mismatch is *invalid*, not a conversion. Validity
-of the value is the metric's: non-negative throughput, positive time. An available engine (A) estimate
+that the returned metric is the requested one — a mismatch is *invalid*, not a conversion. A valid
+value is finite and strictly positive in every metric (a 0 throughput is the kernel path's "no
+measurement"). An available engine (A) estimate
 names the UHD that produced it. An available configuration (B) answer names one too when a model
 produced its value, and names none when the value is measured ([Section 5](#5-selection-flow) step 9);
 the host admits both, never invents an identity for a measurement, and still applies every other

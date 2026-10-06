@@ -221,8 +221,21 @@ bool SelectionHeuristic::finalize(const PredictionProvider& predict,
                 *result = {bytes.data(), bytes.size()};
                 return HIPDNN_PLUGIN_STATUS_SUCCESS;
             }
+            catch(const std::exception& e)
+            {
+                HIPDNN_BACKEND_LOG_WARN(
+                    "Exception while predicting {} for engine ID {}: {}",
+                    kind == HIPDNN_ENGINE_PREDICTION_CONFIGURATION ? "configuration" : "engine",
+                    engineId,
+                    e.what());
+                return HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR;
+            }
             catch(...)
             {
+                HIPDNN_BACKEND_LOG_WARN(
+                    "Unknown exception while predicting {} for engine ID {}",
+                    kind == HIPDNN_ENGINE_PREDICTION_CONFIGURATION ? "configuration" : "engine",
+                    engineId);
                 return HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR;
             }
         },

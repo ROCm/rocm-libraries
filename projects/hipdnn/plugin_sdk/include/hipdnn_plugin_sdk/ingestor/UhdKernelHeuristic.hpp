@@ -205,157 +205,13 @@ public:
                   const std::vector<std::string>& knobs = {},
                   const std::unordered_set<std::string>& kmdFields = {})
     {
-        // RFC 0019 §9.4 load time: covers config, signature compilation and artifact read.
-        const auto loadStart = Clock::now();
-        try
+        std::ostringstream failure;
+        auto built = create(descriptor, describedBy, knobs, kmdFields, failure);
+        if(built == nullptr)
         {
-            auto config = configFrom(descriptor);
-            // Also checked by the loader; repeated for descriptors that arrive another way.
-            if(const auto mismatch
-               = uhd::featureSemanticsMismatch(config.featuresSignature, config.trainedAgainst);
-               !mismatch.empty())
-            {
-                HIPDNN_PLUGIN_LOG_ERROR("uhd: " << describedBy << " " << mismatch
-                                                << "; the model is not used and kernels rank "
-                                                   "by priority, then id");
-                return nullptr;
-            }
-            if(descriptor.adapter == UhdAdapter::STATIC_ORDER
-               || (descriptor.adapter == UhdAdapter::NATIVE && config.featuresSignature.empty()))
-            {
-                auto built
-                    = std::shared_ptr<UhdKernelHeuristic>(new UhdKernelHeuristic(describedBy));
-                built->_objectiveSign = objectiveSignOf(config.objective);
-                if(descriptor.adapter == UhdAdapter::STATIC_ORDER)
-                {
-                    built->_direct = std::make_shared<UnrankedKernelHeuristic>();
-                }
-                else
-                {
-                    // rankScored orders higher-first, so a cost scorer needs the objective.
-                    built->_direct
-                        = std::make_shared<NativeKernelHeuristic>(descriptor.nativeSymbol,
-                                                                  describedBy,
-                                                                  config.objective,
-                                                                  config.scoreTransform,
-                                                                  config.scoreMetric);
-                }
-                built->_config = std::move(config);
-                built->_hasDefaultModel = true;
-                return built;
-            }
-
-            auto extractor = std::make_shared<const uhd::FeatureExtractor>(
-                config.featuresSignature, config.categoricalEncoding);
-            // RFC 0019 §6.3 check 2: every axis the model ranks on must be an exposed knob;
-            // otherwise degrade to declared order (§5 step 7).
-            const auto axes = kernelAxesOf(*extractor);
-            const std::unordered_set<std::string> exposed(knobs.begin(), knobs.end());
-            const auto join = [](const auto& names) {
-                std::string text;
-                for(const auto& name : names)
-                {
-                    text += (text.empty() ? "" : ", ") + name;
-                }
-                return text.empty() ? std::string("<none>") : text;
-            };
-
-            // RFC 0019 §6.3 check 2, first assertion: `F ⊆ KMD.fields`. Re-checked here
-            // because descriptor sets are drop-in and may be edited after generation.
-            const auto undeclared = extractor->getMissingKmdFields(kmdFields);
-            if(!undeclared.empty())
-            {
-                std::vector<std::string> missing = undeclared;
-                std::sort(missing.begin(), missing.end());
-                std::vector<std::string> declared(kmdFields.begin(), kmdFields.end());
-                std::sort(declared.begin(), declared.end());
-                HIPDNN_PLUGIN_LOG_ERROR(
-                    "uhd: " << describeDescriptor("heuristic", descriptor.name, descriptor.id)
-                            << " on " << describedBy << " reads [" << join(missing)
-                            << "], which its KMD does not declare as fields [" << join(declared)
-                            << "]; RFC 0019 §6.3 requires the model's axes to be declared, so "
-                               "the model is not used and kernels rank by priority, then id");
-                return nullptr;
-            }
-
-            std::vector<std::string> unexposed;
-            for(const auto& axis : axes)
-            {
-                if(exposed.count(axis) == 0)
-                {
-                    unexposed.push_back(axis);
-                }
-            }
-            if(!unexposed.empty())
-            {
-                std::sort(unexposed.begin(), unexposed.end());
-                HIPDNN_PLUGIN_LOG_ERROR(
-                    "uhd: " << describedBy << " ranks on [" << join(unexposed)
-                            << "], which its UED does not expose as knobs [" << join(exposed)
-                            << "]; RFC 0019 §6.3 requires the model's axes to be exposed, so "
-                               "the model is not used and kernels rank by priority, then id");
-                return nullptr;
-            }
-
-            // Knobs the model does not read are legal (e.g. constant in training); warn only.
-            std::vector<std::string> unread;
-            for(const auto& knob : exposed)
-            {
-                if(axes.count(knob) == 0)
-                {
-                    unread.push_back(knob);
-                }
-            }
-            if(!unread.empty())
-            {
-                std::sort(unread.begin(), unread.end());
-                HIPDNN_PLUGIN_LOG_WARN("uhd: " << describedBy << " exposes knobs [" << join(unread)
-                                               << "] its model does not rank on; selection "
-                                                  "ignores them");
-            }
-
-            auto adapter = uhd::makeUhdAdapter(config);
-            if(adapter == nullptr)
-            {
-                HIPDNN_PLUGIN_LOG_ERROR("uhd: " << describedBy << " names adapter '"
-                                                << config.adapterType
-                                                << "', which built no scorer");
-                return nullptr;
-            }
-
-            // RFC 0019 §6.3: the descriptor's features hash must match the signature.
-            if(!config.featuresSignature.empty()
-               && extractor->getSignatureHash() != config.featuresHash)
-            {
-                HIPDNN_PLUGIN_LOG_ERROR("uhd: " << describedBy << " signature hashes disagree -- "
-                                                << "descriptor declares '" << config.featuresHash
-                                                << "', signature computes '"
-                                                << extractor->getSignatureHash() << "'");
-                return nullptr;
-            }
-
-            // RFC 0019 §6.3 check 4: the hash does not cover artifact arity, and
-            // TreeDataAdapter silently treats a short row as missing values.
-            if(adapter->expectedFeatureCount() != extractor->featureCount())
-            {
-                HIPDNN_PLUGIN_LOG_ERROR(
-                    "uhd: " << describedBy << " model expects " << adapter->expectedFeatureCount()
-                            << " features, its signature " << "produces "
-                            << extractor->featureCount()
-                            << "; the model is not used and kernels rank by priority, then id");
-                return nullptr;
-            }
-
-            auto built = std::shared_ptr<UhdKernelHeuristic>(new UhdKernelHeuristic(
-                std::move(config), std::move(adapter), std::move(extractor), describedBy));
-            built->_timing.loadNs.store(elapsedNs(loadStart), std::memory_order_relaxed);
-            return built;
+            HIPDNN_PLUGIN_LOG_ERROR(failure.str());
         }
-        catch(const std::exception& e)
-        {
-            HIPDNN_PLUGIN_LOG_ERROR("uhd: " << describedBy << " failed to load: " << e.what());
-            return nullptr;
-        }
+        return built;
     }
 
     /// The descriptor's fields, with the artifact path resolved against the file it was
@@ -560,8 +416,10 @@ public:
         return detail::asScored(detail::declaredOrder(catalog.entries));
     }
 
-    /// The model @p metric's own entries name for @p arch, loaded once per (metric, arch key)
-    /// and cached. Fallback stays inside the metric (RFC 0019 §3.1).
+    /// The model @p metric's own entries name for @p arch, loaded on first success per
+    /// (metric, arch key) and cached. A failed load is retried on the next call so an
+    /// artifact still being deployed can recover (RFC 0019 §5); it is reported once per key.
+    /// Fallback stays inside the metric (RFC 0019 §3.1).
     std::shared_ptr<const UhdKernelHeuristic> resolveFor(const std::string& metric,
                                                          const std::string& arch) const
     {
@@ -578,14 +436,19 @@ public:
             return cached->second;
         }
         // Lazily resolved models face the same knob/field checks (RFC 0019 §8.3).
-        auto loaded = tryCreate(*chosen, _describedBy, _knobs, _kmdFields);
-        if(!loaded)
+        std::ostringstream failure;
+        auto loaded = create(*chosen, _describedBy, _knobs, _kmdFields, failure);
+        if(loaded)
+        {
+            _archCache.emplace(cacheKey, loaded);
+        }
+        else if(_archLoadFailuresReported.insert(cacheKey).second)
         {
             HIPDNN_PLUGIN_LOG_ERROR("uhd: " << _describedBy << " model for metric "
                                             << (metric.empty() ? "(none)" : "'" + metric + "'")
-                                            << " on '" << key << "' failed to load");
+                                            << " on '" << key
+                                            << "' failed to load: " << failure.str());
         }
-        _archCache.emplace(cacheKey, loaded);
         return loaded;
     }
 
@@ -616,6 +479,163 @@ public:
     }
 
 private:
+    /// tryCreate() without the ERROR: why the UHD was refused goes to @p failure, so a caller
+    /// that retries can report it once.
+    static std::shared_ptr<UhdKernelHeuristic>
+        create(const HeuristicDescriptor& descriptor,
+               const std::string& describedBy,
+               const std::vector<std::string>& knobs,
+               const std::unordered_set<std::string>& kmdFields,
+               std::ostream& failure)
+    {
+        // RFC 0019 §9.4 load time: covers config, signature compilation and artifact read.
+        const auto loadStart = Clock::now();
+        try
+        {
+            auto config = configFrom(descriptor);
+            // Also checked by the loader; repeated for descriptors that arrive another way.
+            if(const auto mismatch
+               = uhd::featureSemanticsMismatch(config.featuresSignature, config.trainedAgainst);
+               !mismatch.empty())
+            {
+                failure << "uhd: " << describedBy << " " << mismatch
+                        << "; the model is not used and kernels rank by priority, then id";
+                return nullptr;
+            }
+            if(descriptor.adapter == UhdAdapter::STATIC_ORDER
+               || (descriptor.adapter == UhdAdapter::NATIVE && config.featuresSignature.empty()))
+            {
+                auto built
+                    = std::shared_ptr<UhdKernelHeuristic>(new UhdKernelHeuristic(describedBy));
+                built->_objectiveSign = objectiveSignOf(config.objective);
+                if(descriptor.adapter == UhdAdapter::STATIC_ORDER)
+                {
+                    built->_direct = std::make_shared<UnrankedKernelHeuristic>();
+                }
+                else
+                {
+                    // rankScored orders higher-first, so a cost scorer needs the objective.
+                    built->_direct
+                        = std::make_shared<NativeKernelHeuristic>(descriptor.nativeSymbol,
+                                                                  describedBy,
+                                                                  config.objective,
+                                                                  config.scoreTransform,
+                                                                  config.scoreMetric);
+                }
+                built->_config = std::move(config);
+                built->_hasDefaultModel = true;
+                return built;
+            }
+
+            auto extractor = std::make_shared<const uhd::FeatureExtractor>(
+                config.featuresSignature, config.categoricalEncoding);
+            // RFC 0019 §6.3 check 2: every axis the model ranks on must be an exposed knob;
+            // otherwise degrade to declared order (§5 step 7).
+            const auto axes = kernelAxesOf(*extractor);
+            const std::unordered_set<std::string> exposed(knobs.begin(), knobs.end());
+            const auto join = [](const auto& names) {
+                std::string text;
+                for(const auto& name : names)
+                {
+                    text += (text.empty() ? "" : ", ") + name;
+                }
+                return text.empty() ? std::string("<none>") : text;
+            };
+
+            // RFC 0019 §6.3 check 2, first assertion: `F ⊆ KMD.fields`. Re-checked here
+            // because descriptor sets are drop-in and may be edited after generation.
+            const auto undeclared = extractor->getMissingKmdFields(kmdFields);
+            if(!undeclared.empty())
+            {
+                std::vector<std::string> missing = undeclared;
+                std::sort(missing.begin(), missing.end());
+                std::vector<std::string> declared(kmdFields.begin(), kmdFields.end());
+                std::sort(declared.begin(), declared.end());
+                failure << "uhd: "
+                        << describeDescriptor("heuristic", descriptor.name, descriptor.id) << " on "
+                        << describedBy << " reads [" << join(missing)
+                        << "], which its KMD does not declare as fields [" << join(declared)
+                        << "]; RFC 0019 §6.3 requires the model's axes to be declared, so the "
+                           "model is not used and kernels rank by priority, then id";
+                return nullptr;
+            }
+
+            std::vector<std::string> unexposed;
+            for(const auto& axis : axes)
+            {
+                if(exposed.count(axis) == 0)
+                {
+                    unexposed.push_back(axis);
+                }
+            }
+            if(!unexposed.empty())
+            {
+                std::sort(unexposed.begin(), unexposed.end());
+                failure << "uhd: " << describedBy << " ranks on [" << join(unexposed)
+                        << "], which its UED does not expose as knobs [" << join(exposed)
+                        << "]; RFC 0019 §6.3 requires the model's axes to be exposed, so the "
+                           "model is not used and kernels rank by priority, then id";
+                return nullptr;
+            }
+
+            auto adapter = uhd::makeUhdAdapter(config);
+            if(adapter == nullptr)
+            {
+                failure << "uhd: " << describedBy << " names adapter '" << config.adapterType
+                        << "', which built no scorer";
+                return nullptr;
+            }
+
+            // RFC 0019 §6.3: the descriptor's features hash must match the signature.
+            if(!config.featuresSignature.empty()
+               && extractor->getSignatureHash() != config.featuresHash)
+            {
+                failure << "uhd: " << describedBy << " signature hashes disagree -- "
+                        << "descriptor declares '" << config.featuresHash
+                        << "', signature computes '" << extractor->getSignatureHash() << "'";
+                return nullptr;
+            }
+
+            // RFC 0019 §6.3 check 4: the hash does not cover artifact arity, and
+            // TreeDataAdapter silently treats a short row as missing values.
+            if(adapter->expectedFeatureCount() != extractor->featureCount())
+            {
+                failure << "uhd: " << describedBy << " model expects "
+                        << adapter->expectedFeatureCount() << " features, its signature "
+                        << "produces " << extractor->featureCount()
+                        << "; the model is not used and kernels rank by priority, then id";
+                return nullptr;
+            }
+
+            // Knobs the model does not read are legal (e.g. constant in training); warn only.
+            std::vector<std::string> unread;
+            for(const auto& knob : exposed)
+            {
+                if(axes.count(knob) == 0)
+                {
+                    unread.push_back(knob);
+                }
+            }
+            if(!unread.empty())
+            {
+                std::sort(unread.begin(), unread.end());
+                HIPDNN_PLUGIN_LOG_WARN("uhd: " << describedBy << " exposes knobs [" << join(unread)
+                                               << "] its model does not rank on; selection "
+                                                  "ignores them");
+            }
+
+            auto built = std::shared_ptr<UhdKernelHeuristic>(new UhdKernelHeuristic(
+                std::move(config), std::move(adapter), std::move(extractor), describedBy));
+            built->_timing.loadNs.store(elapsedNs(loadStart), std::memory_order_relaxed);
+            return built;
+        }
+        catch(const std::exception& e)
+        {
+            failure << "uhd: " << describedBy << " failed to load: " << e.what();
+            return nullptr;
+        }
+    }
+
     /// The descriptor @p metric's own entries bind for @p arch, and its arch key, or null.
     /// A refused entry (exact or `default`) never falls through to a model it would shadow.
     const HeuristicDescriptor*
@@ -1018,8 +1038,11 @@ private:
     std::unordered_set<std::string> _kmdFields;
     mutable std::mutex _archMutex;
     /// Keyed by (metric, arch key): one UHD per metric per key, so the pair names a model.
+    /// Holds successful loads only.
     mutable std::map<std::pair<std::string, std::string>, std::shared_ptr<const UhdKernelHeuristic>>
         _archCache;
+    /// Keys whose load failure was already logged; guarded by _archMutex.
+    mutable std::set<std::pair<std::string, std::string>> _archLoadFailuresReported;
 
     uhd::UhdConfig _config;
     std::shared_ptr<const IKernelHeuristic> _direct;

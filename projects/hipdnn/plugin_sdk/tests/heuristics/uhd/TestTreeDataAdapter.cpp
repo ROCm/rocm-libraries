@@ -1039,6 +1039,40 @@ TEST_F(TestTreeDataAdapter, ATreeWhoseParallelArraysDisagreeIsRejected)
            "at load, not walked";
 }
 
+TEST_F(TestTreeDataAdapter, RepeatedTreeOffsetsCannotClaimMoreNodesThanTheBufferHolds)
+{
+    // Every `trees` entry may point at one table, so the claimed node count must be checked
+    // against the buffer before the adapter reserves storage for it.
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    const auto buildRepeated = [](size_t repeats) {
+        flatbuffers::FlatBufferBuilder builder;
+        const auto spec = makeBinarySplitTree(0, 5.0, 1.0, 2.0);
+        const auto tree = fb::CreateGbdtTreeDirect(builder,
+                                                   &spec.featureIndices,
+                                                   &spec.thresholds,
+                                                   &spec.leftChildren,
+                                                   &spec.rightChildren,
+                                                   &spec.leafValues,
+                                                   &spec.defaultLeft);
+        const std::vector<flatbuffers::Offset<fb::GbdtTree>> trees(repeats, tree);
+        builder.Finish(fb::CreateGbdtModel(builder, builder.CreateVector(trees), 1),
+                       fb::GbdtModelIdentifier());
+        return std::vector<uint8_t>(builder.GetBufferPointer(),
+                                    builder.GetBufferPointer() + builder.GetSize());
+    };
+
+    // Sharing a table is legal while the total stays within what the buffer could back.
+    const auto shared = buildRepeated(4);
+    auto sharedAdapter = TreeDataAdapter::loadFromBuffer(shared.data(), shared.size(), "");
+    ASSERT_NE(sharedAdapter, nullptr);
+    EXPECT_DOUBLE_EQ(sharedAdapter->score({0.0}), 4.0);
+
+    constexpr size_t REPEATS = 1000;
+    const auto inflated = buildRepeated(REPEATS);
+    ASSERT_GT(3 * REPEATS, inflated.size() / sizeof(int32_t));
+    EXPECT_EQ(TreeDataAdapter::loadFromBuffer(inflated.data(), inflated.size(), ""), nullptr);
+}
+
 // ---- Grouped models: solver first, then kernel, inside one artifact -------------------
 
 namespace

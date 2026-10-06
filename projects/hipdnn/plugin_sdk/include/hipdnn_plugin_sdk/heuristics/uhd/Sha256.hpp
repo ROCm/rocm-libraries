@@ -5,12 +5,13 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <iomanip>
 #include <sstream>
 #include <string>
-#include <vector>
 
 /// @file Sha256.hpp
 /// @brief Dependency-free SHA-256 (FIPS 180-4) for UHD fingerprints (RFC 0019 §6.3), so
@@ -67,6 +68,57 @@ constexpr uint32_t gamma1(uint32_t x)
     return rotr(x, 17) ^ rotr(x, 19) ^ (x >> 10);
 }
 
+inline constexpr size_t BLOCK_BYTES = 64;
+
+/// Compress one 64-byte block into @p h.
+inline void sha256Block(std::array<uint32_t, 8>& h, const uint8_t* block)
+{
+    std::array<uint32_t, 64> w{};
+    for(size_t i = 0; i < 16; ++i)
+    {
+        w[i] = (static_cast<uint32_t>(block[i * 4]) << 24)
+               | (static_cast<uint32_t>(block[i * 4 + 1]) << 16)
+               | (static_cast<uint32_t>(block[i * 4 + 2]) << 8)
+               | (static_cast<uint32_t>(block[i * 4 + 3]));
+    }
+    for(size_t i = 16; i < 64; ++i)
+    {
+        w[i] = gamma1(w[i - 2]) + w[i - 7] + gamma0(w[i - 15]) + w[i - 16];
+    }
+
+    auto a = h[0];
+    auto b = h[1];
+    auto c = h[2];
+    auto d = h[3];
+    auto e = h[4];
+    auto f = h[5];
+    auto g = h[6];
+    auto hh = h[7];
+
+    for(size_t i = 0; i < 64; ++i)
+    {
+        const uint32_t t1 = hh + sigma1(e) + ch(e, f, g) + K[i] + w[i];
+        const uint32_t t2 = sigma0(a) + maj(a, b, c);
+        hh = g;
+        g = f;
+        f = e;
+        e = d + t1;
+        d = c;
+        c = b;
+        b = a;
+        a = t1 + t2;
+    }
+
+    h[0] += a;
+    h[1] += b;
+    h[2] += c;
+    h[3] += d;
+    h[4] += e;
+    h[5] += f;
+    h[6] += g;
+    h[7] += hh;
+}
+
 inline std::string sha256Impl(const uint8_t* data, size_t length)
 {
     std::array<uint32_t, 8> h = {0x6a09e667,
@@ -78,65 +130,28 @@ inline std::string sha256Impl(const uint8_t* data, size_t length)
                                  0x1f83d9ab,
                                  0x5be0cd19};
 
-    // Pre-processing: padding
-    std::vector<uint8_t> msg(data, data + length);
-    const uint64_t bitLen = msg.size() * 8;
-    msg.push_back(0x80);
-    while((msg.size() % 64) != 56)
+    // Whole blocks are read in place; only the tail is copied, to append the padding.
+    const size_t whole = length - length % BLOCK_BYTES;
+    for(size_t offset = 0; offset < whole; offset += BLOCK_BYTES)
     {
-        msg.push_back(0x00);
-    }
-    for(int i = 7; i >= 0; --i)
-    {
-        msg.push_back(static_cast<uint8_t>((bitLen >> (i * 8)) & 0xFF));
+        sha256Block(h, data + offset);
     }
 
-    for(size_t chunk = 0; chunk < msg.size(); chunk += 64)
+    // The 0x80 marker and the 8-byte big-endian bit length follow the tail: one block if
+    // they fit after it, else two.
+    std::array<uint8_t, 2 * BLOCK_BYTES> tail{};
+    const size_t rest = length - whole;
+    std::copy(data + whole, data + length, tail.begin());
+    tail[rest] = 0x80;
+    const size_t tailBytes = rest < BLOCK_BYTES - 8 ? BLOCK_BYTES : 2 * BLOCK_BYTES;
+    const uint64_t bitLen = static_cast<uint64_t>(length) * 8;
+    for(size_t i = 0; i < 8; ++i)
     {
-        std::array<uint32_t, 64> w{};
-        for(size_t i = 0; i < 16; ++i)
-        {
-            w[i] = (static_cast<uint32_t>(msg[chunk + i * 4]) << 24)
-                   | (static_cast<uint32_t>(msg[chunk + i * 4 + 1]) << 16)
-                   | (static_cast<uint32_t>(msg[chunk + i * 4 + 2]) << 8)
-                   | (static_cast<uint32_t>(msg[chunk + i * 4 + 3]));
-        }
-        for(size_t i = 16; i < 64; ++i)
-        {
-            w[i] = gamma1(w[i - 2]) + w[i - 7] + gamma0(w[i - 15]) + w[i - 16];
-        }
-
-        auto a = h[0];
-        auto b = h[1];
-        auto c = h[2];
-        auto d = h[3];
-        auto e = h[4];
-        auto f = h[5];
-        auto g = h[6];
-        auto hh = h[7];
-
-        for(size_t i = 0; i < 64; ++i)
-        {
-            const uint32_t t1 = hh + sigma1(e) + ch(e, f, g) + K[i] + w[i];
-            const uint32_t t2 = sigma0(a) + maj(a, b, c);
-            hh = g;
-            g = f;
-            f = e;
-            e = d + t1;
-            d = c;
-            c = b;
-            b = a;
-            a = t1 + t2;
-        }
-
-        h[0] += a;
-        h[1] += b;
-        h[2] += c;
-        h[3] += d;
-        h[4] += e;
-        h[5] += f;
-        h[6] += g;
-        h[7] += hh;
+        tail[tailBytes - 1 - i] = static_cast<uint8_t>(bitLen >> (i * 8));
+    }
+    for(size_t offset = 0; offset < tailBytes; offset += BLOCK_BYTES)
+    {
+        sha256Block(h, tail.data() + offset);
     }
 
     std::ostringstream oss;

@@ -532,6 +532,35 @@ TEST(TestIngestorUhdKernelHeuristic, AnAbsentArtifactDegradesToDeclaredOrder)
     EXPECT_EQ(ranked.front().kernelId, testId(0x01)); // highest priority
 }
 
+TEST(TestIngestorUhdKernelHeuristic, AnArtifactDeployedAfterAMissIsPickedUp)
+{
+    // RFC 0019 §5: a failed load is not cached, so a model still being deployed recovers.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_late_deploy");
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), "model.bin"), {}, KNOBS, FIELDS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+    const auto missing = heuristic->rank(catalogAgainstPriority(2048), context);
+    ASSERT_EQ(missing.size(), 2U);
+    EXPECT_EQ(missing.front().kernelId, testId(0x01)); // declared order
+
+    // Retrying must not repeat the failure report on every ranking.
+    const auto reported = recorder.countLogsAtLevel(HIPDNN_SEV_ERROR);
+    EXPECT_GT(reported, 0U) << "the missing model was not reported";
+    (void)heuristic->rank(catalogAgainstPriority(2048), context);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), reported) << "the report repeated";
+
+    (void)writeFixture(dir.path(), preferLargeTiles());
+    const auto deployed = heuristic->rank(catalogAgainstPriority(2048), context);
+    ASSERT_EQ(deployed.size(), 2U);
+    EXPECT_EQ(deployed.front().kernelId, testId(0x02)) << "the deployed model was not used";
+}
+
 TEST(TestIngestorUhdKernelHeuristic, AFeaturesHashMismatchDegradesToDeclaredOrder)
 {
     // RFC 0019 §6.3 check 1.

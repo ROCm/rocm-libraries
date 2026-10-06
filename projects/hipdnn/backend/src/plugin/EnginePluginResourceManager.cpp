@@ -590,11 +590,16 @@ std::vector<uint8_t>
             {
                 HIPDNN_BACKEND_LOG_WARN("Failed to release candidate page: {}", error.what());
             }
+            catch(...)
+            {
+                HIPDNN_BACKEND_LOG_WARN("Failed to release candidate page");
+            }
         }
     };
     const std::unique_ptr<hipdnnPluginConstData_t, decltype(release)> guard(&data, release);
     plugin->enumerateCandidates(handle, &engineConfig, &serializedGraph, offset, limit, &data);
     THROW_IF_NULL(data.ptr, HIPDNN_STATUS_PLUGIN_ERROR, "Plugin returned a null candidate page");
+    // Verification also enforces the schema's required page and candidate strings.
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(data.ptr), data.size);
     THROW_IF_FALSE(verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::EngineDetails>(),
                    HIPDNN_STATUS_PLUGIN_ERROR,

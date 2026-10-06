@@ -122,11 +122,13 @@ private:
                     bool positiveRequired);
 
     /// Prepare one ensemble. Shared by layer 1 and every group so all trees get the same
-    /// bounds validation before the walker indexes rows with them.
+    /// bounds validation before the walker indexes rows with them. @p maxNodes caps the
+    /// shared store across all calls.
     static bool prepareTrees(
         const flatbuffers::Vector<
             flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtTree>>* trees,
         int32_t numFeatures,
+        size_t maxNodes,
         std::vector<Node>& nodes,
         std::vector<uint32_t>& roots);
 
@@ -274,9 +276,14 @@ inline std::unique_ptr<TreeDataAdapter>
         return nullptr;
     }
 
+    // Many `trees` entries may share one table, so the node count the offsets claim is not
+    // bounded by the buffer. Each distinct node needs an int32 in left_children; more nodes
+    // than that are repeats, and reserving for them could exhaust memory before validation.
+    const size_t maxNodes
+        = std::min<size_t>(size / sizeof(int32_t), std::numeric_limits<uint32_t>::max());
     std::vector<Node> nodes;
     std::vector<uint32_t> roots;
-    if(!prepareTrees(model->trees(), model->num_features(), nodes, roots))
+    if(!prepareTrees(model->trees(), model->num_features(), maxNodes, nodes, roots))
     {
         return nullptr;
     }
@@ -305,7 +312,7 @@ inline std::unique_ptr<TreeDataAdapter>
                 return nullptr;
             }
             std::vector<uint32_t> groupRoots;
-            if(!prepareTrees(group->trees(), model->num_features(), nodes, groupRoots))
+            if(!prepareTrees(group->trees(), model->num_features(), maxNodes, nodes, groupRoots))
             {
                 return nullptr;
             }
@@ -370,6 +377,7 @@ inline TreeDataAdapter::TreeDataAdapter(std::vector<Node> nodes,
 inline bool TreeDataAdapter::prepareTrees(
     const flatbuffers::Vector<flatbuffers::Offset<fb::GbdtTree>>* trees,
     int32_t numFeatures,
+    size_t maxNodes,
     std::vector<Node>& nodes,
     std::vector<uint32_t>& roots)
 {
@@ -385,7 +393,7 @@ inline bool TreeDataAdapter::prepareTrees(
 
     // FlatBuffers verifies each vector, not the relationships between vectors, so check sizes
     // before reserving or indexing. Count from nodes.size(): all layers share one store and
-    // children are absolute indices into it.
+    // children are absolute indices into it. maxNodes fits uint32_t, so offsets stay exact.
     size_t totalNodes = nodes.size();
     for(flatbuffers::uoffset_t t = 0; t < trees->size(); ++t)
     {
@@ -402,9 +410,9 @@ inline bool TreeDataAdapter::prepareTrees(
         {
             return reject(t, "node-parallel arrays have different lengths");
         }
-        if(count > std::numeric_limits<uint32_t>::max() - totalNodes)
+        if(count > maxNodes - totalNodes)
         {
-            return reject(t, "ensemble exceeds the prepared node index range");
+            return reject(t, "ensemble has more nodes than the model buffer can hold");
         }
         totalNodes += count;
     }

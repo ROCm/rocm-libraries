@@ -6632,9 +6632,11 @@ public:
      * @brief Choose the ranking metric engine selection and kernel choice optimize.
      *
      * @c "tflops" ranks higher first; @c "time" (milliseconds) lower first (RFC 0019 §4.4).
-     * Applies to later heuristic queries and explicit-engine configurations; engines with no
-     * model for the metric rank last. HIPDNN_HEUR_RANKING_METRIC overrides it for heuristic
-     * selection.
+     * Engine order changes only under HeuristicMode A/B, where engines with no model for the
+     * metric rank last; the default FALLBACK mode (Config, then StaticOrdering) ignores it.
+     * An engine that ranks its own kernels ranks them by it in every mode. Applies to later
+     * heuristic queries and explicit-engine configurations; HIPDNN_HEUR_RANKING_METRIC
+     * overrides it for heuristic selection.
      *
      * @param metric A registered ranking metric name
      * @return ErrorCode::INVALID_VALUE, with the metric unchanged, for an unregistered name

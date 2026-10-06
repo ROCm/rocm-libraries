@@ -53,8 +53,7 @@ inline void keys(const nlohmann::json& value,
     for(const auto& item : value.items())
     {
         if(std::find(allowed.begin(), allowed.end(), item.key()) == allowed.end()
-           && item.key().rfind("x-", 0) != 0 && item.key().rfind('_', 0) != 0
-           && item.key() != "provenance")
+           && item.key().rfind("x-", 0) != 0 && item.key().rfind('_', 0) != 0)
         {
             fail("unknown key '" + item.key() + "' in " + where);
         }
@@ -322,7 +321,9 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
           "table",
           "onnx",
           "custom_library",
-          "trained_against"},
+          "trained_against",
+          // Free-form authoring notes, never read; root only (RFC 0019 §4.1).
+          "provenance"},
          where);
     if(text(root, "version", where) != "1.0")
     {

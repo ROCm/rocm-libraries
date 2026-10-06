@@ -94,13 +94,11 @@ public:
     /// Orders @p catalog best-first, breaking ties on `priority`, then descriptor id
     /// bytes (stable across runs).
     ///
-    /// A NaN score ranks last rather than poisoning the order. `score()` is supplied by
-    /// the pack, so its value is outside this class's control, and NaN compares false
-    /// against everything -- it would read as equivalent to every kernel while real
-    /// scores stayed ordered among themselves, which is not a strict weak ordering and
-    /// is undefined behaviour for stable_sort. Mapping it to -infinity keeps the order
-    /// total, so a pack that returns NaN loses selection quality without costing
-    /// determinism or reaching UB. Infinities are already well-ordered and pass through.
+    /// A non-finite score (NaN or either infinity) ranks last, after every finite score,
+    /// and is reported as 0 (RFC 0019 §5 step 7). `score()` is supplied by the pack, so its
+    /// value is outside this class's control; NaN compares false against everything, which
+    /// is not a strict weak ordering and is undefined behaviour for stable_sort. In
+    /// particular, +infinity is not a "must pick" sentinel: it ranks below every finite score.
     ///
     /// Results cross a plugin boundary as ids and scores (§15.2), never objects or references.
     using ScoredKernel = ingestor::ScoredKernel;
@@ -137,7 +135,7 @@ public:
         struct Ranked
         {
             double ordering; ///< NaN-free, so the comparator stays a strict weak ordering
-            double reported; ///< exactly what score() returned, NaN included
+            double reported; ///< what score() returned if finite, else 0
             const KernelDefinition* entry;
         };
 

@@ -57,15 +57,12 @@ constexpr std::string_view objectiveOf(const RankingMetric& metric) noexcept
     return metric.direction == MetricDirection::HIGHER_IS_BETTER ? "max" : "min";
 }
 
-/// Whether @p value is a physically meaningful value of @p metric: finite, and
-/// non-negative for a throughput, strictly positive for a time.
-inline bool isValidMetricValue(const RankingMetric& metric, double value) noexcept
+/// Whether @p value is a physically meaningful value of @p metric: finite and strictly
+/// positive. Zero is excluded for every direction because kernel rankings write 0 for
+/// "no measurement".
+inline bool isValidMetricValue(const RankingMetric& /*metric*/, double value) noexcept
 {
-    if(!std::isfinite(value))
-    {
-        return false;
-    }
-    return metric.direction == MetricDirection::HIGHER_IS_BETTER ? value >= 0.0 : value > 0.0;
+    return std::isfinite(value) && value > 0.0;
 }
 
 /// Whether @p left is strictly better than @p right in @p metric's direction.

@@ -274,20 +274,19 @@ TEST_F(TestPredictionPolicies, UnscoredEnginesFallBackToStaticOrdering)
     }
 }
 
-// Engines the operator names lead the unscored tail in written order; the rest follow in
-// built-in order rather than being dropped.
+// Engines the operator names lead the unscored tail in written order.
 TEST_F(TestPredictionPolicies, UnscoredEnginesFollowTheOperatorFallbackOrder)
 {
     using hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_ID;
     using hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID;
     using hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID;
-    using hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID;
 
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(
         "HIPDNN_HEUR_FALLBACK_ENGINE_ORDER",
-        std::to_string(MIOPEN_ENGINE_DETERMINISTIC_ID) + "," + std::to_string(ASM_SDPA_ENGINE_ID));
+        std::to_string(MIOPEN_ENGINE_DETERMINISTIC_ID) + "," + std::to_string(ASM_SDPA_ENGINE_ID)
+            + "," + std::to_string(HIPBLASLT_ENGINE_ID));
     const std::vector<int64_t> arrival{
-        MIOPEN_ENGINE_ID, ASM_SDPA_ENGINE_ID, HIPBLASLT_ENGINE_ID, MIOPEN_ENGINE_DETERMINISTIC_ID};
+        ASM_SDPA_ENGINE_ID, HIPBLASLT_ENGINE_ID, MIOPEN_ENGINE_DETERMINISTIC_ID};
     for(const auto* mode : {MODE_A_POLICY_NAME, MODE_B_POLICY_NAME})
     {
         selectMode(mode, arrival);
@@ -295,11 +294,54 @@ TEST_F(TestPredictionPolicies, UnscoredEnginesFollowTheOperatorFallbackOrder)
         const auto services = host();
         ASSERT_TRUE(_plugin->finalizeWithHost(_descriptor.get(), &services));
         EXPECT_EQ(_plugin->getSortedEngineIds(_descriptor.get()),
-                  (std::vector<int64_t>{HIPBLASLT_ENGINE_ID,
-                                        MIOPEN_ENGINE_DETERMINISTIC_ID,
-                                        ASM_SDPA_ENGINE_ID,
-                                        MIOPEN_ENGINE_ID}))
+                  (std::vector<int64_t>{
+                      HIPBLASLT_ENGINE_ID, MIOPEN_ENGINE_DETERMINISTIC_ID, ASM_SDPA_ENGINE_ID}))
             << "policy " << mode;
+    }
+}
+
+// A set HIPDNN_HEUR_FALLBACK_ENGINE_ORDER is a shortlist, as under StaticOrdering: an
+// unlisted engine is never ranked, however well it predicts.
+TEST_F(TestPredictionPolicies, OperatorFallbackOrderExcludesUnlistedEngines)
+{
+    using hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID;
+    using hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID;
+
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(
+        "HIPDNN_HEUR_FALLBACK_ENGINE_ORDER", std::to_string(MIOPEN_ENGINE_ID));
+    for(const auto* mode : {MODE_A_POLICY_NAME, MODE_B_POLICY_NAME})
+    {
+        selectMode(mode, {HIPBLASLT_ENGINE_ID, MIOPEN_ENGINE_ID});
+        estimate(MIOPEN_ENGINE_ID, HIPDNN_ENGINE_PREDICTION_ENGINE, 10);
+        estimate(HIPBLASLT_ENGINE_ID, HIPDNN_ENGINE_PREDICTION_ENGINE, 100);
+        const auto services = host();
+        ASSERT_TRUE(_plugin->finalizeWithHost(_descriptor.get(), &services)) << mode;
+        EXPECT_EQ(_plugin->getSortedEngineIds(_descriptor.get()),
+                  (std::vector<int64_t>{MIOPEN_ENGINE_ID}))
+            << mode;
+        EXPECT_THROW(_plugin->getEngineConfig(_descriptor.get(), HIPBLASLT_ENGINE_ID),
+                     hipdnn_backend::HipdnnException)
+            << mode;
+    }
+}
+
+// Listing no candidate leaves nothing to rank: decline so the next policy runs.
+TEST_F(TestPredictionPolicies, OperatorFallbackOrderListingNoCandidateDeclines)
+{
+    using hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID;
+    using hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID;
+
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(
+        "HIPDNN_HEUR_FALLBACK_ENGINE_ORDER", std::to_string(MIOPEN_ENGINE_ID));
+    for(const auto* mode : {MODE_A_POLICY_NAME, MODE_B_POLICY_NAME})
+    {
+        selectMode(mode, {HIPBLASLT_ENGINE_ID});
+        estimate(HIPBLASLT_ENGINE_ID, HIPDNN_ENGINE_PREDICTION_ENGINE, 100);
+        const auto services = host();
+        EXPECT_FALSE(_plugin->finalizeWithHost(_descriptor.get(), &services)) << mode;
+        EXPECT_THROW(_plugin->getSortedEngineIds(_descriptor.get()),
+                     hipdnn_backend::HipdnnException)
+            << mode;
     }
 }
 

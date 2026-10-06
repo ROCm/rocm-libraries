@@ -141,7 +141,7 @@ Overrides the ranking metric the prediction policies (`SelectionHeuristic::ModeA
 | `tflops`   | Calibrated throughput in TFLOPS; higher ranks first. |
 | `time`     | Predicted device time in milliseconds; lower ranks first. |
 
-Any other value fails `finalize()` with `HIPDNN_STATUS_BAD_PARAM`: an unregistered metric has no direction to rank by, and engines are never ranked by a metric other than the one requested. The effective metric is stamped into every configuration in `HIPDNN_ATTR_ENGINEHEUR_RESULTS`, so the chosen engine picks its kernel by the same metric at plan build. It affects only engine heuristic descriptors; the per-query `HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT` and `HIPDNN_ATTR_ENGINECFG_RANKING_METRIC_EXT` attributes are not overridden.
+Any other value is logged as an error and ignored: the descriptor attribute, else `tflops`, applies as if the variable were unset. Engines are never ranked by a metric other than the effective one. The effective metric is stamped into every configuration in `HIPDNN_ATTR_ENGINEHEUR_RESULTS`, so the chosen engine picks its kernel by the same metric at plan build. It affects only engine heuristic descriptors; the per-query `HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT` and `HIPDNN_ATTR_ENGINECFG_RANKING_METRIC_EXT` attributes are not overridden.
 
 **Example:**
 ```bash
@@ -167,9 +167,9 @@ export HIPDNN_HEUR_CONFIG_PATH=/etc/hipdnn/engine_overrides.json
 
 #### HIPDNN_HEUR_FALLBACK_ENGINE_ORDER
 
-Replaces the built-in ordering used by `SelectionHeuristic::StaticOrdering`. When set, **only** engines named here are eligible — anything else is dropped from the candidate list.
+Replaces the built-in ordering used by `SelectionHeuristic::StaticOrdering`, `SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB`. When set, **only** engines named here are eligible — anything else is dropped from the candidate list, however well a prediction policy would score it.
 
-`SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB` use the same list for the engines they cannot score: unscored engines (and ties between equal scores) follow the order written here, then any engine it does not name in the built-in order. These policies never drop an engine; only `StaticOrdering` restricts selection to the listed engines.
+`SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB` still rank the listed engines by prediction; unscored engines (and ties between equal scores) follow the order written here.
 
 | Value      | Description                                                |
 |------------|------------------------------------------------------------|

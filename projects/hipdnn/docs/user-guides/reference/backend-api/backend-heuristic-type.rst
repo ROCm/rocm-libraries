@@ -34,8 +34,8 @@ the requested one and its ``value`` is in that metric's units. An engine answers
 only in the requested metric: with no model for it, the answer is ``UNAVAILABLE``,
 never a value in another metric.
 
-``AVAILABLE`` provides a calibrated physical value, finite, non-negative for
-``tflops`` and positive for ``time``. ``UNAVAILABLE`` means no usable prediction is
+``AVAILABLE`` provides a calibrated physical value, finite and strictly positive in
+every metric. ``UNAVAILABLE`` means no usable prediction is
 supplied; ``INVALID`` reports an incompatible or malformed prediction. Neither
 status removes an otherwise applicable engine.
 Setting ``HIPDNN_ATTR_ENGINE_PREDICTION_EVALUATE_EXT`` or

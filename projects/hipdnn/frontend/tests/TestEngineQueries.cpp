@@ -19,6 +19,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace hipdnn_frontend;
@@ -124,6 +125,24 @@ protected:
         static int s_sentinel = 0;
         return reinterpret_cast<hipdnnBackendDescriptor_t>(&s_sentinel);
     }
+
+    /// Answers candidate-page reads with @p response as it is at read time.
+    void serveCandidatePage(const flatbuffers::DetachedBuffer& response)
+    {
+        ON_CALL(*_mockBackend,
+                backendGetAttribute(_, HIPDNN_ATTR_ENGINE_CANDIDATES_EXT, _, _, _, _))
+            .WillByDefault([&response](hipdnnBackendDescriptor_t,
+                                       hipdnnBackendAttributeName_t,
+                                       hipdnnBackendAttributeType_t,
+                                       int64_t,
+                                       int64_t*,
+                                       void* out) {
+                auto* data = static_cast<hipdnnBackendFlatbufferData_t*>(out);
+                data->ptr = response.data();
+                data->size = response.size();
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    }
 };
 
 TEST_F(TestEngineQueries, PredictionIsAnsweredInTheRequestedMetric)
@@ -203,7 +222,7 @@ TEST_F(TestEngineQueries, AnswerWithoutMetricIsRejected)
     EXPECT_EQ(error.code, ErrorCode::HIPDNN_BACKEND_ERROR);
 }
 
-// Validity follows the metric: zero throughput is a legal measurement, zero time is not.
+// Zero is invalid under every metric: a 0 throughput means "no measurement".
 TEST_F(TestEngineQueries, AvailableValueIsValidatedAgainstTheMetric)
 {
     _respond = [](PredictionKind, const std::string& metric) {
@@ -214,13 +233,14 @@ TEST_F(TestEngineQueries, AvailableValueIsValidatedAgainstTheMetric)
         return response;
     };
     EnginePrediction prediction;
-    EXPECT_TRUE(detail::getEnginePrediction(
-                    graph(), ENGINE_ID, prediction, PredictionKind::ENGINE, true, {}, "tflops")
-                    .is_good());
-    EXPECT_EQ(detail::getEnginePrediction(
-                  graph(), ENGINE_ID, prediction, PredictionKind::ENGINE, true, {}, "time")
-                  .code,
-              ErrorCode::HIPDNN_BACKEND_ERROR);
+    for(const auto* metric : {"tflops", "time"})
+    {
+        EXPECT_EQ(detail::getEnginePrediction(
+                      graph(), ENGINE_ID, prediction, PredictionKind::ENGINE, true, {}, metric)
+                      .code,
+                  ErrorCode::HIPDNN_BACKEND_ERROR)
+            << metric;
+    }
 }
 
 // Unbound metrics and INVALID bindings are both left out.
@@ -387,18 +407,7 @@ TEST_F(TestEngineQueries, PredictionKnobTaggedWithoutItsValueIsAnError)
 TEST_F(TestEngineQueries, CandidateKnobTaggedWithoutItsValueIsAnError)
 {
     flatbuffers::DetachedBuffer response;
-    ON_CALL(*_mockBackend, backendGetAttribute(_, HIPDNN_ATTR_ENGINE_CANDIDATES_EXT, _, _, _, _))
-        .WillByDefault([&response](hipdnnBackendDescriptor_t,
-                                   hipdnnBackendAttributeName_t,
-                                   hipdnnBackendAttributeType_t,
-                                   int64_t,
-                                   int64_t*,
-                                   void* out) {
-            auto* data = static_cast<hipdnnBackendFlatbufferData_t*>(out);
-            data->ptr = response.data();
-            data->size = response.size();
-            return HIPDNN_STATUS_SUCCESS;
-        });
+    serveCandidatePage(response);
 
     for(const auto tag : TAGGED_KNOB_VALUES)
     {
@@ -415,6 +424,109 @@ TEST_F(TestEngineQueries, CandidateKnobTaggedWithoutItsValueIsAnError)
         ASSERT_TRUE(verifier.VerifyBuffer<fb::EngineDetails>());
         EXPECT_FALSE(detail::getEngineCandidates(graph(), ENGINE_ID, page).is_good());
     }
+}
+
+/// A one-candidate page omitting page field @p pageField and candidate field
+/// @p candidateField (0 omits neither). Hand-built: the generated builders assert that
+/// required fields are present.
+flatbuffers::DetachedBuffer pageOmitting(flatbuffers::voffset_t pageField,
+                                         flatbuffers::voffset_t candidateField)
+{
+    using Candidate = fb::EngineCandidate;
+    using Page = fb::EngineCandidatePage;
+    flatbuffers::FlatBufferBuilder builder;
+    const auto addUnless = [&builder](flatbuffers::voffset_t omitted,
+                                      flatbuffers::voffset_t field,
+                                      flatbuffers::Offset<flatbuffers::String> value) {
+        if(field != omitted)
+        {
+            builder.AddOffset(field, value);
+        }
+    };
+    const auto id = builder.CreateString("candidate");
+    const auto kernelFeatures = builder.CreateString("{}");
+    const auto candidateStart = builder.StartTable();
+    addUnless(candidateField, Candidate::VT_ID, id);
+    addUnless(candidateField, Candidate::VT_KERNEL_FEATURES, kernelFeatures);
+    const std::vector<flatbuffers::Offset<Candidate>> candidates{
+        flatbuffers::Offset<Candidate>(builder.EndTable(candidateStart))};
+    const auto candidateVector = builder.CreateVector(candidates);
+    const std::array<std::pair<flatbuffers::voffset_t, flatbuffers::Offset<flatbuffers::String>>, 5>
+        strings{{{Page::VT_GRAPH_ID, builder.CreateString("graph")},
+                 {Page::VT_DEVICE_ID, builder.CreateString("device")},
+                 {Page::VT_DEVICE_ARCH, builder.CreateString("gfx942")},
+                 {Page::VT_PROBLEM_FEATURES, builder.CreateString("{}")},
+                 {Page::VT_DEVICE_FEATURES, builder.CreateString("{}")}}};
+    const auto pageStart = builder.StartTable();
+    for(const auto& [field, value] : strings)
+    {
+        addUnless(pageField, field, value);
+    }
+    builder.AddElement<uint64_t>(Page::VT_TOTAL_COUNT, 1, 0);
+    builder.AddOffset(Page::VT_CANDIDATES, candidateVector);
+    const flatbuffers::Offset<Page> page(builder.EndTable(pageStart));
+    builder.Finish(fb::CreateEngineDetails(builder, ENGINE_ID, 0, 0, 0, page));
+    return builder.Release();
+}
+
+TEST_F(TestEngineQueries, CandidatePageMissingARequiredFieldIsAnError)
+{
+    using Candidate = fb::EngineCandidate;
+    using Page = fb::EngineCandidatePage;
+    flatbuffers::DetachedBuffer response;
+    serveCandidatePage(response);
+    EngineCandidatePage page;
+
+    // Control: the hand-built page decodes when nothing is omitted.
+    response = pageOmitting(0, 0);
+    const auto good = detail::getEngineCandidates(graph(), ENGINE_ID, page);
+    ASSERT_TRUE(good.is_good()) << good.get_message();
+
+    const std::array<std::pair<flatbuffers::voffset_t, flatbuffers::voffset_t>, 7> omissions{
+        {{Page::VT_GRAPH_ID, 0},
+         {Page::VT_DEVICE_ID, 0},
+         {Page::VT_DEVICE_ARCH, 0},
+         {Page::VT_PROBLEM_FEATURES, 0},
+         {Page::VT_DEVICE_FEATURES, 0},
+         {0, Candidate::VT_ID},
+         {0, Candidate::VT_KERNEL_FEATURES}}};
+    for(const auto& [pageField, candidateField] : omissions)
+    {
+        SCOPED_TRACE(::testing::Message()
+                     << "page field " << pageField << ", candidate field " << candidateField);
+        response = pageOmitting(pageField, candidateField);
+        EXPECT_EQ(detail::getEngineCandidates(graph(), ENGINE_ID, page).get_code(),
+                  ErrorCode::HIPDNN_BACKEND_ERROR);
+    }
+}
+
+// Unique ids need not ascend: the page keeps the plugin's stable order.
+TEST_F(TestEngineQueries, CandidatesKeepPluginOrderWhenIdsAreNotAscending)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    const auto candidate = [&builder](const char* id, int64_t knobValue) {
+        const std::vector<flatbuffers::Offset<fb::KnobSetting>> knobs{
+            fb::CreateKnobSettingDirect(builder,
+                                        "test.knob",
+                                        fb::KnobValue::IntValue,
+                                        fb::CreateIntValue(builder, knobValue).Union())};
+        return fb::CreateEngineCandidateDirect(builder, id, &knobs, "{}");
+    };
+    const std::vector<flatbuffers::Offset<fb::EngineCandidate>> candidates{candidate("b", 1),
+                                                                           candidate("a", 2)};
+    const auto source = fb::CreateEngineCandidatePageDirect(
+        builder, "graph", "device", "gfx942", "{}", "{}", 2, 0, &candidates);
+    builder.Finish(
+        fb::CreateEngineDetailsDirect(builder, ENGINE_ID, nullptr, nullptr, nullptr, source));
+    const auto response = builder.Release();
+    serveCandidatePage(response);
+
+    EngineCandidatePage page;
+    const auto error = detail::getEngineCandidates(graph(), ENGINE_ID, page);
+    ASSERT_TRUE(error.is_good()) << error.get_message();
+    ASSERT_EQ(page.candidates.size(), 2U);
+    EXPECT_EQ(page.candidates[0].id, "b");
+    EXPECT_EQ(page.candidates[1].id, "a");
 }
 
 } // namespace

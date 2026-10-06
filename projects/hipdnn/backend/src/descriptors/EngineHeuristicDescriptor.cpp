@@ -114,16 +114,19 @@ std::vector<int64_t> EngineHeuristicDescriptor::resolveHeuristicPolicyOrder()
 std::string EngineHeuristicDescriptor::resolveRankingMetric() const
 {
     // RFC 0019 §11.4: environment, then descriptor attribute, then default.
+    // A bad value is ignored, as for the other heuristic env variables: the environment
+    // bypasses the set-time check, so validate it here.
     std::string envStr = hipdnn_data_sdk::utilities::getEnv("HIPDNN_HEUR_RANKING_METRIC");
     if(!envStr.empty())
     {
-        // The environment bypasses the set-time check, so validate it here.
-        THROW_IF_NULL(hipdnn_data_sdk::utilities::findRankingMetric(envStr),
-                      HIPDNN_STATUS_BAD_PARAM,
-                      "HIPDNN_HEUR_RANKING_METRIC names unregistered ranking metric '" + envStr
-                          + "'");
-        HIPDNN_BACKEND_LOG_INFO("Using environment variable ranking metric '{}'", envStr);
-        return envStr;
+        if(hipdnn_data_sdk::utilities::findRankingMetric(envStr) != nullptr)
+        {
+            HIPDNN_BACKEND_LOG_INFO("Using environment variable ranking metric '{}'", envStr);
+            return envStr;
+        }
+        HIPDNN_BACKEND_LOG_ERROR("Ignoring HIPDNN_HEUR_RANKING_METRIC: unregistered ranking "
+                                 "metric '{}'",
+                                 envStr);
     }
     return std::string(heuristics::resolveRankingMetric(_rankingMetric).name);
 }

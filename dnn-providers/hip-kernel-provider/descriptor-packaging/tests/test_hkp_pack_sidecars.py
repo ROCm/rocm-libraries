@@ -271,16 +271,22 @@ def test_explicit_semantic_revision_does_not_change_format_admission(tmp_path):
         load_flat_input(root, log=lambda *_: None)
 
 
+_UHD_SCHEMA = "projects/hipdnn/plugin_sdk/schemas/uhd.schema.json"
+
+
+def _repo_root() -> Path:
+    return next(
+        parent
+        for parent in Path(__file__).resolve().parents
+        if (parent / _UHD_SCHEMA).is_file()
+    )
+
+
 def _canonical_uhd_validator():
     """The published schema, which the runtime loader (UhdParser.hpp) mirrors."""
     jsonschema = pytest.importorskip("jsonschema")
-    schema_path = next(
-        parent / "projects/hipdnn/plugin_sdk/schemas/uhd.schema.json"
-        for parent in Path(__file__).resolve().parents
-        if (parent / "projects/hipdnn/plugin_sdk/schemas/uhd.schema.json").is_file()
-    )
     return jsonschema.Draft7Validator(
-        json.loads(schema_path.read_text(encoding="utf-8"))
+        json.loads((_repo_root() / _UHD_SCHEMA).read_text(encoding="utf-8"))
     )
 
 
@@ -390,6 +396,122 @@ def test_schema_admits_the_extension_namespaces_the_loader_ignores():
     stray_nested = _model_uhd("model.bin")
     stray_nested["tree_data"]["bytes"] = 2048
     assert not validator.is_valid(stray_nested)
+
+
+def test_every_in_tree_uhd_conforms_to_the_canonical_schema():
+    validator = _canonical_uhd_validator()
+    root = _repo_root()
+    paths = sorted(
+        path
+        for tree in ("projects/hipdnn", "dnn-providers")
+        for path in (root / tree).rglob("*.uhd.json")
+    )
+    # A wrong root would make the check vacuous.
+    assert paths
+    errors = {
+        str(path.relative_to(root)): [
+            error.message
+            for error in validator.iter_errors(
+                json.loads(path.read_text(encoding="utf-8"))
+            )
+        ]
+        for path in paths
+    }
+    assert not {path: found for path, found in errors.items() if found}
+
+
+def _custom_library_uhd() -> dict:
+    doc = _native_uhd()
+    del doc["native"]
+    doc["adapter"] = "custom_library"
+    doc["custom_library"] = {"library": "lib/model.so", "symbol": "score", "config": {}}
+    return doc
+
+
+def _bounded_uhd() -> dict:
+    """A model UHD sitting exactly on the parser's int32 code and revision bounds."""
+    doc = _model_uhd("model.bin")
+    doc["features_signature"] = ["$kernel.layout"]
+    doc["categorical_encoding"] = {
+        "$kernel.layout": {"nhwc": -(2**31), "nchw": 2**31 - 1}
+    }
+    doc["trained_against"]["kmd"]["revision"] = "999999999.999999999"
+    doc["trained_against"]["feature_semantics_revision"] = 2**63 - 1
+    doc["provenance"] = {"dataset": "nightly"}
+    return doc
+
+
+def _set(*path_and_value):
+    """A mutation assigning the last argument at the key path given by the others."""
+    *path, key, value = path_and_value
+
+    def mutate(doc: dict) -> None:
+        target = doc
+        for step in path:
+            target = target[step]
+        target[key] = value
+
+    return mutate
+
+
+@pytest.mark.parametrize(
+    "build, mutate",
+    [
+        pytest.param(
+            _custom_library_uhd,
+            _set("custom_library", "config", {"threads": 4}),
+            id="custom_library_config_not_empty",
+        ),
+        pytest.param(
+            _bounded_uhd,
+            _set("categorical_encoding", "kernel.dtype", {"fp16": 0}),
+            id="categorical_field_not_a_reference",
+        ),
+        pytest.param(
+            _bounded_uhd,
+            _set("categorical_encoding", "$kernel.layout", "chwn", 2**31),
+            id="categorical_code_above_int32",
+        ),
+        pytest.param(
+            _bounded_uhd,
+            _set("categorical_encoding", "$kernel.layout", "chwn", -(2**31) - 1),
+            id="categorical_code_below_int32",
+        ),
+        pytest.param(
+            _bounded_uhd,
+            _set("trained_against", "ued", "revision", "1000000000.0"),
+            id="revision_major_over_nine_digits",
+        ),
+        pytest.param(
+            _bounded_uhd,
+            _set("trained_against", "ued", "revision", "1.1000000000"),
+            id="revision_minor_over_nine_digits",
+        ),
+        pytest.param(
+            _bounded_uhd,
+            _set("trained_against", "feature_semantics_revision", 2**63),
+            id="feature_semantics_revision_over_int64",
+        ),
+        pytest.param(
+            _bounded_uhd,
+            _set("trained_against", "provenance", {"dataset": "nightly"}),
+            id="provenance_below_the_root",
+        ),
+        pytest.param(
+            _bounded_uhd,
+            _set("tree_data", "provenance", {"dataset": "nightly"}),
+            id="provenance_in_the_body",
+        ),
+    ],
+)
+def test_schema_refuses_what_the_runtime_parser_refuses(build, mutate):
+    validator = _canonical_uhd_validator()
+    doc = build()
+    assert validator.is_valid(doc), [
+        error.message for error in validator.iter_errors(doc)
+    ]
+    mutate(doc)
+    assert not validator.is_valid(doc)
 
 
 def _static_order_uhd(body: dict) -> dict:
