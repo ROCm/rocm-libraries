@@ -145,6 +145,16 @@ prefill shapes are not included.
   graphs decode (`max_seqlen_q == 1`) and short prefill (`<= 768`) — where host
   launch overhead is a large fraction — and ungraphs long prefill (kernel-bound).
   Toggle with `HIPDNN_GFX942_2D_GRAPH` / `HIPDNN_GFX942_3D_GRAPH` (both default-on).
+- **The attention band matches gfx950.** The tiled 2D/3D kernels compute the
+  cuDNN / hipDNN band: top-left alignment (`causal_top_left`, name token `tl`),
+  full attention (`NO_MASK`, `rbu`), lookahead (`rb<R>`) and non-causal windows.
+  With top-left, `context_len` is 0, so the ALiBi / QQ-bias offsets follow it;
+  `right_bound != 0` is rejected together with ALiBi / QQ-bias. The 4-warp GQA
+  cohorts (D256 causal, D128 sliding-window) keep top-left but decline a right
+  bound other than 0, so those problems build the generic tiled 2D spec. The
+  default mask keeps every kernel name, cache key and IR unchanged. See
+  [`../../../dispatch/attention/README.md`](../../../dispatch/attention/README.md)
+  ("Attention band"). gfx1250 remains the causal-only gap.
 
 ### Lever environment variables
 

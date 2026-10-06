@@ -572,14 +572,22 @@ class TestBandTuning(unittest.TestCase):
                             other, label, f"{what} shared: {other} / {label}"
                         )
 
-    def test_gfx942_tuning_declines_a_top_left_band_without_raising(self):
+    def test_gfx942_tuning_carries_a_top_left_band(self):
         from dispatch.attention.gfx942_unified import GFX942_TUNING_VARIANTS
         from dispatch.attention.unified_rules import iter_tuning_specs
 
         req = _request("gfx942", mask_type=1, seqlen_q=700, seqlen_k=1400)
+        default = _request("gfx942", mask_type=2, seqlen_q=700, seqlen_k=1400)
         for variant in GFX942_TUNING_VARIANTS[:8]:
             with self.subTest(variant=variant.variant_id):
-                self.assertEqual(list(islice(iter_tuning_specs(req, variant), 3)), [])
+                specs = list(islice(iter_tuning_specs(req, variant), 3))
+                # The mask adds no geometry limit: top-left is served wherever the
+                # default bottom-right mask is.
+                served = bool(list(islice(iter_tuning_specs(default, variant), 1)))
+                self.assertEqual(bool(specs), served)
+                for spec in specs:
+                    self.assertTrue(spec.kernel_spec.causal_top_left)
+                    self.assertEqual(spec.kernel_spec.right_bound, 0)
 
 
 class TestGfx950UnifiedLegality(unittest.TestCase):

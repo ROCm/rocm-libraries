@@ -1784,6 +1784,46 @@ class TestDenseBandNumeric:
         out, (ref, empty) = _run_band(spec, window, right, seed=2)
         _check_band(out, ref, empty, spec.kernel_name())
 
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("sq,skv,window,right,persistent,ragged", _BAND_CASES)
+    def test_dispatched_request_matches_band(
+        self, sq, skv, window, right, persistent, ragged
+    ):
+        """The same bands through ``AttentionRequest`` -> dispatch -> dense spec."""
+        from dispatch.attention import (
+            AttentionRequest,
+            attention_tuning_spec,
+            tuning_spec_with_knobs,
+        )
+
+        req = AttentionRequest(
+            batch=1,
+            nhead_q=4,
+            nhead_k=1,
+            seqlen_q=sq,
+            seqlen_k=skv,
+            hdim_q=128,
+            hdim_v=128,
+            arch="gfx942",
+            dtype="bf16",
+            mask_type=0,  # NO_MASK: the band comes from (sliding_window, right_bound)
+            sliding_window=window,
+            right_bound=right,
+            algorithm="attention_dense",
+            spec_id="gfx942_dense",
+        )
+        spec = attention_tuning_spec(req, "gfx942_dense").kernel_spec
+        if spec.persistent != persistent:
+            # persistence is a knob of the candidate, not a request field.
+            spec = tuning_spec_with_knobs(
+                req, "gfx942_dense", {"persistent": persistent}
+            ).kernel_spec
+        assert spec.causal == (right >= 0) and spec.right_bound == max(right, 0)
+        assert spec.ragged == ragged and spec.persistent == persistent
+        out, (ref, empty) = _run_band(spec, window, right, seed=1)
+        _check_band(out, ref, empty, spec.kernel_name())
+
 
 def _band_sink_lse_reference(q, k, v, scale, window, right, sinks):
     """fp32 O and natural-log LSE for the band, optionally with one sink logit per
