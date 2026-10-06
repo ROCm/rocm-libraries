@@ -327,8 +327,36 @@ typedef enum {
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE4M3_EXT = 1003, /**<Not supported yet. Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit ``HIP_R_8F_E4M3`` value for each 32-element block in the innermost dimension of the corresponding data tensor. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT = 1004, /**<Not supported yet. Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit ``HIP_R_8F_E5M3_EXT`` value for each 16-element block in the innermost dimension of the corresponding data tensor. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE5M3_EXT = 1005, /**<Not supported yet. Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit ``HIP_R_8F_E5M3_EXT`` value for each 32-element block in the innermost dimension of the corresponding data tensor. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_EXT = 1006, /**<w4a16 group scaling. Scaling factors are a dense ``[M][ceil(K/32)]`` tensor holding one scale per 32 consecutive K elements of a row of the corresponding data tensor, laid out with the K/32 dimension innermost. The scale element type is the type of matrix B (``HIP_R_16BF`` or ``HIP_R_16F``), so it is not named here. Symmetric quantization only (no zero-point). Currently supported for matrix A only, with A of type ``HIP_R_4I``. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_EXT = 1007, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_EXT`` with a group size of 64. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_EXT = 1008, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_EXT`` with a group size of 128. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_ZP_EXT = 1009, /**<Asymmetric w4a16 group scaling with a group size of 32. The scale pointer addresses a single allocation holding two regions: first the ``[M][ceil(K/32)]`` scales exactly as in ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_EXT``, then, starting at the next 256-byte boundary, ``ceil(M/8) * ceil(K/32)`` 32-bit words of packed 4-bit zero-points. Word ``(m/8)*ceil(K/32) + g`` stores row ``m`` in bits ``4*(m%8)`` through ``4*(m%8)+3``. Zero-point nibbles use the domain selected by ``HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT``: signed two's complement or unsigned [0,15]. The zero-point region is packed int4 whatever the scale type is. The dequantized weight is ``(q - z) * s``. Currently supported for matrix A only, with A of type ``HIP_R_4I``. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_ZP_EXT = 1010, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_ZP_EXT`` with a group size of 64. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_ZP_EXT = 1011, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_ZP_EXT`` with a group size of 128. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_END
 } hipblasLtMatmulMatrixScale_t;
+
+/*! \ingroup types_module
+ *  \brief Encoding of the int4 weights in matrix A for the w4a16 path.
+ *
+ *  Selected with ``HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT``. Orthogonal to
+ *  ``hipblasLtMatmulMatrixScale_t``: the scale mode says how the *scales* are
+ *  laid out, this says how the *weights* are. The dequantized weight is
+ *  ``(q - z) * s`` in every case; only q's storage differs.
+ */
+typedef enum
+{
+    /*! Two's-complement int4 in ``[-8, 7]``, nibbles in K order: element ``2n``
+     *  in the low nibble of byte ``n``. Default. */
+    HIPBLASLT_INT4_ENCODING_SIGNED_EXT = 0,
+    /*! Unsigned int4 in ``[0, 15]`` with an implicit zero-point of 8 when no
+     *  zero-point tensor is supplied, nibbles in K order. This is the encoding
+     *  GPTQ and compressed-tensors checkpoints store natively: their int32
+     *  words, viewed as bytes, put element ``2n`` in the low nibble of byte
+     *  ``n``, so a checkpoint's ``qweight`` can be consumed without a repack. */
+    HIPBLASLT_INT4_ENCODING_UNSIGNED_BIAS8_EXT = 1,
+    HIPBLASLT_INT4_ENCODING_END_EXT
+} hipblasLtInt4Encoding_t;
 
 /*! \ingroup types_module
  *  \brief Mode values for the ``HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT``
@@ -376,6 +404,7 @@ typedef enum {
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
   HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE = 106,              /**<Attach a fused epilogue to this matmul. The value is a ``hipblasLtFusedEpilogueDescriptor_t`` built with ``hipblasLtFusedEpilogueCreate`` / ``...Add`` / ``...SetAttribute``. The descriptor is referenced, not copied, so it must outlive every matmul call that uses this matmul descriptor. Required parameters are validated when the matmul runs: ``hipblasLtMatmulAlgoGetHeuristic`` and ``hipblasLtMatmul`` reject a descriptor whose selected stages are incomplete. Set the value to NULL to detach. Data type: ``hipblasLtFusedEpilogueDescriptor_t``. */
 #endif
+  HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT = 107, /**<Encoding of the int4 weights in matrix A on the w4a16 path. Provided as an ``_EXT`` attribute. Accepts values from ``hipblasLtInt4Encoding_t``; the default ``0`` (``HIPBLASLT_INT4_ENCODING_SIGNED_EXT``) is two's-complement int4. Values outside the enum are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Ignored unless matrix A is ``HIP_R_4I`` with a block scale mode. Data type: ``int32_t``. */
   HIPBLASLT_MATMUL_DESC_MAX,
 } hipblasLtMatmulDescAttributes_t;
 

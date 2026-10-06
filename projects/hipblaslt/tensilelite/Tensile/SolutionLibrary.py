@@ -533,6 +533,15 @@ class MasterSolutionLibrary:
                     placeholderName += '_SAB'
                 elif problemType.useScaleAB == "Vector":
                     placeholderName += '_SABV'
+                if problemType.scaleBlockSizeA:
+                    # Runtime-group kernels share one table; fixed-group kernels
+                    # and different quantization modes still need separate tables.
+                    groups = problemType.scaleBlockSizesA
+                    groupTag = ('G' + 'x'.join(map(str, groups)) if groups
+                                else str(problemType.scaleBlockSizeA))
+                    placeholderName += ('_SABB' + groupTag
+                                        + '_ZP' + str(int(problemType.scaleZeroPointA))
+                                        + '_' + problemType.int4EncodingA)
                 if problemType.useScaleCD:
                     placeholderName += '_SCD'
                 if problemType.useScaleAlphaVec:

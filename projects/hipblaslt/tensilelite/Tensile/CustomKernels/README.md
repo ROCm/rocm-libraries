@@ -158,3 +158,29 @@ Two ways to validate:
 | -------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | Tensile-generated    | `InternalSupportParams.KernArgsVersion`                                                                              |
 | External (`Source:`) | All of: `Source.Origin`, `Features` (mapping), `InternalSupportParams.KernArgsVersion`, `Version`, `ProblemType`, `MatrixInstruction`, `CustomKernel` with `args` / `macrotile` / `threads` / `grid` |
+
+# Runtime-group W4A16 kernels (gfx1151)
+
+The shipped W4A16 kernels take G32/G64/G128 through the `ScaleBlockSizeA`
+kernel argument. Group-specialized assembly copies are no longer shipped.
+BF16 has signed symmetric, signed asymmetric and unsigned asymmetric matrix
+kernels. FP16 has signed symmetric, unsigned symmetric and unsigned asymmetric kernels, with
+separate tile and decode schedules where required by the shape.
+
+Each quantization mode has one logic file. `ScaleBlockSizesA: [32, 64, 128]`
+produces an OR of exact group predicates and a shared lazy library. The scalar
+`ScaleBlockSizeA: 32` remains the representative size for deriving solution
+metadata; dispatch passes the actual problem's group size. The list is allowed
+only for custom kernels with that runtime argument. Fixed-group generated
+solutions keep the scalar predicate and separate partitions.
+
+Symmetric/asymmetric and signed/unsigned predicates remain separate, so equal
+shape keys cannot select a kernel for another quantization mode.
+
+The W4A16 Equality tables retain measured decode and prefill selections.
+W4A16-specific predicates limit `_N4_` decode variants to N=1..4 and other
+decode variants to N=1; all require batch=1 and positive K.
+
+Generation and optimization tools are maintained on the stacked
+`users/mgehre/hipblaslt-w4a16-generator` branch. Building these checked-in
+assembly kernels does not require those tools.

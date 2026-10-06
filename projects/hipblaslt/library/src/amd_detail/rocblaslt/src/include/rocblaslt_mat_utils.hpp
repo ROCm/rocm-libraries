@@ -30,6 +30,23 @@
 #include "handle.h"
 #include "utility.hpp"
 
+inline bool isW4A16ScaleFormat(RocblasltContractionProblem::ScalingFormat format)
+{
+    using Format = RocblasltContractionProblem::ScalingFormat;
+    switch(format)
+    {
+    case Format::Block_32:
+    case Format::Block_64:
+    case Format::Block_128:
+    case Format::Block_32_ZP:
+    case Format::Block_64_ZP:
+    case Format::Block_128_ZP:
+        return true;
+    default:
+        return false;
+    }
+}
+
 inline bool isValidOrderForDatatype(hipDataType datatype, hipblasLtOrder_t order)
 {
     if((datatype == HIP_R_16F && order != HIPBLASLT_ORDER_COL16_4R8)
@@ -318,7 +335,11 @@ inline rocblaslt_status
     batch_stride_e = original_stride_e > 0 ? original_stride_e : original_lde * num_cols_e;
     if(E != nullptr && ((lde < num_rows_e) || (batch_stride_e < (num_cols_e * num_rows_e))))
         status = rocblaslt_status_invalid_value;
-    if(scaleAType != RocblasltContractionProblem::ScalingFormat::None
+    const bool w4a16ScalarB
+        = isW4A16ScaleFormat(scaleAType)
+          && scaleBType == RocblasltContractionProblem::ScalingFormat::Scalar;
+    if(!w4a16ScalarB
+       && scaleAType != RocblasltContractionProblem::ScalingFormat::None
        && scaleBType != RocblasltContractionProblem::ScalingFormat::None
        && scaleAType != scaleBType)
     {
@@ -441,6 +462,35 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
                       ", C=", batch_offset_c,
                       ", D=", batch_offset_d);
             return rocblaslt_status_invalid_value;
+        }
+    }
+
+    // w4a16: int4 A and a block A-scale only make sense together.
+    {
+        const bool int4A       = (matA->type == HIP_R_4I);
+        const bool blockScaleA = isW4A16ScaleFormat(matmul_descr->scaleAType);
+        if(int4A != blockScaleA)
+        {
+            log_error(__func__,
+                      "w4a16 requires HIP_R_4I matrix A together with a "
+                      "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC{32,64,128}[_ZP]_EXT A scale mode; "
+                      "got a_type=",
+                      static_cast<int>(matA->type),
+                      " scaleAType=",
+                      rocblaslt_scaling_format_to_string(matmul_descr->scaleAType));
+            return rocblaslt_status_invalid_value;
+        }
+        if(int4A && matmul_descr->scaleA == nullptr)
+        {
+            log_error(__func__, "w4a16 requires a non-null A scale pointer");
+            return rocblaslt_status_invalid_pointer;
+        }
+        // The scale tensor has no batch dimension.
+        if(int4A && num_batches_a > 1)
+        {
+            log_error(__func__, "w4a16 does not support batch_count > 1 yet (got ",
+                      num_batches_a, ")");
+            return rocblaslt_status_not_implemented;
         }
     }
 

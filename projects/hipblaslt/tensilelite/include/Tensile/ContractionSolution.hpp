@@ -164,7 +164,9 @@ namespace TensileLite
         X_MACRO(StrideE2) \
         X_MACRO(StrideScaleA2) \
         X_MACRO(StrideScaleB2) \
-        X_MACRO(StrideMetadata2)
+        X_MACRO(StrideMetadata2) \
+        X_MACRO(AddressScaleZeroA) \
+        X_MACRO(ScaleBlockSizeA)
 
     enum class CustomArgSemantic
     {
@@ -1351,6 +1353,12 @@ namespace TensileLite
             bool swizzleTensorB             = false;
             bool fusedGemmA2A               = false;
             int  metadataLayout             = 0;
+            // K-group size for dense [M][ceil(K/G)] scales of B's type.
+            int              scaleBlockSizeA = 0;
+            // Enable per-group zero-points: (q - z)*s.
+            bool             scaleZeroPointA = false;
+            ContractionProblemGemm::Int4Encoding int4EncodingA
+                = ContractionProblemGemm::Int4Encoding::Signed;
             int  mxBlockA                   = 0;
             int  mxBlockB                   = 0;
             rocisa::DataType mxTypeA        = rocisa::DataType::E8;

@@ -93,6 +93,8 @@ const char* hipDataType_to_string(hipDataType type)
         return "R_8F_E5M2";
     case HIP_R_8I:
         return "R_8I";
+    case HIP_R_4I:
+        return "R_4I";
     case static_cast<hipDataType>(HIP_R_6F_E2M3):
         return "R_6F_E2M3";
     case static_cast<hipDataType>(HIP_R_6F_E3M2):
@@ -130,6 +132,8 @@ const char* hipDataType_to_bench_string(hipDataType type)
         return "bf16_r";
     case HIP_R_8I:
         return "i8_r";
+    case HIP_R_4I:
+        return "i4_r";
     case HIP_R_32I:
         return "i32_r";
     case HIP_R_8F_E4M3_FNUZ:
@@ -333,6 +337,18 @@ const char* rocblaslt_scaling_format_to_string(RocblasltContractionProblem::Scal
         return "Block_32_UE5M3";
     case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
         return "Block_16_UE5M3";
+    case RocblasltContractionProblem::ScalingFormat::Block_32:
+        return "Block_32";
+    case RocblasltContractionProblem::ScalingFormat::Block_64:
+        return "Block_64";
+    case RocblasltContractionProblem::ScalingFormat::Block_128:
+        return "Block_128";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_ZP:
+        return "Block_32_ZP";
+    case RocblasltContractionProblem::ScalingFormat::Block_64_ZP:
+        return "Block_64_ZP";
+    case RocblasltContractionProblem::ScalingFormat::Block_128_ZP:
+        return "Block_128_ZP";
     default:
         return "Invalid";
     }

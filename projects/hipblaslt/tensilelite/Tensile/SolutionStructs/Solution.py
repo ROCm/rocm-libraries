@@ -57,7 +57,7 @@ from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, 
 from ..Components.TDMFuse import tdmBothTensors, tdmGroupingAccepted, \
                                        tdmGroupingName, tdmPapRejectReason
 from ..Common.TypeValidationErrors import ConfigTypeError
-from ..CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload, validateCustomPersistentArgs
+from ..CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload, validateCustomPersistentArgs, w4a16DecodeMaxN
 from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
                                                get_fp16_mt_config, get_fp32_mt_config, get_metadata_mt_config, \
                                                get_fp4_valid_blocks, get_fp8_valid_blocks, \
@@ -1012,6 +1012,14 @@ class Solution(collections.abc.Mapping):
       and state["ProblemType"]["HighPrecisionAccumulate"] \
       and ((state["ISA"] == IsaVersion(9,4,2) and state["ProblemType"]["DataType"].isHalf()) \
       or (state["ISA"] == IsaVersion(9,5,0) and (state["ProblemType"]["DataType"].isBFloat16() or state["ProblemType"]["DataType"].isHalf())))
+    # Checked-in W4A16 decode uses dot2 and supplies its own load/store schedule.
+    if (w4a16DecodeMaxN(state.get("CustomKernelName", "")) is not None
+        and state["WaveSplitK"] and not state["EnableMatrixInstruction"]
+        and state["ProblemType"]["HighPrecisionAccumulate"]):
+      caps = isaInfoMap[state["ISA"]].asmCaps
+      state["UseDotInstruction"] |= (
+        state["ProblemType"]["DataType"].isHalf() and caps['v_dot2_f32_f16']) or (
+        state["ProblemType"]["DataType"].isBFloat16() and caps['v_dot2_f32_bf16'])
     if state["UseDotInstruction"]:
       # need modification for dot4 or dot8
       state["NumDotElements"] = 2
@@ -7042,7 +7050,8 @@ class Solution(collections.abc.Mapping):
       if cont1 and cont2:
         reject(state, printRejectionReason, "MatrixInstN %u %% GlobalReadVectorWidthB %u must be 0" % \
           (state["MatrixInstN"], state["GlobalReadVectorWidthB"]))
-    else: # mac
+    elif not (w4a16DecodeMaxN(state.get("CustomKernelName", "")) is not None
+              and state["WaveSplitK"]):
       # if not bufferLoad or not state["GuaranteeNoPartialA"]:
       # Restrict GRVW/VW combos so shift-ptr logic will work
       if state["GlobalReadVectorWidthA"] > 1 \

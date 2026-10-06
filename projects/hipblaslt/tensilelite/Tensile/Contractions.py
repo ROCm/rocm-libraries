@@ -27,6 +27,7 @@ from .ExecutionPolicy import isPersistent, isStreamK, isPersistentDataParallel, 
 from typing import Dict
 
 from .Activation import ActivationType
+from .CustomKernels import w4a16DecodeMaxN
 from . import Hardware
 from . import Properties
 from .Common import state, state_key_ordering, IsaInfo
@@ -74,7 +75,8 @@ class ProblemType:
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
                  'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
-                 'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A']
+                 'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A',
+                 'scaleBlockSizeA', 'scaleZeroPointA', 'int4EncodingA']
     @classmethod
     def FromOriginalState(cls, d):
         indices = [None]*d['TotalIndices']
@@ -263,6 +265,18 @@ class ProblemType:
         rv.useScaleAB = ""
         if 'UseScaleAB' in d:
             rv.useScaleAB = d['UseScaleAB']
+        # W4A16 group scaling is independent of scalar/vector operand scales.
+        rv.scaleBlockSizeA = d.get('ScaleBlockSizeA', 0)
+        groups = d.get('ScaleBlockSizesA', [])
+        if not isinstance(groups, (list, tuple)):
+            raise ValueError("ScaleBlockSizesA must be a list of supported groups")
+        if groups and (not rv.aType.isInt4()
+                       or any(type(g) is not int or g not in (32, 64, 128) for g in groups)
+                       or rv.scaleBlockSizeA not in groups):
+            raise ValueError("ScaleBlockSizesA requires W4A16 groups containing ScaleBlockSizeA")
+        rv.scaleBlockSizesA = tuple(sorted(set(groups)))
+        rv.scaleZeroPointA = bool(d.get('ScaleZeroPointA', False))
+        rv.int4EncodingA = d.get('Int4EncodingA', 'Signed')
         rv.useScaleCD = False
         if 'UseScaleCD' in d:
             rv.useScaleCD = d['UseScaleCD']
@@ -422,6 +436,15 @@ class ProblemType:
             predicates.append(ProblemPredicate("StridedBatched", value=self.stridedBatched))
             predicates.append(ProblemPredicate("GroupedGemm", value=self.groupedGemm))
             predicates.append(ProblemPredicate("UseScaleAB", value=self.useScaleAB))
+            if self.scaleBlockSizeA:
+                if self.scaleBlockSizesA:
+                    predicates.append(ProblemPredicate("Or", value=[
+                        ProblemPredicate("ScaleBlockSizeA", value=g)
+                        for g in self.scaleBlockSizesA]))
+                else:
+                    predicates.append(ProblemPredicate("ScaleBlockSizeA", value=self.scaleBlockSizeA))
+                predicates.append(ProblemPredicate("ScaleZeroPointA", value=self.scaleZeroPointA))
+                predicates.append(ProblemPredicate("Int4EncodingA", value=self.int4EncodingA))
             predicates.append(ProblemPredicate("UseScaleCD", value=self.useScaleCD))
             predicates.append(ProblemPredicate("UseScaleAlphaVec", value=self.useScaleAlphaVec))
             predicates.append(ProblemPredicate("Sparse", value=self.sparse))
@@ -498,8 +521,24 @@ class ProblemPredicate(Properties.Predicate):
             raise RuntimeError("Unknown assertion key: {}".format(key))
 
     @classmethod
+    def W4A16DecodePredicates(cls, state):
+        custom = state.get("CustomKernel")
+        name = custom.get("name", "") if isinstance(custom, dict) else ""
+        maxN = w4a16DecodeMaxN(name or state.get("CustomKernelName", ""))
+        if maxN is None:
+            return []
+        predicates = [cls("SizeEqual", index=2, value=1),
+                      cls("SizeGreaterThan", index=3, value=0)]
+        if maxN == 1:
+            predicates.append(cls("SizeEqual", index=1, value=1))
+        else:
+            predicates.extend([cls("SizeGreaterThan", index=1, value=0),
+                               cls("SizeLessThan", index=1, value=maxN + 1)])
+        return predicates
+
+    @classmethod
     def CompoundPredicates(cls, state, problemType):
-        rv = []
+        rv = cls.W4A16DecodePredicates(state)
 
         if "BatchSizeEqual" in state:
             rv += [cls('BatchSizeEqual', index=0, value=state["BatchSizeEqual"])]

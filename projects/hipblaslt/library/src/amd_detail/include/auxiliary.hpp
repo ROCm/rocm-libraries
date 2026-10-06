@@ -152,6 +152,9 @@ constexpr const char* hip_datatype_to_string(hipDataType type)
     case static_cast<hipDataType>(HIP_R_8F_E5M3_EXT):
 #pragma GCC diagnostic pop
         return "e5m3_r";
+    // w4a16 weights: signed int4, two elements per byte.
+    case HIP_R_4I:
+        return "i4_r";
     default:
         return "non-supported type";
     }
@@ -228,6 +231,7 @@ constexpr hipDataType string_to_hip_datatype(const std::string& value)
         value == "bf8_r"                 ? HIP_R_8F_E5M2 :
         value == "e8_r"                  ? HIP_R_8F_UE8M0 :
         value == "e5m3_r"                ? static_cast<hipDataType>(HIP_R_8F_E5M3_EXT) :
+        value == "i4_r"                  ? HIP_R_4I :
         HIPBLASLT_DATATYPE_INVALID;
 }
 
@@ -241,6 +245,35 @@ constexpr hipDataType string_to_hip_datatype_assert(const std::string& value)
         exit(1);
     }
     return datatype;
+}
+
+// Encoding names shared by hipblaslt-bench and log_bench.
+HIPBLASLT_EXPORT
+constexpr const char* hipblaslt_int4_encoding_to_string(hipblasLtInt4Encoding_t value)
+{
+    switch(value)
+    {
+    case HIPBLASLT_INT4_ENCODING_SIGNED_EXT:
+        return "signed";
+    case HIPBLASLT_INT4_ENCODING_UNSIGNED_BIAS8_EXT:
+        return "unsigned_bias8";
+    default:
+        return "invalid";
+    }
+}
+
+//! Accepted --int4_encoding spellings, for help text and error messages.
+constexpr const char* c_int4_encoding_names = "signed, unsigned_bias8";
+
+//! Return HIPBLASLT_INT4_ENCODING_END_EXT for unknown names; also accept legacy numerals.
+HIPBLASLT_EXPORT
+constexpr hipblasLtInt4Encoding_t string_to_int4_encoding(std::string_view value)
+{
+    if(value == "signed" || value == "0")
+        return HIPBLASLT_INT4_ENCODING_SIGNED_EXT;
+    if(value == "unsigned_bias8" || value == "1")
+        return HIPBLASLT_INT4_ENCODING_UNSIGNED_BIAS8_EXT;
+    return HIPBLASLT_INT4_ENCODING_END_EXT;
 }
 
 HIPBLASLT_EXPORT

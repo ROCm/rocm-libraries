@@ -400,6 +400,8 @@ def getRealDataTypeB(dataType):
     else:
         return dataType
 
+_INT4_ENCODING_CHAR = {"Signed": "", "UnsignedBias8": "U8"}
+
 ################################################################################
 # ProblemType
 # name of solution should begin with name of problemType, and arguments can be listed out explicitly
@@ -429,6 +431,13 @@ _defaultProblemType = {
     "UseGateResidual": False,  # =True apply gate residual: D = gate * spmm_result + gate
     "BiasSrc": "D",  # This parameter is used in gradient + bias. Support A, B, D.
     "UseScaleAB": "",  # Support "", "Scalar", and "Vector"
+    # Block scales: dense [M][ceil(K/G)] in DataTypeB, applied before LDS writes.
+    "ScaleBlockSizeA": 0,  # 0 = off, else the K-group size (32, 64 or 128)
+    "ScaleBlockSizesA": [],  # Accepted groups for a custom runtime-group kernel.
+    # Packed per-group zero-points; see setW4A16ScaleBlockSizeA for layout.
+    "ScaleZeroPointA": False,
+    # Int4 weight encoding; UnsignedBias8 uses implicit zero-point 8 when symmetric.
+    "Int4EncodingA": "Signed",
     "UseScaleCD": False,  # =True use scaleC, scaleD
     "UseScaleAlphaVec": 0,  # =1 support alpha vector on M direction, =2 support bias vector on N direction, =3 support alpha vector on both M,N direction
     "HighPrecisionAccumulate": False,  # f32 += f16*f16
@@ -1383,6 +1392,10 @@ class ProblemType(Mapping):
       name.append("SAB")
     elif self["UseScaleAB"] == "Vector":
       name.append("SABV")
+    if self["ScaleBlockSizeA"]:
+      name.append("SABB%u%s%s" % (self["ScaleBlockSizeA"],
+                                  "ZP" if self["ScaleZeroPointA"] else "",
+                                  _INT4_ENCODING_CHAR[self["Int4EncodingA"]]))
     if self["UseScaleCD"]: name.append("SCD")
     if self["UseScaleAlphaVec"]: name.append("SAV")
     if self["UseGateResidual"]:

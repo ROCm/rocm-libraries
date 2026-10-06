@@ -55,6 +55,8 @@ _METADATA_NAME_TO_SEMANTIC = {
     "betapad":                "Beta",
     "AddressScaleA":          "AddressScaleA",
     "AddressScaleB":          "AddressScaleB",
+    "AddressScaleZeroA":      "AddressScaleZeroA",
+    "groupSize":              "ScaleBlockSizeA",
     "AddressScaleC":          "AddressScaleC",
     "AddressScaleD":          "AddressScaleD",
     "AddressMXScaleA":        "AddressMXScaleA",
@@ -109,6 +111,13 @@ _ACTIVATION_ARG_INDEX = {
 # dict, while validateCustomKernelMetadata still sees them via its independent
 # readCustomKernelConfig call.
 _PASSTHROUGH_KEYS = {"ProblemType", "InternalSupportParams", "KernelLanguage", "CustomKernelName"}
+
+def w4a16DecodeMaxN(kernelName):
+    """Return the decode column limit encoded by the W4A16 kernel name."""
+    if not kernelName.startswith(("Custom_W4A16_Decode_", "RuntimeGroup_Decode_")):
+        return None
+    return 4 if "_N4_" in kernelName else 1
+
 
 def isCustomKernelConfig(config):
     # CustomKernel may be absent, None, or the -1 placeholder for an unset parameter,
@@ -364,7 +373,28 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
             f"section to custom.config."
         )
 
-    args = [_metadataArgToCustomArg(a, kernelName) for a in kernelMeta[".args"]]
+    metadataArgs = kernelMeta[".args"]
+    isW4A16Decode = w4a16DecodeMaxN(kernelName) is not None
+    if isW4A16Decode:
+        # HIP omits argument names; these decode kernels use the universal ABI.
+        names = ["Gemm info", "kernel info0", "kernel info1", "numWG",
+                 "SizesFree0", "SizesFree1", "SizesFree2", "SizesSum0",
+                 "A", "B", "strideA0", "strideA1", "strideB0", "strideB1",
+                 "alpha", "beta", "D", "C", "strideD0", "strideD1",
+                 "strideC0", "strideC1", "AddressScaleA", "AddressScaleB",
+                 "AddressScaleZeroA", "batchOffsetD", "batchOffsetC",
+                 "batchOffsetA", "batchOffsetB"]
+        if kernelName.startswith("RuntimeGroup_"):
+            names.append("groupSize")
+        if len(metadataArgs) != len(names):
+            raise RuntimeError(f"Unexpected W4A16 decode ABI for {kernelName}")
+        metadataArgs = [dict(a, **{".name": name}) for a, name in zip(metadataArgs, names)]
+    args = [_metadataArgToCustomArg(a, kernelName) for a in metadataArgs]
+    if args and args[-1]["semantic"] == "ScaleBlockSizeA":
+        last = metadataArgs[-1]
+        padding = kernelMeta[".kernarg_segment_size"] - last[".offset"] - last[".size"]
+        if padding:
+            args[-1]["padding"] = padding
 
     # UseUniversalArgs kernels expect a header (GemmInfo, InternalArgs, ...) at
     # the start of the kernel argument buffer, followed by the data args.  The
@@ -386,6 +416,10 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
         wg = kernelConfig.get("MIWaveGroup", [1, 1])
     depthU = kernelConfig.get("DepthU", 0)
     macrotile = [mi[0] * wt[0] * wg[0], mi[1] * wt[1] * wg[1], depthU]
+    if isW4A16Decode:
+        workgroup = kernelConfig["WorkGroup"]
+        tile = kernelConfig["ThreadTile"]
+        macrotile = [workgroup[0] * tile[0], workgroup[1] * tile[1], depthU]
 
     # Fallback: parse macrotile from kernel name if computed values are zero
     if macrotile[0] == 0 or macrotile[1] == 0:
