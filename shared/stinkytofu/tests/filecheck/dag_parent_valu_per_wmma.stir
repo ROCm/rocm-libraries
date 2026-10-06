@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --mx-unit1-scheduling --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --print-output
 #
 # Two independent MX WMMAs, each with its own v_perm parent. Phase B must unlock
 # one WMMA at a time: perm0, wmma0, then perm1, wmma1 — not dump both perms
