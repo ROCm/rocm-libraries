@@ -194,8 +194,9 @@ cmake -S "$project_root/projects/hipblaslt" -B "$project_build" \
 cmake --build "$project_build" --parallel
 ```
 
-`HIPBLASLT_JIT_ENABLE_HIPKITTENS=ON` adds the gfx950 HipKittens backend. It
-needs a network fetch of the pinned HipKittens commit unless
+`GPU_TARGETS` is `gfx90a`, `gfx942` or `gfx950`. The command above uses
+`gfx950`. `HIPBLASLT_JIT_ENABLE_HIPKITTENS=ON` adds the gfx950 HipKittens
+backend. It needs a network fetch of the pinned HipKittens commit unless
 `FETCHCONTENT_SOURCE_DIR_HIPKITTENS` points at an unpacked archive. The
 [JIT test guide](clients/tests/jit/README.md) lists the test targets and the
 validation commands.

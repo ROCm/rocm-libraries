@@ -24,8 +24,10 @@ ctest --test-dir "$project_build/clients/tests/jit" -L jit-gpu --output-on-failu
 ```
 
 `-L jit-cpu` runs the tests that need no GPU. `-L jit-gpu` runs the tests that
-need device 0, which must be a gfx90a, gfx942 or gfx950; they run the bundles of
-its architecture. Each test empties its own directory
+need device 0. `GPU_TARGETS` is that device's architecture, `gfx90a`, `gfx942`
+or `gfx950`; the command above uses `gfx950`. Replay, the JIT solution library
+and the heuristic queries run the committed bundles of that architecture, the
+same way on each of the three. Each test empties its own directory
 under `clients/tests/jit/scratch` in the build directory before it runs.
 
 The CTest tests are:
@@ -37,12 +39,14 @@ The CTest tests are:
   `jit-end-to-end`, `jit-end-to-end-library`, `jit-heuristic-off`,
   `jit-heuristic-fallback` and `jit-heuristic-forced`, when `GPU_TARGETS`
   include an architecture with committed bundles. A build with
-  `HIPBLASLT_JIT_ENABLE_HIPKITTENS=ON` and gfx950 also has `jit-hipkittens`. The library tests load no
-  code, but TensileLite queries the current device when it reads a library
-  entry. A build with `HIPBLASLT_ENABLE_JIT=OFF` has `jit-heuristic-ignored`
-  instead, which sets `HIPBLASLT_JIT=2` and requires that the queries still do
-  not return JIT algorithms. A build with `HIPBLASLT_ENABLE_YAML=ON` has none
-  of them, because the library entries are MsgPack.
+  `HIPBLASLT_JIT_ENABLE_HIPKITTENS=ON` and gfx950 also has `jit-hipkittens`.
+  The library tests load no code, but TensileLite queries the current device
+  when it reads a library entry, and they publish the `plain` bundle of that
+  architecture. Replay and the heuristic queries use its `plain-pair`. A build with
+  `HIPBLASLT_ENABLE_JIT=OFF` has `jit-heuristic-ignored` instead, which sets
+  `HIPBLASLT_JIT=2` and requires that the queries still do not return JIT
+  algorithms. A build with `HIPBLASLT_ENABLE_YAML=ON` has none of them, because
+  the library entries are MsgPack.
 
 ## What each test checks
 
@@ -89,9 +93,10 @@ unless it is set, so that it never publishes into the default library.
 ## JIT solution library tests
 
 `hipblaslt-jit-library-test` compiles the JIT solution library directly. It
-takes the written gfx950 `plain` bundle, whose library entry it publishes
-under several kernel names with stand-in code objects, and a scratch directory
-for the libraries it creates; it ignores `HIPBLASLT_JIT_LIBRARY_PATH`. Adding
+takes the written bundle directory and publishes the `plain` entry of device 0's
+architecture under several kernel names with stand-in code objects, and a
+scratch directory for the libraries it creates; it ignores
+`HIPBLASLT_JIT_LIBRARY_PATH`. Adding
 `--writers N --per-writer M` runs the multi-process check instead: N writer
 processes each publish M entries shared by all writers and M of their own,
 while one reader process looks them up.
