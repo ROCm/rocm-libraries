@@ -439,6 +439,27 @@ def _spec(idx: int):
             DirectConvWgradSpec(problem=p, mfma_k=16, ho_per_block=2),
             "gfx950",
         )
+    if idx == 32:
+        # depthwise 7x7 stride 2 bf16: PAD > 1 shifts the row stream's static
+        # slots, and stride 2 gates its flushes on the row parity.
+        p = DirectConvProblem(
+            N=2,
+            H=14,
+            W=14,
+            groups=128,
+            cpg=1,
+            kpg=1,
+            KH=7,
+            KW=7,
+            PAD=3,
+            stride=2,
+            dtype="bf16",
+        )
+        return (
+            "dw",
+            DirectDepthwiseSpec(problem=p, block_w=8, block_waves=2),
+            "gfx950",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 

@@ -2354,7 +2354,7 @@ def _run_sweep(
             rt.memset(D_dev, 0, D_t.nbytes)
 
         ms = _stop.measure(
-            lambda: launcher(values, config=cfg),
+            launcher.bind(values, config=cfg),
             warmup=args.warmup,
             iters=args.iters,
             stream=stream,
@@ -2886,7 +2886,7 @@ def _run_wgrad_sweep(
             else:
                 _vals_snap = dict(values)
                 _cfg_snap = cfg
-                timed_fn = lambda _v=_vals_snap, _c=_cfg_snap: launcher(_v, config=_c)
+                timed_fn = launcher.bind(_vals_snap, config=_cfg_snap)
 
             ms = _stop.measure(
                 timed_fn,
@@ -3479,7 +3479,7 @@ def _run_dgrad_sweep(
 
             timed_fn = _launch_atomic
         else:
-            timed_fn = lambda: launcher(values, config=cfg)
+            timed_fn = launcher.bind(values, config=cfg)
 
         ms = _stop.measure(
             timed_fn, warmup=args.warmup, iters=args.iters, stream=stream
@@ -3829,7 +3829,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                         ),
                         stream=0,
                     )
-                    run = lambda: launcher(values, config=cfg)  # noqa: E731
+                    run = launcher.bind(values, config=cfg)
                     if direction == "wgrad" and ident.two_stage:
                         # Two-stage is three steps and all of them are the
                         # algorithm's cost: zero the scratch (Stage 1
@@ -3945,6 +3945,9 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     f"{ms:>8.3f} ms  {label}",
                     flush=True,
                 )
+            # The line benchmark_conv_compare.py reads, as the JIT sweep prints.
+            tflops, _, ms, label = results[0]
+            print(f"\nBest: {tflops:.1f} TFLOPS — {label}  {ms:.3f} ms", flush=True)
 
     return overall_rc
 

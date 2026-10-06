@@ -5737,8 +5737,9 @@ class DirectDepthwiseSpec:
         ``by * block_ch + w * 64 + l``.
       - Weights (``KH × KW`` values per channel) are preloaded into registers
         before the H-streaming loop.
-      - H-streaming loop (runtime loop over ``H + KH - 1`` rows, ``KH`` rows
-        per iteration, the next iteration's input rows prefetched):
+      - H-streaming loop (runtime loop over the ``H`` input rows, ``KH`` rows
+        per iteration, input rows prefetched a few rows ahead, then a
+        load-free loop over the rows that only complete output rows):
         circular ``KH``-slot accumulators per output W position, flushed to
         global memory one output row at a time.  For stride > 1 only input
         rows that align to an output position produce a write.
@@ -5891,11 +5892,6 @@ def build_direct_depthwise(
     b_rsrc = b.buffer_rsrc(Bp, B_bytes)
     d_rsrc = b.buffer_rsrc(D, D_bytes)
 
-    # A[N, H, W, C] NHWC descriptor with h and w boundary embeds.
-    a_desc = direct_a_descriptor_dynamic(
-        b, params, pad=p.PAD, stride=p.stride, w_upper=("wo", "s_off")
-    )
-
     # B[total_k, KH, KW, 1] KRSC descriptor (cpg=1: last dim is always 0).
     b_desc = TensorDescriptor.naive(
         "B",
@@ -5933,24 +5929,26 @@ def build_direct_depthwise(
     # ---- H-streaming loop ----
     # AOT: the row count follows the runtime height, so only the
     # grouped-period scf.for form is usable -- the Python-unrolled variant
-    # would bake H into the trip count. The outer loop runs
-    # n_groups = ceil(n_iters / KH) times and the inner KH steps are unrolled
-    # with STATIC slot indices, so the preloaded weights are still referenced
-    # directly (no scatter, no runtime weight loads).
+    # would bake H into the trip count. The loops below walk the rows KH at
+    # a time and unroll the KH steps of a group with STATIC slot indices, so
+    # the preloaded weights are still referenced directly (no scatter, no
+    # runtime weight loads).
     #
-    # The input rows are software-pipelined one group ahead: iteration g
-    # first issues the loads of group g + 1 and carries them to the next
-    # iteration, then computes group g from the rows the previous iteration
-    # loaded. Loaded and used in the same iteration, the rows are pulled back
-    # next to their FMAs by the scheduler, and every load then waits out the
-    # full memory latency before the next one issues (the unrolled JIT body
-    # had no such problem; in a loop it costs 2-6x).
+    # Streaming row y holds input row hi = y - PAD and completes output row
+    # (y - (KH-1)) / stride. Of the H + KH - 1 rows only hi in [0, H) has
+    # data: the first PAD rows are halo and are skipped outright (the stream
+    # starts at y = PAD), and the last PAD rows only complete output rows.
+    # The FMA loop therefore covers ceil(H / KH) groups and a second loop,
+    # with no loads and no FMAs, flushes what is left. Without the split the
+    # loop iterates (H + KH - 1) / H times per output row -- substantially
+    # more than necessary for small H -- and the kernel becomes FMA-bound.
     c1 = b.const_i32(1)
     c_KH = b.const_i32(p.KH)
     c_stride_rv = b.const_i32(c_stride_dw)
-    # n_iters = H + KH - 1 rows; the loop walks them KH at a time.
+    # n_iters = H + KH - 1 rows, the last one completing the last output row.
     n_iters_v = b.add(p_Hi, b.const_i32(p.KH - 1))
-    n_groups_v = b.div(b.add(n_iters_v, b.const_i32(p.KH - 1)), c_KH)
+    n_fma_groups_v = b.div(b.add(p_Hi, b.const_i32(p.KH - 1)), c_KH)
+    n_groups_v = b.div(b.add(p_Hi, b.const_i32(p.PAD + p.KH - 1)), c_KH)
 
     # One load per distinct input column of a row: tap (w_out, s) reads
     # column w_out * stride + s. ``row_cols`` maps each column to the first
@@ -5959,108 +5957,164 @@ def build_direct_depthwise(
     for w_out in range(BLOCK_W):
         for s_const in range(p.KW):
             row_cols.setdefault(w_out * c_stride_dw + s_const, (w_out, s_const))
+    n_cols = len(row_cols)
 
-    def load_group(y0: Value) -> List[Value]:
-        """Raw input values of rows y0 .. y0 + KH - 1, row-major by column.
+    # Every lane of a wave reads the same input row and column, each at its
+    # own channel, so an input offset is the lane's channel plus a
+    # wave-uniform term for batch, row and column -- computed on the SALU,
+    # one VALU add per load. The uniform term is the OOB sentinel for a tap
+    # outside the image, which keeps the sum past the end of the buffer (the
+    # descriptor returns zero) as long as the tensor is under 2 GiB, the
+    # limit of the i32 offsets anyway. Bounds travel as integers -- one
+    # term per column, the sentinel where the column is outside [0, W) --
+    # rather than as booleans: a uniform boolean feeding a load offset is a
+    # 64-bit lane mask, and a mask per column held across the loop spills
+    # the SGPRs. Lanes past the channel count need no guard here: they load
+    # whatever lies there and their sums are never stored.
+    ch_off = b.mul(ch, c_half_bytes)
+    wi_tile = b.add(b.mul(q_tile_start, c_stride_rv), b.const_i32(-p.PAD))
+    col_terms: List[Value] = []
+    for col in row_cols:
+        wi = b.add(wi_tile, b.const_i32(col))
+        col_ok = b.land(b.cmp_ge(wi, c0), b.cmp_lt(wi, params["p_Wi"]))
+        col_off = b.mul(b.mul(wi, params["p_A_stride_wi"]), c_half_bytes)
+        col_terms.append(b.select(col_ok, col_off, oob_sentinel))
+    n_off = b.mul(n, params["p_A_stride_n"])
 
-        Rows past the last iteration, halo rows and columns, and lanes past
-        the channel count all load from the OOB sentinel, which the buffer
-        descriptor returns as zero.
-        """
+    def load_row(y: Value) -> List[Value]:
+        """Raw input values of streaming row ``y``, one per distinct column."""
+        hi = b.add(y, b.const_i32(-p.PAD))
+        row_ok = b.cmp_lt(hi, p_Hi)
+        row_off = b.mul(b.add(n_off, b.mul(hi, params["p_A_stride_hi"])), c_half_bytes)
         vals: List[Value] = []
-        for j in range(p.KH):
-            y_j = b.add(y0, b.const_i32(j))
-            j_valid = b.cmp_lt(y_j, n_iters_v)
-            for w_out, s_const in row_cols.values():
-                a_off, valid = a_desc.offset(
-                    b,
-                    n=n,
-                    y_iter=y_j,
-                    wo=b.add(q_tile_start, b.const_i32(w_out)),
-                    s_off=b.const_i32(s_const),
-                    c=ch,
-                )
-                ok = b.land(b.land(valid, j_valid), ch_in_range)
-                safe_off = b.select(ok, b.mul(a_off, c_half_bytes), oob_sentinel)
-                vals.append(
-                    b.buffer_load_bf16(a_rsrc, safe_off, c0)
-                    if p.dtype == "bf16"
-                    else b.buffer_load_f16(a_rsrc, safe_off, c0)
-                )
+        for col_term in col_terms:
+            s_term = b.select(row_ok, b.add(row_off, col_term), oob_sentinel)
+            v_off = b.add(ch_off, s_term)
+            vals.append(
+                b.buffer_load_bf16(a_rsrc, v_off, c0)
+                if p.dtype == "bf16"
+                else b.buffer_load_f16(a_rsrc, v_off, c0)
+            )
         return vals
 
+    def row_y(grp_iv: Value, j: int) -> Value:
+        """Streaming row of step ``j`` of group ``grp_iv``."""
+        return b.add(b.mul(grp_iv, c_KH), b.const_i32(p.PAD + j))
+
+    def flush(grp_iv: Value, j: int, y_j: Value, accs: List[Value]) -> None:
+        """Store the output row streaming row ``y_j`` completes; reset its slot."""
+        j_valid = b.cmp_lt(y_j, n_iters_v)
+        P_FLUSH_j = (p.PAD + j + 1) % p.KH  # STATIC
+        p_flush_rv = b.add(y_j, b.const_i32(-(p.KH - 1)))
+
+        # y_j >= KH - 1 holds from group 1 on; in group 0 from step PAD on.
+        if j >= p.PAD:
+            flush_ge = j_valid
+        else:
+            flush_ge = b.land(b.cmp_lt(c0, grp_iv), j_valid)
+
+        if c_stride_dw == 1:
+            should_flush = flush_ge
+        else:
+            flush_stride = b.cmp_eq(b.mod(p_flush_rv, c_stride_rv), c0)
+            should_flush = b.land(flush_ge, flush_stride)
+
+        ho_row_j = b.div(p_flush_rv, c_stride_rv)
+
+        for w_out in range(BLOCK_W):
+            out_q = b.add(q_tile_start, b.const_i32(w_out))
+            out_q_ok = b.land(b.cmp_lt(out_q, c_W), ch_in_range)
+            store_ok = b.land(out_q_ok, should_flush)
+            acc_val = accs[P_FLUSH_j * BLOCK_W + w_out]  # STATIC index
+            d_off, _ = d_desc.offset(b, n=n, h=ho_row_j, w=out_q, k=ch)
+            safe_d = b.select(store_ok, b.mul(d_off, c_half_bytes), oob_sentinel)
+            if p.dtype == "bf16":
+                b.buffer_store_bf16(d_rsrc, safe_d, c0, b.trunc_f32_to_bf16(acc_val))
+            else:
+                b.buffer_store_f16(d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc_val))
+
+        for w_out in range(BLOCK_W):
+            accs[P_FLUSH_j * BLOCK_W + w_out] = zero_f32
+
+    # The input rows are software-pipelined PF rows ahead: step y issues the
+    # loads of row y + PF before computing row y, and the PF rows in flight
+    # at the end of an iteration are carried into the next one. Loaded and
+    # used in the same step, every load would wait out the full memory
+    # latency before the next one issues. Carrying a whole KH-row group
+    # instead holds KH x n_cols loads in registers on top of the KH x BLOCK_W
+    # accumulators and the KH x KW weights; a few rows hide the latency as
+    # well.
+    PF = min(p.KH, -(-16 // n_cols))
     n_acc = p.KH * BLOCK_W
     dw_iter_args = [
         (f"dw_acc_kh{kh}_w{w}", zero_f32) for kh in range(p.KH) for w in range(BLOCK_W)
     ]
-    row_names = [f"dw_a_r{j}_c{col}" for j in range(p.KH) for col in row_cols]
-    dw_iter_args += list(zip(row_names, load_group(c0)))
-    group_loop = b.scf_for_iter(
+    for k in range(PF):
+        for col, a_h in zip(row_cols, load_row(b.const_i32(p.PAD + k))):
+            dw_iter_args.append((f"dw_a_r{k}_c{col}", a_h))
+    fma_loop = b.scf_for_iter(
         c0,
-        n_groups_v,
+        n_fma_groups_v,
         c1,
         dw_iter_args,
         iv_name="dw_grp",
         elide_trailing_barrier=False,
     )
-    with group_loop as (grp_iv, loop_vals):
+    with fma_loop as (grp_iv, loop_vals):
         new_accs = list(loop_vals[:n_acc])
-        cur_rows = loop_vals[n_acc:]
-        next_rows = load_group(b.mul(b.add(grp_iv, c1), c_KH))
+        window = [
+            loop_vals[n_acc + k * n_cols : n_acc + (k + 1) * n_cols] for k in range(PF)
+        ]
         col_idx = {col: i for i, col in enumerate(row_cols)}
 
         for j in range(p.KH):
-            y_j = b.add(b.mul(grp_iv, c_KH), b.const_i32(j))
-            j_valid = b.cmp_lt(y_j, n_iters_v)
-            a_row = [
-                b.cast_to_f32(a_h)
-                for a_h in cur_rows[j * len(row_cols) : (j + 1) * len(row_cols)]
-            ]
+            y_j = row_y(grp_iv, j)
+            # Issue row y_j + PF, then compute row y_j (the oldest in flight).
+            window.append(load_row(b.add(y_j, b.const_i32(PF))))
+            a_row = [b.cast_to_f32(a_h) for a_h in window.pop(0)]
 
             for w_out in range(BLOCK_W):
                 for s_const in range(p.KW):
                     a_f32 = a_row[col_idx[w_out * c_stride_dw + s_const]]
                     for r_const in range(p.KH):
-                        p_idx = (j - r_const + p.KH) % p.KH  # STATIC slot
+                        # STATIC slot of output row (y_j - r) / stride.
+                        p_idx = (p.PAD + j - r_const) % p.KH
                         idx = p_idx * BLOCK_W + w_out
                         new_accs[idx] = b.fma(
                             weights_f32[r_const][s_const], a_f32, new_accs[idx]
                         )
 
-            P_FLUSH_j = (j + 1) % p.KH  # STATIC
-            p_flush_rv = b.add(y_j, b.const_i32(-(p.KH - 1)))
+            flush(grp_iv, j, y_j, new_accs)
 
-            if j >= p.KH - 1:
-                flush_ge = j_valid
-            else:
-                flush_ge = b.land(b.cmp_lt(c0, grp_iv), j_valid)
+        # Pass the accumulators through an empty asm on their way into the
+        # next iteration. Without it LLVM's SLP vectorizer pairs the loop-
+        # carried FMA chains into v_pk_fma_f32, which requires their operands
+        # in adjacent registers; the register copies needed to arrange that
+        # consume enough VGPRs to halve occupancy. The asm emits no instruction.
+        new_accs = [
+            b.inline_asm("", "=v,0", [a], result_type=F32, sideeffect=False)
+            for a in new_accs
+        ]
+        b.scf_yield(*new_accs, *(a_h for row in window for a_h in row))
 
-            if c_stride_dw == 1:
-                should_flush = flush_ge
-            else:
-                flush_stride = b.cmp_eq(b.mod(p_flush_rv, c_stride_rv), c0)
-                should_flush = b.land(flush_ge, flush_stride)
-
-            ho_row_j = b.div(p_flush_rv, c_stride_rv)
-
-            for w_out in range(BLOCK_W):
-                out_q = b.add(q_tile_start, b.const_i32(w_out))
-                out_q_ok = b.land(b.cmp_lt(out_q, c_W), ch_in_range)
-                store_ok = b.land(out_q_ok, should_flush)
-                acc_val = new_accs[P_FLUSH_j * BLOCK_W + w_out]  # STATIC index
-                d_off, _ = d_desc.offset(b, n=n, h=ho_row_j, w=out_q, k=ch)
-                safe_d = b.select(store_ok, b.mul(d_off, c_half_bytes), oob_sentinel)
-                if p.dtype == "bf16":
-                    b.buffer_store_bf16(
-                        d_rsrc, safe_d, c0, b.trunc_f32_to_bf16(acc_val)
-                    )
-                else:
-                    b.buffer_store_f16(d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc_val))
-
-            for w_out in range(BLOCK_W):
-                new_accs[P_FLUSH_j * BLOCK_W + w_out] = zero_f32
-
-        b.scf_yield(*new_accs, *next_rows)
+    # The rows past the image: no input, only output rows to complete.
+    flush_loop = b.scf_for_iter(
+        n_fma_groups_v,
+        n_groups_v,
+        c1,
+        [
+            (f"dw_tail_acc_kh{kh}_w{w}", fma_loop.results[kh * BLOCK_W + w])
+            for kh in range(p.KH)
+            for w in range(BLOCK_W)
+        ],
+        iv_name="dw_tail",
+        elide_trailing_barrier=False,
+    )
+    with flush_loop as (grp_iv, loop_vals):
+        new_accs = list(loop_vals)
+        for j in range(p.KH):
+            flush(grp_iv, j, row_y(grp_iv, j), new_accs)
+        b.scf_yield(*new_accs)
 
     return b.kernel
 
@@ -6195,6 +6249,11 @@ def build_direct_depthwise_spatial(
     # bake H into the trip count.
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
+    # Two waves per SIMD: the KH x KW weights and the prefetch window push
+    # larger filters just over the threshold for one wave, and the two-wave
+    # budget spills a few loop-invariant weights while being faster overall.
+    # Small filters fit either way.
+    b.kernel.attrs["waves_per_eu"] = 2
 
     io_type = _io_type(p.dtype)
 
@@ -6374,6 +6433,13 @@ def build_direct_depthwise_spatial(
 
             new_accs[P_FLUSH_j] = zero_f32  # unconditional static reset
 
+        # The accumulators pass through an empty asm into the next iteration,
+        # which keeps the SLP vectorizer from pairing the loop-carried FMA
+        # chains into v_pk_fma_f32 (see build_direct_depthwise).
+        new_accs = [
+            b.inline_asm("", "=v,0", [a], result_type=F32, sideeffect=False)
+            for a in new_accs
+        ]
         b.scf_yield(*new_accs, *[a_h for row in window for a_h in row])
 
     return b.kernel

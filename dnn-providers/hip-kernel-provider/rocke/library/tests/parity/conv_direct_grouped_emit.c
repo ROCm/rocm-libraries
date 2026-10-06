@@ -543,6 +543,27 @@ static int make_cfg(int idx,
         *kind = KIND_WGRAD;
         *arch = "gfx950";
         return 0;
+    case 32:
+        /* depthwise 7x7 stride 2 bf16: PAD > 1 shifts the row stream's static
+         * slots, and stride 2 gates its flushes on the row parity. */
+        p.N = 2;
+        p.H = 14;
+        p.W = 14;
+        p.groups = 128;
+        p.cpg = 1;
+        p.kpg = 1;
+        p.KH = 7;
+        p.KW = 7;
+        p.PAD = 3;
+        p.stride = 2;
+        p.dtype = "bf16";
+        *sdw = rocke_direct_depthwise_spec_default();
+        sdw->problem = p;
+        sdw->block_w = 8;
+        sdw->block_waves = 2;
+        *kind = KIND_DW;
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }

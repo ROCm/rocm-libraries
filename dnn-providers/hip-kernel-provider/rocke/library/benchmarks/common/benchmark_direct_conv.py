@@ -231,6 +231,13 @@ def parse_miopen_cmd_direct(cmd: str):
     return problem, dtype, miopen_args.forw
 
 
+def _dw_config_label(block_w, block_waves) -> str:
+    """A depthwise sweep entry's knobs; the spatial kernel has no block_w."""
+    if block_w is None:
+        return f"spatial bwv={block_waves}"
+    return f"bw={block_w:3d} bwv={block_waves}"
+
+
 def _sample_combos(combos: list, frac: float, seed: int) -> list:
     import random
 
@@ -443,7 +450,7 @@ def _print_depthwise_results(
     print(hdr)
     print("-" * width)
     for rank, r in enumerate(results[:top_n], 1):
-        cfg = f"bw={r.block_w:3d} bwv={r.block_waves}"
+        cfg = _dw_config_label(r.block_w, r.block_waves)
         if show_verify:
             v = "PASS" if r.passed else "FAIL"
             print(
@@ -645,7 +652,7 @@ def _run_depthwise_sweep(
             rt.memset(D_dev, 0, D_t.nbytes)
 
         ms = _stop.measure(
-            lambda: launcher(values, config=cfg),
+            launcher.bind(values, config=cfg),
             warmup=args.warmup,
             iters=args.iters,
             stream=stream,
@@ -671,7 +678,7 @@ def _run_depthwise_sweep(
             )
         )
         print(
-            f"[{n_run:4d}] bw={block_w:3d} bwv={block_waves}"
+            f"[{n_run:4d}] {_dw_config_label(block_w, block_waves)}"
             f"  {cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
             flush=True,
         )
@@ -855,7 +862,7 @@ def _run_sweep(
             rt.memset(D_dev, 0, D_t.nbytes)
 
         ms = _stop.measure(
-            lambda: launcher(values, config=cfg),
+            launcher.bind(values, config=cfg),
             warmup=args.warmup,
             iters=args.iters,
             stream=stream,
@@ -1095,7 +1102,7 @@ def _run_wgrad_sweep(
 
         cfg_wg = LaunchConfig(grid=grid, block=block_dim)
         ms = _stop.measure(
-            lambda: launcher(values, config=cfg_wg),
+            launcher.bind(values, config=cfg_wg),
             warmup=args.warmup,
             iters=args.iters,
             stream=0,
@@ -1681,7 +1688,7 @@ def _run_dgrad_sweep(
         else:
             cfg = LaunchConfig(grid=grid, block=block_dim)
             ms = _stop.measure(
-                lambda: launcher(values, config=cfg),
+                launcher.bind(values, config=cfg),
                 warmup=args.warmup,
                 iters=args.iters,
                 stream=0,
@@ -1925,9 +1932,16 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                     print(f"  [skip] {plan.label}: {e}", flush=True)
                     continue
 
-                def run(launches=launches):
-                    for launcher, values, cfg in launches:
-                        launcher(values, config=cfg)
+                # Each step packed once: a timed loop that packs per launch
+                # times the host, not a short kernel.
+                bound = [
+                    launcher.bind(values, config=cfg)
+                    for launcher, values, cfg in launches
+                ]
+
+                def run(bound=bound):
+                    for launch in bound:
+                        launch()
 
                 passed = None
                 if ref_out is not None:
@@ -1983,6 +1997,9 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                 print(
                     f"  {rank:>4}  {tflops:>7.1f}  {ms:>8.3f}  {gbps:>7.1f}  {verdict:>6}  {label}"
                 )
+            # The line benchmark_conv_compare.py reads, as the JIT sweep prints.
+            tflops, _, ms, _, label = results[0]
+            print(f"\nBest: {tflops:.1f} TFLOPS — {label}  {ms:.3f} ms", flush=True)
     return overall_rc
 
 

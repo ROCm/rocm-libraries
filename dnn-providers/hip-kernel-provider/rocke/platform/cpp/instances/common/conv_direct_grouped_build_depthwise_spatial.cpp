@@ -181,6 +181,15 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     }
 
     p = &spec->problem;
+    /* The weight table is sized for filters up to the depthwise limit. */
+    if(p->KH > ROCKE_DCONV_DW_MAX_KH || p->KW > ROCKE_DCONV_DW_MAX_KW)
+    {
+        if(bld->status == ROCKE_OK)
+        {
+            bld->status = ROCKE_ERR_VALUE;
+        }
+        return NULL;
+    }
     WAVE = spec->wave_size;
     BLOCK_WAVES = spec->block_waves;
     THREADS = rocke_direct_depthwise_spatial_threads_per_block(spec);
@@ -196,6 +205,9 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     is_bf16 = (p->dtype && strcmp(p->dtype, "bf16") == 0) ? 1 : 0;
 
     rocke_attr_set_int(bld, &bld->kernel->attrs, "max_workgroup_size", THREADS);
+    /* Two waves per SIMD: the KH x KW weights and the prefetch window push
+     * larger filters just over the one-wave threshold; two waves are faster. */
+    rocke_attr_set_int(bld, &bld->kernel->attrs, "waves_per_eu", 2);
 
     /* ---- parameters ---- */
     {
@@ -541,6 +553,22 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
             new_accs[P_FLUSH_j] = zero_f32;
         }
 
+        /* An empty asm on each accumulator keeps LLVM's SLP vectorizer from
+         * pairing the loop-carried FMA chains into v_pk_fma_f32 (see Python). */
+        {
+            const rocke_type_t* f32_ty = rocke_f32();
+            rocke_inline_asm_opts_t opts;
+            int i;
+            memset(&opts, 0, sizeof opts);
+            opts.sideeffect = false;
+            opts.sideeffect_set = true;
+            for(i = 0; i < KH; ++i)
+            {
+                rocke_op_t* asm_op
+                    = rocke_b_inline_asm(bld, "", "=v,0", &new_accs[i], 1, &f32_ty, 1, &opts);
+                new_accs[i] = asm_op ? asm_op->results[0] : NULL;
+            }
+        }
         {
             rocke_value_t** yields
                 = (rocke_value_t**)alloca((size_t)num_iargs * sizeof(rocke_value_t*));

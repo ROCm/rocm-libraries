@@ -307,7 +307,7 @@ def main() -> int:
     parser.add_argument(
         "--top",
         type=int,
-        default=5,
+        default=10,
         help="top-N results to show per benchmark (default: 5)",
     )
     parser.add_argument(
