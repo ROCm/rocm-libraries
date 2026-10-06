@@ -15,9 +15,13 @@
 
 #include "fake_backend/MockHipdnnBackend.hpp"
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -527,6 +531,286 @@ TEST_F(TestEngineQueries, CandidatesKeepPluginOrderWhenIdsAreNotAscending)
     ASSERT_EQ(page.candidates.size(), 2U);
     EXPECT_EQ(page.candidates[0].id, "b");
     EXPECT_EQ(page.candidates[1].id, "a");
+}
+
+/// One candidate as a plugin reports it, with integer knobs in report order.
+struct CandidateSpec
+{
+    CandidateSpec(std::string candidateId,
+                  std::vector<std::pair<std::string, int64_t>> knobSettings,
+                  std::string kernelFeatureMap = "{}")
+        : id(std::move(candidateId))
+        , knobs(std::move(knobSettings))
+        , kernelFeatures(std::move(kernelFeatureMap))
+    {
+    }
+
+    std::string id;
+    std::vector<std::pair<std::string, int64_t>> knobs;
+    std::string kernelFeatures;
+};
+
+/// A candidate page as a plugin reports it; the identity defaults are valid.
+struct PageSpec
+{
+    uint64_t totalCount = 0;
+    uint64_t offset = 0;
+    std::vector<CandidateSpec> candidates;
+    std::string graphId = "graph";
+    std::string deviceId = "device";
+    std::string deviceArch = "gfx942";
+    std::string problemFeatures = "{}";
+    std::string deviceFeatures = "{}";
+};
+
+flatbuffers::DetachedBuffer buildCandidatePage(const PageSpec& spec)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::EngineCandidate>> candidates;
+    candidates.reserve(spec.candidates.size());
+    for(const auto& candidate : spec.candidates)
+    {
+        std::vector<flatbuffers::Offset<fb::KnobSetting>> knobs;
+        knobs.reserve(candidate.knobs.size());
+        for(const auto& [knobId, value] : candidate.knobs)
+        {
+            knobs.push_back(
+                fb::CreateKnobSettingDirect(builder,
+                                            knobId.c_str(),
+                                            fb::KnobValue::IntValue,
+                                            fb::CreateIntValue(builder, value).Union()));
+        }
+        candidates.push_back(fb::CreateEngineCandidateDirect(
+            builder, candidate.id.c_str(), &knobs, candidate.kernelFeatures.c_str()));
+    }
+    const auto page = fb::CreateEngineCandidatePageDirect(builder,
+                                                          spec.graphId.c_str(),
+                                                          spec.deviceId.c_str(),
+                                                          spec.deviceArch.c_str(),
+                                                          spec.problemFeatures.c_str(),
+                                                          spec.deviceFeatures.c_str(),
+                                                          spec.totalCount,
+                                                          spec.offset,
+                                                          &candidates);
+    builder.Finish(
+        fb::CreateEngineDetailsDirect(builder, ENGINE_ID, nullptr, nullptr, nullptr, page));
+    return builder.Release();
+}
+
+/// A well-formed page buffer that one decode check must refuse for the given request.
+struct RefusedPage
+{
+    RefusedPage(std::string caseName,
+                std::string expectedMessage,
+                PageSpec pageSpec,
+                int64_t requestOffset = 0,
+                int64_t requestLimit = 10,
+                std::vector<KnobSetting> requestScope = {})
+        : name(std::move(caseName))
+        , message(std::move(expectedMessage))
+        , page(std::move(pageSpec))
+        , offset(requestOffset)
+        , limit(requestLimit)
+        , scope(std::move(requestScope))
+    {
+    }
+
+    std::string name;
+    std::string message;
+    PageSpec page;
+    int64_t offset;
+    int64_t limit;
+    std::vector<KnobSetting> scope;
+};
+
+PageSpec pageOf(std::vector<CandidateSpec> candidates)
+{
+    PageSpec page;
+    page.totalCount = candidates.size();
+    page.candidates = std::move(candidates);
+    return page;
+}
+
+PageSpec validPageWith(std::string PageSpec::*field, std::string value)
+{
+    auto page = pageOf({{"a", {{"test.knob", 1}}}});
+    page.*field = std::move(value);
+    return page;
+}
+
+/// Each case breaks exactly one rule, so the expected message names the check that fired.
+std::vector<RefusedPage> refusedPages()
+{
+    const std::vector<KnobSetting> scope{KnobSetting("test.knob", int64_t{1})};
+    const std::string identity = "Ambiguous candidate identity";
+    const std::string inconsistent = "Inconsistent candidate page";
+    const std::string outOfScope = "Candidate violates knob scope";
+
+    PageSpec offsetMismatch;
+    offsetMismatch.totalCount = 3;
+    offsetMismatch.offset = 1;
+    offsetMismatch.candidates = {{"b", {{"test.knob", 2}}}, {"c", {{"test.knob", 3}}}};
+
+    // Exactly `limit` candidates past the total: only the total/offset ordering refuses
+    // this, since the unsigned remainder would wrap past the limit.
+    PageSpec totalBeforeOffset;
+    totalBeforeOffset.totalCount = 3;
+    totalBeforeOffset.offset = 5;
+    totalBeforeOffset.candidates = {{"f", {{"test.knob", 5}}}};
+
+    auto shortPage = pageOf({{"a", {{"test.knob", 1}}}, {"b", {{"test.knob", 2}}}});
+    shortPage.totalCount = 3;
+
+    auto overLimit
+        = pageOf({{"a", {{"test.knob", 1}}}, {"b", {{"test.knob", 2}}}, {"c", {{"test.knob", 3}}}});
+    overLimit.totalCount = 5;
+
+    PageSpec overRemainder;
+    overRemainder.totalCount = 3;
+    overRemainder.offset = 2;
+    overRemainder.candidates = {{"c", {{"test.knob", 3}}}, {"d", {{"test.knob", 4}}}};
+
+    return {
+        {"EmptyId", identity, pageOf({{"", {{"test.knob", 1}}}})},
+        {"DuplicateId", identity, pageOf({{"a", {{"test.knob", 1}}}, {"a", {{"test.knob", 2}}}})},
+        {"DuplicateKnobTuple",
+         "Ambiguous candidate knob tuple",
+         pageOf({{"a", {{"test.knob", 1}}}, {"b", {{"test.knob", 1}}}})},
+        {"KnobRepeatedInOneCandidate",
+         "Duplicate candidate knob",
+         pageOf({{"a", {{"test.knob", 1}, {"test.knob", 2}}}})},
+        {"KernelFeaturesNotAnObject",
+         "Invalid kernel feature map",
+         pageOf({{"a", {{"test.knob", 1}}, "[]"}})},
+        {"ScopedKnobHasAnotherValue",
+         outOfScope,
+         pageOf({{"a", {{"test.knob", 1}}}, {"b", {{"test.knob", 2}}}}),
+         0,
+         10,
+         scope},
+        {"ScopedKnobMissing", outOfScope, pageOf({{"a", {{"other.knob", 1}}}}), 0, 10, scope},
+        {"EmptyGraphId", inconsistent, validPageWith(&PageSpec::graphId, "")},
+        {"EmptyDeviceId", inconsistent, validPageWith(&PageSpec::deviceId, "")},
+        {"EmptyDeviceArch", inconsistent, validPageWith(&PageSpec::deviceArch, "")},
+        {"ProblemFeaturesNotAnObject",
+         inconsistent,
+         validPageWith(&PageSpec::problemFeatures, "[]")},
+        {"DeviceFeaturesNotAnObject", inconsistent, validPageWith(&PageSpec::deviceFeatures, "[]")},
+        {"OffsetDiffersFromRequest", inconsistent, offsetMismatch},
+        {"TotalBeforeOffset", inconsistent, totalBeforeOffset, 5, 1},
+        {"FewerThanAvailable", inconsistent, shortPage},
+        {"MoreThanLimit", inconsistent, overLimit, 0, 2},
+        {"MoreThanRemainder", inconsistent, overRemainder, 2},
+    };
+}
+
+class TestRefusedCandidatePage : public TestEngineQueries, public WithParamInterface<RefusedPage>
+{
+};
+
+TEST_P(TestRefusedCandidatePage, DecodeIsRefused)
+{
+    const auto& refused = GetParam();
+    const auto response = buildCandidatePage(refused.page);
+    serveCandidatePage(response);
+
+    EngineCandidatePage page;
+    page.candidates.emplace_back();
+    const auto error = detail::getEngineCandidates(
+        graph(), ENGINE_ID, page, refused.offset, refused.limit, refused.scope);
+    EXPECT_EQ(error.get_code(), ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_EQ(error.get_message(), refused.message);
+    EXPECT_TRUE(page.candidates.empty());
+    EXPECT_FALSE(page.nextOffset.has_value());
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestRefusedCandidatePage,
+                         ValuesIn(refusedPages()),
+                         [](const TestParamInfo<RefusedPage>& info) { return info.param.name; });
+
+// Limits 3, 1, 10 over seven entries: uneven pages, the last bounded by the remainder and
+// ending exactly at the total.
+TEST_F(TestEngineQueries, CandidatePagesWalkTheCatalogOnceInOrder)
+{
+    std::vector<CandidateSpec> catalog;
+    std::vector<std::string> catalogIds;
+    for(int64_t index = 0; index < 7; ++index)
+    {
+        catalog.push_back({"entry-" + std::to_string(index), {{"test.knob", index}}});
+        catalogIds.push_back(catalog.back().id);
+    }
+
+    int64_t requestedOffset = -1;
+    int64_t requestedLimit = -1;
+    ON_CALL(*_mockBackend,
+            backendSetAttribute(_,
+                                AnyOf(HIPDNN_ATTR_ENGINE_CANDIDATE_OFFSET_EXT,
+                                      HIPDNN_ATTR_ENGINE_CANDIDATE_LIMIT_EXT),
+                                HIPDNN_TYPE_INT64,
+                                1,
+                                _))
+        .WillByDefault([&requestedOffset, &requestedLimit](hipdnnBackendDescriptor_t,
+                                                           hipdnnBackendAttributeName_t name,
+                                                           hipdnnBackendAttributeType_t,
+                                                           int64_t,
+                                                           const void* value) {
+            const auto requested = *static_cast<const int64_t*>(value);
+            if(name == HIPDNN_ATTR_ENGINE_CANDIDATE_OFFSET_EXT)
+            {
+                requestedOffset = requested;
+            }
+            else
+            {
+                requestedLimit = requested;
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    // A plugin serving the requested slice of the catalog.
+    flatbuffers::DetachedBuffer response;
+    ON_CALL(*_mockBackend, backendGetAttribute(_, HIPDNN_ATTR_ENGINE_CANDIDATES_EXT, _, _, _, _))
+        .WillByDefault([&](hipdnnBackendDescriptor_t,
+                           hipdnnBackendAttributeName_t,
+                           hipdnnBackendAttributeType_t,
+                           int64_t,
+                           int64_t*,
+                           void* out) {
+            const auto begin = std::min(static_cast<size_t>(requestedOffset), catalog.size());
+            const auto end = std::min(begin + static_cast<size_t>(requestedLimit), catalog.size());
+            PageSpec spec;
+            spec.totalCount = catalog.size();
+            spec.offset = static_cast<uint64_t>(requestedOffset);
+            spec.candidates.assign(catalog.begin() + static_cast<std::ptrdiff_t>(begin),
+                                   catalog.begin() + static_cast<std::ptrdiff_t>(end));
+            response = buildCandidatePage(spec);
+            auto* data = static_cast<hipdnnBackendFlatbufferData_t*>(out);
+            data->ptr = response.data();
+            data->size = response.size();
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    const std::array<int64_t, 3> limits{3, 1, 10};
+    const std::array<std::optional<uint64_t>, 3> expectedNext{3U, 4U, std::nullopt};
+    std::vector<std::string> walked;
+    std::optional<uint64_t> nextOffset = 0U;
+    for(size_t index = 0; index < limits.size(); ++index)
+    {
+        SCOPED_TRACE(::testing::Message() << "page " << index);
+        ASSERT_TRUE(nextOffset.has_value());
+        EngineCandidatePage page;
+        const auto error = detail::getEngineCandidates(
+            graph(), ENGINE_ID, page, static_cast<int64_t>(*nextOffset), limits[index]);
+        ASSERT_TRUE(error.is_good()) << error.get_message();
+        EXPECT_EQ(page.offset, *nextOffset);
+        EXPECT_EQ(page.totalCount, catalog.size());
+        EXPECT_EQ(page.nextOffset, expectedNext[index]);
+        for(const auto& candidate : page.candidates)
+        {
+            walked.push_back(candidate.id);
+        }
+        nextOffset = page.nextOffset;
+    }
+    EXPECT_EQ(walked, catalogIds);
 }
 
 } // namespace

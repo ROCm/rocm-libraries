@@ -19,14 +19,25 @@
         "revision": {"$ref": "#/definitions/revision"}
       }
     },
+    "sha256": {
+      "description": "SHA-256 of the named file: 64 lowercase hexadecimal digits, no prefix.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "relative_path": {
+      "description": "A file inside the descriptor's directory: no root, UNC or drive prefix and no '..' segment. The loader also refuses any path that normalises outside the directory.",
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?![\\s\\S]*(?:^|[/\\\\])\\.\\.(?:[/\\\\]|$))"
+    },
     "artifact": {
       "type": "object",
       "additionalProperties": false,
       "patternProperties": {"^(x-|_)": {}},
       "required": ["artifact"],
       "properties": {
-        "artifact": {"type": "string", "minLength": 1},
-        "hash": {"type": "string", "minLength": 1}
+        "artifact": {"$ref": "#/definitions/relative_path"},
+        "hash": {"$ref": "#/definitions/sha256"}
       }
     }
   },
@@ -108,11 +119,11 @@
       "type": "object",
       "additionalProperties": false,
       "patternProperties": {"^(x-|_)": {}},
-      "required": ["library", "symbol"],
+      "required": ["library", "symbol", "hash"],
       "properties": {
-        "library": {"type": "string", "minLength": 1},
+        "library": {"$ref": "#/definitions/relative_path"},
         "symbol": {"type": "string", "minLength": 1},
-        "hash": {"type": "string", "minLength": 1},
+        "hash": {"$ref": "#/definitions/sha256"},
         "config": {"type": "object", "maxProperties": 0}
       }
     }

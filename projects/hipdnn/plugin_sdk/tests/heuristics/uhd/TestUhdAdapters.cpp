@@ -138,10 +138,6 @@ TEST(TestIngestorUhdAdapters, TheFactoryRefusesACustomLibraryWhoseDeclaredHashIs
     const auto loaded = makeUhdAdapter(config);
     ASSERT_NE(loaded, nullptr);
     EXPECT_DOUBLE_EQ(loaded->score({1.0, 2.0, 3.0}), 6.0) << "not testLinearScorer";
-
-    // §4.1 makes the artifact hash optional.
-    config.modelHash.clear();
-    EXPECT_NE(makeUhdAdapter(config), nullptr);
 #endif
 }
 

@@ -4785,3 +4785,162 @@ TEST_F(TestEnginePredictionTransport, CandidatePageMissingARequiredFieldIsAPlugi
         [&] { std::ignore = _resources->enumerateCandidates(100, engineConfig, &graph, 0, 10); },
         HIPDNN_STATUS_PLUGIN_ERROR);
 }
+
+namespace
+{
+
+// A candidate page a plugin hands back for a request. An empty `refusal` means the page
+// answers the request and is passed on; otherwise it is refused with that message.
+struct CandidatePageCase
+{
+    const char* name;
+    uint64_t requestOffset;
+    uint64_t requestLimit;
+    int64_t pageEngineId;
+    uint64_t pageOffset;
+    uint64_t totalCount;
+    size_t candidateCount;
+    const char* refusal;
+};
+
+class TestCandidatePageTransport : public TestEnginePredictionTransport
+{
+protected:
+    static flatbuffers::DetachedBuffer
+        candidatePage(int64_t engineId, uint64_t offset, uint64_t totalCount, size_t candidateCount)
+    {
+        namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+        fb::EngineDetailsT details;
+        details.engine_id = engineId;
+        details.candidate_page = std::make_unique<fb::EngineCandidatePageT>();
+        auto& page = *details.candidate_page;
+        page.graph_id = "graph";
+        page.device_id = "device";
+        page.device_arch = "gfx942";
+        page.problem_features = "{}";
+        page.device_features = "{}";
+        page.total_count = totalCount;
+        page.offset = offset;
+        for(size_t index = 0; index < candidateCount; ++index)
+        {
+            auto candidate = std::make_unique<fb::EngineCandidateT>();
+            candidate->id = "candidate-" + std::to_string(offset + index);
+            candidate->kernel_features = "{}";
+            page.candidates.push_back(std::move(candidate));
+        }
+        flatbuffers::FlatBufferBuilder builder;
+        builder.Finish(fb::EngineDetails::Pack(builder, &details));
+        return builder.Release();
+    }
+
+    // Every enumeration hands out `_page`; the resource manager must release exactly
+    // that allocation, once, whatever the outcome.
+    void servePageAndExpectOneRelease()
+    {
+        ON_CALL(*_plugin, enumerateCandidates(_handle, _, _, _, _, _))
+            .WillByDefault(
+                [this](hipdnnEnginePluginHandle_t,
+                       const hipdnnPluginConstData_t*,
+                       const hipdnnPluginConstData_t*,
+                       uint64_t,
+                       uint64_t,
+                       hipdnnPluginConstData_t* out) { *out = {_page.data(), _page.size()}; });
+        expectOneReleaseOfPage();
+    }
+
+    void expectOneReleaseOfPage()
+    {
+        EXPECT_CALL(*_plugin, destroyEngineDetails(_, _)).Times(0);
+        EXPECT_CALL(
+            *_plugin,
+            destroyEngineDetails(_handle,
+                                 Pointee(Field(&hipdnnPluginConstData_t::ptr,
+                                               Eq(static_cast<const void*>(_page.data()))))))
+            .Times(1);
+    }
+
+    std::vector<uint8_t> enumerate(uint64_t offset, uint64_t limit)
+    {
+        EXPECT_CALL(_graph, getSerializedGraph())
+            .WillRepeatedly(Return(hipdnnPluginConstData_t{nullptr, 0}));
+        return _resources->enumerateCandidates(100, {nullptr, 0}, &_graph, offset, limit);
+    }
+
+    flatbuffers::DetachedBuffer _page;
+    MockGraphDescriptor _graph;
+};
+
+class TestCandidatePageVerification : public TestCandidatePageTransport,
+                                      public WithParamInterface<CandidatePageCase>
+{
+};
+
+} // namespace
+
+// The page must belong to the requested engine, start at the requested offset and hold
+// exactly min(limit, total_count - offset) candidates: a full page before the end, the
+// remainder on the final page.
+TEST_P(TestCandidatePageVerification, PageIsPassedOnOnlyWhenItAnswersTheRequest)
+{
+    const auto& testCase = GetParam();
+    _page = candidatePage(
+        testCase.pageEngineId, testCase.pageOffset, testCase.totalCount, testCase.candidateCount);
+    servePageAndExpectOneRelease();
+
+    if(std::string_view(testCase.refusal).empty())
+    {
+        EXPECT_EQ(enumerate(testCase.requestOffset, testCase.requestLimit),
+                  std::vector<uint8_t>(_page.data(), _page.data() + _page.size()));
+        return;
+    }
+    const auto message = thrownMessage(
+        [&] { std::ignore = enumerate(testCase.requestOffset, testCase.requestLimit); },
+        HIPDNN_STATUS_PLUGIN_ERROR);
+    EXPECT_THAT(message, HasSubstr(testCase.refusal));
+}
+
+constexpr const char* K_WRONG_ENGINE = "wrong enumeration engine";
+constexpr const char* K_INCONSISTENT_PAGE = "inconsistent candidate page";
+
+// Columns: request offset, request limit, page engine ID, page offset, total_count,
+// candidates on the page, refusal.
+INSTANTIATE_TEST_SUITE_P(
+    CandidatePages,
+    TestCandidatePageVerification,
+    Values(
+        CandidatePageCase{"FullPageBeforeTheEnd", 0, 10, 100, 0, 25, 10, ""},
+        CandidatePageCase{"FullPageEndingExactlyAtTheEnd", 15, 10, 100, 15, 25, 10, ""},
+        CandidatePageCase{"ShortFinalPage", 20, 10, 100, 20, 25, 5, ""},
+        CandidatePageCase{"EmptyPageAtTheEnd", 25, 10, 100, 25, 25, 0, ""},
+        CandidatePageCase{"PageForAnotherEngine", 0, 10, 101, 0, 25, 10, K_WRONG_ENGINE},
+        CandidatePageCase{"PageAtAnotherOffset", 10, 10, 100, 0, 25, 10, K_INCONSISTENT_PAGE},
+        CandidatePageCase{"LimitPlusOneBeforeTheEnd", 0, 10, 100, 0, 25, 11, K_INCONSISTENT_PAGE},
+        CandidatePageCase{"ShortPageBeforeTheEnd", 0, 10, 100, 0, 25, 9, K_INCONSISTENT_PAGE},
+        CandidatePageCase{"OneTooManyOnTheFinalPage", 20, 10, 100, 20, 25, 6, K_INCONSISTENT_PAGE},
+        CandidatePageCase{"OneTooFewOnTheFinalPage", 20, 10, 100, 20, 25, 4, K_INCONSISTENT_PAGE},
+        // total_count - offset would wrap to a huge remainder without the bound check.
+        CandidatePageCase{"FullPagePastTheEnd", 30, 10, 100, 30, 25, 10, K_INCONSISTENT_PAGE}),
+    [](const TestParamInfo<CandidatePageCase>& info) { return std::string(info.param.name); });
+
+// A plugin that fails after writing a page: its failure reaches the caller and the page
+// is still released once.
+TEST_F(TestCandidatePageTransport, PageWrittenBeforeAPluginFailureIsReleasedOnce)
+{
+    _page = candidatePage(100, 0, 25, 10);
+    ON_CALL(*_plugin, enumerateCandidates(_handle, _, _, _, _, _))
+        .WillByDefault([this](hipdnnEnginePluginHandle_t,
+                              const hipdnnPluginConstData_t*,
+                              const hipdnnPluginConstData_t*,
+                              uint64_t,
+                              uint64_t,
+                              hipdnnPluginConstData_t* out) {
+            *out = {_page.data(), _page.size()};
+            throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,
+                                  "Candidate enumeration failed: device lost");
+        });
+    expectOneReleaseOfPage();
+
+    const auto message
+        = thrownMessage([&] { std::ignore = enumerate(0, 10); }, HIPDNN_STATUS_PLUGIN_ERROR);
+    EXPECT_THAT(message, HasSubstr("Candidate enumeration failed: device lost"));
+}

@@ -92,15 +92,15 @@ class CustomLibraryAdapter : public IUhdAdapter
 public:
     /// @brief Loads a custom library scorer, searching the library's own directory first
     /// for its dependents.
-    /// @param expectedModelHash SHA-256 of the library bytes (`custom_library.hash`); empty
-    ///        when undeclared (RFC 0019 §4.1). A declared hash must match.
+    /// @param expectedModelHash SHA-256 of the library bytes (`custom_library.hash`, which
+    ///        RFC 0019 §4.1 requires). The library is opened only when its bytes match.
     /// @return nullptr on any load failure, so a malformed descriptor degrades to
     ///         static_order (RFC 0019 §5) instead of failing the request.
     static std::unique_ptr<CustomLibraryAdapter> load(const std::filesystem::path& libraryPath,
                                                       const std::string& symbolName,
                                                       size_t numFeatures,
                                                       const std::string& expectedFeaturesHash,
-                                                      const std::string& expectedModelHash = "");
+                                                      const std::string& expectedModelHash);
 
     ~CustomLibraryAdapter() override
     {
@@ -182,7 +182,13 @@ inline std::unique_ptr<CustomLibraryAdapter>
     }
 
     // Verify before opening: loading runs the library's initialisers.
-    if(!expectedModelHash.empty() && !detail::artifactHashMatches(libraryPath, expectedModelHash))
+    if(expectedModelHash.empty())
+    {
+        HIPDNN_SDK_LOG_ERROR("CustomLibraryAdapter: no hash declared for library "
+                             << shown << "; an unverified library is not loaded");
+        return nullptr;
+    }
+    if(!detail::artifactHashMatches(libraryPath, expectedModelHash))
     {
         return nullptr;
     }

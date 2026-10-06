@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: MIT
 
 """The validator's two opt-in regressions: the generate -> validate round trip and
-the discriminating mutation fixtures under ``tests/fixtures/validate_descriptors/``.
+the discriminating mutation and role fixtures under
+``tests/fixtures/validate_descriptors/``.
 
 Both need ``hipdnn_validate_descriptors``, a C++ binary this Python suite does not
 build -- it exists only under ``HIPDNN_ENABLE_KERNEL_INGESTOR=ON`` -- so they skip
@@ -56,6 +57,23 @@ MALFORMED_FIXTURES = [
     ("undeclared_knob", "tile_count"),
 ]
 
+# Each role fixture is valid/ with one role-bound UHD changed; the engine loads in every
+# case. Expected: exit status, then (role, success) for every model_checks entry in report
+# order. See the fixtures' README for the runtime admission each one mirrors.
+ROLE_FIXTURES = [
+    ("l2_static_order", 0, [("sort_kernel_catalog", True)]),
+    (
+        "l1_static_order",
+        1,
+        [("sort_kernel_catalog", True), ("predict_engine", False)],
+    ),
+    (
+        "l1_native",
+        0,
+        [("sort_kernel_catalog", True), ("predict_engine", True)],
+    ),
+]
+
 
 def _run_validator(validator, root):
     """Validate a fixture bundle, always naming the engine it should expose: malformed
@@ -103,32 +121,20 @@ def test_malformed_fixture_is_rejected(validator, name, marker):
     )
 
 
-# The engine always loads; a refused model fails only its role, so the verdict is the
-# exit status plus the bound model's own check.
-ROLE_FIXTURES = [
-    # A kernel ranker may keep declared order.
-    ("l2_static_order", "sort_kernel_catalog", True),
-    # An L1 estimate is a calibrated value; static_order has none to give.
-    ("l1_static_order", "predict_engine", False),
-    # A signature-less native L1 scorer resolves via the UHD scorer registry.
-    ("l1_native", "predict_engine", True),
-]
-
-
 @pytest.mark.parametrize(
-    "name,role,admitted", ROLE_FIXTURES, ids=[n for n, _, _ in ROLE_FIXTURES]
+    "name,exit_code,expected_checks",
+    ROLE_FIXTURES,
+    ids=[name for name, _, _ in ROLE_FIXTURES],
 )
-def test_role_bound_model_is_admitted_as_its_runtime_role_admits_it(
-    validator, name, role, admitted
-):
+def test_role_fixture_model_checks(validator, name, exit_code, expected_checks):
     result, payload = _run_validator(validator, FIXTURE_ROOT / name)
 
+    assert result.returncode == exit_code, result.stdout + result.stderr
+    assert payload["success"] is (exit_code == 0)
     assert FIXTURE_ENGINE in payload["engines"]
-    checks = [check for check in payload["model_checks"] if check["role"] == role]
-    assert len(checks) == 1, payload["model_checks"]
-    assert checks[0]["success"] is admitted, checks[0]
-    assert payload["success"] is admitted
-    assert (result.returncode == 0) is admitted, result.stdout + result.stderr
+    assert [
+        (check["role"], check["success"]) for check in payload["model_checks"]
+    ] == expected_checks, payload["model_checks"]
 
 
 def test_scale_add_round_trip_validates_clean(

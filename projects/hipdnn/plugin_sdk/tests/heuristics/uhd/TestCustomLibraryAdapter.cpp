@@ -14,6 +14,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <vector>
@@ -29,6 +31,23 @@ std::string getTestScorerLibPath()
     return hipdnn_plugin_sdk::test::testScorerLibrary().string();
 }
 
+/// The SHA-256 of the test scorer library. Computed rather than pinned because the
+/// library's bytes differ per toolchain.
+std::string libraryHash()
+{
+    std::ifstream file(getTestScorerLibPath(), std::ios::binary);
+    const std::string bytes{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+    EXPECT_FALSE(bytes.empty()) << "the test scorer library is missing: " << getTestScorerLibPath();
+    return sha256(bytes);
+}
+
+/// Loads @p symbol from the test scorer library, declaring the library's real digest.
+std::unique_ptr<CustomLibraryAdapter> loadScorer(const std::string& symbol, size_t numFeatures)
+{
+    return CustomLibraryAdapter::load(
+        getTestScorerLibPath(), symbol, numFeatures, TEST_HASH, libraryHash());
+}
+
 } // namespace
 
 class TestCustomLibraryAdapter : public ::testing::Test
@@ -37,8 +56,7 @@ class TestCustomLibraryAdapter : public ::testing::Test
 
 TEST_F(TestCustomLibraryAdapter, LoadAndScoreLinear)
 {
-    const auto libPath = getTestScorerLibPath();
-    auto adapter = CustomLibraryAdapter::load(libPath, "testLinearScorer", 3, TEST_HASH);
+    auto adapter = loadScorer("testLinearScorer", 3);
     ASSERT_NE(adapter, nullptr);
     EXPECT_EQ(adapter->expectedFeatureCount(), 3U);
     EXPECT_EQ(adapter->getFeaturesHash(), TEST_HASH);
@@ -51,8 +69,7 @@ TEST_F(TestCustomLibraryAdapter, LoadAndScoreLinear)
 
 TEST_F(TestCustomLibraryAdapter, LoadAndScoreConstant)
 {
-    const auto libPath = getTestScorerLibPath();
-    auto adapter = CustomLibraryAdapter::load(libPath, "testConstantScorer", 2, TEST_HASH);
+    auto adapter = loadScorer("testConstantScorer", 2);
     ASSERT_NE(adapter, nullptr);
 
     // testConstantScorer always returns 42.0
@@ -62,8 +79,7 @@ TEST_F(TestCustomLibraryAdapter, LoadAndScoreConstant)
 
 TEST_F(TestCustomLibraryAdapter, LoadAndScoreProduct)
 {
-    const auto libPath = getTestScorerLibPath();
-    auto adapter = CustomLibraryAdapter::load(libPath, "testProductScorer", 2, TEST_HASH);
+    auto adapter = loadScorer("testProductScorer", 2);
     ASSERT_NE(adapter, nullptr);
 
     // testProductScorer multiplies first two features
@@ -75,34 +91,39 @@ TEST_F(TestCustomLibraryAdapter, LoadAndScoreProduct)
 TEST_F(TestCustomLibraryAdapter, LoadFailsMissingLibrary)
 {
     auto adapter = CustomLibraryAdapter::load(
-        "/nonexistent/path/to/library.so", "some_symbol", 2, TEST_HASH);
+        "/nonexistent/path/to/library.so", "some_symbol", 2, TEST_HASH, libraryHash());
     EXPECT_EQ(adapter, nullptr);
 }
 
 TEST_F(TestCustomLibraryAdapter, LoadFailsMissingSymbol)
 {
-    const auto libPath = getTestScorerLibPath();
-    auto adapter = CustomLibraryAdapter::load(libPath, "nonexistent_symbol", 2, TEST_HASH);
+    auto adapter = loadScorer("nonexistent_symbol", 2);
     EXPECT_EQ(adapter, nullptr);
 }
 
 TEST_F(TestCustomLibraryAdapter, LoadFailsEmptyLibraryPath)
 {
-    auto adapter = CustomLibraryAdapter::load("", "testLinearScorer", 2, TEST_HASH);
+    auto adapter = CustomLibraryAdapter::load("", "testLinearScorer", 2, TEST_HASH, libraryHash());
     EXPECT_EQ(adapter, nullptr);
+}
+
+/// Loading runs the library's initialisers, so a library declaring no digest is never opened.
+TEST_F(TestCustomLibraryAdapter, LoadRefusesALibraryDeclaringNoHash)
+{
+    EXPECT_EQ(
+        CustomLibraryAdapter::load(getTestScorerLibPath(), "testLinearScorer", 3, TEST_HASH, ""),
+        nullptr);
 }
 
 TEST_F(TestCustomLibraryAdapter, LoadFailsEmptySymbolName)
 {
-    const auto libPath = getTestScorerLibPath();
-    auto adapter = CustomLibraryAdapter::load(libPath, "", 2, TEST_HASH);
+    auto adapter = loadScorer("", 2);
     EXPECT_EQ(adapter, nullptr);
 }
 
 TEST_F(TestCustomLibraryAdapter, ScoreThrowsOnFeatureCountMismatch)
 {
-    const auto libPath = getTestScorerLibPath();
-    auto adapter = CustomLibraryAdapter::load(libPath, "testLinearScorer", 3, TEST_HASH);
+    auto adapter = loadScorer("testLinearScorer", 3);
     ASSERT_NE(adapter, nullptr);
 
     EXPECT_THROW(adapter->score({1.0, 2.0}), std::invalid_argument);
@@ -111,8 +132,7 @@ TEST_F(TestCustomLibraryAdapter, ScoreThrowsOnFeatureCountMismatch)
 
 TEST_F(TestCustomLibraryAdapter, ScoreBatch)
 {
-    const auto libPath = getTestScorerLibPath();
-    auto adapter = CustomLibraryAdapter::load(libPath, "testLinearScorer", 2, TEST_HASH);
+    auto adapter = loadScorer("testLinearScorer", 2);
     ASSERT_NE(adapter, nullptr);
 
     const std::vector<std::vector<double>> batch = {{1.0, 2.0}, {3.0, 4.0}, {0.0, 0.0}};
@@ -125,10 +145,8 @@ TEST_F(TestCustomLibraryAdapter, ScoreBatch)
 
 TEST_F(TestCustomLibraryAdapter, MultipleAdaptersFromSameLibrary)
 {
-    const auto libPath = getTestScorerLibPath();
-
-    auto adapter1 = CustomLibraryAdapter::load(libPath, "testLinearScorer", 2, TEST_HASH);
-    auto adapter2 = CustomLibraryAdapter::load(libPath, "testConstantScorer", 2, TEST_HASH);
+    auto adapter1 = loadScorer("testLinearScorer", 2);
+    auto adapter2 = loadScorer("testConstantScorer", 2);
 
     ASSERT_NE(adapter1, nullptr);
     ASSERT_NE(adapter2, nullptr);

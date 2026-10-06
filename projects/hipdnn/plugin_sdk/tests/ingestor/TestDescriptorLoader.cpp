@@ -1886,11 +1886,14 @@ std::filesystem::path writeModelHeuristicSet(const std::filesystem::path& root,
     return root;
 }
 
-/// Contents are irrelevant: the loader only checks that the path is a file.
+/// What writeArtifact() writes. Contents are irrelevant to the loader, which only checks that
+/// the path is a file; a declared `hash` is the digest of these bytes.
+constexpr const char* ARTIFACT_BYTES = "not a real model";
+
 void writeArtifact(const std::filesystem::path& path)
 {
     std::filesystem::create_directories(path.parent_path());
-    std::ofstream(path, std::ios::binary) << "not a real model";
+    std::ofstream(path, std::ios::binary) << ARTIFACT_BYTES;
 }
 
 } // namespace
@@ -1942,7 +1945,8 @@ TEST(TestDescriptorLoader, ReadsTheWholeHeuristicHeader)
     // `calibrated: true` is not the default, so this proves the boolean is parsed.
     heuristic["objective"] = "max";
     heuristic["score"] = {{"metric", "tflops"}, {"calibrated", true}, {"transform", "log1p"}};
-    heuristic["tree_data"] = {{"artifact", "model.bin"}, {"hash", "sha256:model"}};
+    const auto modelHash = hipdnn_plugin_sdk::uhd::sha256(std::string(ARTIFACT_BYTES));
+    heuristic["tree_data"] = {{"artifact", "model.bin"}, {"hash", modelHash}};
     writeDocuments(dir.path(), documents);
     writeArtifact(dir.path() / "model.bin");
 
@@ -1961,7 +1965,7 @@ TEST(TestDescriptorLoader, ReadsTheWholeHeuristicHeader)
     EXPECT_EQ(parsed.score.metric, "tflops");
     EXPECT_TRUE(parsed.score.calibrated);
     EXPECT_EQ(parsed.score.transform, "log1p");
-    EXPECT_EQ(parsed.modelHash, "sha256:model");
+    EXPECT_EQ(parsed.modelHash, modelHash);
     ASSERT_EQ(parsed.categoricalEncoding.count("$q.dtype"), 1u);
     EXPECT_EQ(parsed.categoricalEncoding.at("$q.dtype").at("bf16"), 1);
 }
@@ -2102,6 +2106,8 @@ TEST(TestDescriptorLoader, ReplacingUndeclaredWeightsChangesTheEngineModelIdenti
     EXPECT_FALSE(native.modelHash.empty());
 }
 
+/// RFC 0019 §4.1: a model ships inside its descriptor's directory. One named outside it is
+/// refused at parse, which disables the model and keeps the engine.
 TEST(TestDescriptorLoader, EscapingModelArtifactIsDisabledWithoutDroppingTheEngine)
 {
     const ScopedSymbols symbols;
@@ -2116,13 +2122,16 @@ TEST(TestDescriptorLoader, EscapingModelArtifactIsDisabledWithoutDroppingTheEngi
     const auto sets = loadValidatedDescriptorSets<LoaderHandle>(tree);
 
     ASSERT_EQ(sets.size(), 1u);
+    EXPECT_FALSE(sets.front().heuristic.has_value());
     EXPECT_EQ(firstBlockSize(sets.front()), 64);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "inside the descriptor's directory"))
+        << recorder.getRecordedLogsAsString();
 }
 
-TEST(TestDescriptorLoader, AcceptsAModelArtifactAboveTheDescriptorButInsideTheTree)
+/// The boundary is the descriptor's own directory, not the tree: a nested descriptor cannot
+/// reach a shared artifact above it, even one inside the tree.
+TEST(TestDescriptorLoader, RefusesAModelArtifactAboveTheDescriptorButInsideTheTree)
 {
-    // The boundary is the tree, not the descriptor's folder: a nested descriptor may reach
-    // a shared artifact at the shard root.
     const ScopedSymbols symbols;
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_nested"));
     writeModelHeuristicSet(dir.path() / "pack", "test:model_nested", "../shared/model.bin");
@@ -2132,6 +2141,23 @@ TEST(TestDescriptorLoader, AcceptsAModelArtifactAboveTheDescriptorButInsideTheTr
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:model_nested");
+    EXPECT_FALSE(sets.front().heuristic.has_value());
+}
+
+TEST(TestDescriptorLoader, AcceptsAModelArtifactInASubdirectoryOfTheDescriptor)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_subdir"));
+    writeModelHeuristicSet(dir.path(), "test:model_subdir", "models/model.bin");
+    writeArtifact(dir.path() / "models" / "model.bin");
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_TRUE(sets.front().heuristic.has_value());
+    EXPECT_EQ(
+        sets.front().heuristic->modelArtifactPath,
+        std::filesystem::absolute(dir.path() / "models" / "model.bin").lexically_normal().string());
 }
 
 /// RFC 0019 §11.2: a `predict_engine` model gets the same artifact pre-flight as a ranker.
@@ -2172,7 +2198,8 @@ TEST(TestDescriptorLoader, DisablesAPredictionModelWhoseArtifactEscapesTheTree)
     // The ranking UHD still loads and picks its winner (256), not the declared-order head.
     EXPECT_TRUE(sets.front().heuristic.has_value());
     EXPECT_EQ(firstBlockSize(sets.front()), 256);
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "outside the descriptor tree"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "inside the descriptor's directory"))
+        << recorder.getRecordedLogsAsString();
 }
 
 /// RFC 0019 Open Question 7: an engine with no UED declares its L1 model's UUID in code.

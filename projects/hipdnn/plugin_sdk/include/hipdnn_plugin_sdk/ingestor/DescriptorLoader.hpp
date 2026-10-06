@@ -1858,6 +1858,8 @@ struct EnvironmentDescriptorRoots
 
 /// @brief Reads @ref EnvironmentDescriptorRoots out of the current environment. Each call
 /// re-reads it and warns again about an unusable value, so call it once per discovery.
+/// A descriptor can name a shared library to load (`custom_library`), so all three
+/// variables are read with getSecureEnv(): a secure-execution process ignores them.
 inline EnvironmentDescriptorRoots environmentDescriptorRoots()
 {
     EnvironmentDescriptorRoots roots;
@@ -1871,12 +1873,13 @@ inline EnvironmentDescriptorRoots environmentDescriptorRoots()
                                                      << "', which is not a directory; ignoring it");
         return false;
     };
-    if(const auto replacement = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR");
+    if(const auto replacement = hipdnn_data_sdk::utilities::getSecureEnv("HIPDNN_DESCRIPTOR_DIR");
        !replacement.empty() && usable("HIPDNN_DESCRIPTOR_DIR", replacement))
     {
         roots.replacement = replacement;
     }
-    if(const auto runtime = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR");
+    if(const auto runtime
+       = hipdnn_data_sdk::utilities::getSecureEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR");
        !runtime.empty() && usable("HIPDNN_DESCRIPTOR_RUNTIME_DIR", runtime))
     {
         roots.additional.emplace_back(runtime);
@@ -1884,7 +1887,7 @@ inline EnvironmentDescriptorRoots environmentDescriptorRoots()
 
     // Not existence-checked, unlike the two above: a search path is a list of candidates,
     // and an entry that is simply not installed on this machine is the normal case.
-    const auto pathList = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_PATH");
+    const auto pathList = hipdnn_data_sdk::utilities::getSecureEnv("HIPDNN_DESCRIPTOR_PATH");
 #ifdef _WIN32
     constexpr char PATH_SEPARATOR = ';';
 #else

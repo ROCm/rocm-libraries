@@ -178,7 +178,7 @@ no model for the selected metric is ranked after the engines that have one.
 Secure execution
 ================
 
-On Linux, in a secure execution environment -- a set-user-ID or set-group-ID process, or one that gained capabilities across ``execve`` -- hipDNN ignores every environment variable that steers what code it loads: ``HIPDNN_BACKEND_LIBRARY_PATH``, ``HIPDNN_PLUGIN_DIR``, and ``HIPDNN_HEURISTIC_PLUGIN_DIR``.
+On Linux, in a secure execution environment -- a set-user-ID or set-group-ID process, or one that gained capabilities across ``execve`` -- hipDNN ignores every environment variable that steers what code it loads: ``HIPDNN_BACKEND_LIBRARY_PATH``, ``HIPDNN_PLUGIN_DIR``, ``HIPDNN_HEURISTIC_PLUGIN_DIR``, and the kernel ingestor descriptor roots ``HIPDNN_DESCRIPTOR_DIR``, ``HIPDNN_DESCRIPTOR_RUNTIME_DIR``, and ``HIPDNN_DESCRIPTOR_PATH`` (a descriptor can name a shared library for the provider to load).
 Backend resolution skips module-relative and HIP-runtime locations, but still honors an explicit ``setBackendLibraryPath_ext()`` override before the system loader's hardened search.
 Variables that do not select code, such as the logging variables above, are unaffected.
-Windows has no equivalent execution mode, so these three variables are always honored there.
+Windows has no equivalent execution mode, so these variables are always honored there.

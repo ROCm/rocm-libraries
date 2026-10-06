@@ -68,10 +68,16 @@ admitted through `UhdKernelHeuristic::tryCreate`; `predict_engine` through the L
 GenericEngine evaluates it with (`uhd::prediction_detail::validateBinding` and `model`).
 
 - `l2_static_order/`: the `sort_kernel_catalog` UHD is `static_order`. Expected: exit 0
-  -- declared order is a legal kernel ranking.
+  -- declared order is a legal kernel ranking. `model_checks`: `sort_kernel_catalog`
+  succeeds.
 - `l1_static_order/`: `predict_engine` binds a calibrated `time` UHD whose adapter is
   `static_order`. Expected: non-zero exit -- an L1 estimate needs a `tree_data`, `native`
-  or `custom_library` model, so the runtime refuses it.
+  or `custom_library` model, so the runtime refuses it. `model_checks`:
+  `sort_kernel_catalog` succeeds, `predict_engine` fails.
 - `l1_native/`: `predict_engine` binds a calibrated `time` UHD with a signature-less
   `native` scorer. Expected: exit 0 -- the symbol resolves through the UHD scorer
-  registry the L1 path uses, not the kernel comparator registry.
+  registry the L1 path uses, not the kernel comparator registry. `model_checks`:
+  `sort_kernel_catalog` and `predict_engine` both succeed.
+
+`tests/test_round_trip.py` and the `hipdnn_validate_descriptors_<fixture>` CTest cases
+(`tools/CMakeLists.txt`) assert these exit statuses and `model_checks` verdicts.

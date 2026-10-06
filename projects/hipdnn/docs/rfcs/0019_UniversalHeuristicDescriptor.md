@@ -483,7 +483,7 @@ Other adapters keep the same header and swap the body:
 // custom_library — author-shipped .so behind a C ABI; features_hash advisory if it self-features
 { …, "adapter": "custom_library",
   "custom_library": {"library": "vendor_scorer.so", "symbol": "vendor.fmha_scorer",
-                     "config": { … }} }                // symbol + typed config, never inline code
+                     "hash": "<64 hex>", "config": { … }} }  // symbol + typed config, never inline code
 ```
 
 **On `static_order`.** The body has no parameters. It ranks by UKD `priority` (higher first), then by
@@ -511,7 +511,7 @@ The normative header. A loader can validate every row here without instantiating
 | `trained_against` | if the adapter features | descriptor refs, `selector_revision`, or both; optionally `feature_semantics_revision` | What this heuristic was generated against: the `{id, revision}` **content revisions** of the `ued`, `kmd`, and every `umd`, and/or the selector revision whose behaviour was measured — the provider's, for an engine that has no descriptor set, or the generic engine's own, which an engine estimate (`predict_engine`) of a descriptor engine must record beside its descriptor refs ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). Either form may also record the integer revision of the feature semantics the model was trained on; absent means 1 ([Section 6.9](#69-feature-semantics-revision)). |
 | `objective` | if the adapter scores | `max` \| `min` | Direction of the winning score, applied when the ranking is ordered. An adapter returns its model's raw value; the sign is the consumer's to apply, so a `min` model needs no trainer-side negation ([Section 5](#5-selection-flow)). |
 | `score` | no | object | `metric`, `calibrated`, and a `transform` drawn from the closed invertible set — lets a consumer recover the metric's value in its registered units ([Section 4.4](#44-ranking-metrics), [Section 11.3](#113-cross-engine-comparison)). `metric` names a registered ranking metric and fixes the units and the winning direction, so `objective` must agree with it. A `calibrated` score requires a `metric`. |
-| `<adapter>` | yes | object | Adapter-scoped body; its key **must** equal `adapter`. A body naming a model file may also carry that file's `hash` ([Section 7.2](#72-default-tree_data)). |
+| `<adapter>` | yes | object | Adapter-scoped body; its key **must** equal `adapter`. A body naming a model file names it by a relative path that stays inside the descriptor's directory, and may also carry that file's `hash`: its SHA-256 as 64 lowercase hexadecimal digits. A `custom_library` body must ([Section 7.2](#72-default-tree_data)). |
 | `x-…`, `_…` | no | any | Author-reserved extension namespaces, ignored by the loader ([Section 4.1](#41-field-reference-normative)). |
 
 Two header rules govern the split:
@@ -551,13 +551,20 @@ the runtime enforces the same rules through its parser, and the packaging tests 
       "properties": { "id":       { "$ref": "#/definitions/guid" },
                       "revision": { "$ref": "#/definitions/revision" } }
     },
+    "sha256":   { "description": "SHA-256 of the named file: 64 lowercase hexadecimal digits, no prefix.",
+                  "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "relative_path": {
+      "description": "A file inside the descriptor's directory: no root, UNC or drive prefix and no '..' segment. The loader also refuses any path that normalises outside the directory.",
+      "type": "string", "minLength": 1,
+      "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?![\\s\\S]*(?:^|[/\\\\])\\.\\.(?:[/\\\\]|$))"
+    },
     "artifact": {
-      "description": "A model file beside the descriptor, optionally content-addressed (section 7.2).",
+      "description": "A model file inside the descriptor's directory, optionally content-addressed (section 7.2).",
       "type": "object", "additionalProperties": false,
       "patternProperties": { "^(x-|_)": {} },
       "required": ["artifact"],
-      "properties": { "artifact": { "type": "string", "minLength": 1 },
-                      "hash":     { "type": "string", "minLength": 1 } }
+      "properties": { "artifact": { "$ref": "#/definitions/relative_path" },
+                      "hash":     { "$ref": "#/definitions/sha256" } }
     }
   },
 
@@ -639,10 +646,10 @@ the runtime enforces the same rules through its parser, and the packaging tests 
     "onnx":           { "$ref": "#/definitions/artifact" },
     "custom_library": { "type": "object", "additionalProperties": false,
                         "patternProperties": { "^(x-|_)": {} },
-                        "required": ["library", "symbol"],
-                        "properties": { "library": { "type": "string", "minLength": 1 },
+                        "required": ["library", "symbol", "hash"],
+                        "properties": { "library": { "$ref": "#/definitions/relative_path" },
                                         "symbol":  { "type": "string", "minLength": 1 },
-                                        "hash":    { "type": "string", "minLength": 1 },
+                                        "hash":    { "$ref": "#/definitions/sha256" },
                                         "config":  { "type": "object", "maxProperties": 0 } } }
   },
 
@@ -750,9 +757,13 @@ without `categorical_encoding`, under both provenance forms — and rejects each
 header rules describe: a missing or duplicated adapter body, a model adapter with no `objective` or
 `trained_against`, an empty or partial `trained_against`, a mixture of the two provenance forms, a
 scalar `umd`, a `umd` entry carrying no revision, an unrecognised transform, a calibrated score naming
-no metric, an `objective` that contradicts its metric's direction, and an untruncated digest. Descriptors at earlier versions, such as the `0.1`
-packaging-test fixtures with placeholder ids, are rejected by the `version` constraint, which is the
-accept rule working as intended rather than a gap.
+no metric, an `objective` that contradicts its metric's direction, an untruncated digest, a model `hash`
+spelled any way but 64 lowercase hexadecimal digits, a `custom_library` with no `hash`, and a model path
+that is absolute or climbs out of the descriptor's directory. The path pattern refuses every `..`
+segment; the loader normalises the path and refuses only one that leaves the directory, so `a/../b`
+loads but does not validate, which keeps the schema the tighter side. Descriptors at earlier versions,
+such as the `0.1` packaging-test fixtures with placeholder ids, are rejected by the `version`
+constraint, which is the accept rule working as intended rather than a gap.
 
 **Schema, packer and parser parity.** The hip-kernel-provider packaging tests
 (`descriptor-packaging/tests/test_hkp_pack_sidecars.py`) validate every in-tree UHD against
@@ -779,9 +790,11 @@ new model family) is one more `adapter` value — the single discriminant is wha
 See [Section 7](#7-model-adapters) for adapter details.
 
 **The model ships as data with the engine, not linked into the provider.** For every *data* adapter, the
-body's `artifact` is a path resolved relative to the engine's descriptor set (the UED + its UHD + KMD +
-model), which is itself standalone-droppable. The model is per-engine (owned by the UED), so there is
-no `(arch,dtype)→artifact` table — the single arch-aware model serves every pack that joins the engine.
+body's `artifact` is a path relative to the UHD's own directory, in it or below it, so the descriptor
+and its model are standalone-droppable together. A path that is absolute (`/…`, `\…`, `C:…`) or that
+normalises outside that directory is refused at load, as it is by the schema and the packer. The model
+is per-engine (owned by the UED), so there is no `(arch,dtype)→artifact` table — the single arch-aware
+model serves every pack that joins the engine.
 The `native` adapter is the deliberate exception: it names a symbol the engine already compiled in, so it
 is *not* droppable — which is exactly why it is the bootstrap path and not the destination
 ([Section 7.1](#71-first-native)).
@@ -1794,7 +1807,11 @@ cycle in a tree is not a malformed buffer; it is a buffer that verifies cleanly 
 terminate.
 
 **A model artifact may be content-addressed.** The body naming the artifact may also carry the digest
-of its bytes, which the adapter recomputes before parsing and refuses on mismatch. `features_hash`
+of its bytes as `hash`: the file's SHA-256 as 64 lowercase hexadecimal digits, with no `sha256:` prefix
+(unlike `features_hash`). Any other spelling is refused at load, since it could never match. The
+adapter recomputes the digest before parsing and refuses on mismatch. Without one, the loader digests
+the bytes deployed at load. A `custom_library` must declare it, because its file is loaded as code
+([Section 7.3](#73-escape-hatch-custom_library)). `features_hash`
 fingerprints the model's *input contract*; this fingerprints the *model*, and the two answer different
 questions — a retrained model over an unchanged signature has the same feature hash and different
 content. The size a model may occupy is bounded before any of it is parsed, so a malformed or hostile
@@ -3357,15 +3374,14 @@ dependency-gated and land only when a concrete need appears.
     `adapter: custom_library` with a `library` and `symbol` reaches `dlopen` (`AdapterFactory.hpp`,
     `CustomLibraryAdapter::load`), whether bound as
     `sort_kernel_catalog` or `predict_engine`. The only check is an integrity check the descriptor
-    itself supplies: an optional `custom_library.hash`, compared against the library bytes before the
-    open. It is not a trust decision, since whoever writes the descriptor also writes the hash. The
+    itself supplies: a required `custom_library.hash`, compared against the library bytes before the
+    open, with the library confined to the descriptor's own directory. It is not a trust decision,
+    since whoever writes the descriptor also writes the hash. The
     library exports no feature contract: as for `native`, the feature count and `features_hash` the
     adapter reports are the descriptor's own, so a scorer built for another feature order is accepted
     and the descriptor's declaration is trusted. The digest is computed from the path and the library
-    is then opened by the same path, so bytes replaced between the two load unverified. Without a
-    declared `hash`, the identity is the digest of the bytes present at parse time; an artifact absent
-    then has an empty digest and loads unverified once deployed. No signing, allow-list, or opt-in
-    exists; the audit this question asks for has not happened.
+    is then opened by the same path, so bytes replaced between the two load unverified. No signing,
+    allow-list, or opt-in exists; the audit this question asks for has not happened.
     *(Impacts [Section 7](#7-model-adapters), [Section 9.1](#91-dependencies).)*
 
 12. **Enumerating the valid catalog — RESOLVED.** The generation path enumerates the applicable catalog

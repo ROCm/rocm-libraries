@@ -132,6 +132,9 @@ export HIPDNN_DESCRIPTOR_RUNTIME_DIR=/opt/site/hipdnn-descriptors
 export HIPDNN_DESCRIPTOR_PATH=/opt/vendor-a/descriptors:/opt/vendor-b/descriptors
 ```
 
+**Notes:**
+- On Linux, all three variables are ignored in a secure execution environment, for the same reason as `HIPDNN_PLUGIN_DIR`: a descriptor can name a shared library (`custom_library`) that the provider then loads. Windows has no equivalent execution mode, so they are always honored there.
+
 ### Heuristic Policy Selection
 
 hipDNN's heuristic framework selects an engine for each graph by running a configurable list of selection policies (the *outer loop*). The following variables tune that loop and the behavior of two built-in policies.

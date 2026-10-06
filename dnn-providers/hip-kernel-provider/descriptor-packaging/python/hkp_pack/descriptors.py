@@ -28,6 +28,8 @@ _SCALAR_TYPES = (str, int, float, bool)
 # the name-char class on both halves.
 _UED_NAME_RE = re.compile(r"[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+")
 _UUID_RE = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
+# A UHD model `hash`: the artifact's SHA-256 as UhdParser and the adapters spell it.
+_SHA256_RE = re.compile(r"[0-9a-f]{64}")
 
 
 def canonical_id(value):
@@ -817,8 +819,16 @@ def _validate_uhd(desc, source_root):
     )
     _known_keys(body, allowed, f"{where}.{adapter}")
     _string(body.get(key), f"{where}.{adapter}.{key}")
-    if "hash" in body:
-        _string(body["hash"], f"{where}.{adapter}.hash")
+    _validate_contained_path(body[key], f"{where}.{adapter}.{key}")
+    # A library is loaded as code, so it must declare the digest it is verified
+    # against; any other artifact without one is digested by the loader.
+    if adapter == "custom_library" or "hash" in body:
+        _require(body, ("hash",), f"{where}.{adapter}")
+        if not isinstance(body["hash"], str) or not _SHA256_RE.fullmatch(body["hash"]):
+            raise HkpPackError(
+                f"{where}.{adapter}.hash must be the SHA-256 of the {key} as 64 "
+                f"lowercase hexadecimal digits, got {body['hash']!r}"
+            )
     if adapter == "custom_library":
         _string(body.get("symbol"), f"{where}.{adapter}.symbol")
         # The runtime supports no library configuration; only `{}` loads.
@@ -827,11 +837,35 @@ def _validate_uhd(desc, source_root):
     desc.sidecars.append(_resolve_sidecar(desc, source_root, body[key]))
 
 
+def _validate_contained_path(payload, where):
+    """Refuse a model path that does not name a file inside the descriptor's directory.
+
+    Mirrors UhdParser isContainedRelativePath: no leading `/` or `\\` (root, UNC),
+    no drive prefix, and the lexically normalised path may neither climb above the
+    directory nor name the directory itself. Both separators count on every
+    platform, so a descriptor resolves the same way wherever it is loaded.
+    """
+    depth = 0
+    if payload[:1] not in ("/", "\\") and not re.match(r"[A-Za-z]:", payload):
+        for segment in re.split(r"[/\\]", payload):
+            if segment == "..":
+                depth -= 1
+                if depth < 0:
+                    break
+            elif segment not in ("", "."):
+                depth += 1
+    if depth <= 0:
+        raise HkpPackError(
+            f"{where} {payload!r} must be a relative path inside the descriptor's directory"
+        )
+
+
 def _resolve_sidecar(desc, source_root, payload):
     """Resolve a descriptor-relative payload path to a carriable Sidecar.
 
     No root-relative fallback (matching compile_hip_variant): a typo must not bind
-    to a same-named file elsewhere. Use `../shared/model.bin` to share an artifact.
+    to a same-named file elsewhere. The path is already known to stay inside the
+    descriptor's directory (_validate_contained_path).
 
     The staged location is the authored path, lexically normalised as UhdParser
     normalises it before opening it. Symlinks are followed only to check
@@ -846,11 +880,8 @@ def _resolve_sidecar(desc, source_root, payload):
     try:
         root = Path(source_root).resolve()
         resolved = (root / dest).resolve()
-        escapes = (
-            bool(dest.anchor)
-            or dest.parts[:1] == ("..",)
-            or not resolved.is_relative_to(root)
-        )
+        # Only a symlink can reach outside the root once the path is contained.
+        escapes = not resolved.is_relative_to(root)
         found = resolved.is_file()
     except (OSError, ValueError) as exc:
         raise HkpPackError(

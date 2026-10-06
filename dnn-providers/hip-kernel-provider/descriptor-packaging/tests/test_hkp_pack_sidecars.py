@@ -3,6 +3,7 @@
 """Tests that the packer resolves and carries the model file a trained UHD names."""
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -36,6 +37,11 @@ def _model_uhd(artifact: str) -> dict:
         "objective": "max",
         "tree_data": {"artifact": artifact},
     }
+
+
+# Bytes of the custom library the fixtures here write, and the digest a UHD declares.
+_LIBRARY_BYTES = b"shared object"
+_LIBRARY_HASH = hashlib.sha256(_LIBRARY_BYTES).hexdigest()
 
 
 def _native_uhd() -> dict:
@@ -109,22 +115,24 @@ class TestResolution:
         (uhd,) = [d for d in flat.descriptors if d.type == "uhd"]
         assert uhd.sidecars[0].source.read_bytes() == b"correct"
 
-    def test_a_shared_artifact_keeps_its_authored_position(self, tmp_path: Path):
-        """`../shared/x` keeps its relative position so the path still resolves."""
+    def test_an_artifact_in_a_subdirectory_keeps_its_authored_position(
+        self, tmp_path: Path
+    ):
+        """`models/x` keeps its relative position so the path still resolves."""
         root = tmp_path / "src"
         _write_json(
             root / "rocKE" / "attn" / "heuristic.uhd.json",
-            _model_uhd("../shared/model.bin"),
+            _model_uhd("models/model.bin"),
         )
-        shared = root / "rocKE" / "shared" / "model.bin"
-        shared.parent.mkdir(parents=True, exist_ok=True)
-        shared.write_bytes(b"shared")
+        model = root / "rocKE" / "attn" / "models" / "model.bin"
+        model.parent.mkdir(parents=True, exist_ok=True)
+        model.write_bytes(b"nested")
 
         flat = load_flat_input(root, log=lambda *_: None)
 
         (uhd,) = [d for d in flat.descriptors if d.type == "uhd"]
         (sidecar,) = uhd.sidecars
-        assert sidecar.rel_dir == Path("rocKE/shared")
+        assert sidecar.rel_dir == Path("rocKE/attn/models")
         assert sidecar.name == "model.bin"
 
     def test_a_symlinked_artifact_is_staged_under_its_authored_name(
@@ -174,15 +182,19 @@ class TestRejection:
         with pytest.raises(HkpPackError, match="exactly one body"):
             load_flat_input(root, log=lambda *_: None)
 
-    def test_artifact_outside_the_root_is_rejected(self, tmp_path: Path):
-        """Mirrors the hip source check and the runtime's treeRoot bound."""
+    def test_artifact_outside_the_descriptor_directory_is_rejected(
+        self, tmp_path: Path
+    ):
+        """Mirrors UhdParser: a model ships inside its descriptor's own directory,
+        even when the file it names is elsewhere in the source tree."""
         root = tmp_path / "src"
         _write_json(
-            root / "pack" / "heuristic.uhd.json", _model_uhd("../../outside.bin")
+            root / "pack" / "heuristic.uhd.json", _model_uhd("../shared/model.bin")
         )
-        (tmp_path / "outside.bin").write_bytes(b"outside")
+        (root / "shared").mkdir(parents=True)
+        (root / "shared" / "model.bin").write_bytes(b"shared")
 
-        with pytest.raises(HkpPackError, match="payload escapes the source root"):
+        with pytest.raises(HkpPackError, match="inside the descriptor's directory"):
             load_flat_input(root, log=lambda *_: None)
 
     def test_escape_is_checked_before_existence(self, tmp_path: Path):
@@ -191,7 +203,7 @@ class TestRejection:
             root / "pack" / "heuristic.uhd.json", _model_uhd("../../nowhere.bin")
         )
 
-        with pytest.raises(HkpPackError, match="payload escapes the source root"):
+        with pytest.raises(HkpPackError, match="inside the descriptor's directory"):
             load_flat_input(root, log=lambda *_: None)
 
     def test_an_embedded_nul_is_a_packing_error(self, tmp_path: Path):
@@ -207,9 +219,7 @@ class TestRejection:
     ):
         """`kpack/` is where the per-arch archive is written."""
         root = tmp_path / "src"
-        _write_json(
-            root / "pack" / "heuristic.uhd.json", _model_uhd(f"../{folder}/model.bin")
-        )
+        _write_json(root / "heuristic.uhd.json", _model_uhd(f"{folder}/model.bin"))
         (root / folder).mkdir(parents=True)
         (root / folder / "model.bin").write_bytes(b"model")
 
@@ -243,11 +253,11 @@ class TestIntermediateStaging:
         root = tmp_path / "src"
         _write_json(
             root / "rocKE" / "attn" / "heuristic.uhd.json",
-            _model_uhd("../shared/model.bin"),
+            _model_uhd("models/model.bin"),
         )
-        shared = root / "rocKE" / "shared" / "model.bin"
-        shared.parent.mkdir(parents=True, exist_ok=True)
-        shared.write_bytes(b"shared")
+        nested = root / "rocKE" / "attn" / "models" / "model.bin"
+        nested.parent.mkdir(parents=True, exist_ok=True)
+        nested.write_bytes(b"nested")
         flat = load_flat_input(root, log=lambda *_: None)
         inter_dir = tmp_path / "inter" / "gfx942"
 
@@ -260,7 +270,8 @@ class TestIntermediateStaging:
             log=lambda *_: None,
         )
 
-        assert (inter_dir / "rocKE" / "shared" / "model.bin").read_bytes() == b"shared"
+        staged = inter_dir / "rocKE" / "attn" / "models" / "model.bin"
+        assert staged.read_bytes() == b"nested"
         assert not (inter_dir / "rocKE" / "attn" / "model.bin").exists()
 
 
@@ -290,7 +301,11 @@ def test_custom_library_uses_library_and_carries_the_shared_object(tmp_path):
     doc = _native_uhd()
     del doc["native"]
     doc["adapter"] = "custom_library"
-    doc["custom_library"] = {"library": "lib/model.so", "symbol": "score"}
+    doc["custom_library"] = {
+        "library": "lib/model.so",
+        "symbol": "score",
+        "hash": _LIBRARY_HASH,
+    }
     _write_json(root / "custom.uhd.json", doc)
     (root / "lib").mkdir()
     (root / "lib" / "model.so").write_bytes(b"shared object")
@@ -453,7 +468,7 @@ def _load_uhd(root: Path, doc: dict):
     _write_json(root / "heuristic.uhd.json", doc)
     (root / "model.bin").write_bytes(b"artifact")
     (root / "lib").mkdir(exist_ok=True)
-    (root / "lib" / "model.so").write_bytes(b"shared object")
+    (root / "lib" / "model.so").write_bytes(_LIBRARY_BYTES)
     return load_flat_input(root, log=lambda *_: None)
 
 
@@ -514,7 +529,12 @@ def _custom_library_uhd() -> dict:
     doc = _native_uhd()
     del doc["native"]
     doc["adapter"] = "custom_library"
-    doc["custom_library"] = {"library": "lib/model.so", "symbol": "score", "config": {}}
+    doc["custom_library"] = {
+        "library": "lib/model.so",
+        "symbol": "score",
+        "hash": _LIBRARY_HASH,
+        "config": {},
+    }
     return doc
 
 
@@ -540,6 +560,19 @@ def _set(*path_and_value):
         for step in path:
             target = target[step]
         target[key] = value
+
+    return mutate
+
+
+def _delete(*path):
+    """A mutation removing the key at @p path."""
+    *parents, key = path
+
+    def mutate(doc: dict) -> None:
+        target = doc
+        for step in parents:
+            target = target[step]
+        del target[key]
 
     return mutate
 
@@ -592,6 +625,56 @@ def _set(*path_and_value):
             _set("tree_data", "provenance", {"dataset": "nightly"}),
             id="provenance_in_the_body",
         ),
+        pytest.param(
+            _bounded_uhd,
+            _set("tree_data", "hash", _LIBRARY_HASH.upper()),
+            id="hash_uppercase",
+        ),
+        pytest.param(
+            _bounded_uhd,
+            _set("tree_data", "hash", "sha256:" + _LIBRARY_HASH),
+            id="hash_prefixed",
+        ),
+        pytest.param(
+            _bounded_uhd,
+            _set("tree_data", "hash", _LIBRARY_HASH[:63]),
+            id="hash_63_digits",
+        ),
+        pytest.param(
+            _custom_library_uhd,
+            _delete("custom_library", "hash"),
+            id="custom_library_without_hash",
+        ),
+        pytest.param(
+            _bounded_uhd,
+            _set("tree_data", "artifact", "/models/model.bin"),
+            id="artifact_absolute",
+        ),
+        pytest.param(
+            _bounded_uhd,
+            _set("tree_data", "artifact", "C:\\models\\model.bin"),
+            id="artifact_drive_letter",
+        ),
+        pytest.param(
+            _bounded_uhd,
+            _set("tree_data", "artifact", "\\\\server\\share\\model.bin"),
+            id="artifact_unc",
+        ),
+        pytest.param(
+            _bounded_uhd,
+            _set("tree_data", "artifact", "../model.bin"),
+            id="artifact_parent",
+        ),
+        pytest.param(
+            _bounded_uhd,
+            _set("tree_data", "artifact", "a/../../model.bin"),
+            id="artifact_escapes_after_normalising",
+        ),
+        pytest.param(
+            _custom_library_uhd,
+            _set("custom_library", "library", "../lib/model.so"),
+            id="library_parent",
+        ),
     ],
 )
 def test_schema_and_packaging_refuse_what_the_runtime_parser_refuses(
@@ -607,6 +690,24 @@ def test_schema_and_packaging_refuse_what_the_runtime_parser_refuses(
     assert not validator.is_valid(doc)
     with pytest.raises(HkpPackError):
         _load_uhd(tmp_path / "mutated", doc)
+
+
+def test_schema_and_packaging_admit_a_hashed_model_in_a_subdirectory(tmp_path):
+    """The control for the path and hash refusals: a file below the descriptor's
+    directory, declared by its 64-digit SHA-256, is admitted by both."""
+    validator = _canonical_uhd_validator()
+    doc = _model_uhd("models/model.bin")
+    doc["tree_data"]["hash"] = hashlib.sha256(b"nested").hexdigest()
+    assert validator.is_valid(doc), [
+        error.message for error in validator.iter_errors(doc)
+    ]
+    root = tmp_path / "src"
+    _write_json(root / "heuristic.uhd.json", doc)
+    (root / "models").mkdir(parents=True)
+    (root / "models" / "model.bin").write_bytes(b"nested")
+    flat = load_flat_input(root, log=lambda *_: None)
+    (sidecar,) = flat.descriptors[0].sidecars
+    assert (sidecar.rel_dir, sidecar.name) == (Path("models"), "model.bin")
 
 
 def test_packaging_refuses_an_adapter_the_loader_cannot_build(tmp_path):

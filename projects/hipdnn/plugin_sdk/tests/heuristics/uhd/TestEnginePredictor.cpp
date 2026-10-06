@@ -3,7 +3,9 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -121,7 +123,7 @@ protected:
         return config(doc);
     }
 
-    /// document() as a tree_data model naming @p artifact beside the UHD, declaring no hash.
+    /// document() as a tree_data model naming @p artifact relative to the UHD, declaring no hash.
     nlohmann::json treeDocument(const std::string& artifact) const
     {
         auto doc = document();
@@ -148,6 +150,15 @@ protected:
     {
         return (_directory.path() / artifact).string();
     }
+
+    /// The SHA-256 of the file at @p path, as a descriptor declares it.
+    static std::string fileDigest(const std::filesystem::path& path)
+    {
+        std::ifstream file(path, std::ios::binary);
+        const std::string bytes{std::istreambuf_iterator<char>(file),
+                                std::istreambuf_iterator<char>()};
+        return sha256(bytes);
+    }
 };
 
 TEST_F(TestEnginePredictor, NativeCustomAndTreeRecoverTheSamePhysicalThroughput)
@@ -162,6 +173,7 @@ TEST_F(TestEnginePredictor, NativeCustomAndTreeRecoverTheSamePhysicalThroughput)
     custom.adapterType = "custom_library";
     custom.modelArtifactPath = hipdnn_plugin_sdk::test::testScorerLibrary().string();
     custom.customLibrarySymbol = "testLinearScorer";
+    custom.modelHash = fileDigest(custom.modelArtifactPath);
     const auto customResult = predict(custom);
 #ifdef _WIN32
     // A descriptor cannot name a Windows build of the library (RFC 0019 §7.3).
@@ -222,6 +234,7 @@ TEST_F(TestEnginePredictor, ABindingRefusedForItsScoreNeverLoadsItsLibrary)
     custom.adapterType = "custom_library";
     custom.modelArtifactPath = library.string();
     custom.customLibrarySymbol = "testLinearScorer";
+    custom.modelHash = fileDigest(library);
     custom.scoreCalibrated = false;
     const auto ask = [&](const EngineModelBinding& binding) {
         return binding.predict(
@@ -625,6 +638,83 @@ TEST_F(TestEnginePredictor, AGroupedTreeArtifactIsRefusedForTheEngineRole)
     EXPECT_EQ(grouped.status, PredictionStatus::INVALID);
     EXPECT_NE(grouped.reason.find("grouped"), std::string::npos) << grouped.reason;
     EXPECT_DOUBLE_EQ(grouped.value, 0.0);
+}
+
+/// RFC 0019 §4.1: a model `hash` is the artifact's SHA-256 as 64 lowercase hexadecimal
+/// digits, the form the adapters compute. Any other spelling could never match.
+TEST_F(TestEnginePredictor, AModelHashMustBeALowercaseSha256Digest)
+{
+    const auto digest = sha256(std::string("model bytes"));
+    auto doc = treeDocument("weights.fb");
+    doc["tree_data"]["hash"] = digest;
+    EXPECT_EQ(config(doc).modelHash, digest);
+
+    std::string uppercase = digest;
+    std::transform(uppercase.begin(), uppercase.end(), uppercase.begin(), [](unsigned char c) {
+        return static_cast<char>(std::toupper(c));
+    });
+    ASSERT_NE(uppercase, digest);
+    for(const auto& malformed :
+        std::vector<std::string>{uppercase, "sha256:" + digest, digest.substr(1), digest + "0"})
+    {
+        doc["tree_data"]["hash"] = malformed;
+        EXPECT_THROW(config(doc), std::invalid_argument) << malformed;
+    }
+}
+
+/// RFC 0019 §4.1: a library is loaded as code, so its descriptor must declare the digest it
+/// is verified against. A data artifact may leave its digest to be computed at load.
+TEST_F(TestEnginePredictor, ACustomLibraryMustDeclareItsHash)
+{
+    auto doc = document();
+    doc["adapter"] = "custom_library";
+    doc.erase("native");
+    doc["custom_library"] = {{"library", "lib/scorer.so"},
+                             {"symbol", "testLinearScorer"},
+                             {"hash", sha256(std::string("library bytes"))}};
+    EXPECT_EQ(config(doc).modelHash, sha256(std::string("library bytes")));
+
+    doc["custom_library"].erase("hash");
+    EXPECT_THROW(config(doc), std::invalid_argument);
+}
+
+/// RFC 0019 §4.1: a model file ships inside its descriptor's directory. A path that is absolute
+/// in any platform's spelling, or that climbs out once normalised, is refused at load.
+TEST_F(TestEnginePredictor, AModelPathMustNameAFileInsideTheDescriptorDirectory)
+{
+    const auto expected = std::filesystem::absolute(_directory.path() / "models" / "model.fb")
+                              .lexically_normal()
+                              .string();
+    for(const auto* inside : {"models/model.fb", "scratch/../models/model.fb", "./models/model.fb"})
+    {
+        EXPECT_EQ(config(treeDocument(inside)).modelArtifactPath, expected) << inside;
+    }
+
+    const std::vector<std::string> outside
+        = {std::filesystem::absolute(_directory.path() / "model.fb").string(),
+           "/model.fb",
+           R"(\model.fb)",
+           R"(\\server\share\model.fb)",
+           R"(C:\model.fb)",
+           "c:model.fb",
+           "../model.fb",
+           R"(..\model.fb)",
+           "models/../../model.fb",
+           "models/..",
+           "."};
+    for(const auto& path : outside)
+    {
+        EXPECT_THROW(config(treeDocument(path)), std::invalid_argument) << path;
+    }
+
+    // The same rule binds a custom library.
+    auto custom = document();
+    custom["adapter"] = "custom_library";
+    custom.erase("native");
+    custom["custom_library"] = {{"library", "../scorer.so"},
+                                {"symbol", "testLinearScorer"},
+                                {"hash", sha256(std::string("library bytes"))}};
+    EXPECT_THROW(config(custom), std::invalid_argument);
 }
 
 TEST_F(TestEnginePredictor, ParserRejectsDuplicateKeysAndOversizedNesting)

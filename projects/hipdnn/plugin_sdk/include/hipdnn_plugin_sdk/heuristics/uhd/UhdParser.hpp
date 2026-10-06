@@ -82,6 +82,55 @@ inline std::string
     return entry.get<std::string>();
 }
 
+/// Whether @p value is a SHA-256 digest as a model body's `hash` spells it: exactly 64
+/// lowercase hexadecimal digits, no prefix.
+inline bool isSha256Digest(std::string_view value)
+{
+    return value.size() == 64 && std::all_of(value.begin(), value.end(), [](unsigned char c) {
+               return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+           });
+}
+
+/// Whether @p value names a file inside the descriptor's own directory (subdirectories
+/// allowed). Refuses a leading `/` or `\` (root, UNC) and a drive prefix such as `C:`, and
+/// any path whose lexically normalised form climbs above that directory or names the
+/// directory itself. Both separators count on every platform, so a descriptor resolves the
+/// same way wherever it is loaded.
+inline bool isContainedRelativePath(std::string_view value)
+{
+    const auto letter = [](char c) { return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'); };
+    if(value.empty() || value.front() == '/' || value.front() == '\\'
+       || (value.size() >= 2 && letter(value[0]) && value[1] == ':'))
+    {
+        return false;
+    }
+    size_t depth = 0;
+    size_t start = 0;
+    while(true)
+    {
+        // npos - start still exceeds the remainder, so the last segment runs to the end.
+        const auto end = value.find_first_of("/\\", start);
+        const auto segment = value.substr(start, end - start);
+        if(segment == "..")
+        {
+            if(depth == 0)
+            {
+                return false;
+            }
+            --depth;
+        }
+        else if(!segment.empty() && segment != ".")
+        {
+            ++depth;
+        }
+        if(end == std::string_view::npos)
+        {
+            return depth > 0;
+        }
+        start = end + 1;
+    }
+}
+
 inline void bounds(const nlohmann::json& value, size_t depth, size_t& count, size_t& bytes)
 {
     if(depth > MAX_DOCUMENT_DEPTH || ++count > MAX_DOCUMENT_NODES)
@@ -295,8 +344,10 @@ inline std::string artifactDigest(const std::filesystem::path& path)
 
 /// @brief Parse the common UHD format independently of any descriptor catalog.
 /// @param root Already-decoded document; structural size/depth bounds still apply.
-/// @param path Descriptor filename, used to resolve artifact paths absolutely. A model body
-///        declaring no `hash` has its artifact read and digested (artifactDigest()).
+/// @param path Descriptor filename. A model body's `artifact` or `library` must resolve
+///        inside this file's directory and is made absolute against it. A `custom_library`
+///        body must declare its `hash`; any other model body declaring none has its artifact
+///        read and digested (artifactDigest()).
 /// @throws std::invalid_argument or nlohmann::json::exception for malformed input.
 inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesystem::path& path)
 {
@@ -509,16 +560,33 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
                 fail("model UHD requires features_signature in " + where);
             }
         }
-        result.modelArtifactPath
-            = std::filesystem::absolute(path.parent_path()
-                                        / text(body, custom ? "library" : "artifact", where))
-                  .lexically_normal()
-                  .string();
-        // Model identity is its content digest (versions the winner cache). Without a
-        // declared hash, digest the deployed bytes now; the adapter verifies it later.
-        // Empty when not yet deployed (RFC 0019 §5).
-        result.modelHash = body.contains("hash") ? text(body, "hash", where)
-                                                 : artifactDigest(result.modelArtifactPath);
+        const std::string pathKey = custom ? "library" : "artifact";
+        const auto relativePath = text(body, pathKey, where);
+        if(!isContainedRelativePath(relativePath))
+        {
+            fail("key '" + pathKey + "' must be a relative path inside the descriptor's "
+                 + "directory, got '" + relativePath + "' in " + where);
+        }
+        result.modelArtifactPath = std::filesystem::absolute(path.parent_path() / relativePath)
+                                       .lexically_normal()
+                                       .string();
+        // Model identity is its content digest (versions the winner cache). A library is
+        // loaded as code, so it must declare the digest of the bytes it was built as. Any
+        // other artifact without a declared hash is digested as deployed now, and the
+        // adapter verifies it later; empty when not yet deployed (RFC 0019 §5).
+        if(custom || body.contains("hash"))
+        {
+            result.modelHash = text(body, "hash", where);
+            if(!isSha256Digest(result.modelHash))
+            {
+                fail("key 'hash' must be the SHA-256 of the " + pathKey
+                     + " as 64 lowercase hexadecimal digits in " + where);
+            }
+        }
+        else
+        {
+            result.modelHash = artifactDigest(result.modelArtifactPath);
+        }
     }
     return result;
 }
