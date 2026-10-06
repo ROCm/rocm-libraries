@@ -97,6 +97,20 @@ Tests:
   direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_zero]
 
+- name: spsort_coo_batched
+  category: quick
+  function: spsort_coo
+  indextype: *i32_i64
+  precision: *single_only_precisions
+  M: [0, 10]
+  N: [0, 33]
+  batch_count_A: [1, 2]
+  batch_count_B: [2]
+  algo: [1]
+  baseA: [rocsparse_index_base_zero]
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_random]
+
 - name: spsort_coo_file
   category: quick
   function: spsort_coo

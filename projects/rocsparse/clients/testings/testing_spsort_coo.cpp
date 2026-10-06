@@ -28,74 +28,71 @@
 #include <numeric>
 #include <tuple>
 
-namespace
+template <typename I, typename T>
+static void host_spsort_coo(rocsparse_direction dir, host_coo_matrix<T, I>& A)
 {
-    template <typename I, typename T>
-    void host_spsort_coo(rocsparse_direction dir, host_coo_matrix<T, I>& A)
+    const int64_t nnz = A.nnz;
+    const I*      row = A.row_ind.data();
+    const I*      col = A.col_ind.data();
+    const T*      val = A.val.data();
+
+    std::vector<int64_t> perm(nnz);
+    std::iota(perm.begin(), perm.end(), 0);
+
+    if(dir == rocsparse_direction_row)
     {
-        const int64_t nnz = A.nnz;
-        const I*      row = A.row_ind.data();
-        const I*      col = A.col_ind.data();
-        const T*      val = A.val.data();
-
-        std::vector<int64_t> perm(nnz);
-        std::iota(perm.begin(), perm.end(), 0);
-
-        if(dir == rocsparse_direction_row)
-        {
-            std::sort(perm.begin(), perm.end(), [&](int64_t a, int64_t b) {
-                return std::tie(row[a], col[a]) < std::tie(row[b], col[b]);
-            });
-        }
-        else
-        {
-            std::sort(perm.begin(), perm.end(), [&](int64_t a, int64_t b) {
-                return std::tie(col[a], row[a]) < std::tie(col[b], row[b]);
-            });
-        }
-
-        std::vector<I> sorted_row(nnz);
-        std::vector<I> sorted_col(nnz);
-        std::vector<T> sorted_val(nnz);
-        for(int64_t k = 0; k < nnz; ++k)
-        {
-            sorted_row[k] = row[perm[k]];
-            sorted_col[k] = col[perm[k]];
-            sorted_val[k] = val[perm[k]];
-        }
-
-        std::copy(sorted_row.begin(), sorted_row.end(), A.row_ind.data());
-        std::copy(sorted_col.begin(), sorted_col.end(), A.col_ind.data());
-        std::copy(sorted_val.begin(), sorted_val.end(), A.val.data());
+        std::stable_sort(perm.begin(), perm.end(), [&](int64_t a, int64_t b) {
+            return std::tie(row[a], col[a]) < std::tie(row[b], col[b]);
+        });
+    }
+    else
+    {
+        std::stable_sort(perm.begin(), perm.end(), [&](int64_t a, int64_t b) {
+            return std::tie(col[a], row[a]) < std::tie(col[b], row[b]);
+        });
     }
 
-    template <typename I, typename T>
-    void host_shuffle_coo(host_coo_matrix<T, I>& A)
+    std::vector<I> sorted_row(nnz);
+    std::vector<I> sorted_col(nnz);
+    std::vector<T> sorted_val(nnz);
+    for(int64_t k = 0; k < nnz; ++k)
     {
-        const int64_t nnz = A.nnz;
-        I*            row = A.row_ind.data();
-        I*            col = A.col_ind.data();
-        T*            val = A.val.data();
-
-        for(int64_t i = 0; i < nnz; ++i)
-        {
-            const int64_t j = rand() % nnz;
-            std::swap(row[i], row[j]);
-            std::swap(col[i], col[j]);
-            std::swap(val[i], val[j]);
-        }
+        sorted_row[k] = row[perm[k]];
+        sorted_col[k] = col[perm[k]];
+        sorted_val[k] = val[perm[k]];
     }
 
-    void set_spsort_inputs(rocsparse_handle       handle,
-                           rocsparse_spsort_descr descr,
-                           rocsparse_spsort_alg   alg,
-                           rocsparse_direction    dir)
+    std::copy(sorted_row.begin(), sorted_row.end(), A.row_ind.data());
+    std::copy(sorted_col.begin(), sorted_col.end(), A.col_ind.data());
+    std::copy(sorted_val.begin(), sorted_val.end(), A.val.data());
+}
+
+template <typename I, typename T>
+static void host_shuffle_coo(host_coo_matrix<T, I>& A)
+{
+    const int64_t nnz = A.nnz;
+    I*            row = A.row_ind.data();
+    I*            col = A.col_ind.data();
+    T*            val = A.val.data();
+
+    for(int64_t i = 0; i < nnz; ++i)
     {
-        CHECK_ROCSPARSE_ERROR(rocsparse_spsort_set_input(
-            handle, descr, rocsparse_spsort_input_alg, &alg, sizeof(alg), nullptr));
-        CHECK_ROCSPARSE_ERROR(rocsparse_spsort_set_input(
-            handle, descr, rocsparse_spsort_input_direction, &dir, sizeof(dir), nullptr));
+        const int64_t j = random_generator<int64_t>(0, nnz - 1);
+        std::swap(row[i], row[j]);
+        std::swap(col[i], col[j]);
+        std::swap(val[i], val[j]);
     }
+}
+
+static void set_spsort_inputs(rocsparse_handle       handle,
+                              rocsparse_spsort_descr descr,
+                              rocsparse_spsort_alg   alg,
+                              rocsparse_direction    dir)
+{
+    CHECK_ROCSPARSE_ERROR(rocsparse_spsort_set_input(
+        handle, descr, rocsparse_spsort_input_alg, &alg, sizeof(alg), nullptr));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spsort_set_input(
+        handle, descr, rocsparse_spsort_input_direction, &dir, sizeof(dir), nullptr));
 }
 
 template <typename I, typename T>
@@ -289,6 +286,33 @@ void testing_spsort_coo_bad_arg(const Arguments& arg)
                                                                  nullptr),
                                     rocsparse_status_invalid_value);
 
+            // Unsupported format.
+            rocsparse_local_spmat mat_coo_aos(safe_size,
+                                              safe_size,
+                                              safe_size,
+                                              d_coo_row_ind,
+                                              d_coo_val,
+                                              get_indextype<I>(),
+                                              rocsparse_index_base_zero,
+                                              get_datatype<T>());
+            EXPECT_ROCSPARSE_STATUS(rocsparse_spsort_buffer_size(handle,
+                                                                 descr,
+                                                                 mat_coo_aos,
+                                                                 mat_coo_aos,
+                                                                 rocsparse_spsort_stage_analysis,
+                                                                 &buffer_size,
+                                                                 nullptr),
+                                    rocsparse_status_not_implemented);
+            EXPECT_ROCSPARSE_STATUS(rocsparse_spsort(handle,
+                                                     descr,
+                                                     mat_coo_aos,
+                                                     mat_coo_aos,
+                                                     rocsparse_spsort_stage_analysis,
+                                                     0,
+                                                     nullptr,
+                                                     nullptr),
+                                    rocsparse_status_not_implemented);
+
             auto expect_batch_status = [&](int64_t          batch_count_A,
                                            int64_t          batch_stride_A,
                                            int64_t          batch_count_B,
@@ -375,6 +399,28 @@ void testing_spsort_coo_bad_arg(const Arguments& arg)
             rocsparse_spsort_buffer_size(
                 handle, descr, mat, mat, rocsparse_spsort_stage_analysis, &buffer_size, nullptr),
             rocsparse_status_invalid_value);
+        EXPECT_ROCSPARSE_STATUS(
+            rocsparse_spsort(
+                handle, descr, mat, mat, rocsparse_spsort_stage_analysis, 0, nullptr, nullptr),
+            rocsparse_status_invalid_value);
+
+        // Invalid algorithm value, which is only rejected once the descriptor is used.
+        const rocsparse_spsort_alg invalid_alg = (rocsparse_spsort_alg)-1;
+        CHECK_ROCSPARSE_ERROR(rocsparse_spsort_set_input(
+            handle, descr, rocsparse_spsort_input_alg, &invalid_alg, sizeof(invalid_alg), nullptr));
+        CHECK_ROCSPARSE_ERROR(rocsparse_spsort_set_input(
+            handle, descr, rocsparse_spsort_input_direction, &dir, sizeof(dir), nullptr));
+        EXPECT_ROCSPARSE_STATUS(
+            rocsparse_spsort_buffer_size(
+                handle, descr, mat, mat, rocsparse_spsort_stage_analysis, &buffer_size, nullptr),
+            rocsparse_status_invalid_value);
+        EXPECT_ROCSPARSE_STATUS(
+            rocsparse_spsort(
+                handle, descr, mat, mat, rocsparse_spsort_stage_analysis, 0, nullptr, nullptr),
+            rocsparse_status_invalid_value);
+
+        CHECK_ROCSPARSE_ERROR(rocsparse_spsort_descr_destroy(handle, descr, nullptr));
+        CHECK_ROCSPARSE_ERROR(rocsparse_spsort_descr_create(handle, &descr, nullptr));
 
         CHECK_ROCSPARSE_ERROR(rocsparse_spsort_set_input(
             handle, descr, rocsparse_spsort_input_alg, &alg, sizeof(alg), nullptr));
@@ -420,6 +466,21 @@ void testing_spsort_coo_bad_arg(const Arguments& arg)
                                                buffer_size,
                                                dbuffer,
                                                nullptr));
+        CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
+
+        // The buffer is smaller than the size returned by the buffer size query.
+        CHECK_ROCSPARSE_ERROR(rocsparse_spsort_buffer_size(
+            handle, descr, mat, mat, rocsparse_spsort_stage_compute, &buffer_size, nullptr));
+        CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spsort(handle,
+                                                 descr,
+                                                 mat,
+                                                 mat,
+                                                 rocsparse_spsort_stage_compute,
+                                                 buffer_size - 1,
+                                                 dbuffer,
+                                                 nullptr),
+                                rocsparse_status_invalid_size);
 
         // Analysis cannot be executed twice.
         EXPECT_ROCSPARSE_STATUS(rocsparse_spsort(handle,
@@ -490,7 +551,6 @@ void testing_spsort_coo(const Arguments& arg)
     std::fill(hA_col.data(), hA_col.data() + size_A, static_cast<I>(-1));
     std::fill(hA_val.data(), hA_val.data() + size_A, static_cast<T>(-1));
 
-    rocsparse_seedrand();
     host_shuffle_coo(hA_single);
     for(int64_t batch = 0; batch < batch_count_B; ++batch)
     {
@@ -639,7 +699,7 @@ void testing_spsort_coo(const Arguments& arg)
                                                dbuffer,
                                                nullptr);
 
-        const double gbyte_count = batch_count_B * spsort_coo_gbyte_count<I, T>(nnz);
+        const double gbyte_count = spsort_coo_gbyte_count<I, T>(nnz, batch_count_B);
         const double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);
 
         display_timing_info(display_key_t::M,
