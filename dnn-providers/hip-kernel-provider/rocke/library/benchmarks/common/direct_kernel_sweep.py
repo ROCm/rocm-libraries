@@ -75,7 +75,13 @@ DW_BLOCK_WAVES = (1, 2, 4)
 # tile: the row loop is unrolled at build time, so the tile height is a
 # capability while the image height stays a kernarg. Pairs whose band does not
 # fit the arch's live-f32 budget are dropped by the spec validator.
-DW_COL_BLOCK_W = (1, 2, 4, 8, 16, 32)
+#
+# Measured on gfx950 over 15 depthwise shapes (3x3..11x11, stride 1 and 2,
+# 7x7..112x112 images, large enough batches to clear launch latency): block_w
+# 8/16/32 never won a shape, and this 3x3x3 grid matches the best of the full
+# 3x6x3 grid on every one. All three block_h values are needed -- dropping 32
+# costs up to 16% on a shape, dropping 8 up to 74%.
+DW_COL_BLOCK_W = (1, 2, 4)
 DW_COL_BLOCK_H = (8, 16, 32)
 # Grouped scalar-FMA dgrad.
 DGRAD_BLOCK_Q = (4, 8, 16, 32)
@@ -130,11 +136,14 @@ def _all_pads(kh: int) -> range:
     return range(kh)
 
 
-def _col_pads(kh: int, stride: int) -> range:
-    # The column-streamed kernel serves every padding in [0, KH-1] except the
-    # over-padded stride-1 ones (PAD > (KH-1)/2), whose output is taller than
-    # the input -- its validator rejects those for every image.
-    return range((kh - 1) // 2 + 1) if stride == 1 else _all_pads(kh)
+def _col_pads(kh: int) -> Tuple[int, ...]:
+    # The column-streamed kernel can compute any PAD in [0, KH-1] (bar stride-1
+    # over-padding, which its validator rejects), but every padding is its own
+    # binary. The cache carries the two networks actually use -- "valid"
+    # (PAD=0) and "same" -- rather than the whole range: the intermediate ones
+    # would be two thirds of the variant's entries for shapes that are rare in
+    # practice. Other paddings still build on demand (the JIT sweep).
+    return tuple(sorted({0, _same_pad(kh)}))
 
 
 # variant -> (direction, capability list). Forward rows only list "same"
@@ -162,13 +171,13 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
     ),
     # Column-streamed depthwise forward: same filters and strides. It bounds
     # its output rows against p_Ho rather than streaming them by input row, so
-    # unlike the other forward kernels it is padding-generic.
+    # unlike the other forward kernels it also serves "valid" padding.
     "direct_depthwise_col": (
         "fwd",
         tuple(
             DirectCaps(KH=k, PAD=pad, stride=s, cpg=1, kpg=1)
             for k, s in itertools.product(_DEPTHWISE_FILTERS, _STRIDES)
-            for pad in _col_pads(k, s)
+            for pad in _col_pads(k)
         ),
     ),
     # Depthwise dgrad (row-streaming kernel): same filters and strides.

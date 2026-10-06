@@ -62,9 +62,10 @@ def test_padding_generic_forward_entries_cover_other_paddings(jobs):
         for j in jobs
         if j.identity.algorithm in _PADDING_GENERIC_FWD
     }
-    assert (3, 1, 0) in pads and (5, 2, 4) in pads
-    # Over-padding at stride 1 makes Ho > H, which the validator rejects.
-    assert (3, 1, 2) not in pads
+    # "valid" and "same" padding at both strides; intermediate paddings are
+    # not cached.
+    assert {(5, 1, 0), (5, 1, 2), (5, 2, 0), (5, 2, 2)} <= pads
+    assert (5, 2, 1) not in pads
 
 
 def test_every_capability_row_is_built(jobs):
@@ -122,7 +123,7 @@ def test_depthwise_forward_offers_col_alongside_preload(cache):
     same = _problem(groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=2, stride=2)
     plans, _ = dks.direct_plans(cache, same, "fwd", _ARCH)
     assert _variants(plans) == {"direct_depthwise", "direct_depthwise_col"}
-    other = _problem(groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=1, stride=2)
+    other = _problem(groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=0, stride=2)
     plans, _ = dks.direct_plans(cache, other, "fwd", _ARCH)
     assert _variants(plans) == {"direct_depthwise_col"}
     # The row tile is a capability: the grid follows the runtime height.
@@ -159,7 +160,7 @@ def test_dgrad_stride1_offers_mfma_pipeline_and_scalar(cache):
         ("fwd", _problem()),
         ("fwd", _problem(groups=64, cpg=1, kpg=1, KH=7, KW=7, PAD=3, stride=2)),
         # Only the column-streamed kernel serves non-"same" forward padding.
-        ("fwd", _problem(groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=1, stride=2)),
+        ("fwd", _problem(groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=0, stride=2)),
         ("dgrad", _problem(groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=0, stride=2)),
         ("dgrad", _problem(cpg=8, kpg=8, stride=2)),
         ("dgrad", _problem()),

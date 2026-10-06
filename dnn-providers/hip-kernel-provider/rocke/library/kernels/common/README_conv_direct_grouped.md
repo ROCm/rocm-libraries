@@ -85,7 +85,7 @@ Tunable parameters:
 - `block_h` — output rows per block (default 16; swept: 8, 16, 32).  The row
   loop is unrolled at build time, so this is the AOT capability; the image
   height is a kernarg.
-- `block_w` — output W positions per block (default 1; swept: 1 to 32).
+- `block_w` — output W positions per block (default 1; swept: 1, 2, 4).
 - `block_waves` — waves per workgroup (default 1; swept: 1, 2, 4).
 
 Pairs whose band exceeds the arch's live-f32 budget (3/8 of the VGPR file) are
