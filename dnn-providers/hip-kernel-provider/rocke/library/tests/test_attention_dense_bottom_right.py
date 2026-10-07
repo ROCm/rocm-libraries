@@ -191,11 +191,10 @@ def test_equal_length_bottom_right_emits_no_add_zero(geometry):
 
 
 def test_equal_length_dispatch_normalizes_to_top_left_body():
-    from dispatch.attention import AttentionRequest
-    from dispatch.attention.gfx950 import dense_spec_for_request
+    from dispatch.attention import AttentionRequest, attention_tuning_spec
 
     def dispatched(mask_type):
-        return dense_spec_for_request(
+        return attention_tuning_spec(
             AttentionRequest(
                 batch=1,
                 nhead_q=4,
@@ -207,10 +206,9 @@ def test_equal_length_dispatch_normalizes_to_top_left_body():
                 arch="gfx950",
                 mask_type=mask_type,
                 dtype="bf16",
-                algorithm="attention_dense",
-                dense_persistent="off",
-            )
-        )
+            ),
+            "gfx950_dense_grid",
+        ).kernel_spec
 
     top_left = dispatched(1)
     bottom_right_request = dispatched(2)

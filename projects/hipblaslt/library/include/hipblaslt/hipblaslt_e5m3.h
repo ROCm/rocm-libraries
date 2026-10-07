@@ -33,7 +33,8 @@
 #define HIP_HOST __host__
 #define HIP_DEVICE __device__
 
-#if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && __HIP_DEVICE_COMPILE__
+// gfx1250-strict (v0) has no e5m3 conversion instructions; it takes the software path.
+#if defined(__gfx1250__) && __HIP_DEVICE_COMPILE__
 #define HIP_E5M3_CVT_FAST_PATH 1
 #else
 #define HIP_E5M3_CVT_FAST_PATH 0

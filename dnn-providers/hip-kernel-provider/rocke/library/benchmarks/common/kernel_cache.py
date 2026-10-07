@@ -25,11 +25,12 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import itertools
 import json
 import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -503,9 +504,20 @@ class KernelCache:
         self.link(identity, key, meta)
         return path
 
-    def index(self) -> Dict[str, dict]:
-        """``{identity sha1: metadata}`` for every entry with a binary."""
-        return {ident.stable_hash(): meta for ident, _, meta in self._entries(None)}
+    def index(self, directions: Optional[Iterable[str]] = None) -> Dict[str, dict]:
+        """``{identity sha1: metadata}`` for every entry with a binary.
+
+        ``directions`` limits the walk to those directions' entries; every
+        direction is parsed per entry, so on a large cache reading only the
+        ones needed is the difference between a few files and ~10^6.
+        """
+        if directions is None:
+            entries: Iterable = self._entries(None)
+        else:
+            entries = itertools.chain.from_iterable(
+                self._entries(d) for d in sorted(set(directions))
+            )
+        return {ident.stable_hash(): meta for ident, _, meta in entries}
 
     def meta(self, identity: KernelIdentity) -> Optional[dict]:
         """The identity's metadata, or ``None`` when it has no entry."""
@@ -748,6 +760,9 @@ class KernelCache:
             if actual is not None and int(actual) != baked:
                 return False, f"{field}={baked} but problem has {actual}"
 
+        # 0 means runtime here, for direct conv too: the non-grouped direct
+        # kernel takes its channel counts as kernargs (cpg == 0 is never a
+        # real shape, unlike PAD == 0 above).
         if identity.cpg and identity.cpg != cpg:
             return False, f"kernel baked cpg={identity.cpg}, problem has {cpg}"
         if identity.kpg and identity.kpg != kpg:

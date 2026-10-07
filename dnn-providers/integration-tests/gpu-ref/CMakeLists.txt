@@ -36,6 +36,7 @@ add_library(
     src/GpuFpReferenceMatmul.cpp
     src/GpuFpReferenceSdpa.cpp
     src/GpuFpReferenceReduction.cpp
+    src/GpuFpReferenceSdpaRagged.cpp
     src/GpuFpReferenceRMSNorm.cpp
     src/GpuFpReferenceBatchnorm.cpp
     src/GpuFpReferenceRmsValidation.cpp

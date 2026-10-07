@@ -23,6 +23,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from _hostcaps import available_cpus
+
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parents[0] if HERE.name != "tools" else HERE.parent  # tools -> rocKE
 RUN_DIFF = ROCKE / "tests" / "instances" / "differential" / "run_diff.py"
@@ -78,8 +80,12 @@ def main() -> int:
             str(build_root),
             "--target",
             "rocke_core",
+            # This process's share, not the machine's size. `os.cpu_count()`
+            # reports the host, so on a scheduler-pinned node it asked ninja
+            # for 384 compile jobs against an affinity of 2 -- which is how a
+            # gate that should take a couple of minutes turns into a thrash.
             "-j",
-            str(os.cpu_count() or 1),
+            str(available_cpus()),
         ],
         check=True,
         stdout=subprocess.DEVNULL,

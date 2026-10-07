@@ -871,8 +871,8 @@ TYPED_TEST(TestGpuSdpaFwdPlain, LargerShape)
 
 // ============================================================================
 // Explicit (non-default) attention scale. Every case above leaves attnScaleValue
-// unset, so both references fall back to 1/sqrt(D); this passes an explicit value
-// to exercise the provided-scale path on both sides.
+// unset, so both references apply no scaling; this passes an explicit value to
+// exercise the provided-scale path on both sides.
 // ============================================================================
 
 TYPED_TEST(TestGpuSdpaFwdPlain, ExplicitAttnScale)
@@ -888,6 +888,31 @@ TYPED_TEST(TestGpuSdpaFwdPlain, ExplicitAttnScale)
 
     compareGpuVsCpuSdpaFwd<T, T, T, T>(
         q, k, v, oCpu, oGpu, gpuRefFwdTolerance<T>(), /*attnScaleValue=*/0.25f);
+}
+
+// An absent scale is 1.0 (no scaling), as in cuDNN. One query against two keys,
+// D = 4: the logits are q.k = 4 and 0, so the output is 1 / (e^4 + 1). With the
+// 1/sqrt(D) scale it would be 1 / (e^2 + 1), about 0.119.
+TEST(TestGpuSdpaFwdDefaultScale, AbsentScaleIsOne)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<float> q({1, 1, 1, 4});
+    Tensor<float> k({1, 1, 2, 4});
+    Tensor<float> v({1, 1, 2, 1});
+    Tensor<float> o({1, 1, 1, 1});
+    for(int i = 0; i < 4; ++i)
+    {
+        q.memory().hostData()[i] = 1.0f;
+        k.memory().hostData()[i] = 1.0f;
+        k.memory().hostData()[4 + i] = 0.0f;
+    }
+    v.memory().hostData()[0] = 0.0f;
+    v.memory().hostData()[1] = 1.0f;
+
+    GpuFpReferenceSdpa::fprop<float>(q, k, v, o);
+
+    EXPECT_NEAR(o.memory().hostData()[0], 1.0f / (std::exp(4.0f) + 1.0f), 1e-6f);
 }
 
 // ============================================================================

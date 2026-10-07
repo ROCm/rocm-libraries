@@ -21,9 +21,11 @@ from .core import (
     KernelCandidate,
     KernelId,
     OperatorRequest,
+    PinRefused,
     ShapeRange,
     TorchBinding,
     opt_in_probe,
+    pin_to_spec,
     spec_identity,
 )
 from .families import (
@@ -61,9 +63,11 @@ __all__ = [
     "KernelCandidate",
     "KernelId",
     "OperatorRequest",
+    "PinRefused",
     "ShapeRange",
     "TorchBinding",
     "opt_in_probe",
+    "pin_to_spec",
     "spec_identity",
     "dispatch_gemm_fp16",
     "dispatch_gemm_fp16_all",
