@@ -142,75 +142,12 @@ GPU correctness results.
 
 ## Offline qualification and baseline promotion
 
-1. Export a specific committed rocm-libraries revision. The snapshot command
-   exports only the rocKE Python/library sources from Git, records their digests,
-   and leaves the working checkout unchanged:
-
-   ```bash
-   python library/tests/run_sdpa_reference.py snapshot \
-     --repository <rocm-libraries-checkout> \
-     --revision <full-commit-sha> \
-     --output <new-baseline-snapshot-directory>
-   ```
-
-2. On gfx942, qualify the exported sources against NumPy SDPA:
-
-   ```bash
-   python library/tests/run_sdpa_reference.py qualify --arch gfx942 \
-     --baseline <baseline-snapshot-directory> \
-     --output <new-bundle-directory> \
-     --repetitions 3
-   ```
-
-   Qualification exports the actual HSACO used by the old public launch entry,
-   its launch signature/grid, a frozen old Python runtime, a frozen replay
-   worker, input-generation metadata, and the per-case bounds and digests.
-   Neither input nor answer tensors are part of the final bundle. The manifest records source,
-   compiler, reference, and target identities. No kernel binaries belong in Git.
-
-3. Verify the completed bundle before promotion, using the proposed lock:
-
-   ```bash
-   python library/tests/run_sdpa_reference.py verify --arch gfx942 \
-     --bundle <new-bundle-directory> \
-     --lock <new-bundle-directory>/qualification-lock.json \
-     --current-root .
-   ```
-
-4. Review the qualification results and update
-   [`baseline_lock.json`](../library/tests/sdpa_reference/architectures/gfx942/baseline_lock.json)
-   with the reviewed `qualification-lock.json`. Ordinary CI uses the committed
-   lock; it cannot regenerate or bless its own baseline.
-
-5. Pack the reviewed bundle from the rocKE root:
-
-   ```bash
-   python library/tests/reference_common/artifact.py pack --operation sdpa \
-     --bundle <new-bundle-directory> \
-     --lock library/tests/sdpa_reference/architectures/gfx942/baseline_lock.json \
-     --archive library/tests/reference_bundles/sdpa/gfx942.tar.gz
-   ```
-
-   From the rocm-libraries root, update and publish the scoped DVC object:
-
-   ```bash
-   dvc add dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/sdpa/gfx942.tar.gz
-   dvc push dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/sdpa/gfx942.tar.gz.dvc
-   ```
-
-   Publishing requires write access to the repository's `storage` remote;
-   downloads support anonymous access. Have an authorized maintainer publish
-   before CI consumes a changed pointer. A locally cached object does not prove
-   remote availability: verify a fresh download. Review the pointer, trusted lock,
-   case changes, and qualification evidence together; commit the small pointer and
-   lock, not the archive. `dvc add` can stage metadata automatically in this repo.
-   Moving an unchanged pointer/archive within the operation layout does not require
-   uploading a new content-addressed object.
-
-Every replacement baseline is independently qualified against NumPy SDPA. Bounds
-are never transferred solely by comparing successive old versions. A current
-result can fail this sufficient comparison while improving accuracy; investigate
-such a failure against the independent reference before considering promotion.
+Follow [Adding or updating a pinned GPU reference](gpu-reference-workflow.md)
+for the authoritative snapshot, qualification, candidate verification, DVC
+publication, and installation procedure. Select operation `sdpa`; qualification
+uses the independent NumPy SDPA oracle and this guide's numerical contract.
+Adding cases or architectures requires qualification of the complete resulting
+cohort. The workflow also covers replacement baselines and publication enrollment.
 
 ## Installed hip-kernel-provider lane
 
@@ -354,4 +291,4 @@ Legacy Torch-dependent tests still skip in the supplied CI environment, as does
 an optional jsonschema check. Passing the selected CTests does not establish
 execution of those skipped numerical cohorts.
 
-Archive packaging uses the [shared artifact command](../TESTING.md#shared-gpu-reference-artifact-command).
+Archive packaging uses the [packing and publication workflow](gpu-reference-workflow.md#5-review-pack-and-publish-the-replacement).

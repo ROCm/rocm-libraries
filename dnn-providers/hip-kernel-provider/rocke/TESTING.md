@@ -148,18 +148,16 @@ the strategy's biggest holes live (see
   The installed GPU suite reuses separate baseline and current worker processes
   across cases. Each case still executes both versions twice and validates its
   outputs independently; worker failures and timeouts fail the test.
-  To publish a replacement, independently qualify it first, update the source
-  lock, and use `python library/tests/reference_common/artifact.py pack --operation sdpa --bundle <qualified-bundle> --lock library/tests/sdpa_reference/architectures/gfx942/baseline_lock.json --archive library/tests/reference_bundles/sdpa/gfx942.tar.gz`
-  from the rocKE root. Then run `dvc add` and a scoped `dvc push` for the
-  archive from the repository root before pushing its Git pointer. Git tracks
-  the lock, pointer, and ignore entry; compiled kernels stay in DVC; inputs are regenerated.
+  For replacement baselines and coverage changes, follow the
+  [authoritative reference workflow](docs/gpu-reference-workflow.md).
   Architecture enrollments are listed in
   [`architectures/registry.json`](library/tests/sdpa_reference/architectures/registry.json),
-  shared by CMake and Python. Each architecture owns its case list, source-dispatch
+  used by Python qualification and verification. CMake publication is separate.
+  Each architecture owns its case list, source-dispatch
   adapter, and baseline lock under `sdpa_reference/architectures/<arch>/`, with a
   separate DVC archive under `reference_bundles/sdpa/<arch>.tar.gz`. Each operation
   owns its directory under `reference_bundles/`, and convolution references
-  use `reference_bundles/conv/<arch>.tar.gz` and be updated independently.
+  use `reference_bundles/conv/<arch>.tar.gz` and can be updated independently.
   Source pytest looks for extracted bundles under `reference_bundles/sdpa/<arch>/`;
   the runtime override can select another directory. Installed bundles
   live under `engines/test_arch_content/rocke/sdpa/<arch>/` relative to the test
@@ -612,6 +610,8 @@ reference them, don't copy them here.*
 
 ## Pinned-reference documentation
 
+- [Adding or updating a reference: authoritative workflow](docs/gpu-reference-workflow.md)
+
 - [SDPA implementation and usage](docs/sdpa-test-reference.md)
 - [Convolution implementation and usage](docs/conv-test-reference.md)
 - [GPU attention coverage and gaps](docs/gpu-attention-test-coverage.md)
@@ -622,63 +622,29 @@ reference them, don't copy them here.*
 A Torch-free gfx942 forward-convolution qualification and GPU replay harness is
 available alongside SDPA. Both gfx942 bundles are listed in the publication
 registry and installed by default for provider artifact builds. See [the convolution reference guide](docs/conv-test-reference.md)
-for the cohort, numerical contract, qualification commands, and installed tests.
+for the cohort and numerical contract. Use the
+[reference workflow](docs/gpu-reference-workflow.md) to add coverage or replace a bundle.
 
-## Shared GPU reference artifact command
+## Shared GPU reference artifacts
 
-SDPA and convolution use the same standalone archive tool:
-
-```bash
-python library/tests/reference_common/artifact.py pack --operation conv \
-  --bundle <qualified-bundle> --lock <reviewed-lock> --archive <archive.tar.gz>
-python library/tests/reference_common/artifact.py unpack --operation conv \
-  --archive <archive.tar.gz> --bundle <new-directory> --lock <reviewed-lock>
-python library/tests/reference_common/artifact.py validate --operation conv \
-  --bundle <bundle-directory> --lock <reviewed-lock>
-```
-
-Use `--operation sdpa` for SDPA. The operation is explicit; the tool checks it
-against the locked manifest and archive namespace. The deployed SDPA schema-2 manifest
-uses its reviewed lock to identify the operation. These commands authenticate and
-package an already qualified bundle; they do not qualify GPU outputs or promote
-a baseline. They require only Python's standard library and also work with `-I -S`.
-
-Use `reference_common/artifact.py` for all archive operations. The shared
-`rocke_reference_common_pytest` suite checks archive handling for both operations,
-independently of GPU enrollment. Schema-1 tensor bundles are not supported.
+Use [Adding or updating a pinned GPU reference](docs/gpu-reference-workflow.md)
+for archive creation, qualification, publication, and enrollment. Both operations
+use `library/tests/reference_common/artifact.py`; archive commands require an
+explicit `--operation`, authenticate against a reviewed lock, and use only the
+Python standard library. They do not qualify GPU results. Schema-1 tensor bundles
+are not supported.
 
 ### Installing enrolled GPU reference bundles
 
 `ROCKE_INSTALL_TEST_GPU_REFERENCES` is the single installation switch. It defaults
 ON for provider artifact builds and OFF for standalone and rocm-libraries
 superbuild configurations. Host reference tests remain installed when it is OFF.
-When reference installation is enabled, a Python 3 interpreter is required at
-configure time to validate and extract archives. A missing interpreter fails configuration with the option to disable
-reference installation; it never silently drops required GPU coverage.
-
-[`PublishedGpuReferences.cmake`](platform/cmake/PublishedGpuReferences.cmake)
-lists published operation/architecture pairs. With the option ON, CMake installs
-all of them, failing on a missing archive, missing lock, or failed integrity check.
-Qualification support alone does not enroll a bundle: each operation's
-`architectures/registry.json` also includes cohorts available for offline work.
-
-Archives, DVC pointers, locks, and installed directories remain separate for each
-operation and architecture. For example, `sdpa/gfx942` and `conv/gfx942` have
-independent archives under `reference_bundles/` and independent installed payloads
-under `engines/test_arch_content/rocke/`.
-
-Test unpublished candidates with the operation's offline CLI, passing explicit
-`--bundle` and `--lock` paths to `verify`. CMake consumes only the standard archives
-and committed locks for published pairs; qualification registries are used by the
-offline tooling. After reviewing qualification evidence, publish the DVC object
-and commit its pointer and lock before enrolling the pair. Validate the installed
-layout through the normal CMake installation path.
-
-The CMake publication/install contract can be checked without a GPU or DVC data:
-
-```bash
-python -m pytest platform/tests/test_gpu_references.py -q
-```
+CMake installs all pairs listed in
+[`PublishedGpuReferences.cmake`](platform/cmake/PublishedGpuReferences.cmake),
+failing on missing archives, missing locks, or failed integrity checks. Fetch all
+published archives before configuring. Each operation/architecture keeps its own
+archive, committed lock, and installed payload. Qualification registries enable
+offline work; only the CMake publication lists enroll installation.
 
 ### Running installed reference tests without Torch
 
