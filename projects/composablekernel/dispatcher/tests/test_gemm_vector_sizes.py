@@ -24,7 +24,9 @@ import io
 import json
 import sys
 import tempfile
+import itertools
 import unittest
+from types import SimpleNamespace
 from dataclasses import replace
 from pathlib import Path
 from unittest import mock
@@ -39,6 +41,7 @@ from codegen_common import (  # noqa: E402
     TileConfig,
     _native_ab_vector_size,
     gemm_native_vector_sizes,
+    gemm_tile_divides_problem,
     gemm_problem_vector_sizes,
     gemm_vector_size_suffix,
     gemm_lockstep_vector_bytes,
@@ -53,7 +56,7 @@ from unified_gemm_codegen import (  # noqa: E402
     TraitConfig,
 )
 from gemm_utils import GemmKernelConfig  # noqa: E402
-from gemm_vector_fallback import VectorFallback  # noqa: E402
+from gemm_vector_fallback import VectorFallback, _tile_fits  # noqa: E402
 
 TILE = dict(tile=(256, 256, 64), waves=(2, 2, 1), warp_tile=(32, 32, 16))
 
@@ -390,10 +393,11 @@ class TestCompileTimeout(unittest.TestCase):
                 root = Path(d)
                 cfg, reason = _bridge_config(vec)
                 self.assertIsNone(reason)
-                with mock.patch.object(
-                    ctypes_utils, "get_build_dir", return_value=root
-                ), mock.patch.object(
-                    gemm_utils, "_tile_engine_codegen_flags", return_value=[]
+                with (
+                    mock.patch.object(ctypes_utils, "get_build_dir", return_value=root),
+                    mock.patch.object(
+                        gemm_utils, "_tile_engine_codegen_flags", return_value=[]
+                    ),
                 ):
                     job, _ = gemm_utils._build_compile_jobs(cfg, root / "kernel.hpp")
                 with mock.patch(
@@ -704,6 +708,342 @@ class TestExpandSweep(unittest.TestCase):
             ([1], [1], [8]),
         )
         self.assertEqual(replace(cfg).to_dict()["vector_sizes"], [1, 1, 8])
+
+
+class TestTileDividesProblemGuards(unittest.TestCase):
+    """The validation guards, each pinned individually.
+
+    gemm_contiguous_dims indexes the layout string positionally and validates
+    nothing, and 0 % tile == 0, so without these an unknown layout or a zero
+    extent returns a confident True -- the wrong direction for a predicate whose
+    whole job is rejection. Deleting either guard previously left the suite
+    green.
+    """
+
+    OK = dict(
+        m=256,
+        n=256,
+        k=256,
+        tile_m=128,
+        tile_n=128,
+        tile_k=128,
+        pad_m=False,
+        pad_n=False,
+        pad_k=False,
+    )
+
+    def test_baseline_is_accepted(self):
+        self.assertTrue(gemm_tile_divides_problem(layout="ccr", **self.OK))
+
+    def test_unknown_layout_raises(self):
+        for layout in ("zzz", "rc", "rcrr", ""):
+            with self.subTest(layout=layout):
+                with self.assertRaisesRegex(ValueError, "unknown layout"):
+                    gemm_tile_divides_problem(layout=layout, **self.OK)
+
+    def test_layout_is_case_sensitive(self):
+        """The mapping is keyed on lowercase r/c; an uppercase string would
+        otherwise resolve positionally to a fabricated dimension set."""
+        with self.assertRaisesRegex(ValueError, "unknown layout"):
+            gemm_tile_divides_problem(layout="RCR", **self.OK)
+
+    def test_non_positive_extent_raises(self):
+        for dim in ("m", "n", "k"):
+            for bad in (0, -1, None):
+                with self.subTest(dim=dim, value=bad):
+                    kw = {**self.OK, dim: bad}
+                    with self.assertRaisesRegex(ValueError, "must be >= 1"):
+                        gemm_tile_divides_problem(layout="ccr", **kw)
+
+    def test_split_k_with_padded_k_skips_the_multiplier(self):
+        """pad_k short-circuits the K check entirely, so k_batch cannot make a
+        padded K fail however badly it divides."""
+        self.assertTrue(
+            gemm_tile_divides_problem(
+                m=256,
+                n=256,
+                k=384,
+                layout="rcr",
+                tile_m=128,
+                tile_n=128,
+                tile_k=128,
+                pad_m=False,
+                pad_n=False,
+                pad_k=True,
+                k_batch=5,
+            )
+        )
+
+    def test_split_k_on_a_column_major_c_layout(self):
+        """ccc checks {m, k}: C contiguous in M rather than N."""
+        common = dict(
+            m=256,
+            n=300,
+            k=384,
+            layout="ccc",
+            tile_m=128,
+            tile_n=128,
+            tile_k=128,
+            pad_m=False,
+            pad_n=False,
+            pad_k=False,
+        )
+        # 384 % 128 == 0 but 384 % (128 * 2) != 0
+        self.assertTrue(gemm_tile_divides_problem(**common, k_batch=1))
+        self.assertFalse(gemm_tile_divides_problem(**common, k_batch=2))
+        self.assertTrue(gemm_tile_divides_problem(**common, k_batch=3))
+        # N=300 is never checked on ccc, which is the point of the layout rule.
+        self.assertTrue(gemm_tile_divides_problem(**{**common, "n": 7}, k_batch=1))
+
+
+class TestTileFitsDelegation(unittest.TestCase):
+    """Pin the ARGUMENT ORDER of _tile_fits's call into the shared rule.
+
+    Mutation testing showed the call site was wholly unpinned: transposing
+    pad_m/pad_k, tile_m/tile_n or dims["m"]/dims["n"] all survived the suite,
+    because every existing case used layout rcr with uniform pad flags and cubic
+    tiles -- inputs under which a transposition is a no-op. The case below is
+    asymmetric on all three axes at once, so any single swap changes the answer.
+
+    The pad booleans are keyword-only in the callee, which makes a pad
+    transposition a TypeError rather than a wrong answer; this still covers the
+    positional extents and tiles, and the pads behaviourally.
+    """
+
+    #: ccr checks all three dims, so no swap can hide in an unchecked dimension.
+    LAYOUT = "ccr"
+    DIMS = {"m": 384, "n": 512, "k": 255}
+    TILE = dict(tile_m=128, tile_n=256, tile_k=128)
+
+    def _cfg(self, **over):
+        pads = dict(pad_m=True, pad_n=False, pad_k=False)
+        pads.update(over)
+        return SimpleNamespace(layout=self.LAYOUT, **self.TILE, **pads)
+
+    def test_baseline_is_false_on_the_k_check(self):
+        # M padded -> unchecked. N=512 % 256 == 0 -> passes. K=255 % 128 != 0.
+        self.assertFalse(_tile_fits(self._cfg(), self.DIMS))
+
+    def test_padding_k_flips_it(self):
+        """Distinguishes pad_k from the other two: only pad_k rescues K=255."""
+        self.assertTrue(_tile_fits(self._cfg(pad_k=True), self.DIMS))
+
+    def test_unpadding_m_flips_it_for_a_different_reason(self):
+        # 384 % 128 == 0, so dropping pad_m keeps it False via K, not M.
+        self.assertFalse(
+            _tile_fits(self._cfg(pad_m=False, pad_k=True), {**self.DIMS, "m": 300})
+        )
+
+    def test_m_and_n_are_not_transposed(self):
+        """tile_m=128, tile_n=256 and m=384, n=512: swapping either pair changes
+        the verdict, so this fails if the call site transposes them."""
+        dims = {"m": 384, "n": 512, "k": 256}
+        self.assertTrue(_tile_fits(self._cfg(pad_m=False), dims))
+        # n=384 is NOT a multiple of tile_n=256; m=512 IS a multiple of tile_m.
+        self.assertFalse(
+            _tile_fits(self._cfg(pad_m=False), {"m": 512, "n": 384, "k": 256})
+        )
+
+    def test_delegation_matches_the_shared_rule(self):
+        for pad_m, pad_n, pad_k in itertools.product((False, True), repeat=3):
+            for dims in (
+                self.DIMS,
+                {"m": 256, "n": 512, "k": 256},
+                {"m": 256, "n": 512, "k": 384},
+            ):
+                with self.subTest(pads=(pad_m, pad_n, pad_k), dims=dims):
+                    self.assertEqual(
+                        _tile_fits(
+                            self._cfg(pad_m=pad_m, pad_n=pad_n, pad_k=pad_k), dims
+                        ),
+                        gemm_tile_divides_problem(
+                            dims["m"],
+                            dims["n"],
+                            dims["k"],
+                            self.LAYOUT,
+                            self.TILE["tile_m"],
+                            self.TILE["tile_n"],
+                            self.TILE["tile_k"],
+                            pad_m=pad_m,
+                            pad_n=pad_n,
+                            pad_k=pad_k,
+                            k_batch=1,
+                        ),
+                    )
+
+
+class TestTileDividesProblem(unittest.TestCase):
+    """gemm_tile_divides_problem mirrors the tile-divisibility half of
+    UniversalGemmKernel::IsSupportedArgument.
+
+    The property under test is that the check is per TENSOR on its CONTIGUOUS
+    dimension, not per dimension globally, and that split-K scales the K tile.
+    The two readings differ only on narrow shapes, which is exactly where a
+    selection heuristic needs it.
+
+    Expected dimension sets are written out as literals rather than derived from
+    gemm_contiguous_dims: deriving them from the helper the implementation calls
+    would assert f(x) == f(x) and pin nothing.
+    """
+
+    UNPADDED = dict(pad_m=False, pad_n=False, pad_k=False)
+
+    #: layout -> dims actually checked. Note column-major C moves the C check
+    #: from N to M, so rcc checks M even though rcr does not.
+    CHECKED = {
+        "rcr": {"k", "n"},
+        "rrr": {"k", "n"},
+        "crr": {"m", "n"},
+        "ccr": {"m", "n", "k"},
+        "rcc": {"k", "m"},
+        "rrc": {"k", "n", "m"},
+        "crc": {"m", "n"},
+        "ccc": {"m", "k"},
+    }
+
+    def test_checked_dims_match_the_expected_table(self):
+        """Probe behaviourally: make one dim indivisible at a time."""
+        for layout, checked in self.CHECKED.items():
+            for dim in ("m", "n", "k"):
+                ext = {"m": 256, "n": 256, "k": 256}
+                ext[dim] = 255
+                ok = gemm_tile_divides_problem(
+                    ext["m"], ext["n"], ext["k"], layout, 128, 128, 128, **self.UNPADDED
+                )
+                self.assertEqual(
+                    ok,
+                    dim not in checked,
+                    f"{layout}: making {dim} indivisible should "
+                    f"{'reject' if dim in checked else 'be ignored'}",
+                )
+
+    def test_m_is_not_checked_for_row_major_a_and_row_major_c(self):
+        """The case the naive 'all three dims' reading gets wrong: a gemv-shaped
+        problem runs on a wide tile. Scoped to row-major C -- see rcc below."""
+        for layout in ("rcr", "rrr"):
+            self.assertTrue(
+                gemm_tile_divides_problem(
+                    1, 256, 256, layout, 128, 128, 128, **self.UNPADDED
+                ),
+                layout,
+            )
+
+    def test_column_major_c_does_check_m(self):
+        """rcc shares A/B with rcr but reads C column-major, so M IS checked.
+        Guards against over-generalising the previous test."""
+        self.assertFalse(
+            gemm_tile_divides_problem(
+                255, 256, 256, "rcc", 128, 128, 128, **self.UNPADDED
+            )
+        )
+
+    def test_k_is_never_checked_for_crr(self):
+        self.assertTrue(
+            gemm_tile_divides_problem(
+                256, 256, 1, "crr", 128, 128, 128, **self.UNPADDED
+            )
+        )
+
+    def test_ccr_checks_all_three(self):
+        for m, n, k in ((255, 256, 256), (256, 255, 256), (256, 256, 255)):
+            self.assertFalse(
+                gemm_tile_divides_problem(
+                    m, n, k, "ccr", 128, 128, 128, **self.UNPADDED
+                ),
+                f"{m}x{n}x{k}",
+            )
+
+    def test_each_dim_pairs_with_its_own_tile(self):
+        """Non-square tiles: swapping tile_m/tile_n internally would pass if
+        every test used 128 cubed."""
+        self.assertFalse(
+            gemm_tile_divides_problem(
+                256, 384, 256, "ccr", 128, 256, 128, **self.UNPADDED
+            )
+        )
+        self.assertTrue(
+            gemm_tile_divides_problem(
+                256, 512, 256, "ccr", 128, 256, 128, **self.UNPADDED
+            )
+        )
+
+    def test_each_pad_flag_waives_only_its_own_dim(self):
+        """Varying one flag at a time; swapping pad_m/pad_k internally would
+        pass if only pad_n were ever exercised."""
+        cases = [
+            ("m", dict(pad_m=True, pad_n=False, pad_k=False), (255, 256, 256)),
+            ("n", dict(pad_m=False, pad_n=True, pad_k=False), (256, 255, 256)),
+            ("k", dict(pad_m=False, pad_n=False, pad_k=True), (256, 256, 255)),
+        ]
+        for dim, pads, (m, n, k) in cases:
+            self.assertFalse(
+                gemm_tile_divides_problem(
+                    m, n, k, "ccr", 128, 128, 128, **self.UNPADDED
+                ),
+                f"{dim} unpadded",
+            )
+            self.assertTrue(
+                gemm_tile_divides_problem(m, n, k, "ccr", 128, 128, 128, **pads),
+                f"{dim} padded",
+            )
+
+    def test_split_k_scales_the_k_tile_only(self):
+        """K must divide KPerBlock * k_batch (universal_gemm_kernel.hpp:562,631).
+        M and N are checked against their own extents regardless of the split."""
+        # K=384 divides 128 but not 256, so k_batch=2 must reject
+        self.assertTrue(
+            gemm_tile_divides_problem(
+                256, 256, 384, "rcr", 128, 128, 128, **self.UNPADDED, k_batch=1
+            )
+        )
+        self.assertFalse(
+            gemm_tile_divides_problem(
+                256, 256, 384, "rcr", 128, 128, 128, **self.UNPADDED, k_batch=2
+            )
+        )
+        self.assertTrue(
+            gemm_tile_divides_problem(
+                256, 256, 384, "rcr", 128, 128, 128, **self.UNPADDED, k_batch=3
+            )
+        )
+        # a split does not tighten M or N: crr never checks K at all
+        self.assertTrue(
+            gemm_tile_divides_problem(
+                256, 256, 384, "crr", 128, 128, 128, **self.UNPADDED, k_batch=7
+            )
+        )
+
+    def test_split_k_defaults_to_one(self):
+        self.assertEqual(
+            gemm_tile_divides_problem(
+                256, 256, 384, "rcr", 128, 128, 128, **self.UNPADDED
+            ),
+            gemm_tile_divides_problem(
+                256, 256, 384, "rcr", 128, 128, 128, **self.UNPADDED, k_batch=1
+            ),
+        )
+
+    def test_divisible_problem_always_accepted(self):
+        for layout in self.CHECKED:
+            self.assertTrue(
+                gemm_tile_divides_problem(
+                    512, 512, 512, layout, 128, 128, 128, **self.UNPADDED
+                ),
+                layout,
+            )
+
+    def test_rejects_non_positive_tile(self):
+        """A falsy tile must not silently accept every problem -- the failure
+        direction matters in a function whose purpose is rejection."""
+        for tiles in ((128, 0, 128), (0, 128, 128), (128, 128, None)):
+            with self.assertRaises(ValueError):
+                gemm_tile_divides_problem(256, 255, 256, "rcr", *tiles, **self.UNPADDED)
+
+    def test_rejects_non_positive_k_batch(self):
+        with self.assertRaises(ValueError):
+            gemm_tile_divides_problem(
+                256, 256, 256, "rcr", 128, 128, 128, **self.UNPADDED, k_batch=0
+            )
 
 
 if __name__ == "__main__":

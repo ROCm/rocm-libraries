@@ -22,6 +22,7 @@ from codegen_common import (
     VECTOR_SIZE_VARIANTS,
     gemm_contiguous_dims,
     gemm_problem_vector_sizes,
+    gemm_tile_divides_problem,
     gemm_vector_size_sweep,
 )
 
@@ -57,10 +58,28 @@ def _base_key(cfg):
 
 
 def _tile_fits(cfg, dims):
-    """Mirrors the kernel's check: an unpadded contiguous extent must be a tile multiple."""
-    return all(
-        getattr(cfg, f"pad_{d}") or dims[d] % getattr(cfg, f"tile_{d}") == 0
-        for d in gemm_contiguous_dims(cfg.layout)
+    """Mirrors the kernel's check: an unpadded contiguous extent must be a tile multiple.
+
+    Delegates to :func:`codegen_common.gemm_tile_divides_problem` so the rule has
+    one definition. ``k_batch`` is 1 here because this pairing path does not
+    split K; a split-K caller must pass its own value.
+    """
+    # Every argument named: the signature takes three same-typed extents, three
+    # same-typed tiles and three same-typed booleans in a row, and this project
+    # has already paid for one positional transposition in a name of that shape
+    # (persistent is the LAST of the four kernel-name booleans, not the first).
+    return gemm_tile_divides_problem(
+        m=dims["m"],
+        n=dims["n"],
+        k=dims["k"],
+        layout=cfg.layout,
+        tile_m=cfg.tile_m,
+        tile_n=cfg.tile_n,
+        tile_k=cfg.tile_k,
+        pad_m=cfg.pad_m,
+        pad_n=cfg.pad_n,
+        pad_k=cfg.pad_k,
+        k_batch=1,
     )
 
 

@@ -896,6 +896,13 @@ def gemm_vector_size_sweep(
     return sweep or [(0, 0, 0)]
 
 
+#: Every layout gemm_contiguous_dims can resolve: three chars, each r or c,
+#: for A, B and C. Callers that act on a REJECTION must validate against this
+#: first -- the function below indexes positionally and cannot tell a typo from
+#: a layout.
+_GEMM_LAYOUTS = frozenset(a + b + c for a in "rc" for b in "rc" for c in "rc")
+
+
 def gemm_contiguous_dims(layout: str) -> Tuple[str, str, str]:
     """Contiguous dim (``"m"``/``"n"``/``"k"``) of A/B/C for a layout like ``"rcr"``."""
     return (
@@ -918,6 +925,118 @@ def gemm_problem_vector_sizes(
     return tuple(
         math.gcd(e, 16 // _VEC_ELEMENT_BYTES[d]) for e, d in zip(extents, dtypes)
     )
+
+
+def gemm_tile_divides_problem(
+    m: int,
+    n: int,
+    k: int,
+    layout: str,
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    *,
+    pad_m: bool,
+    pad_n: bool,
+    pad_k: bool,
+    k_batch: int = 1,
+) -> bool:
+    """Does this tile divide the problem, as ``IsSupportedArgument`` requires?
+
+    This is **one of several** gates in
+    ``UniversalGemmKernel::IsSupportedArgument``. It does not answer "will this
+    launch be accepted" on its own -- see *Scope* below.
+
+    An unpadded kernel requires its tile to divide the problem, but the check
+    is **per tensor on that tensor's contiguous dimension only**, and only when
+    the matching ``kPad`` is false (``universal_gemm_kernel.hpp``)::
+
+        A RowMajor  K % (KPerBlock * k_batch)   A ColMajor  M % MPerBlock
+        B RowMajor  N % NPerBlock               B ColMajor  K % (KPerBlock * k_batch)
+        C RowMajor  N % NPerBlock               C ColMajor  M % MPerBlock
+
+    The dimension set is exactly :func:`gemm_contiguous_dims`, the same mapping
+    :func:`gemm_problem_vector_sizes` uses -- so this is that rule applied to a
+    different quantity, not a third rule. It is reused rather than restated,
+    because two copies of a layout table drift.
+
+    Resolving per layout, for row-major C::
+
+        rcr, rrr -> {k, n}      M is NEVER checked
+        crr      -> {m, n}      K is NEVER checked
+        ccr      -> {m, n, k}
+
+    Column-major C moves the C check from N to M, so e.g. ``rcc`` checks
+    ``{k, m}``. Do not generalise from the row-major-C cases.
+
+    The intuitive "the tile must divide all three dimensions" reading is
+    **over-strict** and silently discards kernels that run: it rejects, for
+    example, ``rrr`` with ``m=1`` on a 32-row tile, which looks unarguable
+    until you note that ``rrr`` never checks M. Both readings agree on
+    well-shaped problems, so a check validated only on those will not catch the
+    difference -- it shows up on narrow and gemv-like shapes.
+
+    **Split-K.** ``k_batch`` splits K across that many workgroups, so each chunk
+    must itself be a whole number of K tiles -- hence ``KPerBlock * k_batch``,
+    not ``KPerBlock``. ``k_batch=1`` (no split) is the default and reduces to
+    the plain tile check. Pass the problem's ``split_k``; omitting it accepts
+    candidates the kernel rejects whenever ``K`` is a multiple of ``KPerBlock``
+    but not of ``KPerBlock * k_batch``.
+
+    Scope
+    -----
+    ``IsSupportedArgument`` also enforces a **vector-size** rule that this
+    function does not model, and that one is *not* gated by padding: each
+    tensor's extent on its own contiguous dimension must divide that tensor's
+    vector width -- the same per-layout mapping as above, so for row-major A/B/C
+    that reads ``K % vectorSizeA``, ``N % vectorSizeB``, ``N % GetVectorSizeC()``
+    and for the column-major forms it is M, K and M respectively. A fully
+    padded kernel short-circuits to ``True`` here and can still be rejected on
+    vector width. Use :func:`gemm_problem_vector_sizes` for that half; a
+    candidate must pass both. Neither is the whole of IsSupportedArgument --
+    the split-K warp-tile check and the D-tensor checks are also unmodelled --
+    so a True here is a necessary condition for launch, never a sufficient one.
+
+    This matters to any candidate-pool construction or selection heuristic: a
+    rejected launch produces no measurement, so it is absent from benchmark
+    data rather than recorded as a failure. Nothing downstream can learn the
+    rule from measurements alone; it has to be applied explicitly.
+    """
+    if k_batch < 1:
+        raise ValueError(f"k_batch must be >= 1, got {k_batch}")
+    if layout not in _GEMM_LAYOUTS:
+        # gemm_contiguous_dims indexes the layout string positionally and
+        # validates nothing, so an unknown layout resolves to a plausible-looking
+        # dimension set ("xyz" -> m, k, m) and this returns a confident verdict
+        # about the wrong dimensions.
+        raise ValueError(
+            f"unknown layout {layout!r}; expected one of {sorted(_GEMM_LAYOUTS)}"
+        )
+    for name, extent in (("m", m), ("n", n), ("k", k)):
+        if extent is None or extent < 1:
+            # 0 % tile == 0, so a zero extent would report every tile as a
+            # perfect fit -- the wrong direction for a rejection predicate.
+            raise ValueError(f"problem extent {name} must be >= 1, got {extent}")
+    for tile in (tile_m, tile_n, tile_k):
+        if tile is None or tile <= 0:
+            raise ValueError(
+                f"tile extents must be positive, got "
+                f"({tile_m}, {tile_n}, {tile_k}) -- a falsy tile would otherwise "
+                f"silently accept every problem"
+            )
+    # k_batch multiplies the K tile only; M and N are checked against their own
+    # per-block extents regardless of the split (the B/C RowMajor branch of
+    # UniversalGemmKernel::IsSupportedArgument).
+    extents = {
+        "m": (m, tile_m, pad_m),
+        "n": (n, tile_n, pad_n),
+        "k": (k, tile_k * k_batch, pad_k),
+    }
+    for d in set(gemm_contiguous_dims(layout)):
+        extent, tile, padded = extents[d]
+        if not padded and extent % tile != 0:
+            return False
+    return True
 
 
 def gemm_default_epilogue_vector_size(dtype_a, layout, gfx_arch):
