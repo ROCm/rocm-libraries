@@ -19,10 +19,6 @@ constexpr int kWaveSize = 32;
 constexpr int kNumSlots = 2;
 constexpr int kNumSteps = 8;
 
-static_assert(kNumSteps % kNumSlots == 0,
-              "the ring is driven kNumSlots steps at a time; a ragged tail leaves a generation "
-              "unsignalled and hangs");
-
 using ring_pipe = ck_tile::named_barrier_pipeline<ck_tile::ring_spec<kNumSlots, 1, 1>>;
 
 class Gfx125Device : public ::testing::Test
@@ -99,7 +95,7 @@ constexpr int32_t fan_out_value(ck_tile::index_t step, int producer, int lane)
 // generation needs both producers' signals, and every release fans out to each producer's own
 // FREE barrier. Each producer owns one half of every slot, as the GEMM's A and B loaders do.
 // Consumers come first so that, as in the GEMM, they occupy waves [0, kNumConsumers).
-template <typename Pipe, ck_tile::index_t Lag>
+template <typename Pipe, ck_tile::index_t PublishLag>
 struct fan_out_ring_kernel
 {
     using barrier_pipeline = Pipe;
@@ -120,7 +116,7 @@ struct fan_out_ring_kernel
 
             __shared__ int32_t slots[kSlots][kProducers][kWaveSize];
 
-            const int lane                 = static_cast<int>(threadIdx.x) % kWaveSize;
+            const ck_tile::index_t lane    = ck_tile::get_lane_id();
             const ck_tile::index_t wave_id = ck_tile::get_warp_id();
             const auto bar                 = Pipe::template init<fan_out_ring_kernel>();
 
@@ -141,7 +137,7 @@ struct fan_out_ring_kernel
                     constexpr int kProducer = decltype(p)::value;
                     if(wave_id == kConsumers + kProducer)
                     {
-                        ring::template producer<kProducer>::template run<Lag>(
+                        ring::template producer<kProducer>::template run<PublishLag>(
                             bar,
                             num_steps,
                             [&](auto slot, ck_tile::index_t step) {
@@ -161,10 +157,10 @@ struct fan_out_ring_kernel
 };
 
 // Launches one configuration and checks every consumer saw every step from both producers.
-template <typename Pipe, ck_tile::index_t Lag>
+template <typename Pipe, ck_tile::index_t PublishLag>
 void expect_fan_out_delivers(ck_tile::index_t num_steps)
 {
-    using kernel = fan_out_ring_kernel<Pipe, Lag>;
+    using kernel = fan_out_ring_kernel<Pipe, PublishLag>;
     const int out_elems =
         kernel::kConsumers * static_cast<int>(num_steps) * kernel::kProducers * kWaveSize;
 
@@ -194,9 +190,9 @@ void expect_fan_out_delivers(ck_tile::index_t num_steps)
                     const int i =
                         ((c * num_steps + step) * kernel::kProducers + p) * kWaveSize + lane;
                     ASSERT_EQ(out[i], fan_out_value(step, p, lane))
-                        << "slots " << kernel::kSlots << ", lag " << Lag << ", steps " << num_steps
-                        << ": consumer " << c << " step " << step << " producer " << p << " lane "
-                        << lane;
+                        << "slots " << kernel::kSlots << ", publish lag " << PublishLag
+                        << ", steps " << num_steps << ": consumer " << c << " step " << step
+                        << " producer " << p << " lane " << lane;
                 }
             }
         }
@@ -229,6 +225,9 @@ struct slot_ring_kernel
 
     // Used only by the supported branch below.
     [[maybe_unused]] static constexpr int kNumIters = kNumSteps / kNumSlots;
+    static_assert(kNumSlots == 2 && kNumSteps % kNumSlots == 0,
+                  "the loops below are unrolled for two slots and run whole trips round the ring, "
+                  "dropping a ragged tail; run() handles any slot and step count");
 
     CK_TILE_DEVICE void operator()(int32_t* __restrict__ out) const
     {
@@ -236,14 +235,13 @@ struct slot_ring_kernel
         {
             // Dependent on Pipe, so it cannot fire from the discarded branch.
             static_assert(!ring::kIsSupported || ck_tile::get_warp_size() == kWaveSize,
-                          "threadIdx.x / kWaveSize must be wave-uniform; under wave64 one wave "
-                          "would run both sides of the handshake and deadlock");
+                          "one wave per role and one slot element per lane assume wave32");
 
             // The ring's barriers are a separate hardware pool, so this is all the LDS needed.
             __shared__ int32_t p_slots[kNumSlots * kWaveSize];
 
-            const int lane    = static_cast<int>(threadIdx.x) % kWaveSize;
-            const int wave_id = static_cast<int>(threadIdx.x) / kWaveSize;
+            const ck_tile::index_t lane    = ck_tile::get_lane_id();
+            const ck_tile::index_t wave_id = ck_tile::get_warp_id();
 
             // The token proves init() ran; every ring call requires one.
             const auto bar = Pipe::template init<slot_ring_kernel>();
@@ -348,25 +346,14 @@ TEST_F(NamedBarrierSlotRingDevice, ProducerConsumerHandshakeOrdersEveryStep)
     std::vector<int32_t> out(kOutElems);
     out_buf.FromDevice(out.data());
 
-    int mismatches = 0;
-    int first      = -1;
     for(int step = 0; step < kNumSteps; ++step)
     {
         for(int lane = 0; lane < kWaveSize; ++lane)
         {
-            const int i = step * kWaveSize + lane;
-            if(out[i] != slot_value(step, lane))
-            {
-                ++mismatches;
-                first = (first < 0) ? i : first;
-            }
+            ASSERT_EQ(out[step * kWaveSize + lane], slot_value(step, lane))
+                << "step " << step << " lane " << lane;
         }
     }
-
-    ASSERT_EQ(mismatches, 0) << "first at step " << (first / kWaveSize) << " lane "
-                             << (first % kWaveSize) << ": expected "
-                             << slot_value(first / kWaveSize, first % kWaveSize) << ", got "
-                             << out[first];
 }
 
 TEST_F(NamedBarrierRingRunDevice, TwoProducersFeedEveryConsumerForAnyStepCount)
