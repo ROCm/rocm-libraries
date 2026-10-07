@@ -7,7 +7,16 @@ function(add_hipstdpar_test TEST TEST_TYPE INTERPOSE_ALLOC)
     if(USE_HIPCXX)
         set_source_files_properties(${TEST_SOURCE} PROPERTIES LANGUAGE HIP)
     endif()
-    set(TEST_TARGET "${TEST}_${TEST_TYPE}.hip")
+    if(ARGC GREATER 3)
+        set(INTERPOSE_VERSION "${ARGV3}")
+        if(NOT INTERPOSE_ALLOC OR ARGC GREATER 4 OR NOT INTERPOSE_VERSION STREQUAL "v0")
+            message(FATAL_ERROR "add_hipstdpar_test(${TEST}): the only supported interposer version is v0, which requires INTERPOSE_ALLOC")
+        endif()
+        set(TEST_TARGET "${TEST}_${INTERPOSE_VERSION}_${TEST_TYPE}.hip")
+    else()
+        set(INTERPOSE_VERSION "")
+        set(TEST_TARGET "${TEST}_${TEST_TYPE}.hip")
+    endif()
 
     add_executable(${TEST_TARGET} ${TEST_SOURCE})
     target_compile_options(${TEST_TARGET} PRIVATE ${COMPILE_OPTIONS})
@@ -26,6 +35,12 @@ function(add_hipstdpar_test TEST TEST_TYPE INTERPOSE_ALLOC)
             PRIVATE
                 --hipstdpar-interpose-alloc
         )
+        if(INTERPOSE_VERSION STREQUAL "v0")
+            target_compile_options(${TEST_TARGET}
+                PRIVATE
+                    -U__HIPSTDPAR_INTERPOSE_ALLOC_V1__
+            )
+        endif()
     endif()
     target_link_libraries(${TEST_TARGET}
         PRIVATE
@@ -105,8 +120,14 @@ set(ROCPRIM_LOCATION ${ROCPRIM_INCLUDE_DIR})
 
 # Add tests
 add_hipstdpar_test("algorithms" "compile" OFF)
-add_hipstdpar_test("interpose" "compile" ON)
+add_hipstdpar_test("calloc" "run" ON)
+add_hipstdpar_test("calloc" "run" ON "v0")
+add_hipstdpar_test("interpose" "run" ON)
+add_hipstdpar_test("interpose" "run" ON "v0")
 add_hipstdpar_test("realloc" "run" ON)
+add_hipstdpar_test("realloc" "run" ON "v0")
+add_hipstdpar_test("zero_size_alloc" "run" ON)
+add_hipstdpar_test("zero_size_alloc" "run" ON "v0")
 
 # Restore global state
 set(CMAKE_CXX_STANDARD ${ROCTHRUST_CMAKE_CXX_STANDARD})

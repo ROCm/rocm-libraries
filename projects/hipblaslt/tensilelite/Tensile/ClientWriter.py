@@ -712,13 +712,11 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('activation-no-guard', problemType.activationNoGuard)
         if globalParameters["DataInitValueActivationArgs"]:
           param('activation-additional-args', ','.join(map(str, globalParameters["DataInitValueActivationArgs"])))
-        # Only emit non-default StreamKHybridMode values to keep
-        # existing tests' INIs byte-identical. The C++ client defaults
-        # to a single-element vector [0], which is the same as omitting
-        # the INI key entirely.
-        if globalParameters["StreamKHybridMode"] not in ([0], (0,)):
-          for v in globalParameters["StreamKHybridMode"]:
-            param('streamk-hybrid-mode', int(v))
+        # Global-parameter ingestion resolves the legacy alias before emission.
+        # Omitting Default preserves the client's existing runtime policy.
+        if globalParameters["HybridAssignmentPolicy"] not in (["Default"], ("Default",)):
+          for policy in globalParameters["HybridAssignmentPolicy"]:
+            param('hybrid-assignment-policy', policy)
 
         param("device-idx",               deviceId)
 
@@ -765,6 +763,7 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
          else:
            numElementsToValidate = max(globalParameters["NumElementsToValidateWinner"], globalParameters["NumElementsToValidate"])
         param("num-elements-to-validate", numElementsToValidate)
+        param("check-synchronizer",       globalParameters["CheckSynchronizer"])
         param("num-enqueues-per-sync",    globalParameters["EnqueuesPerSync"])
         param("max-enqueues-per-sync",    globalParameters["MaxEnqueuesPerSync"])
         param("num-syncs-per-benchmark",  globalParameters["SyncsPerBenchmark"])

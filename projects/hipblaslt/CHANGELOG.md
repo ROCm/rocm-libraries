@@ -6,6 +6,15 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Added
 
+* `HIPBLASLT_CHECK_SYNCHRONIZER` environment variable: opt-in post-launch
+  dirty-buffer check for the handle's inter-workgroup flag buffers, which their
+  kernels must leave at zero (`1`, `on` or `true` to enable; anything else
+  disables). It scans the whole `Synchronizer` buffer used by GSU
+  MultipleBufferSingleKernel and amaxD, and the Stream-K flag block bound to the
+  launch's stream. Covers `rocblaslt_matmul_impl` only. Unlike
+  `HIPBLASLT_CHECK_NUMERICS`, each covered call pays a stream sync and a
+  device-to-host copy, so this is single-threaded debugging use only, not for
+  concurrent-stream workloads.
 * `FusedGemmA2A` TensileLite problem-type parameter (default `0`, off) that fuses an all-to-all redistribution into the GEMM store path using SDMA, avoiding a separate collective kernel and staging buffer; currently limited to gfx950 and bf16.
 * Tensor swizzling (pre-swizzled/pre-tiled A/B tensors) support for gfx11 (WMMA) architectures.
 * Batch-offset support for General Batched GEMM on gfx1250.
@@ -17,6 +26,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Changed
 
+* Persistent launch controls now use `TENSILE_PERSISTENT_*` environment names, and Hybrid assignment uses `--hybrid_assignment_policy` in `hipblaslt-bench` and `HybridAssignmentPolicy` in TensileLite YAML. Legacy environment, CLI, and YAML aliases remain supported. Preferred environment names take precedence; conflicting old and new CLI or YAML values are rejected.
 * `--global-parameters` and `--benchmark-parameters` values are now parsed as Python literals via `ast.literal_eval` instead of `eval`, correctly handling values containing `=` and rejecting non-literal expressions with an `argparse.ArgumentTypeError`.
 * `HIPBLASLT_TENSILE_LIBPATH` and `HIPBLASLT_EXT_OP_LIBRARY_PATH` are now ignored when the process runs in a secure execution context (set-uid/set-gid or other credential-changing exec), falling back to the default library location with a diagnostic; behavior is unchanged for non-privileged processes.
 * Enabled gfx1250 cluster-launch kernels for GEMM sizes whose work-group count is not a multiple of `ClusterDim` by padding the launch grid up to a `ClusterDim` multiple and early-exiting the padded work-groups, removing the `ClusterDimCheck` predicate that previously rejected these sizes.

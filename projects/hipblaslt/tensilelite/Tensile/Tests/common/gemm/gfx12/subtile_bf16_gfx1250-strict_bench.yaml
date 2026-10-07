@@ -56,7 +56,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - PreloadKernArgs: [True]
         - UseSubtileImpl: [True]
-        - StreamK: [0]
+        - TileProcessingStrategy: ["None"]
         - TDMInst: [3]
         - StaggerU: [0]
         - LdsPadA: [-1]

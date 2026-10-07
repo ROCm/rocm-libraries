@@ -189,5 +189,13 @@ inline std::optional<std::string> tryGetDeviceString(hipStream_t stream, const c
     }
 }
 
+// The attention scale the kernels apply when the graph has no scale tensor:
+// attn_scale_value, or 1.0 (no scaling, cuDNN's default) when it is unset.
+template <typename SdpaAttrsT>
+float attnScaleOrDefault(const SdpaAttrsT& attrs)
+{
+    return attrs.attn_scale_value().value_or(1.0f);
+}
+
 } // namespace plan_utils
 } // namespace asm_sdpa_engine

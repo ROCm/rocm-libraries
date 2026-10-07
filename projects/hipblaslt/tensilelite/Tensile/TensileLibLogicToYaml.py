@@ -28,6 +28,7 @@ from .Common.GlobalParameters import defaultBenchmarkCommonParameters
 from .Common.Constants import HR
 from .SolutionStructs.Problem import _defaultProblemType as defaultProblemType
 from .Common.GlobalParameters import globalParameters
+from .ExecutionPolicy import normalize_execution_policy
 
 import argparse
 import os
@@ -176,7 +177,10 @@ def form9BitMIInst(currentSolutionState: dict) -> dict:
 
 
 def formForkParams(currentIndexSolution: dict, skipMI: bool) -> dict:
-
+    # Library logic may contain legacy selectors. Translate the raw solution
+    # before filtering against canonical tuning defaults, or persistence and
+    # work-queue controls would be silently discarded during extraction.
+    currentIndexSolution = normalize_execution_policy(currentIndexSolution)
     data = {}
     data["InitialSolutionParameters"] = None
     kernelLang = {}

@@ -68,7 +68,7 @@ namespace TensileLite
 
                 virtual bool operator()(Task const& task) const override
                 {
-                    if (task.solution.sizeMapping.streamK == 0)
+                    if (!task.solution.sizeMapping.isPersistent())
                     {
                         // For non-stream-k kernels, check if the launch grid would overflow the maximum number of work items
                         dim3 workGroupSize;
@@ -88,7 +88,7 @@ namespace TensileLite
 
                 virtual bool debugEval(Task const& task, std::ostream& stream) const override
                 {
-                    if (task.solution.sizeMapping.streamK == 0)
+                    if (!task.solution.sizeMapping.isPersistent())
                     {
                         // For non-stream-k kernels, check if the launch grid would overflow the maximum number of work items
                         dim3 workGroupSize;

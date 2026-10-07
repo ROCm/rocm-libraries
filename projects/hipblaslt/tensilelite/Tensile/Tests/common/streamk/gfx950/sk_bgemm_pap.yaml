@@ -37,8 +37,8 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - StreamK: [3]
-        - StreamKForceDPOnly: [0, 1]
+        - TileProcessingStrategy: [StreamK, DataParallel]
+        - WorkAssignment: [StaticGrid]
         - GlobalSplitU: [0]
         - WavefrontSize: [64]
         - DepthU: [64]

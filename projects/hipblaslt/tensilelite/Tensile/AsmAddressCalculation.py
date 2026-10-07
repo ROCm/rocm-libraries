@@ -28,6 +28,7 @@ from rocisa.instruction import MacroInstruction, SAddCU32, SAddU32, SAndB32, \
     VCmpEQU32, VCmpGtU32, VCmpLtU32, VCmpXNeU32, VCndMaskB32, VLShiftLeftB32, \
     VMadI32I24, VMovB32, VMulLOU32, VSubI32, VSubU32
 from rocisa.functions import vectorAddMultiplyBpe, vectorMultiply64Bpe
+from .ExecutionPolicy import isPersistent
 from .Common import INDEX_CHARS, DataDirection, log2
 
 ##############################################################################
@@ -381,7 +382,7 @@ class AddrCalculation:
                 comment="scale element by non-unit stride"))
             elementVgpr = addrVgpr
 
-        isSingleKernel = ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or kernel["StreamK"] > 0
+        isSingleKernel = ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or isPersistent(kernel)
         if ss.optSingleColVgpr:
             # This is first element in the first batch, create a byte address that will
             # be re-used by subsequent elements:
@@ -798,7 +799,7 @@ class AddrCalculation:
 
         laneSGPRCount = self.kernelWriter.states.laneSGPRCount
         module = Module("emitLdChange")
-        isSingleKernel = ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or kernel["StreamK"] > 0
+        isSingleKernel = ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or isPersistent(kernel)
         if kernel["BufferStore"]:
             module.add(self.emitScaleToBpe(kernel, ss, tmpVgpr, tmpSgpr, singleUpdate, tc, dim))
             if edge and (not kernel["StoreRemapVectorWidth"] or (kernel["StoreRemapVectorWidth"] and (beta or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"))) and \

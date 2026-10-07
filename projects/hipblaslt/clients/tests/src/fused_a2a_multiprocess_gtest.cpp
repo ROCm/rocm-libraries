@@ -168,30 +168,31 @@ namespace hipblaslt_bench
 
         // A failed launch still runs the rest of the iteration.
         bool           verified = true;
+        bool           cleared  = true;
         const uint32_t launches = rank_child_launches();
         for(uint32_t i = 0; i < launches && verified; ++i)
         {
-            // Peers write into this buffer from their own launch, so every rank
-            // has to finish clearing its buffer before any rank launches.
-            const bool cleared = hipMemsetAsync(res.dRecv, 0, recvBytes, res.stream) == hipSuccess
-                                 && hipStreamSynchronize(res.stream) == hipSuccess;
-            if(!agreement.agree(cleared, std::logical_and<>{}))
-            {
-                hipblaslt_cerr << "error: rank " << env.rank << " failed to clear before launch "
-                               << i << "\n";
-                verified = false;
-                break;
-            }
+            const uint32_t slice = i % kRecvSlices;
+            const bool     sliced
+                = hipblasLtFusedEpilogueSetAttribute(res.fused,
+                                                     HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS,
+                                                     res.recvPtrs[slice],
+                                                     arg.a2a_world * sizeof(res.recvPtrs[slice][0]))
+                  == HIPBLAS_STATUS_SUCCESS;
 
             launch(int64_t(i));
 
             const bool synced          = hipStreamSynchronize(res.stream) == hipSuccess;
-            const bool landedCorrectly = check_recv(env, arg, res, gold, landed);
-            const bool ok = synced && landedCorrectly && lastStatus == HIPBLAS_STATUS_SUCCESS;
+            const bool landedCorrectly = check_recv(env, arg, res, i, gold, landed);
+            const bool ok              = cleared && sliced && synced && landedCorrectly
+                            && lastStatus == HIPBLAS_STATUS_SUCCESS;
             if(!ok)
                 hipblaslt_cerr << "error: rank " << env.rank << " failed launch " << i << "\n";
 
             verified = agreement.agree(ok, std::logical_and<>{});
+
+            // Clears this launch's recv slice ahead of its next use.
+            cleared = hipMemsetAsync(res.dRecv[slice], 0, recvBytes, res.stream) == hipSuccess;
         }
 
         return verified ? kRankChildPassed : kRankChildFailed;

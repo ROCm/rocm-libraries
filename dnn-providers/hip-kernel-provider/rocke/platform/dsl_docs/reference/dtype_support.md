@@ -23,12 +23,18 @@ estimates, shipping order, and acceptance checklists are maintained separately.
 | **Out of scope** | Runtime/dispatch dtype validation, the provider's C-api surface, and any measurement. |
 | **Keeping it current** | When a dtype's support changes at any layer, update the affected row(s) and the §2.6 anchors in the same change. The criteria (§2.2) and rubric (§2.3) are the stable part; the scores are not. **Line anchors and the §4B atom tables are hand-maintained mirrors of the basis tree and go stale on rebase** — an arch entry gaining or losing atoms upstream silently invalidates §4B without touching this file. Re-check both against the new base before merging any rebase. |
 
+**TF32 coverage update.** The TF32 entries in §1, §4B, and §4D reflect the
+logical dtype and native gfx942 atoms added after the original basis snapshot.
+Other scores and source line numbers retain their stated historical basis.
+
 ---
 
 ## 1. The canonical dtype set
 
-rocKE's compiler knows exactly **10 scalar IR types**, defined identically in
-both engines:
+The original basis snapshot listed ten scalar IR types. The table below also
+includes the subsequently added logical TF32 type. For the newer logical
+low-bit and scale types, see [dtype storage and packing](../architecture/dtype_storage_packing.md).
+The definitions in both engines are:
 
 - Python: `platform/python/rocke/core/ir.py:43-52`
 - C++: `platform/cpp/include/rocke/ir.h:93-108`,
@@ -44,6 +50,7 @@ both engines:
 | `f16` | `half` | 16 | float |
 | `bf16` | `bfloat` | 16 | float |
 | `f32` | `float` | 32 | float |
+| `tf32` | `i32` (carrier) | 32 | logical float; native gfx942 XF32 input |
 | `fp8e4m3` | `i8` (storage) | 8 | float (OCP E4M3) |
 | `bf8e5m2` | `i8` (storage) | 8 | float (OCP E5M2) |
 
@@ -52,9 +59,10 @@ LLVM mapping: `lower_llvm.py:1093-1129` (Python, `_llvm_type`) ↔
 storage and materialized through `llvm.amdgcn.cvt.*` intrinsics — there is no
 native `<8 x fp8>` LLVM type in the emitter.
 
-**Sub-byte / block formats are NOT scalar IR types.** `i4`, `fp4`, `fp6`, and
-the `e8m0` MX scale exist only as *packed encodings* consumed by dedicated
-helpers/atoms, never as first-class `Type` objects (see §4).
+**Sub-byte / block formats in the original snapshot.** The basis tree treated
+`i4`, `fp4`, `fp6`, and the `e8m0` MX scale as packed encodings consumed by
+dedicated helpers/atoms. Those historical scores do not describe the newer
+logical-type and storage APIs linked above.
 
 > CK-Tile gives these formats named logical types backed by a packed storage
 > representation: `pk_fp4_t = pk_float4_e2m1_t`
@@ -67,15 +75,27 @@ helpers/atoms, never as first-class `Type` objects (see §4).
 > rocKE's dedicated packed-format paths can provide support without a first-class
 > IR `Type`; C5 separately measures whether kernel families accept the format.
 
-**Reduced-precision compute (the "tf32 request") is a mode, not a storage type.**
-It never appears as a tensor dtype: storage stays `f32` and the *precision* is
-reduced before the MMA. What is missing is the **mode itself**: no spec knob selects
-reduced-precision compute, so a caller's TF32 request cannot be expressed at all.
+**TF32 is a logical dtype with a 32-bit I32 carrier.** `tf32` and its `xf32`
+alias select two native gfx942 XF32 atoms independently of ordinary FP32
+selection. The logical type survives serialization; only A/B are bitcast to
+the intrinsic's float-vector ABI, while C/D remain FP32.
 
-Native XF32 is available on gfx942, a supported rocKE target, but absent on
-gfx950 and gfx1250 (§4D). The catalog has no XF32 atom, including on gfx942.
-Native instruction absence does not rule out software implementations of TF32
-semantics.
+`bitcast(value, TF32)` wraps an FP32 or I32 payload without rounding.
+`cvt_f32_to_tf32(value)` explicitly prepares FP32 inputs with round-to-nearest,
+ties-to-even; bitcasting back to F32 reinterprets the prepared bits. Generic
+TF32 scalar and vector arithmetic is rejected. Bitcasts, vector transport,
+selection, and the native atoms are supported. Direct global vector loads
+accept 2, 3, 4, or 8 TF32 elements; global vector stores accept 1, 2, 4, or 8.
+Both use the same alignment rules as I32. Payload width and address alignment
+are independent: underaligned HIP stores copy exactly the payload bytes, and
+target/alignment determine the machine transfer instructions.
+The fragment loader uses `storage_ir_type("tf32") == I32` and returns carriers
+that the caller wraps as logical TF32.
+
+Native XF32 is available on gfx942, but absent on gfx950 and gfx1250 (§4D).
+Production GEMM/convolution selectors and cross-target TF32 emulation remain
+outside this support. The [numerical probe](../../python/rocke/examples/gfx942/tf32_numerics/README.md)
+covers raw payloads, explicit RNE preparation, and ordinary FP32 controls.
 
 A **BF16 compute mode over `f32` storage** could convert operands to `bf16` and
 use existing bf16 MFMA/WMMA atoms. Its precision differs from TF32: the reference
@@ -85,14 +105,17 @@ of an `f32`, `GpuRefTypes.h:92-103`, gated by `USE_TF32`), while `bf16` keeps
 `1.0` in bf16. Widening validation tolerances does not make these contracts
 equivalent; `USE_TF32` output is not a bit-accuracy oracle for BF16 compute.
 
-The matrix below therefore labels this possible mode `bf16-mode`. No API selector
-or TF32-request mapping currently exists.
+The matrix below therefore labels this possible mode `bf16-mode`. It is separate
+from logical TF32; no production selector maps TF32 requests to BF16 compute.
 
 **Types that are entirely absent from the vocabulary:** `f64`, unsigned
 `u8/u16/u32/u64`, and a distinct `bool` (predicates reuse `i1`). No engine
 references them.
 
-Both engines define the same set of **10 scalar IR types**.
+TF32 source anchors: [Python type and builders](../../python/rocke/core/ir.py),
+[native type declarations](../../cpp/include/rocke/ir.h),
+[Python contracts](../../python/rocke/core/tf32.py), and
+[native contracts](../../cpp/include/rocke/tf32_internal.h).
 
 ---
 
@@ -162,6 +185,8 @@ planning questions and deliberately live outside this document (see
 
 Scores 0–3 per criterion; `—` = N/A (excluded from the denominator). Rows are
 grouped by type family, not ranked — see "What the scores are not" in §2.3.
+TF32 was added after this scored snapshot; its current layer boundaries are
+described in §1 and §4D rather than assigned a retrospective percentage here.
 
 Gap categories: **[C]** conversion gap · **[P]** partial/plumbing gap ·
 **[M]** missing entirely.
@@ -406,13 +431,13 @@ to gfx1251, so this is not a missing gfx1250 atom.
 
 `core/arch/data/arch_specs.json` is rocKE's architecture SSOT. An atom that is not
 declared there is unusable by any kernel regardless of what the silicon provides.
-Verbatim at the basis commit:
+The original basis snapshot, with the gfx942 XF32 addition noted below:
 
 | Arch | Declared matrix atoms | dtypes reachable |
 |---|---|---|
 | `gfx90a` | `mfma_f32_{16x16x16,32x32x8}_{f16,bf16}` | f16, bf16 |
-| `gfx942` | the gfx90a set + `mfma_f32_{16x16x4,32x32x2}_f32` + `mfma_f32_{16x16x32,32x32x16}_{fp8,bf8}` | f32, f16, bf16, fp8, bf8 |
-| `gfx950` | the gfx942 set + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_f32_16x16x128_fp4` + `mfma_f32_16x16x96_fp6` | f32, f16, bf16, fp8, bf8, **fp4, fp6** |
+| `gfx942` | the gfx90a set + `mfma_f32_{16x16x4,32x32x2}_f32` + `mfma_f32_{16x16x32,32x32x16}_{fp8,bf8}` + `mfma_f32_{16x16x8,32x32x4}_xf32` | f32, f16, bf16, fp8, bf8, **tf32** |
+| `gfx950` | the gfx942 set **excluding XF32** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_f32_16x16x128_fp4` + `mfma_f32_16x16x96_fp6` | f32, f16, bf16, fp8, bf8, **fp4, fp6** |
 | `gfx1151` | `wmma_f32_16x16x16_{f16,bf16}`, `wmma_i32_16x16x16_{iu8,iu4}` | f16, bf16, **iu8, iu4** |
 | `gfx1201` | `wmma_gfx12_f32_16x16x16_{f16,bf16}` | f16, bf16 |
 | `gfx1250` | `wmma_gfx1250_f32_16x16x4_f32`, `..._16x16x32_{f16,bf16}`, `..._16x16x64_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_scale_f32_16x16x128_fp8_fp8`, `wmma_scale16_f32_16x16x128_fp8_fp8` | f32, f16, bf16, fp8, bf8 (+ fp8 block-scaled) |
@@ -428,8 +453,8 @@ Verbatim at the basis commit:
 ### 4C. Deltas — silicon capability vs. rocKE's declared atoms
 
 The following gaps compare §4A with §4B. The first five concern atom declarations
-only; f64 (4C.6) also lacks an IR type. The gfx942 XF32 declaration gap is covered
-separately in §4D.
+only; f64 (4C.6) also lacks an IR type. The gfx942 XF32 declaration gap is now
+closed; §4D describes its logical dtype and remaining integration boundaries.
 
 #### 4C.1 gfx1250 — fp4/fp6/bf6 block-scaled atoms are omitted (deliberately)
 The part carries `V_WMMA_F32_16X16X128_F8F6F4`, a dedicated
@@ -478,11 +503,13 @@ gfx1250 has no native F64 matrix instruction and is excluded from this gap.
 | gfx1151 / gfx1201 (RDNA3.5 / RDNA4) | ❌ never present |
 | gfx1250 (CDNA5) | ❌ absent from the public XML and LLVM target features |
 
-**Consequence for rocKE.** gfx942 is a supported target: it has a catalog entry
-and block-scale GEMM accepts it for FP8/BF8. It provides native XF32, but rocKE
-does not declare XF32 atoms. gfx950/gfx1250 have no native XF32 instruction.
-See [§1](#1-the-canonical-dtype-set) for the distinction between native XF32,
-software TF32 implementations, and a BF16 compute mode.
+**Consequence for rocKE.** The gfx942 catalog declares
+`mfma_f32_16x16x8_xf32` and `mfma_f32_32x32x4_xf32`, with logical TF32 A/B and
+FP32 C/D. Both Python and C++ lowerers support them and reject these atoms on
+other targets. gfx950/gfx1250 have no native XF32 instruction. This atom support
+does not add production GEMM/convolution dispatch or cross-target emulation.
+See [§1](#1-the-canonical-dtype-set) for the distinction between logical TF32,
+raw payload wrapping, explicit RNE preparation, and a BF16 compute mode.
 
 ### 4E. The FP8 encoding dialect (FNUZ vs OCP)
 
