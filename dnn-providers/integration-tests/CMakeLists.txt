@@ -122,6 +122,14 @@ if(USE_ROCRAND AND NOT TARGET roc::rocrand)
     set(USE_ROCRAND OFF)
 endif()
 
+# FillInputs.cpp generates large inputs with rocRAND (DeviceInputFiller). Only that
+# file is built with USE_ROCRAND: rocrand.h declares a global `half`, which is
+# ambiguous in any file that also pulls in hipdnn_data_sdk::types::half unqualified.
+if(USE_ROCRAND)
+    set_source_files_properties(src/harness/input-init/FillInputs.cpp
+        PROPERTIES COMPILE_DEFINITIONS USE_ROCRAND)
+endif()
+
 include(Dependencies)
 fetch_gtest_dependency()
 
@@ -231,6 +239,7 @@ target_link_libraries(${GOLDEN_DATA_TESTS_EXE}
         hipdnn_plugin_sdk
         GTest::gtest
         Threads::Threads
+        $<$<BOOL:${USE_ROCRAND}>:roc::rocrand>
         $<$<PLATFORM_ID:Windows>:shlwapi>
 )
 
@@ -266,6 +275,7 @@ target_link_libraries(${INTEGRATION_TESTS_EXE}
         hipdnn_plugin_sdk
         GTest::gtest
         Threads::Threads
+        $<$<BOOL:${USE_ROCRAND}>:roc::rocrand>
         $<$<PLATFORM_ID:Windows>:shlwapi>
 )
 

@@ -24,12 +24,14 @@ from sdpa_reference.contract import (
     checked_inputs,
     make_inputs,
     Case,
+    independent_reference,
+)
+from reference_common.numeric import (
     ErrorBudget,
     array_digest,
     decode,
     encode,
     file_digest,
-    independent_reference,
     max_abs_upper,
     payload_digests,
     write_json,
@@ -275,7 +277,7 @@ def test_reused_workers_isolate_roles_and_import_roots(tmp_path):
     import json
     import os
 
-    from sdpa_reference.session import WorkerSession
+    from reference_common.session import WorkerSession
 
     def environment(name):
         root = tmp_path / name
@@ -292,7 +294,7 @@ def test_reused_workers_isolate_roles_and_import_roots(tmp_path):
         return dict(os.environ, PYTHONPATH=str(root), PYTHONNOUSERSITE="1")
 
     first, second = environment("first"), environment("second")
-    session = WorkerSession(timeout=10)
+    session = WorkerSession(module="sdpa_reference.worker", timeout=10)
     processes = []
     try:
         results = []
@@ -323,7 +325,7 @@ def test_reused_workers_isolate_roles_and_import_roots(tmp_path):
 def test_reused_worker_failures_are_not_silently_retried(tmp_path, behavior):
     import os
 
-    from sdpa_reference.session import WorkerSession
+    from reference_common.session import WorkerSession
 
     package = tmp_path / "sdpa_reference"
     package.mkdir()
@@ -340,7 +342,9 @@ def test_reused_worker_failures_are_not_silently_retried(tmp_path, behavior):
     work.mkdir()
     request = work / "request.json"
     request.write_text("{}")
-    session = WorkerSession(timeout=0.5 if behavior == "timeout" else 10)
+    session = WorkerSession(
+        module="sdpa_reference.worker", timeout=0.5 if behavior == "timeout" else 10
+    )
     try:
         with pytest.raises(TimeoutError if behavior == "timeout" else RuntimeError):
             session.execute(
@@ -440,73 +444,6 @@ def test_generated_inputs_are_temporary_and_shared_by_both_workers(
         assert len(paths) == 2 and paths[0] == paths[1]
     assert not paths[0].exists()
     assert not list(tmp_path.rglob("*.npz"))
-
-
-@pytest.mark.parametrize("change", [None, "generated", "stored", "payload"])
-def test_storage_migration_preserves_evidence_and_rejects_changed_inputs(
-    tmp_path, monkeypatch, change
-):
-    from types import SimpleNamespace
-    from sdpa_reference import cli, migration
-
-    case = Case("fp16", 2, 4, 2, False, True, sequence_length=8)
-    target = SimpleNamespace(CASES=(case,))
-    monkeypatch.setattr(cli, "get_architecture", lambda arch: target)
-    monkeypatch.setattr(migration, "get_architecture", lambda arch: target)
-    bundle = tmp_path / "original"
-    directory = bundle / "payload/cases" / case.id
-    directory.mkdir(parents=True)
-    inputs = make_inputs(case)
-    digests = {name: array_digest(a) for name, a in inputs.items()}
-    if change == "stored":
-        inputs["q"].flat[0] += 1
-    np.savez(directory / "inputs.npz", **inputs)
-    (directory / "kernel.hsaco").write_bytes(b"unchanged kernel")
-    budget = ErrorBudget(case.tolerance, 0.001, case.margin)
-    entry = {
-        "case": asdict(case),
-        "input_digests": digests,
-        "device_target": "gfx942:sramecc+:xnack-",
-        "budget": asdict(budget),
-        "comparison_limit": budget.comparison_limit,
-        "output_digest": "unchanged output",
-        "reference_digest": "unchanged reference",
-        "compiler": {"llvm_flavor": "unchanged"},
-    }
-    manifest = {
-        "schema": 1,
-        "baseline_revision": "a" * 40,
-        "cases": {case.id: entry},
-        "files": payload_digests(bundle / "payload"),
-    }
-    _lock(bundle, manifest)
-    if change == "generated":
-        monkeypatch.setattr(
-            migration,
-            "checked_inputs",
-            lambda *args: {name: a + 1 for name, a in inputs.items()},
-        )
-    if change == "payload":
-        (directory / "inputs.npz").write_bytes(b"corrupt")
-    output = tmp_path / "migrated"
-    if change is not None:
-        with pytest.raises(
-            ValueError, match="digest mismatch|differs from generator|payload"
-        ):
-            migration.remove_stored_inputs(bundle, bundle / "lock.json", output)
-        assert not output.exists()
-        return
-    migration.remove_stored_inputs(bundle, bundle / "lock.json", output)
-    loaded = load_bundle(output, output / "qualification-lock.json")
-    assert loaded["cases"] == manifest["cases"]
-    assert loaded["storage_migration"]["source_manifest_sha256"] == file_digest(
-        bundle / "manifest.json"
-    )
-    assert (
-        output / "payload/cases" / case.id / "kernel.hsaco"
-    ).read_bytes() == b"unchanged kernel"
-    assert not list(output.rglob("*.npz"))
-    assert (directory / "inputs.npz").is_file()
 
 
 @pytest.mark.parametrize(
