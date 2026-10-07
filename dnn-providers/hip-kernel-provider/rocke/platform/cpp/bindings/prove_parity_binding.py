@@ -745,7 +745,7 @@ def cfgs_gfx1151_wmma_fmha_fwd():
         for block in (32, 64)
         for waves in (1, 2)
     ]
-    return (
+    standard = (
         configs
         + transposed
         + [dict(config) for config in transposed if config["mask_mode"] == "causal"]
@@ -854,6 +854,72 @@ def cfgs_gfx1151_wmma_fmha_fwd():
                 ("dense", 0, 64, "none", False, False, "q", "", 0, "bf16"),
             )
         ]
+    )
+    # (dict, arch) pairs aligned with the standalone emitter indices: 0..135 at
+    # gfx1151, 136..142 replay representative configs at gfx11-generic, and
+    # 143..156 exercise runtime_head_dims on gfx1151 and both generic targets.
+    flag_fields = (
+        ("t", "query_tail"),
+        ("t", "kv_tail"),
+        ("l", "v_lds_stage"),
+        ("s", "use_softcap"),
+        ("k", "use_sinks"),
+        ("a", "use_alibi"),
+        ("q", "use_qq_bias"),
+        ("c", "causal_tile_skip"),
+    )
+    rtdim = [
+        (
+            dict(
+                head_size=head,
+                v_head_size=v_head,
+                dtype=dtype,
+                mask_mode=mask,
+                layout=layout,
+                page_block_size=page,
+                kv_dtype="fp8e4m3" if "8" in flags else "",
+                use_attn_bias=bool(bias),
+                bias_dtype=bias or "f32",
+                runtime_head_dims=True,
+                **{field: flag in flags for flag, field in flag_fields},
+            ),
+            arch,
+        )
+        for (arch, dtype, head, v_head, mask, flags, layout, page, bias) in (
+            ("gfx1151", "fp16", 64, 0, "none", "", "dense", 0, ""),
+            ("gfx1151", "bf16", 128, 0, "causal", "tlc", "dense", 0, ""),
+            ("gfx1151", "fp16", 256, 0, "none", "l", "dense", 0, ""),
+            ("gfx1151", "fp16", 128, 64, "window", "t", "dense", 0, ""),
+            ("gfx1151", "fp16", 128, 0, "window", "tl", "dense", 0, "f32"),
+            ("gfx1151", "fp16", 128, 0, "causal", "t8", "paged", 16, ""),
+            ("gfx1151", "bf16", 64, 0, "window", "tlskaq", "ragged", 0, "q"),
+            ("gfx11-generic", "fp16", 128, 0, "causal", "tl", "dense", 0, ""),
+            ("gfx11-generic", "bf16", 256, 128, "none", "", "dense", 0, "f32"),
+            ("gfx12-generic", "fp16", 128, 0, "causal", "tl", "dense", 0, ""),
+            ("gfx12-generic", "bf16", 128, 64, "window", "t", "dense", 0, "f32"),
+            ("gfx12-generic", "fp16", 256, 0, "causal", "tl8", "paged", 32, ""),
+            ("gfx12-generic", "fp16", 64, 0, "none", "", "dense", 0, ""),
+            ("gfx12-generic", "bf16", 192, 0, "window", "tska", "ragged", 0, ""),
+        )
+    ]
+    # Emitter replay index 85 is the BF16 D128 causal bn64/w2 transposed config,
+    # which this list's FP16-only transposed rows do not carry at index 85.
+    replay = [dict(standard[index]) for index in (0, 70)]
+    replay.append(
+        dict(
+            head_size=128,
+            dtype="bf16",
+            mask_mode="causal",
+            transposed_qk=True,
+            block_n=64,
+            num_waves=2,
+        )
+    )
+    replay += [dict(standard[index]) for index in (115, 123, 128, 133)]
+    return (
+        [(dict(config), "gfx1151") for config in standard]
+        + [(config, "gfx11-generic") for config in replay]
+        + rtdim
     )
 
 
@@ -1952,7 +2018,7 @@ FAMILIES = [
         "gfx1151_wmma_fmha_fwd",
         "gfx1151_wmma_fmha_fwd_lower_llvm",
         cfgs_gfx1151_wmma_fmha_fwd(),
-        "gfx1151",
+        None,
     ),
     (
         "gfx1201_wmma_gemm",

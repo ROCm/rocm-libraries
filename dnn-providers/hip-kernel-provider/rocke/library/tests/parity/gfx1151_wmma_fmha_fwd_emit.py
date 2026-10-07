@@ -4,12 +4,14 @@
 #
 # tests/parity/gfx1151_wmma_fmha_fwd_emit.py -- Python reference emitter for the
 # gfx1151 (RDNA3.5 / Strix Halo) WMMA FMHA forward instance parity harness.
-# Selects one of 143 sampled configurations by argv[1] (0..142), builds it
+# Selects one of 157 sampled configurations by argv[1] (0..156), builds it
 # via build_wmma_fmha_fwd(arch=<cfg arch>) and prints
 # lower_kernel_to_llvm(kernel, arch=<cfg arch>) to stdout so it can be
 # byte-compared with the C emitter gfx1151_wmma_fmha_fwd_emit.c. Configs 0..135
 # use gfx1151; 136..142 replay representative configs at gfx11-generic, whose
 # output must equal the replayed config's (one kernel set for every gfx11).
+# Configs 143..156 exercise runtime_head_dims on gfx1151, gfx11-generic and
+# gfx12-generic.
 from dataclasses import replace
 
 from kernels.gfx1151.wmma_fmha_fwd import WmmaFmhaFwdSpec, build_wmma_fmha_fwd
@@ -43,10 +45,58 @@ _ATTN_BIAS_CASES = (
 # distinct V width, additive bias, and D256 output-column tiling.
 _GENERIC_REPLAY = (0, 70, 85, 115, 123, 128, 133)
 
+_RTDIM_BASE = 136 + len(_GENERIC_REPLAY)
+_RTDIM_CASES = (
+    # arch, dtype, head_size, v_head_size, mask, flags, layout, page, bias dtype
+    # ("" = none). Flags: t=query/kv tails, l=v_lds_stage, 8=fp8 KV,
+    # c=causal_tile_skip, s=softcap, k=sinks, a=alibi, q=qq_bias.
+    ("gfx1151", "fp16", 64, 0, "none", "", "dense", 0, ""),
+    ("gfx1151", "bf16", 128, 0, "causal", "tlc", "dense", 0, ""),
+    ("gfx1151", "fp16", 256, 0, "none", "l", "dense", 0, ""),
+    ("gfx1151", "fp16", 128, 64, "window", "t", "dense", 0, ""),
+    ("gfx1151", "fp16", 128, 0, "window", "tl", "dense", 0, "f32"),
+    ("gfx1151", "fp16", 128, 0, "causal", "t8", "paged", 16, ""),
+    ("gfx1151", "bf16", 64, 0, "window", "tlskaq", "ragged", 0, "q"),
+    ("gfx11-generic", "fp16", 128, 0, "causal", "tl", "dense", 0, ""),
+    ("gfx11-generic", "bf16", 256, 128, "none", "", "dense", 0, "f32"),
+    ("gfx12-generic", "fp16", 128, 0, "causal", "tl", "dense", 0, ""),
+    ("gfx12-generic", "bf16", 128, 64, "window", "t", "dense", 0, "f32"),
+    ("gfx12-generic", "fp16", 256, 0, "causal", "tl8", "paged", 32, ""),
+    ("gfx12-generic", "fp16", 64, 0, "none", "", "dense", 0, ""),
+    ("gfx12-generic", "bf16", 192, 0, "window", "tska", "ragged", 0, ""),
+)
+
+
+def _rtdim_spec(case) -> WmmaFmhaFwdSpec:
+    _arch, dtype, head, v_head, mask, flags, layout, page, bias = case
+    return WmmaFmhaFwdSpec(
+        head_size=head,
+        v_head_size=v_head,
+        dtype=dtype,
+        mask_mode=mask,
+        query_tail="t" in flags,
+        kv_tail="t" in flags,
+        v_lds_stage="l" in flags,
+        layout=layout,
+        page_block_size=page,
+        kv_dtype="fp8e4m3" if "8" in flags else "",
+        use_attn_bias=bool(bias),
+        bias_dtype=bias or "f32",
+        use_softcap="s" in flags,
+        use_sinks="k" in flags,
+        use_alibi="a" in flags,
+        use_qq_bias="q" in flags,
+        causal_tile_skip="c" in flags,
+        runtime_head_dims=True,
+    )
+
 
 def _spec_and_arch(idx: int):
-    if 136 <= idx < 136 + len(_GENERIC_REPLAY):
+    if 136 <= idx < _RTDIM_BASE:
         return _spec(_GENERIC_REPLAY[idx - 136]), "gfx11-generic"
+    if _RTDIM_BASE <= idx < _RTDIM_BASE + len(_RTDIM_CASES):
+        case = _RTDIM_CASES[idx - _RTDIM_BASE]
+        return _rtdim_spec(case), case[0]
     return _spec(idx), "gfx1151"
 
 
@@ -271,7 +321,7 @@ def main() -> int:
     return run_emit(
         _spec_and_arch,
         build_wmma_fmha_fwd,
-        usage="usage: gfx1151_wmma_fmha_fwd_emit.py <config_index 0..142>\n",
+        usage="usage: gfx1151_wmma_fmha_fwd_emit.py <config_index 0..156>\n",
     )
 
 

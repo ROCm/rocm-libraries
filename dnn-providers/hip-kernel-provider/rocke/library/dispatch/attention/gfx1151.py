@@ -42,11 +42,12 @@ from .common import (
     _selector_matches,
 )
 
-# v5 composes the runtime-shape-generic base ABI (including runtime windows and
+# v6 composes the runtime-shape-generic base ABI (including runtime windows and
 # runtime-gated LSE) with unequal Q/V widths, causal tile skipping, additive
-# attention bias, output-column tiling, and the expanded multiple-of-16 catalog.
-# Callers compiled against any earlier header must be rebuilt.
-ATTENTION_GFX1151_ABI = "rocke-attention-gfx1151/v5"
+# attention bias, output-column tiling, opt-in runtime head widths and V head
+# counts, and the expanded multiple-of-16 catalog. Callers compiled against any
+# earlier header must be rebuilt.
+ATTENTION_GFX1151_ABI = "rocke-attention-gfx1151/v6"
 
 # Compute units of the reference gfx1151 part, where the output-column tiling
 # gate was tuned. Used only when the request names no count and no device of the

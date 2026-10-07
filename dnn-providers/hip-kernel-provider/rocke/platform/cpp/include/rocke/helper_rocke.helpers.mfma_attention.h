@@ -262,6 +262,18 @@ typedef struct rocke_mfma_attn_params
     int wmma_value_tile_size; /* 0 => full PV/output head; QK always uses head_size */
     rocke_value_t* wmma_value_offset; /* optional first V/O column, in elements */
     int wmma_v_head_size; /* 0 => V/O width equals head_size; wave32 only */
+    rocke_value_t* wmma_v_head_idx; /* NULL => kv_head_idx addresses V; wave32 only */
+    /* Optional runtime i32 widths (multiples of 16, >= 16) inside head_size and
+     * the V head: Q/K tiles past wmma_head_dim_q read zeros, V/O columns past
+     * wmma_head_dim_v are never stored. Set both or neither; wave32 only, no
+     * output-column tiling. */
+    rocke_value_t* wmma_head_dim_q;
+    rocke_value_t* wmma_head_dim_v;
+    /* Optional bounded buffer resources over the batch's K / V (dense 16-bit
+     * KV with runtime head widths): every head-dim tile loads at a constant
+     * byte offset from one per-row base; bytes past the extent read zero. */
+    rocke_value_t* wmma_k_rsrc;
+    rocke_value_t* wmma_v_rsrc;
     rocke_value_t* lse; /* optional FP32 log-sum-exp output */
     rocke_value_t* write_lse; /* runtime i32 output gate */
     rocke_value_t* stride_lse_token;

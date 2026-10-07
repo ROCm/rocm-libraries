@@ -2,11 +2,13 @@
  * SPDX-License-Identifier: MIT
  *
  * tests/parity/gfx1151_wmma_fmha_fwd_emit.c -- C-side emitter for the gfx1151
- * WMMA FMHA forward parity harness. Selects one of 143 configurations
- * by argv[1] (0..142), builds it exactly as the
+ * WMMA FMHA forward parity harness. Selects one of 157 configurations
+ * by argv[1] (0..156), builds it exactly as the
  * Python emitter gfx1151_wmma_fmha_fwd_emit.py does, and lowers to LLVM .ll
  * text (flavor AUTO) so the two outputs can be byte-compared. Configs 0..135
- * use arch=gfx1151; 136..142 replay representative configs at gfx11-generic.
+ * use arch=gfx1151; 136..142 replay representative configs at gfx11-generic;
+ * 143..156 exercise runtime_head_dims on gfx1151, gfx11-generic and
+ * gfx12-generic.
  *
  * Build flow (mirrors the Python build_wmma_fmha_fwd path):
  *   (1) rocke_ir_builder_init(b, spec.kernel_name())
@@ -257,11 +259,67 @@ static const int k_generic_replay[] = {0, 70, 85, 115, 123, 128, 133};
 #define GENERIC_REPLAY_BASE 136
 #define GENERIC_REPLAY_COUNT ((int)(sizeof k_generic_replay / sizeof k_generic_replay[0]))
 
+/* Configs 143..156: runtime_head_dims (mirrors the Python emitter's
+ * _RTDIM_CASES). Flags: t=query/kv tails, l=v_lds_stage, 8=fp8 KV,
+ * c=causal_tile_skip, s=softcap, k=sinks, a=alibi, q=qq_bias. */
+struct rtdim_case
+{
+    const char* arch;
+    const char* dtype;
+    int head, v_head;
+    rocke_fmha_mask_mode_t mask;
+    const char* flags;
+    const char* layout;
+    int page;
+    const char* bias; /* "" => no attention bias */
+};
+static const struct rtdim_case k_rtdim_cases[] = {
+    {"gfx1151", "fp16", 64, 0, ROCKE_FMHA_MASK_NONE, "", "dense", 0, ""},
+    {"gfx1151", "bf16", 128, 0, ROCKE_FMHA_MASK_CAUSAL, "tlc", "dense", 0, ""},
+    {"gfx1151", "fp16", 256, 0, ROCKE_FMHA_MASK_NONE, "l", "dense", 0, ""},
+    {"gfx1151", "fp16", 128, 64, ROCKE_FMHA_MASK_SLIDING_WINDOW, "t", "dense", 0, ""},
+    {"gfx1151", "fp16", 128, 0, ROCKE_FMHA_MASK_SLIDING_WINDOW, "tl", "dense", 0, "f32"},
+    {"gfx1151", "fp16", 128, 0, ROCKE_FMHA_MASK_CAUSAL, "t8", "paged", 16, ""},
+    {"gfx1151", "bf16", 64, 0, ROCKE_FMHA_MASK_SLIDING_WINDOW, "tlskaq", "ragged", 0, "q"},
+    {"gfx11-generic", "fp16", 128, 0, ROCKE_FMHA_MASK_CAUSAL, "tl", "dense", 0, ""},
+    {"gfx11-generic", "bf16", 256, 128, ROCKE_FMHA_MASK_NONE, "", "dense", 0, "f32"},
+    {"gfx12-generic", "fp16", 128, 0, ROCKE_FMHA_MASK_CAUSAL, "tl", "dense", 0, ""},
+    {"gfx12-generic", "bf16", 128, 64, ROCKE_FMHA_MASK_SLIDING_WINDOW, "t", "dense", 0, "f32"},
+    {"gfx12-generic", "fp16", 256, 0, ROCKE_FMHA_MASK_CAUSAL, "tl8", "paged", 32, ""},
+    {"gfx12-generic", "fp16", 64, 0, ROCKE_FMHA_MASK_NONE, "", "dense", 0, ""},
+    {"gfx12-generic", "bf16", 192, 0, ROCKE_FMHA_MASK_SLIDING_WINDOW, "tska", "ragged", 0, ""},
+};
+#define RTDIM_BASE (GENERIC_REPLAY_BASE + GENERIC_REPLAY_COUNT)
+#define RTDIM_COUNT ((int)(sizeof k_rtdim_cases / sizeof k_rtdim_cases[0]))
+
+static void make_rtdim_spec(const struct rtdim_case* c, rocke_wmma_fmha_fwd_spec_t* spec)
+{
+    *spec = rocke_wmma_fmha_fwd_spec_default();
+    spec->head_size = c->head;
+    spec->v_head_size = c->v_head;
+    spec->dtype = c->dtype;
+    spec->mask_mode = c->mask;
+    spec->query_tail = strchr(c->flags, 't') != NULL;
+    spec->kv_tail = strchr(c->flags, 't') != NULL;
+    spec->v_lds_stage = strchr(c->flags, 'l') != NULL;
+    spec->layout = c->layout;
+    spec->page_block_size = c->page;
+    spec->kv_dtype = strchr(c->flags, '8') != NULL ? "fp8e4m3" : "";
+    spec->use_attn_bias = c->bias[0] != '\0';
+    spec->bias_dtype = c->bias[0] != '\0' ? c->bias : "f32";
+    spec->use_softcap = strchr(c->flags, 's') != NULL;
+    spec->use_sinks = strchr(c->flags, 'k') != NULL;
+    spec->use_alibi = strchr(c->flags, 'a') != NULL;
+    spec->use_qq_bias = strchr(c->flags, 'q') != NULL;
+    spec->causal_tile_skip = strchr(c->flags, 'c') != NULL;
+    spec->runtime_head_dims = true;
+}
+
 int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..142>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..156>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);
@@ -276,7 +334,13 @@ int main(int argc, char** argv)
     }
 
     rocke_wmma_fmha_fwd_spec_t spec;
-    if(make_spec(spec_idx, &spec) != 0)
+    if(idx >= RTDIM_BASE && idx < RTDIM_BASE + RTDIM_COUNT)
+    {
+        const struct rtdim_case* c = &k_rtdim_cases[idx - RTDIM_BASE];
+        make_rtdim_spec(c, &spec);
+        arch = c->arch;
+    }
+    else if(make_spec(spec_idx, &spec) != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;

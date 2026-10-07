@@ -104,6 +104,12 @@ static bool wmma_valid_value_tile(const rocke_wmma_fmha_fwd_spec_t* spec)
                    && !spec->transposed_qk));
 }
 
+/* runtime_head_dims runs the standard path without output-column tiling. */
+static bool wmma_valid_runtime_dims(const rocke_wmma_fmha_fwd_spec_t* spec)
+{
+    return !spec->runtime_head_dims || (!spec->transposed_qk && spec->value_tile_size == 0);
+}
+
 /* Window masking is emitted by this adapter's runtime-bound score transform. */
 static rocke_attn_mask_mode_t wmma_to_attn_mask(rocke_fmha_mask_mode_t m)
 {
@@ -139,6 +145,7 @@ rocke_wmma_fmha_fwd_spec_t rocke_wmma_fmha_fwd_spec_default(void)
     s.v_head_size = 0;
     s.use_attn_bias = false;
     s.bias_dtype = "f32";
+    s.runtime_head_dims = false;
     return s;
 }
 
@@ -157,7 +164,7 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
 
     if(spec == NULL || out == NULL || dtype == NULL || !wmma_valid_layout(spec)
        || !wmma_valid_kv_dtype(spec) || !rocke_scheduler_strategy_is_valid(spec->scheduler_strategy)
-       || !wmma_valid_value_tile(spec))
+       || !wmma_valid_value_tile(spec) || !wmma_valid_runtime_dims(spec))
     {
         return ROCKE_ERR_VALUE;
     }
@@ -215,16 +222,18 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
     }
     if(spec->use_attn_bias)
         parts[num_parts++] = wmma_bias_is_q(spec) ? "abias_q" : "abias_f32";
-    const char* flag_names[] = {"qtail", "kvtail", "softcap", "sinks", "alibi", "qqbias", "cskip"};
+    const char* flag_names[]
+        = {"qtail", "kvtail", "softcap", "sinks", "alibi", "qqbias", "cskip", "rtdim"};
     const int flag_on[] = {spec->query_tail || packed,
                            spec->kv_tail || packed,
                            spec->use_softcap,
                            spec->use_sinks,
                            spec->use_alibi,
                            spec->use_qq_bias,
-                           spec->causal_tile_skip};
+                           spec->causal_tile_skip,
+                           spec->runtime_head_dims};
     return rocke_kernel_name_join(
-        name, parts, num_parts, flag_names, flag_on, 7, out, out_cap, NULL);
+        name, parts, num_parts, flag_names, flag_on, 8, out, out_cap, NULL);
 }
 
 /* --------------------------------------------------------------------------- *
@@ -328,6 +337,14 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
     else if(spec->block_n != 32 || spec->num_waves != 1)
     {
         wmma_set_reason(reason, reason_cap, "block_n and num_waves are transposed-QK options");
+        return false;
+    }
+    if(!wmma_valid_runtime_dims(spec))
+    {
+        wmma_set_reason(reason,
+                        reason_cap,
+                        "runtime_head_dims requires the standard path without output-column "
+                        "tiling");
         return false;
     }
 
@@ -465,6 +482,12 @@ static void wmma_declare_params(rocke_ir_builder_t* b, const rocke_wmma_fmha_fwd
     (void)rocke_b_param(b, "stride_lse_batch", rocke_i32(), NULL);
     (void)rocke_b_param(b, "stride_lse_token", rocke_i32(), NULL);
     (void)rocke_b_param(b, "stride_lse_head", rocke_i32(), NULL);
+    if(spec->runtime_head_dims)
+    {
+        (void)rocke_b_param(b, "head_dim_q", rocke_i32(), NULL);
+        (void)rocke_b_param(b, "head_dim_v", rocke_i32(), NULL);
+        (void)rocke_b_param(b, "num_v_heads", rocke_i32(), NULL);
+    }
 
     if(spec->use_softcap)
         (void)rocke_b_param(b, "softcap", rocke_f32(), NULL);
@@ -727,6 +750,14 @@ static rocke_status_t
     rocke_value_t* group_size = rocke_b_div(
         b, rocke_b_get_param(b, "num_query_heads"), rocke_b_get_param(b, "num_kv_heads"));
     rocke_value_t* kv_head = rocke_b_div(b, head, group_size);
+    rocke_value_t* v_head = kv_head;
+    if(spec->runtime_head_dims)
+    {
+        /* V may carry its own head count (any Hv dividing Hq). */
+        rocke_value_t* v_group = rocke_b_div(
+            b, rocke_b_get_param(b, "num_query_heads"), rocke_b_get_param(b, "num_v_heads"));
+        v_head = rocke_b_div(b, head, v_group);
+    }
     rocke_value_t* seqlen_q = rocke_b_get_param(b, "seqlen_q");
     rocke_value_t* seqlen_k = rocke_b_get_param(b, "seqlen_k");
     rocke_value_t* q_row0 = rocke_b_mul(b, q_tile, q_step);
@@ -835,6 +866,12 @@ static rocke_status_t
     p.wmma_value_tile_size = spec->value_tile_size;
     p.wmma_value_offset = value_offset;
     p.wmma_v_head_size = spec->v_head_size;
+    if(spec->runtime_head_dims)
+    {
+        p.wmma_v_head_idx = v_head;
+        p.wmma_head_dim_q = rocke_b_get_param(b, "head_dim_q");
+        p.wmma_head_dim_v = rocke_b_get_param(b, "head_dim_v");
+    }
     p.lse = LSE;
     p.write_lse = rocke_b_get_param(b, "write_lse");
     p.stride_lse_token = rocke_b_get_param(b, "stride_lse_token");
@@ -946,7 +983,7 @@ static rocke_status_t
                    page_mask,
                    rocke_b_get_param(b, "stride_v_block"),
                    p.stride_v_token,
-                   rocke_b_mul(b, kv_head, p.stride_v_head)};
+                   rocke_b_mul(b, v_head, p.stride_v_head)};
         p.k_row_base_fn = wmma_paged_row;
         p.k_row_base_user = &paged_k;
         p.v_row_base_fn = wmma_paged_row;
@@ -958,6 +995,31 @@ static rocke_status_t
         p.kv_dtype = spec->kv_dtype;
         p.k_scale = rocke_b_get_param(b, "k_scale");
         p.v_scale = rocke_b_get_param(b, "v_scale");
+    }
+
+    /* Dense runtime-head-dim 16-bit K/V: bounded buffer resources spanning this
+     * batch's rows, extent (seqlen_k - 1) * stride_token + (heads - 1) *
+     * stride_head + head_dim elements, flagless-shifted to bytes. Mirrors
+     * Python _bounded_kv_rsrcs op for op. */
+    if(spec->runtime_head_dims && !packed && spec->kv_dtype[0] == '\0')
+    {
+        rocke_value_t* one = rocke_b_const_i32(b, 1);
+        const auto rsrc = [&](rocke_value_t* pointer,
+                              const char* stride_token,
+                              const char* stride_head,
+                              const char* heads,
+                              const char* head_dim) {
+            rocke_value_t* token_rows = rocke_b_sub(b, seqlen_k, one);
+            rocke_value_t* rows = rocke_b_mul(b, token_rows, rocke_b_get_param(b, stride_token));
+            rocke_value_t* head_rows = rocke_b_sub(b, rocke_b_get_param(b, heads), one);
+            rocke_value_t* head_span = rocke_b_mul(b, head_rows, rocke_b_get_param(b, stride_head));
+            rocke_value_t* span = rocke_b_add(b, rows, head_span);
+            rocke_value_t* elems = rocke_b_add(b, span, rocke_b_get_param(b, head_dim));
+            rocke_value_t* bytes = rocke_b_shl(b, elems, one);
+            return rocke_b_buffer_rsrc(b, pointer, bytes);
+        };
+        p.wmma_k_rsrc = rsrc(p.K, "stride_k_token", "stride_k_head", "num_kv_heads", "head_dim_q");
+        p.wmma_v_rsrc = rsrc(p.V, "stride_v_token", "stride_v_head", "num_v_heads", "head_dim_v");
     }
 
     if(spec->transposed_qk)

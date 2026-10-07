@@ -80,9 +80,10 @@ class WmmaFmhaFwdSpec:
 
     ``head_size`` and the optional distinct ``v_head_size`` are the only
     problem dimensions specialized into the code object; both are multiples of
-    16 in ``[16, 256]``. Batch, sequence lengths, query/KV head counts, tensor
-    strides, bottom-right alignment, LSE selection, and window bounds are
-    kernel arguments so one AOT object serves all matching runtime shapes.
+    16 in ``[16, 256]`` (maxima under ``runtime_head_dims``). Batch, sequence
+    lengths, query/KV head counts, tensor strides, bottom-right alignment, LSE
+    selection, and window bounds are kernel arguments so one AOT object serves
+    all matching runtime shapes.
     ``mask_mode`` selects unmasked, causal, or arbitrary diagonal-band masking;
     the latter consumes runtime ``window_left``/``window_right``.
     """
@@ -117,6 +118,12 @@ class WmmaFmhaFwdSpec:
     # runtime args (0 broadcasts). ``bias_dtype`` is "f32" or "q" (the Q dtype).
     use_attn_bias: bool = False
     bias_dtype: str = "f32"
+    # Serve runtime head widths inside one compiled bucket: ``head_size`` and the
+    # V width become maxima, and ``head_dim_q``/``head_dim_v``/``num_v_heads``
+    # I32 arguments follow the LSE strides. Head-dim tiles past ``head_dim_q``
+    # contribute zero to QK; V/O columns past ``head_dim_v`` are never stored.
+    # V heads are ``head / (num_query_heads / num_v_heads)``.
+    runtime_head_dims: bool = False
 
     def __post_init__(self) -> None:
         from rocke.core.codegen_policy import normalize_scheduler_strategy
@@ -207,6 +214,11 @@ class WmmaFmhaFwdSpec:
                 )
         elif self.block_n != 32 or self.num_waves != 1:
             raise ValueError("block_n and num_waves are transposed-QK options")
+        if self.runtime_head_dims and (self.transposed_qk or self.value_tile_size):
+            raise ValueError(
+                "runtime_head_dims requires the standard path without "
+                "output-column tiling"
+            )
 
     @property
     def v_dim(self) -> int:
@@ -255,6 +267,7 @@ class WmmaFmhaFwdSpec:
                 "alibi": self.use_alibi,
                 "qqbias": self.use_qq_bias,
                 "cskip": self.causal_tile_skip,
+                "rtdim": self.runtime_head_dims,
             },
         )
 
@@ -362,6 +375,9 @@ def _declare_params(b: IRBuilder, spec: WmmaFmhaFwdSpec):
     params["stride_lse_batch"] = b.param("stride_lse_batch", I32)
     params["stride_lse_token"] = b.param("stride_lse_token", I32)
     params["stride_lse_head"] = b.param("stride_lse_head", I32)
+    if spec.runtime_head_dims:
+        for name in ("head_dim_q", "head_dim_v", "num_v_heads"):
+            params[name] = b.param(name, I32)
     if spec.use_softcap:
         params["softcap"] = b.param("softcap", F32)
     if spec.use_sinks:
@@ -573,13 +589,13 @@ def _window_tiles(
     return start, stop
 
 
-def _paged_rows(b, spec, params, batch, kv_head):
+def _paged_rows(b, spec, params, batch, kv_head, v_head):
     page_log2 = b.const_i32(spec.page_block_size.bit_length() - 1)
     page_mask = b.const_i32(spec.page_block_size - 1)
     table_row = b.mul(batch, params["block_table_stride"])
 
-    def rows(stride_block, stride_token, stride_head):
-        head_offset = b.mul(kv_head, stride_head)
+    def rows(head, stride_block, stride_token, stride_head):
+        head_offset = b.mul(head, stride_head)
 
         def row(b, token):
             logical_block = b.lshr(token, page_log2)
@@ -599,11 +615,40 @@ def _paged_rows(b, spec, params, batch, kv_head):
 
     return (
         rows(
-            params["stride_k_block"], params["stride_k_token"], params["stride_k_head"]
+            kv_head,
+            params["stride_k_block"],
+            params["stride_k_token"],
+            params["stride_k_head"],
         ),
         rows(
-            params["stride_v_block"], params["stride_v_token"], params["stride_v_head"]
+            v_head,
+            params["stride_v_block"],
+            params["stride_v_token"],
+            params["stride_v_head"],
         ),
+    )
+
+
+def _bounded_kv_rsrcs(b, params, K, V, seqlen_k):
+    """Dense runtime-head-dim K/V buffer resources spanning this batch's rows.
+
+    The extent ends at the last live element, ``(seqlen_k - 1) * stride_token
+    + (heads - 1) * stride_head + head_dim`` (strides are non-negative), so
+    constant-offset tile loads past a runtime head width either stay inside
+    the caller's tensor or read zero. Element offsets fit I32, so the flagless
+    byte shift fits the unsigned 32-bit ``num_records``.
+    """
+    one = b.const_i32(1)
+
+    def rsrc(pointer, tensor, heads, head_dim):
+        rows = b.mul(b.sub(seqlen_k, one), params[f"stride_{tensor}_token"])
+        head_span = b.mul(b.sub(heads, one), params[f"stride_{tensor}_head"])
+        elems = b.add(b.add(rows, head_span), head_dim)
+        return b.buffer_rsrc(pointer, b.shl(elems, one))
+
+    return (
+        rsrc(K, "k", params["num_kv_heads"], params["head_dim_q"]),
+        rsrc(V, "v", params["num_v_heads"], params["head_dim_v"]),
     )
 
 
@@ -659,6 +704,11 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
     # Runtime GQA: one AOT object serves every integral Hq/Hkv ratio.
     group_size = b.div(p["num_query_heads"], p["num_kv_heads"])
     kv_head = b.div(head, group_size)
+    v_head = kv_head
+    if spec.runtime_head_dims:
+        # V may carry its own head count (any Hv dividing Hq).
+        v_group = b.div(p["num_query_heads"], p["num_v_heads"])
+        v_head = b.div(head, v_group)
     seqlen_q = p["seqlen_q"]
     seqlen_k = p["seqlen_k"]
     q_row0 = b.mul(q_tile, q_step)
@@ -740,7 +790,10 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
         )
     k_row, v_row = (None, None)
     if spec.layout == "paged":
-        k_row, v_row = _paged_rows(b, spec, p, batch, kv_head)
+        k_row, v_row = _paged_rows(b, spec, p, batch, kv_head, v_head)
+    k_rsrc = v_rsrc = None
+    if spec.runtime_head_dims and spec.layout == "dense" and not spec.kv_dtype:
+        k_rsrc, v_rsrc = _bounded_kv_rsrcs(b, p, K, V, seqlen_k)
 
     common_lse = {
         "lse": LSE,
@@ -821,6 +874,11 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
         wmma_value_tile_size=spec.value_tile_size,
         wmma_value_offset=value_offset,
         wmma_v_head_size=spec.v_head_size,
+        wmma_v_head_idx=v_head if spec.runtime_head_dims else None,
+        wmma_head_dim_q=p.get("head_dim_q"),
+        wmma_head_dim_v=p.get("head_dim_v"),
+        wmma_k_rsrc=k_rsrc,
+        wmma_v_rsrc=v_rsrc,
         extra_score_transform=score_transform,
         sink_log2=sink,
         k_tile_start=tile_start,

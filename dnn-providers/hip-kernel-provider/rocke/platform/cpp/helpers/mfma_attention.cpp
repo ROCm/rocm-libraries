@@ -374,6 +374,12 @@ rocke_status_t rocke_mfma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "a distinct WMMA V head size requires a wave32 target");
         return ROCKE_ERR_VALUE;
     }
+    if(p->wmma_v_head_idx != NULL || p->wmma_head_dim_q != NULL || p->wmma_head_dim_v != NULL
+       || p->wmma_k_rsrc != NULL || p->wmma_v_rsrc != NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "runtime WMMA head dims require a wave32 target");
+        return ROCKE_ERR_VALUE;
+    }
     if(p->lse != NULL)
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "LSE output requires a wave32 target");
@@ -737,6 +743,45 @@ static rocke_value_t* load_wmma_fp8(rocke_ir_builder_t* b,
     return rocke_b_vec_pack(b, values, count, dtype);
 }
 
+/* Byte voffset of element elem_base + elem_offset (Python _wmma_buffer_offset):
+ * const, add, then a flagless shift so element offsets below 2^31 stay valid
+ * unsigned byte offsets; the backend folds the shifted constant into the load
+ * immediate. */
+static rocke_value_t* wmma_buffer_offset(rocke_ir_builder_t* b,
+                                         rocke_value_t* elem_base,
+                                         int elem_offset,
+                                         rocke_value_t* one)
+{
+    rocke_value_t* elems = elem_base;
+    if(elem_offset != 0)
+    {
+        rocke_value_t* off = rocke_b_const_i32(b, elem_offset);
+        elems = rocke_b_add(b, elem_base, off);
+    }
+    return rocke_b_shl(b, elems, one);
+}
+
+/* count (8 or 16) two-byte elements from element elem_base + elem_offset
+ * through a bounded buffer resource (Python _load_wmma_buffer). */
+static rocke_value_t* load_wmma_buffer(rocke_ir_builder_t* b,
+                                       rocke_value_t* rsrc,
+                                       rocke_value_t* elem_base,
+                                       int elem_offset,
+                                       int count,
+                                       rocke_value_t* soffset,
+                                       bool bf16,
+                                       rocke_value_t* one)
+{
+    rocke_value_t* parts[2] = {NULL, NULL};
+    for(int part = 0; part < count / 8; ++part)
+    {
+        rocke_value_t* voffset = wmma_buffer_offset(b, elem_base, elem_offset + 8 * part, one);
+        parts[part] = bf16 ? rocke_b_buffer_load_vN_bf16(b, rsrc, voffset, soffset, 4)
+                           : rocke_b_buffer_load_vN_f16(b, rsrc, voffset, soffset, 4);
+    }
+    return count / 8 == 1 ? parts[0] : rocke_b_vec_concat(b, parts[0], parts[1]);
+}
+
 const char* rocke_wmma_attn_op_id(const rocke_arch_target_t* target,
                                   const char* dtype,
                                   char* out,
@@ -804,6 +849,30 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         return ROCKE_ERR_VALUE;
     }
     int n_dv = value_head_size / 16;
+    const bool runtime_dims = p->wmma_head_dim_q != NULL || p->wmma_head_dim_v != NULL;
+    if(runtime_dims
+       && (p->wmma_head_dim_q == NULL || p->wmma_head_dim_v == NULL || p->wmma_value_tile_size != 0
+           || p->wmma_value_offset != NULL))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "runtime WMMA head dims need both widths and no output-column tiling");
+        return ROCKE_ERR_VALUE;
+    }
+    rocke_value_t* v_head = p->wmma_v_head_idx != NULL ? p->wmma_v_head_idx : p->kv_head_idx;
+    if((p->wmma_k_rsrc != NULL && p->k_row_base_fn != NULL)
+       || (p->wmma_v_rsrc != NULL && p->v_row_base_fn != NULL))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "bounded WMMA K/V resources need dense row addressing");
+        return ROCKE_ERR_VALUE;
+    }
+    if((p->wmma_k_rsrc != NULL || p->wmma_v_rsrc != NULL) && (!runtime_dims || fp8_kv))
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "bounded WMMA K/V resources need runtime head dims and 16-bit KV");
+        return ROCKE_ERR_VALUE;
+    }
+    const bool bf16_io = strcmp(dtype, "bf16") == 0;
 
     /* Python evaluates b.mod(b.thread_id_x(), b.const_i32(wave)) left-to-right:
      * thread_id_x is created before the wave constant. C arg eval order is
@@ -861,10 +930,30 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         q_addr_row_base = rocke_b_select(b, q_valid, q_addr_row_base, rocke_b_const_i32(b, 0));
         q_zero = rocke_b_zero_vec(b, dtype_ir, a_frag);
     }
+    /* Runtime head widths (mirrors Python): d-tiles past head_dim_q read their
+     * row's first tile and are zeroed; tile 0 is always live. */
+    rocke_value_t* dim_zero = NULL;
+    rocke_value_t* zero_i = NULL;
+    rocke_value_t* qk_offsets[ROCKE_ATTN_MAX_ATOMS] = {};
+    rocke_value_t* dq_ok[ROCKE_ATTN_MAX_ATOMS] = {};
+    if(runtime_dims)
+    {
+        zero_i = rocke_b_const_i32(b, 0);
+        dim_zero = rocke_b_zero_vec(b, dtype_ir, a_frag);
+    }
     rocke_value_t* q_frags[ROCKE_ATTN_MAX_ATOMS];
     for(int d = 0; d < n_dk; ++d)
     {
-        rocke_value_t* q_addr = rocke_b_add(b, q_addr_row_base, rocke_b_const_i32(b, d * 16));
+        rocke_value_t* q_addr;
+        if(runtime_dims && d != 0)
+        {
+            rocke_value_t* d_off = rocke_b_const_i32(b, d * 16);
+            dq_ok[d] = rocke_b_cmp_lt(b, d_off, p->wmma_head_dim_q);
+            qk_offsets[d] = rocke_b_select(b, dq_ok[d], d_off, zero_i);
+            q_addr = rocke_b_add(b, q_addr_row_base, qk_offsets[d]);
+        }
+        else
+            q_addr = rocke_b_add(b, q_addr_row_base, rocke_b_const_i32(b, d * 16));
         if(k_half_off != NULL)
         {
             q_addr = rocke_b_add(b, q_addr, k_half_off);
@@ -872,8 +961,25 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         rocke_value_t* q_frag = rocke_b_global_load_vN(b, p->Q, q_addr, dtype_ir, a_frag, 2);
         if(q_valid != NULL)
             q_frag = rocke_b_select(b, q_valid, q_frag, q_zero);
+        if(dq_ok[d] != NULL)
+            q_frag = rocke_b_select(b, dq_ok[d], q_frag, dim_zero);
         q_frags[d] = q_frag;
     }
+    /* Live V/output column tiles (tile 0 always is). Without a bounded V
+     * resource dead tiles clamp their V reads in bounds; either way their
+     * accumulators are discarded at the store. */
+    rocke_value_t* dv_ok[ROCKE_ATTN_MAX_ATOMS] = {};
+    if(runtime_dims)
+    {
+        for(int d = 1; d < n_dv; ++d)
+        {
+            rocke_value_t* d_off = rocke_b_const_i32(b, d * 16);
+            dv_ok[d] = rocke_b_cmp_lt(b, d_off, p->wmma_head_dim_v);
+        }
+    }
+    /* Element -> byte shift for the bounded K/V buffer loads (16-bit KV only). */
+    rocke_value_t* kv_shift
+        = (p->wmma_k_rsrc != NULL || p->wmma_v_rsrc != NULL) ? rocke_b_const_i32(b, 1) : NULL;
     rocke_value_t* k_zero = p->wmma_kv_tail ? rocke_b_zero_vec(b, dtype_ir, a_frag) : NULL;
     rocke_value_t* v_zero
         = p->wmma_kv_tail && v_lds_stage ? rocke_b_zero_vec(b, dtype_ir, 8) : NULL;
@@ -986,19 +1092,40 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         }
 
         /* ---- QK^T WMMA chain ---- */
+        rocke_value_t* k_elem_base = NULL;
+        if(p->wmma_k_rsrc != NULL)
+        {
+            /* One base per row; every d-tile is a constant offset from it. */
+            k_elem_base = k_addr_row_base;
+            if(k_half_off != NULL)
+                k_elem_base = rocke_b_add(b, k_elem_base, k_half_off);
+        }
         rocke_value_t* score = rocke_b_zero_vec_f32(b, c_frag);
         for(int d = 0; d < n_dk; ++d)
         {
-            rocke_value_t* k_addr = rocke_b_add(b, k_addr_row_base, rocke_b_const_i32(b, d * 16));
-            if(k_half_off != NULL)
+            rocke_value_t* k_frag;
+            if(k_elem_base != NULL)
             {
-                k_addr = rocke_b_add(b, k_addr, k_half_off);
+                k_frag = load_wmma_buffer(
+                    b, p->wmma_k_rsrc, k_elem_base, d * 16, a_frag, zero_i, bf16_io, kv_shift);
             }
-            rocke_value_t* k_frag
-                = fp8_kv ? load_wmma_fp8(b, p->K, k_addr, a_frag, p->k_scale, dtype_ir)
-                         : rocke_b_global_load_vN(b, p->K, k_addr, dtype_ir, a_frag, 2);
+            else
+            {
+                rocke_value_t* k_addr
+                    = qk_offsets[d] != NULL
+                          ? rocke_b_add(b, k_addr_row_base, qk_offsets[d])
+                          : rocke_b_add(b, k_addr_row_base, rocke_b_const_i32(b, d * 16));
+                if(k_half_off != NULL)
+                {
+                    k_addr = rocke_b_add(b, k_addr, k_half_off);
+                }
+                k_frag = fp8_kv ? load_wmma_fp8(b, p->K, k_addr, a_frag, p->k_scale, dtype_ir)
+                                : rocke_b_global_load_vN(b, p->K, k_addr, dtype_ir, a_frag, 2);
+            }
             if(k_valid != NULL)
                 k_frag = rocke_b_select(b, k_valid, k_frag, k_zero);
+            if(dq_ok[d] != NULL)
+                k_frag = rocke_b_select(b, dq_ok[d], k_frag, dim_zero);
             score = rocke_b_mma(b, op->op_id, q_frags[d], k_frag, score, NULL, 0);
         }
 
@@ -1090,18 +1217,33 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
             {
                 /* Python: token mul before head mul (left-to-right). */
                 rocke_value_t* vs_tok_mul = rocke_b_mul(b, v_stage_row, p->stride_v_token);
-                rocke_value_t* vs_hd_mul = rocke_b_mul(b, p->kv_head_idx, p->stride_v_head);
+                rocke_value_t* vs_hd_mul = rocke_b_mul(b, v_head, p->stride_v_head);
                 v_stage_base = rocke_b_add(b, rocke_b_add(b, vs_tok_mul, vs_hd_mul), v_off);
             }
             if(p->wmma_value_offset != NULL)
                 v_stage_base = rocke_b_add(b, v_stage_base, p->wmma_value_offset);
             for(int e = 0; e < value_head_size / 8; ++e)
             {
-                rocke_value_t* v_address
-                    = rocke_b_add(b, v_stage_base, rocke_b_const_i32(b, e * 8));
-                rocke_value_t* v_g
-                    = fp8_kv ? load_wmma_fp8(b, p->V, v_address, 8, p->v_scale, dtype_ir)
-                             : rocke_b_global_load_vN(b, p->V, v_address, dtype_ir, 8, 2);
+                rocke_value_t* v_g;
+                if(p->wmma_v_rsrc != NULL)
+                {
+                    v_g = load_wmma_buffer(
+                        b, p->wmma_v_rsrc, v_stage_base, e * 8, 8, zero_i, bf16_io, kv_shift);
+                }
+                else
+                {
+                    rocke_value_t* v_address;
+                    if(dv_ok[e / 2] != NULL)
+                    {
+                        rocke_value_t* e_off = rocke_b_const_i32(b, e * 8);
+                        rocke_value_t* live_off = rocke_b_select(b, dv_ok[e / 2], e_off, zero_i);
+                        v_address = rocke_b_add(b, v_stage_base, live_off);
+                    }
+                    else
+                        v_address = rocke_b_add(b, v_stage_base, rocke_b_const_i32(b, e * 8));
+                    v_g = fp8_kv ? load_wmma_fp8(b, p->V, v_address, 8, p->v_scale, dtype_ir)
+                                 : rocke_b_global_load_vN(b, p->V, v_address, dtype_ir, 8, 2);
+                }
                 if(k_valid != NULL)
                     v_g = rocke_b_select(b, k_valid, v_g, v_zero);
                 rocke_value_t* idx[2] = {a_row, rocke_b_const_i32(b, e * 8)};
@@ -1133,11 +1275,19 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
             p_a = rocke_b_vec_insert(b, p_a, p_v, j);
         }
 
+        /* A bounded V resource gathers every column tile at a constant byte
+         * offset from one per-row base and needs no dead-column clamp. */
+        const bool gather_rsrc = p->wmma_v_rsrc != NULL && !v_lds_stage;
         for(int d = 0; d < n_dv; ++d)
         {
-            rocke_value_t* d_col = rocke_b_add(b, rocke_b_const_i32(b, d * 16), col);
+            rocke_value_t* d_col = NULL;
+            if(!gather_rsrc)
+                d_col = rocke_b_add(b, rocke_b_const_i32(b, d * 16), col);
             if(!v_lds_stage && p->wmma_value_offset != NULL)
                 d_col = rocke_b_add(b, d_col, p->wmma_value_offset);
+            /* Dead output tile: gather the live first column instead. */
+            if(!v_lds_stage && !gather_rsrc && dv_ok[d] != NULL)
+                d_col = rocke_b_select(b, dv_ok[d], d_col, col);
             rocke_value_t* v_b = rocke_b_zero_vec(b, dtype_ir, a_frag);
             for(int j = 0; j < a_frag; ++j)
             {
@@ -1174,10 +1324,19 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
                     {
                         /* Python: token mul before head mul (left-to-right). */
                         rocke_value_t* v_tok_mul = rocke_b_mul(b, v_row, p->stride_v_token);
-                        rocke_value_t* v_hd_mul = rocke_b_mul(b, p->kv_head_idx, p->stride_v_head);
+                        rocke_value_t* v_hd_mul = rocke_b_mul(b, v_head, p->stride_v_head);
                         v_row_base = rocke_b_add(b, rocke_b_add(b, v_tok_mul, v_hd_mul), v_off);
                     }
-                    if(fp8_kv)
+                    if(gather_rsrc)
+                    {
+                        rocke_value_t* v_elem_base = rocke_b_add(b, v_row_base, col);
+                        rocke_value_t* v_byte
+                            = wmma_buffer_offset(b, v_elem_base, d * 16, kv_shift);
+                        rocke_value_t* v_rsrc = p->wmma_v_rsrc;
+                        v_elem = bf16_io ? rocke_b_buffer_load_bf16(b, v_rsrc, v_byte, zero_i)
+                                         : rocke_b_buffer_load_f16(b, v_rsrc, v_byte, zero_i);
+                    }
+                    else if(fp8_kv)
                     {
                         rocke_value_t* raw = rocke_b_global_load(
                             b, p->V, rocke_b_add(b, v_row_base, d_col), rocke_fp8e4m3(), 1);
@@ -1270,9 +1429,14 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         }
     }
 
-    /* ---- Epilogue ---- */
+    /* ---- Epilogue ---- (output tiles past a runtime head_dim_v are not stored) */
     for(int d = 0; d < n_dv; ++d)
     {
+        if(dv_ok[d] != NULL)
+        {
+            rocke_if_t tile_gate = rocke_b_scf_if(b, dv_ok[d]);
+            rocke_b_region_enter(b, tile_gate.then_region);
+        }
         for(int r = 0; r < c_frag; ++r)
         {
             rocke_value_t* row_rel = NULL;
@@ -1306,6 +1470,8 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
                 rocke_b_region_leave(b);
             }
         }
+        if(dv_ok[d] != NULL)
+            rocke_b_region_leave(b);
     }
 
     return rocke_ir_builder_status(b);

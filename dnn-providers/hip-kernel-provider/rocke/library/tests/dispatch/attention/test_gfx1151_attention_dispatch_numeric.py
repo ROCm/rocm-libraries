@@ -572,6 +572,104 @@ class TestMetadataSafety(unittest.TestCase):
                 request, spec, {"q": q, "k": k, "v": k, "out": out}
             )
 
+    def test_runtime_head_dims_collect_widths_and_v_heads(self):
+        from dispatch.attention.bindings import _gfx1151_validate_and_collect
+
+        spec = _dense_spec(head_size=128, runtime_head_dims=True)
+        request = _dense_request(nhead_q=8, nhead_k=4, hdim_q=80, hdim_v=48)
+        q = _fake_tensor((2, 32, 8, 80))
+        k = _fake_tensor((2, 32, 4, 80))
+        out = _fake_tensor((2, 32, 8, 48))
+        for hv in (1, 2, 4, 8):
+            with self.subTest(num_v_heads=hv):
+                v = _fake_tensor((2, 32, hv, 48))
+                values = _gfx1151_validate_and_collect(
+                    request, spec, {"q": q, "k": k, "v": v, "out": out}
+                )
+                self.assertEqual((values["head_dim_q"], values["head_dim_v"]), (80, 48))
+                self.assertEqual(values["num_v_heads"], hv)
+                self.assertEqual(values["num_kv_heads"], 4)
+                self.assertEqual(values["stride_v_token"], hv * 48)
+        with self.assertRaisesRegex(ValueError, "must divide"):
+            _gfx1151_validate_and_collect(
+                request,
+                spec,
+                {"q": q, "k": k, "v": _fake_tensor((2, 32, 3, 48)), "out": out},
+            )
+        # BHSD reads the V head count from axis 1.
+        bhsd = _dense_request(
+            nhead_q=8, nhead_k=4, hdim_q=64, hdim_v=64, tensor_layout="bhsd"
+        )
+        values = _gfx1151_validate_and_collect(
+            bhsd,
+            spec,
+            {
+                "q": _fake_tensor((2, 8, 32, 64)),
+                "k": _fake_tensor((2, 4, 32, 64)),
+                "v": _fake_tensor((2, 2, 32, 64)),
+                "out": _fake_tensor((2, 8, 32, 64)),
+            },
+        )
+        self.assertEqual(values["num_v_heads"], 2)
+
+    def test_runtime_head_dims_reject_widths_outside_the_bucket(self):
+        from dispatch.attention.bindings import _gfx1151_validate_and_collect
+
+        spec = _dense_spec(head_size=128, runtime_head_dims=True)
+        for dq, dv in ((144, 64), (64, 144), (72, 64), (64, 8), (64, 272)):
+            request = _dense_request(hdim_q=dq, hdim_v=dv)
+            tensors = {
+                "q": _fake_tensor((2, 32, 4, dq)),
+                "k": _fake_tensor((2, 32, 2, dq)),
+                "v": _fake_tensor((2, 32, 2, dv)),
+                "out": _fake_tensor((2, 32, 4, dv)),
+            }
+            with self.subTest(dq=dq, dv=dv), self.assertRaises(ValueError):
+                _gfx1151_validate_and_collect(request, spec, tensors)
+
+    def test_runtime_head_dims_packed_v_heads(self):
+        from dispatch.attention.bindings import _gfx1151_validate_and_collect
+
+        spec = _dense_spec(head_size=128, layout="ragged", runtime_head_dims=True)
+        request = _dense_request(
+            batch=1, nhead_q=8, nhead_k=4, hdim_q=96, hdim_v=32, layout="ragged"
+        )
+        cu = _fake_tensor((2,), dtype="int32")
+        tensors = {
+            "q": _fake_tensor((32, 8, 96)),
+            "k": _fake_tensor((32, 4, 96)),
+            "v": _fake_tensor((32, 1, 32)),
+            "out": _fake_tensor((32, 8, 32)),
+            "cu_seqlens_q": cu,
+            "cu_seqlens_k": cu,
+        }
+        values = _gfx1151_validate_and_collect(request, spec, tensors)
+        self.assertEqual(
+            (values["head_dim_q"], values["head_dim_v"], values["num_v_heads"]),
+            (96, 32, 1),
+        )
+        with self.assertRaisesRegex(ValueError, "head count and dim"):
+            _gfx1151_validate_and_collect(
+                request, spec, {**tensors, "v": _fake_tensor((31, 1, 32))}
+            )
+
+    def test_exact_size_spec_ignores_v_head_count_and_extra_args(self):
+        from dispatch.attention.bindings import _gfx1151_validate_and_collect
+
+        q = _fake_tensor((2, 32, 4, 64))
+        k = _fake_tensor((2, 32, 2, 64))
+        values = _gfx1151_validate_and_collect(
+            _dense_request(), _dense_spec(), {"q": q, "k": k, "v": k, "out": q}
+        )
+        for name in ("head_dim_q", "head_dim_v", "num_v_heads"):
+            self.assertNotIn(name, values)
+        with self.assertRaisesRegex(ValueError, "v must have"):
+            _gfx1151_validate_and_collect(
+                _dense_request(),
+                _dense_spec(),
+                {"q": q, "k": k, "v": _fake_tensor((2, 32, 1, 64)), "out": q},
+            )
+
     def test_rejects_wrong_kv_dtype_for_fp8_spec(self):
         from dispatch.attention.bindings import bind_gfx1151_attention_torch
 
@@ -1226,11 +1324,14 @@ def test_dispatch_dense_packed_qkv_views(batch):
 # ---------------------------------------------------------------------
 
 
-def _launch_np(request, arrays, outputs, *, scale, overrides=None):
+def _launch_np(request, arrays, outputs, *, scale, overrides=None, spec=None):
     """Upload each named host array, launch through the public binder, and
     return the downloaded arrays named in ``outputs``. ``overrides`` maps a
     name to ``(shape, element_strides)`` describing a view over the uploaded
-    contiguous buffer (expanded, permuted or padded layouts)."""
+    contiguous buffer (expanded, permuted or padded layouts). An explicit
+    ``spec`` binds through ``bind_gfx1151_attention_torch`` instead of the
+    dispatch-selected one."""
+    from dispatch.attention.bindings import bind_gfx1151_attention_torch
     from benchmarks.gfx1151.attention.benchmark_sdpa import _host_bytes
     from rocke.runtime.launcher import release_retained_for_stream
     from rocke.runtime.torch_interop import resolve_stream
@@ -1255,9 +1356,11 @@ def _launch_np(request, arrays, outputs, *, scale, overrides=None):
                 _strides=tuple(strides),
                 _dtype=str(a.dtype),
             )
-        binding = dispatch_attention(request).bind_torch(
-            tensors, softmax_scale=scale, stream=stream, fence=False
-        )
+        kwargs = dict(softmax_scale=scale, stream=stream, fence=False)
+        if spec is None:
+            binding = dispatch_attention(request).bind_torch(tensors, **kwargs)
+        else:
+            binding = bind_gfx1151_attention_torch(request, spec, tensors, **kwargs)
         binding.launch()
         rt.stream_sync(stream)
         release_retained_for_stream(stream)
@@ -1867,3 +1970,273 @@ def test_dispatch_bhsd_head96_noncausal_window_with_lse():
         )
     finally:
         buffers.close()
+
+
+# ---------------------------------------------------------------------
+# runtime_head_dims: one bucket object serves every multiple-of-16 width up
+# to its maximum, and V may carry its own head count.
+# ---------------------------------------------------------------------
+
+
+def _rtdim_spec(bucket, *, v_bucket=0, mask="none", vlds=False, **kw):
+    from kernels.gfx1151.wmma_fmha_fwd import WmmaFmhaFwdSpec
+
+    return WmmaFmhaFwdSpec(
+        head_size=bucket,
+        v_head_size=v_bucket,
+        mask_mode=mask,
+        v_lds_stage=vlds,
+        query_tail=True,
+        kv_tail=True,
+        runtime_head_dims=True,
+        **kw,
+    )
+
+
+def _rtdim_qkv(seed, batch, sq, sk, hq, hkv, hv, dq, dv):
+    rng = np.random.default_rng(seed)
+    return (
+        rng.standard_normal((batch, sq, hq, dq)).astype(np.float16),
+        rng.standard_normal((batch, sk, hkv, dq)).astype(np.float16),
+        rng.standard_normal((batch, sk, hv, dv)).astype(np.float16),
+    )
+
+
+def _rtdim_expected(q, k, v, scale, *, ctx, left, right, bias=None):
+    """FP64 ``(out, lse)`` with K and V expanded to the query heads first, so
+    the shared references see one head count."""
+    hq = q.shape[2]
+    k_rep = np.repeat(k, hq // k.shape[2], axis=2)
+    v_rep = np.repeat(v, hq // v.shape[2], axis=2)
+    if bias is not None:
+        return _bias_reference(q, k_rep, v_rep, bias.astype(np.float64), scale, ctx=ctx)
+    out = _windowed_reference(
+        q, k_rep, v_rep, scale=scale, ctx=ctx, left=left, right=right
+    )
+    lse = _lse_reference(q, k_rep, scale, ctx=ctx, left=left, right=right)
+    return out, lse
+
+
+def _run_rtdim(request, spec, q, k, v, *, scale, bias=None, overrides=None):
+    batch, sq, hq, _ = q.shape
+    arrays = {
+        "q": q,
+        "k": k,
+        "v": v,
+        "out": np.full((batch, sq, hq, v.shape[-1]), np.nan, dtype=np.float16),
+        "lse": np.full((batch, hq, sq), np.nan, dtype=np.float32),
+    }
+    if bias is not None:
+        arrays["attn_bias"] = bias
+    return _launch_np(
+        request, arrays, ("out", "lse"), scale=scale, overrides=overrides, spec=spec
+    )
+
+
+@pytest.mark.gpu
+@_NEEDS_GPU
+@pytest.mark.parametrize("vlds", [False, True])
+@pytest.mark.parametrize(
+    "bucket,dim",
+    [
+        (128, 16),
+        (128, 48),
+        (128, 80),
+        (128, 112),
+        (128, 128),
+        (256, 144),
+        (256, 192),
+        (256, 240),
+    ],
+)
+def test_runtime_head_dims_serve_every_width_in_a_bucket(bucket, dim, vlds):
+    batch, sq, sk, hq, hkv = 2, 37, 53, 8, 4
+    q, k, v = _rtdim_qkv(501, batch, sq, sk, hq, hkv, hkv, dim, dim)
+    scale = 1.0 / np.sqrt(dim)
+    request = _dense_direct_request(batch, sq, sk, hq, hkv, dim, dim, return_lse=True)
+    got = _run_rtdim(request, _rtdim_spec(bucket, vlds=vlds), q, k, v, scale=scale)
+    out, lse = _rtdim_expected(q, k, v, scale, ctx=0, left=0, right=-1)
+    np.testing.assert_allclose(got["out"], out, rtol=0, atol=2e-2)
+    _assert_lse_close(got["lse"], lse)
+
+
+@pytest.mark.gpu
+@_NEEDS_GPU
+@pytest.mark.parametrize("vlds", [False, True])
+@pytest.mark.parametrize(
+    "bucket,v_bucket,dq,dv",
+    [(128, 0, 80, 48), (128, 0, 48, 112), (128, 64, 96, 48), (256, 128, 176, 80)],
+)
+def test_runtime_head_dims_unequal_widths(bucket, v_bucket, dq, dv, vlds):
+    batch, sq, sk, hq, hkv = 2, 37, 53, 8, 4
+    q, k, v = _rtdim_qkv(502, batch, sq, sk, hq, hkv, hkv, dq, dv)
+    scale = 1.0 / np.sqrt(dq)
+    request = _dense_direct_request(batch, sq, sk, hq, hkv, dq, dv, return_lse=True)
+    spec = _rtdim_spec(bucket, v_bucket=v_bucket, vlds=vlds)
+    got = _run_rtdim(request, spec, q, k, v, scale=scale)
+    out, lse = _rtdim_expected(q, k, v, scale, ctx=0, left=0, right=-1)
+    np.testing.assert_allclose(got["out"], out, rtol=0, atol=2e-2)
+    _assert_lse_close(got["lse"], lse)
+
+
+@pytest.mark.gpu
+@_NEEDS_GPU
+@pytest.mark.parametrize("vlds", [False, True])
+@pytest.mark.parametrize("hv", [1, 4, 8])
+def test_runtime_head_dims_independent_v_heads(hv, vlds):
+    """Hq=8, Hk=4 with Hv in {1, Hk, Hq}: V heads follow Hq/Hv, not Hq/Hk."""
+    batch, sq, sk, hq, hkv, dq, dv = 2, 33, 47, 8, 4, 64, 48
+    q, k, v = _rtdim_qkv(503, batch, sq, sk, hq, hkv, hv, dq, dv)
+    scale = 1.0 / np.sqrt(dq)
+    request = _dense_direct_request(batch, sq, sk, hq, hkv, dq, dv, return_lse=True)
+    got = _run_rtdim(request, _rtdim_spec(128, vlds=vlds), q, k, v, scale=scale)
+    out, lse = _rtdim_expected(q, k, v, scale, ctx=0, left=0, right=-1)
+    np.testing.assert_allclose(got["out"], out, rtol=0, atol=2e-2)
+    _assert_lse_close(got["lse"], lse)
+
+
+@pytest.mark.gpu
+@_NEEDS_GPU
+@pytest.mark.parametrize("vlds", [False, True])
+@pytest.mark.parametrize("mask", ["causal", "window"])
+def test_runtime_head_dims_causal_and_window(mask, vlds):
+    hq, hkv, hv, dim = 8, 4, 2, 80
+    if mask == "causal":
+        sq, sk, left, right = 33, 49, 0, 0
+        ctx = sk - sq
+        extra = dict(mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL)
+    else:
+        sq, sk, left, right, ctx = 33, 41, 24, 8, 0
+        extra = dict(
+            mask_type=AttentionMaskType.SLIDING_WINDOW,
+            sliding_window=left,
+            window_right=right,
+        )
+    q, k, v = _rtdim_qkv(504, 2, sq, sk, hq, hkv, hv, dim, dim)
+    scale = 1.0 / np.sqrt(dim)
+    request = _dense_direct_request(
+        2, sq, sk, hq, hkv, dim, dim, return_lse=True, **extra
+    )
+    spec = _rtdim_spec(128, mask=mask, vlds=vlds)
+    got = _run_rtdim(request, spec, q, k, v, scale=scale)
+    out, lse = _rtdim_expected(q, k, v, scale, ctx=ctx, left=left, right=right)
+    np.testing.assert_allclose(got["out"], out, rtol=0, atol=2e-2)
+    _assert_lse_close(got["lse"], lse)
+
+
+@pytest.mark.gpu
+@_NEEDS_GPU
+@pytest.mark.parametrize("vlds", [False, True])
+def test_runtime_head_dims_attn_bias_f32_with_lse(vlds):
+    batch, sq, sk, hq, hkv, hv, dim = 2, 37, 53, 8, 4, 4, 48
+    q, k, v = _rtdim_qkv(505, batch, sq, sk, hq, hkv, hv, dim, dim)
+    bias = _make_bias(506, (batch, hq, sq, sk), "f32")
+    scale = 1.0 / np.sqrt(dim)
+    request = _bias_request(
+        batch,
+        sq,
+        sk,
+        hq,
+        hkv,
+        dim,
+        "f32",
+        AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+        return_lse=True,
+    )
+    spec = _rtdim_spec(
+        128, mask="causal", vlds=vlds, use_attn_bias=True, bias_dtype="f32"
+    )
+    got = _run_rtdim(request, spec, q, k, v, scale=scale, bias=bias)
+    out, lse = _rtdim_expected(q, k, v, scale, ctx=sk - sq, left=0, right=0, bias=bias)
+    np.testing.assert_allclose(got["out"], out, rtol=0, atol=2e-2)
+    _assert_lse_close(got["lse"], lse)
+
+
+@pytest.mark.gpu
+@_NEEDS_GPU
+@pytest.mark.parametrize("vlds", [False, True])
+def test_runtime_head_dims_never_touch_columns_past_the_widths(vlds):
+    """Q/K/V live in bucket-wide rows whose padding is NaN, and O in rows
+    whose padding holds a sentinel: no padding is read into the result and
+    no output column past ``hdim_v`` is written."""
+    batch, sq, sk, hq, hkv, hv, dq, dv, bucket = 2, 37, 53, 8, 4, 2, 48, 80, 128
+    q, k, v = _rtdim_qkv(507, batch, sq, sk, hq, hkv, hv, dq, dv)
+
+    def padded(x, fill):
+        store = np.full(x.shape[:3] + (bucket,), fill, dtype=np.float16)
+        store[..., : x.shape[-1]] = x
+        return store
+
+    def view(store, dim):
+        strides = tuple(s // store.itemsize for s in store.strides)
+        return store.shape[:3] + (dim,), strides
+
+    sentinel = 7.0
+    arrays = {
+        "q": padded(q, np.nan),
+        "k": padded(k, np.nan),
+        "v": padded(v, np.nan),
+        "out": np.full((batch, sq, hq, bucket), sentinel, dtype=np.float16),
+        "lse": np.full((batch, hq, sq), np.nan, dtype=np.float32),
+    }
+    overrides = {
+        "q": view(arrays["q"], dq),
+        "k": view(arrays["k"], dq),
+        "v": view(arrays["v"], dv),
+        "out": view(arrays["out"], dv),
+    }
+    scale = 1.0 / np.sqrt(dq)
+    request = _dense_direct_request(batch, sq, sk, hq, hkv, dq, dv, return_lse=True)
+    got = _launch_np(
+        request,
+        arrays,
+        ("out", "lse"),
+        scale=scale,
+        overrides=overrides,
+        spec=_rtdim_spec(bucket, vlds=vlds),
+    )
+    out, lse = _rtdim_expected(q, k, v, scale, ctx=0, left=0, right=-1)
+    np.testing.assert_allclose(got["out"][..., :dv], out, rtol=0, atol=2e-2)
+    np.testing.assert_array_equal(
+        got["out"][..., dv:], np.full_like(got["out"][..., dv:], sentinel)
+    )
+    _assert_lse_close(got["lse"], lse)
+
+
+@pytest.mark.gpu
+@_NEEDS_GPU
+@pytest.mark.parametrize("vlds", [False, True])
+@pytest.mark.parametrize("bucket,dim", [(128, 80), (64, 16)])
+def test_runtime_head_dims_rows_ending_at_the_allocation(bucket, dim, vlds):
+    """Contiguous BHSD K/V allocated to exactly ``B*H*S*d`` elements: the last
+    row of the last head ends at the allocation end, so head-dim tiles past
+    ``d`` must be bounded by the K/V resource extent rather than read past
+    the tensor."""
+    batch, sq, sk, hq, hkv = 2, 37, 53, 8, 4
+    q, k, v = _rtdim_qkv(508, batch, sq, sk, hq, hkv, hkv, dim, dim)
+
+    def bhsd(x):
+        return np.ascontiguousarray(x.transpose(0, 2, 1, 3))
+
+    arrays = {
+        "q": bhsd(q),
+        "k": bhsd(k),
+        "v": bhsd(v),
+        "out": np.full((batch, hq, sq, dim), np.nan, dtype=np.float16),
+        "lse": np.full((batch, hq, sq), np.nan, dtype=np.float32),
+    }
+    assert arrays["k"].size == batch * hkv * sk * dim
+    scale = 1.0 / np.sqrt(dim)
+    request = _dense_direct_request(
+        batch, sq, sk, hq, hkv, dim, dim, return_lse=True, tensor_layout="bhsd"
+    )
+    got = _launch_np(
+        request,
+        arrays,
+        ("out", "lse"),
+        scale=scale,
+        spec=_rtdim_spec(bucket, vlds=vlds),
+    )
+    out, lse = _rtdim_expected(q, k, v, scale, ctx=0, left=0, right=-1)
+    np.testing.assert_allclose(got["out"].transpose(0, 2, 1, 3), out, rtol=0, atol=2e-2)
+    _assert_lse_close(got["lse"], lse)
