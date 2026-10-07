@@ -209,6 +209,38 @@ class ArchDomainWarning(UserWarning):
 # ``off`` disables the lookup entirely. AICK-2274 adds ``error``, which is why
 # this is a mode rather than a boolean.
 _ARCH_DOMAIN_ENV = "ROCKE_ARCH_DOMAIN"
+_ARCH_DOMAIN_WARN = "warn"
+_ARCH_DOMAIN_OFF = "off"
+_ARCH_DOMAIN_MODES = (_ARCH_DOMAIN_WARN, _ARCH_DOMAIN_OFF)
+
+
+def _arch_domain_mode() -> str:
+    """The configured lane mode, or raise if the value is not one we know.
+
+    Matching ``off`` and letting everything else mean ``warn`` would be the
+    quieter implementation and the wrong one. The two plausible mistakes --
+    ``ROCKE_ARCH_DOMAIN=0`` and ``ROCKE_ARCH_DOMAIN=ofF``-style typos -- are
+    both attempts to turn the lane *off*, and both would leave it on while the
+    developer believed otherwise. Silently doing the opposite of what the
+    environment asked is worse than refusing: the whole point of this variable
+    is to be the escape hatch when the lane is wrong, and an escape hatch that
+    quietly does not open is not one.
+
+    Unset and empty mean ``warn``, which is the default and not a mistake.
+    """
+    raw = os.environ.get(_ARCH_DOMAIN_ENV, "").strip()
+    if not raw:
+        return _ARCH_DOMAIN_WARN
+    mode = raw.lower()
+    if mode not in _ARCH_DOMAIN_MODES:
+        raise ValueError(
+            f"{_ARCH_DOMAIN_ENV}={raw!r} is not a mode; expected one of "
+            f"{', '.join(_ARCH_DOMAIN_MODES)} (unset means "
+            f"{_ARCH_DOMAIN_WARN}). Refusing rather than guessing: every way "
+            "of getting this wrong is an attempt to switch the lane off, and "
+            "falling back to the default would leave it on."
+        )
+    return mode
 
 
 class LlvmDatalayoutKind(enum.Enum):
@@ -1829,7 +1861,7 @@ class _Lowerer:
         trains people to ignore the lane, and on an older ROCm there would be a
         lot of them -- 14% of the llvm20 column is no-data.
         """
-        if os.environ.get(_ARCH_DOMAIN_ENV, "").strip().lower() == "off":
+        if _arch_domain_mode() == _ARCH_DOMAIN_OFF:
             return
         from .arch import domain as arch_domain
 
@@ -6240,8 +6272,7 @@ class _Lowerer:
         then_blk = self._new_block("if.then")
         # Emit the conditional branch from the predecessor block.
         cur.emit(
-            f"  br i1 {self._operand(cond)}, "
-            f"label %{then_blk.label}, label %IF_ELSE"
+            f"  br i1 {self._operand(cond)}, label %{then_blk.label}, label %IF_ELSE"
         )
         cur.terminated = True
 
