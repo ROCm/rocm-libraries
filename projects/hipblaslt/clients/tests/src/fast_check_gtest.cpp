@@ -1188,6 +1188,26 @@ namespace
         EXPECT_NE(host.find("of host memory"), std::string::npos) << host;
     }
 
+    TEST(FastCheckDevice_pre_checkin, memory_shortfall_reclaims_idle_buffers)
+    {
+        // Hold one live allocation while returning another to the client pool. The latter
+        // is reusable capacity, so it must not make an otherwise fitting case skip.
+        auto live = memory_pool<d_memory>::Get(4096);
+        ASSERT_NE(live.get(), nullptr);
+        ASSERT_EQ(hipMemset(live.get(), 42, live.bytes()), hipSuccess);
+        auto cached = memory_pool<d_memory>::Get(size_t(16) << 20);
+        ASSERT_NE(cached.get(), nullptr);
+        const size_t capacity = cached.capacity();
+        memory_pool<d_memory>::Restore(cached);
+        size_t free_bytes = 0, total_bytes = 0;
+        ASSERT_EQ(hipMemGetInfo(&free_bytes, &total_bytes), hipSuccess);
+        EXPECT_EQ(fast_check_memory_shortfall(free_bytes + capacity / 2, 0), "");
+        unsigned char value = 0;
+        ASSERT_EQ(hipMemcpy(&value, live.get(), 1, hipMemcpyDeviceToHost), hipSuccess);
+        EXPECT_EQ(value, 42);
+        memory_pool<d_memory>::Restore(live);
+    }
+
     // The fast_check_inject self-test corrupts exactly one element, and never leaves it holding
     // the value it had: a correct value becomes the sentinel, and the sentinel becomes poison.
     TEST(FastCheckDevice_pre_checkin, corrupt_element_changes_exactly_one_element)

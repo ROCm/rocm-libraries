@@ -235,6 +235,14 @@ public:
         Instance().restore(dm);
     }
 
+    // Release only idle buffers returned to the pool; live allocations remain owned by callers.
+    static void ReleaseCached()
+    {
+        std::lock_guard<std::mutex> lock(Instance().m_mutex);
+        Instance().m_pool.clear();
+        Instance().m_pool_managed.clear();
+    }
+
 private:
     std::vector<M> m_pool, m_pool_managed;
     std::mutex m_mutex;

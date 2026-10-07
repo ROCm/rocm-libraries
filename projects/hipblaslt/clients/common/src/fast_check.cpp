@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "fast_check.hpp"
+#include "d_vector.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -2027,14 +2028,26 @@ std::string fast_check_memory_shortfall(size_t device_bytes, size_t host_bytes)
         s << double(bytes) / double(size_t(1) << 30) << " GiB";
         return s.str();
     };
-    size_t free_bytes = 0, total_bytes = 0;
-    if(hipMemGetInfo(&free_bytes, &total_bytes) == hipSuccess && device_bytes > free_bytes)
-        return "this case needs " + gib(device_bytes) + " of device memory and " + gib(free_bytes)
-               + " is free";
+    auto shortfall = [&]() -> std::string {
+        size_t free_bytes = 0, total_bytes = 0;
+        if(hipMemGetInfo(&free_bytes, &total_bytes) == hipSuccess && device_bytes > free_bytes)
+            return "this case needs " + gib(device_bytes) + " of device memory and "
+                   + gib(free_bytes) + " is free";
 
-    const size_t available = available_host_bytes();
-    if(available > 0 && host_bytes > available)
-        return "this case needs " + gib(host_bytes) + " of host memory and " + gib(available)
-               + " is available";
-    return {};
+        const size_t available = available_host_bytes();
+        if(available > 0 && host_bytes > available)
+            return "this case needs " + gib(host_bytes) + " of host memory and " + gib(available)
+                   + " is available";
+        return {};
+    };
+    std::string why = shortfall();
+    if(!why.empty())
+    {
+        // A previous large case can retain most of the free memory in these pools. The
+        // allocator could reuse or release it, but a preflight skip never reaches allocation.
+        memory_pool<d_memory>::ReleaseCached();
+        memory_pool<h_memory>::ReleaseCached();
+        why = shortfall();
+    }
+    return why;
 }
