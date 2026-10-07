@@ -63,8 +63,7 @@ def test_use_fp8_request_carries_the_feature():
 
 def _grid_candidate():
     (grid,) = [
-        c for c in attention_candidates()
-        if c.name == "attention_gfx950_dense_grid"
+        c for c in attention_candidates() if c.name == "attention_gfx950_dense_grid"
     ]
     return grid
 
