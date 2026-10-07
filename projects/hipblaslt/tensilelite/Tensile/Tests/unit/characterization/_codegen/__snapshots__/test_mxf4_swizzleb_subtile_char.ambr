@@ -1,0 +1,17 @@
+# serializer version: 1
+# name: test_mxf4_swizzleb_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_STB_BH_UseKnjIHp0lfLEXxSxRaMsvavzNnHgBfMPwn4FKBxvt3vM=',
+      'err': 0,
+    }),
+  ])
+# ---
+# name: test_ordinary_b_control_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_UserArgvK-QisVL6pKcIzCVWF_YGyp_Z94HL7wmvLilkIQ3f_E=',
+      'err': 0,
+    }),
+  ])
+# ---
