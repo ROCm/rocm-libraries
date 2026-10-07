@@ -703,12 +703,16 @@ namespace
 using hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT;
 using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
 
-/// The ENGINE prediction for a small conv forward graph, asked in @p metric.
+/// The ENGINE prediction for a small conv forward graph, asked in @p metric with benchmarking
+/// forced off, so a runner's HIPDNN_FORCE_BENCHMARKING does not decide the answer.
 EnginePredictionT predictConv(const MiopenEngine& engine,
                               HipdnnMiopenHandle& handle,
                               const std::string& metric,
-                              bool evaluate)
+                              bool evaluate,
+                              const char* forceBenchmarking = "0")
 {
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter benchmarking(
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME, forceBenchmarking);
     auto graphBuilder = createValidConvFwdGraph();
     const GraphWrapper graph(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     flatbuffers::FlatBufferBuilder configBuilder;
@@ -809,6 +813,26 @@ TEST(TestMiopenEngine, DescriptionNamesTheModelIdDeclaredForTheRequestedMetric)
 
     const MiopenEngine tflopsOnly(1, "test:miopen", {{"tflops", tflopsId}});
     EXPECT_FALSE(describedBinding(tflopsOnly, handle, "time").contains("uhd_id"));
+}
+
+/// Models are measured with MIOpen's tuning search off; with it on, neither an estimate nor a
+/// description may stand for the run, or collection would label searched times as untuned.
+TEST(TestMiopenEngine, DeclinesToPredictWhileBenchmarkingIsEnabled)
+{
+    SKIP_IF_NO_DEVICES();
+
+    HipdnnMiopenHandle handle;
+    const MiopenEngine engine(
+        1, "test:miopen", {{"tflops", "aceee89e-ae84-4e79-abfd-4cfed80eaf87"}});
+    for(const bool evaluate : {true, false})
+    {
+        const auto prediction = predictConv(engine, handle, "tflops", evaluate, "1");
+        EXPECT_EQ(prediction.status, PredictionStatus::UNAVAILABLE) << evaluate;
+        EXPECT_TRUE(prediction.binding_json.empty()) << evaluate;
+        EXPECT_NE(prediction.reason.find("benchmarking"), std::string::npos) << prediction.reason;
+    }
+    // The same engine describes itself once benchmarking is off.
+    EXPECT_FALSE(predictConv(engine, handle, "tflops", false).binding_json.empty());
 }
 
 namespace
