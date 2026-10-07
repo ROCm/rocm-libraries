@@ -54,6 +54,14 @@ def test_show_arch_info_unmapped_datatype_raises():
 
 
 @pytest.mark.skipif(not ugc.HAS_ARCH_FILTER, reason="arch_filter not importable")
+def test_show_arch_info_strips_feature_suffix(capsys):
+    ugc._show_arch_info("gfx1250:xnack-", "fp32")
+    out = capsys.readouterr().out
+    assert "Architecture Info for gfx1250 ===" in out
+    assert "[16, 16, 4]" in out
+
+
+@pytest.mark.skipif(not ugc.HAS_ARCH_FILTER, reason="arch_filter not importable")
 def test_fp32_validated_as_fp32(tmp_path):
     codegen = _codegen(tmp_path, "fp32")
     codegen.arch_filter = _RecordingFilter()
