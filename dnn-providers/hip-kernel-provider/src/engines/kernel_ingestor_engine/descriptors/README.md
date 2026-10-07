@@ -44,6 +44,17 @@ stale product tree is removed — not an error. A KDP that *is* present but prun
 architecture is a hard failure for a root the build NAMED, and dormancy for this root
 reached as the built-in default.
 
+Packaging probes read this root too (superbuild-only,
+`HIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES`, `OFF` by default). Every architecture an
+explicit `arch` of a KDP or UKD here names is probed automatically in each build that does
+not target it, with the default sample (one UKD per compile group, or for rocKE a sweep
+packing each value of each varying `spec` field once); wildcard descriptors get no probe.
+An integration that needs specific UKDs packed adds a named probe,
+`hkp_add_packaging_probe(ARCH <gfx> NAME <integration> UKDS <ukd-name>...)`, naming UKDs of
+this root by `name`. A KDP a probe keeps must
+keep its `kernelDescriptors` inline: a standalone-UKD reference fails probe configure.
+See "Packaging probes" in `descriptor-packaging/README.md`.
+
 Do not delete this README: git tracks no empty directory, and the cache variable's
 set-but-not-a-directory check is fatal.
 

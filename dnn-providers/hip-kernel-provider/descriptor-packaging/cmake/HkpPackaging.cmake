@@ -62,14 +62,29 @@ function(hkp_resolve_kpack out_var python_exe)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# hkp_is_concrete_arch(<out_var> <arch>)
+#   TRUE when <arch> (already stripped of any :feature suffix) is a concrete gfx target
+#   name: a lowercase processor id (gfx942) optionally followed by lowercase
+#   hyphen-separated words that name a distinct target (gfx1250-strict), and none of
+#   those words is generic, all, dcgpu, dgpu or igpu (generic targets and TheRock family
+#   names, which no device reports). Only the shape is checked.
+# ---------------------------------------------------------------------------
+function(hkp_is_concrete_arch out_var arch)
+    if(arch MATCHES "^gfx[0-9a-f]+(-[a-z]+)*$"
+       AND NOT arch MATCHES "-(generic|all|dcgpu|dgpu|igpu)(-|$)")
+        set(${out_var} TRUE PARENT_SCOPE)
+    else()
+        set(${out_var} FALSE PARENT_SCOPE)
+    endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
 # hkp_selected_arches(<out_var> <out_source_var>)
 #   Normalize GPU_TARGETS (or AMDGPU_TARGETS) into a bare gfx arch list,
 #   stripping feature suffixes (gfx942:xnack-) and dropping anything that is not
 #   a concrete gfx target name.
 #
-#   A concrete name is a lowercase processor id (gfx942) optionally followed by
-#   lowercase hyphen-separated words that name a distinct target (gfx1250-strict).
-#   Dropped:
+#   A concrete name is one hkp_is_concrete_arch() accepts. Dropped:
 #     - TheRock family names, recognised by any hyphen-separated word of
 #       dcgpu, dgpu, igpu or all, so a variant such as gfx950-dcgpu-asan is
 #       dropped with its family (gfx94X-dcgpu, gfx950-dcgpu, gfx906-dgpu,
@@ -112,8 +127,8 @@ function(hkp_selected_arches out_var out_source_var)
         if(NOT _bare)
             continue()
         endif()
-        if(NOT _bare MATCHES "^gfx[0-9a-f]+(-[a-z]+)*$"
-           OR _bare MATCHES "-(generic|all|dcgpu|dgpu|igpu)(-|$)")
+        hkp_is_concrete_arch(_concrete "${_bare}")
+        if(NOT _concrete)
             message(WARNING
                 "hkp: ignoring '${_arch}' from ${_source}; it is not a concrete gfx "
                 "target name (a TheRock family, a generic target, or an unrecognised "
@@ -1459,6 +1474,11 @@ function(hkp_add_packaging)
         PACK_JOBS 1)
 
     hkp_register_tests("${_rocm_kpack_dir}" "${HKP_HIPCC}" "${_rocke_comgr_lib}")
+    if(HIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES)
+        include("${HKP_PKG_DIR}/cmake/HkpPackagingProbes.cmake")
+        hkp_load_packaging_probes(
+            "${_rocm_kpack_dir}" "${HKP_HIPCC}" "${_rocke_comgr_lib}" ${_rocke_args})
+    endif()
 endfunction()
 
 # ---------------------------------------------------------------------------
