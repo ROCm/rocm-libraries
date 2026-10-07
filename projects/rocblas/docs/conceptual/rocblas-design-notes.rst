@@ -26,8 +26,28 @@ builds it as an integrated part of the rocBLAS build. No further set-up work is 
 user.  For hermetic builds, the Tensile component can be built from a local path installation (see command line options).
 Note that external facing APIs for Tensile are not provided.
 
-The choice of whether to use the embedded Tensile backend or hipBLASLt is handled automatically based on the architecture and problem.
-For instance, hipBLASLt is used as the default backend for problems on the gfx12 architecture.  Source code GEMMs internal to the rocBLAS library also
+The choice of whether to use the embedded Tensile backend or hipBLASLt is handled automatically based on the architecture,
+the data type, and the problem. The architectures which default to hipBLASLt, and the data types for which they do so, are:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 30, 70
+
+    * - **Architecture**
+      - **Data types defaulting to hipBLASLt**
+
+    * - gfx1200, gfx1201, gfx1250
+      - All data types.
+
+    * - gfx942, gfx950
+      - ``f16_r``, ``bf16_r``, and ``f64_r``, including their mixed-precision ``gemm_ex`` forms. All other data types
+        default to Tensile.
+
+    * - All others
+      - None. Tensile is always the default.
+
+Where hipBLASLt is the default but provides no solution for a given problem, or reports an error, the backend falls back
+to Tensile. Source code GEMMs internal to the rocBLAS library also
 allow rocBLAS to be built without Tensile or hipBLASLt.
 They can potentially be used as fallbacks for problems that are not supported by the Tensile or hipBLASLt backends.
 
