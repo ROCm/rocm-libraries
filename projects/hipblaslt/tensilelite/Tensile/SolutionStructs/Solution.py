@@ -6916,8 +6916,10 @@ class Solution(collections.abc.Mapping):
       if isPersistent(state) and not hasStaticAssignment(state):
         reject(state, printRejectionReason, "PrefetchGL2 with persistent execution requires WorkAssignment=StaticGrid")
         return
+      # General batch is supported on StridedBatched SupportUserArgs kernels,
+      # where ArgType == 3 selects it at runtime. StridedBatched=False is not.
       if state["ProblemType"]["Batched"] and not state["ProblemType"]["StridedBatched"]:
-        reject(state, printRejectionReason, "PrefetchGL2 does not support general batch")
+        reject(state, printRejectionReason, "PrefetchGL2 does not support StridedBatched=False")
         return
       if state["ProblemType"]["Sparse"]:
         if state["DirectToVgprSparseMetadata"]:
