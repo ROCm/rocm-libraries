@@ -131,9 +131,11 @@ namespace TensileLite
         struct Dynamic
         {
             /**
-             * Kernel arguments of a dynamic StreamK launch: whole tiles plus `split`
-             * parts per split tile. Tiles split only under the debug overrides
-             * (TENSILE_STREAMK_TILES / _SPLIT).
+             * Kernel arguments of a dynamic StreamK launch (DynamicWorkQueue, and
+             * Hybrid's dynamic sub-mode): totalItems work items, the whole tiles
+             * plus `tiles` tiles cut into `split` parts of itersPerWI iterations;
+             * grid is the launched workgroups. Tiles split only under the debug
+             * overrides (TENSILE_STREAMK_TILES / _SPLIT).
              */
             struct KernelArguments
             {
@@ -142,22 +144,43 @@ namespace TensileLite
                 uint32_t split      = 0;
                 uint32_t itersPerWI = 0;
                 uint32_t grid       = 0;
+
+                // Workspace partial-tile slots (and, on the flag-protocol kernels, ready
+                // flags) the kernel indexes: one per part of every split tile.
+                size_t partialSlots() const
+                {
+                    return size_t{tiles} * split;
+                }
+            };
+
+            struct SplitInputs
+            {
+                // Batch-inclusive tile count, getNumTiles(sizeMapping, 1).
+                size_t tiles = 0;
+                // getItersPerTile(sizeMapping), clamped to at least 1.
+                size_t itersPerTile = 1;
+                // Iterations per indivisible K unit, skKGranularity().
+                size_t kGranularity = 1;
+                // Workgroups the dynamic grid policy may launch (CUs x occupancy).
+                size_t maxGrid = 0;
+                // Flag-region entries left after the per-XCD queue counters.
+                size_t flagSlots = 0;
+                // Workspace the launch is given, and the bytes of one partial tile.
+                size_t workspaceBytes   = 0;
+                size_t partialTileBytes = 0;
+                // TENSILE_STREAMK_TILES / TENSILE_STREAMK_SPLIT, -1 when unset.
+                int overrideTiles = -1;
+                int overrideSplit = -1;
             };
 
             /**
-             * Compute the work items of a dynamic launch. Every field but `grid`
-             * is filled in; `grid` is left at 0 for the caller.
+             * Choose the dynamic StreamK work decomposition.
              *
-             * @param hardware      Source of the AMDGPU skTiles / skSplit overrides.
-             * @param tiles         Tile count the work queue covers.
-             * @param itersPerTile  Iterations per tile; clamped to at least 1.
-             * @param kGranularity  Iterations per indivisible K unit. Chunk
-             *                      boundaries are rounded onto that unit.
+             * Every tile is whole (tiles = 0) unless the debug overrides ask for a
+             * split; if the partials they ask for do not fit the workspace or the flag
+             * region the tiles stay whole.
              */
-            TENSILELITEHOST_EXPORT static KernelArguments items(Hardware const& hardware,
-                                                                size_t          tiles,
-                                                                size_t          itersPerTile,
-                                                                size_t          kGranularity = 1);
+            TENSILELITEHOST_EXPORT static KernelArguments computeSplit(SplitInputs const& in);
 
             /**
              * Work item i sits in queue i % numQueues, and a workgroup pops only its
@@ -409,8 +432,8 @@ namespace TensileLite
             size_t idealWorkspaceBytes = 0;
             // available: problem.workspaceSize().
             size_t givenWorkspaceBytes = 0;
-            // recomputed: StreamK4 skTiles*skSplit slot count for the dynamic path (informational; does
-            // NOT feed the allocation guard, which is sized by grid).
+            // recomputed: skTiles*skSplit slot count for the dynamic path. When tiles are
+            // split this, not the grid, sizes the partials workspace.
             size_t dynamicPartialsSlots = 0;
             // available: StreamK::Dynamic::bakedQueueCount() -- baked per-XCD work-queue count (NUM_XCD),
             // 0 if unknown.
