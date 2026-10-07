@@ -53,9 +53,10 @@ arch_spec:
   class: Gfx950ConvFwdSpec
 
 # Consult the real forward candidate, including its capability gate. Grouped
-# (G > 1, including depthwise) 2D forward is in scope; grouped pointwise
-# (1x1, stride 1, no padding) and 3D cases the reference accepts remain visible
-# as integration scope gaps.
+# (G > 1, including depthwise) 2D forward is in scope. The factory builds no
+# grouped pointwise (1x1, stride 1, no padding) kernel, which grouped kernels
+# serve at runtime instead; it and 3D cases the reference accepts remain visible
+# as build-side scope gaps.
 reference_candidates:
   module: dispatch.grouped_convolution
   function: conv_grouped_candidates
@@ -148,8 +149,10 @@ specialization:
     block_w: {field: block_w}
     block_waves: {field: block_waves}
 
-# One exact-shape kernel per catalog entry: no field is read only from kernel
-# arguments, so nothing is reused across runtime shapes. Documentation only.
+# The problem is passed as AOT kernel arguments computed from the graph, and the
+# N..dW / groups metadata records the build problem that fixes each binary's
+# capabilities (runtime_capabilities), so every field stays a descriptor field.
+# Documentation only.
 runtime_param_fields: []
 
 graph_match:
@@ -192,8 +195,14 @@ launch_surface:
     python_source: builders/common/convolution_forward.py:supports_gfx950_conv_fwd
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdNative.cpp:kernelFits
     kmd_fields: *metadata_fields
-    guard: matchProblem checks the unfused forward graph and storage contract, derives groups from X.C / W.dims[1] and declines grouped pointwise; kernelFits compares every compiled shape, groups and tuning value, and takes the default epilogue only when K/groups is odd, before loading code.
+    guard: matchProblem checks the unfused forward graph and storage contract and derives groups from X.C / W.dims[1]; kernelFits reads the kernel's build problem and tuning, refuses malformed metadata, unreviewed launch contracts and a default epilogue whose build K/groups is even, and admits the graph only when the binary's capabilities serve it (runtime_capabilities), before loading code.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvFwdMatchers.cpp
+  - name: runtime_capabilities
+    python_source: builders/common/convolution_forward.py:gfx950_conv_fwd_serves
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdGeometry.hpp:implicitGemmServes
+    kmd_fields: [N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW, groups, dtype, tile_m, tile_n, tile_k, warp_m, warp_n, epilogue, kernel_family, direct_variant]
+    guard: A kernel serves every graph its build-time capabilities admit. Implicit GEMM (implicitGemmCapabilities/implicitGemmServes) keeps the grouped and pointwise code paths and the load (build C/groups, tile-capped) and cshuffle store (build K/groups) widths; directServes keeps the filter, stride, padding and dilation. library/tests/test_convolution_forward_packaging.py checks the binary is rocKE's IR for other problems with those capabilities and that the implicit-GEMM rule is the forward subset of KernelCache.supports_problem; the GPU suite runs every serving kernel on graphs no kernel was compiled for.
+    test: dnn-providers/hip-kernel-provider/src/integration_tests/kernel_ingestor_engine/IntegrationGpuGfx950ConvFwd.cpp
   - name: problem_geometry_and_byte_counts
     python_source: builders/common/convolution_forward.py:_problem_error
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdGeometry.hpp:deriveGeometry

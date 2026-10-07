@@ -54,9 +54,12 @@ constexpr const char* TILE_K_KNOB = "tile_k";
 constexpr const char* KERNEL_FAMILY_KNOB = "kernel_family";
 constexpr int64_t IMPLICIT_GEMM_FAMILY = 0;
 constexpr int64_t DIRECT_DEPTHWISE_FAMILY = 1;
-// Both tile_k arms of every catalog request, against which a direct-capable
-// graph's candidate counts are stated.
-constexpr size_t IMPLICIT_GEMM_ARMS = 2;
+// rocKE's AOT kernels take the problem as kernel arguments, so a graph is served by every
+// packaged kernel whose build-time capabilities admit it, not only the one compiled for
+// its shape. Every count below is the number of shipped kernels that
+// gfx950_conv_fwd_serves in convolution_forward.py accepts for the graph, so the native
+// matcher is checked against the Python one.
+constexpr size_t SMOKE_CANDIDATES = 42;
 
 struct ConvProblem
 {
@@ -83,9 +86,11 @@ struct Variant
     DataType dtype;
     int64_t tileK;
     ConvProblem problem{};
-    // Direct depthwise kernels the catalog packs for this graph; 0 when the
-    // graph is outside the direct family's guard.
+    // Direct depthwise kernels that serve this graph; 0 when the graph is outside the
+    // direct family's guard.
     size_t directArms = 0;
+    // Implicit-GEMM kernels that serve this graph, both tile_k arms.
+    size_t implicitArms = 0;
 };
 
 std::string dtypeSuffix(DataType dtype)
@@ -134,15 +139,16 @@ std::vector<Variant> correctnessVariants()
     return variants;
 }
 
-std::vector<Variant>
-    withBothDtypes(const std::vector<std::tuple<std::string, ConvProblem, size_t>>& problems)
+std::vector<Variant> withBothDtypes(
+    const std::vector<std::tuple<std::string, ConvProblem, size_t, size_t>>& problems)
 {
     std::vector<Variant> variants;
-    for(const auto& [name, problem, directArms] : problems)
+    for(const auto& [name, problem, directArms, implicitArms] : problems)
     {
         for(const auto dtype : {DataType::HALF, DataType::BFLOAT16})
         {
-            variants.push_back({name + dtypeSuffix(dtype), dtype, 0, problem, directArms});
+            variants.push_back(
+                {name + dtypeSuffix(dtype), dtype, 0, problem, directArms, implicitArms});
         }
     }
     return variants;
@@ -151,22 +157,27 @@ std::vector<Variant>
 std::vector<Variant> directVariants()
 {
     // Every depthwise request in gfx950_conv_fwd.requests.json that carries
-    // _catalog_direct arms, with its arm count. N is 2 throughout, so a write
-    // that spills past the last output row lands in the next image and fails.
+    // _catalog_direct arms. A direct kernel serves every graph with its compiled filter,
+    // stride and padding, so the arm counts
+    // include kernels built for other images and channel counts. N is 2 throughout, so a
+    // write that spills past the last output row lands in the next image and fails.
     return withBothDtypes({
-        {"Depthwise", {2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 2},
+        {"Depthwise", {2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 6, 26},
         // Stride 2 on an odd input height.
-        {"DepthwiseStrided", {2, 32, 32, 17, 17, 3, 3, 2, 2, 1, 1, 1, 1, 32}, 2},
-        {"DepthwiseOdd7x7", {2, 5, 5, 9, 9, 7, 7, 1, 1, 3, 3, 1, 1, 5}, 2},
+        {"DepthwiseStrided", {2, 32, 32, 17, 17, 3, 3, 2, 2, 1, 1, 1, 1, 32}, 6, 26},
+        {"DepthwiseOdd7x7", {2, 5, 5, 9, 9, 7, 7, 1, 1, 3, 3, 1, 1, 5}, 2, 26},
         // 96 channels leave the last 64-lane channel tile partly empty.
-        {"DepthwiseC96", {2, 96, 96, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 96}, 2},
-        {"DepthwiseC96StridedOddH", {2, 96, 96, 17, 17, 3, 3, 2, 2, 1, 1, 1, 1, 96}, 1},
-        {"DepthwiseC96StridedEvenH", {2, 96, 96, 16, 18, 3, 3, 2, 2, 1, 1, 1, 1, 96}, 1},
+        {"DepthwiseC96", {2, 96, 96, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 96}, 5, 26},
+        {"DepthwiseC96StridedOddH", {2, 96, 96, 17, 17, 3, 3, 2, 2, 1, 1, 1, 1, 96}, 5, 26},
+        {"DepthwiseC96StridedEvenH", {2, 96, 96, 16, 18, 3, 3, 2, 2, 1, 1, 1, 1, 96}, 5, 26},
         // The block_w=32 arm of each 70x40 graph takes rocKE's runtime H loop.
-        {"DepthwiseC64RuntimeLoop", {2, 64, 64, 70, 40, 3, 3, 1, 1, 1, 1, 1, 1, 64}, 2},
-        {"DepthwiseC64StridedRuntimeLoop", {2, 64, 64, 70, 40, 3, 3, 2, 2, 1, 1, 1, 1, 64}, 2},
+        {"DepthwiseC64RuntimeLoop", {2, 64, 64, 70, 40, 3, 3, 1, 1, 1, 1, 1, 1, 64}, 5, 26},
+        {"DepthwiseC64StridedRuntimeLoop", {2, 64, 64, 70, 40, 3, 3, 2, 2, 1, 1, 1, 1, 64}, 5, 26},
         // Spatial variant on the runtime H loop.
-        {"DepthwiseC5Spatial17x17RuntimeLoop", {2, 5, 5, 56, 24, 17, 17, 1, 1, 8, 8, 1, 1, 5}, 1},
+        {"DepthwiseC5Spatial17x17RuntimeLoop",
+         {2, 5, 5, 56, 24, 17, 17, 1, 1, 8, 8, 1, 1, 5},
+         1,
+         26},
     });
 }
 
@@ -176,11 +187,33 @@ std::vector<Variant> declinedDirectVariants()
     // kernels would skip or misplace output rows for the first two (row coverage),
     // and do not implement the other three.
     return withBothDtypes({
-        {"DepthwisePad0", {2, 24, 24, 12, 12, 3, 3, 1, 1, 0, 0, 1, 1, 24}, 0},
-        {"DepthwisePad2", {2, 24, 24, 12, 12, 3, 3, 1, 1, 2, 2, 1, 1, 24}, 0},
-        {"DepthwiseStride2x1", {2, 24, 24, 13, 13, 3, 3, 2, 1, 1, 1, 1, 1, 24}, 0},
-        {"DepthwiseDilated", {2, 24, 24, 13, 13, 3, 3, 1, 1, 2, 2, 2, 2, 24}, 0},
-        {"DepthwiseMultiplier2", {2, 16, 32, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1, 16}, 0},
+        {"DepthwisePad0", {2, 24, 24, 12, 12, 3, 3, 1, 1, 0, 0, 1, 1, 24}, 0, 26},
+        {"DepthwisePad2", {2, 24, 24, 12, 12, 3, 3, 1, 1, 2, 2, 1, 1, 24}, 0, 26},
+        {"DepthwiseStride2x1", {2, 24, 24, 13, 13, 3, 3, 2, 1, 1, 1, 1, 1, 24}, 0, 26},
+        {"DepthwiseDilated", {2, 24, 24, 13, 13, 3, 3, 1, 1, 2, 2, 2, 2, 24}, 0, 26},
+        {"DepthwiseMultiplier2", {2, 16, 32, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1, 16}, 0, 30},
+    });
+}
+
+std::vector<Variant> uncatalogedVariants()
+{
+    // Graphs no packaged kernel was compiled for: every candidate is a kernel built for
+    // another shape. They cover each capability the matcher checks: a grouped binary on a
+    // dense graph, a non-pointwise binary on a 1x1 graph and on a grouped 1x1 graph,
+    // narrowed load and store widths, and direct kernels on new images and group counts.
+    return withBothDtypes({
+        {"Dense", {3, 48, 40, 20, 24, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 42},
+        {"Strided5x5", {2, 64, 96, 23, 19, 5, 5, 2, 2, 2, 2, 1, 1}, 0, 42},
+        {"Pointwise", {4, 64, 48, 9, 11, 1, 1, 1, 1, 0, 0, 1, 1}, 0, 44},
+        {"GroupedPointwise", {2, 64, 64, 10, 10, 1, 1, 1, 1, 0, 0, 1, 1, 8}, 0, 34},
+        {"Grouped", {2, 48, 48, 15, 13, 3, 3, 1, 1, 1, 1, 1, 1, 3}, 0, 34},
+        {"Depthwise", {3, 64, 64, 28, 20, 3, 3, 1, 1, 1, 1, 1, 1, 64}, 5, 26},
+        {"DepthwiseStrided", {1, 96, 96, 31, 29, 3, 3, 2, 2, 1, 1, 1, 1, 96}, 5, 26},
+        {"Depthwise7x7", {2, 5, 5, 21, 15, 7, 7, 1, 1, 3, 3, 1, 1, 5}, 2, 26},
+        // Spatial kernels built for 32 and 5 groups serve 16 and 12: the variant derives
+        // its columns per wave from the runtime group count.
+        {"DepthwiseG16", {2, 16, 16, 20, 18, 3, 3, 1, 1, 1, 1, 1, 1, 16}, 6, 26},
+        {"Depthwise7x7G12", {2, 12, 12, 15, 13, 7, 7, 1, 1, 3, 3, 1, 1, 12}, 2, 26},
     });
 }
 
@@ -566,7 +599,7 @@ class IntegrationGpuGfx950ConvFwdBenchmark : public IntegrationGpuGfx950ConvFwd
 {
 };
 
-TEST_P(IntegrationGpuGfx950ConvFwdBenchmark, MeasuresTwoCandidatesAndReusesFastestRecordedWinner)
+TEST_P(IntegrationGpuGfx950ConvFwdBenchmark, MeasuresEveryServingKernelAndReusesTheFastest)
 {
     const auto dtype = GetParam().dtype;
     // Exercise both the public knob and the process override requested by the runbook.
@@ -576,21 +609,23 @@ TEST_P(IntegrationGpuGfx950ConvFwdBenchmark, MeasuresTwoCandidatesAndReusesFaste
     auto& recorder = capture.recorder();
     auto graph = buildConvGraph(dtype);
     ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, {enableBenchmarkingKnob()}));
-    EXPECT_TRUE(recorder.hasLogContaining("will benchmark 2 candidate(s)"))
+    EXPECT_TRUE(recorder.hasLogContaining("will benchmark " + candidateCount(SMOKE_CANDIDATES)))
         << recorder.getRecordedLogsAsString();
     ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*graph, dtype, 19));
     ASSERT_EQ(selectionCount(recorder), 1U) << recorder.getRecordedLogsAsString();
 
     const auto ranking = persistedRanking();
     ASSERT_TRUE(ranking) << "Benchmarking did not persist its measured candidate ranking";
-    ASSERT_EQ(ranking->size(), 2U);
-    EXPECT_NE((*ranking)[0].kernelId, (*ranking)[1].kernelId);
+    ASSERT_EQ(ranking->size(), SMOKE_CANDIDATES);
+    std::unordered_set<std::string> measured;
     for(const auto& candidate : *ranking)
     {
         EXPECT_TRUE(std::isfinite(candidate.timeMs));
         EXPECT_GT(candidate.timeMs, 0.0);
+        EXPECT_LE(ranking->front().timeMs, candidate.timeMs);
+        measured.insert(ingestor::toString(candidate.kernelId));
     }
-    EXPECT_LE((*ranking)[0].timeMs, (*ranking)[1].timeMs);
+    EXPECT_EQ(measured.size(), SMOKE_CANDIDATES);
     const std::string winner = ingestor::toString(ranking->front().kernelId);
     EXPECT_TRUE(recorder.hasLogContaining("benchmarking selected kernel " + winner))
         << recorder.getRecordedLogsAsString();
@@ -604,8 +639,9 @@ TEST_P(IntegrationGpuGfx950ConvFwdBenchmark, MeasuresTwoCandidatesAndReusesFaste
     ASSERT_NO_FATAL_FAILURE(buildAndCompile(*recreated, {enableBenchmarkingKnob()}));
     EXPECT_TRUE(recorder.hasLogContaining("served kernel " + winner + " at rank 0"))
         << recorder.getRecordedLogsAsString();
-    EXPECT_TRUE(
-        recorder.hasLogContaining("from a benchmarked record of 2 entry(s) for 2 candidate(s)"))
+    const auto count = std::to_string(SMOKE_CANDIDATES);
+    EXPECT_TRUE(recorder.hasLogContaining("from a benchmarked record of " + count + " entry(s) for "
+                                          + count + " candidate(s)"))
         << recorder.getRecordedLogsAsString();
     EXPECT_FALSE(recorder.hasLogContaining("will benchmark"));
     ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*recreated, dtype, 29));
@@ -621,7 +657,7 @@ TEST_P(IntegrationGpuGfx950ConvFwdDirect, UnforcedPlanServesTheDirectFamily)
     const auto& variant = GetParam();
     const ScopedPluginLogCapture capture(this);
     auto& recorder = capture.recorder();
-    const auto catalog = variant.directArms + IMPLICIT_GEMM_ARMS;
+    const auto catalog = variant.directArms + variant.implicitArms;
 
     auto forced = buildConvGraph(variant.dtype, variant.problem);
     ASSERT_NO_FATAL_FAILURE(buildAndCompile(
@@ -639,7 +675,7 @@ TEST_P(IntegrationGpuGfx950ConvFwdDirect, UnforcedPlanServesTheDirectFamily)
     auto implicitGemm = buildConvGraph(variant.dtype, variant.problem);
     ASSERT_NO_FATAL_FAILURE(buildAndCompile(
         *implicitGemm, {kernelFamilyKnob(IMPLICIT_GEMM_FAMILY), disableBenchmarkingKnob()}));
-    EXPECT_TRUE(recorder.hasLogContaining("at rank 0 from " + candidateCount(IMPLICIT_GEMM_ARMS)))
+    EXPECT_TRUE(recorder.hasLogContaining("at rank 0 from " + candidateCount(variant.implicitArms)))
         << recorder.getRecordedLogsAsString();
     EXPECT_NE(selectedKernel(recorder), direct);
     ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*implicitGemm, variant.dtype, 5));
@@ -702,7 +738,7 @@ TEST_P(IntegrationGpuGfx950ConvFwdDirect, BenchmarkingComparesBothFamiliesAndReu
     const auto& variant = GetParam();
     const ScopedPluginLogCapture capture(this);
     auto& recorder = capture.recorder();
-    const auto catalog = variant.directArms + IMPLICIT_GEMM_ARMS;
+    const auto catalog = variant.directArms + variant.implicitArms;
 
     // One kernel from each family, as the unbenchmarked heuristic orders them.
     std::unordered_set<std::string> families;
@@ -791,12 +827,59 @@ TEST_P(IntegrationGpuGfx950ConvFwdDirectDeclined, ImplicitGemmServesTheGraphAlon
     recorder.clearLogs();
     auto graph = buildConvGraph(variant.dtype, variant.problem);
     ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, {disableBenchmarkingKnob()}));
-    EXPECT_TRUE(recorder.hasLogContaining("at rank 0 from " + candidateCount(IMPLICIT_GEMM_ARMS)
-                                          + " (" + std::to_string(IMPLICIT_GEMM_ARMS)
+    EXPECT_TRUE(recorder.hasLogContaining("at rank 0 from " + candidateCount(variant.implicitArms)
+                                          + " (" + std::to_string(variant.implicitArms)
                                           + " before knob filtering)"))
         << recorder.getRecordedLogsAsString();
     ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*graph, variant.dtype, 3));
     ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*graph, variant.dtype, 11));
+}
+
+class IntegrationGpuGfx950ConvFwdServing : public IntegrationGpuGfx950ConvFwd
+{
+};
+
+TEST_P(IntegrationGpuGfx950ConvFwdServing, EveryServingKernelMatchesCpuReference)
+{
+    const auto& variant = GetParam();
+    const ScopedPluginLogCapture capture(this);
+    auto& recorder = capture.recorder();
+    const std::vector<KnobSetting> knobs{enableBenchmarkingKnob()};
+    const auto candidates = variant.directArms + variant.implicitArms;
+
+    auto graph = buildConvGraph(variant.dtype, variant.problem);
+    ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, knobs));
+    EXPECT_TRUE(recorder.hasLogContaining("will benchmark " + candidateCount(candidates)))
+        << recorder.getRecordedLogsAsString();
+    ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*graph, variant.dtype, 43));
+    graph.reset();
+
+    const auto measured = lastPersistedRecord();
+    ASSERT_TRUE(measured) << "Benchmarking did not persist its measured ranking";
+    const auto& [key, ranking] = *measured;
+    ASSERT_EQ(ranking.size(), candidates);
+
+    // Benchmarking executes only its winner. Serving each kernel in turn from a record
+    // that ranks it first runs every kernel, all compiled for other shapes, on this graph.
+    for(size_t arm = 0; arm < ranking.size(); ++arm)
+    {
+        auto pinned = ranking;
+        std::rotate(pinned.begin(),
+                    pinned.begin() + static_cast<std::ptrdiff_t>(arm),
+                    pinned.begin() + static_cast<std::ptrdiff_t>(arm) + 1);
+        ASSERT_NO_FATAL_FAILURE(appendPersistedRecord(key, pinned));
+        ASSERT_NO_FATAL_FAILURE(recreateHandle());
+        recorder.clearLogs();
+
+        auto served = buildConvGraph(variant.dtype, variant.problem);
+        ASSERT_NO_FATAL_FAILURE(buildAndCompile(*served, knobs));
+        const auto kernel = ingestor::toString(pinned.front().kernelId);
+        EXPECT_TRUE(recorder.hasLogContaining("served kernel " + kernel + " at rank 0"))
+            << "kernel " << arm << ": " << recorder.getRecordedLogsAsString();
+        EXPECT_FALSE(recorder.hasLogContaining("will benchmark"));
+        ASSERT_NO_FATAL_FAILURE(
+            executeAndVerifyStorage(*served, variant.dtype, 47 + static_cast<unsigned int>(arm)));
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(Correctness,
@@ -819,6 +902,11 @@ INSTANTIATE_TEST_SUITE_P(DirectDepthwiseDeclined,
                          [](const ::testing::TestParamInfo<Variant>& info) {
                              return info.param.name;
                          });
+
+INSTANTIATE_TEST_SUITE_P(Uncataloged,
+                         IntegrationGpuGfx950ConvFwdServing,
+                         ::testing::ValuesIn(uncatalogedVariants()),
+                         [](const auto& info) { return info.param.name; });
 
 INSTANTIATE_TEST_SUITE_P(Autotuning,
                          IntegrationGpuGfx950ConvFwdBenchmark,

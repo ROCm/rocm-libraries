@@ -4,6 +4,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -200,15 +201,10 @@ std::optional<MatchedProblem> matchProblem(const MatchContext& context)
                                 attributes.dilation()->Get(0),
                                 attributes.dilation()->Get(1),
                                 groups};
-    // Known rocKE bug: the is_pointwise shortcut (1x1 filter, unit stride, no padding)
-    // indexes A and D as a plain GEMM and ignores groups, so grouped pointwise kernels
-    // compute wrong results. Same predicate as ConvProblem.is_pointwise.
-    const bool pointwise = problem.y == 1 && problem.x == 1 && problem.strideH == 1
-                           && problem.strideW == 1 && problem.padH == 0 && problem.padW == 0;
-    if(groups > 1 && pointwise)
-    {
-        return std::nullopt;
-    }
+    // Grouped pointwise graphs are matched too. rocKE's pointwise shortcut ignores groups,
+    // but no packaged pointwise binary is grouped (the adapter refuses to build one) and
+    // conv::implicitGemmServes gives a grouped graph only grouped binaries, which index
+    // through their descriptors.
     const auto geometry = conv::deriveGeometry(problem);
     if(!geometry)
     {
@@ -258,17 +254,53 @@ const std::string* stringMetadata(const KernelDefinition& kernel, const char* fi
 constexpr std::array<const char*, 8> GEMM_TUNING_FIELDS{
     "tile_m", "tile_n", "tile_k", "warp_m", "warp_n", "warp_tile_m", "warp_tile_n", "warp_tile_k"};
 
-std::optional<ConvLaunch> implicitGemmLaunch(const MatchedProblem& matched,
-                                             const KernelDefinition& kernel)
+/// The problem a packaged kernel was compiled for, from its metadata. rocKE's AOT kernels
+/// take the problem as kernel arguments, so this no longer has to equal the graph; it
+/// records which build-time capabilities the binary has (see conv::implicitGemmCapabilities
+/// and conv::directServes).
+std::optional<conv::Problem> buildProblem(const KernelDefinition& kernel)
 {
-    // The tuning values are whatever the build validated for this exact geometry: rocKE's
-    // is_valid_spec_for_problem ran on every variant before it was compiled, and the
-    // geometry fields above pin each kernel to one problem. What stays reviewed here is the
-    // launch contract. These pipelines all launch warp_m * warp_n * 64 threads over an
-    // (N-tiles, M-tiles, groups) grid with static LDS; "wavelet" appends load waves and is
-    // not accepted. rocKE derives vec_c from the per-group K (default_vector_sizes(cpg,
-    // kpg)) and picks vec_c > 1 when it is even; the default epilogue then needs scalar
-    // stores, so an even K / groups takes cshuffle only.
+    std::array<int64_t, 14> values{};
+    const std::array<const char*, 14> fields{
+        "N", "C", "K", "Hi", "Wi", "Y", "X", "sH", "sW", "pH", "pW", "dH", "dW", "groups"};
+    for(size_t i = 0; i < fields.size(); ++i)
+    {
+        const auto value = intMetadata(kernel, fields[i]);
+        if(!value)
+        {
+            return std::nullopt;
+        }
+        values[i] = *value;
+    }
+    const conv::Problem problem{values[0],
+                                values[1],
+                                values[2],
+                                values[3],
+                                values[4],
+                                values[5],
+                                values[6],
+                                values[7],
+                                values[8],
+                                values[9],
+                                values[10],
+                                values[11],
+                                values[12],
+                                values[13]};
+    // A malformed build problem says nothing reliable about the binary's capabilities.
+    if(!conv::deriveGeometry(problem))
+    {
+        return std::nullopt;
+    }
+    return problem;
+}
+
+std::optional<ConvLaunch> implicitGemmLaunch(const MatchedProblem& matched,
+                                             const KernelDefinition& kernel,
+                                             const conv::Problem& build)
+{
+    // What stays reviewed here is the launch contract and the binary's capabilities. These
+    // pipelines all launch warp_m * warp_n * 64 threads over an (N-tiles, M-tiles, groups)
+    // grid with static LDS; "wavelet" appends load waves and is not accepted.
     const auto& p = matched.problem;
     const auto* pipelineName = stringMetadata(kernel, "pipeline");
     if(pipelineName == nullptr
@@ -277,10 +309,13 @@ std::optional<ConvLaunch> implicitGemmLaunch(const MatchedProblem& matched,
     {
         return std::nullopt;
     }
-    // The default epilogue stores scalars, so it is valid only when K/groups is odd.
-    const bool defaultEpilogueAllowed
-        = (p.k / p.groups) % 2 != 0 && metadataEquals(kernel, "epilogue", std::string("default"));
-    if(!metadataEquals(kernel, "epilogue", std::string("cshuffle")) && !defaultEpilogueAllowed)
+    // rocKE builds the default epilogue only with scalar stores, which its default
+    // vector width gives only for an odd build K / groups; any other descriptor is
+    // malformed. A scalar store then serves every graph's K / groups.
+    const bool cshuffle = metadataEquals(kernel, "epilogue", std::string("cshuffle"));
+    if(!cshuffle
+       && !(metadataEquals(kernel, "epilogue", std::string("default"))
+            && (build.k / build.groups) % 2 != 0))
     {
         return std::nullopt;
     }
@@ -294,6 +329,12 @@ std::optional<ConvLaunch> implicitGemmLaunch(const MatchedProblem& matched,
             return std::nullopt;
         }
         tuning[i] = *value;
+    }
+    const auto capabilities = conv::implicitGemmCapabilities(
+        build, tuning[0], tuning[1], tuning[2], tuning[3], tuning[4], cshuffle);
+    if(!capabilities || !conv::implicitGemmServes(*capabilities, p))
+    {
+        return std::nullopt;
     }
     const auto launch
         = conv::launchGeometry(p, matched.geometry, tuning[0], tuning[1], tuning[3], tuning[4], 64);
@@ -313,12 +354,13 @@ std::optional<ConvLaunch> implicitGemmLaunch(const MatchedProblem& matched,
 /// the guard declines stays on implicit GEMM.
 std::optional<ConvLaunch> directLaunch(const MatchedProblem& matched,
                                        const KernelDefinition& kernel,
+                                       const conv::Problem& build,
                                        conv::DirectVariant variant,
                                        int64_t blockW,
                                        int64_t blockWaves)
 {
     const auto& p = matched.problem;
-    if(!conv::directProblemSupported(p))
+    if(!conv::directProblemSupported(p) || !conv::directServes(build, p))
     {
         return std::nullopt;
     }
@@ -345,39 +387,20 @@ std::optional<ConvLaunch> directLaunch(const MatchedProblem& matched,
     return ConvLaunch{*launch, conv::directKernargs(p, matched.geometry)};
 }
 
-/// The launch when @p kernel is packaged code compiled for exactly this problem under a
-/// launch contract this pack reviewed; std::nullopt otherwise.
+/// The launch when @p kernel is packaged code that computes this graph under a launch
+/// contract this pack reviewed; std::nullopt otherwise. rocKE's AOT kernels take the
+/// problem as kernel arguments, so a kernel serves every graph its build-time
+/// capabilities admit, not only the shape it was compiled for.
 std::optional<ConvLaunch> kernelFits(const MatchedProblem& matched, const KernelDefinition& kernel)
 {
     if(kernel.source.kind != KernelSourceKind::KPACK)
     {
         return std::nullopt;
     }
-    const auto& p = matched.problem;
-    const std::array<std::pair<const char*, int64_t>, 13> fields{{{"N", p.n},
-                                                                  {"C", p.c},
-                                                                  {"K", p.k},
-                                                                  {"Hi", p.hi},
-                                                                  {"Wi", p.wi},
-                                                                  {"Y", p.y},
-                                                                  {"X", p.x},
-                                                                  {"sH", p.strideH},
-                                                                  {"sW", p.strideW},
-                                                                  {"pH", p.padH},
-                                                                  {"pW", p.padW},
-                                                                  {"dH", p.dilationH},
-                                                                  {"dW", p.dilationW}}};
-    for(const auto& field : fields)
-    {
-        if(!metadataEquals(kernel, field.first, field.second))
-        {
-            return std::nullopt;
-        }
-    }
+    const auto build = buildProblem(kernel);
     const std::string dtype = matched.dtype == data_objects::DataType::HALF ? "fp16" : "bf16";
-    if(!metadataEquals(kernel, "dtype", dtype)
+    if(!build || !metadataEquals(kernel, "dtype", dtype)
        || !metadataEquals(kernel, "layout", std::string("NHWC"))
-       || !metadataEquals(kernel, "groups", p.groups)
        || !metadataEquals(kernel, "wave_size", int64_t{64}))
     {
         return std::nullopt;
@@ -405,9 +428,9 @@ std::optional<ConvLaunch> kernelFits(const MatchedProblem& matched, const Kernel
         {
             return std::nullopt;
         }
-        return implicitGemmLaunch(matched, kernel);
+        return implicitGemmLaunch(matched, kernel, *build);
     }
-    return directLaunch(matched, kernel, *variant, *blockW, *blockWaves);
+    return directLaunch(matched, kernel, *build, *variant, *blockW, *blockWaves);
 }
 
 bool kernelMatches(const MatchContext& context,
@@ -438,19 +461,63 @@ bool isDefaultDirectArm(const KernelDefinition& kernel)
            && metadataEquals(kernel, "block_waves", conv::DEFAULT_DIRECT_BLOCK_WAVES);
 }
 
-double score(const MatchContext& /*context*/,
-             const BoundTokens& /*bound*/,
-             const KernelDefinition& kernel)
+/// How well @p kernel's build-time specialization suits @p matched, in [0, 0.85): the
+/// kernel compiled for exactly this graph (rocKE's dispatcher pick for it) first, then the
+/// specialized code paths the graph can use (the pointwise GEMM, the ungrouped path), then
+/// wider load and store widths. Below one step of score()'s family and tile levels.
+double specializationBonus(const MatchedProblem& matched, const KernelDefinition& kernel)
+{
+    const auto build = buildProblem(kernel);
+    if(!build)
+    {
+        return 0.0;
+    }
+    const auto& p = matched.problem;
+    const bool exact = build->n == p.n && build->c == p.c && build->k == p.k && build->hi == p.hi
+                       && build->wi == p.wi && build->y == p.y && build->x == p.x
+                       && build->strideH == p.strideH && build->strideW == p.strideW
+                       && build->padH == p.padH && build->padW == p.padW
+                       && build->dilationH == p.dilationH && build->dilationW == p.dilationW
+                       && build->groups == p.groups;
+    double bonus = exact ? 0.5 : 0.0;
+    if(metadataEquals(
+           kernel, "kernel_family", static_cast<int64_t>(conv::KernelFamily::IMPLICIT_GEMM)))
+    {
+        const auto tile = [&](const char* field) { return intMetadata(kernel, field).value_or(0); };
+        const auto capabilities = conv::implicitGemmCapabilities(
+            *build,
+            tile("tile_m"),
+            tile("tile_n"),
+            tile("tile_k"),
+            tile("warp_m"),
+            tile("warp_n"),
+            metadataEquals(kernel, "epilogue", std::string("cshuffle")));
+        if(capabilities)
+        {
+            bonus += capabilities->pointwise ? 0.1 : 0.0;
+            bonus += !capabilities->grouped && p.groups == 1 ? 0.1 : 0.0;
+            bonus += 0.02 * std::log2(static_cast<double>(capabilities->loadWidth))
+                     + 0.02 * std::log2(static_cast<double>(capabilities->storeWidth));
+        }
+    }
+    return bonus;
+}
+
+double
+    score(const MatchContext& context, const BoundTokens& /*bound*/, const KernelDefinition& kernel)
 {
     // Deterministic fallback only. BenchmarkPlan replaces this order with measurements
     // across both families when benchmarking is enabled. A direct depthwise kernel ranks
     // first where one fits, its default arm highest. Next is the gfx950 dispatcher's own
-    // implicit-GEMM pick, so an unbenchmarked run without a direct kernel serves what
-    // rocKE would; its tile_k=128 sibling follows.
+    // implicit-GEMM tile, so an unbenchmarked run without a direct kernel serves what
+    // rocKE would; its tile_k=128 sibling follows. Every kernel the matcher admits computes
+    // the graph, and specializationBonus orders those that share a level.
+    const auto matched = matchProblem(context);
+    const auto bonus = matched ? specializationBonus(*matched, kernel) : 0.0;
     if(metadataEquals(
            kernel, "kernel_family", static_cast<int64_t>(conv::KernelFamily::DIRECT_DEPTHWISE)))
     {
-        return isDefaultDirectArm(kernel) ? 4.0 : 3.0;
+        return (isDefaultDirectArm(kernel) ? 4.0 : 3.0) + bonus;
     }
     const bool dispatcherTile = metadataEquals(kernel, "tile_m", int64_t{64})
                                 && metadataEquals(kernel, "tile_n", int64_t{64})
@@ -462,9 +529,9 @@ double score(const MatchContext& /*context*/,
                                 && metadataEquals(kernel, "pipeline", std::string("mem"));
     if(!dispatcherTile)
     {
-        return 0.0;
+        return bonus;
     }
-    return metadataEquals(kernel, "tile_k", int64_t{64}) ? 2.0 : 1.0;
+    return (metadataEquals(kernel, "tile_k", int64_t{64}) ? 2.0 : 1.0) + bonus;
 }
 
 void requireBindings(const BoundTokens& bound, const Binding& binding)

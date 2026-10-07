@@ -17,10 +17,10 @@ named in `graph_contract.md`, and the existing convolution reference tests.
 | Dtype | Uniform FP16 or BF16 with FP32 accumulation | Graph match and adapter; per-kernel dtype equality. |
 | Layout | Dense channels-last | Graph strides and prepare-time output check. |
 | Spatial rank | 2D only in this engine | Rank/attribute vector checks. |
-| Group count | Any divisor of both C and K, at most 65535; grouped pointwise (1x1, stride 1, no padding) declined | Graph match infers X.C / W.dims[1]; adapter `_problem_error`; per-kernel `groups` equality. |
+| Group count | Any divisor of both C and K, at most 65535; no kernel is built for grouped pointwise (1x1, stride 1, no padding), which grouped non-pointwise kernels serve | Graph match infers X.C / W.dims[1]; adapter `_problem_error`; a grouped graph needs a grouped binary. |
 | Padding | Nonnegative and symmetric | Both graph padding vectors checked. |
-| Stride and dilation | Positive, both dimensions baked | Exact per-kernel metadata match. |
-| Shape | Every dimension is baked | Exact per-kernel metadata match. |
+| Stride and dilation | Positive; runtime for implicit GEMM, compiled in for the direct kernels | `conv::directServes` for direct kernels. |
+| Shape | Runtime (AOT kernel arguments); the build problem fixes only the capabilities in [graph contract section 7](graph_contract.md#7-which-kernels-serve-a-graph) | `conv::implicitGemmServes`, `conv::directServes`. |
 | Fusion callbacks | None | Adapter delegates without callbacks; graph declines fusion. |
 | Buffer ABI | Three 16-byte-aligned, nonaliasing pointers | Launch validation. |
 | Buffer byte counts | Signed i32 | Checked multiplication before narrowing. |
@@ -96,9 +96,10 @@ The kernels are rocKE's AOT builds, which take the problem as kernel arguments.
 The order is defined once in `rocke/library/kernels/common/conv_abi.py` and the
 values by `ConvArgs.to_launch_values` in `conv_args.py`; the adapter exposes
 both as `Gfx950ConvFwdSpec.launch_signature` / `launch_values`. Each packaged
-kernel is still built for one exact problem, because the builder makes
-code-shape decisions (pointwise, grouping, load widths) from it, so the matcher
-still requires every geometry field.
+kernel is built for one problem, from which the builder makes the code-shape
+decisions (pointwise, grouping, load and store widths); the matcher checks a
+graph against those capabilities and launches the binary with the graph's own
+problem.
 
 Both families open with, in declaration order:
 

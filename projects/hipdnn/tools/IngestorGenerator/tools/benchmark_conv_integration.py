@@ -64,7 +64,7 @@ import sys
 import time
 import traceback
 from contextlib import contextmanager
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 ENGINE_NAME = "hipkernel:Gfx950ConvFwd"
@@ -454,16 +454,41 @@ def variant_label(spec) -> str:
     return f"direct_{spec.direct_variant}_bw{spec.block_w}_bwv{spec.block_waves}"
 
 
-def packaged_candidates(
-    root: Path, specs: dict, direct_spec, spec_type, problem_fields
-) -> dict:
-    """Installed descriptors for ``specs`` (label -> spec) and the graph's direct arms.
+#: The problem half of the flat spec: what a packaged kernel was built for, and
+#: what the runtime graph supplies to it as AOT kernel arguments.
+PROBLEM_FIELDS = (
+    "N",
+    "Hi",
+    "Wi",
+    "C",
+    "K",
+    "Y",
+    "X",
+    "sH",
+    "sW",
+    "pH",
+    "pW",
+    "dH",
+    "dW",
+    "groups",
+)
 
-    Implicit-GEMM descriptors must match a requested spec exactly. Every direct
-    descriptor with the request's geometry is a candidate: its metadata must
-    hydrate a spec the adapter rebuilds for the same arm (``direct_spec``), so a
-    descriptor the adapter would not package fails here rather than being
-    measured. Metadata omitting a field the KMD defaults reads as that default.
+
+def packaged_candidates(
+    root: Path, specs: dict, direct_spec, spec_type, problem_fields, serves, problem
+) -> tuple[dict, dict]:
+    """``(exact, serving)``: the descriptors compiled for this graph, and every
+    descriptor whose binary computes it.
+
+    ``exact`` maps a label to the descriptors built for exactly this graph:
+    implicit-GEMM descriptors must match a requested spec in ``specs``, and every
+    direct descriptor with the request's geometry is an arm whose metadata must
+    hydrate the spec the adapter rebuilds for it (``direct_spec``). rocKE's AOT
+    kernels take the problem as kernel arguments, so the engine also offers every
+    other packaged kernel that ``serves`` (``gfx950_conv_fwd_serves``) accepts for
+    ``problem``; ``serving`` holds them all, keyed by a label unique to each. Its
+    symbol must still be the one the adapter emits for its own metadata.
+    Metadata omitting a field the KMD defaults reads as that default.
     """
     defaults = {
         name: field.default
@@ -525,16 +550,43 @@ def packaged_candidates(
                 f"Multiple packaged descriptors have the same requested configuration: {label}",
             )
             found[label] = item
-    missing = sorted(set(specs) - set(found))
-    require(
-        not missing,
-        f"Installed catalog is missing requested tile_k variants: {missing}",
-    )
     require(
         len({item["id"] for item in found.values()}) == len(found),
         "Variants must have distinct descriptor UUIDs",
     )
-    return found
+    serving: dict[str, dict] = {}
+    for path in sorted(root.rglob("*.json")):
+        value = json.loads(path.read_text(encoding="utf-8"))
+        for kernel in kernel_objects(value):
+            if kernel.get("kernel_source", {}).get("kind") != "kpack":
+                continue
+            metadata = {**defaults, **kernel["metadata"]}
+            if not all(k in metadata for k in spec_type.__dataclass_fields__):
+                continue
+            spec = spec_type(**{k: metadata[k] for k in spec_type.__dataclass_fields__})
+            if not serves(spec, problem)[0]:
+                continue
+            require(
+                kernel["kernel_source"].get("symbol") == spec.kernel_name(),
+                f"Packaged symbol disagrees with the adapter: {path}",
+            )
+            label = f"{variant_label(spec)}#{kernel['id'].lower()[:8]}"
+            serving[label] = {
+                "id": kernel["id"].lower(),
+                "name": kernel.get("name"),
+                "label": label,
+                "spec": spec,
+                "metadata": kernel["metadata"],
+                "source": kernel["kernel_source"],
+                "descriptor": str(path),
+                "descriptor_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+    exact_ids = {item["id"] for item in found.values()}
+    require(
+        exact_ids <= {item["id"] for item in serving.values()},
+        "A descriptor compiled for this graph is not one the adapter says serves it",
+    )
+    return found, serving
 
 
 def cached_ranking(cache_dir: Path, candidate_ids: set[str]) -> dict | None:
@@ -878,6 +930,7 @@ def run(args: argparse.Namespace, report: dict) -> dict:
         Gfx950ConvFwdSpec,
         build_gfx950_conv_fwd,
         gfx950_conv_fwd_direct_spec_for_request,
+        gfx950_conv_fwd_serves,
         gfx950_conv_fwd_spec_for_request,
     )
     from dispatch.grouped_convolution import ConvGroupedRequest
@@ -952,28 +1005,38 @@ def run(args: argparse.Namespace, report: dict) -> dict:
         for key, value in asdict(base).items()
         if key in SMOKE or key in ("dtype", "layout")
     }
-    installed = packaged_candidates(
+    installed, serving = packaged_candidates(
         args.descriptor_root,
         specs,
         direct_arm if default_direct is not None else None,
         Gfx950ConvFwdSpec,
         problem_fields,
+        gfx950_conv_fwd_serves,
+        base,
     )
-    direct_installed = any(
-        item["spec"].kernel_family == 1 for item in installed.values()
-    )
+    direct_installed = any(item["spec"].kernel_family == 1 for item in serving.values())
     require(
         args.kernel_family != 1 or direct_installed,
         "--kernel-family 1 needs installed direct depthwise kernels for this graph",
     )
-    if args.tile_k is not None:
+    if args.tile_k is not None and forced:
+        # The unbenchmarked order serves the kernel compiled for this graph first, so a
+        # forced tile needs one; other modes measure whatever serves the graph.
+        missing = sorted(set(specs) - set(installed))
+        require(
+            not missing,
+            f"Installed catalog is missing requested tile_k variants: {missing}",
+        )
         candidates = {f"tile_k{args.tile_k}": installed[f"tile_k{args.tile_k}"]}
     else:
         candidates = {
             label: item
-            for label, item in installed.items()
-            if args.kernel_family is None
-            or item["spec"].kernel_family == args.kernel_family
+            for label, item in serving.items()
+            if (
+                args.kernel_family is None
+                or item["spec"].kernel_family == args.kernel_family
+            )
+            and (args.tile_k is None or item["spec"].tile_k == args.tile_k)
         }
     report["requested_specs"] = {
         label: asdict(item["spec"]) for label, item in candidates.items()
@@ -1201,7 +1264,10 @@ def run(args: argparse.Namespace, report: dict) -> dict:
             direct_output = torch.empty_like(output)
             direct_output.fill_(float("nan"))
             # The AOT problem block after the six leading arguments, from rocKE's ConvArgs.
-            values = spec.launch_values(
+            # The winner may be compiled for another shape: launch its binary with the
+            # request's problem, as the engine does.
+            runtime = replace(spec, **{k: getattr(base, k) for k in PROBLEM_FIELDS})
+            values = runtime.launch_values(
                 x,
                 w,
                 direct_output,
@@ -1210,8 +1276,8 @@ def run(args: argparse.Namespace, report: dict) -> dict:
                 direct_output.numel() * direct_output.element_size(),
             )
             config = LaunchConfig(
-                grid=spec.grid(),
-                block=spec.block(),
+                grid=runtime.grid(),
+                block=runtime.block(),
                 stream=int(stream.cuda_stream),
                 fence=False,
             )
@@ -1233,8 +1299,8 @@ def run(args: argparse.Namespace, report: dict) -> dict:
                 "adapter_ir_matches_original": True,
                 "llvm_sha256": hashlib.sha256(artifact.llvm_text.encode()).hexdigest(),
                 "hsaco_sha256": hashlib.sha256(artifact.hsaco).hexdigest(),
-                "grid": spec.grid(),
-                "block": spec.block(),
+                "grid": runtime.grid(),
+                "block": runtime.block(),
             }
             # Finish both compilation paths and correctness checks before timing either.
             capture.stage = "steady_state"
