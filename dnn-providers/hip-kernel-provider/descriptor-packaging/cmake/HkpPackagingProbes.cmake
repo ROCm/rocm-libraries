@@ -51,6 +51,7 @@ function(_hkp_probe_derive_root name from_dir arch out_dir expect_var)
                  PROPERTY CMAKE_CONFIGURE_DEPENDS ${_derive_inputs}
                           "${HKP_PKG_DIR}/tools/hkp_probe_derive_root.py"
                           "${HKP_PKG_DIR}/tools/hkp_probe_kinds.py")
+    get_property(_filter_args GLOBAL PROPERTY HKP_PROBE_FILTER_ARGS)
     set(_ukd_args "")
     foreach(_ukd IN LISTS ARGN)
         list(APPEND _ukd_args --ukd "${_ukd}")
@@ -61,6 +62,7 @@ function(_hkp_probe_derive_root name from_dir arch out_dir expect_var)
                 --from "${from_dir}"
                 --arch "${arch}"
                 --out "${out_dir}"
+                ${_filter_args}
                 ${_ukd_args}
         RESULT_VARIABLE _derive_rc
         OUTPUT_VARIABLE _derive_out
@@ -213,7 +215,7 @@ function(hkp_add_packaging_probe)
     get_property(_kpack_dir GLOBAL PROPERTY HKP_PROBE_ROCM_KPACK_DIR)
     get_property(_hipcc GLOBAL PROPERTY HKP_PROBE_HIPCC)
     get_property(_comgr_lib GLOBAL PROPERTY HKP_PROBE_COMGR_LIB)
-    get_property(_rocke_args GLOBAL PROPERTY HKP_PROBE_ROCKE_ARGS)
+    get_property(_root_args GLOBAL PROPERTY HKP_PROBE_ROOT_ARGS)
 
     set(_probe_dir "${CMAKE_BINARY_DIR}/hkp-probes/${ARG_NAME}")
     set(_out_root "${_probe_dir}/out")
@@ -232,7 +234,7 @@ function(hkp_add_packaging_probe)
         HIPCC "${_hipcc}"
         ROCM_KPACK_DIR "${_kpack_dir}"
         OUT_ROOT "${_out_root}"
-        ${_rocke_args}
+        ${_root_args}
         PACK_JOBS "${ARG_PACK_JOBS}")
 
     set(_assert_args
@@ -266,6 +268,7 @@ endfunction()
 #   re-runs when a file under the root or the derive tooling changes.
 # ---------------------------------------------------------------------------
 function(_hkp_probe_automatic_arches out_var)
+    get_property(_filter_args GLOBAL PROPERTY HKP_PROBE_FILTER_ARGS)
     set(_root "${HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT}")
     file(GLOB_RECURSE _root_inputs CONFIGURE_DEPENDS "${_root}/*")
     set_property(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" APPEND
@@ -275,7 +278,7 @@ function(_hkp_probe_automatic_arches out_var)
     execute_process(
         COMMAND "${Python3_EXECUTABLE}"
                 "${HKP_PKG_DIR}/tools/hkp_probe_derive_root.py"
-                --list-arches --from "${_root}"
+                --list-arches --from "${_root}" ${_filter_args}
         RESULT_VARIABLE _rc
         OUTPUT_VARIABLE _out
         ERROR_VARIABLE _err)
@@ -317,9 +320,14 @@ function(_hkp_probe_automatic_arches out_var)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_load_packaging_probes(<rocm_kpack_dir> <hipcc> <rocke_comgr_lib> [<rocke args>...])
-#   Store the toolchain hkp_add_packaging resolved, load the named probes from
-#   probes/probes.cmake, then declare one automatic probe per architecture the production
+# hkp_load_packaging_probes(<rocm_kpack_dir> <hipcc> <rocke_comgr_lib> [<root args>...])
+#   Store the toolchain hkp_add_packaging resolved (<root args> are the keywords every
+#   production root is wired with: ENABLE_ROCKE, the ROCKE_* toolchain when ON, and
+#   EXCLUDE_FOLDERS). A build lacking a producer (rocKE OFF) still probes: derive and the
+#   pack read the root under the same excluded folders and disabled kinds the production
+#   pack gets, so rocKE content is neither packed nor expected and every other kind is
+#   probed as usual; an arch left with no content names no probe. Load the named
+#   probes from probes/probes.cmake, then declare one automatic probe per architecture the production
 #   root names that the build does not target: the explicit `arch` entries of its KDPs
 #   and UKDs (hkp_probe_derive_root.py --list-arches; wildcard descriptors name none)
 #   minus hkp_selected_arches(), each as hkp_add_packaging_probe(ARCH <arch>). Register
@@ -333,7 +341,20 @@ function(hkp_load_packaging_probes rocm_kpack_dir hipcc rocke_comgr_lib)
     set_property(GLOBAL PROPERTY HKP_PROBE_ROCM_KPACK_DIR "${rocm_kpack_dir}")
     set_property(GLOBAL PROPERTY HKP_PROBE_HIPCC "${hipcc}")
     set_property(GLOBAL PROPERTY HKP_PROBE_COMGR_LIB "${rocke_comgr_lib}")
-    set_property(GLOBAL PROPERTY HKP_PROBE_ROCKE_ARGS "${ARGN}")
+    set_property(GLOBAL PROPERTY HKP_PROBE_ROOT_ARGS "${ARGN}")
+    # The filters the production pack runs under: derive and the arch listing read the
+    # root under them, so what a probe expects is what its pack ships.
+    _hkp_disabled_families(_exclude_folders)
+    _hkp_disabled_kinds(_disabled_pairs "${HIPKERNELPROVIDER_ENABLE_ROCKE}")
+    set(_filter_args "")
+    foreach(_folder IN LISTS _exclude_folders)
+        list(APPEND _filter_args --exclude-folder "${_folder}")
+    endforeach()
+    foreach(_pair IN LISTS _disabled_pairs)
+        string(REGEX REPLACE "=.*$" "" _kind "${_pair}")
+        list(APPEND _filter_args --disable-kind "${_kind}")
+    endforeach()
+    set_property(GLOBAL PROPERTY HKP_PROBE_FILTER_ARGS "${_filter_args}")
     set_property(GLOBAL PROPERTY HKP_PROBE_NAMES "")
     set_property(GLOBAL PROPERTY HKP_PROBE_TOOLCHAIN_SET TRUE)
 

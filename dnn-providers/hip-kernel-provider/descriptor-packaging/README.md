@@ -318,6 +318,12 @@ builds them alone. Probe output is written under `<build>/hkp-probes/<NAME>/`, o
 shipped descriptor trees, and is never installed. With the option `OFF` the only difference
 is that cache entry; the probe module is never read.
 
+Probes read and pack the root under the same filters the production pack gets. With
+`HIPKERNELPROVIDER_ENABLE_ROCKE=OFF` the `rocKE/` family folder and every `rocke` UKD are
+neither packed nor expected, so a probe covers whatever other kinds the arch carries, and
+an architecture whose only content is rocKE gets no probe. Probes run for every producer
+the build has; none is skipped wholesale.
+
 **What a probe proves**
 
 - The descriptors it packs, taken from the real root (ids, the specialization contract,

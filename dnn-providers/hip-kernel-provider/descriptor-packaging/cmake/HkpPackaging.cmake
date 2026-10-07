@@ -1724,16 +1724,9 @@ function(hkp_add_packaging)
 
     hkp_register_tests("${_rocm_kpack_dir}" "${HKP_HIPCC}" "${_rocke_comgr_lib}")
     if(HIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES)
-        if(HIPKERNELPROVIDER_ENABLE_ROCKE)
-            include("${HKP_PKG_DIR}/cmake/HkpPackagingProbes.cmake")
-            hkp_load_packaging_probes(
-                "${_rocm_kpack_dir}" "${HKP_HIPCC}" "${_rocke_comgr_lib}"
-                ENABLE_ROCKE ON ${_rocke_resolved_args})
-        else()
-            message(STATUS
-                "hkp: packaging probes skipped (HIPKERNELPROVIDER_ENABLE_ROCKE=OFF); "
-                "probes pack rocKE descriptors with the rocKE toolchain")
-        endif()
+        include("${HKP_PKG_DIR}/cmake/HkpPackagingProbes.cmake")
+        hkp_load_packaging_probes(
+            "${_rocm_kpack_dir}" "${HKP_HIPCC}" "${_rocke_comgr_lib}" ${_root_args})
     endif()
 endfunction()
 

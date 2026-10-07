@@ -563,9 +563,16 @@ def test_rederive_follows_source_changes(tmp_path):
 
 
 # --- --list-arches ----------------------------------------------------------
-def _list_arches(src: Path):
+def _list_arches(src: Path, *filters: str):
     r = subprocess.run(
-        [sys.executable, str(PROBE_DERIVE), "--list-arches", "--from", str(src)],
+        [
+            sys.executable,
+            str(PROBE_DERIVE),
+            "--list-arches",
+            "--from",
+            str(src),
+            *filters,
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -603,6 +610,48 @@ def test_list_arches_packer_rejection_exits_2(tmp_path):
     assert r.returncode == 2
     assert r.stderr.startswith("hkp_probe_derive:")
     assert "is not a subset of KDP" in r.stderr
+
+
+# --- disabled kinds and excluded folders -------------------------------------
+def test_disabled_kind_is_neither_kept_nor_expected(tmp_path):
+    src = tmp_path / "src"
+    _write_root(src, [_rocke("r", "b1"), _hip("h", "a.cpp")])
+    out = tmp_path / "w" / "root"
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(PROBE_DERIVE),
+            "--from",
+            str(src),
+            "--arch",
+            "gfx950",
+            "--out",
+            str(out),
+            "--disable-kind",
+            "rocke",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert r.returncode == 0, r.stderr
+    assert _kept(out) == ["h"]
+    expect = json.loads((out.parent / "expect.json").read_text())
+    assert [(e["kind"], e["name"]) for e in expect] == [("hip", "h")]
+
+
+def test_list_arches_ignores_content_of_disabled_kind_and_excluded_folder(tmp_path):
+    src = tmp_path / "src"
+    _write_root(src, [_hip("h", arch=["gfx942"])], kdp_arch=("gfx942",))
+    _write_root(src, [_rocke("r", arch=["gfx950"])], kdp_file="rocKE/r.kdp.json")
+    _write_root(
+        src,
+        [_rocke("q", arch=["gfx1201"])],
+        kdp_arch=("gfx1201",),
+        kdp_file="q.kdp.json",
+    )
+    assert _list_arches(src, "--exclude-folder", "rocKE") == ["gfx1201", "gfx942"]
+    assert _list_arches(src, "--disable-kind", "rocke") == ["gfx942"]
 
 
 # --- the kinds registry -----------------------------------------------------
