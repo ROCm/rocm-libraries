@@ -26,6 +26,9 @@
 #include "../../shared/precision_type.h"
 #include "../../shared/rocfft_hip.h"
 #include "logging.h"
+#include "rocfft_current_function.h"
+#include <algorithm>
+#include <exception>
 #include <map>
 #include <mutex>
 #include <stdexcept>
@@ -50,19 +53,24 @@ struct rocfft_rccl_comm_t::Impl
 {
     struct device_state_t
     {
-        device_state_t(int device, int nccl_rank, int nworld, const ncclUniqueId& unique_id)
+        // local resources only; ncclCommInitRank is deferred to init() so
+        // local failures can be agreed on before any rank blocks in it
+        explicit device_state_t(int device)
             : device_id(device)
         {
-            if(nccl_rank < 0 || nccl_rank >= nworld)
-                throw std::out_of_range("device_state_t constructor: rank is out of range");
             rocfft_scoped_device dev(device_id);
             stream.alloc();
-            auto nccl_ret = ncclCommInitRank(&comm, nworld, unique_id, nccl_rank);
+        }
+
+        void init(int nccl_rank, int num_nccl_ranks, const ncclUniqueId& unique_id)
+        {
+            if(nccl_rank < 0 || nccl_rank >= num_nccl_ranks)
+                throw std::out_of_range(ROCFFT_CURRENT_FUNCTION + ": rank is out of range");
+            rocfft_scoped_device dev(device_id);
+            auto nccl_ret = ncclCommInitRank(&comm, num_nccl_ranks, unique_id, nccl_rank);
             if(nccl_ret != ncclSuccess)
-            {
                 throw rocfft_rccl_exception_t(
-                    "ncclCommInitRank failed in device_state_t constructor", nccl_ret);
-            }
+                    "ncclCommInitRank failed in " + ROCFFT_CURRENT_FUNCTION, nccl_ret);
         }
 
         ~device_state_t()
@@ -96,13 +104,13 @@ struct rocfft_rccl_comm_t::Impl
         ncclComm_t get_comm() const
         {
             if(!comm)
-                throw std::runtime_error("device_state_t::get_comm: comm is null");
+                throw std::runtime_error(ROCFFT_CURRENT_FUNCTION + ": comm is null");
             return comm;
         }
         hipStream_t get_stream() const
         {
             if(!stream)
-                throw std::runtime_error("device_state_t::get_stream: stream is null");
+                throw std::runtime_error(ROCFFT_CURRENT_FUNCTION + ": stream is null");
             return stream;
         }
 
@@ -113,10 +121,10 @@ struct rocfft_rccl_comm_t::Impl
         ncclComm_t          comm{};
     };
 
-    std::vector<rocfft_location_t>   world_locations;
-    std::map<rocfft_location_t, int> loc_to_rank;
+    std::vector<rocfft_location_t>   nccl_rank_to_world_loc;
+    std::map<rocfft_location_t, int> world_loc_to_nccl_rank;
     std::map<int, device_state_t>    device_to_state;
-    int                              local_comm_rank = 0;
+    int                              local_world_rank = 0;
     ncclUniqueId                     uniqueId{};
 };
 
@@ -125,48 +133,102 @@ std::mutex                                                rocfft_rccl_comm_t::co
 
 rocfft_rccl_comm_t rocfft_rccl_comm_t::create(const std::set<int>& devices)
 {
-    std::set<rocfft_location_t> world;
+    std::set<rocfft_location_t> locs;
     for(int d : devices)
-        world.emplace(0, d);
+        locs.emplace(0, d);
 #ifdef ROCFFT_MPI_ENABLE
-    return create_from_world(world, 0, MPI_COMM_NULL);
+    return create_from_locs(locs, 0, MPI_COMM_NULL);
 #else
-    return create_from_world(world, 0);
+    return create_from_locs(locs, 0);
 #endif
 }
 
 #ifdef ROCFFT_MPI_ENABLE
 rocfft_rccl_comm_t rocfft_rccl_comm_t::create(MPI_Comm                           mpi_comm,
                                               int                                local_comm_rank,
-                                              const std::set<rocfft_location_t>& world)
+                                              const std::set<rocfft_location_t>& comm_locations)
 {
-    return create_from_world(world, local_comm_rank, mpi_comm);
+    return create_from_locs(comm_locations, local_comm_rank, mpi_comm);
 }
 #endif
 
-rocfft_rccl_comm_t rocfft_rccl_comm_t::create_from_world(const std::set<rocfft_location_t>& world,
-                                                         int local_comm_rank
+rocfft_location_t rocfft_rccl_comm_t::to_world(const rocfft_location_t& comm_location) const
+{
+    if(world_ranks)
+        return {world_ranks->at(static_cast<size_t>(comm_location.comm_rank)),
+                comm_location.device};
+    return comm_location;
+}
+
+rocfft_location_t rocfft_rccl_comm_t::to_comm(const rocfft_location_t& world_location) const
+{
+    if(world_ranks)
+    {
+        auto it = std::find(world_ranks->begin(), world_ranks->end(), world_location.comm_rank);
+        if(it == world_ranks->end())
+            throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION + ": MPI_COMM_WORLD rank "
+                                        + std::to_string(world_location.comm_rank)
+                                        + " is not in the plan communicator");
+        return {static_cast<int>(it - world_ranks->begin()), world_location.device};
+    }
+    return world_location;
+}
+
+rocfft_rccl_comm_t rocfft_rccl_comm_t::create_from_locs(const std::set<rocfft_location_t>& locs,
+                                                        int local_comm_rank
 #ifdef ROCFFT_MPI_ENABLE
-                                                         ,
-                                                         MPI_Comm mpi_comm
+                                                        ,
+                                                        MPI_Comm mpi_comm
 #endif
 )
 {
-    if(world.size() < 2)
-        throw std::invalid_argument("rocfft_rccl_comm_t::create: need at least 2 world locations");
+    if(locs.size() < 2)
+        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION + ": need at least 2 locations");
+
+    // the cache and NCCL ranks use MPI_COMM_WORLD ranks, so communicators
+    // over different processes never share an RCCL comm
+    rocfft_rccl_comm_t new_comm;
+#ifdef ROCFFT_MPI_ENABLE
+    if(mpi_comm != MPI_COMM_NULL)
+    {
+        int world_rank = -1;
+        int comm_size  = 0;
+        if(MPI_Comm_rank(MPI_COMM_WORLD, &world_rank) != MPI_SUCCESS
+           || MPI_Comm_size(mpi_comm, &comm_size) != MPI_SUCCESS)
+            throw std::runtime_error(ROCFFT_CURRENT_FUNCTION + ": MPI_Comm_rank/size failed");
+        auto& world_ranks = new_comm.world_ranks.emplace(static_cast<size_t>(comm_size));
+        if(MPI_Allgather(&world_rank, 1, MPI_INT, world_ranks.data(), 1, MPI_INT, mpi_comm)
+           != MPI_SUCCESS)
+            throw std::runtime_error(ROCFFT_CURRENT_FUNCTION + ": MPI_Allgather failed");
+        // identical on all ranks, so every rank throws or none does
+        if(std::set<int>(world_ranks.begin(), world_ranks.end()).size() != world_ranks.size())
+            throw std::runtime_error(
+                ROCFFT_CURRENT_FUNCTION
+                + ": plan communicator has processes sharing an MPI_COMM_WORLD rank (e.g. "
+                  "from MPI_Comm_spawn), so they cannot be told apart");
+    }
+#endif
+    // new_comm.world_ranks is now set (or nullopt for single-process), so to_world is usable
+    std::set<rocfft_location_t> world_locs;
+    for(const auto& loc : locs)
+        world_locs.insert(new_comm.to_world(loc));
 
     std::lock_guard<std::mutex> lock(comm_cache_mutex);
 
-    auto it = comm_cache.find(world);
+    // reuse only the shared state; world_ranks belongs to this plan's communicator
+    auto it = comm_cache.find(world_locs);
     if(it != comm_cache.end())
-        return it->second;
+    {
+        new_comm.pimpl = it->second.pimpl;
+        return new_comm;
+    }
 
-    rocfft_rccl_comm_t new_comm;
-    new_comm.pimpl                  = std::make_shared<Impl>();
-    new_comm.pimpl->local_comm_rank = local_comm_rank;
-    new_comm.pimpl->world_locations.assign(world.begin(), world.end());
-    for(size_t r = 0; r < new_comm.pimpl->world_locations.size(); ++r)
-        new_comm.pimpl->loc_to_rank[new_comm.pimpl->world_locations[r]] = static_cast<int>(r);
+    new_comm.pimpl                   = std::make_shared<Impl>();
+    new_comm.pimpl->local_world_rank = new_comm.to_world({local_comm_rank, 0}).comm_rank;
+    new_comm.pimpl->nccl_rank_to_world_loc.assign(world_locs.begin(), world_locs.end());
+    for(size_t r = 0; r < new_comm.pimpl->nccl_rank_to_world_loc.size(); ++r)
+        new_comm.pimpl->world_loc_to_nccl_rank[new_comm.pimpl->nccl_rank_to_world_loc[r]]
+            = static_cast<int>(r);
 
 #ifdef ROCFFT_MPI_ENABLE
     const bool multi_process = (mpi_comm != MPI_COMM_NULL);
@@ -176,9 +238,9 @@ rocfft_rccl_comm_t rocfft_rccl_comm_t::create_from_world(const std::set<rocfft_l
         int mpi_size = 0;
         if(MPI_Comm_rank(mpi_comm, &mpi_rank) != MPI_SUCCESS
            || MPI_Comm_size(mpi_comm, &mpi_size) != MPI_SUCCESS)
-            throw std::runtime_error("rocfft_rccl_comm_t::create: MPI_Comm_rank/size failed");
+            throw std::runtime_error(ROCFFT_CURRENT_FUNCTION + ": MPI_Comm_rank/size failed");
         if(mpi_rank != local_comm_rank)
-            throw std::invalid_argument("rocfft_rccl_comm_t::create: local_comm_rank ("
+            throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION + ": local_comm_rank ("
                                         + std::to_string(local_comm_rank) + ") != MPI rank ("
                                         + std::to_string(mpi_rank) + ")");
 
@@ -190,43 +252,78 @@ rocfft_rccl_comm_t rocfft_rccl_comm_t::create_from_world(const std::set<rocfft_l
                 id_ok = 0;
         }
         if(MPI_Bcast(&id_ok, 1, MPI_INT, 0, mpi_comm) != MPI_SUCCESS)
-            throw std::runtime_error("rocfft_rccl_comm_t::create: MPI_Bcast of id_ok failed");
+            throw std::runtime_error(ROCFFT_CURRENT_FUNCTION + ": MPI_Bcast of id_ok failed");
         if(!id_ok)
-            throw std::runtime_error("ncclGetUniqueId failed in rocfft_rccl_comm_t::create");
+            throw std::runtime_error("ncclGetUniqueId failed in " + ROCFFT_CURRENT_FUNCTION);
         if(MPI_Bcast(&new_comm.pimpl->uniqueId,
                      static_cast<int>(sizeof(ncclUniqueId)),
                      MPI_BYTE,
                      0,
                      mpi_comm)
            != MPI_SUCCESS)
-            throw std::runtime_error(
-                "rocfft_rccl_comm_t::create: MPI_Bcast of ncclUniqueId failed");
+            throw std::runtime_error(ROCFFT_CURRENT_FUNCTION
+                                     + ": MPI_Bcast of ncclUniqueId failed");
     }
     else
 #endif
     {
         auto result = ncclGetUniqueId(&new_comm.pimpl->uniqueId);
         if(result != ncclSuccess)
-            throw rocfft_rccl_exception_t("ncclGetUniqueId failed in rocfft_rccl_comm_t::create",
+            throw rocfft_rccl_exception_t("ncclGetUniqueId failed in " + ROCFFT_CURRENT_FUNCTION,
                                           result);
     }
 
-    const int           nworld = static_cast<int>(new_comm.pimpl->world_locations.size());
-    rocfft_rccl_group_t group;
-    for(size_t r = 0; r < new_comm.pimpl->world_locations.size(); ++r)
-    {
-        const auto& loc = new_comm.pimpl->world_locations[r];
-        if(loc.comm_rank != local_comm_rank)
-            continue;
-        new_comm.pimpl->device_to_state.try_emplace(
-            loc.device, loc.device, static_cast<int>(r), nworld, new_comm.pimpl->uniqueId);
-    }
-    group.end();
+    // runs a local step; if it fails on any rank, every rank throws
+    const auto current_function = ROCFFT_CURRENT_FUNCTION;
+    auto       global_check     = [&](const auto& local_step) {
+        std::exception_ptr local_error;
+        try
+        {
+            local_step();
+        }
+        catch(...)
+        {
+            local_error = std::current_exception();
+        }
+        int ok = local_error ? 0 : 1;
+#ifdef ROCFFT_MPI_ENABLE
+        if(multi_process
+           && MPI_Allreduce(MPI_IN_PLACE, &ok, 1, MPI_INT, MPI_MIN, mpi_comm) != MPI_SUCCESS)
+            throw std::runtime_error(current_function + ": MPI_Allreduce failed");
+#endif
+        if(local_error)
+            std::rethrow_exception(local_error);
+        if(!ok)
+            throw std::runtime_error(current_function + ": failed on another rank");
+    };
 
-    if(new_comm.pimpl->device_to_state.empty())
-        throw std::runtime_error("rocfft_rccl_comm_t::create: no local locations to initialize");
+    // create device states for local devices
+    global_check([&] {
+        for(const auto& loc : new_comm.pimpl->nccl_rank_to_world_loc)
+        {
+            if(loc.comm_rank == new_comm.pimpl->local_world_rank)
+                new_comm.pimpl->device_to_state.try_emplace(loc.device, loc.device);
+        }
+        if(new_comm.pimpl->device_to_state.empty())
+            throw std::runtime_error(current_function + ": no local locations to initialize");
+    });
 
-    comm_cache[world] = new_comm;
+    const int num_nccl_ranks = static_cast<int>(new_comm.pimpl->nccl_rank_to_world_loc.size());
+    // initialize nccl comm(s)
+    global_check([&] {
+        rocfft_rccl_group_t group;
+        for(size_t r = 0; r < new_comm.pimpl->nccl_rank_to_world_loc.size(); ++r)
+        {
+            const auto& loc = new_comm.pimpl->nccl_rank_to_world_loc[r];
+            if(loc.comm_rank != new_comm.pimpl->local_world_rank)
+                continue;
+            new_comm.pimpl->device_to_state.at(loc.device)
+                .init(static_cast<int>(r), num_nccl_ranks, new_comm.pimpl->uniqueId);
+        }
+        group.end();
+    });
+
+    comm_cache[world_locs] = new_comm;
     return new_comm;
 }
 
@@ -240,7 +337,7 @@ ncclComm_t rocfft_rccl_comm_t::get_comm(int device_id) const
 {
     auto it = pimpl->device_to_state.find(device_id);
     if(it == pimpl->device_to_state.end())
-        throw std::invalid_argument("rocfft_rccl_comm_t::get_comm: device_id "
+        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION + ": device_id "
                                     + std::to_string(device_id)
                                     + " is not a local participant of this communicator");
     return it->second.get_comm();
@@ -250,7 +347,7 @@ hipStream_t rocfft_rccl_comm_t::get_stream(int device_id) const
 {
     auto it = pimpl->device_to_state.find(device_id);
     if(it == pimpl->device_to_state.end())
-        throw std::invalid_argument("rocfft_rccl_comm_t::get_stream: device_id "
+        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION + ": device_id "
                                     + std::to_string(device_id)
                                     + " is not a local participant of this communicator");
     return it->second.get_stream();
@@ -258,35 +355,38 @@ hipStream_t rocfft_rccl_comm_t::get_stream(int device_id) const
 
 size_t rocfft_rccl_comm_t::num_ranks() const
 {
-    return pimpl->world_locations.size();
+    return pimpl->nccl_rank_to_world_loc.size();
 }
 
 int rocfft_rccl_comm_t::get_rank(const rocfft_location_t& location) const
 {
-    auto it = pimpl->loc_to_rank.find(location);
-    if(it == pimpl->loc_to_rank.end())
-        throw std::invalid_argument("rocfft_rccl_comm_t::get_rank: location " + location.str()
+    auto it = pimpl->world_loc_to_nccl_rank.find(to_world(location));
+    if(it == pimpl->world_loc_to_nccl_rank.end())
+        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION + ": location " + location.str()
                                     + " is not in this communicator");
     return it->second;
 }
 
 int rocfft_rccl_comm_t::get_rank(int device_id) const
 {
-    return get_rank(rocfft_location_t{pimpl->local_comm_rank, device_id});
+    return get_rank(to_comm(rocfft_location_t{pimpl->local_world_rank, device_id}));
 }
 
 std::vector<rocfft_location_t> rocfft_rccl_comm_t::get_locations() const
 {
-    return pimpl->world_locations;
+    std::vector<rocfft_location_t> locations;
+    for(const auto& loc : pimpl->nccl_rank_to_world_loc)
+        locations.push_back(to_comm(loc));
+    return locations;
 }
 
 std::vector<rocfft_location_t> rocfft_rccl_comm_t::get_local_locations() const
 {
     std::vector<rocfft_location_t> local;
-    for(const auto& loc : pimpl->world_locations)
+    for(const auto& loc : pimpl->nccl_rank_to_world_loc)
     {
-        if(loc.comm_rank == pimpl->local_comm_rank)
-            local.push_back(loc);
+        if(loc.comm_rank == pimpl->local_world_rank)
+            local.push_back(to_comm(loc));
     }
     return local;
 }
@@ -343,8 +443,7 @@ void rocfft_rccl_comm_t::alltoall(const std::vector<const void*>& sendbufs,
     const auto nranks = num_ranks();
     if(sendbufs.size() != nranks || recvbufs.size() != nranks)
         throw std::invalid_argument(
-            "rocfft_rccl_comm_t::alltoall: sendbufs/recvbufs must each have size "
-            "num_ranks() ("
+            ROCFFT_CURRENT_FUNCTION + ": sendbufs/recvbufs must each have size num_ranks() ("
             + std::to_string(nranks) + "); got sendbufs=" + std::to_string(sendbufs.size())
             + ", recvbufs=" + std::to_string(recvbufs.size()));
 
@@ -356,7 +455,7 @@ void rocfft_rccl_comm_t::alltoall(const std::vector<const void*>& sendbufs,
     {
         const int r = get_rank(loc);
         if(!sendbufs[r] || !recvbufs[r])
-            throw std::invalid_argument("rocfft_rccl_comm_t::alltoall: local rank "
+            throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION + ": local rank "
                                         + std::to_string(r) + " has a null send or recv buffer");
 
         rocfft_scoped_device dev(loc.device);
@@ -405,7 +504,7 @@ void rocfft_rccl_comm_t::send(const void*       sendbuf,
 {
     send(sendbuf,
          count,
-         rocfft_location_t{pimpl->local_comm_rank, peer_device_id},
+         to_comm(rocfft_location_t{pimpl->local_world_rank, peer_device_id}),
          device_id,
          precision,
          array_type);
@@ -442,7 +541,7 @@ void rocfft_rccl_comm_t::recv(void*             recvbuf,
 {
     recv(recvbuf,
          count,
-         rocfft_location_t{pimpl->local_comm_rank, peer_device_id},
+         to_comm(rocfft_location_t{pimpl->local_world_rank, peer_device_id}),
          device_id,
          precision,
          array_type);

@@ -766,7 +766,7 @@ void CommRCCLAllToAll::Wait()
 void CommRCCLAllToAll::Print(rocfft_ostream& os, const int indent) const
 {
     const std::string indentStr(indent * 4, ' ');
-    const auto        world = rccl.get_locations();
+    const auto        locations = rccl.get_locations();
 
     os << indentStr << "CommRCCLAllToAll " << precision_name(precision) << " "
        << PrintArrayType(arrayType) << ":\n";
@@ -774,7 +774,7 @@ void CommRCCLAllToAll::Print(rocfft_ostream& os, const int indent) const
     os << indentStr << "  num_ranks: " << agents.size() << "\n";
     for(size_t r = 0; r < agents.size(); ++r)
     {
-        os << indentStr << "  rank " << r << ": " << world[r].str()
+        os << indentStr << "  rank " << r << ": " << locations[r].str()
            << " sendBuf=" << PrintBufferPtrOffset(agents[r].sendBuffer, 0)
            << " recvBuf=" << PrintBufferPtrOffset(agents[r].recvBuffer, 0) << "\n";
     }
