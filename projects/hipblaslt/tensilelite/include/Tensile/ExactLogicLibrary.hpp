@@ -26,9 +26,15 @@
 
 #pragma once
 
+#include <algorithm>
+#include <array>
 #include <atomic>
+#include <cstdint>
 #include <optional>
 #include <set>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/ContractionProblemPredicates.hpp>
@@ -50,6 +56,47 @@ namespace TensileLite
     template <typename MyProblem, typename MySolution, typename MyPredicate>
     using LibraryRow = std::pair<MyPredicate, LibraryEntry<MyProblem, MySolution>>;
 
+    /// What a row of an ExactLogicLibrary selects on, named by its predicate type.
+    enum class LibraryRowKind : std::uint8_t
+    {
+        Other,
+        AMDGPU,
+        ExperimentalStreamK,
+        EqualityMatching,
+        RangeMatching,
+        GridBasedMatching,
+        FreeSizeMatching,
+        PredictionMatching,
+    };
+
+    template <typename RowPredicate>
+    LibraryRowKind libraryRowKind(RowPredicate const& predicate)
+    {
+        if(!predicate.value)
+            return LibraryRowKind::Other;
+
+        std::string const type = predicate.value->type();
+        if(type == "AMDGPU")
+            return LibraryRowKind::AMDGPU;
+        if(type == "ExperimentalStreamK")
+            return LibraryRowKind::ExperimentalStreamK;
+        if(type == "EqualityMatching")
+            return LibraryRowKind::EqualityMatching;
+        if(type == "RangeMatching")
+            return LibraryRowKind::RangeMatching;
+        if(type == "GridBasedMatching")
+            return LibraryRowKind::GridBasedMatching;
+        if(type == "FreeSizeMatching")
+            return LibraryRowKind::FreeSizeMatching;
+        if(type == "PredictionMatching")
+            return LibraryRowKind::PredictionMatching;
+        return LibraryRowKind::Other;
+    }
+
+    /// Data types of A, B, C, D and the compute input types A and B, as compared
+    /// by Predicates::Contraction::TypesEqual.
+    using LibraryRowTypes = std::array<rocisa::DataType, 6>;
+
     /**
  * Represents a set of sub-libraries, each with associated predicates. It
  * should be placed in order of best to worst solutions. We assume the best
@@ -69,11 +116,44 @@ namespace TensileLite
         ExactLogicLibrary(std::initializer_list<Row> init)
             : rows(init)
         {
+            prepareRows();
         }
 
         ExactLogicLibrary(std::vector<Row> const& init)
             : rows(init)
         {
+            prepareRows();
+        }
+
+        /// Caches the kind of every row and, when every row predicate starts
+        /// with a TypesEqual term, indexes the rows by those types. `rows` must
+        /// not change afterwards, except by appending rows, which then go
+        /// unindexed.
+        void prepareRows()
+        {
+            rowKinds.clear();
+            rowKinds.reserve(rows.size());
+            for(auto const& row : rows)
+                rowKinds.push_back(libraryRowKind(row.first));
+
+            rowsByTypes.clear();
+            rowsByTypes.reserve(rows.size());
+            for(size_t i = 0; i < rows.size(); i++)
+            {
+                auto const types = rows[i].first.leadingTypes();
+                if(!types)
+                {
+                    rowsByTypes.clear();
+                    break;
+                }
+                rowsByTypes.emplace_back(*types, i);
+            }
+            std::sort(rowsByTypes.begin(), rowsByTypes.end());
+        }
+
+        LibraryRowKind rowKind(size_t row) const
+        {
+            return row < rowKinds.size() ? rowKinds[row] : libraryRowKind(rows[row].first);
         }
 
         virtual std::shared_ptr<MySolution> getSolutionByIndex(MyProblem const& problem,
@@ -83,9 +163,10 @@ namespace TensileLite
             std::shared_ptr<MySolution> rv;
             const bool                  streamK = Debug::Instance().useExperimentalSelection() == 2;
 
-            for(auto const& row : rows)
+            for(size_t i = 0; i < rows.size(); i++)
             {
-                if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
+                auto const& row = rows[i];
+                if(rowKind(i) == LibraryRowKind::ExperimentalStreamK && !streamK)
                     continue;
 
                 if(row.first(problem, hardware))
@@ -106,23 +187,23 @@ namespace TensileLite
         {
             std::shared_ptr<MySolution> fallbackRv;
             const bool                  streamK = Debug::Instance().useExperimentalSelection() == 2;
+            const bool                  rowDebug = MyPredicate::debugging();
 
             // Return exact match immediately; otherwise keep first successful fallback.
-            for(auto const& row : rows)
-            {
-                if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
-                    continue;
+            auto visit = [&](size_t i) {
+                auto const& row = rows[i];
+                if(rowKind(i) == LibraryRowKind::ExperimentalStreamK && !streamK)
+                    return false;
 
-                if(!row.first(problem, hardware))
-                    continue;
+                if(!rowMatches(row, problem, hardware, rowDebug))
+                    return false;
 
+                bool const equality = rowKind(i) == LibraryRowKind::EqualityMatching;
                 if(!row.first.isFallbackMatch(hardware))
                 {
                     auto rv = row.second->findBestSolution(problem, hardware, fitness);
 
-                    if(rv
-                       && dynamic_cast<Predicates::Contraction::EqualityMatching*>(
-                           row.first.value.get()))
+                    if(rv && equality)
                         rv->tag = MySolution::MatchingTag::Equal;
 
                     if(rv)
@@ -132,24 +213,27 @@ namespace TensileLite
                             std::cout << "  Solution found (exact): " << rv->name()
                                       << " [MatchingTag: " << rv->matchingTag() << "]" << std::endl;
                         }
-                        return rv;
+                        fallbackRv = std::move(rv);
+                        return true;
                     }
                 }
                 else if(!fallbackRv)
                 {
                     fallbackRv = row.second->findBestSolution(problem, hardware, fitness);
 
-                    if(fallbackRv
-                       && dynamic_cast<Predicates::Contraction::EqualityMatching*>(
-                           row.first.value.get()))
+                    if(fallbackRv && equality)
                         fallbackRv->tag = MySolution::MatchingTag::Equal;
                 }
-            }
+                return false;
+            };
 
-            if(fallbackRv && Debug::Instance().printDeviceSelection())
+            if(!forEachCandidateRow(problem, rowDebug, visit))
             {
-                std::cout << "  Solution found (fallback): " << fallbackRv->name()
-                          << " [MatchingTag: " << fallbackRv->matchingTag() << "]" << std::endl;
+                if(fallbackRv && Debug::Instance().printDeviceSelection())
+                {
+                    std::cout << "  Solution found (fallback): " << fallbackRv->name()
+                              << " [MatchingTag: " << fallbackRv->matchingTag() << "]" << std::endl;
+                }
             }
 
             return fallbackRv;
@@ -171,8 +255,10 @@ namespace TensileLite
             auto amdGPU             = static_cast<AMDGPU const*>(&hardware);
             bool isStandardCUDevice = amdGPU->isStandardCU();
 
-            for(auto const& row : rows)
+            for(size_t i = 0; i < rows.size(); i++)
             {
+                auto const& row  = rows[i];
+                auto const  kind = rowKind(i);
                 // we want to exclude this lib from getAll. If the Set is not empty,
                 // it means we want to skip searched GridBased, Prediction.
                 // But if this is a non-standard-CU GPU, we still need to search all for CU-Fallback solutions.
@@ -183,49 +269,15 @@ namespace TensileLite
                         continue;
                 }
 
-                if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
+                if(kind == LibraryRowKind::ExperimentalStreamK && !streamK)
                     continue;
 
-                if(row.first.value->type() == "AMDGPU" && !row.first(problem, hardware))
+                if(kind == LibraryRowKind::AMDGPU && !row.first(problem, hardware))
                     continue;
 
                 auto rowSolutions = row.second->findAllSolutions(problem, hardware, searchType);
 
-                // hipblaslt_ext::matmulIsTuned() -> rocblaslt_matmul_is_tuned() needs this Equal test
-                if(dynamic_cast<Predicates::Contraction::EqualityMatching*>(row.first.value.get()))
-                {
-                    for(auto& sol : rowSolutions)
-                        sol->tag = MySolution::MatchingTag::Equal;
-                }
-                // except for Equal, we test others only when debug mode.
-                else if(debug)
-                {
-                    if(dynamic_cast<Predicates::Contraction::GridBasedMatching*>(
-                           row.first.value.get()))
-                    {
-                        for(auto& sol : rowSolutions)
-                            sol->tag = MySolution::MatchingTag::GridBased;
-                    }
-                    else if(dynamic_cast<Predicates::Contraction::RangeMatching*>(
-                                row.first.value.get()))
-                    {
-                        for(auto& sol : rowSolutions)
-                            sol->tag = MySolution::MatchingTag::Range;
-                    }
-                    else if(dynamic_cast<Predicates::Contraction::FreeSizeMatching*>(
-                                row.first.value.get()))
-                    {
-                        for(auto& sol : rowSolutions)
-                            sol->tag = MySolution::MatchingTag::FreeSize;
-                    }
-                    else if(dynamic_cast<Predicates::Contraction::PredictionMatching*>(
-                                row.first.value.get()))
-                    {
-                        for(auto& sol : rowSolutions)
-                            sol->tag = MySolution::MatchingTag::Prediction;
-                    }
-                    // TODO- Experimental?
-                }
+                tagSolutions(kind, debug, rowSolutions);
 
                 rv.insert(rowSolutions.begin(), rowSolutions.end());
             }
@@ -241,9 +293,10 @@ namespace TensileLite
         {
             SolutionSet<MySolution> rv;
 
-            for(auto const& row : rows)
+            for(size_t i = 0; i < rows.size(); i++)
             {
-                if(row.first.value->type() == "AMDGPU" && !row.first(problems[0], hardware))
+                auto const& row = rows[i];
+                if(rowKind(i) == LibraryRowKind::AMDGPU && !row.first(problems[0], hardware))
                     continue;
 
                 auto rowSolutions
@@ -264,82 +317,54 @@ namespace TensileLite
                                                             int numSolutions) const override
         {
             SolutionVector<MySolution> rv, solutions;
-            const bool                 debug   = Debug::Instance().printPropertyEvaluation();
-            const bool                 streamK = Debug::Instance().useExperimentalSelection() == 2;
+            Debug const&               settings = Debug::Instance();
+            const bool                 debug    = settings.printPropertyEvaluation();
+            const bool                 streamK  = settings.useExperimentalSelection() == 2;
+            const bool                 rowDebug = MyPredicate::debugging();
 
-            const auto forceDynamic = Debug::Instance().streamK5ForceMode();
+            const auto forceDynamic = settings.streamK5ForceMode();
             const bool effectiveDynamic = 
                 (forceDynamic == 1) ||
                 (forceDynamic != 0 && problem.getParams().streamKTileSchedulingMode() != 0);
-            const bool                 predictionLib = Debug::Instance().usePredictionLibrary() || effectiveDynamic;
+            const bool predictionOnly = settings.usePredictionLibrary();
+            const bool predictionLib  = predictionOnly || effectiveDynamic;
 
             // false in case of early return;
             lastFindTopRetAll = false;
 
-            for(auto const& row : rows)
-            {
-                if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
-                    continue;
+            auto visit = [&](size_t i) {
+                auto const& row  = rows[i];
+                auto const  kind = rowKind(i);
+                if(kind == LibraryRowKind::ExperimentalStreamK && !streamK)
+                    return false;
 
                 if(predictionLib
-                   && ((row.first.value->type() == "EqualityMatching")
-                       || (row.first.value->type() == "RangeMatching")))
-                    continue;
+                   && (kind == LibraryRowKind::EqualityMatching
+                       || kind == LibraryRowKind::RangeMatching))
+                    return false;
 
                 // Only an explicit TENSILE_PREDICTION_LIB drops these rows; prediction
                 // implied by dynamic Stream-K scheduling still returns their solutions.
-                if(Debug::Instance().usePredictionLibrary()
-                   && ((row.first.value->type() == "GridBasedMatching")
-                       || (row.first.value->type() == "FreeSizeMatching")))
-                    continue;
+                if(predictionOnly
+                   && (kind == LibraryRowKind::GridBasedMatching
+                       || kind == LibraryRowKind::FreeSizeMatching))
+                    return false;
 
-                if(row.first(problem, hardware))
-                {
-                    solutions
-                        = row.second->findTopSolutions(problem, hardware, numSolutions - rv.size());
+                if(!rowMatches(row, problem, hardware, rowDebug))
+                    return false;
 
-                    // hipblaslt_ext::matmulIsTuned() -> rocblaslt_matmul_is_tuned() needs this Equal test
-                    if(dynamic_cast<Predicates::Contraction::EqualityMatching*>(
-                           row.first.value.get()))
-                    {
-                        for(auto& sol : solutions)
-                            sol->tag = MySolution::MatchingTag::Equal;
-                    }
-                    // except for Equal, we test others only when debug mode.
-                    else if(debug)
-                    {
-                        if(dynamic_cast<Predicates::Contraction::GridBasedMatching*>(
-                               row.first.value.get()))
-                        {
-                            for(auto& sol : solutions)
-                                sol->tag = MySolution::MatchingTag::GridBased;
-                        }
-                        else if(dynamic_cast<Predicates::Contraction::RangeMatching*>(
-                                    row.first.value.get()))
-                        {
-                            for(auto& sol : solutions)
-                                sol->tag = MySolution::MatchingTag::Range;
-                        }
-                        else if(dynamic_cast<Predicates::Contraction::FreeSizeMatching*>(
-                                    row.first.value.get()))
-                        {
-                            for(auto& sol : solutions)
-                                sol->tag = MySolution::MatchingTag::FreeSize;
-                        }
-                        else if(dynamic_cast<Predicates::Contraction::PredictionMatching*>(
-                                    row.first.value.get()))
-                        {
-                            for(auto& sol : solutions)
-                                sol->tag = MySolution::MatchingTag::Prediction;
-                        }
-                        // TODO- Experimental
-                    }
+                solutions
+                    = row.second->findTopSolutions(problem, hardware, numSolutions - rv.size());
 
-                    rv.insert(std::end(rv), std::begin(solutions), std::end(solutions));
-                    if(rv.size() == numSolutions)
-                        return rv;
-                }
-            }
+                // hipblaslt_ext::matmulIsTuned() -> rocblaslt_matmul_is_tuned() needs this Equal test
+                tagSolutions(kind, debug, solutions);
+
+                rv.insert(std::end(rv), std::begin(solutions), std::end(solutions));
+                return rv.size() == numSolutions;
+            };
+
+            if(forEachCandidateRow(problem, rowDebug, visit))
+                return rv;
 
             // can't reach the requested number, means findTop already done its best
             lastFindTopRetAll = (rv.size() < numSolutions);
@@ -372,6 +397,81 @@ namespace TensileLite
 
             return rv;
         }
+
+    private:
+        static bool rowMatches(Row const&       row,
+                               MyProblem const& problem,
+                               Hardware const&  hardware,
+                               bool             rowDebug)
+        {
+            return rowDebug ? row.first(problem, hardware) : row.first.evaluate(problem, hardware);
+        }
+
+        // Calls visit(i) for the rows that can match `problem`, in row order,
+        // until it returns true; returns whether it did. Without predicate
+        // debugging, rows indexed under other data types are skipped.
+        template <typename Visit>
+        bool forEachCandidateRow(MyProblem const& problem, bool rowDebug, Visit&& visit) const
+        {
+            if(!rowDebug && !rowsByTypes.empty() && rowKinds.size() == rows.size())
+            {
+                auto const types = MyPredicate::problemTypes(problem);
+                auto const first = std::lower_bound(
+                    rowsByTypes.begin(), rowsByTypes.end(), std::make_pair(types, size_t(0)));
+                for(auto it = first; it != rowsByTypes.end() && it->first == types; ++it)
+                {
+                    if(visit(it->second))
+                        return true;
+                }
+                return false;
+            }
+
+            for(size_t i = 0; i < rows.size(); i++)
+            {
+                if(visit(i))
+                    return true;
+            }
+            return false;
+        }
+
+        template <typename Solutions>
+        static void tagSolutions(LibraryRowKind kind, bool debug, Solutions& solutions)
+        {
+            if(kind == LibraryRowKind::EqualityMatching)
+            {
+                for(auto& sol : solutions)
+                    sol->tag = MySolution::MatchingTag::Equal;
+                return;
+            }
+            // except for Equal, we test others only when debug mode.
+            if(!debug)
+                return;
+
+            switch(kind)
+            {
+            case LibraryRowKind::GridBasedMatching:
+                for(auto& sol : solutions)
+                    sol->tag = MySolution::MatchingTag::GridBased;
+                break;
+            case LibraryRowKind::RangeMatching:
+                for(auto& sol : solutions)
+                    sol->tag = MySolution::MatchingTag::Range;
+                break;
+            case LibraryRowKind::FreeSizeMatching:
+                for(auto& sol : solutions)
+                    sol->tag = MySolution::MatchingTag::FreeSize;
+                break;
+            case LibraryRowKind::PredictionMatching:
+                for(auto& sol : solutions)
+                    sol->tag = MySolution::MatchingTag::Prediction;
+                break;
+            default:
+                break;
+            }
+        }
+
+        std::vector<LibraryRowKind>                     rowKinds;
+        std::vector<std::pair<LibraryRowTypes, size_t>> rowsByTypes;
     };
 
     struct HardwarePredicate
@@ -413,6 +513,30 @@ namespace TensileLite
             }
 
             return rv;
+        }
+
+        /// Whether operator() prints its evaluation.
+        static bool debugging()
+        {
+            return Debug::Instance().printDeviceSelection();
+        }
+
+        /// operator() without the debug output.
+        template <typename Any>
+        bool evaluate(Any const&, Hardware const& hardware) const
+        {
+            return (*value)(hardware);
+        }
+
+        std::optional<LibraryRowTypes> leadingTypes() const
+        {
+            return std::nullopt;
+        }
+
+        template <typename Any>
+        static LibraryRowTypes problemTypes(Any const&)
+        {
+            return {};
         }
 
         // A match is a fallback when the predicate targets a specific chip ID
@@ -482,6 +606,48 @@ namespace TensileLite
             }
 
             return rv;
+        }
+
+        /// Whether operator() prints its evaluation.
+        static bool debugging()
+        {
+            return Debug::Instance().printPredicateEvaluation();
+        }
+
+        /// operator() without the debug output.
+        bool evaluate(MyProblem const& problem, Hardware const&) const
+        {
+            return (*value)(problem);
+        }
+
+        /// The types an And predicate whose first term is TypesEqual requires;
+        /// such a predicate is false for a problem of other types.
+        std::optional<LibraryRowTypes> leadingTypes() const
+        {
+            if constexpr(std::is_same_v<MyProblem, ContractionProblemGemm>)
+            {
+                auto const* all = dynamic_cast<Predicates::And<MyProblem> const*>(value.get());
+                if(all && !all->value.empty())
+                {
+                    if(auto const* types = dynamic_cast<Predicates::Contraction::TypesEqual const*>(
+                           all->value.front().get()))
+                        return types->value;
+                }
+            }
+            return std::nullopt;
+        }
+
+        static LibraryRowTypes problemTypes(MyProblem const& problem)
+        {
+            if constexpr(std::is_same_v<MyProblem, ContractionProblemGemm>)
+                return {problem.a().dataType(),
+                        problem.b().dataType(),
+                        problem.c().dataType(),
+                        problem.d().dataType(),
+                        problem.computeInputTypeA(),
+                        problem.computeInputTypeB()};
+            else
+                return {};
         }
 
         // Problem predicates never involve hardware fallback.

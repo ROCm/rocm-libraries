@@ -49,6 +49,8 @@ namespace TensileLite
             static void mapping(IO& io, Library& lib)
             {
                 iot::mapRequired(io, "rows", lib.rows);
+                if(!iot::outputting(io))
+                    lib.prepareRows();
             }
 
             const static bool flow = false;
@@ -63,6 +65,8 @@ namespace TensileLite
             static void mapping(IO& io, Library& lib)
             {
                 iot::mapRequired(io, "rows", lib.rows);
+                if(!iot::outputting(io))
+                    lib.prepareRows();
             }
 
             const static bool flow = false;

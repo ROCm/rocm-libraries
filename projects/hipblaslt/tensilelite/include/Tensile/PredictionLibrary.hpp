@@ -167,27 +167,6 @@ namespace TensileLite
                 lastFindTopRetAll = false;
                 return rv;
             }
-            size_t                     m     = 1;
-            size_t                     n     = 1;
-            size_t                     k     = 1;
-            size_t                     batch = 1;
-            for(size_t i = 0; i < problem.freeIndicesA().size(); i++)
-            {
-                m *= problem.freeSizeA(i);
-            }
-            for(size_t i = 0; i < problem.freeIndicesB().size(); i++)
-            {
-                n *= problem.freeSizeB(i);
-            }
-            for(size_t i = 0; i < problem.boundIndices().size(); ++i)
-            {
-                k *= problem.boundSize(i);
-            }
-            for(size_t i = 0; i < problem.batchIndices().size(); ++i)
-            {
-                batch *= problem.batchSize(i);
-            }
-
             hip::HipAMDGPU const* pAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
             const bool debug = Debug::Instance().printPropertyEvaluation();
@@ -226,51 +205,82 @@ namespace TensileLite
 
             if(pAMDGPU && pAMDGPU->analyticalHardware)
             {
-                auto miDataType = datatypeToAnalyticalDatatype(problem.computeInputTypeA());
-
-                if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32) // Check F32 compute type
-                    miDataType = origami::data_type_t::XFloat32;
-                origami::problem_t origami_problem = {
-                    .size        = {m, n, k},
-                    .batch       = batch,
-                    // CU budget hint; 0 = use all CUs.
-                    .num_cus     = static_cast<size_t>(problem.getParams().smCountTarget()),
-                    .a_transpose = problem.transA() ? origami::transpose_t::T : origami::transpose_t::N,
-                    .b_transpose = problem.transB() ? origami::transpose_t::T : origami::transpose_t::N,
-                    .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
-                    .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
-                    .c_dtype     = datatypeToAnalyticalDatatype(problem.c().dataType()),
-                    .d_dtype     = datatypeToAnalyticalDatatype(problem.d().dataType()),
-                    .mi_dtype    = miDataType,
-                    .a_mx_block_size = 0, // MX Data types come from rocroller
-                    .b_mx_block_size = 0, // MX Data types come from rocroller
-                };
-
 #ifdef TENSILELITE_HAS_TILEWRIGHT
-                // Solutions tilewright already offered; origami ranks the rest.
-                std::vector<bool> offered;
+                // Pool positions tilewright offered, in order; origami ranks the rest.
+                std::vector<size_t> ranked;
+                size_t              offeredCount = 0;
                 if(tilewright_ranker)
                 {
-                    offered.assign(solution_list.size(), false);
-                    for(size_t position : tilewright_ranker->rank(
-                            problem, *(pAMDGPU->analyticalHardware), numSolutions))
+                    ranked = tilewright_ranker->rank(
+                        problem, *(pAMDGPU->analyticalHardware), numSolutions);
+                    for(; offeredCount < ranked.size() && rv.size() != numSolutions; offeredCount++)
                     {
-                        if(position >= solution_list.size())
-                        {
-                            continue;
-                        }
-                        offered[position] = true;
-                        considerSolution(solution_list[position].second);
-                        if(rv.size() == numSolutions)
-                        {
-                            break;
-                        }
+                        size_t const position = ranked[offeredCount];
+                        if(position < solution_list.size())
+                            considerSolution(solution_list[position].second);
                     }
                 }
 #endif
 
                 if(rv.size() != numSolutions)
                 {
+                    size_t m     = 1;
+                    size_t n     = 1;
+                    size_t k     = 1;
+                    size_t batch = 1;
+                    for(size_t i = 0; i < problem.freeIndicesA().size(); i++)
+                    {
+                        m *= problem.freeSizeA(i);
+                    }
+                    for(size_t i = 0; i < problem.freeIndicesB().size(); i++)
+                    {
+                        n *= problem.freeSizeB(i);
+                    }
+                    for(size_t i = 0; i < problem.boundIndices().size(); ++i)
+                    {
+                        k *= problem.boundSize(i);
+                    }
+                    for(size_t i = 0; i < problem.batchIndices().size(); ++i)
+                    {
+                        batch *= problem.batchSize(i);
+                    }
+
+                    auto miDataType = datatypeToAnalyticalDatatype(problem.computeInputTypeA());
+
+                    if(problem.f32XdlMathOp()
+                       == rocisa::DataType::XFloat32) // Check F32 compute type
+                        miDataType = origami::data_type_t::XFloat32;
+                    origami::problem_t origami_problem = {
+                        .size  = {m, n, k},
+                        .batch = batch,
+                        // CU budget hint; 0 = use all CUs.
+                        .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
+                        .a_transpose
+                        = problem.transA() ? origami::transpose_t::T : origami::transpose_t::N,
+                        .b_transpose
+                        = problem.transB() ? origami::transpose_t::T : origami::transpose_t::N,
+                        .a_dtype         = datatypeToAnalyticalDatatype(problem.a().dataType()),
+                        .b_dtype         = datatypeToAnalyticalDatatype(problem.b().dataType()),
+                        .c_dtype         = datatypeToAnalyticalDatatype(problem.c().dataType()),
+                        .d_dtype         = datatypeToAnalyticalDatatype(problem.d().dataType()),
+                        .mi_dtype        = miDataType,
+                        .a_mx_block_size = 0, // MX Data types come from rocroller
+                        .b_mx_block_size = 0, // MX Data types come from rocroller
+                    };
+
+#ifdef TENSILELITE_HAS_TILEWRIGHT
+                    std::vector<bool> offered;
+                    if(tilewright_ranker)
+                    {
+                        offered.assign(solution_list.size(), false);
+                        for(size_t i = 0; i < offeredCount; i++)
+                        {
+                            if(ranked[i] < solution_list.size())
+                                offered[ranked[i]] = true;
+                        }
+                    }
+#endif
+
                     auto prediction_result = origami::rank_configs(
                         origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
 
@@ -314,4 +324,3 @@ namespace TensileLite
         }
     };
 } // namespace TensileLite
-

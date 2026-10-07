@@ -27,6 +27,9 @@
 #pragma once
 
 #include <atomic>
+#include <string>
+#include <type_traits>
+#include <utility>
 
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/PropertyMatching.hpp>
@@ -35,6 +38,20 @@
 
 namespace TensileLite
 {
+    template <typename MyProblem, typename = void>
+    struct HoldsOperationIdentifier : std::false_type
+    {
+    };
+
+    template <typename MyProblem>
+    struct HoldsOperationIdentifier<
+        MyProblem,
+        std::enable_if_t<
+            std::is_same_v<decltype(std::declval<MyProblem const&>().operationIdentifier()),
+                           std::string const&>>> : std::true_type
+    {
+    };
+
     /**
  * \ingroup SolutionLibrary
  */
@@ -77,10 +94,21 @@ namespace TensileLite
         LibraryEntry<MyProblem, MySolution> lookup(MyProblem const& problem,
                                                    Hardware const&  hardware) const
         {
+            bool debug = Debug::Instance().printPropertyEvaluation();
+
+            if constexpr(std::is_same_v<Key, std::string>
+                         && HoldsOperationIdentifier<MyProblem>::value)
+            {
+                if(keyIsOperationIdentifier && !debug)
+                {
+                    auto iter = map.find(problem.operationIdentifier());
+                    return iter == map.end() ? nullptr : iter->second;
+                }
+            }
+
             auto key  = (*property)(problem);
             auto iter = map.find(key);
 
-            bool debug = Debug::Instance().printPropertyEvaluation();
             if(debug)
             {
                 if(iter == map.end())
@@ -187,6 +215,8 @@ namespace TensileLite
         std::shared_ptr<Property<MyProblem, Key>> property;
         LibraryMap<MyProblem, MySolution, Key>    map;
         mutable std::atomic<bool>                 lastFindTopRetAll = false;
+        // `property` is an OperationIdentifier, whose value the problem holds.
+        bool keyIsOperationIdentifier = false;
 
         virtual SolutionVector<MySolution> findTopSolutions(MyProblem const& problem,
                                                             Hardware const&  hardware,
