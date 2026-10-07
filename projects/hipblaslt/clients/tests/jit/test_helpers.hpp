@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <catch2/catch_test_macros.hpp>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -9,13 +10,13 @@
 #include <stdexcept>
 #include <string>
 
-// Helpers the JIT tests share.
+// Helpers the JIT tests share. Assertions go through Catch2.
 namespace hipblaslt_jit_test
 {
     inline void require(bool condition, const std::string& message)
     {
-        if(!condition)
-            throw std::runtime_error(message);
+        INFO(message);
+        REQUIRE(condition);
     }
 
     // Requires that f throws.

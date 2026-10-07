@@ -4,6 +4,7 @@
 #include "hipblaslt-jit-component.hpp"
 #include "hipblaslt-jit-source-bundle.hpp"
 #include "test_helpers.hpp"
+#include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -118,13 +119,11 @@ namespace
     }
 }
 
-int main(int argc, char** argv)
-try
+TEST_CASE("comgr builds the HIP kernel and every written bundle", "[jit-cpu]")
 {
-    require(argc == 4, "Usage: hipblaslt-jit-builder-test BUNDLES KERNEL SCRATCH");
-    const auto bundles = fs::u8path(argv[1]);
-    const auto source  = hipblaslt_jit_test::readFile(fs::u8path(argv[2]));
-    const auto scratch = fs::u8path(argv[3]);
+    const auto bundles = fs::u8path(HIPBLASLT_JIT_BUNDLES);
+    const auto source  = hipblaslt_jit_test::readFile(fs::u8path(HIPBLASLT_JIT_KERNEL));
+    const auto scratch = fs::u8path(HIPBLASLT_JIT_SCRATCH);
     fs::remove_all(scratch);
     fs::create_directories(scratch);
     const hj::BuildUnit kernel{"builder_test_kernel.hip",
@@ -143,10 +142,4 @@ try
     }
     require(built > 0, "No bundle in " + bundles.u8string());
     std::cout << "PASS the build of every bundle fails when a kernel name is not defined\n";
-    return 0;
-}
-catch(const std::exception& error)
-{
-    std::cerr << "FAIL: " << error.what() << '\n';
-    return 1;
 }

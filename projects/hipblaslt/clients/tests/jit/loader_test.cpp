@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #include "hipblaslt-jit-loader.hpp"
 #include "test_helpers.hpp"
+#include <catch2/catch_test_macros.hpp>
 
 #include <Tensile/hip/HipHardware.hpp>
 #include <algorithm>
@@ -82,11 +83,9 @@ namespace
     }
 }
 
-int main(int argc, char** argv)
-try
+TEST_CASE("the TensileLite loader selects the written bundles", "[jit-gpu]")
 {
-    require(argc == 3, "Usage: hipblaslt-jit-loader-test BUNDLES SCRATCH");
-    const auto scratch = fs::u8path(argv[2]);
+    const auto scratch = fs::u8path(HIPBLASLT_JIT_SCRATCH);
     fs::remove_all(scratch);
     fs::create_directories(scratch);
 
@@ -96,7 +95,7 @@ try
                 && hipGetDeviceProperties(&properties, device) == hipSuccess,
             "Cannot query the current HIP device");
     const auto hardware = TensileLite::hip::GetDevice(properties, device);
-    const auto bundles  = hipblaslt_jit_test::deviceBundles(fs::u8path(argv[1]),
+    const auto bundles  = hipblaslt_jit_test::deviceBundles(fs::u8path(HIPBLASLT_JIT_BUNDLES),
                                                            properties.gcnArchName);
 
     const auto load = [&](const std::string& name, hj::BuiltSolution& built) {
@@ -144,10 +143,4 @@ try
     reject(unused, "a built kernel no solution names");
     std::cout << "PASS the loader rejects solutions 0 and 2, an undefined kernel and an "
                  "unused kernel\n";
-    return 0;
-}
-catch(const std::exception& error)
-{
-    std::cerr << "FAIL: " << error.what() << '\n';
-    return 1;
 }

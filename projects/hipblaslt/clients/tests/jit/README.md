@@ -46,9 +46,7 @@ The CTest tests are:
 
 ## Test arguments
 
-`hipblaslt-jit-bundle-writer` takes the `data` directory and an output
-directory. `hipblaslt-jit-builder-test` takes the output directory, the HIP
-kernel and a scratch directory. `hipblaslt-jit-loader-test` takes the output directory and a
-scratch directory, and checks the bundles of device 0's architecture with FP16
-problems with M=256, N=128 and K=512 or 256.
-`hipblaslt-jit-source-bundle-test` takes a scratch directory.
+The tests are Catch2 executables. CMake compiles in the data directory, the
+scratch directory and the HIP kernel path, so a developer runs the staged
+binary with no arguments. `hipblaslt-jit-loader-test` checks the bundles of
+device 0's architecture with FP16 problems with M=256, N=128 and K=512 or 256.

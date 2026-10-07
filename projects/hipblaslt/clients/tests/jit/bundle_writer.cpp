@@ -1,6 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 #include "test_helpers.hpp"
+#include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <array>
@@ -368,11 +369,9 @@ namespace
     }
 }
 
-int main(int argc, char** argv)
-try
+TEST_CASE("the bundle writer records each described solution", "[jit-cpu]")
 {
-    require(argc == 3, "Usage: hipblaslt-jit-bundle-writer DATA OUT");
-    const auto data = fs::u8path(argv[1]), out = fs::u8path(argv[2]);
+    const auto data = fs::u8path(HIPBLASLT_JIT_DATA), out = fs::u8path(HIPBLASLT_JIT_OUT);
     fs::remove_all(out);
     const auto bundles = describe();
     for(const auto& target : fs::directory_iterator(data))
@@ -402,10 +401,4 @@ try
         std::cout << "PASS wrote " << target << '/' << name << " with "
                   << bundle.solutions.size() << " solutions\n";
     }
-    return 0;
-}
-catch(const std::exception& error)
-{
-    std::cerr << "FAIL: " << error.what() << '\n';
-    return 1;
 }
