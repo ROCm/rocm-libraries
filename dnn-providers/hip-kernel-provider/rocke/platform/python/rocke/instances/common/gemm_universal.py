@@ -65,11 +65,14 @@ from ...core.ir import (
     Type,
     Value,
 )
-from ...core.tdm import build_tdm_descriptor_2d, encode_tdm_padding, tdm_padding_for_tile
+from ...core.tdm import (
+    build_tdm_descriptor_2d,
+    encode_tdm_padding,
+    tdm_padding_for_tile,
+)
 from ...helpers.io import io_ir_type
 from ...helpers.spec import WarpTileBlockSizeMixin, choose_load_vec
 from ...helpers.tensor_view import make_global_view, make_tile_window
-
 
 # ---------------------------------------------------------------------
 # Spec dataclasses
@@ -479,7 +482,9 @@ def _ab_lds_plan(spec: UniversalGemmSpec, arch: str) -> Tuple[int, bool, bool]:
     # path, and on direct-to-LDS only for gfx1250's per-lane async instruction.
     # The gfx9 ``buffer_load_lds`` family writes wave-contiguous bytes and
     # stays unpadded.
-    lds_pad = 0 if (spec.trait.direct_to_lds and arch != "gfx1250") else spec.trait.lds_k_pad
+    lds_pad = (
+        0 if (spec.trait.direct_to_lds and arch != "gfx1250") else spec.trait.lds_k_pad
+    )
     lds_k = t.tile_k + lds_pad
     ab_single = ((t.tile_m * lds_k) + (t.tile_n * lds_k)) * 2
     lds_cap = ArchTarget.from_gfx(arch).lds_capacity_bytes
@@ -685,7 +690,8 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             if spec.trait.lds_k_pad:
                 try:
                     encode_tdm_padding(
-                        row_bytes, spec.trait.lds_k_pad * _dtype_bytes(spec.data.dtype_a)
+                        row_bytes,
+                        spec.trait.lds_k_pad * _dtype_bytes(spec.data.dtype_a),
                     )
                 except ValueError as exc:
                     return False, f"tdm cannot encode lds_k_pad: {exc}"
@@ -1632,7 +1638,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
 
             k_remaining = b.smax(b.sub(K, k_off), zero)
 
-            def _issue(ptr, row_off, rows, lds_base, batch_off):
+            def _issue(ptr, row_off, rows, extent, lds_base, batch_off):
                 origin = b.add(batch_off, b.add(b.mul(row_off, K), k_off))
                 groups = build_tdm_descriptor_2d(
                     b,
@@ -1640,7 +1646,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     lds_addr=lds_base,
                     elem_bytes=_tdm_elem_bytes,
                     tensor_dim0=k_remaining,
-                    tensor_dim1=b.const_i32(rows),
+                    tensor_dim1=b.smax(b.sub(extent, row_off), zero),
                     tile_dim0=block_k,
                     tile_dim1=rows,
                     dim0_stride=K,
@@ -1657,12 +1663,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             # contents through the barrier in the drain.
             if _tdm_waves > 1:
                 with b.scf_if(b.cmp_eq(_tdm_wave_id, zero)):
-                    _issue(A, block_m_off, block_m, a_lds, batch_off_a)
+                    _issue(A, block_m_off, block_m, M, a_lds, batch_off_a)
                 with b.scf_if(b.cmp_eq(_tdm_wave_id, b.const_i32(1))):
-                    _issue(Bp, block_n_off, block_n, b_lds, batch_off_b)
+                    _issue(Bp, block_n_off, block_n, N, b_lds, batch_off_b)
             else:
-                _issue(A, block_m_off, block_m, a_lds, batch_off_a)
-                _issue(Bp, block_n_off, block_n, b_lds, batch_off_b)
+                _issue(A, block_m_off, block_m, M, a_lds, batch_off_a)
+                _issue(Bp, block_n_off, block_n, N, b_lds, batch_off_b)
             return
         if spec.trait.direct_to_lds:
             # For each pass, every lane copies one chunk of HALVES halves
@@ -1718,35 +1724,42 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 a_lds_wave_base = a_lds_par_base
                 b_lds_wave_base = b_lds_par_base
 
-            def _gfx1250_async_load(src, off_elems, smem, lds_row, col, cpol):
-                def _load() -> None:
-                    b.global_load_async_to_lds(
-                        src,
-                        off_elems,
-                        smem,
-                        [lds_row, col],
-                        width_bytes=_DTL_BYTES_PER_LANE,
-                        coherency=cpol,
-                    )
-
-                if not spec.trait.pad_k:
-                    _load()
-                    return
-                # The copy is unpredicated, so a chunk past K would read the next
-                # row's head (or past the buffer on the last row). Zero its LDS
-                # slot instead. A chunk is all-in or all-out only when K is a
-                # multiple of _DTL_HALVES, which the 16 B async copy needs anyway.
-                valid = b.cmp_lt(b.add(k_off, col), K)
+            def _gfx1250_async_load(
+                src, off_elems, smem, lds_row, col, global_row, extent, cpol
+            ):
+                # Async b128 needs an aligned source and a complete eight-element
+                # chunk. A ragged row pitch can misalign even non-tail chunks.
+                row_valid = b.cmp_lt(global_row, extent)
+                k_col = b.add(k_off, col)
+                full = b.cmp_le(b.add(k_col, b.const_i32(_DTL_HALVES)), K)
+                aligned = b.cmp_eq(
+                    b.mod(off_elems, b.const_i32(_DTL_HALVES)), b.const_i32(0)
+                )
+                valid = b.land(row_valid, b.land(full, aligned))
                 with b.scf_if_else(valid) as (then_ctx, else_ctx):
                     with then_ctx:
-                        _load()
-                    with else_ctx:
-                        b.smem_store_vN(
+                        b.global_load_async_to_lds(
+                            src,
+                            off_elems,
                             smem,
                             [lds_row, col],
-                            b.zero_vec(storage_dtype, _DTL_HALVES),
-                            _DTL_HALVES,
+                            width_bytes=_DTL_BYTES_PER_LANE,
+                            coherency=cpol,
                         )
+                    with else_ctx:
+                        zero = b.vec_extract(b.zero_vec(storage_dtype, _DTL_HALVES), 0)
+                        for i in range(_DTL_HALVES):
+                            ci = b.const_i32(i)
+                            mask = b.land(row_valid, b.cmp_lt(b.add(k_col, ci), K))
+                            value = b.masked_global_load(
+                                src,
+                                b.add(off_elems, ci),
+                                mask,
+                                zero,
+                                storage_dtype,
+                                align=2,
+                            )
+                            b.smem_store_vN(smem, [lds_row, b.add(col, ci)], value, 1)
 
             for p in range(_dtl_a_passes):
                 pass_off_bytes = p * _dtl_pass_bytes + a_parity_bytes_static
@@ -1774,15 +1787,20 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 )
                 if arch == "gfx1250":
                     if _prefetch and _parity_is_value:
-                        lds_row = b.add(
-                            row, b.mul(lds_parity, b.const_i32(block_m))
-                        )
+                        lds_row = b.add(row, b.mul(lds_parity, b.const_i32(block_m)))
                     elif _prefetch and lds_parity:
                         lds_row = b.add(row, b.const_i32(lds_parity * block_m))
                     else:
                         lds_row = row
                     _gfx1250_async_load(
-                        A, off_elems, A_smem, lds_row, col, spec.trait.dtl_cache_a
+                        A,
+                        off_elems,
+                        A_smem,
+                        lds_row,
+                        col,
+                        b.add(block_m_off, row),
+                        M,
+                        spec.trait.dtl_cache_a,
                     )
                 else:
                     off_bytes = b.mul(off_elems, c2)
@@ -1816,15 +1834,20 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 )
                 if arch == "gfx1250":
                     if _prefetch and _parity_is_value:
-                        lds_row = b.add(
-                            row, b.mul(lds_parity, b.const_i32(block_n))
-                        )
+                        lds_row = b.add(row, b.mul(lds_parity, b.const_i32(block_n)))
                     elif _prefetch and lds_parity:
                         lds_row = b.add(row, b.const_i32(lds_parity * block_n))
                     else:
                         lds_row = row
                     _gfx1250_async_load(
-                        Bp, off_elems, B_smem, lds_row, col, spec.trait.dtl_cache_b
+                        Bp,
+                        off_elems,
+                        B_smem,
+                        lds_row,
+                        col,
+                        b.add(block_n_off, row),
+                        N,
+                        spec.trait.dtl_cache_b,
                     )
                 else:
                     off_bytes = b.mul(off_elems, c2)
@@ -2559,6 +2582,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         MFMAs overlaps the next tile's HBM transfer with current-tile compute.
         gfx1250 tracks these transfers with ASYNCcnt; gfx9 uses VMEM waitcnt.
         """
+
         def _drain_prefetch_and_sync() -> None:
             if spec.trait.tdm:
                 # Only the current tile's two descriptors are outstanding at
