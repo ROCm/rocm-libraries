@@ -6236,8 +6236,8 @@ def depthwise_stream_register_reason(spec) -> Optional[str]:
 # leaves, as the FMA operands are consumed one at a time.
 _DW_TILED_REG_BUDGET = 256
 # FMAs an unrolled filter-row loop may emit (KH iterations of a block_h x
-# block_w x KW body). Compile time grows with the unrolled body, about 0.75 ms
-# per FMA on gfx950; this keeps an unrolled kernel within a few seconds.
+# block_w x KW body). Compile time grows with the unrolled body; the cap keeps
+# it bounded.
 _DW_TILED_UNROLL_MAX_FMAS = 6144
 
 
@@ -6375,6 +6375,14 @@ def is_valid_depthwise_tiled_spec(
         return False, why
     if p.stride > p.KH:
         return False, f"stride {p.stride} > KH {p.KH}: some phases see no filter row"
+    # A filter larger than the padded input leaves nothing to compute and a
+    # non-positive launch grid.
+    if p.Ho < 1 or p.Wo < 1:
+        return False, (
+            f"filter does not fit the padded input: Ho={p.Ho}, Wo={p.Wo} "
+            f"(H={p.H}, W={p.W}, KH={p.KH}, KW={p.KW}, PAD={p.PAD}, "
+            f"stride={p.stride})"
+        )
     if spec.wave_size != target.wave_size:
         return False, f"wave_size {spec.wave_size} != {arch} wave {target.wave_size}"
     if spec.threads_per_block > target.max_threads_per_block:
@@ -6783,6 +6791,10 @@ def is_valid_depthwise_col_spec(
     p = spec.problem
     if p.cpg != 1 or p.kpg != 1:
         return False, f"cpg and kpg must both be 1 (got cpg={p.cpg}, kpg={p.kpg})"
+    # The tap indexing has no dilation term.
+    why = dilation_reason(p)
+    if why is not None:
+        return False, why
 
     # Geometry the Ho/Wo formulas assume before they can be evaluated at all.
     if p.stride < 1:

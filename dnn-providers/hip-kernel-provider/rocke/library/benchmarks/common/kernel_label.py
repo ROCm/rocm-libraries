@@ -294,6 +294,10 @@ def _knob_tokens(knobs: str, baseline: str) -> Optional[List[str]]:
         return None
     if not isinstance(parsed, dict) or json.dumps(parsed, sort_keys=True) != knobs:
         return None
+    # A non-baseline empty dict would encode to no tokens, i.e. to the
+    # baseline's name.
+    if not parsed:
+        return None
     out = []
     for key in sorted(parsed):
         if not _KNOB_RE.fullmatch(f"{key}=") or key.startswith(_GENERIC):

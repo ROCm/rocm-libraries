@@ -7,8 +7,8 @@
  * rocke_direct_conv_4c_spec_t / rocke_direct_conv_8c_spec_t /
  * rocke_direct_conv_32c_spec_t / rocke_direct_depthwise_spec_t /
  * rocke_direct_depthwise_col_spec_t / rocke_direct_conv_wgrad_spec_t (and,
- * from index 42, the non-grouped rocke_direct_conv_nongrouped_spec_t)
- * identically to the Python emitter conv_direct_grouped_emit.py, builds the
+ * from index 42, the non-grouped rocke_direct_conv_nongrouped_spec_t; from
+ * index 66, specs both engines must reject) identically to the Python emitter conv_direct_grouped_emit.py, builds the
  * kernel via the matching rocke_build_direct_conv_*_new function and lowers via
  * rocke_lower_kernel_to_llvm (per-config arch, flavor AUTO) and prints the .ll
  * to stdout so the two outputs can be byte-compared.
@@ -45,6 +45,8 @@ enum
 #define TILED_CFG_BASE 57
 /* Dilated non-grouped configs follow the 6 tiled ones. */
 #define NONGROUPED_DIL_CFG_BASE 63
+/* Specs both engines must reject follow the 3 dilated non-grouped ones. */
+#define REJECT_CFG_BASE 66
 
 static rocke_direct_conv_problem_t
     mk_dw_problem(int N, int H, int W, int groups, int KH, int PAD, int stride, const char* dtype)
@@ -272,6 +274,76 @@ static int make_nongrouped_cfg(int idx, rocke_direct_conv_nongrouped_spec_t* s, 
         s->double_buffer = true;
         s->iglp = 1;
         s->chiplet_swizzle = false;
+        return 0;
+    default:
+        return -1;
+    }
+}
+
+/* Must-reject configs, emitted as REJECT_CFG_BASE + idx (mirrors Python
+ * _reject_spec). Each pins a validator branch whose failure mode the engines
+ * must share. Returns 0 on success, -1 past the last one. */
+static int make_reject_cfg(int idx,
+                           int* kind,
+                           rocke_direct_conv_16c_spec_t* s16,
+                           rocke_direct_depthwise_col_spec_t* sdwc,
+                           rocke_direct_conv_nongrouped_spec_t* snongrouped,
+                           rocke_direct_depthwise_tiled_spec_t* stiled,
+                           const char** arch)
+{
+    rocke_direct_conv_problem_t p;
+    *arch = "gfx950";
+    switch(idx)
+    {
+    case 0:
+        /* The column-streamed tap indexing has no dilation term. */
+        p = mk_dw_problem(2, 8, 8, 128, 3, 1, 1, "fp16");
+        p.dil_h = 2;
+        *sdwc = rocke_direct_depthwise_col_spec_default();
+        sdwc->problem = p;
+        sdwc->block_w = 4;
+        sdwc->block_waves = 2;
+        sdwc->dtype = "fp16";
+        *kind = KIND_DWCOL;
+        return 0;
+    case 1:
+        /* Tiled: a filter larger than the padded input (Ho = Wo = -26). */
+        *stiled = rocke_direct_depthwise_tiled_spec_default();
+        stiled->problem = mk_dw_problem(1, 4, 4, 64, 31, 0, 1, "fp16");
+        stiled->block_w = 8;
+        stiled->block_h = 2;
+        *kind = KIND_DW_TILED;
+        return 0;
+    case 2:
+        /* Tiled: H + 2*PAD - KH = -1 at stride 2. Ho floors to 0; a truncating
+         * division would make it 1. */
+        *stiled = rocke_direct_depthwise_tiled_spec_default();
+        stiled->problem = mk_dw_problem(1, 4, 16, 64, 5, 0, 2, "fp16");
+        stiled->block_w = 4;
+        stiled->block_h = 2;
+        *kind = KIND_DW_TILED;
+        return 0;
+    case 3:
+        /* Non-grouped: a zero dilation is refused, not read as 1. */
+        p = mk_nongrouped_problem(2, 16, 32, 64, 128, 3, 3, 1, 1, "bf16");
+        p.dil_h = 0;
+        *snongrouped = mk_nongrouped_spec(p);
+        *kind = KIND_NONGROUPED;
+        return 0;
+    case 4:
+        /* 16c: any dilation other than 1, zero included, is refused. */
+        p = rocke_direct_conv_problem_default();
+        p.N = 2;
+        p.H = 16;
+        p.W = 16;
+        p.groups = 16;
+        p.cpg = 16;
+        p.kpg = 16;
+        p.dil_w = 0;
+        *s16 = rocke_direct_conv_16c_spec_default();
+        s16->problem = p;
+        s16->block_groups = 4;
+        *kind = KIND_16C;
         return 0;
     default:
         return -1;
@@ -983,6 +1055,9 @@ static int make_cfg(int idx,
         *arch = "gfx950";
         return 0;
     default:
+        if(idx >= REJECT_CFG_BASE)
+            return make_reject_cfg(
+                idx - REJECT_CFG_BASE, kind, s16, sdwc, snongrouped, stiled, arch);
         if(idx >= NONGROUPED_DIL_CFG_BASE)
         {
             if(make_nongrouped_dil_cfg(idx - NONGROUPED_DIL_CFG_BASE, snongrouped, arch) == 0)

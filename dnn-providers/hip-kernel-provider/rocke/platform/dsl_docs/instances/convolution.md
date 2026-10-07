@@ -669,9 +669,9 @@ class DirectDepthwiseTiledSpec:
 
 The row-streaming `DirectDepthwiseSpec` holds all `KH x KW` weights and `KH`
 accumulator slots per column and unrolls `KH` rows per loop iteration: its
-registers and loop body grow with `KH^2 * KW`, so past 11x11 it spills and takes
-minutes to compile (31x31: ~10 min, ~5000 spilled VGPRs). This kernel is linear
-in the filter width:
+registers and loop body grow with `KH^2 * KW`, so past 11x11 it spills heavily
+(a 31x31 case was observed with ~5000 spilled VGPRs) and compiles slowly. This
+kernel is linear in the filter width:
 
 - a block owns a `block_h x block_w` output tile; the grid also splits the
   output rows: `(ceil(Wo/block_w), ceil(C/block_ch), N * ceil(Ho/block_h))`;
@@ -685,15 +685,15 @@ in the filter width:
 
 Outputs are indexed directly, so it is not tied to "same" padding. Constraints
 (`is_valid_depthwise_tiled_spec` / `rocke_direct_depthwise_tiled_is_valid_spec`):
-`cpg == kpg == 1`, `KH, KW <= 32`, `stride <= KH`, no dilation, and
-`live_regs = block_h*block_w + block_h*n_cols + 2*KW <= 256`
-(`n_cols = (block_w-1)*stride + KW`). Every config the budget admits builds in
-under a second (unrolled: a few seconds).
+`cpg == kpg == 1`, `KH, KW <= 32`, `stride <= KH`, no dilation, `Ho, Wo >= 1`,
+and `live_regs = block_h*block_w + block_h*n_cols + 2*KW <= 256`
+(`n_cols = (block_w-1)*stride + KW`). The register budget and the unroll cap
+bound the compile cost of both rolled and unrolled configurations.
 
 The sweeps skip a row-streaming config that would spill
 (`depthwise_stream_register_reason`) and leave its shape to this kernel.
 
-Parity gate: configs 48-53 in `library/tests/parity/conv_direct_grouped_emit.{c,py}`.
+Parity gate: configs 57-62 in `library/tests/parity/conv_direct_grouped_emit.{c,py}`.
 
 ## Direct Non-grouped Convolution
 

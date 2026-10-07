@@ -75,10 +75,12 @@ int rocke_direct_conv_problem_total_k(const rocke_direct_conv_problem_t* p)
     return p->groups * p->kpg;
 }
 
-/* Dilated filter extent (KH - 1) * dil + 1; a zero dilation reads as 1. */
+/* Dilated filter extent (KH - 1) * dil + 1. A dilation below 1 is not
+ * normalised: every validator rejects it (dilation_reason, and the non-grouped
+ * kernel's positivity check). */
 static int dconv_dilated_extent(int k, int dil)
 {
-    return (k - 1) * (dil > 0 ? dil : 1) + 1;
+    return (k - 1) * dil + 1;
 }
 
 int rocke_direct_conv_problem_Ho(const rocke_direct_conv_problem_t* p)
@@ -207,12 +209,13 @@ rocke_status_t rocke_direct_conv_16c_kernel_name(const rocke_direct_conv_16c_spe
  * padding makes the kernel write wrong rows (including the next image's)
  * rather than fail, so it is refused before a binary is built. */
 /* dilation_reason(p): why a direct-conv kernel without dilation support cannot
- * compute p. Only the non-grouped forward kernel computes a dilated conv. A
- * zero dilation (a zero-initialised problem) reads as 1. */
+ * compute p. Only the non-grouped forward kernel computes a dilated conv. Any
+ * dilation other than 1 -- zero and negatives included -- is refused, as in
+ * Python's is_dilated. */
 static bool
     rocke_direct_dilation_reason(const rocke_direct_conv_problem_t* p, char* why, size_t why_cap)
 {
-    if(p->dil_h > 1 || p->dil_w > 1)
+    if(p->dil_h != 1 || p->dil_w != 1)
     {
         snprintf(why,
                  why_cap,
@@ -1777,6 +1780,16 @@ bool rocke_direct_depthwise_col_is_valid_spec(const rocke_direct_depthwise_col_s
         }
         return false;
     }
+    /* The tap indexing has no dilation term. */
+    {
+        char dil_why[256];
+        if(rocke_direct_dilation_reason(p, dil_why, sizeof dil_why))
+        {
+            if(reason != NULL && reason_cap > 0)
+                snprintf(reason, reason_cap, "%s", dil_why);
+            return false;
+        }
+    }
     if(p->stride < 1)
     {
         if(reason && reason_cap > 0)
@@ -2859,6 +2872,30 @@ bool rocke_direct_depthwise_tiled_is_valid_spec(const rocke_direct_depthwise_til
                      p->stride,
                      p->KH);
         return false;
+    }
+    /* A filter larger than the padded input leaves nothing to compute and a
+     * non-positive launch grid. Floored like Python's Ho / Wo (no dilation
+     * term: a dilated problem is refused above). */
+    {
+        const int Ho = rocke_dconv_col__Ho(p);
+        const int Wo = rocke_dconv_col__Wo(p);
+        if(Ho < 1 || Wo < 1)
+        {
+            if(reason && reason_cap > 0)
+                snprintf(reason,
+                         reason_cap,
+                         "filter does not fit the padded input: Ho=%d, Wo=%d (H=%d, W=%d, KH=%d, "
+                         "KW=%d, PAD=%d, stride=%d)",
+                         Ho,
+                         Wo,
+                         p->H,
+                         p->W,
+                         p->KH,
+                         p->KW,
+                         p->PAD,
+                         p->stride);
+            return false;
+        }
     }
     if(spec->wave_size != target->wave_size)
     {

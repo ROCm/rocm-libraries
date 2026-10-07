@@ -9,8 +9,9 @@
 # DirectDepthwiseColSpec /
 # DirectConvDgradSpec / DirectDepthwiseDgradSpec / DirectConvWgradSpec (and,
 # from index 42, the non-grouped DirectNongroupedConvSpec, from index 57 the
-# output-stationary DirectDepthwiseTiledSpec and from index 63 the dilated
-# non-grouped DirectNongroupedConvSpec), builds the kernel
+# output-stationary DirectDepthwiseTiledSpec, from index 63 the dilated
+# non-grouped DirectNongroupedConvSpec and from index 66 specs both engines
+# must reject), builds the kernel
 # via the matching build_direct_conv_* function (arch=<cfg arch>) and prints
 # _native_lower(arch=<cfg arch>) to stdout so it can be byte-compared with
 # the C emitter conv_direct_grouped_emit.c.
@@ -68,6 +69,8 @@ _NONGROUPED_CFG_BASE = 42
 _TILED_CFG_BASE = 57
 # Dilated non-grouped configs follow the 6 tiled ones.
 _NONGROUPED_DIL_CFG_BASE = 63
+# Specs both engines must reject follow the 3 dilated non-grouped ones.
+_REJECT_CFG_BASE = 66
 
 
 def _nongrouped_p(
@@ -130,6 +133,55 @@ _NONGROUPED_BASE = dict(
 
 def _nongrouped_s(problem, **kw):
     return DirectNongroupedConvSpec(problem=problem, **{**_NONGROUPED_BASE, **kw})
+
+
+def _reject_spec(idx: int):
+    """Return (kind, spec, arch) for must-reject config ``idx`` (emitted as
+    ``_REJECT_CFG_BASE + idx``), or None past the last one. Each pins a
+    validator branch whose failure mode the engines must share."""
+    if idx == 0:
+        # The column-streamed tap indexing has no dilation term.
+        p = DirectConvProblem(
+            N=2, H=8, W=8, groups=128, cpg=1, kpg=1, KH=3, KW=3, PAD=1, dil_h=2
+        )
+        return (
+            "dwcol",
+            DirectDepthwiseColSpec(problem=p, block_w=4, block_waves=2, dtype="fp16"),
+            "gfx950",
+        )
+    if idx == 1:
+        # Tiled: a filter larger than the padded input (Ho = Wo = -26).
+        p = DirectConvProblem(
+            N=1, H=4, W=4, groups=64, cpg=1, kpg=1, KH=31, KW=31, PAD=0
+        )
+        return (
+            "dw_tiled",
+            DirectDepthwiseTiledSpec(problem=p, block_w=8, block_h=2),
+            "gfx950",
+        )
+    if idx == 2:
+        # Tiled: H + 2*PAD - KH = -1 at stride 2. Ho floors to 0; a truncating
+        # division would make it 1.
+        p = DirectConvProblem(
+            N=1, H=4, W=16, groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=0, stride=2
+        )
+        return (
+            "dw_tiled",
+            DirectDepthwiseTiledSpec(problem=p, block_w=4, block_h=2),
+            "gfx950",
+        )
+    if idx == 3:
+        # Non-grouped: a zero dilation is refused, not read as 1.
+        return (
+            "nongrouped",
+            _nongrouped_s(_nongrouped_p(2, 16, 32, 64, 128, dil_h=0)),
+            "gfx950",
+        )
+    if idx == 4:
+        # 16c: any dilation other than 1, zero included, is refused.
+        p = DirectConvProblem(N=2, H=16, W=16, groups=16, cpg=16, kpg=16, dil_w=0)
+        return ("16c", DirectConv16cSpec(problem=p, block_groups=4), "gfx950")
+    return None
 
 
 def _tiled_spec(idx: int):
@@ -860,6 +912,11 @@ def _spec(idx: int):
             DirectDepthwiseSpec(problem=p, block_w=8, block_waves=2),
             "gfx950",
         )
+    if idx >= _REJECT_CFG_BASE:
+        sel = _reject_spec(idx - _REJECT_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
     if idx >= _NONGROUPED_DIL_CFG_BASE:
         sel = _nongrouped_dil_spec(idx - _NONGROUPED_DIL_CFG_BASE)
         if sel is not None:

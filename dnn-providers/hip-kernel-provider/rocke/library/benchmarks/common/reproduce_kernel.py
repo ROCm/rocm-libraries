@@ -14,7 +14,9 @@ it, lowers it and (unless ``--ir-only``) compiles it::
         --cache ./kernel_cache/
 
 and writes ``<name>.ll``, ``<name>.hsaco`` and ``<name>.json`` (identity, spec
-kwargs, content key, provenance) to ``--out-dir``. Every implicit-GEMM
+kwargs, content key, provenance) to ``--out-dir`` -- a name too long for a file
+name is shortened to a prefix plus a hash (:func:`artifact_stem`), the full
+name kept in the ``.json``. Every implicit-GEMM
 (fwd/wgrad/dgrad) and direct-conv (fwd/dgrad, and the MFMA dgrad's weight
 transforms) kernel is covered.
 
@@ -29,6 +31,7 @@ reproduced bit for bit.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -43,6 +46,23 @@ from benchmarks.common.kernel_cache import (
     current_llvm_flavor,
 )
 from benchmarks.common.kernel_label import strip_launch_suffix
+
+# Longest artifact stem written to --out-dir: a file name is capped at 255
+# bytes (NAME_MAX) and a lossless label can exceed it, so a longer name is cut
+# and suffixed with a hash of the whole name; the full name stays in the .json
+# record.
+_MAX_STEM = 255 - len(".hsaco")
+_STEM_HASH_LEN = 16
+
+
+def artifact_stem(name: str) -> str:
+    """File stem for ``name``'s artifacts: ``name`` itself when it fits in
+    :data:`_MAX_STEM` bytes, else a readable prefix plus a stable hash."""
+    if len(name.encode("utf-8")) <= _MAX_STEM:
+        return name
+    digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:_STEM_HASH_LEN]
+    prefix = name.encode("utf-8")[: _MAX_STEM - _STEM_HASH_LEN - 1]
+    return f"{prefix.decode('utf-8', 'ignore')}-{digest}"
 
 
 def job_and_builder(identity: KernelIdentity):
@@ -160,9 +180,10 @@ def reproduce(
 
     if out_dir is not None:
         out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / f"{name}.ll").write_text(comgr_input.llvm_text, encoding="utf-8")
+        stem = artifact_stem(name)
+        (out_dir / f"{stem}.ll").write_text(comgr_input.llvm_text, encoding="utf-8")
         if hsaco is not None:
-            (out_dir / f"{name}.hsaco").write_bytes(hsaco)
+            (out_dir / f"{stem}.hsaco").write_bytes(hsaco)
         record = dict(
             name=name,
             identity=identity.to_dict(),
@@ -176,11 +197,11 @@ def reproduce(
             comgr_id=current_comgr_id(),
             **{k: v for k, v in meta.items() if k not in ("kernel_name",)},
         )
-        (out_dir / f"{name}.json").write_text(
+        (out_dir / f"{stem}.json").write_text(
             json.dumps(record, indent=2, sort_keys=True, default=str), encoding="utf-8"
         )
         log(
-            f"  written         {out_dir / name}.{{ll,json{',hsaco' if hsaco else ''}}}"
+            f"  written         {out_dir / stem}.{{ll,json{',hsaco' if hsaco else ''}}}"
         )
     return ok
 

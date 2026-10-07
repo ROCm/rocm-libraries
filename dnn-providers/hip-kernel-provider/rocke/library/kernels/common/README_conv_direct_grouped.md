@@ -78,9 +78,9 @@ Large filters (13x13 .. 31x31) go to the output-stationary
 `DirectDepthwiseTiledSpec` (`build_direct_depthwise_tiled`): a runtime loop over
 the filter rows with one weight row and a sliding window of input rows in
 registers, an output tile of `block_h x block_w`, and a grid split over output
-rows too. Its footprint is linear in the filter width, so a 31x31 kernel
-compiles in well under a second where the row-streaming one spills and takes
-minutes. See `platform/dsl_docs/instances/convolution.md`.
+rows too. Its footprint is linear in the filter width, so it avoids the
+register spills and the steep compile cost the row-streaming kernel has at these
+sizes. See `platform/dsl_docs/instances/convolution.md`.
 
 ### cpg = 1 — Column-streamed depthwise (`DirectDepthwiseColSpec`)
 

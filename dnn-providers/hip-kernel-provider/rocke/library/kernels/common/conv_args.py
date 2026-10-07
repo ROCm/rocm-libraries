@@ -174,8 +174,8 @@ class ConvGeometry:
             pH=problem.PAD,
             pW=problem.PAD,
             dD=1,
-            dH=getattr(problem, "dil_h", 1),
-            dW=getattr(problem, "dil_w", 1),
+            dH=problem.dil_h,
+            dW=problem.dil_w,
             groups=problem.groups,
             is_3d=False,
         )

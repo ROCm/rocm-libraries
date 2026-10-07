@@ -57,6 +57,10 @@ _SKIP_REASON = _skip_reason()
 
 _TOL = 5e-2
 _TOL_BF16 = 1e-1  # bf16 has 3 fewer mantissa bits than fp16 (~8x coarser precision)
+# The tiled depthwise kernel accumulates in fp32 and rounds once on store, so a
+# correct result is within about one output ulp; the loose tolerances above
+# would still pass it with a filter tap dropped.
+_TILED_TOL = {"fp16": 5e-3, "bf16": 1.5e-2}
 
 
 # ---------------------------------------------------------------------------
@@ -177,8 +181,8 @@ _SHAPES: List[_Shape] = [
 # groups=64 exercises full-wave utilisation; stride=2 validates Ho/Wo output.
 # Output-stationary depthwise (DirectDepthwiseTiledSpec): (shape, knobs). Each
 # pins one branch: a 31x31 filter, the unrolled filter-row loop, stride-2
-# phases on ragged H/W tiles, block_h 1 (no carried window), non-"same"
-# padding, and a partial channel tile over two waves.
+# phases on ragged H/W tiles (rolled and unrolled), block_h 1 (no carried
+# window), non-"same" padding, and a partial channel tile over two waves.
 _TILED_CASES: List[Tuple[_Shape, dict]] = [
     (
         _Shape(
@@ -214,6 +218,21 @@ _TILED_CASES: List[Tuple[_Shape, dict]] = [
             stride=2,
         ),
         dict(block_w=4, block_h=4),
+    ),
+    (
+        _Shape(
+            "dwt_k5s2u_N2H13W11_g64",
+            N=2,
+            H=13,
+            W=11,
+            groups=64,
+            cpg=1,
+            KH=5,
+            KW=5,
+            PAD=2,
+            stride=2,
+        ),
+        dict(block_w=4, block_h=4, unroll_rows=True),
     ),
     (
         _Shape("dwt_k3_N2H14W14_g64", N=2, H=14, W=14, groups=64, cpg=1),
@@ -763,7 +782,10 @@ def _run_depthwise_one(
     abs_diff = (out_f32 - ref_f32).abs()
     ref_scale = ref_f32.abs().max().clamp(min=1.0)
     rel_err = float(abs_diff.max() / ref_scale)
-    tol = _TOL_BF16 if dtype == "bf16" else _TOL
+    if tiled is not None:
+        tol = _TILED_TOL[dtype]
+    else:
+        tol = _TOL_BF16 if dtype == "bf16" else _TOL
     if not rel_err < tol:
         return False, f"rel_err={rel_err:.3e} > tol={tol:.1e}"
     print(

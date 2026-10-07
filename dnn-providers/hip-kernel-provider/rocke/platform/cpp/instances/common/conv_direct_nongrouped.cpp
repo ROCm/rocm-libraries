@@ -100,20 +100,14 @@ static bool nongrouped_is_bf16(const rocke_direct_conv_nongrouped_spec_t* spec)
     return strcmp(nongrouped_dtype(spec), "bf16") == 0;
 }
 
-/* Filter dilation; a zero (zero-initialised problem) reads as 1. */
-static int nongrouped_dil(int d)
-{
-    return d > 0 ? d : 1;
-}
-
 static int nongrouped_ho(const rocke_direct_conv_problem_t* p)
 {
-    return (p->H + 2 * p->PAD - (p->KH - 1) * nongrouped_dil(p->dil_h) - 1) / p->stride + 1;
+    return (p->H + 2 * p->PAD - (p->KH - 1) * p->dil_h - 1) / p->stride + 1;
 }
 
 static int nongrouped_wo(const rocke_direct_conv_problem_t* p)
 {
-    return (p->W + 2 * p->PAD - (p->KW - 1) * nongrouped_dil(p->dil_w) - 1) / p->stride + 1;
+    return (p->W + 2 * p->PAD - (p->KW - 1) * p->dil_w - 1) / p->stride + 1;
 }
 
 static void nongrouped_set_reason(char* reason, size_t reason_cap, const char* msg)
@@ -168,10 +162,8 @@ long rocke_direct_conv_nongrouped_lds_bytes(const rocke_direct_conv_nongrouped_s
     {
         return 0;
     }
-    lds_in_h
-        = (long)(spec->tile_h - 1) * p->stride + (long)(p->KH - 1) * nongrouped_dil(p->dil_h) + 1;
-    lds_in_w
-        = (long)(spec->tile_w - 1) * p->stride + (long)(p->KW - 1) * nongrouped_dil(p->dil_w) + 1;
+    lds_in_h = (long)(spec->tile_h - 1) * p->stride + (long)(p->KH - 1) * p->dil_h + 1;
+    lds_in_w = (long)(spec->tile_w - 1) * p->stride + (long)(p->KW - 1) * p->dil_w + 1;
     x_halves = lds_in_h * lds_in_w * (spec->ck + spec->lds_pad);
     w_halves = (long)spec->tile_k * p->KH * p->KW * spec->ck;
     /* + one scratch fragment per array (see the builder). */
@@ -262,13 +254,9 @@ rocke_status_t rocke_direct_conv_nongrouped_kernel_name(
     }
     /* f"d{dil_h}x{dil_w}" only for a dilated problem: undilated names are unchanged. */
     d_buf[0] = '\0';
-    if(nongrouped_dil(spec->problem.dil_h) != 1 || nongrouped_dil(spec->problem.dil_w) != 1)
+    if(spec->problem.dil_h != 1 || spec->problem.dil_w != 1)
     {
-        snprintf(d_buf,
-                 sizeof(d_buf),
-                 "d%dx%d",
-                 nongrouped_dil(spec->problem.dil_h),
-                 nongrouped_dil(spec->problem.dil_w));
+        snprintf(d_buf, sizeof(d_buf), "d%dx%d", spec->problem.dil_h, spec->problem.dil_w);
     }
     parts[0] = prob_short;
     parts[1] = d_buf;
@@ -337,8 +325,7 @@ rocke_status_t rocke_direct_conv_nongrouped_validate(
         NONGROUPED_REJECT("DirectNongroupedConvSpec: tile, wave, stride and channel parameters "
                           "must be positive");
     }
-    /* A zero dilation is a zero-initialised problem and reads as 1. */
-    if(p->dil_h < 0 || p->dil_w < 0)
+    if(p->dil_h < 1 || p->dil_w < 1)
     {
         NONGROUPED_REJECT(
             "DirectNongroupedConvSpec: dilation must be positive (got %dx%d)", p->dil_h, p->dil_w);
@@ -650,8 +637,8 @@ bool nongrouped_prologue(nongrouped_ctx& c, const char* arch)
     c.KW = c.p.KW;
     c.S = c.p.stride;
     c.PAD = c.p.PAD;
-    c.DH = nongrouped_dil(c.p.dil_h);
-    c.DW = nongrouped_dil(c.p.dil_w);
+    c.DH = c.p.dil_h;
+    c.DW = c.p.dil_w;
 
     c.TH = spec->tile_h;
     c.TW = spec->tile_w;

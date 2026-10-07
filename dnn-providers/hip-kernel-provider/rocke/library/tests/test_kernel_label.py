@@ -168,8 +168,18 @@ def test_knobs_round_trip_byte_for_byte():
         json.dumps({"nested": [1, 2]}),
         "not json",
         "",
+        "{}",
     ):
         _round_trips(dataclasses.replace(base, knobs=knobs))
+
+
+def test_empty_knob_dict_is_not_the_implicit_baseline():
+    # The implicit-GEMM baseline is "" -- an empty dict must not encode to
+    # the same name.
+    base = _base_identity(direct=False)
+    for knobs in ("", "{}"):
+        _round_trips(dataclasses.replace(base, knobs=knobs))
+    assert dataclasses.replace(base, knobs="{}").label() != base.label()
 
 
 def test_tags_do_not_overlap():
@@ -196,6 +206,25 @@ def test_name_is_readable():
     direct = _base_identity(direct=True).label()
     assert direct.startswith("fwd-direct_grouped-fp16-2d-f3x3-p1x1-s1x1-d1x1-c16k16-")
     assert "-block_q=16-" in direct and "-double_buffer=true-" in direct
+
+
+def test_artifact_stem_fits_a_file_name():
+    from benchmarks.common.reproduce_kernel import artifact_stem
+
+    short = _base_identity(direct=True).label()
+    assert artifact_stem(short) == short
+    # Knobs that leave the baseline lengthen a direct name past NAME_MAX.
+    long = dataclasses.replace(
+        _base_identity(direct=True),
+        knobs=json.dumps({f"knob_{i}": i for i in range(40)}, sort_keys=True),
+    ).label()
+    assert len(long.encode()) > 255
+    stem = artifact_stem(long)
+    assert len(f"{stem}.hsaco".encode()) <= 255
+    assert stem.startswith(long[:64])
+    assert stem == artifact_stem(long)
+    other = artifact_stem(long.replace("knob_39=39", "knob_39=38"))
+    assert other != stem
 
 
 def test_launch_suffix_is_ignored():
