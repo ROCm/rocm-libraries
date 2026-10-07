@@ -2010,13 +2010,13 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["BufferLoad"] or kernel["BufferStore"]:
       module.addComment0("2GB limit - set offsets to -1 to exceed this and clamp")
       module.add(ValueSet("BufferLimit", 0xffffffff, format=1))
-      # BufferOOB: Offset value used for out-of-bounds threads.
-      # Set to 0xfffff000 to reserve 4KB safety margin for instruction offsets (max 4095).
-      # This prevents 32-bit overflow: 0xfffff000 + 4095 = 0xffffffff (stays in range).
-      # With correctly-sized buffer descriptors (stride*N*bpe), this offset will exceed
-      # the buffer size and hardware will reject OOB writes, preventing memory corruption.
+      # Use 2^31 for BufferOOB behavior.
+      # set BufferOOB to NumRecords field of SRD.
+      # if thread is OOB, we can invalid it by setting vOffset to BufferOOB
       module.add(ValueSet("BufferOOB", 0xfffff000, format=1))
-
+      # Set BufferOOB to 0xfffff000 instead of 0xffffffff (reserving 4KB) to prevent
+      # overflows from instruction offsets (max 4095) during memory access.
+      
       srdUpperValue = SrdUpperValue(self.states.version)
       module.addComment2("Bits 127:96 of SRD.\n" + srdUpperValue.desc())
       module.add(ValueSet("Srd127_96", srdUpperValue.getValue(), format=1))
