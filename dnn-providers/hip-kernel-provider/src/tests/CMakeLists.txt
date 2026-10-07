@@ -279,6 +279,23 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "hkp: this configuration does not ship hipkernel:Gfx950AttentionDense for "
             "gfx950, so its census is not registered.")
     endif()
+
+    hkp_register_census_tests(
+        TARGET hip_kernel_provider_census_tests
+        PACK_NAME product
+        ARCHES gfx1151
+        SUITES TestGfx1151WmmaAttentionPacks
+        EXPECTED_CASES
+            LoadsExactlyTheEmittedPacks
+            LoadsExactlyTheEmittedKernels
+            EveryLoadedDescriptorCoversTheRequestedArch
+            EveryKernelDeclaresTheEmittedRuntimeSourceKind
+            DeclaresTheConfiguredSdkVersion
+            ExposesTheConfiguredKnobs
+            RanksThroughItsRegisteredScoreSymbol
+            CarriesNoGraphScopedMatcher
+            CarriesExactlyOneSharedKernelScopedMatcher
+    )
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)

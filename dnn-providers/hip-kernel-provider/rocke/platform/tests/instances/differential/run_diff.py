@@ -88,7 +88,7 @@ def collect_ref_shas(results):
     return out
 
 
-MAX_CFG = 128  # hard cap on config enumeration per family
+MAX_CFG = 256  # hard cap on config enumeration per family
 TIMEOUT = 120  # seconds per emitter invocation
 
 _CANON = None

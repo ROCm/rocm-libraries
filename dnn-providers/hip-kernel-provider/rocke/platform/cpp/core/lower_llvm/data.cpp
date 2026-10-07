@@ -316,6 +316,9 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"raw.ptr.buffer.load.i16",
      "declare i16 @llvm.amdgcn.raw.ptr.buffer.load.i16(ptr addrspace(8) nocapture readonly, i32, "
      "i32, i32 immarg)"},
+    {"raw.ptr.buffer.load.f16",
+     "declare half @llvm.amdgcn.raw.ptr.buffer.load.f16(ptr addrspace(8) nocapture readonly, i32, "
+     "i32, i32 immarg)"},
     {"raw.ptr.buffer.store.i32",
      "declare void @llvm.amdgcn.raw.ptr.buffer.store.i32(i32, ptr addrspace(8) nocapture "
      "writeonly, i32, i32, i32 immarg)"},

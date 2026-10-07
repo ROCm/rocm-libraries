@@ -428,9 +428,11 @@ class TestRealBundleDtypeVocabulary:
             kernels = _kernels(_read(kdp))
             spec = kernels[0]["kernel_source"]["spec"]
             meta = kernels[0]["metadata"]
-            # The premise: two different spellings of one type. A failure here
-            # means the bundle changed and the regression needs re-grounding.
-            assert (spec["dtype"], meta["dtype"]) == ("bf16", "BF16"), kdp
+            # The premise: two different spellings of one type (bf16/BF16,
+            # fp16/FP16, ...). A failure here means the bundle changed and the
+            # regression needs re-grounding.
+            assert spec["dtype"] != meta["dtype"], kdp
+            assert spec["dtype"].upper() == meta["dtype"], kdp
             assert metadata_spec_drift(kernels, ("dtype",)) == [], kdp
 
     @pytest.mark.parametrize(

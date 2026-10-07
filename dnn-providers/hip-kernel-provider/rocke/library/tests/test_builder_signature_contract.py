@@ -131,7 +131,7 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "seqlen_q",
     ),
     "kernels.common.sparse_attention.VsaSparseSpec": ("common", "seqlen_k", "seqlen_q"),
-    "kernels.gfx1151.wmma_fmha_fwd.WmmaFmhaFwdSpec": ("head_size", "num_query_heads"),
+    "kernels.gfx1151.wmma_fmha_fwd.WmmaFmhaFwdSpec": ("head_size",),
     "kernels.gfx1250.attention_tiled_2d.UnifiedAttention2DTiledSpec": (
         "block_size",
         "dtype",

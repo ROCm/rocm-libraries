@@ -21,14 +21,15 @@ import argparse
 import ctypes
 import json
 import math
-import struct
 
 from rocke.helpers import compile_kernel
 from kernels.gfx1151.wmma_fmha_fwd import (
     WmmaFmhaFwdSpec,
     build_wmma_fmha_fwd,
     wmma_fmha_fwd_grid,
+    wmma_fmha_fwd_signature,
 )
+from rocke.runtime.packing import pack_args
 from rocke.runtime.hip_module import Runtime
 from rocke.runtime.launcher import time_launches
 
@@ -84,8 +85,6 @@ def main() -> int:
     kvh = args.kv_heads or args.heads
     spec = WmmaFmhaFwdSpec(
         head_size=args.head_size,
-        num_query_heads=args.heads,
-        num_kv_heads=kvh,
         mask_mode="causal" if args.causal else "none",
         v_lds_stage=args.v_lds_stage,
         name=f"wmma_fmha_bench_{args.arch}",
@@ -112,7 +111,7 @@ def main() -> int:
     stride_o_head = D
     scale_log2 = float(1.0 / math.sqrt(D) * math.log2(math.e))
 
-    grid = wmma_fmha_fwd_grid(spec, seqlen_q=Sq, batch=B)
+    grid = wmma_fmha_fwd_grid(spec, seqlen_q=Sq, num_query_heads=Hq, batch=B)
     block = (spec.block_size, 1, 1)
 
     rt = Runtime()
@@ -131,24 +130,38 @@ def main() -> int:
     rt.memcpy_h2d(vd, u8(V), V.nbytes)
     rt.memset(od, 0, Out.nbytes)
 
-    packed = struct.pack(
-        "<QQQQfiiiiiiiiii",
-        qd,
-        kd,
-        vd,
-        od,
-        scale_log2,
-        Sq,
-        Sk,
-        stride_q_token,
-        stride_q_head,
-        stride_k_token,
-        stride_k_head,
-        stride_v_token,
-        stride_v_head,
-        stride_o_token,
-        stride_o_head,
-    )
+    values = {
+        "Q": qd,
+        "K": kd,
+        "V": vd,
+        "O": od,
+        "LSE": od,
+        "scale_log2": scale_log2,
+        "seqlen_q": Sq,
+        "seqlen_k": Sk,
+        "num_query_heads": Hq,
+        "num_kv_heads": Hk,
+        "bottom_right": 0,
+        "window_left": -1,
+        "window_right": 0 if args.causal else -1,
+        "write_lse": 0,
+        "stride_q_batch": Sq * stride_q_token,
+        "stride_q_token": stride_q_token,
+        "stride_q_head": stride_q_head,
+        "stride_k_batch": Sk * stride_k_token,
+        "stride_k_token": stride_k_token,
+        "stride_k_head": stride_k_head,
+        "stride_v_batch": Sk * stride_v_token,
+        "stride_v_token": stride_v_token,
+        "stride_v_head": stride_v_head,
+        "stride_o_batch": Sq * stride_o_token,
+        "stride_o_token": stride_o_token,
+        "stride_o_head": stride_o_head,
+        "stride_lse_batch": 0,
+        "stride_lse_token": 0,
+        "stride_lse_head": 0,
+    }
+    packed = pack_args(wmma_fmha_fwd_signature(spec), values)
 
     # ---- Correctness gate (one launch) before timing ----
     rt.launch(fn, grid, block, packed)

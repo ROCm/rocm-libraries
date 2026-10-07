@@ -1737,6 +1737,19 @@ class IRBuilder:
             result_name_hint="splat",
         ).result
 
+    def undef_vec(self, elem: Type, n: int) -> Value:
+        """Freeze-poison base for a `<n x elem>` vector that will be fully
+        overwritten by subsequent inserts (never a zero substitute). Port of
+        the pinned PR9710 ``vector.undef`` op; lowers to ``freeze <nxtype>
+        poison``.
+        """
+        return self._op(
+            "vector.undef",
+            result_types=[VectorType(elem, n)],
+            attrs={"elem": elem.name, "vec": n},
+            result_name_hint=f"udf{n}",
+        ).result
+
     def vector_select(self, mask: Value, lhs: Value, rhs: Value) -> Value:
         if lhs.type != rhs.type:
             raise ValueError("vector_select lhs/rhs type mismatch")
@@ -3937,6 +3950,18 @@ class IRBuilder:
             [rsrc, voffset, soffset],
             [F16],
             result_name_hint="bl1",
+        ).result
+
+    def buffer_load_f16_d16(self, rsrc: Value, voffset: Value, soffset: Value) -> Value:
+        """D16-form scalar half buffer load: ``raw_ptr_buffer_load.f16``
+        returns `half` directly (no i16 + bitcast round-trip). Port of the
+        pinned PR9710 ``tile.buffer_load_f16_d16`` op.
+        """
+        return self._op(
+            "tile.buffer_load_f16_d16",
+            [rsrc, voffset, soffset],
+            [F16],
+            result_name_hint="bld16",
         ).result
 
     def buffer_load_bf16(self, rsrc: Value, voffset: Value, soffset: Value) -> Value:
