@@ -461,7 +461,9 @@ transform, values}` with transforms `identity`, `log2p1`, `nonzero` and
 hipBLASLt makes for each training pair (`lib/hipblaslt_launch.py`, from the
 kernel's occupancy and its `tile_processing_strategy`, `work_assignment`,
 `stream_k_atomic` and `work_group_x/y/z` attributes; evaluations hand the
-engine the same plans and `launch_key`s as its launch model), launch keys
+engine the same plans and `launch_key`s as its launch model;
+`scripts/check_launch_plans.py` compares TensileLite's plans and keys
+for a library's pool with these), launch keys
 (`train.launch_keys`, default off: the model's serving flag that makes the
 engine score each launch class of a view key on its own instead of the view
 key's first kernel only; the integration's launch model returns the keys
