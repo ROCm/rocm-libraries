@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import logging
+import math
 from typing import Tuple, List
 
 
@@ -37,6 +38,18 @@ GEMM_PIPELINES = ["mem", "compv3", "compv4"]
 # the pipeline sets (and therefore generated kernels) of every other arch stay
 # exactly GEMM_PIPELINES.
 GEMM_TDM_PIPELINES = ["comp_tdm", "comp_tdm_v2"]
+# Epilogues each TDM pipeline can host. comp_tdm (V1) also runs CShuffle, whose
+# entry s_wait_tensorcnt barrier retires the pipeline's TDM loads before the
+# shuffle reuses LDS. comp_tdm_v2 keeps TdmEpilogue only.
+GEMM_TDM_EPILOGUES = {"comp_tdm": ("tdm", "cshuffle"), "comp_tdm_v2": ("tdm",)}
+# TDM pipelines that honour UsePersistentKernel. comp_tdm_v2 pins it to false
+# until its wave-specialized cross-tile TENSORcnt drain is analysed.
+GEMM_TDM_PERSISTENT_PIPELINES = ("comp_tdm",)
+# Sweeps (--list_kernels) keep the TDM pipelines at TdmEpilogue, non-persistent
+# unless the trait_config opts in with {"tdm_extended_traits": {"values": [true]}}.
+# The wider combinations above are legal, but have not run on hardware, so they
+# are opt-in for sweeps; --gen_single accepts them whenever they are legal.
+GEMM_TDM_EXTENDED_TRAITS_KEY = "tdm_extended_traits"
 GEMM_ASYNC_PIPELINES = ["comp_async"]
 GEMM_PIPELINES_BY_ARCH = {
     "gfx1250": GEMM_PIPELINES + GEMM_ASYNC_PIPELINES + GEMM_TDM_PIPELINES,
@@ -121,6 +134,51 @@ def tdm_pad_reject_reason(pipeline, epilogue, pad_m=False, pad_n=False, pad_k=Fa
         return ""
     if _is_true(pad_m) or _is_true(pad_n) or _is_true(pad_k):
         return TDM_PAD_REJECT_REASON
+    return ""
+
+
+def tdm_trait_reject_reason(pipeline, epilogue, persistent=False):
+    """Reason string if a TDM pipeline gets an epilogue or persistent mode it
+    does not support, else "". Non-TDM pipelines return "".
+
+    persistent follows the TDM trait convention: only True / "true" request
+    the persistent kernel.
+    """
+    if pipeline not in GEMM_TDM_PIPELINES:
+        return ""
+    if epilogue not in GEMM_TDM_EPILOGUES[pipeline]:
+        return (
+            f"{pipeline} supports the {'/'.join(GEMM_TDM_EPILOGUES[pipeline])} "
+            f"epilogue, got '{epilogue}'"
+        )
+    if persistent in (True, "true") and pipeline not in GEMM_TDM_PERSISTENT_PIPELINES:
+        return f"{pipeline} does not support the persistent kernel"
+    return ""
+
+
+def tdm_extended_traits_enabled(trait_config):
+    """True if a trait_config opts its sweep into the extended TDM traits
+    (see GEMM_TDM_EXTENDED_TRAITS_KEY)."""
+    entry = (trait_config or {}).get(GEMM_TDM_EXTENDED_TRAITS_KEY, {})
+    values = entry.get("values", []) if isinstance(entry, dict) else entry
+    return any(v in (True, "true") for v in values)
+
+
+def tdm_sweep_skip_reason(pipeline, epilogue, persistent=False, extended=False):
+    """Reason string if a sweep leaves out a legal TDM trait combination because
+    the config did not opt into the extended TDM traits, else "".
+
+    Without the opt-in a TDM pipeline sweeps only epilogue=tdm, non-persistent:
+    the instances every gfx1250 sweep generated before comp_tdm accepted the
+    cshuffle epilogue and the persistent kernel.
+    """
+    if extended or pipeline not in GEMM_TDM_PIPELINES:
+        return ""
+    if epilogue != "tdm" or persistent in (True, "true"):
+        return (
+            f"{pipeline} with epilogue={epilogue}, persistent={persistent} needs "
+            f'"{GEMM_TDM_EXTENDED_TRAITS_KEY}" in the trait_config'
+        )
     return ""
 
 
@@ -232,6 +290,13 @@ WARP_SUPPORTED_COMBINATIONS = {
         [4, 1, 1],
         [1, 4, 1],
         [2, 2, 1],
+        # 16- and 32-wave grids (512 and 1024 threads). comp_tdm_v2 stays
+        # 4-wave only; validate_gemm_gfx1250_pipeline rejects these for it.
+        [4, 4, 1],
+        [8, 2, 1],
+        [2, 8, 1],
+        [8, 4, 1],
+        [4, 8, 1],
     ],
     "gfx90a": [
         [1, 4, 1],
@@ -403,6 +468,15 @@ GEMM_WARP_TILE_SUPPORTED_COMBINATIONS = {
             [16, 16, 16],
         ],
     },
+    # Keys are a_b_c with c the output type, as for the other archs here
+    # (dispatcher arch_specs.json keys the same tiles by the fp32 accumulator).
+    # fp16/bf16 have a single native WMMA shape on gfx1250; listing it closes
+    # the permissive fallback in validate_gemm_warp_tile_combination. 8-bit
+    # types are not listed yet and stay permissive.
+    "gfx1250": {
+        "fp16_fp16_fp16": [[16, 16, 32]],
+        "bf16_bf16_bf16": [[16, 16, 32]],
+    },
 }
 
 GEMM_MX_WARP_TILE_SUPPORTED_COMBINATIONS = {
@@ -528,17 +602,19 @@ def is_trait_combination_valid(
     else:
         if kernel_name_prefix != "mx_gemm":
             if pipeline in GEMM_TDM_PIPELINES:
-                # TDM: intrawave only, TdmEpilogue only, no persistent kernel
-                # (TdmEpilogue has no split-K / persistent write path), and no
-                # padding (see TDM_PAD_REJECT_REASON).
+                # TDM: intrawave only, no padding (see TDM_PAD_REJECT_REASON),
+                # and only the epilogues / persistent mode of the pipeline (see
+                # tdm_trait_reject_reason).
                 if tdm_pad_reject_reason(pipeline, epilogue, pad_m, pad_n, pad_k):
                     logging.debug(f"{pipeline}: {TDM_PAD_REJECT_REASON}")
                     return False
-                return (
-                    scheduler == "intrawave"
-                    and epilogue == "tdm"
-                    and persistent_or_preshuffle_quant not in (True, "true")
+                trait_reason = tdm_trait_reject_reason(
+                    pipeline, epilogue, persistent_or_preshuffle_quant
                 )
+                if trait_reason:
+                    logging.debug(trait_reason)
+                    return False
+                return scheduler == "intrawave"
             if epilogue == "tdm":
                 return False
             # Non-MX comp_async (gfx1250) must be fully padded (see
@@ -718,6 +794,160 @@ def validate_lds_capacity(
     return True, ""
 
 
+# VGPR budget estimate (gfx1250 only; advisory tag, never a reject).
+#
+# The register file is 1024 VGPRs per SIMD lane with a 16-register allocation
+# granule and a block spread over four SIMDs, so the compiler's per-wave cap is
+#   1024 / max(ceil(waves_per_block / 4), k_block_per_cu)
+# rounded down to the granule: 128 threads -> 1024, 256 -> 512, 512 -> 256,
+# 1024 -> 128. v256 and above need s_set_vgpr_msb, so estimates above
+# VGPR_FAST_LIMIT are tagged separately.
+#
+# The footprint model is deliberately coarse (accumulator + WMMA operand
+# fragments for one block-K step + VGPR-staged global prefetch + fixed
+# overhead). The fragment and prefetch scale factors are uncalibrated (1.0)
+# until fitted against compiled instances, so the result is only a tag for
+# ranking/screening; is_tile_config_valid never rejects on it.
+VGPR_FILE_PER_LANE_MAP = {
+    "gfx1250": 1024,
+}
+VGPR_ALLOC_GRANULE = 16
+VGPR_FAST_LIMIT = 256
+VGPR_ESTIMATE_OVERHEAD = 32
+VGPR_FRAG_SCALE = 1.0
+VGPR_PREFETCH_SCALE = 1.0
+# Pipelines that move global data to LDS without VGPR staging.
+VGPR_PREFETCH_FREE_PIPELINES = (
+    "comp_async",
+    "comp_async_eight_waves",
+    "comp_tdm",
+    "comp_tdm_v2",
+)
+# WMMA/MFMA accumulators are fp32 or int32 for every supported input type.
+VGPR_ACC_ELEMENT_BYTES = 4
+
+VGPR_TAG_OVER_BUDGET = "vgpr_over_budget"
+VGPR_TAG_ABOVE_FAST = "vgpr_above_256"
+
+
+def _ceil_div(a, b):
+    return -(-a // b)
+
+
+def get_vgpr_budget_per_wave(
+    waves_per_block: int, k_block_per_cu: int = 1, gpu_target: str = "gfx1250"
+) -> int:
+    """Per-wave VGPR cap the compiler allows for a block size (0 if unknown)."""
+    vgpr_file = VGPR_FILE_PER_LANE_MAP.get(_base_gfx_arch(gpu_target), 0)
+    if vgpr_file == 0:
+        return 0
+    waves_per_simd = max(_ceil_div(waves_per_block, 4), k_block_per_cu, 1)
+    budget = (vgpr_file // waves_per_simd) // VGPR_ALLOC_GRANULE * VGPR_ALLOC_GRANULE
+    return min(vgpr_file, budget)
+
+
+def estimate_vgpr_usage(
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    warp_m: int,
+    warp_n: int,
+    warp_k: int,
+    warp_tile_m: int,
+    warp_tile_n: int,
+    warp_tile_k: int,
+    a_datatype: str,
+    b_datatype: str,
+    pipeline: str,
+    gpu_target: str = "gfx1250",
+    k_block_per_cu: int = 1,
+    frag_scale: float = VGPR_FRAG_SCALE,
+    prefetch_scale: float = VGPR_PREFETCH_SCALE,
+) -> dict:
+    """Coarse per-wave VGPR estimate for a GEMM tile (plan M2 B2).
+
+    acc  = mi * ni * (warp_tile_m * warp_tile_n * 4 B / lane / 4 B)
+    frag = (tile_k / (warp_k * warp_tile_k)) * (mi * a_atom + ni * b_atom) * frag_scale
+    pref = ceil((tile_m * a_B + tile_n * b_B) * tile_k / threads / 4) * prefetch_scale
+           (0 for comp_async* / comp_tdm*)
+    est  = acc + frag + pref + VGPR_ESTIMATE_OVERHEAD
+
+    with mi/ni the per-warp atom repeats along M/N and a_atom/b_atom the VGPRs
+    one lane holds for one A/B WMMA operand. Returns a dict with the terms,
+    ``estimate``, ``budget`` (0 if the arch has no model) and ``fast_limit``.
+    Callers must pass a dimension-aligned configuration.
+    """
+    warp_size = get_warp_size_for_gpu(_base_gfx_arch(gpu_target))
+    waves = warp_m * warp_n * warp_k
+    threads = waves * warp_size
+    lane_bytes = warp_size * 4  # bytes held by one VGPR across a wave
+    a_bytes = element_size(a_datatype)
+    b_bytes = element_size(b_datatype)
+
+    mi = tile_m // (warp_m * warp_tile_m)
+    ni = tile_n // (warp_n * warp_tile_n)
+    ki = tile_k // (warp_k * warp_tile_k)
+
+    acc_atom = _ceil_div(warp_tile_m * warp_tile_n * VGPR_ACC_ELEMENT_BYTES, lane_bytes)
+    a_atom = math.ceil(warp_tile_m * warp_tile_k * a_bytes / lane_bytes)
+    b_atom = math.ceil(warp_tile_n * warp_tile_k * b_bytes / lane_bytes)
+
+    acc = mi * ni * acc_atom
+    frag = math.ceil(ki * (mi * a_atom + ni * b_atom) * frag_scale)
+    if pipeline in VGPR_PREFETCH_FREE_PIPELINES:
+        pref = 0
+    else:
+        pref = math.ceil(
+            math.ceil((tile_m * a_bytes + tile_n * b_bytes) * tile_k / threads / 4)
+            * prefetch_scale
+        )
+    estimate = acc + frag + pref + VGPR_ESTIMATE_OVERHEAD
+    return {
+        "acc": acc,
+        "frag": frag,
+        "pref": pref,
+        "overhead": VGPR_ESTIMATE_OVERHEAD,
+        "estimate": estimate,
+        "budget": get_vgpr_budget_per_wave(waves, k_block_per_cu, gpu_target),
+        "fast_limit": VGPR_FAST_LIMIT,
+    }
+
+
+def is_vgpr_budget_ok(*args, **kwargs) -> Tuple[bool, str]:
+    """Return (ok, reason) for estimate_vgpr_usage(*args, **kwargs).
+
+    ok is False only when the estimate exceeds the per-wave budget. Arches
+    without a VGPR model always pass. Not called by is_tile_config_valid: it
+    is the reject-with-reason hook for a later calibrated screen/ranking step.
+    """
+    est = estimate_vgpr_usage(*args, **kwargs)
+    if est["budget"] and est["estimate"] > est["budget"]:
+        return False, (
+            f"Estimated {est['estimate']} VGPRs/wave (acc {est['acc']} + frag "
+            f"{est['frag']} + pref {est['pref']} + {est['overhead']}) > "
+            f"budget {est['budget']}"
+        )
+    return True, ""
+
+
+def vgpr_budget_tags(*args, **kwargs) -> List[str]:
+    """Advisory tags for estimate_vgpr_usage(*args, **kwargs).
+
+    VGPR_TAG_OVER_BUDGET when the estimate exceeds the per-wave budget (likely
+    spills), VGPR_TAG_ABOVE_FAST when it exceeds VGPR_FAST_LIMIT (needs
+    s_set_vgpr_msb). Empty for arches without a VGPR model.
+    """
+    est = estimate_vgpr_usage(*args, **kwargs)
+    if not est["budget"]:
+        return []
+    tags = []
+    if est["estimate"] > est["budget"]:
+        tags.append(VGPR_TAG_OVER_BUDGET)
+    if est["estimate"] > est["fast_limit"]:
+        tags.append(VGPR_TAG_ABOVE_FAST)
+    return tags
+
+
 def validate_gemm_warp_tile_combination(
     warp_tile_m: int,
     warp_tile_n: int,
@@ -735,6 +965,10 @@ def validate_gemm_warp_tile_combination(
 
     # Check if we have GPU-specific combinations
     gpu_warp_tile_combinations = GEMM_WARP_TILE_SUPPORTED_COMBINATIONS.get(gpu_name, {})
+    # Same scoping as validate_warp_configuration: only gfx1250 is normalized,
+    # so a suffixed gfx9 target keeps develop's permissive behaviour.
+    if not gpu_warp_tile_combinations and _base_gfx_arch(gpu_name) == "gfx1250":
+        gpu_warp_tile_combinations = GEMM_WARP_TILE_SUPPORTED_COMBINATIONS["gfx1250"]
     if not gpu_warp_tile_combinations:
         # If GPU not recognized, try to be permissive but log warning
         logging.warning(f"No warp tile combinations found for GPU: {gpu_name}")
@@ -982,6 +1216,32 @@ def is_tile_config_valid(
     if not lds_valid:
         logging.debug(f"LDS validation failed: {lds_error}")
         return False
+
+    # Advisory only: the estimate is uncalibrated, so it never rejects. It is
+    # only logged, so skip the work unless debug logging is on.
+    if logging.getLogger().isEnabledFor(logging.DEBUG) and VGPR_FILE_PER_LANE_MAP.get(
+        _base_gfx_arch(gpu_target)
+    ):
+        vgpr_tags = vgpr_budget_tags(
+            tile_m,
+            tile_n,
+            tile_k,
+            warp_m,
+            warp_n,
+            warp_k,
+            warp_tile_m,
+            warp_tile_n,
+            warp_tile_k,
+            a_datatype,
+            b_datatype,
+            pipeline,
+            gpu_target,
+        )
+        if vgpr_tags:
+            logging.debug(
+                f"VGPR budget tags {vgpr_tags} for {tile_m}x{tile_n}x{tile_k} "
+                f"warp {warp_m}x{warp_n}x{warp_k} {pipeline}"
+            )
 
     if _uses_gfx1250_gemm_pipeline(pipeline, kernel_name_prefix):
         # Non-MX comp_async / comp_tdm*: route on the op, not on the pipeline

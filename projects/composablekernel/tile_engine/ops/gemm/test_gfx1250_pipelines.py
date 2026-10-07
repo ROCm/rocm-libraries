@@ -38,6 +38,9 @@ _TILE = {
     "warp_tile_n": 16,
     "warp_tile_k": 16,
 }
+# _TILE with the only fp16/bf16 warp tile gfx1250 supports (16x16x32), for
+# tests that run the full gfx1250 tile validation.
+_GFX1250_TILE = dict(_TILE, warp_tile_k=32)
 
 
 def _config(pipelines, epilogues, persistent=(False,), pads=(False,)):
@@ -142,13 +145,71 @@ class TestValidationRules(unittest.TestCase):
         ok = vu.is_trait_combination_valid
         self.assertTrue(ok("comp_tdm", "tdm", "intrawave", False, "gemm_universal"))
         self.assertTrue(ok("comp_tdm_v2", "tdm", "intrawave", False, "batched_gemm"))
-        self.assertFalse(
-            ok("comp_tdm", "cshuffle", "intrawave", False, "gemm_universal")
-        )
         self.assertFalse(ok("comp_tdm", "tdm", "interwave", False, "gemm_universal"))
-        self.assertFalse(ok("comp_tdm", "tdm", "intrawave", True, "gemm_universal"))
         self.assertFalse(ok("compv3", "tdm", "intrawave", False, "gemm_universal"))
         self.assertFalse(ok("comp_async", "tdm", "intrawave", False, "gemm_universal"))
+
+    def test_comp_tdm_cshuffle_and_persistent(self):
+        # comp_tdm (V1) takes the tdm or cshuffle epilogue, persistent or not.
+        ok = vu.is_trait_combination_valid
+        for epilogue in ("tdm", "cshuffle"):
+            for persistent in (False, True, "true"):
+                self.assertTrue(
+                    ok("comp_tdm", epilogue, "intrawave", persistent, "gemm_universal"),
+                    (epilogue, persistent),
+                )
+            self.assertTrue(
+                ok("comp_tdm", epilogue, "intrawave", False, "batched_gemm")
+            )
+            # The scheduler and pad rules still apply to the new combinations.
+            self.assertFalse(
+                ok("comp_tdm", epilogue, "interwave", True, "gemm_universal")
+            )
+            self.assertFalse(
+                ok(
+                    "comp_tdm",
+                    epilogue,
+                    "intrawave",
+                    True,
+                    "gemm_universal",
+                    "rcr",
+                    True,
+                    False,
+                    False,
+                )
+            )
+        self.assertFalse(
+            ok("comp_tdm", "default", "intrawave", False, "gemm_universal")
+        )
+
+    def test_comp_tdm_v2_tdm_only_non_persistent(self):
+        ok = vu.is_trait_combination_valid
+        self.assertFalse(
+            ok("comp_tdm_v2", "cshuffle", "intrawave", False, "gemm_universal")
+        )
+        self.assertFalse(
+            ok("comp_tdm_v2", "default", "intrawave", False, "gemm_universal")
+        )
+        for persistent in (True, "true"):
+            self.assertFalse(
+                ok("comp_tdm_v2", "tdm", "intrawave", persistent, "gemm_universal")
+            )
+
+    def test_tdm_trait_reject_reason(self):
+        reason = vu.tdm_trait_reject_reason
+        self.assertEqual(reason("compv3", "default", True), "")
+        self.assertEqual(reason("comp_tdm", "cshuffle", True), "")
+        self.assertEqual(reason("comp_tdm", "tdm", "true"), "")
+        self.assertIn("tdm/cshuffle", reason("comp_tdm", "default"))
+        self.assertIn("tdm epilogue", reason("comp_tdm_v2", "cshuffle"))
+        self.assertIn("persistent", reason("comp_tdm_v2", "tdm", True))
+
+    def test_mx_tdm_rules_unchanged(self):
+        # MX TDM problems stay TdmEpilogue-only and one block per tile.
+        ok = vu.is_trait_combination_valid
+        self.assertTrue(ok("comp_tdm", "tdm", "intrawave", False, "mx_gemm"))
+        self.assertFalse(ok("comp_tdm", "cshuffle", "intrawave", False, "mx_gemm"))
+        self.assertFalse(ok("comp_tdm", "tdm", "intrawave", True, "mx_gemm"))
 
     def test_tdm_pad_rejected(self):
         ok = vu.is_trait_combination_valid
@@ -308,7 +369,7 @@ class TestValidationRules(unittest.TestCase):
                 self.assertTrue(
                     v(128, 128, 2, 2, 1, "fp16", p, "gfx1250", layout)[0], (p, layout)
                 )
-        args = [_TILE[k] for k in _TILE] + ["fp16", "fp16", "fp16"]
+        args = list(_GFX1250_TILE.values()) + ["fp16", "fp16", "fp16"]
         for prefix in ("gemm_universal", "batched_gemm"):
             self.assertTrue(
                 vu.is_tile_config_valid(*args, "comp_async", "rcr", "gfx1250", prefix)
@@ -413,13 +474,110 @@ class TestValidationRules(unittest.TestCase):
                 self.assertFalse(v(128, 128, 2, 2, 1, "fp16", p, arch)[0])
 
     def test_tile_config_rejects_off_arch(self):
-        args = [_TILE[k] for k in _TILE] + ["fp16", "fp16", "fp16"]
+        args = list(_GFX1250_TILE.values()) + ["fp16", "fp16", "fp16"]
         for p in ("comp_tdm", "comp_tdm_v2", "comp_async"):
             self.assertFalse(
                 vu.is_tile_config_valid(*args, p, "rcr", "gfx942", "gemm_universal")
             )
             self.assertTrue(
                 vu.is_tile_config_valid(*args, p, "rcr", "gfx1250", "gemm_universal")
+            )
+
+
+class TestGfx1250WarpLegality(unittest.TestCase):
+    """16/32-wave warp grids and the fp16/bf16 warp-tile row on gfx1250."""
+
+    LARGE_GRIDS = ([4, 4, 1], [8, 2, 1], [2, 8, 1], [8, 4, 1], [4, 8, 1])
+
+    def test_large_wave_grids_listed(self):
+        table = vu.WARP_SUPPORTED_COMBINATIONS["gfx1250"]
+        for grid in self.LARGE_GRIDS:
+            self.assertIn(grid, table)
+        # Appended after the original nine, which keep their order.
+        self.assertEqual(table[-len(self.LARGE_GRIDS) :], list(self.LARGE_GRIDS))
+        self.assertEqual(len(table), len({tuple(c) for c in table}))
+
+    def test_large_wave_grids_validate(self):
+        for arch in ("gfx1250", "gfx1250:xnack-"):
+            for grid in self.LARGE_GRIDS:
+                self.assertTrue(vu.validate_warp_configuration(*grid, arch), arch)
+            for grid in ([8, 8, 1], [4, 4, 2], [16, 1, 1]):
+                self.assertFalse(vu.validate_warp_configuration(*grid, arch), arch)
+        for arch in ("gfx942", "gfx950", "gfx1201"):
+            for grid in self.LARGE_GRIDS:
+                self.assertFalse(vu.validate_warp_configuration(*grid, arch), arch)
+
+    def test_comp_tdm_v2_stays_four_waves(self):
+        v = vu.validate_gemm_gfx1250_pipeline
+        for wm, wn, wk in self.LARGE_GRIDS:
+            self.assertFalse(
+                v(256, 256, wm, wn, wk, "bf16", "comp_tdm_v2", "gfx1250")[0]
+            )
+            self.assertTrue(v(256, 256, wm, wn, wk, "bf16", "comp_tdm", "gfx1250")[0])
+
+    def test_tile_config_large_wave_grids(self):
+        def valid(waves, pipeline, layout="rcr", dt="bf16"):
+            return vu.is_tile_config_valid(
+                256,
+                256,
+                64,
+                *waves,
+                16,
+                16,
+                32,
+                dt,
+                dt,
+                dt,
+                pipeline,
+                layout,
+                "gfx1250",
+                "gemm_universal",
+            )
+
+        self.assertTrue(valid((8, 4, 1), "compv3"))
+        self.assertTrue(valid((4, 4, 1), "comp_tdm"))
+        self.assertTrue(valid((4, 8, 1), "comp_async"))
+        self.assertFalse(valid((4, 4, 1), "comp_tdm_v2"))
+        self.assertTrue(valid((2, 2, 1), "comp_tdm_v2"))
+
+    def test_fp16_bf16_warp_tile_row(self):
+        v = vu.validate_gemm_warp_tile_combination
+        for arch in ("gfx1250", "gfx1250:xnack-"):
+            for dt in ("fp16", "bf16"):
+                self.assertEqual(v(16, 16, 32, dt, dt, dt, arch), (True, ""))
+                for tile in ((16, 16, 64), (16, 16, 16), (32, 32, 16)):
+                    ok, msg = v(*tile, dt, dt, dt, arch)
+                    self.assertFalse(ok, (arch, dt, tile))
+                    self.assertIn("16, 16, 32", msg)
+            # 8-bit types have no row yet and stay permissive.
+            self.assertTrue(v(16, 16, 64, "fp8", "fp8", "fp16", arch)[0])
+        # The other archs are untouched: gfx942 has no bf16 16x16x64, and a
+        # suffixed gfx9 target keeps the permissive fallback.
+        self.assertFalse(v(16, 16, 64, "bf16", "bf16", "bf16", "gfx942")[0])
+        self.assertTrue(v(16, 16, 64, "bf16", "bf16", "bf16", "gfx942:xnack-")[0])
+
+    def test_tile_config_rejects_bf16_16x16x64(self):
+        for pipeline in ("compv3", "comp_tdm"):
+            self.assertFalse(
+                vu.is_tile_config_valid(
+                    128,
+                    128,
+                    64,
+                    2,
+                    2,
+                    1,
+                    16,
+                    16,
+                    64,
+                    "bf16",
+                    "bf16",
+                    "bf16",
+                    pipeline,
+                    "rcr",
+                    "gfx1250",
+                    "gemm_universal",
+                ),
+                pipeline,
             )
 
 
@@ -497,7 +655,22 @@ class TestBuilderGolden(_BuilderCase):
         with self.assertRaises(ValueError):
             self._gen("gemm_universal", "compv3", "tdm")
         with self.assertRaises(ValueError):
-            self._gen("gemm_universal", "comp_tdm", "cshuffle")
+            self._gen("gemm_universal", "comp_tdm_v2", "cshuffle")
+        with self.assertRaises(ValueError):
+            self._gen("gemm_universal", "comp_tdm", "default")
+
+    def test_comp_tdm_cshuffle_codegen(self):
+        for prefix in ("gemm_universal", "batched_gemm"):
+            code = self._gen(prefix, "comp_tdm", "cshuffle")
+            self.assertIn("GemmPipelineAgBgCrCompTDMV1", code, prefix)
+            self.assertIn("CShuffleEpilogue<", code, prefix)
+            self.assertNotIn("TdmEpilogue<", code, prefix)
+            self.assertIn("DoubleSmemBuffer>;", code, prefix)
+            self.assertIn("args.k_batch != 1", code, prefix)
+        for epilogue in ("tdm", "cshuffle"):
+            code = self._gen("gemm_universal", "comp_tdm", epilogue, persistent=True)
+            self.assertIn("UsePersistentKernel = true", code, epilogue)
+            self.assertIn("GemmKernel::MaxOccupancyGridSize(stream)", code, epilogue)
 
     def test_builder_rejects_padded_tdm(self):
         for prefix in ("gemm_universal", "batched_gemm"):
@@ -565,23 +738,56 @@ class TestBuilderGolden(_BuilderCase):
         with self.assertRaises(ValueError):
             lookup_pipeline({"a": "x"}, "b")
 
-    def test_trait_enumeration(self):
-        b = self._builder(
-            "gemm_universal",
-            _config(
-                ["compv3", "comp_async", "comp_tdm", "comp_tdm_v2"],
-                ["cshuffle", "tdm"],
-                persistent=(False, True),
-                pads=(False, True),
-            ),
+    def _trait_combos(self, extended):
+        cfg = _config(
+            ["compv3", "comp_async", "comp_tdm", "comp_tdm_v2"],
+            ["cshuffle", "tdm"],
+            persistent=(False, True),
+            pads=(False, True),
         )
-        combos = {(c[0], c[1], c[6]) for c in b._generate_trait_combinations()}
-        self.assertIn(("comp_tdm", "tdm", False), combos)
-        self.assertIn(("comp_tdm_v2", "tdm", False), combos)
-        self.assertNotIn(("comp_tdm", "tdm", True), combos)
-        self.assertNotIn(("comp_tdm", "cshuffle", False), combos)
+        if extended is not None:
+            cfg["trait_config"][vu.GEMM_TDM_EXTENDED_TRAITS_KEY] = {
+                "values": [extended]
+            }
+        b = self._builder("gemm_universal", cfg)
+        return {(c[0], c[1], c[6]) for c in b._generate_trait_combinations()}
+
+    def test_trait_enumeration(self):
+        # Without the opt-in the sweep keeps comp_tdm at tdm / non-persistent.
+        for extended in (None, False):
+            combos = self._trait_combos(extended)
+            self.assertEqual(
+                {c for c in combos if c[0] == "comp_tdm"}, {("comp_tdm", "tdm", False)}
+            )
+            self.assertIn(("comp_tdm_v2", "tdm", False), combos)
+            self.assertNotIn(("compv3", "tdm", False), combos)
+            self.assertIn(("comp_async", "cshuffle", True), combos)
+
+    def test_trait_enumeration_tdm_extended(self):
+        base = self._trait_combos(None)
+        combos = self._trait_combos(True)
+        for epilogue in ("tdm", "cshuffle"):
+            for persistent in (False, True):
+                self.assertIn(("comp_tdm", epilogue, persistent), combos)
+        self.assertNotIn(("comp_tdm_v2", "tdm", True), combos)
+        self.assertNotIn(("comp_tdm_v2", "cshuffle", False), combos)
         self.assertNotIn(("compv3", "tdm", False), combos)
-        self.assertIn(("comp_async", "cshuffle", True), combos)
+        # The opt-in only adds comp_tdm combinations.
+        self.assertTrue(base <= combos)
+        self.assertEqual({c[0] for c in combos - base}, {"comp_tdm"})
+
+    def test_tdm_sweep_skip_reason(self):
+        skip = vu.tdm_sweep_skip_reason
+        self.assertEqual(skip("comp_tdm", "tdm", False), "")
+        self.assertEqual(skip("compv3", "cshuffle", True), "")
+        self.assertIn(vu.GEMM_TDM_EXTENDED_TRAITS_KEY, skip("comp_tdm", "cshuffle"))
+        self.assertTrue(skip("comp_tdm", "tdm", "true"))
+        self.assertEqual(skip("comp_tdm", "cshuffle", True, extended=True), "")
+        enabled = vu.tdm_extended_traits_enabled
+        self.assertFalse(enabled({}))
+        self.assertTrue(
+            enabled({vu.GEMM_TDM_EXTENDED_TRAITS_KEY: {"values": ["true"]}})
+        )
 
 
 if __name__ == "__main__":

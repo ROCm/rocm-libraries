@@ -26,9 +26,22 @@ enum struct GemmPipelineType
     CompV6,
     CompAsync,
     CompAsyncEightWaves,
+    CompAsyncPP,
     CompTDMV1,
-    CompTDMV2
+    CompTDMV2,
+    CompTDMRing,
+    CompTDMRingD2FillThenWait,
+    CompTDMRingD4PerOperandWave,
+    CompTDMRingD3SplitBarrier
 };
+
+constexpr bool is_comp_tdm_ring(GemmPipelineType pt)
+{
+    return pt == GemmPipelineType::CompTDMRing ||
+           pt == GemmPipelineType::CompTDMRingD2FillThenWait ||
+           pt == GemmPipelineType::CompTDMRingD4PerOperandWave ||
+           pt == GemmPipelineType::CompTDMRingD3SplitBarrier;
+}
 
 template <typename Layout>
 static constexpr inline auto is_row_major(Layout layout_)
@@ -156,6 +169,15 @@ struct GemmPipelineTypeSelector<GemmPipelineType::CompAsync, Problem>
 };
 
 template <typename Problem>
+struct GemmPipelineTypeSelector<GemmPipelineType::CompAsyncPP, Problem>
+{
+    using base_pipeline = ck_tile::BaseGemmPipelineAgBgCrCompAsyncPP<Problem>;
+    using pipeline      = ck_tile::GemmPipelineAgBgCrCompAsyncPP<Problem>;
+
+    static constexpr auto GetName() { return "GemmPipelineAgBgCrCompAsyncPP"; }
+};
+
+template <typename Problem>
 struct GemmPipelineTypeSelector<GemmPipelineType::CompAsyncEightWaves, Problem>
 {
     using base_pipeline = ck_tile::BaseGemmPipelineAgBgCrCompV3<Problem>;
@@ -184,6 +206,53 @@ struct GemmPipelineTypeSelector<GemmPipelineType::CompTDMV2, Problem>
     static constexpr auto GetName() { return "GemmPipelineAgBgCrCompTDMV2"; }
 };
 
+template <typename Problem>
+struct GemmPipelineTypeSelector<GemmPipelineType::CompTDMRing, Problem>
+{
+    using base_pipeline = ck_tile::BaseGemmPipelineAgBgCrCompTDM<Problem>;
+    using pipeline      = ck_tile::GemmPipelineAgBgCrCompTDMRing<Problem>;
+
+    static constexpr auto GetName() { return "GemmPipelineAgBgCrCompTDMRing"; }
+};
+
+template <typename Problem>
+struct GemmPipelineTypeSelector<GemmPipelineType::CompTDMRingD2FillThenWait, Problem>
+{
+    using base_pipeline = ck_tile::BaseGemmPipelineAgBgCrCompTDM<Problem>;
+    using pipeline      = ck_tile::GemmPipelineAgBgCrCompTDMRing<
+             Problem,
+             ck_tile::GemmPipelineAgBgCrCompTDMRingPolicy<2,
+                                                          ck_tile::TdmIssueMode::AllWaves,
+                                                          ck_tile::TdmOrder::FillThenWait>>;
+
+    static constexpr auto GetName() { return "GemmPipelineAgBgCrCompTDMRingD2FillThenWait"; }
+};
+
+template <typename Problem>
+struct GemmPipelineTypeSelector<GemmPipelineType::CompTDMRingD4PerOperandWave, Problem>
+{
+    using base_pipeline = ck_tile::BaseGemmPipelineAgBgCrCompTDM<Problem>;
+    using pipeline      = ck_tile::GemmPipelineAgBgCrCompTDMRing<
+             Problem,
+             ck_tile::GemmPipelineAgBgCrCompTDMRingPolicy<4, ck_tile::TdmIssueMode::PerOperandWave>>;
+
+    static constexpr auto GetName() { return "GemmPipelineAgBgCrCompTDMRingD4PerOperandWave"; }
+};
+
+template <typename Problem>
+struct GemmPipelineTypeSelector<GemmPipelineType::CompTDMRingD3SplitBarrier, Problem>
+{
+    using base_pipeline = ck_tile::BaseGemmPipelineAgBgCrCompTDM<Problem>;
+    using pipeline      = ck_tile::GemmPipelineAgBgCrCompTDMRing<
+             Problem,
+             ck_tile::GemmPipelineAgBgCrCompTDMRingPolicy<3,
+                                                          ck_tile::TdmIssueMode::AllWaves,
+                                                          ck_tile::TdmOrder::WaitThenFill,
+                                                          true>>;
+
+    static constexpr auto GetName() { return "GemmPipelineAgBgCrCompTDMRingD3SplitBarrier"; }
+};
+
 template <GemmPipelineType PT, typename Problem, typename Enable = void>
 struct GemmEpilogueTypeSelector
 {
@@ -194,7 +263,8 @@ template <GemmPipelineType PT, typename Problem>
 struct GemmEpilogueTypeSelector<
     PT,
     Problem,
-    std::enable_if_t<PT == GemmPipelineType::CompTDMV1 || PT == GemmPipelineType::CompTDMV2>>
+    std::enable_if_t<PT == GemmPipelineType::CompTDMV1 || PT == GemmPipelineType::CompTDMV2 ||
+                     is_comp_tdm_ring(PT)>>
 {
     using epilogue = ck_tile::TdmEpilogue<Problem>;
 };
@@ -211,7 +281,8 @@ struct PipelineDefaultParams
 template <GemmPipelineType PT>
 struct PipelineDefaultParams<
     PT,
-    std::enable_if_t<PT == GemmPipelineType::CompTDMV1 || PT == GemmPipelineType::CompTDMV2>>
+    std::enable_if_t<PT == GemmPipelineType::CompTDMV1 || PT == GemmPipelineType::CompTDMV2 ||
+                     is_comp_tdm_ring(PT)>>
 {
     static constexpr bool PadM       = false;
     static constexpr bool PadN       = false;
@@ -289,10 +360,12 @@ class TestCkTileGemmPipeline : public ::testing::Test
         constexpr bool kPadK      = PadK;
         constexpr bool preshuffle = Preshuffle;
 
-        constexpr bool DoubleSmemBuffer = (PipelineType == GemmPipelineType::CompV4 ||
-                                           PipelineType == GemmPipelineType::CompAsync ||
-                                           PipelineType == GemmPipelineType::CompTDMV1 ||
-                                           PipelineType == GemmPipelineType::CompTDMV2);
+        constexpr bool DoubleSmemBuffer =
+            (PipelineType == GemmPipelineType::CompV4 ||
+             PipelineType == GemmPipelineType::CompAsync ||
+             PipelineType == GemmPipelineType::CompAsyncPP ||
+             PipelineType == GemmPipelineType::CompTDMV1 ||
+             PipelineType == GemmPipelineType::CompTDMV2 || is_comp_tdm_ring(PipelineType));
 
 #if defined(CK_USE_GFX1250)
         // gfx1250 only. Improve performance when C is RowMajor
@@ -468,6 +541,7 @@ class TestCkTileGemmPipeline : public ::testing::Test
                      PipelineType == GemmPipelineType::CompAsyncEightWaves || IsAsync_v ||
                      PipelineType == GemmPipelineType::CompTDMV1 ||
                      PipelineType == GemmPipelineType::CompTDMV2 ||
+                     is_comp_tdm_ring(PipelineType) ||
                      std::is_same_v<BDataType, ck_tile::pk_int4_t>)
         {
             // Only do k_batch = 1 when pipeline is CompV4, BDataType is I4 or async pipeline

@@ -34,6 +34,7 @@ sys.path.insert(0, str(DISPATCHER_DIR / "python"))
 sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
 
 from dispatcher_common import (  # noqa: E402
+    grouped_conv_wave_configs,
     print_phase,
     print_success,
     print_error,
@@ -340,7 +341,7 @@ def validate_grouped_conv_kernel_config(decl: dict, arch: str = "gfx942") -> tup
         )
 
     # Check wave configuration for this arch
-    warp_combos = arch_data["warp_combos"].get(arch, [[2, 2, 1]])
+    warp_combos = grouped_conv_wave_configs(arch)
     wave_cfg = [wave_m, wave_n, wave_k]
     if wave_cfg not in warp_combos:
         valid_str = ", ".join(f"[{c[0]},{c[1]},{c[2]}]" for c in warp_combos)
@@ -394,7 +395,7 @@ def expand_grouped_conv_declaration_with_arch_filter(
     dtype = decl.get("dtype", "fp16")
 
     # Get valid combinations for this arch
-    valid_wave_combos = arch_data["warp_combos"].get(arch, [[2, 2, 1]])
+    valid_wave_combos = grouped_conv_wave_configs(arch)
     acc_dtype = "int32" if dtype == "int8" else "fp32"
     dtype_key = f"{dtype}_{dtype}_{acc_dtype}"
     valid_warp_tiles = (

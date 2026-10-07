@@ -25,7 +25,8 @@ struct UniversalInvoker
               typename ComputeDataType = void>
     static float gemm(const ck_tile::GemmHostArgs& args,
                       const ck_tile::stream_config& s,
-                      bool check_arg_only = false)
+                      bool check_arg_only                   = false,
+                      const PersistentGrid& persistent_grid = {})
     {
         constexpr bool ClusterLaunch =
             GemmConfig::kClusterSizeM > 1 || GemmConfig::kClusterSizeN > 1;
@@ -136,17 +137,13 @@ struct UniversalInvoker
                                              1,                            /*BlockedXDLN_PerWarp_*/
                                              GemmConfig::DoubleSmemBuffer, /*DoubleSmemBuffer*/
                                              AComputeDataType,
-                                             BComputeDataType>>::Epilogue;
+                                             BComputeDataType>,
+            GemmConfig::UseCShuffleEpilogue>::Epilogue;
 
         using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
 
         auto kargs       = Kernel::MakeKernelArgs(args);
-        const dim3 grids = [&]() {
-            if constexpr(Persistent)
-                return Kernel::MaxOccupancyGridSize(s);
-            else
-                return Kernel::GridSize(args.M, args.N, args.k_batch);
-        }();
+        const dim3 grids = gemm_grid_size<Kernel, Persistent>(args, s, persistent_grid);
 
         const dim3 blocks = Kernel::BlockSize();
 
@@ -225,6 +222,40 @@ struct UniversalInvoker
         }
     }
 
+    // Same launch with a persistent grid request; the (args, s, persistent_grid) form shared by
+    // every 03_gemm invoker.
+    template <typename GemmConfig,
+              typename ADataType,
+              typename BDataType,
+              typename DsDataType,
+              typename AccDataType,
+              typename CDataType,
+              typename ALayout,
+              typename BLayout,
+              typename DsLayout,
+              typename ELayout,
+              bool Persistent,
+              typename CDEElementWise,
+              typename ComputeDataType = void>
+    static float gemm(const ck_tile::GemmHostArgs& args,
+                      const ck_tile::stream_config& s,
+                      const PersistentGrid& persistent_grid)
+    {
+        return gemm<GemmConfig,
+                    ADataType,
+                    BDataType,
+                    DsDataType,
+                    AccDataType,
+                    CDataType,
+                    ALayout,
+                    BLayout,
+                    DsLayout,
+                    ELayout,
+                    Persistent,
+                    CDEElementWise,
+                    ComputeDataType>(args, s, false, persistent_grid);
+    }
+
     template <typename GemmConfig,
               typename ADataType,
               typename BDataType,
@@ -238,7 +269,8 @@ struct UniversalInvoker
               typename CDEElementWise,
               typename ComputeDataType = void>
     static void test_async_input_scheduler(const ck_tile::GemmHostArgs& args,
-                                           const ck_tile::stream_config& s)
+                                           const ck_tile::stream_config& s,
+                                           const PersistentGrid& persistent_grid = {})
     {
         using GemmShape = ck_tile::TileGemmShape<
             ck_tile::sequence<GemmConfig::M_Tile, GemmConfig::N_Tile, GemmConfig::K_Tile>,
@@ -379,7 +411,7 @@ struct UniversalInvoker
 
         auto kargs = Kernel::UniversalGemmKernel::MakeKernelArgs(host_args);
 
-        const dim3 grids  = Kernel::MaxOccupancyGridSize(s);
+        const dim3 grids  = gemm_grid_size<Kernel, true>(args, s, persistent_grid);
         const dim3 blocks = Kernel::BlockSize();
 
         std::cout << "  Grid: {" << grids.x << ", " << grids.y << ", " << grids.z << "}"

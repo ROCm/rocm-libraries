@@ -4,7 +4,7 @@
 AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY!
 
 Generated from: arch_specs.json
-Generated at: 2026-09-18T18:27:17.660727
+Generated at: 2026-10-06T20:01:02.365340
 
 To update this file:
 1. Edit arch_specs.json
@@ -43,7 +43,7 @@ WARP_SUPPORTED_COMBINATIONS: Dict[str, List[List[int]]] = {
     "gfx1100": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1]],
     "gfx1200": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1]],
     "gfx1201": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1]],
-    "gfx1250": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1], [2, 1, 1], [1, 2, 2], [4, 1, 1], [1, 4, 1], [2, 2, 1]],
+    "gfx1250": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1], [2, 1, 1], [1, 2, 2], [4, 1, 1], [1, 4, 1], [2, 2, 1], [4, 4, 1], [8, 2, 1], [2, 8, 1], [8, 4, 1], [4, 8, 1]],
 }
 
 # Supported warp tile combinations: arch -> dtype_key -> [[warp_tile_m, n, k], ...]

@@ -52,6 +52,10 @@ struct GemmConfigBase
     static constexpr ck_tile::DataCachePrefetchKind DataCachePrefetchB =
         ck_tile::DataCachePrefetchKind::None;
     static constexpr bool Async = false;
+    // COMPUTE_TDM_V1 only: use CShuffleEpilogue instead of TdmEpilogue. Every
+    // other pipeline except COMPUTE_TDM_V2 (TdmEpilogue only) already uses
+    // CShuffleEpilogue.
+    static constexpr bool UseCShuffleEpilogue = false;
 
     static constexpr bool FixedVectorSize = false;
     // If FixedVectorSize==true: use these vector sizes for A/B loads and C store
@@ -365,6 +369,37 @@ struct GemmConfigComputeAsync : public GemmConfigBase
     static constexpr bool UseStructuredSparsity     = false;
 };
 
+// gfx1250 bf16 compute config for rocKE "Opt-4" class shapes: 256x128x64 tile, 4x2 waves,
+// 16x16x32 WMMA, no padding (M/N/K must be multiples of the tile), CShuffle epilogue. With a
+// row-major C and a square warp tile, TransposeC turns the per-lane CShuffle LDS writes from 2-byte
+// into 16-byte stores (same rule as test/ck_tile/gemm/test_gemm_pipeline_util.hpp).
+template <typename CLayout = ck_tile::tensor_layout::gemm::RowMajor>
+struct GemmConfigGfx1250Bf16_Opt4 : public GemmConfigBase
+{
+    static constexpr ck_tile::index_t M_Tile = 256;
+    static constexpr ck_tile::index_t N_Tile = 128;
+    static constexpr ck_tile::index_t K_Tile = 64;
+
+    static constexpr ck_tile::index_t M_Warp = 4;
+    static constexpr ck_tile::index_t N_Warp = 2;
+    static constexpr ck_tile::index_t K_Warp = 1;
+
+    static constexpr ck_tile::index_t M_Warp_Tile = 16;
+    static constexpr ck_tile::index_t N_Warp_Tile = 16;
+    static constexpr ck_tile::index_t K_Warp_Tile = 32;
+
+#if defined(CK_USE_GFX1250)
+    static constexpr bool TransposeC =
+        std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor> &&
+        M_Warp_Tile == N_Warp_Tile;
+#else
+    static constexpr bool TransposeC = false;
+#endif
+
+    static constexpr bool DoubleSmemBuffer          = false;
+    static constexpr ck_tile::GemmPipeline Pipeline = ck_tile::GemmPipeline::COMPUTE_V3;
+};
+
 template <typename PrecType>
 struct GemmConfigPreshuffleDecode : public GemmConfigBase
 {
@@ -644,6 +679,13 @@ struct PipelineTypeTraits<ck_tile::GemmPipeline::COMPUTE_ASYNC_V2>
 };
 
 template <>
+struct PipelineTypeTraits<ck_tile::GemmPipeline::COMPUTE_ASYNC_PP>
+{
+    template <typename PipelineProblem>
+    using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompAsyncPP<PipelineProblem>;
+};
+
+template <>
 struct PipelineTypeTraits<ck_tile::GemmPipeline::COMPUTE_TDM_V1>
 {
     template <typename PipelineProblem>
@@ -668,6 +710,14 @@ struct PipelineTypeTraits<ck_tile::GemmPipeline::COMPUTE_TDM_V2>
 };
 
 template <>
+struct PipelineTypeTraits<ck_tile::GemmPipeline::COMPUTE_TDM_RING>
+{
+    // Default ring: depth 3, every wave issues, wait-then-fill.
+    template <typename PipelineProblem>
+    using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompTDMRing<PipelineProblem>;
+};
+
+template <>
 struct PipelineTypeTraits<ck_tile::GemmPipeline::PRESHUFFLE_TDM>
 {
     template <typename PipelineProblem>
@@ -678,25 +728,87 @@ struct PipelineTypeTraits<ck_tile::GemmPipeline::PRESHUFFLE_TDM>
             PipelineProblem::Traits::DataCachePrefetchB>>;
 };
 
-template <ck_tile::GemmPipeline PipelineId, typename Problem>
+template <ck_tile::GemmPipeline PipelineId, typename Problem, bool UseCShuffle = false>
 struct EpilogueTypeTraits
 {
     using Epilogue = ck_tile::CShuffleEpilogue<Problem>;
 };
 
+// TDM V1 defaults to TdmEpilogue; UseCShuffle selects CShuffleEpilogue, whose entry
+// s_wait_tensorcnt barrier retires the pipeline's TDM loads before the shuffle reuses LDS.
 template <typename Problem>
-struct EpilogueTypeTraits<ck_tile::GemmPipeline::COMPUTE_TDM_V1, Problem>
+struct EpilogueTypeTraits<ck_tile::GemmPipeline::COMPUTE_TDM_V1, Problem, false>
 {
     using Epilogue = ck_tile::TdmEpilogue<Problem>;
 };
 
+template <typename Problem, bool UseCShuffle>
+struct EpilogueTypeTraits<ck_tile::GemmPipeline::COMPUTE_TDM_V2, Problem, UseCShuffle>
+{
+    static_assert(!UseCShuffle, "COMPUTE_TDM_V2 supports only TdmEpilogue");
+    using Epilogue = ck_tile::TdmEpilogue<Problem>;
+};
+
 template <typename Problem>
-struct EpilogueTypeTraits<ck_tile::GemmPipeline::COMPUTE_TDM_V2, Problem>
+struct EpilogueTypeTraits<ck_tile::GemmPipeline::COMPUTE_TDM_RING, Problem>
 {
     using Epilogue = ck_tile::TdmEpilogue<Problem>;
 };
 
-inline auto create_args()
+// Grid request of a persistent launch (-persistent_ctas): ctas CTAs, or the occupancy-derived
+// Kernel::MaxOccupancyGridSize when ctas is 0. The occupancy query is not reliable on every target
+// (gfx1250 workgroup-processor mode), so the grid is also a tuning axis.
+struct PersistentGrid
+{
+    ck_tile::index_t ctas = 0;
+};
+
+// Reads -persistent_ctas; negative values are rejected and a value without -persistent=1 is
+// ignored with a warning.
+inline PersistentGrid get_persistent_grid(const ck_tile::ArgParser& arg_parser, bool persistent)
+{
+    const ck_tile::index_t ctas = arg_parser.get_int("persistent_ctas");
+    if(ctas < 0)
+    {
+        throw std::runtime_error("persistent_ctas must be >= 0");
+    }
+    if(ctas > 0 && !persistent)
+    {
+        std::cout << "WARNING: Ignoring persistent_ctas for the non-persistent kernel."
+                  << std::endl;
+    }
+    return PersistentGrid{ctas};
+}
+
+// Grid of a GemmKernel launch. A pipeline may decline the persistent request
+// (Kernel::UniversalGemmKernel::PersistentKernel is false, e.g. COMPUTE_TDM_V2 or a TDM V1 cluster
+// launch); its kernel computes one tile per workgroup, so it gets the full GridSize: a persistent
+// grid would leave every tile beyond it uncomputed.
+template <typename Kernel, bool Persistent, typename HostArgs>
+dim3 gemm_grid_size(const HostArgs& args,
+                    const ck_tile::stream_config& s,
+                    const PersistentGrid& persistent_grid)
+{
+    if constexpr(Persistent && Kernel::UniversalGemmKernel::PersistentKernel)
+    {
+        return persistent_grid.ctas > 0 ? dim3(persistent_grid.ctas, 1, 1)
+                                        : Kernel::MaxOccupancyGridSize(s);
+    }
+    else
+    {
+        if constexpr(Persistent)
+        {
+            std::cout << "WARNING: The pipeline has no persistent kernel; launching one "
+                         "workgroup per tile."
+                      << std::endl;
+        }
+        ck_tile::ignore = s;
+        ck_tile::ignore = persistent_grid;
+        return Kernel::GridSize(args.M, args.N, args.k_batch);
+    }
+}
+
+inline auto create_args(const std::string& default_prec = "fp16")
 {
     ck_tile::ArgParser arg_parser;
     arg_parser.insert("m", "3840", "m dimension")
@@ -709,13 +821,18 @@ inline auto create_args()
         .insert("stride_b", "0", "Tensor B stride")
         .insert("stride_c", "0", "Tensor C stride")
         .insert("v", "2", "0. No validation, 1. Validation on CPU, 2. Validation on GPU")
-        .insert("prec", "fp16", "data type. fp16/bf16/fp8/bf8/pk_int4_t/tf32 (tf32 only on gfx950)")
+        .insert("prec",
+                default_prec,
+                "data type. fp16/bf16/fp8/bf8/pk_int4_t/tf32 (tf32 only on gfx950)")
         .insert("warmup", "50", "number of iterations before benchmark the kernel")
         .insert("repeat", "100", "number of iterations to benchmark the kernel")
         .insert("timer", "gpu", "gpu:gpu timer, cpu:cpu timer")
         .insert("split_k", "1", "splitK value")
         .insert("init", "0", "0:random, 1:linear, 2:constant(1)")
         .insert("persistent", "0", "0:non-persistent, 1:persistent")
+        .insert("persistent_ctas",
+                "0",
+                "persistent grid size (CTAs); 0: occupancy-derived (MaxOccupancyGridSize)")
         .insert("json", "0", "0: No Json, 1: Dump Results in Json format")
         .insert("jsonfile", "gemm.json", "json file name to dump results")
         .insert("flush_cache", "true", "flush cache before running the kernel, defaults to true")

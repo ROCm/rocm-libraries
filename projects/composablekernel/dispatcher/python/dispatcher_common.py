@@ -506,6 +506,18 @@ def validate_trait_combo(
 # ============================================================================
 
 
+def grouped_conv_wave_configs(arch: str) -> List[List[int]]:
+    """Return the [wave_m, wave_n, wave_k] configs grouped convolution uses on *arch*.
+
+    This is the arch wave list minus the GEMM-only grids (see
+    codegen_common.GEMM_ONLY_WAVE_CONFIGS).
+    """
+    data = get_arch_filter_data()  # also puts codegen/ on sys.path
+    from codegen_common import grouped_conv_wave_configs as _filter
+
+    return _filter(arch, data["warp_combos"].get(arch, [[2, 2, 1]]))
+
+
 def auto_correct_wave(wave_cfg: List[int], arch: str) -> List[int]:
     """Return the first valid wave config for *arch*.
 

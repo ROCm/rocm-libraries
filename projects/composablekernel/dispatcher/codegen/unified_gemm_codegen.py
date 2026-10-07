@@ -35,9 +35,12 @@ from codegen_common import (
     GFX1250_ARCH,  # noqa: F401 (re-exported)
     GFX1250_ONLY_PIPELINES,
     TDM_PAD_REJECT_REASON,  # noqa: F401 (re-exported)
+    TDM_EXTENDED_TRAITS_KEY,
     TDM_PIPELINES,
     gfx1250_comp_async_8bit_warp_tile_k_rejected,  # noqa: F401 (re-exported)
     gfx1250_pipeline_reject_reason,
+    tdm_extended_traits_enabled,
+    tdm_sweep_skip_reason,
     gemm_lockstep_vector_bytes,
     gemm_default_epilogue_vector_size,
     gemm_vector_size_suffix,
@@ -401,6 +404,28 @@ class KernelConfig:
 # TypeMappings imported from codegen_common as CommonTypeMappings -> TypeMappings alias
 
 
+def gfx1250_transpose_c(config: "KernelConfig", layout: str, gpu_target: str) -> bool:
+    """TransposeC for a gfx1250 universal GEMM, mirroring the Tile Engine builder.
+
+    On gfx1250, TransposeC with a row-major C and a square warp tile turns the
+    per-lane C shuffle into 16-byte LDS writes (CShuffle / TDM epilogue) instead
+    of 2-byte ones. Same rule as test/ck_tile/gemm/test_gemm_pipeline_util.hpp
+    (RowMajor C && WarpTileM == WarpTileN). Limited to the plain universal GEMM
+    with an LDS-staged epilogue; every other arch, variant and the default
+    epilogue keep TransposeC=false. The host-side key builders (KernelKeyBuilder,
+    KernelConfig::build_key) derive key.algorithm.transpose_c from the C++ mirror
+    universal_gemm_transpose_c() in kernel_key.hpp, so keep the two in sync.
+    """
+    return (
+        gpu_target.split(":")[0] == "gfx1250"
+        and config.variant == GemmVariant.STANDARD
+        and not config.preshuffle
+        and config.trait.epilogue in ("cshuffle", "tdm")
+        and layout[2] == "r"
+        and config.tile.warp_tile_m == config.tile.warp_tile_n
+    )
+
+
 # ============================================================================
 # Kernel Name Generator
 # ============================================================================
@@ -721,6 +746,7 @@ constexpr index_t NumDTensors = {ns_name}::NumDTensors;
         # spuriously flips AccumVGPR 224->384 and spills to scratch (~32% slower on small
         # register-bound shapes), so force it off here to stay byte-identical to Old-TE.
         use_persistent_kernel = tr.persistent and config.variant != GemmVariant.MULTI_D
+        transpose_c = gfx1250_transpose_c(config, self.layout, self.gpu_target)
 
         return f"""
 namespace {ns_name} {{
@@ -760,7 +786,7 @@ struct {struct_name} {{
     static constexpr bool kPadM = {str(tr.pad_m).lower()};
     static constexpr bool kPadN = {str(tr.pad_n).lower()};
     static constexpr bool kPadK = {str(tr.pad_k).lower()};
-    static constexpr bool TransposeC = false;
+    static constexpr bool TransposeC = {str(transpose_c).lower()};
     static constexpr bool UsePersistentKernel = {str(use_persistent_kernel).lower()};
     static constexpr bool DoubleSmemBuffer = {str(tr.pipeline in DOUBLE_SMEM_BUFFER_PIPELINES).lower()};
     static constexpr bool UseStructuredSparsity = false;
@@ -831,7 +857,7 @@ using CLayout = {ns_name}::CLayout;
 #define GEMM_KEY_PERSISTENT {int(tr.persistent)}
 #define GEMM_KEY_DOUBLE_BUFFER {int(tr.pipeline in DOUBLE_SMEM_BUFFER_PIPELINES)}
 #define GEMM_KEY_PRESHUFFLE {int(config.preshuffle)}
-#define GEMM_KEY_TRANSPOSE_C 0
+#define GEMM_KEY_TRANSPOSE_C {int(transpose_c)}
 #define GEMM_KEY_GROUPED 0
 #define GEMM_KEY_BATCHED {int(config.variant == GemmVariant.BATCHED)}
 #define GEMM_KEY_SPLIT_K 1
@@ -1583,9 +1609,10 @@ using CLayout = {ns_name}::CLayout;
 class DispatcherWrapperGenerator:
     """Generates dispatcher wrapper code"""
 
-    def __init__(self, datatype: str, layout: str):
+    def __init__(self, datatype: str, layout: str, gpu_target: str = ""):
         self.datatype = datatype
         self.layout = layout
+        self.gpu_target = gpu_target
         self.tm = TypeMappings()
 
     def generate(
@@ -1689,7 +1716,7 @@ inline KernelInstancePtr make_{kernel_name}(const std::string& gfx_arch = "gfx94
     key.algorithm.double_buffer = {str(config.trait.pipeline in DOUBLE_SMEM_BUFFER_PIPELINES).lower()};
     key.algorithm.persistent = {str(config.trait.persistent).lower()};
     key.algorithm.preshuffle = {str(config.preshuffle).lower()};
-    key.algorithm.transpose_c = false;
+    key.algorithm.transpose_c = {str(gfx1250_transpose_c(config, self.layout, self.gpu_target)).lower()};
     key.algorithm.num_wave_groups = {config.num_wave_groups};
     key.algorithm.vector_size_a = {config.trait.vector_size_a};
     key.algorithm.vector_size_b = {config.trait.vector_size_b};
@@ -1760,7 +1787,7 @@ class UnifiedGemmCodegen:
 
         # Initialize generators (use self.layout which is the 3-char A,B,C layout)
         self.ck_gen = CKTileKernelGenerator(datatype, self.layout, gpu_target)
-        self.disp_gen = DispatcherWrapperGenerator(datatype, self.layout)
+        self.disp_gen = DispatcherWrapperGenerator(datatype, self.layout, gpu_target)
 
     def _load_config(self, config_file: Optional[Path]) -> Dict:
         """Load or create default configuration"""
@@ -1937,8 +1964,19 @@ class UnifiedGemmCodegen:
         tile_configs = self._get_tile_configs()
         trait_configs = self._get_trait_configs()
 
+        # TDM cshuffle / persistent kernels are opt-in for sweeps (see
+        # codegen_common.TDM_EXTENDED_TRAITS_KEY).
+        tdm_extended = tdm_extended_traits_enabled(self.config.get("trait_config"))
+
         vector_rejects: Dict[str, int] = {}
         for tile, trait in itertools.product(tile_configs, trait_configs):
+            reason = tdm_sweep_skip_reason(
+                trait.pipeline, trait.epilogue, trait.persistent, tdm_extended
+            )
+            if reason:
+                log.debug(f"Skipped {variant.value} {trait.pipeline}: {reason}")
+                continue
+
             # gfx1250 pipelines (non-MX comp_async / comp_tdm*) and the TDM
             # epilogue: exact-arch, variant and trait gate.
             reason = self._gfx1250_pipeline_reject_reason(tile, trait, variant)
@@ -2620,6 +2658,11 @@ def main():
             trait_config.setdefault("pad_n", [False])
             trait_config.setdefault("pad_k", [False])
             trait_config.setdefault("persistent", [False])
+            # An inline config names its kernel explicitly, so it may use the
+            # extended TDM traits (TDM_EXTENDED_TRAITS_KEY) unless it says not to.
+            trait_config[TDM_EXTENDED_TRAITS_KEY] = cfg.get(
+                TDM_EXTENDED_TRAITS_KEY, [True]
+            )
             if trait_config:
                 full_config["trait_config"] = trait_config
 

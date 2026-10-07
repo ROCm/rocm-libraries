@@ -199,7 +199,7 @@ class TestWarpConfigurationLookupIsUnchangedOnGfx9(unittest.TestCase):
     def test_suffixed_gfx1250_rejects_maps_absent_from_the_table(self):
         # develop allowed all of these on "gfx1250:xnack-" because the lookup
         # missed. 1x1x1 is the example the review asked about.
-        for combo in ((1, 1, 1), (1, 1, 2), (8, 8, 8), (4, 4, 1)):
+        for combo in ((1, 1, 1), (1, 1, 2), (8, 8, 8), (8, 8, 1)):
             with self.subTest(combo=combo):
                 self.assertFalse(
                     gvu.validate_warp_configuration(*combo, _SUFFIXES["gfx1250"])

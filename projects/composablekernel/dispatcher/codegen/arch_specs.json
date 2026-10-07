@@ -195,6 +195,13 @@
         "of this file; without this entry, regenerating would delete them.",
         "Any change to these lists belongs to gfx1250 enablement, not here."
       ],
+      "_warp_configs_16_32_wave": [
+        "The trailing 16-wave (4x4, 8x2, 2x8) and 32-wave (8x4, 4x8) grids mirror",
+        "WARP_SUPPORTED_COMBINATIONS['gfx1250'] in tile_engine gemm_validation_utils.py.",
+        "They are appended so existing entries keep their order. comp_tdm_v2",
+        "remains 4-wave only (gfx1250_pipeline_reject_reason). They are GEMM-only:",
+        "grouped conv drops them (codegen_common.GEMM_ONLY_WAVE_CONFIGS)."
+      ],
       "warp_configs": [
         [2, 4, 1],
         [1, 8, 1],
@@ -204,7 +211,12 @@
         [1, 2, 2],
         [4, 1, 1],
         [1, 4, 1],
-        [2, 2, 1]
+        [2, 2, 1],
+        [4, 4, 1],
+        [8, 2, 1],
+        [2, 8, 1],
+        [8, 4, 1],
+        [4, 8, 1]
       ],
       "_warp_tile_8bit_source": [
         "The 8-bit shapes are the dense WmmaTraits<gfx125_t, ...> specialisations in",

@@ -543,5 +543,26 @@ inline bool vector_widths_divide(const KernelKey& key,
            ext_b % width_b == 0 && ext_c % width_c == 0;
 }
 
+/// TransposeC that unified_gemm_codegen.py generates for a universal GEMM with
+/// this configuration (gfx1250_transpose_c() there). On gfx1250 a plain
+/// universal GEMM (no preshuffle, no D tensors) with a row-major C, a square
+/// warp tile and an LDS-staged epilogue (CShuffle or TDM) is generated with
+/// TransposeC=true, so that the epilogue writes C to LDS with 16-byte stores.
+/// Every other arch and configuration is generated with TransposeC=false.
+/// Host-side key builders use this so that an exact Registry lookup matches
+/// the key the generated kernel registered under.
+inline bool universal_gemm_transpose_c(const std::string& gfx_arch,
+                                       LayoutTag layout_c,
+                                       int warp_m,
+                                       int warp_n,
+                                       Epilogue epilogue,
+                                       bool preshuffle,
+                                       int num_d_tensors)
+{
+    return gfx_arch.substr(0, gfx_arch.find(':')) == "gfx1250" && !preshuffle &&
+           num_d_tensors == 0 && (epilogue == Epilogue::CShuffle || epilogue == Epilogue::Tdm) &&
+           layout_c == LayoutTag::RowMajor && warp_m == warp_n;
+}
+
 } // namespace dispatcher
 } // namespace ck_tile

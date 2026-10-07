@@ -678,9 +678,10 @@ struct KernelKeyBuilder
         // single-buffered pipeline half the LDS budget it is entitled to.
         key.algorithm.double_buffer =
             (pipeline == Pipeline::CompV4 || pipeline == Pipeline::PreShuffleV2);
-        key.algorithm.persistent      = false;
-        key.algorithm.preshuffle      = preshuffle;
-        key.algorithm.transpose_c     = false;
+        key.algorithm.persistent  = false;
+        key.algorithm.preshuffle  = preshuffle;
+        key.algorithm.transpose_c = universal_gemm_transpose_c(
+            gfx_arch, layout_c, warp_m, warp_n, epilogue, preshuffle, num_d_tensors);
         key.algorithm.num_wave_groups = 1;
 
         key.gfx_arch = gfx_arch;

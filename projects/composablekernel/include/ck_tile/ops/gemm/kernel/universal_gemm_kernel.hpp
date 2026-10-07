@@ -229,6 +229,29 @@ struct UniversalGemmKernel
     };
     static constexpr bool PersistentKernel = has_persistent_kernel::value;
 
+    // Pipelines issuing TDM (TENSORcnt) operations can leave them in flight when a tile
+    // finishes, e.g. the comp_tdm over-prefetch or TdmEpilogue's tensor stores. The persistent
+    // loop drains TENSORcnt before the next tile reuses LDS unless the epilogue already
+    // guarantees that no tensor op is outstanding on exit (CShuffleEpilogue).
+    struct has_persistent_tensorcnt_drain
+    {
+        template <typename T>
+        using uses_tensorcnt_type = decltype(T::UsesTensorCnt);
+        template <typename T>
+        using tensorcnt_idle_on_exit_type = decltype(T::TensorCntIdleOnExit);
+
+        static constexpr bool value = []() {
+            bool uses_tensorcnt = false;
+            if constexpr(is_detected<uses_tensorcnt_type, GemmPipeline>{})
+                uses_tensorcnt = GemmPipeline::UsesTensorCnt;
+            bool idle_on_exit = false;
+            if constexpr(is_detected<tensorcnt_idle_on_exit_type, EpiloguePipeline>{})
+                idle_on_exit = EpiloguePipeline::TensorCntIdleOnExit;
+            return uses_tensorcnt && !idle_on_exit;
+        }();
+    };
+    static constexpr bool PersistentTensorCntDrain = has_persistent_tensorcnt_drain::value;
+
     // Not every pipeline exposes LargeTensors; when absent the default 32-bit path is used.
     struct has_large_tensors
     {
@@ -463,6 +486,15 @@ struct UniversalGemmKernel
         }();
     };
 
+    // Pipelines with constraints of their own (e.g. unchecked async loads that need exact tile
+    // multiples) expose a static IsSupportedArgument(M, N, K, k_batch).
+    template <typename T>
+    using pipeline_is_supported_argument_t =
+        decltype(T::IsSupportedArgument(index_t{}, index_t{}, index_t{}, index_t{}));
+
+    static constexpr bool has_pipeline_is_supported_argument =
+        is_detected<pipeline_is_supported_argument_t, GemmPipeline>{};
+
     // Large single-dimension support (a byte extent exceeding the 2GB buffer-addressing limit)
     // is routed through 64-bit global load/store instead of buffer addressing. Two B layouts are
     // excluded: PermuteB addresses B through a merged K0/K1 transform chain, and Preshuffle uses
@@ -528,6 +560,13 @@ struct UniversalGemmKernel
         if constexpr(has_skip_check_valid_launch_params::value)
         {
             return true;
+        }
+        if constexpr(has_pipeline_is_supported_argument)
+        {
+            if(!GemmPipeline::IsSupportedArgument(kargs.M, kargs.N, kargs.K, kargs.k_batch))
+            {
+                return false;
+            }
         }
         if constexpr(EpiloguePipeline::GetVectorSizeC() % 2 != 0 &&
                      is_any_of<EDataType, fp16_t, bf16_t>::value)
@@ -1500,6 +1539,13 @@ struct UniversalGemmKernel
 
         while(block_id < num_work)
         {
+#if defined(__gfx125__)
+            if constexpr(PersistentTensorCntDrain)
+            {
+                // Retire tile i's in-flight tensor ops before tile i+1 writes the same LDS.
+                s_wait_tensorcnt<0>();
+            }
+#endif
             s_waitcnt_barrier();
             const auto tile_idx = amd_wave_read_first_lane(block_id % num_tiles);
             const auto [iM, iN] = TilePartitioner{kargs.M, kargs.N}.GetOutputTileIndex(tile_idx);

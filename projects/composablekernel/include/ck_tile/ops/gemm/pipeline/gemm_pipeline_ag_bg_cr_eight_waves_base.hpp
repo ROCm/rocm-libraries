@@ -62,11 +62,19 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
                                             SrcTileWindow& dram_tile_window) const
     {
         constexpr auto NEG1 = number<-1>{};
+#if defined(__gfx125__)
+        // gfx125 global-to-LDS loads have no buffer descriptor to clamp them, so an unchecked
+        // load is only safe when every access is in bounds. The pong group prefetches one tile
+        // ahead and may step past K, so keep the range check and zero-fill here.
+        constexpr auto oob_conditional_check = true_type{};
+#else
+        constexpr auto oob_conditional_check = false_type{};
+#endif
         dts_block_window.set_bottom_tensor_view_data_ptr(smem);
         async_load_tile(dts_block_window,
                         dram_tile_window,
                         NEG1,
-                        false_type{},
+                        oob_conditional_check,
                         bool_constant<get_warp_size() == 64>{});
     }
 

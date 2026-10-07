@@ -32,7 +32,9 @@ struct SplitKTwoStageInvoker
               typename ELayout,
               bool Persistent,
               typename CDEElementWise>
-    static float gemm(const ck_tile::GemmHostArgs& args, const ck_tile::stream_config& s)
+    static float gemm(const ck_tile::GemmHostArgs& args,
+                      const ck_tile::stream_config& s,
+                      const PersistentGrid& persistent_grid = {})
 
     {
         using GemmShape = ck_tile::TileGemmShape<
@@ -121,8 +123,7 @@ struct SplitKTwoStageInvoker
         ws_args.c_ptr                 = ws_m_n_dev_buf.GetDeviceBuffer();
         auto gemm_kargs               = GemmKernel::MakeKernelArgs(ws_args);
 
-        const dim3 grids  = Persistent ? GemmKernel::MaxOccupancyGridSize(s)
-                                       : GemmKernel::GridSize(args.M, args.N, args.k_batch);
+        const dim3 grids  = gemm_grid_size<GemmKernel, Persistent>(args, s, persistent_grid);
         const dim3 blocks = GemmKernel::BlockSize();
 
         if(!GemmKernel::IsSupportedArgument(gemm_kargs))

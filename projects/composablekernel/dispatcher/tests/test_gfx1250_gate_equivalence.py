@@ -149,13 +149,15 @@ def _tile(tm, tn, tk, wm, wn, wk, wtm, wtn, wtk):
     )
 
 
-# Trait sweep tiles: 4 waves and 8 waves, warp_tile_k below and at the 8-bit
-# comp_async minimum.
+# Trait sweep tiles: 4, 8, 16 and 32 waves, warp_tile_k below and at the
+# 8-bit comp_async minimum.
 TRAIT_TILES = (
     _tile(128, 128, 128, 2, 2, 1, 16, 16, 32),
     _tile(128, 128, 128, 2, 2, 1, 16, 16, 128),
     _tile(256, 128, 128, 4, 2, 1, 16, 16, 32),
     _tile(256, 128, 128, 4, 2, 1, 16, 16, 128),
+    _tile(256, 256, 64, 4, 4, 1, 16, 16, 32),
+    _tile(256, 256, 64, 8, 4, 1, 16, 16, 32),
 )
 
 
@@ -295,6 +297,48 @@ class TestGfx1250GateEquivalence(unittest.TestCase):
         self.assertEqual(
             mismatches[:10], [], f"{len(mismatches)} mismatches of {compared}"
         )
+
+
+@unittest.skipIf(te is None, "tile_engine/ops/gemm not importable")
+class TestGfx1250WarpTableParity(unittest.TestCase):
+    """The gfx1250 warps-per-block list is kept in three places: Tile Engine's
+    WARP_SUPPORTED_COMBINATIONS, the dispatcher's arch_specs.json (and the
+    modules generated from it), and the gemm_utils fallback. They must agree,
+    in order, including the 16- and 32-wave grids."""
+
+    LARGE_GRIDS = ([4, 4, 1], [8, 2, 1], [2, 8, 1], [8, 4, 1], [4, 8, 1])
+
+    def test_tables_agree(self):
+        import json
+
+        from arch_specs_generated import WARP_SUPPORTED_COMBINATIONS as generated
+
+        with open(DISPATCHER_DIR / "codegen" / "arch_specs.json") as f:
+            spec = json.load(f)["architectures"][ARCH]["warp_configs"]
+        table = te.WARP_SUPPORTED_COMBINATIONS[ARCH]
+        self.assertEqual(spec, table)
+        self.assertEqual(generated[ARCH], table)
+        if gemm_utils is not None:
+            self.assertEqual(
+                gemm_utils._WARP_SUPPORTED_COMBINATIONS_FALLBACK[ARCH], table
+            )
+        for grid in self.LARGE_GRIDS:
+            self.assertIn(grid, table)
+
+    def test_large_grids_in_tile_space(self):
+        waves = {(t["warp_m"], t["warp_n"], t["warp_k"]) for t in _tile_space()}
+        for grid in self.LARGE_GRIDS:
+            self.assertIn(tuple(grid), waves)
+
+    def test_fp16_bf16_warp_tile_rows_agree(self):
+        """Tile Engine keys by the C type, the dispatcher by the accumulator;
+        the fp16/bf16 rows must still list the same tiles."""
+        from arch_specs_generated import WARP_TILE_SUPPORTED_COMBINATIONS
+
+        te_row = te.GEMM_WARP_TILE_SUPPORTED_COMBINATIONS[ARCH]
+        disp_row = WARP_TILE_SUPPORTED_COMBINATIONS[ARCH]
+        for dt in ("fp16", "bf16"):
+            self.assertEqual(te_row[f"{dt}_{dt}_{dt}"], disp_row[f"{dt}_{dt}_fp32"], dt)
 
 
 if __name__ == "__main__":

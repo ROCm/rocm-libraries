@@ -123,7 +123,9 @@ template <typename GemmConfig,
           typename ELayout,
           bool Persistent,
           typename CDEElementWise>
-float gemm_stage1(const GemmSplitKHostArgs& args, const ck_tile::stream_config& s)
+float gemm_stage1(const GemmSplitKHostArgs& args,
+                  const ck_tile::stream_config& s,
+                  const PersistentGrid& persistent_grid)
 {
     using GemmShape = ck_tile::TileGemmShape<
         ck_tile::sequence<GemmConfig::M_Tile, GemmConfig::N_Tile, GemmConfig::K_Tile>,
@@ -209,15 +211,7 @@ float gemm_stage1(const GemmSplitKHostArgs& args, const ck_tile::stream_config& 
     using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
     auto kargs   = Kernel::MakeKernelArgs(base_args);
 
-    dim3 grids;
-    if constexpr(Persistent)
-    {
-        grids = Kernel::MaxOccupancyGridSize(s);
-    }
-    else
-    {
-        grids = Kernel::GridSize(args.M, args.N, args.k_batch);
-    }
+    const dim3 grids  = gemm_grid_size<Kernel, Persistent>(args, s, persistent_grid);
     const dim3 blocks = Kernel::BlockSize();
 
     if(!Kernel::IsSupportedArgument(kargs))
@@ -379,7 +373,9 @@ template <typename GemmConfig,
           typename ELayout,
           bool Persistent,
           typename CDEElementWise>
-float gemm_splitk_two_stage(const GemmSplitKHostArgs& args, const ck_tile::stream_config& s)
+float gemm_splitk_two_stage(const GemmSplitKHostArgs& args,
+                            const ck_tile::stream_config& s,
+                            const PersistentGrid& persistent_grid)
 {
     float gemm_time   = 0.0f;
     float reduce_time = 0.0f;
@@ -404,7 +400,7 @@ float gemm_splitk_two_stage(const GemmSplitKHostArgs& args, const ck_tile::strea
                             DsLayout,
                             ELayout,
                             Persistent,
-                            CDEElementWise>(args, s);
+                            CDEElementWise>(args, s, persistent_grid);
 
     // Synchronize before stage 2
     auto sync_result = hipStreamSynchronize(s.stream_id_);
@@ -491,7 +487,8 @@ float invoke_gemm_splitk_two_stage(ck_tile::DeviceMem& a_m_k_dev_buf,
                                    ck_tile::index_t kbatch,
                                    int n_warmup,
                                    int n_repeat,
-                                   bool persistent)
+                                   bool persistent,
+                                   const PersistentGrid& persistent_grid)
 {
     // Calculate workspace size: kbatch * M * N elements
     const ck_tile::index_t workspace_size   = kbatch * M * N * sizeof(CDataType);
@@ -533,7 +530,7 @@ float invoke_gemm_splitk_two_stage(ck_tile::DeviceMem& a_m_k_dev_buf,
                                          DsLayout,
                                          CLayout,
                                          true,
-                                         CDEElementWise>(args, config);
+                                         CDEElementWise>(args, config, persistent_grid);
     }
     else
     {
@@ -548,7 +545,7 @@ float invoke_gemm_splitk_two_stage(ck_tile::DeviceMem& a_m_k_dev_buf,
                                          DsLayout,
                                          CLayout,
                                          false,
-                                         CDEElementWise>(args, config);
+                                         CDEElementWise>(args, config, persistent_grid);
     }
 
     std::size_t flop = std::size_t(2) * M * N * K;
@@ -595,11 +592,12 @@ int run_gemm_example_with_layouts_two_stage(ck_tile::ArgParser& arg_parser,
     ck_tile::index_t stride_B = arg_parser.get_int("stride_b");
     ck_tile::index_t stride_C = arg_parser.get_int("stride_c");
 
-    ck_tile::index_t kbatch      = arg_parser.get_int("split_k");
-    int n_warmup                 = arg_parser.get_int("warmup");
-    int n_repeat                 = arg_parser.get_int("repeat");
-    ck_tile::index_t init_method = arg_parser.get_int("init");
-    bool persistent              = arg_parser.get_int("persistent");
+    ck_tile::index_t kbatch              = arg_parser.get_int("split_k");
+    int n_warmup                         = arg_parser.get_int("warmup");
+    int n_repeat                         = arg_parser.get_int("repeat");
+    ck_tile::index_t init_method         = arg_parser.get_int("init");
+    bool persistent                      = arg_parser.get_int("persistent");
+    const PersistentGrid persistent_grid = get_persistent_grid(arg_parser, persistent);
 
     const bool preshuffle = GemmConfig::Preshuffle;
 
@@ -719,7 +717,8 @@ int run_gemm_example_with_layouts_two_stage(ck_tile::ArgParser& arg_parser,
                                           kbatch,
                                           n_warmup,
                                           n_repeat,
-                                          persistent);
+                                          persistent,
+                                          persistent_grid);
 
     c_m_n_dev_buf.FromDevice(c_m_n_dev_result.data());
     bool pass = true;

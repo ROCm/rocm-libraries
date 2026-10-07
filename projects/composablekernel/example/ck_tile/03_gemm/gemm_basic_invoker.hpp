@@ -17,8 +17,11 @@ struct BasicInvoker
               typename CLayout,
               bool Persistent,
               typename CDEElementWise>
-    static float gemm(const ck_tile::GemmHostArgs& args, const ck_tile::stream_config& s)
+    static float gemm(const ck_tile::GemmHostArgs& args,
+                      const ck_tile::stream_config& s,
+                      const PersistentGrid& persistent_grid = {})
     {
+        ck_tile::ignore = persistent_grid;
         if constexpr(std::is_same_v<ADataType, ck_tile::tf32_t>)
         {
             static_assert(std::is_same_v<ADataType, BDataType>,

@@ -7,6 +7,7 @@
 #include "ck_tile/ops/common/tensor_layout.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_asmem_bsmem_creg_v1_custom_policy.hpp"
 #include "ck_tile/ops/gemm/block/block_universal_gemm_as_bs_cr.hpp"
+#include "ck_tile/ops/gemm/pipeline/gemm_lds_padding.hpp"
 #include "ck_tile/ops/gemm/pipeline/tile_gemm_shape.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
 
@@ -180,6 +181,10 @@ struct UniversalGemmBasePolicy
     template <typename Problem, typename ArchTag>
     CK_TILE_DEVICE static constexpr auto MakeALdsBlockDescriptorImpl(ArchTag)
     {
+#if defined(__HIP_DEVICE_COMPILE__)
+        static_assert(lds_pad_spec_t<Problem, true>::is_auto,
+                      "an explicit LDS K padding spec is only supported by the gfx125 layout");
+#endif
         using ALayout               = remove_cvref_t<typename Problem::ALayout>;
         using ADataType             = ALdsDataType_<Problem>;
         constexpr index_t MPerBlock = Problem::BlockGemmShape::kM;
@@ -393,7 +398,8 @@ struct UniversalGemmBasePolicy
         else
         {
 
-            constexpr auto LdsPaddingConfigA = GetLdsPaddingConfig<Problem, true>();
+            // An explicit spec only needs the layout here, not TDM-encodable codes
+            constexpr auto LdsPaddingConfigA = GetLayoutLdsPaddingConfig<Problem, true>();
 
             constexpr auto IsNeedPadding = LdsPaddingConfigA[I0];
             // set to -1 to make sure PaddingDataAmount = 0 when IsNeedPadding = false
@@ -402,9 +408,20 @@ struct UniversalGemmBasePolicy
             constexpr index_t MLdsLayerRequired =
                 get_n_lds_banks() * get_n_dwords_per_128b() / KPerBlock / DataTypeSize;
 
-            constexpr auto MLdsLayer = max(1, MLdsLayerRequired);
+            constexpr auto MLdsLayerAuto = max(1, MLdsLayerRequired);
 
-            constexpr auto PaddingDataAmount = (PaddingAmount + 1) * BytesPerDword / DataTypeSize;
+            constexpr auto PaddingDataAmountAuto =
+                (PaddingAmount + 1) * BytesPerDword / DataTypeSize;
+
+            // Auto keeps the values above; an explicit spec on the problem overrides both
+            using LdsPadLayout                  = LdsKPadLayout<lds_pad_spec_t<Problem, true>,
+                                                                ADataType,
+                                                                MPerBlock,
+                                                                KPerBlock,
+                                                                MLdsLayerAuto,
+                                                                PaddingDataAmountAuto>;
+            constexpr index_t MLdsLayer         = LdsPadLayout::rows_per_group;
+            constexpr index_t PaddingDataAmount = LdsPadLayout::pad_elems;
 
             // gfx125: use simple layout without XOR (relies on padding in descriptor)
             constexpr auto a_lds_block_desc_0 = make_naive_tensor_descriptor(
@@ -456,6 +473,10 @@ struct UniversalGemmBasePolicy
     template <typename Problem, typename ArchTag>
     CK_TILE_DEVICE static constexpr auto MakeBLdsBlockDescriptorImpl(ArchTag)
     {
+#if defined(__HIP_DEVICE_COMPILE__)
+        static_assert(lds_pad_spec_t<Problem, false>::is_auto,
+                      "an explicit LDS K padding spec is only supported by the gfx125 layout");
+#endif
         using BLayout                              = remove_cvref_t<typename Problem::BLayout>;
         constexpr bool IsBCastPolicyBeforeLDSWrite = IsBCastPolicyBeforeLDSWrite_v<Problem>;
         using BDataType                            = std::conditional_t<IsBCastPolicyBeforeLDSWrite,
@@ -669,7 +690,8 @@ struct UniversalGemmBasePolicy
         }
         else
         {
-            constexpr auto LdsPaddingConfigB = GetLdsPaddingConfig<Problem, false>();
+            // An explicit spec only needs the layout here, not TDM-encodable codes
+            constexpr auto LdsPaddingConfigB = GetLayoutLdsPaddingConfig<Problem, false>();
 
             constexpr auto IsNeedPadding = LdsPaddingConfigB[I0];
             // set to -1 to make sure PaddingDataAmount = 0 when IsNeedPadding = false
@@ -677,9 +699,20 @@ struct UniversalGemmBasePolicy
 
             constexpr index_t NLdsLayerRequired =
                 get_n_lds_banks() * get_n_dwords_per_128b() / KPerBlock / DataTypeSize;
-            constexpr auto NLdsLayer = max(1, NLdsLayerRequired);
+            constexpr auto NLdsLayerAuto = max(1, NLdsLayerRequired);
 
-            constexpr auto PaddingDataAmount = (PaddingAmount + 1) * BytesPerDword / DataTypeSize;
+            constexpr auto PaddingDataAmountAuto =
+                (PaddingAmount + 1) * BytesPerDword / DataTypeSize;
+
+            // Auto keeps the values above; an explicit spec on the problem overrides both
+            using LdsPadLayout                  = LdsKPadLayout<lds_pad_spec_t<Problem, false>,
+                                                                BDataType,
+                                                                NPerBlock,
+                                                                KPerBlock,
+                                                                NLdsLayerAuto,
+                                                                PaddingDataAmountAuto>;
+            constexpr index_t NLdsLayer         = LdsPadLayout::rows_per_group;
+            constexpr index_t PaddingDataAmount = LdsPadLayout::pad_elems;
 
             // gfx125: use simple layout without XOR (relies on padding in descriptor)
             constexpr auto b_lds_block_desc_0 = make_naive_tensor_descriptor(
@@ -1128,6 +1161,22 @@ struct UniversalGemmBasePolicy
         return smem_size_a + smem_size_b;
     }
 
+    // Padding config read by the non-TDM gfx125 descriptors. Auto forwards GetLdsPaddingConfig;
+    // an explicit spec is resolved by LdsKPadLayout and skips the TDM encoding limits, which only
+    // pipelines that program the TDM (and so call GetLdsPaddingConfig) have to meet.
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr auto GetLayoutLdsPaddingConfig()
+    {
+        if constexpr(lds_pad_spec_t<Problem, IsA>::is_auto)
+        {
+            return GetLdsPaddingConfig<Problem, IsA>();
+        }
+        else
+        {
+            return make_tuple(number<false>{}, number<0>{}, number<0>{});
+        }
+    }
+
     // GetLdsPaddingConfig,  MakeALdsBlockDescriptorForTrLoad, MakeBLdsBlockDescriptorForTrLoad
     // functions are used in gfx1250
     template <typename Problem, bool IsA>
@@ -1152,7 +1201,25 @@ struct UniversalGemmBasePolicy
 
         constexpr auto is_tr_load = IsA ? is_a_load_tr<Problem> : is_b_load_tr<Problem>;
         constexpr auto PackedSize = numeric_traits<DataType>::PackedSize;
-        if constexpr(is_tr_load)
+
+        using LdsPadSpec = lds_pad_spec_t<Problem, IsA>;
+        if constexpr(!LdsPadSpec::is_auto)
+        {
+            static_assert(!is_tr_load,
+                          "an explicit LDS K padding spec is not supported with transpose loads");
+            using ResolvedPad = ResolvedLdsPad<DataType, Problem::BlockGemmShape::kK, LdsPadSpec>;
+            constexpr auto config              = ResolvedPad::get_padding_config();
+            constexpr index_t tdm_pad_amount   = config[I1];
+            constexpr index_t tdm_pad_interval = config[I2];
+            // The TDM mover must reproduce the descriptor's group stride exactly
+            static_assert(
+                !ResolvedPad::pad_enable ||
+                    ((tdm_pad_amount + 1) * BytesPerDword == ResolvedPad::pad_bytes &&
+                     (2 << tdm_pad_interval) * BytesPerDword == ResolvedPad::interval_bytes),
+                "TDM pad codes disagree with the LDS descriptor group stride");
+            return config;
+        }
+        else if constexpr(is_tr_load)
         {
             constexpr index_t banks_per_mblk =
                 MNPerBlock * DataTypeSize / PackedSize / BytesPerDword;

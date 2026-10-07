@@ -14,3 +14,6 @@ if(GPU_TARGETS MATCHES "gfx9|amdgcnspirv")
 else()
     message(DEBUG "Skipping test_arch tests for current target")
 endif()
+
+# Pure compile-time checks of the VGPR budget model; valid for every target.
+add_gtest_executable(test_vgpr_budget test_vgpr_budget.cpp)

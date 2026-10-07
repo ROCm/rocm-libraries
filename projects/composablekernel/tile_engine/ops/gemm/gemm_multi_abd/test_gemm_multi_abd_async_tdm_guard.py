@@ -34,7 +34,9 @@ _TILE = {
     "warp_tile_n": 32,
     "warp_tile_k": 16,
 }
-_TILE_STR = "128x128x64_2x2x1_32x32x16"
+# The --gen_single CLI validates against gfx1250, whose only fp16 warp tile is
+# 16x16x32.
+_TILE_STR = "128x128x64_2x2x1_16x16x32"
 
 
 def _load_config():

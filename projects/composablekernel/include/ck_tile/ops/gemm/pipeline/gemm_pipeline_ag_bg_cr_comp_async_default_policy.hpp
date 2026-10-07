@@ -291,6 +291,11 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
 #if defined(__gfx125__)
         return Base::template MakeALdsBlockDescriptor<Problem>();
 #else
+#if defined(__HIP_DEVICE_COMPILE__)
+        // The XOR-swizzled layout has no padding to tune
+        static_assert(lds_pad_spec_t<Problem, true>::is_auto,
+                      "an explicit LDS K padding spec is only supported by the gfx125 layout");
+#endif
         constexpr index_t MPerBlock = Problem::BlockGemmShape::kM;
         constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
         if constexpr(Base::template is_a_load_tr<Problem>)
@@ -349,6 +354,11 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
 #if defined(__gfx125__)
         return Base::template MakeBLdsBlockDescriptor<Problem>();
 #else
+#if defined(__HIP_DEVICE_COMPILE__)
+        // The XOR-swizzled layout has no padding to tune
+        static_assert(lds_pad_spec_t<Problem, false>::is_auto,
+                      "an explicit LDS K padding spec is only supported by the gfx125 layout");
+#endif
         constexpr index_t NPerBlock = Problem::BlockGemmShape::kN;
         constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
         if constexpr(Base::template is_b_load_tr<Problem>)

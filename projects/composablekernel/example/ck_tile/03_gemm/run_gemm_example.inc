@@ -130,7 +130,8 @@ float invoke_gemm(ck_tile::DeviceMem& a_m_k_dev_buf,
                   int n_repeat,
                   bool persistent,
                   bool flush_cache,
-                  int rotating_count)
+                  int rotating_count,
+                  const PersistentGrid& persistent_grid = {})
 {
     ck_tile::GemmHostArgs args = {a_m_k_dev_buf.GetDeviceBuffer(),
                                   b_k_n_dev_buf.GetDeviceBuffer(),
@@ -160,7 +161,8 @@ float invoke_gemm(ck_tile::DeviceMem& a_m_k_dev_buf,
                                           CDEElementWise>(
             args,
             ck_tile::stream_config{
-                nullptr, true, 1, n_warmup, n_repeat, true, flush_cache, rotating_count});
+                nullptr, true, 1, n_warmup, n_repeat, true, flush_cache, rotating_count},
+            persistent_grid);
     }
     else
     {
@@ -240,13 +242,14 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
     ck_tile::index_t stride_B = arg_parser.get_int("stride_b");
     ck_tile::index_t stride_C = arg_parser.get_int("stride_c");
 
-    ck_tile::index_t kbatch      = arg_parser.get_int("split_k");
-    int n_warmup                 = arg_parser.get_int("warmup");
-    int n_repeat                 = arg_parser.get_int("repeat");
-    ck_tile::index_t init_method = arg_parser.get_int("init");
-    bool persistent              = arg_parser.get_int("persistent");
-    bool flush_cache             = arg_parser.get_bool("flush_cache");
-    int rotating_count           = arg_parser.get_int("rotating_count");
+    ck_tile::index_t kbatch              = arg_parser.get_int("split_k");
+    int n_warmup                         = arg_parser.get_int("warmup");
+    int n_repeat                         = arg_parser.get_int("repeat");
+    ck_tile::index_t init_method         = arg_parser.get_int("init");
+    bool persistent                      = arg_parser.get_int("persistent");
+    const PersistentGrid persistent_grid = get_persistent_grid(arg_parser, persistent);
+    bool flush_cache                     = arg_parser.get_bool("flush_cache");
+    int rotating_count                   = arg_parser.get_int("rotating_count");
 
     const bool preshuffle = GemmConfig::Preshuffle;
 
@@ -375,7 +378,8 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
                                     n_repeat,
                                     persistent,
                                     flush_cache,
-                                    rotating_count);
+                                    rotating_count,
+                                    persistent_grid);
     };
 
     float ave_time = ck_tile_example::dispatch_vector_size_fallback<GemmConfig,

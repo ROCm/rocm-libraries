@@ -25,6 +25,19 @@ struct scale_block_size_or_default<T, std::void_t<decltype(T::ScaleBlockSize)>>
 {
     static constexpr index_t value = T::ScaleBlockSize;
 };
+
+// Resolves a TDM pipeline policy's split-barrier switch: yields T::UseSplitBarrier when the
+// member exists, otherwise false (so existing policies keep the full-barrier hot loop).
+template <typename T, typename = void>
+struct use_split_barrier_or_default
+{
+    static constexpr bool value = false;
+};
+template <typename T>
+struct use_split_barrier_or_default<T, std::void_t<decltype(T::UseSplitBarrier)>>
+{
+    static constexpr bool value = T::UseSplitBarrier;
+};
 } // namespace detail
 
 enum class MultiCastDirection
@@ -159,6 +172,39 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
         }
     }
 
+    // The TDM restarts its pad interval at the start of every op, and each wave moves
+    // MNPerBlock / warpNum K rows per op (see Make{A,B}DramTileDistribution). With an explicit
+    // pad spec, every op must therefore start on a pad group boundary: the rows per op must be a
+    // multiple or a divisor of the rows per group. Auto satisfies this by construction.
+    template <typename Problem, bool IsA, index_t RowsPerGroup>
+    CK_TILE_HOST_DEVICE static constexpr void CheckTdmLdsPadGroup()
+    {
+        if constexpr(!lds_pad_spec_t<Problem, IsA>::is_auto)
+        {
+            using Layout = remove_cvref_t<
+                std::tuple_element_t<number<0>{},
+                                     std::conditional_t<IsA,
+                                                        problem_as_layout_t<Problem>,
+                                                        problem_bs_layout_t<Problem>>>>;
+            // K contiguous in DRAM: RowMajor for A, ColumnMajor for B
+            constexpr bool is_k_contiguous =
+                std::is_same_v<Layout,
+                               std::conditional_t<IsA,
+                                                  ck_tile::tensor_layout::gemm::RowMajor,
+                                                  ck_tile::tensor_layout::gemm::ColumnMajor>>;
+            static_assert(is_k_contiguous,
+                          "an explicit LDS K padding spec needs K-contiguous TDM loads");
+
+            constexpr index_t warpNum =
+                WaveSpecialized ? 1 : (Problem::kBlockSize / get_warp_size());
+            constexpr index_t MNPerBlock =
+                IsA ? Problem::BlockGemmShape::kM : Problem::BlockGemmShape::kN;
+            constexpr index_t RowsPerTdmOp = MNPerBlock / warpNum;
+            static_assert(RowsPerTdmOp % RowsPerGroup == 0 || RowsPerGroup % RowsPerTdmOp == 0,
+                          "each TDM op must start on an LDS pad group boundary");
+        }
+    }
+
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeALdsBlockDescriptor()
     {
@@ -181,11 +227,22 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
             constexpr index_t AVectorLen = VecByteSize / DataTypeSize * PackedSize;
             constexpr index_t MLdsLayerRequired =
                 get_n_lds_banks() * get_n_dwords_per_128b() / KPerBlock / DataTypeSize * PackedSize;
-            constexpr auto MLdsLayer = max(1, MLdsLayerRequired);
+            constexpr auto MLdsLayerAuto = max(1, MLdsLayerRequired);
             // calculate how many elements to pad to avoid bank conflict
             constexpr index_t BytesPerDword = sizeof(int32_t);
-            constexpr auto PaddingDataAmount =
+            constexpr auto PaddingDataAmountAuto =
                 (PaddingAmount + 1) * BytesPerDword / DataTypeSize * PackedSize;
+
+            // Auto keeps the values above; an explicit spec on the problem overrides both
+            using LdsPadLayout                  = LdsKPadLayout<lds_pad_spec_t<Problem, true>,
+                                                                ADataType,
+                                                                MPerBlock,
+                                                                KPerBlock,
+                                                                MLdsLayerAuto,
+                                                                PaddingDataAmountAuto>;
+            constexpr index_t MLdsLayer         = LdsPadLayout::rows_per_group;
+            constexpr index_t PaddingDataAmount = LdsPadLayout::pad_elems;
+            CheckTdmLdsPadGroup<Problem, true, MLdsLayer>();
 
             constexpr auto a_lds_block_desc_0 = make_naive_tensor_descriptor(
                 make_tuple(number<MPerBlock / MLdsLayer>{},
@@ -242,11 +299,22 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
             constexpr index_t BVectorLen = VecByteSize / DataTypeSize * PackedSize;
             constexpr index_t NLdsLayerRequired =
                 get_n_lds_banks() * get_n_dwords_per_128b() / KPerBlock / DataTypeSize * PackedSize;
-            constexpr auto NLdsLayer = max(1, NLdsLayerRequired);
+            constexpr auto NLdsLayerAuto = max(1, NLdsLayerRequired);
             // calculate how many elements to pad to avoid bank conflict
             constexpr index_t BytesPerDword = sizeof(int32_t);
-            constexpr auto PaddingDataAmount =
+            constexpr auto PaddingDataAmountAuto =
                 (PaddingAmount + 1) * BytesPerDword / DataTypeSize * PackedSize;
+
+            // Auto keeps the values above; an explicit spec on the problem overrides both
+            using LdsPadLayout                  = LdsKPadLayout<lds_pad_spec_t<Problem, false>,
+                                                                BDataType,
+                                                                NPerBlock,
+                                                                KPerBlock,
+                                                                NLdsLayerAuto,
+                                                                PaddingDataAmountAuto>;
+            constexpr index_t NLdsLayer         = LdsPadLayout::rows_per_group;
+            constexpr index_t PaddingDataAmount = LdsPadLayout::pad_elems;
+            CheckTdmLdsPadGroup<Problem, false, NLdsLayer>();
 
             constexpr auto b_lds_block_desc_0 = make_naive_tensor_descriptor(
                 make_tuple(number<NPerBlock / NLdsLayer>{},
@@ -561,5 +629,16 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
 
 // Type aliases for backward compatibility
 using GemmPipelineAgBgCrCompTDMWaveSpecializedPolicy = GemmPipelineAgBgCrCompTDMDefaultPolicy<true>;
+
+// Opt-in split-barrier variant of a comp_tdm V1 policy (V1 only; comp_tdm V2 and the
+// weight-preshuffle TDM pipeline static_assert against it): every member comes from BasePolicy, and
+// the hot loop of GemmPipelineAgBgCrCompTDMV1 replaces its two full barriers per stage by one
+// s_barrier_signal / s_barrier_wait pair around the stage's last WMMA group. Kept as a separate
+// type so that instances using BasePolicy directly are unchanged.
+template <typename BasePolicy>
+struct GemmPipelineAgBgCrCompTDMSplitBarrierPolicy : public BasePolicy
+{
+    static constexpr bool UseSplitBarrier = true;
+};
 
 } // namespace ck_tile

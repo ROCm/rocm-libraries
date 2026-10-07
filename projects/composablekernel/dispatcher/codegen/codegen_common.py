@@ -192,7 +192,7 @@ class CommonTypeMappings:
         "compv5": "GemmPipelineAgBgCrCompV5",
         "preshufflev2": "WeightPreshufflePipelineAGmemBGmemCRegV2",
         "comp_async": "GemmPipelineAgBgCrCompAsync",
-        # gfx1250 only (Tensor Data Mover); always paired with the tdm epilogue.
+        # gfx1250 only (Tensor Data Mover); comp_tdm also pairs with cshuffle.
         "comp_tdm": "GemmPipelineAgBgCrCompTDMV1",
         "comp_tdm_v2": "GemmPipelineAgBgCrCompTDMV2",
     }
@@ -365,6 +365,24 @@ def valid_wave_configs(arch: str) -> List[List[int]]:
     """Return valid [wave_m, wave_n, wave_k] combos for *arch*."""
     data = _get_arch_data()
     return data["warp_combos"].get(arch, [[2, 2, 1]])
+
+
+# Wave grids [wave_m, wave_n, wave_k] that arch_specs.json lists for GEMM only.
+# The gfx1250 16-wave (4x4, 8x2, 2x8) and 32-wave (8x4, 4x8) grids were added
+# for GEMM; no grouped-conv instance has been built or validated with them, so
+# grouped conv keeps the grids it had before. Other arches are unaffected.
+GEMM_ONLY_WAVE_CONFIGS: Dict[str, List[List[int]]] = {
+    "gfx1250": [[4, 4, 1], [8, 2, 1], [2, 8, 1], [8, 4, 1], [4, 8, 1]],
+}
+
+
+def grouped_conv_wave_configs(arch: str, wave_configs):
+    """Return *wave_configs* (the arch wave list) minus the GEMM-only grids of *arch*.
+
+    Keeps the input order and element type ([m, n, k] lists or tuples).
+    """
+    excluded = GEMM_ONLY_WAVE_CONFIGS.get(arch, [])
+    return [c for c in wave_configs if list(c) not in excluded]
 
 
 def valid_warp_configs(arch: str, dtype: str) -> List[List[int]]:
@@ -1081,6 +1099,19 @@ def gfx1250_comp_async_8bit_warp_tile_k_rejected(dtype_a, dtype_b, warp_tile_k) 
 GFX1250_ARCH = "gfx1250"
 TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2")
 GFX1250_ONLY_PIPELINES = ("comp_async",) + TDM_PIPELINES
+# Epilogues each TDM pipeline can host and the TDM pipelines that honour the
+# persistent kernel; same rules as the Tile Engine GEMM_TDM_EPILOGUES /
+# GEMM_TDM_PERSISTENT_PIPELINES. comp_tdm (V1) also runs CShuffle (its entry
+# s_wait_tensorcnt barrier retires the TDM loads) and the persistent kernel;
+# comp_tdm_v2 keeps TdmEpilogue only and pins UsePersistentKernel to false.
+TDM_EPILOGUES = {"comp_tdm": ("tdm", "cshuffle"), "comp_tdm_v2": ("tdm",)}
+TDM_PERSISTENT_PIPELINES = ("comp_tdm",)
+# Sweeps generate the TDM pipelines with the tdm epilogue, non-persistent, only:
+# the wider combinations are legal but have not run on hardware, so a sweep
+# opts in with "tdm_extended_traits": [true] in its trait_config (Tile Engine
+# form {"values": [true]}; same key as GEMM_TDM_EXTENDED_TRAITS_KEY there).
+# Single-config requests (python/gemm_utils, --tile-config-json) opt in.
+TDM_EXTENDED_TRAITS_KEY = "tdm_extended_traits"
 TDM_PAD_REJECT_REASON = (
     "TDM bounds-clips on real descriptor extents; kPad right-pad transforms "
     "inflate them, so TDM requires pad_m=pad_n=pad_k=False"
@@ -1111,6 +1142,31 @@ def reject_async_tdm_traits(op_name: str, pipeline: str, epilogue: str) -> None:
             f"{op_name} does not support the '{epilogue}' epilogue "
             "(TDM epilogue is not implemented for grouped quant GEMM)"
         )
+
+
+def tdm_extended_traits_enabled(trait_config) -> bool:
+    """True if a trait_config opts its sweep into the extended TDM traits
+    (see TDM_EXTENDED_TRAITS_KEY). Accepts list and {"values": [...]} forms."""
+    entry = (trait_config or {}).get(TDM_EXTENDED_TRAITS_KEY, [])
+    values = entry.get("values", []) if isinstance(entry, dict) else entry
+    return any(v in (True, "true") for v in values)
+
+
+def tdm_sweep_skip_reason(pipeline, epilogue, persistent=False, extended=False) -> str:
+    """Reason string if a sweep leaves out a legal TDM trait combination because
+    it did not opt into the extended TDM traits, else "".
+
+    Without the opt-in a TDM pipeline is swept with epilogue=tdm, non-persistent
+    only, the kernels generated before comp_tdm accepted cshuffle / persistent.
+    """
+    if extended or pipeline not in TDM_PIPELINES:
+        return ""
+    if epilogue != "tdm" or persistent in (True, "true"):
+        return (
+            f"{pipeline} with epilogue={epilogue}, persistent={persistent} needs "
+            f'"{TDM_EXTENDED_TRAITS_KEY}" in the trait_config'
+        )
+    return ""
 
 
 def gfx1250_pipeline_reject_reason(
@@ -1153,9 +1209,10 @@ def gfx1250_pipeline_reject_reason(
     if not variant_supported:
         return f"pipeline={pipeline} is not supported for {variant_name}"
     if is_tdm:
-        if epilogue != "tdm":
-            return f"pipeline={pipeline} requires epilogue=tdm"
-        if persistent:
+        if epilogue not in TDM_EPILOGUES[pipeline]:
+            epilogues = "/".join(TDM_EPILOGUES[pipeline])
+            return f"pipeline={pipeline} requires epilogue={epilogues}"
+        if persistent and pipeline not in TDM_PERSISTENT_PIPELINES:
             return f"pipeline={pipeline} does not support the persistent kernel"
         if pads is not None and any(pads):
             return TDM_PAD_REJECT_REASON

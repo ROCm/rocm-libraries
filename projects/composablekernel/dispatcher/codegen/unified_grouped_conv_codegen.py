@@ -26,6 +26,7 @@ from enum import Enum
 from codegen_common import (
     TileConfig,
     TraitConfigBase,
+    grouped_conv_wave_configs,
     parallel_generate,
 )
 
@@ -353,6 +354,7 @@ class GroupedConvKernelConfig:
             supported = WARP_SUPPORTED_COMBINATIONS.get(target_arch)
             if supported is None:
                 return False  # Unknown architecture
+            supported = grouped_conv_wave_configs(target_arch, supported)
             warp_cfg = [self.tile.warp_m, self.tile.warp_n, self.tile.warp_k]
             if warp_cfg not in supported:
                 return False

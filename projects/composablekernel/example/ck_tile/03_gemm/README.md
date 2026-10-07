@@ -74,6 +74,7 @@ args:
           -split_k    splitK value (default:1)
        -init    0:random, 1:linear, 2:constant(1) (default:0)
  -persistent    0:non-persistent, 1:persistent (default:0)
+-persistent_ctas    persistent grid size (CTAs); 0: occupancy-derived (MaxOccupancyGridSize) (default:0)
        -json    0: No Json, 1: Dump Results in Json format (default:0)
    -jsonfile    json file name to dump results (default:gemm.json)
 ```

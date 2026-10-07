@@ -37,6 +37,8 @@ int run_gemm_example_with_layouts_universal(ck_tile::ArgParser& arg_parser,
         const ck_tile::index_t N      = arg_parser.get_int("n");
         const ck_tile::index_t K      = arg_parser.get_int("k");
         const ck_tile::index_t kbatch = arg_parser.get_int("split_k");
+        // The async input scheduler always launches the persistent kernel.
+        const PersistentGrid persistent_grid = get_persistent_grid(arg_parser, true);
 
         using Row                     = ck_tile::tensor_layout::gemm::RowMajor;
         constexpr bool is_a_row_major = std::is_same_v<ALayout, Row>;
@@ -89,7 +91,7 @@ int run_gemm_example_with_layouts_universal(ck_tile::ArgParser& arg_parser,
                                                      ck_tile::tuple<>,
                                                      CLayout,
                                                      ck_tile::element_wise::PassThrough>(
-            args, ck_tile::stream_config{nullptr, false, 1});
+            args, ck_tile::stream_config{nullptr, false, 1}, persistent_grid);
 
         // Copy result from device for verification
         c_m_n_dev_buf.FromDevice(c_m_n_dev_result.data());
@@ -300,15 +302,28 @@ int run_gemm_example(ck_tile::ArgParser& arg_parser)
 
 int main(int argc, char* argv[])
 {
+#ifdef GFX1250_OPT4_ENABLED
+    // GemmConfigGfx1250Bf16_Opt4 is bf16-only, so a bare run defaults to -prec=bf16.
+    auto arg_parser = create_args("bf16");
+#else
     auto arg_parser = create_args();
-    auto result     = arg_parser.parse(argc, argv);
+#endif
+    auto result = arg_parser.parse(argc, argv);
 
     if(!result)
         return -1;
 
     try
     {
-#if CK_TILE_USE_WMMA
+#ifdef GFX1250_OPT4_ENABLED
+        // bf16-only gfx1250 config; the example always writes a row-major C.
+        if(arg_parser.get_str("prec") != "bf16")
+        {
+            throw std::runtime_error("GemmConfigGfx1250Bf16_Opt4 supports only -prec=bf16!");
+        }
+        return !run_gemm_example_prec_type_universal<GemmConfigGfx1250Bf16_Opt4<>, ck_tile::bf16_t>(
+            arg_parser.get_str("a_layout"), arg_parser.get_str("b_layout"), arg_parser);
+#elif CK_TILE_USE_WMMA
 #ifdef CLUSTER_LAUNCH_ENABLED
         return !run_gemm_example<GemmConfigComputeV3_WMMA_ClusterLaunch>(arg_parser);
 #else

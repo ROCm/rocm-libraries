@@ -37,6 +37,15 @@ struct GemmPipelineAgBgCrCompTDMV2 : public GemmPipelineAgBgCrCompTDMV1<Problem,
     static_assert(Problem::BlockGemmShape::NumWarps == 4,
                   "comp_tdm_v2 requires exactly 4 waves per workgroup");
 
+    // The wave-specialized schedule has not been analysed for the cross-tile TENSORcnt drain of
+    // the persistent loop, so V2 always runs one workgroup per tile.
+    static constexpr bool UsePersistentKernel = false;
+
+    // V2 has its own wave-specialized hot loop; the split barrier of V1 is not implemented here.
+    static_assert(
+        !detail::use_split_barrier_or_default<Policy>::value,
+        "split barrier (UseSplitBarrier) is only implemented by GemmPipelineAgBgCrCompTDMV1");
+
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
         constexpr index_t smem_size = Policy::template GetSmemSize<Problem>();
@@ -683,6 +692,13 @@ struct GemmPipelineAgBgCrCompTDMV2 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                 block_gemm(
                     c_block_tile, a_block_tile[final_compute_idx], b_block_tile[final_compute_idx]);
             }
+            // Drain TENSORcnt before leaving the pipeline. On the TailNumber::One path the
+            // prefetch into LDS window(1) issued by warps 2/3 for the (past-the-end) next K
+            // tile is still in flight, and the TDM write to LDS is not tracked by the
+            // compiler. TENSORcnt is per wave, so every wave waits on its own counter (a no-op
+            // for waves without outstanding TDM ops); the barrier then makes the drain visible
+            // block-wide and orders the final LDS reads before any LDS reuse.
+            s_wait_tensorcnt_barrier<0 /*tensorcnt*/, 0 /*lgkmcnt*/>();
             return c_block_tile;
         }
 
@@ -1338,6 +1354,8 @@ struct GemmPipelineAgBgCrCompTDMV2 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                                                                  a_scale_tile[0],
                                                                  b_scale_tile[0]);
             }
+            // Exit drain: see RunPipelineLoop above.
+            s_wait_tensorcnt_barrier<0 /*tensorcnt*/, 0 /*lgkmcnt*/>();
             return c_block_tile;
         }
 

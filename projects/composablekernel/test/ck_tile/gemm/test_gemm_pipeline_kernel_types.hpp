@@ -25,8 +25,9 @@ using CompV6    = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType:
 using CompAsync = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompAsync>;
 using CompAsyncEightWaves =
     ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompAsyncEightWaves>;
-using CompTDMV1 = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompTDMV1>;
-using CompTDMV2 = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompTDMV2>;
+using CompAsyncPP = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompAsyncPP>;
+using CompTDMV1   = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompTDMV1>;
+using CompTDMV2   = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompTDMV2>;
 
 using Persistent    = std::true_type;
 using NonPersistent = std::false_type;
@@ -323,6 +324,12 @@ using KernelTypesCompTDMWmma = ::testing::Types<
 using KernelTypesCompAsyncWmma = ::testing::Types<
     std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I64,         I64,          I32,        I16,        I16, Intrawave,        CompAsync>,
     std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I64,         I64,          I32,        I16,        I16, Intrawave,        CompAsync, Persistent>
+>;
+
+using KernelTypesCompAsyncPPWmma = ::testing::Types<
+    std::tuple<    Row,     Col,     Row,      BF16,      BF16,         F32,      BF16,        I64,        I128,          I32,        I16,        I16, Intrawave,      CompAsyncPP>,
+    std::tuple<    Row,     Col,     Row,      BF16,      BF16,         F32,      BF16,        I64,        I128,          I32,        I16,        I16, Intrawave,      CompAsyncPP, Persistent>,
+    std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I64,         I64,          I32,        I16,        I16, Intrawave,      CompAsyncPP>
 >;
 
 // clang-format on

@@ -55,6 +55,7 @@ from dispatcher_common import (
     auto_correct_trait,
     auto_correct_wave,
     get_arch_filter_data,
+    grouped_conv_wave_configs,
     validate_trait_combo,
     validate_wave_config,
     validate_warp_tile_config,
@@ -1183,10 +1184,16 @@ def validate_grouped_conv_config(config: dict) -> GroupedConvValidationResult:
 
     wave_cfg = _extract_wave_config(tile_config)
     ok, msg = validate_wave_config(wave_cfg, arch)
+    valid_waves = grouped_conv_wave_configs(arch)
+    if ok and wave_cfg not in valid_waves:
+        ok = False
+        msg = (
+            f"Wave configuration {wave_cfg} for {arch} is GEMM-only; "
+            "grouped convolution valid wave configs: "
+            + ", ".join(f"[{c[0]},{c[1]},{c[2]}]" for c in valid_waves)
+        )
     if not ok:
         errors.append(msg)
-        arch_data = get_arch_filter_data()
-        valid_waves = arch_data["warp_combos"].get(arch, [[2, 2, 1]])
         if valid_waves:
             suggested_fixes["wave_m"] = valid_waves[0][0]
             suggested_fixes["wave_n"] = valid_waves[0][1]
@@ -1240,6 +1247,9 @@ def auto_correct_grouped_conv_config(
     wave_cfg = _extract_wave_config(tile_config)
     arch = config.get("arch", "gfx942")
     fixed_wave = auto_correct_wave(wave_cfg, arch)
+    conv_waves = grouped_conv_wave_configs(arch)
+    if fixed_wave not in conv_waves and conv_waves:
+        fixed_wave = conv_waves[0]
     tile_config["wave_m"] = fixed_wave[0]
     tile_config["wave_n"] = fixed_wave[1]
     tile_config["wave_k"] = fixed_wave[2]

@@ -471,8 +471,17 @@ struct buffer_view<address_space_enum::global,
         // Match the buffer instruction's bounds check, including speculative
         // prefetches past the last row that have valid transform coordinates.
         const index_t global_offset = i + wave_i;
-        is_valid_element = is_valid_element && global_offset >= 0 && buffer_size_ >= t_per_x &&
-                           global_offset <= buffer_size_ - t_per_x;
+        // With oob_conditional_check off there is no hardware range clamp to fall back on
+        // (no buffer resource), so the caller guarantees every access is in bounds, e.g.
+        // kPad=false and no speculative prefetch past the end. A constant-true flag drops
+        // the v_cmp, the exec branch and the zero-fill DS store. This is stricter than the
+        // buffer path below, where false still gets the descriptor clamp: callers written
+        // for that meaning must pass true on gfx125.
+        if constexpr(oob_conditional_check)
+            is_valid_element = is_valid_element && global_offset >= 0 && buffer_size_ >= t_per_x &&
+                               global_offset <= buffer_size_ - t_per_x;
+        else
+            is_valid_element = true;
         amd_async_global_load_to_lds<remove_cvref_t<T>, t_per_x, static_offset, true, Coherence>(
             smem, p_uniform_ptr, global_offset, is_valid_element);
         ignore = linear_offset;

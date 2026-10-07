@@ -5,7 +5,7 @@
  * AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY!
  *
  * Generated from: arch_specs.json
- * Generated at: 2026-09-16T15:00:49.741464
+ * Generated at: 2026-10-06T20:01:02.365967
  *
  * To update this file:
  * 1. Edit arch_specs.json
@@ -139,7 +139,12 @@ inline std::vector<WarpConfig> get_supported_warp_configs(GpuArch arch)
                 {1, 2, 2},
                 {4, 1, 1},
                 {1, 4, 1},
-                {2, 2, 1}};
+                {2, 2, 1},
+                {4, 4, 1},
+                {8, 2, 1},
+                {2, 8, 1},
+                {8, 4, 1},
+                {4, 8, 1}};
     default: return {};
     }
 }

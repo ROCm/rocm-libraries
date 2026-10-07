@@ -57,17 +57,20 @@ GFX1250_LDS = 320 * 1024
 # new pipeline. Pins the sweep so any config or validator drift is noticed.
 # comp_async is rcr-only on gfx1250, so the rrr rows have no comp_async. The
 # pads sweep [false, true]: comp_async keeps only all-True, TDM only all-False,
-# and the legacy pipelines keep all 8 combos.
+# and the legacy pipelines keep all 8 combos. The 4x4x1 (16-wave) grid is
+# swept by every pipeline except comp_tdm_v2, which stays 4-wave only.
+# comp_tdm sweeps only the tdm epilogue, non-persistent: the configs do not
+# set tdm_extended_traits.
 FULL_COUNTS = {
-    ("fp16", "rcr"): (27525, 384, 174, 87),
-    ("fp16", "rrr"): (27141, 0, 174, 87),
-    ("bf16", "rcr"): (27525, 384, 174, 87),
-    ("bf16", "rrr"): (27141, 0, 174, 87),
+    ("fp16", "rcr"): (32056, 406, 203, 87),
+    ("fp16", "rrr"): (31263, 0, 200, 87),
+    ("bf16", "rcr"): (32056, 406, 203, 87),
+    ("bf16", "rrr"): (31263, 0, 200, 87),
     # fp8/bf8 comp_async keeps only warp_tile_k=128 (the 16x16x64 set is gated).
-    ("fp8", "rcr"): (46908, 288, 360, 180),
-    ("fp8", "rrr"): (46620, 0, 360, 180),
-    ("bf8", "rcr"): (46908, 288, 360, 180),
-    ("bf8", "rrr"): (46620, 0, 360, 180),
+    ("fp8", "rcr"): (54696, 336, 420, 180),
+    ("fp8", "rrr"): (53715, 0, 415, 180),
+    ("bf8", "rcr"): (54696, 336, 420, 180),
+    ("bf8", "rrr"): (53715, 0, 415, 180),
 }
 
 
@@ -92,7 +95,7 @@ def _kernels(gpu_target, dtype, layout, config, cls=None):
 
 
 def setUpModule():
-    # The shared warp-tile table has no gfx1250 row and warns once per tile.
+    # The shared warp-tile table has no gfx1250 8-bit row and warns per tile.
     logging.disable(logging.WARNING)
 
 
@@ -193,9 +196,10 @@ class _ConfigLintMixin:
             name,
         )
         if pipeline in TDM_PIPELINES:
-            self.assertEqual(
-                (epilogue, scheduler, persistent), ("tdm", "intrawave", False), name
-            )
+            self.assertEqual(scheduler, "intrawave", name)
+            self.assertIn(epilogue, vu.GEMM_TDM_EPILOGUES[pipeline], name)
+            if persistent:
+                self.assertIn(pipeline, vu.GEMM_TDM_PERSISTENT_PIPELINES, name)
             self.assertEqual((pad_m, pad_n, pad_k), (False, False, False), name)
             c_bytes = t["tile_m"] * t["tile_n"] * vu.element_size(_c_dtype(dtype))
             self.assertLessEqual(c_bytes, GFX1250_LDS, name)
@@ -248,6 +252,23 @@ class TestCiConfig(_ConfigLintMixin, unittest.TestCase):
                 if layout[:2] == "rc" and dtype not in ("fp8", "bf8"):
                     expected["comp_async"] = 1
                 self.assertEqual(counts, expected, (dtype, layout))
+
+    def test_tdm_extended_traits_opt_in(self):
+        # Opting in adds exactly the comp_tdm cshuffle kernel (the CI config is
+        # non-persistent); every other kernel is unchanged.
+        cfg = json.loads(_CI_CONFIG.read_text())
+        cfg["trait_config"][vu.GEMM_TDM_EXTENDED_TRAITS_KEY] = {"values": [True]}
+        tmp = Path(tempfile.mkdtemp(prefix="gu_gfx1250_ext_"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        ext_config = tmp / "ci_ext.json"
+        ext_config.write_text(json.dumps(cfg))
+        for dtype, layout in (("fp16", "rcr"), ("fp8", "rrr")):
+            base = {k["name"] for k in self._lint(dtype, layout)}
+            ext = {k["name"] for k in _kernels("gfx1250", dtype, layout, ext_config)}
+            added = ext - base
+            self.assertTrue(base <= ext, (dtype, layout))
+            self.assertEqual(len(added), 1, added)
+            self.assertIn("_comp_tdm_cshuffle_", next(iter(added)))
 
 
 class TestFullConfig(_ConfigLintMixin, unittest.TestCase):
@@ -356,6 +377,28 @@ class TestTileEngineGolden(unittest.TestCase):
         self.assertNotIn("TdmEpilogue", code)
         self.assertIn("static constexpr bool DoubleSmemBuffer = true;", code)
         self.assertNotIn("TDM pipeline requires k_batch==1", code)
+
+    def test_transpose_c_lds_staged_epilogues(self):
+        # gfx1250 rule: RowMajor C && square warp tile, for CShuffle and TDM.
+        rule = (
+            "static constexpr bool TransposeC = std::is_same_v<CLayout, "
+            "ck_tile::tensor_layout::gemm::RowMajor> && WarpTileM == WarpTileN;"
+        )
+        for pipeline, epilogue, pad in [
+            ("compv3", "cshuffle", False),
+            ("comp_async", "cshuffle", True),
+            ("comp_tdm", "tdm", False),
+        ]:
+            _name, code = self._instance(pipeline, epilogue, pad=pad)
+            self.assertIn(rule, code, (pipeline, epilogue))
+
+    def test_transpose_c_off_for_default_epilogue_and_other_arches(self):
+        _name, code = self._instance("compv3", "default")
+        self.assertIn("static constexpr bool TransposeC = false;", code)
+        b = _builder("gfx950", "fp16", "rcr", _CI_CONFIG)
+        trait = ("compv3", "cshuffle", "intrawave", False, False, False, False)
+        _name, code = b._generate_kernel_instance(_GOLDEN_TILE, trait)
+        self.assertIn("static constexpr bool TransposeC = false;", code)
 
     def test_gen_single_cli_multi_token_pipeline(self):
         tmp = Path(tempfile.mkdtemp(prefix="gu_gfx1250_cli_"))
@@ -491,6 +534,43 @@ class TestDispatcherGolden(unittest.TestCase):
         self.assertIn("GemmPipelineAgBgCrCompAsync<", code)
         self.assertNotIn("TdmEpilogue", code)
         self.assertIn("static constexpr bool DoubleSmemBuffer = true;", code)
+
+    def test_transpose_c(self):
+        # fp16 rcr with a 16x16 warp tile: the gfx1250 TransposeC rule holds and
+        # the registry key and single-include macro agree with the kernel.
+        for marker, pads in [
+            ("_comp_tdm_tdm_", "False_False_False"),
+            ("_comp_async_", "True_True_True"),
+        ]:
+            code, wrapper = self._header(marker, pads=pads)
+            self.assertIn("static constexpr bool TransposeC = true;", code)
+            self.assertIn("#define GEMM_KEY_TRANSPOSE_C 1", code)
+            self.assertIn("key.algorithm.transpose_c = true;", wrapper)
+
+    def test_transpose_c_rule(self):
+        from unified_gemm_codegen import (
+            GemmVariant,
+            KernelConfig,
+            TileConfig,
+            TraitConfig,
+            gfx1250_transpose_c,
+        )
+
+        def cfg(epilogue="cshuffle", warp_tile_n=16, **kw):
+            tile = TileConfig(128, 128, 64, 2, 2, 1, 16, warp_tile_n, 32)
+            trait = TraitConfig("compv3", epilogue, "intrawave", False, False, False)
+            return KernelConfig(tile=tile, trait=trait, **kw)
+
+        self.assertTrue(gfx1250_transpose_c(cfg(), "rcr", "gfx1250"))
+        self.assertTrue(gfx1250_transpose_c(cfg("tdm"), "rrr", "gfx1250:xnack-"))
+        self.assertFalse(gfx1250_transpose_c(cfg(), "rcr", "gfx950"))
+        self.assertFalse(gfx1250_transpose_c(cfg(), "rcc", "gfx1250"))
+        self.assertFalse(gfx1250_transpose_c(cfg("default"), "rcr", "gfx1250"))
+        self.assertFalse(gfx1250_transpose_c(cfg(warp_tile_n=32), "rcr", "gfx1250"))
+        self.assertFalse(gfx1250_transpose_c(cfg(preshuffle=True), "rcr", "gfx1250"))
+        self.assertFalse(
+            gfx1250_transpose_c(cfg(variant=GemmVariant.MULTI_D), "rcr", "gfx1250")
+        )
 
     def test_expand_sweep_matches_tile_engine(self):
         from gemm_utils import expand_sweep

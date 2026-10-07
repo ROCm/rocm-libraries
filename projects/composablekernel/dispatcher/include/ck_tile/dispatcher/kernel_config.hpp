@@ -282,9 +282,10 @@ class KernelConfig
         // single-buffered pipeline half the LDS budget it is entitled to.
         key.algorithm.double_buffer =
             (pipeline_type == Pipeline::CompV4 || pipeline_type == Pipeline::PreShuffleV2);
-        key.algorithm.persistent      = false;
-        key.algorithm.preshuffle      = preshuffle;
-        key.algorithm.transpose_c     = false;
+        key.algorithm.persistent  = false;
+        key.algorithm.preshuffle  = preshuffle;
+        key.algorithm.transpose_c = universal_gemm_transpose_c(
+            gfx_arch, layout_c, warp_m, warp_n, epilogue_type, preshuffle, 0);
         key.algorithm.num_wave_groups = 1;
 
         key.gfx_arch = gfx_arch;

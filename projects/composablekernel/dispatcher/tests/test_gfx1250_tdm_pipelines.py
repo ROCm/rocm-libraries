@@ -36,7 +36,10 @@ from arch_specs_generated import get_lds_limit  # noqa: E402
 from codegen_common import (  # noqa: E402
     CommonTypeMappings,
     GFX1250_COMP_ASYNC_PAD_REJECT_REASON,
+    TDM_EXTENDED_TRAITS_KEY,
     gfx1250_comp_async_8bit_warp_tile_k_rejected,
+    tdm_extended_traits_enabled,
+    tdm_sweep_skip_reason,
 )
 
 TE_GEMM_DIR = DISPATCHER_DIR.parent / "tile_engine" / "ops" / "gemm"
@@ -86,8 +89,15 @@ class TestArchFilter(unittest.TestCase):
 
     def test_tdm_pipeline_epilogue_pairing(self):
         self.assertFalse(self._valid("gfx1250", pipeline="compv3", epilogue="tdm"))
-        self.assertFalse(
+        # comp_tdm (V1) also takes cshuffle; comp_tdm_v2 is tdm-only.
+        self.assertTrue(
             self._valid("gfx1250", pipeline="comp_tdm", epilogue="cshuffle")
+        )
+        self.assertFalse(
+            self._valid("gfx1250", pipeline="comp_tdm_v2", epilogue="cshuffle")
+        )
+        self.assertFalse(
+            self._valid("gfx950", pipeline="comp_tdm", epilogue="cshuffle")
         )
 
     def test_tdm_rejects_interwave(self):
@@ -206,12 +216,23 @@ class TestArchFilterGfx1250Rejects(unittest.TestCase):
             )
 
     def test_tdm_scheduler_and_epilogue(self):
+        for pipe, epi in (
+            ("comp_tdm", "default"),
+            ("comp_tdm_v2", "cshuffle"),
+            ("comp_tdm_v2", "default"),
+        ):
+            self.assertFalse(self._valid(pipeline=pipe, epilogue=epi), (pipe, epi))
+        self.assertTrue(self._valid(pipeline="comp_tdm", epilogue="cshuffle"))
         for pipe in ("comp_tdm", "comp_tdm_v2"):
-            for epi in ("cshuffle", "default"):
-                self.assertFalse(self._valid(pipeline=pipe, epilogue=epi), (pipe, epi))
-            self.assertFalse(
-                self._valid(pipeline=pipe, epilogue="tdm", scheduler="interwave")
-            )
+            for epi in ("tdm", "cshuffle"):
+                self.assertFalse(
+                    self._valid(pipeline=pipe, epilogue=epi, scheduler="interwave"),
+                    (pipe, epi),
+                )
+        pad_m_only = dict(self.PADS_FFF, pad_m=True)
+        self.assertFalse(
+            self._valid(pipeline="comp_tdm", epilogue="cshuffle", **pad_m_only)
+        )
         # The tdm epilogue needs a TDM pipeline on every arch.
         for arch in ("gfx950", "gfx1250"):
             for pipe in ("comp_async", "compv3", "compv4", "mem"):
@@ -475,22 +496,30 @@ class TestUnifiedCodegenGolden(unittest.TestCase):
         cls.tmp = Path(tempfile.mkdtemp(prefix="tdm_codegen_"))
         cls.cfg = cls.tmp / "cfg.json"
         cls.cfg.write_text(json.dumps(cls.CONFIG))
+        # Same sweep, opted into the cshuffle / persistent comp_tdm kernels.
+        ext = json.loads(json.dumps(cls.CONFIG))
+        ext["trait_config"]["tdm_extended_traits"] = [True]
+        cls.cfg_ext = cls.tmp / "cfg_ext.json"
+        cls.cfg_ext.write_text(json.dumps(ext))
 
     @classmethod
     def tearDownClass(cls):
         shutil.rmtree(cls.tmp, ignore_errors=True)
 
-    def _gen(self, arch, variant, layout="rcr"):
-        out = self.tmp / f"{arch}_{variant}_{layout}"
-        return out, _run_codegen(out, arch, variant, self.cfg, layout)
+    def _gen(self, arch, variant, layout="rcr", extended=False):
+        out = self.tmp / f"{arch}_{variant}_{layout}{'_ext' if extended else ''}"
+        cfg = self.cfg_ext if extended else self.cfg
+        return out, _run_codegen(out, arch, variant, cfg, layout)
 
     def test_gfx1250_standard_kernel_set(self):
         out, names = self._gen("gfx1250", "standard")
         tdm = [n for n in names if "_comp_tdm_tdm_" in n]
         tdm_v2 = [n for n in names if "_comp_tdm_v2_tdm_" in n]
         async_ = [n for n in names if "_comp_async_" in n]
-        # comp_tdm: 2 wave layouts, non-persistent, unpadded only.
+        # comp_tdm: 2 wave layouts, non-persistent, unpadded only. The sweep
+        # lists cshuffle and persistent, but did not opt into them for TDM.
         self.assertEqual(len(tdm), 2)
+        self.assertFalse(any("_comp_tdm_cshuffle_" in n for n in names))
         # comp_tdm_v2: 4 waves only.
         self.assertEqual(len(tdm_v2), 1)
         self.assertIn("2x2x1", tdm_v2[0])
@@ -504,6 +533,25 @@ class TestUnifiedCodegenGolden(unittest.TestCase):
         self.assertFalse(
             any("_compv3_tdm_" in n or "_comp_async_tdm_" in n for n in names)
         )
+
+    def test_gfx1250_extended_tdm_kernel_set(self):
+        _, base = self._gen("gfx1250", "standard")
+        _, names = self._gen("gfx1250", "standard", extended=True)
+        tdm = [n for n in names if "_comp_tdm_tdm_" in n]
+        tdm_cs = [n for n in names if "_comp_tdm_cshuffle_" in n]
+        # comp_tdm: 2 wave layouts x persistent on/off, unpadded only, for
+        # each of the tdm and cshuffle epilogues.
+        self.assertEqual(len(tdm), 4)
+        self.assertEqual(len(tdm_cs), 4)
+        for n in tdm + tdm_cs:
+            self.assertIn("_intrawave_False_False_False_", n)
+        self.assertEqual(sum("_False_False_False_True_" in n for n in tdm), 2)
+        self.assertEqual(sum("_False_False_False_True_" in n for n in tdm_cs), 2)
+        # comp_tdm_v2 stays tdm-only and non-persistent; the opt-in only adds
+        # the 6 comp_tdm kernels.
+        self.assertEqual(sum("_comp_tdm_v2_" in n for n in names), 1)
+        self.assertTrue(set(base) <= set(names))
+        self.assertEqual(len(names) - len(base), 6)
 
     def test_gfx1250_tdm_header_contents(self):
         out, names = self._gen("gfx1250", "standard")
@@ -522,6 +570,28 @@ class TestUnifiedCodegenGolden(unittest.TestCase):
         self.assertIn("Pipeline::CompTDMV1", wrapper)
         self.assertIn("Epilogue::Tdm", wrapper)
         self.assertIn("key.algorithm.double_buffer = true;", wrapper)
+
+    def test_gfx1250_tdm_cshuffle_persistent_header_contents(self):
+        out, names = self._gen("gfx1250", "standard", extended=True)
+        name = next(
+            n
+            for n in names
+            if "_comp_tdm_cshuffle_intrawave_False_False_False_True_" in n
+            and "2x2x1" in n
+        )
+        text = (out / name).read_text()
+        self.assertIn("GemmPipelineAgBgCrCompTDMV1<", text)
+        self.assertIn("CShuffleEpilogue<", text)
+        self.assertNotIn("TdmEpilogue<", text)
+        self.assertIn("static constexpr bool UsePersistentKernel = true;", text)
+        self.assertIn("GemmKernel::MaxOccupancyGridSize(stream)", text)
+        self.assertIn("args.k_batch != 1", text)
+        wrapper = (
+            out / "dispatcher_wrappers" / f"dispatcher_wrapper_{name}"
+        ).read_text()
+        self.assertIn("Pipeline::CompTDMV1", wrapper)
+        self.assertNotIn("Epilogue::Tdm", wrapper)
+        self.assertIn("key.algorithm.persistent = true;", wrapper)
 
     def test_gfx1250_compv3_header_has_no_tdm(self):
         out, names = self._gen("gfx1250", "standard")
@@ -656,8 +726,14 @@ class TestGemmUtilsSweepGate(unittest.TestCase):
         self.assertTrue(self._ok("comp_tdm", "tdm", variant="batched"))
         self.assertTrue(self._ok("comp_tdm_v2", "tdm"))
         self.assertFalse(self._ok("comp_tdm", "tdm", arch="gfx950"))
-        self.assertFalse(self._ok("comp_tdm", "cshuffle"))
-        self.assertFalse(self._ok("comp_tdm", "tdm", persist=True))
+        self.assertTrue(self._ok("comp_tdm", "cshuffle"))
+        self.assertTrue(self._ok("comp_tdm", "cshuffle", variant="batched"))
+        self.assertTrue(self._ok("comp_tdm", "tdm", persist=True))
+        self.assertTrue(self._ok("comp_tdm", "cshuffle", persist=True))
+        self.assertFalse(self._ok("comp_tdm", "default"))
+        self.assertFalse(self._ok("comp_tdm", "cshuffle", arch="gfx950"))
+        self.assertFalse(self._ok("comp_tdm_v2", "cshuffle"))
+        self.assertFalse(self._ok("comp_tdm_v2", "tdm", persist=True))
         self.assertFalse(self._ok("comp_tdm", "tdm", sched="interwave"))
         for variant in ("multi_d", "grouped", "multi_abd", "stream_k"):
             self.assertFalse(self._ok("comp_tdm", "tdm", variant=variant), variant)
@@ -801,6 +877,110 @@ class TestCppEnums(unittest.TestCase):
             self.assertEqual(build.returncode, 0, build.stderr)
             run = subprocess.run([str(exe)], capture_output=True, text=True)
             self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+
+
+class TestTdmExtendedTraitsOptIn(unittest.TestCase):
+    """comp_tdm cshuffle / persistent are legal, but sweeps opt into them."""
+
+    def test_enabled_forms(self):
+        self.assertFalse(tdm_extended_traits_enabled(None))
+        self.assertFalse(tdm_extended_traits_enabled({}))
+        self.assertFalse(
+            tdm_extended_traits_enabled({TDM_EXTENDED_TRAITS_KEY: [False]})
+        )
+        self.assertTrue(tdm_extended_traits_enabled({TDM_EXTENDED_TRAITS_KEY: [True]}))
+        self.assertTrue(
+            tdm_extended_traits_enabled({TDM_EXTENDED_TRAITS_KEY: {"values": ["true"]}})
+        )
+
+    def test_sweep_skip_reason(self):
+        self.assertEqual(tdm_sweep_skip_reason("comp_tdm", "tdm", False), "")
+        self.assertEqual(tdm_sweep_skip_reason("compv3", "cshuffle", True), "")
+        self.assertIn(
+            TDM_EXTENDED_TRAITS_KEY, tdm_sweep_skip_reason("comp_tdm", "cshuffle")
+        )
+        self.assertTrue(tdm_sweep_skip_reason("comp_tdm", "tdm", True))
+        self.assertTrue(tdm_sweep_skip_reason("comp_tdm_v2", "tdm", "true"))
+        self.assertEqual(tdm_sweep_skip_reason("comp_tdm", "cshuffle", True, True), "")
+
+    def test_matches_tile_engine(self):
+        if te is None:
+            self.skipTest("gemm_validation_utils not importable")
+        self.assertEqual(TDM_EXTENDED_TRAITS_KEY, te.GEMM_TDM_EXTENDED_TRAITS_KEY)
+        for pipe in ("compv3", "comp_tdm", "comp_tdm_v2"):
+            for epi in ("tdm", "cshuffle"):
+                for persist in (False, True):
+                    for ext in (False, True):
+                        self.assertEqual(
+                            bool(tdm_sweep_skip_reason(pipe, epi, persist, ext)),
+                            bool(te.tdm_sweep_skip_reason(pipe, epi, persist, ext)),
+                            (pipe, epi, persist, ext),
+                        )
+
+    def test_single_config_opts_in(self):
+        try:
+            import gemm_utils
+        except Exception as exc:  # pragma: no cover - environment dependent
+            self.skipTest(f"gemm_utils not importable: {exc}")
+
+        def trait_config(**kw):
+            cfg = gemm_utils.GemmKernelConfig(gfx_arch="gfx1250", **kw)
+            return cfg.to_codegen_json()["trait_config"]
+
+        ext = trait_config(pipeline="comp_tdm", epilogue="cshuffle", persistent=True)
+        self.assertEqual(ext[TDM_EXTENDED_TRAITS_KEY], [True])
+        for kw in (
+            dict(pipeline="comp_tdm", epilogue="tdm"),
+            dict(pipeline="compv3", epilogue="cshuffle", persistent=True),
+        ):
+            self.assertNotIn(TDM_EXTENDED_TRAITS_KEY, trait_config(**kw), kw)
+
+    def test_expand_sweep_opt_in(self):
+        try:
+            import gemm_utils
+        except Exception as exc:  # pragma: no cover - environment dependent
+            self.skipTest(f"gemm_utils not importable: {exc}")
+        cfg = {
+            "tile_config": {
+                k: {"values": [v]}
+                for k, v in dict(
+                    tile_m=128,
+                    tile_n=128,
+                    tile_k=64,
+                    warp_m=2,
+                    warp_n=2,
+                    warp_k=1,
+                    warp_tile_m=16,
+                    warp_tile_n=16,
+                    warp_tile_k=32,
+                ).items()
+            },
+            "trait_config": {
+                "pipeline": {"values": ["comp_tdm"]},
+                "epilogue": {"values": ["tdm", "cshuffle"]},
+                "scheduler": {"values": ["intrawave"]},
+                "persistent": {"values": [False, True]},
+            },
+        }
+        tmp = Path(tempfile.mkdtemp(prefix="tdm_sweep_"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+
+        def combos(extended):
+            c = json.loads(json.dumps(cfg))
+            if extended:
+                c["trait_config"][TDM_EXTENDED_TRAITS_KEY] = {"values": [True]}
+            path = tmp / f"cfg_{extended}.json"
+            path.write_text(json.dumps(c))
+            return {
+                (k.epilogue, k.persistent)
+                for k in gemm_utils.expand_sweep(str(path), arch="gfx1250")
+            }
+
+        self.assertEqual(combos(False), {("tdm", False)})
+        self.assertEqual(
+            combos(True),
+            {(e, p) for e in ("tdm", "cshuffle") for p in (False, True)},
+        )
 
 
 if __name__ == "__main__":

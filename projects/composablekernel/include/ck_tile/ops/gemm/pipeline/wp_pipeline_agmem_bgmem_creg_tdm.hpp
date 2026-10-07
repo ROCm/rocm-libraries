@@ -6,6 +6,7 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/core/utility/data_cache_prefetch.hpp"
 #include "ck_tile/host/concat.hpp"
+#include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_tdm_default_policy.hpp"
 #include "ck_tile/ops/gemm/pipeline/wp_pipeline_agmem_bgmem_creg_tdm_policy.hpp"
 
 namespace ck_tile {
@@ -17,6 +18,10 @@ struct BaseWeightPreshufflePipelineAGmemBGmemCRegTDM
     static constexpr index_t PrefillStages    = 1;
     static constexpr index_t GlobalBufferNum  = 1;
     static constexpr bool UsePersistentKernel = Problem::Traits::UsePersistentKernel;
+
+    // TDM loads complete on TENSORcnt. A persistent kernel must retire them (and any TDM epilogue
+    // stores) before the next tile reuses the LDS they target.
+    static constexpr bool UsesTensorCnt = true;
 
     CK_TILE_HOST_DEVICE static constexpr auto TransposeC() { return Problem::TransposeC; }
 
@@ -125,6 +130,10 @@ struct WeightPreshufflePipelineAGmemBGmemCRegTDM
     static constexpr index_t KIterPerWarp = kKPerBlock / BlockGemmShape::WarpTile::at(I2);
 
     static constexpr bool UseClusterLaunch = PipelinePolicy::template isClusterLaunch<Problem>();
+
+    static_assert(
+        !detail::use_split_barrier_or_default<PipelinePolicy>::value,
+        "split barrier (UseSplitBarrier) is only implemented by GemmPipelineAgBgCrCompTDMV1");
 
     // DsReadPreload and m_preload is the same as block_wp_asmem_breg_creg.hpp's logic
     static constexpr index_t DsReadPreload = 2; // default 2, preload 2 ds read

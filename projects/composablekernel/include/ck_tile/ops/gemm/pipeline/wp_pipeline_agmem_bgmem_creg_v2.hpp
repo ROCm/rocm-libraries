@@ -686,7 +686,15 @@ struct WeightPreshufflePipelineAGmemBGmemCRegV2
                     {
                         // global -> lds
                         constexpr auto NEG1 = number<-1>{};
-                        async_load_tile(lds_tile_a, dram_tile_a, NEG1, false_type{}, true_type{});
+#if defined(__gfx125__)
+                        // No buffer descriptor clamps gfx125 global-to-LDS loads; keep the
+                        // range check and zero-fill for the prefetch past the last K tile.
+                        constexpr auto oob_conditional_check = true_type{};
+#else
+                        constexpr auto oob_conditional_check = false_type{};
+#endif
+                        async_load_tile(
+                            lds_tile_a, dram_tile_a, NEG1, oob_conditional_check, true_type{});
                         move_tile_window(dram_tile_a, window_step_a);
                     }
                     else

@@ -236,6 +236,21 @@ struct GemmConfigTDMV1Prefetch : public GemmConfigBase
     static constexpr ck_tile::index_t kClusterSizeN = kClusterSizeN_;
 };
 
+// TDM V1 GEMM Configuration with CShuffleEpilogue instead of TdmEpilogue
+template <typename PrecType,
+          ck_tile::DataCachePrefetchKind DataCachePrefetchA_ = ck_tile::DataCachePrefetchKind::L2,
+          ck_tile::DataCachePrefetchKind DataCachePrefetchB_ = DataCachePrefetchA_,
+          ck_tile::index_t kClusterSizeM_                    = 1,
+          ck_tile::index_t kClusterSizeN_                    = 1>
+struct GemmConfigTDMV1CShufflePrefetch : public GemmConfigTDMV1Prefetch<PrecType,
+                                                                        DataCachePrefetchA_,
+                                                                        DataCachePrefetchB_,
+                                                                        kClusterSizeM_,
+                                                                        kClusterSizeN_>
+{
+    static constexpr bool UseCShuffleEpilogue = true;
+};
+
 // TDM V2 GEMM Configuration with Data Cache Prefetch control
 template <typename PrecType,
           ck_tile::DataCachePrefetchKind DataCachePrefetchA_ = ck_tile::DataCachePrefetchKind::L2,
@@ -276,9 +291,22 @@ int run_gemm_example(ck_tile::ArgParser& arg_parser)
     const std::string pipeline = arg_parser.get_str("pipeline");
     const bool use_cluster_2x2 = arg_parser.get_int("use_cluster_2x2") == 1;
     const bool is_v2           = (pipeline == "v2");
+    const std::string epilogue = arg_parser.get_str("epilogue");
 
     if(!is_v2 && pipeline != "v1")
         std::cerr << "Unknown pipeline '" << pipeline << "', defaulting to v1." << std::endl;
+
+    if(epilogue == "cshuffle")
+    {
+        if(is_v2)
+            throw std::runtime_error("The cshuffle epilogue requires the v1 pipeline.");
+        if(use_cluster_2x2)
+            throw std::runtime_error(
+                "The cshuffle epilogue supports single-workgroup launch only.");
+        return run_gemm_example_with_prefetch<GemmConfigTDMV1CShufflePrefetch, 1, 1>(arg_parser);
+    }
+    if(epilogue != "tdm")
+        throw std::runtime_error("Unknown epilogue '" + epilogue + "', expected tdm or cshuffle.");
 
     if(is_v2)
     {
@@ -303,6 +331,9 @@ int main(int argc, char* argv[])
         "pipeline",
         "v1",
         "TDM pipeline version to use: v1 (8 waves) or v2 (4 waves, wave-specialized)");
+    arg_parser.insert("epilogue",
+                      "tdm",
+                      "tdm: TdmEpilogue, cshuffle: CShuffleEpilogue (v1 pipeline, no cluster)");
     arg_parser.insert("use_cluster_2x2",
                       "0",
                       "0: single workgroup, 1: enable 2x2 cluster launch for TDM multicast");

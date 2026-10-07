@@ -591,6 +591,12 @@ class GemmKernelConfig:
             # other variants, which ignore it.
             "permute_n": self.permute_n,
         }
+        # A single config is an explicit request, so it opts into the extended
+        # TDM traits (cshuffle / persistent comp_tdm) the codegen leaves out of
+        # sweeps. Only emitted when needed, so other configs are unchanged.
+        common = _codegen_common()
+        if common.tdm_sweep_skip_reason(self.pipeline, self.epilogue, self.persistent):
+            cfg["trait_config"][common.TDM_EXTENDED_TRAITS_KEY] = [True]
         # Pin the single reduction strategy so stream-K codegen emits exactly this
         # kernel (the generator otherwise expands all strategies in its default).
         if self.variant == "stream_k":
@@ -2438,7 +2444,7 @@ _WARP_SUPPORTED_COMBINATIONS_FALLBACK = {
     "gfx90a": [[1, 4, 1], [2, 2, 1], [4, 1, 1]],
     "gfx942": [[1, 4, 1], [2, 2, 1], [4, 1, 1]],
     "gfx950": [[1, 4, 1], [2, 2, 1], [4, 1, 1]],
-    "gfx1250": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1], [2, 1, 1], [1, 2, 2], [4, 1, 1], [1, 4, 1], [2, 2, 1]],
+    "gfx1250": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1], [2, 1, 1], [1, 2, 2], [4, 1, 1], [1, 4, 1], [2, 2, 1], [4, 4, 1], [8, 2, 1], [2, 8, 1], [8, 4, 1], [4, 8, 1]],
     "gfx1201": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1]],
 }
 
@@ -2616,6 +2622,9 @@ def expand_sweep(
     pad_ns = _expand_values(tr.get("pad_n"), [False])
     pad_ks = _expand_values(tr.get("pad_k"), [False])
     persistents = _expand_values(tr.get("persistent"), [False])
+    # TDM cshuffle / persistent kernels are opt-in for sweeps, as in the codegen
+    # (codegen_common.TDM_EXTENDED_TRAITS_KEY).
+    tdm_extended = _codegen_common().tdm_extended_traits_enabled(tr)
     if vector_sizes is None:
         vector_sizes = list(
             itertools.product(
@@ -2797,6 +2806,10 @@ def expand_sweep(
             and pipe == "compv3"
             and sched == "intrawave"
             and wm * wn == 8
+        ):
+            continue
+        if _codegen_common().tdm_sweep_skip_reason(
+            pipe, epi, bool(persist), tdm_extended
         ):
             continue
         if not _gfx1250_pipeline_supported(

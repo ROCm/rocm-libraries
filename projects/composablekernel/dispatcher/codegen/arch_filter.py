@@ -792,7 +792,8 @@ class ArchFilter:
         single source of truth shared with unified_gemm_codegen and
         python/gemm_utils: TDM pipelines are gfx1250-only (off gfx1250 the TDM
         instructions compile to no-ops and the kernel silently writes zeros),
-        need the TDM epilogue (and vice versa), intrawave, unpadded tiles and,
+        need the TDM epilogue (comp_tdm also takes cshuffle) and the TDM
+        epilogue needs a TDM pipeline, intrawave, unpadded tiles and,
         for comp_tdm_v2, exactly four waves; only the plain GEMM operator can
         use them. Non-MX comp_async GEMM on gfx1250 needs the cshuffle
         epilogue, an rc A/B layout, pad_m=pad_n=pad_k=True and, for fp8/bf8,
@@ -801,7 +802,7 @@ class ArchFilter:
         comp_async is only gated for the GEMM operator on gfx1250: other
         operators (e.g. grouped convolution) and architectures use it under
         their own rules. Pad rules are skipped while the pads are unknown
-        (None). KernelConfig has no persistent field, so the TDM
+        (None). KernelConfig has no persistent field, so the comp_tdm_v2
         "no persistent kernel" rule is enforced only by the codegen and
         python/gemm_utils, which see the persistent trait.
         """

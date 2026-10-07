@@ -3,6 +3,7 @@
 
 /// Unit tests for KernelKey using Google Test
 
+#include "ck_tile/dispatcher/kernel_config.hpp"
 #include "ck_tile/dispatcher/kernel_key.hpp"
 #include "test_mock_kernel.hpp"
 #include <gtest/gtest.h>
@@ -175,6 +176,31 @@ TEST(KernelKeyTest, VectorWidthsDivide)
     native.signature.layout_c = LayoutTag::ColMajor;
     EXPECT_TRUE(vector_widths_divide(native, 260, 264, 257, 4, 8, 4));
     EXPECT_FALSE(vector_widths_divide(native, 258, 264, 257, 4, 8, 4));
+}
+
+TEST(KernelKeyTest, UniversalGemmTransposeC)
+{
+    // Same cases as test_transpose_c_rule (unified_gemm_codegen.gfx1250_transpose_c).
+    const auto R = LayoutTag::RowMajor;
+    const auto C = LayoutTag::ColMajor;
+    EXPECT_TRUE(universal_gemm_transpose_c("gfx1250", R, 16, 16, Epilogue::CShuffle, false, 0));
+    EXPECT_TRUE(universal_gemm_transpose_c("gfx1250:xnack-", R, 16, 16, Epilogue::Tdm, false, 0));
+    EXPECT_FALSE(universal_gemm_transpose_c("gfx950", R, 16, 16, Epilogue::CShuffle, false, 0));
+    EXPECT_FALSE(universal_gemm_transpose_c("gfx1250", C, 16, 16, Epilogue::CShuffle, false, 0));
+    EXPECT_FALSE(universal_gemm_transpose_c("gfx1250", R, 16, 16, Epilogue::Default, false, 0));
+    EXPECT_FALSE(universal_gemm_transpose_c("gfx1250", R, 16, 32, Epilogue::CShuffle, false, 0));
+    EXPECT_FALSE(universal_gemm_transpose_c("gfx1250", R, 16, 16, Epilogue::CShuffle, true, 0));
+    EXPECT_FALSE(universal_gemm_transpose_c("gfx1250", R, 16, 16, Epilogue::CShuffle, false, 1));
+
+    // KernelConfig::build_key() reports the TransposeC the codegen registers under.
+    KernelConfig cfg;
+    EXPECT_FALSE(cfg.build_key().algorithm.transpose_c); // gfx942 default
+    cfg.gfx_arch = "gfx1250";
+    cfg.warp_m   = 16;
+    cfg.warp_n   = 16;
+    EXPECT_TRUE(cfg.build_key().algorithm.transpose_c);
+    cfg.layout_c = C;
+    EXPECT_FALSE(cfg.build_key().algorithm.transpose_c);
 }
 
 TEST(KernelKeyTest, EncodeIdentifierWithSparsity)

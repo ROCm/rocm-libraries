@@ -307,6 +307,11 @@ The system uses JSON configuration files to specify kernel parameters:
 }
 ```
 
+On gfx1250 the TDM pipelines (`comp_tdm`, `comp_tdm_v2`) are swept with the
+`tdm` epilogue, non-persistent. Add `"tdm_extended_traits": {"values": [true]}`
+to `trait_config` to also sweep `comp_tdm` with the `cshuffle` epilogue and the
+persistent kernel; those combinations have not been run on hardware yet.
+
 ## Scripts and Tools
 
 ### Python Scripts
@@ -375,6 +380,51 @@ python test_validation.py
 - Template processing
 - Code formatting utilities
 - File generation helpers
+
+#### compile_one.py and isa_report.py (compile-only ISA report)
+**Purpose**: Inspect the code generated for one kernel instance without a GPU
+or a CMake build tree, e.g. for gfx1250 before hardware is available.
+
+- `compile_one.py` compiles one `gemm_universal` instance (an existing
+  single-instance header, or one generated with the instance builder's
+  `--gen_single`) with the device-relevant definitions and `-mllvm` options of
+  the CMake benchmark target, keeps the ISA (`-save-temps`) and the
+  `-Rpass-analysis=kernel-resource-usage` remarks, and runs `isa_report.py`.
+  It only runs the device pass unless `--full` is given. The ROCm root comes
+  from `--rocm-path` (default `$ROCM_PATH`, then `/opt/rocm`) and the CK tree
+  from `--ck-root` (default: the tree the script lives in).
+- `isa_report.py` reads a `.s` file or a code object (`llvm-readelf --notes`
+  / `llvm-objdump -d`) and reports per kernel: VGPR/AGPR/SGPR counts, spills,
+  private and group segment sizes, LDS use against the target capacity,
+  occupancy (with `--remarks`), the `s_set_vgpr_msb` count, the instruction
+  mix of every natural loop (exact `v_wmma`/`v_mfma`, `ds_load_*`,
+  `ds_store_*`, `tensor_load_to_lds`, `global_load_async_to_lds_*` and
+  `scratch_*` opcodes, every `s_wait_*` immediate, barriers), the hot loop
+  normalised per K tile (with `--tile`), the prologue length and the epilogue
+  store widths. `--json` gives machine-readable output, `--ref` diffs against
+  a second input (e.g. a reference code object) and `--check` exits 1 on
+  spills or LDS overflow.
+
+The counts are static: every path of a loop body is counted once, whether or
+not it executes on a given iteration.
+
+**Usage**:
+```bash
+cd tile_engine/ops/gemm
+
+# Generate, compile and report one gfx1250 instance (about 30-60 s).
+python3 compile_one.py --rocm-path /opt/rocm --arch gfx1250 \
+    --datatype bf16 --layout rcr --tile-config 256x256x64_2x4x1_16x16x32 \
+    --trait-combo comp_tdm_tdm_intrawave_False_False_False_False \
+    --out-dir /tmp/te_isa
+
+# Report on an existing ISA dump or code object.
+python3 isa_report.py /tmp/te_isa/*-gfx1250.s --kernel GemmKernel \
+    --remarks /tmp/te_isa/build.log --tile 256x256x64_2x4x1_16x16x32
+
+# CPU unit tests (checked-in fixture, no compiler needed).
+python3 -m pytest test_isa_report.py -v
+```
 
 ### Shell Scripts
 

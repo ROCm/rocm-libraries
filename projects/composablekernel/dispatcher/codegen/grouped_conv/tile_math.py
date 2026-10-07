@@ -31,6 +31,7 @@ from arch_specs_generated import (
     WARP_TILE_SUPPORTED_COMBINATIONS,  # [warp_m, warp_n, warp_k] per arch+dtype
     ELEMENT_SIZE_MAP,                  # bytes per element per dtype string
 )
+from codegen_common import grouped_conv_wave_configs
 
 # Warp size on AMD GPUs
 WARP_SIZE = 64
@@ -136,8 +137,10 @@ def get_valid_wave_warp_pairs(
         List of ((wave_m, wave_n, wave_k), (warp_tile_m, warp_tile_n, warp_tile_k)) tuples.
         Each pair is structurally valid for the given arch and pipeline.
     """
+    # The GEMM-only grids (codegen_common.GEMM_ONLY_WAVE_CONFIGS) are dropped.
+    arch_wave_combos = WARP_SUPPORTED_COMBINATIONS.get(arch, [])
     supported_wave_combos: Set[Tuple[int, int, int]] = {
-        tuple(c) for c in WARP_SUPPORTED_COMBINATIONS.get(arch, [])
+        tuple(c) for c in grouped_conv_wave_configs(arch, arch_wave_combos)
     }
     warp_tile_shapes: List[List[int]] = (
         WARP_TILE_SUPPORTED_COMBINATIONS

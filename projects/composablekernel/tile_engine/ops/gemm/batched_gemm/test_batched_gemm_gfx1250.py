@@ -43,6 +43,11 @@ _GFX1250_WARP_LAYOUTS = {
     (4, 1, 1),
     (1, 4, 1),
     (2, 2, 1),
+    (4, 4, 1),
+    (8, 2, 1),
+    (2, 8, 1),
+    (8, 4, 1),
+    (4, 8, 1),
 }
 
 
@@ -155,7 +160,9 @@ class TestGfx1250Configs(unittest.TestCase):
                 k["name"],
             )
             if pipe in _TDM_PIPELINES:
-                self.assertEqual((epi, sched), ("tdm", "intrawave"), k["name"])
+                self.assertEqual(sched, "intrawave", k["name"])
+                self.assertIn(epi, vu.GEMM_TDM_EPILOGUES[pipe], k["name"])
+                self.assertFalse(persistent, k["name"])
                 self.assertEqual((pad_m, pad_n, pad_k), (False,) * 3, k["name"])
             if pipe == "comp_async":
                 self.assertEqual((epi, sched), ("cshuffle", "intrawave"), k["name"])
