@@ -837,6 +837,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     std::map<int, int> crossBBDsResiduals_;
 
     void advanceTime(int cycles);
+    void advanceIssueCycles(int issueCycles);
     int computeValuAdvanceCycles(int issueCycles) const;
     void updateWMMAStatus(DAGNode* node);
     void stampDataReady(const StinkyInstruction& inst, int extraDelay = 0);
@@ -1108,6 +1109,22 @@ int CDNA5ReadyQueue::freeCoIssueSpace() const {
     return activeWmmaLatency_ - coIssueCyclePos_;
 }
 
+// The wave needs \p issueCycles of issue time. Queued windows are concatenated, so a blocked
+// (LD_SCALE) cycle can lie inside the span: each one stalls the wave for a cycle on top. Only
+// issue work goes through here; spans that are already elapsed time (a wait, the distance to a
+// window end, computeValuAdvanceCycles) use advanceTime directly or they would be charged twice.
+void CDNA5ReadyQueue::advanceIssueCycles(int issueCycles) {
+    if (wmmaQueueCover() > 0) {
+        int landing = coIssueCyclePos_;
+        for (int c = 0; c < issueCycles; ++c) {
+            while (isBlockedCycle(landing)) ++landing;
+            ++landing;
+        }
+        issueCycles = landing - coIssueCyclePos_;
+    }
+    advanceTime(issueCycles);
+}
+
 // Advance the co-issue timeline and the elapse-time clock, and decay the RAW
 // data-ready counters by \p cycles.
 void CDNA5ReadyQueue::advanceTime(int cycles) {
@@ -1116,15 +1133,6 @@ void CDNA5ReadyQueue::advanceTime(int cycles) {
     // there. Roll on to the next issuable cycle instead; the skipped cycles still
     // elapse, the hardware is just spending them itself.
     int landing = coIssueCyclePos_ + cycles;
-    if (wmmaQueueCover() > 0) {
-        // Queued windows are concatenated, so a blocked cycle can lie inside the span: each
-        // one the advance crosses stalls the wave for a cycle.
-        landing = coIssueCyclePos_;
-        for (int c = 0; c < cycles; ++c) {
-            while (isBlockedCycle(landing)) ++landing;
-            ++landing;
-        }
-    }
     while (isBlockedCycle(landing)) ++landing;
     cycles = landing - coIssueCyclePos_;
     coIssueCyclePos_ += cycles;
@@ -1176,14 +1184,21 @@ int CDNA5ReadyQueue::computeValuAdvanceCycles(int issueCycles) const {
 // result latency (latencyCycles); VALU/transcendentals use co-issue-aware issue
 // progress; others use issueCycles.
 void CDNA5ReadyQueue::updateWMMAStatus(DAGNode* node) {
-    int elapsedCycles = node->inst->issueCycles;
-    if (isBarrier(*node->inst))
-        elapsedCycles = node->inst->latencyCycles;
-    else if (isVectorALU(*node->inst) || isTranscendental(*node->inst))
-        elapsedCycles = computeValuAdvanceCycles(node->inst->issueCycles);
-    else if (isDSRead(*node->inst))
-        elapsedCycles = dsIssueCost(*node->inst);
-    advanceTime(elapsedCycles);
+    int cycles = node->inst->issueCycles;
+    bool isIssueTime = true;  // false: already elapsed time
+    if (isBarrier(*node->inst)) {
+        cycles = node->inst->latencyCycles;
+        isIssueTime = false;
+    } else if (isVectorALU(*node->inst) || isTranscendental(*node->inst)) {
+        cycles = computeValuAdvanceCycles(node->inst->issueCycles);  // skips blocked slots
+        isIssueTime = false;
+    } else if (isDSRead(*node->inst)) {
+        cycles = dsIssueCost(*node->inst);
+    }
+    if (isIssueTime)
+        advanceIssueCycles(cycles);
+    else
+        advanceTime(cycles);
 }
 
 // True if VALU can be picked in the current co-issue timeline position.
@@ -1559,7 +1574,7 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     // Advance by WMMA issue cycles after opening a new timeline window.
     // This keeps coIssueCyclePos_ aligned with elapsed cycles right after WMMA
     // issue.
-    advanceTime(node->inst->issueCycles);
+    advanceIssueCycles(node->inst->issueCycles);
     wmmaIssueConfig.issuedCount--;
 
     if (deferHeadBalanceThisRegion_) deferFirstHeadWmmaActive_ = false;

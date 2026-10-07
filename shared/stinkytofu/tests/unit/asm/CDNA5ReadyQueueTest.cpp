@@ -144,6 +144,9 @@ struct CDNA5ReadyQueueTestPeer {
     static void advance(CDNA5ReadyQueue& q, int cycles) {
         q.advanceTime(cycles);
     }
+    static void advanceIssue(CDNA5ReadyQueue& q, int cycles) {
+        q.advanceIssueCycles(cycles);
+    }
     static void carry(CDNA5ReadyQueue& q) {
         q.carryQueuedWar();
     }
@@ -325,18 +328,28 @@ TEST_F(CDNA5ReadyQueueTest, MixedDrainCapUsesMaxDrainInBurst) {
 }
 
 // Queued windows are concatenated, so a blocked (LD_SCALE) cycle can lie inside an advance. At
-// position 14 with slot 15 blocked, a two-cycle advance crosses it: 3 cycles elapse, not 2.
-// With the queue model off the original landing-only rule applies.
-TEST_F(CDNA5ReadyQueueTest, AdvanceTimeChargesBlockedCyclesCrossedInAQueuedWindow) {
+// position 14 with slot 15 blocked:
+//  - two cycles of issue work cross it: 3 cycles elapse, not 2 (queue model on; off keeps the
+//    original landing-only rule);
+//  - an advance that is already elapsed time (a wait, the distance to a window end,
+//    computeValuAdvanceCycles) is not charged for the blocked cycle again.
+TEST_F(CDNA5ReadyQueueTest, BlockedCyclesAreChargedOnceInAQueuedWindow) {
     for (int on = 0; on < 2; ++on) {
         PassContext ctx = on ? makeQueueCtx(8, 16) : makeQueueCtx(1, 0);
-        CDNA5ReadyQueue queue(ctx);
-        CDNA5ReadyQueueTestPeer::slots(queue).assign(20, 1);
-        CDNA5ReadyQueueTestPeer::slots(queue)[15] = CDNA5ReadyQueueTestPeer::kBlocked;
-        CDNA5ReadyQueueTestPeer::latency(queue) = 20;
-        CDNA5ReadyQueueTestPeer::pos(queue) = 14;
-        CDNA5ReadyQueueTestPeer::advance(queue, 2);
-        EXPECT_EQ(CDNA5ReadyQueueTestPeer::pos(queue), on ? 17 : 16) << "queue model " << on;
+        for (int issue = 0; issue < 2; ++issue) {
+            CDNA5ReadyQueue queue(ctx);
+            CDNA5ReadyQueueTestPeer::slots(queue).assign(20, 1);
+            CDNA5ReadyQueueTestPeer::slots(queue)[15] = CDNA5ReadyQueueTestPeer::kBlocked;
+            CDNA5ReadyQueueTestPeer::latency(queue) = 20;
+            CDNA5ReadyQueueTestPeer::pos(queue) = 14;
+            if (issue)
+                CDNA5ReadyQueueTestPeer::advanceIssue(queue, 2);
+            else
+                CDNA5ReadyQueueTestPeer::advance(queue, 3);  // 14 -> 17 elapsed, slot 15 included
+            const int want = issue ? (on ? 17 : 16) : 17;
+            EXPECT_EQ(CDNA5ReadyQueueTestPeer::pos(queue), want)
+                << "queue model " << on << (issue ? ", issue cycles" : ", elapsed cycles");
+        }
     }
 }
 
