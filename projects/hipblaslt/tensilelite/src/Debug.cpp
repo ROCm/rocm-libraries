@@ -26,6 +26,7 @@
 
 #include <Tensile/Debug.hpp>
 
+#include <atomic>
 #include <mutex>
 
 #ifndef DEBUG_SM
@@ -39,6 +40,24 @@
 namespace TensileLite
 {
     std::once_flag debug_init;
+
+    namespace
+    {
+        int readTilewrightBank()
+        {
+            const char* bank = std::getenv("TENSILE_TILEWRIGHT_BANK");
+            if(!bank)
+                return -1;
+            return strtol(bank, nullptr, 0) != 0 ? 1 : 0;
+        }
+
+        // Kept outside Debug so that the class layout stays the same.
+        std::atomic<int>& tilewrightBankSetting()
+        {
+            static std::atomic<int> setting{readTilewrightBank()};
+            return setting;
+        }
+    }
 
     bool Debug::printPropertyEvaluation() const
     {
@@ -185,6 +204,11 @@ namespace TensileLite
         return m_tilewright;
     }
 
+    int Debug::tilewrightBank() const
+    {
+        return tilewrightBankSetting().load(std::memory_order_relaxed);
+    }
+
     int Debug::getGridbasedTopSols() const
     {
         return m_gridbasedTopSols;
@@ -312,6 +336,8 @@ namespace TensileLite
 
         const char* prediction_only = std::getenv("TENSILE_PREDICTION_LIB");
         m_predictionLib = prediction_only && strtol(prediction_only, nullptr, 0) != 0;
+
+        tilewrightBankSetting().store(readTilewrightBank(), std::memory_order_relaxed);
 
         const char* sk5Force    = (std::getenv("TENSILE_PERSISTENT_HYBRID_FORCE_MODE") ? std::getenv("TENSILE_PERSISTENT_HYBRID_FORCE_MODE") : std::getenv("TENSILE_STREAMK5_FORCE_MODE"));
         m_streamK5ForceMode     = -1;

@@ -76,6 +76,9 @@ namespace TensileLite
         // the first few fields.
         std::map<std::string, std::shared_ptr<SolutionBlobCache<MySolution>>>* solutionSources
             = nullptr;
+
+        // The PlaceholderRegistry the placeholders of the loading file join.
+        std::shared_ptr<void> placeholders;
     };
 
     /**

@@ -28,6 +28,7 @@
 
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
+#include <Tensile/SolutionLibrary.hpp>
 
 #ifdef TENSILE_YAML
 #include <Tensile/llvm/Loading.hpp>
@@ -45,6 +46,12 @@ namespace TensileLite
     TENSILELITEHOST_EXPORT Hardware::~Hardware()               = default;
     TENSILELITEHOST_EXPORT Solution::~Solution()               = default;
     TENSILELITEHOST_EXPORT SolutionAdapter::~SolutionAdapter() = default;
+
+    SelectedSolutionsScope const*& SelectedSolutionsScope::innermost()
+    {
+        thread_local SelectedSolutionsScope const* scope = nullptr;
+        return scope;
+    }
 
 #ifdef TENSILE_MSGPACK
     std::map<int, std::string> LoadLibraryMapping(std::string const& filename)

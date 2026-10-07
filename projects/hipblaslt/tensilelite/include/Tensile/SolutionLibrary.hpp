@@ -134,6 +134,61 @@ namespace TensileLite
     using SolutionVector = std::vector<std::shared_ptr<MySolution>>;
 
     /**
+ * Makes the solutions a findTopSolutions call has collected so far visible to
+ * the libraries it calls on the same thread, for as long as it lives. Scopes
+ * nest; contains() searches all of them.
+ */
+    class TENSILELITEHOST_EXPORT SelectedSolutionsScope
+    {
+    public:
+        template <typename MySolution>
+        explicit SelectedSolutionsScope(SolutionVector<MySolution> const& selected)
+            : m_selected(&selected)
+            , m_contains(&containsIndex<MySolution>)
+            , m_outer(innermost())
+        {
+            innermost() = this;
+        }
+
+        ~SelectedSolutionsScope()
+        {
+            innermost() = m_outer;
+        }
+
+        SelectedSolutionsScope(SelectedSolutionsScope const&)            = delete;
+        SelectedSolutionsScope& operator=(SelectedSolutionsScope const&) = delete;
+
+        /// Whether an enclosing scope holds a solution with this index.
+        static bool contains(int index)
+        {
+            for(auto const* scope = innermost(); scope != nullptr; scope = scope->m_outer)
+            {
+                if(scope->m_contains(scope->m_selected, index))
+                    return true;
+            }
+            return false;
+        }
+
+    private:
+        template <typename MySolution>
+        static bool containsIndex(void const* selected, int index)
+        {
+            for(auto const& solution : *static_cast<SolutionVector<MySolution> const*>(selected))
+            {
+                if(solution && solution->index == index)
+                    return true;
+            }
+            return false;
+        }
+
+        static SelectedSolutionsScope const*& innermost();
+
+        void const* m_selected;
+        bool (*m_contains)(void const*, int);
+        SelectedSolutionsScope const* m_outer;
+    };
+
+    /**
  * \ingroup SolutionLibrary
  *
  * @brief Abstract base class for Library objects that can provide a

@@ -32,6 +32,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -46,6 +47,7 @@
 #include <utility>
 #include <vector>
 
+#include <Tensile/AMDGPUPredicates.hpp>
 #include <Tensile/ContractionLibrary.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
@@ -53,6 +55,7 @@
 #include <origami/hardware.hpp>
 
 #if defined(TENSILELITE_HAS_TILEWRIGHT)
+#include <Tensile/PlaceholderLibrary.hpp>
 #include <Tensile/TilewrightRanker.hpp>
 #endif
 
@@ -139,15 +142,15 @@ namespace
 #endif
     }
 
-    hip::HipAMDGPU makeGfx950Device()
+    hip::HipAMDGPU makeGfx950Device(int computeUnits = 256)
     {
         using arch_t = origami::hardware_t::architecture_t;
         hip::HipAMDGPU device;
         device.processor        = AMDGPU::Processor::gfx950;
-        device.computeUnitCount = 256;
+        device.computeUnitCount = computeUnits;
         device.analyticalHardware
             = std::make_shared<origami::hardware_t>(arch_t::gfx950,
-                                                    256,
+                                                    computeUnits,
                                                     163840,
                                                     262144,
                                                     8,
@@ -903,5 +906,395 @@ TEST(PredictionLibraryTest, StreamK5ForceModeDecidesBetweenTilewrightAndOrigami)
         expectTilewrightOrder(lib, problem);
     }
 }
+
+namespace
+{
+    // Sets TENSILE_TILEWRIGHT_BANK (unsets it for nullptr) for the lifetime of
+    // the object.
+    class ScopedTilewrightBank
+    {
+    public:
+        explicit ScopedTilewrightBank(char const* value)
+        {
+            if(char const* previous = std::getenv("TENSILE_TILEWRIGHT_BANK"))
+                m_previous = previous;
+            if(value)
+                setenv("TENSILE_TILEWRIGHT_BANK", value, 1);
+            else
+                unsetenv("TENSILE_TILEWRIGHT_BANK");
+            Debug::Instance().reloadDebugBitsForTest();
+        }
+
+        ~ScopedTilewrightBank()
+        {
+            if(m_previous)
+                setenv("TENSILE_TILEWRIGHT_BANK", m_previous->c_str(), 1);
+            else
+                unsetenv("TENSILE_TILEWRIGHT_BANK");
+            Debug::Instance().reloadDebugBitsForTest();
+        }
+
+    private:
+        std::optional<std::string> m_previous;
+    };
+
+    // Returns its solutions from findTopSolutions, like an Equality row that
+    // matches the problem exactly.
+    class ExactRow : public ContractionLibrary
+    {
+    public:
+        explicit ExactRow(SolutionVector<ContractionSolution> solutions)
+            : m_solutions(std::move(solutions))
+        {
+        }
+
+        std::shared_ptr<ContractionSolution>
+            getSolutionByIndex(ContractionProblemGemm const&, Hardware const&, int) const override
+        {
+            return {};
+        }
+
+        std::shared_ptr<ContractionSolution> findBestSolution(ContractionProblemGemm const&,
+                                                              Hardware const&,
+                                                              double* = nullptr) const override
+        {
+            return m_solutions.empty() ? nullptr : m_solutions.front();
+        }
+
+        SolutionSet<ContractionSolution>
+            findAllSolutions(ContractionProblemGemm const&,
+                             Hardware const&,
+                             SolutionLibrarySearchType
+                             = SolutionLibrarySearchType::DEFAULT) const override
+        {
+            return SolutionSet<ContractionSolution>(m_solutions.begin(), m_solutions.end());
+        }
+
+        SolutionSet<ContractionSolution>
+            findAllSolutionsGroupedGemm(std::vector<ContractionProblemGemm> const&,
+                                        Hardware const&,
+                                        SolutionLibrarySearchType
+                                        = SolutionLibrarySearchType::DEFAULT) const override
+        {
+            return {};
+        }
+
+        std::string type() const override
+        {
+            return "ExactRow";
+        }
+
+        std::string description() const override
+        {
+            return "ExactRow";
+        }
+
+        SolutionVector<ContractionSolution> findTopSolutions(ContractionProblemGemm const&,
+                                                             Hardware const&,
+                                                             int count) const override
+        {
+            return SolutionVector<ContractionSolution>(
+                m_solutions.begin(),
+                m_solutions.begin() + std::min<size_t>(m_solutions.size(), std::max(count, 0)));
+        }
+
+    private:
+        SolutionVector<ContractionSolution> m_solutions;
+    };
+
+    using Bank = TilewrightBank<ContractionSolution>;
+
+    std::shared_ptr<ContractionSolution> withTile(int index, size_t m, size_t n)
+    {
+        auto solution                   = makeMappedSolution(index);
+        solution->sizeMapping.macroTile = TensileLite::dim3(m, n, 1);
+        return solution;
+    }
+
+    // Runs only on devices with `computeUnits` CUs.
+    std::shared_ptr<ContractionSolution> onlyFor(std::shared_ptr<ContractionSolution> solution,
+                                                 int                                  computeUnits)
+    {
+        solution->hardwarePredicate = std::make_shared<Predicates::IsSubclass<Hardware, AMDGPU>>(
+            std::make_shared<Predicates::GPU::CUCountEqual>(computeUnits));
+        return solution;
+    }
+
+    // Each solution as a bank source of its own, the way Equality rows hold
+    // their solutions in leaves.
+    void setBankSources(ContractionProblemPredictionLibrary&                     lib,
+                        std::vector<std::shared_ptr<ContractionSolution>> const& bank)
+    {
+        std::vector<std::shared_ptr<ContractionLibrary>> sources;
+        for(auto const& solution : bank)
+            sources.push_back(std::make_shared<SingleContractionLibrary>(solution));
+        lib.tilewright_bank_sources = [sources]() { return sources; };
+    }
+
+    // The bank pool built for `device`; fails when there is none yet.
+    Bank::Pool const& builtPool(ContractionProblemPredictionLibrary const& lib,
+                                AMDGPU const&                              device)
+    {
+        return lib.tilewright_bank->pool(device, []() {
+            ADD_FAILURE() << "no bank pool for the device yet";
+            return Bank::Pool{};
+        });
+    }
+
+    std::vector<int> bankIndices(Bank::Pool const& pool)
+    {
+        std::vector<int> indices;
+        for(auto const& solution : pool.bank)
+            indices.push_back(solution->index);
+        return indices;
+    }
+}
+
+TEST(PredictionLibraryTest, TilewrightBankFollowsTheSettingAndTheModel)
+{
+    if(!std::filesystem::exists(shippedGfx950Model()))
+        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
+
+    for(auto [setting, bank] :
+        std::vector<std::pair<char const*, bool>>{{nullptr, false}, {"0", false}, {"1", true}})
+    {
+        SCOPED_TRACE(setting ? setting : "unset");
+        ScopedTilewrightBank scoped(setting);
+
+        SolutionMap<ContractionSolution> solutions;
+        addContestedKernels(solutions);
+        ScratchDir                          dir("tensilelite_tilewright_bank_setting");
+        ContractionProblemPredictionLibrary lib;
+        loadWithTilewright(dir, shippedGfx950Model(), contestedTable, solutions, lib);
+        ASSERT_NE(lib.tilewright_ranker, nullptr);
+        // The shipped models read no kernel attributes.
+        EXPECT_EQ(lib.tilewright_bank != nullptr, bank);
+    }
+}
+
+TEST(PredictionLibraryTest, TilewrightBankFollowsThePoolInSolutionIndexOrder)
+{
+    if(!std::filesystem::exists(shippedGfx950Model()))
+        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
+    ScopedTilewrightBank bankOn("1");
+
+    SolutionMap<ContractionSolution> solutions;
+    addContestedKernels(solutions);
+    ScratchDir                          dir("tensilelite_tilewright_bank_order");
+    ContractionProblemPredictionLibrary lib;
+    loadWithTilewright(dir, shippedGfx950Model(), contestedTable, solutions, lib);
+    ASSERT_NE(lib.tilewright_bank, nullptr);
+
+    auto const bank30 = withTile(30, 256, 128);
+    auto const bank21 = withTile(21, 64, 64);
+    setBankSources(
+        lib, {bank30, bank21, solutions.at(11), onlyFor(withTile(25, 128, 128), 128), bank21});
+
+    auto const device = makeGfx950Device();
+    lib.findTopSolutions(TensileLite::testing::dummyProblem(), device, 1);
+    auto const& pool = builtPool(lib, device);
+    EXPECT_EQ(bankIndices(pool), (std::vector<int>{21, 30}));
+    ASSERT_NE(pool.ranker, nullptr);
+
+    auto const& configs = pool.ranker->candidates().configs();
+    ASSERT_EQ(configs.size(), lib.solution_list.size() + 2);
+    for(size_t i = 0; i < configs.size(); i++)
+    {
+        auto const& solution = i < lib.solution_list.size()
+                                   ? lib.solution_list[i].second
+                                   : pool.bank[i - lib.solution_list.size()];
+        EXPECT_EQ(configs[i].index, i);
+        EXPECT_EQ(configs[i].mt.m, solution->sizeMapping.macroTile.x) << i;
+        EXPECT_EQ(configs[i].mt.n, solution->sizeMapping.macroTile.y) << i;
+    }
+}
+
+TEST(PredictionLibraryTest, TilewrightBankOffersEqualityKernelsForAnySize)
+{
+    if(!std::filesystem::exists(shippedGfx950Model()))
+        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
+
+    auto const problem = TensileLite::testing::dummyProblem();
+    auto const device  = makeGfx950Device();
+    auto const blocky  = withTile(21, 128, 64);
+    for(char const* setting : {"0", "1"})
+    {
+        SCOPED_TRACE(setting);
+        ScopedTilewrightBank scoped(setting);
+
+        // The model scores no kernel of this pool, so origami ranks it alone.
+        SolutionMap<ContractionSolution> solutions;
+        solutions.emplace(13, makeDot2Solution(13));
+        ScratchDir                          dir("tensilelite_tilewright_bank_any_size");
+        ContractionProblemPredictionLibrary lib;
+        loadWithTilewright(dir, shippedGfx950Model(), {13}, solutions, lib);
+        ASSERT_NE(lib.tilewright_ranker, nullptr);
+        setBankSources(lib, {blocky});
+
+        auto const top = lib.findTopSolutions(problem, device, 2);
+        if(std::string(setting) == "1")
+            EXPECT_EQ(solutionIndices(top), (std::vector<int>{21, 13}));
+        else
+            EXPECT_EQ(solutionIndices(top), (std::vector<int>{13}));
+    }
+}
+
+TEST(PredictionLibraryTest, TilewrightBankLeavesExactMatchesToTheirEqualityRow)
+{
+    if(!std::filesystem::exists(shippedGfx950Model()))
+        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
+    ScopedTilewrightBank bankOn("1");
+
+    SolutionMap<ContractionSolution> solutions;
+    solutions.emplace(13, makeDot2Solution(13));
+    ScratchDir dir("tensilelite_tilewright_bank_exact");
+    auto       lib = std::make_shared<ContractionProblemPredictionLibrary>();
+    loadWithTilewright(dir, shippedGfx950Model(), {13}, solutions, *lib);
+    ASSERT_NE(lib->tilewright_bank, nullptr);
+    setBankSources(*lib, {withTile(21, 128, 64), withTile(22, 256, 256), withTile(23, 64, 256)});
+
+    auto const problem = TensileLite::testing::dummyProblem();
+    auto const device  = makeGfx950Device();
+    auto const ranked  = lib->findTopSolutions(problem, device, 3);
+    ASSERT_EQ(ranked.size(), 3u);
+
+    ContractionProblemSelectionLibrary rows;
+    rows.rows.emplace_back(
+        ContractionProblemPredicate(std::make_shared<Predicates::Contraction::EqualityMatching>()),
+        std::make_shared<ExactRow>(SolutionVector<ContractionSolution>{ranked[0]}));
+    rows.rows.emplace_back(ContractionProblemPredicate(
+                               std::make_shared<Predicates::Contraction::PredictionMatching>()),
+                           lib);
+
+    EXPECT_EQ(solutionIndices(rows.findTopSolutions(problem, device, 3)),
+              (std::vector<int>{ranked[0]->index, ranked[1]->index, ranked[2]->index}));
+    EXPECT_EQ(solutionIndices(lib->findTopSolutions(problem, device, 3)), solutionIndices(ranked));
+}
+
+TEST(PredictionLibraryTest, TilewrightBankPoolsAreKeptPerDevice)
+{
+    if(!std::filesystem::exists(shippedGfx950Model()))
+        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
+    ScopedTilewrightBank bankOn("1");
+
+    SolutionMap<ContractionSolution> solutions;
+    addContestedKernels(solutions);
+    ScratchDir                          dir("tensilelite_tilewright_bank_devices");
+    ContractionProblemPredictionLibrary lib;
+    loadWithTilewright(dir, shippedGfx950Model(), contestedTable, solutions, lib);
+    ASSERT_NE(lib.tilewright_bank, nullptr);
+    setBankSources(lib, {onlyFor(withTile(21, 128, 64), 256), onlyFor(withTile(22, 128, 64), 128)});
+
+    auto const problem = TensileLite::testing::dummyProblem();
+    auto const full    = makeGfx950Device(256);
+    auto const half    = makeGfx950Device(128);
+    lib.findTopSolutions(problem, full, 1);
+    lib.findTopSolutions(problem, half, 1);
+    EXPECT_EQ(bankIndices(builtPool(lib, full)), (std::vector<int>{21}));
+    EXPECT_EQ(bankIndices(builtPool(lib, half)), (std::vector<int>{22}));
+}
+
+TEST(PredictionLibraryTest, TilewrightBankWithoutKernelsRanksThePredictionPool)
+{
+    if(!std::filesystem::exists(shippedGfx950Model()))
+        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
+
+    auto const problem = TensileLite::testing::dummyProblem();
+    auto const device  = makeGfx950Device();
+
+    std::vector<int> withoutBank;
+    {
+        ScopedTilewrightBank             bankOff("0");
+        SolutionMap<ContractionSolution> solutions;
+        addContestedKernels(solutions);
+        ScratchDir                          dir("tensilelite_tilewright_bank_off");
+        ContractionProblemPredictionLibrary lib;
+        loadWithTilewright(dir, shippedGfx950Model(), contestedTable, solutions, lib);
+        withoutBank = solutionIndices(lib.findTopSolutions(problem, device, 3));
+    }
+
+    ScopedTilewrightBank             bankOn("1");
+    SolutionMap<ContractionSolution> solutions;
+    addContestedKernels(solutions);
+    ScratchDir                          dir("tensilelite_tilewright_bank_empty");
+    ContractionProblemPredictionLibrary lib;
+    loadWithTilewright(dir, shippedGfx950Model(), contestedTable, solutions, lib);
+    ASSERT_NE(lib.tilewright_bank, nullptr);
+    setBankSources(lib, {solutions.at(12)});
+
+    EXPECT_EQ(solutionIndices(lib.findTopSolutions(problem, device, 3)), withoutBank);
+    auto const& pool = builtPool(lib, device);
+    EXPECT_TRUE(pool.bank.empty());
+    EXPECT_EQ(pool.ranker, nullptr);
+}
 #endif
+
+TEST(PredictionLibraryTest, LibraryProblemTypeKeyDropsTheHardwareParts)
+{
+    std::string const type = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_"
+                             "Bljk_Cijk_Dijk";
+    for(auto const& hardware : {"", "_CU256", "_ID75a0", "_CU256_ID75a0", "_ID75a3-75a2"})
+        EXPECT_EQ(libraryProblemTypeKey(type + hardware + "_gfx950"), type + "_gfx950") << hardware;
+    EXPECT_EQ(libraryProblemTypeKey(type + "_CU128_gfx1250-strict"), type + "_gfx1250-strict");
+    EXPECT_EQ(libraryProblemTypeKey("TensileLibrary_Probe_IDx_gfx950"),
+              "TensileLibrary_Probe_IDx_gfx950");
+    EXPECT_EQ(libraryProblemTypeKey("TensileLibrary_Probe_CU_gfx950"),
+              "TensileLibrary_Probe_CU_gfx950");
+    EXPECT_NE(libraryProblemTypeKey(type + "_ID75a0_gfx950"),
+              libraryProblemTypeKey(type + "_ID75a0_gfx942"));
+}
+
+TEST(PredictionLibraryTest, PlaceholderRegistryListsTheEqualityRowsOfTheProblemType)
+{
+    using Placeholder = PlaceholderLibrary<ContractionProblemGemm, ContractionSolution>;
+
+    auto row = [](auto predicate, int index) {
+        return ContractionProblemSelectionLibrary::Row(
+            ContractionProblemPredicate(predicate),
+            std::make_shared<SingleContractionLibrary>(makeMappedSolution(index)));
+    };
+    auto equality   = std::make_shared<Predicates::Contraction::EqualityMatching>();
+    auto range      = std::make_shared<Predicates::Contraction::RangeMatching>();
+    auto prediction = std::make_shared<Predicates::Contraction::PredictionMatching>();
+
+    std::string const type = "TensileLibrary_Probe_Contraction_l_Alik_Bljk_Cijk_Dijk";
+    std::vector<std::pair<std::string, std::shared_ptr<ContractionProblemSelectionLibrary>>> files{
+        {type + "_ID75a0_gfx950",
+         std::make_shared<ContractionProblemSelectionLibrary>(
+             std::vector<ContractionProblemSelectionLibrary::Row>{
+                 row(range, 1), row(equality, 2), row(prediction, 3)})},
+        {type + "_CU256_ID75a0_gfx950",
+         std::make_shared<ContractionProblemSelectionLibrary>(
+             std::vector<ContractionProblemSelectionLibrary::Row>{row(equality, 4)})},
+        {type + "_ID75a3-75a2_gfx950",
+         std::make_shared<ContractionProblemSelectionLibrary>(
+             std::vector<ContractionProblemSelectionLibrary::Row>{row(equality, 5)})},
+        {"TensileLibrary_Other_Contraction_l_Alik_Bljk_Cijk_Dijk_CU256_ID75a0_gfx950",
+         std::make_shared<ContractionProblemSelectionLibrary>(
+             std::vector<ContractionProblemSelectionLibrary::Row>{row(equality, 6)})},
+    };
+
+    PlaceholderRegistry<ContractionProblemGemm, ContractionSolution> registry;
+    std::vector<std::unique_ptr<Placeholder>>                        placeholders;
+    for(auto const& [prefix, tree] : files)
+    {
+        auto placeholder        = std::make_unique<Placeholder>();
+        placeholder->filePrefix = prefix;
+        placeholder->library    = tree;
+        registry.byPrefix.emplace(prefix, placeholder.get());
+        placeholders.push_back(std::move(placeholder));
+    }
+
+    std::vector<int> indices;
+    auto const       problem = TensileLite::testing::dummyProblem();
+    auto const       device  = makeGfx950Device();
+    for(auto const& library : registry.equalityLibraries(type + "_ID75a0_gfx950"))
+    {
+        for(auto const& solution :
+            library->findAllSolutions(problem, device, SolutionLibrarySearchType::HARDWARE_ONLY))
+            indices.push_back(solution->index);
+    }
+    // In file-prefix order: _CU256_ID75a0, _ID75a0, _ID75a3-75a2.
+    EXPECT_EQ(indices, (std::vector<int>{4, 2, 5}));
+}
 #endif
