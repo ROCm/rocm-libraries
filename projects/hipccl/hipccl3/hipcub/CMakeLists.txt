@@ -147,7 +147,7 @@ check_fetch_method(ROCPRIM_FETCH_METHOD)
 # Add project and ROCm-related CMake module paths.
 list(APPEND CMAKE_MODULE_PATH
   # Shared within monorepo:
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/cmake
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/cmake
   # ROCm related:
   $ENV{ROCM_PATH}
   $ENV{ROCM_PATH}/share
