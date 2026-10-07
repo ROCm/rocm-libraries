@@ -71,7 +71,6 @@ namespace TensileLite
         gfx1153,
         gfx1170,
         gfx1171,
-        gfx1172,
         gfx1200,
         gfx1201,
         gfx1250,
@@ -140,8 +139,6 @@ namespace TensileLite
             return "TensileLibrary_*_gfx1170";
         case LazyLoadingInit::gfx1171:
             return "TensileLibrary_*_gfx1171";
-        case LazyLoadingInit::gfx1172:
-            return "TensileLibrary_*_gfx1172";
         case LazyLoadingInit::gfx1200:
             return "TensileLibrary_*_gfx1200";
         case LazyLoadingInit::gfx1201:

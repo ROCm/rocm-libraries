@@ -1450,7 +1450,7 @@ Tests:
   bias_type: bf16_r
   unit_check: 0
   norm_check: 1
-  gpu_arch: ['^117[0-2]', '^12(0[01]|50)']
+  gpu_arch: ['^117[01]', '^12(0[01]|50)']
 
 - name: matmul_f8_bf8_dst_fp16_gfx117x_gfx12
   category: pre_checkin
@@ -1467,7 +1467,7 @@ Tests:
   bias_vector: [0, 1]
   bias_type: f16_r
   unit_check: 1
-  gpu_arch: ['^117[0-2]', '^12(0[01]|50)']
+  gpu_arch: ['^117[01]', '^12(0[01]|50)']
 
 - name: matmul_f8_bf8_dst_bf16_gfx117x_gfx12
   category: pre_checkin
@@ -1484,7 +1484,7 @@ Tests:
   bias_vector: [0, 1]
   bias_type: bf16_r
   unit_check: 1
-  gpu_arch: ['^117[0-2]', '^12(0[01]|50)']
+  gpu_arch: ['^117[01]', '^12(0[01]|50)']
 
 #scale ab vector//no solution
 #  scaleA: [2]
@@ -1507,7 +1507,7 @@ Tests:
   bias_vector: [0, 1]
   bias_type: f16_r
   unit_check: 1
-  gpu_arch: ['^117[0-2]', '^12(0[01]|50)']
+  gpu_arch: ['^117[01]', '^12(0[01]|50)']
 
 - name: matmul_real_1b_dst_f8_SCDNotInt_gfx117x_gfx12
   category: pre_checkin
@@ -1526,7 +1526,7 @@ Tests:
   bias_vector: [0, 1]
   bias_type: f16_r
   unit_check: 1
-  gpu_arch: ['^117[0-2]', '^12(0[01]|50)']
+  gpu_arch: ['^117[01]', '^12(0[01]|50)']
 
 - name: matmul_one_real_precisions_1b_gfx117x_gfx12
   category: quick
@@ -1536,7 +1536,7 @@ Tests:
   transA_transB: *transA_transB_range
   alpha: [ 0.0, 1.0 ]
   beta: [ 0.0, 2.0 ]
-  gpu_arch: ['^117[0-2]', '^12(0[01]|50)']
+  gpu_arch: ['^117[01]', '^12(0[01]|50)']
 
 - name: matmul_one_integer_precisions_i8_gfx117x_gfx12
   category: quick
@@ -1546,7 +1546,7 @@ Tests:
   transA_transB: *transA_transB_range
   alpha: [ 0.0, 1.0 ]
   beta: [ 0.0, 2.0 ]
-  gpu_arch: ['^117[0-2]', '^120[01]']
+  gpu_arch: ['^117[01]', '^120[01]']
 
 ### END
 - name: matmul_real_1b_fnuz_dst_f8_fnuz_SCDInt1
