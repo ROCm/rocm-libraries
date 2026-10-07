@@ -197,7 +197,6 @@ float recipeMagnitude(const FillRecipe& recipe)
 }
 
 void setBlockScaleDequantizeInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                         const TensorDataTypes& dataTypes,
                                          InputFillRecipes& recipes)
 {
     const auto* a = node.attributes_as_BlockScaleDequantizeAttributes();
@@ -206,20 +205,8 @@ void setBlockScaleDequantizeInitDefaults(const hipdnn_flatbuffers_sdk::data_obje
         return;
     }
 
-    // Recorded only when non-generic, like any dtype default: a recorded entry
-    // replays as an override and would pin the operand range.
-    const auto xType = dataTypes.find(a->x_tensor_uid());
-    if(xType != dataTypes.end())
-    {
-        const auto xRecipe = defaultFillFor(xType->second);
-        if(xRecipe != FillRecipe{})
-        {
-            recipes.setDefault(a->x_tensor_uid(), xRecipe);
-        }
-    }
-
-    // Scale is normalized against the operand range in effect (default or a
-    // test override), as OCP MX does: scale ~ 2^-floor(log2(amax)) for
+    // Scale is normalized against the operand range in effect (its data-type
+    // default or a test override), as OCP MX does: scale ~ 2^-floor(log2(amax)) for
     // amax >= 1. The dequantized block then peaks between 2 and 4 (FP4/FP6:
     // 3 to 3.75), so products stay within FP16 range; an operand with
     // amax < 1 keeps e = 0 and peaks at 2 * amax. UE8M0 has no mantissa bits,
@@ -265,7 +252,6 @@ void setSdpaBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Nod
 // ── Dispatch ─────────────────────────────────────────────────────────────────
 
 bool applyDefaultFills(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                       const TensorDataTypes& dataTypes,
                        InputFillRecipes& recipes)
 {
     using NA = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
@@ -297,7 +283,7 @@ bool applyDefaultFills(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
         setRmsnormBackwardInitDefaults(node, recipes);
         return true;
     case NA::BlockScaleDequantizeAttributes:
-        setBlockScaleDequantizeInitDefaults(node, dataTypes, recipes);
+        setBlockScaleDequantizeInitDefaults(node, recipes);
         return true;
     case NA::SdpaAttributes:
         setSdpaForwardInitDefaults(node, recipes);
@@ -537,23 +523,12 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
                       InputFillRecipes& recipes,
                       DeviceInputFiller* device)
 {
-    const auto dataTypes = collectDataTypes(graph);
-
-    for(flatbuffers::uoffset_t i = 0; i < graph.nodes()->size(); ++i)
-    {
-        const auto& node = *graph.nodes()->Get(i);
-        if(!applyDefaultFills(node, dataTypes, recipes))
-        {
-            const auto* name = node.name();
-            return FillResult::unsupported(
-                "no input fill registered for op "
-                + std::string(name != nullptr ? name->c_str() : "(unnamed)"));
-        }
-    }
-
     // Dtype defaults sit below test and per-op recipes. Only those that differ
     // from the generic FREE[-1, 1] are recorded, so meta.inputs stays unchanged
-    // for float graphs and names the range for narrow formats.
+    // for float graphs and names the range for narrow formats. Registered
+    // before the per-op pass so a default derived from another input's range
+    // (block-scale dequantize's scale) sees that input's final range.
+    const auto dataTypes = collectDataTypes(graph);
     for(const int64_t uid : ownedUids)
     {
         const auto dataType = dataTypes.find(uid);
@@ -564,7 +539,19 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
         const auto recipe = defaultFillFor(dataType->second);
         if(recipe != FillRecipe{})
         {
-            recipes.setDefault(uid, recipe);
+            recipes.setTypeDefault(uid, recipe);
+        }
+    }
+
+    for(flatbuffers::uoffset_t i = 0; i < graph.nodes()->size(); ++i)
+    {
+        const auto& node = *graph.nodes()->Get(i);
+        if(!applyDefaultFills(node, recipes))
+        {
+            const auto* name = node.name();
+            return FillResult::unsupported(
+                "no input fill registered for op "
+                + std::string(name != nullptr ? name->c_str() : "(unnamed)"));
         }
     }
 
