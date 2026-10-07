@@ -14,7 +14,8 @@ file. Every line records the environment the run saw, so a failure can be matche
   - preemption: the amdgpu cwsr_enable module parameter, which needs a reload to change, so it
     is recorded rather than toggled;
   - placement: every buffer a failing case reports crossing a 4 GiB boundary. If failures line up
-    with such buffers they are carry-drop defects (AIHPBLAS-4994), not races.
+    with such buffers, investigate carry-drop defects with controlled placement
+    (AIHPBLAS-4994); the correlation alone does not establish the cause.
 
     fast_check_sdc_hunt.py --test-bin build/release/clients/hipblaslt-test \\
         --xnack unset 0 --load none gemm --runs 3 --results sdc.jsonl

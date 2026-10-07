@@ -16,9 +16,10 @@ to a results file. Each line records the environment the run saw:
 | Preemption | the amdgpu `cwsr_enable` module parameter; changing it needs a driver reload, so run once per setting and driver (before and after the ROCM-31285 fix) | `cwsr_enable`, `amdgpu_version` |
 | Placement | every buffer a failing case reports crossing a 4 GiB boundary | `buffers_crossing_4gib` |
 
-If failures line up with buffers that cross a 4 GiB boundary, they are carry-drop
-address defects (class C on AIHPBLAS-4988), and the placement cases from
-AIHPBLAS-4994 reproduce them deterministically.
+If failures line up with buffers that cross a 4 GiB boundary, investigate
+carry-drop address defects (class C on AIHPBLAS-4988). Confirm the cause with
+controlled placement from AIHPBLAS-4994 and the failing address arithmetic;
+correlation with a boundary crossing alone does not identify the cause.
 
 ## Running
 
@@ -54,3 +55,9 @@ the test it was running.
 
 This is for dedicated hardware, not CI: the runs hold the GPU for a long time, and
 on gfx1250 a page fault can leave the GPU unusable until it is reset (ROCM-32049).
+
+## Testing the runner
+
+From `projects/hipblaslt`, `python -m unittest discover -s clients/scripts/sdc_hunt -v`
+runs the CPU-only parser, CLI, log-preservation and process-cleanup tests. They need
+neither ROCm nor a GPU, and they do not run the SDC hunt.
