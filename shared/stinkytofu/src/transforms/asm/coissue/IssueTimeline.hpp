@@ -17,6 +17,7 @@
 // costs, latency rules, and the matrix queue in front of the pipe.
 
 #include <cstdint>
+#include <deque>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -52,6 +53,9 @@ struct TimedInst {
     /// are left out.
     std::vector<uint16_t> defs;
     std::vector<uint16_t> uses;
+    /// The uses a gating producer of the stream can write (TimedInstCache::restrictUses);
+    /// all of `uses` unless restricted. Only these can delay the instruction.
+    std::vector<uint16_t> gatedUses;
     /// Bit r: the instruction is a producer / consumer of HWModel::hazards rule r.
     uint32_t hazardProducer = 0;
     uint32_t hazardConsumer = 0;
@@ -72,12 +76,21 @@ TimedInst makeLabel();
 /// Timed instructions keyed by the IR instruction, built once.
 class TimedInstCache {
    public:
-    explicit TimedInstCache(const HWModel& hw) : hw_(hw) {}
+    explicit TimedInstCache(const HWModel& hw);
     const TimedInst& get(const StinkyInstruction& inst);
+    /// Only `gating[slot]` registers can hold a result that delays a consumer (every scalar
+    /// and vector def of the streams to come): drop every other slot from gatedUses, now and
+    /// for instructions built later.
+    void restrictUses(std::vector<bool> gating);
 
    private:
+    void restrict(TimedInst& t) const;
+
     const HWModel& hw_;
-    std::unordered_map<const StinkyInstruction*, TimedInst> cache_;
+    // Open addressing on the instruction pointer; the instructions live in `store_`.
+    std::vector<std::pair<const StinkyInstruction*, uint32_t>> table_;
+    std::deque<TimedInst> store_;
+    std::vector<bool> gating_;
 };
 
 struct Placement {
@@ -90,6 +103,9 @@ struct Placement {
 class IssueTimeline {
    public:
     explicit IssueTimeline(const TimingProfile& profile);
+
+    /// Start over at cycle 0, keeping the tables.
+    void reset();
 
     /// Issue `inst` at the earliest cycle the rules allow, and no earlier than
     /// `notBefore`; advance the stream past it. Labels are skipped.
@@ -133,8 +149,9 @@ class IssueTimeline {
     std::vector<int> dsDone_;
     QueueModel queue_;
     std::vector<Producer> producers_;
-    /// [gap][slot]: the cycle a consumer of that hazard gap may read the slot.
-    std::vector<std::vector<int>> hazardReady_;
+    /// [gap][slot]: the cycle a consumer of that hazard gap may read the slot, valid for
+    /// generation gen_.
+    std::vector<std::vector<std::pair<uint32_t, int>>> hazardReady_;
     uint32_t gen_ = 1;
     bool hasPrev_ = false;
     IssueClass prevKind_ = IssueClass::Any;
@@ -157,15 +174,23 @@ struct TripTiming {
     std::vector<PipeOp> pipe;
     /// The previous trip's last matrix op, if any.
     std::optional<PipeOp> handover;
+    /// Timing stopped early: the pipe idle already exceeded the bound.
+    bool overBound = false;
 
     TripCost cost() const {
         return {pipeIdleWithHandover, cycles};
     }
 };
 
-constexpr int kSteadyTrips = 3;
+constexpr int kSteadyTrips = 2;
 
 TripTiming steadyTrip(const std::vector<const TimedInst*>& body, const TimingProfile& profile,
                       int trips = kSteadyTrips);
+/// The same on `timeline` (reset first), which keeps its tables between calls. Without
+/// `placements`, TripTiming::placements stays empty. With `idleBound`, timing stops once the
+/// last trip's pipe idle exceeds it (idle only grows): the result then has `overBound` set.
+TripTiming steadyTrip(const std::vector<const TimedInst*>& body, IssueTimeline& timeline,
+                      bool placements = true, int trips = kSteadyTrips,
+                      std::optional<int> idleBound = std::nullopt);
 
 }  // namespace stinkytofu::coissue

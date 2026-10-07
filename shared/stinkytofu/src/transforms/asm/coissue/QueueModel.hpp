@@ -30,6 +30,11 @@ class QueueModel {
     int depth() const {
         return depth_;
     }
+    /// Empty the queue and the pipe, keeping the storage.
+    void reset(int depth) {
+        depth_ = depth;
+        ops_.clear();
+    }
     /// The earliest cycle at or after `at` a matrix op can leave the issue stream at: once
     /// fewer than `depth` ops wait in front of the pipe.
     int issueAt(int at) const;

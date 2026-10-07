@@ -81,6 +81,8 @@ class STINKYTOFU_EXPORT WaitAluTracker {
     WaitAluNeed query(const StinkyInstruction& inst) const;
     /// Issue `inst`: apply the wait it needs, then record what it produces.
     void commit(const StinkyInstruction& inst);
+    /// commit(), returning the wait query() would have reported for `inst`.
+    WaitAluNeed step(const StinkyInstruction& inst);
     /// Widen this state with `other`, as the pass merges a predecessor's exit into a block's
     /// entry. Returns true if the state changed.
     bool merge(const WaitAluTracker& other);

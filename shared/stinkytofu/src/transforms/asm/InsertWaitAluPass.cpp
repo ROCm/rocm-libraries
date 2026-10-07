@@ -375,6 +375,81 @@ struct VgprStamp {
     bool unmodeledSince = false;
 };
 
+// The scoreboard's stamps by register key. Every matrix op touches every live stamp, so they
+// sit in one array, and a dense index finds VGPR and AGPR keys in O(1). Stamps are never
+// removed, and no rule depends on the order stamps are visited in.
+class ScoreMap {
+   public:
+    using value_type = std::pair<RegKey, VgprStamp>;
+    using iterator = std::vector<value_type>::iterator;
+    using const_iterator = std::vector<value_type>::const_iterator;
+
+    iterator begin() {
+        return entries_.begin();
+    }
+    iterator end() {
+        return entries_.end();
+    }
+    const_iterator begin() const {
+        return entries_.begin();
+    }
+    const_iterator end() const {
+        return entries_.end();
+    }
+    size_t size() const {
+        return entries_.size();
+    }
+    iterator find(const RegKey& k) {
+        const int32_t i = indexOf(k);
+        return i < 0 ? entries_.end() : entries_.begin() + i;
+    }
+    const_iterator find(const RegKey& k) const {
+        const int32_t i = indexOf(k);
+        return i < 0 ? entries_.end() : entries_.begin() + i;
+    }
+    VgprStamp& operator[](const RegKey& k) {
+        return try_emplace(k).first->second;
+    }
+    std::pair<iterator, bool> try_emplace(const RegKey& k) {
+        const int32_t i = indexOf(k);
+        if (i >= 0) return {entries_.begin() + i, false};
+        const int32_t slot = denseSlot(k);
+        const auto added = static_cast<int32_t>(entries_.size());
+        if (slot >= 0) {
+            if (dense_.size() <= static_cast<size_t>(slot)) dense_.resize(slot + 1, -1);
+            dense_[slot] = added;
+        } else {
+            sparse_.emplace(k, added);
+        }
+        entries_.emplace_back(k, VgprStamp{});
+        return {entries_.end() - 1, true};
+    }
+
+   private:
+    static constexpr int kDenseRegs = 2048;
+    static int32_t denseSlot(const RegKey& k) {
+        int base;
+        if (k.type == RegType::V)
+            base = 0;
+        else if (k.type == RegType::AGPR || k.type == RegType::A || k.type == RegType::ACC)
+            base = kDenseRegs * 3;
+        else
+            return -1;
+        if (k.idx >= static_cast<unsigned>(kDenseRegs)) return -1;
+        return base + static_cast<int32_t>(k.idx) * 3 + (static_cast<int>(k.half) + 1);
+    }
+    int32_t indexOf(const RegKey& k) const {
+        const int32_t slot = denseSlot(k);
+        if (slot >= 0) return static_cast<size_t>(slot) < dense_.size() ? dense_[slot] : -1;
+        auto it = sparse_.find(k);
+        return it == sparse_.end() ? -1 : it->second;
+    }
+
+    std::vector<value_type> entries_;
+    std::vector<int32_t> dense_;
+    std::unordered_map<RegKey, int32_t, RegKeyHash> sparse_;
+};
+
 class WaitcntBrackets {
    public:
     explicit WaitcntBrackets(const WaitAluContext& ctx) : ctx(&ctx) {}
@@ -1081,7 +1156,7 @@ class WaitcntBrackets {
     // VM_VSRC per-FIFO UB/LB.
     std::array<unsigned, NUM_VM_FIFOS> vmFifoUB = {};
     std::array<unsigned, NUM_VM_FIFOS> vmFifoLB = {};
-    std::unordered_map<RegKey, VgprStamp, RegKeyHash> scores;
+    ScoreMap scores;
     // Owned by the pass instance, which outlives every bracket it builds.
     const WaitAluContext* ctx;
 };
@@ -1599,6 +1674,15 @@ WaitAluNeed WaitAluTracker::query(const StinkyInstruction& inst) const {
 
 void WaitAluTracker::commit(const StinkyInstruction& inst) {
     stepInstruction(impl_->sb, inst, impl_->keyer);
+}
+
+WaitAluNeed WaitAluTracker::step(const StinkyInstruction& inst) {
+    const Step s = stepInstruction(impl_->sb, inst, impl_->keyer);
+    WaitAluNeed need;
+    if (s.kind != StepKind::Normal) return need;
+    if (!isNoWait(s.wait, CT_VA_VDST)) need.vaVdst = static_cast<int>(s.wait.get(CT_VA_VDST));
+    if (!isNoWait(s.wait, CT_VM_VSRC)) need.vmVsrc = static_cast<int>(s.wait.get(CT_VM_VSRC));
+    return need;
 }
 
 std::unique_ptr<Pass> createInsertWaitAluPass(InsertWaitAluOptions opts) {

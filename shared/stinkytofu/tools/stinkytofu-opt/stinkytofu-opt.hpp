@@ -394,6 +394,25 @@ const std::vector<PassInfo> availablePasses = {
     {"LoopRegionRemarkPass", [](const auto&) { return createLoopRegionRemarkPass(); }},
     {"MemTokenConsistencyCheckPass",
      [](const auto&) { return createMemTokenConsistencyCheckPass(); }},
+    {"CoissueRepairPass",
+     [](const std::vector<std::string>& args) {
+         CoissueRepairOptions o;
+         if (const std::string v = passArgValue(args, "mode"); !v.empty()) o.mode = v;
+         if (const std::string v = passArgValue(args, "margin"); !v.empty())
+             o.marginPercent = std::stod(v);
+         if (const std::string v = passArgValue(args, "maxMoves"); !v.empty())
+             o.maxMoves = std::stoi(v);
+         if (const std::string v = passArgValue(args, "radius"); !v.empty())
+             o.searchRadius = std::stoi(v);
+         if (const std::string v = passArgValue(args, "profiles"); !v.empty()) o.profileSet = v;
+         if (const std::string v = passArgValue(args, "patterns"); !v.empty()) o.patterns = v;
+         if (hasPassArg(args, "trust")) o.trustUncalibrated = true;
+         if (hasPassArg(args, "esm2")) o.esm2 = true;
+         if (hasPassArg(args, "trackValuVsrc")) o.trackValuVsrc = true;
+         o.audit = hasPassArg(args, "audit");
+         o.prototypeWaitAluRule = hasPassArg(args, "prototypeWaitAlu");
+         return createCoissueRepairPass(o);
+     }},
     {"CoissueAuditPass",
      [](const std::vector<std::string>& args) {
          return createCoissueAuditPass(hasPassArg(args, "timeline"), passArgValue(args, "trace"));

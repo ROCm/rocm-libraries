@@ -152,6 +152,7 @@ TimedInst makeTimedInst(const StinkyInstruction& inst, const HWModel& hw) {
     }
     addSlots(inst.getDestRegs(), t.defs);
     addSlots(inst.getSrcRegs(), t.uses);
+    t.gatedUses = t.uses;
     for (int r = 0; r < hw.hazards.numRules && r < 32; ++r) {
         const HazardRule& rule = hw.hazards.rules[r];
         if (rule.unit != HazardUnit::Cycles || rule.dir != HazardDir::WriteThenRead) continue;
@@ -161,17 +162,67 @@ TimedInst makeTimedInst(const StinkyInstruction& inst, const HWModel& hw) {
     return t;
 }
 
+TimedInstCache::TimedInstCache(const HWModel& hw) : hw_(hw), table_(1024, {nullptr, 0}) {}
+
 const TimedInst& TimedInstCache::get(const StinkyInstruction& inst) {
-    auto it = cache_.find(&inst);
-    if (it != cache_.end()) return it->second;
-    return cache_.emplace(&inst, makeTimedInst(inst, hw_)).first->second;
+    const size_t mask = table_.size() - 1;
+    size_t h = (reinterpret_cast<uintptr_t>(&inst) >> 4) * 0x9E3779B97F4A7C15ULL;
+    for (size_t i = h & mask;; i = (i + 1) & mask) {
+        if (table_[i].first == &inst) return store_[table_[i].second];
+        if (table_[i].first != nullptr) continue;
+        store_.push_back(makeTimedInst(inst, hw_));
+        restrict(store_.back());
+        table_[i] = {&inst, static_cast<uint32_t>(store_.size() - 1)};
+        if (store_.size() * 2 > table_.size()) {
+            // Grow and re-insert, keeping the load under one half.
+            std::vector<std::pair<const StinkyInstruction*, uint32_t>> old(table_.size() * 2,
+                                                                            {nullptr, 0});
+            old.swap(table_);
+            const size_t m = table_.size() - 1;
+            for (const auto& e : old) {
+                if (e.first == nullptr) continue;
+                size_t j = ((reinterpret_cast<uintptr_t>(e.first) >> 4) * 0x9E3779B97F4A7C15ULL) & m;
+                while (table_[j].first != nullptr) j = (j + 1) & m;
+                table_[j] = e;
+            }
+        }
+        return store_.back();
+    }
+}
+
+void TimedInstCache::restrict(TimedInst& t) const {
+    t.gatedUses.clear();
+    for (uint16_t slot : t.uses)
+        if (gating_.empty() || gating_[slot]) t.gatedUses.push_back(slot);
+}
+
+void TimedInstCache::restrictUses(std::vector<bool> gating) {
+    gating_ = std::move(gating);
+    for (TimedInst& t : store_) restrict(t);
 }
 
 IssueTimeline::IssueTimeline(const TimingProfile& profile)
     : profile_(profile),
       queue_(profile.matrixQueueDepth),
       producers_(kNumRegSlots),
-      hazardReady_(profile.hazardGaps.size(), std::vector<int>(kNumRegSlots, 0)) {}
+      hazardReady_(profile.hazardGaps.size(),
+                   std::vector<std::pair<uint32_t, int>>(kNumRegSlots, {0, 0})) {}
+
+void IssueTimeline::reset() {
+    t_ = 0;
+    hasWindow_ = false;
+    winStart_ = winLatency_ = 0;
+    winMask_ = winBlocked_ = 0;
+    window_ = -1;
+    dsDone_.clear();
+    queue_.reset(profile_.matrixQueueDepth);
+    ++gen_;
+    hasPrev_ = false;
+    prevKind_ = IssueClass::Any;
+    prevKindIsBranch_ = false;
+    prevOpcode_ = -1;
+    prevIsWait_ = false;
+}
 
 bool IssueTimeline::inWindow(int c) const {
     return hasWindow_ && c - winStart_ < winLatency_;
@@ -208,7 +259,7 @@ int IssueTimeline::costOf(const TimedInst& inst) const {
 
 int IssueTimeline::dataReady(const TimedInst& inst) const {
     int ready = 0;
-    for (uint16_t slot : inst.uses) {
+    for (uint16_t slot : inst.gatedUses) {
         const Producer& p = producers_[slot];
         if (p.gen != gen_) continue;
         int lat = std::max(p.inst->latency, p.inst->issue);
@@ -227,9 +278,10 @@ int IssueTimeline::dataReady(const TimedInst& inst) const {
         for (size_t g = 0; g < profile_.hazardGaps.size(); ++g) {
             const HazardGap& gap = profile_.hazardGaps[g];
             if (((inst.hazardConsumer >> gap.ruleIndex) & 1u) == 0u) continue;
-            for (uint16_t slot : inst.uses)
-                if (gap.reg == LatencyReg::Any || regClassOfSlot(slot) == gap.reg)
-                    ready = std::max(ready, hazardReady_[g][slot]);
+            for (uint16_t slot : inst.gatedUses)
+                if ((gap.reg == LatencyReg::Any || regClassOfSlot(slot) == gap.reg) &&
+                    hazardReady_[g][slot].first == gen_)
+                    ready = std::max(ready, hazardReady_[g][slot].second);
         }
     }
     return ready;
@@ -308,7 +360,7 @@ Placement IssueTimeline::place(const TimedInst& in, int notBefore) {
             const int ready = (profile_.gapsFromIssueEnd ? t_ : at) + gap.cycles;
             for (uint16_t slot : in.defs)
                 if (gap.reg == LatencyReg::Any || regClassOfSlot(slot) == gap.reg)
-                    hazardReady_[g][slot] = ready;
+                    hazardReady_[g][slot] = {gen_, ready};
         }
     }
 
@@ -329,19 +381,39 @@ Placement IssueTimeline::place(const TimedInst& in, int notBefore) {
 TripTiming steadyTrip(const std::vector<const TimedInst*>& body, const TimingProfile& profile,
                       int trips) {
     IssueTimeline tl(profile);
+    return steadyTrip(body, tl, true, trips);
+}
+
+TripTiming steadyTrip(const std::vector<const TimedInst*>& body, IssueTimeline& tl,
+                      bool placements, int trips, std::optional<int> idleBound) {
+    tl.reset();
     TripTiming out;
-    out.placements.resize(body.size());
+    if (placements) out.placements.resize(body.size());
     int t0 = -1;
     int matrixPerTrip = 0;
     for (const TimedInst* inst : body)
         if (!inst->isLabel && inst->kind == IssueClass::Matrix) ++matrixPerTrip;
     const int windowBase = (trips - 1) * matrixPerTrip;
+    // Idle so far in the last trip, hand-over included, for the early stop.
+    size_t lastTripFirstOp = 0;
+    int idleSoFar = 0;
     for (int k = 0; k < trips; ++k) {
         const bool last = k == trips - 1;
+        if (last) lastTripFirstOp = tl.pipe().size();
         for (size_t i = 0; i < body.size(); ++i) {
             Placement pl = tl.place(*body[i]);
             if (!last) continue;
+            if (idleBound && !body[i]->isLabel && body[i]->kind == IssueClass::Matrix) {
+                const auto& ops = tl.pipe();
+                if (ops.size() >= 2 && ops.size() - 1 >= (lastTripFirstOp > 0 ? lastTripFirstOp : 1))
+                    idleSoFar += std::max(0, ops.back().start - ops[ops.size() - 2].end);
+                if (idleSoFar > *idleBound) {
+                    out.overBound = true;
+                    return out;
+                }
+            }
             if (!body[i]->isLabel && t0 < 0) t0 = pl.cycle;
+            if (!placements) continue;
             pl.window -= windowBase;
             out.placements[i] = pl;
         }

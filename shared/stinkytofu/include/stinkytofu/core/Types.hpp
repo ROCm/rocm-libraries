@@ -219,6 +219,10 @@ struct PassFeatureConfig {
         std::string scalarLatency;
         /// Matrix ops queued in front of the pipe; -1 = the fact, 0 = no queue.
         int matrixQueueDepth = -1;
+        /// Set by the backend, not knobs: the passes after the repair include InsertWaitAlu
+        /// and the prefetch bridge (expert scheduling mode 2), with this va_vsrc tracking.
+        bool esm2 = false;
+        bool esm2TrackValuVsrc = false;
     };
 
     LoopConfig loopConfig;

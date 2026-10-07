@@ -52,6 +52,11 @@ class InstructionPool {
     bool owns(const StinkyInstruction* inst) const {
         return owned_.count(inst) != 0;
     }
+    /// The prefetch a FLAT bridge stands for, or null if `inst` is not one.
+    const StinkyInstruction* originalOf(const StinkyInstruction* inst) const {
+        auto it = originals_.find(inst);
+        return it != originals_.end() ? it->second : nullptr;
+    }
 
    private:
     StinkyInstruction* create(int opcode);
@@ -62,6 +67,7 @@ class InstructionPool {
     std::map<int, const StinkyInstruction*> bankSwitches_;
     std::map<std::tuple<int, int, int>, const StinkyInstruction*> waitAlus_;
     std::unordered_map<const StinkyInstruction*, const StinkyInstruction*> bridges_;
+    std::unordered_map<const StinkyInstruction*, const StinkyInstruction*> originals_;
     const StinkyInstruction* nop0_ = nullptr;
     const StinkyInstruction* vnop_ = nullptr;
     std::unordered_set<const StinkyInstruction*> owned_;
@@ -82,14 +88,35 @@ struct PredictedBlock {
     std::vector<const BasicBlock*> blocks;  ///< layout order
     std::vector<std::vector<const StinkyInstruction*>> seqs;
     InsertedCounts counts;
+    /// The only instruction whose position differs from the base order's (Fidelity::ExactBase),
+    /// when the caller knows it; models may then reuse what they planned for the base.
+    const StinkyInstruction* movedFromBase = nullptr;
+};
+
+/// How exact a prediction has to be.
+enum class Fidelity {
+    /// Exactly what the passes insert.
+    Exact,
+    /// Exact, and the reference for later Screen predictions (the current order).
+    ExactBase,
+    /// For screening candidates: the s_wait_alu of the base order, in front of the same
+    /// instructions, wherever recomputing them would be expensive. Everything else exact.
+    Screen,
 };
 
 class InsertionModel {
    public:
     virtual ~InsertionModel() = default;
     virtual const char* name() const = 0;
-    /// Insert into `block` exactly what the model's pass would.
-    virtual void apply(PredictedBlock& block) = 0;
+    /// Insert into `block` what the model's pass would; exactly, unless `fidelity` is Screen.
+    virtual void apply(PredictedBlock& block, Fidelity fidelity) = 0;
+    void apply(PredictedBlock& block) {
+        apply(block, Fidelity::Exact);
+    }
+    /// A line of counters for the pass's debug output.
+    virtual std::string stats() const {
+        return "";
+    }
 };
 
 /// The single models, for testing each against its pass. `scope` are blocks of `func` in
@@ -119,7 +146,9 @@ class InsertionPipeline {
     ~InsertionPipeline();
 
     /// The scope with everything the later passes insert, for `orders` (one per block).
-    PredictedBlock predict(const std::vector<std::vector<const StinkyInstruction*>>& orders);
+    PredictedBlock predict(const std::vector<std::vector<const StinkyInstruction*>>& orders,
+                           Fidelity fidelity = Fidelity::Exact,
+                           const StinkyInstruction* movedFromBase = nullptr);
 
     InstructionPool& pool() {
         return *pool_;
@@ -127,9 +156,14 @@ class InsertionPipeline {
     const std::vector<std::unique_ptr<InsertionModel>>& models() const {
         return models_;
     }
+    /// Wall time spent in each model so far, in seconds.
+    const std::vector<double>& modelSeconds() const {
+        return modelSeconds_;
+    }
 
    private:
     std::vector<const BasicBlock*> scope_;
+    std::vector<double> modelSeconds_;
     std::unique_ptr<InstructionPool> pool_;
     std::vector<std::unique_ptr<InsertionModel>> models_;
 };

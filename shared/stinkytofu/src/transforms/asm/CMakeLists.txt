@@ -66,6 +66,11 @@ target_sources(stinkytofu_objs PRIVATE
     coissue/InsertionModels.cpp
     coissue/QueueModel.cpp
     coissue/DamageReport.cpp
+    coissue/AuditLog.cpp
+    coissue/RepairPolicy.cpp
+    coissue/RepairPatterns.cpp
+    coissue/RepairRules.cpp
+    coissue/MoveChecker.cpp
 )
 
 add_subdirectory(ra)

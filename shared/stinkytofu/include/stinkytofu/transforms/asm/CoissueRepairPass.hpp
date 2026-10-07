@@ -16,6 +16,32 @@
 namespace stinkytofu {
 class Pass;
 
+/// Overrides of the Coissue* knobs for one pass instance (stinkytofu-opt arguments); unset
+/// fields take PassFeatureConfig::CoissueFeatures.
+struct CoissueRepairOptions {
+    std::optional<std::string> mode;
+    std::optional<double> marginPercent;
+    std::optional<int> maxMoves;
+    std::optional<int> searchRadius;
+    std::optional<std::string> profileSet;
+    std::optional<std::string> patterns;
+    std::optional<bool> trustUncalibrated;
+    /// InsertWaitAlu and the prefetch bridge run after the repair, with va_vsrc tracking.
+    std::optional<bool> esm2;
+    std::optional<bool> trackValuVsrc;
+    /// Record each loop's prediction for CoissueAuditPass.
+    bool audit = false;
+    /// Also refuse a VALU move that lands within 13 matrix ops before, or 11 after, a memory
+    /// op reading what it writes. That is the Python prototype's stand-in for the s_wait_alu
+    /// model; only for comparing the engine with it.
+    bool prototypeWaitAluRule = false;
+};
+
+/// Reorders the SALU/VALU fillers of each innermost loop that has matrix ops, so that what
+/// the passes after it insert costs less matrix-pipe time. Off unless CoissueRepairMode
+/// (or `options.mode`) is shadow or apply; see docs/developer/coissue-repair-pass.md.
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createCoissueRepairPass(CoissueRepairOptions options = {});
+
 /// Debug pass that reports the co-issue timing of the code as it stands. With
 /// `printTimeline`, it prints the steady trip of every innermost loop that has matrix ops,
 /// under each profile of PassFeatureConfig::CoissueFeatures::profileSet; with

@@ -95,9 +95,22 @@ bool transOverlap(const StinkyInstruction& prod, const StinkyInstruction& cons) 
     return false;
 }
 
+// Blocks a scan entered, and on how few fillers: the memo of one consumer's scan.
+using EntryMemo = std::vector<std::pair<const BasicBlock*, int>>;
+
 class Planner {
    public:
-    Planner(const HWModel& hw, BlockSequences& seqs) : hw_(hw), seqs_(seqs) {}
+    Planner(const HWModel& hw, BlockSequences& seqs) : hw_(hw), seqs_(seqs) {
+        // A kind no instruction of the sequences can produce never needs a scan.
+        for (const auto& [bb, seq] : seqs_) {
+            (void)bb;
+            for (const StinkyInstruction* inst : seq) {
+                hasTrans_ |= isTranscendental(*inst);
+                hasDgemm_ |= isDGEMMProducer(*inst);
+                hasPerm_ |= isTensorLUT(*inst);
+            }
+        }
+    }
 
     // V_NOPs a consumer needs behind a matched producer.
     int required(ProducerKind kind, int slots, bool consumerIsWmma) const {
@@ -135,13 +148,17 @@ class Planner {
     // all predecessor paths; memo prunes re-entries. Gives up after maxSlotBudget
     // fillers.
     int scanBack(const BasicBlock* bb, std::optional<size_t> startBefore, int accExisting,
-                 const ConsumerCtx& ctx, std::unordered_map<const BasicBlock*, int>& minExisting) {
+                 const ConsumerCtx& ctx, EntryMemo& minExisting) {
         // Memoize predecessor entries on fewest fillers; prune when this arrival can't widen the
         // shortfall.
         if (!startBefore) {
-            auto it = minExisting.find(bb);
+            auto it = std::find_if(minExisting.begin(), minExisting.end(),
+                                   [bb](const auto& e) { return e.first == bb; });
             if (it != minExisting.end() && it->second <= accExisting) return INT_MIN;
-            minExisting[bb] = accExisting;
+            if (it != minExisting.end())
+                it->second = accExisting;
+            else
+                minExisting.emplace_back(bb, accExisting);
         }
 
         int best = INT_MIN;
@@ -181,11 +198,14 @@ class Planner {
     }
 
     int hazardFor(const BasicBlock* bb, size_t index, ProducerKind kind, bool consumerIsWmma) {
+        if ((kind == ProducerKind::TRANS && !hasTrans_) || (kind == ProducerKind::DGEMM && !hasDgemm_) ||
+            (kind == ProducerKind::PERM && !hasPerm_))
+            return 0;
         ConsumerCtx ctx{kind, consumerIsWmma, seqs_.at(bb)[index]};
         // minExisting bounds re-entries: a block is re-scanned only on a strictly smaller filler
         // count.
-        std::unordered_map<const BasicBlock*, int> minExisting;
-        const int r = scanBack(bb, index, /*accExisting=*/0, ctx, minExisting);
+        minExisting_.clear();
+        const int r = scanBack(bb, index, /*accExisting=*/0, ctx, minExisting_);
         return r > 0 ? r : 0;
     }
 
@@ -228,6 +248,10 @@ class Planner {
    private:
     const HWModel& hw_;
     BlockSequences& seqs_;
+    EntryMemo minExisting_;
+    bool hasTrans_ = false;
+    bool hasDgemm_ = false;
+    bool hasPerm_ = false;
 };
 
 }  // namespace
