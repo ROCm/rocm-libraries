@@ -95,6 +95,39 @@ namespace TensileLite
                                      hipEvent_t                           stopEvent,
                                      bool                                 isKernelLoaded = false);
 
+            // bestEffortEvents says the events are instrumentation the caller
+            // can do without: hipEventRecord is still attempted, but its
+            // failure costs the measurement rather than the launch. The
+            // overloads above keep the strict behaviour, so a benchmark that
+            // cannot time what it ran still hears about it.
+            //
+            // The flag exists because the events are recorded around a
+            // PRODUCTION dispatch. Online tuning times the caller's own
+            // hipblasLtMatmul, so without it an unrecordable event becomes the
+            // status of that matmul -- a correct GEMM reported as a failure,
+            // or a GEMM not run at all when the start record is the one that
+            // fails. A tuner that cannot measure has to stop measuring, not
+            // break the call it was measuring. Nothing more is needed on the
+            // tuner's side: a pair no launch recorded reads back non-positive,
+            // which the harvest already drops and retires.
+            //
+            // Separate overloads rather than a defaulted parameter because
+            // this library is installed with its headers and an exported CMake
+            // target, so the existing mangled names are ABI.
+            hipError_t launchKernel(KernelInvocation const& kernel,
+                                    hipStream_t             stream,
+                                    hipEvent_t              startEvent,
+                                    hipEvent_t              stopEvent,
+                                    bool                    isKernelLoaded,
+                                    bool                    bestEffortEvents);
+
+            hipError_t launchKernels(std::vector<KernelInvocation> const& kernels,
+                                     hipStream_t                          stream,
+                                     hipEvent_t                           startEvent,
+                                     hipEvent_t                           stopEvent,
+                                     bool                                 isKernelLoaded,
+                                     bool                                 bestEffortEvents);
+
             hipError_t launchKernels(std::vector<KernelInvocation> const& kernels,
                                      hipStream_t                          stream,
                                      std::vector<hipEvent_t> const&       startEvents,
