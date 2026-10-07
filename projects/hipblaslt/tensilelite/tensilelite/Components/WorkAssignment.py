@@ -1183,7 +1183,8 @@ class Hybrid(WorkAssignment):
 
         # No USO prologue. Bit 30 must still be extracted and cleared above:
         # WorkAssignmentMode's dispatch is a plain SCmpEQU32==0 and the SKTiles
-        # alias needs a clean tile count. Bit 29 needs neither.
+        # alias needs a clean tile count. Bit 29 is not USO here: the dynamic
+        # preLoop (extractDynamicParallelMode) extracts and clears it.
 
         module.add(processing.initializePartition(writer, kernel))
         return module
