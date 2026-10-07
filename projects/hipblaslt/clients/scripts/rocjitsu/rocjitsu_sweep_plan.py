@@ -4,13 +4,14 @@
 
 from collections import Counter
 import hashlib
+import heapq
 import json
 import math
 from pathlib import Path
 from Tensile.Utilities.LibraryIO import readMessagePack
 
 POLICY = "tile-depth-v1"
-CASES_PER_KERNEL = 4
+CASES_PER_SOLUTION = 4
 
 
 def sha256(path):
@@ -190,40 +191,44 @@ def derive_cases(solution):
     return cases
 
 
-class KernelSample:
-    """Bounded, order-independent deterministic hash priorities over kernel names.
+def select_solutions(entries, count, seed):
+    """Rank every entry, retaining duplicate kernel and solution names.
 
-    Aliases do not get extra sampling weight. Choose their representative by a
-    separate priority over solution names, independent of index renumbering.
-    Selection does not depend on backend or generated cases.
+    Names set the priority; configuration metadata resolves repeated names.
+    Indices only distinguish otherwise identical configurations. A bounded heap
+    keeps the smallest N entries, or count=None selects the entire inventory.
     """
 
-    def __init__(self, count, seed):
-        self.count, self.seed, self.entries = count, seed, {}
-
-    def consider(self, library, solution):
-        name = solution["kernelName"]
-        rank = hashlib.sha256((self.seed + "\0" + name).encode()).hexdigest()
-        alias = (
-            hashlib.sha256((self.seed + "\0" + solution["name"]).encode()).hexdigest(),
+    def priority(entry):
+        _, solution = entry
+        # Include all execution metadata, including argument formats and custom
+        # kernels. Index/logic bookkeeping and performance models do not describe
+        # the workload when the client is given an explicit solution index.
+        configuration = {
+            key: value
+            for key, value in solution.items()
+            if key not in ("index", "libraryLogicIndex", "ideals", "linearModel")
+        }
+        return (
+            hashlib.sha256((seed + "\0" + solution["name"]).encode()).digest(),
             solution["name"],
-            library.name,
+            json.dumps(configuration, sort_keys=True, separators=(",", ":")),
             solution["index"],
         )
-        if rank in self.entries and alias >= self.entries[rank][0]:
-            return
-        if len(self.entries) == self.count and rank > max(self.entries):
-            return
-        self.entries[rank] = (alias, library, solution)
-        if len(self.entries) > self.count:
-            del self.entries[max(self.entries)]
 
-    def selected(self):
-        if len(self.entries) != self.count:
-            raise ValueError(
-                f"Requested {self.count} distinct kernels; found only {len(self.entries)}"
-            )
-        return [self.entries[k][1:] for k in sorted(self.entries)]
+    if count is None:
+        selected = sorted(entries, key=priority)
+        if not selected:
+            raise ValueError("No eligible solutions")
+        return selected
+    if count < 1:
+        raise ValueError("Solution count must be positive")
+    selected = heapq.nsmallest(count, entries, key=priority)
+    if len(selected) != count:
+        raise ValueError(
+            f"Requested {count} eligible solutions; found only {len(selected)}"
+        )
+    return selected
 
 
 def make_plan(library_dir, target, device, count, seed, solution_indices=None):
@@ -239,40 +244,47 @@ def make_plan(library_dir, target, device, count, seed, solution_indices=None):
     }
     if not libraries:
         raise ValueError(f"No {target} packaged metadata under {library_dir}")
-    counts, sample, inputs = Counter(), KernelSample(count, seed), {}
+    counts, inputs = Counter(), {}
     names, eligible_names = set(), set()
     indices, requested = set(), {}
     wanted = set(solution_indices or [])
-    for path in sorted(libraries.values()):
-        inputs[path.name] = sha256(path)
-        for solution in read_library(path).get("solutions", []):
-            if solution["index"] in indices:
-                raise ValueError(
-                    f"Duplicate solution index {solution['index']} in {path}"
-                )
-            indices.add(solution["index"])
-            counts["solutions"] += 1
-            if solution["index"] in wanted:
-                requested[solution["index"]] = (path, solution)
-            name = hashlib.sha256(solution["kernelName"].encode()).digest()
-            names.add(name)
-            if not matches_hardware(solution["hardwarePredicate"], target, device):
-                counts["other_or_unknown_hardware"] += 1
-            elif not ordinary_problem(solution["problemType"]):
-                counts["outside_adapter_scope"] += 1
-            else:
-                counts["eligible_solutions"] += 1
-                eligible_names.add(name)
-                if not wanted:
-                    sample.consider(path, solution)
+
+    def inventory():
+        for path in sorted(libraries.values()):
+            inputs[path.name] = sha256(path)
+            for solution in read_library(path).get("solutions", []):
+                if solution["index"] in indices:
+                    raise ValueError(
+                        f"Duplicate solution index {solution['index']} in {path}"
+                    )
+                indices.add(solution["index"])
+                counts["solutions"] += 1
+                if solution["index"] in wanted:
+                    requested[solution["index"]] = (path, solution)
+                name = hashlib.sha256(solution["kernelName"].encode()).digest()
+                names.add(name)
+                if not matches_hardware(solution["hardwarePredicate"], target, device):
+                    counts["other_or_unknown_hardware"] += 1
+                elif not ordinary_problem(solution["problemType"]):
+                    counts["outside_adapter_scope"] += 1
+                else:
+                    counts["eligible_solutions"] += 1
+                    eligible_names.add(name)
+                    yield path, solution
+
+    if wanted:
+        for _ in inventory():
+            pass
+        if wanted - requested.keys():
+            raise ValueError(
+                f"Requested solution indices not found: {sorted(wanted - requested.keys())}"
+            )
+        selected = [requested[i] for i in sorted(wanted)]
+    else:
+        selected = select_solutions(inventory(), count, seed)
     counts.update(
         unique_kernel_names=len(names), eligible_kernel_names=len(eligible_names)
     )
-    if wanted - requested.keys():
-        raise ValueError(
-            f"Requested solution indices not found: {sorted(wanted - requested.keys())}"
-        )
-    selected = [requested[i] for i in sorted(wanted)] if wanted else sample.selected()
     jobs = []
     for job_id, (metadata, s) in enumerate(selected):
         job = {
@@ -325,9 +337,14 @@ def make_plan(library_dir, target, device, count, seed, solution_indices=None):
         "policy": POLICY,
         "seed": seed,
         "target": target,
-        "selection": "solution-indices" if wanted else "sampled-kernels",
+        "selection": (
+            "solution-indices"
+            if wanted
+            else "all-eligible-solutions" if count is None else "sampled-solutions"
+        ),
+        "solutions": len(selected),
         "kernels": len({s["kernelName"] for _, s in selected}),
-        "planned_cases": len(jobs) * CASES_PER_KERNEL,
+        "planned_cases": len(jobs) * CASES_PER_SOLUTION,
         "inventory": dict(counts),
         "input_sha256": inputs,
         "artifact_fingerprint": fingerprint,

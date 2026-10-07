@@ -1,7 +1,7 @@
 # This reusable workflow is a narrow post-build instrumentation job for
 # hipBLASLt. It fetches BLAS artifacts from the just-finished TheRock build and
 # runs independent TensileLite/hipBLASLt-bench packaged-GEMM sweeps
-# (four workers, 100 sampled kernels each) under
+# (four workers, 100 sampled solutions each) under
 # rocjitsu's race detector. The workloads run entirely under CPU-side emulation,
 # so the workflow uses the CPU build runner instead of consuming GPU test capacity.
 

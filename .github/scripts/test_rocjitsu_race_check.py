@@ -214,7 +214,7 @@ python3() { printf 'ARG: %s\n' "$@"; if [[ "$3" == tensile ]]; then return "$TEN
                 )
                 for flag, value in [
                     ("--workers", "4"),
-                    ("--kernels", "100"),
+                    ("--solutions", "100"),
                     ("--target", "gfx942"),
                     ("--seed", "0"),
                     ("--suite-timeout", "1500"),
