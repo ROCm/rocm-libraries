@@ -49,6 +49,7 @@ from .Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from .Common.GlobalParameters import globalParameters, assignGlobalParameters, \
                                             restoreDefaultGlobalParameters, validateRuntimeLanguage
 from .Common.TimingInstrumentation import timing_context, flush_timing_buffer
+from .ExecutionPolicy import normalize_hybrid_assignment_policy
 from .Toolchain.Assembly import AssemblyToolchain, makeAssemblyToolchain
 from .Toolchain.Source import SourceToolchain, makeSourceToolchain
 from .Toolchain.Validators import validateToolchain, ToolchainDefaults
@@ -305,7 +306,9 @@ def argUpdatedGlobalParameters(args):
     if PyTestBuildArchNames != None and len(PyTestBuildArchNames) > 0:
         rv["Architecture"] = PyTestBuildArchNames
 
-    return rv
+    # Resolve aliases within the explicit CLI tier before it overrides YAML
+    # values, so inherited spellings cannot mask an override or conflict with it.
+    return normalize_hybrid_assignment_policy(rv)
 
 def get_gpu_max_frequency_smi(device_id):
     '''

@@ -198,24 +198,30 @@ globalParameters["DataInitTypeScaleAlphaVec"] = 3
 globalParameters["DataInitTypeMXSA"] = 1
 globalParameters["DataInitTypeMXSB"] = 1
 globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
-# StreamK=5 hybrid-mode toggle values driven by the benchmark client.
-# Each list entry causes ClientProblemFactory to replay every base
-# problem with setParams().setStreamKTileSchedulingMode(value). Accepts
-# the full tri-state {0=OFF (static), 1=ON (dynamic per-XCD work-queue),
-# 2=AUTO (heuristic)}. Set to [0, 1] in YAML GlobalParameters to
-# deterministically exercise both SK5 sub-paths in a single sweep run;
-# AUTO is supported as well, but in a sweep it leaves the per-launch
-# sub-path up to the runtime heuristic, so [0, 1] is preferred when
-# the YAML's job is sub-path coverage. AUTO is most useful when
-# overriding from the command line (e.g. `--streamk-hybrid-mode 2`)
-# to run the heuristic end-to-end on a real problem. Ignored at the
-# host for non-SK5 solutions. Default keeps behavior unchanged for
-# existing tests.
+# Runtime steering for solutions compiled with WorkAssignment=Hybrid; this
+# does not select a compiled tile-processing or work-assignment family.
+# Each list entry replays every base problem through the benchmark client.
+# HybridAssignmentPolicy accepts Default / DynamicWorkQueue / Auto, preserving
+# the existing 0 / 1 / 2 encodings. Default normally uses static assignment but
+# may invoke the heuristic when sm_count_target is positive; it is not an
+# unconditional static request. DynamicWorkQueue selects the per-XCD queue,
+# and Auto asks the runtime heuristic to choose the effective assignment.
+# For deterministic static/dynamic branch coverage, use the explicit runtime
+# debug override TENSILE_PERSISTENT_HYBRID_FORCE_MODE=0 / 1.
+# StreamKHybridMode is the deprecated numeric input alias; existing values and
+# behavior remain supported. These controls are ignored for other compiled
+# WorkAssignment values.
 globalParameters["StreamKHybridMode"] = [0]
+globalParameters["HybridAssignmentPolicy"] = ["Default"]
 # Runtime batch ABI used by the Tensile client: 0=strided, 1=pointer array.
 # This is intentionally independent of ProblemType.StridedBatched so universal
 # strided kernels can exercise their ArgType==3 general-batched path.
 globalParameters["BatchMode"] = 0
+# Read the shared Synchronizer buffer back after each solution's first warmup
+# and fail the run if a kernel left it nonzero; residue is otherwise silent,
+# corrupting a later launch rather than the one that left it. Only StreamK,
+# GSU MultipleBufferSingleKernel, and output-amax solutions are scanned.
+globalParameters["CheckSynchronizer"] = True
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.
 )
@@ -402,6 +408,17 @@ globalParameters["StinkyTofuEnableRemarks"] = False
 # slow kernel generation can be attributed to individual passes.
 globalParameters["StinkyTofuTimePasses"] = False
 
+# StinkyTofu ds_load issue cap (gfx1250 DAG scheduler): at most DsReadPerCap ds_loads per
+# DsIssueCapSpanCycles. Mode 0 = sliding (each ds_load frees its slot that many cycles after
+# its own issue), 1 = periodic (a period opens at its first ds_load; all slots free together).
+# Span 0 = one WMMA window. See stinkytofu docs/user/scheduler-tuning-parameters.md.
+globalParameters["StinkyTofuDsIssueCapMode"] = 0
+globalParameters["StinkyTofuDsIssueCapSpanCycles"] = 0
+# Extra StinkyTofu module options, applied last so they override KernelWriter's own values,
+# e.g. {WmmaQueueDepth: 8, DsReadPerCap: 12}. Keys are StinkyAsmModule::ModuleOptions names;
+# see stinkytofu docs/user/scheduler-tuning-parameters.md.
+globalParameters["StinkyTofuModuleOptions"] = {}
+
 # Directory for StinkyTofu per-kernel instruction-cost output files (empty = disabled).
 # When set, each kernel's StinkyTofu module writes its cost file here via
 # StinkyTofuModule.setOutputDir (see KernelWriter._convertToStinkyTofu).
@@ -442,6 +459,9 @@ internalParameters = {
 
 # These parameters are used in ContractionSolutions for user arguments support.
 defaultInternalSupportParams = {
+    # Missing prebuilt metadata keeps layout 0; the generator selects the
+    # current scheduling layout after resolving the execution policy.
+    "PersistentLoopArgsVersion": 0,
     "KernArgsVersion": 3,
     # Information about user input internal kernel argument support
     # Change this to False if the CustomKernel does not support.
@@ -594,11 +614,11 @@ defaultBenchmarkCommonParameters = [
     {"StoreSyncOpt": [0]},
     {"GroupLoadStore": [False]},
     {"MIArchVgpr": [False]},
-    {"StreamK": [0]},
-    {"StreamKForceDPOnly": [0]},
+    {"TileProcessingStrategy": ["None"]},
+    {"WorkAssignment": ["StaticGrid"]},
     {"StreamKAtomic": [0]},
-    {"StreamKWorkStealing": [0]},
-    {"StreamKXCCMapping": [0]},
+    {"WorkQueueStealing": [0]},
+    {"PersistentXCCMapping": [0]},
     {"StreamKFixupTreeReduction": [0]},
     {"DebugStreamK": [0]},
     {"DebugPersistentKernelLoopForever": [False]},
@@ -877,6 +897,8 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
 
     global globalParameters
 
+    from ..ExecutionPolicy import normalize_hybrid_assignment_policy
+    config = normalize_hybrid_assignment_policy(config)
     validateRuntimeLanguage(config.get("RuntimeLanguage"))
 
     # Minimum Required Version

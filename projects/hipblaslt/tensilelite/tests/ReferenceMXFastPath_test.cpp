@@ -100,8 +100,6 @@ TEST(ReferenceMXFastPath, RejectsMixedInputTypesWithMXFP4)
 
 #endif
 
-#ifdef TENSILE_USE_FP8_BF8
-
 TEST(ReferenceMXFastPath, MatchesSlowPathForScaledFP8Gemm)
 {
     const size_t M       = 64;
@@ -188,12 +186,3 @@ TEST(ReferenceMXFastPath, MatchesSlowPathWithBetaAndBias)
 
     EXPECT_LT(maxAbsDiff(dSlow, dFast), 1e-3f);
 }
-
-#else
-
-TEST(ReferenceMXFastPath, DisabledWithoutFP8Support)
-{
-    GTEST_SKIP() << "TENSILE_USE_FP8_BF8 not enabled";
-}
-
-#endif

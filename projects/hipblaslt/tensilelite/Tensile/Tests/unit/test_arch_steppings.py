@@ -81,6 +81,8 @@ CAP_FP4_32X16 = "HasWMMA_f4_32x16"
 # A probed archCap v0 shares with v1 (present in the table, NOT overridden: v0
 # has the same XNACK-replay hazard and keeps the drain).
 CAP_XCNT = "RequiresXCntForVolatileVMEM"
+# Bit position of DISABLE_XDL_ARB_STALL in SCHED_MODE; -1 where the field is absent.
+CAP_ARB_STALL_OFFSET = "WmmaArbStallBitOffset"
 
 FP4_32X16_REASON = "does not support the fp4 32x16 matrix-instruction shape"
 
@@ -344,6 +346,16 @@ def test_xcnt_is_a_really_probed_archcap_strict_inherits(gfx1250_iim):
     (HasTDMMulticast also lives in archCaps but is a fill-missing key, guarded by
     the absent-key test above.)"""
     assert CAP_XCNT in gfx1250_iim[ISA_GFX1250].archCaps
+
+
+def test_wmma_arb_stall_bit_offset_is_declared_per_arch(gfx1250_cxx, gfx1250_iim):
+    """DISABLE_XDL_ARB_STALL sits at a different bit on different arches, so the
+    offset is declared per arch and -1 means the field is absent. rocisa keeps its
+    own table; stinkytofu's copy is pinned separately in test_comgr.py."""
+    assert gfx1250_iim[ISA_GFX1250].archCaps[CAP_ARB_STALL_OFFSET] == 2
+    absent = IsaVersion(12, 0, 0)
+    iim = makeIsaInfoMap([absent], gfx1250_cxx)
+    assert iim[absent].archCaps[CAP_ARB_STALL_OFFSET] == -1
 
 
 @pytest.fixture(scope="module")
@@ -642,6 +654,14 @@ def test_kernel_names_identical_across_steppings(
 MULTICAST_MARKERS = ("MulticastMask", "multicast mask")
 
 
+def _stableLabels(src):
+    # StinkyTofu suffixes labels with a random 16-char [0-9a-zA-Z] hash, which
+    # canonicalize_asm only renames when it happens to be all [A-Z0-9]. Run this
+    # first, on the raw source, so every hash takes the same path in both emits.
+    ids = {}
+    return re.sub(r"_[A-Za-z0-9]{16}(?![A-Za-z0-9])", lambda m: ids.setdefault(m.group(0), f"_L{len(ids)}"), src)
+
+
 def _emit(archName, stinkyArchName=""):
     from Tensile.Common.GlobalParameters import globalParameters
     from Tensile.Common.Types import DebugConfig
@@ -691,7 +711,7 @@ def _emit(archName, stinkyArchName=""):
         ri = _init_rocisa_for(kernel)
         _prepare_kernel(kernel, False)
         res = processKernelSource(kwa, ri.getData(), ri.getOutputOptions(), False, kernel)
-        return canonicalize_asm(res.src), res.err, kwa.states.archCaps
+        return canonicalize_asm(_stableLabels(res.src)), res.err, kwa.states.archCaps
 
 
 def test_gfx1250_emits_multicast_gfx1250_strict_does_not(gfx1250_cxx):
@@ -3718,13 +3738,7 @@ def test_gfx1250v0_emits_what_gfx1250_strict_emits(gfx1250_cxx):
     assert strictErr == 0 and v0Err == 0
     assert v0Caps[CAP_MULTICAST] is False
     assert not any(m in v0Src for m in MULTICAST_MARKERS)
-
-    def _stableLabels(src):
-        # canonicalize_asm misses the mixed-case suffixes some labels carry.
-        ids = {}
-        return re.sub(r"_[A-Za-z0-9]{16}(?![A-Za-z0-9])", lambda m: ids.setdefault(m.group(0), f"_L{len(ids)}"), src)
-
-    assert _stableLabels(v0Src) == _stableLabels(strictSrc)
+    assert v0Src == strictSrc
 
 
 def test_gfx1250v0_parses_strict_logic_under_the_gfx1250_name(

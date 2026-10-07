@@ -234,7 +234,8 @@ ctest -L <label>                 (build tree or install tree)
 | `standard` | Pre-checkin / PR (~2 hr) | `ctest_standard` → `*quick*:*pre_checkin*-*known_bug*` |
 | `comprehensive` | Extended / nightly (~2 hr) | `ctest_comprehensive` → `*nightly*-*known_bug*` |
 | `full` | Stress / weekly (~8 hr) | `ctest_full` → quick + pre_checkin + nightly |
-| `ffm-quick`, `ffm-full` | FFM simulation pipelines | FFM-specific YAML / filters |
+| `ffm-quick` | FFM PR simulation (< 2 hr) | `ctest_ffm-quick` → `rocblas_smoke.yaml` |
+| `ffm-full` | FFM nightly simulation (2 hr) | `ctest_ffm-full` → `rocblas_smoke.yaml` plus `rocblas_extras.yaml` `*regression*` |
 
 Each category carries CTest **labels** (for `-L` filtering), a **timeout** from `execution_settings.category_timeouts`, and optional **exclude** patterns (always including `*known_bug*`).
 
@@ -247,6 +248,17 @@ cd build/release
 ctest -N -L quick
 ctest -L standard -V
 ```
+
+`/usr/bin/ctest -N -L ffm-full` (CMake 3.30.2), after configuring `test_categories.yaml` with the rtest driver, lists one suite:
+
+```
+Test #2: rocblas-test_ffm-full_suite
+Test command: /usr/bin/python3 "rocblas_rtest.py" "-t" "ctest_ffm-full"
+Labels: ffm-full
+TIMEOUT "7200"
+```
+
+That set is `ctest_ffm-full` in `rtest.xml`: `FFM-full-smoke` (`rocblas_smoke.yaml`), then `FFM-full-regression` (`rocblas_extras.yaml` `*regression*`).
 
 **Install-tree CTest (TheRock / packaged builds).** An install-time `CTestTestfile.cmake` is generated with relative paths to the staged binary. Layout after install:
 
@@ -384,6 +396,8 @@ APIs, logging, and bad-argument cases. Results are compared to host reference BL
 | `standard` / pre-checkin | `*quick*:*pre_checkin*` | Up to ~2 hours |
 | `comprehensive` / nightly | `*quick*:*pre_checkin*:*nightly*` | TBD Hours |
 | `full` / stress | Includes stress and large-memory cases | Up to ~8 hours (CTest timeout) |
+| `ffm-quick` | `rocblas_smoke.yaml` | CTest timeout 2 hours |
+| `ffm-full` | `rocblas_smoke.yaml` plus `rocblas_extras.yaml` `*regression*` | CTest timeout 2 hours |
 | `known_bug` | Quarantined failures | Excluded via `-*known_bug*` |
 
 `rocblas_rtest.py` offers more test set flexibility as defined in `rocblas_rtest.xml`.
@@ -567,6 +581,20 @@ Document unsupported combinations explicitly during release planning rather than
 | `known_bugs.yaml` quarantine without ticket discipline | Medium | Review before release |
 | Sparse checkout without `shared/ctest` | Low | `ROCBLAS_ENABLE_CTEST=OFF`; no install CTest labels |
 | Stress tests and OOM on small hosts | Medium | `ROCBLAS_CLIENT_RAM_GB_LIMIT`; exclude `*stress*` |
+
+Tracked CI/CD infrastructure Gaps are the most significant known risks and live under [AIDEVOPS-392].  These lead to product regressions:
+
+**Table: `AIDEVOPS-392 tasks`**
+
+| Task | Summary | Priority | Status |
+| --- | --- | --- | --- |
+| [AIDEVOPS-393] | Expand GPU architecture coverage across CI runners on PRs | P1: High | Open |
+| [AIDEVOPS-394] | Add control opt in/out for downstream integration tests for rocBLAS consumers on PRs | P1: High | Open |
+| [AIDEVOPS-395] | Provide for dbgsym to be loaded for CI testing | P2: Medium | Open |
+| [AIDEVOPS-396] | Add stress test pipeline options to CI on PRs | P1: High | Open |
+| [AIDEVOPS-397] | Add multi-gpu test pipeline option to CI on PRs | P2: Medium | Open |
+| [AIDEVOPS-398] | Add comprehensive test pipeline option to CI on PRs | P1: High | Open |
+| [AIDEVOPS-399] | Add ASAN test pipeline option to CI on PRs | P2: Medium | Open |
 
 ## Improvement Roadmap
 

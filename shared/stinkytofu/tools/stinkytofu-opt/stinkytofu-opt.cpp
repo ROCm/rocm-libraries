@@ -183,12 +183,23 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--ds-read-throttle-transition-entries=") ||
                 arg.starts_with("--ds-read-per-cap=") ||
                 arg.starts_with("--ds-issue-cap-span-cycles=") ||
+                arg.starts_with("--ds-issue-cap-mode=") ||
                 arg.starts_with("--tensor-load-wmma-space=") ||
+                arg.starts_with("--tensor-load-ds-load-gap-cycles=") ||
+                arg.starts_with("--barrier-half-slack=") ||
+                arg.starts_with("--wmma-queue-depth=") ||
+                arg.starts_with("--wmma-queue-cover-cycles=") ||
                 arg.starts_with("--global-read-queue-depth=") ||
                 arg.starts_with("--global-read-drain-latency=") ||
                 arg.starts_with("--merge-barrier-threshold=") ||
-                arg == "--enable-wmma-hide-budget-prescan" || arg.starts_with("--vgpr-msb-mode=") ||
-                arg == "--from-label" || arg == "--to-label" || isKernelConfigArg(arg))
+                arg == "--enable-wmma-hide-budget-prescan" ||
+                arg == "--enable-esm2-track-valu-vsrc" ||
+                arg.starts_with("--wait-alu-hold-strict-count=") ||
+                arg.starts_with("--prefetch-lead-wmmas=") ||
+                arg.starts_with("--prefetch-lead-min-stage-wmmas=") ||
+                arg.starts_with("--war-gate-wmmas=") || arg == "--ds-slot-first" ||
+                arg.starts_with("--vgpr-msb-mode=") || arg == "--from-label" ||
+                arg == "--to-label" || isKernelConfigArg(arg))
                 continue;
             // Two-arg flags: skip both the flag and its value so the value
             // doesn't get mistaken for a pass name and the flag doesn't get
@@ -535,14 +546,50 @@ int main(int argc, char** argv) {
             // anything alone, so both are reachable from the CLI.
             passFeatureConfig.dagFeatures.dsIssueCapSpanCycles =
                 std::stoi(a.substr(std::string("--ds-issue-cap-span-cycles=").size()));
+        } else if (a.starts_with("--ds-issue-cap-mode=")) {
+            const std::string val = a.substr(std::string("--ds-issue-cap-mode=").size());
+            if (val == "sliding")
+                passFeatureConfig.dagFeatures.dsIssueCapMode =
+                    stinkytofu::PassFeatureConfig::DsIssueCapMode::Sliding;
+            else if (val == "periodic")
+                passFeatureConfig.dagFeatures.dsIssueCapMode =
+                    stinkytofu::PassFeatureConfig::DsIssueCapMode::Periodic;
+            else {
+                std::cerr << "error: --ds-issue-cap-mode must be sliding or periodic\n";
+                return 1;
+            }
         } else if (a.starts_with("--tensor-load-wmma-space=")) {
             passFeatureConfig.dagFeatures.tensorLoadWmmaSpace = std::stoi(a.substr(25));
+        } else if (a.starts_with("--tensor-load-ds-load-gap-cycles=")) {
+            passFeatureConfig.dagFeatures.tensorLoadDsLoadGapCycles =
+                std::stoi(a.substr(std::string("--tensor-load-ds-load-gap-cycles=").size()));
+        } else if (a.starts_with("--barrier-half-slack=")) {
+            passFeatureConfig.dagFeatures.barrierHalfSlack =
+                std::stoi(a.substr(std::string("--barrier-half-slack=").size()));
+        } else if (a.starts_with("--wmma-queue-depth=")) {
+            passFeatureConfig.dagFeatures.wmmaQueueDepth =
+                std::stoi(a.substr(std::string("--wmma-queue-depth=").size()));
+        } else if (a.starts_with("--wmma-queue-cover-cycles=")) {
+            passFeatureConfig.dagFeatures.wmmaQueueCoverCycles =
+                std::stoi(a.substr(std::string("--wmma-queue-cover-cycles=").size()));
         } else if (a.starts_with("--global-read-queue-depth=")) {
             passFeatureConfig.dagFeatures.globalReadQueueDepth = std::stoi(a.substr(26));
         } else if (a.starts_with("--global-read-drain-latency=")) {
             passFeatureConfig.dagFeatures.globalReadDrainLatency = std::stoi(a.substr(28));
         } else if (a == "--enable-wmma-hide-budget-prescan") {
             passFeatureConfig.dagFeatures.enableWmmaHideBudgetPrescan = true;
+        } else if (a == "--enable-esm2-track-valu-vsrc") {
+            passFeatureConfig.dagFeatures.enableESM2TrackValuVsrc = true;
+        } else if (a.starts_with("--wait-alu-hold-strict-count=")) {
+            passFeatureConfig.dagFeatures.waitAluHoldStrictCount = std::stoi(a.substr(29));
+        } else if (a.starts_with("--prefetch-lead-wmmas=")) {
+            passFeatureConfig.dagFeatures.prefetchLeadWmmas = std::stoi(a.substr(22));
+        } else if (a.starts_with("--prefetch-lead-min-stage-wmmas=")) {
+            passFeatureConfig.dagFeatures.prefetchLeadMinStageWmmas = std::stoi(a.substr(32));
+        } else if (a.starts_with("--war-gate-wmmas=")) {
+            passFeatureConfig.dagFeatures.warGateWmmas = std::stoi(a.substr(17));
+        } else if (a == "--ds-slot-first") {
+            passFeatureConfig.dagFeatures.dsSlotFirst = true;
         } else if (a.starts_with("--merge-barrier-threshold=")) {
             passFeatureConfig.dagFeatures.mergeBarrierThreshold = std::stoi(a.substr(26));
         }

@@ -28,7 +28,7 @@ ENGINE=<your-bundle-engine-id>
 
 Replace `<your-bundle-engine-id>` with your bundle's engine ID; it is consumed verbatim
 as `--expect-engine` below. A gfx942 dense attention bundle would spell it
-`hipkernel:Gfx942AttentionDense`; this tree ships no such engine.
+`hipkernel:Gfx942AttentionDense`; the name is an illustration, not an engine to look for.
 
 Follow the **Setup** section of `$GEN/README.md`. Authoring and mining imports need the
 profile's rocKE library environment; production packaging uses its own selected
@@ -67,7 +67,9 @@ Exits: 0 feasible, 1 device/path/write failure, 2 invalid invocation, 3 neither
 `rocminfo` nor `hipInfo` could run. Exit 3 means the device was never observed, not that
 it is absent: obtain an inspection utility on this host. For rocKE, confirm the actual
 builder/spec and its `(spec, *, arch)` interface; an unknown architecture inventory
-needs source investigation.
+needs source investigation. A packaged engine whose kernel is a prebuilt per-arch code
+object plus its symbol is authored as `hsaco`, not mined for a rocKE builder; see the
+authored-source table in [SKILL.md](SKILL.md).
 
 **Gate:** feasible target/workspace, representable scope and capable reference. A
 missing dependency blocks its gate; host-only research may continue while a device
@@ -93,7 +95,24 @@ miner:
   --include-windowed --out "$SHAPES"
 ```
 
-Add `--rocke-bench <actual-benchmark-tree>` when applicable. Reconcile each source's
+Add `--rocke-bench <actual-benchmark-tree>` when applicable. A dense prefill
+benchmark (`benchmark_dense_prefill_live.py`) keeps its shapes in Python, so the tree
+alone misses them. `--rocke-bench` takes one tree, and a repeated flag keeps only the
+last one, so copy the benchmark tree, emit the dense shapes into the copy and mine the
+copy in place of the original tree. Emitting needs no GPU and no torch, only an
+interpreter that imports the rocKE library (numpy):
+
+```bash
+OWNER_BENCH=/absolute/path/to/owner-bench-tree   # a new directory; cp creates it
+cp -r "$PROVIDER/rocke/library/benchmarks/$ARCH/attention" "$OWNER_BENCH"
+"$PY" "$PROVIDER/rocke/library/benchmarks/$ARCH/attention/prefill/benchmark_dense_prefill_live.py" \
+  --emit-shapes "$OWNER_BENCH/dense_prefill_live_shapes.json" \
+  --dtype bf16 --hq 128 --hkv 8 --d 128
+```
+
+Repeat the emit with another file name per dtype or head configuration the owner
+measures, then pass `--rocke-bench "$OWNER_BENCH"`. Packed varlen rows are skipped and
+counted. Reconcile each source's
 total, parsed, servable, covered and excluded counts; do not discard window/sink or
 independent operand dimensions to fit the request schema.
 
@@ -294,40 +313,42 @@ results. None proves native loading or numerical dispatch.
 ## 4. Build, pack, install and prove the host boundary
 
 Configure from `$REPO` using `hipdnn-superbuild`, with
-`CMAKE_INSTALL_PREFIX="$INSTALL"`, `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`,
-`HIPKERNELPROVIDER_ENABLE_ROCKE=ON` and `HIPKERNELPROVIDER_ENABLE_TESTS=ON`. SDPA needs
-`HIPDNN_ENABLE_SDPA=ON` consistently in SDK and provider.
+`CMAKE_INSTALL_PREFIX="$INSTALL"`, `HIPDNN_ENABLE_KERNEL_INGESTOR=ON` and
+`HIPKERNELPROVIDER_ENABLE_TESTS=ON`, plus `HIPKERNELPROVIDER_ENABLE_ROCKE=ON` when the
+build packs a rocKE bundle. SDPA needs `HIPDNN_ENABLE_SDPA=ON` consistently in SDK and
+provider.
 
 The component selection must include the provider. The `hipdnn-providers` preset does
 **not** build hip-kernel-provider; the presets that do are `hipdnn-providers-all`,
 `hip-kernel-provider`, `hipdnn-dev-all` and `miopen-hipdnn-dev-all`.
 
-**`HIPKERNELPROVIDER_ENABLE_ROCKE=ON` is unconditional.** The provider's top-level
-`CMakeLists.txt` raises `FATAL_ERROR` whenever `HIPDNN_ENABLE_KERNEL_INGESTOR` is ON and
-it is OFF, inspecting no `kernel_source.kind`, no production root and no descriptor, so
-it fires for HIP-only and `embedded_source` bundles and for a dormant default configure.
-rocKE is likewise resolved once for **every** root, test roots included, so an
-unresolvable comgr is fatal at configure even in a hip-only build.
+**`HIPKERNELPROVIDER_ENABLE_ROCKE=ON` is required to pack a rocKE bundle.** With it ON,
+rocKE is resolved once for **every** root, test roots included, so an unresolvable comgr
+is fatal at configure even in a hip-only build. With it OFF the ingestor still
+configures, builds and packs: the hip producer packs alone with no rocKE wheel, pip or
+comgr, the `rocKE/` family folder is excluded from every root, and any `rocke` UKD
+elsewhere is pruned like an arch-pruned one. HIP-only and `embedded_source` bundles pack
+in either mode.
 
 There is **no per-producer production switch**: producer selection is per-UKD on
-`kernel_source.kind`, so one root feeds every producer.
+`kernel_source.kind`, so one root feeds every producer. Two filters remove content: a
+family folder (`rocKE/`) is excluded when its option is OFF, matched by exact name as a
+top-level folder of a root, and only producers gated by a build option (rocKE) are
+disabled by kind.
 
-Production packaging is wired on exactly one condition — the root named by
-`HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` holds at least one **non-hidden
-`*.kdp.json`**. Standalone UKDs, kernel sources and READMEs do not make a pack, because
-a KDP is what arch pruning consumes. Outcomes:
+Every root the provider wires, production and test alike, is probed at configure with
+the same filters the pack step gets. A root that is empty, or that would ship nothing
+for any architecture this build packs for, is **dormant**: it is skipped at pack, any
+stale output tree is removed, and one STATUS line says why. That is never an error,
+whether the root was named or inherited. A root set but not a directory is fatal at configure. A KDP is
+what arch pruning consumes, so standalone UKDs, kernel sources, READMEs and hidden-path
+KDPs alone do not make a pack.
 
-| Condition | Outcome |
-|---|---|
-| No KDP under the root | Dormant; any stale product tree is removed. Not an error |
-| KDP present, pruned on every arch, root explicitly named by this build | **Hard failure** — naming a root asserts it ships here |
-| KDP present, pruned on every arch, built-in default root | Dormant, so configuring for an undeclared arch is not a build error |
-| Root set but not a directory | Fatal at configure |
-
-That default root is `$PROVIDER/src/engines/kernel_ingestor_engine/descriptors/` and
-holds no bundle, so a default configure leaves production packaging dormant. Supply your
-own bundle under it — or repoint the cache variable — before expecting output, and
-substitute your bundle's name wherever a bundle path appears below.
+The production root is `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT`, a `CACHE PATH`
+defaulting to `$PROVIDER/src/engines/kernel_ingestor_engine/descriptors/`. It carries the
+rocKE `gfx950_attention_dense` bundle, so production packaging is dormant for a build
+that excludes `rocKE/` or packs no arch that bundle's KDP declares. Substitute your
+bundle's name wherever a bundle path appears below.
 `descriptors/README.md` carries the authoring rules that root enforces, including the
 native pack whose symbols a bundle's UKDs must name before it serves. The packaging
 dependencies are documented from the repository root in
@@ -392,8 +413,8 @@ separately:
   required checks `NOT RUN` block acceptance, including missing vocabulary.
 - A packed kernel declaring no specialized `metadata_fields` and carrying no
   `effective_spec` reports **`NOT VERIFIED HERE`** when `provenance.origin_kind` is
-  absent or `hip`: no gate failure and no compiled-specialization proof. AOT HIP
-  specialization stays outside this check.
+  absent, `hip` or `hsaco`: no gate failure and no compiled-specialization proof. AOT
+  HIP specialization stays outside this check.
 - **The exemption does not extend to rocKE.** The same condition with
   `provenance.origin_kind` of `rocke` is a **hard failure**: the packer publishes a
   rocKE kernel's `effective_spec` when it ships it, so the pair means the archive bytes
@@ -405,8 +426,9 @@ separately:
 - **An `embedded_source` root legitimately produces descriptors and no archive.** It is
   a passthrough kind: emitted as authored, no producer, no code object, no archive
   entry, so its shard holds no `kpack/` directory. Compiled-specialization obligations
-  stay mandatory for every compiling kind. "Descriptors but no archive" is legal; "no
-  descriptors" never is.
+  stay mandatory for every compiling kind. "Descriptors but no archive" is legal, and
+  so is a root with nothing to pack for the build: it is skipped, and configure leaves
+  the production root dormant.
 - **Two independent artifact checks bind a packed kernel to its binary.** `sha256` is
   byte identity of the *decompressed* code object, 64 lowercase hex;
   `kernel_signature.py` records the argument list read back out of the compiled object.
@@ -527,11 +549,11 @@ provider's default installed CTest root is **`$INSTALL/bin/hip_kernel_provider`*
 `hip_kernel_provider_asm_sdpa_gpu_ref_integration_tests`, which is the ASM SDPA engine
 reached by a different path and never ingestor evidence.
 
-The production descriptor root ships no bundle, so no dense-attention target is
-registered. Replace `<your-bundle-ctest-target>` with the name your own registration
-creates — a gfx942 dense bundle would be shaped like
-`hip_kernel_provider_gfx942_attention_dense_gpu_ref_integration_tests`, which exists
-nowhere in this tree:
+Other bundles in the production root may register their own targets; they are not
+evidence for yours. Replace `<your-bundle-ctest-target>` with the name your own
+registration creates. A gfx942 dense bundle would be shaped like
+`hip_kernel_provider_gfx942_attention_dense_gpu_ref_integration_tests`; treat it as an
+illustration, not a name to copy:
 
 ```bash
 CTEST_ROOT="$INSTALL/bin/hip_kernel_provider"

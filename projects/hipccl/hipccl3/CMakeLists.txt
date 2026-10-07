@@ -258,6 +258,66 @@ set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_RPM_PACKAGE_LICENSE "MIT and BSD and ASL 2.0")
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}")
 
+# --- Supersession of the standalone component packages ---
+#
+# TODO(hipccl): confirm whether this block is actually needed, and delete it
+# if not. It is currently believed to be inert - see "Status" below. It costs
+# nothing at runtime and is correct where it does apply, so it is kept for
+# now rather than removed on an assumption.
+#
+# The intent: where hipCCL is packaged under a *flat* <prefix> (headers at
+# <prefix>/include, CMake configs at <prefix>/lib/cmake), it ships paths that
+# standalone rocprim-dev/hipcub-dev/rocthrust-dev packages also own:
+#   <prefix>/lib/cmake/{rocprim,hipcub,rocthrust}/   (each component's own
+#       rocm_export_targets() output, which hipCCL must keep shipping because
+#       hipccl-config.cmake delegates to find_package(<component> CONFIG))
+#   <prefix>/include/{rocprim,hipcub,thrust}         (the compatibility
+#       symlinks, when HIPCCL_INSTALL_LEGACY_HEADER_SYMLINKS is ON)
+# Retiring those packages from the archive does not remove them from machines
+# they are already installed on, so without a Conflicts an upgrade would abort
+# on a file ownership clash the first time hipCCL unpacks.
+#
+# Conflicts (rather than Provides/Replaces/Obsoletes) is a deliberate choice:
+# it makes the package manager stop and require the superseded packages to be
+# removed explicitly, rather than allowing a half-migrated install where one
+# package silently owns another's files. Unversioned, because the retirement
+# is permanent and one-way.
+#
+# Status (2026-09-30): the packages TheRock actually builds from this branch
+# do NOT appear to carry this metadata. Inspected CI artifacts
+# (amdrocm-hipccl-devel10.2) show "Conflicts: (none)" and install under a
+# version-scoped prefix (/opt/rocm/core-10.2) rather than a flat /opt/rocm -
+# so TheRock stages this install tree and repackages it with its own naming
+# and metadata, and the collision described above does not arise there.
+# A version-scoped prefix also means different ROCm releases never share a
+# path, which removes the cross-release collision this guards against.
+#
+# So this is expected to matter only if a flat-prefix packaging path is also
+# shipped. Whether that is the case is the open question behind the TODO.
+#
+# Set on the devel component specifically: hipCCL is HEADER_ONLY, so
+# rocm_create_package() routes its content to <name>-dev/<name>-devel, and
+# that is the package whose files would collide. The package-level variables
+# are set too so any other component produced here inherits the same
+# declaration rather than silently shipping without it.
+#
+# Both naming layers are listed - the per-component packages, and the
+# amdrocm-ccl-* bundle name that preceded the amdrocm-hipccl-* rename. A
+# Conflicts entry matching a package that is never published simply never
+# fires, so naming both is harmless. Note the amdrocm-ccl-* entries are the
+# weakest part: that bundle is version-scoped, so it could in principle
+# coexist with a flat-prefix hipCCL without overlapping any file, making the
+# conflict a false positive. It has never shipped, so nothing is affected in
+# practice - but these are the first entries to drop if this block is trimmed
+# rather than deleted outright.
+set(HIPCCL_SUPERSEDED_DEB_PACKAGES "rocprim-dev, hipcub-dev, rocthrust-dev, amdrocm-ccl-dev")
+set(HIPCCL_SUPERSEDED_RPM_PACKAGES "rocprim-devel, hipcub-devel, rocthrust-devel, amdrocm-ccl-devel")
+
+set(CPACK_DEBIAN_PACKAGE_CONFLICTS "${HIPCCL_SUPERSEDED_DEB_PACKAGES}")
+set(CPACK_DEBIAN_DEVEL_PACKAGE_CONFLICTS "${HIPCCL_SUPERSEDED_DEB_PACKAGES}")
+set(CPACK_RPM_PACKAGE_CONFLICTS "${HIPCCL_SUPERSEDED_RPM_PACKAGES}")
+set(CPACK_RPM_DEVEL_PACKAGE_CONFLICTS "${HIPCCL_SUPERSEDED_RPM_PACKAGES}")
+
 rocm_create_package(
     NAME hipccl
     DESCRIPTION "hipCCL: unified rocPRIM, hipCUB, and rocThrust package"
