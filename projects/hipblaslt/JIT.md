@@ -95,10 +95,14 @@ message.
 
 `JitLibrary` in `hipblaslt-jit-library.{hpp,cpp}` is a TensileLite
 lazy-loading library on disk. Indices start at `2^30` (`jitIndexBase`). Each
-cache-key directory holds a master library, an index mapping, one entry file
-and one code object per published solution. A row matches the solution's
-problem type and its exact sizes. Publishing replaces files atomically, in an
-order that never leaves a reference to a missing file. `readTensileSourceBundle`
+directory holds a master library, an index mapping, one entry file and one
+code object per published solution, all MessagePack, plus `cache-key.msgpack`.
+Directory and entry names are filesystem-safe literals of the device, backend,
+kernel, problem type and sizes. A row matches the solution's problem type and
+its exact sizes. A solution whose code-object version or kernarg version this
+build cannot run is skipped; the rest of the library still loads. Publishing
+replaces files atomically, in an order that never leaves a reference to a
+missing file. `readTensileSourceBundle`
 still returns a `TensileSource` when a caller has a source directory; the tests
 publish and load the JIT solution library instead of that directory.
 
