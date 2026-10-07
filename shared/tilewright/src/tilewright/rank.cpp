@@ -110,18 +110,6 @@ void item_embedding(const Kernels& k,
   k.linear(w.i_w2.data(), w.i_b2.data(), hidden, cell.embed_dim, cell.hidden_dim, i_emb);
 }
 
-float interaction_score(const Kernels& k,
-                        const Cell& cell,
-                        const CellWeights& w,
-                        const float* x_feat,
-                        std::size_t x_dim,
-                        float* norm,
-                        float* hidden) {
-  whiten(x_feat, w.x_mean, w.x_scale, x_dim, norm);
-  k.linear_relu(w.x_w0.data(), w.x_b0.data(), norm, cell.inter_hidden, x_dim, hidden);
-  return w.x_b2 + k.dot(w.x_w2.data(), hidden, cell.inter_hidden);
-}
-
 bool whitelisted(const Cell& cell, const Config& c) {
   const Signature s = signature_of(c);
   return std::find(cell.signatures.begin(), cell.signatures.end(), s) != cell.signatures.end();
@@ -260,6 +248,10 @@ class CellCacheSource {
   virtual ~CellCacheSource() = default;
   // With `all_keys`, the embeddings of keys outside the whitelist are present.
   virtual const CellCache& cache(std::size_t cell, const CellWeights& w, bool all_keys) const = 0;
+  // FeatureCatalog::inter_kernel of every key (keys x inter_kernel_dim) for
+  // the data types of `p` and the device `hw`, or nullptr when they are not
+  // the ones the pool's values were computed for.
+  virtual const float* inter_kernel(const Problem& p, const HwView& hw) const = 0;
 };
 
 namespace {
@@ -269,7 +261,8 @@ namespace {
 struct Scratch {
   std::vector<unsigned char> feasibility, in_tier1, used;
   std::vector<std::size_t> tier1, tier2, order, ranked, run;
-  std::vector<float> score, q_feat, i_feat, x_feat, norm, q_emb, i_emb, h0, h2;
+  std::vector<float> score, q_feat, i_feat, x_feat, x_problem, norm, q_emb, i_emb, h0, h2, x_batch,
+      h_batch;
 };
 
 Scratch& scratch() {
@@ -302,15 +295,10 @@ std::vector<Result> rank_in_cell(const Model& model,
   // Per key: 0 not yet evaluated, 1 infeasible, 2 feasible.
   std::vector<unsigned char>& feasibility = s.feasibility;
   feasibility.assign(nk, 0);
+  const Feasibility rules(problem, hardware, keys.nt_a, keys.nt_b);
   const auto feasible = [&](std::size_t key) {
     unsigned char& f = feasibility[key];
-    if (f == 0) {
-      const Config& c = configs[keys.first[key]];
-      f               = check_lds_capacity(hardware, c.mt, problem.a_dtype, problem.b_dtype) &&
-                  is_kernel_feasible(problem, c, keys.nt_a, keys.nt_b)
-                            ? 2
-                            : 1;
-    }
+    if (f == 0) f = rules(keys.shape[key]) ? 2 : 1;
     return f == 2;
   };
 
@@ -353,16 +341,18 @@ std::vector<Result> rank_in_cell(const Model& model,
   if (cache != nullptr && (!tier1_is_whitelist || !tier2.empty()))
     cache = &source->cache(cell_index, w, true);
 
-  const HwView hw            = hw_view(model, hardware);
-  const std::size_t e        = cell.embed_dim;
-  std::vector<float>& q_feat = s.q_feat;
-  std::vector<float>& i_feat = s.i_feat;
-  std::vector<float>& x_feat = s.x_feat;
-  std::vector<float>& norm   = s.norm;
-  std::vector<float>& q_emb  = s.q_emb;
-  std::vector<float>& i_emb  = s.i_emb;
-  std::vector<float>& h0     = s.h0;
-  std::vector<float>& h2     = s.h2;
+  const HwView hw               = hw_view(model, hardware);
+  const float* x_kernel         = source != nullptr ? source->inter_kernel(problem, hw) : nullptr;
+  const std::size_t e           = cell.embed_dim;
+  std::vector<float>& q_feat    = s.q_feat;
+  std::vector<float>& i_feat    = s.i_feat;
+  std::vector<float>& x_feat    = s.x_feat;
+  std::vector<float>& norm      = s.norm;
+  std::vector<float>& q_emb     = s.q_emb;
+  std::vector<float>& i_emb     = s.i_emb;
+  std::vector<float>& h0        = s.h0;
+  std::vector<float>& h2        = s.h2;
+  std::vector<float>& x_problem = s.x_problem;
   q_feat.resize(cat.query_dim);
   i_feat.resize(cat.item_dim);
   x_feat.resize(cat.inter_dim);
@@ -370,8 +360,12 @@ std::vector<Result> rank_in_cell(const Model& model,
   q_emb.resize(e);
   i_emb.resize(e);
   h0.resize(cell.hidden_dim);
-  h2.resize(std::max(cell.hidden_dim, cell.inter_hidden));
+  h2.resize(cell.hidden_dim);
   cat.query(problem, hw, q_feat.data());
+  if (x_kernel != nullptr) {
+    x_problem.resize(cat.inter_problem_dim);
+    cat.inter_problem(problem, hw, x_problem.data());
+  }
   query_embedding(
       k, cell, w, q_feat.data(), cat.query_dim, norm.data(), h0.data(), h2.data(), q_emb.data());
 
@@ -382,27 +376,79 @@ std::vector<Result> rank_in_cell(const Model& model,
   std::vector<std::size_t>& run    = s.run;
   order.clear();
   order.reserve(tier1_configs);
+  // Interaction scores of up to kBatch keys at a time: column c of x_batch
+  // holds the interaction features of key c of the batch. A batch costs about
+  // as much as kMinBatch keys scored one at a time.
+  constexpr std::size_t kMinBatch = 6;
+  std::vector<float>& x_batch     = s.x_batch;
+  std::vector<float>& h_batch     = s.h_batch;
+  x_batch.resize(cat.inter_dim * kBatch);
+  h_batch.resize(cell.inter_hidden * kBatch);
   const auto rank_tier = [&](const std::vector<std::size_t>& tier) {
     ranked.clear();
-    for (std::size_t key : tier) {
-      const Config& c = configs[keys.first[key]];
-      const float* ie = nullptr;
-      if (cache != nullptr) {
-        ie = cached_embedding(*cache, key, e);
-      } else {
-        cat.item(c, i_feat.data());
-        item_embedding(
-            k, cell, w, i_feat.data(), cat.item_dim, norm.data(), h0.data(), i_emb.data());
-        ie = i_emb.data();
+    float emb_score[kBatch], inter[kBatch];
+    for (std::size_t b0 = 0; b0 < tier.size(); b0 += kBatch) {
+      const std::size_t nc = std::min(kBatch, tier.size() - b0);
+      const bool batched   = nc >= kMinBatch;
+      for (std::size_t c = 0; c < nc; ++c) {
+        const std::size_t key = tier[b0 + c];
+        const Config& cfg     = configs[keys.first[key]];
+        const float* ie       = nullptr;
+        if (cache != nullptr) {
+          ie = cached_embedding(*cache, key, e);
+        } else {
+          cat.item(cfg, i_feat.data());
+          item_embedding(
+              k, cell, w, i_feat.data(), cat.item_dim, norm.data(), h0.data(), i_emb.data());
+          ie = i_emb.data();
+        }
+        emb_score[c] = k.dot(q_emb.data(), ie, e) / w.temperature;
+        if (x_kernel != nullptr)
+          cat.inter_pair(problem,
+                         cfg,
+                         hw,
+                         x_kernel + key * cat.inter_kernel_dim,
+                         x_problem.data(),
+                         x_feat.data());
+        else
+          cat.inter(model, problem, cfg, hw, x_feat.data());
+        if (batched) {
+          for (std::size_t j = 0; j < cat.inter_dim; ++j) x_batch[j * kBatch + c] = x_feat[j];
+        } else {
+          whiten(x_feat.data(), w.x_mean, w.x_scale, cat.inter_dim, norm.data());
+          k.linear_relu(w.x_w0.data(),
+                        w.x_b0.data(),
+                        norm.data(),
+                        cell.inter_hidden,
+                        cat.inter_dim,
+                        h_batch.data());
+          inter[c] = k.dot(w.x_w2.data(), h_batch.data(), cell.inter_hidden);
+        }
       }
-      const float emb_score = k.dot(q_emb.data(), ie, e) / w.temperature;
-      cat.inter(model, problem, c, hw, x_feat.data());
-      const float s =
-          emb_score +
-          interaction_score(k, cell, w, x_feat.data(), cat.inter_dim, norm.data(), h2.data());
-      if (!finite(s)) continue;
-      score[key] = s;
-      ranked.push_back(key);
+      if (batched) {
+        for (std::size_t j = 0; j < cat.inter_dim; ++j) {
+          float* row = &x_batch[j * kBatch];
+          std::fill(row + nc, row + kBatch, 0.0f);
+          const float mean = w.x_mean[j], scale = w.x_scale[j];
+          for (std::size_t c = 0; c < kBatch; ++c) row[c] = (row[c] - mean) / scale;
+        }
+        k.interaction_batch(w.x_w0.data(),
+                            w.x_b0.data(),
+                            w.x_w2.data(),
+                            x_batch.data(),
+                            cell.inter_hidden,
+                            cat.inter_dim,
+                            nc,
+                            h_batch.data(),
+                            inter);
+      }
+      for (std::size_t c = 0; c < nc; ++c) {
+        const float total = emb_score[c] + (w.x_b2 + inter[c]);
+        if (!finite(total)) continue;
+        const std::size_t key = tier[b0 + c];
+        score[key]            = total;
+        ranked.push_back(key);
+      }
     }
     std::sort(ranked.begin(), ranked.end(), [&](std::size_t a, std::size_t b) {
       return score[a] > score[b] || (!(score[b] > score[a]) && a < b);
@@ -521,6 +567,7 @@ PoolKeys pool_keys(const FeatureCatalog& catalog, const std::vector<Config>& con
         table[s]     = p.first.size();
         p.key_of[ci] = p.first.size();
         p.first.push_back(ci);
+        p.shape.push_back(kernel_shape(c));
         key_hash.push_back(h);
         break;
       }
@@ -568,6 +615,14 @@ struct CandidateSet::Impl final : detail::CellCacheSource {
     std::once_flag once_others;  // embeddings of the other keys
     std::unique_ptr<detail::CellCache> cache;
   };
+  // FeatureCatalog::inter_kernel of every key, for the data types and device
+  // of the first ranking that scores a config.
+  struct KernelPart {
+    std::once_flag once;
+    DataType a = DataType::None, b = DataType::None, mi = DataType::None;
+    double lds = 0.0;
+    std::vector<float> values;
+  };
 
   ModelPtr model;
   std::vector<Config> configs;
@@ -577,6 +632,7 @@ struct CandidateSet::Impl final : detail::CellCacheSource {
   // (signature, key) of every key, ascending.
   std::vector<std::pair<detail::Signature, std::size_t>> signature_keys;
   std::unique_ptr<Slot[]> slots;  // one per model cell
+  mutable KernelPart kernel_part;
 
   void embed(const detail::Cell& cell,
              const detail::CellWeights& w,
@@ -638,6 +694,24 @@ struct CandidateSet::Impl final : detail::CellCacheSource {
             embed(cell, w, key, hidden, norm, &c.other_emb[key * e]);
       });
     return *slot.cache;
+  }
+
+  const float* inter_kernel(const Problem& p, const detail::HwView& hw) const override {
+    KernelPart& part = kernel_part;
+    std::call_once(part.once, [&] {
+      const detail::FeatureCatalog& cat = *model->catalog;
+      const std::size_t d               = cat.inter_kernel_dim;
+      part.a                            = p.a_dtype;
+      part.b                            = p.b_dtype;
+      part.mi                           = p.mi_dtype;
+      part.lds                          = hw.LDS;
+      part.values.resize(keys.first.size() * d);
+      for (std::size_t key = 0; key < keys.first.size(); ++key)
+        cat.inter_kernel(*model, p, configs[keys.first[key]], hw, &part.values[key * d]);
+    });
+    if (p.a_dtype != part.a || p.b_dtype != part.b || p.mi_dtype != part.mi || hw.LDS != part.lds)
+      return nullptr;
+    return part.values.data();
   }
 };
 

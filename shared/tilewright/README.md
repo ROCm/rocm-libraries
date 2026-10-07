@@ -126,7 +126,9 @@ unscored.
 order: 16 interleaved lanes accumulated with fused multiply-adds, a fixed
 pairwise reduction of the lanes, then the remaining elements added in order.
 The scalar, AVX2 and AVX-512 kernels (chosen at run time from the CPU's
-features) implement that order exactly, and the library is built without
+features) implement that order exactly, including when the interaction MLPs
+of up to 16 kernels are evaluated together with one kernel per vector lane,
+and the library is built without
 fast-math or floating-point contraction, so rankings do not depend on the
 instruction set the CPU offers or on the compiler (GCC or Clang). Features are
 computed in double with the C library's `log2` and rounded once to float. Weights stay
@@ -214,8 +216,11 @@ if (!tilewright::supports(*model, context, hw)) { /* use another ranking */ }
   duplicate attribute name. Whitelist membership and the item embeddings of
   the whitelisted kernels are computed the first time a problem reaches a
   cell, the embeddings of the other kernels the first time a ranking of the
-  cell scores one of them, and all are reused afterwards; it is safe to share
-  between threads.
+  cell scores one of them, and all are reused afterwards. The interaction
+  features that depend only on the kernel, the problem's data types and the
+  device are computed on the first ranking that scores a kernel and reused for
+  problems with those data types on that device. It is safe to share between
+  threads.
   `rank(problem, hardware, min_scored)` ranks for exclusive use of the device;
   `rank(problem, hardware, context, min_scored, prior)` ranks for `context`
   (every kernel unscored unless `supports(model, context, hardware)`) and, with

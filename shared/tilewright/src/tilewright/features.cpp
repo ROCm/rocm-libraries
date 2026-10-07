@@ -145,9 +145,6 @@ bool skinny(std::uint64_t num_dim,
   return num / den > 5;
 }
 
-// v <= 2 * t without overflow.
-bool at_most_twice(std::uint64_t v, std::uint64_t t) { return (v >> 1) + (v & 1) <= t; }
-
 }  // namespace
 
 HwView hw_view(const Model& model, const Hardware& h) {
@@ -173,15 +170,57 @@ double mi_cycles(const Model& model,
   return model.mi_default_cycles;
 }
 
+KernelShape kernel_shape(const Config& c) {
+  KernelShape k;
+  k.mt_m          = c.mt.m;
+  k.mt_n          = c.mt.n;
+  k.mt_k          = c.mt.k;
+  k.mk            = c.mt.mk();
+  k.nk            = c.mt.nk();
+  k.grvw_a        = c.grvw_a;
+  k.grvw_b        = c.grvw_b;
+  k.cache_hints_a = c.cache_hints_a;
+  k.cache_hints_b = c.cache_hints_b;
+  k.dot2          = c.mi.m == 1 && c.mi.n == 1 && c.mi.k == 64;
+  return k;
+}
+
+Feasibility::Feasibility(const Problem& p,
+                         const Hardware& hardware,
+                         bool nt_a_available,
+                         bool nt_b_available) {
+  M_                         = p.size.m;
+  N_                         = p.size.n;
+  const std::uint64_t K      = p.size.k;
+  const bool a_trans         = p.a_transpose == Transpose::T;
+  const bool b_trans         = p.b_transpose == Transpose::T;
+  a_bits_                    = static_cast<std::uint64_t>(dtype_bits_feasible(p.a_dtype));
+  const std::uint64_t b_bits = static_cast<std::uint64_t>(dtype_bits_feasible(p.b_dtype));
+  lds_valid_                 = datatype_to_bits(p.a_dtype) > 0 && datatype_to_bits(p.b_dtype) > 0;
+  bytes_a_                   = data_type_to_bytes(p.a_dtype);
+  bytes_b_                   = data_type_to_bytes(p.b_dtype);
+  lds_capacity_              = static_cast<double>(hardware.lds_capacity);
+  small_batched_             = M_ <= 256 && N_ <= 256 && K < 1024 && p.batch != 1;
+  leading_free_a_            = p.a_dtype != DataType::Int8x4 && !a_trans;
+  leading_free_b_            = p.a_dtype != DataType::Int8x4 && b_trans;
+  k_aligned_                 = (K % 1024) * a_bits_ % 1024 == 0;
+  skinny_b_                  = !b_trans && skinny(N_, b_bits, M_, a_bits_);
+  skinny_a_                  = a_trans && skinny(M_, a_bits_, N_, b_bits);
+  nt_a_                      = nt_a_available;
+  nt_b_                      = nt_b_available;
+}
+
 bool check_lds_capacity(const Hardware& hardware,
                         const Dim3& mt,
                         DataType a_dtype,
                         DataType b_dtype) {
-  if (datatype_to_bits(a_dtype) <= 0 || datatype_to_bits(b_dtype) <= 0) return false;
-  const double a_loads_in_bytes = static_cast<double>(mt.mk()) * data_type_to_bytes(a_dtype);
-  const double b_loads_in_bytes = static_cast<double>(mt.nk()) * data_type_to_bytes(b_dtype);
-  const double lds_usage        = a_loads_in_bytes + b_loads_in_bytes;
-  return lds_usage <= static_cast<double>(hardware.lds_capacity);
+  Problem p;
+  p.a_dtype = a_dtype;
+  p.b_dtype = b_dtype;
+  KernelShape k;
+  k.mk = mt.mk();
+  k.nk = mt.nk();
+  return Feasibility(p, hardware, false, false).lds_fits(k);
 }
 
 namespace {
@@ -302,15 +341,18 @@ void build_item_features(const Config& c, float* out) {
   out[i++] = static_cast<float>(gwvw_d / 8.0);
 }
 
-void build_inter_features(const Model& model,
-                          const Problem& p,
-                          const Config& c,
-                          const HwView& hw,
-                          float* out) {
-  const double m      = static_cast<double>(p.size.m);
-  const double n      = static_cast<double>(p.size.n);
-  const double k      = static_cast<double>(p.size.k);
-  const double b      = static_cast<double>(p.batch);
+// Interaction features in three parts: the values that depend on the config,
+// the problem's data types, the device and the model (inter_kernel), those
+// that depend on the problem and the device (inter_problem), and the rest
+// (inter_pair, which writes the full vector).
+constexpr std::size_t kV2InterKernelDim  = 11;
+constexpr std::size_t kV2InterProblemDim = 6;
+
+void build_inter_kernel(const Model& model,
+                        const Problem& p,
+                        const Config& c,
+                        const HwView& hw,
+                        float* out) {
   const double mt_m   = static_cast<double>(std::max<std::size_t>(c.mt.m, 1));
   const double mt_n   = static_cast<double>(std::max<std::size_t>(c.mt.n, 1));
   const double mt_k   = static_cast<double>(std::max<std::size_t>(c.mt.k, 1));
@@ -322,16 +364,82 @@ void build_inter_features(const Model& model,
 
   const double bpe_a     = bpe_for_dtype(p.a_dtype);
   const double bpe_b     = bpe_for_dtype(p.b_dtype);
+  const double flop_mult = (p.mi_dtype == DataType::XFloat32) ? 3.0 : 1.0;
+
+  const double lds_bytes = mt_m * mt_k * bpe_a + mt_n * mt_k * bpe_b;
+  const double lds_ratio = lds_bytes / hw.LDS;
+  const double L_MI      = mi_cycles(model,
+                                std::max<std::size_t>(c.mi.m, 1),
+                                std::max<std::size_t>(c.mi.n, 1),
+                                std::max<std::size_t>(c.mi.k, 1),
+                                p.mi_dtype) /
+                      std::max(hw.parallel_mi_cu, 1.0);
+  const double n_mi = std::ceil(mt_m / mi_m) * std::ceil(mt_n / mi_n) * std::ceil(mt_k / mi_k);
+  const double L_MT = n_mi * L_MI;
+  const double ai_tile =
+      (flop_mult * 2.0 * mt_m * mt_n * mt_k) / (mt_m * mt_k + mt_n * mt_k + mt_m * mt_n);
+
+  std::size_t i = 0;
+  out[i++]      = static_cast<float>(dlog2(std::max(lds_bytes, 1.0)));
+  out[i++]      = static_cast<float>(lds_ratio);
+  out[i++]      = static_cast<float>(dlog2(std::max(mt_m * mt_k * bpe_a, 1.0)));
+  out[i++]      = static_cast<float>(dlog2(std::max(mt_n * mt_k * bpe_b, 1.0)));
+  out[i++]      = static_cast<float>(
+      dlog2(std::max((mt_m * mt_n * mt_k * 2.0 * flop_mult) /
+                         std::max(mt_m * mt_k * bpe_a + mt_n * mt_k * bpe_b, 1.0),
+                     0.001)));
+  out[i++] = static_cast<float>(dlog2(std::max(grvw_a * bpe_a, 1.0)));
+  out[i++] = static_cast<float>(dlog2(std::max(grvw_b * bpe_b, 1.0)));
+  out[i++] = static_cast<float>(ai_tile);
+  out[i++] = static_cast<float>(L_MI);
+  out[i++] = static_cast<float>(dlog2(std::max(L_MT, 1.0)));
+  out[i++] = std::fmod(mt_k * bpe_a, 128.0) == 0.0 ? 1.0f : 0.0f;
+}
+
+void build_inter_problem(const Problem& p, const HwView& hw, float* out) {
+  const double m         = static_cast<double>(p.size.m);
+  const double n         = static_cast<double>(p.size.n);
+  const double k         = static_cast<double>(p.size.k);
+  const double b         = static_cast<double>(p.batch);
+  const double bpe_a     = bpe_for_dtype(p.a_dtype);
+  const double bpe_b     = bpe_for_dtype(p.b_dtype);
   const double bpe_c     = bpe_for_dtype(p.c_dtype);
   const double bpe_d     = bpe_for_dtype(p.d_dtype);
   const double flop_mult = (p.mi_dtype == DataType::XFloat32) ? 3.0 : 1.0;
-  const double N_CU      = hw.N_CU;
 
   const double mn          = m * n;
   const double mk          = m * k;
   const double nk          = n * k;
   const double total_flops = flop_mult * 2.0 * m * n * k * b;
   const double total_bytes = mk * bpe_a * b + nk * bpe_b * b + mn * bpe_c * b + mn * bpe_d * b;
+
+  out[0] = static_cast<float>(std::min(total_bytes / hw.L2, 4.0) / 4.0);
+  out[1] = static_cast<float>(dlog2(std::max(total_bytes / hw.N_CU, 1.0)));
+  out[2] = static_cast<float>(dlog2(std::max(total_bytes, 1.0)));
+  out[3] = static_cast<float>(dlog2(std::max(total_flops, 1.0)));
+  out[4] = static_cast<float>((b > 1.0) ? 1.0 : 0.0);
+  out[5] = std::fmod(k * bpe_a, 128.0) == 0.0 ? 1.0f : 0.0f;
+}
+
+void build_inter_pair(const Problem& p,
+                      const Config& c,
+                      const HwView& hw,
+                      const float* kernel,
+                      const float* problem,
+                      float* out) {
+  const double m    = static_cast<double>(p.size.m);
+  const double n    = static_cast<double>(p.size.n);
+  const double k    = static_cast<double>(p.size.k);
+  const double b    = static_cast<double>(p.batch);
+  const double mt_m = static_cast<double>(std::max<std::size_t>(c.mt.m, 1));
+  const double mt_n = static_cast<double>(std::max<std::size_t>(c.mt.n, 1));
+  const double mt_k = static_cast<double>(std::max<std::size_t>(c.mt.k, 1));
+
+  const double bpe_a = bpe_for_dtype(p.a_dtype);
+  const double bpe_b = bpe_for_dtype(p.b_dtype);
+  const double N_CU  = hw.N_CU;
+
+  const double mn = m * n;
 
   const double nt_m            = std::ceil(m / mt_m);
   const double nt_n            = std::ceil(n / mt_n);
@@ -350,23 +458,9 @@ void build_inter_features(const Model& model,
   const double util_out   = mn / std::max(launched_m * launched_n, 1.0);
   const double util_3d    = (m * n * k) / std::max(launched_m * launched_n * launched_k, 1.0);
 
-  const double lds_bytes      = mt_m * mt_k * bpe_a + mt_n * mt_k * bpe_b;
-  const double lds_ratio      = lds_bytes / hw.LDS;
-  const double l2_fit_ratio   = total_bytes / hw.L2;
-  const double bw_per_cu      = total_bytes / N_CU;
   const double l2_working_set = (nt_m * mt_m * mt_k * bpe_a) + (nt_n * mt_n * mt_k * bpe_b);
   const double l2_fit_ws      = std::min(l2_working_set / hw.L2, 2.0) / 2.0;
 
-  const double L_MI = mi_cycles(model,
-                                std::max<std::size_t>(c.mi.m, 1),
-                                std::max<std::size_t>(c.mi.n, 1),
-                                std::max<std::size_t>(c.mi.k, 1),
-                                p.mi_dtype) /
-                      std::max(hw.parallel_mi_cu, 1.0);
-  const double n_mi = std::ceil(mt_m / mi_m) * std::ceil(mt_n / mi_n) * std::ceil(mt_k / mi_k);
-  const double L_MT = n_mi * L_MI;
-  const double ai_tile =
-      (flop_mult * 2.0 * mt_m * mt_n * mt_k) / (mt_m * mt_k + mt_n * mt_k + mt_m * mt_n);
   const double active_cus = std::min(num_tiles_total, N_CU);
   const double bw_occ = std::min(1.0, hw.c0 * active_cus * active_cus + hw.c1 * active_cus + hw.c2);
 
@@ -382,40 +476,47 @@ void build_inter_features(const Model& model,
   out[i++] = static_cast<float>(util_out);
   out[i++] = static_cast<float>(util_3d);
   out[i++] = static_cast<float>(std::min((mt_m * mt_n) / std::max(mn, 1.0), 1.0));
-  out[i++] = static_cast<float>(dlog2(std::max(lds_bytes, 1.0)));
-  out[i++] = static_cast<float>(lds_ratio);
-  out[i++] = static_cast<float>(std::min(l2_fit_ratio, 4.0) / 4.0);
+  out[i++] = kernel[0];
+  out[i++] = kernel[1];
+  out[i++] = problem[0];
   out[i++] = static_cast<float>(l2_fit_ws);
-  out[i++] = static_cast<float>(dlog2(std::max(bw_per_cu, 1.0)));
-  out[i++] = static_cast<float>(dlog2(std::max(total_bytes, 1.0)));
-  out[i++] = static_cast<float>(dlog2(std::max(total_flops, 1.0)));
+  out[i++] = problem[1];
+  out[i++] = problem[2];
+  out[i++] = problem[3];
   out[i++] = static_cast<float>(std::min(1.0, mt_m / std::max(m, 1.0)));
   out[i++] = static_cast<float>(std::min(1.0, mt_n / std::max(n, 1.0)));
   out[i++] = static_cast<float>((k - (k_iters - 1.0) * mt_k) / std::max(k, 1.0));
-  out[i++] = static_cast<float>(
-      (std::fmod(k * bpe_a, 128.0) == 0.0 && std::fmod(mt_k * bpe_a, 128.0) == 0.0) ? 1.0 : 0.0);
+  out[i++] = problem[5] != 0.0f && kernel[10] != 0.0f ? 1.0f : 0.0f;
   out[i++] = static_cast<float>((m <= 2.0 * mt_m) ? 1.0 : 0.0);
   out[i++] = static_cast<float>((n <= 2.0 * mt_n) ? 1.0 : 0.0);
-  out[i++] = static_cast<float>((b > 1.0) ? 1.0 : 0.0);
-  out[i++] = static_cast<float>(dlog2(std::max(mt_m * mt_k * bpe_a, 1.0)));
-  out[i++] = static_cast<float>(dlog2(std::max(mt_n * mt_k * bpe_b, 1.0)));
-  out[i++] = static_cast<float>(
-      dlog2(std::max((mt_m * mt_n * mt_k * 2.0 * flop_mult) /
-                         std::max(mt_m * mt_k * bpe_a + mt_n * mt_k * bpe_b, 1.0),
-                     0.001)));
+  out[i++] = problem[4];
+  out[i++] = kernel[2];
+  out[i++] = kernel[3];
+  out[i++] = kernel[4];
   out[i++] = static_cast<float>(dlog2(std::max(k_iters * num_tiles * b, 1.0)));
   out[i++] = static_cast<float>(b * k_iters / std::max(num_tiles, 1.0));
   out[i++] = static_cast<float>(
       num_tiles_total > 0 ? num_tiles_total / (std::ceil(num_tiles_total / N_CU) * N_CU) : 1.0);
-  out[i++] = static_cast<float>(dlog2(std::max(grvw_a * bpe_a, 1.0)));
-  out[i++] = static_cast<float>(dlog2(std::max(grvw_b * bpe_b, 1.0)));
+  out[i++] = kernel[5];
+  out[i++] = kernel[6];
 
   // hw_proxies (5)
-  out[i++] = static_cast<float>(ai_tile);
-  out[i++] = static_cast<float>(L_MI);
-  out[i++] = static_cast<float>(dlog2(std::max(L_MT, 1.0)));
+  out[i++] = kernel[7];
+  out[i++] = kernel[8];
+  out[i++] = kernel[9];
   out[i++] = static_cast<float>(bw_occ);
   out[i++] = static_cast<float>(active_cus / N_CU);
+}
+
+void build_inter_features(const Model& model,
+                          const Problem& p,
+                          const Config& c,
+                          const HwView& hw,
+                          float* out) {
+  float kernel[kV2InterKernelDim], problem[kV2InterProblemDim];
+  build_inter_kernel(model, p, c, hw, kernel);
+  build_inter_problem(p, hw, problem);
+  build_inter_pair(p, c, hw, kernel, problem, out);
 }
 
 std::uint64_t key_value(std::size_t v) { return static_cast<std::uint64_t>(v); }
@@ -455,7 +556,12 @@ constexpr FeatureCatalog kCatalogV2 = {"e7fe4b524851e895",
                                        0,
                                        &build_query_features,
                                        &build_item_features,
-                                       &build_inter_features};
+                                       &build_inter_features,
+                                       kV2InterKernelDim,
+                                       kV2InterProblemDim,
+                                       &build_inter_kernel,
+                                       &build_inter_problem,
+                                       &build_inter_pair};
 
 static_assert(kCatalogV2.view_key_size <= kMaxViewKeySize);
 
@@ -475,48 +581,7 @@ bool is_kernel_feasible(const Problem& p,
                         const Config& c,
                         bool nt_a_available,
                         bool nt_b_available) {
-  const std::uint64_t M      = p.size.m;
-  const std::uint64_t N      = p.size.n;
-  const std::uint64_t K      = p.size.k;
-  const std::uint64_t B      = p.batch;
-  const std::uint64_t MT_M   = c.mt.m;
-  const std::uint64_t MT_N   = c.mt.n;
-  const std::uint64_t MT_K   = c.mt.k;
-  const int cha              = c.cache_hints_a;
-  const int chb              = c.cache_hints_b;
-  const bool a_trans         = (p.a_transpose == Transpose::T);
-  const bool b_trans         = (p.b_transpose == Transpose::T);
-  const std::uint64_t a_bits = static_cast<std::uint64_t>(dtype_bits_feasible(p.a_dtype));
-  const std::uint64_t b_bits = static_cast<std::uint64_t>(dtype_bits_feasible(p.b_dtype));
-
-  // 1) A small batched problem must fit in one tile.
-  if (M <= 256 && N <= 256 && K < 1024 && B != 1 && (MT_M < M || MT_N < N)) return false;
-  // 2) Dot2 is only correct for M < 3.
-  if (c.mi.m == 1 && c.mi.n == 1 && c.mi.k == 64 && M > 2) return false;
-  // 3) An operand whose free dimension is contiguous is read in global-read
-  //    vectors, so that dimension must hold one (TensileLite's
-  //    LeadingFree0/1SizesGreaterOrEqual; not emitted for Int8x4).
-  if (p.a_dtype != DataType::Int8x4) {
-    if (!a_trans && M < c.grvw_a) return false;
-    if (b_trans && N < c.grvw_b) return false;
-  }
-  // 4) Non-temporal hints: on 128-byte-aligned K a skinny problem requires the
-  //    matching operand's non-temporal variant when the pool has one, and every
-  //    other aligned problem rejects hinted kernels.
-  const bool k_aligned  = (K % 1024) * a_bits % 1024 == 0;
-  const bool mt_aligned = (MT_K % 1024) * a_bits % 1024 == 0;
-  if (k_aligned && mt_aligned) {
-    if (at_most_twice(M, MT_M) && !b_trans && skinny(N, b_bits, M, a_bits)) {
-      if (nt_b_available && chb != 4) return false;
-    } else if (at_most_twice(N, MT_N) && a_trans && skinny(M, a_bits, N, b_bits)) {
-      if (nt_a_available && cha != 4) return false;
-    } else {
-      if (cha || chb) return false;
-    }
-  } else if (cha || chb) {
-    return false;
-  }
-  return true;
+  return Feasibility(p, Hardware{}, nt_a_available, nt_b_available).rules_pass(kernel_shape(c));
 }
 
 Signature signature_of(const Config& c) {

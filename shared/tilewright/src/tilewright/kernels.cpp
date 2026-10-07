@@ -65,7 +65,43 @@ float dot_scalar(const float* a, const float* b, std::size_t n) {
   return s;
 }
 
-const Kernels kScalar = {Isa::Scalar, &linear_scalar<false>, &linear_scalar<true>, &dot_scalar};
+void interaction_batch_scalar(const float* W,
+                              const float* b,
+                              const float* w2,
+                              const float* X,
+                              std::size_t m,
+                              std::size_t k,
+                              std::size_t nc,
+                              float* hidden,
+                              float* out) {
+  const std::size_t kv = k & ~static_cast<std::size_t>(15);
+  const std::size_t mv = m & ~static_cast<std::size_t>(15);
+  for (std::size_t c = 0; c < nc; ++c) {
+    for (std::size_t i = 0; i < m; ++i) {
+      const float* w = W + i * k;
+      float acc[16]  = {};
+      for (std::size_t j = 0; j < kv; j += 16)
+        for (std::size_t l = 0; l < 16; ++l)
+          acc[l] = std::fma(w[j + l], X[(j + l) * kBatch + c], acc[l]);
+      float v = b[i] + reduce16(acc);
+      for (std::size_t j = kv; j < k; ++j) v = v + w[j] * X[j * kBatch + c];
+      hidden[i * kBatch + c] = finish<true>(v);
+    }
+    float acc[16] = {};
+    for (std::size_t i = 0; i < mv; i += 16)
+      for (std::size_t l = 0; l < 16; ++l)
+        acc[l] = std::fma(w2[i + l], hidden[(i + l) * kBatch + c], acc[l]);
+    float s = reduce16(acc);
+    for (std::size_t i = mv; i < m; ++i) s = s + w2[i] * hidden[i * kBatch + c];
+    out[c] = s;
+  }
+}
+
+const Kernels kScalar = {Isa::Scalar,
+                         &linear_scalar<false>,
+                         &linear_scalar<true>,
+                         &dot_scalar,
+                         &interaction_batch_scalar};
 
 #if TILEWRIGHT_X86_DISPATCH
 
@@ -218,8 +254,157 @@ TILEWRIGHT_AVX512 float dot_avx512(const float* a, const float* b, std::size_t n
   return s;
 }
 
-const Kernels kAvx2   = {Isa::Avx2, &linear_avx2<false>, &linear_avx2<true>, &dot_avx2};
-const Kernels kAvx512 = {Isa::Avx512, &linear_avx512<false>, &linear_avx512<true>, &dot_avx512};
+// One column per vector lane: lane c of a row holds the row arithmetic of
+// column c. Accumulators l and l + 8 are formed as a pair and summed at once,
+// the first step of the reduce16 order.
+TILEWRIGHT_AVX2 inline __m256 lane_dot_avx2(const float* w,
+                                            const float* rows,
+                                            std::size_t n,
+                                            const float* bias) {
+  const std::size_t nv = n & ~static_cast<std::size_t>(15);
+  __m256 t8[8];
+  for (std::size_t l = 0; l < 8; ++l) {
+    __m256 lo = _mm256_setzero_ps(), hi = lo;
+    for (std::size_t j = 0; j < nv; j += 16) {
+      lo = _mm256_fmadd_ps(_mm256_set1_ps(w[j + l]), _mm256_loadu_ps(rows + (j + l) * kBatch), lo);
+      hi = _mm256_fmadd_ps(
+          _mm256_set1_ps(w[j + l + 8]), _mm256_loadu_ps(rows + (j + l + 8) * kBatch), hi);
+    }
+    t8[l] = _mm256_add_ps(lo, hi);
+  }
+  __m256 t4[4];
+  for (std::size_t l = 0; l < 4; ++l) t4[l] = _mm256_add_ps(t8[l], t8[l + 4]);
+  __m256 v = _mm256_add_ps(_mm256_add_ps(t4[0], t4[2]), _mm256_add_ps(t4[1], t4[3]));
+  if (bias != nullptr) v = _mm256_add_ps(_mm256_set1_ps(*bias), v);
+  for (std::size_t j = nv; j < n; ++j)
+    v = _mm256_add_ps(v, _mm256_mul_ps(_mm256_set1_ps(w[j]), _mm256_loadu_ps(rows + j * kBatch)));
+  return v;
+}
+
+TILEWRIGHT_AVX2 void interaction_batch_avx2(const float* W,
+                                            const float* b,
+                                            const float* w2,
+                                            const float* X,
+                                            std::size_t m,
+                                            std::size_t k,
+                                            std::size_t nc,
+                                            float* hidden,
+                                            float* out) {
+  for (std::size_t c0 = 0; c0 < nc; c0 += 8) {
+    for (std::size_t i = 0; i < m; ++i)
+      _mm256_storeu_ps(
+          hidden + i * kBatch + c0,
+          _mm256_max_ps(lane_dot_avx2(W + i * k, X + c0, k, b + i), _mm256_setzero_ps()));
+    float s[8];
+    _mm256_storeu_ps(s, lane_dot_avx2(w2, hidden + c0, m, nullptr));
+    for (std::size_t c = c0; c < nc && c < c0 + 8; ++c) out[c] = s[c - c0];
+  }
+}
+
+TILEWRIGHT_AVX512 inline __m512 lane_dot_avx512(const float* w,
+                                                const float* rows,
+                                                std::size_t n,
+                                                const float* bias) {
+  const std::size_t nv = n & ~static_cast<std::size_t>(15);
+  __m512 t8[8];
+  for (std::size_t l = 0; l < 8; ++l) {
+    __m512 lo = _mm512_setzero_ps(), hi = lo;
+    for (std::size_t j = 0; j < nv; j += 16) {
+      lo = _mm512_fmadd_ps(_mm512_set1_ps(w[j + l]), _mm512_loadu_ps(rows + (j + l) * kBatch), lo);
+      hi = _mm512_fmadd_ps(
+          _mm512_set1_ps(w[j + l + 8]), _mm512_loadu_ps(rows + (j + l + 8) * kBatch), hi);
+    }
+    t8[l] = _mm512_add_ps(lo, hi);
+  }
+  __m512 t4[4];
+  for (std::size_t l = 0; l < 4; ++l) t4[l] = _mm512_add_ps(t8[l], t8[l + 4]);
+  __m512 v = _mm512_add_ps(_mm512_add_ps(t4[0], t4[2]), _mm512_add_ps(t4[1], t4[3]));
+  if (bias != nullptr) v = _mm512_add_ps(_mm512_set1_ps(*bias), v);
+  for (std::size_t j = nv; j < n; ++j)
+    v = _mm512_add_ps(v, _mm512_mul_ps(_mm512_set1_ps(w[j]), _mm512_loadu_ps(rows + j * kBatch)));
+  return v;
+}
+
+// lane_dot_avx512 of rows w0 and w1 with shared loads of `rows`: the
+// accumulators of lanes l, l + 8, l + 4 and l + 12 are formed together and
+// reduced to t4[l] at once.
+TILEWRIGHT_AVX512 inline void lane_dot2_avx512(const float* w0,
+                                               const float* w1,
+                                               const float* rows,
+                                               std::size_t n,
+                                               float b0,
+                                               float b1,
+                                               __m512* v0,
+                                               __m512* v1) {
+  const std::size_t nv = n & ~static_cast<std::size_t>(15);
+  __m512 s0[4], s1[4];
+  for (std::size_t l = 0; l < 4; ++l) {
+    __m512 a0 = _mm512_setzero_ps(), a8 = a0, a4 = a0, a12 = a0;
+    __m512 c0 = a0, c8 = a0, c4 = a0, c12 = a0;
+    for (std::size_t j = 0; j < nv; j += 16) {
+      const __m512 x0  = _mm512_loadu_ps(rows + (j + l) * kBatch);
+      const __m512 x8  = _mm512_loadu_ps(rows + (j + l + 8) * kBatch);
+      const __m512 x4  = _mm512_loadu_ps(rows + (j + l + 4) * kBatch);
+      const __m512 x12 = _mm512_loadu_ps(rows + (j + l + 12) * kBatch);
+      a0               = _mm512_fmadd_ps(_mm512_set1_ps(w0[j + l]), x0, a0);
+      a8               = _mm512_fmadd_ps(_mm512_set1_ps(w0[j + l + 8]), x8, a8);
+      a4               = _mm512_fmadd_ps(_mm512_set1_ps(w0[j + l + 4]), x4, a4);
+      a12              = _mm512_fmadd_ps(_mm512_set1_ps(w0[j + l + 12]), x12, a12);
+      c0               = _mm512_fmadd_ps(_mm512_set1_ps(w1[j + l]), x0, c0);
+      c8               = _mm512_fmadd_ps(_mm512_set1_ps(w1[j + l + 8]), x8, c8);
+      c4               = _mm512_fmadd_ps(_mm512_set1_ps(w1[j + l + 4]), x4, c4);
+      c12              = _mm512_fmadd_ps(_mm512_set1_ps(w1[j + l + 12]), x12, c12);
+    }
+    s0[l] = _mm512_add_ps(_mm512_add_ps(a0, a8), _mm512_add_ps(a4, a12));
+    s1[l] = _mm512_add_ps(_mm512_add_ps(c0, c8), _mm512_add_ps(c4, c12));
+  }
+  __m512 r0 = _mm512_add_ps(_mm512_add_ps(s0[0], s0[2]), _mm512_add_ps(s0[1], s0[3]));
+  __m512 r1 = _mm512_add_ps(_mm512_add_ps(s1[0], s1[2]), _mm512_add_ps(s1[1], s1[3]));
+  r0        = _mm512_add_ps(_mm512_set1_ps(b0), r0);
+  r1        = _mm512_add_ps(_mm512_set1_ps(b1), r1);
+  for (std::size_t j = nv; j < n; ++j) {
+    const __m512 x = _mm512_loadu_ps(rows + j * kBatch);
+    r0             = _mm512_add_ps(r0, _mm512_mul_ps(_mm512_set1_ps(w0[j]), x));
+    r1             = _mm512_add_ps(r1, _mm512_mul_ps(_mm512_set1_ps(w1[j]), x));
+  }
+  *v0 = r0;
+  *v1 = r1;
+}
+
+TILEWRIGHT_AVX512 void interaction_batch_avx512(const float* W,
+                                                const float* b,
+                                                const float* w2,
+                                                const float* X,
+                                                std::size_t m,
+                                                std::size_t k,
+                                                std::size_t nc,
+                                                float* hidden,
+                                                float* out) {
+  std::size_t i = 0;
+  for (; i + 2 <= m; i += 2) {
+    __m512 v0, v1;
+    lane_dot2_avx512(W + i * k, W + (i + 1) * k, X, k, b[i], b[i + 1], &v0, &v1);
+    _mm512_storeu_ps(hidden + i * kBatch, _mm512_max_ps(v0, _mm512_setzero_ps()));
+    _mm512_storeu_ps(hidden + (i + 1) * kBatch, _mm512_max_ps(v1, _mm512_setzero_ps()));
+  }
+  for (; i < m; ++i)
+    _mm512_storeu_ps(hidden + i * kBatch,
+                     _mm512_max_ps(lane_dot_avx512(W + i * k, X, k, b + i), _mm512_setzero_ps()));
+  float s[16];
+  _mm512_storeu_ps(s, lane_dot_avx512(w2, hidden, m, nullptr));
+  for (std::size_t c = 0; c < nc; ++c) out[c] = s[c];
+}
+
+const Kernels kAvx2   = {Isa::Avx2,
+                         &linear_avx2<false>,
+                         &linear_avx2<true>,
+                         &dot_avx2,
+                         &interaction_batch_avx2};
+const Kernels kAvx512 = {Isa::Avx512,
+                         &linear_avx512<false>,
+                         &linear_avx512<true>,
+                         &dot_avx512,
+                         &interaction_batch_avx512};
 
 bool cpu_supports(Isa isa) {
   __builtin_cpu_init();
