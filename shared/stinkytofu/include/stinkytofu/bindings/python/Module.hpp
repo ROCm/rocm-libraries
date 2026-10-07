@@ -108,7 +108,7 @@
     X(DsReadDrainLatency, int)                    \
     X(TensorLoadWmmaSpace, int)                   \
     X(WmmaQueueDepth, int)                        \
-    X(WmmaQueueTarget, int)                       \
+    X(WmmaQueueCoverCycles, int)                  \
     X(GlobalReadQueueDepth, int)                  \
     X(GlobalReadDrainLatency, int)                \
     X(DsReadOrder, int)                           \

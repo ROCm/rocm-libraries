@@ -502,14 +502,22 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.tensorLoadWmmaSpace;
         return cfg > 0 ? cfg : config_.tensorLoadWmmaSpace;
     }
-    // WMMA issue queue (see PassFeatureConfig::DagFeatures::wmmaQueueDepth). Depth 1 /
-    // target 1 is the single-window model: a WMMA waits for the previous one to finish.
+    // WMMA issue queue (see PassFeatureConfig::DagFeatures::wmmaQueueDepth). Depth 1 is the
+    // single-window model: a WMMA waits for the previous one to finish.
+    // The queue model runs only with depth > 1 and a cover > 0; otherwise the depth is 1.
     int wmmaQueueDepth() const {
-        return std::max(1, getPassContext().getPassFeatureConfig().dagFeatures.wmmaQueueDepth);
+        const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
+        return f.wmmaQueueCoverCycles > 0 ? std::max(1, f.wmmaQueueDepth) : 1;
     }
-    int wmmaQueueTarget() const {
-        const int t = getPassContext().getPassFeatureConfig().dagFeatures.wmmaQueueTarget;
-        return std::clamp(t, 1, wmmaQueueDepth());
+    // Cycles of queued WMMA work needed before a non-WMMA pick may issue (0 = off).
+    int wmmaQueueCover() const {
+        if (wmmaQueueDepth() <= 1) return 0;
+        return std::max(0,
+                        getPassContext().getPassFeatureConfig().dagFeatures.wmmaQueueCoverCycles);
+    }
+    // Cycles until the pipe has run everything queued.
+    int queuedCoverCycles() const {
+        return queuedEnds_.empty() ? 0 : std::max(0, queuedEnds_.back() - coIssueCyclePos_);
     }
     // Extra cycles between an after-barrier and the before-side ds_loads on
     // the gap placement path. 0 disables the extra gap.
@@ -2353,9 +2361,11 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
              (isCriticalFiller(smallestPickable) && criticalMayIssue()) || memWorkFitsWindow_);
         const bool quotaClosedWindow =
             activeWmmaNode_ != nullptr && fillQuotaMet() && !nonFillerPickable;
-        // Below the queue target the next WMMA preempts fillers: the queue must not run dry.
-        const bool preemptForQueue =
-            wmmaQueueTarget() > 1 && outstandingWmmas() < wmmaQueueTarget();
+        // Too little queued WMMA work to hide a non-WMMA stall: the next WMMA goes first, while
+        // the queue has room (a full queue already covers it, and the wait fits other work).
+        const bool preemptForQueue = wmmaQueueCover() > 0 &&
+                                     outstandingWmmas() < wmmaQueueDepth() &&
+                                     queuedCoverCycles() < wmmaQueueCover();
         const bool blockWmmaForActiveWindow = !preemptForQueue && !quotaClosedWindow &&
                                               (coIssueCyclePos_ < activeWmmaLatency_) &&
                                               (smallestPickable != nullptr);

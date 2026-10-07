@@ -119,10 +119,11 @@ struct PassFeatureConfig {
         /// ~8 on gfx1250). A WMMA is appended whenever fewer are outstanding, instead
         /// of waiting for the previous one to finish. 1 = the single-window model.
         int wmmaQueueDepth = 1;
-        /// Outstanding WMMAs below which the next WMMA preempts ds/fillers, so the pipe
-        /// never runs dry; at or above it ds/fillers go first. Clamped to
-        /// [1, wmmaQueueDepth]; 1 = never preempt.
-        int wmmaQueueTarget = 1;
+        /// Cycles of queued WMMA work that must remain before a non-WMMA pick (ds_load,
+        /// filler, tensor_load) may issue; below it, and with room in the queue, the next
+        /// ready WMMA goes first so the pipe never runs dry. Picks the scheduler is forced
+        /// to make (a promoted barrier) are not held. 0 = off; ignored at depth 1.
+        int wmmaQueueCoverCycles = 0;
         /// Extra cycles kept between an after-barrier and the before-side
         /// ds_loads when exclusive overlap uses gap placement. Converted to
         /// WMMA windows by the region's matrix latency. 0 disables the extra
