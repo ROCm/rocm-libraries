@@ -18,8 +18,10 @@ from types import SimpleNamespace
 import zlib
 
 import msgpack
+import yaml
 import rocjitsu_race_sweep as sweep
 import rocjitsu_sweep_plan as plan
+from rocjitsu_known_failures import apply_known_failures, known_failures
 
 
 def solution(index, tile=(64, 96, 1), depth=32):
@@ -61,43 +63,374 @@ def job():
     }
 
 
-def success_log():
+def success_log(j=None):
+    j = job() if j is None else j
+    s = j["solutions"][0]
     stream = io.StringIO()
-    for n, case in enumerate(job()["cases"]):
-        stream.write('[rocjitsu] Kernel dispatch: "kernel-7" symbol="kernel-7"\n')
+    for n, case in enumerate(j["cases"]):
+        stream.write(sweep.target_dispatch_line(j) + "\n")
         csv.writer(stream, lineterminator="\n").writerow(
             [
                 0,
                 f"{n}/3",
-                "7/7",
+                f"{s['index']}/{s['index']}",
                 "Contraction",
                 "(" + ",".join(map(str, case["shape"])) + ")",
                 "None",
                 "",
                 "None",
-                "solution-7",
+                s["name"],
                 "PASSED",
             ]
         )
     return stream.getvalue()
 
 
-def bench_log():
+def bench_log(j=None):
+    j = job() if j is None else j
+    s = j["solutions"][0]
     lines = []
-    for case in job()["cases"]:
+    for case in j["cases"]:
         m, n, batch, k = case["shape"]
-        lines += ['[rocjitsu] Kernel dispatch: "kernel-7" symbol="kernel-7"'] * 2
+        lines += [sweep.target_dispatch_line(j)] * 2
         lines += [
             "[0]:m,n,batch_count,k,norm_error,atol,rtol",
             f"    {m},{n},{batch},{k},0,0.00001,0.00001",
-            "    --Solution index: 7",
-            "    --Solution name:  solution-7",
-            "    --kernel name:    kernel-7",
+            f"    --Solution index: {s['index']}",
+            f"    --Solution name:  {s['name']}",
+            f"    --kernel name:    {s['kernel']}",
         ]
     return "\n".join(lines) + "\n"
 
 
+def failure_list():
+    return {
+        "version": 1,
+        "rocjitsu_revision": "a" * 40,
+        "case_policy": plan.POLICY,
+        "failures": [
+            {
+                "id": "test-hang",
+                "reason": "Unsupported instruction leaves the client waiting",
+                "tracking": ["https://github.com/ROCm/rocm-systems/pull/12963"],
+                "review_by": "2099-01-01",
+                "target": "gfx942",
+                "backends": ["tensile", "bench"],
+                "cases": [c["id"] for c in job()["cases"]],
+                "solutions": [
+                    {
+                        "index": 7,
+                        "metadata_sha256": "1" * 64,
+                        "code_object_sha256": "2" * 64,
+                    }
+                ],
+            }
+        ],
+    }
+
+
 class SweepTests(unittest.TestCase):
+    def test_known_failures_require_the_exact_artifact_backend_and_case(self):
+        j = job()
+        j["code_objects"] = ["kernel.co"]
+        original = {
+            "target": "gfx942",
+            "backend": "tensile",
+            "policy": plan.POLICY,
+            "input_sha256": {"library.dat": "1" * 64, "kernel.co": "2" * 64},
+            "jobs": [j],
+        }
+        data = failure_list()
+        data["failures"][0]["cases"] = ["tile"]
+        data["failures"][0]["backends"] = ["tensile"]
+        for difference in (
+            None,
+            "index",
+            "metadata",
+            "code",
+            "target",
+            "backend",
+            "planning",
+        ):
+            with self.subTest(difference=difference):
+                manifest = copy.deepcopy(original)
+                if difference == "index":
+                    manifest["jobs"][0]["solutions"][0]["index"] = 8
+                elif difference == "metadata":
+                    manifest["input_sha256"]["library.dat"] = "3" * 64
+                elif difference == "code":
+                    manifest["input_sha256"]["kernel.co"] = "3" * 64
+                elif difference == "target":
+                    manifest["target"] = "gfx950"
+                elif difference == "backend":
+                    manifest["backend"] = "bench"
+                elif difference == "planning":
+                    manifest["jobs"][0]["planning_error"] = "Missing code object"
+                before = copy.deepcopy(manifest["jobs"])
+                apply_known_failures(manifest, yaml.safe_dump(data), "a" * 40)
+                cases = manifest["jobs"][0]["cases"]
+                self.assertEqual(
+                    [c["id"] for c in cases if c.get("skip")],
+                    ["tile"] if difference is None else [],
+                )
+                for case in cases:
+                    case.pop("skip", None)
+                self.assertEqual(
+                    manifest["jobs"],
+                    before,
+                    "skips must not replace or reshape selections",
+                )
+
+    def test_known_failure_schema_revision_review_and_overlap_guards(self):
+        for change in (
+            "missing_tracking",
+            "bad_case",
+            "bad_hash",
+            "bad_index",
+            "unknown_key",
+        ):
+            with self.subTest(change=change):
+                data = failure_list()
+                entry = data["failures"][0]
+                if change == "missing_tracking":
+                    entry["tracking"] = []
+                elif change == "bad_case":
+                    entry["cases"] = ["typo"]
+                elif change == "bad_hash":
+                    entry["solutions"][0]["metadata_sha256"] = "*"
+                elif change == "bad_index":
+                    entry["solutions"][0]["index"] = True
+                else:
+                    entry["case"] = ["tile"]
+                with self.assertRaises(ValueError):
+                    known_failures(yaml.safe_dump(data))
+        for change in ("revision", "policy", "review", "overlap"):
+            with self.subTest(change=change):
+                data = failure_list()
+                manifest = {
+                    "target": "gfx942",
+                    "backend": "tensile",
+                    "policy": plan.POLICY,
+                    "input_sha256": {"library.dat": "1" * 64, "kernel.co": "2" * 64},
+                    "jobs": [{**job(), "code_objects": ["kernel.co"]}],
+                }
+                revision = "a" * 40
+                if change == "revision":
+                    revision = "b" * 40
+                elif change == "policy":
+                    manifest["policy"] = "new-policy"
+                elif change == "review":
+                    data["failures"][0]["review_by"] = "2000-01-01"
+                else:
+                    duplicate = copy.deepcopy(data["failures"][0])
+                    duplicate["id"] = "overlap"
+                    data["failures"].append(duplicate)
+                with self.assertRaises(ValueError):
+                    apply_known_failures(manifest, yaml.safe_dump(data), revision)
+
+    def exercise_skips(
+        self, root, backend, cases, indices=(7, 8), recheck=False, failure=None
+    ):
+        """Use the real planner/list/runner; only the native subprocess is simulated."""
+        library = root / "library_gfx942.dat"
+        library.write_bytes(
+            msgpack.packb(
+                {"solutions": [solution(i) for i in indices]}, use_bin_type=True
+            )
+        )
+        code_object = root / "library_gfx942.co"
+        code_object.write_bytes(b"kernel")
+        config = root / "config.json"
+        config.write_text(json.dumps({"vm": {"gpu": {"device": {}}}}))
+        data = failure_list()
+        entry = data["failures"][0]
+        entry["cases"] = cases
+        entry["solutions"][0].update(
+            metadata_sha256=plan.sha256(library),
+            code_object_sha256=plan.sha256(code_object),
+        )
+        if recheck:
+            entry["review_by"] = "2000-01-01"
+        path = root / "failures.yaml"
+        path.write_text(yaml.safe_dump(data))
+        args = SimpleNamespace(
+            reports=root / "reports",
+            backend=backend,
+            workers=1,
+            timeout=120,
+            suite_timeout=1500,
+            seed="test",
+            target="gfx942",
+            library_dir=root,
+            kernels=100,
+            solution_indices=list(indices),
+            config=config,
+            rocjitsu=code_object,
+            client=code_object,
+            known_failures=path,
+            rocjitsu_revision=("b" if recheck else "a") * 40,
+            run_known_failures=recheck,
+        )
+        invocations = []
+
+        def execute(command, log, timeout, env):
+            native_input = Path(command[-1]).read_text()
+            if backend == "tensile":
+                options = [line.split("=", 1) for line in native_input.splitlines()]
+                index = int(next(v for k, v in options if k == "solution-start-idx"))
+                shapes = [
+                    list(map(int, v.split(",")))
+                    for k, v in options
+                    if k == "problem-size"
+                ]
+            else:
+                rows = yaml.safe_load(native_input)
+                self.assertEqual(len({r["solution_index"] for r in rows}), 1)
+                index = rows[0]["solution_index"]
+                shapes = [[r[k] for k in ("M", "N", "batch_count", "K")] for r in rows]
+            expected = [
+                c
+                for c in plan.derive_cases(solution(index))
+                if recheck or index != 7 or c["id"] not in cases
+            ]
+            self.assertEqual(
+                shapes,
+                [c["shape"] for c in expected],
+                "known failures reached native input",
+            )
+            invocations.append(index)
+            if failure == "exception":
+                raise ValueError("native adapter failed")
+            native_job = {
+                "solutions": [
+                    {
+                        "index": index,
+                        "name": f"solution-{index}",
+                        "kernel": f"kernel-{index}",
+                    }
+                ],
+                "cases": expected,
+            }
+            text = (
+                success_log(native_job)
+                if backend == "tensile"
+                else bench_log(native_job)
+            )
+            if failure == "race":
+                text += "RACE new finding\nEND_RACE\n"
+            elif failure == "warning":
+                text += "[rj warn] new unsupported instruction\n"
+            elif failure == "dispatch":
+                text = text.replace(
+                    sweep.target_dispatch_line(native_job) + "\n", "", 1
+                )
+            elif failure == "numerical":
+                text = (
+                    text.replace(",PASSED", ",FAILED", 1)
+                    if backend == "tensile"
+                    else text.replace("0.00001", "nan", 1)
+                )
+            log.write_text(text)
+            return 0
+
+        with (
+            patch.object(sweep, "physical_cpus", return_value=[0]),
+            patch.object(sweep, "execute_command", side_effect=execute),
+        ):
+            self.assertEqual(sweep.run(args), int(failure is not None))
+        summary = json.loads((args.reports / "summary.json").read_text())
+        manifest = json.loads((args.reports / "manifest.json").read_text())
+        self.assertEqual(manifest["planned_cases"], 4 * len(indices))
+        self.assertEqual(summary["accounted_cases"], 4 * len(indices))
+        self.assertEqual(
+            (args.reports / "known_failures.yaml").read_bytes(), path.read_bytes()
+        )
+        self.assertEqual(manifest["known_failures"]["sha256"], plan.sha256(path))
+        return args.reports, summary, invocations
+
+    def test_full_and_partial_skips_filter_inputs_and_allow_following_jobs(self):
+        for backend in ("tensile", "bench"):
+            for cases, indices in (
+                ([c["id"] for c in job()["cases"]], (7,)),
+                ([c["id"] for c in job()["cases"]], (7, 8)),
+                (["tile", "mn_edge"], (7, 8)),
+            ):
+                with (
+                    self.subTest(backend=backend, cases=cases, indices=indices),
+                    tempfile.TemporaryDirectory() as tmp,
+                ):
+                    reports, summary, invocations = self.exercise_skips(
+                        Path(tmp), backend, cases, indices
+                    )
+                    self.assertEqual(
+                        invocations, [i for i in indices if i != 7 or len(cases) < 4]
+                    )
+                    self.assertEqual(
+                        summary["counts"].get("PASSED", 0),
+                        4 * len(indices) - len(cases),
+                    )
+                    self.assertEqual(summary["counts"]["SKIPPED"], len(cases))
+                    self.assertEqual(summary["missing"], [])
+                    self.assertEqual(summary["unstarted_cases"], [])
+                    self.assertTrue(summary["passed"])
+                    self.assertFalse(summary["fully_validated"])
+                    self.assertIsNone(summary["stop"])
+                    self.assertIn(
+                        "Run status: PASS WITH SKIPS.",
+                        (reports / "summary.md").read_text(),
+                    )
+                    for case in summary["results"][0]["cases"]:
+                        if case["status"] == "SKIPPED":
+                            self.assertEqual(case["target_dispatches"], 0)
+                            self.assertIn("12963", case["known_failure"]["tracking"][0])
+                    if len(cases) == 4:
+                        self.assertIsNone(summary["results"][0]["returncode"])
+                        self.assertEqual(summary["results"][0]["target_dispatches"], 0)
+                        self.assertFalse((reports / "batch-000.command.json").exists())
+
+    def test_remaining_case_failures_still_stop_the_sweep(self):
+        for backend in ("tensile", "bench"):
+            for failure in ("race", "warning", "dispatch", "numerical", "exception"):
+                with (
+                    self.subTest(backend=backend, failure=failure),
+                    tempfile.TemporaryDirectory() as tmp,
+                ):
+                    _, summary, invocations = self.exercise_skips(
+                        Path(tmp), backend, ["tile", "mn_edge"], failure=failure
+                    )
+                    self.assertEqual(invocations, [7])
+                    self.assertFalse(summary["passed"])
+                    self.assertFalse(summary["fully_validated"])
+                    self.assertEqual(summary["stop"]["reason"], "job-failure")
+                    self.assertEqual(summary["counts"]["SKIPPED"], 2)
+                    self.assertEqual(len(summary["unstarted_cases"]), 4)
+                    if failure == "exception":
+                        self.assertEqual(len(summary["missing"]), 2)
+
+    def test_recheck_executes_known_cases_and_keeps_strict_validation(self):
+        for backend in ("tensile", "bench"):
+            for failure in (None, "race"):
+                with (
+                    self.subTest(backend=backend, failure=failure),
+                    tempfile.TemporaryDirectory() as tmp,
+                ):
+                    _, summary, invocations = self.exercise_skips(
+                        Path(tmp),
+                        backend,
+                        [c["id"] for c in job()["cases"]],
+                        recheck=True,
+                        failure=failure,
+                    )
+                    self.assertEqual(invocations, [7] if failure else [7, 8])
+                    self.assertEqual(summary["counts"].get("SKIPPED", 0), 0)
+                    self.assertEqual(summary["fully_validated"], failure is None)
+
+    def test_shipped_known_failures_are_valid(self):
+        data = known_failures(
+            Path(sweep.__file__).with_name("known_failures.yaml").read_text()
+        )
+        self.assertTrue(data["rocjitsu_revision"])
+
     def test_native_and_compressed_messagepack(self):
         with tempfile.TemporaryDirectory() as tmp:
             payload = msgpack.packb({"solutions": [solution(7)]}, use_bin_type=True)
@@ -268,6 +601,22 @@ class SweepTests(unittest.TestCase):
                 for r in rows
             )
         )
+
+    def test_bench_preserves_fnuz_compute_inputs_with_half_storage(self):
+        # Sampled solution 236890 stores Half but computes with two FNUZ formats.
+        j = job()
+        j["problem_type"].update(
+            aType="Half",
+            bType="Half",
+            cType="Half",
+            dType="Half",
+            computeInputTypeA="Float8_fnuz",
+            computeInputTypeB="BFloat8_fnuz",
+        )
+        rows = sweep.bench_options(j)
+        self.assertTrue(all(r["a_type"] == r["b_type"] == "f16_r" for r in rows))
+        self.assertTrue(all(r["compute_input_typeA"] == "f8_fnuz_r" for r in rows))
+        self.assertTrue(all(r["compute_input_typeB"] == "bf8_fnuz_r" for r in rows))
 
     def test_integer_bench_inputs_use_native_compute_type(self):
         # Bench accepts INT8 storage, but rejects an explicit INT8 compute-input

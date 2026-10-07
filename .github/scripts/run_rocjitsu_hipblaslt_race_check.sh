@@ -33,6 +33,7 @@ RACE_REPORT_DIR="${RACE_REPORT_DIR:-${PWD}/race-reports}"
 HIPBLASLT_BENCH="${HIPBLASLT_BENCH:-${ROCM_PATH}/bin/hipblaslt-bench}"
 TENSILELITE_ROOT="${TENSILELITE_ROOT:-${ROCM_PATH}/share/hipblaslt/tensilelite}"
 SWEEP_DRIVER="${TENSILELITE_ROOT}/rocjitsu/rocjitsu_race_sweep.py"
+KNOWN_FAILURES="${TENSILELITE_ROOT}/rocjitsu/known_failures.yaml"
 TENSILELITE_CLIENT="${TENSILELITE_CLIENT:-${ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client}"
 TIMING_FILE="${RACE_REPORT_DIR}/timing.tsv"
 
@@ -257,6 +258,7 @@ if [[ ! -s "${ROCJITSU_BUILD_DIR}/librocjitsu_plugin_race.so" ]]; then
 fi
 
 run_timed "rocjitsu version" "${ROCJITSU_BIN}" --version
+ROCJITSU_REVISION="$(git -C "${ROCJITSU_SOURCE_DIR}" rev-parse HEAD)"
 
 check_status=0
 
@@ -271,6 +273,7 @@ for backend in tensile bench; do
     python3 "${SWEEP_DRIVER}" \
       --backend "${backend}" --seed "${sweep_seed}" \
       --rocjitsu "${ROCJITSU_BIN}" --client "${client}" \
+      --rocjitsu-revision "${ROCJITSU_REVISION}" --known-failures "${KNOWN_FAILURES}" \
       --config "${ROCJITSU_CONFIG}" --target "${ROCJITSU_GPU_TARGET}" \
       --library-dir "${ROCM_PATH}/lib/hipblaslt/library" \
       --reports "${RACE_REPORT_DIR}/sweep-${backend}" \

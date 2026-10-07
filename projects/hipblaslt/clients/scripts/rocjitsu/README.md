@@ -57,6 +57,40 @@ entire artifact by solution index, including aliases. Broader coverage then need
 additional adapter support and case policies, with unsupported and unstarted
 cases still accounted for. It does not require another runner or scheduler.
 
+## Known failures
+
+[`known_failures.yaml`](known_failures.yaml) is the executable skip list. After
+selection and shape generation, the runner matches each case by architecture,
+backend, native solution index, metadata SHA-256, main code-object SHA-256 and
+case ID. The two hashes come from `manifest.json`'s `input_sha256` map. This binds
+an index to its packaged kernel; a rebuilt or renumbered artifact cannot inherit
+a skip just because it uses the same index. The original selection and all four
+planned cases stay in the manifest.
+
+Each failure has a description, tracking links and a review date. Its `cases`
+list can name a subset of `tile`, `multi_tile`, `mn_edge` and `k_remainder`; listing
+all four skips the solution. Matching cases are omitted from the native INI/YAML.
+If all cases match, no client process is launched. A skip records `SKIPPED`, its
+reason and tracking links, with zero numerical passes or dispatches. Workers
+continue to the next solution. Planning errors and failures in executed cases
+still stop new work.
+
+The list is reviewed against one rocJITsu revision and case policy. Supply the
+detector's full source revision with `--rocjitsu-revision`; CI obtains it from
+the checkout used to build the detector. A revision/policy mismatch or a matched
+entry past its `review_by` date requires rechecking. `--run-known-failures`
+disables skips and these guards while retaining every normal validation check.
+Use it with the same seed or explicit indices to reassess the list when bumping
+the detector pin. Remove passing entries and document/review remaining failures
+before updating the list's revision and date. `--known-failures PATH` selects a
+different list for local diagnosis; the default is the file beside the script.
+
+The current entries cover gfx942 `s_atomic_dec` hangs, tracked by
+[instruction support](https://github.com/ROCm/rocm-systems/pull/12963) and
+[fatal-error propagation](https://github.com/ROCm/rocm-systems/pull/12964).
+The previous LDS/FLAT wait false positives are fixed in the new pin and have no
+skip entries. Newly selected indices may still expose unlisted failures.
+
 ## Evidence and bounds
 
 TensileLite validates every output element with one target dispatch per case.
@@ -65,7 +99,7 @@ validation and one timed dispatch. It uses `--host_side_fill_kernel` to evaluate
 the existing matrix initializers on the CPU and copy the inputs to the device,
 avoiding emulated input-fill kernels. The option applies to every YAML/data
 record; ordinary bench runs continue to initialize on the device by default.
-Both parsers require every planned case,
+Both parsers require every case sent to the client,
 matching solution names/indices and exact kernel names/symbols from race-plugin
 dispatch logs. A successful exit or numerical result alone cannot establish PASS.
 The human-readable client output is an interface dependency; format changes must
@@ -83,14 +117,23 @@ not a hard process-memory limit.
 
 Each backend writes into a fresh report directory:
 
-- `summary.md`: solution index, PASS/FAIL, numerical passes, dispatch counts,
+- `summary.md`: solution index, PASS/FAIL/SKIPPED/PASS WITH SKIPS, numerical passes, dispatch counts,
   elapsed time and reasons. Updated atomically after each result and published
   in the GitHub job summary. Partial reports distinguish pending/incomplete work.
-- `manifest.json`: inventory, selection, policy, shapes, predicates and input hashes.
+- `manifest.json`: inventory, selection, policy, shapes, predicates, input hashes,
+  detector revision and known-failure matches.
+- `known_failures.yaml`: the exact list used for this run, hashed in the manifest.
 - `settings.json`, `rocjitsu.json`: CPU assignment, environment and emulator settings.
 - `batch-*`: per-solution INI/YAML, command, combined log and classified result.
 - `progress.json`, `summary.json`: incremental/final accounting and first-failure
-  state. Setup/finalization errors also leave `setup-or-run-error.json`.
+state. Setup/finalization errors also leave `setup-or-run-error.json`.
+
+A successful run with skips reports `PASS WITH SKIPS`. In `summary.json`,
+`passed` allows these tracked skips; `fully_validated` additionally requires
+every planned case to have run successfully. Numerical passes keep the original
+planned-case denominator; expected dispatch counts exclude skipped cases. Final
+accounting includes all observed statuses, skipped cases, missing records and
+unstarted cases. Skips do not establish numerical or race coverage.
 
 The console reports each completed solution. Reduce findings using its saved
 command and inputs, preserving artifact/tool revisions. Distinguish emulator
@@ -111,6 +154,7 @@ python3 -B "$sweep/test_rocjitsu_race_sweep.py"
 python3 -B "$sweep/rocjitsu_race_sweep.py" \
   --backend tensile --seed "$PR_REVISION" \
   --rocjitsu "$ROCJITSU_BUILD_DIR/tools/rocjitsu/rocjitsu" \
+  --rocjitsu-revision "$(git -C "$ROCJITSU_SOURCE_DIR" rev-parse HEAD)" \
   --client "$ROCM_PATH/libexec/hipblaslt/tensilelite/tensilelite-client" \
   --config "$ROCJITSU_SOURCE_DIR/configs/gfx942_cdna3_kmd.json" \
   --library-dir "$ROCM_PATH/lib/hipblaslt/library" \

@@ -18,6 +18,7 @@ import time
 import math
 
 from rocjitsu_sweep_plan import make_plan, sha256
+from rocjitsu_known_failures import apply_known_failures
 
 from Tensile.Utilities.ClientConfig import problemTypeOptions
 
@@ -32,17 +33,46 @@ def write_json(path, value):
     write_text(path, json.dumps(value, indent=2) + "\n")
 
 
+def skipped_cases(job):
+    return [
+        {
+            "case_id": c["id"],
+            "index": job["solutions"][0]["index"],
+            "shape": c["shape"],
+            "status": "SKIPPED",
+            "target_dispatches": 0,
+            "known_failure": c["skip"],
+        }
+        for c in job["cases"]
+        if c.get("skip")
+    ]
+
+
 def solution_report(job, result, backend):
     """One row of evidence; numerical success alone never means PASS."""
     planned = len(job["cases"])
     observed = sum(c["status"] == "PASSED" for c in result["cases"])
+    skipped = [c for c in result["cases"] if c["status"] == "SKIPPED"]
+    state = "FAIL" if result["failed"] else "PASS"
+    notes = "; ".join(result["errors"])
+    if skipped:
+        if not result["failed"]:
+            state = "SKIPPED" if len(skipped) == planned else "PASS WITH SKIPS"
+        reasons = {
+            c["known_failure"]["id"]: c["known_failure"]
+            for c in skipped
+            if "known_failure" in c
+        }
+        notes += ("; " if notes else "") + f"{len(skipped)}/{planned} cases skipped"
+        for key, reason in reasons.items():
+            notes += f"; {key}: {reason['reason']} ({', '.join(reason['tracking'])})"
     return [
         str(job["solutions"][0]["index"]),
-        "FAIL" if result["failed"] else "PASS",
+        state,
         f"{observed}/{planned}",
-        f"{result.get('target_dispatches', '?')}/{planned * (2 if backend == 'bench' else 1)}",
+        f"{result.get('target_dispatches', '?')}/{(planned - len(skipped)) * (2 if backend == 'bench' else 1)}",
         f"{result['seconds']:.2f}" if "seconds" in result else "—",
-        "; ".join(result["errors"]) or "Identity, numerical and race checks passed",
+        notes or "Identity, numerical and race checks passed",
     ]
 
 
@@ -63,7 +93,8 @@ def render_report(manifest, summary):
         f"Selected solutions: {len(manifest['jobs'])}; eligible/inventory kernel names: "
         f"{inventory.get('eligible_kernel_names', '?')}/{inventory.get('unique_kernel_names', '?')}.",
         "",
-        "PASS requires all planned cases, matching identities/dispatches, no races or warnings, and a successful exit.",
+        "PASS requires all planned cases, matching identities/dispatches, no races or warnings, and a successful exit. "
+        "SKIPPED cases did not run; PASS WITH SKIPS validates only the remaining cases.",
         f"Full shapes, identities, commands and logs are in the uploaded `sweep-{backend}/` artifacts.",
         "",
         "| Solution index | Result | Numerical passes | Target dispatches | Seconds | Notes |",
@@ -84,12 +115,25 @@ def render_report(manifest, summary):
     lines += [
         "",
         (
-            f"Run status: {'PASS' if summary['passed'] else 'FAIL'}."
-            if "passed" in summary
-            else "Run incomplete; this table is updated after each result."
+            f"Run status: {'PASS WITH SKIPS' if summary.get('counts', {}).get('SKIPPED') else 'PASS'}."
+            if summary.get("passed")
+            else (
+                "Run status: FAIL."
+                if "passed" in summary
+                else "Run incomplete; this table is updated after each result."
+            )
         ),
         "",
     ]
+    if "counts" in summary:
+        lines += [
+            f"Cases: {summary['counts'].get('PASSED', 0)} numerical passes, "
+            f"{summary['counts'].get('SKIPPED', 0)} skipped, "
+            f"{len(summary['missing'])} missing, "
+            f"{len(summary['unstarted_cases'])} unstarted; "
+            f"{summary['planned_cases']} planned.",
+            "",
+        ]
     if summary.get("stop"):
         lines += [f"Stopped: {cell(summary['stop']['reason'])}.", ""]
     return "\n".join(lines)
@@ -110,8 +154,13 @@ def prepare(args):
         backend=args.backend,
         workers=args.workers,
         tools={str(p): sha256(p) for p in (args.rocjitsu, args.client, args.config)},
-        preparation_seconds=time.monotonic() - begin,
     )
+    failures = args.known_failures.read_text(encoding="utf-8")
+    apply_known_failures(
+        manifest, failures, args.rocjitsu_revision, args.run_known_failures
+    )
+    write_text(args.reports / "known_failures.yaml", failures)
+    manifest["preparation_seconds"] = time.monotonic() - begin
     base.update(
         max_ticks=0,
         num_threads=1,
@@ -273,6 +322,8 @@ BENCH_TYPES = {
     "BFloat16": "bf16_r",
     "Float8": "f8_r",
     "BFloat8": "bf8_r",
+    "Float8_fnuz": "f8_fnuz_r",
+    "BFloat8_fnuz": "bf8_fnuz_r",
     "Int8": "i8_r",
     "Int32": "i32_r",
 }
@@ -606,6 +657,23 @@ def run(args):
                 }
                 write_json(stem.with_suffix(".result.json"), result)
                 return result
+            skipped = skipped_cases(job)
+            job = {**job, "cases": [c for c in job["cases"] if not c.get("skip")]}
+            if not job["cases"]:
+                result = {
+                    "id": job["id"],
+                    "failed": False,
+                    "errors": [],
+                    "cases": skipped,
+                    "target_dispatches": 0,
+                    "auxiliary_dispatches": {},
+                    "race_headers": [],
+                    "warnings": {},
+                    "returncode": None,
+                    "seconds": 0,
+                }
+                write_json(stem.with_suffix(".result.json"), result)
+                return result
             if args.backend == "tensile":
                 options = client_options(job, stem.with_suffix(".csv"))
                 ini = [f"{k}={v}" for k, v in options.items()]
@@ -657,6 +725,7 @@ def run(args):
                 stem.with_suffix(".log").read_text(encoding="utf-8", errors="replace"),
                 rc,
             )
+            result["cases"] += skipped
             if rc == 124:
                 result["errors"].append(
                     "Suite time budget exhausted"
@@ -691,6 +760,13 @@ def run(args):
         for result in summary["results"]:
             job = by_id[result["id"]]
             observed = {c["case_id"] for c in result["cases"]}
+            # A worker exception can interrupt native setup/parsing. These cases
+            # were still excluded from its input; retain their skip evidence.
+            skipped = [c for c in skipped_cases(job) if c["case_id"] not in observed]
+            if skipped:
+                result["cases"] += skipped
+                observed.update(c["case_id"] for c in skipped)
+                write_json(args.reports / f"batch-{job['id']:03}.result.json", result)
             missing += [
                 {
                     "job": job["id"],
@@ -733,12 +809,13 @@ def run(args):
             and not unstarted
             and not missing
             and all(not r["failed"] for r in summary["results"])
-            and counts["PASSED"] == summary["planned_cases"]
+            and counts["PASSED"] + counts["SKIPPED"] == summary["planned_cases"]
         )
+        summary["fully_validated"] = summary["passed"] and not counts["SKIPPED"]
         write_json(args.reports / "summary.json", summary)
         write_text(args.reports / "summary.md", render_report(manifest, summary))
         print(
-            f"{counts['PASSED']}/{summary['planned_cases']} numerical passes; {len(missing)} missing, {len(unstarted)} unstarted. Reports: {args.reports}"
+            f"{counts['PASSED']}/{summary['planned_cases']} numerical passes; {counts['SKIPPED']} skipped, {len(missing)} missing, {len(unstarted)} unstarted. Reports: {args.reports}"
         )
         return 0 if summary["passed"] else 1
     except Exception as error:
@@ -773,6 +850,22 @@ def main():
         help="Run this artifact-specific index; repeat for multiple solutions (including aliases)",
     )
     parser.add_argument("--backend", choices=("tensile", "bench"), required=True)
+    parser.add_argument(
+        "--known-failures",
+        type=Path,
+        default=Path(__file__).with_name("known_failures.yaml"),
+        help="Versioned list of artifact-specific cases to skip",
+    )
+    parser.add_argument(
+        "--rocjitsu-revision",
+        required=True,
+        help="Full source revision of the detector; must match the list unless rechecking",
+    )
+    parser.add_argument(
+        "--run-known-failures",
+        action="store_true",
+        help="Execute every selected case, ignoring skips and their revision/review guards",
+    )
     parser.add_argument(
         "--seed",
         required=True,
