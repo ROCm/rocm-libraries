@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdlib>
 #include <optional>
 #include <string>
@@ -11,8 +12,10 @@
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/ContractionLibrary.hpp>
 #include <Tensile/ContractionProblemPredicates.hpp>
+#include <Tensile/ContractionProblemProperties.hpp>
 #include <Tensile/Debug.hpp>
 #include <Tensile/ExactLogicLibrary.hpp>
+#include <Tensile/MapLibrary.hpp>
 
 #include "FallbackTestUtils.hpp"
 
@@ -163,6 +166,79 @@ namespace
             names.push_back(solution->solutionName);
         return names;
     }
+
+    using Types = std::array<rocisa::DataType, 6>;
+
+    Types allOf(rocisa::DataType type)
+    {
+        return {type, type, type, type, type, type};
+    }
+
+    // And(TypesEqual(types), HighPrecisionAccumulate(hpa)).
+    ContractionProblemPredicate typesRow(Types const& types, bool hpa)
+    {
+        auto typesEqual   = std::make_shared<Predicates::Contraction::TypesEqual>();
+        typesEqual->value = types;
+        auto accumulate = std::make_shared<Predicates::Contraction::HighPrecisionAccumulateEqual>();
+        accumulate->value = hpa;
+        return makeRowPredicate(std::make_shared<Predicates::And<ContractionProblemGemm>>(
+            std::vector<std::shared_ptr<Predicates::Predicate<ContractionProblemGemm>>>{
+                typesEqual, accumulate}));
+    }
+
+    // Rows selecting on data types, with rows for Float problems in several
+    // places, so that the selected rows are not adjacent.
+    std::vector<ContractionProblemSelectionLibrary::Row> typedRows()
+    {
+        using rocisa::DataType;
+        std::vector<ContractionProblemSelectionLibrary::Row> rows;
+        auto add = [&rows](Types const& types, bool hpa, std::string const& name, int index) {
+            rows.emplace_back(typesRow(types, hpa),
+                              std::make_shared<StubTopLibrary>(makeSolution(name, index)));
+        };
+        add(allOf(DataType::Half), false, "half", 1);
+        add(allOf(DataType::Float), false, "float-a", 2);
+        add(allOf(DataType::BFloat16), true, "bf16", 3);
+        add(allOf(DataType::Float), true, "float-hpa", 4);
+        add(allOf(DataType::Half), true, "half-hpa", 5);
+        add(allOf(DataType::Float), false, "float-b", 6);
+        return rows;
+    }
+
+    std::vector<ContractionProblemGemm> typedProblems()
+    {
+        std::vector<ContractionProblemGemm> problems;
+        for(auto type : {rocisa::DataType::Float, rocisa::DataType::Half, rocisa::DataType::Double})
+        {
+            for(bool hpa : {false, true})
+            {
+                auto problem = ContractionProblemGemm::GEMM_Strides(false,
+                                                                    false,
+                                                                    type,
+                                                                    type,
+                                                                    type,
+                                                                    type,
+                                                                    64,
+                                                                    64,
+                                                                    64,
+                                                                    1,
+                                                                    64,
+                                                                    4096,
+                                                                    64,
+                                                                    4096,
+                                                                    64,
+                                                                    4096,
+                                                                    64,
+                                                                    4096,
+                                                                    1.0);
+                problem.setComputeInputTypeA(type);
+                problem.setComputeInputTypeB(type);
+                problem.setHighPrecisionAccumulate(hpa);
+                problems.push_back(problem);
+            }
+        }
+        return problems;
+    }
 } // namespace
 
 TEST(ExactLogicLibraryTest, FindTopSolutionsIncludesEqualityAndRangeByDefault)
@@ -255,6 +331,129 @@ TEST(ExactLogicLibraryTest, FindTopSolutionsKeepsGridBasedAndFreeSizeWhenStreamK
 
     EXPECT_EQ(solutionNames(lib->findTopSolutions(problem, device, 5)),
               (std::vector<std::string>{"prediction", "gridbased", "freesize"}));
+}
+
+TEST(ExactLogicLibraryTest, PreparedRowsSelectLikeRowsAddedOneByOne)
+{
+    ContractionProblemSelectionLibrary prepared(typedRows());
+    ContractionProblemSelectionLibrary added;
+    for(auto const& row : typedRows())
+        added.rows.push_back(row);
+
+    const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    for(auto const& problem : typedProblems())
+    {
+        SCOPED_TRACE(problem.description());
+        for(int count : {1, 2, 3})
+        {
+            auto const expected = solutionNames(added.findTopSolutions(problem, device, count));
+            EXPECT_EQ(solutionNames(prepared.findTopSolutions(problem, device, count)), expected);
+            EXPECT_EQ(prepared.lastFindTopAlreadyRetAll(), added.lastFindTopAlreadyRetAll());
+        }
+        auto const best     = prepared.findBestSolution(problem, device);
+        auto const expected = added.findBestSolution(problem, device);
+        EXPECT_EQ(best ? best->solutionName : "", expected ? expected->solutionName : "");
+    }
+}
+
+TEST(ExactLogicLibraryTest, RowsOfTheProblemTypesAreReturnedInRowOrder)
+{
+    ContractionProblemSelectionLibrary lib(typedRows());
+    auto                               problem = typedProblems().front();
+    ASSERT_EQ(problem.a().dataType(), rocisa::DataType::Float);
+    ASSERT_FALSE(problem.highPrecisionAccumulate());
+
+    const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    EXPECT_EQ(solutionNames(lib.findTopSolutions(problem, device, 3)),
+              (std::vector<std::string>{"float-a", "float-b"}));
+    EXPECT_TRUE(lib.lastFindTopAlreadyRetAll());
+    EXPECT_EQ(lib.findBestSolution(problem, device)->solutionName, "float-a");
+
+    problem.setHighPrecisionAccumulate(true);
+    EXPECT_EQ(solutionNames(lib.findTopSolutions(problem, device, 3)),
+              (std::vector<std::string>{"float-hpa"}));
+}
+
+TEST(ExactLogicLibraryTest, RowsWithoutLeadingTypesAreAllEvaluated)
+{
+    auto rows = typedRows();
+    rows.insert(rows.begin() + 2,
+                ContractionProblemSelectionLibrary::Row(
+                    makeRowPredicate(std::make_shared<Predicates::True<ContractionProblemGemm>>()),
+                    std::make_shared<StubTopLibrary>(makeSolution("any", 7))));
+    ContractionProblemSelectionLibrary lib(rows);
+
+    const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    EXPECT_EQ(solutionNames(lib.findTopSolutions(typedProblems().front(), device, 4)),
+              (std::vector<std::string>{"float-a", "any", "float-b"}));
+}
+
+TEST(ExactLogicLibraryTest, PredicateDebuggingEvaluatesEveryRow)
+{
+    const char*       previous = std::getenv("TENSILE_DB");
+    const std::string saved    = previous ? previous : "";
+    setenv("TENSILE_DB", "0x40010", 1);
+    Debug::Instance().reloadDebugBitsForTest();
+
+    ContractionProblemSelectionLibrary lib(typedRows());
+    const AMDGPU                       device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    ::testing::internal::CaptureStdout();
+    auto const names = solutionNames(lib.findTopSolutions(typedProblems().front(), device, 3));
+    auto const trace = ::testing::internal::GetCapturedStdout();
+
+    if(previous)
+        setenv("TENSILE_DB", saved.c_str(), 1);
+    else
+        unsetenv("TENSILE_DB");
+    Debug::Instance().reloadDebugBitsForTest();
+
+    EXPECT_EQ(names, (std::vector<std::string>{"float-a", "float-b"}));
+    size_t rows = 0;
+    for(size_t at = trace.find("PREDICATE: ExactLogic: Problem"); at != std::string::npos;
+        at        = trace.find("PREDICATE: ExactLogic: Problem", at + 1))
+        rows++;
+    EXPECT_EQ(rows, lib.rows.size());
+}
+
+TEST(ExactLogicLibraryTest, RowKindsSkipTheSameRowsAsTheirTypeNames)
+{
+    auto lib = buildAllMatchingKindsLibrary();
+    for(size_t i = 0; i < lib->rows.size(); i++)
+        EXPECT_EQ(lib->rowKind(i), libraryRowKind(lib->rows[i].first)) << i;
+
+    ContractionProblemSelectionLibrary prepared(lib->rows);
+    auto const                         problem = dummyProblem();
+    const AMDGPU                       device  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    EXPECT_EQ(solutionNames(prepared.findTopSolutions(problem, device, 5)),
+              solutionNames(lib->findTopSolutions(problem, device, 5)));
+
+    EXPECT_EQ(prepared.rowKind(0), LibraryRowKind::EqualityMatching);
+    EXPECT_EQ(prepared.rowKind(1), LibraryRowKind::RangeMatching);
+    EXPECT_EQ(prepared.rowKind(2), LibraryRowKind::PredictionMatching);
+    EXPECT_EQ(prepared.rowKind(3), LibraryRowKind::GridBasedMatching);
+    EXPECT_EQ(prepared.rowKind(4), LibraryRowKind::FreeSizeMatching);
+}
+
+TEST(ProblemMapLibraryTest, OperationIdentifierKeyFindsTheSameLibrary)
+{
+    auto problem = dummyProblem();
+    auto other   = ContractionProblemGemm::GEMM(true, false, 64, 64, 64, 64, 64, 64, 1.0, false, 1);
+    ASSERT_NE(problem.operationIdentifier(), other.operationIdentifier());
+
+    ContractionProblemMapLibrary lib;
+    lib.property = std::make_shared<Contraction::OperationIdentifier>();
+    lib.map.emplace(problem.operationIdentifier(),
+                    std::make_shared<StubTopLibrary>(makeSolution("mapped", 1)));
+
+    const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    for(bool byOperationIdentifier : {false, true})
+    {
+        SCOPED_TRACE(byOperationIdentifier);
+        lib.keyIsOperationIdentifier = byOperationIdentifier;
+        EXPECT_EQ(solutionNames(lib.findTopSolutions(problem, device, 1)),
+                  (std::vector<std::string>{"mapped"}));
+        EXPECT_TRUE(lib.findTopSolutions(other, device, 1).empty());
+    }
 }
 
 TEST(ExactLogicLibraryTest, FindTopSolutionsReturnsOnlyPredictionWithPredictionLib)

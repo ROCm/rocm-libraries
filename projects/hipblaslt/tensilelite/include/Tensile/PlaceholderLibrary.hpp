@@ -214,6 +214,8 @@ namespace TensileLite
                         // Keeping this shard's own tree, so its cache is the one
                         // the leaves reference.
                         publishShardCache();
+                        for(auto const& entry : mLibrary->solutions)
+                            entry.second->codeObjectFilename = getCodeObjectFileName();
                         return true;
                     }
                     // Adopting the tree the master loaded means adopting the
@@ -264,12 +266,7 @@ namespace TensileLite
             if(!library)
                 loadPlaceholderLibrary();
 
-            auto solution = library->getSolutionByIndex(problem, hardware, index);
-
-            if(solution)
-                solution->codeObjectFilename = getCodeObjectFileName();
-
-            return solution;
+            return library->getSolutionByIndex(problem, hardware, index);
         }
 
         virtual std::shared_ptr<MySolution> findBestSolution(MyProblem const& problem,
@@ -280,12 +277,7 @@ namespace TensileLite
             if(!library)
                 loadPlaceholderLibrary();
 
-            auto solution = library->findBestSolution(problem, hardware, fitness);
-
-            if(solution)
-                solution->codeObjectFilename = getCodeObjectFileName();
-
-            return solution;
+            return library->findBestSolution(problem, hardware, fitness);
         }
 
         /**
@@ -305,14 +297,7 @@ namespace TensileLite
                 loadPlaceholderLibrary();
             }
 
-            auto solutions = library->findAllSolutions(problem, hardware, searchType);
-
-            for(auto& solution : solutions)
-            {
-                solution->codeObjectFilename = getCodeObjectFileName();
-            }
-
-            return solutions;
+            return library->findAllSolutions(problem, hardware, searchType);
         }
 
         virtual SolutionSet<MySolution>
@@ -326,14 +311,7 @@ namespace TensileLite
                 loadPlaceholderLibrary();
             }
 
-            auto solutions = library->findAllSolutionsGroupedGemm(problems, hardware, searchType);
-
-            for(auto& solution : solutions)
-            {
-                solution->codeObjectFilename = getCodeObjectFileName();
-            }
-
-            return solutions;
+            return library->findAllSolutionsGroupedGemm(problems, hardware, searchType);
         }
 
         virtual SolutionVector<MySolution> findTopSolutions(MyProblem const& problem,
@@ -346,11 +324,6 @@ namespace TensileLite
             }
 
             auto solutions = library->findTopSolutions(problem, hardware, numSolutions);
-
-            for(auto& solution : solutions)
-            {
-                solution->codeObjectFilename = getCodeObjectFileName();
-            }
 
             // can't reach the requested number, means findTop already done its best
             lastFindTopRetAll = (solutions.size() < numSolutions);
@@ -372,13 +345,7 @@ namespace TensileLite
                 loadPlaceholderLibrary();
             }
 
-            auto solutions = library->findTopSolutionsGroupedGemm(problems, hardware, numSolutions);
-
-            for(auto& solution : solutions)
-            {
-                solution->codeObjectFilename = getCodeObjectFileName();
-            }
-            return solutions;
+            return library->findTopSolutionsGroupedGemm(problems, hardware, numSolutions);
         }
 
         static std::string Type()
