@@ -1236,24 +1236,10 @@ namespace
     }
 }
 
-TEST_CASE("the JIT solution library", "[jit-gpu]")
+void runLibrary(const fs::path& scratch, int writers, int perWriter)
 {
-    const char* scratchEnv = std::getenv("HIPBLASLT_JIT_LIBRARY_SCRATCH");
-    {
-        INFO(("Set HIPBLASLT_JIT_LIBRARY_SCRATCH"));
-        REQUIRE((scratchEnv && *scratchEnv));
-    }
-    int writers = 0, perWriter = 0;
-    if(const char* value = std::getenv("HIPBLASLT_JIT_LIBRARY_WRITERS"))
-        writers = std::atoi(value);
-    if(const char* value = std::getenv("HIPBLASLT_JIT_LIBRARY_PER_WRITER"))
-        perWriter = std::atoi(value);
-    {
-        INFO(("writers and per-writer must both be set"));
-        REQUIRE(((writers == 0 && perWriter == 0) || (writers > 0 && perWriter > 0)));
-    }
     Context ctx;
-    ctx.scratch = fs::absolute(scratchEnv);
+    ctx.scratch = scratch;
     fs::remove_all(ctx.scratch);
     fs::create_directories(ctx.scratch);
 
@@ -1315,4 +1301,16 @@ TEST_CASE("the JIT solution library", "[jit-gpu]")
         fusedA2A(ctx);
     }
     std::cout << "ALL JIT LIBRARY CHECKS PASSED\n";
+}
+
+TEST_CASE("the JIT solution library", "[jit-gpu][library-checks]")
+{
+    hipblaslt_jit_test::ScratchDir scratch("library");
+    runLibrary(scratch.path, 0, 0);
+}
+
+TEST_CASE("concurrent JIT solution library publishers", "[jit-gpu][library-concurrency]")
+{
+    hipblaslt_jit_test::ScratchDir scratch("library-concurrency");
+    runLibrary(scratch.path, 8, 4);
 }

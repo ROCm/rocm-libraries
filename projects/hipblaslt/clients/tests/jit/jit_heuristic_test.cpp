@@ -6,29 +6,47 @@
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include <cstdlib>
 #include <iostream>
 #include <set>
 #include <string>
 #include <vector>
-#include <sys/wait.h>
-#include <unistd.h>
 
-// Heuristic queries under HIPBLASLT_JIT. The mode is a process environment
-// variable, so each CTest entry runs one mode. The test stages the device's
-// plain-pair sources and lists that directory in HIPBLASLT_JIT_TEST_REPLAY
-// before the first query.
+// Heuristic queries under HIPBLASLT_JIT. Each CTest entry runs one Catch2 case,
+// which sets HIPBLASLT_JIT and points HIPBLASLT_JIT_LIBRARY_PATH at a scratch
+// directory. The first query is a miss and generation runs. The second query in
+// this process is a hit and generation does not run.
 namespace
 {
-    namespace fs = std::filesystem;
     using hipblaslt_jit_test::Device;
     using hipblaslt_jit_test::endsWith;
 
 #define HIP(expression) hipblaslt_jit_test::checkHip((expression), #expression)
 
+#ifdef HIPBLASLT_JIT_HIPKITTENS
+    constexpr int M = 256;
+    constexpr int N = 256;
+    constexpr int kWide = 128;
+    constexpr int kNarrow = 256;
+    constexpr hipblasOperation_t opA = HIPBLAS_OP_T;
+    constexpr const char* wideSuffix = "HK_gemm_f16_TN";
+    constexpr const char* narrowSuffix = "HK_gemm_f16_TN";
+#else
     constexpr int M = hipblaslt_jit_test::Fp16Gemm::rows;
     constexpr int N = hipblaslt_jit_test::Fp16Gemm::cols;
+    constexpr int kWide = 512;
+    constexpr int kNarrow = 256;
+    constexpr hipblasOperation_t opA = HIPBLAS_OP_N;
+    constexpr const char* wideSuffix = "_K512_WGM8";
+    constexpr const char* narrowSuffix = "_WGM1";
+#endif
     constexpr uint64_t workspaceLimit = 64ull << 20;
+
+    bool nameMatches(const std::string& name, const std::string& token)
+    {
+        if(!token.empty() && token.front() == '_')
+            return endsWith(name, token);
+        return name.find(token) != std::string::npos;
+    }
 
     struct Layouts
     {
@@ -182,8 +200,8 @@ namespace
             }
             const auto name = hipblaslt_ext::getSolutionNameFromAlgo(handle, algo);
             {
-                INFO((label + " selected '" + name + "', not a solution ending in " + suffix));
-                REQUIRE((endsWith(name, suffix)));
+                INFO((label + " selected '" + name + "', not a solution matching " + suffix));
+                REQUIRE((nameMatches(name, suffix)));
             }
         }
     }
@@ -302,134 +320,21 @@ namespace
         requireUniqueKernels(handle, cpp);
     }
 
-    // A fresh process querying the same K=512 problem. Prints INDEX <n> and nothing else.
-    void reuse(const std::string& root)
+    void requireMissThenHit(uint64_t before, uint64_t afterFirst, uint64_t afterSecond, int first,
+                             int second)
     {
-        int             device = -1;
-        hipDeviceProp_t properties{};
-        HIP(hipGetDevice(&device));
-        HIP(hipGetDeviceProperties(&properties, device));
-        const auto bundles = hipblaslt_jit_test::deviceBundles(root, properties.gcnArchName);
         {
-            INFO(("setenv"));
-            REQUIRE((setenv("HIPBLASLT_JIT_TEST_REPLAY", (bundles / "plain-pair").u8string().c_str(), 1)
-                == 0));
-        }
-
-        hipblasLtHandle_t           handle{};
-        hipblasLtMatmulDesc_t       desc{};
-        hipblasLtMatmulPreference_t pref{};
-        {
-            INFO(("hipblasLtCreate"));
-            REQUIRE((hipblasLtCreate(&handle) == HIPBLAS_STATUS_SUCCESS));
+            INFO(("the first query did not generate"));
+            REQUIRE((afterFirst == before + 1 && afterSecond == before + 1));
         }
         {
-            INFO(("hipblasLtMatmulDescCreate"));
-            REQUIRE((hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F)
-                == HIPBLAS_STATUS_SUCCESS));
+            INFO(("the second query returned another index"));
+            REQUIRE((first == second));
         }
-        {
-            INFO(("preference"));
-            REQUIRE((hipblasLtMatmulPreferenceCreate(&pref) == HIPBLAS_STATUS_SUCCESS));
-        }
-        {
-            INFO(("workspace preference"));
-            REQUIRE((hipblasLtMatmulPreferenceSetAttribute(pref,
-                                                  HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
-                                                  &workspaceLimit,
-                                                  sizeof(workspaceLimit))
-                == HIPBLAS_STATUS_SUCCESS));
-        }
-        Layouts    layouts(M, 512, M, 512, N, 512);
-        const auto listed = queryC(handle, desc, pref, layouts, 1);
-        {
-            INFO(("second process query"));
-            REQUIRE((listed.status == HIPBLAS_STATUS_SUCCESS && listed.results.size() == 1));
-        }
-        auto      algo  = listed.results.front().algo;
-        const int index = hipblaslt_ext::getIndexFromAlgo(algo);
-        std::cout << "INDEX " << index << '\n' << std::flush;
-        hipblasLtMatmulPreferenceDestroy(pref);
-        hipblasLtMatmulDescDestroy(desc);
-        hipblasLtDestroy(handle);
     }
 
-    void requireSameIndexInChild(const std::string& root, int expected)
+    void test(const std::string& mode)
     {
-        int pipes[2];
-        {
-            INFO(("pipe"));
-            REQUIRE((pipe(pipes) == 0));
-        }
-        const auto child = fork();
-        {
-            INFO(("fork"));
-            REQUIRE((child >= 0));
-        }
-        if(child == 0)
-        {
-            if(dup2(pipes[1], STDOUT_FILENO) < 0)
-                _exit(127);
-            close(pipes[0]);
-            close(pipes[1]);
-            if(setenv("HIPBLASLT_JIT_TEST_MODE", "reuse", 1) != 0
-               || setenv("HIPBLASLT_JIT_REUSE_ROOT", root.c_str(), 1) != 0)
-                _exit(127);
-            // Catch2's reporter must not share the pipe that carries INDEX.
-            execl("/proc/self/exe",
-                  "hipblaslt-jit-heuristic-test",
-                  "--out",
-                  "/dev/null",
-                  static_cast<char*>(nullptr));
-            _exit(127);
-        }
-        close(pipes[1]);
-        std::string output;
-        char        buffer[256];
-        ssize_t     count = 0;
-        while((count = read(pipes[0], buffer, sizeof(buffer))) > 0)
-            output.append(buffer, buffer + count);
-        close(pipes[0]);
-        int status = 0;
-        {
-            INFO(("The second process failed (wait status " + std::to_string(status) + ")"));
-            REQUIRE((
-                waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0));
-        }
-        {
-            INFO(("The second process reported '" + output + "', not index "
-                + std::to_string(expected)));
-            REQUIRE((output == "INDEX " + std::to_string(expected) + "\n"));
-        }
-        std::cout << "PASS a second process reused JIT library index " << expected << '\n';
-    }
-
-    void test(const std::string& mode, const std::string& root)
-    {
-        int             device = -1;
-        hipDeviceProp_t properties{};
-        HIP(hipGetDevice(&device));
-        HIP(hipGetDeviceProperties(&properties, device));
-        std::string replayRoot = root;
-        if(mode == "ignored")
-        {
-            INFO(("setenv"));
-            REQUIRE((setenv("HIPBLASLT_JIT_TEST_REPLAY", "ignored", 1) == 0));
-        }
-        else
-        {
-            const auto stage = fs::u8path(HIPBLASLT_JIT_REPLAY_ROOT) / mode;
-            hipblaslt_jit_test::stageDescribedSources(fs::u8path(root), stage);
-            replayRoot       = stage.u8string();
-            const auto bundles
-                = hipblaslt_jit_test::deviceBundles(stage, properties.gcnArchName);
-            {
-                INFO(("setenv"));
-                REQUIRE((setenv("HIPBLASLT_JIT_TEST_REPLAY", (bundles / "plain-pair").u8string().c_str(), 1)
-                    == 0));
-            }
-        }
-
         hipblasLtHandle_t           handle{};
         hipblasLtMatmulDesc_t       desc{};
         hipblasLtMatmulPreference_t pref{};
@@ -457,9 +362,11 @@ namespace
         }
         HIP(hipStreamCreate(&stream));
 
-        constexpr int K = 512;
-        Device        A(M * K * 2), B(K * N * 2), C(M * N * 2), D(M * N * 2);
-        Layouts       layouts(M, K, M, K, N, K);
+        constexpr int kBuffer = kWide > kNarrow ? kWide : kNarrow;
+        Device        A(static_cast<size_t>(M) * kBuffer * 2);
+        Device        B(static_cast<size_t>(kBuffer) * N * 2);
+        Device        C(static_cast<size_t>(M) * N * 2);
+        Device        D(static_cast<size_t>(M) * N * 2);
         const int equalitySizes[][3]
             = {{1024, 4096, 20}, {2048, 128, 16}, {864, 512, 432}, {128, 5120, 1024}};
         bool tuned = false;
@@ -468,79 +375,151 @@ namespace
             for(const auto& size : equalitySizes)
                 tuned = tuned || equalitySize(handle, desc, size[0], size[1], size[2]);
         }
+#ifdef HIPBLASLT_JIT_HIPKITTENS
+        const hipblasOperation_t transpose = HIPBLAS_OP_T;
+        {
+            INFO(("transpose A"));
+            REQUIRE((hipblasLtMatmulDescSetAttribute(
+                    desc, HIPBLASLT_MATMUL_DESC_TRANSA, &transpose, sizeof(transpose))
+                == HIPBLAS_STATUS_SUCCESS));
+        }
+#endif
 
-        const auto c512 = queryC(handle, desc, pref, layouts, 4);
-        const auto cpp512
-            = queryCpp(handle, desc, HIPBLAS_OP_N, HIPBLAS_OP_N, layouts, A.pointer, B.pointer,
-                       C.pointer, D.pointer, 4);
-        Layouts    k256(M, 256, M, 256, N, 256);
-        const auto c256 = queryC(handle, desc, pref, k256, 4);
-        const auto cpp256 = queryCpp(handle, desc, HIPBLAS_OP_N, HIPBLAS_OP_N, k256, A.pointer,
-                                     B.pointer, C.pointer, D.pointer, 4);
+#ifdef HIPBLASLT_JIT_HIPKITTENS
+        Layouts wide(kWide, M, kWide, kWide, N, kWide);
+        Layouts narrow(kNarrow, M, kNarrow, kNarrow, N, kNarrow);
+#else
+        Layouts wide(M, kWide, M, kWide, N, kWide);
+        Layouts narrow(M, kNarrow, M, kNarrow, N, kNarrow);
+#endif
+#ifndef HIPBLASLT_JIT_HEURISTIC_IGNORED
+        const auto before = hipblaslt_jit::generationCount();
+#endif
+        // One result fills the request, so the C++ query is a library hit.
+        const auto cWide = queryC(handle, desc, pref, wide, 1);
+#ifndef HIPBLASLT_JIT_HEURISTIC_IGNORED
+        const auto afterWideC = hipblaslt_jit::generationCount();
+#endif
+        const auto cppWide
+            = queryCpp(handle, desc, opA, HIPBLAS_OP_N, wide, A.pointer, B.pointer, C.pointer,
+                       D.pointer, 1);
+#ifndef HIPBLASLT_JIT_HEURISTIC_IGNORED
+        const auto afterWide = hipblaslt_jit::generationCount();
+#endif
+        const auto cNarrow = queryC(handle, desc, pref, narrow, 1);
+#ifndef HIPBLASLT_JIT_HEURISTIC_IGNORED
+        const auto afterNarrowC = hipblaslt_jit::generationCount();
+#endif
+        const auto cppNarrow = queryCpp(handle, desc, opA, HIPBLAS_OP_N, narrow, A.pointer,
+                                        B.pointer, C.pointer, D.pointer, 1);
+#ifndef HIPBLASLT_JIT_HEURISTIC_IGNORED
+        const auto afterNarrow = hipblaslt_jit::generationCount();
+#endif
 
         if(mode == "off" || mode == "ignored")
         {
-            checkPair("K=512", c512, cpp512, false, "", handle);
-            checkPair("K=256", c256, cpp256, false, "", handle);
+#ifndef HIPBLASLT_JIT_HEURISTIC_IGNORED
+            {
+                INFO(("HIPBLASLT_JIT off generated a solution"));
+                REQUIRE((afterNarrow == before));
+            }
+#endif
+            checkPair("wide", cWide, cppWide, false, "", handle);
+            checkPair("narrow", cNarrow, cppNarrow, false, "", handle);
         }
         else if(mode == "forced" || !tuned)
         {
-            checkPair("K=512", c512, cpp512, true, "_K512_WGM8", handle);
-            checkPair("K=256", c256, cpp256, true, "_WGM1", handle);
-            runFirst(handle, desc, stream, K, c512.results.front());
-            std::cout << "PASS K=512 first result\n";
-            auto      algo  = c512.results.front().algo;
-            const int index = hipblaslt_ext::getIndexFromAlgo(algo);
-            requireSameIndexInChild(replayRoot, index);
+            checkPair("wide", cWide, cppWide, true, wideSuffix, handle);
+            checkPair("narrow", cNarrow, cppNarrow, true, narrowSuffix, handle);
+#ifndef HIPBLASLT_JIT_HEURISTIC_IGNORED
+            requireMissThenHit(before,
+                               afterWideC,
+                               afterWide,
+                               hipblaslt_ext::getIndexFromAlgo(cWide.results.front().algo),
+                               hipblaslt_ext::getIndexFromAlgo(cppWide.results.front().algo));
+            requireMissThenHit(afterWide,
+                               afterNarrowC,
+                               afterNarrow,
+                               hipblaslt_ext::getIndexFromAlgo(cNarrow.results.front().algo),
+                               hipblaslt_ext::getIndexFromAlgo(cppNarrow.results.front().algo));
+#endif
+#ifndef HIPBLASLT_JIT_HIPKITTENS
+            runFirst(handle, desc, stream, kWide, cWide.results.front());
+            std::cout << "PASS wide first result\n";
+#endif
+            std::cout << "PASS a second query reused the JIT library index\n";
         }
         else
         {
             {
-                INFO(("K=512"));
-                REQUIRE((c512.status == HIPBLAS_STATUS_SUCCESS && !c512.results.empty()));
+                INFO(("wide"));
+                REQUIRE((cWide.status == HIPBLAS_STATUS_SUCCESS && !cWide.results.empty()));
             }
             {
                 INFO(("an untuned size with library results did not start with JIT"));
-                REQUIRE((isJit(c512.results.front().algo)));
+                REQUIRE((isJit(cWide.results.front().algo)));
             }
-            requireUniqueKernels(handle, c512);
-            requireUniqueKernels(handle, cpp512);
-            runFirst(handle, desc, stream, K, c512.results.front());
-            std::cout << "PASS K=512 first result\n";
+#ifndef HIPBLASLT_JIT_HEURISTIC_IGNORED
+            requireMissThenHit(before,
+                               afterWideC,
+                               afterWide,
+                               hipblaslt_ext::getIndexFromAlgo(cWide.results.front().algo),
+                               hipblaslt_ext::getIndexFromAlgo(cppWide.results.front().algo));
+#endif
+            requireUniqueKernels(handle, cWide);
+            requireUniqueKernels(handle, cppWide);
+#ifndef HIPBLASLT_JIT_HIPKITTENS
+            runFirst(handle, desc, stream, kWide, cWide.results.front());
+#endif
+            std::cout << "PASS wide first result\n";
         }
 
         if(mode == "forced" || mode == "fallback")
         {
-            hipblasLtMatmulDesc_t    tn{};
+#ifdef HIPBLASLT_JIT_HIPKITTENS
+            // NN is outside the HipKittens kernel.
+            hipblasLtMatmulDesc_t outside{};
+            {
+                INFO(("NN descriptor"));
+                REQUIRE((hipblasLtMatmulDescCreate(&outside, HIPBLAS_COMPUTE_32F, HIP_R_32F)
+                    == HIPBLAS_STATUS_SUCCESS));
+            }
+            Layouts    nn(M, kWide, M, kWide, N, kWide);
+            const auto cT = queryC(handle, outside, pref, nn, 4);
+            const auto cppT = queryCpp(handle, outside, HIPBLAS_OP_N, HIPBLAS_OP_N, nn, A.pointer,
+                                       B.pointer, C.pointer, D.pointer, 4);
+#else
+            hipblasLtMatmulDesc_t    outside{};
             const hipblasOperation_t transpose = HIPBLAS_OP_T;
             {
                 INFO(("transposed descriptor"));
-                REQUIRE((hipblasLtMatmulDescCreate(&tn, HIPBLAS_COMPUTE_32F, HIP_R_32F)
+                REQUIRE((hipblasLtMatmulDescCreate(&outside, HIPBLAS_COMPUTE_32F, HIP_R_32F)
                     == HIPBLAS_STATUS_SUCCESS));
             }
             {
                 INFO(("transpose A"));
-                REQUIRE((hipblasLtMatmulDescSetAttribute(tn, HIPBLASLT_MATMUL_DESC_TRANSA, &transpose,
-                                                sizeof(transpose))
+                REQUIRE((hipblasLtMatmulDescSetAttribute(outside, HIPBLASLT_MATMUL_DESC_TRANSA,
+                                                        &transpose, sizeof(transpose))
                     == HIPBLAS_STATUS_SUCCESS));
             }
-            Layouts    transposed(K, M, K, K, N, K);
-            const auto cT = queryC(handle, tn, pref, transposed, 4);
-            const auto cppT = queryCpp(handle, tn, HIPBLAS_OP_T, HIPBLAS_OP_N, transposed, A.pointer,
+            Layouts    nn(kWide, M, kWide, kWide, N, kWide);
+            const auto cT = queryC(handle, outside, pref, nn, 4);
+            const auto cppT = queryCpp(handle, outside, HIPBLAS_OP_T, HIPBLAS_OP_N, nn, A.pointer,
                                        B.pointer, C.pointer, D.pointer, 4);
+#endif
             if(mode == "forced")
             {
                 {
-                    INFO(("forced mode returned a solution for transposed A"));
+                    INFO(("forced mode returned a solution the kernel does not solve"));
                     REQUIRE((cT.status == HIPBLAS_STATUS_SUCCESS && cT.results.empty()));
                 }
                 {
-                    INFO(("forced mode C++ returned a solution for transposed A"));
+                    INFO(("forced mode C++ returned a solution the kernel does not solve"));
                     REQUIRE((cppT.status == HIPBLAS_STATUS_SUCCESS && cppT.results.empty()));
                 }
-                std::cout << "PASS transposed A returns no solution\n";
+                std::cout << "PASS a problem the kernel does not solve returns no solution\n";
             }
-            hipblasLtMatmulDescDestroy(tn);
+            hipblasLtMatmulDescDestroy(outside);
         }
 
         if(mode == "fallback")
@@ -607,29 +586,32 @@ namespace
     }
 }
 
-TEST_CASE("heuristic queries under HIPBLASLT_JIT", "[jit-gpu]")
+#ifdef HIPBLASLT_JIT_HEURISTIC_IGNORED
+TEST_CASE("heuristic ignored", "[jit-gpu]")
 {
-    const char* mode = std::getenv("HIPBLASLT_JIT_TEST_MODE");
-    {
-        INFO(("Set HIPBLASLT_JIT_TEST_MODE"));
-        REQUIRE((mode && *mode));
-    }
-    const std::string which = mode;
-    if(which == "reuse")
-    {
-        const char* root = std::getenv("HIPBLASLT_JIT_REUSE_ROOT");
-        {
-            INFO(("reuse is missing its data directory"));
-            REQUIRE((root && *root));
-        }
-        reuse(root);
-    }
-    else if(which == "ignored")
-        test(which, "");
-    else if(which == "off" || which == "fallback" || which == "forced")
-        test(which, HIPBLASLT_JIT_DATA);
-    else
-    {
-        FAIL(("Unknown mode " + which));
-    }
+    hipblaslt_jit_test::setJitMode("2");
+    hipblaslt_jit_test::LibraryScratch library("heuristic-ignored");
+    test("ignored");
 }
+#else
+TEST_CASE("heuristic off", "[jit-gpu]")
+{
+    hipblaslt_jit_test::setJitMode("0");
+    hipblaslt_jit_test::LibraryScratch library("heuristic-off");
+    test("off");
+}
+
+TEST_CASE("heuristic fallback", "[jit-gpu]")
+{
+    hipblaslt_jit_test::setJitMode("1");
+    hipblaslt_jit_test::LibraryScratch library("heuristic-fallback");
+    test("fallback");
+}
+
+TEST_CASE("heuristic forced", "[jit-gpu]")
+{
+    hipblaslt_jit_test::setJitMode("2");
+    hipblaslt_jit_test::LibraryScratch library("heuristic-forced");
+    test("forced");
+}
+#endif

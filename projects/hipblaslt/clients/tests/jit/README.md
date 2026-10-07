@@ -28,9 +28,11 @@ ctest --test-dir "$project_build/clients/tests/jit" -L jit-gpu --output-on-failu
 need device 0. `GPU_TARGETS` is that device's architecture, `gfx90a`, `gfx942`
 or `gfx950`; the command above uses `gfx950`. The publish, load, replay,
 library and heuristic tests use the committed assembly of that architecture,
-the same way on each of the three. Each test empties its own directory
-under `clients/tests/jit/scratch` in the build directory before it runs, except
-`jit-loader`, which reads the library `jit-publish` wrote.
+the same way on each of the three. `jit-publish`, `jit-builder` and
+`jit-source-bundle` empty a directory under `clients/tests/jit/scratch` in the
+build tree. `jit-loader` reads the library `jit-publish` wrote. The end-to-end,
+heuristic and library tests create a temporary directory. The end-to-end and
+heuristic tests point `HIPBLASLT_JIT_LIBRARY_PATH` at that directory.
 
 The CTest tests are:
 
@@ -56,50 +58,46 @@ The CTest tests are:
 | `jit-builder` | The comgr builder, without a GPU, building the hand-written HIP kernel `builder_test_kernel.hip` for each committed assembly target, then each assembly file linked with that kernel into one code object; each code object defines its kernels and has the builder's code-object version, and a kernel name it does not define fails the build |
 | `jit-publish` | Builds the device's committed assembly and publishes it into the JIT solution library: `plain` for K=512, and `plain-pair`'s two solutions for K=1024 and K=256. Indices are at least `2^30` |
 | `jit-loader` | Loads that library, finds each published solution and the pre-generated kernel, resolves the kernel from its code object, and finds nothing for a transposed A. An entry whose solutions are not 0 to N-1 is rejected. Launches no kernel |
-| `jit-end-to-end` | `plain-pair` replayed and built with comgr. `getJitAlgo` publishes its first solution for K=512 and its second for K=256 as JIT library indices, and each runs through `hipblasLtMatmul` and `hipblaslt_ext::Gemm` with D checked against a host reference. A second lookup returns the same index from the library without generating. A problem neither solution solves is not supported |
-| `jit-end-to-end-library` | `getLibraryAlgos` publishes the first `plain-pair` solution for K=512 and the second for K=256 into a fresh JIT solution library, each as its own entry, and returns two reserved indices, which `getAlgosFromIndex` and `hipblasLtMatmul` run with checked numerics. Later queries return the same indices from the library without generating. A second process runs the indices before any query, then finds them the same way |
+| `jit-end-to-end` | `plain-pair` replayed and built with comgr. `getJitAlgo` publishes its first solution for K=512 and its second for K=256 as JIT library indices, and each runs through `hipblasLtMatmul` and `hipblaslt_ext::Gemm` with D checked against a host reference. The first lookup is a miss and generation runs. A second lookup in the same process is a hit and generation does not run. A problem neither solution solves is not supported |
+| `jit-end-to-end-library` | `getLibraryAlgos` publishes the first `plain-pair` solution for K=512 and the second for K=256 into a fresh JIT solution library, each as its own entry, and returns two reserved indices, which `getAlgosFromIndex` and `hipblasLtMatmul` run with checked numerics. Each publish is a miss and generation runs. A later query of the same problem in the same process is a hit and generation does not run |
 | `jit-library` | The JIT solution library: cache-key fields and compiler-environment filtering; rejected group- or other-writable, linked and non-directory roots; the stock TensileLite loader reading a published library; exact-size matching with the solution predicates still applied; deduplication, hash collisions, order, count and excluded kernels; mismatched and tampered keys ignored and left untouched; index allocation up to `INT32_MAX` and exhaustion; a publisher killed after each publication step; readers reloading after another instance publishes; and a fused GEMM and all-to-all problem rejected by lookup, publication and the ProblemType key without touching the library, even beside a plain solution of the same sizes |
 | `jit-library-concurrency` | Eight processes publish shared and private entries into one library while another process looks them up: shared entries get one index, private ones unique indices with no gaps, and every reader snapshot loads |
 | `jit-disabled` | The JIT headers are absent from the public include tree, `hipblaslt-ext.hpp` compiles without them, and the extension API links against the disabled library |
 | `jit-heuristic-off` | `HIPBLASLT_JIT=0`. Both heuristic queries for the plain-pair FP16 GEMM return no JIT algorithm |
 | `jit-heuristic-fallback` | `HIPBLASLT_JIT=1`. With no device library, every returned algorithm is JIT and the first result for K=512 matches the host. With a device library, an Equality size returns Equality algorithms, then JIT, then the others, with no repeated kernel, and an untuned size starts with JIT. Without such a library the ordering check prints `SKIP heuristic-provider-order: the build has no device library with an Equality size` |
-| `jit-heuristic-forced` | `HIPBLASLT_JIT=2`. Both queries return only JIT library indices. K=512 selects the solution ending in `_K512_WGM8` and K=256 the one ending in `_WGM1`. A transposed A returns no algorithm. The first K=512 result matches the host. A second process querying that problem gets the same index |
+| `jit-heuristic-forced` | `HIPBLASLT_JIT=2`. Both queries return only JIT library indices. K=512 selects the solution ending in `_K512_WGM8` and K=256 the one ending in `_WGM1`. A transposed A returns no algorithm. The first K=512 result matches the host. The first query is a miss and generation runs. The C++ query of the same problem is a hit and generation does not run |
 | `jit-heuristic-ignored` | Built only with `HIPBLASLT_ENABLE_JIT=OFF`, with `HIPBLASLT_JIT=2`. The queries do not return JIT algorithms |
 
-## Test arguments
+## Test parameters
 
-The tests are Catch2 executables and take no arguments. CMake compiles in the
-data directory, the library directory and the HIP kernel path. Run
-`jit-publish` before `jit-loader`; the loader reads the library the publisher
-wrote. Problems are FP16 with M=256, N=128 and K=512, 1024 or 256.
+The tests are Catch2 cases. CMake compiles in the data directory, the library
+directory and the HIP kernel path, and CTest selects a case by name. The only
+environment variables a test sets are the user-facing ones: `HIPBLASLT_JIT` and
+`HIPBLASLT_JIT_LIBRARY_PATH`, pointed at a scratch directory the test creates.
+Run `jit-publish` before `jit-loader`; the loader reads the library the
+publisher wrote. Problems are FP16 with M=256, N=128 and K=512, 1024 or 256.
 
-`hipblaslt-jit-end-to-end-test` stages `plain-pair` from that data directory.
-It creates the replay backend with `jit::replay::createBackend` from
-`hipblaslt-jit-replay.hpp`, so generation runs no generator, and solves FP16
-problems with M=256, N=128 and K=512 or 256. CTest sets `HIPBLASLT_JIT_E2E_MODE`
-to `run` or `library`, and `HIPBLASLT_JIT_LIBRARY_PATH` to a scratch directory.
-The test empties that directory first and refuses to run unless it is set, so
-it never publishes into the default library. `getJitAlgo` returns a JIT library
-index, and a second lookup of the same problem returns that index without
-generating. The `library` mode starts a second process, which sets
-`HIPBLASLT_JIT_E2E_MODE` to `library-reader` and runs the published indices
-before any query of its own.
+`hipblaslt-jit-end-to-end-test` has two cases. Each stages `plain-pair` from
+the data directory into a scratch directory and creates the replay backend with
+`jit::replay::createBackend` from `hipblaslt-jit-replay.hpp`, so generation
+runs no generator. The cases solve FP16 problems with M=256, N=128 and K=512
+or 256. `getJitAlgo` and `getLibraryAlgos` publish a JIT library index. A
+second lookup of the same problem in that process returns the index and does
+not generate. The test reads a generation counter to tell the miss from the hit.
 
-`hipblaslt-jit-heuristic-test` reads `HIPBLASLT_JIT_TEST_MODE`: `off`,
-`fallback`, `forced`, `ignored`, or `reuse`. CTest sets that mode,
-`HIPBLASLT_JIT`, and a private `HIPBLASLT_JIT_LIBRARY_PATH`. The test stages
-`plain-pair` and sets `HIPBLASLT_JIT_TEST_REPLAY` before either heuristic
-query. A JIT heuristic result is a solution library index from 2^30. `reuse`
-is the second process: it queries K=512 once and prints that index. Its Catch2
-reporter is sent to `/dev/null`, so the parent reads only that line.
+`hipblaslt-jit-heuristic-test` has one case per mode: `off`, `fallback`,
+`forced`, and, when JIT is not built, `ignored`. The case sets `HIPBLASLT_JIT`
+to 0, 1 or 2 and points `HIPBLASLT_JIT_LIBRARY_PATH` at its scratch directory.
+Heuristic queries use the backend compiled into the library. A JIT result is a
+solution library index from 2^30. The first query of a problem is a miss and
+generation runs. The C++ query of that problem is a hit and generation does
+not run.
 
 ## JIT solution library tests
 
 `hipblaslt-jit-library-test` compiles the JIT solution library directly. It
 publishes the `plain` entry of the device's architecture under several kernel
-names with stand-in code objects. CTest sets `HIPBLASLT_JIT_LIBRARY_SCRATCH`
-to the directory for those libraries. The test ignores
-`HIPBLASLT_JIT_LIBRARY_PATH`. The concurrency entry also sets
-`HIPBLASLT_JIT_LIBRARY_WRITERS` and `HIPBLASLT_JIT_LIBRARY_PER_WRITER`: that
-many writer processes each publish that many entries shared by all writers and
-that many of their own, while one reader process looks them up.
+names with stand-in code objects, into a scratch directory the test creates.
+It does not read `HIPBLASLT_JIT_LIBRARY_PATH`. The concurrency case runs eight
+writer processes, each publishing four entries shared by all writers and four
+of its own, while one reader process looks them up.

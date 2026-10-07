@@ -2,16 +2,16 @@
 # SPDX-License-Identifier:  MIT
 
 # JIT tests, staged in clients/staging. CTest labels them jit-cpu, which needs
-# no GPU, or jit-gpu. Each test empties its own scratch directory.
+# no GPU, or jit-gpu. A test that writes under this build tree empties its
+# directory. End-to-end, heuristic and library tests create a temporary directory.
 enable_testing()
 
 set(hipblaslt_jit_source "${PROJECT_SOURCE_DIR}/library/src/amd_detail")
 set(hipblaslt_jit_scratch "${CMAKE_CURRENT_BINARY_DIR}/scratch")
 set(hipblaslt_jit_data "${CMAKE_CURRENT_SOURCE_DIR}/data")
 # The publish test writes the JIT solution library here. Replay tests stage a
-# temporary source directory under replay/, from the same descriptions.
+# temporary source directory themselves, from the same descriptions.
 set(hipblaslt_jit_library "${hipblaslt_jit_scratch}/published")
-set(hipblaslt_jit_replay "${hipblaslt_jit_scratch}/replay")
 set(hipblaslt_jit_library_sources
     "${hipblaslt_jit_source}/hipblaslt-jit-code-object.cpp"
     "${hipblaslt_jit_source}/hipblaslt-jit-fs.cpp"
@@ -44,10 +44,10 @@ function(hipblaslt_jit_executable name label test_target)
     set_tests_properties(${name} PROPERTIES LABELS ${label})
 endfunction()
 
-# Catch2 tests take no arguments. Paths are compile definitions.
+# Catch2 tests. Extra arguments select one case. Paths are compile definitions.
 function(hipblaslt_jit_catch_test name label test_target)
     target_link_libraries(${test_target} PRIVATE Catch2::Catch2WithMain)
-    hipblaslt_jit_executable(${name} ${label} ${test_target})
+    hipblaslt_jit_executable(${name} ${label} ${test_target} ${ARGN})
 endfunction()
 
 # Tests with their own main. Extra arguments are passed to the executable.
@@ -78,12 +78,9 @@ if(NOT HIPBLASLT_ENABLE_JIT)
     if(hipblaslt_jit_gpu AND NOT HIPBLASLT_ENABLE_YAML)
         add_executable(hipblaslt-jit-heuristic-test jit_heuristic_test.cpp)
         target_link_libraries(hipblaslt-jit-heuristic-test PRIVATE roc::hipblaslt hip::device)
-        target_compile_definitions(hipblaslt-jit-heuristic-test PRIVATE
-            "HIPBLASLT_JIT_DATA=\"${hipblaslt_jit_data}\""
-            "HIPBLASLT_JIT_REPLAY_ROOT=\"${hipblaslt_jit_replay}\"")
-        hipblaslt_jit_catch_test(jit-heuristic-ignored jit-gpu hipblaslt-jit-heuristic-test)
-        set_tests_properties(jit-heuristic-ignored PROPERTIES
-            ENVIRONMENT "HIPBLASLT_JIT=2;HIPBLASLT_JIT_TEST_MODE=ignored")
+        target_compile_definitions(hipblaslt-jit-heuristic-test PRIVATE HIPBLASLT_JIT_HEURISTIC_IGNORED)
+        hipblaslt_jit_catch_test(jit-heuristic-ignored jit-gpu hipblaslt-jit-heuristic-test
+            "heuristic ignored")
     endif()
     return()
 endif()
@@ -169,42 +166,27 @@ target_compile_definitions(hipblaslt-jit-library-test PRIVATE
 target_link_libraries(hipblaslt-jit-library-test PRIVATE
     roc::hipblaslt roc::tensilelite-host ${hipblaslt_msgpack_target} amd_comgr
     hip::device Threads::Threads)
-hipblaslt_jit_catch_test(jit-library jit-gpu hipblaslt-jit-library-test)
-set_tests_properties(jit-library PROPERTIES
-    ENVIRONMENT "HIPBLASLT_JIT_LIBRARY_SCRATCH=${hipblaslt_jit_scratch}/library")
-hipblaslt_jit_catch_test(jit-library-concurrency jit-gpu hipblaslt-jit-library-test)
-set_tests_properties(jit-library-concurrency PROPERTIES
-    ENVIRONMENT "HIPBLASLT_JIT_LIBRARY_SCRATCH=${hipblaslt_jit_scratch}/library-concurrency;HIPBLASLT_JIT_LIBRARY_WRITERS=8;HIPBLASLT_JIT_LIBRARY_PER_WRITER=4")
+hipblaslt_jit_catch_test(jit-library jit-gpu hipblaslt-jit-library-test "[library-checks]")
+hipblaslt_jit_catch_test(jit-library-concurrency jit-gpu hipblaslt-jit-library-test
+    "[library-concurrency]")
 
 add_executable(hipblaslt-jit-end-to-end-test jit_end_to_end_test.cpp)
 target_compile_definitions(hipblaslt-jit-end-to-end-test PRIVATE
-    "HIPBLASLT_JIT_DATA=\"${hipblaslt_jit_data}\""
-    "HIPBLASLT_JIT_REPLAY_ROOT=\"${hipblaslt_jit_replay}\"")
+    "HIPBLASLT_JIT_DATA=\"${hipblaslt_jit_data}\"")
 target_link_libraries(hipblaslt-jit-end-to-end-test PRIVATE roc::hipblaslt hip::device)
-hipblaslt_jit_catch_test(jit-end-to-end jit-gpu hipblaslt-jit-end-to-end-test)
-set_tests_properties(jit-end-to-end PROPERTIES
-    ENVIRONMENT "HIPBLASLT_JIT_LIBRARY_PATH=${hipblaslt_jit_scratch}/end-to-end;HIPBLASLT_JIT_E2E_MODE=run")
-# Publishes the solutions in one process and runs their indices in a second.
-hipblaslt_jit_catch_test(jit-end-to-end-library jit-gpu hipblaslt-jit-end-to-end-test)
-set_tests_properties(jit-end-to-end-library PROPERTIES
-    ENVIRONMENT "HIPBLASLT_JIT_LIBRARY_PATH=${hipblaslt_jit_scratch}/end-to-end-library;HIPBLASLT_JIT_E2E_MODE=library")
+hipblaslt_jit_catch_test(jit-end-to-end jit-gpu hipblaslt-jit-end-to-end-test
+    "replayed JIT GEMM solutions run end to end")
+hipblaslt_jit_catch_test(jit-end-to-end-library jit-gpu hipblaslt-jit-end-to-end-test
+    "getLibraryAlgos publishes plain-pair solutions")
 
-# One process per mode: HIPBLASLT_JIT is read once. The test stages the
-# device's plain-pair sources and sets HIPBLASLT_JIT_TEST_REPLAY to them.
+# One process per mode: HIPBLASLT_JIT is read once. The test sets that variable
+# and points HIPBLASLT_JIT_LIBRARY_PATH at a scratch directory it creates.
 add_executable(hipblaslt-jit-heuristic-test jit_heuristic_test.cpp)
 target_link_libraries(hipblaslt-jit-heuristic-test PRIVATE roc::hipblaslt hip::device)
-target_compile_definitions(hipblaslt-jit-heuristic-test PRIVATE
-    "HIPBLASLT_JIT_DATA=\"${hipblaslt_jit_data}\""
-    "HIPBLASLT_JIT_REPLAY_ROOT=\"${hipblaslt_jit_replay}\"")
+if(HIPBLASLT_JIT_BUILT_HIPKITTENS)
+    target_compile_definitions(hipblaslt-jit-heuristic-test PRIVATE HIPBLASLT_JIT_HIPKITTENS)
+endif()
 foreach(mode IN ITEMS off fallback forced)
-    if(mode STREQUAL "off")
-        set(hipblaslt_jit_mode_value 0)
-    elseif(mode STREQUAL "fallback")
-        set(hipblaslt_jit_mode_value 1)
-    else()
-        set(hipblaslt_jit_mode_value 2)
-    endif()
-    hipblaslt_jit_catch_test(jit-heuristic-${mode} jit-gpu hipblaslt-jit-heuristic-test)
-    set_tests_properties(jit-heuristic-${mode} PROPERTIES
-        ENVIRONMENT "HIPBLASLT_JIT=${hipblaslt_jit_mode_value};HIPBLASLT_JIT_LIBRARY_PATH=${hipblaslt_jit_scratch}/heuristic-${mode};HIPBLASLT_JIT_TEST_MODE=${mode}")
+    hipblaslt_jit_catch_test(jit-heuristic-${mode} jit-gpu hipblaslt-jit-heuristic-test
+        "heuristic ${mode}")
 endforeach()

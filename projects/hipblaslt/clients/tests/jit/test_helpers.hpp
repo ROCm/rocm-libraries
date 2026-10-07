@@ -7,8 +7,10 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 
+#include <chrono>
 #include <cmath>
 #include <catch2/catch_test_macros.hpp>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -280,4 +282,47 @@ namespace hipblaslt_jit_test
         ReplayFixture(const ReplayFixture&)            = delete;
         ReplayFixture& operator=(const ReplayFixture&) = delete;
     };
+
+    // A private directory this test creates and removes. 0700 matches the
+    // permission check on a JIT solution library root.
+    struct ScratchDir
+    {
+        std::filesystem::path path;
+
+        explicit ScratchDir(const std::string& name)
+        {
+            const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+            path             = std::filesystem::temp_directory_path()
+                   / ("hipblaslt-jit-test-" + name + "-" + std::to_string(stamp));
+            std::filesystem::remove_all(path);
+            std::filesystem::create_directories(path);
+            std::filesystem::permissions(path, std::filesystem::perms::owner_all);
+        }
+
+        ~ScratchDir()
+        {
+            std::error_code error;
+            std::filesystem::remove_all(path, error);
+        }
+
+        ScratchDir(const ScratchDir&)            = delete;
+        ScratchDir& operator=(const ScratchDir&) = delete;
+    };
+
+    // Points HIPBLASLT_JIT_LIBRARY_PATH at a scratch directory this test owns.
+    struct LibraryScratch : ScratchDir
+    {
+        explicit LibraryScratch(const std::string& name)
+            : ScratchDir(name)
+        {
+            if(setenv("HIPBLASLT_JIT_LIBRARY_PATH", path.c_str(), 1) != 0)
+                throw std::runtime_error("Cannot set HIPBLASLT_JIT_LIBRARY_PATH");
+        }
+    };
+
+    inline void setJitMode(const char* value)
+    {
+        if(setenv("HIPBLASLT_JIT", value, 1) != 0)
+            throw std::runtime_error("Cannot set HIPBLASLT_JIT");
+    }
 }
