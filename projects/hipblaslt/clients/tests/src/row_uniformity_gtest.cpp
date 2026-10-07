@@ -2728,13 +2728,14 @@ namespace
         in.tiles            = tiles;
         in.itersPerTile     = itersPerTile;
         in.maxGrid          = 256;
+        in.splitCUs         = 256;
         in.flagSlots        = 1792;
         in.workspaceBytes   = size_t{1} << 30;
         in.partialTileBytes = 192 * 224 * 4;
         return in;
     }
 
-    TEST(StreamKDynamicSplit_pre_checkin, TilesStayWholeByDefault)
+    TEST(StreamKDynamicSplit_pre_checkin, ManyTilesStayWhole)
     {
         const auto d = TensileLite::streamKDynamicSplit(dynamicSplitInputs(300, 128));
         EXPECT_EQ(d.skTiles, 0u);
@@ -2745,10 +2746,98 @@ namespace
         EXPECT_EQ(d.grid, 256u);
         EXPECT_EQ(d.partialSlots(), 0u);
 
-        const auto e = TensileLite::streamKDynamicSplit(dynamicSplitInputs(1, 262144));
+        const auto e = TensileLite::streamKDynamicSplit(dynamicSplitInputs(256, 128));
+        EXPECT_EQ(e.skTiles, 0u) << "tiles == CUs already fills the grid";
+        EXPECT_EQ(e.grid, 256u);
+    }
+
+    // The static grid's split for fewer tiles than CUs (origami
+    // grid_k_split_aware, tree reduction): the largest of 16, 12, 8, 6, 4, 3,
+    // 2 parts with one part per CU and at least 8 iterations per part.
+    TEST(StreamKDynamicSplit_pre_checkin, SplitFollowsTheStaticFactors)
+    {
+        const auto d = TensileLite::streamKDynamicSplit(dynamicSplitInputs(1, 20480));
+        EXPECT_EQ(d.skTiles, 1u);
+        EXPECT_EQ(d.skSplit, 16u) << "at most 16 parts, however long K is";
+        EXPECT_EQ(d.skItersPerWI, 1280u);
+        EXPECT_EQ(d.totalItems, 16u);
+        EXPECT_EQ(d.grid, 16u);
+
+        // 20 tiles: 16 parts would need 320 CUs, 12 fit in 240.
+        const auto e = TensileLite::streamKDynamicSplit(dynamicSplitInputs(20, 128));
+        EXPECT_EQ(e.skTiles, 20u);
+        EXPECT_EQ(e.skSplit, 12u);
+        EXPECT_EQ(e.skItersPerWI, 11u);
+        EXPECT_EQ(e.totalItems, 240u);
+        EXPECT_EQ(e.grid, 240u);
+        EXPECT_GE(size_t{e.skItersPerWI} * e.skSplit, 128u) << "parts cover the tile";
+        EXPECT_LT(size_t{e.skItersPerWI} * (e.skSplit - 1), 128u) << "no empty part";
+
+        // The split is sized for the CUs, not for the grid.
+        auto in      = dynamicSplitInputs(50, 128);
+        in.maxGrid   = 768;
+        const auto f = TensileLite::streamKDynamicSplit(in);
+        EXPECT_EQ(f.skSplit, 4u) << "50 x 4 <= 256 CUs, 50 x 6 is not";
+        EXPECT_EQ(f.grid, 200u);
+    }
+
+    TEST(StreamKDynamicSplit_pre_checkin, FewTilesSplitWithinOneWave)
+    {
+        // 100 tiles: two parts each still fit one wave of 256 workgroups.
+        const auto d = TensileLite::streamKDynamicSplit(dynamicSplitInputs(100, 128));
+        EXPECT_EQ(d.skTiles, 100u);
+        EXPECT_EQ(d.skSplit, 2u);
+        EXPECT_EQ(d.skItersPerWI, 64u);
+        EXPECT_EQ(d.totalItems, 200u);
+        EXPECT_EQ(d.grid, 200u);
+
+        // 200 tiles: a second part would not fit, so they stay whole.
+        const auto e = TensileLite::streamKDynamicSplit(dynamicSplitInputs(200, 128));
         EXPECT_EQ(e.skTiles, 0u);
-        EXPECT_EQ(e.totalItems, 1u);
-        EXPECT_EQ(e.grid, 1u);
+        EXPECT_EQ(e.totalItems, 200u);
+        EXPECT_EQ(e.grid, 200u);
+    }
+
+    TEST(StreamKDynamicSplit_pre_checkin, MinimumItersPerPart)
+    {
+        // I = 40: at most 5 parts of 8 iterations, so 4 of the factors.
+        const auto d = TensileLite::streamKDynamicSplit(dynamicSplitInputs(1, 40));
+        EXPECT_EQ(d.skSplit, 4u);
+        EXPECT_EQ(d.skItersPerWI, 10u);
+        EXPECT_GE(d.skItersPerWI, TensileLite::StreamKDynamicMinItersPerWI);
+
+        const auto e = TensileLite::streamKDynamicSplit(dynamicSplitInputs(1, 15));
+        EXPECT_EQ(e.skTiles, 0u) << "too short to split";
+    }
+
+    TEST(StreamKDynamicSplit_pre_checkin, ShrinksToFitWorkspaceAndFlags)
+    {
+        auto in           = dynamicSplitInputs(1, 262144);
+        in.workspaceBytes = 10 * in.partialTileBytes + 7;
+        const auto d      = TensileLite::streamKDynamicSplit(in);
+        EXPECT_EQ(d.skSplit, 8u) << "the largest factor whose partials fit";
+        EXPECT_LE(d.partialSlots() * in.partialTileBytes, in.workspaceBytes);
+
+        in.workspaceBytes = in.partialTileBytes;
+        EXPECT_EQ(TensileLite::streamKDynamicSplit(in).skTiles, 0u)
+            << "room for one partial is no split at all";
+
+        auto fl      = dynamicSplitInputs(7, 262144);
+        fl.flagSlots = 20;
+        const auto f = TensileLite::streamKDynamicSplit(fl);
+        EXPECT_EQ(f.skSplit, 2u);
+        EXPECT_LE(f.partialSlots(), fl.flagSlots);
+    }
+
+    TEST(StreamKDynamicSplit_pre_checkin, SplitNotAllowedKeepsTilesWhole)
+    {
+        auto in       = dynamicSplitInputs(1, 262144);
+        in.allowSplit = false;
+        const auto d  = TensileLite::streamKDynamicSplit(in);
+        EXPECT_EQ(d.skTiles, 0u);
+        EXPECT_EQ(d.skSplit, 2u);
+        EXPECT_EQ(d.totalItems, 1u);
+        EXPECT_EQ(d.grid, 1u);
     }
 
     TEST(StreamKDynamicSplit_pre_checkin, DebugOverridesReplaceThePolicy)
@@ -2761,6 +2850,10 @@ namespace
         EXPECT_EQ(d.skSplit, 64u);
         EXPECT_EQ(d.totalItems, 64u);
         EXPECT_EQ(d.grid, 64u);
+
+        // Even when the split is not allowed by default.
+        in.allowSplit = false;
+        EXPECT_EQ(TensileLite::streamKDynamicSplit(in).skSplit, 64u);
 
         // Split alone keeps the default of no stream-k tiles.
         auto s          = dynamicSplitInputs(1, 262144);
@@ -2775,6 +2868,87 @@ namespace
         d                 = TensileLite::streamKDynamicSplit(in);
         EXPECT_EQ(d.skTiles, 0u);
         EXPECT_EQ(d.partialSlots(), 0u);
+    }
+
+    // The same decomposition seen through a synthesised SK5 hybrid solution on
+    // the dynamic sub-path (tile scheduling ON), so the workspace query, the
+    // launch settings, the launch-summary snapshot and the packed launch are
+    // all compared with each other rather than with the pure helper alone.
+    std::shared_ptr<TensileLite::ContractionSolution> dynamicSplitSolution()
+    {
+        auto solution                                = uniformitySteeringSolution();
+        solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
+        solution->sizeMapping.workAssignment         = TensileLite::WorkAssignment::Hybrid;
+        solution->internalArgsSupport.arrivalFixup   = true;
+        return solution;
+    }
+
+    TensileLite::ContractionProblemGemm dynamicSplitGemm(size_t m, size_t n, size_t k, size_t batch)
+    {
+        auto problem = TensileLite::ContractionProblemGemm::GEMM(
+            false, false, m, n, k, m, n, m, 1.0, false, batch);
+        problem.setComputeInputTypeA(rocisa::DataType::Float);
+        problem.setComputeInputTypeB(rocisa::DataType::Float);
+        problem.setWorkspaceSize(size_t{1} << 30);
+        problem.setParams().setStreamKTileSchedulingMode(1);
+        return problem;
+    }
+
+    // Only kernels that advertise the arrival fixup are split: the spin-flag
+    // kernels (no scalar atomics, DebugStreamK, PAP, SK4) keep tiles whole.
+    TEST(StreamKDynamicSplit_pre_checkin, SplitNeedsTheArrivalFixup)
+    {
+        auto         device  = uniformitySteeringDevice();
+        auto         problem = dynamicSplitGemm(128, 128, 262144, 1);
+        auto         capable = dynamicSplitSolution();
+        const size_t tiles   = problem.getNumTiles(capable->sizeMapping, 1);
+        ASSERT_GT(capable->streamKDynamicDecomposition(problem, device, tiles).skTiles, 0u);
+
+        auto spinFlag                              = dynamicSplitSolution();
+        spinFlag->internalArgsSupport.arrivalFixup = false;
+        EXPECT_EQ(spinFlag->streamKDynamicDecomposition(problem, device, tiles).skTiles, 0u);
+
+        auto pap                                  = dynamicSplitSolution();
+        pap->sizeMapping.prefetchAcrossPersistent = 1;
+        EXPECT_EQ(pap->streamKDynamicDecomposition(problem, device, tiles).skTiles, 0u);
+    }
+
+    void expectSameSplit(TensileLite::StreamKDynamicSplit const& a,
+                         TensileLite::StreamKDynamicSplit const& b)
+    {
+        EXPECT_EQ(a.skTiles, b.skTiles);
+        EXPECT_EQ(a.skSplit, b.skSplit);
+        EXPECT_EQ(a.skItersPerWI, b.skItersPerWI);
+        EXPECT_EQ(a.totalItems, b.totalItems);
+        EXPECT_EQ(a.grid, b.grid);
+    }
+
+    // A fixed grid is what launches, so the split is sized for it: every part
+    // keeps a workgroup of its own and the grid is not raised for the queues.
+    TEST(StreamKDynamicSplit_pre_checkin, FixedGridBoundsTheSplit)
+    {
+        auto         solution  = dynamicSplitSolution();
+        auto         device    = uniformitySteeringDevice();
+        auto         problem   = dynamicSplitGemm(128, 128, 262144, 1);
+        const size_t tiles     = problem.getNumTiles(solution->sizeMapping, 1);
+        const auto   unbounded = solution->streamKDynamicDecomposition(problem, device, tiles);
+        ASSERT_GT(unbounded.totalItems, 8u);
+        for(int fixed : {4, 8})
+        {
+            SCOPED_TRACE("fixed grid " + std::to_string(fixed));
+            device.persistentFixedGrid = fixed;
+            const auto d = solution->streamKDynamicDecomposition(problem, device, tiles);
+            EXPECT_EQ(d.skTiles, tiles);
+            EXPECT_EQ(d.totalItems, size_t(fixed));
+            // 4 is below the 8 per-XCD queues: before the bound the split
+            // ignored the fixed grid and the queues forced it up to 8.
+            EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree),
+                      size_t(fixed))
+                << "no raise: the items fit the fixed grid";
+        }
+        // Only an upper bound: a larger fixed grid does not split further.
+        device.persistentFixedGrid = 100000;
+        expectSameSplit(solution->streamKDynamicDecomposition(problem, device, tiles), unbounded);
     }
 
 } // namespace

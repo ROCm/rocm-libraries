@@ -442,6 +442,23 @@ namespace TensileLite
             return d;
         }
 
+        if(!in.allowSplit || in.tiles == 0 || in.splitCUs == 0 || in.tiles >= in.splitCUs)
+            return whole;
+
+        // Split every tile as the static grid does for fewer tiles than CUs
+        // with tree reduction (origami grid_k_split_aware): the largest factor
+        // that keeps one part per CU and at least MinItersPerCU iterations per
+        // part. A factor whose partials do not fit the flag region or the
+        // workspace is skipped for the next smaller one.
+        for(const size_t split : StreamKDynamicSplitFactors)
+        {
+            if(in.tiles * split > in.splitCUs
+               || itersPerTile / split < StreamKDynamicMinItersPerWI)
+                continue;
+            const StreamKDynamicSplit d = decompose(in.tiles, split);
+            if(d.skSplit >= 2 && fits(d.skTiles, d.skSplit))
+                return d;
+        }
         return whole;
     }
 
@@ -7361,9 +7378,32 @@ namespace TensileLite
             in.maxGrid             = pAMDGPU->computeUnitCount * std::min(occupancy, size_t{3});
             if(pAMDGPU->persistentMaxCUs > 0)
                 in.maxGrid = std::min(in.maxGrid, static_cast<size_t>(pAMDGPU->persistentMaxCUs));
+            // A fixed grid (TENSILE_STREAMK_FIXED_GRID) is what launches, so
+            // size the split for it: with tiles*skSplit <= fixed grid every part
+            // still has a workgroup of its own, and the work items stay within
+            // the grid getPersistentGridImpl() uses (no raise for the queues).
+            // Only an upper bound: a larger fixed grid does not split further.
+            if(pAMDGPU->persistentFixedGrid > 0)
+                in.maxGrid
+                    = std::min(in.maxGrid, static_cast<size_t>(pAMDGPU->persistentFixedGrid));
+            // The split is sized for the CUs, as origami sizes the static
+            // grid's split (one part per CU), within the grid above.
+            in.splitCUs = std::min(static_cast<size_t>(pAMDGPU->computeUnitCount), in.maxGrid);
             in.overrideTiles = pAMDGPU->skTiles;
             in.overrideSplit = pAMDGPU->skSplit;
         }
+        // Only kernels that fix split tiles up by last arrival may be split:
+        // the generator advertises it (InternalArgsSupport::arrivalFixup) for
+        // SK5 hybrid kernels with scalar atomics, DebugStreamK == 0 and no PAP.
+        // SK4, PAP, DebugStreamK and no-scalar-atomic (e.g. gfx1250) kernels
+        // still spin on per-part ready flags, which can wait on parts no
+        // resident workgroup will run; keep them whole. The hybrid/PAP terms
+        // are implied by the bit and kept as a guard against hand-edited logic.
+        // Uniform summation order needs every tile whole: the arrival order of
+        // the parts decides the order they are summed in.
+        in.allowSplit = internalArgsSupport.arrivalFixup && sizeMapping.hasHybridAssignment()
+                        && !sizeMapping.prefetchAcrossPersistent
+                        && !problem.getParams().uniformSummationOrder();
         // Arrival counters (and per-part flags) start after the queue counters.
         const size_t prefixEntries = streamKQueueRegionBytes(hardware) / sizeof(int);
         in.flagSlots = prefixEntries < StreamKFlagElements ? StreamKFlagElements - prefixEntries : 0;
