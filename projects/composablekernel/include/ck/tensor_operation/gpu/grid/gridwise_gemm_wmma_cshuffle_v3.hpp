@@ -1076,7 +1076,7 @@ struct GridwiseGemm_wmma_cshuffle_v3
             }
         }();
 
-        const auto ds_n_offset = [&]() -> long_index_t {
+        const auto ds_n_offset = [&]() {
             if constexpr((is_fwd || is_bwd_data))
             {
                 return compute_ptr_offset_of_n.GetDsPtrOffset(n_idx);

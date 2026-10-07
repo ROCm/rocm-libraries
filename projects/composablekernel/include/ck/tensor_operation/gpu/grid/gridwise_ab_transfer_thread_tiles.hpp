@@ -289,7 +289,7 @@ struct ABTransferThreadTiles
     }
 
     template <>
-    __device__ constexpr auto GetBlockDescriptorImpl<gfx125_t>(gfx125_t)
+    __host__ __device__ constexpr auto GetBlockDescriptorImpl<gfx125_t>(gfx125_t)
     {
         constexpr index_t KPerBlockInByte = KPerBlock * sizeof(LDSTypeAB) / ABPackedSize;
         constexpr index_t LdsSize         = get_n_lds_banks(gfx125_t{}) * 4 / KPerBlockInByte;
@@ -494,7 +494,8 @@ struct ABTransferThreadTiles
         }
     }
 
-    __host__ __device__ static constexpr auto GetBlockDescriptor()
+    template <typename DeviceArch>
+    __host__ __device__ static constexpr auto GetBlockDescriptor(DeviceArch)
     {
         if constexpr(UseLdsTranspose)
         {
@@ -512,23 +513,10 @@ struct ABTransferThreadTiles
                     make_unmerge_transform(make_tuple(ABK0Number, ABK1Number))),
                 make_tuple(Sequence<0, 2>{}, Sequence<1>{}),
                 make_tuple(Sequence<1>{}, Sequence<0, 2>{}));
-
-            // constexpr index_t MN1    = MNPerWmma / 2;
-            // constexpr auto base_desc = make_naive_tensor_descriptor(
-            //     make_tuple(Number<MNPerBlock / MN1>{}, Number<KPerBlock>{}, Number<MN1>{}),
-            //     make_tuple(Number<KPerBlock + 1>{} * Number<MN1>{}, Number<MN1>{}, I1));
-
-            // return transform_tensor_descriptor(
-            //     base_desc,
-            //     make_tuple(
-            //         make_merge_transform(make_tuple(Number<MNPerBlock / MN1>{}, Number<MN1>{})),
-            //         make_unmerge_transform(make_tuple(ABK0Number, ABK1Number))),
-            //     make_tuple(Sequence<0, 2>{}, Sequence<1>{}),
-            //     make_tuple(Sequence<1>{}, Sequence<0, 2>{}));
         }
         else
         {
-            return GetBlockDescriptorImpl(get_device_arch());
+            return GetBlockDescriptorImpl(DeviceArch{});
         }
     }
 
@@ -621,7 +609,7 @@ struct ABTransferThreadTiles
         // This is a block descriptor used to read LDS memory into register
         // It's defined in a way consistent with the existing implementation to
         // avoid changes in the pipelines
-        using BlockDesc = decltype(GetBlockDescriptor());
+        using BlockDesc = decltype(GetBlockDescriptor(get_device_arch()));
         // ABK0_MN_ABK1 -> ABK0_MNRepeat_MNWaves_KRow_MNPerWmma_ABK1
         constexpr auto ABK0 = BlockDesc{}.GetLength(I0);
         constexpr auto ABK1 = BlockDesc{}.GetLength(I2);
