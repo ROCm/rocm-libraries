@@ -305,16 +305,20 @@ END_HIPCUB_NAMESPACE
         while(0)
 #endif // HIPCUB_TRY_CUDA_API
 
+#ifndef HIPCUB_ASSERT
+    #define HIPCUB_ASSERT(expression, message, ...) _CCCL_ASSERT(expression, message);
+#endif // HIPCUB_ASSERT
+
 #ifndef HIPCUB_ASSERT_CUDA_API
-    #define HIPCUB_ASSERT_CUDA_API(_NAME, _MSG, ...)     \
-        do                                               \
-        {                                                \
-            [[maybe_unused]]                             \
-            const ::hipError_t __status                  \
-                = _NAME(__VA_ARGS__);                    \
-            (void)::hipGetLastError();                   \
-            _CCCL_ASSERT(__status == cudaSuccess, _MSG); \
-        }                                                \
+    #define HIPCUB_ASSERT_CUDA_API(_NAME, _MSG, ...)      \
+        do                                                \
+        {                                                 \
+            [[maybe_unused]]                              \
+            const ::hipError_t __status                   \
+                = _NAME(__VA_ARGS__);                     \
+            (void)::hipGetLastError();                    \
+            HIPCUB_ASSERT(__status == cudaSuccess, _MSG); \
+        }                                                 \
         while(0)
 #endif // HIPCUB_ASSERT_CUDA_API
 
