@@ -1,0 +1,70 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --vgpr-msb-mode=msb16 --remarks --CoissueRepairPass=mode=apply,margin=0,patternsOnly --print-output 2>&1 ; %stinkytofu-opt --arch gfx1250 %s --vgpr-msb-mode=msb16 --remarks --CoissueRepairPass=mode=apply,margin=0,patternsOnly,patterns=none 2>&1
+#
+# The two gfx1250 patterns, each on its own (patternsOnly runs no core rule).
+# @hoist_compare: the compare feeding the mid-loop branch moves into window 1, which has lead,
+# so the 9-cycle SCC latency of the measured profiles overlaps the third v_wmma.
+# @switch_after_load: the low-bank VALU after a high-bank LDS load needs a bank switch, which
+# costs 3 cycles right after the load and none after a SALU: the s_mov goes in between.
+# With the patterns disabled, nothing moves.
+
+# CHECK: move 1: hoist-compare window 2 -> 1 (end) gains [0, 2, 2, 2, 2]
+# CHECK-SAME: s_cmp_eq_u32 s60, 0
+# CHECK-LABEL: @hoist_compare
+# CHECK: v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[132:147]
+# CHECK-NEXT: SCC0 = "st.s_cmp_eq_u32"(s60, 0)
+# CHECK-NEXT: v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[148:163]
+# CHECK-NEXT: "st.s_cbranch_scc1"(label_skip, SCC0)
+# CHECK: move 1: switch-after-load window 0 -> 0 (after-load) gains [1, 1, 1, 1, 1]
+# CHECK-SAME: s_mov_b32 s1, 1
+# CHECK-LABEL: @switch_after_load
+# CHECK: v[300:303] = "st.ds_load_b128"(v38)
+# CHECK-NEXT: s1 = "st.s_mov_b32"(1)
+# CHECK-NEXT: v30 = "st.v_add_nc_u32"(v31, v32)
+# CHECK: patterns=none
+# CHECK-NOT: CoissueRepairPass: loop label_LoopBeginL move
+# CHECK: loop label_LoopBeginL: moves 0
+# CHECK: loop label_LoopBeginL: moves 0
+
+st.func @hoist_compare() {
+^entry:
+  s10 = "st.s_mov_b32"(8)
+  Successors: ^label_LoopBeginL
+^label_LoopBeginL:
+  v[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[116:131], v[0:7], v20, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  s1 = "st.s_mov_b32"(1)
+  v[8:15] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[132:147], v[8:15], v20, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[16:23] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[148:163], v[16:23], v20, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  SCC0 = "st.s_cmp_eq_u32"(s60, 0)
+  "st.s_cbranch_scc1"(label_skip, SCC0)
+  Successors: ^label_signal, ^label_skip
+^label_signal:
+  s61 = "st.s_mov_b32"(1)
+  Successors: ^label_skip
+^label_skip:
+  v[24:31] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[164:179], v[24:31], v20, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  s10, SCC0 = "st.s_add_i32"(s10, -1)
+  SCC0 = "st.s_cmp_eq_u32"(s10, 0)
+  "st.s_cbranch_scc0"(label_LoopBeginL, SCC0)
+  Successors: ^label_LoopBeginL, ^label_end
+^label_end:
+  "st.s_endpgm"()
+}
+
+st.func @switch_after_load() {
+^entry:
+  s10 = "st.s_mov_b32"(8)
+  Successors: ^label_LoopBeginL
+^label_LoopBeginL:
+  v[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[116:131], v[0:7], v20, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[300:303] = "st.ds_load_b128"(v38) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v30 = "st.v_add_nc_u32"(v31, v32)
+  s1 = "st.s_mov_b32"(1)
+  v[8:15] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[132:147], v[8:15], v20, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[16:23] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[148:163], v[16:23], v20, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  s10, SCC0 = "st.s_add_i32"(s10, -1)
+  SCC0 = "st.s_cmp_eq_u32"(s10, 0)
+  "st.s_cbranch_scc0"(label_LoopBeginL, SCC0)
+  Successors: ^label_LoopBeginL, ^label_end
+^label_end:
+  "st.s_endpgm"()
+}

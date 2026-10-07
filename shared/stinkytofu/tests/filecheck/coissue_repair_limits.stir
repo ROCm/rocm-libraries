@@ -1,0 +1,62 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --vgpr-msb-mode=msb16 --remarks --CoissueRepairPass=mode=apply,margin=0 --print-output 2>&1
+#
+# Limits: no move may add a bank switch. In @low_bank a VALU of window 0 moves to window 1.
+# In @high_bank the two VALUs share one switch pair; moving either one apart would need a
+# second pair, so only the SALUs move.
+
+# CHECK: move 1: make-room window 0 -> 1 (start)
+# CHECK-SAME: v_add_nc_u32 v30, v31, v32
+# CHECK-LABEL: @low_bank
+# CHECK-NOT: v_add_nc_u32 v330,
+# CHECK-NOT: v_add_nc_u32 v333,
+# CHECK: loop label_LoopBeginL: moves 2
+# CHECK-SAME: would add insertions
+# CHECK-LABEL: @high_bank
+# CHECK: v[60:63] = "st.ds_load_b128"(v38)
+# CHECK-NEXT: v330 = "st.v_add_nc_u32"(v331, v332)
+# CHECK-NEXT: v333 = "st.v_add_nc_u32"(v334, v335)
+# CHECK-NEXT: "st.s_wait_dscnt"(4)
+
+st.func @low_bank() {
+^entry:
+  s10 = "st.s_mov_b32"(8)
+  Successors: ^label_LoopBeginL
+^label_LoopBeginL:
+  v[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[116:131], v[0:7], v20, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[60:63] = "st.ds_load_b128"(v38) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v30 = "st.v_add_nc_u32"(v31, v32)
+  v33 = "st.v_add_nc_u32"(v34, v35)
+  s3 = "st.s_mov_b32"(3)
+  s4 = "st.s_mov_b32"(4)
+  "st.s_wait_dscnt"(4)
+  v[8:15] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[132:147], v[8:15], v20, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[16:23] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[148:163], v[16:23], v20, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  s10, SCC0 = "st.s_add_i32"(s10, -1)
+  SCC0 = "st.s_cmp_eq_u32"(s10, 0)
+  "st.s_cbranch_scc0"(label_LoopBeginL, SCC0)
+  Successors: ^label_LoopBeginL, ^label_end
+^label_end:
+  "st.s_endpgm"()
+}
+
+st.func @high_bank() {
+^entry:
+  s10 = "st.s_mov_b32"(8)
+  Successors: ^label_LoopBeginL
+^label_LoopBeginL:
+  v[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[116:131], v[0:7], v20, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[60:63] = "st.ds_load_b128"(v38) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v330 = "st.v_add_nc_u32"(v331, v332)
+  v333 = "st.v_add_nc_u32"(v334, v335)
+  s3 = "st.s_mov_b32"(3)
+  s4 = "st.s_mov_b32"(4)
+  "st.s_wait_dscnt"(4)
+  v[8:15] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[132:147], v[8:15], v20, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[16:23] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[148:163], v[16:23], v20, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  s10, SCC0 = "st.s_add_i32"(s10, -1)
+  SCC0 = "st.s_cmp_eq_u32"(s10, 0)
+  "st.s_cbranch_scc0"(label_LoopBeginL, SCC0)
+  Successors: ^label_LoopBeginL, ^label_end
+^label_end:
+  "st.s_endpgm"()
+}

@@ -1,0 +1,109 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --vgpr-msb-mode=msb16 --remarks --CoissueRepairPass=mode=apply,margin=0 --print-output 2>&1 ; %stinkytofu-opt --arch gfx1250 %s --vgpr-msb-mode=msb16 --remarks --CoissueRepairPass=mode=apply,margin=0,patternsOnly 2>&1
+#
+# Legality. @barrier and @block are the make-room loop with a barrier wait, or a block
+# boundary, between window 0 and window 1: every move out of window 0 would cross it, so
+# nothing moves. In @scc_chain the compare in front of the mid-loop branch cannot be hoisted
+# past the s_add/s_addc pair that also writes SCC (second run, patterns only); the core rules
+# may move s_add, but s_addc, the compare and the branch keep their order.
+
+# CHECK-NOT: move 1:
+# CHECK: loop label_LoopBeginL: moves 0
+# CHECK-LABEL: @barrier
+# CHECK: "st.s_mov_b32"(6)
+# CHECK-NEXT: "st.s_wait_dscnt"(0)
+# CHECK-NEXT: "st.s_barrier_wait"(-1)
+# CHECK-NOT: move 1:
+# CHECK: loop label_LoopBeginL: moves 0
+# CHECK-LABEL: @block
+# CHECK: "st.s_mov_b32"(6)
+# CHECK-NEXT: "st.s_wait_dscnt"(0)
+# CHECK-NEXT: Successors: ^label_second
+# CHECK-NEXT: ^label_second:
+# CHECK: move 1: make-room
+# CHECK-SAME: s_add_u32 s62, s62, s8
+# CHECK-LABEL: @scc_chain
+# CHECK: s62, SCC0 = "st.s_add_u32"(s62, s8)
+# CHECK: s63, SCC0 = "st.s_addc_u32"(s63, 0, SCC0)
+# CHECK-NEXT: SCC0 = "st.s_cmp_eq_u32"(s60, 0)
+# CHECK-NEXT: "st.s_cbranch_scc1"(label_skip, SCC0)
+# CHECK: patternsOnly
+# CHECK-NOT: hoist-compare
+# CHECK: loop label_LoopBeginL: moves 0
+# CHECK: loop label_LoopBeginL: moves 0
+# CHECK: loop label_LoopBeginL: moves 0
+
+st.func @barrier() {
+^entry:
+  s10 = "st.s_mov_b32"(8)
+  Successors: ^label_LoopBeginL
+^label_LoopBeginL:
+  v[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[116:131], v[0:7], v20, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  s1 = "st.s_mov_b32"(1)
+  s2 = "st.s_mov_b32"(2)
+  s3 = "st.s_mov_b32"(3)
+  s4 = "st.s_mov_b32"(4)
+  s5 = "st.s_mov_b32"(5)
+  s6 = "st.s_mov_b32"(6)
+  "st.s_wait_dscnt"(0)
+  "st.s_barrier_wait"(-1)
+  v[8:15] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[132:147], v[8:15], v20, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[16:23] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[148:163], v[16:23], v20, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  s10, SCC0 = "st.s_add_i32"(s10, -1)
+  SCC0 = "st.s_cmp_eq_u32"(s10, 0)
+  "st.s_cbranch_scc0"(label_LoopBeginL, SCC0)
+  Successors: ^label_LoopBeginL, ^label_end
+^label_end:
+  "st.s_endpgm"()
+}
+
+st.func @block() {
+^entry:
+  s10 = "st.s_mov_b32"(8)
+  Successors: ^label_LoopBeginL
+^label_LoopBeginL:
+  v[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[116:131], v[0:7], v20, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  s1 = "st.s_mov_b32"(1)
+  s2 = "st.s_mov_b32"(2)
+  s3 = "st.s_mov_b32"(3)
+  s4 = "st.s_mov_b32"(4)
+  s5 = "st.s_mov_b32"(5)
+  s6 = "st.s_mov_b32"(6)
+  "st.s_wait_dscnt"(0)
+  Successors: ^label_second
+^label_second:
+  v[8:15] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[132:147], v[8:15], v20, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[16:23] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[148:163], v[16:23], v20, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  s10, SCC0 = "st.s_add_i32"(s10, -1)
+  SCC0 = "st.s_cmp_eq_u32"(s10, 0)
+  "st.s_cbranch_scc0"(label_LoopBeginL, SCC0)
+  Successors: ^label_LoopBeginL, ^label_end
+^label_end:
+  "st.s_endpgm"()
+}
+
+st.func @scc_chain() {
+^entry:
+  s10 = "st.s_mov_b32"(8)
+  Successors: ^label_LoopBeginL
+^label_LoopBeginL:
+  v[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[116:131], v[0:7], v20, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  s1 = "st.s_mov_b32"(1)
+  v[8:15] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[132:147], v[8:15], v20, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[16:23] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[148:163], v[16:23], v20, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  s62, SCC0 = "st.s_add_u32"(s62, s8)
+  s63, SCC0 = "st.s_addc_u32"(s63, 0, SCC0)
+  SCC0 = "st.s_cmp_eq_u32"(s60, 0)
+  "st.s_cbranch_scc1"(label_skip, SCC0)
+  Successors: ^label_signal, ^label_skip
+^label_signal:
+  s61 = "st.s_mov_b32"(1)
+  Successors: ^label_skip
+^label_skip:
+  v[24:31] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[164:179], v[24:31], v20, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  s10, SCC0 = "st.s_add_i32"(s10, -1)
+  SCC0 = "st.s_cmp_eq_u32"(s10, 0)
+  "st.s_cbranch_scc0"(label_LoopBeginL, SCC0)
+  Successors: ^label_LoopBeginL, ^label_end
+^label_end:
+  "st.s_endpgm"()
+}

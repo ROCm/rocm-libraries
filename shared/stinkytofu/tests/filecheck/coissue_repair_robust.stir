@@ -1,0 +1,42 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --vgpr-msb-mode=msb16 --remarks --CoissueRepairPass=mode=apply,margin=0 --print-output 2>&1 ; %stinkytofu-opt --arch gfx1250 %s --vgpr-msb-mode=msb16 --remarks --CoissueRepairPass=mode=apply,margin=0,profiles=compiler,trust --print-output 2>&1
+#
+# Robust acceptance: after the VALU moves, putting the s_mov in window 1 still gains a cycle
+# under the compiler profile, but costs one under the measured profiles: the bank switch in
+# front of the next v_wmma then follows the wait (1 cycle) instead of the s_mov (free). The
+# robust set keeps the s_mov where it is; with the compiler profile alone, it moves.
+
+# CHECK: move 1: clear-slot window 0 -> 0 (start)
+# CHECK-NOT: move 2:
+# CHECK: loop label_LoopBeginL: moves 1
+# CHECK: ^label_LoopBeginL:
+# CHECK: s1 = "st.s_mov_b32"(1)
+# CHECK-NEXT: "st.s_wait_dscnt"(4)
+# CHECK: profiles=compiler
+# CHECK: move 1: clear-slot window 0 -> 0 (start)
+# CHECK: move 2: make-room window 0 -> 1 (start) gains [1]
+# CHECK-SAME: s_mov_b32 s1, 1
+# CHECK: loop label_LoopBeginL: moves 2
+# CHECK: ^label_LoopBeginL:
+# CHECK: "st.s_wait_dscnt"(4)
+# CHECK-NEXT: v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[132:147]
+# CHECK-NEXT: s1 = "st.s_mov_b32"(1)
+
+st.func @robust() {
+^entry:
+  s10 = "st.s_mov_b32"(8)
+  Successors: ^label_LoopBeginL
+^label_LoopBeginL:
+  v[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[116:131], v[0:7], v20, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[300:303] = "st.ds_load_b128"(v38) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  s1 = "st.s_mov_b32"(1)
+  v30 = "st.v_add_nc_u32"(v31, v32)
+  "st.s_wait_dscnt"(4)
+  v[8:15] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[132:147], v[8:15], v30, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[16:23] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[148:163], v[16:23], v20, v21) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  s10, SCC0 = "st.s_add_i32"(s10, -1)
+  SCC0 = "st.s_cmp_eq_u32"(s10, 0)
+  "st.s_cbranch_scc0"(label_LoopBeginL, SCC0)
+  Successors: ^label_LoopBeginL, ^label_end
+^label_end:
+  "st.s_endpgm"()
+}

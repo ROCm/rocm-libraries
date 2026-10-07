@@ -1,0 +1,35 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --vgpr-msb-mode=msb16 --remarks --CoissueRepairPass=mode=apply,margin=0 --print-output 2>&1 ; %stinkytofu-opt --arch gfx1250 %s --vgpr-msb-mode=msb16 --remarks --CoissueRepairPass=mode=apply,margin=0,trust --print-output 2>&1
+#
+# Calibrated scope: no measured profile covers v_wmma_f32_16x16x32_bf16, so the move found on
+# this loop is not written back; with trust (CoissueTrustUncalibrated) it is.
+
+# CHECK: loop label_LoopBeginL: moves 1
+# CHECK-SAME: -> matrix ops not calibrated;
+# CHECK: ^label_LoopBeginL:
+# CHECK: v[300:303] = "st.ds_load_b128"(v38)
+# CHECK-NEXT: v30 = "st.v_add_nc_u32"(v31, v32)
+# CHECK: trust
+# CHECK: loop label_LoopBeginL: moves 1
+# CHECK-SAME: -> apply;
+# CHECK: ^label_LoopBeginL:
+# CHECK: v[300:303] = "st.ds_load_b128"(v38)
+# CHECK-NEXT: s1 = "st.s_mov_b32"(1)
+
+st.func @bf16() {
+^entry:
+  s10 = "st.s_mov_b32"(8)
+  Successors: ^label_LoopBeginL
+^label_LoopBeginL:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[100:107], v[116:123], v[0:7])
+  v[300:303] = "st.ds_load_b128"(v38) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v30 = "st.v_add_nc_u32"(v31, v32)
+  s1 = "st.s_mov_b32"(1)
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[100:107], v[132:139], v[8:15])
+  v[16:23] = "st.v_wmma_f32_16x16x32_bf16"(v[100:107], v[148:155], v[16:23])
+  s10, SCC0 = "st.s_add_i32"(s10, -1)
+  SCC0 = "st.s_cmp_eq_u32"(s10, 0)
+  "st.s_cbranch_scc0"(label_LoopBeginL, SCC0)
+  Successors: ^label_LoopBeginL, ^label_end
+^label_end:
+  "st.s_endpgm"()
+}
