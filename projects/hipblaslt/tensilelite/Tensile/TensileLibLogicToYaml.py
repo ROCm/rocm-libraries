@@ -24,6 +24,7 @@
 
 from . import __version__
 from . import LibraryIO
+from . import ExactLogicSidecar
 from .Common.GlobalParameters import defaultBenchmarkCommonParameters
 from .Common.Constants import HR
 from .SolutionStructs.Problem import _defaultProblemType as defaultProblemType
@@ -349,7 +350,7 @@ def TensileLibLogicToYaml(
     tPrint(1, "#")
     tPrint(1, HR)
     tPrint(1, "")
-    libYaml = LibraryIO.readYAML(logicFilePath)
+    libYaml = ExactLogicSidecar.attachSidecar(LibraryIO.readYAML(logicFilePath), logicFilePath)
     if libYaml == "":
         raise RuntimeError(
             "Yaml file data is empty, read yaml file :{} failed".format(logicFilePath)

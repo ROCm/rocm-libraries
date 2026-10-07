@@ -32,6 +32,7 @@ from typing import Any
 
 from . import __version__
 from . import LibraryIO
+from . import ExactLogicSidecar
 from .SolutionStructs.Naming import getSolutionNameMin
 from .SolutionStructs.Naming import getKernelNameMin
 from .SolutionStructs.Problem import ProblemType, problemTypeToEnum
@@ -267,6 +268,7 @@ def loadData(filename: str) -> list[Any]:
             ``printExit``.
     """
     data = load_yaml_stream(filename, yaml.CSafeLoader)
+    ExactLogicSidecar.attachSidecar(data, filename)
     normalized = False
     wasList = isinstance(data, list)
     data = convertToDict(data, filename)
@@ -467,6 +469,10 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
             outputFile = os.path.join(outputPath, os.path.split(file)[-1])
             shutil.copyfile(file, outputFile)
             msg("Copied", file, "to", outputFile)
+            sidecar = ExactLogicSidecar.findSidecar(file)
+            if sidecar:
+                shutil.copyfile(sidecar, ExactLogicSidecar.sidecarPath(outputFile))
+                msg("Copied", sidecar, "to", ExactLogicSidecar.sidecarPath(outputFile))
 
     incrementalFiles = incrementalFilesTemp
 
@@ -527,6 +533,12 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
         if isinstance(mergedData.get("ProblemType"), dict):
             mergedData["ProblemType"] = dict(sorted(mergedData["ProblemType"].items()))
 
+        # The merged table is written inline; a sidecar left at the destination
+        # would make the pair ambiguous, so drop it.
+        staleSidecar = ExactLogicSidecar.findSidecar(os.path.join(outputPath, basename))
+        if staleSidecar:
+            os.remove(staleSidecar)
+            msg("Removed stale ExactLogic sidecar", staleSidecar)
         LibraryIO.writeYAML(
             os.path.join(outputPath, basename),
             mergedData,
