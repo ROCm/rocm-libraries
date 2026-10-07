@@ -16,6 +16,7 @@ it via ``-m "not gpu"``. Run standalone:
 
 from __future__ import annotations
 
+import dataclasses
 import math
 
 import pytest
@@ -76,15 +77,23 @@ def _spec(
     factory rather than hand-rolled.
 
     Deriving the spec from the factory means a future gfx950 tuning change is picked
-    up here with no edit. Only ``dense_persistent`` is pinned rather than left on
-    "auto": the cohort asserts BOTH grid variants at one fixed Sq.
+    up here with no edit. The candidate is pinned by ``spec_id``: the cohort
+    asserts BOTH bodies at one fixed Sq, and the persistent row runs wide
+    DMA on aligned causal D128 without sinks/SWA (``TestWideDmaFeatures``
+    covers the other masks).
     """
     # Imported lazily: keeps module import (and hence CPU collection of this
     # gpu-marked file) independent of the dispatch package.
-    from dispatch.attention import AttentionRequest
-    from dispatch.attention.gfx950 import dense_spec_for_request
+    from dispatch.attention import AttentionRequest, attention_tuning_spec
 
-    return dense_spec_for_request(
+    wide = d == 128 and causal and not use_sinks and not sliding_window
+    if not persistent:
+        spec_id = "gfx950_dense_grid"
+    elif wide:
+        spec_id = "gfx950_dense_persist_widedma"
+    else:
+        spec_id = "gfx950_dense_persist"
+    return attention_tuning_spec(
         AttentionRequest(
             batch=batch,
             nhead_q=hq,
@@ -96,12 +105,11 @@ def _spec(
             arch="gfx950",
             mask_type=1 if causal else 0,
             dtype=dtype,
-            algorithm="attention_dense",
-            dense_persistent="on" if persistent else "off",
             use_sinks=use_sinks,
             sliding_window=sliding_window,
-        )
-    )
+        ),
+        spec_id,
+    ).kernel_spec
 
 
 def _launcher_for(spec):
@@ -203,6 +211,36 @@ class TestDenseNumeric:
         assert max_abs < tol, (
             f"{dtype} D{d} GQA{hq}/{hkv} "
             f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
+        )
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "d,persistent,width",
+        [(128, False, 1), (128, True, 2), (64, False, 2), (64, True, 1)],
+    )
+    def test_bf16_narrow_output_store_is_bit_identical(self, d, persistent, width):
+        """bf16 o_store_width 1/2 must write the same bits as the width-4 store
+        (fp16 is rejected below 4 because it does not)."""
+        import torch
+
+        hq, hkv, B, S = 16, 4, 1, 512
+        scale = 1.0 / math.sqrt(d)
+        torch.manual_seed(0)
+        q = torch.randn(B, S, hq, d, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(B, S, hkv, d, device="cuda", dtype=torch.bfloat16)
+        v = torch.randn(B, S, hkv, d, device="cuda", dtype=torch.bfloat16)
+        base = _spec("bf16", d, hq, hkv, persistent, batch=B, sq=S)
+
+        outs = []
+        for spec in (base, dataclasses.replace(base, o_store_width=width)):
+            out = torch.empty(B, S, hq, d, device="cuda", dtype=torch.bfloat16)
+            run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+            outs.append(out)
+        torch.cuda.synchronize()
+        assert torch.equal(outs[0], outs[1]), (
+            f"bf16 D{d} {'persist' if persistent else 'default'} "
+            f"o_store_width={width} diverged from width 4"
         )
 
     @requires_gfx950_gpu
@@ -731,6 +769,81 @@ class TestDenseBottomRightNumeric:
         assert top_left_err > 1e-3, (
             f"{label}: unexpectedly matches top-left " f"(max_abs={top_left_err:.3e})"
         )
+
+
+# The wide-DMA candidate admits every mask the persistent body implements, not
+# only the causal no-sinks no-SWA shapes the cohort above routes to it.
+_WIDE_DMA_MASKS = [
+    # (name, causal, sliding_window, use_sinks)
+    ("non_causal", False, 0, False),
+    ("causal_sinks", True, 0, True),
+    ("causal_swa", True, 128, False),
+    ("non_causal_sinks", False, 0, True),
+    ("causal_swa_sinks", True, 128, True),
+]
+
+
+class TestWideDmaFeatures:
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("dtype", ("bf16", "fp16"))
+    @pytest.mark.parametrize("block_m", (256, 128))
+    @pytest.mark.parametrize("_name,causal,sliding_window,use_sinks", _WIDE_DMA_MASKS)
+    def test_wide_dma_numeric(
+        self, _name, causal, sliding_window, use_sinks, block_m, dtype
+    ):
+        import torch
+
+        from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
+
+        B, S, Hq, Hkv, D = 1, 512, 32, 8, 128
+        spec = tuning_spec_with_knobs(
+            AttentionRequest(
+                batch=B,
+                nhead_q=Hq,
+                nhead_k=Hkv,
+                seqlen_q=S,
+                seqlen_k=S,
+                hdim_q=D,
+                hdim_v=D,
+                arch="gfx950",
+                mask_type=1 if causal else 0,
+                dtype=dtype,
+                use_sinks=use_sinks,
+                sliding_window=sliding_window,
+            ),
+            "gfx950_dense_persist_widedma",
+            {"block_m": block_m},
+        ).kernel_spec
+        assert spec.wide_lds_dma
+        assert spec.block_m == block_m
+
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        torch.manual_seed(0)
+        q = torch.randn(B, S, Hq, D, device="cuda", dtype=tdt)
+        k = torch.randn(B, S, Hkv, D, device="cuda", dtype=tdt)
+        v = torch.randn(B, S, Hkv, D, device="cuda", dtype=tdt)
+        out = torch.empty_like(q)
+        sinks = torch.randn(Hq, device="cuda", dtype=tdt) if use_sinks else None
+        scale = 1.0 / math.sqrt(D)
+        run_attention_dense_torch(
+            spec=spec, q=q, k=k, v=v, out=out, scale=scale, sinks=sinks
+        )
+        torch.cuda.synchronize()
+
+        # A sink of -inf contributes nothing, so one reference covers both.
+        ref_sinks = (
+            sinks
+            if use_sinks
+            else torch.full((Hq,), float("-inf"), device="cuda", dtype=torch.float32)
+        )
+        ref = _sink_reference(
+            q, k, v, ref_sinks, scale, sliding_window=sliding_window, causal=causal
+        )
+        max_abs = (ref - out.float()).abs().max().item()
+        assert max_abs < _tolerance(
+            dtype
+        ), f"{spec_id} {dtype} {_name}: max_abs={max_abs:.3e}"
 
 
 if __name__ == "__main__":

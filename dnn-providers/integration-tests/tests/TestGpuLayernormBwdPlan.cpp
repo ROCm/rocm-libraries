@@ -9,6 +9,7 @@
 #include <unordered_map>
 
 #include <hip/hip_runtime.h>
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -28,6 +29,7 @@ using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace hipdnn_integration_tests::test_utils;
 using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
 using namespace hipdnn_test_sdk::utilities;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 
 TEST(TestGpuLayernormBwdPlanBuilder, PlanConstruction)
 {
@@ -347,15 +349,19 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
     Tensor<ScaleBiasType> cpuDbias(normDims, normStrides);
 
     constexpr unsigned int SEED = 42;
-    dyTensor.fillWithRandomValues(static_cast<DyType>(-1.0), static_cast<DyType>(1.0), SEED);
-    xTensor.fillWithRandomValues(static_cast<DxType>(-1.0), static_cast<DxType>(1.0), SEED + 1);
-    scaleTensor.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-1.0), static_cast<ScaleBiasType>(1.0), SEED + 2);
+    fillWithRandomValues(dyTensor, static_cast<DyType>(-1.0), static_cast<DyType>(1.0), SEED);
+    fillWithRandomValues(xTensor, static_cast<DxType>(-1.0), static_cast<DxType>(1.0), SEED + 1);
+    fillWithRandomValues(
+        scaleTensor, static_cast<ScaleBiasType>(-1.0), static_cast<ScaleBiasType>(1.0), SEED + 2);
     epsilonTensor.fillWithValue(static_cast<ComputeType>(LAYERNORM_DEFAULT_EPSILON));
-    meanTensor.fillWithRandomValues(
-        static_cast<MeanInvVarianceType>(-1.0), static_cast<MeanInvVarianceType>(1.0), SEED + 3);
-    rstdTensor.fillWithRandomValues(
-        static_cast<MeanInvVarianceType>(-1.0), static_cast<MeanInvVarianceType>(1.0), SEED + 4);
+    fillWithRandomValues(meanTensor,
+                         static_cast<MeanInvVarianceType>(-1.0),
+                         static_cast<MeanInvVarianceType>(1.0),
+                         SEED + 3);
+    fillWithRandomValues(rstdTensor,
+                         static_cast<MeanInvVarianceType>(-1.0),
+                         static_cast<MeanInvVarianceType>(1.0),
+                         SEED + 4);
 
     Tensor<DxType> gpuDx(ioDims, ioStrides);
     Tensor<ScaleBiasType> gpuDscale(normDims, normStrides);

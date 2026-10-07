@@ -11,6 +11,7 @@ Documentation for rocFFT is available at
 * Fixed out-of-bounds memory access when executing a multi-device complex-to-complex plan whose
   bricks used non-contiguous data layouts.
 * Fixed a memory leak when `rocfft_plan_create` fails.
+* Fixed a potential write-after-free if plans are destroyed during process teardown.
 
 ### Added
 
