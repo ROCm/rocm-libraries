@@ -92,7 +92,7 @@ namespace
         search.allKernels     = false;
         search.maxCandidates  = maxCandidates;
         search.workspaceBytes = 32 << 20;
-        search.coldIters      = 32;
+        search.coldIters      = 0;
         search.hotIters       = hotIters;
         search.flushICache    = false;
         search.rotatingMb     = 0;

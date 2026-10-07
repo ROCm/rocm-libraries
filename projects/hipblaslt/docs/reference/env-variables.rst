@@ -158,7 +158,7 @@ closing summary. Replaying a cache adds no output per call. Where the notices go
     * - | ``HIPBLASLT_TUNING_COLD_ITERS``
         | Sets untimed warm-up launches per candidate in ``tune`` mode, and untimed first visits
           per problem in ``online`` mode.
-      - | Non-negative integer (``tune`` default: 1000, ``online`` default: 32)
+      - | Non-negative integer (``tune`` default: 1000, ``online`` default: 0)
         | 0 disables warm-up
 
     * - | ``HIPBLASLT_TUNING_HOT_ITERS``

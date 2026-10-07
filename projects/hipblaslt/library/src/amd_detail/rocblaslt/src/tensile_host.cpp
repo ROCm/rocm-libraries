@@ -3963,22 +3963,28 @@ namespace
          * Visits of a shape that dispatch the ranking's own pick and are
          * sampled by nothing.
          *
-         * tune's 1000 would be wrong by three orders of magnitude: there a cold
-         * iteration is one untimed launch inside a search the caller is already
-         * blocked on, here it is a whole call that goes by unexplored, so 1000
-         * would silence the feature on everything but a shape seen thousands of
-         * times. 32 covers the transients that are a property of the first
-         * touch rather than of the kernel -- code-object load, clock ramp -- and
-         * leaves exploration to finish inside the first few dozen visits.
+         * None by default, so exploration starts on the first visit. tune's
+         * 1000 is not a candidate here: there a cold iteration is one untimed
+         * launch inside a search the caller is already blocked on, here it is a
+         * whole call that goes by unexplored, so 1000 would silence the feature
+         * on everything but a shape seen thousands of times.
          *
-         * The per-candidate share of that warm-up is already handled without
-         * it: candidates are issued round-robin and scored on their smallest
-         * sample, so one slow first launch per candidate is discarded. This is
-         * the device's warm-up, not the kernel's.
+         * Nor is a smaller gate cheap against what it gates. Exploration
+         * finishes in 3K+1 visits -- sixteen at the default K -- so a gate of
+         * 32 would make a shape wait 48 visits to resolve rather than 16 and
+         * would never resolve one seen fewer than 48 times. Short-lived shapes
+         * are most of a real trace.
+         *
+         * There is no per-candidate warm-up left for it to cover either:
+         * candidates are issued round-robin and scored on their smallest
+         * sample, so each gets a first launch of its own and has its slowest
+         * sample discarded. Zero is also the regime every result this feature
+         * was validated in was measured in, the POC it is ported from having
+         * had no such gate at all.
          */
         static int onlineColdIterations()
         {
-            return std::max(0, envInt("HIPBLASLT_TUNING_COLD_ITERS", 32));
+            return std::max(0, envInt("HIPBLASLT_TUNING_COLD_ITERS", 0));
         }
 
         /**
