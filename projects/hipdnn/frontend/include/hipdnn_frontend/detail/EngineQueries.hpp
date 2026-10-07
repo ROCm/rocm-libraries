@@ -4,8 +4,14 @@
 #pragma once
 
 /// @file
-/// Generation-tool surfaces for engine inspection (RFC 0019 Open Question 12). Not part of
-/// the public Graph API: consumers select engines through the heuristic descriptor.
+/// Generation-tool surfaces for engine inspection (RFC 0019 Open Question 12). Installed with
+/// the frontend headers, but not part of the public Graph API: consumers select engines
+/// through the heuristic descriptor. This header decodes FlatBuffers pages, and the installed
+/// hipdnn_frontend package does not provide hipdnn_flatbuffers_sdk, so a target including it
+/// must link hipdnn_flatbuffers_sdk itself. Like EngineQueryTypes.hpp, it is empty when the
+/// frontend is built with HIPDNN_FRONTEND_SKIP_JSON_LIB.
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 #include <HipdnnBackendFlatbufferData.h>
 #include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
@@ -486,6 +492,13 @@ inline Error getEngineCandidates(hipdnnBackendDescriptor_t graphDesc,
                             return {ErrorCode::HIPDNN_BACKEND_ERROR,
                                     "Invalid candidate knob value"};
                         }
+                        // The backend refuses a non-finite knob in a configuration, and NaN
+                        // has no strict weak order for the tuple set below.
+                        if(const auto* real = std::get_if<double>(&*value);
+                           real != nullptr && !std::isfinite(*real))
+                        {
+                            return {ErrorCode::HIPDNN_BACKEND_ERROR, "Non-finite candidate knob"};
+                        }
                         if(!candidate.variant.knobSettings
                                 .emplace(setting->knob_id()->str(), std::move(*value))
                                 .second)
@@ -535,3 +548,5 @@ inline Error getEngineCandidates(hipdnnBackendDescriptor_t graphDesc,
 }
 
 } // namespace hipdnn_frontend::detail
+
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB

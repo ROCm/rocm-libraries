@@ -4,6 +4,7 @@
 #pragma once
 
 #include "BackendDescriptor.hpp"
+#include <atomic>
 #include <flatbuffers/detached_buffer.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
@@ -21,8 +22,10 @@ class EngineConfigDescriptor : public HipdnnBackendDescriptorImpl<EngineConfigDe
 private:
     std::shared_ptr<const EngineDescriptor> _engine;
     std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineConfigT> _engineConfigData;
+    /// Packed in finalize(), so it is immutable once the descriptor is finalized.
     mutable flatbuffers::DetachedBuffer _engineConfigSerializedBuffer;
-    mutable int64_t _maxWorkspaceSize = INVALID_WORKSPACE_SIZE;
+    /// Written once under _workspaceOnce; atomic because toString() reads it without that guard.
+    mutable std::atomic<int64_t> _maxWorkspaceSize{INVALID_WORKSPACE_SIZE};
     mutable std::once_flag _workspaceOnce;
     bool _deferWorkspace = false;
     bool _predictionEvaluate = true;

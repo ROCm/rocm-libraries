@@ -10,24 +10,30 @@
 #include "descriptors/GraphDescriptor.hpp"
 #include "descriptors/ScopedDescriptor.hpp"
 #include "heuristics/SelectionHeuristic.hpp"
+#include "heuristics/prediction/PredictionBuiltIn.hpp"
 #include "hipdnn_backend.h"
 #include "mocks/MockDescriptor.hpp"
 #include "mocks/MockEnginePluginResourceManager.hpp"
 #include "mocks/MockHandle.hpp"
 #include "mocks/MockHeuristicPlugin.hpp"
 #include "mocks/MockHeuristicPluginResourceManager.hpp"
+#include "plugin/HeuristicPlugin.hpp"
 
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
+#include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include <array>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace hipdnn_backend;
@@ -1428,4 +1434,155 @@ TEST_F(TestGpuEngineHeuristicDescriptor, EveryResultConfigCarriesTheRankingMetri
         ASSERT_NE(serialized->ranking_metric(), nullptr);
         EXPECT_EQ(serialized->ranking_metric()->string_view(), "time");
     }
+}
+
+// ========== Prediction policy wiring (RFC 0019 §11.2, §11.4) ==========
+
+namespace
+{
+// The prediction request names the candidate and the ranking metric.
+MATCHER_P2(isPredictionRequestFor, engineId, metric, "")
+{
+    if(arg.ptr == nullptr)
+    {
+        return false;
+    }
+    const auto* config = hipdnn_flatbuffers_sdk::data_objects::GetEngineConfig(arg.ptr);
+    return config->engine_id() == engineId && config->ranking_metric() != nullptr
+           && config->ranking_metric()->str() == metric;
+}
+} // namespace
+
+class TestGpuPredictionPolicyWiring : public TestGpuEngineHeuristicDescriptor
+{
+protected:
+    // Outlive the descriptor's policy slots, which the base TearDown releases.
+    std::shared_ptr<HeuristicPlugin> _predictionPlugin;
+    hipdnn_data_sdk::utilities::ScopedResource<hipdnnHeuristicHandle_t> _predictionHandle;
+    flatbuffers::DetachedBuffer _serializedGraph;
+
+    // Finalizes under the built-in prediction policy and checks that every candidate is
+    // predicted in the descriptor's metric and that the predictions decide the order. Any
+    // prediction request outside the expectations (another metric, engine or kind) fails.
+    void expectRankedByPredictions(const char* policyName, bool requestsConfigurations)
+    {
+        namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter policyGuard(
+            "HIPDNN_HEUR_POLICY_ORDER", "");
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter metricGuard(
+            "HIPDNN_HEUR_RANKING_METRIC", "");
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter fallbackGuard(
+            "HIPDNN_HEUR_FALLBACK_ENGINE_ORDER", "");
+
+        _predictionPlugin = HeuristicPlugin::createBuiltIn(
+            hipdnn_backend::heuristics::prediction::populateFunctionTable(),
+            "prediction-wiring-test");
+        _predictionHandle = hipdnn_data_sdk::utilities::ScopedResource<hipdnnHeuristicHandle_t>(
+            _predictionPlugin->createHandle(),
+            [this](auto handle) { _predictionPlugin->destroyHandle(handle); });
+        const int64_t policyId = hipdnn_data_sdk::utilities::policyNameToId(policyName);
+
+        const fb::GraphT graph{};
+        flatbuffers::FlatBufferBuilder graphBuilder;
+        graphBuilder.Finish(fb::Graph::Pack(graphBuilder, &graph));
+        _serializedGraph = graphBuilder.Release();
+        const hipdnnPluginConstData_t graphBytes{_serializedGraph.data(), _serializedGraph.size()};
+
+        auto heur = getEngineHeuristicDescriptor();
+        setRankingMetric(*heur, "time");
+        setGraph();
+        setHeuristicMode();
+        EXPECT_CALL(*getMockGraph(), getSerializedGraph()).WillRepeatedly(Return(graphBytes));
+        EXPECT_CALL(*_mockHeuristicPluginResourceManager, getPluginForPolicyId(policyId))
+            .WillRepeatedly(Return(_predictionPlugin.get()));
+        EXPECT_CALL(*_mockHeuristicPluginResourceManager, getHeuristicHandleForPolicyId(policyId))
+            .WillRepeatedly(Return(_predictionHandle.get()));
+        ASSERT_NO_THROW(heur->setAttribute(
+            HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT, HIPDNN_TYPE_INT64, 1, &policyId));
+        EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
+            .WillRepeatedly(Return(std::vector<int64_t>{1, 2, 3}));
+
+        EXPECT_CALL(*_mockEnginePluginResourceManager, getEnginePrediction(_, _, _, _)).Times(0);
+        // Static order is 1, 2, 3; the predicted times rank 2, 3, 1.
+        const std::vector<std::pair<int64_t, double>> predictedTimes{
+            {1, 30.0}, {2, 10.0}, {3, 20.0}};
+        for(const auto& predictedTime : predictedTimes)
+        {
+            const int64_t engineId = predictedTime.first;
+            const double time = predictedTime.second;
+            EXPECT_CALL(*_mockEnginePluginResourceManager,
+                        getEnginePrediction(isPredictionRequestFor(engineId, "time"),
+                                            _,
+                                            HIPDNN_ENGINE_PREDICTION_ENGINE,
+                                            _))
+                .WillOnce(Invoke([engineId, time](const hipdnnPluginConstData_t&,
+                                                  const hipdnnPluginConstData_t&,
+                                                  hipdnnEnginePredictionKind_t,
+                                                  bool) {
+                    fb::EnginePredictionT prediction;
+                    prediction.engine_id = engineId;
+                    prediction.kind = fb::PredictionKind::ENGINE;
+                    prediction.status = fb::PredictionStatus::AVAILABLE;
+                    prediction.value = time;
+                    prediction.metric = "time";
+                    return prediction;
+                }));
+            if(requestsConfigurations)
+            {
+                EXPECT_CALL(*_mockEnginePluginResourceManager,
+                            getEnginePrediction(isPredictionRequestFor(engineId, "time"),
+                                                _,
+                                                HIPDNN_ENGINE_PREDICTION_CONFIGURATION,
+                                                _))
+                    .WillOnce(Invoke([engineId](const hipdnnPluginConstData_t&,
+                                                const hipdnnPluginConstData_t&,
+                                                hipdnnEnginePredictionKind_t,
+                                                bool) {
+                        fb::EnginePredictionT prediction;
+                        prediction.engine_id = engineId;
+                        prediction.kind = fb::PredictionKind::CONFIGURATION;
+                        prediction.status = fb::PredictionStatus::UNAVAILABLE;
+                        prediction.metric = "time";
+                        return prediction;
+                    }));
+            }
+        }
+
+        ASSERT_NO_THROW(heur->finalize());
+
+        std::vector<ScopedDescriptor> ownedConfigs(predictedTimes.size());
+        std::vector<hipdnnBackendDescriptor_t> configs;
+        configs.reserve(ownedConfigs.size());
+        for(auto& owned : ownedConfigs)
+        {
+            owned = ScopedDescriptor(createDescriptorPtr<EngineConfigDescriptor>());
+            configs.push_back(owned.get());
+        }
+        int64_t count = 0;
+        ASSERT_NO_THROW(heur->getAttribute(HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                           HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                           static_cast<int64_t>(configs.size()),
+                                           &count,
+                                           static_cast<void*>(configs.data())));
+        ASSERT_EQ(count, 3);
+        std::vector<int64_t> order;
+        order.reserve(configs.size());
+        for(auto* config : configs)
+        {
+            const auto bytes
+                = config->asDescriptor<EngineConfigDescriptor>()->getSerializedEngineConfig();
+            order.push_back(fb::GetEngineConfig(bytes.ptr)->engine_id());
+        }
+        EXPECT_EQ(order, (std::vector<int64_t>{2, 3, 1}));
+    }
+};
+
+TEST_F(TestGpuPredictionPolicyWiring, ModeAPredictsEachCandidateInTheRankingMetric)
+{
+    expectRankedByPredictions(hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME, false);
+}
+
+TEST_F(TestGpuPredictionPolicyWiring, ModeBPredictsEachCandidateInTheRankingMetric)
+{
+    expectRankedByPredictions(hipdnn_data_sdk::utilities::MODE_B_POLICY_NAME, true);
 }

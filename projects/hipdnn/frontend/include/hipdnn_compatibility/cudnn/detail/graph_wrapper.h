@@ -1593,18 +1593,19 @@ private:
         return static_cast<int>(_stage) >= static_cast<int>(stage);
     }
 
-    error_t refreshEngineIndexMap(const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
+    // Engine indices are a property of the operation graph, as in cuDNN: they always follow
+    // the FALLBACK ranking, whatever heuristic modes created the plans, so get_engine_count,
+    // get_knobs_for_engine, create_execution_plan and deselect_engines agree on every index.
+    error_t refreshEngineIndexMap()
     {
         _engineIndexToNativeEngineId.clear();
         HIPDNN_CUDNN_SHIM_RETURN_OK_IF_NO_NATIVE_GRAPH();
-        return _graph->get_ranked_engine_ids(_engineIndexToNativeEngineId, modes);
+        return _graph->get_ranked_engine_ids(_engineIndexToNativeEngineId, {HeurMode_t::FALLBACK});
     }
 
-    error_t mapEngineIndex(int64_t engineIndex,
-                           int64_t& nativeEngineId,
-                           const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
+    error_t mapEngineIndex(int64_t engineIndex, int64_t& nativeEngineId)
     {
-        CHECK_CUDNN_FRONTEND_ERROR(refreshEngineIndexMap(modes));
+        CHECK_CUDNN_FRONTEND_ERROR(refreshEngineIndexMap());
         if(engineIndex < 0
            || static_cast<size_t>(engineIndex) >= _engineIndexToNativeEngineId.size())
         {
@@ -1619,15 +1620,14 @@ private:
     }
 
     error_t mapEngineIndices(const std::vector<int64_t>& engineIndices,
-                             std::vector<int64_t>& nativeEngineIds,
-                             const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
+                             std::vector<int64_t>& nativeEngineIds)
     {
         nativeEngineIds.clear();
         nativeEngineIds.reserve(engineIndices.size());
         for(const auto engineIndex : engineIndices)
         {
             int64_t nativeEngineId = -1;
-            CHECK_CUDNN_FRONTEND_ERROR(mapEngineIndex(engineIndex, nativeEngineId, modes));
+            CHECK_CUDNN_FRONTEND_ERROR(mapEngineIndex(engineIndex, nativeEngineId));
             nativeEngineIds.push_back(nativeEngineId);
         }
         return {};
@@ -1664,8 +1664,7 @@ private:
         if(!_barredEngineIndices.empty())
         {
             std::vector<int64_t> nativeEngineIds;
-            CHECK_CUDNN_FRONTEND_ERROR(
-                mapEngineIndices(_barredEngineIndices, nativeEngineIds, modes));
+            CHECK_CUDNN_FRONTEND_ERROR(mapEngineIndices(_barredEngineIndices, nativeEngineIds));
             _graph->deselect_engines(nativeEngineIds);
             _shimBarredEngineIds.insert(nativeEngineIds.begin(), nativeEngineIds.end());
         }

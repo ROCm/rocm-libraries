@@ -793,6 +793,10 @@ void visit(const MoeGroupedMatmulBwdAttributes& op, V& visitor)
 template <typename V>
 bool visit(const Node& node, V&& visitor)
 {
+    // Fails when NodeAttributes gains a member this header has no case for: rerun
+    // scripts/gen_node_operands.py.
+    static_assert(NodeAttributes::MAX == NodeAttributes::MoeGroupedMatmulBwdAttributes,
+                  "node_operands_generated.h is stale: rerun scripts/gen_node_operands.py");
     switch(node.attributes_type())
     {
     case NodeAttributes::BatchnormInferenceAttributes:

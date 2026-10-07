@@ -23,6 +23,7 @@
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/heuristics/RankingMetric.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/EnginePredictor.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlanBuilder.hpp>
@@ -210,6 +211,10 @@ public:
     /// @brief L1 uses only graph bindings; L2 returns the calibrated ranker's exact candidate.
     /// Answers are in @p config's metric (RFC 0019 §11.4), named on every response. An
     /// unregistered metric throws BAD_PARAM rather than reporting UNAVAILABLE.
+    /// @throws HipdnnPluginException INVALID_VALUE, from a configuration evaluation, when the
+    ///         request or a descriptor is malformed: an unknown or duplicate constraint, a
+    ///         benchmarking request no exact prediction can honour, or a descriptor plan build
+    ///         would reject too.
     hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
         getPrediction(THandle& handle,
                       const IGraph& graph,
@@ -229,6 +234,17 @@ public:
             try
             {
                 _planBuilder.predictConfiguration(handle, graph, config, result);
+            }
+            catch(const HipdnnPluginException& error)
+            {
+                // A malformed request or descriptor is a fault, not a missing estimate, so it
+                // is not reported as UNAVAILABLE.
+                if(error.getStatus() == HIPDNN_PLUGIN_STATUS_INVALID_VALUE)
+                {
+                    throw;
+                }
+                result.status = PredictionStatus::UNAVAILABLE;
+                result.reason = error.what();
             }
             catch(const std::exception& error)
             {

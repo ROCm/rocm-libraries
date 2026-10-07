@@ -11,6 +11,9 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+// The engine queries carry nlohmann::json members, so they exist only with JSON support.
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+
 #include <hipdnn_frontend/detail/EngineQueries.hpp>
 
 #include "fake_backend/MockHipdnnBackend.hpp"
@@ -20,6 +23,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -533,21 +537,24 @@ TEST_F(TestEngineQueries, CandidatesKeepPluginOrderWhenIdsAreNotAscending)
     EXPECT_EQ(page.candidates[1].id, "a");
 }
 
-/// One candidate as a plugin reports it, with integer knobs in report order.
+/// One candidate as a plugin reports it, with integer then floating knobs in report order.
 struct CandidateSpec
 {
     CandidateSpec(std::string candidateId,
                   std::vector<std::pair<std::string, int64_t>> knobSettings,
-                  std::string kernelFeatureMap = "{}")
+                  std::string kernelFeatureMap = "{}",
+                  std::vector<std::pair<std::string, double>> floatKnobSettings = {})
         : id(std::move(candidateId))
         , knobs(std::move(knobSettings))
         , kernelFeatures(std::move(kernelFeatureMap))
+        , floatKnobs(std::move(floatKnobSettings))
     {
     }
 
     std::string id;
     std::vector<std::pair<std::string, int64_t>> knobs;
     std::string kernelFeatures;
+    std::vector<std::pair<std::string, double>> floatKnobs;
 };
 
 /// A candidate page as a plugin reports it; the identity defaults are valid.
@@ -571,7 +578,7 @@ flatbuffers::DetachedBuffer buildCandidatePage(const PageSpec& spec)
     for(const auto& candidate : spec.candidates)
     {
         std::vector<flatbuffers::Offset<fb::KnobSetting>> knobs;
-        knobs.reserve(candidate.knobs.size());
+        knobs.reserve(candidate.knobs.size() + candidate.floatKnobs.size());
         for(const auto& [knobId, value] : candidate.knobs)
         {
             knobs.push_back(
@@ -579,6 +586,14 @@ flatbuffers::DetachedBuffer buildCandidatePage(const PageSpec& spec)
                                             knobId.c_str(),
                                             fb::KnobValue::IntValue,
                                             fb::CreateIntValue(builder, value).Union()));
+        }
+        for(const auto& [knobId, value] : candidate.floatKnobs)
+        {
+            knobs.push_back(
+                fb::CreateKnobSettingDirect(builder,
+                                            knobId.c_str(),
+                                            fb::KnobValue::FloatValue,
+                                            fb::CreateFloatValue(builder, value).Union()));
         }
         candidates.push_back(fb::CreateEngineCandidateDirect(
             builder, candidate.id.c_str(), &knobs, candidate.kernelFeatures.c_str()));
@@ -682,6 +697,12 @@ std::vector<RefusedPage> refusedPages()
         {"KernelFeaturesNotAnObject",
          "Invalid kernel feature map",
          pageOf({{"a", {{"test.knob", 1}}, "[]"}})},
+        {"NaNKnob",
+         "Non-finite candidate knob",
+         pageOf({{"a",
+                  {{"test.knob", 1}},
+                  "{}",
+                  {{"test.ratio", std::numeric_limits<double>::quiet_NaN()}}}})},
         {"ScopedKnobHasAnotherValue",
          outOfScope,
          pageOf({{"a", {{"test.knob", 1}}}, {"b", {{"test.knob", 2}}}}),
@@ -814,3 +835,5 @@ TEST_F(TestEngineQueries, CandidatePagesWalkTheCatalogOnceInOrder)
 }
 
 } // namespace
+
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB

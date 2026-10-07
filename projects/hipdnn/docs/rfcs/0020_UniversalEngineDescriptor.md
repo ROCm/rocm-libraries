@@ -87,8 +87,8 @@ a follow-up, filling 0017's deferred scope is expected and is not itself a diver
   hashed into the engine-id space and must not collide.
 - **Duplicate detection (§ 13.2.1).** An independent descriptor-`id` check; drop all UEDs in a
   genuine collision, but accept content-identical `id` duplicates, loading them as one.
-- **Role-scoped, arch-keyed heuristics (§ 4.6).** RFC 0017 shows a single `heuristic` id; this RFC
-  replaces it with three optional, arch-keyed maps — `sort_kernel_catalog`, `predict_engine`,
+- **Role-scoped, arch-keyed heuristics (§ 4.6).** Three optional, arch-keyed maps rather than a
+  single heuristic id — `sort_kernel_catalog`, `predict_engine`,
   and `predict_applicable_kernels` — so an engine's distinct selection jobs, and per-architecture
   model choice, are expressible without a later schema change. Consumed by
   [RFC 0019](0019_UniversalHeuristicDescriptor.md).
@@ -1146,7 +1146,7 @@ performed at build time and run time alike:
 
 The full cross-descriptor reference-integrity check (which references must resolve, and to what)
 spans multiple descriptor types and is best specified at a higher level than the UED format.
-This RFC fixes only that a UED's own `heuristic` and `metadata` references are subject to it, at
+This RFC fixes only that a UED's own heuristic-role and `metadata` references are subject to it, at
 both build and run time.
 
 #### 13.2.1 Duplicate detection (descriptor `id` and `name`)
@@ -1329,7 +1329,7 @@ fuzzing, this RFC adds UED-specific coverage.
 - **Version accept rule** (§ 14.1): matrix of `file` vs `provider` `major.minor` read from the
   `version` field: same major/older-or-equal minor loads; newer minor rejected; any major mismatch
   dropped.
-- **Semantic checks** (§ 13.2): dangling `metadata`; a dangling `heuristic` when one is named; a
+- **Semantic checks** (§ 13.2): dangling `metadata`; a dangling UHD id in a heuristic role; a
   `knobs` entry absent from the KMD.
 - **`graph_match` arm selection** (§ 4.2, § 13.1): an object carrying both `nodes` and `native` is
   rejected; one carrying neither is rejected; an absent `graph_match` loads and the engine binds an

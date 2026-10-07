@@ -70,6 +70,14 @@ GenericEngine evaluates it with (`uhd::prediction_detail::validateBinding` and `
 - `l2_static_order/`: the `sort_kernel_catalog` UHD is `static_order`. Expected: exit 0
   -- declared order is a legal kernel ranking. `model_checks`: `sort_kernel_catalog`
   succeeds.
+- `l2_dynamic_features/`: the `sort_kernel_catalog` UHD is a `native` scorer whose
+  signature reads `$kernel.block_size` and `$graph.batch`, with the `features_hash` and
+  `trained_against` a feature-consuming model needs. Expected: exit 0 without
+  `--feature-samples` -- the model loads and is admitted, and extraction, which needs a
+  recorded `$graph.batch`, is skipped with a warning (`feature_rows_checked` 0,
+  `feature_extraction_skipped` set). `model_checks`: `sort_kernel_catalog` succeeds. With
+  a sample covering the engine, extraction runs for each candidate kernel, and a sample
+  leaving `$graph.batch` unbound fails the run.
 - `l1_static_order/`: `predict_engine` binds a calibrated `time` UHD whose adapter is
   `static_order`. Expected: non-zero exit -- an L1 estimate needs a `tree_data`, `native`
   or `custom_library` model, so the runtime refuses it. `model_checks`:

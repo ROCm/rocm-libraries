@@ -480,10 +480,10 @@ Other adapters keep the same header and swap the body:
 { "version": "1.0", "id": "…", "name": "…", "adapter": "static_order",
   "static_order": {} }
 
-// custom_library — author-shipped .so behind a C ABI; features_hash advisory if it self-features
+// custom_library — author-shipped .so behind a C ABI; a declared features_signature brings its hash
 { …, "adapter": "custom_library",
   "custom_library": {"library": "vendor_scorer.so", "symbol": "vendor.fmha_scorer",
-                     "hash": "<64 hex>", "config": { … }} }  // symbol + typed config, never inline code
+                     "hash": "<64 hex>", "config": {}} }  // symbol only; a nonempty config is refused
 ```
 
 **On `static_order`.** The body has no parameters. It ranks by UKD `priority` (higher first), then by
@@ -526,8 +526,8 @@ Two header rules govern the split:
 The authoritative schema is the source-tree file `projects/hipdnn/plugin_sdk/schemas/uhd.schema.json`
 (one file per `major.minor`); the inline copy below mirrors it. It targets **Draft 7**, matching
 [RFC 0020 §4.2](0020_UniversalEngineDescriptor.md#42-normative-schema). The schema is not installed:
-the runtime enforces the same rules through its parser, and the packaging tests hold the two together
-(below).
+the runtime enforces the same rules through its own parser (`UhdParser.hpp`), and the packaging tests
+hold the schema and the packer together (below).
 
 ```json
 {
@@ -536,75 +536,76 @@ the runtime enforces the same rules through its parser, and the packaging tests 
   "title": "hipDNN Universal Heuristic Descriptor",
   "type": "object",
   "additionalProperties": false,
-  "patternProperties": { "^(x-|_)": {} },
+  "patternProperties": {"^(x-|_)": {}},
   "required": ["version", "id", "name", "adapter"],
-
   "definitions": {
-    "guid":     { "type": "string",
-                  "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
-    "revision": { "type": "string", "pattern": "^[0-9]{1,9}\\.[0-9]{1,9}$" },
-    "descriptor_ref": {
-      "description": "Which descriptor, and which content revision of it (section 8.1).",
-      "type": "object", "additionalProperties": false,
-      "patternProperties": { "^(x-|_)": {} },
+    "uuid": {"type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?![\\s\\S])"},
+    "revision": {"type": "string", "pattern": "^[0-9]{1,9}\\.[0-9]{1,9}(?![\\s\\S])"},
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {"^(x-|_)": {}},
       "required": ["id", "revision"],
-      "properties": { "id":       { "$ref": "#/definitions/guid" },
-                      "revision": { "$ref": "#/definitions/revision" } }
+      "properties": {
+        "id": {"$ref": "#/definitions/uuid"},
+        "revision": {"$ref": "#/definitions/revision"}
+      }
     },
-    "sha256":   { "description": "SHA-256 of the named file: 64 lowercase hexadecimal digits, no prefix.",
-                  "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "sha256": {
+      "description": "SHA-256 of the named file: 64 lowercase hexadecimal digits, no prefix.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+    },
     "relative_path": {
-      "description": "A file inside the descriptor's directory: no root, UNC or drive prefix and no '..' segment. The loader also refuses any path that normalises outside the directory.",
-      "type": "string", "minLength": 1,
-      "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?![\\s\\S]*(?:^|[/\\\\])\\.\\.(?:[/\\\\]|$))"
+      "description": "A portable '/'-separated file inside the descriptor's directory: no root, backslash, colon, NUL or '..' segment; the final segment names a file. Runtime and packer also reject symlinks escaping that directory at admission (not a concurrent filesystem-mutation boundary).",
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![\\s\\S]*[\\\\:\\u0000])(?![\\s\\S]*(?:^|/)\\.\\.(?:/|(?![\\s\\S])))(?![\\s\\S]*(?:^|/)(?:\\.|)(?![\\s\\S]))"
     },
     "artifact": {
-      "description": "A model file inside the descriptor's directory, optionally content-addressed (section 7.2).",
-      "type": "object", "additionalProperties": false,
-      "patternProperties": { "^(x-|_)": {} },
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {"^(x-|_)": {}},
       "required": ["artifact"],
-      "properties": { "artifact": { "$ref": "#/definitions/relative_path" },
-                      "hash":     { "$ref": "#/definitions/sha256" } }
+      "properties": {
+        "artifact": {"$ref": "#/definitions/relative_path"},
+        "hash": {"$ref": "#/definitions/sha256"}
+      }
     }
   },
-
   "properties": {
-    "version":    { "type": "string", "const": "1.0" },
-    "id":         { "$ref": "#/definitions/guid" },
-    "name":       { "type": "string", "minLength": 1 },
-    "adapter":    { "enum": ["static_order", "native", "table", "tree_data", "onnx", "custom_library"] },
-    "provenance": { "description": "Free-form authoring notes; never read by the loader." },
-
+    "version": {"const": "1.0"},
+    "id": {"$ref": "#/definitions/uuid"},
+    "name": {"type": "string", "minLength": 1},
+    "adapter": {"enum": ["static_order", "native", "table", "tree_data", "onnx", "custom_library"]},
+    "provenance": {"description": "Free-form authoring notes; never read by the loader."},
     "features_signature": {
-      "description": "Ordered model inputs. A string is a $-reference; an object is an expression.",
       "type": "array",
       "minItems": 1,
       "items": {
         "oneOf": [
-          { "type": "string", "pattern": "^\\$." },
-          { "type": "object", "minProperties": 1, "maxProperties": 1 }
+          {"type": "string", "pattern": "^\\$.+"},
+          {"type": "object", "minProperties": 1, "maxProperties": 1}
         ]
       }
     },
+    "features_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{16}(?![\\s\\S])"},
     "categorical_encoding": {
-      "description": "Per-field value->code maps for string-valued features (section 6.5).",
       "type": "object",
-      "propertyNames": { "pattern": "^\\$" },
+      "propertyNames": {"pattern": "^\\$"},
       "additionalProperties": {
         "type": "object",
-        "additionalProperties": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
-        "minProperties": 1
+        "minProperties": 1,
+        "additionalProperties": {"type": "integer", "minimum": -2147483648, "maximum": 2147483647}
       }
     },
-    "features_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{16}$" },
     "trained_against": {
-      "description": "What this heuristic was generated against (section 8.1).",
       "type": "object",
       "additionalProperties": false,
-      "patternProperties": { "^(x-|_)": {} },
+      "patternProperties": {"^(x-|_)": {}},
       "anyOf": [
-        { "required": ["ued", "kmd", "umd"] },
-        { "required": ["selector_revision"] }
+        {"required": ["ued", "kmd", "umd"]},
+        {"required": ["selector_revision"]}
       ],
       "dependencies": {
         "ued": ["kmd", "umd"],
@@ -612,112 +613,111 @@ the runtime enforces the same rules through its parser, and the packaging tests 
         "umd": ["ued", "kmd"]
       },
       "properties": {
-        "ued": { "$ref": "#/definitions/descriptor_ref" },
-        "kmd": { "$ref": "#/definitions/descriptor_ref" },
-        "umd": { "description": "One entry per matcher; empty records that none narrowed the catalog.",
-                 "type": "array", "uniqueItems": true,
-                 "items": { "$ref": "#/definitions/descriptor_ref" } },
-        "selector_revision": { "type": "string", "minLength": 1 },
-        "feature_semantics_revision": {
-          "description": "Revision of the published feature semantics; absent means 1 (section 6.9).",
-          "type": "integer", "minimum": 1, "maximum": 9223372036854775807 }
+        "ued": {"$ref": "#/definitions/dependency"},
+        "kmd": {"$ref": "#/definitions/dependency"},
+        "umd": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/definitions/dependency"}},
+        "selector_revision": {"type": "string", "minLength": 1},
+        "feature_semantics_revision": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807}
       }
     },
-    "objective": { "enum": ["max", "min"] },
+    "objective": {"enum": ["max", "min"]},
     "score": {
       "type": "object",
       "additionalProperties": false,
-      "patternProperties": { "^(x-|_)": {} },
+      "patternProperties": {"^(x-|_)": {}},
       "properties": {
-        "metric":     { "enum": ["tflops", "time"] },
-        "calibrated": { "type": "boolean" },
-        "transform":  { "enum": ["identity", "log1p", "log", "exp", "sqrt"] }
+        "metric": {"enum": ["tflops", "time"]},
+        "calibrated": {"type": "boolean"},
+        "transform": {"enum": ["identity", "log1p", "log", "exp", "sqrt"]}
       }
     },
-
-    "static_order":   { "type": "object", "additionalProperties": false,
-                        "patternProperties": { "^(x-|_)": {} } },
-    "native":         { "type": "object", "additionalProperties": false,
-                        "patternProperties": { "^(x-|_)": {} },
-                        "required": ["symbol"],
-                        "properties": { "symbol": { "type": "string", "minLength": 1 } } },
-    "table":          { "$ref": "#/definitions/artifact" },
-    "tree_data":      { "$ref": "#/definitions/artifact" },
-    "onnx":           { "$ref": "#/definitions/artifact" },
-    "custom_library": { "type": "object", "additionalProperties": false,
-                        "patternProperties": { "^(x-|_)": {} },
-                        "required": ["library", "symbol", "hash"],
-                        "properties": { "library": { "$ref": "#/definitions/relative_path" },
-                                        "symbol":  { "type": "string", "minLength": 1 },
-                                        "hash":    { "$ref": "#/definitions/sha256" },
-                                        "config":  { "type": "object", "maxProperties": 0 } } }
+    "static_order": {
+      "description": "No parameters: static_order ranks by UKD priority, then descriptor id. Declared ordering criteria (`order`) are not implemented and are refused.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {"^(x-|_)": {}}
+    },
+    "native": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {"^(x-|_)": {}},
+      "required": ["symbol"],
+      "properties": {"symbol": {"type": "string", "minLength": 1}}
+    },
+    "table": {"$ref": "#/definitions/artifact"},
+    "tree_data": {"$ref": "#/definitions/artifact"},
+    "onnx": {"$ref": "#/definitions/artifact"},
+    "custom_library": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {"^(x-|_)": {}},
+      "required": ["library", "symbol", "hash"],
+      "properties": {
+        "library": {"$ref": "#/definitions/relative_path"},
+        "symbol": {"type": "string", "minLength": 1},
+        "hash": {"$ref": "#/definitions/sha256"},
+        "config": {"type": "object", "maxProperties": 0}
+      }
+    }
   },
-
+  "oneOf": [
+    {"required": ["static_order"], "properties": {"adapter": {"const": "static_order"}}},
+    {"required": ["native"], "properties": {"adapter": {"const": "native"}}},
+    {"required": ["table"], "properties": {"adapter": {"const": "table"}}},
+    {"required": ["tree_data"], "properties": {"adapter": {"const": "tree_data"}}},
+    {"required": ["onnx"], "properties": {"adapter": {"const": "onnx"}}},
+    {"required": ["custom_library"], "properties": {"adapter": {"const": "custom_library"}}}
+  ],
   "allOf": [
-    { "if":   { "properties": { "adapter": { "const": "static_order" } } },
-      "then": { "required": ["static_order"] } },
-    { "if":   { "properties": { "adapter": { "const": "native" } } },
-      "then": { "required": ["native", "objective"] } },
-    { "if":   { "properties": { "adapter": { "const": "table" } } },
-      "then": { "required": ["table", "objective",
-                             "features_signature", "features_hash", "trained_against"] } },
-    { "if":   { "properties": { "adapter": { "const": "tree_data" } } },
-      "then": { "required": ["tree_data", "objective",
-                             "features_signature", "features_hash", "trained_against"] } },
-    { "if":   { "properties": { "adapter": { "const": "onnx" } } },
-      "then": { "required": ["onnx", "objective",
-                             "features_signature", "features_hash", "trained_against"] } },
-    { "if":   { "properties": { "adapter": { "const": "custom_library" } } },
-      "then": { "required": ["custom_library", "objective"] } },
-
-    { "if": { "required": ["static_order"] },
-      "then": { "properties": { "adapter": { "const": "static_order" } } } },
-    { "if": { "required": ["native"] },
-      "then": { "properties": { "adapter": { "const": "native" } } } },
-    { "if": { "required": ["table"] },
-      "then": { "properties": { "adapter": { "const": "table" } } } },
-    { "if": { "required": ["tree_data"] },
-      "then": { "properties": { "adapter": { "const": "tree_data" } } } },
-    { "if": { "required": ["onnx"] },
-      "then": { "properties": { "adapter": { "const": "onnx" } } } },
-    { "if": { "required": ["custom_library"] },
-      "then": { "properties": { "adapter": { "const": "custom_library" } } } },
-
-    { "if":   { "required": ["features_signature"] },
-      "then": { "required": ["features_hash"] } },
-    { "if":   { "required": ["categorical_encoding"] },
-      "then": { "required": ["features_signature"] } },
-    { "if":   { "properties": { "score": { "required": ["calibrated"],
-                                           "properties": { "calibrated": { "const": true } } } },
-                "required": ["score"] },
-      "then": { "properties": { "score": { "required": ["metric"] } }, "required": ["objective"] } },
-    { "if":   { "properties": { "score": { "required": ["metric"],
-                                           "properties": { "metric": { "const": "tflops" } } } },
-                "required": ["score"] },
-      "then": { "properties": { "objective": { "const": "max" } }, "required": ["objective"] } },
-    { "if":   { "properties": { "score": { "required": ["metric"],
-                                           "properties": { "metric": { "const": "time" } } } },
-                "required": ["score"] },
-      "then": { "properties": { "objective": { "const": "min" } }, "required": ["objective"] } }
+    {"oneOf": [
+      {"required": ["static_order"]}, {"required": ["native"]},
+      {"required": ["table"]}, {"required": ["tree_data"]},
+      {"required": ["onnx"]}, {"required": ["custom_library"]}
+    ]},
+    {"if": {"properties": {"adapter": {"enum": ["table", "tree_data", "onnx"]}}},
+     "then": {"required": ["features_signature", "features_hash", "trained_against"]}},
+    {"if": {"required": ["features_signature"]},
+     "then": {"required": ["features_hash", "trained_against"]}},
+    {"if": {"required": ["categorical_encoding"]},
+     "then": {"required": ["features_signature"]}},
+    {"if": {"properties": {"adapter": {"enum": ["native", "table", "tree_data", "onnx", "custom_library"]}}},
+     "then": {"required": ["objective"]}},
+    {"if": {"required": ["score"],
+            "properties": {"score": {"required": ["calibrated"],
+                                     "properties": {"calibrated": {"const": true}}}}},
+     "then": {"properties": {"score": {"required": ["metric"]}}}},
+    {"if": {"required": ["score"],
+            "properties": {"score": {"required": ["metric"],
+                                     "properties": {"metric": {"const": "tflops"}}}}},
+     "then": {"required": ["objective"], "properties": {"objective": {"const": "max"}}}},
+    {"if": {"required": ["score"],
+            "properties": {"score": {"required": ["metric"],
+                                     "properties": {"metric": {"const": "time"}}}}},
+     "then": {"required": ["objective"], "properties": {"objective": {"const": "min"}}}}
   ]
 }
 ```
 
-**The schema enforces the header rules; it does not merely accompany them.** Three of them are worth
+**The schema enforces the header rules; it does not merely accompany them.** Several of them are worth
 naming, because each needs an explicit construct rather than falling out of the document shape:
 
 - **Exactly one body, and it is the named one.** `additionalProperties: false` is not what delivers
   this. That keyword rejects *undeclared* property names, and every adapter body is declared — a
   `native` descriptor carrying an `onnx` body alongside it uses only names the schema knows, so the
-  keyword has nothing to object to. Exclusivity comes from the second block of conditionals: each body,
-  *if present*, constrains `adapter` to its own name. Paired with the first block (each `adapter` value
-  requires its body), the discriminant and the body imply each other in both directions, and a second
-  body of any kind is unsatisfiable.
+  keyword has nothing to object to. Two `oneOf` constructs deliver it instead. The top-level `oneOf`
+  pairs each `adapter` value with its own required body, so the named body must be present. The first
+  `allOf` entry is a `oneOf` over body presence alone, so exactly one body may be present. Together
+  they make the discriminant and the body imply each other, and a second body of any kind is
+  unsatisfiable.
 - **A body is required, including `static_order`'s.** The body is a required member for every adapter
-  ([Section 4.1](#41-field-reference-normative)), so `static_order` is conditioned like the rest rather
-  than left as the one adapter whose absent body validates.
-- **The scoring and training fields are conditioned, and their subfields are reachable.** A model
-  adapter requires `objective`, the feature contract, and `trained_against`. `trained_against` in turn
+  ([Section 4.1](#41-field-reference-normative)), so `static_order` has its own `oneOf` branch like the
+  rest rather than being left as the one adapter whose absent body validates. Its body is closed: a
+  declared ordering criterion (`order`) is refused.
+- **The scoring and training fields are conditioned, and their subfields are reachable.** Every adapter
+  except `static_order` requires `objective`. The model adapters (`table`, `tree_data`, `onnx`) also
+  require the feature contract and `trained_against`, and any document declaring a
+  `features_signature` requires `features_hash` and `trained_against` with it, whatever its adapter.
+  `trained_against` in turn
   requires at least one complete form — all three descriptor entries, a `selector_revision`, or both —
   through an `anyOf` paired with `dependencies` that make partial descriptor provenance unsatisfiable.
   Which forms a binding *needs* is the loader's to check, not the schema's: an engine estimate of a
@@ -734,8 +734,8 @@ naming, because each needs an explicit construct rather than falling out of the 
   `objective` that metric's registry entry fixes ([Section 4.4](#44-ranking-metrics)) — `max` for
   `tflops`, `min` for `time` — and a `calibrated` score must name its metric. The pairing is checked
   here rather than discovered when an engine's estimate sorts backwards
-  ([Section 11.3](#113-cross-engine-comparison)). The `metric` enum and these conditionals are generated
-  from the registry, one conditional per metric, so adding a metric adds a row rather than a hand edit.
+  ([Section 11.3](#113-cross-engine-comparison)). There is one conditional per metric, so adding a
+  metric adds an enum value and one conditional, beside its registry entry.
 - **`transform` is a closed, invertible vocabulary.** A consumer recovering real TFLOPS has to invert
   whatever the trainer applied, so the set is the one the runtime can invert rather than free text. An
   unrecognised transform is refused at load rather than silently treated as `identity`.
@@ -759,23 +759,26 @@ header rules describe: a missing or duplicated adapter body, a model adapter wit
 scalar `umd`, a `umd` entry carrying no revision, an unrecognised transform, a calibrated score naming
 no metric, an `objective` that contradicts its metric's direction, an untruncated digest, a model `hash`
 spelled any way but 64 lowercase hexadecimal digits, a `custom_library` with no `hash`, and a model path
-that is absolute or climbs out of the descriptor's directory. The path pattern refuses every `..`
-segment; the loader normalises the path and refuses only one that leaves the directory, so `a/../b`
-loads but does not validate, which keeps the schema the tighter side. Descriptors at earlier versions,
-such as the `0.1` packaging-test fixtures with placeholder ids, are rejected by the `version`
-constraint, which is the accept rule working as intended rather than a gap.
+that is not a portable descriptor-relative file name. The path pattern refuses a leading `/`, any
+backslash, colon or NUL, every `..` segment, and an empty or `.` final segment; the runtime parser
+applies the same spelling rules and then resolves symlinks, refusing a path whose target leaves the
+descriptor's directory, which no schema can express. Any `version` other than `1.0` is rejected by the
+`const`, which is the accept rule working as intended rather than a gap.
 
-**Schema, packer and parser parity.** The hip-kernel-provider packaging tests
+**Schema and packer parity.** The hip-kernel-provider packaging tests
 (`descriptor-packaging/tests/test_hkp_pack_sidecars.py`) validate every in-tree UHD against
-`uhd.schema.json`, and for each admission rule check that the schema, the packer and the runtime parser
-accept and refuse the same document. A new adapter body or header rule lands in the schema file, the
-inline copy and those tests together. *(See [Open Question 13](#operational).)*
+`uhd.schema.json`, and for each admission rule check that the schema and the packer accept and refuse
+the same document. They do not run the runtime parser: their cases are written to mirror the rules in
+`UhdParser.hpp`, whose own admission behaviour is tested by the plugin SDK's C++ tests
+(`tests/ingestor/uhd/TestUhdKernelHeuristic.cpp`). A new adapter body or header rule lands in the
+schema file, the inline copy, the parser and both test suites together.
+*(See [Open Question 13](#operational).)*
 
 ### 4.2 Adapter Summary
 
-`adapter` is a **single discriminant** — it subsumes [RFC 0017](0017_UniversalKernelDescriptor.md)'s
-illustrative `kind` + `model.framework` into one field (`tree_data` ≈ `kind:model, framework:lightgbm`
-shipped as data), and the body is an adapter-keyed union. Adding a new ranker (a static list, ONNX, a
+`adapter` is a **single discriminant** naming both the ranking mechanism and the model format
+(`tree_data` is a GBDT model, such as LightGBM's, shipped as data), and the body is an adapter-keyed
+union. Adding a new ranker (a static list, ONNX, a
 new model family) is one more `adapter` value — the single discriminant is what makes that additive.
 
 | `adapter` | What it is | Ranking | Model artifact |
@@ -1024,7 +1027,9 @@ the model is trained to rank exactly that catalog. Kernel selection then proceed
    prediction (B, [Section 11.2](#112-two-engine-selection-policies-rfc-0007)) names a configuration and
    its value; plan build later builds one. Both resolve the full applicable catalog's order the same way
    — a covering record first, then the model, then `static_order` — and only then apply any knob pin,
-   taking the first buildable, knob-addressable entry in that order. So when a record covers the
+   taking the first buildable entry in that order. A prediction names that entry by its knobs; when no
+   exposed knob setting names it alone, the prediction is unavailable rather than naming a later entry
+   plan build would not serve. So when a record covers the
    catalog, it decides the configuration the prediction returns, and the plan built from that
    prediction, or from the same request unpinned, is that configuration. The prediction's value is the
    measured one wherever the record yields the requested metric — its time, or the throughput derived
@@ -3400,7 +3405,7 @@ dependency-gated and land only when a concrete need appears.
 13. **Publishing the schema file — RESOLVED for the source tree.** The schema ships as
     `projects/hipdnn/plugin_sdk/schemas/uhd.schema.json`, mirrored by [Section 4.1](#41-field-reference-normative)'s
     inline block, and the packaging tests check every in-tree UHD against it along with
-    schema/packer/parser parity for each admission rule. It is a source-tree file and is not
+    schema/packer parity for each admission rule. It is a source-tree file and is not
     installed. What remains open is whether to install it beside the plugin SDK for out-of-tree
     descriptor authors, and where it sits relative to the UED schema
     ([RFC 0020 §4.2](0020_UniversalEngineDescriptor.md#42-normative-schema)).

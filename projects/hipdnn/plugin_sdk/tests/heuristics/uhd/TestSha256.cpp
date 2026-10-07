@@ -1,11 +1,13 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include "../../DigitGroupingLocale.hpp"
 #include <hipdnn_plugin_sdk/heuristics/uhd/Sha256.hpp>
 
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -75,6 +77,18 @@ TEST(TestIngestorSha256, EveryDigestIsSixtyFourLowercaseHexDigits)
                 << "not lowercase hex: " << digest;
         }
     }
+}
+
+TEST(TestIngestorSha256, TheDigestIgnoresTheGlobalLocale)
+{
+    // A host that installs its users' locale must still produce the digest Python wrote,
+    // or every hashed model is refused.
+    const hipdnn_plugin_sdk::test::ScopedDigitGroupingLocale grouping;
+    std::ostringstream probe;
+    probe << 1234567;
+    ASSERT_EQ(probe.str(), "1,234,567") << "the grouping locale is not in effect";
+
+    EXPECT_EQ(sha256("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 }
 
 } // namespace

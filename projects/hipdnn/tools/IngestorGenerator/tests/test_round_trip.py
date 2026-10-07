@@ -62,6 +62,7 @@ MALFORMED_FIXTURES = [
 # order. See the fixtures' README for the runtime admission each one mirrors.
 ROLE_FIXTURES = [
     ("l2_static_order", 0, [("sort_kernel_catalog", True)]),
+    ("l2_dynamic_features", 0, [("sort_kernel_catalog", True)]),
     (
         "l1_static_order",
         1,
@@ -75,12 +76,19 @@ ROLE_FIXTURES = [
 ]
 
 
-def _run_validator(validator, root):
+def _run_validator(validator, root, *extra):
     """Validate a fixture bundle, always naming the engine it should expose: malformed
     bundles fail by making the loader DROP the engine, leaving no error behind, and
     ``--expect-engine`` turns that silent drop into a non-zero exit."""
     result = subprocess.run(
-        [str(validator), str(root), "--expect-engine", FIXTURE_ENGINE, "--json"],
+        [
+            str(validator),
+            str(root),
+            "--expect-engine",
+            FIXTURE_ENGINE,
+            "--json",
+            *extra,
+        ],
         capture_output=True,
         text=True,
     )
@@ -135,6 +143,35 @@ def test_role_fixture_model_checks(validator, name, exit_code, expected_checks):
     assert [
         (check["role"], check["success"]) for check in payload["model_checks"]
     ] == expected_checks, payload["model_checks"]
+
+
+@pytest.mark.parametrize(
+    "bindings,exit_code,rows",
+    [({"graph.batch": 8}, 0, 2), ({}, 1, None)],
+    ids=["bound", "unbound"],
+)
+def test_a_covering_sample_requires_every_feature_to_extract(
+    validator, tmp_path, bindings, exit_code, rows
+):
+    """Extraction is skipped only when no sample covers the engine. Once one does, every
+    feature must extract -- one row per candidate kernel -- and a sample leaving a
+    feature unbound fails the run instead of being skipped."""
+    samples = tmp_path / "samples.json"
+    samples.write_text(
+        json.dumps([{"engine": FIXTURE_ENGINE, "arch": "gfx942", "bindings": bindings}])
+    )
+    result, payload = _run_validator(
+        validator,
+        FIXTURE_ROOT / "l2_dynamic_features",
+        "--feature-samples",
+        str(samples),
+    )
+
+    assert result.returncode == exit_code, result.stdout + result.stderr
+    [check] = payload["model_checks"]
+    assert check["success"] is (exit_code == 0), check
+    assert check.get("feature_rows_checked") == rows, check
+    assert "feature_extraction_skipped" not in check, check
 
 
 def test_scale_add_round_trip_validates_clean(

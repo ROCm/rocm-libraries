@@ -651,8 +651,18 @@ apply_ctest_category_labels(
             self.assertEqual(
                 configured.returncode, 0, configured.stdout + configured.stderr
             )
+            # A multi-config generator (Visual Studio) lists no tests without -C.
             selected = subprocess.run(
-                [ctest, "--test-dir", str(build), "--show-only=json-v1", "-L", "quick"],
+                [
+                    ctest,
+                    "--test-dir",
+                    str(build),
+                    "-C",
+                    "Debug",
+                    "--show-only=json-v1",
+                    "-L",
+                    "quick",
+                ],
                 capture_output=True,
                 text=True,
                 check=False,

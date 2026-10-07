@@ -9,9 +9,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <iomanip>
-#include <sstream>
 #include <string>
+#include <string_view>
 
 /// @file Sha256.hpp
 /// @brief Dependency-free SHA-256 (FIPS 180-4) for UHD fingerprints (RFC 0019 §6.3), so
@@ -154,13 +153,20 @@ inline std::string sha256Impl(const uint8_t* data, size_t length)
         sha256Block(h, tail.data() + offset);
     }
 
-    std::ostringstream oss;
-    oss << std::hex << std::setfill('0');
-    for(auto hv : h)
+    // Formatted by hand rather than through a stream, whose global locale may group digits:
+    // the digest is compared as text against the one Python wrote.
+    constexpr std::string_view HEX_DIGITS = "0123456789abcdef";
+    constexpr size_t NIBBLES_PER_WORD = 8;
+    std::string digest;
+    digest.reserve(h.size() * NIBBLES_PER_WORD);
+    for(const auto word : h)
     {
-        oss << std::setw(8) << hv;
+        for(size_t nibble = NIBBLES_PER_WORD; nibble-- > 0;)
+        {
+            digest.push_back(HEX_DIGITS[(word >> (nibble * 4)) & 0xFU]);
+        }
     }
-    return oss.str();
+    return digest;
 }
 
 } // namespace detail

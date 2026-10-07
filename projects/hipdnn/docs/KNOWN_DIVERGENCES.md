@@ -113,13 +113,14 @@ maintains a graph-local mapping:
 cuDNN-shaped engine index -> native hipDNN engine ID
 ```
 
-`get_engine_count()` refreshes this map from hipDNN's ranked applicable engine
-list. `get_knobs_for_engine`, `create_execution_plan`, and
+`get_engine_count()` refreshes this map from hipDNN's `FALLBACK` ranking of the
+applicable engines, whatever heuristic modes (including `HeurMode_t` A or B) the
+plans were created with. `get_knobs_for_engine`, `create_execution_plan`, and
 `deselect_engines(vector<int64_t>)` translate cuDNN-shaped dense indices through
-that map before calling native hipDNN APIs.
+that map before calling native hipDNN APIs, so every index names the same engine.
 
-Impact: ordering follows hipDNN's ranked applicable engine list, not cuDNN's
-backend ordering.
+Impact: ordering follows hipDNN's `FALLBACK` ranking of the applicable engines,
+not cuDNN's backend ordering or the ranking of the requested heuristic mode.
 
 ## Knobs
 

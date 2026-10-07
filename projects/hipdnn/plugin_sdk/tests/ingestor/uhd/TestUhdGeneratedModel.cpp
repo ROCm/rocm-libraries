@@ -64,17 +64,17 @@ Catalog catalogAgainstPriority(int64_t seqlen)
 {
     Catalog catalog;
 
-    KernelDefinition small;
-    small.kernelId = testId(0x01);
-    small.priority = 10;
-    small.metadata["tile_m"] = int64_t{64};
+    KernelDefinition smallTile;
+    smallTile.kernelId = testId(0x01);
+    smallTile.priority = 10;
+    smallTile.metadata["tile_m"] = int64_t{64};
 
-    KernelDefinition large;
-    large.kernelId = testId(0x02);
-    large.priority = 1;
-    large.metadata["tile_m"] = int64_t{128};
+    KernelDefinition largeTile;
+    largeTile.kernelId = testId(0x02);
+    largeTile.priority = 1;
+    largeTile.metadata["tile_m"] = int64_t{128};
 
-    catalog.entries = {small, large};
+    catalog.entries = {smallTile, largeTile};
     catalog.bound["q.seqlen"] = seqlen;
     return catalog;
 }

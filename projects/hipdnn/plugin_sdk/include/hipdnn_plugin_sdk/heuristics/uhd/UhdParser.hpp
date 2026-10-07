@@ -118,6 +118,19 @@ inline bool isContainedRelativePath(std::string_view value)
     }
 }
 
+/// A descriptor's asset name is UTF-8 JSON text, so it is decoded as UTF-8 on every
+/// platform; a path built from the narrow string would read it in the Windows active code
+/// page instead. A consumer may compile this header as C++20, where u8path is deprecated.
+inline std::filesystem::path utf8Path(const std::string& value)
+{
+#ifdef __cpp_lib_char8_t
+    return std::filesystem::path(
+        std::u8string_view(reinterpret_cast<const char8_t*>(value.data()), value.size()));
+#else
+    return std::filesystem::u8path(value);
+#endif
+}
+
 /// Resolve existing symlinks too, including a symlinked ancestor of a missing asset.
 /// This is an admission-time containment check, not protection from later filesystem
 /// mutation; deployment must keep descriptors and artifacts immutable while in use.
@@ -126,7 +139,7 @@ inline std::filesystem::path containedArtifactPath(const std::filesystem::path& 
 {
     const auto directory
         = std::filesystem::weakly_canonical(std::filesystem::absolute(descriptor).parent_path());
-    const auto resolved = std::filesystem::weakly_canonical(directory / relativePath);
+    const auto resolved = std::filesystem::weakly_canonical(directory / utf8Path(relativePath));
     const auto relative = resolved.lexically_relative(directory);
     if(relative.empty() || relative == "." || relative.is_absolute() || *relative.begin() == "..")
     {
@@ -279,6 +292,8 @@ inline std::string featureSemanticsMismatch(const std::vector<nlohmann::json>& f
 }
 
 /// @brief Read a bounded UHD JSON document, rejecting duplicate keys before interpretation.
+/// Comments are stripped, as in every authored descriptor (RFC 0020 §4.3); trailing commas
+/// are still malformed.
 inline nlohmann::json readUhdDocument(const std::filesystem::path& path)
 {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
@@ -300,7 +315,8 @@ inline nlohmann::json readUhdDocument(const std::filesystem::path& path)
     std::vector<std::set<std::string>> objects;
     size_t events = 0;
     return nlohmann::json::parse(
-        contents, [&](int depth, nlohmann::json::parse_event_t event, nlohmann::json& parsed) {
+        contents,
+        [&](int depth, nlohmann::json::parse_event_t event, nlohmann::json& parsed) {
             if(depth > static_cast<int>(parser_detail::MAX_DOCUMENT_DEPTH)
                || ++events > 4 * parser_detail::MAX_DOCUMENT_NODES)
             {
@@ -320,7 +336,9 @@ inline nlohmann::json readUhdDocument(const std::filesystem::path& path)
                 parser_detail::fail("duplicate UHD key in " + path.string());
             }
             return true;
-        });
+        },
+        /*allow_exceptions=*/true,
+        /*ignore_comments=*/true);
 }
 
 /// @brief Lowercase SHA-256 hex of the artifact at @p path, or "" when it is absent, not a

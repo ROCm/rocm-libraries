@@ -272,39 +272,67 @@ TEST(TestIngestorKernelHeuristic, BreaksTiesAmongNanScoringKernelsOnPriorityThen
     EXPECT_EQ(ranked[2].kernelId, lowPriorityId); // priority 1 sinks despite the id order
 }
 
-TEST(TestIngestorKernelHeuristic, TreatsInfiniteScoresAsOrdinaryExtremes)
+/// RFC 0019 §5 step 4: an infinite score is not a "must pick" sentinel. Both infinities carry
+/// ids that sort ahead of the finite kernel, so only demotion can put the finite one first.
+TEST(TestIngestorKernelHeuristic, RanksInfiniteScoresLastWhateverTheirKernelId)
 {
-    // Infinities are already a valid strict weak ordering; they must keep ranking
-    // normally rather than being lumped in with NaN.
-    const ScopedTestSymbols symbols;
+    constexpr const char* INFINITE_SCORE_SYMBOL = "hipdnn.kernel_ingestor.test.infinite_score";
+    ScoreRegistry::registerSymbol(
+        INFINITE_SCORE_SYMBOL,
+        +[](const MatchContext&, const BoundTokens&, const KernelDefinition& kernel) -> double {
+            switch(kernel.getIntMetadata(BLOCK_SIZE))
+            {
+            case 4096:
+                return std::numeric_limits<double>::infinity();
+            case 128:
+                return -std::numeric_limits<double>::infinity();
+            default:
+                return 1.0;
+            }
+        });
     const TestGraph graph;
     const auto properties = testDeviceProperties();
-    const MatchContext context{graph, 0, properties};
-
-    ScoreRegistry::registerSymbol(
-        "hipdnn.kernel_ingestor.test.infinite_score",
-        +[](const MatchContext&, const BoundTokens&, const KernelDefinition& kernel) -> double {
-            return kernel.getIntMetadata(BLOCK_SIZE) == 4096
-                       ? std::numeric_limits<double>::infinity()
-                       : -std::numeric_limits<double>::infinity();
-        });
 
     Catalog catalog;
     const auto positiveInfinityId = testId(0x01);
     const auto negativeInfinityId = testId(0x02);
-    catalog.entries
-        = {makeDefinition(negativeInfinityId, 64), makeDefinition(positiveInfinityId, 4096)};
+    const auto finiteId = testId(0x03);
+    catalog.entries = {makeDefinition(finiteId, 64),
+                       makeDefinition(positiveInfinityId, 4096),
+                       makeDefinition(negativeInfinityId, 128)};
 
+    // Metric-less `max` and `min` build NativeKernelHeuristic directly; `time` is a physical
+    // `min` score ranked through UhdKernelHeuristic.
+    struct Objective
     {
-        const NativeKernelHeuristic heuristic("hipdnn.kernel_ingestor.test.infinite_score");
-        const auto ranked = heuristic.rank(catalog, context);
+        const char* objective;
+        const char* metric;
+        const char* rankingMetric;
+    };
+    const std::vector<Objective> objectives
+        = {{"max", "", "tflops"}, {"min", "", "tflops"}, {"min", "time", "time"}};
+    for(const auto& [objective, metric, rankingMetric] : objectives)
+    {
+        SCOPED_TRACE(std::string("objective '") + objective + "', metric '" + metric + "'");
+        HeuristicDescriptor descriptor;
+        descriptor.id = HEURISTIC_ID;
+        descriptor.name = "infinite scorer";
+        descriptor.adapter = UhdAdapter::NATIVE;
+        descriptor.nativeSymbol = INFINITE_SCORE_SYMBOL;
+        descriptor.objective = objective;
+        descriptor.score = {metric, false, "identity"};
+        const auto heuristic = makeKernelHeuristic(descriptor);
+        ASSERT_NE(heuristic, nullptr);
+        const MatchContext context{graph, 0, properties, rankingMetric};
 
-        ASSERT_EQ(ranked.size(), 2U);
-        EXPECT_EQ(ranked.front().kernelId, positiveInfinityId);
-        EXPECT_EQ(ranked.back().kernelId, negativeInfinityId);
+        const auto ranked = heuristic->rankScored(catalog, context);
+        ASSERT_EQ(ranked.size(), 3U);
+        EXPECT_EQ(ranked[0].kernelId, finiteId) << "an infinite score outranked a finite one";
+        EXPECT_DOUBLE_EQ(ranked[1].score, 0.0) << "an infinite score was reported";
+        EXPECT_DOUBLE_EQ(ranked[2].score, 0.0) << "an infinite score was reported";
     }
 
-    ScoreRegistry::unregisterSymbol("hipdnn.kernel_ingestor.test.infinite_score");
+    ScoreRegistry::unregisterSymbol(INFINITE_SCORE_SYMBOL);
 }
 
 TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicBuildsANativeHeuristicForNativeKind)
@@ -449,26 +477,60 @@ TEST(TestIngestorKernelHeuristic, ATransformedZeroIsAMeasurementNotItsAbsence)
     ScoreRegistry::unregisterSymbol(LOG_MILLISECONDS_SYMBOL);
 }
 
-/// Under `min` a zero cost means no measurement; negated it would be -0 and outrank every
-/// priced kernel.
-TEST(TestIngestorKernelHeuristic, AZeroCostDoesNotWinUnderANativeMinScorer)
+/// RFC 0019 §5 step 4 holds a native scorer to the model adapters' rule: only a physical score
+/// must be positive. A metric-less cost is an ordering value, so zero and negative costs rank
+/// on their value; a `time` cost that is not positive ranks last and reports 0.
+TEST(TestIngestorKernelHeuristic, ANativeMinScorerHoldsOnlyAPhysicalCostPositive)
 {
-    const ScopedMillisecondsScorer scorer;
+    constexpr const char* SIGNED_COST_SYMBOL = "hipdnn.kernel_ingestor.test.signed_cost";
+    ScoreRegistry::registerSymbol(
+        SIGNED_COST_SYMBOL,
+        +[](const MatchContext&, const BoundTokens&, const KernelDefinition& kernel) {
+            switch(kernel.getIntMetadata(BLOCK_SIZE))
+            {
+            case 256:
+                return 1.0;
+            case 128:
+                return 0.0;
+            default:
+                return -1.0;
+            }
+        });
     const TestGraph graph;
     const auto properties = testDeviceProperties();
-    const MatchContext context{graph, 0, properties};
 
     Catalog catalog;
-    const auto unpricedId = testId(0x01);
-    const auto slowId = testId(0x02);
-    catalog.entries = {makeDefinition(unpricedId, 128), makeDefinition(slowId, 64)};
+    // Ids in descending cost, so the id tie-break alone would put the positive cost first.
+    const auto positiveId = testId(0x01);
+    const auto zeroId = testId(0x02);
+    const auto negativeId = testId(0x03);
+    catalog.entries = {makeDefinition(positiveId, 256),
+                       makeDefinition(zeroId, 128),
+                       makeDefinition(negativeId, 64)};
 
-    const auto heuristic = makeKernelHeuristic(millisecondsDescriptor(""));
-    const auto ranked = heuristic->rankScored(catalog, context);
+    auto descriptor = millisecondsDescriptor("");
+    descriptor.nativeSymbol = SIGNED_COST_SYMBOL;
+    const auto orderingCost = makeKernelHeuristic(descriptor);
+    ASSERT_NE(orderingCost, nullptr);
+    const auto ordered = orderingCost->rankScored(catalog, MatchContext{graph, 0, properties});
+    ASSERT_EQ(ordered.size(), 3U);
+    EXPECT_EQ(ordered[0].kernelId, negativeId) << "a negative metric-less cost was refused";
+    EXPECT_EQ(ordered[1].kernelId, zeroId) << "a zero metric-less cost was refused";
+    EXPECT_EQ(ordered[2].kernelId, positiveId);
+    EXPECT_DOUBLE_EQ(ordered[0].score, 1.0);
 
-    ASSERT_EQ(ranked.size(), 2U);
-    EXPECT_EQ(ranked.front().kernelId, slowId);
-    EXPECT_DOUBLE_EQ(ranked.back().score, 0.0) << "the unpriced kernel reported a figure of merit";
+    auto timeDescriptor = millisecondsDescriptor("time");
+    timeDescriptor.nativeSymbol = SIGNED_COST_SYMBOL;
+    const auto physicalCost = makeKernelHeuristic(timeDescriptor);
+    ASSERT_NE(physicalCost, nullptr);
+    const auto timed
+        = physicalCost->rankScored(catalog, MatchContext{graph, 0, properties, "time"});
+    ASSERT_EQ(timed.size(), 3U);
+    EXPECT_EQ(timed[0].kernelId, positiveId) << "a non-positive time outranked a real one";
+    EXPECT_DOUBLE_EQ(timed[1].score, 0.0) << "a non-positive time reported a figure of merit";
+    EXPECT_DOUBLE_EQ(timed[2].score, 0.0) << "a non-positive time reported a figure of merit";
+
+    ScoreRegistry::unregisterSymbol(SIGNED_COST_SYMBOL);
 }
 
 TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicDegradesWhenAModelCannotBeBroughtUp)

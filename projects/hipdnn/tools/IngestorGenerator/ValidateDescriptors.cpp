@@ -59,6 +59,9 @@
  * models load through `UhdKernelHeuristic::tryCreate`, and `predict_engine` models pass
  * the L1 guards. A model the loader withheld is reported invalid without being loaded.
  * Model artifacts, `custom_library` scorers included, are loaded; no scorer is called.
+ * Features are extracted for every `--feature-samples` entry covering the engine. With
+ * none, a signature reading values only a sample supplies has its extraction skipped with
+ * a warning; with one, every extraction failure is an error.
  */
 
 namespace
@@ -410,6 +413,44 @@ std::vector<const nlohmann::json*> relevantSamples(const nlohmann::json& samples
     return relevant;
 }
 
+/// The feature rows a model check extracted, or why it extracted none.
+struct FeatureCheck
+{
+    size_t rows = 0;
+    /// Set when no recorded sample covers the binding and the signature reads values only a
+    /// sample supplies. The model is still loaded and admitted; only extraction is skipped,
+    /// which is a warning rather than a failure.
+    std::string skipped;
+};
+
+/// Why extraction is skipped for a binding no recorded sample covers, or "" when the
+/// signature reads nothing outside `$kernel` (which the candidate kernels bind) and so
+/// extracts from its static values and the kernels alone.
+std::string skipReasonWithoutSample(const hipdnn_plugin_sdk::uhd::FeatureExtractor& extractor)
+{
+    constexpr std::string_view KERNEL_REFERENCE_PREFIX = "$kernel.";
+    // Sorted, so the warning naming them is stable.
+    std::set<std::string> unbound;
+    for(const auto& reference : extractor.getVariableRefs())
+    {
+        if(reference.rfind(KERNEL_REFERENCE_PREFIX, 0) != 0)
+        {
+            unbound.insert(reference);
+        }
+    }
+    if(unbound.empty())
+    {
+        return {};
+    }
+    std::string reason = "no --feature-samples entry covers this engine and architecture; "
+                         "feature extraction skipped for";
+    for(const auto& reference : unbound)
+    {
+        reason += " " + reference;
+    }
+    return reason;
+}
+
 /// The loader's resolved binding of @p id for (@p metric, @p arch) in @p byMetric, after
 /// its pre-flight pruning. Throws when the loader withheld the model, which it has already
 /// logged.
@@ -434,12 +475,12 @@ const HeuristicDescriptor&
 
 /// `predict_engine`: the L1 admission GenericEngine applies (`validateBinding`, `model`),
 /// not the kernel ranker's loader. Features extract once per graph sample, with no kernel.
-/// @returns The feature rows extracted.
-size_t checkEngineModel(const DescriptorSet& set,
-                        const std::string& arch,
-                        const DescriptorId& id,
-                        const HeuristicDescriptor& model,
-                        const nlohmann::json& samples)
+/// @returns The feature rows extracted, or why extraction was skipped.
+FeatureCheck checkEngineModel(const DescriptorSet& set,
+                              const std::string& arch,
+                              const DescriptorId& id,
+                              const HeuristicDescriptor& model,
+                              const nlohmann::json& samples)
 {
     namespace prediction = hipdnn_plugin_sdk::uhd::prediction_detail;
     const auto& bound = loaderBinding(
@@ -454,7 +495,7 @@ size_t checkEngineModel(const DescriptorSet& set,
             + hipdnn_flatbuffers_sdk::data_objects::EnumNamePredictionStatus(compiled->status)
             + ": " + compiled->reason);
     }
-    size_t evaluated = 0;
+    FeatureCheck checked;
     if(!model.featuresSignature.empty())
     {
         for(const auto* sample : relevantSamples(samples, set.engine.name, arch))
@@ -464,24 +505,32 @@ size_t checkEngineModel(const DescriptorSet& set,
             {
                 bindSample(context, sample->at("bindings"));
             }
+            else
+            {
+                checked.skipped = skipReasonWithoutSample(*compiled->extractor);
+                if(!checked.skipped.empty())
+                {
+                    return checked;
+                }
+            }
             static_cast<void>(compiled->extractor->extract(context));
-            ++evaluated;
+            ++checked.rows;
         }
     }
-    return evaluated;
+    return checked;
 }
 
 /// Kernel-scoped roles: the real `UhdKernelHeuristic::tryCreate`, then extraction for
 /// every candidate kernel the model would rank.
-/// @returns The feature rows extracted.
-size_t checkKernelModel(const DescriptorSet& set,
-                        const char* role,
-                        const std::string& arch,
-                        const DescriptorId& id,
-                        const HeuristicDescriptor& model,
-                        const hipdnn_plugin_sdk::uhd::FeatureExtractor& extractor,
-                        const std::unordered_set<std::string>& fields,
-                        const nlohmann::json& samples)
+/// @returns The feature rows extracted, or why extraction was skipped.
+FeatureCheck checkKernelModel(const DescriptorSet& set,
+                              const char* role,
+                              const std::string& arch,
+                              const DescriptorId& id,
+                              const HeuristicDescriptor& model,
+                              const hipdnn_plugin_sdk::uhd::FeatureExtractor& extractor,
+                              const std::unordered_set<std::string>& fields,
+                              const nlohmann::json& samples)
 {
     // A ranker the loader pruned is never loaded, as at runtime. predict_applicable_kernels
     // has no consumer and so no resolved binding; its model is loaded as authored.
@@ -495,10 +544,10 @@ size_t checkKernelModel(const DescriptorSet& set,
     {
         throw std::invalid_argument("Model load failed; see runtime diagnostics");
     }
-    size_t evaluated = 0;
+    FeatureCheck checked;
     if(model.featuresSignature.empty())
     {
-        return evaluated;
+        return checked;
     }
     for(const auto* sample : relevantSamples(samples, set.engine.name, arch))
     {
@@ -506,6 +555,14 @@ size_t checkKernelModel(const DescriptorSet& set,
         if(sample != nullptr)
         {
             bindSample(context, sample->at("bindings"));
+        }
+        else
+        {
+            checked.skipped = skipReasonWithoutSample(extractor);
+            if(!checked.skipped.empty())
+            {
+                return checked;
+            }
         }
         const auto target = sample == nullptr ? arch : sample->at("arch").get<std::string>();
         for(const auto& pack : set.packs)
@@ -521,18 +578,18 @@ size_t checkKernelModel(const DescriptorSet& set,
                 definition.metadata = kernel.metadata;
                 context.clearKernelVars();
                 context.bindKernelVars(detail::kernelVarsFrom(definition));
-                // Missing dynamic values are errors, not zeros or made-up
-                // device facts. Supply a sample from real enumeration.
+                // A value the sample or the kernel leaves unbound is an error, not a
+                // zero or a made-up device fact.
                 static_cast<void>(extractor.extract(context));
-                ++evaluated;
+                ++checked.rows;
             }
         }
     }
-    if(evaluated == 0)
+    if(checked.rows == 0)
     {
         throw std::invalid_argument("No matching candidate to validate feature bindings");
     }
-    return evaluated;
+    return checked;
 }
 
 /// RFC 0019 §6.3 over every role-bound model. A failure is logged as an ERROR so it fails
@@ -582,13 +639,21 @@ nlohmann::json validateModels(const DescriptorCatalog& catalog,
                       {
                           throw std::invalid_argument("Feature contract hash mismatch");
                       }
-                      const size_t evaluated
+                      const auto features
                           = std::string_view(role)
                                     == hipdnn_plugin_sdk::uhd::prediction_detail::ENGINE_ROLE
                                 ? checkEngineModel(set, arch, id, *model, samples)
                                 : checkKernelModel(
                                       set, role, arch, id, *model, extractor, fields, samples);
-                      check["feature_rows_checked"] = evaluated;
+                      check["feature_rows_checked"] = features.rows;
+                      if(!features.skipped.empty())
+                      {
+                          check["feature_extraction_skipped"] = features.skipped;
+                          HIPDNN_PLUGIN_LOG_WARN("descriptor validator: engine='"
+                                                 << set.engine.name << "' role=" << role
+                                                 << " arch='" << arch << "' model=" << toString(id)
+                                                 << ": " << features.skipped);
+                      }
                       check["scorer_execution"] = "loaded_not_called";
                       check["success"] = true;
                   }
@@ -598,8 +663,7 @@ nlohmann::json validateModels(const DescriptorCatalog& catalog,
                       HIPDNN_PLUGIN_LOG_ERROR("descriptor validator: engine='"
                                               << set.engine.name << "' role=" << role << " arch='"
                                               << arch << "' model=" << toString(id) << ": "
-                                              << error.what()
-                                              << "; dynamic bindings require --feature-samples");
+                                              << error.what());
                   }
                   checks.push_back(std::move(check));
               };
@@ -681,7 +745,10 @@ void printHelp(const char* programName)
               << "  --expect-engine <name>    Require this engine name in the validated set "
                  "(repeatable)\n"
               << "  --feature-samples <json>  Recorded [{engine, arch, bindings}] for dynamic "
-                 "features (repeatable)\n"
+                 "features\n"
+              << "                            (repeatable). An engine no sample covers skips "
+                 "the extraction\n"
+              << "                            that needs one, with a warning\n"
               << "  --json                    Emit machine-readable JSON instead of text\n"
               << "  --help, -h                Show this help message\n";
 }

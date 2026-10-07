@@ -15,6 +15,7 @@
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
+#include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericEngine.hpp>
@@ -410,6 +411,41 @@ TEST(TestIngestorGenericEngine, AnUnregisteredRankingMetricIsABadParameter)
     expectBadParam([&] { engine.initializeExecutionContext(handle, graph, config, context); });
 }
 
+/// A request no exact prediction can honour is a fault in the request, not a missing estimate.
+TEST(TestIngestorGenericEngine, AConfigurationPredictionOfABenchmarkingRequestIsAnInvalidValue)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    const ScopedTestSymbols symbols;
+    const StubDeviceResolver resolver;
+    const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}), makeStubStateManager(), resolver);
+    StubHandle handle;
+    const TestGraph graph(makeGraphId(0x71));
+
+    EngineConfigT request;
+    auto benchmarking = std::make_unique<KnobSettingT>();
+    benchmarking->knob_id = hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME;
+    IntValueT enabled;
+    enabled.value = 1;
+    benchmarking->value.Set(enabled);
+    request.knobs.push_back(std::move(benchmarking));
+    flatbuffers::FlatBufferBuilder buffer;
+    buffer.Finish(EngineConfig::Pack(buffer, &request));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(
+        buffer.GetBufferPointer(), buffer.GetSize());
+
+    try
+    {
+        const auto prediction = engine.getPrediction(
+            handle, graph, config, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, true);
+        ADD_FAILURE() << "answered with status " << static_cast<int>(prediction.status) << ": "
+                      << prediction.reason;
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+    }
+}
+
 enum class ConfigurationCatalog
 {
     SINGLETON,
@@ -509,6 +545,61 @@ INSTANTIATE_TEST_SUITE_P(KnobTuples,
                          ::testing::Values(ConfigurationCatalog::SINGLETON,
                                            ConfigurationCatalog::DISTINCT_KNOBS,
                                            ConfigurationCatalog::AMBIGUOUS_KNOBS));
+
+/// RFC 0019 §5 step 9: the prediction names the configuration plan build serves. When knobs
+/// cannot name it, a lower-ranked configuration is not a substitute.
+TEST(TestIngestorGenericEngine, AnUnnameableServedConfigurationIsNotPredictedAsTheNextOne)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    const ScopedTestSymbols symbols;
+    const StubDeviceResolver resolver;
+    const StubWorkspaceHandler handler; // sizes workspace by block size: names the built kernel
+    const ScopedDispatchRegistration<StubHandle> dispatch("hipdnn.kernel_ingestor.test.dispatch",
+                                                          handler);
+    MetadataSchema schema;
+    schema.id = SCHEMA_ID;
+    schema.fields = {{BLOCK_SIZE, MetadataType::INT, MetadataValue{int64_t{64}}},
+                     {DTYPE, MetadataType::STRING, std::nullopt}};
+    KernelDescriptorPack pack;
+    pack.id = PACK_ID;
+    pack.engineId = ENGINE_ID;
+    pack.dispatchId = DISPATCH_ID;
+    // The two 128 kernels rank first and share the only exposed knob; K64 alone is nameable.
+    pack.kernels = {makeTestKernel(testId(0x64), "kernel_64_float", 64, "FLOAT"),
+                    makeTestKernel(testId(0x65), "kernel_128_float", 128, "FLOAT"),
+                    makeTestKernel(testId(0x66), "kernel_128_half", 128, "HALF")};
+    HeuristicDescriptor model;
+    model.id = HEURISTIC_ID;
+    model.adapter = UhdAdapter::NATIVE;
+    model.nativeSymbol = SCORE_SYMBOL; // the block size
+    model.score = {"tflops", true, "identity"};
+    auto ranker = UhdKernelHeuristic::tryCreate(model, "calibrated configuration", {BLOCK_SIZE});
+    ASSERT_NE(ranker, nullptr);
+    auto manager = std::make_unique<KernelIngestorStateManager<StubHandle>>(
+        std::move(schema),
+        std::vector<MatchDescriptor>{},
+        makeStubDispatches(),
+        std::vector<KernelDescriptorPack>{std::move(pack)},
+        std::move(ranker),
+        GRAPH_MATCH_SYMBOL);
+    const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}), std::move(manager), resolver);
+    StubHandle handle;
+    const TestGraph graph(makeGraphId(0x72));
+    const auto buffer = configWithMetric("tflops");
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(
+        buffer.GetBufferPointer(), buffer.GetSize());
+
+    StubContext context;
+    engine.initializeExecutionContext(handle, graph, config, context);
+    ASSERT_EQ(context.plan().getWorkspaceSize(handle), 128U)
+        << "the precondition: plan build serves a kernel its knobs cannot name";
+
+    const auto prediction
+        = engine.getPrediction(handle, graph, config, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, true);
+    EXPECT_EQ(prediction.status, PredictionStatus::UNAVAILABLE)
+        << "predicted value " << prediction.value << " for a kernel plan build does not serve";
+    EXPECT_EQ(prediction.engine_config, nullptr);
+}
 
 /// RFC 0019 §5 step 9: a benchmark record covering the catalog decides the predicted
 /// configuration and its value. The model prefers K128; the record measured K64 faster.

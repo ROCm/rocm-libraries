@@ -359,17 +359,16 @@ TEST(TestKernelIngestorEngine, ResolvesAModuleDirectoryFromAnAddressWithinIt)
 // ---------------------------------------------------------------------------
 
 /// With no runtime dir set, the provider's own tree is the only root -- no phantom
-/// second entry. HIPDNN_DESCRIPTOR_RUNTIME_DIR may already be set from an outer shell,
-/// so it's cleared here the same way FallsBackToAModuleRelativeOrInstalledPath clears
-/// HIPDNN_DESCRIPTOR_DIR: an explicit empty value, which the empty() check treats as
-/// absent. HIPDNN_DESCRIPTOR_PATH is cleared for the same reason and one more: main()
-/// publishes the production root there for the pack census cases, so these three count
-/// roots against a list this binary always sets.
+/// second entry. HIPDNN_DESCRIPTOR_RUNTIME_DIR and HIPDNN_DESCRIPTOR_PATH may already be
+/// set from an outer shell, so both are cleared here the same way
+/// FallsBackToAModuleRelativeOrInstalledPath clears HIPDNN_DESCRIPTOR_DIR: an explicit
+/// empty value, which the loader treats as absent. Every test below that counts roots
+/// clears HIPDNN_DESCRIPTOR_PATH for the same reason: each of its entries is another root.
 TEST(TestKernelIngestorEngine, ReturnsOnlyTheProviderTreeWhenRuntimeDirIsUnset)
 {
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter unset(
         "HIPDNN_DESCRIPTOR_RUNTIME_DIR", "");
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter noPath(
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter noSearchPath(
         "HIPDNN_DESCRIPTOR_PATH", "");
 
     const auto roots = descriptorSearchDirectories();
@@ -386,7 +385,7 @@ TEST(TestKernelIngestorEngine, AppendsHipdnnDescriptorRuntimeDirAfterTheProvider
     const ScopedDirectory runtimeDir = claimScratchDirectory(SCRATCH_LABEL);
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter override(
         "HIPDNN_DESCRIPTOR_RUNTIME_DIR", runtimeDir.path().string());
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter noPath(
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter noSearchPath(
         "HIPDNN_DESCRIPTOR_PATH", "");
 
     const auto roots = descriptorSearchDirectories();
@@ -402,7 +401,7 @@ TEST(TestKernelIngestorEngine, IgnoresAHipdnnDescriptorRuntimeDirThatDoesNotExis
 {
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter stale(
         "HIPDNN_DESCRIPTOR_RUNTIME_DIR", "/nowhere/in/particular");
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter noPath(
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter noSearchPath(
         "HIPDNN_DESCRIPTOR_PATH", "");
 
     const auto roots = descriptorSearchDirectories();

@@ -7,6 +7,7 @@
 
 #include <map>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -23,6 +24,66 @@
 /// @brief Builds an engine from a descriptor set; nothing here is operation-specific.
 namespace hipdnn_plugin_sdk::ingestor
 {
+
+namespace detail
+{
+
+/// @p adapter as it enters a selector revision or model hash. The codes are fixed here rather
+/// than taken from the enumerator's position, so reordering UhdAdapter cannot change the
+/// revision a shipped model records. A new adapter takes the next unused code.
+inline int selectorCode(UhdAdapter adapter)
+{
+    switch(adapter)
+    {
+    case UhdAdapter::STATIC_ORDER:
+        return 0;
+    case UhdAdapter::NATIVE:
+        return 1;
+    case UhdAdapter::TREE_DATA:
+        return 2;
+    case UhdAdapter::TABLE:
+        return 3;
+    case UhdAdapter::CUSTOM_LIBRARY:
+        return 4;
+    // Required by -Wswitch-default; reached only by an adapter missing from this table.
+    default:
+        throw std::logic_error("UHD adapter has no selector code");
+    }
+}
+
+/// @p kind as it enters a selector revision, fixed for the same reason as the adapter codes.
+inline int selectorCode(KernelSourceKind kind)
+{
+    switch(kind)
+    {
+    case KernelSourceKind::EMBEDDED_SOURCE:
+        return 0;
+    case KernelSourceKind::KPACK:
+        return 1;
+    case KernelSourceKind::HSACO_FILE:
+        return 2;
+    case KernelSourceKind::ROCKE_BUILDER:
+        return 3;
+    // Required by -Wswitch-default; reached only by a source kind missing from this table.
+    default:
+        throw std::logic_error("kernel source kind has no selector code");
+    }
+}
+
+/// What identifies one ranker to a selector revision and to the model hash.
+inline nlohmann::json rankerIdentity(const HeuristicDescriptor& descriptor)
+{
+    return nlohmann::json{{"id", toString(descriptor.id)},
+                          {"model_hash", descriptor.modelHash},
+                          {"features_hash", descriptor.featuresHash},
+                          {"adapter", selectorCode(descriptor.adapter)},
+                          {"native", descriptor.nativeSymbol},
+                          {"objective", descriptor.objective},
+                          {"metric", descriptor.score.metric},
+                          {"transform", descriptor.score.transform}};
+}
+
+} // namespace detail
 
 /// @brief Descriptor dependencies published even before the first L1 model is trained.
 inline nlohmann::json enginePredictionProvenance(const DescriptorSet& set)
@@ -54,30 +115,20 @@ inline std::string engineSelectorRevision(const DescriptorSet& set)
     selector["graph_match"] = set.engine.graphMatchNativeSymbol;
     selector["knobs"] = set.engine.knobs;
     selector["rankers"] = nlohmann::json::object();
-    const auto rankerIdentity = [](const HeuristicDescriptor& descriptor) {
-        return nlohmann::json{{"id", toString(descriptor.id)},
-                              {"model_hash", descriptor.modelHash},
-                              {"features_hash", descriptor.featuresHash},
-                              {"adapter", static_cast<int>(descriptor.adapter)},
-                              {"native", descriptor.nativeSymbol},
-                              {"objective", descriptor.objective},
-                              {"metric", descriptor.score.metric},
-                              {"transform", descriptor.score.transform}};
-    };
     // Per metric, then arch: which model ranks depends on the request's metric as well as the
     // device (RFC 0019 §11.4), so either changing is a different selector.
     for(const auto& [metric, byArch] : set.heuristicsByMetric)
     {
         for(const auto& [arch, descriptor] : byArch)
         {
-            selector["rankers"][metric][arch] = rankerIdentity(descriptor);
+            selector["rankers"][metric][arch] = detail::rankerIdentity(descriptor);
         }
     }
     // A set built in memory may carry only its default ranker.
     if(set.heuristic && !selector["rankers"][set.heuristic->score.metric].contains("default"))
     {
         selector["rankers"][set.heuristic->score.metric]["default"]
-            = rankerIdentity(*set.heuristic);
+            = detail::rankerIdentity(*set.heuristic);
     }
     for(const auto& [metric, arches] : set.unavailableHeuristicArches)
     {
@@ -104,7 +155,7 @@ inline std::string engineSelectorRevision(const DescriptorSet& set)
             auto& value = resolvedPack["kernels"][toString(kernel.id)];
             value = {{"priority", kernel.priority},
                      {"arch", kernel.arch},
-                     {"source_kind", static_cast<int>(kernel.source.kind)},
+                     {"source_kind", detail::selectorCode(kernel.source.kind)},
                      {"entry_point", kernel.source.entryPoint},
                      {"source_file", kernel.source.sourceFile},
                      {"toc_key", kernel.source.tocKey},
@@ -126,17 +177,6 @@ inline std::string engineSelectorRevision(const DescriptorSet& set)
 /// the coverage gate's concern. Empty when the engine ships no heuristic.
 inline std::string engineModelHash(const DescriptorSet& set)
 {
-    const auto rankerIdentity = [](const HeuristicDescriptor& descriptor) {
-        return nlohmann::json{{"id", toString(descriptor.id)},
-                              {"model_hash", descriptor.modelHash},
-                              {"features_hash", descriptor.featuresHash},
-                              {"adapter", static_cast<int>(descriptor.adapter)},
-                              {"native", descriptor.nativeSymbol},
-                              {"objective", descriptor.objective},
-                              {"metric", descriptor.score.metric},
-                              {"transform", descriptor.score.transform}};
-    };
-
     // An ordered map, so the digest does not depend on hash-table iteration order. Keyed by
     // metric and arch together: one UHD per (metric, arch key).
     std::map<std::string, nlohmann::json> rankers;
@@ -145,12 +185,13 @@ inline std::string engineModelHash(const DescriptorSet& set)
         const std::string metricPrefix = metric + "@";
         for(const auto& [arch, descriptor] : byArch)
         {
-            rankers.emplace(metricPrefix + arch, rankerIdentity(descriptor));
+            rankers.emplace(metricPrefix + arch, detail::rankerIdentity(descriptor));
         }
     }
     if(set.heuristic)
     {
-        rankers.emplace(set.heuristic->score.metric + "@default", rankerIdentity(*set.heuristic));
+        rankers.emplace(set.heuristic->score.metric + "@default",
+                        detail::rankerIdentity(*set.heuristic));
     }
     if(rankers.empty())
     {

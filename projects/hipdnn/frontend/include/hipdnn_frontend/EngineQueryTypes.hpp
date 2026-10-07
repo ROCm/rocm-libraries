@@ -4,8 +4,13 @@
 #pragma once
 
 /// @file
-/// Internal generation-tool types decoded by the hipdnn_frontend::detail engine queries. Not
-/// part of the public Graph API and not bound to Python (RFC 0019 Open Question 12).
+/// Generation-tool types decoded by the hipdnn_frontend::detail engine queries
+/// (detail/EngineQueries.hpp). Installed with the frontend headers, but not part of the
+/// public Graph API and not bound to Python (RFC 0019 Open Question 12). The types carry
+/// nlohmann::json members, so this header is empty when the frontend is built with
+/// HIPDNN_FRONTEND_SKIP_JSON_LIB.
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/autotune/PlanSpec.hpp>
@@ -86,3 +91,5 @@ struct EngineCandidatePage
 };
 
 } // namespace hipdnn_frontend
+
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB

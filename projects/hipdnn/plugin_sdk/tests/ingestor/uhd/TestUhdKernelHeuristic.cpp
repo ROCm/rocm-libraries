@@ -451,13 +451,15 @@ TEST(TestIngestorUhdKernelHeuristic, TheGraphsLogicalWorkChangesTheRankingThroug
         = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
-    const testing::MatmulTestGraph small(4, 4, 4); // 128 flops
-    const testing::MatmulTestGraph large(64, 64, 64); // 524288 flops
+    const testing::MatmulTestGraph smallProblem(4, 4, 4); // 128 flops
+    const testing::MatmulTestGraph largeProblem(64, 64, 64); // 524288 flops
     const auto properties = gfx942();
     const auto catalog = catalogAgainstPriority(2048);
 
-    const auto onSmall = heuristic->rankScored(catalog, MatchContext{small.graph(), 0, properties});
-    const auto onLarge = heuristic->rankScored(catalog, MatchContext{large.graph(), 0, properties});
+    const auto onSmall
+        = heuristic->rankScored(catalog, MatchContext{smallProblem.graph(), 0, properties});
+    const auto onLarge
+        = heuristic->rankScored(catalog, MatchContext{largeProblem.graph(), 0, properties});
 
     ASSERT_EQ(onSmall.size(), 2U);
     ASSERT_EQ(onLarge.size(), 2U);
@@ -555,7 +557,8 @@ TEST(TestIngestorUhdKernelHeuristic, AnAbsentArtifactDegradesToDeclaredOrder)
 
 TEST(TestIngestorUhdKernelHeuristic, AnArtifactDeployedAfterAMissIsPickedUp)
 {
-    // RFC 0019 §5: a failed load is not cached, so a model still being deployed recovers.
+    // RFC 0019 §5: an artifact not deployed yet is not cached, so a model being deployed
+    // recovers.
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(
@@ -581,6 +584,37 @@ TEST(TestIngestorUhdKernelHeuristic, AnArtifactDeployedAfterAMissIsPickedUp)
     const auto deployed = heuristic->rank(catalogAgainstPriority(2048), context);
     ASSERT_EQ(deployed.size(), 2U);
     EXPECT_EQ(deployed.front().kernelId, testId(0x02)) << "the deployed model was not used";
+}
+
+/// A model that was read and refused stays refused for the engine's lifetime: it is not
+/// reloaded and re-reported on every ranking. The same policy as uhd::EngineModelBinding.
+TEST(TestIngestorUhdKernelHeuristic, ABrokenModelIsLoadedAndReportedOnce)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_kernel_heuristic_broken_cached"));
+    // The artifact embeds a features hash its descriptor does not declare (§6.3 check 3).
+    (void)writeFixture(dir.path(), preferLargeTiles(), "max", "sha256:not_the_real_hash");
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), "model.bin"), {}, KNOBS, FIELDS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+    const auto refused = heuristic->rank(catalogAgainstPriority(2048), context);
+    ASSERT_EQ(refused.size(), 2U);
+    EXPECT_EQ(refused.front().kernelId, testId(0x01)); // declared order
+    const auto reported = recorder.countLogsAtLevel(HIPDNN_SEV_ERROR);
+    EXPECT_GT(reported, 0U) << "the broken model was not reported";
+
+    // A valid artifact in its place is not read: the refusal was cached.
+    (void)writeFixture(dir.path(), preferLargeTiles());
+    const auto again = heuristic->rank(catalogAgainstPriority(2048), context);
+    ASSERT_EQ(again.size(), 2U);
+    EXPECT_EQ(again.front().kernelId, testId(0x01)) << "the refused model was loaded again";
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), reported) << "the report repeated";
 }
 
 TEST(TestIngestorUhdKernelHeuristic, AFeaturesHashMismatchDegradesToDeclaredOrder)
@@ -1256,6 +1290,38 @@ TEST(TestIngestorUhdKernelHeuristic, AMetriclessRankerOrdersOnSignedScores)
     ASSERT_EQ(declared.size(), 2U);
     EXPECT_EQ(declared.front().kernelId, testId(0x01)) << "declared order did not decide";
     EXPECT_DOUBLE_EQ(declared.front().score, 0.0);
+}
+
+/// The adapter half of the native rule in TestKernelHeuristic: a metric-less `min` cost is an
+/// ordering value, so a zero or negative cost ranks on its value (RFC 0019 §5 step 4).
+TEST(TestIngestorUhdKernelHeuristic, AMetriclessMinRankerOrdersOnZeroAndNegativeCosts)
+{
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+
+    // Each tree costs the large tile (0x02) at the given value and the small tile at 4.
+    const std::vector<std::pair<hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec, double>>
+        costs = {{oneUsableOneZero(), 0.0}, {oneUsableOneOutOfRange(), -1.0}};
+    for(const auto& [tree, cost] : costs)
+    {
+        SCOPED_TRACE("large-tile cost " + std::to_string(cost));
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+            uniqueDirectory("uhd_metricless_min_signed"));
+        const auto fixture
+            = writeFixture(dir.path(), tree, "min", {}, /*calibrated=*/false, "identity");
+        auto descriptor = modelDescriptor(dir.path(), fixture);
+        descriptor.score.metric.clear();
+        const auto heuristic = makeKernelHeuristic(descriptor, {}, KNOBS, FIELDS);
+        ASSERT_NE(heuristic, nullptr);
+
+        // Declared order puts the small tile first, so only the model can reverse it.
+        const auto scored = heuristic->rankScored(catalogAgainstPriority(2048), context);
+        ASSERT_EQ(scored.size(), 2U);
+        EXPECT_EQ(scored.front().kernelId, testId(0x02)) << "the cheaper cost was refused";
+        EXPECT_DOUBLE_EQ(scored.front().score, -cost);
+        EXPECT_DOUBLE_EQ(scored.back().score, -4.0);
+    }
 }
 
 TEST(TestIngestorUhdKernelHeuristic, AModelReadingAListFieldElementIsAdmittedOnTheField)

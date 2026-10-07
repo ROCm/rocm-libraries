@@ -6,12 +6,14 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <array>
+#include <charconv>
 #include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <map>
 #include <memory>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -68,6 +70,15 @@ inline void addMetadataFeature(nlohmann::json& features,
             features.emplace(name + "[" + std::to_string(i) + "]", (*values)[i]);
         }
     }
+}
+
+/// @p value as lowercase hex without leading zeros. std::to_chars ignores the global locale,
+/// which a stream would consult and could group the digits under.
+inline std::string toHex(uint64_t value)
+{
+    std::array<char, 16> digits{};
+    const auto end = std::to_chars(digits.data(), digits.data() + digits.size(), value, 16).ptr;
+    return {digits.data(), end};
 }
 
 } // namespace detail
@@ -408,10 +419,8 @@ public:
         // The graph and device halves of the winner key, in hex, so an exporter can group
         // rows per (graph, device) problem exactly as the cache keys it. `winnerKey` is
         // engaged here: benchmarking always builds it above.
-        std::ostringstream benchmarkId;
-        benchmarkId << std::hex << winnerKey->graph.hash();
-        std::ostringstream deviceId;
-        deviceId << std::hex << winnerKey->device.hash();
+        auto benchmarkId = detail::toHex(winnerKey->graph.hash());
+        auto deviceId = detail::toHex(winnerKey->device.hash());
 
         // A record that exists but did not serve this graph -- either it failed the coverage gate
         // or none of its ranked entries still resolved -- is being superseded, so its write must
@@ -429,8 +438,8 @@ public:
                 const std::vector<RankedEntry>& ranking) {
                 stateManager.recordWinner(winnerKey, ranking, cause);
             },
-            benchmarkId.str(),
-            deviceId.str()));
+            std::move(benchmarkId),
+            std::move(deviceId)));
     }
     /// One knob per KMD field the engine exposes; default is the top-ranked value.
     std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>
@@ -710,6 +719,27 @@ public:
                 throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                             "Ranker returned an unknown candidate");
             }
+            // Plan build walks past a candidate it cannot build, so the prediction does too.
+            try
+            {
+                const GenericPlan<THandle> prepared(
+                    _stateManager.getDispatchDetails(*selected), context, catalog.bound);
+            }
+            catch(const HipdnnPluginException& error)
+            {
+                if(error.getStatus() == HIPDNN_PLUGIN_STATUS_INVALID_VALUE)
+                {
+                    throw;
+                }
+                continue;
+            }
+            catch(const std::exception&)
+            {
+                continue;
+            }
+
+            // This is the configuration plan build serves. Naming a later candidate when this
+            // one cannot be named would advertise a kernel the request does not build.
             const auto knobs = candidateKnobs(*selected);
             // Same comparison as applyKnobFilter(): the tuple holds ordinals for non-integer knobs.
             const auto matching = std::count_if(
@@ -721,64 +751,48 @@ public:
                 });
             if(matching != 1)
             {
-                result.reason = "The scored candidate cannot be identified by its exposed knobs";
-                continue;
-            }
-            try
-            {
-                // The prediction must name a candidate that can actually be built.
-                const GenericPlan<THandle> prepared(
-                    _stateManager.getDispatchDetails(*selected), context, catalog.bound);
-                if(!valued)
-                {
-                    // Only reachable under a record: this is the configuration plan build
-                    // serves, and nothing can say what it is worth in this metric.
-                    result.reason = "The benchmarked configuration has no '" + result.metric
-                                    + "' value: the record does not measure it and no "
-                                      "calibrated model estimates it";
-                    return;
-                }
-                auto exact = config.isValid()
-                                 ? std::unique_ptr<EngineConfigT>(config.getEngineConfig().UnPack())
-                                 : std::make_unique<EngineConfigT>();
-                exact->engine_id = result.engine_id;
-                for(const auto& field : knobs)
-                {
-                    const auto& name = field.first;
-                    const auto value = field.second;
-                    auto existing = std::find_if(
-                        exact->knobs.begin(), exact->knobs.end(), [&](const auto& setting) {
-                            return setting->knob_id == name;
-                        });
-                    if(existing == exact->knobs.end())
-                    {
-                        auto setting = std::make_unique<KnobSettingT>();
-                        setting->knob_id = name;
-                        IntValueT integer;
-                        integer.value = value;
-                        setting->value.Set(integer);
-                        exact->knobs.push_back(std::move(setting));
-                    }
-                }
-                result.engine_config = std::move(exact);
-                result.value = scored.score;
-                // Empty when the record supplied the value: no model produced the number.
-                result.uhd_id = modelId;
-                result.status = PredictionStatus::AVAILABLE;
-                result.reason.clear();
+                result.reason
+                    = "The served configuration cannot be identified by its exposed knobs";
                 return;
             }
-            catch(const HipdnnPluginException& error)
+            if(!valued)
             {
-                if(error.getStatus() == HIPDNN_PLUGIN_STATUS_INVALID_VALUE)
+                // Only reachable under a record: nothing can say what this configuration is
+                // worth in this metric.
+                result.reason = "The benchmarked configuration has no '" + result.metric
+                                + "' value: the record does not measure it and no "
+                                  "calibrated model estimates it";
+                return;
+            }
+            auto exact = config.isValid()
+                             ? std::unique_ptr<EngineConfigT>(config.getEngineConfig().UnPack())
+                             : std::make_unique<EngineConfigT>();
+            exact->engine_id = result.engine_id;
+            for(const auto& field : knobs)
+            {
+                const auto& name = field.first;
+                const auto value = field.second;
+                auto existing
+                    = std::find_if(exact->knobs.begin(),
+                                   exact->knobs.end(),
+                                   [&](const auto& setting) { return setting->knob_id == name; });
+                if(existing == exact->knobs.end())
                 {
-                    throw;
+                    auto setting = std::make_unique<KnobSettingT>();
+                    setting->knob_id = name;
+                    IntValueT integer;
+                    integer.value = value;
+                    setting->value.Set(integer);
+                    exact->knobs.push_back(std::move(setting));
                 }
             }
-            catch(const std::exception&)
-            {
-                continue;
-            }
+            result.engine_config = std::move(exact);
+            result.value = scored.score;
+            // Empty when the record supplied the value: no model produced the number.
+            result.uhd_id = modelId;
+            result.status = PredictionStatus::AVAILABLE;
+            result.reason.clear();
+            return;
         }
     }
     void validateKnobConstraints(const IEngineConfig& config) const

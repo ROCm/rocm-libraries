@@ -346,10 +346,12 @@ endforeach()
 
         # <fixture>:<exit status>:<model checks>, as the fixtures' README states them. A
         # predict_engine model is admitted only through the L1 guards, so a static_order
-        # estimate fails the run while a static_order kernel ranker does not.
+        # estimate fails the run while a static_order kernel ranker does not. A ranker whose
+        # features need a sample, run without one, is admitted with extraction skipped.
         foreach(
             roleFixture
             "l2_static_order:0:sort_kernel_catalog=true"
+            "l2_dynamic_features:0:sort_kernel_catalog=true"
             "l1_static_order:1:sort_kernel_catalog=true,predict_engine=false"
             "l1_native:0:sort_kernel_catalog=true,predict_engine=true"
         )

@@ -264,16 +264,16 @@ public:
         : _scoreFn(ScoreRegistry::resolve(scoreSymbol, describedBy))
         , _sign(objective == "min" ? -1.0 : 1.0)
         , _transform(std::move(transform))
-        // Under `min` a cost must be positive: a native scorer's 0 means "no measurement", and
-        // negated it would outrank every real cost. Otherwise §5 step 4's rule decides.
-        , _positiveRequired(objective == "min"
-                            || uhd::score_transform::isPhysicalScore(metric, _transform))
+        // RFC 0019 §5 step 4, as for model adapters: only a physical score must be positive.
+        // A metric-less `identity` or `exp` cost is an ordering value and may be zero or
+        // negative, whatever the objective.
+        , _positiveRequired(uhd::score_transform::isPhysicalScore(metric, _transform))
     {
     }
 
     /// The scorer's value inverse-transformed and oriented so higher wins. Recovered before
-    /// any zero check, since a transformed 0 is a real value. When positivity is required, a
-    /// non-positive or non-finite value becomes NaN (ranked last, reported as 0).
+    /// any range check, since a transformed 0 is a real value. A physical score that is not
+    /// positive becomes NaN (ranked last, reported as 0).
     double score(const MatchContext& context,
                  const BoundTokens& bound,
                  const KernelDefinition& kernel) const override

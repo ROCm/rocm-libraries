@@ -451,6 +451,10 @@ class OperandsEmitter:
     def emit_entry(self, w):
         union = short_name(self.union["name"])
         node = short_name(self.node_name)
+        # flatc's MAX names the highest-valued member; pinning it here makes a header
+        # generated before a member was added fail to compile against the new schema
+        # instead of silently returning false for that member.
+        last = max(self.union["values"], key=lambda value: value["value"])["name"]
         w(
             "/// Visits @p node's operands. Returns false, visiting nothing, when the node has"
         )
@@ -458,6 +462,14 @@ class OperandsEmitter:
         w("template <typename V>")
         w(f"bool visit(const {node}& node, V&& visitor)")
         w("{")
+        w(
+            f"    // Fails when {union} gains a member this header has no case for: rerun"
+        )
+        w("    // scripts/gen_node_operands.py.")
+        w(f"    static_assert({union}::MAX == {union}::{last},")
+        w(
+            f'                  "{HEADER_NAME} is stale: rerun scripts/gen_node_operands.py");'
+        )
         w(f"    switch(node.{self.union_field}_type())")
         w("    {")
         for tag, member in self.members:

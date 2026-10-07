@@ -542,11 +542,8 @@ solvers to compute a workspace default.
   "version": "1.0",
   "id":     "ae896b07-80cd-473c-b3f4-6a8892998519",       // stable, unique; referenced by a UED heuristic role
   "name":   "Example attention LightGBM selector",
-  "kind":   "model",          // "model" | "static_order" | "custom_library"
-  "model": {
-    "framework": "lightgbm",  // tagged so other frameworks are additive
-    "artifact":  "example_attn/model.bin"
-  },
+  "adapter": "tree_data",     // the ranking mechanism, and the key of the body below (RFC 0019 §4.2)
+  "tree_data": {"artifact": "example_attn/model.bin"},  // a GBDT tree table exported as data, inside this descriptor's directory
   "features_signature": [     // ordered model inputs, bound like a UDD args_signature; order and form must match training
     "$device.cu_count",                          // device property
     "$device.lds_size",                          // device property
@@ -556,6 +553,12 @@ solvers to compute a workspace default.
     "$q.dims[2]",                                // graph tensor dim (query sequence length)
     {"*": ["$q.dims[0]", "$q.dims[1]"]}          // a derived feature: batch times head count
   ],
+  "features_hash": "sha256:…",  // fingerprint of the feature contract (RFC 0019 §6.3)
+  "trained_against": {          // the descriptor content revisions the model was trained on (RFC 0019 §8.1)
+    "ued": {"id": "efc9eae4-fe33-4cb0-a593-95d771dc13b2", "revision": "1.0"},
+    "kmd": {"id": "9ae0b215-32a7-49d1-96df-e9b05e1927ea", "revision": "1.0"},
+    "umd": [{"id": "…", "revision": "1.0"}]     // one entry per matcher
+  },
   "objective": "max"          // higher predicted score wins
 }
 ```
@@ -1623,9 +1626,11 @@ from the descriptors instead of tracked beside them.
 
 ### 9.2 Heuristic Adapters
 
-Heuristic descriptors extend the same way: a heuristic names a `kind`, and an adapter interprets
-that content into a scorer. The first adapter is a **LightGBM model**; alongside it, a **custom
-heuristic library** adapter satisfies a small C-API, so a provider can supply a bespoke selector
+Heuristic descriptors extend the same way: a heuristic names an `adapter`, and that adapter interprets
+its content into a scorer ([RFC 0019 §4.2](0019_UniversalHeuristicDescriptor.md#42-adapter-summary)).
+The default adapter is a GBDT tree table shipped as data (`tree_data`), such as an exported LightGBM
+model; alongside it, a **custom heuristic library** adapter (`custom_library`) satisfies a small C-API,
+so a provider can supply a bespoke selector
 without a model file. Further adapters extend what a heuristic can reference (other model formats,
 or plain file types such as a static CSV lookup or a fixed static order) without changing the
 spec. A heuristic runs at selection time, so its adapter is always build-and-runtime, never
@@ -1711,7 +1716,7 @@ The provider surfaces:
   schema, every graph token resolves against the set the engine's pattern publishes, and every
   `$kernel.*` a matcher or dispatch formula reads exists in the engine's metadata schema);
   cross-descriptor references that resolve (a pack's `engine`, `matchers`, and `dispatch`; an
-  engine descriptor's `heuristic` and `metadata`); dispatch formulas that reference only fields the
+  engine descriptor's heuristic roles and `metadata`); dispatch formulas that reference only fields the
   engine's pattern binds; and launch slots that every referenced kernel source fills. Where
   a code object exposes its kernarg layout, the dispatch descriptor's argument signature is checked
   against it, catching an ABI mismatch here rather than at a corrupted launch. An unbound token, an
@@ -2457,7 +2462,7 @@ choices; none is a dependency.
   each assigned to an engine that satisfies it with its own applicability check and heuristic.
 - **id / name:** every descriptor carries a stable `id`, a GUID minted by the author so ids never
   collide without a central authority, and a human-readable `name`; references (a KDP's `matchers`,
-  `engine`, and `dispatch`, and a UED's `heuristic` and `metadata`) use the id.
+  `engine`, and `dispatch`, and a UED's heuristic roles and `metadata`) use the id.
 - **ABI:** the calling convention a kernel expects, its argument layout and order plus launch
   configuration, which a UDD encodes as data.
 - **SDPA:** scaled dot-product attention, the running example operation used throughout this

@@ -20,9 +20,11 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <limits>
 #include <memory>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <vector>
 
@@ -138,6 +140,64 @@ TEST_F(TestEngineConfigDescriptor, HeuristicResultDefersSelectionUntilWorkspaceI
         HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE, HIPDNN_TYPE_INT64, 1, nullptr, &workspace);
     EXPECT_EQ(workspace, 8192);
     EXPECT_EQ(selections, 1u);
+}
+
+// A finalized config is shared by execution plans built on other threads. With a deferred
+// workspace, concurrent readers must all see one serialized form and one workspace query.
+TEST_F(TestEngineConfigDescriptor, DeferredWorkspaceConfigIsSafeToReadConcurrentlyAfterFinalize)
+{
+    EXPECT_CALL(*getMockEngine(), getEngineId()).WillRepeatedly(Return(1));
+    EXPECT_CALL(*getMockEngine(), getGraph()).WillRepeatedly(Return(getMockGraphDescriptor()));
+    EXPECT_CALL(*getMockGraphDescriptor(), getHandle()).WillOnce(Return(_mockHandle.get()));
+    EXPECT_CALL(*_mockHandle, getPluginResourceManager())
+        .WillOnce(Return(_mockEnginePluginResourceManager));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getWorkspaceSize(_, _, _))
+        .WillOnce(Return(size_t{4096}));
+    setEngine();
+    hipdnn_flatbuffers_sdk::data_objects::EngineConfigT scored;
+    scored.engine_id = 1;
+    scored.ranking_metric = "time";
+    auto config = getEngineConfigDescriptor();
+    config->setEngineConfig(scored, true);
+    config->finalize();
+
+    constexpr size_t THREAD_COUNT = 8;
+    std::atomic<bool> start{false};
+    std::vector<const void*> serializedPointers(THREAD_COUNT, nullptr);
+    std::vector<int64_t> workspaces(THREAD_COUNT, 0);
+    std::vector<std::thread> threads;
+    threads.reserve(THREAD_COUNT);
+    for(size_t threadIndex = 0; threadIndex < THREAD_COUNT; ++threadIndex)
+    {
+        threads.emplace_back([&, threadIndex] {
+            while(!start.load())
+            {
+                std::this_thread::yield();
+            }
+            serializedPointers[threadIndex] = config->getSerializedEngineConfig().ptr;
+            config->getAttribute(HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE,
+                                 HIPDNN_TYPE_INT64,
+                                 1,
+                                 nullptr,
+                                 &workspaces[threadIndex]);
+        });
+    }
+    start.store(true);
+    for(auto& thread : threads)
+    {
+        thread.join();
+    }
+
+    const auto serialized = config->getSerializedEngineConfig();
+    for(size_t threadIndex = 0; threadIndex < THREAD_COUNT; ++threadIndex)
+    {
+        EXPECT_EQ(serializedPointers[threadIndex], serialized.ptr);
+        EXPECT_EQ(workspaces[threadIndex], 4096);
+    }
+    const auto* restored = hipdnn_flatbuffers_sdk::data_objects::GetEngineConfig(serialized.ptr);
+    EXPECT_EQ(restored->engine_id(), 1);
+    ASSERT_NE(restored->ranking_metric(), nullptr);
+    EXPECT_EQ(restored->ranking_metric()->string_view(), "time");
 }
 
 TEST_F(TestEngineConfigDescriptor, ScoredKnobsSurviveConfigSerializationRoundTrip)

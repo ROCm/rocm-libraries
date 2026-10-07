@@ -23,8 +23,10 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include "../DigitGroupingLocale.hpp"
 #include <hipdnn_data_sdk/utilities/StallGate.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/ingestor/BenchmarkPlan.hpp>
@@ -1345,6 +1347,35 @@ TEST(TestIngestorBenchmarkPlan, ARecordCarriesTheTimesItsSamplesProduced)
     EXPECT_DOUBLE_EQ(records[0]["stddev_ms"].get<double>(), 0.0);
 }
 
+TEST(TestIngestorBenchmarkPlan, EachRecordCarriesItsOwnKernelsTimes)
+{
+    // Every kernel times differently, so a record carrying a sibling's statistics, or one
+    // set shared by all three, cannot match.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const BenchmarkTestHandle handle;
+    const auto plan = makeDeterministicPlan(threeCandidates(), handle, {5.0, 1.0, 3.0});
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    const std::map<std::string, double> timeByKernel{{toString(testId(0x01)), 5.0},
+                                                     {toString(testId(0x02)), 1.0},
+                                                     {toString(testId(0x03)), 3.0}};
+    const auto records = candidateRecords(recorder);
+    ASSERT_EQ(records.size(), timeByKernel.size());
+    for(const auto& record : records)
+    {
+        const auto kernel = record["kernel"].get<std::string>();
+        const auto expected = timeByKernel.find(kernel);
+        ASSERT_NE(expected, timeByKernel.end()) << "unexpected kernel " << kernel;
+        for(const auto* field : {"min_ms", "avg_ms", "robust_mean_ms"})
+        {
+            EXPECT_DOUBLE_EQ(record[field].get<double>(), expected->second)
+                << field << " of kernel " << kernel;
+        }
+    }
+}
+
 TEST(TestIngestorBenchmarkPlan, ACandidateThatFailedToTimeIsStillLogged)
 {
     // The winner cache omits failed candidates, so this record is the only evidence the
@@ -1595,6 +1626,67 @@ TEST(TestIngestorBenchmarkPlan, BuildPlanGivesEachCandidateItsFeaturesAndTheDevi
     EXPECT_THAT(blockSizes, ::testing::UnorderedElementsAre(64, 64, 256))
         << "each row must carry the metadata of the kernel it measured, not one kernel's "
            "copied onto all three";
+}
+
+/// The exporter joins rows on these ids as text, so the host's locale must not reach them.
+TEST(TestIngestorBenchmarkPlan, BuildPlanSpellsItsBenchmarkAndDeviceIdsWhateverTheGlobalLocale)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter forceBenchmarking(
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME, "1");
+    const ScopedTestSymbols symbols;
+    const StubWorkspaceHandler handler;
+    const ScopedDispatchRegistration<StubHandle> dispatch("hipdnn.kernel_ingestor.test.dispatch",
+                                                          handler);
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    const auto manager = makeThreeKernelStubStateManager();
+    const auto engine = makeEngineWithKnobs({});
+    const StubDeviceResolver resolver;
+    const OraclePlanBuilder builder(engine,
+                                    *manager,
+                                    resolver,
+                                    [](const hipdnn_plugin_sdk::IPlan<StubHandle>&,
+                                       const StubHandle&,
+                                       const hipdnnPluginDeviceBuffer_t*,
+                                       uint32_t,
+                                       void*) -> std::optional<double> { return 1.0; });
+    const TestGraph graph(makeGraphId(0x52));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper invalidConfig(nullptr,
+                                                                                          0);
+
+    // Spelled under the classic locale, as the winner cache and every exporter read them.
+    std::ostringstream expectedBenchmark;
+    expectedBenchmark
+        << std::hex << hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{graph}.hash();
+    std::ostringstream expectedDevice;
+    expectedDevice << std::hex << DeviceKey{testDeviceProperties()}.hash();
+
+    OracleContext context;
+    {
+        const hipdnn_plugin_sdk::test::ScopedDigitGroupingLocale grouping;
+        std::ostringstream probe;
+        probe << std::hex << DeviceKey{testDeviceProperties()}.hash();
+        ASSERT_NE(probe.str(), expectedDevice.str()) << "the grouping locale is not in effect";
+
+        StubSettings settings;
+        builder.initializeExecutionSettings(StubHandle{}, graph, invalidConfig, settings);
+        ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+        context.setExecutionSettings(settings);
+        builder.buildPlan(StubHandle{}, graph, invalidConfig, context);
+    }
+
+    const StubHandle handle;
+    std::vector<std::byte> workspace(context.plan().getWorkspaceSize(handle));
+    context.plan().execute(handle, nullptr, 0, workspace.data());
+
+    const auto records = candidateRecords(recorder);
+    ASSERT_EQ(records.size(), 3U);
+    for(const auto& record : records)
+    {
+        EXPECT_EQ(record["benchmark"].get<std::string>(), expectedBenchmark.str());
+        EXPECT_EQ(record["device"].get<std::string>(), expectedDevice.str());
+    }
 }
 
 } // namespace

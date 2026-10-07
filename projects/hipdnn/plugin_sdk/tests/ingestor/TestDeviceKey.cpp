@@ -73,12 +73,12 @@ TEST(TestIngestorDeviceKey, TwoBoardsOfOneArchSharingCuCountStillGetDifferentKey
 
 TEST(TestIngestorDeviceKey, LdsSizeDiscriminates)
 {
-    auto small = propertiesFor("gfx942");
-    small.sharedMemPerBlock = std::size_t{64} * 1024;
-    auto large = propertiesFor("gfx942");
-    large.sharedMemPerBlock = std::size_t{160} * 1024;
+    auto lessSharedMemory = propertiesFor("gfx942");
+    lessSharedMemory.sharedMemPerBlock = std::size_t{64} * 1024;
+    auto moreSharedMemory = propertiesFor("gfx942");
+    moreSharedMemory.sharedMemPerBlock = std::size_t{160} * 1024;
 
-    EXPECT_NE(DeviceKey{small}, DeviceKey{large});
+    EXPECT_NE(DeviceKey{lessSharedMemory}, DeviceKey{moreSharedMemory});
 }
 
 TEST(TestIngestorDeviceKey, IdenticalPropertiesCompareEqual)

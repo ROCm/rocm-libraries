@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <optional>
@@ -17,8 +18,8 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <unordered_set>
-#include <utility>
 #include <vector>
 
 #include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
@@ -209,7 +210,8 @@ public:
                   const std::unordered_set<std::string>& kmdFields = {})
     {
         std::ostringstream failure;
-        auto built = create(descriptor, describedBy, knobs, kmdFields, failure);
+        bool awaitingArtifact = false;
+        auto built = create(descriptor, describedBy, knobs, kmdFields, failure, awaitingArtifact);
         if(built == nullptr)
         {
             HIPDNN_PLUGIN_LOG_ERROR(failure.str());
@@ -419,10 +421,13 @@ public:
         return detail::asScored(detail::declaredOrder(catalog.entries));
     }
 
-    /// The model @p metric's own entries name for @p arch, loaded on first success per
-    /// (metric, arch key) and cached. A failed load is retried on the next call so an
-    /// artifact still being deployed can recover (RFC 0019 §5); it is reported once per key.
-    /// Fallback stays inside the metric (RFC 0019 §3.1).
+    /// The model @p metric's own entries name for @p arch, loaded once per (metric, arch key)
+    /// and cached, failures included, so a broken model is read and reported once. The one
+    /// outcome not cached is an artifact that is not deployed yet: it is retried on the next
+    /// call so a model being deployed recovers (RFC 0019 §5), and reported once. The same
+    /// policy as uhd::EngineModelBinding. Loads outside the lock; concurrent first uses may
+    /// both load, and the first cached result wins. Fallback stays inside the metric (RFC 0019
+    /// §3.1).
     std::shared_ptr<const UhdKernelHeuristic> resolveFor(const std::string& metric,
                                                          const std::string& arch) const
     {
@@ -432,20 +437,33 @@ public:
         {
             return nullptr;
         }
-        const std::lock_guard<std::mutex> lock(_archMutex);
         const auto cacheKey = std::make_pair(metric, key);
-        if(const auto cached = _archCache.find(cacheKey); cached != _archCache.end())
         {
-            return cached->second;
+            const std::lock_guard<std::mutex> lock(_archMutex);
+            if(const auto cached = _archCache.find(cacheKey); cached != _archCache.end())
+            {
+                return cached->second;
+            }
         }
         // Lazily resolved models face the same knob/field checks (RFC 0019 §8.3).
         std::ostringstream failure;
-        auto loaded = create(*chosen, _describedBy, _knobs, _kmdFields, failure);
-        if(loaded)
+        bool awaitingArtifact = false;
+        std::shared_ptr<const UhdKernelHeuristic> loaded
+            = create(*chosen, _describedBy, _knobs, _kmdFields, failure, awaitingArtifact);
+
+        const std::lock_guard<std::mutex> lock(_archMutex);
+        bool report = false;
+        if(awaitingArtifact)
         {
-            _archCache.emplace(cacheKey, loaded);
+            report = _archAwaitingReported.insert(cacheKey).second;
         }
-        else if(_archLoadFailuresReported.insert(cacheKey).second)
+        else
+        {
+            const auto [cached, inserted] = _archCache.emplace(cacheKey, std::move(loaded));
+            loaded = cached->second;
+            report = inserted && loaded == nullptr;
+        }
+        if(report)
         {
             HIPDNN_PLUGIN_LOG_ERROR("uhd: " << _describedBy << " model for metric "
                                             << (metric.empty() ? "(none)" : "'" + metric + "'")
@@ -483,13 +501,15 @@ public:
 
 private:
     /// tryCreate() without the ERROR: why the UHD was refused goes to @p failure, so a caller
-    /// that retries can report it once.
+    /// that retries can report it once. @p awaitingArtifact is set when the refusal is only
+    /// that the model artifact is not deployed yet, so a later call may succeed.
     static std::shared_ptr<UhdKernelHeuristic>
         create(const HeuristicDescriptor& descriptor,
                const std::string& describedBy,
                const std::vector<std::string>& knobs,
                const std::unordered_set<std::string>& kmdFields,
-               std::ostream& failure)
+               std::ostream& failure,
+               bool& awaitingArtifact)
     {
         // RFC 0019 §9.4 load time: covers config, signature compilation and artifact read.
         const auto loadStart = Clock::now();
@@ -579,6 +599,21 @@ private:
                         << "]; RFC 0019 §6.3 requires the model's axes to be exposed, so the "
                            "model is not used and kernels rank by priority, then id";
                 return nullptr;
+            }
+
+            // Checked before the adapter reads the file, so a missing artifact is told apart
+            // from a broken one. Native adapters have no artifact.
+            if(config.adapterType != "native" && !config.modelArtifactPath.empty())
+            {
+                std::error_code error;
+                if(!std::filesystem::exists(config.modelArtifactPath, error) && !error)
+                {
+                    awaitingArtifact = true;
+                    failure << "uhd: " << describedBy << " model artifact '"
+                            << config.modelArtifactPath
+                            << "' is not deployed; kernels rank by priority, then id";
+                    return nullptr;
+                }
             }
 
             auto adapter = uhd::makeUhdAdapter(config);
@@ -1056,11 +1091,11 @@ private:
     std::unordered_set<std::string> _kmdFields;
     mutable std::mutex _archMutex;
     /// Keyed by (metric, arch key): one UHD per metric per key, so the pair names a model.
-    /// Holds successful loads only.
+    /// Holds every load outcome, a failure as nullptr, except an artifact not yet deployed.
     mutable std::map<std::pair<std::string, std::string>, std::shared_ptr<const UhdKernelHeuristic>>
         _archCache;
-    /// Keys whose load failure was already logged; guarded by _archMutex.
-    mutable std::set<std::pair<std::string, std::string>> _archLoadFailuresReported;
+    /// Keys whose undeployed artifact was already logged; guarded by _archMutex.
+    mutable std::set<std::pair<std::string, std::string>> _archAwaitingReported;
 
     uhd::UhdConfig _config;
     std::shared_ptr<const IKernelHeuristic> _direct;

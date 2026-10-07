@@ -92,6 +92,21 @@ class TestEveryMemberIsVisited(unittest.TestCase):
         header = emit([("Empty", [field("label", "String", 0)])])
         self.assertIn("void visit(const Empty&, V&)", header)
 
+    def test_dispatch_pins_the_last_union_member_at_compile_time(self):
+        # A header generated before a member was added must fail to compile against the
+        # new schema, whose MAX moves, instead of reaching `default: return false`.
+        header = emit(
+            [
+                ("Alpha", [field("x_tensor_uid", "Long", 0, uid=True)]),
+                ("Beta", [field("mode", "Byte", 0)]),
+            ]
+        )
+        dispatch = header[header.index("bool visit(const Node& node") :]
+        self.assertRegex(
+            dispatch[: dispatch.index("switch(")],
+            r"static_assert\(Attrs::MAX == Attrs::Beta,",
+        )
+
 
 class TestTensorOperands(unittest.TestCase):
     def test_a_uid_reports_its_role_and_annotation(self):

@@ -40,6 +40,9 @@ void EngineConfigDescriptor::finalize()
                   HIPDNN_STATUS_BAD_PARAM,
                   "EngineConfigDescriptor::finalize() failed: Engine is not set.");
 
+    // Pack before finalizing: a finalized descriptor is shared across threads, so only the
+    // deferred workspace query (guarded by call_once) may run after this point.
+    std::ignore = getSerializedEngineConfig();
     if(!_deferWorkspace)
     {
         ensureWorkspaceSize();
@@ -521,7 +524,7 @@ std::string EngineConfigDescriptor::toString() const
 {
     std::string str = "EngineConfigDescriptor: {engineId=";
     str += _engine ? std::to_string(_engine->getEngineId()) : "null";
-    str += ", maxWorkspaceSize=" + std::to_string(_maxWorkspaceSize) + "}";
+    str += ", maxWorkspaceSize=" + std::to_string(_maxWorkspaceSize.load()) + "}";
     return str;
 }
 

@@ -682,6 +682,30 @@ TEST(TestDescriptorLoader, MalformedProvenanceCannotSilentlyEnableAModel)
     EXPECT_EQ(firstBlockSize(sets.front()), 64);
 }
 
+/// RFC 0019 §8.1: a model bound to a UED records the descriptor set it was trained on. A
+/// `selector_revision` alone leaves that set unchecked, so the model is refused; recording
+/// both forms, as an engine estimate of a descriptor engine does, is accepted.
+TEST(TestDescriptorLoader, AUedBoundModelRecordingOnlyASelectorRevisionCannotRank)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("selector_only"));
+    auto documents = makeSetDocuments('1', "test:selector_only");
+    auto& model = documentOfType(documents, ".uhd.json");
+    model["trained_against"] = {{"selector_revision", "test-provider/1.0"}};
+    writeDocuments(dir.path(), documents);
+
+    const auto refused = loadFrom(dir.path());
+    ASSERT_EQ(refused.size(), 1u);
+    EXPECT_EQ(firstBlockSize(refused.front()), 64);
+
+    model["trained_against"].update(provenanceOf(documents));
+    writeDocuments(dir.path(), documents);
+
+    const auto accepted = loadFrom(dir.path());
+    ASSERT_EQ(accepted.size(), 1u);
+    EXPECT_EQ(firstBlockSize(accepted.front()), 256);
+}
+
 /// The multiple-reference form: roles are independently optional and each is an arch map.
 TEST(TestDescriptorLoader, LoadsRoleScopedHeuristicsMappedByArchitecture)
 {
@@ -838,6 +862,42 @@ TEST(TestDescriptorLoader, DisablesAMetricTwoEnginePredictionsClaimOnOneArch)
     EXPECT_EQ(set.unavailableEnginePredictionArches.at("tflops").count("default"), 1u);
     EXPECT_TRUE(
         recorder.hasLogContaining(HIPDNN_SEV_ERROR, "names more than one UHD for metric 'tflops'"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// An arch entry naming a metric-less estimate is refused rather than falling back to the
+/// `default` key's model: what it was meant to estimate is unknown, so every metric is
+/// withheld on that arch.
+TEST(TestDescriptorLoader, AMetricLessEnginePredictionWithholdsItsArchitecture)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("metricless_prediction"));
+    auto documents = makeSetDocuments('1', "test:metricless_prediction");
+    const auto defaultId = testUuid('1', 'c');
+    const auto metricLessId = testUuid('1', 'e');
+    auto metricLess = documentOfType(documents, ".uhd.json");
+    metricLess["id"] = metricLessId;
+    documentOfType(documents, ".ued.json")["predict_engine"]
+        = {{"default", defaultId}, {"gfx942", metricLessId}};
+    documents.push_back({".uhd.json", metricUhd(documents, defaultId, "tflops")});
+    documents.push_back({".uhd.json", std::move(metricLess)});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& set = sets.front();
+    ASSERT_EQ(set.enginePredictionsByMetric.count("tflops"), 1u);
+    EXPECT_EQ(set.enginePredictionsByMetric.at("tflops").count("default"), 1u);
+    EXPECT_EQ(set.enginePredictionsByMetric.at("tflops").count("gfx942"), 0u);
+    for(const auto& metric : hipdnn_data_sdk::utilities::RANKING_METRICS)
+    {
+        const auto withheld = set.unavailableEnginePredictionArches.find(std::string(metric.name));
+        ASSERT_NE(withheld, set.unavailableEnginePredictionArches.end()) << metric.name;
+        EXPECT_EQ(withheld->second.count("gfx942"), 1u) << metric.name;
+    }
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "declares no score.metric"))
         << recorder.getRecordedLogsAsString();
 }
 
@@ -1479,6 +1539,82 @@ TEST(TestDescriptorLoader, AMissingRootContributesNothingButTheOtherRootStillLoa
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:present");
+}
+
+namespace
+{
+
+/// Clears the three descriptor-root variables for one test, so an inherited value cannot
+/// answer, and restores them afterwards.
+struct ScopedDescriptorEnvironment
+{
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter replacement{
+        "HIPDNN_DESCRIPTOR_DIR"};
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter runtime{
+        "HIPDNN_DESCRIPTOR_RUNTIME_DIR"};
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter searchPath{
+        "HIPDNN_DESCRIPTOR_PATH"};
+};
+
+#ifdef _WIN32
+constexpr char DESCRIPTOR_PATH_SEPARATOR = ';';
+#else
+constexpr char DESCRIPTOR_PATH_SEPARATOR = ':';
+#endif
+
+} // namespace
+
+/// HIPDNN_DESCRIPTOR_DIR names the replacement tree; HIPDNN_DESCRIPTOR_RUNTIME_DIR, then
+/// each HIPDNN_DESCRIPTOR_PATH entry in order, are additive. Search-path entries are not
+/// existence-checked, and empty ones are skipped.
+TEST(TestDescriptorLoader, ReadsTheDescriptorRootsTheEnvironmentNames)
+{
+    ScopedDescriptorEnvironment environment;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("environment_roots"));
+    const auto replacement = dir.path() / "replacement";
+    const auto runtime = dir.path() / "runtime";
+    const auto vendor = dir.path() / "vendor";
+    const auto notInstalled = dir.path() / "not-installed";
+    for(const auto& root : {replacement, runtime, vendor})
+    {
+        std::filesystem::create_directories(root);
+    }
+    environment.replacement.setValue(replacement.string());
+    environment.runtime.setValue(runtime.string());
+    environment.searchPath.setValue(vendor.string() + DESCRIPTOR_PATH_SEPARATOR
+                                    + DESCRIPTOR_PATH_SEPARATOR + notInstalled.string()
+                                    + DESCRIPTOR_PATH_SEPARATOR);
+
+    const auto roots = environmentDescriptorRoots();
+
+    EXPECT_EQ(roots.replacement, replacement);
+    EXPECT_EQ(roots.additional,
+              (std::vector<std::filesystem::path>{runtime, vendor, notInstalled}));
+}
+
+/// A replacement or runtime root that is not a directory is dropped with a warning naming
+/// the variable, rather than loading nothing silently.
+TEST(TestDescriptorLoader, IgnoresAnEnvironmentRootThatIsNotADirectory)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    ScopedDescriptorEnvironment environment;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("environment_unusable"));
+    const auto file = dir.path() / "descriptors.txt";
+    std::ofstream(file, std::ios::binary) << "not a directory\n";
+    environment.replacement.setValue(file.string());
+    environment.runtime.setValue((dir.path() / "missing").string());
+
+    const auto roots = environmentDescriptorRoots();
+
+    EXPECT_TRUE(roots.replacement.empty());
+    EXPECT_TRUE(roots.additional.empty());
+    for(const auto* variable : {"HIPDNN_DESCRIPTOR_DIR", "HIPDNN_DESCRIPTOR_RUNTIME_DIR"})
+    {
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, variable))
+            << variable << "\n"
+            << recorder.getRecordedLogsAsString();
+    }
 }
 
 TEST(TestDescriptorLoader, DropsAnIdTwoFilesDisagreeAbout)
@@ -3340,6 +3476,31 @@ TEST(TestDescriptorLoader, ReadsCommentedDescriptorsAndIgnoresCommentsWhenCompar
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:commented");
+}
+
+/// A UHD is read with uhd::readUhdDocument: a repeated key refuses the file instead of
+/// letting its last spelling win, and the engine keeps declared-order ranking.
+TEST(TestDescriptorLoader, RefusesAUhdRepeatingAKey)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_repeated_key"));
+    auto documents = makeSetDocuments('1', "test:uhd_repeated_key");
+    writeDocuments(dir.path(), documents);
+    const auto& model = documentOfType(documents, ".uhd.json");
+    auto text = model.dump(2);
+    text.insert(1, R"("name": "shadowed",)");
+    std::ofstream(dir.path() / (model.at("id").get<std::string>() + ".uhd.json"), std::ios::binary)
+        << text;
+
+    const auto catalog = loadDescriptorCatalog(dir.path());
+    EXPECT_TRUE(catalog.heuristics.empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "duplicate UHD key"))
+        << recorder.getRecordedLogsAsString();
+    const auto sets = resolveDescriptorSets(catalog);
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(firstBlockSize(sets.front()), 64);
 }
 
 /// RFC 0020 §4.3's authored form strips comments only; a trailing comma is a hard

@@ -175,6 +175,51 @@ no model for the selected metric is ranked after the engines that have one.
 
   export HIPDNN_HEUR_RANKING_METRIC=time
 
+.. _descriptor-root-variables:
+
+Kernel ingestor descriptors
+===========================
+
+Providers built with ``HIPDNN_ENABLE_KERNEL_INGESTOR``, such as hip-kernel-provider, build engines from descriptor trees: JSON descriptors and the model artifacts they name.
+A process reads these variables once, the first time the provider discovers its descriptors.
+The provider loads its own tree first and then any additional roots, in the order listed below.
+Within one root, two files that define the same descriptor id with different contents are both ignored.
+An additional root cannot replace what an earlier root defined: a file redefining an id already loaded is ignored with an error, and the earlier definition stands.
+
+``HIPDNN_DESCRIPTOR_DIR``
+-------------------------
+
+Replaces the provider's own descriptor tree. This is the only variable that can remove shipped descriptors.
+
+- Unset: the provider uses the ``arch_content/hip-kernel-provider`` directory beside the loaded provider library, or the configure-time install location when that directory does not exist.
+- ``<path>``: the provider loads this directory instead of its own tree.
+
+A value that is not an existing directory is ignored with a warning, and the default tree is used.
+
+``HIPDNN_DESCRIPTOR_RUNTIME_DIR``
+---------------------------------
+
+An additional descriptor root, loaded after the provider's tree (or ``HIPDNN_DESCRIPTOR_DIR``).
+It adds descriptors beside the shipped ones and never replaces them.
+A value that is not an existing directory is ignored with a warning.
+
+``HIPDNN_DESCRIPTOR_PATH``
+--------------------------
+
+A list of additional descriptor roots, loaded in order after ``HIPDNN_DESCRIPTOR_RUNTIME_DIR``.
+Entries are separated by ``:`` on Linux and ``;`` on Windows, and empty entries are skipped.
+Like ``HIPDNN_DESCRIPTOR_RUNTIME_DIR``, it is additive.
+Entries are not checked for existence: an entry that does not exist on this machine contributes nothing, without a warning.
+
+.. code:: bash
+
+  export HIPDNN_DESCRIPTOR_RUNTIME_DIR=/opt/site/hipdnn-descriptors
+  export HIPDNN_DESCRIPTOR_PATH=/opt/vendor-a/descriptors:/opt/vendor-b/descriptors
+
+On Linux, all three variables are ignored in a secure execution environment, because a descriptor can name a shared library for the provider to load (see :ref:`secure-execution-variables`).
+
+.. _secure-execution-variables:
+
 Secure execution
 ================
 
