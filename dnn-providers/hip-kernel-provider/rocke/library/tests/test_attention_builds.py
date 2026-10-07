@@ -865,11 +865,9 @@ class TestAttentionHelpers(unittest.TestCase):
     def test_unified_attention_scalar_kernels_compile(self):
         """The scalar fallbacks lower on every arch we ship, not just one.
 
-        These three kernels carry no MFMA and no arch-gated memory op, which is
-        exactly why pinning them to a single target was easy to do and worth
-        undoing: the claim being made is that the scalar path is the portable
-        one, and a single-arch run cannot make that claim. Both wired targets
-        are sub-tested so a regression names the arch it broke on.
+        These kernels carry no MFMA and no arch-gated memory op, so the claim
+        is that the scalar path is portable -- which a single-arch run cannot
+        make. Both wired targets are sub-tested so a regression names its arch.
         """
         p = UnifiedAttentionProblem(
             total_q=3,
@@ -2583,13 +2581,11 @@ class TestAttentionHelpers(unittest.TestCase):
                     num_seqs=4,
                 )
             )
-            # gfx942, not gfx950: every assertion below is about what this
-            # target can and cannot lower, so selection and emission have to
-            # name the same arch. Lowering at gfx950 also blinded the warning
-            # lane to the exact regression this test exists to catch -- the
-            # 16x16x32 MFMA asserted absent here, and its ds.read.tr16 /
-            # permlane32.swap neighbours, are `ok` on gfx950 and `arch_absent`
-            # on gfx942 in all three committed arch-domain columns.
+            # gfx942, not gfx950: the assertions below are about what this
+            # target can and cannot lower, so selection and emission must name
+            # the same arch. The 16x16x32 MFMA asserted absent here, and its
+            # ds.read.tr16 / permlane32.swap neighbours, are `ok` on gfx950 and
+            # `arch_absent` on gfx942 in every committed arch-domain column.
             seg_ll = lower_kernel_to_llvm(seg, arch="gfx942")
             # The arch-dispatched reduce kernel must also build on gfx942.
             red = build_unified_attention_reduce_tiled(

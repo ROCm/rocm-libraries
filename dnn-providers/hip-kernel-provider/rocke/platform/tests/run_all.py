@@ -14,22 +14,17 @@
 #       [--no-both] [--only SUBSTR] [--only-ir SUBSTR] [--build-root DIR]
 #       [--config CONFIG]
 #
-# The two filters are deliberately separate, and the split is by *vocabulary*,
-# not by gate. `--only` selects *families* for the byte-identity gate.
-# `--only-ir` selects *case ids* for both gates that lower the shared corpus --
-# emitted-IR validity and arch-domain -- where a case id is `family/arch/
-# variant`. The two vocabularies overlap without being the same.
+# The two filters are separate by *vocabulary*, not by gate. `--only` selects
+# *families* for the byte-identity gate; `--only-ir` selects *case ids*
+# (`family/arch/variant`) for both corpus gates -- emitted-IR validity and
+# arch-domain. The vocabularies overlap without being the same, and a word can
+# be a legal family while matching no corpus case; the tools read an empty
+# selection oppositely (run_diff reports green, the corpus gates call it FATAL),
+# so forwarding one substring to all of them can go red for a filter that was
+# valid where the user aimed it. Any new corpus gate belongs on `--only-ir`.
 #
-# Forwarding one substring to all of them was a real trap: a word can be a legal
-# family while matching no corpus case, and the tools read an empty selection
-# oppositely -- run_diff runs zero families and reports green, while
-# check_ir_validity and check_arch_domain both call it FATAL -- so a partial run
-# could go red for a filter that was valid where the user aimed it. Any new
-# corpus gate belongs on `--only-ir` for the same reason.
-#
-# Filtering is also kept separate from skipping: an unfiltered gate still runs
-# in full; use `--no-gate` / `--no-ir-validity` / `--no-arch-domain` to opt out
-# of one.
+# Filtering is separate from skipping: an unfiltered gate still runs in full;
+# use `--no-gate` / `--no-ir-validity` / `--no-arch-domain` to opt out of one.
 
 from __future__ import annotations
 
@@ -302,15 +297,13 @@ def main() -> int:
         status |= subprocess.run(ir_gate).returncode
 
     if not args.no_arch_domain:
-        # The same question as the gate above, asked of committed data instead
-        # of a compiler: does any kernel demand an intrinsic its target provably
-        # cannot lower? Needs no toolchain, so unlike check_ir_validity it rules
-        # on every LLVM flavor on any host.
+        # The gate above's question asked of committed data instead of a
+        # compiler: does any kernel demand an intrinsic its target provably
+        # cannot lower? Needs no toolchain, so it rules on every LLVM flavor.
         print("\n== arch-domain warning gate ==")
         ad_gate = [sys.executable, str(TOOLS / "check_arch_domain.py")]
-        # `--only-ir`, not `--only`: this gate matches case ids, the same
-        # vocabulary check_ir_validity uses and a different one from the
-        # byte-identity families. See the note at the top of this file.
+        # `--only-ir`, not `--only`: this gate matches case ids, like
+        # check_ir_validity. See the note at the top of this file.
         if args.only_ir:
             ad_gate += ["--only", args.only_ir]
         status |= subprocess.run(ad_gate).returncode

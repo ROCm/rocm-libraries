@@ -165,27 +165,19 @@ def _unpaired_opt(
 ) -> str | None:
     """Why L0 must be skipped because `opt` is not clang's sibling, or None.
 
-    `_llvm_tool` resolves the two independently, and nothing else asks `opt`
-    what it is. Under the discovered-prefix path a prefix that ships clang but
-    not `opt` lets clang bind there while `opt` falls through to the next
-    prefix or to PATH, so the L0 verifier and the L1 compiler can be different
-    LLVM vintages. That is not cosmetic: an older `opt` rejecting a construct
-    its own parser predates reds the case as L0-VERIFY, which reads as "rocke
-    emitted invalid IR" when the IR is fine and the verifier is wrong -- a
-    failure attributed to the kernel, by the gate that exists to attribute
-    failures to kernels.
+    `_llvm_tool` resolves the two independently: a discovered prefix shipping
+    clang but not `opt` lets `opt` fall through to PATH, so the L0 verifier and
+    the L1 compiler can be different vintages. An older `opt` rejecting a
+    construct its own parser predates reds the case as L0-VERIFY, i.e. blames
+    the kernel for IR that is fine.
 
-    Skip the lane rather than fail the run, which is where this parts company
-    with the generator's hard refusal on the same mismatch. The generator needs
-    both tools -- it measures one axis with each -- so a mismatch there
-    invalidates the whole measurement and must stop it. Here `opt` only adds a
-    lane whose findings clang's own front end re-reaches at L1, so dropping it
-    costs an earlier, clearer diagnostic and nothing else. The caller already
-    handles `opt is None`, so the skip needs no new path.
+    Skip the lane rather than fail the run (unlike the generator, which needs
+    both tools and must stop): clang's front end re-reaches L0's findings at
+    L1, so dropping it costs only an earlier diagnostic. The caller already
+    handles `opt is None`.
 
     Silent when either banner is unparseable, per `flavor_of_clang`: an
-    unreadable version string is not evidence of a mismatch, and guessing one
-    would disable L0 on every toolchain whose banner we have not seen.
+    unreadable version is not evidence of a mismatch.
     """
     opt_identity = tool_identity(opt)
     opt_flavor = flavor_of_clang(opt_identity)
@@ -458,14 +450,11 @@ def main() -> int:
     if not_lowerable:
         print(f"   {len(not_lowerable)} case(s) need a newer LLVM than {flavor}")
 
-    # `available_cpus()`, not `os.cpu_count()`: this gate is default-on in
-    # run_all.py, and the hosts it runs on are scheduler-pinned (384 CPUs
-    # reported, 2 allowed) or containerised. Sizing from the machine would
-    # launch ~32 concurrent clang+link jobs against a 2-CPU allocation, and the
-    # resulting contention and resource-limit failures surface here as
-    # L1-COMPILE defects -- i.e. the gate would report bad IR when what it
-    # actually hit was an oversubscribed host. The other two tools in this
-    # directory already size from the same helper.
+    # `available_cpus()`, not `os.cpu_count()`: the hosts this runs on are
+    # scheduler-pinned (384 CPUs reported, 2 allowed) or containerised. Sizing
+    # from the machine would run ~32 concurrent clang+link jobs on a 2-CPU
+    # allocation, and the resulting resource-limit failures surface as
+    # L1-COMPILE defects -- bad IR reported for an oversubscribed host.
     jobs = args.jobs or min(32, available_cpus())
     out_dir = Path(tmp.name) / "out"
     out_dir.mkdir(exist_ok=True)

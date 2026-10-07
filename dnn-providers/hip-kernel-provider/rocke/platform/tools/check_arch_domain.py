@@ -11,23 +11,15 @@
 # whole representative corpus at every committed LLVM flavor, harvests those
 # warnings, and compares them against EXPECTED_WARNINGS below.
 #
-# Why this gate can run anywhere
-# ------------------------------
-# check_ir_validity.py needs the host's own clang, so it can only ever rule on
-# one flavor and reports UNVALIDATED for the rest. Lowering is pure Python and
-# the artifact is committed data, so this gate measures all three flavors on any
-# host with no toolchain at all. That is what makes it usable in CI.
+# Lowering is pure Python and the artifact is committed data, so this gate needs
+# no toolchain and rules on every flavor on any host. It overlaps
+# check_ir_validity without either subsuming the other:
 #
-# What the two gates each catch
-# -----------------------------
-# They overlap on purpose and neither subsumes the other:
-#
-#   check_ir_validity   links the emitted module. Catches anything the backend
-#                       rejects, named or not -- but only at the host's flavor,
-#                       and its diagnostic is whatever the backend chose to say.
-#   check_arch_domain   consults measured data at declaration-demand time.
-#                       Catches the specific defect "this target cannot lower
-#                       this intrinsic" at every flavor, and names the intrinsic.
+#   check_ir_validity   links the emitted module: catches anything the backend
+#                       rejects, but only at the host's flavor.
+#   check_arch_domain   consults measured data at declaration-demand time:
+#                       catches "this target cannot lower this intrinsic" at
+#                       every flavor, and names the intrinsic.
 #
 # Usage:
 #   python rocke/platform/tools/check_arch_domain.py
@@ -50,9 +42,9 @@ ROCKE = HERE.parent  # tools -> rocke/platform
 
 def _bootstrap_sys_path() -> None:
     """Same layout probing as check_ir_validity, so this runs from a checkout
-    without an external PYTHONPATH. The corpus lives in the test tree and its
-    attention/KDA families are the one sanctioned platform -> library reach, so
-    `kernels`/`builders` must resolve too."""
+    without an external PYTHONPATH. The corpus's attention/KDA families are the
+    one sanctioned platform -> library reach, so `kernels`/`builders` must
+    resolve too."""
     for path in (ROCKE / "python", ROCKE / "tests" / "instances"):
         if str(path) not in sys.path:
             sys.path.insert(0, str(path))
@@ -65,15 +57,13 @@ def _bootstrap_sys_path() -> None:
 
 # Every (declaration key, target, flavor) the corpus is currently allowed to
 # demand against a target the artifact says cannot lower it, with the reason and
-# the ticket that owns the fix.
-#
-# Naming the owning ticket is a requirement of AICK-2273, not decoration: the
-# rule below says entries burn down, and an entry nobody owns cannot burn down.
+# the owning ticket (AICK-2273 requires naming one -- an entry nobody owns
+# cannot burn down).
 #
 # Same rule as KNOWN_BAD in check_ir_validity.py and KNOWN_VIOLATIONS in
 # library/tests/test_library_layering.py: **this list only ever SHRINKS**. An
-# entry that stops firing is itself a failure, so a fix cannot leave dead weight
-# behind, and a new entry is a kernel bug to fix rather than a line to add.
+# entry that stops firing is itself a failure, and a new entry is a kernel bug
+# to fix rather than a line to add.
 EXPECTED_WARNINGS: dict[tuple[str, str, str], str] = {}
 
 for _flavor in ("llvm20", "llvm22", "llvm23"):
@@ -86,14 +76,10 @@ for _flavor in ("llvm20", "llvm22", "llvm23"):
         )
 del _flavor, _key
 
-# `wmma.i32.16x16x16.iu4`/`.iu8` on gfx11-generic and gfx1151 at llvm20 used to
-# be listed here too, as a documented false negative in the artifact rather than
-# a kernel defect. Generator 5 builds each probe from the declare `opt` resolves,
-# so `immarg` now comes from the LLVM being measured instead of the hand-written
-# decl table, the probe passes constants where the intrinsic demands them, and
-# those four cells measure `ok`. The entries are deleted rather than kept,
-# because an allowlist that outlives its defect is the failure this gate reports
-# as STALE.
+# `wmma.i32.16x16x16.iu4`/`.iu8` on gfx11-generic and gfx1151 at llvm20 were
+# listed here as artifact false negatives. Generator 5 builds each probe from
+# the declare `opt` resolves, so `immarg` comes from the LLVM being measured and
+# those four cells now measure `ok`; the entries are deleted rather than kept.
 
 
 def _harvest(
@@ -107,29 +93,17 @@ def _harvest(
     raised them, then two separate lists of cases that did not lower: the ones
     that *could not* at this flavor, and the ones that failed.
 
-    The split is the whole point. Unlike check_ir_validity, which runs at the
-    host's one flavor, this gate lowers the same corpus at *every* committed
-    flavor -- so every llvm23-gated instance is guaranteed to refuse on the
-    llvm20 and llvm22 passes, by design, on a clean tree. Counting those as
-    failures reds the gate (and `run_all.py` with it) for cases that were never
-    answerable at that vintage. A genuine lowering error is still reported, and
-    still red: it is reported rather than raised only so that one broken family
+    The split matters because this gate lowers the corpus at *every* committed
+    flavor, so an llvm23-gated instance always refuses on the llvm20/llvm22
+    passes of a clean tree; counting those as failures would red the gate (and
+    `run_all.py`) for cases never answerable at that vintage. A genuine lowering
+    error is still red -- reported rather than raised only so one broken family
     cannot hide the warning state of the rest.
 
     The native lowerer is called directly, NOT the backend-dispatched public
-    entry point. The default backend is the C++ engine, and only the Python
-    lowerer consults the arch-domain table -- so on any host where the engine
-    is importable, the public entry point would lower every case successfully
-    and harvest nothing. The gate would report a serene green while asserting
-    nothing at all, and worse, would call every EXPECTED_WARNINGS entry stale,
-    because stale is exactly what "this warning no longer fires" looks like
-    from here. That failure is invisible on a host without the extension
-    (where dispatch falls back to Python anyway), which is the kind of gate
-    that passes everywhere except where it matters.
-
-    `ROCKE_ARCH_DOMAIN` is pinned for the same reason: the lane it measures
-    must not be switchable off by ambient environment. A developer with `off`
-    exported would otherwise get a green gate measuring a disabled lane.
+    entry point: the default backend is the C++ engine and only the Python
+    lowerer consults the arch-domain table, so dispatching would harvest nothing
+    and call every EXPECTED_WARNINGS entry stale on any host with the extension.
     """
     from rocke.core.lower_llvm import ArchDomainWarning
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as lower_native
@@ -139,9 +113,9 @@ def _harvest(
     unlowerable: list[tuple[str, str]] = []
     for case in cases:
         with warnings.catch_warnings(record=True) as caught:
-            # `always`, not the default `once`: the default dedupes per code
-            # location, which would silently drop the second case that demands
-            # the same intrinsic from the same line.
+            # `always`, not the default `once`: `once` dedupes per code
+            # location, dropping the second case that demands the same
+            # intrinsic from the same line.
             warnings.simplefilter("always")
             try:
                 lower_native(case["build"](), arch=case["arch"], llvm_flavor=flavor)
@@ -172,10 +146,9 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    # Pin the lane on before anything imports the lowerer. A developer with
-    # ROCKE_ARCH_DOMAIN=off exported would otherwise get a green gate that
-    # measured a disabled lane -- the gate must not be silenceable by the
-    # environment it runs in. See _harvest for the matching backend pin.
+    # Pin the lane on before anything imports the lowerer: an exported
+    # ROCKE_ARCH_DOMAIN=off would otherwise give a green gate over a disabled
+    # lane. See _harvest for the matching backend pin.
     os.environ["ROCKE_ARCH_DOMAIN"] = "warn"
 
     _bootstrap_sys_path()
@@ -198,8 +171,7 @@ def main() -> int:
         [s for s in args.flavor.split(",") if s] if args.flavor else list(LLVM_FLAVORS)
     )
     # A flavor with no committed column has nothing to say -- every lookup
-    # returns None and the lane is silent -- so measuring it would report a
-    # vacuous green. Skip it and say so.
+    # returns None -- so measuring it would report a vacuous green.
     flavors = [f for f in wanted_flavors if arch_domain.load(f) is not None]
     skipped = [f for f in wanted_flavors if f not in flavors]
 
@@ -221,9 +193,8 @@ def main() -> int:
         errors.extend(errs)
         unlowerable.extend(skipped_cases)
 
-    # Only entries whose flavor was actually measured can be judged stale. A
-    # --flavor or --arch selection narrows what ran, and an entry that did not
-    # run is not evidence of anything.
+    # Only entries whose flavor was actually measured can be judged stale: a
+    # --flavor or --arch selection narrows what ran.
     selected_arches = {c["arch"] for c in keep}
     in_scope = {
         k
@@ -248,7 +219,7 @@ def main() -> int:
 
     if unlowerable and args.verbose:
         # Not a finding, so it stays behind --verbose: on a three-flavor sweep
-        # every llvm23-gated instance lands here twice, every run, forever.
+        # every llvm23-gated instance lands here twice on every run.
         print("\n== not asked (instance declined this flavor) ==")
         for cid, msg in unlowerable:
             print(f"  {cid}\n    {msg}")

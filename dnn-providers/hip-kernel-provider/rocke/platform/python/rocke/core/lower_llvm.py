@@ -183,11 +183,9 @@ LLVM_FLAVORS: Tuple[str, ...] = (
 class ArchDomainWarning(UserWarning):
     """A kernel demanded an intrinsic its target provably cannot lower.
 
-    Carries the measured cell as structured attributes as well as in the
-    message, so a gate can key on ``(key, arch, flavor)`` instead of parsing
-    prose. ``evidence`` is the toolchain diagnostic the artifact recorded when
-    the probe failed, which is the actionable part -- it is what the developer
-    would have seen at link time, only named and arriving earlier.
+    The measured cell is exposed as attributes as well as in the message, so a
+    gate can key on ``(key, arch, flavor)`` instead of parsing prose.
+    ``evidence`` is the toolchain diagnostic the artifact recorded.
     """
 
     def __init__(
@@ -215,18 +213,12 @@ _ARCH_DOMAIN_MODES = (_ARCH_DOMAIN_WARN, _ARCH_DOMAIN_OFF)
 
 
 def _arch_domain_mode() -> str:
-    """The configured lane mode, or raise if the value is not one we know.
+    """The configured lane mode; raises on a value outside the vocabulary.
 
-    Matching ``off`` and letting everything else mean ``warn`` would be the
-    quieter implementation and the wrong one. The two plausible mistakes --
-    ``ROCKE_ARCH_DOMAIN=0`` and ``ROCKE_ARCH_DOMAIN=ofF``-style typos -- are
-    both attempts to turn the lane *off*, and both would leave it on while the
-    developer believed otherwise. Silently doing the opposite of what the
-    environment asked is worse than refusing: the whole point of this variable
-    is to be the escape hatch when the lane is wrong, and an escape hatch that
-    quietly does not open is not one.
-
-    Unset and empty mean ``warn``, which is the default and not a mistake.
+    Refusing rather than defaulting to ``warn``: every misspelling (``0``,
+    ``false``, ``ofF``) is an attempt to switch the lane *off*, and falling
+    back to the default would leave it on without saying so. Unset and empty
+    mean ``warn``.
     """
     raw = os.environ.get(_ARCH_DOMAIN_ENV, "").strip()
     if not raw:
@@ -236,9 +228,7 @@ def _arch_domain_mode() -> str:
         raise ValueError(
             f"{_ARCH_DOMAIN_ENV}={raw!r} is not a mode; expected one of "
             f"{', '.join(_ARCH_DOMAIN_MODES)} (unset means "
-            f"{_ARCH_DOMAIN_WARN}). Refusing rather than guessing: every way "
-            "of getting this wrong is an attempt to switch the lane off, and "
-            "falling back to the default would leave it on."
+            f"{_ARCH_DOMAIN_WARN})."
         )
     return mode
 
@@ -1177,14 +1167,12 @@ _INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = {
 def _decls_for_flavor(flavor: str) -> Dict[str, str]:
     """The declaration table a lowering at ``flavor`` resolves against.
 
-    Insertion order of ``_INTRINSIC_DECLS`` is preserved deliberately -- it
-    drives the emit order in ``finalize``, so the result is byte-significant
-    and not merely a lookup.
+    Insertion order of ``_INTRINSIC_DECLS`` is preserved: it drives the emit
+    order in ``finalize``, so the result is byte-significant.
 
-    One copy, because there are now two readers: ``_Lowerer.__init__`` and
-    :func:`check_arch_domain_in_ir`, which has to resolve the same table
-    without a lowerer to ask. A second hand-rolled merge is how the two would
-    drift the moment a flavor gains an override rung.
+    Kept as one copy because there are two readers -- ``_Lowerer.__init__``
+    and :func:`check_arch_domain_in_ir`, which needs the table without a
+    lowerer to ask.
     """
     decls = dict(_INTRINSIC_DECLS)
     if flavor == LLVM_FLAVOR_LLVM22:
@@ -1197,27 +1185,19 @@ def _decls_for_flavor(flavor: str) -> Dict[str, str]:
 def check_arch_domain_in_ir(ir_text: str, arch: str, flavor: Optional[str]) -> None:
     """Run the arch-domain lane over already-emitted IR.
 
-    The lane proper lives in ``_Lowerer._need``, which is the right place for
-    it and reaches exactly one backend: the Python one. The default backend is
-    the C++ engine, which returns finished IR without the Python lowerer ever
-    running, so for most users the lane was dead -- a kernel could demand an
-    intrinsic the table records as ``arch_absent`` on its target and nothing
-    would say so. A requirement enforced on one of two backends is not a
-    requirement; this is the same defect the explicit-target check two
-    screens down in ``lower_kernel_to_llvm`` was moved to the chokepoint to
-    fix, and it gets the same treatment.
+    The lane proper lives in ``_Lowerer._need``, which reaches only the Python
+    backend. The default is the C++ engine, which returns finished IR without
+    the Python lowerer ever running, so the lane was dead for most users. A
+    requirement enforced on one of two backends is not a requirement.
 
-    Checking the emitted text rather than mirroring the lane into C++ is the
-    cheaper half of that and also the more honest one: ``_need`` vets what the
-    emitter *intended* to declare, while this vets what actually came out, so
-    it cannot be bypassed by an engine that reaches a declare another way.
+    Checking emitted text beats mirroring the lane into C++: ``_need`` vets
+    what the emitter *intended* to declare, this vets what came out.
 
-    The mapping back to table keys is exact, not heuristic. ``finalize``
-    emits declares verbatim from the flavor's table, and the C++ engine is
-    held to byte-identity with it, so a declare line either *is* a table value
-    -- and names its key -- or belongs to something the table never measured
-    (the dynamically registered ``llvm.smax.v<N>i<W>`` declares, say), which
-    is silence by the same rule as everywhere else in this lane.
+    The declare -> key mapping is exact, not heuristic -- ``finalize`` emits
+    declares verbatim from the flavor's table and the C++ engine is held to
+    byte-identity with it. A line that is not a table value belongs to
+    something never measured (the dynamic ``llvm.smax.v<N>i<W>`` declares),
+    which is silence by the same rule as the rest of the lane.
     """
     if _arch_domain_mode() == _ARCH_DOMAIN_OFF:
         return
@@ -1703,13 +1683,9 @@ class _Lowerer:
     ) -> None:
         self.kernel = kernel
         # ISA backend selects the gfx-keyed LLVM details (datalayout, triple,
-        # waitcnt encoding).
-        #
-        # There is no default. A silent gfx950 was not a convenience: it meant a
-        # caller who forgot the arch lowered for gfx950 and then compiled for
-        # whatever target it actually wanted, with nothing anywhere saying the
-        # two disagreed. It also makes the arch-domain check below unanswerable,
-        # because the target the table is consulted for would be a guess.
+        # waitcnt encoding). No default: a silent gfx950 meant a caller who
+        # forgot the arch lowered for one target and compiled for another, and
+        # it makes the arch-domain check below unanswerable.
         from .isa.backend import backend_for
 
         if arch is None:
@@ -1894,16 +1870,13 @@ class _Lowerer:
     def _need(self, key: str) -> None:
         """Register a demand for an intrinsic declaration, and vet it.
 
-        This is the only place an intrinsic demand may be recorded. Every path
-        that wants a declare emitted must come through here, because this is
-        where the arch-domain table gets consulted -- a path that writes
-        ``self._needs_intrin`` directly gets the declare and skips the check,
-        which is the failure mode this function exists to make impossible.
+        The only place a demand may be recorded: writing ``self._needs_intrin``
+        directly gets the declare but skips the arch-domain check.
         ``tests/core/test_arch_domain_lane.py`` enforces that by AST walk.
         """
         if key in self._needs_intrin:
-            # Already demanded. Checking once per key rather than once per call
-            # keeps a key requested inside a loop from warning per iteration.
+            # Check once per key, not per call, so a demand inside a loop does
+            # not warn per iteration.
             return
         self._needs_intrin[key] = True
         self._check_arch_domain(key)
@@ -1911,17 +1884,10 @@ class _Lowerer:
     def _check_arch_domain(self, key: str) -> None:
         """Warn if the arch-domain table says this target cannot lower ``key``.
 
-        Silence is the default and covers far more ground than the warning. A
-        flavor with no committed column, a target the generator never swept, a
-        key that is not in the table at all (the dynamically registered
-        ``llvm.smax.v<N>i<W>`` declares in ``_op_vector_smax``, for instance),
-        and every one of the no-data statuses all produce nothing. Only a
-        measured, definite negative speaks.
-
-        That asymmetry is deliberate. A missed warning costs a diagnostic the
-        developer was going to get from the compiler anyway; a spurious one
-        trains people to ignore the lane, and on an older ROCm there would be a
-        lot of them -- 14% of the llvm20 column is no-data.
+        Only a measured, definite negative speaks. A missing column, an
+        unswept target, a key absent from the table, and every no-data status
+        are all silent -- a spurious warning trains people to ignore the lane,
+        and 14% of the llvm20 column is no-data.
         """
         if _arch_domain_mode() == _ARCH_DOMAIN_OFF:
             return
@@ -5882,12 +5848,10 @@ class _Lowerer:
         intrin = f"llvm.smax.v{count}i{width}"
         vec_llvm = _llvm_type(vec_ty)
         self._decls[intrin] = f"declare {vec_llvm} @{intrin}({vec_llvm}, {vec_llvm})"
-        # Registers the decl TEXT and then demands it through the chokepoint, so
-        # the arch-domain lookup still runs. It finds nothing: the key is
-        # synthesised per element width and is not in the static decl table the
-        # generator sweeps, so the table has no row for it and the demand is
-        # silent. That is the right answer -- ``llvm.smax`` is a target-agnostic
-        # LLVM intrinsic, not an AMDGCN one.
+        # Goes through the chokepoint so the arch-domain lookup still runs. It
+        # finds nothing: the key is synthesised per element width and is not in
+        # the static decl table the generator sweeps. That is correct --
+        # ``llvm.smax`` is target-agnostic, not an AMDGCN intrinsic.
         self._need(intrin)
         self._current().emit(
             f"  {op.result.name} = call {vec_llvm} @{intrin}("
@@ -6667,14 +6631,11 @@ def lower_kernel_to_llvm(
     """
     from .backend import lower_kernel_via_backend
 
-    # Validated here, *before* dispatch, not only in the Python lowerer's
-    # constructor. The constructor runs on the Python path alone, so with the
-    # C++ engine available -- which is the default -- an omitted target slipped
-    # past it and the backend substituted gfx950, meaning the same call raised
-    # under ROCKE_BACKEND=python and silently lowered for a guessed target
-    # otherwise. A requirement enforced on one of two backends is not a
-    # requirement; the chokepoint every caller funnels through is the only
-    # place it holds for both.
+    # Validated before dispatch, not only in the Python lowerer's constructor:
+    # that constructor runs on the Python path alone, so with the C++ engine
+    # (the default) the same call raised under ROCKE_BACKEND=python and
+    # silently guessed a target otherwise. A requirement enforced on one of two
+    # backends is not a requirement.
     if arch is None:
         raise ValueError(
             "lowering requires an explicit gfx target; "

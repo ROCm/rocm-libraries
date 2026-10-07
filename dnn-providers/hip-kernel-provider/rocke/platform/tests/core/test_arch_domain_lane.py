@@ -8,17 +8,15 @@ the lowerer does with it: every intrinsic demand goes through one chokepoint,
 that chokepoint consults the table, and it speaks only for a measured, definite
 negative.
 
-The three things that can quietly break the lane, and the test that holds each:
+The three things that can quietly break the lane:
 
 * **A demand that skips the chokepoint.** Writing ``self._needs_intrin[k] =
-  True`` directly still emits the declare, so nothing visibly breaks — the check
-  just never runs for that key. Caught by AST walk, in the style of
-  ``library/tests/test_library_layering.py``.
+  True`` directly still emits the declare, so the check never runs for that key.
+  Caught by AST walk, in the style of ``library/tests/test_library_layering.py``.
 * **A no-data status read as a negative.** ``target_unsupported``,
   ``toolchain_crash``, ``toolchain_timeout`` and a missing column all mean the
-  question was never answered. Treating any of them as "no" turns a developer on
-  an older ROCm into a wall of warnings about intrinsics that are fine — 14% of
-  the llvm20 column is no-data.
+  question was never answered; treating them as "no" gives a developer on an
+  older ROCm a wall of warnings -- 14% of the llvm20 column is no-data.
 * **The implicit target default coming back.** A silent ``gfx950`` makes the
   lookup unanswerable, because the target it is consulted for would be a guess.
 """
@@ -40,14 +38,10 @@ LOWER_LLVM = PLATFORM / "python" / "rocke" / "core" / "lower_llvm.py"
 CPP_CORE = PLATFORM / "cpp" / "core" / "lower_llvm" / "core.cpp"
 CHECK_GATE = PLATFORM / "tools" / "check_arch_domain.py"
 
-# Most of this file tests the installed package and travels with it. Three
-# tests below instead read the *sources* next to it -- the Python emitter, the
-# C++ core, the gate script -- and `install(DIRECTORY tests/)` ships only
-# `tests/`, so in an installed layout those paths do not exist. Without this
-# they fail there, which reads as "the lane is broken" when it means "the file
-# being asserted about was not shipped". Skipping is right and excluding the
-# whole module is not: the rest of the file is portable and is exactly what an
-# installed-package consumer wants run.
+# Three tests below read the *sources* -- the Python emitter, the C++ core, the
+# gate script -- which `install(DIRECTORY tests/)` does not ship. Skip those
+# rather than excluding the module: the rest of the file is portable and is
+# exactly what an installed-package consumer wants run.
 _needs_sources = pytest.mark.skipif(
     not (LOWER_LLVM.exists() and CPP_CORE.exists() and CHECK_GATE.exists()),
     reason="reads the platform sources, which an installed test layout omits",
@@ -112,13 +106,9 @@ def test_unknown_key_and_unknown_arch_are_no_data() -> None:
 def test_a_malformed_column_is_rejected_not_emptied() -> None:
     """A wrong document must not become an empty table.
 
-    ``None`` from :func:`lookup` is this module's word for "not measured", so
-    a column that parses as JSON but is not *this* schema -- ``{}``, a future
-    v2, a different artifact entirely -- would hand back an ``ArchDomain``
-    whose every lookup says no-data. The lane would switch itself off for
-    everyone and report nothing, which is precisely the silent failure it
-    exists to prevent. ``load`` already lets a JSON parse error propagate for
-    the same reason; a wrong schema is that defect one layer up.
+    ``None`` from :func:`lookup` means "not measured", so a column that parses
+    as JSON but is not *this* schema would hand back an ``ArchDomain`` whose
+    every lookup says no-data -- the lane silently switched off for everyone.
     """
     for doc in (
         {},
@@ -181,8 +171,7 @@ def _needs_intrin_writes() -> list[tuple[str, int]]:
 @_needs_sources
 def test_needs_intrin_is_only_written_by_need() -> None:
     """A path that writes the map directly gets its declare emitted and skips
-    the arch-domain lookup — the exact failure this lane exists to prevent, and
-    one that leaves no trace in the emitted bytes."""
+    the arch-domain lookup, leaving no trace in the emitted bytes."""
     offenders = [(fn, line) for fn, line in _needs_intrin_writes() if fn != "_need"]
     assert not offenders, (
         "these write _Lowerer._needs_intrin outside _need() and so bypass the "
@@ -196,8 +185,8 @@ def test_needs_intrin_is_only_written_by_need() -> None:
 
 
 def _a_kernel():
-    """An ordinary gfx950 GEMM -- one the table has nothing negative to say
-    about, so these tests isolate the arch argument rather than the warning."""
+    """An ordinary gfx950 GEMM the table has nothing negative to say about, so
+    these tests isolate the arch argument rather than the warning."""
     from rocke.instances.common.gemm_universal import (
         TileSpec,
         TraitSpec,
@@ -305,18 +294,14 @@ def test_an_unset_or_empty_lane_setting_warns(monkeypatch: pytest.MonkeyPatch) -
 def test_a_misspelled_lane_setting_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """Falling back to the default here does the opposite of what was asked.
 
-    Every plausible way to get this wrong -- ``0``, ``false``, ``no``, a
-    typo -- is somebody trying to turn the lane *off*. Matching only the exact
-    string ``off`` and silently warning for everything else leaves the lane on
-    while the developer believes it is off, and this variable exists precisely
-    to be the escape hatch when the lane is wrong. An escape hatch that
-    quietly does not open is worse than none.
+    Every plausible misspelling -- ``0``, ``false``, ``no``, a typo -- is
+    somebody trying to turn the lane *off*. Warning anyway leaves the lane on
+    while the developer believes this escape hatch opened it.
     """
     from rocke.core.lower_llvm import _ARCH_DOMAIN_ENV, _arch_domain_mode
 
-    # `error` is a planned third mode, not a current one. It belongs here
-    # until it exists: the day it is added, this line is the reminder that
-    # `_ARCH_DOMAIN_MODES` has to learn about it too.
+    # `error` is a planned third mode, not a current one: the day it is added,
+    # this line is the reminder that `_ARCH_DOMAIN_MODES` must learn about it.
     for raw in ("0", "1", "false", "no", "offf", "on", "warning", "error"):
         monkeypatch.setenv(_ARCH_DOMAIN_ENV, raw)
         with pytest.raises(ValueError, match=_ARCH_DOMAIN_ENV):
@@ -332,9 +317,8 @@ def _negative_declare() -> tuple[str, str, str, str]:
     """A (declare line, key, arch, flavor) the table calls arch_absent.
 
     Built from the flavor's own declaration table so the line is byte-for-byte
-    what ``finalize`` emits -- the post-pass maps declares back to keys by
-    exact match, and a hand-written approximation would pass this test while
-    the real thing silently matched nothing.
+    what ``finalize`` emits: the post-pass maps declares back to keys by exact
+    match, so a hand-written approximation would match nothing in the real run.
     """
     from rocke.core.lower_llvm import _decls_for_flavor
 
@@ -358,8 +342,8 @@ def test_the_post_pass_is_silent_on_an_unmeasured_declare() -> None:
     """A declare the table never measured is not evidence of anything.
 
     ``llvm.smax.v<N>i<W>`` is registered dynamically at lowering time and so
-    appears in no column. Silence is the rule everywhere else in this lane and
-    has to hold here too, or the default backend becomes the noisy one.
+    appears in no column; silence has to hold here as everywhere else in the
+    lane, or the default backend becomes the noisy one.
     """
     from rocke.core.lower_llvm import check_arch_domain_in_ir
 
@@ -388,10 +372,9 @@ def test_the_post_pass_honours_the_off_switch(monkeypatch: pytest.MonkeyPatch) -
 def test_the_cpp_backend_runs_the_lane(monkeypatch: pytest.MonkeyPatch) -> None:
     """The default backend warns, which is the whole point of the post-pass.
 
-    The C++ engine is stubbed rather than required: this asserts that a
-    *successful* cpp lowering is vetted, and on a host without the extension
-    built the real call would fall back to the Python lowerer -- which runs the
-    lane via ``_need`` and would make the test pass while proving nothing.
+    The C++ engine is stubbed rather than required: without the extension
+    built, the real call falls back to the Python lowerer, whose ``_need``
+    runs the lane and would make the test pass while proving nothing.
     """
     from rocke.core import backend as B
 
@@ -434,8 +417,7 @@ def test_the_cpp_fallback_does_not_warn_twice(monkeypatch: pytest.MonkeyPatch) -
             llvm_flavor=flavor,
             arch=arch,
             # Stands in for the Python lowerer, which would have warned once
-            # from `_need`; emitting the warning here keeps the count honest
-            # without depending on a kernel that demands this key.
+            # from `_need`, without depending on a kernel that demands this key.
             python_lower=lambda *a, **k: (
                 warnings.warn(
                     ArchDomainWarning(key, arch, flavor, "arch_absent", ""),

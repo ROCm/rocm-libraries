@@ -195,10 +195,9 @@ def _build_one(args: Tuple[str, Dict[str, object], str, str]) -> Dict[str, objec
         t0 = time.perf_counter()
         kernel = build_universal_gemm(spec)
         t1 = time.perf_counter()
-        # Lower for the SAME target we are about to compile for. This used to
-        # lower with no arch at all, which silently meant gfx950 while the
-        # compile below used whatever `isa` named -- so a sweep on any other
-        # target built gfx950 IR for it and nothing said so.
+        # Lower for the SAME target we are about to compile for: with no arch
+        # this defaults to gfx950, so a sweep on any other `isa` would silently
+        # compile gfx950 IR.
         ll = lower_kernel_to_llvm(kernel, arch=arch_from_isa(isa))
         t2 = time.perf_counter()
         hsaco, ct = build_hsaco_from_llvm_ir(ll, isa=isa)

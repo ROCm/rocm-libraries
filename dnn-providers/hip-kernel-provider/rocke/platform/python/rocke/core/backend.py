@@ -342,11 +342,6 @@ def lower_kernel_via_backend(
     if chosen == BACKEND_PYTHON:
         return python_lower(kernel, llvm_flavor=llvm_flavor, arch=arch)
 
-    # No `arch or "gfx950"` here. This function is reached only through
-    # `lower_kernel_to_llvm`, which rejects a missing target before dispatch,
-    # so a None arriving here is a caller that bypassed the chokepoint -- and
-    # substituting a target for it would hand the engine a guess while the
-    # Python path next door raises on the same input. Fail instead.
     if arch is None:
         raise ValueError(
             "lowering requires an explicit gfx target; "
@@ -366,15 +361,12 @@ def lower_kernel_via_backend(
             if _cpp_strict():
                 raise
             _record_fallback(name, f"{type(e).__name__}: {e}")
-            # The fallback runs the Python lowerer, whose `_need` already runs
-            # the arch-domain lane. No post-pass here, or the one path that
-            # has the lane would be the one that warns twice.
+            # No post-pass: the fallback runs the Python lowerer, whose `_need`
+            # already runs the lane. Adding one here would warn twice.
             return python_lower(kernel, llvm_flavor=llvm_flavor, arch=arch)
-        # Only this branch needs it. The lane lives in `_Lowerer._need`, so
-        # every other path through this function has already run it; a
-        # successful C++ lowering is the single way out of here that never
-        # touched the Python lowerer, and it is also the default, which is
-        # what made the gap matter.
+        # The arch-domain lane lives in `_Lowerer._need`, so a successful C++
+        # lowering is the only exit here that never runs it -- and it is the
+        # default path.
         from .lower_llvm import check_arch_domain_in_ir
 
         check_arch_domain_in_ir(out, _arch, llvm_flavor)

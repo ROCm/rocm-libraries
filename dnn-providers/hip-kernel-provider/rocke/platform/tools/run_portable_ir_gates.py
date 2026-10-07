@@ -128,9 +128,9 @@ def build_shared_engine(build_root: Path) -> Optional[Path]:
                 "rocke_shared",
                 "-j",
                 # This process's share, not the machine's size -- same reason
-                # the three probe gates size from this helper. A scheduler-
-                # pinned host reports 384 against an allocation of 2, and
-                # `-j384` there is not a fast build but an OOM.
+                # the probe gates size from this helper. A scheduler-pinned
+                # host reports 384 against an allocation of 2, where `-j384`
+                # is an OOM rather than a fast build.
                 str(available_cpus()),
             ],
             check=True,

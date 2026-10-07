@@ -604,9 +604,8 @@ const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t
 {
     const rocke_isa_backend_t* base = NULL;
     /* No default. A NULL arch used to resolve to gfx950 silently, so a caller
-     * that forgot the target lowered for gfx950 and then compiled for whatever
-     * it actually wanted, with nothing saying the two disagreed. Mirrors the
-     * Python lowerer, which raises on `arch=None`. */
+     * that forgot the target lowered for one arch and compiled for another.
+     * Mirrors the Python lowerer, which raises on `arch=None`. */
     if(arch == NULL)
     {
         if(st)
