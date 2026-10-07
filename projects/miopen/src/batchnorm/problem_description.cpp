@@ -96,11 +96,15 @@ bool IsFwdTrainTypeValid(const ProblemDescription& bn_problem)
     bool both_fp32 =
         is_fp32(bn_problem.GetXDesc().GetType()) && is_fp32(bn_problem.GetYDesc().GetType());
 
-    // Supports mixed fp16, bfp16 and pure fp32
-    return ((both_fp16 || both_bfp16 || both_fp32) && is_fp32(bn_problem.GetBnScale().GetType()) &&
-            is_fp32(bn_problem.GetBnBias().GetType()) &&
-            is_fp32(bn_problem.GetBnSMean().GetType()) &&
-            is_fp32(bn_problem.GetBnSVar().GetType()));
+    const auto input_type = bn_problem.GetXDesc().GetType();
+    const bool fp32_parameters =
+        is_fp32(bn_problem.GetBnScale().GetType()) && is_fp32(bn_problem.GetBnBias().GetType());
+    const bool input_parameters = bn_problem.GetMode() == miopenBNSpatial &&
+                                  is_fp16_or_bfp16(input_type) &&
+                                  bn_problem.GetBnScale().GetType() == input_type &&
+                                  bn_problem.GetBnBias().GetType() == input_type;
+    return (both_fp16 || both_bfp16 || both_fp32) && (fp32_parameters || input_parameters) &&
+           is_fp32(bn_problem.GetBnSMean().GetType()) && is_fp32(bn_problem.GetBnSVar().GetType());
 }
 
 bool IsCKFwdTrainTypeValid(const ProblemDescription& bn_problem)
@@ -136,11 +140,15 @@ bool IsBwdTypeValid(const ProblemDescription& bn_problem)
                     is_fp32(bn_problem.GetDXDesc().GetType()) &&
                     is_fp32(bn_problem.GetDYDesc().GetType());
 
-    // Supports mixed fp16, bfp16 and pure fp32
-    return ((all_fp16 || all_bfp16 || all_fp32) && is_fp32(bn_problem.GetBnScale().GetType()) &&
-            is_fp32(bn_problem.GetBnBias().GetType()) &&
-            is_fp32(bn_problem.GetBnSMean().GetType()) &&
-            is_fp32(bn_problem.GetBnSVar().GetType()));
+    const auto input_type = bn_problem.GetXDesc().GetType();
+    const bool standard_data =
+        (all_fp16 || all_bfp16 || all_fp32) && is_fp32(bn_problem.GetBnScale().GetType());
+    const bool mixed_gradients =
+        bn_problem.GetMode() == miopenBNSpatial && is_fp16_or_bfp16(input_type) &&
+        is_fp32(bn_problem.GetDXDesc().GetType()) && is_fp32(bn_problem.GetDYDesc().GetType()) &&
+        bn_problem.GetBnScale().GetType() == input_type;
+    return (standard_data || mixed_gradients) && is_fp32(bn_problem.GetBnBias().GetType()) &&
+           is_fp32(bn_problem.GetBnSMean().GetType()) && is_fp32(bn_problem.GetBnSVar().GetType());
 }
 
 bool IsCKBwdTypeValid(const ProblemDescription& bn_problem)

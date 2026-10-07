@@ -223,7 +223,7 @@ inline bool UseMultiple(const miopen::batchnorm::ProblemDescription& problem)
 inline int GetStashMethod(bool IsLayoutNHWC,
                           miopenDataType_t problem_type,
                           unsigned int stash_values,
-                          size_t c,
+                          size_t channel_vectors,
                           size_t n,
                           size_t in_cstride,
                           size_t ylocalsize,
@@ -241,7 +241,7 @@ inline int GetStashMethod(bool IsLayoutNHWC,
     {
         stash_method = 1;
     }
-    if(IsLayoutNHWC && !(problem_type == miopenFloat) && (c % 2 != 0) &&
+    if(IsLayoutNHWC && !(problem_type == miopenFloat) && (channel_vectors % 2 != 0) &&
        (last_zlocalsize >= stash_values))
     {
         stash_method = 2;
@@ -322,10 +322,9 @@ inline bool IsSpatialBufferedApplicable(const miopen::batchnorm::ProblemDescript
     if(problem.GetDirection() != miopen::batchnorm::Direction::ForwardTraining ||
        problem.GetMode() != miopenBNSpatial || !problem.Is2D() || !problem.IsLayoutNCHW() ||
        (input_type != miopenHalf && input_type != miopenBFloat16) || !problem.IsScaleFp32() ||
-       problem.GetBnBias().GetType() != miopenFloat ||
-       problem.GetYDesc().GetType() != input_type || !problem.GetXDesc().IsPacked() ||
-       !problem.GetYDesc().IsPacked() || !problem.GetBnScale().IsPacked() ||
-       !problem.GetBnBias().IsPacked() ||
+       problem.GetBnBias().GetType() != miopenFloat || problem.GetYDesc().GetType() != input_type ||
+       !problem.GetXDesc().IsPacked() || !problem.GetYDesc().IsPacked() ||
+       !problem.GetBnScale().IsPacked() || !problem.GetBnBias().IsPacked() ||
        problem.GetXDesc().GetLengths() != problem.GetYDesc().GetLengths() ||
        (vectorsize != 4 && vectorsize != 8) ||
        (blocksize != 256 && blocksize != 512 && blocksize != 1024))
@@ -335,8 +334,8 @@ inline bool IsSpatialBufferedApplicable(const miopen::batchnorm::ProblemDescript
     std::tie(n, c, h, w) = tien<4>(problem.GetXDesc().GetLengths());
     if(n == 0 || n > 64 || c == 0 || h == 0 || h > 4800 || w == 0 || w > 4800 / h)
         return false;
-    const size_t hw  = h * w;
-    const size_t nhw = n * hw;
+    const size_t hw    = h * w;
+    const size_t nhw   = n * hw;
     const size_t slots = (nhw / vectorsize + blocksize - 1) / blocksize;
     return hw % vectorsize == 0 && slots * vectorsize * GetTypeSize(input_type) <= 256 &&
            c <= std::numeric_limits<unsigned int>::max() / nhw;
@@ -352,8 +351,7 @@ inline void AddSpatialBufferedConfigs(const miopen::batchnorm::ProblemDescriptio
         for(const size_t vectorsize : {4, 8})
         {
             if(IsSpatialBufferedApplicable(problem, vectorsize, blocksize))
-                valid_kernels.push_back(
-                    GetKernelIdFromVariant(4, vectorsize, blocksize, 1, 1, 1));
+                valid_kernels.push_back(GetKernelIdFromVariant(4, vectorsize, blocksize, 1, 1, 1));
         }
     }
 }
@@ -389,8 +387,7 @@ inline void AddSpatialStreamingConfigs(const miopen::batchnorm::ProblemDescripti
     for(const size_t blocksize : {1024, 512, 256})
         for(const size_t vectorsize : {4, 8})
             if(IsSpatialStreamingApplicable(problem, vectorsize, blocksize))
-                valid_kernels.push_back(
-                    GetKernelIdFromVariant(6, vectorsize, blocksize, 1, 1, 1));
+                valid_kernels.push_back(GetKernelIdFromVariant(6, vectorsize, blocksize, 1, 1, 1));
 }
 
 // Add spatial single instances for given problem
@@ -551,9 +548,10 @@ inline bool IsSpatialMultipleApplicable(const miopen::batchnorm::ProblemDescript
         //  - last block must have enough space to stash intermediate results in HW dimension
         //  - if last block doesn't fit, intermediate results are stored in N dimension which must
         //    be large enough
-        //  - if C is not multiple of 2, intermediate results are stored in N dimension splitting
-        //    float values in group of 2 bytes. N must be large enough
-        if((!bfp32parm && (c % 2 != 0 && last_zlocalsize < static_cast<size_t>(stash_values))) ||
+        //  - an odd channel-vector count needs split stores in N to avoid overlapping
+        //    adjacent FP32 vectors; the last batch tile must have enough space.
+        if((!bfp32parm &&
+            ((c / vectorsize) % 2 != 0 && last_zlocalsize < static_cast<size_t>(stash_values))) ||
            ((last_ylocalsize < stash_values) &&
             (last_zlocalsize < static_cast<size_t>(stash_values))))
         {
@@ -931,9 +929,8 @@ inline void DefaultConfigSpatialMultiple(const miopen::batchnorm::ProblemDescrip
         // Exact divisors avoid a partial per-thread loop; the final z workgroup may
         // still contain inactive threads.
         if(problem.GetDirection() == miopen::batchnorm::Direction::ForwardTraining &&
-           problem.IsBFp16() && problem.IsScaleFp32() && problem.Is2D() &&
-           problem.IsLayoutNCHW() && problem.GetXDesc().IsPacked() &&
-           problem.GetYDesc().IsPacked() && n >= 8 && n <= 64)
+           problem.IsBFp16() && problem.IsScaleFp32() && problem.Is2D() && problem.IsLayoutNCHW() &&
+           problem.GetXDesc().IsPacked() && problem.GetYDesc().IsPacked() && n >= 8 && n <= 64)
         {
             // gfx125 wave32 also supports 16-byte BF16 transactions. Keep vector8
             // behind the forward solver's device check and retain the old default.
@@ -997,10 +994,10 @@ inline void DefaultConfigSpatialMultiple(const miopen::batchnorm::ProblemDescrip
                                                             nelements))
                                 continue;
 
-                            const size_t ytile = ylocalsize * vectorsize;
-                            const size_t ytail = (in_cstride - 1) % ytile + 1;
-                            const size_t ztile = zlocalsize * nelements;
-                            const size_t ztail = (n - 1) % ztile + 1;
+                            const size_t ytile     = ylocalsize * vectorsize;
+                            const size_t ytail     = (in_cstride - 1) % ytile + 1;
+                            const size_t ztile     = zlocalsize * nelements;
+                            const size_t ztail     = (n - 1) % ztile + 1;
                             const int stash_method = GetStashMethod(false,
                                                                     problem.GetXDesc().GetType(),
                                                                     stash_values,
@@ -1016,8 +1013,7 @@ inline void DefaultConfigSpatialMultiple(const miopen::batchnorm::ProblemDescrip
                             const size_t stash_slots = 2 * stash_values;
                             const size_t padding     = in_cstride % 2;
                             if((stash_method == 0 && ytail < stash_slots + padding) ||
-                               (stash_method == 1 &&
-                                (ztail < stash_slots || padding != 0)))
+                               (stash_method == 1 && (ztail < stash_slots || padding != 0)))
                                 continue;
 
                             valid_kernels.push_back(GetKernelIdFromVariant(

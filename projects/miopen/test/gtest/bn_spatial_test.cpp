@@ -1776,11 +1776,12 @@ public:
             std::max(size_t{1}, size_t(0.6f * handle.GetMaxComputeUnits())),
             handle.GetWavefrontWidth(),
             miopen::ActivationDescriptor{miopenActivationPASTHRU, 0.0, 0.0, 0.0}};
-        const auto ctx = miopen::ExecutionContext{&handle};
+        const auto ctx    = miopen::ExecutionContext{&handle};
         const auto solver = miopen::solver::batchnorm::BnFwdTrainingSpatial{};
         // Select the Welford implementation explicitly rather than depending on the heuristic or
         // a perf-db entry. Small NHW regression cases would otherwise use a different variant.
-        const auto config = miopen::solver::batchnorm::PerformanceConfigBnFwdTraining{0, "Variant1-1"};
+        const auto config =
+            miopen::solver::batchnorm::PerformanceConfigBnFwdTraining{0, "Variant1-1"};
         ASSERT_TRUE(solver.IsApplicable(ctx, problem));
         const auto solution = solver.GetSolution(ctx, problem, config);
         ASSERT_TRUE(solution.Succeeded());
@@ -1788,7 +1789,7 @@ public:
         const auto invoker =
             handle.PrepareInvoker(*solution.invoker_factory, solution.construction_params);
 
-        auto invoke_params = miopen::batchnorm::FwdTrainInvokeParams{};
+        auto invoke_params                  = miopen::batchnorm::FwdTrainInvokeParams{};
         invoke_params.type                  = miopen::InvokeType::Run;
         invoke_params.x                     = in_dev.get();
         invoke_params.y                     = out_dev.get();
@@ -1817,13 +1818,12 @@ public:
                         for(size_t column = 0; column < w; ++column)
                         {
                             const double expected =
-                                (double(input(bidx, cidx, row, column)) -
-                                 cpuMean(0, cidx, 0, 0)) *
+                                (double(input(bidx, cidx, row, column)) - cpuMean(0, cidx, 0, 0)) *
                                     inv_var * scale(0, cidx, 0, 0) +
                                 shift(0, cidx, 0, 0);
                             EXPECT_NEAR(out(bidx, cidx, row, column), expected, 0.002)
-                                << "at {" << bidx << ", " << cidx << ", " << row << ", "
-                                << column << "}";
+                                << "at {" << bidx << ", " << cidx << ", " << row << ", " << column
+                                << "}";
                         }
             }
         }
@@ -1921,18 +1921,17 @@ INSTANTIATE_TEST_SUITE_P(Full,
 TEST(GPU_BN_Spatial_BF16, SplitBatchPaddedTile)
 {
     constexpr size_t n = 42, c = 3, h = 30, w = 40;
-    constexpr size_t spatial = h * w;
+    constexpr size_t spatial       = h * w;
     constexpr size_t element_count = n * c * spatial;
-    constexpr size_t guard_count = 14 * c * spatial;
+    constexpr size_t guard_count   = 14 * c * spatial;
     const bfloat16 canary{123.0f};
     tensor<bfloat16> input{n, c, h, w};
     // Distinct channels and batches expose contributions from padded batch lanes.
     for(size_t bidx = 0; bidx < n; ++bidx)
         for(size_t cidx = 0; cidx < c; ++cidx)
             for(size_t hwidx = 0; hwidx < spatial; ++hwidx)
-                input[bidx * c * spatial + cidx * spatial + hwidx] =
-                    bfloat16{float(int((bidx * 13 + hwidx * 7) % 31) - 15) * 0.125f +
-                             float(cidx) * 2.0f};
+                input[bidx * c * spatial + cidx * spatial + hwidx] = bfloat16{
+                    float(int((bidx * 13 + hwidx * 7) % 31) - 15) * 0.125f + float(cidx) * 2.0f};
 
     tensor<float> scale{1, c, 1, 1};
     tensor<float> shift{1, c, 1, 1};
@@ -1955,13 +1954,13 @@ TEST(GPU_BN_Spatial_BF16, SplitBatchPaddedTile)
         variances[cidx] /= n * spatial;
     }
 
-    auto&& handle = get_handle();
+    auto&& handle     = get_handle();
     auto padded_input = input.data;
     padded_input.resize(element_count + guard_count, canary);
-    const auto in_dev = handle.Write(padded_input);
+    const auto in_dev    = handle.Write(padded_input);
     const auto scale_dev = handle.Write(scale.data);
     const auto shift_dev = handle.Write(shift.data);
-    const auto problem = miopen::batchnorm::ProblemDescription{
+    const auto problem   = miopen::batchnorm::ProblemDescription{
         miopenBNSpatial,
         input.desc,
         input.desc,
@@ -1976,14 +1975,13 @@ TEST(GPU_BN_Spatial_BF16, SplitBatchPaddedTile)
         std::max(size_t{1}, size_t(0.6f * handle.GetMaxComputeUnits())),
         handle.GetWavefrontWidth(),
         miopen::ActivationDescriptor{miopenActivationPASTHRU, 0.0, 0.0, 0.0}};
-    const auto ctx = miopen::ExecutionContext{&handle};
+    const auto ctx    = miopen::ExecutionContext{&handle};
     const auto solver = miopen::solver::batchnorm::BnFwdTrainingSpatial{};
     ASSERT_TRUE(solver.IsApplicable(ctx, problem));
     for(const int vector_size : {1, 2, 4, 8})
     {
-        if(vector_size == 8 &&
-           (!miopen::StartsWith(handle.GetDeviceName(), "gfx125") ||
-            handle.GetWavefrontWidth() != 32))
+        if(vector_size == 8 && (!miopen::StartsWith(handle.GetDeviceName(), "gfx125") ||
+                                handle.GetWavefrontWidth() != 32))
             continue;
         SCOPED_TRACE(vector_size);
         const auto config = miopen::solver::batchnorm::PerformanceConfigBnFwdTraining{
@@ -1996,11 +1994,10 @@ TEST(GPU_BN_Spatial_BF16, SplitBatchPaddedTile)
             handle.PrepareInvoker(*solution.invoker_factory, solution.construction_params);
         // The final z lane starts at n=42. Padding the backing allocation makes any
         // erroneous write observable without corrupting an unrelated device allocation.
-        auto out_dev =
-            handle.Write(std::vector<bfloat16>(element_count + guard_count, canary));
-        auto mean_dev = handle.Create<float>(c);
+        auto out_dev     = handle.Write(std::vector<bfloat16>(element_count + guard_count, canary));
+        auto mean_dev    = handle.Create<float>(c);
         auto inv_var_dev = handle.Create<float>(c);
-        auto invoke_params = miopen::batchnorm::FwdTrainInvokeParams{};
+        auto invoke_params                  = miopen::batchnorm::FwdTrainInvokeParams{};
         invoke_params.type                  = miopen::InvokeType::Run;
         invoke_params.x                     = in_dev.get();
         invoke_params.y                     = out_dev.get();
@@ -2013,13 +2010,12 @@ TEST(GPU_BN_Spatial_BF16, SplitBatchPaddedTile)
         invoker(handle, invoke_params);
         handle.Finish();
 
-        const auto gpu_means = handle.Read<float>(mean_dev, c);
+        const auto gpu_means    = handle.Read<float>(mean_dev, c);
         const auto gpu_inv_vars = handle.Read<float>(inv_var_dev, c);
-        const auto output = handle.Read<bfloat16>(out_dev, element_count + guard_count);
+        const auto output       = handle.Read<bfloat16>(out_dev, element_count + guard_count);
         for(size_t cidx = 0; cidx < c; ++cidx)
         {
-            const double inv_var =
-                1.0 / std::sqrt(variances[cidx] + MIO_BN_TEST_EPSILON);
+            const double inv_var = 1.0 / std::sqrt(variances[cidx] + MIO_BN_TEST_EPSILON);
             ASSERT_NEAR(gpu_means[cidx], means[cidx], 1e-4) << "channel " << cidx;
             ASSERT_NEAR(gpu_inv_vars[cidx], inv_var, 1e-4) << "channel " << cidx;
             for(size_t bidx = 0; bidx < n; ++bidx)
@@ -2029,8 +2025,8 @@ TEST(GPU_BN_Spatial_BF16, SplitBatchPaddedTile)
                     const double expected =
                         (double(input[idx]) - means[cidx]) * inv_var * scale[cidx] + shift[cidx];
                     // Allow BF16 output rounding, not contamination from a padded batch.
-                    ASSERT_NEAR(double(output[idx]), expected,
-                                0.008 * std::max(1.0, std::abs(expected)))
+                    ASSERT_NEAR(
+                        double(output[idx]), expected, 0.008 * std::max(1.0, std::abs(expected)))
                         << "at batch " << bidx << ", channel " << cidx << ", HW " << hwidx;
                 }
         }
@@ -2041,10 +2037,10 @@ TEST(GPU_BN_Spatial_BF16, SplitBatchPaddedTile)
 
 template <class T>
 void RunBufferedStableVarianceAndInPlace(std::initializer_list<size_t> batch_sizes,
-                                       std::initializer_list<int> variants,
-                                       float input_spread,
-                                       double output_tolerance,
-                                       bool round_reference)
+                                         std::initializer_list<int> variants,
+                                         float input_spread,
+                                         double output_tolerance,
+                                         bool round_reference)
 {
     auto&& handle = get_handle();
     if(handle.GetDeviceName() != "gfx1250" || handle.GetWavefrontWidth() != 32)
@@ -2053,8 +2049,8 @@ void RunBufferedStableVarianceAndInPlace(std::initializer_list<size_t> batch_siz
     constexpr size_t c = 3, guard_count = 64;
     const T canary{123.0f};
     constexpr float stats_canary = -321.0f;
-    const auto ctx = miopen::ExecutionContext{&handle};
-    const auto solver = miopen::solver::batchnorm::BnFwdTrainingSpatial{};
+    const auto ctx               = miopen::ExecutionContext{&handle};
+    const auto solver            = miopen::solver::batchnorm::BnFwdTrainingSpatial{};
     tensor<float> scale{1, c, 1, 1};
     tensor<float> shift{1, c, 1, 1};
     for(size_t channel = 0; channel < c; ++channel)
@@ -2069,7 +2065,7 @@ void RunBufferedStableVarianceAndInPlace(std::initializer_list<size_t> batch_siz
     {
         // The small batch leaves whole waves empty and a partial final vector-block.
         // Odd C exposes channel crossing; channel two has zero variance.
-        const size_t spatial = n == 42 ? 1200 : 1208;
+        const size_t spatial       = n == 42 ? 1200 : 1208;
         const size_t element_count = n * c * spatial;
         SCOPED_TRACE("N=" + std::to_string(n) + ", HW=" + std::to_string(spatial));
         tensor<T> input{n, c, size_t{1}, spatial};
@@ -2079,10 +2075,12 @@ void RunBufferedStableVarianceAndInPlace(std::initializer_list<size_t> batch_siz
                 for(size_t hw = 0; hw < spatial; ++hw)
                 {
                     const float offset = channel == 1 ? -2048.0f : 2048.0f;
-                    const float spread = channel == 2 ? 0.0f
-                        : ((batch * 13 + hw * 7) % 3 == 0 ? -input_spread : input_spread);
+                    const float spread =
+                        channel == 2
+                            ? 0.0f
+                            : ((batch * 13 + hw * 7) % 3 == 0 ? -input_spread : input_spread);
                     const size_t idx = batch * c * spatial + channel * spatial + hw;
-                    input[idx] = T{offset + spread};
+                    input[idx]       = T{offset + spread};
                     means[channel] += double(input[idx]);
                 }
         for(size_t channel = 0; channel < c; ++channel)
@@ -2101,82 +2099,96 @@ void RunBufferedStableVarianceAndInPlace(std::initializer_list<size_t> batch_siz
         auto padded_input = input.data;
         padded_input.resize(element_count + guard_count, canary);
         const auto problem = miopen::batchnorm::ProblemDescription{
-            miopenBNSpatial, input.desc, input.desc, scale.desc, shift.desc,
-            scale.desc, scale.desc, MIO_BN_TEST_EXPAVGFACTOR, MIO_BN_TEST_EPSILON,
-            true, false, std::max(size_t{1}, size_t(0.6f * handle.GetMaxComputeUnits())),
+            miopenBNSpatial,
+            input.desc,
+            input.desc,
+            scale.desc,
+            shift.desc,
+            scale.desc,
+            scale.desc,
+            MIO_BN_TEST_EXPAVGFACTOR,
+            MIO_BN_TEST_EPSILON,
+            true,
+            false,
+            std::max(size_t{1}, size_t(0.6f * handle.GetMaxComputeUnits())),
             handle.GetWavefrontWidth(),
             miopen::ActivationDescriptor{miopenActivationPASTHRU, 0.0, 0.0, 0.0}};
 
         for(const int variant : variants)
-          for(const size_t block : {512, 1024})
-            for(const size_t vector_size : {4, 8})
-            {
-                const auto id = "Variant" + std::to_string(variant) + "-" +
-                                std::to_string(vector_size) + "-" +
-                                std::to_string(block) + "-1-1-1";
-                SCOPED_TRACE(id);
-                const auto config =
-                    miopen::solver::batchnorm::PerformanceConfigBnFwdTraining{0, id};
-                ASSERT_TRUE(solver.IsValidPerformanceConfig(ctx, problem, config));
-                const auto solution = solver.GetSolution(ctx, problem, config);
-                ASSERT_TRUE(solution.Succeeded());
-                ASSERT_TRUE(solution.invoker_factory);
-                const auto invoker =
-                    handle.PrepareInvoker(*solution.invoker_factory, solution.construction_params);
-                for(const bool in_place : {false, true})
+            for(const size_t block : {512, 1024})
+                for(const size_t vector_size : {4, 8})
                 {
-                    SCOPED_TRACE(in_place ? "in-place" : "disjoint");
-                    auto in_dev = handle.Write(padded_input);
-                    auto out_dev =
-                        handle.Write(std::vector<T>(element_count + guard_count, canary));
-                    auto mean_dev = handle.Write(std::vector<float>(c + guard_count, stats_canary));
-                    auto inv_var_dev =
-                        handle.Write(std::vector<float>(c + guard_count, stats_canary));
-                    auto invoke_params = miopen::batchnorm::FwdTrainInvokeParams{};
-                    invoke_params.type                  = miopen::InvokeType::Run;
-                    invoke_params.x                     = in_dev.get();
-                    invoke_params.y                     = in_place ? in_dev.get() : out_dev.get();
-                    invoke_params.bnScale               = scale_dev.get();
-                    invoke_params.bnBias                = shift_dev.get();
-                    invoke_params.expAvgFactor          = MIO_BN_TEST_EXPAVGFACTOR;
-                    invoke_params.epsilon               = MIO_BN_TEST_EPSILON;
-                    invoke_params.resultSaveMean        = mean_dev.get();
-                    invoke_params.resultSaveInvVariance = inv_var_dev.get();
-                    invoker(handle, invoke_params);
-                    handle.Finish();
-                    const auto gpu_means = handle.Read<float>(mean_dev, c + guard_count);
-                    const auto gpu_inv_vars = handle.Read<float>(inv_var_dev, c + guard_count);
-                    const auto output = handle.Read<T>(
-                        in_place ? in_dev : out_dev, element_count + guard_count);
-                    for(size_t channel = 0; channel < c; ++channel)
+                    const auto id = "Variant" + std::to_string(variant) + "-" +
+                                    std::to_string(vector_size) + "-" + std::to_string(block) +
+                                    "-1-1-1";
+                    SCOPED_TRACE(id);
+                    const auto config =
+                        miopen::solver::batchnorm::PerformanceConfigBnFwdTraining{0, id};
+                    ASSERT_TRUE(solver.IsValidPerformanceConfig(ctx, problem, config));
+                    const auto solution = solver.GetSolution(ctx, problem, config);
+                    ASSERT_TRUE(solution.Succeeded());
+                    ASSERT_TRUE(solution.invoker_factory);
+                    const auto invoker = handle.PrepareInvoker(*solution.invoker_factory,
+                                                               solution.construction_params);
+                    for(const bool in_place : {false, true})
                     {
-                        const double inv_var =
-                            1.0 / std::sqrt(variances[channel] + MIO_BN_TEST_EPSILON);
-                        ASSERT_NEAR(gpu_means[channel], means[channel], 5e-4);
-                        ASSERT_NEAR(gpu_inv_vars[channel], inv_var, 1e-5 * inv_var);
-                        for(size_t batch = 0; batch < n; ++batch)
-                            for(size_t hw = 0; hw < spatial; ++hw)
-                            {
-                                const size_t idx = batch * c * spatial + channel * spatial + hw;
-                                double expected =
-                                    (double(input[idx]) - means[channel]) * inv_var *
-                                        scale[channel] + shift[channel];
-                                if(round_reference)
-                                    expected = double(T{float(expected)});
-                                ASSERT_NEAR(double(output[idx]), expected,
-                                            output_tolerance * std::max(1.0, std::abs(expected)))
-                                    << "batch " << batch << ", channel " << channel << ", HW " << hw;
-                            }
-                    }
-                    for(size_t idx = element_count; idx < output.size(); ++idx)
-                        ASSERT_EQ(float(output[idx]), float(canary)) << "output guard " << idx;
-                    for(size_t idx = c; idx < gpu_means.size(); ++idx)
-                    {
-                        ASSERT_EQ(gpu_means[idx], stats_canary) << "mean guard " << idx;
-                        ASSERT_EQ(gpu_inv_vars[idx], stats_canary) << "inverse variance guard " << idx;
+                        SCOPED_TRACE(in_place ? "in-place" : "disjoint");
+                        auto in_dev = handle.Write(padded_input);
+                        auto out_dev =
+                            handle.Write(std::vector<T>(element_count + guard_count, canary));
+                        auto mean_dev =
+                            handle.Write(std::vector<float>(c + guard_count, stats_canary));
+                        auto inv_var_dev =
+                            handle.Write(std::vector<float>(c + guard_count, stats_canary));
+                        auto invoke_params           = miopen::batchnorm::FwdTrainInvokeParams{};
+                        invoke_params.type           = miopen::InvokeType::Run;
+                        invoke_params.x              = in_dev.get();
+                        invoke_params.y              = in_place ? in_dev.get() : out_dev.get();
+                        invoke_params.bnScale        = scale_dev.get();
+                        invoke_params.bnBias         = shift_dev.get();
+                        invoke_params.expAvgFactor   = MIO_BN_TEST_EXPAVGFACTOR;
+                        invoke_params.epsilon        = MIO_BN_TEST_EPSILON;
+                        invoke_params.resultSaveMean = mean_dev.get();
+                        invoke_params.resultSaveInvVariance = inv_var_dev.get();
+                        invoker(handle, invoke_params);
+                        handle.Finish();
+                        const auto gpu_means    = handle.Read<float>(mean_dev, c + guard_count);
+                        const auto gpu_inv_vars = handle.Read<float>(inv_var_dev, c + guard_count);
+                        const auto output       = handle.Read<T>(in_place ? in_dev : out_dev,
+                                                           element_count + guard_count);
+                        for(size_t channel = 0; channel < c; ++channel)
+                        {
+                            const double inv_var =
+                                1.0 / std::sqrt(variances[channel] + MIO_BN_TEST_EPSILON);
+                            ASSERT_NEAR(gpu_means[channel], means[channel], 5e-4);
+                            ASSERT_NEAR(gpu_inv_vars[channel], inv_var, 1e-5 * inv_var);
+                            for(size_t batch = 0; batch < n; ++batch)
+                                for(size_t hw = 0; hw < spatial; ++hw)
+                                {
+                                    const size_t idx = batch * c * spatial + channel * spatial + hw;
+                                    double expected  = (double(input[idx]) - means[channel]) *
+                                                          inv_var * scale[channel] +
+                                                      shift[channel];
+                                    if(round_reference)
+                                        expected = double(T{float(expected)});
+                                    ASSERT_NEAR(double(output[idx]),
+                                                expected,
+                                                output_tolerance *
+                                                    std::max(1.0, std::abs(expected)))
+                                        << "batch " << batch << ", channel " << channel << ", HW "
+                                        << hw;
+                                }
+                        }
+                        for(size_t idx = element_count; idx < output.size(); ++idx)
+                            ASSERT_EQ(float(output[idx]), float(canary)) << "output guard " << idx;
+                        for(size_t idx = c; idx < gpu_means.size(); ++idx)
+                        {
+                            ASSERT_EQ(gpu_means[idx], stats_canary) << "mean guard " << idx;
+                            ASSERT_EQ(gpu_inv_vars[idx], stats_canary)
+                                << "inverse variance guard " << idx;
+                        }
                     }
                 }
-            }
     }
 }
 
@@ -2198,15 +2210,24 @@ TEST(GPU_BN_Spatial_BF16, BufferedConfigurationBounds)
     if(handle.GetDeviceName() != "gfx1250" || handle.GetWavefrontWidth() != 32)
         GTEST_SKIP() << "Buffered BF16 batchnorm requires gfx1250 wave32";
 
-    const auto ctx = miopen::ExecutionContext{&handle};
+    const auto ctx    = miopen::ExecutionContext{&handle};
     const auto solver = miopen::solver::batchnorm::BnFwdTrainingSpatial{};
     tensor<float> params{1, 3, 1, 1};
     auto make_problem = [&](size_t n, size_t spatial) {
         tensor<bfloat16> input{n, size_t{3}, size_t{1}, spatial};
         return miopen::batchnorm::ProblemDescription{
-            miopenBNSpatial, input.desc, input.desc, params.desc, params.desc,
-            params.desc, params.desc, MIO_BN_TEST_EXPAVGFACTOR, MIO_BN_TEST_EPSILON,
-            true, false, size_t{1},
+            miopenBNSpatial,
+            input.desc,
+            input.desc,
+            params.desc,
+            params.desc,
+            params.desc,
+            params.desc,
+            MIO_BN_TEST_EXPAVGFACTOR,
+            MIO_BN_TEST_EPSILON,
+            true,
+            false,
+            size_t{1},
             handle.GetWavefrontWidth(),
             miopen::ActivationDescriptor{miopenActivationPASTHRU, 0.0, 0.0, 0.0}};
     };
@@ -2217,9 +2238,11 @@ TEST(GPU_BN_Spatial_BF16, BufferedConfigurationBounds)
         EXPECT_THROW(solver.GetSolution(ctx, problem, config), miopen::Exception);
     };
     const auto supported = make_problem(42, 1200);
-    for(const auto* id : {"Variant4-2-512-1-1-1", "Variant4-4-128-1-1-1",
-                         "Variant4-4-512-2-1-1", "Variant4-4-512-1-1-2",
-                         "Variant4-4"})
+    for(const auto* id : {"Variant4-2-512-1-1-1",
+                          "Variant4-4-128-1-1-1",
+                          "Variant4-4-512-2-1-1",
+                          "Variant4-4-512-1-1-2",
+                          "Variant4-4"})
         expect_rejected(supported, id);
     expect_rejected(make_problem(65, 1200), "Variant4-4-1024-1-1-1");
     expect_rejected(make_problem(1, 4808), "Variant4-8-1024-1-1-1");
@@ -2232,10 +2255,10 @@ TEST(GPU_BN_Spatial_BF16, BufferedConfigurationBounds)
 TEST(GPU_BN_Spatial_BF16, BackwardSplitBatchPaddedTile)
 {
     constexpr size_t n = 42, c = 3, h = 30, w = 40;
-    constexpr size_t spatial = h * w;
+    constexpr size_t spatial       = h * w;
     constexpr size_t element_count = n * c * spatial;
-    constexpr size_t guard_count = 14 * c * spatial;
-    constexpr double nhw = n * spatial;
+    constexpr size_t guard_count   = 14 * c * spatial;
+    constexpr double nhw           = n * spatial;
     const bfloat16 canary{123.0f};
     constexpr float gradient_canary = -321.0f;
     tensor<bfloat16> input{n, c, h, w};
@@ -2255,9 +2278,8 @@ TEST(GPU_BN_Spatial_BF16, BackwardSplitBatchPaddedTile)
                     float(int((bidx * 13 + hwidx * 7 + cidx * 5) % 31) - 15) * 0.125f +
                     float(cidx) * 0.75f + float(bidx % 7) * 0.0625f;
                 input[idx] = bfloat16{value};
-                dy[idx] = bfloat16{
-                    0.25f * float(input[idx]) + 0.5f + float(cidx) * 0.125f +
-                    float(int((bidx * 3 + hwidx * 11 + cidx) % 17) - 8) * 0.0625f};
+                dy[idx]    = bfloat16{0.25f * float(input[idx]) + 0.5f + float(cidx) * 0.125f +
+                                   float(int((bidx * 3 + hwidx * 11 + cidx) % 17) - 8) * 0.0625f};
             }
 
     std::vector<double> means(c, 0), variances(c, 0), inv_vars(c, 0);
@@ -2274,18 +2296,18 @@ TEST(GPU_BN_Spatial_BF16, BackwardSplitBatchPaddedTile)
         for(size_t bidx = 0; bidx < n; ++bidx)
             for(size_t hwidx = 0; hwidx < spatial; ++hwidx)
             {
-                const size_t idx = bidx * c * spatial + cidx * spatial + hwidx;
+                const size_t idx   = bidx * c * spatial + cidx * spatial + hwidx;
                 const double delta = double(input[idx]) - means[cidx];
                 variances[cidx] += delta * delta;
             }
         variances[cidx] /= nhw;
-        inv_vars[cidx] = 1.0 / std::sqrt(variances[cidx] + MIO_BN_TEST_EPSILON);
-        saved_mean[cidx] = float(means[cidx]);
+        inv_vars[cidx]      = 1.0 / std::sqrt(variances[cidx] + MIO_BN_TEST_EPSILON);
+        saved_mean[cidx]    = float(means[cidx]);
         saved_inv_var[cidx] = float(inv_vars[cidx]);
         for(size_t bidx = 0; bidx < n; ++bidx)
             for(size_t hwidx = 0; hwidx < spatial; ++hwidx)
             {
-                const size_t idx = bidx * c * spatial + cidx * spatial + hwidx;
+                const size_t idx  = bidx * c * spatial + cidx * spatial + hwidx;
                 const double xhat = (double(input[idx]) - means[cidx]) * inv_vars[cidx];
                 dbias[cidx] += double(dy[idx]);
                 dscale[cidx] += double(dy[idx]) * xhat;
@@ -2297,17 +2319,17 @@ TEST(GPU_BN_Spatial_BF16, BackwardSplitBatchPaddedTile)
         GTEST_SKIP() << "Split-batch BF16 backward batchnorm requires gfx1250 wave32";
 
     auto padded_input = input.data;
-    auto padded_dy = dy.data;
+    auto padded_dy    = dy.data;
     padded_input.resize(element_count + guard_count, canary);
     padded_dy.resize(element_count + guard_count, canary);
-    const auto in_dev = handle.Write(padded_input);
-    const auto dy_dev = handle.Write(padded_dy);
-    const auto scale_dev = handle.Write(scale.data);
-    const auto shift_dev = handle.Write(shift.data);
-    const auto mean_dev = handle.Write(saved_mean.data);
+    const auto in_dev      = handle.Write(padded_input);
+    const auto dy_dev      = handle.Write(padded_dy);
+    const auto scale_dev   = handle.Write(scale.data);
+    const auto shift_dev   = handle.Write(shift.data);
+    const auto mean_dev    = handle.Write(saved_mean.data);
     const auto inv_var_dev = handle.Write(saved_inv_var.data);
-    const auto ctx = miopen::ExecutionContext{&handle};
-    const auto solver = miopen::solver::batchnorm::BnBwdTrainingSpatial{};
+    const auto ctx         = miopen::ExecutionContext{&handle};
+    const auto solver      = miopen::solver::batchnorm::BnBwdTrainingSpatial{};
     for(const bool use_saved : {true, false})
     {
         SCOPED_TRACE(use_saved);
@@ -2339,52 +2361,50 @@ TEST(GPU_BN_Spatial_BF16, BackwardSplitBatchPaddedTile)
                 handle.PrepareInvoker(*solution.invoker_factory, solution.construction_params);
             // Three 14-batch tiles occupy two z=2 workgroups. The final lane
             // starts at n=42, so any unguarded read or write touches this padding.
-            auto dx_dev =
-                handle.Write(std::vector<bfloat16>(element_count + guard_count, canary));
-            auto dscale_dev = handle.Write(std::vector<float>(c + 4, gradient_canary));
-            auto dbias_dev = handle.Write(std::vector<float>(c + 4, gradient_canary));
-            auto invoke_params = miopen::batchnorm::BwdInvokeParams{};
-            invoke_params.type = miopen::InvokeType::Run;
-            invoke_params.x = in_dev.get();
-            invoke_params.dy = dy_dev.get();
-            invoke_params.dx = dx_dev.get();
+            auto dx_dev = handle.Write(std::vector<bfloat16>(element_count + guard_count, canary));
+            auto dscale_dev       = handle.Write(std::vector<float>(c + 4, gradient_canary));
+            auto dbias_dev        = handle.Write(std::vector<float>(c + 4, gradient_canary));
+            auto invoke_params    = miopen::batchnorm::BwdInvokeParams{};
+            invoke_params.type    = miopen::InvokeType::Run;
+            invoke_params.x       = in_dev.get();
+            invoke_params.dy      = dy_dev.get();
+            invoke_params.dx      = dx_dev.get();
             invoke_params.bnScale = scale_dev.get();
-            invoke_params.bnBias = shift_dev.get();
+            invoke_params.bnBias  = shift_dev.get();
             invoke_params.resultBnScaleDiff = dscale_dev.get();
-            invoke_params.resultBnBiasDiff = dbias_dev.get();
-            invoke_params.epsilon = MIO_BN_TEST_EPSILON;
-            invoke_params.savedMean = use_saved ? mean_dev.get() : nullptr;
-            invoke_params.savedInvVariance = use_saved ? inv_var_dev.get() : nullptr;
+            invoke_params.resultBnBiasDiff  = dbias_dev.get();
+            invoke_params.epsilon           = MIO_BN_TEST_EPSILON;
+            invoke_params.savedMean         = use_saved ? mean_dev.get() : nullptr;
+            invoke_params.savedInvVariance  = use_saved ? inv_var_dev.get() : nullptr;
             invoker(handle, invoke_params);
             handle.Finish();
 
-            const auto output = handle.Read<bfloat16>(dx_dev, element_count + guard_count);
+            const auto output     = handle.Read<bfloat16>(dx_dev, element_count + guard_count);
             const auto gpu_dscale = handle.Read<float>(dscale_dev, c + 4);
-            const auto gpu_dbias = handle.Read<float>(dbias_dev, c + 4);
+            const auto gpu_dbias  = handle.Read<float>(dbias_dev, c + 4);
             for(size_t cidx = 0; cidx < c; ++cidx)
             {
-                ASSERT_NEAR(gpu_dscale[cidx], dscale[cidx],
-                            2e-4 * std::max(1.0, std::abs(dscale[cidx])))
+                ASSERT_NEAR(
+                    gpu_dscale[cidx], dscale[cidx], 2e-4 * std::max(1.0, std::abs(dscale[cidx])))
                     << "dscale channel " << cidx;
-                ASSERT_NEAR(gpu_dbias[cidx], dbias[cidx],
-                            2e-4 * std::max(1.0, std::abs(dbias[cidx])))
+                ASSERT_NEAR(
+                    gpu_dbias[cidx], dbias[cidx], 2e-4 * std::max(1.0, std::abs(dbias[cidx])))
                     << "dbias channel " << cidx;
                 for(size_t bidx = 0; bidx < n; ++bidx)
                     for(size_t hwidx = 0; hwidx < spatial; ++hwidx)
                     {
-                        const size_t idx = bidx * c * spatial + cidx * spatial + hwidx;
-                        const double xhat =
-                            (double(input[idx]) - means[cidx]) * inv_vars[cidx];
-                        const double expected = double(scale[cidx]) * inv_vars[cidx] / nhw *
+                        const size_t idx  = bidx * c * spatial + cidx * spatial + hwidx;
+                        const double xhat = (double(input[idx]) - means[cidx]) * inv_vars[cidx];
+                        const double expected =
+                            double(scale[cidx]) * inv_vars[cidx] / nhw *
                             (nhw * double(dy[idx]) - dbias[cidx] - xhat * dscale[cidx]);
-                        ASSERT_NEAR(double(output[idx]), expected,
-                                    0.008 * std::abs(expected) + 0.001)
-                            << "dx at batch " << bidx << ", channel " << cidx
-                            << ", HW " << hwidx;
+                        ASSERT_NEAR(
+                            double(output[idx]), expected, 0.008 * std::abs(expected) + 0.001)
+                            << "dx at batch " << bidx << ", channel " << cidx << ", HW " << hwidx;
                     }
             }
             const auto gpu_input = handle.Read<bfloat16>(in_dev, element_count + guard_count);
-            const auto gpu_dy = handle.Read<bfloat16>(dy_dev, element_count + guard_count);
+            const auto gpu_dy    = handle.Read<bfloat16>(dy_dev, element_count + guard_count);
             for(size_t idx = element_count; idx < output.size(); ++idx)
             {
                 ASSERT_EQ(float(output[idx]), float(canary)) << "padded dx index " << idx;
@@ -2408,8 +2428,8 @@ TEST(GPU_BN_Spatial_BF16, BackwardBufferedSavedActivationAndInPlace)
     constexpr size_t c = 3, guard = 32;
     const bfloat16 canary{123.0f};
     constexpr float gradient_canary = -321.0f;
-    const auto ctx = miopen::ExecutionContext{&handle};
-    const auto solver = miopen::solver::batchnorm::BnBwdTrainingSpatial{};
+    const auto ctx                  = miopen::ExecutionContext{&handle};
+    const auto solver               = miopen::solver::batchnorm::BnBwdTrainingSpatial{};
     for(const auto shape : {std::pair<size_t, size_t>{42, 1200}, {1, 1208}, {42, 4800}})
     {
         const size_t n = shape.first, hw = shape.second, count = n * c * hw;
@@ -2421,16 +2441,16 @@ TEST(GPU_BN_Spatial_BF16, BackwardBufferedSavedActivationAndInPlace)
         std::vector<double> db(c, 0), ds(c, 0), expected(count);
         for(size_t ch = 0; ch < c; ++ch)
         {
-            scale[ch] = 0.75f + 0.25f * ch;
-            bias[ch] = -0.25f;
+            scale[ch]  = 0.75f + 0.25f * ch;
+            bias[ch]   = -0.25f;
             double sum = 0, variance = 0;
             for(size_t b = 0; b < n; ++b)
                 for(size_t s = 0; s < hw; ++s)
                 {
                     const size_t i = b * c * hw + ch * hw + s;
-                    x[i] = bfloat16{256.0f + float(ch * 8) +
-                                   float(int((b * 7 + s * 3) % 17) - 8) * 2.0f};
-                    dy[i] = bfloat16{0.5f + float(int((b * 3 + s * 5) % 13) - 6) * 0.125f};
+                    x[i]           = bfloat16{256.0f + float(ch * 8) +
+                                    float(int((b * 7 + s * 3) % 17) - 8) * 2.0f};
+                    dy[i]          = bfloat16{0.5f + float(int((b * 3 + s * 5) % 13) - 6) * 0.125f};
                     sum += double(x[i]);
                 }
             mean[ch] = float(sum / nhw);
@@ -2444,8 +2464,8 @@ TEST(GPU_BN_Spatial_BF16, BackwardBufferedSavedActivationAndInPlace)
             for(size_t b = 0; b < n; ++b)
                 for(size_t s = 0; s < hw; ++s)
                 {
-                    const size_t i = b * c * hw + ch * hw + s;
-                    const double xhat = (double(x[i]) - mean[ch]) * inv[ch];
+                    const size_t i     = b * c * hw + ch * hw + s;
+                    const double xhat  = (double(x[i]) - mean[ch]) * inv[ch];
                     const double value = xhat * scale[ch] + bias[ch] > 0 ? double(dy[i]) : 0;
                     db[ch] += value;
                     ds[ch] += value * xhat;
@@ -2453,16 +2473,24 @@ TEST(GPU_BN_Spatial_BF16, BackwardBufferedSavedActivationAndInPlace)
             for(size_t b = 0; b < n; ++b)
                 for(size_t s = 0; s < hw; ++s)
                 {
-                    const size_t i = b * c * hw + ch * hw + s;
-                    const double xhat = (double(x[i]) - mean[ch]) * inv[ch];
+                    const size_t i     = b * c * hw + ch * hw + s;
+                    const double xhat  = (double(x[i]) - mean[ch]) * inv[ch];
                     const double value = xhat * scale[ch] + bias[ch] > 0 ? double(dy[i]) : 0;
-                    expected[i] = double(scale[ch]) * inv[ch] / nhw *
-                                  (nhw * value - db[ch] - xhat * ds[ch]);
+                    expected[i] =
+                        double(scale[ch]) * inv[ch] / nhw * (nhw * value - db[ch] - xhat * ds[ch]);
                 }
         }
         const auto problem = miopen::batchnorm::ProblemDescription{
-            miopenBNSpatial, x.desc, dy.desc, x.desc, scale.desc, bias.desc, mean.desc, inv.desc,
-            MIO_BN_TEST_EPSILON, true,
+            miopenBNSpatial,
+            x.desc,
+            dy.desc,
+            x.desc,
+            scale.desc,
+            bias.desc,
+            mean.desc,
+            inv.desc,
+            MIO_BN_TEST_EPSILON,
+            true,
             std::max(size_t{1}, size_t(0.6f * handle.GetMaxComputeUnits())),
             handle.GetWavefrontWidth(),
             miopen::ActivationDescriptor{miopenActivationRELU, 0.0, 0.0, 0.0}};
@@ -2472,85 +2500,86 @@ TEST(GPU_BN_Spatial_BF16, BackwardBufferedSavedActivationAndInPlace)
         padded_x.resize(count + guard, canary);
         padded_dy.resize(count + guard, canary);
         for(const int variant : {5, 8})
-          for(const int vector_size : {4, 8})
-            for(const int alias : {0, 1, 2})
-            {
-                if(variant == 5 && hw > 1208)
-                    continue;
-                SCOPED_TRACE(::testing::Message() << "variant=" << variant
-                                                 << " V=" << vector_size << " alias=" << alias);
-                const auto config = miopen::solver::batchnorm::PerformanceConfigBnBwdBackward{
-                    0, "Variant" + std::to_string(variant) + "-" +
-                       std::to_string(vector_size) + "-1024-1-1-1"};
-                ASSERT_TRUE(solver.IsValidPerformanceConfig(ctx, problem, config));
-                const auto solution = solver.GetSolution(ctx, problem, config);
-                ASSERT_TRUE(solution.Succeeded());
-                ASSERT_TRUE(solution.invoker_factory);
-                const auto invoker =
-                    handle.PrepareInvoker(*solution.invoker_factory, solution.construction_params);
-                auto x_dev = handle.Write(padded_x), dy_dev = handle.Write(padded_dy);
-                auto dx_dev = handle.Write(std::vector<bfloat16>(count + guard, canary));
-                auto ds_dev = handle.Write(std::vector<float>(c + guard, gradient_canary));
-                auto db_dev = handle.Write(std::vector<float>(c + guard, gradient_canary));
-                const auto& output_dev = alias == 1 ? x_dev : alias == 2 ? dy_dev : dx_dev;
-                auto params = miopen::batchnorm::BwdInvokeParams{};
-                params.type = miopen::InvokeType::Run;
-                params.x = x_dev.get();
-                params.dy = dy_dev.get();
-                params.dx = output_dev.get();
-                params.bnScale = scale_dev.get();
-                params.bnBias = bias_dev.get();
-                params.resultBnScaleDiff = ds_dev.get();
-                params.resultBnBiasDiff = db_dev.get();
-                params.savedMean = mean_dev.get();
-                params.savedInvVariance = inv_dev.get();
-                params.epsilon = MIO_BN_TEST_EPSILON;
-                invoker(handle, params);
-                handle.Finish();
-                const auto output = handle.Read<bfloat16>(output_dev, count + guard);
-                const auto gpu_ds = handle.Read<float>(ds_dev, c + guard);
-                const auto gpu_db = handle.Read<float>(db_dev, c + guard);
-                for(size_t i = 0; i < count; ++i)
-                    ASSERT_NEAR(double(output[i]), expected[i],
-                                0.008 * std::abs(expected[i]) + 0.001) << "DX index " << i;
-                for(size_t ch = 0; ch < c; ++ch)
+            for(const int vector_size : {4, 8})
+                for(const int alias : {0, 1, 2})
                 {
-                    ASSERT_NEAR(gpu_ds[ch], ds[ch], 2e-4 * std::max(1.0, std::abs(ds[ch])));
-                    ASSERT_NEAR(gpu_db[ch], db[ch], 2e-4 * std::max(1.0, std::abs(db[ch])));
+                    if(variant == 5 && hw > 1208)
+                        continue;
+                    SCOPED_TRACE(::testing::Message() << "variant=" << variant << " V="
+                                                      << vector_size << " alias=" << alias);
+                    const auto config = miopen::solver::batchnorm::PerformanceConfigBnBwdBackward{
+                        0,
+                        "Variant" + std::to_string(variant) + "-" + std::to_string(vector_size) +
+                            "-1024-1-1-1"};
+                    ASSERT_TRUE(solver.IsValidPerformanceConfig(ctx, problem, config));
+                    const auto solution = solver.GetSolution(ctx, problem, config);
+                    ASSERT_TRUE(solution.Succeeded());
+                    ASSERT_TRUE(solution.invoker_factory);
+                    const auto invoker = handle.PrepareInvoker(*solution.invoker_factory,
+                                                               solution.construction_params);
+                    auto x_dev = handle.Write(padded_x), dy_dev = handle.Write(padded_dy);
+                    auto dx_dev = handle.Write(std::vector<bfloat16>(count + guard, canary));
+                    auto ds_dev = handle.Write(std::vector<float>(c + guard, gradient_canary));
+                    auto db_dev = handle.Write(std::vector<float>(c + guard, gradient_canary));
+                    const auto& output_dev   = alias == 1 ? x_dev : alias == 2 ? dy_dev : dx_dev;
+                    auto params              = miopen::batchnorm::BwdInvokeParams{};
+                    params.type              = miopen::InvokeType::Run;
+                    params.x                 = x_dev.get();
+                    params.dy                = dy_dev.get();
+                    params.dx                = output_dev.get();
+                    params.bnScale           = scale_dev.get();
+                    params.bnBias            = bias_dev.get();
+                    params.resultBnScaleDiff = ds_dev.get();
+                    params.resultBnBiasDiff  = db_dev.get();
+                    params.savedMean         = mean_dev.get();
+                    params.savedInvVariance  = inv_dev.get();
+                    params.epsilon           = MIO_BN_TEST_EPSILON;
+                    invoker(handle, params);
+                    handle.Finish();
+                    const auto output = handle.Read<bfloat16>(output_dev, count + guard);
+                    const auto gpu_ds = handle.Read<float>(ds_dev, c + guard);
+                    const auto gpu_db = handle.Read<float>(db_dev, c + guard);
+                    for(size_t i = 0; i < count; ++i)
+                        ASSERT_NEAR(
+                            double(output[i]), expected[i], 0.008 * std::abs(expected[i]) + 0.001)
+                            << "DX index " << i;
+                    for(size_t ch = 0; ch < c; ++ch)
+                    {
+                        ASSERT_NEAR(gpu_ds[ch], ds[ch], 2e-4 * std::max(1.0, std::abs(ds[ch])));
+                        ASSERT_NEAR(gpu_db[ch], db[ch], 2e-4 * std::max(1.0, std::abs(db[ch])));
+                    }
+                    const auto gpu_x  = handle.Read<bfloat16>(x_dev, count + guard);
+                    const auto gpu_dy = handle.Read<bfloat16>(dy_dev, count + guard);
+                    for(size_t i = count; i < count + guard; ++i)
+                    {
+                        ASSERT_EQ(float(output[i]), float(canary));
+                        ASSERT_EQ(float(gpu_x[i]), float(canary));
+                        ASSERT_EQ(float(gpu_dy[i]), float(canary));
+                    }
+                    for(size_t i = c; i < c + guard; ++i)
+                    {
+                        ASSERT_EQ(gpu_ds[i], gradient_canary);
+                        ASSERT_EQ(gpu_db[i], gradient_canary);
+                    }
                 }
-                const auto gpu_x = handle.Read<bfloat16>(x_dev, count + guard);
-                const auto gpu_dy = handle.Read<bfloat16>(dy_dev, count + guard);
-                for(size_t i = count; i < count + guard; ++i)
-                {
-                    ASSERT_EQ(float(output[i]), float(canary));
-                    ASSERT_EQ(float(gpu_x[i]), float(canary));
-                    ASSERT_EQ(float(gpu_dy[i]), float(canary));
-                }
-                for(size_t i = c; i < c + guard; ++i)
-                {
-                    ASSERT_EQ(gpu_ds[i], gradient_canary);
-                    ASSERT_EQ(gpu_db[i], gradient_canary);
-                }
-            }
     }
 }
 
 TEST(GPU_BN_Spatial_BF16, BackwardVariant1OddSpatial)
 {
-    auto&& handle = get_handle();
-    const auto ctx = miopen::ExecutionContext{&handle};
-    const auto solver = miopen::solver::batchnorm::BnBwdTrainingSpatial{};
+    auto&& handle      = get_handle();
+    const auto ctx     = miopen::ExecutionContext{&handle};
+    const auto solver  = miopen::solver::batchnorm::BnBwdTrainingSpatial{};
     constexpr size_t c = 3, guard_count = 64;
     const bfloat16 canary{123.0f};
     constexpr float gradient_canary = -321.0f;
     // Odd HW uses scalar reads/writes. Adjacent aligned cases retain the two- and
     // four-element fast paths, including partial workgroup tails.
-    for(const auto shape : {std::pair<size_t, size_t>{12, 5369},
-                            {3, 4097}, {3, 4098}, {3, 4100}})
+    for(const auto shape : {std::pair<size_t, size_t>{12, 5369}, {3, 4097}, {3, 4098}, {3, 4100}})
     {
         const size_t n = shape.first, spatial = shape.second;
         const size_t count = n * c * spatial;
-        const double nhw = double(n * spatial);
+        const double nhw   = double(n * spatial);
         SCOPED_TRACE(n);
         SCOPED_TRACE(spatial);
         tensor<bfloat16> input{n, c, 1, spatial};
@@ -2566,13 +2595,12 @@ TEST(GPU_BN_Spatial_BF16, BackwardVariant1OddSpatial)
                     const size_t idx = batch * c * spatial + channel * spatial + hw;
                     // The four-position pattern exposes scalar loops that still
                     // start at 4*lid; batch/channel offsets expose wrong partitions.
-                    input[idx] = bfloat16{
-                        -0.5f + float(channel) + float(hw % 4) * 0.25f +
-                        float(batch % 5) * 0.0625f +
-                        float(int((hw * 7 + batch * 3) % 9) - 4) * 0.03125f};
-                    dy[idx] = bfloat16{
-                        0.125f * float(input[idx]) + 0.5f + float(channel) * 0.125f +
-                        float(int((hw * 11 + batch * 5 + channel) % 17) - 8) * 0.0625f};
+                    input[idx] = bfloat16{-0.5f + float(channel) + float(hw % 4) * 0.25f +
+                                          float(batch % 5) * 0.0625f +
+                                          float(int((hw * 7 + batch * 3) % 9) - 4) * 0.03125f};
+                    dy[idx] =
+                        bfloat16{0.125f * float(input[idx]) + 0.5f + float(channel) * 0.125f +
+                                 float(int((hw * 11 + batch * 5 + channel) % 17) - 8) * 0.0625f};
                 }
 
         std::vector<double> means(c, 0), variances(c, 0), inv_vars(c, 0);
@@ -2589,18 +2617,18 @@ TEST(GPU_BN_Spatial_BF16, BackwardVariant1OddSpatial)
             for(size_t batch = 0; batch < n; ++batch)
                 for(size_t hw = 0; hw < spatial; ++hw)
                 {
-                    const size_t idx = batch * c * spatial + channel * spatial + hw;
+                    const size_t idx   = batch * c * spatial + channel * spatial + hw;
                     const double delta = double(input[idx]) - means[channel];
                     variances[channel] += delta * delta;
                 }
             variances[channel] /= nhw;
-            inv_vars[channel] = 1.0 / std::sqrt(variances[channel] + MIO_BN_TEST_EPSILON);
-            saved_mean[channel] = float(means[channel]);
+            inv_vars[channel]      = 1.0 / std::sqrt(variances[channel] + MIO_BN_TEST_EPSILON);
+            saved_mean[channel]    = float(means[channel]);
             saved_inv_var[channel] = float(inv_vars[channel]);
             for(size_t batch = 0; batch < n; ++batch)
                 for(size_t hw = 0; hw < spatial; ++hw)
                 {
-                    const size_t idx = batch * c * spatial + channel * spatial + hw;
+                    const size_t idx  = batch * c * spatial + channel * spatial + hw;
                     const double xhat = (double(input[idx]) - means[channel]) * inv_vars[channel];
                     dbias[channel] += double(dy[idx]);
                     dscale[channel] += double(dy[idx]) * xhat;
@@ -2609,18 +2637,26 @@ TEST(GPU_BN_Spatial_BF16, BackwardVariant1OddSpatial)
         auto padded_input = input.data, padded_dy = dy.data;
         padded_input.resize(count + guard_count, canary);
         padded_dy.resize(count + guard_count, canary);
-        const auto input_dev = handle.Write(padded_input);
-        const auto dy_dev = handle.Write(padded_dy);
-        const auto scale_dev = handle.Write(scale.data);
-        const auto shift_dev = handle.Write(shift.data);
-        const auto mean_dev = handle.Write(saved_mean.data);
+        const auto input_dev   = handle.Write(padded_input);
+        const auto dy_dev      = handle.Write(padded_dy);
+        const auto scale_dev   = handle.Write(scale.data);
+        const auto shift_dev   = handle.Write(shift.data);
+        const auto mean_dev    = handle.Write(saved_mean.data);
         const auto inv_var_dev = handle.Write(saved_inv_var.data);
         for(const bool use_saved : {false, true})
         {
             SCOPED_TRACE(use_saved);
             const auto problem = miopen::batchnorm::ProblemDescription{
-                miopenBNSpatial, input.desc, dy.desc, input.desc, scale.desc, shift.desc,
-                saved_mean.desc, saved_inv_var.desc, MIO_BN_TEST_EPSILON, use_saved,
+                miopenBNSpatial,
+                input.desc,
+                dy.desc,
+                input.desc,
+                scale.desc,
+                shift.desc,
+                saved_mean.desc,
+                saved_inv_var.desc,
+                MIO_BN_TEST_EPSILON,
+                use_saved,
                 std::max(size_t{1}, size_t(0.6f * handle.GetMaxComputeUnits())),
                 handle.GetWavefrontWidth(),
                 miopen::ActivationDescriptor{miopenActivationPASTHRU, 0.0, 0.0, 0.0}};
@@ -2633,21 +2669,21 @@ TEST(GPU_BN_Spatial_BF16, BackwardVariant1OddSpatial)
             ASSERT_TRUE(solution.invoker_factory);
             const auto invoker =
                 handle.PrepareInvoker(*solution.invoker_factory, solution.construction_params);
-            auto dx_dev = handle.Write(std::vector<bfloat16>(count + guard_count, canary));
-            auto ds_dev = handle.Write(std::vector<float>(c + guard_count, gradient_canary));
-            auto db_dev = handle.Write(std::vector<float>(c + guard_count, gradient_canary));
-            auto params = miopen::batchnorm::BwdInvokeParams{};
-            params.type = miopen::InvokeType::Run;
-            params.x = input_dev.get();
-            params.dy = dy_dev.get();
-            params.dx = dx_dev.get();
+            auto dx_dev    = handle.Write(std::vector<bfloat16>(count + guard_count, canary));
+            auto ds_dev    = handle.Write(std::vector<float>(c + guard_count, gradient_canary));
+            auto db_dev    = handle.Write(std::vector<float>(c + guard_count, gradient_canary));
+            auto params    = miopen::batchnorm::BwdInvokeParams{};
+            params.type    = miopen::InvokeType::Run;
+            params.x       = input_dev.get();
+            params.dy      = dy_dev.get();
+            params.dx      = dx_dev.get();
             params.bnScale = scale_dev.get();
-            params.bnBias = shift_dev.get();
+            params.bnBias  = shift_dev.get();
             params.resultBnScaleDiff = ds_dev.get();
-            params.resultBnBiasDiff = db_dev.get();
-            params.epsilon = MIO_BN_TEST_EPSILON;
-            params.savedMean = use_saved ? mean_dev.get() : nullptr;
-            params.savedInvVariance = use_saved ? inv_var_dev.get() : nullptr;
+            params.resultBnBiasDiff  = db_dev.get();
+            params.epsilon           = MIO_BN_TEST_EPSILON;
+            params.savedMean         = use_saved ? mean_dev.get() : nullptr;
+            params.savedInvVariance  = use_saved ? inv_var_dev.get() : nullptr;
             invoker(handle, params);
             handle.Finish();
             const auto output = handle.Read<bfloat16>(dx_dev, count + guard_count);
@@ -2655,11 +2691,12 @@ TEST(GPU_BN_Spatial_BF16, BackwardVariant1OddSpatial)
             const auto gpu_db = handle.Read<float>(db_dev, c + guard_count);
             for(size_t channel = 0; channel < c; ++channel)
             {
-                ASSERT_NEAR(gpu_ds[channel], dscale[channel],
+                ASSERT_NEAR(gpu_ds[channel],
+                            dscale[channel],
                             2e-4 * std::max(1.0, std::abs(dscale[channel])))
                     << "dscale channel " << channel;
-                ASSERT_NEAR(gpu_db[channel], dbias[channel],
-                            2e-4 * std::max(1.0, std::abs(dbias[channel])))
+                ASSERT_NEAR(
+                    gpu_db[channel], dbias[channel], 2e-4 * std::max(1.0, std::abs(dbias[channel])))
                     << "dbias channel " << channel;
                 for(size_t batch = 0; batch < n; ++batch)
                     for(size_t hw = 0; hw < spatial; ++hw)
@@ -2667,12 +2704,12 @@ TEST(GPU_BN_Spatial_BF16, BackwardVariant1OddSpatial)
                         const size_t idx = batch * c * spatial + channel * spatial + hw;
                         const double xhat =
                             (double(input[idx]) - means[channel]) * inv_vars[channel];
-                        const double expected = double(scale[channel]) * inv_vars[channel] / nhw *
+                        const double expected =
+                            double(scale[channel]) * inv_vars[channel] / nhw *
                             (nhw * double(dy[idx]) - dbias[channel] - xhat * dscale[channel]);
-                        ASSERT_NEAR(double(output[idx]), expected,
-                                    0.008 * std::abs(expected) + 0.001)
-                            << "dx at batch " << batch << ", channel " << channel
-                            << ", HW " << hw;
+                        ASSERT_NEAR(
+                            double(output[idx]), expected, 0.008 * std::abs(expected) + 0.001)
+                            << "dx at batch " << batch << ", channel " << channel << ", HW " << hw;
                     }
             }
             for(size_t idx = count; idx < output.size(); ++idx)
@@ -2688,7 +2725,7 @@ TEST(GPU_BN_Spatial_BF16, BackwardVariant1OddSpatial)
 
 TEST(GPU_BN_Spatial_BF16, NhwcConfiguredOutputRounding)
 {
-    auto&& handle = get_handle();
+    auto&& handle      = get_handle();
     constexpr size_t n = 16, c = 2, h = 24, w = 16;
     constexpr size_t spatial = h * w, count = n * c * spatial, guard_count = 32;
     constexpr double epsilon = 0.25;
@@ -2704,8 +2741,8 @@ TEST(GPU_BN_Spatial_BF16, NhwcConfiguredOutputRounding)
     tensor<float> saved_inv_var{miopenTensorNHWC, stats_lengths};
     scale[0] = 1.123f;
     scale[1] = -0.873f;
-    bias[0] = 0.023f;
-    bias[1] = -0.117f;
+    bias[0]  = 0.023f;
+    bias[1]  = -0.117f;
 
     // Each channel has exactly balanced, BF16-exact +/-1 values. Batch/channel
     // offsets distinguish NHWC indexing while keeping mean=0 and variance=1.
@@ -2735,9 +2772,8 @@ TEST(GPU_BN_Spatial_BF16, NhwcConfiguredOutputRounding)
         inv_vars[channel] = 1.0 / std::sqrt(variances[channel] + epsilon);
         for(size_t sign = 0; sign < 2; ++sign)
         {
-            const float value = sign == 0 ? -1.0f : 1.0f;
-            const float normalized =
-                (value - float(means[channel])) * float(inv_vars[channel]);
+            const float value      = sign == 0 ? -1.0f : 1.0f;
+            const float normalized = (value - float(means[channel])) * float(inv_vars[channel]);
             // Use the configured host BF16 conversion, not a BF16-sized tolerance.
             // The four FP32 values are at least 9.7e-5 from both BF16 values and
             // their midpoints, so small GPU rsqrt/reduction errors cannot change
@@ -2749,38 +2785,38 @@ TEST(GPU_BN_Spatial_BF16, NhwcConfiguredOutputRounding)
 
     auto padded_input = input.data;
     padded_input.resize(count + guard_count, canary);
-    const auto input_dev = handle.Write(padded_input);
-    const auto scale_dev = handle.Write(scale.data);
-    const auto bias_dev = handle.Write(bias.data);
-    const auto output_dev = handle.Write(std::vector<bfloat16>(count + guard_count, canary));
-    const auto mean_dev = handle.Write(std::vector<float>(c + guard_count, stats_canary));
+    const auto input_dev   = handle.Write(padded_input);
+    const auto scale_dev   = handle.Write(scale.data);
+    const auto bias_dev    = handle.Write(bias.data);
+    const auto output_dev  = handle.Write(std::vector<bfloat16>(count + guard_count, canary));
+    const auto mean_dev    = handle.Write(std::vector<float>(c + guard_count, stats_canary));
     const auto inv_var_dev = handle.Write(std::vector<float>(c + guard_count, stats_canary));
-    float alpha = 1.0f;
-    float beta = 0.0f;
+    float alpha            = 1.0f;
+    float beta             = 0.0f;
     ASSERT_EQ(miopenBatchNormalizationForwardTraining_V2(&handle,
-                                                        miopenBNSpatial,
-                                                        &alpha,
-                                                        &beta,
-                                                        &input.desc,
-                                                        input_dev.get(),
-                                                        &output.desc,
-                                                        output_dev.get(),
-                                                        &scale.desc,
-                                                        &bias.desc,
-                                                        &saved_mean.desc,
-                                                        &saved_inv_var.desc,
-                                                        scale_dev.get(),
-                                                        bias_dev.get(),
-                                                        MIO_BN_TEST_EXPAVGFACTOR,
-                                                        nullptr,
-                                                        nullptr,
-                                                        epsilon,
-                                                        mean_dev.get(),
-                                                        inv_var_dev.get()),
+                                                         miopenBNSpatial,
+                                                         &alpha,
+                                                         &beta,
+                                                         &input.desc,
+                                                         input_dev.get(),
+                                                         &output.desc,
+                                                         output_dev.get(),
+                                                         &scale.desc,
+                                                         &bias.desc,
+                                                         &saved_mean.desc,
+                                                         &saved_inv_var.desc,
+                                                         scale_dev.get(),
+                                                         bias_dev.get(),
+                                                         MIO_BN_TEST_EXPAVGFACTOR,
+                                                         nullptr,
+                                                         nullptr,
+                                                         epsilon,
+                                                         mean_dev.get(),
+                                                         inv_var_dev.get()),
               miopenStatusSuccess);
     handle.Finish();
-    const auto gpu_output = handle.Read<bfloat16>(output_dev, count + guard_count);
-    const auto gpu_mean = handle.Read<float>(mean_dev, c + guard_count);
+    const auto gpu_output  = handle.Read<bfloat16>(output_dev, count + guard_count);
+    const auto gpu_mean    = handle.Read<float>(mean_dev, c + guard_count);
     const auto gpu_inv_var = handle.Read<float>(inv_var_dev, c + guard_count);
     for(size_t channel = 0; channel < c; ++channel)
     {
@@ -2791,7 +2827,7 @@ TEST(GPU_BN_Spatial_BF16, NhwcConfiguredOutputRounding)
     for(size_t i = 0; i < count; ++i)
     {
         const size_t channel = i % c;
-        const size_t sign = float(input[i]) < 0 ? 0 : 1;
+        const size_t sign    = float(input[i]) < 0 ? 0 : 1;
         ASSERT_EQ(float(gpu_output[i]), float(expected[sign * c + channel]))
             << "output index " << i << ", channel " << channel;
     }
@@ -2802,4 +2838,262 @@ TEST(GPU_BN_Spatial_BF16, NhwcConfiguredOutputRounding)
         ASSERT_EQ(gpu_mean[i], stats_canary) << "mean guard " << i;
         ASSERT_EQ(gpu_inv_var[i], stats_canary) << "inverse standard deviation guard " << i;
     }
+}
+
+template <class T>
+void RunNhwcOddVectorChannelStash()
+{
+    auto&& handle      = get_handle();
+    constexpr size_t n = 16, c = 40, h = 96, w = 64;
+    constexpr size_t spatial = h * w, nhw = n * spatial, count = nhw * c;
+    constexpr size_t guard       = 32;
+    constexpr double epsilon     = 0.25;
+    constexpr float stats_canary = -321.0f;
+    const T output_canary{123.0f};
+    const std::vector<size_t> lengths{n, c, h, w}, stats_lengths{1, c, 1, 1};
+    tensor<T> input{miopenTensorNHWC, lengths};
+    tensor<T> output{miopenTensorNHWC, lengths};
+    tensor<float> scale{miopenTensorNHWC, stats_lengths};
+    tensor<float> bias{miopenTensorNHWC, stats_lengths};
+    tensor<float> mean{miopenTensorNHWC, stats_lengths};
+    tensor<float> inv_var{miopenTensorNHWC, stats_lengths};
+    for(size_t channel = 0; channel < c; ++channel)
+    {
+        scale[channel] = channel % 2 == 0 ? 1.0f : -0.5f;
+        bias[channel]  = float(channel) / 8.0f;
+        for(size_t sample = 0; sample < nhw; ++sample)
+            input[sample * c + channel] =
+                T{float(channel) / 4.0f + (sample % 2 == 0 ? -1.0f : 1.0f)};
+    }
+    const auto ctx     = miopen::ExecutionContext{&handle};
+    const auto problem = miopen::batchnorm::ProblemDescription{
+        miopenBNSpatial,
+        input.desc,
+        output.desc,
+        scale.desc,
+        bias.desc,
+        mean.desc,
+        inv_var.desc,
+        0.25,
+        epsilon,
+        true,
+        true,
+        size_t{1},
+        handle.GetWavefrontWidth(),
+        miopen::ActivationDescriptor{miopenActivationPASTHRU, 0.0, 0.0, 0.0}};
+    const auto solver = miopen::solver::batchnorm::BnFwdTrainingSpatial{};
+    const auto config =
+        miopen::solver::batchnorm::PerformanceConfigBnFwdTraining{0, "Variant2-8-8-32-2-8"};
+    ASSERT_TRUE(solver.IsApplicable(ctx, problem));
+    ASSERT_TRUE(solver.IsValidPerformanceConfig(ctx, problem, config));
+    const auto solution = solver.GetSolution(ctx, problem, config);
+    const auto invoker =
+        handle.PrepareInvoker(*solution.invoker_factory, solution.construction_params);
+    const auto input_dev = handle.Write(input.data);
+    const auto scale_dev = handle.Write(scale.data), bias_dev = handle.Write(bias.data);
+    const auto output_dev        = handle.Write(std::vector<T>(count + guard, output_canary));
+    const auto mean_dev          = handle.Write(std::vector<float>(c + guard, stats_canary));
+    const auto inv_dev           = handle.Write(std::vector<float>(c + guard, stats_canary));
+    const auto run_mean_dev      = handle.Write(std::vector<float>(c + guard, stats_canary));
+    const auto run_var_dev       = handle.Write(std::vector<float>(c + guard, stats_canary));
+    auto params                  = miopen::batchnorm::FwdTrainInvokeParams{};
+    params.type                  = miopen::InvokeType::Run;
+    params.x                     = input_dev.get();
+    params.y                     = output_dev.get();
+    params.bnScale               = scale_dev.get();
+    params.bnBias                = bias_dev.get();
+    params.epsilon               = epsilon;
+    params.prevResultRunningMean = params.nextResultRunningMean = run_mean_dev.get();
+    params.prevResultRunningVariance = params.nextResultRunningVariance = run_var_dev.get();
+    params.resultSaveMean                                               = mean_dev.get();
+    params.resultSaveInvVariance                                        = inv_dev.get();
+    for(size_t iteration = 0; iteration < 10; ++iteration)
+    {
+        SCOPED_TRACE(iteration);
+        params.expAvgFactor = 1.0 / double(iteration + 1);
+        invoker(handle, params);
+        handle.Finish();
+        const auto gpu_mean     = handle.Read<float>(mean_dev, c + guard);
+        const auto gpu_inv      = handle.Read<float>(inv_dev, c + guard);
+        const auto gpu_run_mean = handle.Read<float>(run_mean_dev, c + guard);
+        const auto gpu_run_var  = handle.Read<float>(run_var_dev, c + guard);
+        for(size_t channel = 0; channel < c; ++channel)
+        {
+            ASSERT_NEAR(gpu_mean[channel], double(channel) / 4.0, 1e-5) << channel;
+            ASSERT_NEAR(gpu_inv[channel], 1.0 / std::sqrt(1.0 + epsilon), 1e-5) << channel;
+            ASSERT_NEAR(gpu_run_mean[channel], double(channel) / 4.0, 1e-5) << channel;
+            ASSERT_NEAR(gpu_run_var[channel], double(nhw) / double(nhw - 1), 1e-5) << channel;
+        }
+        for(size_t channel = c; channel < c + guard; ++channel)
+        {
+            ASSERT_EQ(gpu_mean[channel], stats_canary);
+            ASSERT_EQ(gpu_inv[channel], stats_canary);
+            ASSERT_EQ(gpu_run_mean[channel], stats_canary);
+            ASSERT_EQ(gpu_run_var[channel], stats_canary);
+        }
+    }
+    const auto gpu_output = handle.Read<T>(output_dev, count + guard);
+    double max_error      = 0;
+    for(size_t sample = 0; sample < nhw; ++sample)
+        for(size_t channel = 0; channel < c; ++channel)
+        {
+            const float sign = sample % 2 == 0 ? -1.0f : 1.0f;
+            const T expected{sign * float(1.0 / std::sqrt(1.0 + epsilon)) * scale[channel] +
+                             bias[channel]};
+            max_error = std::max(
+                max_error, std::abs(double(gpu_output[sample * c + channel]) - double(expected)));
+        }
+    ASSERT_LE(max_error, (std::is_same<T, bfloat16>::value ? 0.032 : 0.004));
+    for(size_t i = count; i < count + guard; ++i)
+        ASSERT_EQ(float(gpu_output[i]), float(output_canary));
+}
+
+TEST(GPU_BN_Spatial_BF16, NhwcOddVectorChannelStash) { RunNhwcOddVectorChannelStash<bfloat16>(); }
+
+TEST(GPU_BN_Spatial_FP16, NhwcOddVectorChannelStash)
+{
+    RunNhwcOddVectorChannelStash<half_float::half>();
+}
+
+template <class T>
+void RunLowPrecisionParametersWithFloatGradients()
+{
+    auto&& handle      = get_handle();
+    constexpr size_t n = 4, c = 3, h = 1, w = 65, nhw = n * h * w, count = nhw * c;
+    constexpr double epsilon = 0.25;
+    constexpr size_t guard   = 32;
+    constexpr float canary   = -321.0f;
+    for(const auto layout : {miopenTensorNCHW, miopenTensorNHWC})
+    {
+        SCOPED_TRACE(layout);
+        const std::vector<size_t> lengths{n, c, h, w}, stat_lengths{1, c, 1, 1};
+        tensor<T> input{layout, lengths}, output{layout, lengths};
+        tensor<T> scale{layout, stat_lengths}, bias{layout, stat_lengths};
+        tensor<float> dy{layout, lengths}, dx{layout, lengths};
+        tensor<float> mean{layout, stat_lengths}, inv_var{layout, stat_lengths};
+        tensor<float> parameter_gradient{layout, stat_lengths};
+        const auto index = [&](size_t sample, size_t channel) {
+            return layout == miopenTensorNHWC ? sample * c + channel
+                                              : (sample / w * c + channel) * w + sample % w;
+        };
+        for(size_t channel = 0; channel < c; ++channel)
+        {
+            scale[channel] = T{0.5f + float(channel) * 0.25f};
+            bias[channel]  = T{float(channel) * 0.25f};
+            for(size_t sample = 0; sample < nhw; ++sample)
+            {
+                const float sign              = sample % 2 == 0 ? -1.0f : 1.0f;
+                input[index(sample, channel)] = T{float(channel) + sign};
+                dy[index(sample, channel)]    = 2.0f + 3.0f * sign;
+            }
+        }
+        const auto input_dev = handle.Write(input.data);
+        const auto scale_dev = handle.Write(scale.data), bias_dev = handle.Write(bias.data);
+        const auto output_dev = handle.Create<T>(count);
+        const auto mean_dev = handle.Create<float>(c), inv_dev = handle.Create<float>(c);
+        float alpha = 1.0f, beta = 0.0f;
+        ASSERT_EQ(miopenBatchNormalizationForwardTraining_V2(&handle,
+                                                             miopenBNSpatial,
+                                                             &alpha,
+                                                             &beta,
+                                                             &input.desc,
+                                                             input_dev.get(),
+                                                             &output.desc,
+                                                             output_dev.get(),
+                                                             &scale.desc,
+                                                             &bias.desc,
+                                                             &mean.desc,
+                                                             &inv_var.desc,
+                                                             scale_dev.get(),
+                                                             bias_dev.get(),
+                                                             1.0,
+                                                             nullptr,
+                                                             nullptr,
+                                                             epsilon,
+                                                             mean_dev.get(),
+                                                             inv_dev.get()),
+                  miopenStatusSuccess);
+        handle.Finish();
+        const double inv      = 1.0 / std::sqrt(1.0 + epsilon);
+        const auto gpu_mean   = handle.Read<float>(mean_dev, c);
+        const auto gpu_inv    = handle.Read<float>(inv_dev, c);
+        const auto gpu_output = handle.Read<T>(output_dev, count);
+        for(size_t channel = 0; channel < c; ++channel)
+        {
+            ASSERT_NEAR(gpu_mean[channel], double(channel), 1e-6);
+            ASSERT_NEAR(gpu_inv[channel], inv, 1e-6);
+            for(size_t sample = 0; sample < nhw; ++sample)
+            {
+                const double sign     = sample % 2 == 0 ? -1.0 : 1.0;
+                const double expected = sign * inv * double(scale[channel]) + double(bias[channel]);
+                ASSERT_NEAR(double(gpu_output[index(sample, channel)]),
+                            expected,
+                            (std::is_same<T, bfloat16>::value ? 0.008 : 0.001));
+            }
+        }
+        const auto dy_dev = handle.Write(dy.data);
+        for(const bool use_saved : {false, true})
+        {
+            SCOPED_TRACE(use_saved);
+            const auto dx_dev = handle.Write(std::vector<float>(count + guard, canary));
+            const auto ds_dev = handle.Write(std::vector<float>(c + guard, canary));
+            const auto db_dev = handle.Write(std::vector<float>(c + guard, canary));
+            ASSERT_EQ(miopenBatchNormalizationBackward_V2(&handle,
+                                                          miopenBNSpatial,
+                                                          &alpha,
+                                                          &beta,
+                                                          &alpha,
+                                                          &beta,
+                                                          &input.desc,
+                                                          input_dev.get(),
+                                                          &dy.desc,
+                                                          dy_dev.get(),
+                                                          &dx.desc,
+                                                          dx_dev.get(),
+                                                          &scale.desc,
+                                                          &parameter_gradient.desc,
+                                                          &mean.desc,
+                                                          &inv_var.desc,
+                                                          scale_dev.get(),
+                                                          ds_dev.get(),
+                                                          db_dev.get(),
+                                                          epsilon,
+                                                          use_saved ? mean_dev.get() : nullptr,
+                                                          use_saved ? inv_dev.get() : nullptr),
+                      miopenStatusSuccess);
+            handle.Finish();
+            const auto gpu_dx = handle.Read<float>(dx_dev, count + guard);
+            const auto gpu_ds = handle.Read<float>(ds_dev, c + guard);
+            const auto gpu_db = handle.Read<float>(db_dev, c + guard);
+            for(size_t channel = 0; channel < c; ++channel)
+            {
+                ASSERT_NEAR(gpu_ds[channel], 3.0 * double(nhw) * inv, 0.001);
+                ASSERT_NEAR(gpu_db[channel], 2.0 * double(nhw), 0.001);
+                for(size_t sample = 0; sample < nhw; ++sample)
+                {
+                    const double sign = sample % 2 == 0 ? -1.0 : 1.0;
+                    const double expected =
+                        3.0 * double(scale[channel]) * inv * sign * (1.0 - inv * inv);
+                    ASSERT_NEAR(gpu_dx[index(sample, channel)], expected, 1e-5);
+                }
+            }
+            for(size_t i = count; i < count + guard; ++i)
+                ASSERT_EQ(gpu_dx[i], canary);
+            for(size_t i = c; i < c + guard; ++i)
+            {
+                ASSERT_EQ(gpu_ds[i], canary);
+                ASSERT_EQ(gpu_db[i], canary);
+            }
+        }
+    }
+}
+
+TEST(GPU_BN_Spatial_FP16, LowPrecisionParametersWithFloatGradients)
+{
+    RunLowPrecisionParametersWithFloatGradients<half_float::half>();
+}
+
+TEST(GPU_BN_Spatial_BF16, LowPrecisionParametersWithFloatGradients)
+{
+    RunLowPrecisionParametersWithFloatGradients<bfloat16>();
 }

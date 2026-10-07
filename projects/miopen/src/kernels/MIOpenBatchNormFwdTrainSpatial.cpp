@@ -44,17 +44,18 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<0, FpType, FpPrecType, FpAccumType>
     static constexpr unsigned int nloopm = nloop - 1;
     static constexpr unsigned int snhw   = nloopm * segihw;
 
-    constexpr __forceinline__ __device__ void operator()(const FpType* __restrict in,
-                                                         FpType* __restrict out,
-                                                         const FpPrecType* __restrict scale,
-                                                         const FpPrecType* __restrict bias,
-                                                         FpPrecType INHW,
-                                                         double epsilon,
-                                                         FpPrecType& mean,
-                                                         FpPrecType& variance,
-                                                         FpPrecType& invVariance,
-                                                         FpPrecType _alpha,
-                                                         FpPrecType _beta)
+    constexpr __forceinline__ __device__ void
+    operator()(const FpType* __restrict in,
+               FpType* __restrict out,
+               const mio_bn_config::fp_param_type* __restrict scale,
+               const mio_bn_config::fp_param_type* __restrict bias,
+               FpPrecType INHW,
+               double epsilon,
+               FpPrecType& mean,
+               FpPrecType& variance,
+               FpPrecType& invVariance,
+               FpPrecType _alpha,
+               FpPrecType _beta)
     {
         // ACTIVATION_SET()
 
@@ -77,8 +78,8 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<0, FpType, FpPrecType, FpAccumType>
 
         if(lid == 0)
         {
-            lcl_scale = *(scale + grpid);
-            lcl_bias  = *(bias + grpid);
+            lcl_scale = cast<FpPrecType>(*(scale + grpid));
+            lcl_bias  = cast<FpPrecType>(*(bias + grpid));
         }
 
         __syncthreads();
@@ -187,17 +188,18 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
     static constexpr unsigned int lessout = mio_bn_config::nhw - remout;
 
     // Kernel
-    constexpr __forceinline__ __device__ void operator()(const FpType* __restrict in,
-                                                         FpType* __restrict out,
-                                                         const FpPrecType* __restrict scale,
-                                                         const FpPrecType* __restrict bias,
-                                                         FpPrecType INHW,
-                                                         double epsilon,
-                                                         FpPrecType& mean,
-                                                         FpPrecType& variance,
-                                                         FpPrecType& invVariance,
-                                                         FpPrecType alpha,
-                                                         FpPrecType beta)
+    constexpr __forceinline__ __device__ void
+    operator()(const FpType* __restrict in,
+               FpType* __restrict out,
+               const mio_bn_config::fp_param_type* __restrict scale,
+               const mio_bn_config::fp_param_type* __restrict bias,
+               FpPrecType INHW,
+               double epsilon,
+               FpPrecType& mean,
+               FpPrecType& variance,
+               FpPrecType& invVariance,
+               FpPrecType alpha,
+               FpPrecType beta)
     {
         FpPrecType pvscale, pvbias;
 
@@ -225,8 +227,8 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
 
         if(lid == 0)
         {
-            lcl_scale = *(scale + grpid);
-            lcl_bias  = *(bias + grpid);
+            lcl_scale = cast<FpPrecType>(*(scale + grpid));
+            lcl_bias  = cast<FpPrecType>(*(bias + grpid));
         }
 
         __syncthreads();
@@ -460,17 +462,18 @@ template <typename FpType, typename FpPrecType, typename FpAccumType>
 struct MIOpenBatchNormFwdTrainSpatialImpl<3, FpType, FpPrecType, FpAccumType>
 {
 
-    constexpr __forceinline__ __device__ void operator()(const FpType* __restrict in,
-                                                         FpType* __restrict out,
-                                                         const FpPrecType* __restrict scale,
-                                                         const FpPrecType* __restrict bias,
-                                                         FpPrecType INHW,
-                                                         double epsilon,
-                                                         FpPrecType& mean,
-                                                         FpPrecType& variance,
-                                                         FpPrecType& invVariance,
-                                                         FpPrecType alpha,
-                                                         FpPrecType beta)
+    constexpr __forceinline__ __device__ void
+    operator()(const FpType* __restrict in,
+               FpType* __restrict out,
+               const mio_bn_config::fp_param_type* __restrict scale,
+               const mio_bn_config::fp_param_type* __restrict bias,
+               FpPrecType INHW,
+               double epsilon,
+               FpPrecType& mean,
+               FpPrecType& variance,
+               FpPrecType& invVariance,
+               FpPrecType alpha,
+               FpPrecType beta)
     {
         // SPATIAL
         mean               = cast<FpPrecType>(0.);
@@ -495,8 +498,8 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<3, FpType, FpPrecType, FpAccumType>
 
         if(lid == 0)
         {
-            lcl_scale = *(scale + grpid);
-            lcl_bias  = *(bias + grpid);
+            lcl_scale = cast<FpPrecType>(*(scale + grpid));
+            lcl_bias  = cast<FpPrecType>(*(bias + grpid));
         }
 
         if(lid < mio_bn_config::hw)
@@ -555,15 +558,15 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<3, FpType, FpPrecType, FpAccumType>
 template <typename FpType, typename FpPrecType, typename FpAccumType>
 struct MIOpenBatchNormFwdTrainSpatialImpl<4, FpType, FpPrecType, FpAccumType>
 {
-    static constexpr unsigned int vector_size = mio_bn_config::vec_size;
-    static constexpr unsigned int block_size  = mio_bn_config::launch_dim.grp0;
-    static constexpr unsigned int vector_count = mio_bn_config::nhw / vector_size;
-    static constexpr unsigned int buffer_size =
-        (vector_count + block_size - 1) / block_size;
+    static constexpr unsigned int vector_size   = mio_bn_config::vec_size;
+    static constexpr unsigned int block_size    = mio_bn_config::launch_dim.grp0;
+    static constexpr unsigned int vector_count  = mio_bn_config::nhw / vector_size;
+    static constexpr unsigned int buffer_size   = (vector_count + block_size - 1) / block_size;
     static constexpr unsigned int lcl_data_size = mio_bn_config::lds_gcn_size;
 
     static_assert((mio_config::input_type_strategy == type_strategy::bfpmix ||
                    mio_config::input_type_strategy == type_strategy::fpmix) &&
+                      std::is_same<mio_bn_config::fp_param_type, float>::value &&
                       !mio_config::layout_nhwc &&
                       mio_bn_config::target_arch == architecture::gfx125x,
                   "Buffered batchnorm requires gfx1250 FP16/BF16 NCHW with FP32 parameters");
@@ -587,17 +590,18 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<4, FpType, FpPrecType, FpAccumType>
 
     // Exact in-place input/output is supported: every channel owns one workgroup,
     // and the reduction barriers precede every store. Partial overlap is unsupported.
-    constexpr __forceinline__ __device__ void operator()(const FpType* in,
-                                                         FpType* out,
-                                                         const FpPrecType* __restrict scale,
-                                                         const FpPrecType* __restrict bias,
-                                                         FpPrecType INHW,
-                                                         double epsilon,
-                                                         FpPrecType& mean,
-                                                         FpPrecType& variance,
-                                                         FpPrecType& invVariance,
-                                                         FpPrecType alpha,
-                                                         FpPrecType beta)
+    constexpr __forceinline__ __device__ void
+    operator()(const FpType* in,
+               FpType* out,
+               const mio_bn_config::fp_param_type* __restrict scale,
+               const mio_bn_config::fp_param_type* __restrict bias,
+               FpPrecType INHW,
+               double epsilon,
+               FpPrecType& mean,
+               FpPrecType& variance,
+               FpPrecType& invVariance,
+               FpPrecType alpha,
+               FpPrecType beta)
     {
         const unsigned int lid     = threadIdx.x;
         const unsigned int channel = blockIdx.x;
@@ -623,8 +627,8 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<4, FpType, FpPrecType, FpAccumType>
         {
             const input_vector first = __builtin_bit_cast(input_vector, buffered[0]);
             anchor                   = cast<FpAccumType>(first[0]);
-            lcl_scale                = scale[channel];
-            lcl_bias                 = bias[channel];
+            lcl_scale                = cast<FpPrecType>(scale[channel]);
+            lcl_bias                 = cast<FpPrecType>(bias[channel]);
         }
         __syncthreads();
 
@@ -645,7 +649,7 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<4, FpType, FpPrecType, FpAccumType>
 
         const unsigned int retained_vectors =
             lid < vector_count ? (vector_count - 1 - lid) / block_size + 1 : 0;
-        FpAccumType count = static_cast<FpAccumType>(retained_vectors * vector_size);
+        FpAccumType count     = static_cast<FpAccumType>(retained_vectors * vector_size);
         FpAccumType local_sum = 0;
         static_unroll_full<unsigned int, 0, vector_size, 1>{
             [&](unsigned int component) { local_sum += shifted_sum[component]; }};
@@ -659,8 +663,7 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<4, FpType, FpPrecType, FpAccumType>
                 static_unroll_full<unsigned int, 0, vector_size, 1>{[&](unsigned int component) {
                     const FpAccumType centered =
                         (cast<FpAccumType>(values[component]) - anchor) - mean;
-                    centered_m2[component] =
-                        fma(centered, centered, centered_m2[component]);
+                    centered_m2[component] = fma(centered, centered, centered_m2[component]);
                 }};
             }
         }};
@@ -673,7 +676,7 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<4, FpType, FpPrecType, FpAccumType>
         mean += anchor;
         if(variance < FpPrecType{0})
             variance = FpPrecType{0};
-        invVariance = miopen::rsqrt(variance + static_cast<FpPrecType>(epsilon));
+        invVariance              = miopen::rsqrt(variance + static_cast<FpPrecType>(epsilon));
         const FpPrecType pvscale = lcl_scale;
         const FpPrecType pvbias  = lcl_bias;
 
@@ -705,10 +708,11 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<6, FpType, FpPrecType, FpAccumType>
 {
     static constexpr unsigned int vector_size   = mio_bn_config::vec_size;
     static constexpr unsigned int block_size    = mio_bn_config::launch_dim.grp0;
-    static constexpr unsigned int vector_count = mio_bn_config::nhw / vector_size;
+    static constexpr unsigned int vector_count  = mio_bn_config::nhw / vector_size;
     static constexpr unsigned int lcl_data_size = mio_bn_config::lds_gcn_size;
 
     static_assert(mio_config::input_type_strategy == type_strategy::bfpmix &&
+                      std::is_same<mio_bn_config::fp_param_type, float>::value &&
                       !mio_config::layout_nhwc &&
                       mio_bn_config::target_arch == architecture::gfx125x,
                   "Streaming batchnorm requires gfx1250 BF16 NCHW with FP32 parameters");
@@ -721,8 +725,8 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<6, FpType, FpPrecType, FpAccumType>
                       mio_bn_config::n > 0 && mio_bn_config::n <= 64 && mio_bn_config::c > 0 &&
                       mio_bn_config::hw > 0 && mio_bn_config::hw <= 8192 &&
                       mio_bn_config::hw % vector_size == 0 &&
-                      static_cast<unsigned long long>(mio_bn_config::n) *
-                              mio_bn_config::c * mio_bn_config::hw <=
+                      static_cast<unsigned long long>(mio_bn_config::n) * mio_bn_config::c *
+                              mio_bn_config::hw <=
                           0xffffffffULL,
                   "Streaming batchnorm configuration exceeds its input bounds");
 
@@ -730,17 +734,18 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<6, FpType, FpPrecType, FpAccumType>
     using packed_vector = typename mapped_vector_type<unsigned int, vector_size / 2>::type;
     using accum_vector  = typename mapped_vector_type<FpAccumType, vector_size>::type;
 
-    constexpr __forceinline__ __device__ void operator()(const FpType* in,
-                                                         FpType* out,
-                                                         const FpPrecType* __restrict scale,
-                                                         const FpPrecType* __restrict bias,
-                                                         FpPrecType INHW,
-                                                         double epsilon,
-                                                         FpPrecType& mean,
-                                                         FpPrecType& variance,
-                                                         FpPrecType& invVariance,
-                                                         FpPrecType alpha,
-                                                         FpPrecType beta)
+    constexpr __forceinline__ __device__ void
+    operator()(const FpType* in,
+               FpType* out,
+               const mio_bn_config::fp_param_type* __restrict scale,
+               const mio_bn_config::fp_param_type* __restrict bias,
+               FpPrecType INHW,
+               double epsilon,
+               FpPrecType& mean,
+               FpPrecType& variance,
+               FpPrecType& invVariance,
+               FpPrecType alpha,
+               FpPrecType beta)
     {
         const unsigned int lid     = threadIdx.x;
         const unsigned int channel = blockIdx.x;
@@ -769,8 +774,8 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<6, FpType, FpPrecType, FpAccumType>
             first = *reinterpret_cast<const packed_vector*>(in + input_index(0));
             const input_vector values = __builtin_bit_cast(input_vector, first);
             anchor                    = cast<FpAccumType>(values[0]);
-            lcl_scale = scale[channel];
-            lcl_bias  = bias[channel];
+            lcl_scale                 = cast<FpPrecType>(scale[channel]);
+            lcl_bias                  = cast<FpPrecType>(bias[channel]);
         }
         __syncthreads();
 
@@ -795,7 +800,7 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<6, FpType, FpPrecType, FpAccumType>
 
         const unsigned int partition_vectors =
             lid < vector_count ? (vector_count - 1 - lid) / block_size + 1 : 0;
-        FpAccumType count = static_cast<FpAccumType>(partition_vectors * vector_size);
+        FpAccumType count     = static_cast<FpAccumType>(partition_vectors * vector_size);
         FpAccumType local_sum = 0;
         static_unroll_full<unsigned int, 0, vector_size, 1>{
             [&](unsigned int component) { local_sum += shifted_sum[component]; }};
@@ -808,9 +813,8 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<6, FpType, FpPrecType, FpAccumType>
         {
             const input_vector values = read_vector(vector_index);
             static_unroll_full<unsigned int, 0, vector_size, 1>{[&](unsigned int component) {
-                const FpAccumType centered =
-                    (cast<FpAccumType>(values[component]) - anchor) - mean;
-                centered_m2[component] = fma(centered, centered, centered_m2[component]);
+                const FpAccumType centered = (cast<FpAccumType>(values[component]) - anchor) - mean;
+                centered_m2[component]     = fma(centered, centered, centered_m2[component]);
             }};
         }
         variance = 0;
@@ -822,7 +826,7 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<6, FpType, FpPrecType, FpAccumType>
         mean += anchor;
         if(variance < FpPrecType{0})
             variance = FpPrecType{0};
-        invVariance = miopen::rsqrt(variance + static_cast<FpPrecType>(epsilon));
+        invVariance              = miopen::rsqrt(variance + static_cast<FpPrecType>(epsilon));
         const FpPrecType pvscale = lcl_scale;
         const FpPrecType pvbias  = lcl_bias;
 
@@ -865,8 +869,8 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
 
     static constexpr __forceinline__ __device__ void Norm(const FpType* __restrict__ in,
                                                           FpType* __restrict__ out,
-                                                          const FpPrecType* scale,
-                                                          const FpPrecType* bias,
+                                                          const mio_bn_config::fp_param_type* scale,
+                                                          const mio_bn_config::fp_param_type* bias,
                                                           FpPrecType alpha,
                                                           FpPrecType beta)
     {
@@ -899,8 +903,7 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
         FpPrecType_C pvt_bias;
         FpLsType value;
 
-        if(xgid * mio_bn_config::vec_size_x >= mio_bn_config::c)
-            return;
+        const bool channel_active = xgid * mio_bn_config::vec_size_x < mio_bn_config::c;
 
         // #4 apply the normalization :: x_hat = (x_i - mean) / sqrt(variance_accum + epsilon)
         // Wave32 can load these block-uniform values directly. The block barrier is
@@ -909,8 +912,10 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
         if constexpr(MIO_BN_GFX125X && MIOPEN_USE_BFPMIX && !mio_config::layout_nhwc &&
                      mio_bn_config::launch_dim.grp0 == 1)
         {
-            pvt_scale = *((const FpPrecType_C*)(scale + xgid * mio_bn_config::vec_size_x));
-            pvt_bias  = *((const FpPrecType_C*)(bias + xgid * mio_bn_config::vec_size_x));
+            pvt_scale = cast<FpPrecType_C>(*reinterpret_cast<const mio_bn_config::fp_param_c_type*>(
+                scale + xgid * mio_bn_config::vec_size_x));
+            pvt_bias  = cast<FpPrecType_C>(*reinterpret_cast<const mio_bn_config::fp_param_c_type*>(
+                bias + xgid * mio_bn_config::vec_size_x));
             mean      = miopen::batchnorm::loadFromStash<FpPrecType_C, FpType_C>(
                 (const FpType_C*)(out),
                 0,
@@ -940,11 +945,15 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
             __shared__ FpPrecType_C lcl_mean[mio_bn_config::launch_dim.grp0];
             __shared__ FpPrecType_C lcl_ivar[mio_bn_config::launch_dim.grp0];
 
-            if(ylid == 0 && zlid == 0)
+            if(channel_active && ylid == 0 && zlid == 0)
             {
-                lcl_scale[xlid] = *((const FpPrecType_C*)(scale + xgid * mio_bn_config::vec_size_x));
-                lcl_bias[xlid]  = *((const FpPrecType_C*)(bias + xgid * mio_bn_config::vec_size_x));
-                lcl_mean[xlid]  = miopen::batchnorm::loadFromStash<FpPrecType_C, FpType_C>(
+                lcl_scale[xlid] =
+                    cast<FpPrecType_C>(*reinterpret_cast<const mio_bn_config::fp_param_c_type*>(
+                        scale + xgid * mio_bn_config::vec_size_x));
+                lcl_bias[xlid] =
+                    cast<FpPrecType_C>(*reinterpret_cast<const mio_bn_config::fp_param_c_type*>(
+                        bias + xgid * mio_bn_config::vec_size_x));
+                lcl_mean[xlid] = miopen::batchnorm::loadFromStash<FpPrecType_C, FpType_C>(
                     (const FpType_C*)(out),
                     0,
                     zgrp_sz * zgrp_id * MIO_BN_N_ELEMENTS,
@@ -966,13 +975,16 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
                     xstride);
             }
             __syncthreads();
-            mean        = lcl_mean[xlid];
-            invVariance = lcl_ivar[xlid];
-            pvt_scale   = lcl_scale[xlid];
-            pvt_bias    = lcl_bias[xlid];
+            if(channel_active)
+            {
+                mean        = lcl_mean[xlid];
+                invVariance = lcl_ivar[xlid];
+                pvt_scale   = lcl_scale[xlid];
+                pvt_bias    = lcl_bias[xlid];
+            }
         }
 
-        if(ygid * mio_bn_config::vec_size_y < mio_bn_config::hw &&
+        if(channel_active && ygid * mio_bn_config::vec_size_y < mio_bn_config::hw &&
            zgid * MIO_BN_N_ELEMENTS < mio_bn_config::n)
         {
             unsigned int index_base = zgid * MIO_BN_N_ELEMENTS * MIO_BN_CHW +
@@ -1047,9 +1059,10 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
         unsigned int xstride = mio_config::layout_nhwc ? 1 : mio_bn_config::hw;
         unsigned int ystride = mio_config::layout_nhwc ? mio_bn_config::c : 1;
 
-        commitID = 0;
+        commitID                  = 0;
+        const bool channel_active = xgid * mio_bn_config::vec_size_x < mio_bn_config::c;
 
-        for(unsigned int zoffset = zlid; zoffset < ngrps2; zoffset += zgrp_sz)
+        for(unsigned int zoffset = zlid; channel_active && zoffset < ngrps2; zoffset += zgrp_sz)
         {
             for(unsigned int yoffset = ylid; yoffset < ngrps; yoffset += ygrp_sz)
             {
@@ -1083,12 +1096,11 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
                      (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1 ||
                      (grp_final_total < 64))
         {
-            miopen::reduction::reduce2_2d<
-                FpPrecType_C,
-                FpAccumType,
-                grp_final_total,
-                MIO_BN_GRP0_FINAL,
-                mio_bn_config::target_arch == architecture::gfx125x>(
+            miopen::reduction::reduce2_2d<FpPrecType_C,
+                                          FpAccumType,
+                                          grp_final_total,
+                                          MIO_BN_GRP0_FINAL,
+                                          mio_bn_config::target_arch == architecture::gfx125x>(
                 mean, variance, INHW, xlid, ylid + zlid * ygrp_sz);
         }
         else
@@ -1101,7 +1113,7 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
         variance    = miopen::max(variance, cast<FpPrecType_C>(0.));
         invVariance = miopen::rsqrt(variance + cast<FpPrecType_C>(epsilon));
 
-        for(unsigned int zoffset = zlid; zoffset < ngrps2; zoffset += zgrp_sz)
+        for(unsigned int zoffset = zlid; channel_active && zoffset < ngrps2; zoffset += zgrp_sz)
         {
             for(unsigned int yoffset = ylid; yoffset < ngrps; yoffset += ygrp_sz)
             {
@@ -1158,10 +1170,9 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
         FpPrecType_C variance = cast<FpPrecType_C>(0.);
         FpPrecLsType value;
 
-        if(xgid * mio_bn_config::vec_size_x >= mio_bn_config::c)
-            return;
+        const bool channel_active = xgid * mio_bn_config::vec_size_x < mio_bn_config::c;
 
-        if(ygid * mio_bn_config::vec_size_y < mio_bn_config::hw &&
+        if(channel_active && ygid * mio_bn_config::vec_size_y < mio_bn_config::hw &&
            zgid * MIO_BN_N_ELEMENTS < mio_bn_config::n)
         {
             unsigned int index_base = zgid * MIO_BN_N_ELEMENTS * mio_bn_config::chw +
@@ -1182,12 +1193,11 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
         if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
                      (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
         {
-            miopen::reduction::reduce2_2d<
-                FpPrecType_C,
-                FpAccumType,
-                mio_bn_config::lds_size,
-                mio_bn_config::launch_dim.grp0,
-                mio_bn_config::target_arch == architecture::gfx125x>(
+            miopen::reduction::reduce2_2d<FpPrecType_C,
+                                          FpAccumType,
+                                          mio_bn_config::lds_size,
+                                          mio_bn_config::launch_dim.grp0,
+                                          mio_bn_config::target_arch == architecture::gfx125x>(
                 mean, variance, cast<FpAccumType>(1.0), xlid, ylid + zlid * ygrp_sz);
         }
         else
@@ -1196,7 +1206,7 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
                 mean, variance, static_cast<FpPrecType_C>(1.0), ylid + zlid * ygrp_sz);
         }
 
-        if(ylid == 0 && zlid == 0)
+        if(channel_active && ylid == 0 && zlid == 0)
         {
             storeToStash(mean,
                          (FpType_C*)(mvbuff),
@@ -1252,8 +1262,8 @@ extern "C" __global__ void __launch_bounds__(
         const typename mio_bn_config::fp_type* __restrict in,
         typename mio_bn_config::fp_type* __restrict out,
 #endif
-        const typename mio_bn_config::fp_prec_type* __restrict scale,
-        const typename mio_bn_config::fp_prec_type* __restrict bias,
+        const typename mio_bn_config::fp_param_type* __restrict scale,
+        const typename mio_bn_config::fp_param_type* __restrict bias,
         typename mio_bn_config::fp_prec_type INHW,
 // TODO: should find a better way of doing this
 // but it's hard becasue C does not support function
@@ -1327,8 +1337,8 @@ extern "C" __global__ void __launch_bounds__(
     mio_bn_config::launch_dim.grp0* mio_bn_config::launch_dim.grp1* mio_bn_config::launch_dim.grp2)
     MIOpenBatchNormFwdTrainSpatialNorm(const mio_bn_config::fp_type* __restrict__ in,
                                        mio_bn_config::fp_type* __restrict__ out,
-                                       const mio_bn_config::fp_prec_type* scale,
-                                       const mio_bn_config::fp_prec_type* bias,
+                                       const mio_bn_config::fp_param_type* scale,
+                                       const mio_bn_config::fp_param_type* bias,
                                        mio_bn_config::fp_prec_type alpha,
                                        mio_bn_config::fp_prec_type beta)
 {
@@ -1374,13 +1384,12 @@ __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
     unsigned int zgid = blockIdx.z * blockDim.z + threadIdx.z;
     unsigned int commitID;
 
-    if(xgid * mio_bn_config::vec_size_x >= mio_bn_config::c)
-        return;
+    const bool channel_active = xgid * mio_bn_config::vec_size_x < mio_bn_config::c;
 
     miopen::batchnorm::MIOpenBNFwdTrainSpatialVar2{}.FinalMeanVariance(
         meanvarbuff, INHW, epsilon, xgid, ygid, zgid, commitID, mean, variance, invVariance);
     // Save mean and calculate and save running mean
-    if(ygid == commitID && zgid == 0)
+    if(channel_active && ygid == commitID && zgid == 0)
     {
 #if(MIO_RUNNING_RESULT == 1)
         using StashUpdater = miopen::batchnorm::StashUpdater<fp_accum_c_type>;

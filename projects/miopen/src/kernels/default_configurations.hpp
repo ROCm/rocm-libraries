@@ -76,6 +76,18 @@
 
 // ---------- batchnorm configs ----------
 
+#ifndef MIO_BN_PARAM_FP16
+#define MIO_BN_PARAM_FP16 0
+#endif
+
+#ifndef MIO_BN_PARAM_BF16
+#define MIO_BN_PARAM_BF16 0
+#endif
+
+#ifndef MIO_BN_GRAD_FP32
+#define MIO_BN_GRAD_FP32 0
+#endif
+
 #ifndef HALF_MAX
 #define HALF_MAX 65504
 #endif

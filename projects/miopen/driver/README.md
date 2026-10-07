@@ -138,6 +138,14 @@ MIOpenDriver example usages:
 
 ```./bin/MIOpenDriver bnorm -F 1 -n 32 -c 512 -H 16 -W 16 -m 1 -s 1```
 
+`bnormfp16` and `bnormbfp16` use low-precision activations and gradients with FP32
+scale, bias, and statistics. For spatial batch normalization, `bnormfp16fp32` and
+`bnormbfp16fp32` instead use low-precision scale and bias with FP32 statistics.
+Their forward output remains low precision; their backward input is low precision
+and `dy`, `dx`, `dscale`, and `dbias` are FP32. Mixed-gradient backward supports
+packed NCHW/NHWC tensors, saved or recomputed statistics, and no fused activation.
+Per-activation mode is unchanged.
+
 - RNN with forward and backwards pass, no bias, bi-directional and LSTM mode
 
 ```./bin/MIOpenDriver rnn -n 4,4,4,3,3,3,2,2,2,1 -k 10 -H 512 -W 1024 -l 3 -F 0 -b 0 -r 1 -m lstm```

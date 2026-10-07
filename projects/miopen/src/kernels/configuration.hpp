@@ -214,6 +214,13 @@ struct proto_config
             type>::type;
     using fp_prec_type  = float;
     using fp_accum_type = float;
+    static_assert(!(MIO_BN_PARAM_FP16 && MIO_BN_PARAM_BF16),
+                  "Batchnorm parameters cannot have two storage types");
+    using fp_param_type = typename std::conditional<
+        MIO_BN_PARAM_FP16,
+        _Float16,
+        typename std::conditional<MIO_BN_PARAM_BF16, ushort, float>::type>::type;
+    using fp_grad_type = typename std::conditional<MIO_BN_GRAD_FP32, float, fp_type>::type;
     static constexpr double epsilon =
         input_type_strategy == type_strategy::fp16 ? 0.0001 : 0.000001;
     static constexpr fp_type max_val =
@@ -261,6 +268,8 @@ struct proto_config
         typename std::conditional<vectorize && MiopenConfig::layout_nhwc,
                                   typename mapped_vector_type<fp_prec_type, vec_size>::type,
                                   fp_prec_type>::type;
+
+    using fp_param_c_type = typename mapped_vector_type<fp_param_type, vec_size_x>::type;
 
     using fp_prec_ls_type =
         typename std::conditional<vectorize,

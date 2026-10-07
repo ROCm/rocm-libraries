@@ -31,10 +31,6 @@
 
 #include <utility>
 
-/// W/A for build error for BN kernels when datatype is FP16 and MIO_BN_VARIANT=1. See:
-/// https://github.com/ROCm/MIOpen/issues/1549#issuecomment-1152644636
-#define WORKAROUND_ISSUE_1549_FP16_BUILD_ERROR 1
-
 namespace miopen {
 
 namespace solver {
@@ -72,7 +68,8 @@ struct PerformanceConfigBnBwdBackward : PerfConfigBase<PerformanceConfigBnBwdBac
     }
     PerformanceConfigBnBwdBackward() : PerformanceConfigBnBwdBackward(0, "") {}
     PerformanceConfigBnBwdBackward(bool) : PerformanceConfigBnBwdBackward(0, "") {}
-    MIOPEN_INTERNALS_EXPORT void HeuristicInit(const miopen::batchnorm::ProblemDescription& problem);
+    MIOPEN_INTERNALS_EXPORT void
+    HeuristicInit(const miopen::batchnorm::ProblemDescription& problem);
     bool SetNextValue(const miopen::batchnorm::ProblemDescription& problem);
     bool IsValidValue() const;
     bool IsValid(const ExecutionContext&,
@@ -96,7 +93,8 @@ struct PerformanceConfigBnFwdTraining : PerfConfigBase<PerformanceConfigBnFwdTra
     }
     PerformanceConfigBnFwdTraining() : PerformanceConfigBnFwdTraining(0, "") {}
     PerformanceConfigBnFwdTraining(bool) : PerformanceConfigBnFwdTraining(0, "") {}
-    MIOPEN_INTERNALS_EXPORT void HeuristicInit(const miopen::batchnorm::ProblemDescription& problem);
+    MIOPEN_INTERNALS_EXPORT void
+    HeuristicInit(const miopen::batchnorm::ProblemDescription& problem);
     bool SetNextValue(const miopen::batchnorm::ProblemDescription& problem);
     bool IsValidValue() const;
     bool IsValid(const ExecutionContext&,

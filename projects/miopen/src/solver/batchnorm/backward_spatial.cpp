@@ -48,17 +48,24 @@ namespace batchnorm {
 const unsigned int stash_values_bwd = 4;
 
 namespace {
+bool IsMixedGradientProblem(const miopen::batchnorm::ProblemDescription& problem)
+{
+    const auto input_type = problem.GetXDesc().GetType();
+    return problem.GetDirection() == miopen::batchnorm::Direction::Backward &&
+           (input_type == miopenHalf || input_type == miopenBFloat16) &&
+           problem.GetDYDesc().GetType() == miopenFloat &&
+           problem.GetDXDesc().GetType() == miopenFloat;
+}
+
 bool IsSplitBatchProblem(const miopen::batchnorm::ProblemDescription& problem)
 {
     const auto& lengths = problem.GetXDesc().GetLengths();
     return problem.GetDirection() == miopen::batchnorm::Direction::Backward &&
-           problem.GetMode() == miopenBNSpatial && problem.Is2D() &&
-           problem.IsLayoutNCHW() && IsBwdTypeValid(problem) &&
-           problem.GetXDesc().IsPacked() && problem.GetDYDesc().IsPacked() &&
-           problem.GetDXDesc().IsPacked() &&
+           problem.GetMode() == miopenBNSpatial && problem.Is2D() && problem.IsLayoutNCHW() &&
+           IsBwdTypeValid(problem) && problem.GetXDesc().IsPacked() &&
+           problem.GetDYDesc().IsPacked() && problem.GetDXDesc().IsPacked() &&
            lengths == problem.GetDYDesc().GetLengths() &&
-           lengths == problem.GetDXDesc().GetLengths() &&
-           lengths[0] >= 8 && lengths[0] <= 64;
+           lengths == problem.GetDXDesc().GetLengths() && lengths[0] >= 8 && lengths[0] <= 64;
 }
 
 bool IsSplitBatchConfig(const miopen::batchnorm::ProblemDescription& problem,
@@ -70,8 +77,8 @@ bool IsSplitBatchConfig(const miopen::batchnorm::ProblemDescription& problem,
 {
     if(!IsSplitBatchProblem(problem) || xlocalsize != 1 ||
        (vectorsize != 1 && vectorsize != 2 && vectorsize != 4 && vectorsize != 8) ||
-       (ylocalsize != 256 && ylocalsize != 512) ||
-       (zlocalsize != 1 && zlocalsize != 2) || nelements <= 1)
+       (ylocalsize != 256 && ylocalsize != 512) || (zlocalsize != 1 && zlocalsize != 2) ||
+       nelements <= 1)
         return false;
     const auto& lengths = problem.GetXDesc().GetLengths();
     const size_t n = lengths[0], c = lengths[1], hw = lengths[2] * lengths[3];
@@ -81,12 +88,18 @@ bool IsSplitBatchConfig(const miopen::batchnorm::ProblemDescription& problem,
     if(!IsSpatialMultipleApplicable(
            problem, vectorsize, stash_values, ylocalsize, zlocalsize, nelements))
         return false;
-    const size_t ytail = (hw - 1) % (ylocalsize * vectorsize) + 1;
-    const size_t ztail = (n - 1) % (zlocalsize * nelements) + 1;
-    const auto method = GetStashMethod(
-        false, problem.GetXDesc().GetType(), stash_values, c, n, hw,
-        ylocalsize, zlocalsize, nelements);
-    const bool packed_half = problem.GetXDesc().GetType() != miopenFloat;
+    const size_t ytail       = (hw - 1) % (ylocalsize * vectorsize) + 1;
+    const size_t ztail       = (n - 1) % (zlocalsize * nelements) + 1;
+    const auto method        = GetStashMethod(false,
+                                       problem.GetXDesc().GetType(),
+                                       stash_values,
+                                       c,
+                                       n,
+                                       hw,
+                                       ylocalsize,
+                                       zlocalsize,
+                                       nelements);
+    const bool packed_half   = problem.GetXDesc().GetType() != miopenFloat;
     const size_t stash_slots = stash_values * (packed_half ? 2 : 1);
     return method == 0 ? ytail >= stash_slots + (packed_half ? hw % 2 : 0)
                        : (method == 1 && ztail >= stash_slots && (!packed_half || hw % 2 == 0));
@@ -114,21 +127,19 @@ bool IsBufferedBackwardConfig(const miopen::batchnorm::ProblemDescription& probl
        problem.GetXDesc().GetLengths() != problem.GetDYDesc().GetLengths() ||
        problem.GetXDesc().GetLengths() != problem.GetDXDesc().GetLengths() ||
        (vectorsize != 4 && vectorsize != 8) ||
-       (xlocalsize != 256 && xlocalsize != 512 && xlocalsize != 1024) ||
-       ylocalsize != 1 || zlocalsize != 1 || nelements != 1)
+       (xlocalsize != 256 && xlocalsize != 512 && xlocalsize != 1024) || ylocalsize != 1 ||
+       zlocalsize != 1 || nelements != 1)
         return false;
     const auto& lengths = problem.GetXDesc().GetLengths();
     const size_t n = lengths[0], c = lengths[1], h = lengths[2], w = lengths[3];
     const size_t max_hw = streaming ? 32768 : 4800;
     if(n == 0 || n > 64 || c == 0 || h == 0 || h > max_hw || w == 0 || w > max_hw / h ||
-       problem.GetBnScale().GetElementSize() != c ||
-       problem.GetBnBias().GetElementSize() != c ||
-       problem.GetBnSMean().GetElementSize() != c ||
-       problem.GetBnSVar().GetElementSize() != c)
+       problem.GetBnScale().GetElementSize() != c || problem.GetBnBias().GetElementSize() != c ||
+       problem.GetBnSMean().GetElementSize() != c || problem.GetBnSVar().GetElementSize() != c)
         return false;
     const size_t hw = h * w, nhw = n * hw;
     const size_t vector_count = nhw / vectorsize;
-    const size_t buffer_size = (vector_count + xlocalsize - 1) / xlocalsize;
+    const size_t buffer_size  = (vector_count + xlocalsize - 1) / xlocalsize;
     return hw % vectorsize == 0 && (streaming || 2 * buffer_size * vectorsize <= 128) &&
            c <= std::numeric_limits<unsigned int>::max() / nhw;
 }
@@ -148,14 +159,22 @@ bool PerformanceConfigBnBwdBackward::IsValid(
     int variant = -1;
     GetVariantFromKernelId(
         this->kernel_id, variant, vectorsize, xlocalsize, ylocalsize, zlocalsize, nelements);
+    if(IsMixedGradientProblem(problem))
+        return kernel_id == GetKernelIdFromVariant(1, 1) &&
+               BnBwdTrainingSpatial{}.IsApplicable(context, problem);
     if(variant == 4 || variant == 6 || variant == 7)
         return false; // These spatial configurations are forward-only.
     if(variant == 5 || variant == 8)
     {
         const auto& handle = context.GetStream();
         return handle.GetDeviceName() == "gfx1250" && handle.GetWavefrontWidth() == 32 &&
-               IsBufferedBackwardConfig(
-                   problem, vectorsize, xlocalsize, ylocalsize, zlocalsize, nelements, variant == 8);
+               IsBufferedBackwardConfig(problem,
+                                        vectorsize,
+                                        xlocalsize,
+                                        ylocalsize,
+                                        zlocalsize,
+                                        nelements,
+                                        variant == 8);
     }
     if(variant == 2)
     {
@@ -186,15 +205,13 @@ bool PerformanceConfigBnBwdBackward::IsValid(
                 return false;
             if(problem.IsLayoutNHWC() && !problem.IsFp32() &&
                problem.GetXDesc().GetLengths()[1] != vectorsize &&
-               (problem.GetXDesc().GetLengths()[1] % (2 * vectorsize) != 0 ||
-                xlocalsize % 2 != 0))
+               (problem.GetXDesc().GetLengths()[1] % (2 * vectorsize) != 0 || xlocalsize % 2 != 0))
                 return false; // Mixed-precision stash pairs must stay in one vector-channel row.
         }
         const auto& handle = context.GetStream();
         const bool validate_split =
-            problem.IsBFp16() ||
-            (handle.GetDeviceName() == "gfx1250" && handle.GetWavefrontWidth() == 32 &&
-             IsSplitBatchProblem(problem));
+            problem.IsBFp16() || (handle.GetDeviceName() == "gfx1250" &&
+                                  handle.GetWavefrontWidth() == 32 && IsSplitBatchProblem(problem));
         if(problem.IsLayoutNCHW() && validate_split &&
            nelements < problem.GetXDesc().GetLengths()[0])
         {
@@ -293,8 +310,7 @@ void PerformanceConfigBnBwdBackward::HeuristicInit(
     for(size_t vectorsize : {size_t{4}, size_t{8}})
         for(size_t xlocalsize : {size_t{256}, size_t{512}, size_t{1024}})
             if(IsBufferedBackwardConfig(problem, vectorsize, xlocalsize, 1, 1, 1))
-                valid_kernels.push_back(
-                    GetKernelIdFromVariant(5, vectorsize, xlocalsize, 1, 1, 1));
+                valid_kernels.push_back(GetKernelIdFromVariant(5, vectorsize, xlocalsize, 1, 1, 1));
 
     if(problem.Is2D())
     {
@@ -306,6 +322,11 @@ void PerformanceConfigBnBwdBackward::HeuristicInit(
                     if(IsBufferedBackwardConfig(problem, vectorsize, xlocalsize, 1, 1, 1, true))
                         valid_kernels.push_back(
                             GetKernelIdFromVariant(8, vectorsize, xlocalsize, 1, 1, 1));
+    }
+    if(IsMixedGradientProblem(problem))
+    {
+        // Other variants use the input type for gradients and intermediate scratch.
+        valid_kernels.assign(1, GetKernelIdFromVariant(1, 1));
     }
 
     // Set index and kernel_id to default value
@@ -356,18 +377,33 @@ bool BnBwdTrainingSpatial::IsApplicable(
     if(!bn_problem.Is2D())
         return false;
 
-#if WORKAROUND_ISSUE_1549_FP16_BUILD_ERROR
     if(bn_problem.GetXDesc().GetType() == miopenHalf &&
-       bn_problem.GetBnScale().GetType() == miopenHalf)
-    {
-        // bfp16parm = true;
-        // Unsupported kernel mode, error in kernel code
-        // MIOpenBatchNormBwdSpatial.cl:526 issue#1549
-        return false;
-    }
-#endif
+       bn_problem.GetBnScale().GetType() == miopenHalf && !IsMixedGradientProblem(bn_problem))
+        return false; // Pure FP16 backward is not implemented.
     if(!IsBwdTypeValid(bn_problem))
         return false;
+    if(IsMixedGradientProblem(bn_problem))
+    {
+        const auto& lengths = bn_problem.GetXDesc().GetLengths();
+        const size_t n = lengths[0], c = lengths[1], h = lengths[2], w = lengths[3];
+        const size_t max_index = std::numeric_limits<unsigned int>::max();
+        if((!bn_problem.IsLayoutNCHW() && !bn_problem.IsLayoutNHWC()) ||
+           !bn_problem.GetXDesc().IsPacked() || !bn_problem.GetDYDesc().IsPacked() ||
+           !bn_problem.GetDXDesc().IsPacked() || !bn_problem.GetBnScale().IsPacked() ||
+           !bn_problem.GetBnBias().IsPacked() || !bn_problem.GetBnSMean().IsPacked() ||
+           !bn_problem.GetBnSVar().IsPacked() || lengths != bn_problem.GetDYDesc().GetLengths() ||
+           lengths != bn_problem.GetDXDesc().GetLengths() ||
+           bn_problem.GetBnScale().GetElementSize() != c ||
+           bn_problem.GetBnBias().GetElementSize() != c ||
+           bn_problem.GetBnSMean().GetElementSize() != c ||
+           bn_problem.GetBnSVar().GetElementSize() != c ||
+           bn_problem.GetActivationDesc().GetMode() != miopenActivationPASTHRU || n == 0 ||
+           c == 0 || h == 0 || w == 0 || n > static_cast<size_t>(std::numeric_limits<int>::max()) ||
+           c > static_cast<size_t>(std::numeric_limits<int>::max()) ||
+           h > static_cast<size_t>(std::numeric_limits<int>::max()) / w ||
+           n > max_index / (h * w) || c > max_index / (n * h * w))
+            return false;
+    }
 
     int activ_mode = bn_problem.GetActivationDesc().GetMode();
     if(activ_mode != miopenActivationPASTHRU && activ_mode != miopenActivationRELU &&
@@ -380,7 +416,8 @@ bool BnBwdTrainingSpatial::IsApplicable(
 }
 
 PerformanceConfigBnBwdBackward BnBwdTrainingSpatial::GetDefaultPerformanceConfig(
-    const ExecutionContext& context, const miopen::batchnorm::ProblemDescription& problem_desc) const
+    const ExecutionContext& context,
+    const miopen::batchnorm::ProblemDescription& problem_desc) const
 {
     PerformanceConfigBnBwdBackward pp;
     pp.HeuristicInit(problem_desc);
@@ -402,14 +439,14 @@ PerformanceConfigBnBwdBackward BnBwdTrainingSpatial::GetDefaultPerformanceConfig
             if(split.IsValid(context, problem_desc))
             {
                 pp.kernel_id = split.kernel_id;
-                pp.index = std::distance(
+                pp.index     = std::distance(
                     pp.valid_kernels.begin(),
                     std::find(pp.valid_kernels.begin(), pp.valid_kernels.end(), pp.kernel_id));
             }
         }
     }
-    const auto buffered = PerformanceConfigBnBwdBackward{
-        0, GetKernelIdFromVariant(5, 8, 1024, 1, 1, 1)};
+    const auto buffered =
+        PerformanceConfigBnBwdBackward{0, GetKernelIdFromVariant(5, 8, 1024, 1, 1, 1)};
     if(buffered.IsValid(context, problem_desc))
     {
         const auto& lengths = problem_desc.GetXDesc().GetLengths();
@@ -419,23 +456,22 @@ PerformanceConfigBnBwdBackward BnBwdTrainingSpatial::GetDefaultPerformanceConfig
         if(c >= 128 && hw >= 512)
         {
             pp.kernel_id = buffered.kernel_id;
-            pp.index = std::distance(
+            pp.index     = std::distance(
                 pp.valid_kernels.begin(),
                 std::find(pp.valid_kernels.begin(), pp.valid_kernels.end(), pp.kernel_id));
         }
     }
-    const auto streaming = PerformanceConfigBnBwdBackward{
-        0, GetKernelIdFromVariant(8, 8, 1024, 1, 1, 1)};
+    const auto streaming =
+        PerformanceConfigBnBwdBackward{0, GetKernelIdFromVariant(8, 8, 1024, 1, 1, 1)};
     if(streaming.IsValid(context, problem_desc))
     {
         const auto& lengths = problem_desc.GetXDesc().GetLengths();
         const size_t c = lengths[1], hw = lengths[2] * lengths[3], nhw = lengths[0] * hw;
         // The streaming crossover is limited to the measured medium-spatial family.
-        if(c >= 128 && c <= 256 && hw >= 4096 && hw <= 8192 &&
-           nhw >= 65537 && nhw <= 262144)
+        if(c >= 128 && c <= 256 && hw >= 4096 && hw <= 8192 && nhw >= 65537 && nhw <= 262144)
         {
             pp.kernel_id = streaming.kernel_id;
-            pp.index = std::distance(
+            pp.index     = std::distance(
                 pp.valid_kernels.begin(),
                 std::find(pp.valid_kernels.begin(), pp.valid_kernels.end(), pp.kernel_id));
         }
@@ -466,8 +502,8 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
 {
     const auto& handle      = context.GetStream();
     const unsigned wavesize = handle.GetWavefrontWidth();
-    int variant       = -1;
-    size_t vectorsize = 1;
+    int variant             = -1;
+    size_t vectorsize       = 1;
     size_t xlocalsize = 1, xgridsize = 1;
     size_t ylocalsize = 1, ygridsize = 1;
     size_t zlocalsize = 1, zgridsize = 1;
@@ -479,31 +515,17 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
         config.kernel_id, variant, vectorsize, xlocalsize, ylocalsize, zlocalsize, nelements);
     if(variant == 4 || variant == 6 || variant == 7)
         MIOPEN_THROW(miopenStatusBadParm, "Batchnorm configuration is forward-only");
+    if(IsMixedGradientProblem(problem) && !config.IsValid(context, problem))
+        MIOPEN_THROW(miopenStatusBadParm, "Unsupported mixed-gradient backward configuration");
     if((variant == 5 || variant == 8) && !config.IsValid(context, problem))
-        MIOPEN_THROW(miopenStatusBadParm, "Unsupported buffered or streaming backward configuration");
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "Unsupported buffered or streaming backward configuration");
 
-    bool bfpmixparm   = false;
-    bool bbfpmixparam = false;
-    bool bfp16parm    = false;
-    bool bfp32parm    = true;
-
-    if(problem.GetXDesc().GetType() == miopenHalf && problem.GetBnScale().GetType() == miopenHalf)
-    {
-        bfp16parm = true;
-        bfp32parm = false;
-    }
-    else if(problem.GetXDesc().GetType() == miopenHalf &&
-            problem.GetBnScale().GetType() == miopenFloat)
-    {
-        bfpmixparm = true;
-        bfp32parm  = false;
-    }
-    else if(problem.GetXDesc().GetType() == miopenBFloat16 &&
-            problem.GetBnScale().GetType() == miopenFloat)
-    {
-        bbfpmixparam = true;
-        bfp32parm    = false;
-    }
+    const auto input_type   = problem.GetXDesc().GetType();
+    const auto param_type   = problem.GetBnScale().GetType();
+    const bool bfpmixparm   = input_type == miopenHalf;
+    const bool bbfpmixparam = input_type == miopenBFloat16;
+    const bool bfp32parm    = !bfpmixparm && !bbfpmixparam;
 
     int n, c, h, w;
     std::tie(n, c, h, w) = tien<4>(problem.GetXDesc().GetLengths());
@@ -518,11 +540,11 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
     if(variant == 2 &&
        (vectorsize > 4 ||
         (problem.IsLayoutNCHW() && nelements < static_cast<size_t>(n) &&
-         (problem.IsBFp16() ||
-          (handle.GetDeviceName() == "gfx1250" && wavesize == 32 &&
-           IsSplitBatchProblem(problem))))) &&
+         (problem.IsBFp16() || (handle.GetDeviceName() == "gfx1250" && wavesize == 32 &&
+                                IsSplitBatchProblem(problem))))) &&
        !config.IsValid(context, problem))
-        MIOPEN_THROW(miopenStatusBadParm, "Unsupported vectorized or split-batch backward configuration");
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "Unsupported vectorized or split-batch backward configuration");
 
     size_t xlocalsize_final = xlocalsize, ylocalsize_final = ylocalsize,
            zlocalsize_final = zlocalsize;
@@ -530,9 +552,9 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
     {
         if(variant != 5 && variant != 8)
             xlocalsize = 1024;
-        xgridsize  = xlocalsize * c;
-        ldsgcn     = xlocalsize / wavesize;
-        ldsnogcn   = xlocalsize;
+        xgridsize = xlocalsize * c;
+        ldsgcn    = xlocalsize / wavesize;
+        ldsnogcn  = xlocalsize;
     }
     else
     {
@@ -554,7 +576,7 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
         stash_method = GetStashMethod(problem.IsLayoutNHWC(),
                                       problem.GetXDesc().GetType(),
                                       stash_values,
-                                      c,
+                                      problem.IsLayoutNHWC() ? c / vectorsize : c,
                                       n,
                                       in_cstride,
                                       ylocalsize,
@@ -562,7 +584,7 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
                                       nelements);
 
         // WG size for Final kernels (NHWC)
-        if(problem.IsLayoutNHWC() && c % 2 == 0 && xlocalsize % 2 == 0)
+        if(problem.IsLayoutNHWC() && (c / vectorsize) % 2 == 0 && xlocalsize % 2 == 0)
         {
             // increase number of blocks (xgridsize does not change for final kernels)
             // 2 is the lower bound because of stashing
@@ -582,40 +604,43 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
     {
         auto kernel = KernelInfo{};
 
-        auto build_params =
-            KernelBuildParameters{{"MIOPEN_USE_FP16", static_cast<int>(bfp16parm)},
-                                  {"MIOPEN_USE_RNE_BFLOAT16", MIOPEN_USE_RNE_BFLOAT16},
-                                  {"MIOPEN_USE_FP32", static_cast<int>(bfp32parm)},
-                                  {"MIOPEN_USE_FPMIX", static_cast<int>(bfpmixparm)},
-                                  {"MIOPEN_USE_BFPMIX", static_cast<int>(bbfpmixparam)},
-                                  {"MIO_BN_USESAVED", static_cast<int>(problem.UseSaved())},
-                                  {"MIO_BN_N", static_cast<int>(n)},
-                                  {"MIO_BN_C", static_cast<int>(c)},
-                                  {"MIO_BN_HW", static_cast<int>(in_cstride)},
-                                  {"MIO_BN_NHW", static_cast<int>(in_nhw)},
-                                  {"MIO_BN_CHW", in_nstride},
-                                  {"MIO_BN_NCHW", in_nchw},
-                                  {"MIO_BN_NGRPS", ygridsize / ylocalsize},
-                                  {"MIO_BN_NGRPS2", zgridsize / zlocalsize},
-                                  {"MIO_BN_N_ELEMENTS", nelements},
-                                  {"MIO_BN_LDS_SIZE", ldsnogcn},
-                                  {"MIO_BN_LDSGCN_SIZE", ldsgcn},
-                                  {"MIO_BN_VARIANT", variant},
-                                  {"MIO_WAVESIZE", wavesize},
-                                  {"MIO_BN_GRP0", xlocalsize},
-                                  {"MIO_BN_GRP1", ylocalsize},
-                                  {"MIO_BN_GRP2", zlocalsize},
-                                  {"MIO_BN_GRP0_FINAL", xlocalsize_final},
-                                  {"MIO_BN_GRP1_FINAL", ylocalsize_final},
-                                  {"MIO_BN_GRP2_FINAL", zlocalsize_final},
-                                  {"MIO_BN_GFX125X", StartsWith(handle.GetDeviceName(), "gfx125") ? 1 : 0},
-                                  {"MIO_LAYOUT_NHWC", static_cast<int>(problem.IsLayoutNHWC())},
-                                  {"MIO_BN_VECTORIZE", static_cast<int>(vectorsize > 1)},
-                                  {"MIO_BN_VEC_SIZE", vectorsize},
-                                  {"MIO_BN_BUFFERED_GFX1250",
-                                   handle.GetDeviceName() == "gfx1250" && wavesize == 32 ? 1 : 0},
-                                  {"MIO_BN_STASH_METHOD", stash_method},
-                                  {"MIOPEN_NRN_OP_ID", problem.GetActivationDesc().GetMode()}};
+        auto build_params = KernelBuildParameters{
+            {"MIOPEN_USE_FP16", 0},
+            {"MIOPEN_USE_RNE_BFLOAT16", MIOPEN_USE_RNE_BFLOAT16},
+            {"MIOPEN_USE_FP32", static_cast<int>(bfp32parm)},
+            {"MIOPEN_USE_FPMIX", static_cast<int>(bfpmixparm)},
+            {"MIOPEN_USE_BFPMIX", static_cast<int>(bbfpmixparam)},
+            {"MIO_BN_PARAM_FP16", static_cast<int>(param_type == miopenHalf)},
+            {"MIO_BN_PARAM_BF16", static_cast<int>(param_type == miopenBFloat16)},
+            {"MIO_BN_GRAD_FP32", static_cast<int>(problem.GetDYDesc().GetType() == miopenFloat)},
+            {"MIO_BN_USESAVED", static_cast<int>(problem.UseSaved())},
+            {"MIO_BN_N", static_cast<int>(n)},
+            {"MIO_BN_C", static_cast<int>(c)},
+            {"MIO_BN_HW", static_cast<int>(in_cstride)},
+            {"MIO_BN_NHW", static_cast<int>(in_nhw)},
+            {"MIO_BN_CHW", in_nstride},
+            {"MIO_BN_NCHW", in_nchw},
+            {"MIO_BN_NGRPS", ygridsize / ylocalsize},
+            {"MIO_BN_NGRPS2", zgridsize / zlocalsize},
+            {"MIO_BN_N_ELEMENTS", nelements},
+            {"MIO_BN_LDS_SIZE", ldsnogcn},
+            {"MIO_BN_LDSGCN_SIZE", ldsgcn},
+            {"MIO_BN_VARIANT", variant},
+            {"MIO_WAVESIZE", wavesize},
+            {"MIO_BN_GRP0", xlocalsize},
+            {"MIO_BN_GRP1", ylocalsize},
+            {"MIO_BN_GRP2", zlocalsize},
+            {"MIO_BN_GRP0_FINAL", xlocalsize_final},
+            {"MIO_BN_GRP1_FINAL", ylocalsize_final},
+            {"MIO_BN_GRP2_FINAL", zlocalsize_final},
+            {"MIO_BN_GFX125X", StartsWith(handle.GetDeviceName(), "gfx125") ? 1 : 0},
+            {"MIO_LAYOUT_NHWC", static_cast<int>(problem.IsLayoutNHWC())},
+            {"MIO_BN_VECTORIZE", static_cast<int>(vectorsize > 1)},
+            {"MIO_BN_VEC_SIZE", vectorsize},
+            {"MIO_BN_BUFFERED_GFX1250",
+             handle.GetDeviceName() == "gfx1250" && wavesize == 32 ? 1 : 0},
+            {"MIO_BN_STASH_METHOD", stash_method},
+            {"MIOPEN_NRN_OP_ID", problem.GetActivationDesc().GetMode()}};
 
         {
             kernel.kernel_file      = "MIOpenBatchNormBwdSpatial.cpp";
@@ -677,7 +702,7 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
         }
     }
 
-    const auto dtype    = problem.GetBnScale().GetType();
+    const auto dtype    = problem.GetBnSMean().GetType();
     const auto useSaved = problem.UseSaved();
 
     result.invoker_factory = [=](const std::vector<Kernel>& kernels) {

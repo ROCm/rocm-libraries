@@ -14,11 +14,13 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [BatchNorm] Add gfx1250 buffered saved-statistics backward and stable streaming forward kernels for bounded packed-NCHW BF16 problems, with measured defaults for small-spatial backward and medium-spatial forward families; omit the optional backward Variant1 output-loop barrier on gfx1250.
 * [BatchNorm] Add a saved-statistics streaming backward kernel for gfx1250 medium-spatial BF16 NCHW workloads and finer low-channel forward tiles; saved backward stages load immutable parameters directly without redundant shared-memory broadcasts.
 * [BatchNorm] Reuse shared wave32 spatial reductions across FP32 and mixed FP16/BF16, broaden immutable saved-parameter loads to NCHW/NHWC, retain packed per-activation input, and split fused-inference batch work. Buffered spatial forward now supports FP16 as well as BF16.
+* [BatchNorm] Support spatial FP16/BF16 scale and bias with FP32 statistics, and FP32 backward gradients with matching low-precision input and scale, without architecture-specific gating.
 
 ### Resolved Issues
 * [BatchNorm] Honor configured BF16 output rounding in all batchnorm kernel builds, including explicit truncation mode, and fix scalar fallback indexing for recomputed spatial backward statistics on spatial extents not divisible by four.
 * [BatchNorm] Mask padded batch tiles in spatial forward and backward kernels when multiple batches are processed per thread.
 * [BatchNorm] Fix NHWC vector-channel backward reduction compilation and include epsilon in the recomputed-statistics CPU verification reference.
+* [BatchNorm] Fix overlapping NHWC FP32 scratch stores when the number of FP16/BF16 channel vectors is odd, and keep padded channel lanes participating in spatial forward synchronization on wave32 and wave64 targets.
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
