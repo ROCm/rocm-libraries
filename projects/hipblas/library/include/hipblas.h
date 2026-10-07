@@ -382,7 +382,12 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasSetMathMode(hipblasHandle_t handle, hipbla
 /*! \brief Get hipblas math mode */
 HIPBLAS_EXPORT hipblasStatus_t hipblasGetMathMode(hipblasHandle_t handle, hipblasMath_t* mode);
 
-/*! \brief Set hipblas workspace to user-owned device buffer */
+/*! \brief Set hipblas workspace to user-owned device buffer
+
+    With the rocBLAS backend, the workspace is never resized, so it must be large enough for
+    every call made with the handle. Some functions, such as trsmBatched, need workspace that
+    grows with ``batchCount``. A call that needs more returns ``HIPBLAS_STATUS_ALLOC_FAILED``.
+*/
 HIPBLAS_EXPORT hipblasStatus_t hipblasSetWorkspace(hipblasHandle_t handle,
                                                    void*           workspace,
                                                    size_t          workspaceSizeInBytes);
@@ -21078,6 +21083,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmmStridedBatched_64(hipblasHandle_t    
     ``HIPBLAS_SIDE_LEFT`` and is ``n`` when ``HIPBLAS_SIDE_RIGHT``). For more information on
     preallocated memory in the handle, see the Device Memory Allocation
     in rocBLAS section of the rocBLAS API Reference.
+    With the rocBLAS backend, unless the problem is small, trsm also uses temporary device
+    memory from the handle. If a workspace set with ``hipblasSetWorkspace`` is too small,
+    trsm returns ``HIPBLAS_STATUS_ALLOC_FAILED`` even when free device memory is available.
 
     - Supported precisions in rocBLAS : ``s``, ``d``, ``c``, and ``z``.
     - Supported precisions in cuBLAS  : ``s``, ``d``, ``c``, and ``z``.
@@ -21271,6 +21279,10 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrsm_64(hipblasHandle_t         handle,
     ``HIPBLAS_SIDE_LEFT`` and is ``n`` when ``HIPBLAS_SIDE_RIGHT``). For more information on
     preallocated memory in the handle, see the Device Memory Allocation
     in rocBLAS section of the rocBLAS API Reference.
+    With the rocBLAS backend, unless the problem is small, trsm also uses temporary device
+    memory from the handle that grows linearly with ``batchCount``. If a workspace set with
+    ``hipblasSetWorkspace`` is too small, trsm returns ``HIPBLAS_STATUS_ALLOC_FAILED`` even
+    when free device memory is available.
 
     - Supported precisions in rocBLAS : ``s``, ``d``, ``c``, and ``z``.
     - Supported precisions in cuBLAS  : ``s``, ``d``, ``c``, and ``z``.
@@ -21462,6 +21474,10 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrsmBatched_64(hipblasHandle_t           
     ``HIPBLAS_SIDE_LEFT`` and is ``n`` when ``HIPBLAS_SIDE_RIGHT``). For more information on
     preallocated memory in the handle, see the Device Memory Allocation
     in rocBLAS section of the rocBLAS API Reference.
+    With the rocBLAS backend, unless the problem is small, trsm also uses temporary device
+    memory from the handle that grows linearly with ``batchCount``. If a workspace set with
+    ``hipblasSetWorkspace`` is too small, trsm returns ``HIPBLAS_STATUS_ALLOC_FAILED`` even
+    when free device memory is available.
 
     - Supported precisions in rocBLAS : ``s``, ``d``, ``c``, and ``z``.
     - Supported precisions in cuBLAS  : No support.
