@@ -295,10 +295,10 @@ namespace TensileLite
         if(has(row, "schema_version"))
         {
             const auto version = exactNum(row, "schema_version");
-            if(!version || *version != static_cast<int64_t>(TuningSchemaVersion::Current)
+            if(!version || *version != static_cast<int64_t>(TuningSchemaVersion::V1)
                || !hasRequiredCurrentColumns(row))
                 return std::nullopt;
-            schemaVersion = TuningSchemaVersion::Current;
+            schemaVersion = TuningSchemaVersion::V1;
         }
 
         // Index 0 is a real solution in the shipped logic; only a negative
@@ -439,7 +439,7 @@ namespace TensileLite
             values << value;
         };
 
-        column("schema_version", static_cast<uint32_t>(TuningSchemaVersion::Current));
+        column("schema_version", static_cast<uint32_t>(kCurrentTuningSchemaVersion));
         column("git_version", buildStamp);
 
         auto transposeCell = [](bool transposed, bool conjugated) {

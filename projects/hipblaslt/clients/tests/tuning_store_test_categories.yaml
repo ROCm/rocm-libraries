@@ -2,6 +2,10 @@
 #
 # The tuning file's row format and store, tested without a device. The whole
 # binary takes well under a second, so every tier runs all of it.
+#
+# Each tier registers a ctest entry carrying its labels. TheRock runs a tier by
+# its own name (quick, standard, comprehensive or full); the other labels match
+# the aliases in test_categories.yaml.
 
 test_categories:
   quick:
@@ -37,4 +41,3 @@ test_categories:
     labels:
       - "full"
       - "weekly"
-      - "hmm"

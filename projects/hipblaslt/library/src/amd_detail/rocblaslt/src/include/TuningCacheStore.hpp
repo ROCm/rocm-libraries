@@ -8,8 +8,6 @@
 // here touches a device, the solution library or the logger, so the same code
 // builds into hipBLASLt and into a host-only test.
 
-// Standard headers first: Tensile/Comparison.hpp uses size_t, std::hash and
-// std::tuple without including them.
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -30,18 +28,23 @@
 namespace TensileLite
 {
     /**
-     * Row schema version.
+     * The schema_version a row was written with.
      *
      * Legacy rows are what hipblaslt-bench writes: the ten problem columns the
      * historical key used, solution_index, and no schema_version column. They
      * have no leading dimensions, strides or epilogue, so they can only be
      * matched on the historical fields; see ProblemOverride::legacyKey.
+     *
+     * Each later schema takes the next number, and kCurrentTuningSchemaVersion
+     * names the one this build writes.
      */
     enum class TuningSchemaVersion : uint32_t
     {
-        Legacy  = 0,
-        Current = 1,
+        Legacy = 0,
+        V1     = 1,
     };
+
+    inline constexpr TuningSchemaVersion kCurrentTuningSchemaVersion = TuningSchemaVersion::V1;
 
     /**
      * The problem key.

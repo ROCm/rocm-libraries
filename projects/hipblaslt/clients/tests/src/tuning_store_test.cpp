@@ -60,7 +60,7 @@ namespace
         TunedEntry entry;
         entry.solutionIndex = index;
         entry.kernelName    = kernel;
-        entry.schemaVersion = TuningSchemaVersion::Current;
+        entry.schemaVersion = kCurrentTuningSchemaVersion;
         entry.winnerTimeUs  = 12.5;
         return entry;
     }
@@ -232,7 +232,7 @@ namespace
         const TunedEntry& read = found[0];
         EXPECT_EQ(read.solutionIndex, 4321);
         EXPECT_EQ(read.kernelName, written.kernelName);
-        EXPECT_EQ(read.schemaVersion, TuningSchemaVersion::Current);
+        EXPECT_EQ(read.schemaVersion, kCurrentTuningSchemaVersion);
         EXPECT_EQ(read.buildStamp, kStamp);
         EXPECT_EQ(read.requiredWorkspaceBytes, 4096u);
         EXPECT_DOUBLE_EQ(read.winnerTimeUs, 12.5);
