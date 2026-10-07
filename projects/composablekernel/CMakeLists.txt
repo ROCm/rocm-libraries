@@ -1020,11 +1020,6 @@ write_basic_package_version_file(
     COMPATIBILITY AnyNewerVersion
 )
 
-get_property(CK_SPLIT_CONV_COMPONENTS GLOBAL PROPERTY CK_SPLIT_CONV_COMPONENTS)
-if(CK_SPLIT_CONV_COMPONENTS)
-    list(JOIN CK_SPLIT_CONV_COMPONENTS " " CK_SPLIT_CONV_COMPONENTS)
-    string(PREPEND CK_SPLIT_CONV_COMPONENTS " ")
-endif()
 configure_package_config_file(${CMAKE_CURRENT_SOURCE_DIR}/Config.cmake.in
     "${CMAKE_CURRENT_BINARY_DIR}/composable_kernelConfig.cmake"
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/composable_kernel

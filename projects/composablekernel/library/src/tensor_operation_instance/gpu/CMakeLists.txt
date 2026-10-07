@@ -735,7 +735,6 @@ if(CK_DEVICE_CONV_INSTANCES AND (NOT HIPTENSOR_REQ_LIBS_ONLY OR MIOPEN_REQ_LIBS_
                 NAMESPACE composable_kernel::
                 DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/composable_kernel
             )
-            set_property(GLOBAL APPEND PROPERTY CK_SPLIT_CONV_COMPONENTS "${_ck_lib}")
             message(STATUS "Created ${_ck_lib} STATIC library")
         endforeach()
     endif()
