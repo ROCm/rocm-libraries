@@ -78,7 +78,8 @@ Infer from the user request:
    python <skill-directory>/scripts/tidy_changed.py --build-dir <build-dir> [options]
    ```
 
-   Use the scripts bundled with the skill you were invoked from. Keep full
+   `<skill-directory>` is the directory of the skill you were invoked from;
+   use the scripts bundled there. Keep full
    output in a log when the run is large, and show the diagnostics rather than
    the progress lines.
 
