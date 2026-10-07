@@ -156,6 +156,10 @@ The following two function return values indicate insufficient memory:
 *  ``rocblas_status == rocblas_status_memory_error`` : indicates there is insufficient device memory for a rocBLAS function.
 *  ``rocblas_status == rocblas_status_perf_degraded`` : indicates that a slower algorithm was used because of insufficient device memory for the optimal algorithm.
 
+With a fixed-size workspace, ``rocblas_status_memory_error`` means the workspace is too small for the call, even if free device memory is available.
+The memory needed by batched functions such as ``trsm_batched`` grows with ``batch_count``.
+Use the functions for determining memory requirements to size the workspace for the largest call.
+
 .. _stream order alloc:
 
 Stream-ordered memory allocation
