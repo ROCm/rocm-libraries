@@ -88,6 +88,8 @@ LAPACK main functions
     :ref:`hipsolverXpotrs <potrs>`, x, x, x, x
     :ref:`hipsolverXpotrsBatched_bufferSize <potrs_batched_bufferSize>`, x, x, x, x
     :ref:`hipsolverXpotrsBatched <potrs_batched>`, x, x, x, x
+    :ref:`hipsolverXgetriBatched_bufferSize <getri_batched_bufferSize>`, x, x, x, x
+    :ref:`hipsolverXgetriBatched <getri_batched>`, x, x, x, x
     :ref:`hipsolverXgetrs_bufferSize <getrs_bufferSize>`, x, x, x, x
     :ref:`hipsolverXgetrs <getrs>`, x, x, x, x
     :ref:`hipsolverXXgesv_bufferSize <gesv_bufferSize>`, x, x, x, x
