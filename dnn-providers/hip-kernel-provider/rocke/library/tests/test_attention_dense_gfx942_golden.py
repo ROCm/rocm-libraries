@@ -13,9 +13,9 @@ Every flavor in ``LLVM_FLAVORS`` is checked from any host, through the shared
 fixture is re-blessed.
 
 Covers the acceptance matrix: D64/D128 x bf16/fp16 x default/persistent x GQA, causal
-and full, plus sliding-window (W128/W256, both grids, D64/D128). Every case is in the
-gfx942 supported set (varlen / ragged are rejected on gfx942, so -- unlike the gfx950
-sibling -- they are absent here).
+and full, plus sliding-window (W128/W256, both grids, D64/D128) and sinks (alone and
+combined). Every case is in the gfx942 supported set; varlen and ragged are rejected on
+gfx942, so unlike the gfx950 sibling they are absent here.
 
 Both D64 K-LDS layouts are pinned so drift on either is caught:
   * ``default_d64_*``  -- specs built DIRECTLY with ``lds_k_group_pad=0``: the UNPADDED
@@ -118,6 +118,7 @@ def _cases():
             mask_type=1 if over.get("causal", base["causal"]) else 0,
             dtype=over.get("dtype", base["dtype"]),
             sliding_window=over.get("sliding_window", 0),
+            use_sinks=over.get("use_sinks", False),
         )
         return lambda: build_attention_dense(
             attention_tuning_spec(req, "gfx942_dense").kernel_spec, arch=_ARCH
@@ -202,6 +203,43 @@ def _cases():
         # pad + wpe=4 tune). Numeric coverage is in _SWA_COHORT
         "attention_dense_gfx942/swa_d64_bf16_w128": mk(
             head_size=64, sliding_window=128
+        ),
+        # --- sinks: m/l seeded from sink_ptr[hq] once per work item, before the KV
+        #     loop. Default and persistent grids (both decodes), full and causal,
+        #     both head sizes, SWA-sink, and a dispatch case that guards the
+        #     gfx942_dense._base_spec use_sinks threading end to end. ---
+        "attention_dense_gfx942/sink_d128_bf16_causal": mk(use_sinks=True),
+        "attention_dense_gfx942/sink_d128_fp16_full": mk(
+            dtype="fp16", causal=False, use_sinks=True
+        ),
+        "attention_dense_gfx942/sink_d64_fp16_causal": mk(
+            head_size=64, dtype="fp16", lds_k_group_pad=0, use_sinks=True
+        ),
+        "attention_dense_gfx942/persist_sink_d128_bf16_qbmaj": mk(
+            persistent=True,
+            num_persistent=304,
+            persist_decode="qb_major",
+            use_sinks=True,
+        ),
+        "attention_dense_gfx942/persist_sink_d128_fp16_hkvmaj": mk(
+            dtype="fp16",
+            persistent=True,
+            num_persistent=304,
+            persist_decode="hkv_major",
+            use_sinks=True,
+        ),
+        "attention_dense_gfx942/swa_sink_d128_bf16_w128": mk(
+            sliding_window=128, use_sinks=True
+        ),
+        "attention_dense_gfx942/persist_swa_sink_d128_bf16_w128": mk(
+            sliding_window=128,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="qb_major",
+            use_sinks=True,
+        ),
+        "attention_dense_gfx942/dispatch_sink_d64_bf16_causal": mk_dispatch(
+            head_size=64, use_sinks=True
         ),
     }
 
