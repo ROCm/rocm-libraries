@@ -244,7 +244,7 @@ namespace rocsparse
                                                                 X_op,
                                                                 alpha,
                                                                 A,
-                                                                X,
+                                                                Z,
                                                                 analysis_policy,
                                                                 &csrsm_info,
                                                                 csrsm_buffer_size_in_bytes,
