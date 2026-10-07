@@ -83,7 +83,9 @@ max occupancy 3 stalled. The outcome depends on the GEMM kernel. If a run stalls
 reduce the workgroup count or increase max occupancy to reserve less LDS per
 workgroup. This applies to both launcher and same-process use.
 
-Useful flags: `--device N` (sets `HIP_VISIBLE_DEVICES`), `--wait` (max seconds to
+Useful flags: `--device N` (a HIP device ordinal among the devices
+`ROCR_VISIBLE_DEVICES` exposes; sets `HIP_VISIBLE_DEVICES=N` for the cotenant and
+the command, replacing any inherited value), `--wait` (max seconds to
 wait for `READY`), `--grace` (extra settle time after residency, default 0).
 
 ## Same-process benchmarking
