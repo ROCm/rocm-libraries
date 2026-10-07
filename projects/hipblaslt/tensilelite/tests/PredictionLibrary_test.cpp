@@ -398,10 +398,10 @@ namespace
     {
     public:
         explicit ScratchDir(std::string const& name)
-            : m_path(std::filesystem::temp_directory_path()
-                     / (name + "_"
-                        + std::to_string(
-                            std::chrono::steady_clock::now().time_since_epoch().count())))
+            : m_path(
+                  std::filesystem::temp_directory_path()
+                  / (name + "_"
+                     + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())))
         {
             std::filesystem::create_directories(m_path);
         }

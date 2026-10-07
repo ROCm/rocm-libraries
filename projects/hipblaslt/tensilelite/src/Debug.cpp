@@ -344,7 +344,7 @@ namespace TensileLite
         m_value2        = db2 ? static_cast<int>(strtol(db2, nullptr, 0)) : DEBUG_SM2;
 
         const char* prediction_only = std::getenv("TENSILE_PREDICTION_LIB");
-        m_predictionLib = prediction_only && strtol(prediction_only, nullptr, 0) != 0;
+        m_predictionLib             = prediction_only && strtol(prediction_only, nullptr, 0) != 0;
 
         tilewrightBankSetting().store(readTilewrightBank(), std::memory_order_relaxed);
 
