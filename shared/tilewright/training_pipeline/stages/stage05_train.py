@@ -1270,6 +1270,14 @@ def select_smart_k_signatures(
 # ── training ──────────────────────────────────────────────────────────────────
 
 
+def _usable_cpus() -> int:
+    """CPUs this process may run on (its affinity mask, not the whole host)."""
+    try:
+        return len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        return os.cpu_count() or 8
+
+
 def _train_worker_init(threads_per_worker: int) -> None:
     """Process-pool initializer: cap every thread pool of a training worker
     so workers x threads stays within the core count."""
@@ -1905,7 +1913,7 @@ def main() -> int:
         "--train-threads-per-worker",
         type=int,
         default=0,
-        help="torch/BLAS/LightGBM threads per worker (0: cpu_count // workers)",
+        help="torch/BLAS/LightGBM threads per worker (0: usable CPUs // workers)",
     )
     ap.add_argument(
         "--validation-frac",
@@ -2105,7 +2113,7 @@ def main() -> int:
 
             tpw = int(args.train_threads_per_worker or 0)
             if tpw <= 0:
-                tpw = max(2, (os.cpu_count() or 8) // n_workers)
+                tpw = max(2, _usable_cpus() // n_workers)
             for _v in (
                 "OMP_NUM_THREADS",
                 "MKL_NUM_THREADS",
