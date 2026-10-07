@@ -92,7 +92,7 @@ using asym_b    = asym_pipe::ring<1>;
 using full_pipe = named_barrier_pipeline<ring_spec<3, 4, 1>>;
 using full_ring = full_pipe::ring<0>;
 
-// The shape the gfx1250 GEMM pipeline is planned around.
+// Two loaders, as in the gfx1250 GEMM pipeline, and two consumers.
 using gemm_pipe = named_barrier_pipeline<ring_spec<2, 2, 2>>;
 using gemm_ring = gemm_pipe::ring<0>;
 
@@ -236,7 +236,7 @@ struct recording_consumer
 };
 
 // One log per wave of a workgroup, producers first: what each issues for num_steps steps.
-template <typename Ring, index_t Lag>
+template <typename Ring, index_t PublishLag>
 std::vector<wave_log> record_waves(index_t num_steps)
 {
     std::vector<wave_log> waves(Ring::kNumProducerWaves + Ring::kNumConsumerWaves);
@@ -244,7 +244,8 @@ std::vector<wave_log> record_waves(index_t num_steps)
     ck_tile::static_for<0, Ring::kNumProducerWaves, 1>{}([&](auto p) {
         constexpr index_t kProducer = decltype(p)::value;
         wave_log& log               = waves[kProducer];
-        ck_tile::impl::drive_producer<recording_producer<Ring, kProducer>, Ring::kNumSlots, Lag>(
+        using producer              = recording_producer<Ring, kProducer>;
+        ck_tile::impl::drive_producer<producer, Ring::kNumSlots, PublishLag>(
             recording_token{&log},
             num_steps,
             [&](auto slot, index_t step) {
@@ -468,18 +469,18 @@ struct random_walk
     }
 };
 
-template <typename Spec, index_t Lag>
+template <typename Spec, index_t PublishLag>
 void expect_protocol_sound()
 {
     using ring = typename named_barrier_pipeline<Spec>::template ring<0>;
 
     for(index_t num_steps = 0; num_steps <= 3 * ring::kNumSlots + 1; ++num_steps)
     {
-        const auto waves   = record_waves<ring, Lag>(num_steps);
+        const auto waves   = record_waves<ring, PublishLag>(num_steps);
         const auto context = "slots " + std::to_string(ring::kNumSlots) + ", producers " +
                              std::to_string(ring::kNumProducerWaves) + ", consumers " +
-                             std::to_string(ring::kNumConsumerWaves) + ", lag " +
-                             std::to_string(Lag) + ", steps " + std::to_string(num_steps);
+                             std::to_string(ring::kNumConsumerWaves) + ", publish lag " +
+                             std::to_string(PublishLag) + ", steps " + std::to_string(num_steps);
 
         EXPECT_EQ(replay<ring>(waves, num_steps, first_runnable), "") << context;
         EXPECT_EQ(replay<ring>(waves, num_steps, last_runnable), "") << context;
@@ -503,6 +504,8 @@ TEST(NamedBarrierRingProtocol, SoundForEveryStepCountAndInterleaving)
     expect_protocol_sound<ring_spec<3, 2, 2>, 0>();
     expect_protocol_sound<ring_spec<3, 2, 2>, 1>();
     expect_protocol_sound<ring_spec<3, 2, 2>, 2>();
+    // The producer/consumer GEMM test's ring: default policy, A/B loaders, 2x2 consumer warps.
+    expect_protocol_sound<ring_spec<3, 2, 4>, 0>();
     expect_protocol_sound<ring_spec<3, 2, 4>, 1>();
     expect_protocol_sound<ring_spec<4, 2, 1>, 3>();
     expect_protocol_sound<ring_spec<5, 2, 2>, 0>();
