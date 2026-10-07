@@ -9,7 +9,6 @@
 #include <memory>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -35,57 +34,6 @@ using hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::ContentCarryingTest
 
 constexpr int THREAD_COUNT = 8;
 constexpr int ITERATIONS_PER_THREAD = 200;
-
-/// Ceiling on every wait in this file: bounds a hang to a named assertion instead of a
-/// killed binary with no diagnosis. Named MAX_WAIT because winerror.h makes
-/// WAIT_TIMEOUT a macro.
-constexpr auto MAX_WAIT = std::chrono::seconds(30);
-
-class Gate
-{
-public:
-    bool wait()
-    {
-        std::unique_lock<std::mutex> lock(_mutex);
-        return _cv.wait_for(lock, MAX_WAIT, [this] { return _open; });
-    }
-
-    void open()
-    {
-        {
-            const std::lock_guard<std::mutex> lock(_mutex);
-            _open = true;
-        }
-        _cv.notify_all();
-    }
-
-private:
-    std::mutex _mutex;
-    std::condition_variable _cv;
-    bool _open = false;
-};
-
-template <typename Body>
-void runConcurrently(int threadCount, Body body)
-{
-    Gate start;
-    std::vector<std::thread> threads;
-    threads.reserve(static_cast<size_t>(threadCount));
-
-    for(int i = 0; i < threadCount; ++i)
-    {
-        threads.emplace_back([&start, &body, i]() {
-            EXPECT_TRUE(start.wait()) << "thread " << i << " timed out waiting to start";
-            body(i);
-        });
-    }
-
-    start.open();
-    for(auto& thread : threads)
-    {
-        thread.join();
-    }
-}
 
 TEST(TestIngestorCacheConcurrency, SurvivesConcurrentReadsAndWrites)
 {

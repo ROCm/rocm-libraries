@@ -11,6 +11,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -24,6 +25,7 @@
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
+#include <hipdnn_plugin_sdk/ingestor/StagedApplicability.hpp>
 #include <hipdnn_plugin_sdk/ingestor/WinnerCache.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 
@@ -92,10 +94,123 @@ public:
         }
         catch(const std::exception& error)
         {
-            HIPDNN_PLUGIN_LOG_ERROR("ingestor: engine '"
-                                    << _engine.name
-                                    << "' declined the graph: deciding applicability failed: "
-                                    << error.what());
+            logApplicabilityFailure(error);
+            return false;
+        }
+    }
+
+    /// isApplicable() split for IStagedApplicability: the same verdict, cache contents,
+    /// logging and error handling, with the catalog's per-variant loop left pending when
+    /// the caller thread cannot settle it cheaply. The device and catalog key come from
+    /// @p scope when an earlier engine already resolved them through the same resolver,
+    /// and are recorded there when this engine is the first.
+    StagedApplicability beginApplicability(const THandle& handle,
+                                           const IGraph& opGraph,
+                                           ApplicabilityScope& scope) const
+    {
+        try
+        {
+            if(!understandsGraph(opGraph))
+            {
+                return decided(false);
+            }
+
+            auto& shared = scope.device();
+            const void* resolver = &_deviceResolver;
+            DeviceId deviceId = NO_DEVICE;
+            const DeviceProperties* deviceProperties = nullptr;
+            if(shared.has_value() && shared->resolver == resolver)
+            {
+                deviceId = shared->deviceId;
+                deviceProperties = shared->deviceProperties;
+            }
+            else
+            {
+                const auto resolved = contextFor(handle, opGraph);
+                deviceId = resolved.deviceId;
+                deviceProperties = &resolved.deviceProperties;
+                if(!shared.has_value())
+                {
+                    shared = ApplicabilityScope::Device{
+                        resolver, deviceId, deviceProperties, std::nullopt, false};
+                }
+            }
+            const MatchContext context{opGraph, deviceId, *deviceProperties};
+
+            // The key carries no resolver identity, only the device id.
+            std::optional<CatalogKey> ownedKey;
+            const CatalogKey* key = nullptr;
+            if(shared->deviceId == deviceId)
+            {
+                if(!shared->keyBuilt)
+                {
+                    shared->key = KernelIngestorStateManager<THandle>::cacheKey(context);
+                    shared->keyBuilt = true;
+                }
+                key = shared->key.has_value() ? &*shared->key : nullptr;
+            }
+            else
+            {
+                ownedKey = KernelIngestorStateManager<THandle>::cacheKey(context);
+                key = ownedKey.has_value() ? &*ownedKey : nullptr;
+            }
+
+            if(key == nullptr)
+            {
+                return decided(_stateManager.applicableUncached(context));
+            }
+            if(const auto hit = _stateManager.cachedVerdict(context, *key); hit.has_value())
+            {
+                return decided(*hit);
+            }
+
+            auto stage = _stateManager.beginCatalog(context, *key);
+            if(!stage.has_value())
+            {
+                return decided(false);
+            }
+
+            auto pending = std::make_unique<PendingCatalog>();
+            pending->predictedVariants = stage->predictedVariants;
+            pending->owner = &_stateManager;
+            pending->graph = &opGraph;
+            pending->deviceId = deviceId;
+            pending->deviceProperties = deviceProperties;
+            pending->ownedKey = std::move(ownedKey);
+            pending->key = pending->ownedKey.has_value() ? &*pending->ownedKey : key;
+            pending->stage = std::move(*stage);
+            return {false, false, PendingApplicability(std::move(pending))};
+        }
+        catch(const std::exception& error)
+        {
+            logApplicabilityFailure(error);
+            return decided(false);
+        }
+    }
+
+    /// The per-variant loop @p pending carries; any thread, no HIP calls. A pending this
+    /// builder's state manager did not produce is declined with an error.
+    bool finishApplicability(PendingApplicability&& pending) const
+    {
+        const auto state = pending.release();
+        try
+        {
+            // `owner` is set only by this builder's begin, which always derives
+            // PendingCatalog, so a match makes the downcast safe without RTTI.
+            auto* catalog = state != nullptr && state->owner == &_stateManager
+                                ? static_cast<PendingCatalog*>(state.get())
+                                : nullptr;
+            if(catalog == nullptr)
+            {
+                throw std::invalid_argument("the pending applicability check belongs to "
+                                            "another engine");
+            }
+            return _stateManager.finishCatalog(
+                catalog->context(), *catalog->key, std::move(catalog->stage));
+        }
+        catch(const std::exception& error)
+        {
+            logApplicabilityFailure(error);
             return false;
         }
     }
@@ -431,6 +546,38 @@ public:
     }
 
 private:
+    /// What finishApplicability needs: the context begin resolved and the catalog's
+    /// graph-level stage. The graph, device properties and a scope-owned key are borrowed
+    /// from the caller, which keeps them alive until every finish has returned.
+    struct PendingCatalog : PendingApplicability::State
+    {
+        const IGraph* graph = nullptr;
+        DeviceId deviceId = NO_DEVICE;
+        const DeviceProperties* deviceProperties = nullptr;
+        /// Set when this engine's device differs from the scope's, so the key is its own.
+        std::optional<CatalogKey> ownedKey;
+        const CatalogKey* key = nullptr;
+        CatalogGraphStage stage;
+
+        MatchContext context() const
+        {
+            return MatchContext{*graph, deviceId, *deviceProperties};
+        }
+    };
+
+    static StagedApplicability decided(bool verdict)
+    {
+        return {true, verdict, PendingApplicability{}};
+    }
+
+    void logApplicabilityFailure(const std::exception& error) const
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("ingestor: engine '"
+                                << _engine.name
+                                << "' declined the graph: deciding applicability failed: "
+                                << error.what());
+    }
+
     /// The seam for a deterministic test timer is the constructor's `timer` parameter,
     /// not this factory: tests exercise this exact code path rather than overriding it.
     std::unique_ptr<IPlan<THandle>>

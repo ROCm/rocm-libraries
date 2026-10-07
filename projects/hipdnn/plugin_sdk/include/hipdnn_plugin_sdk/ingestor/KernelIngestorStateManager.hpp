@@ -63,6 +63,22 @@ struct ResolvedDispatch
     const IKernelDispatchHandler<THandle>* handler = nullptr;
 };
 
+/// The graph-level half of a catalog build, run up to and including graph_match: what
+/// the per-variant half needs to finish it. Packs before `firstPack` were declined at
+/// the arch gate and logged as such.
+struct CatalogGraphStage
+{
+    /// The first pack whose arch supports the device; the pack count when none does.
+    size_t firstPack = 0;
+    /// graph_match's tokens; nullopt when it declined or never ran (no pack supports the
+    /// device).
+    std::optional<BoundTokens> bound;
+    /// Kernels the per-variant half will examine: every kernel, in a pack from
+    /// `firstPack` on, whose own arch and whose pack's arch both support the device.
+    /// Graph-scoped criteria may still decline some of those packs.
+    size_t predictedVariants = 0;
+};
+
 /// The engine's view of its own kernels: which apply to a graph, in what order, and
 /// how to launch one. Answers isApplicable (unsortedDefinitions non-empty), getDetails
 /// (sortedDefinitions), getMaxWorkspaceSize (dispatchHandlerFor per survivor, max), and
@@ -199,6 +215,92 @@ public:
     Catalog unsortedCatalog(const MatchContext& context) const
     {
         return catalogFor(context);
+    }
+
+    /// nullopt when the graph supplies no usable content key (no or unverifiable
+    /// `bytes()`); such a graph is rematched on every call. Device comes from the
+    /// context, not a separate argument, so one device's catalog never caches under
+    /// another's key. Carries no engine identity: every manager builds the same key from
+    /// the same context.
+    static std::optional<CatalogKey> cacheKey(const MatchContext& context)
+    {
+        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey graph{context.graph};
+        if(!graph.isUsable())
+        {
+            return std::nullopt;
+        }
+
+        const auto& flatGraph = context.graph.getGraph();
+        std::vector<int64_t> tensorUids;
+        if(const auto* tensors = flatGraph.tensors(); tensors != nullptr)
+        {
+            tensorUids.reserve(tensors->size());
+            for(const auto* tensor : *tensors)
+            {
+                tensorUids.push_back(tensor->uid());
+            }
+        }
+        return CatalogKey{std::move(graph),
+                          CatalogGraphFields::of(flatGraph),
+                          std::move(tensorUids),
+                          context.deviceId};
+    }
+
+    // The staged entry points below answer what `!unsortedDefinitions(context).empty()`
+    // answers, in pieces a caller can spread across threads. Each expects a context that
+    // already passed catalogFor's device guard, and @p key built by cacheKey() from it.
+
+    /// The cached verdict for @p key, read in place without copying the catalog;
+    /// nullopt on a miss.
+    std::optional<bool> cachedVerdict(const MatchContext& context, const CatalogKey& key) const
+    {
+        auto verdict = _catalogCache.visit(
+            key, [](const Catalog& catalog) { return !catalog.entries.empty(); });
+        if(verdict.has_value())
+        {
+            HIPDNN_PLUGIN_LOG_TRACE("ingestor: catalog cache hit for device " << context.deviceId);
+        }
+        return verdict;
+    }
+
+    /// The graph-level half of a miss. nullopt when it alone settles the catalog as
+    /// empty -- no pack supports the device, or graph_match declined -- which is then
+    /// cached exactly as catalogFor would cache it; otherwise what finishCatalog needs.
+    std::optional<CatalogGraphStage> beginCatalog(const MatchContext& context,
+                                                  const CatalogKey& key) const
+    {
+        CatalogGraphStage stage = matchGraph(context);
+        if(stage.firstPack == _packs.size())
+        {
+            finishCatalog(context, key, std::move(stage));
+            return std::nullopt;
+        }
+        if(!stage.bound.has_value())
+        {
+            _catalogCache.putIfAbsent(key, Catalog{});
+            return std::nullopt;
+        }
+        return stage;
+    }
+
+    /// The per-variant half of a miss: completes @p stage's catalog, caches it as
+    /// catalogFor would, and returns whether any kernel applies. Makes no HIP calls.
+    bool finishCatalog(const MatchContext& context,
+                       const CatalogKey& key,
+                       CatalogGraphStage stage) const
+    {
+        Catalog catalog = matchVariants(context, std::move(stage));
+        const bool applicable = !catalog.entries.empty();
+        // putIfAbsent, as in catalogFor: a racing writer may already hold a sorted one.
+        _catalogCache.putIfAbsent(key, std::move(catalog));
+        return applicable;
+    }
+
+    /// Whether any kernel applies to a graph that yields no usable key; matched in full
+    /// and never cached, as catalogFor does for such a graph.
+    bool applicableUncached(const MatchContext& context) const
+    {
+        return !catalogFor(context, std::nullopt).entries.empty();
     }
 
     /// Every kernel that applies to the graph and device @p context names, best first.
@@ -412,6 +514,7 @@ private:
         std::map<MetadataValues, std::vector<std::vector<std::string>>> archesClaimingTuple;
 
         _definitions.reserve(_packs.size());
+        _kernelsByArch.reserve(_packs.size());
         for(const auto& pack : _packs)
         {
             for(const auto& matcherId : pack.matcherIds)
@@ -487,6 +590,24 @@ private:
             // position, so skipping one entry would bind every later pack's definitions to
             // the wrong pack and run the last index out of range.
             _definitions.push_back(std::move(packDefinitions));
+
+            std::vector<ArchKernelCount> counts;
+            for(const auto& definition : _definitions.back())
+            {
+                const auto group
+                    = std::find_if(counts.begin(), counts.end(), [&definition](const auto& count) {
+                          return count.arch == definition.arch;
+                      });
+                if(group == counts.end())
+                {
+                    counts.push_back({definition.arch, 1});
+                }
+                else
+                {
+                    ++group->kernels;
+                }
+            }
+            _kernelsByArch.push_back(std::move(counts));
         }
     }
 
@@ -533,34 +654,6 @@ private:
         }
 
         return complete;
-    }
-
-    /// nullopt when the graph supplies no usable content key (no or unverifiable
-    /// `bytes()`); such a graph is rematched on every call. Device comes from the
-    /// context, not a separate argument, so one device's catalog never caches under
-    /// another's key.
-    std::optional<CatalogKey> cacheKey(const MatchContext& context) const
-    {
-        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey graph{context.graph};
-        if(!graph.isUsable())
-        {
-            return std::nullopt;
-        }
-
-        const auto& flatGraph = context.graph.getGraph();
-        std::vector<int64_t> tensorUids;
-        if(const auto* tensors = flatGraph.tensors(); tensors != nullptr)
-        {
-            tensorUids.reserve(tensors->size());
-            for(const auto* tensor : *tensors)
-            {
-                tensorUids.push_back(tensor->uid());
-            }
-        }
-        return CatalogKey{std::move(graph),
-                          CatalogGraphFields::of(flatGraph),
-                          std::move(tensorUids),
-                          context.deviceId};
     }
 
     Catalog catalogFor(const MatchContext& context) const
@@ -622,43 +715,81 @@ private:
     using GraphMatcherMemo
         = std::unordered_map<DescriptorId, GraphMatcherVerdict, DescriptorIdHash>;
 
-    /// Runs @p context's graph_match once (lazily, on the first pack that clears the
-    /// arch gate; absent means the engine binds nothing and always proceeds with an
-    /// empty map) and every pack's UMDs: graph-scoped criteria (memoized across
-    /// packs), then kernel-scoped ones.
+    /// Runs @p context's graph_match once (absent means the engine binds nothing and
+    /// always proceeds with an empty map) and every pack's UMDs: graph-scoped criteria
+    /// (memoized across packs), then kernel-scoped ones. The two stages it composes are
+    /// one pass over the packs, split where graph_match has run.
     Catalog buildCatalog(const MatchContext& context) const
     {
-        Catalog catalog;
-        GraphMatcherMemo graphVerdicts;
-        std::optional<std::optional<BoundTokens>> graphMatch;
+        CatalogGraphStage stage = matchGraph(context);
+        if(stage.firstPack < _packs.size() && !stage.bound.has_value())
+        {
+            return Catalog{};
+        }
+        return matchVariants(context, std::move(stage));
+    }
 
-        for(size_t packIndex = 0; packIndex < _packs.size(); ++packIndex)
+    /// The pack-level arch gate up to the first pack that clears it, then graph_match,
+    /// run lazily there so an engine no pack of which supports the device never runs it.
+    CatalogGraphStage matchGraph(const MatchContext& context) const
+    {
+        CatalogGraphStage stage;
+        while(stage.firstPack < _packs.size() && !packSupportsDevice(stage.firstPack, context))
+        {
+            ++stage.firstPack;
+        }
+        if(stage.firstPack == _packs.size())
+        {
+            return stage;
+        }
+
+        stage.bound = _graphMatchFn == nullptr ? std::optional<BoundTokens>(BoundTokens{})
+                                               : _graphMatchFn(context);
+        if(!stage.bound.has_value())
+        {
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: engine declined graph_match for device "
+                                   << context.deviceId);
+            return stage;
+        }
+
+        const auto& deviceArch = context.deviceProperties.gcnArchName;
+        for(size_t packIndex = stage.firstPack; packIndex < _packs.size(); ++packIndex)
+        {
+            if(packIndex != stage.firstPack && !archSupports(_packs[packIndex].arch, deviceArch))
+            {
+                continue;
+            }
+            for(const auto& group : _kernelsByArch[packIndex])
+            {
+                if(archSupports(group.arch, deviceArch))
+                {
+                    stage.predictedVariants += group.kernels;
+                }
+            }
+        }
+        return stage;
+    }
+
+    /// The rest of the pass matchGraph began: from @p stage's first pack on, every pack's
+    /// graph-scoped criteria and its kernels' arch and kernel-scoped matchers. With no
+    /// pack supporting the device this only reports the empty catalog.
+    Catalog matchVariants(const MatchContext& context, CatalogGraphStage stage) const
+    {
+        Catalog catalog;
+        if(stage.bound.has_value())
+        {
+            catalog.bound = std::move(*stage.bound);
+        }
+        GraphMatcherMemo graphVerdicts;
+
+        for(size_t packIndex = stage.firstPack; packIndex < _packs.size(); ++packIndex)
         {
             const auto& pack = _packs[packIndex];
 
-            if(!archSupports(pack.arch, context.deviceProperties.gcnArchName))
+            // matchGraph already cleared the first pack.
+            if(packIndex != stage.firstPack && !packSupportsDevice(packIndex, context))
             {
-                HIPDNN_PLUGIN_LOG_INFO("ingestor: pack "
-                                       << toString(pack.id) << " does not support device arch '"
-                                       << context.deviceProperties.gcnArchName << "'");
                 continue;
-            }
-
-            if(!graphMatch.has_value())
-            {
-                graphMatch = _graphMatchFn == nullptr ? std::optional<BoundTokens>(BoundTokens{})
-                                                      : _graphMatchFn(context);
-                if(graphMatch->has_value())
-                {
-                    catalog.bound = std::move(**graphMatch);
-                }
-            }
-
-            if(!graphMatch->has_value())
-            {
-                HIPDNN_PLUGIN_LOG_INFO("ingestor: engine declined graph_match for device "
-                                       << context.deviceId);
-                return catalog;
             }
 
             if(!graphLevelMatchersPass(pack, context, graphVerdicts, catalog.bound))
@@ -713,6 +844,20 @@ private:
                                << context.deviceId << " holds " << catalog.entries.size()
                                << " kernel(s) from " << _packs.size() << " pack(s)");
         return catalog;
+    }
+
+    /// The pack-level arch gate, logging a decline.
+    bool packSupportsDevice(size_t packIndex, const MatchContext& context) const
+    {
+        const auto& pack = _packs[packIndex];
+        if(archSupports(pack.arch, context.deviceProperties.gcnArchName))
+        {
+            return true;
+        }
+        HIPDNN_PLUGIN_LOG_INFO("ingestor: pack " << toString(pack.id)
+                                                 << " does not support device arch '"
+                                                 << context.deviceProperties.gcnArchName << "'");
+        return false;
     }
 
     bool graphLevelMatchersPass(const KernelDescriptorPack& pack,
@@ -1048,6 +1193,15 @@ private:
     /// definitions, completed once at construction and never mutated after, so the
     /// pointers every Catalog holds into it stay valid for this manager's lifetime.
     std::vector<std::vector<KernelDefinition>> _definitions;
+    /// How many kernels a pack holds under one resolved arch list.
+    struct ArchKernelCount
+    {
+        std::vector<std::string> arch;
+        size_t kernels = 0;
+    };
+    /// Parallel to _packs: each pack's kernels counted by distinct arch list, so
+    /// predicting a catalog build's work tests each list once rather than each kernel.
+    std::vector<std::vector<ArchKernelCount>> _kernelsByArch;
     std::shared_ptr<IKernelHeuristic> _heuristic;
     GraphMatchFn _graphMatchFn = nullptr;
     mutable LruCache<CatalogKey, Catalog, CatalogKeyHash> _catalogCache;

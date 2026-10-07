@@ -54,25 +54,6 @@ using namespace hipdnn_plugin_sdk::ingestor::testing;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::ContentCarryingTestGraph;
 
-class CountingBytesGraph final
-    : public hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::ContentCarryingTestGraph
-{
-public:
-    explicit CountingBytesGraph(std::shared_ptr<std::atomic_uint> bytesCalls)
-        : _bytesCalls(std::move(bytesCalls))
-    {
-    }
-
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::SerializedBlobView bytes() const override
-    {
-        ++*_bytesCalls;
-        return ContentCarryingTestGraph::bytes();
-    }
-
-private:
-    std::shared_ptr<std::atomic_uint> _bytesCalls;
-};
-
 using ::testing::_;
 using ::testing::Ref;
 using ::testing::Return;
