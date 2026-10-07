@@ -6,7 +6,7 @@
 Characterisation test — branch_id 82034243636ff093cba429f81384b737464cc0c9
 
 Predicate : kernel["SuppressNoLoadLoop"]
-Site      : Tensile/KernelWriterAssembly.py:7094  (calculateLoopNumIter, if)
+Site      : tensilelite/KernelWriterAssembly.py:7094  (calculateLoopNumIter, if)
 Solver    : z3 4.16.0  — SAT  (solver-backed-under-assumptions)
 
 What the predicate reads

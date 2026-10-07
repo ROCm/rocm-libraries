@@ -7,7 +7,7 @@
 Drives the designed flat-addressing config
 (``data/test_data/_designed/gfx942/s07_non_bufferload_flat_global_read.yaml``)
 through the config-driven emit harness. Targets the flat (non-BufferLoad)
-global-read address VGPR arms in ``Tensile/KernelWriter.py``:
+global-read address VGPR arms in ``tensilelite/KernelWriter.py``:
 
   - the else-of-BufferLoad ``numVgprGlobalReadAddressesB`` assignment,
   - the ``globalReadIncsUseVgpr`` (flat) ``numVgprGlobalReadIncsB`` assignment,

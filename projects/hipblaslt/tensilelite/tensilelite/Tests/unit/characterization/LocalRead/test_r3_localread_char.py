@@ -5,7 +5,7 @@
 """P4 characterization: LocalReadMFMA helper methods + CheckValue1 path.
 
 Directly exercises the pure-Python helper methods on LocalReadMFMA that live
-on the missing-coverage ranges in Tensile/Components/LocalRead.py:
+on the missing-coverage ranges in tensilelite/Components/LocalRead.py:
 
   117-151  LocalReadVALU CheckValue1 debug path (lines 117-118 reachable;
            119-151 are dead code due to RegisterContainer.split() bug)

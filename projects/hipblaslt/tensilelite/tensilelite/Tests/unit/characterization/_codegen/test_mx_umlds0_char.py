@@ -7,7 +7,7 @@
 Target code:
   - KernelWriterAssembly.py MXBlockA/B VGPR macro cold branch
     (`if not kernel["UnrollMajorLDS*"]:`), lines ~1145 (A) / ~1185 (B).
-  - Tensile/SolutionStructs/Solution.py validation of the local-read width.
+  - tensilelite/SolutionStructs/Solution.py validation of the local-read width.
 
 Background:
   Before this validation, a gfx1250 MX-F4 NN-layout config derived to a valid

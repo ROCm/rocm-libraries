@@ -7,7 +7,7 @@
 Drives the designed flat-addressing config
 (``data/test_data/_designed/gfx942/kwa_macroandset_flat.yaml``) through the
 config-driven emit harness. Targets the ``macroAndSet`` RegSet emission in
-``Tensile/KernelWriterAssembly.py``:
+``tensilelite/KernelWriterAssembly.py``:
 
   - the non-BufferLoad else-arm that assigns ``vgprGlobalReadAddrA/B``, and
   - the ``globalReadIncsUseVgpr`` RegSets assigning ``vgprGlobalReadIncsA/B``,

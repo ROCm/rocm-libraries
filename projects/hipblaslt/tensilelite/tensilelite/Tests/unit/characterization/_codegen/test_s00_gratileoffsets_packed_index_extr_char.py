@@ -7,7 +7,7 @@
 Drives the designed swizzled-A + LocalSplitU config
 (``data/test_data/_designed/gfx942/s00_gratileoffsets_packed_index_extr.yaml``)
 through the config-driven emit harness. Targets the ``graTileOffsets``
-``isSwizzled=True`` branch in ``Tensile/KernelWriterAssembly.py``, specifically
+``isSwizzled=True`` branch in ``tensilelite/KernelWriterAssembly.py``, specifically
 the LocalSplitU (LSU) sub-block:
 
   - 3649 ``tmpVgprRes = None``

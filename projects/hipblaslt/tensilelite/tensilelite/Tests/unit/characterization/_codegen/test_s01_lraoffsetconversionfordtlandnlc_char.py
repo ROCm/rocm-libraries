@@ -7,7 +7,7 @@
 Drives the designed DirectToLds + NumLoadsCoalesced>1 config
 (``data/test_data/_designed/gfx950/s01_lraoffsetconversionfordtlandnlc.yaml``)
 through the config-driven emit harness. Targets
-``lraOffsetConversionForDTLandNLC`` in ``Tensile/KernelWriterAssembly.py`` -
+``lraOffsetConversionForDTLandNLC`` in ``tensilelite/KernelWriterAssembly.py`` -
 the 6060-6078 bit-rotation compute block (lines 6061,6071 and the surrounding
 DTL/NLC offset conversion), reached when a bf16 TN kernel with DirectToLdsA,
 GlobalReadVectorWidthA*bpeDS>4 (b128 DTL, gfx950-only), WaveSeparateGlobalReadA

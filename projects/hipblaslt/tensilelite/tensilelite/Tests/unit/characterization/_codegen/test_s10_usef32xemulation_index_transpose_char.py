@@ -7,7 +7,7 @@
 Drives the designed gfx1250 UseF32XEmulation config
 (``data/test_data/_designed/gfx1250/s10_usef32xemulation_index_transpose.yaml``)
 through the config-driven emit harness. Targets the F32X pack / index-transpose
-paths in ``Tensile/Components/LocalRead.py``.
+paths in ``tensilelite/Components/LocalRead.py``.
 
 ``UseF32XEmulation`` (DataType=S + F32XdlMathOp=X + HPA on gfx1250 WMMA_V3)
 forces ``needPack`` and the F32X pack loop; ``VectorWidthA/B=2`` gives

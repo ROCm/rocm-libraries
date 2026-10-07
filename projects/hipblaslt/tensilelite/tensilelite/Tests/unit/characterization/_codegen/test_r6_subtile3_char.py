@@ -5,7 +5,7 @@
 """R6 — SubtileGREmit remaining arms: loadRatioGR branches + dead-code paths.
 
 CPU-only characterization. Targets uncovered regions of
-Tensile/Components/Subtile/SubtileGREmit.py:
+tensilelite/Components/Subtile/SubtileGREmit.py:
 
   528-639   Non-legacy helper functions (_grComputeOffset, _grComputeSubtileOffsets,
             _grComputeRowPartition, _grComputeAllOffsets + graInitPointer).

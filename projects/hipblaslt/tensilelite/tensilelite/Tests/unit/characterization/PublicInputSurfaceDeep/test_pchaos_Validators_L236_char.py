@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-# Characterization of Tensile/Toolchain/Validators.py:236 [if]
+# Characterization of tensilelite/Toolchain/Validators.py:236 [if]
 #   branch_id: 9a47d378ae60f3b7013ec37c14e996c9825948cf
 #   function: _validateExecutable
 #   predicate: Path(file).is_absolute()

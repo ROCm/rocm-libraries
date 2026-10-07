@@ -7,7 +7,7 @@
 Drives the designed non-buffer flat-addressing config
 (``data/test_data/_designed/gfx950/s02b_globalreadguardk_body_tail_loop.yaml``)
 through the config-driven emit harness. Targets the ``globalReadGuardK`` Body
-guarded-read emission in ``Tensile/KernelWriterAssembly.py``:
+guarded-read emission in ``tensilelite/KernelWriterAssembly.py``:
 
   - 11029 : the non-BufferLoad else-arm VCmpXLtU64 addr<maxAddr masking, and
   - 11227 : the BufferLoad=0 checkIn of the maxAddr/bpe/zero VGPRs.

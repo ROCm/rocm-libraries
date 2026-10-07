@@ -6,7 +6,7 @@
 
 Reachable-invalid (category A): the half TN config sets SwizzleTensorA and
 SwizzleTensorB and forks the DirectToVgprA/B permutations. Derivation runs
-Tensile/SolutionStructs/Solution.py:assignDerivedParameters, reaching the
+tensilelite/SolutionStructs/Solution.py:assignDerivedParameters, reaching the
 SwizzleTensor derivation + reject block, where each fork trips a distinct reject
 branch and early-returns. No valid solution survives.
 

@@ -7,7 +7,7 @@
 Drives the designed non-MI LocalSplitU/NumWaveSplitK config
 (``data/test_data/_designed/gfx942/s09_assignderivedparameters_localspl.yaml``)
 through the config-driven emit harness. The coverage target is
-``Tensile/SolutionStructs/Solution.py`` (probe-confirmed lines 4259, 4260, 4320,
+``tensilelite/SolutionStructs/Solution.py`` (probe-confirmed lines 4259, 4260, 4320,
 5286, 5287) which fire during ``assignDerivedParameters``.
 
 On the non-MI (dot2/source) derivation path,

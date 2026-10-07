@@ -9,7 +9,7 @@ Directly exercises validity-reject branches in
 (plus helper predicates) that the SolutionArms / SolutionDerivation suites do
 not yet reach.
 
-Target miss ranges in Tensile/SolutionStructs/Solution.py:
+Target miss ranges in tensilelite/SolutionStructs/Solution.py:
   702       : MXBlock + not-TLU ASEM fixup arm
   739-752   : NonDTLTailLoop{A,B,MXSA,MXSB} + Sparse-Metadata inner branches
   767-770   : DirectToVgprMXSA/B guard (MXBlock + DTV MX sets tailLoopOptMXS*)

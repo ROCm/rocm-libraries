@@ -6,7 +6,7 @@
 Characterisation test — branch_id 8e5e952554311fd1ed0f31ac8dc00295e8616cbe
 
 Predicate : self.states.numSgprPreload > 0
-Site      : Tensile/KernelWriterAssembly.py:2266
+Site      : tensilelite/KernelWriterAssembly.py:2266
 Function  : defineAndResources
 Solver    : z3 4.16.0 — SAT (fully-static; no GPU/filesystem/isinstance probe)
 

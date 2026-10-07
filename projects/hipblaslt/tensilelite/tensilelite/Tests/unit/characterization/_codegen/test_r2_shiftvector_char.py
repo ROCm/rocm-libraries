@@ -8,7 +8,7 @@ Drives the ShiftVectorComponents VALU edge-shift sweep config
 (``data/_designed/gfx942/shiftvector.yaml``) through the config-driven emit
 harness and asserts all emitted kernels have err==0.
 
-Target file: Tensile/Components/ShiftVectorComponents.py
+Target file: tensilelite/Components/ShiftVectorComponents.py
 Missing ranges targeted: 47-200 (ShiftVectorComponentsVALU.__call__).
 The VALU path is entered when EnableMatrixInstruction=False, which the harness
 detects from WorkGroup+ThreadTile parameters (no MatrixInstruction block).

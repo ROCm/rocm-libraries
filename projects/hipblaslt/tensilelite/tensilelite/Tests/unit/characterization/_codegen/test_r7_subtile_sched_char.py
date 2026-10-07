@@ -4,7 +4,7 @@
 ################################################################################
 """R7 — LogicalScheduler (Subtile) remaining arms characterization (CPU-only).
 
-Targets uncovered clusters in Tensile/Components/Subtile/LogicalScheduler.py
+Targets uncovered clusters in tensilelite/Components/Subtile/LogicalScheduler.py
 (miss=151, 88%):
 
   174           _normalize_partition_sizes: s > total -> return [total]

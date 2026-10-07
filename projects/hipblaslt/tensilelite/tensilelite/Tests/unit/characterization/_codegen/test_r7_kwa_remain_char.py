@@ -4,7 +4,7 @@
 ################################################################################
 """R7 — KWA remaining mid-cluster characterization.
 
-Exercises three uncovered clusters in Tensile/KernelWriterAssembly.py via
+Exercises three uncovered clusters in tensilelite/KernelWriterAssembly.py via
 direct component invocation (CPU-only, no GPU, no compile).
 
 Target missing ranges:

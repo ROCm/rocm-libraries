@@ -7,7 +7,7 @@
 Drives the designed AdaptiveGemmGSUA=1 config
 (``data/test_data/_designed/gfx942/s04a_globalwriteelements_mbsk_singleb.yaml``)
 through the config-driven emit harness. Targets the AdaptiveGemmGSUA==1
-else-branch label-wiring arms in ``Tensile/KernelWriterAssembly.py``
+else-branch label-wiring arms in ``tensilelite/KernelWriterAssembly.py``
 (``globalWriteElements``):
 
   - the per-algorithm mode selection (MultipleBuffer / MultipleBufferSingleKernel

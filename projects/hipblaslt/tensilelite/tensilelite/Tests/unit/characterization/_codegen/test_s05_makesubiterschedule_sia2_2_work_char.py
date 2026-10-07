@@ -7,7 +7,7 @@
 Drives the designed SIA2 (2-workgroup interleave) config
 (``data/test_data/_designed/gfx942/s05_makesubiterschedule_sia2_2_work.yaml``)
 through the config-driven emit harness. Targets the ``scheduleIterAlg==2``
-block in ``Tensile/KernelWriter.py`` -- specifically the packItems-non-empty
+block in ``tensilelite/KernelWriter.py`` -- specifically the packItems-non-empty
 sub-path (pack module split / coalesced-read distribution and pack scheduling
 inside the mfma loop).
 

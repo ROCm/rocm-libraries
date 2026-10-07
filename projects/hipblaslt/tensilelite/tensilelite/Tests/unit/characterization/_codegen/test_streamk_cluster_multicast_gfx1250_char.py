@@ -4,7 +4,7 @@
 """StreamK cluster multicast -- gfx1250 characterization (CPU-only).
 
 Exercises the DataParallel cluster cooperative-load path in
-``Tensile/Components/WorkAssignment.py`` + ``Tensile/Components/ClusterLoad.py``.
+``tensilelite/Components/WorkAssignment.py`` + ``tensilelite/Components/ClusterLoad.py``.
 It uses StaticGrid assignment and a ``ClusterDim`` other than ``[1, 1]``.
 
 Each arm is a (PrefetchGlobalRead, ClusterDim) pair and is pinned separately.

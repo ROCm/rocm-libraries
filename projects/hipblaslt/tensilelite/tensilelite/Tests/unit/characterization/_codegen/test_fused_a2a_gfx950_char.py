@@ -7,7 +7,7 @@ instructions and that the result assembles for gfx950. The store path replaces
 the ordinary global-write batch, so a solution that silently fell back to it
 still satisfies every assertion except the SDMA markers.
 
-Covers Tensile/Components/SdmaRingEmitter.py, SdmaPacketEmitter.py, and the
+Covers tensilelite/Components/SdmaRingEmitter.py, SdmaPacketEmitter.py, and the
 FusedGemmA2A=1 store path in GlobalWriteBatch.py.
 """
 

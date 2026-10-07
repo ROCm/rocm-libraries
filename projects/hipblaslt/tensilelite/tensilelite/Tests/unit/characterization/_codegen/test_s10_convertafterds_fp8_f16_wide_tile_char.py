@@ -7,7 +7,7 @@
 Drives the designed ConvertAfterDS config
 (``data/test_data/_designed/gfx950/s10_convertafterds_fp8_f16_wide_tile.yaml``)
 through the config-driven emit harness. Targets the wide-tile local-read
-conversion arms in ``Tensile/Components/LocalRead.py``:
+conversion arms in ``tensilelite/Components/LocalRead.py``:
 
   - the ``lrvwTile==4`` arm (lines 1332/1338/1357) via the ``VectorWidthA=4``
     fork, and

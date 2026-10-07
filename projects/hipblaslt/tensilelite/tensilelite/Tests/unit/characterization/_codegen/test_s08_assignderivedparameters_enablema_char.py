@@ -7,7 +7,7 @@
 Reachable-invalid (category A): the DGEMM (double) TN config forks two valid
 f64 MFMA MatrixInstruction shapes that pass the earlier validateMIParameters
 gate and reach the type/MI reject cluster inside
-Tensile/SolutionStructs/Solution.py:assignDerivedParameters, where each fork
+tensilelite/SolutionStructs/Solution.py:assignDerivedParameters, where each fork
 trips a distinct reject branch and early-returns. No valid solution survives.
 
 Solution.py lines that fire during the rejected derivation (probe-confirmed):

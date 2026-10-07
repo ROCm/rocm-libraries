@@ -7,7 +7,7 @@
 Drives the designed FP8-A / half-MacType config
 (``data/test_data/_designed/gfx950/s03_localwritedo_f8_bf8_stochastic_r.yaml``)
 through the config-driven emit harness. Targets the ``localWriteDo`` FP8 ->
-F16 LDS-write conversion in ``Tensile/KernelWriterAssembly.py``, the
+F16 LDS-write conversion in ``tensilelite/KernelWriterAssembly.py``, the
 ``elif DataType.isAnyFloat8() and MacDataType.isHalf()`` path:
 
   - newBlockWidth==0.25 (GRVWA=1) VCvtScaleFP8toF16 arm,

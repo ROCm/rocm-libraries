@@ -6,7 +6,7 @@
 Drives the designed StoreRemap config
 (``data/test_data/_designed/gfx942/s09_assignderivedparameters_storerem.yaml``)
 through the config-driven emit harness. Targets the StoreRemapVectorWidth
-derivation and reject sites in ``Tensile/SolutionStructs/Solution.py``
+derivation and reject sites in ``tensilelite/SolutionStructs/Solution.py``
 ``assignDerivedParameters``:
 
   - the ``storeRemap: Per wave single global write ... one M column`` reject

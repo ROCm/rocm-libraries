@@ -5,7 +5,7 @@
 """R3 — KWA broad feature-breadth characterization (gfx942, no GPU required).
 
 Sweeps ScheduleIterAlg:[1,2] x StaggerU:[0,32] x ExpandPointerSwap:[0,1] to
-exercise previously uncovered emit arms in Tensile/KernelWriterAssembly.py:
+exercise previously uncovered emit arms in tensilelite/KernelWriterAssembly.py:
 
 Target missing ranges in KernelWriterAssembly.py (miss=3987 at HEAD):
   - 5893-5966 : declareStaggerParms — activated by StaggerU != 0

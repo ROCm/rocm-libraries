@@ -7,7 +7,7 @@
 Drives the designed FP8 ConvertAfterDS config
 (``data/test_data/_designed/gfx950/s05_makesubiterschedule_sia3_conver.yaml``)
 through the config-driven emit harness. Targets the ``_makeSubIterSchedule``
-instPerPack arms in ``Tensile/KernelWriter.py`` (lines 1297,1298): the
+instPerPack arms in ``tensilelite/KernelWriter.py`` (lines 1297,1298): the
 ConvertAfterDS FP8 ``lrvwTile`` pack path that fires under
 ScheduleIterAlg=3 with an FP8 A-read converted after the local-read (UMLDS
 Hascvt convert-after-DS).

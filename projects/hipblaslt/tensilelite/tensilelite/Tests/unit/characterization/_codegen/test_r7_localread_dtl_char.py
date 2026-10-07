@@ -4,7 +4,7 @@
 ################################################################################
 """R7 — LocalRead.py big-cluster coverage: DTL / wide-LRVW / transpose / ConvertAfterDS.
 
-Target missing ranges in Tensile/Components/LocalRead.py (miss=489, 54%):
+Target missing ranges in tensilelite/Components/LocalRead.py (miss=489, 54%):
   785-942  : enableLDSTr + HasWMMA_V3 arm. Subdivides by bpeDS:
                bpeDS==1  (FP8):     lines 835-883  — gfx1250 + LDSTrInst + FP8 A/B
                bpeDS==2  (FP16/BF16): lines 884-942 — gfx1250 + LDSTrInst + HHS
@@ -53,9 +53,9 @@ _GFX950_CAFS_CFG = os.path.join(_DESIGNED, "gfx950", "localread_cafs_fp8.yaml")
 # gfx950: xfp32 (TF32 emulation) wider VectorWidth for lrvwTile>1 / indexTranpose
 # (already exists; re-used here to exercise lines 1090-1135)
 _GFX950_XFP32_CFG = os.path.join(
-    os.path.dirname(_HERE),  # tensilelite/Tests/unit/
+    os.path.dirname(_HERE),  # tensilelite/Tests/unit/characterization/
+    os.pardir,               # tensilelite/Tests/unit/
     os.pardir,               # tensilelite/Tests/
-    os.pardir,               # Tensile/
     "common", "gemm", "gfx950", "xfp32.yaml",
 )
 _GFX950_XFP32_CFG = os.path.normpath(_GFX950_XFP32_CFG)

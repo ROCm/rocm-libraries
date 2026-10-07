@@ -7,7 +7,7 @@
 Drives the designed XF32-emulation config
 (``data/test_data/_designed/gfx950/s07_usef32xemulation_register_layout.yaml``)
 through the config-driven emit harness. Targets the TF32/F32X emulation
-register-layout cluster in ``Tensile/KernelWriter.py``:
+register-layout cluster in ``tensilelite/KernelWriter.py``:
 
   - 9006 : doPackPreSchedulingThisLoop assignment (DirectToLds==1 + numItersPLR),
   - 9028 : the ``UseDirect32XEmulationInterleaveTreg`` full-pack arm,

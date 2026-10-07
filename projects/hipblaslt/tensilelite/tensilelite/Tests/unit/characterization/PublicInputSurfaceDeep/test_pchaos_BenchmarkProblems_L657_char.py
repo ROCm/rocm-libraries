@@ -5,7 +5,7 @@
 
 """PublicInputSurfaceDeep characterization: ``elif not os.path.exists(resultsFileName) or
 globalParameters["ForceRedoBenchmarkProblems"]`` at
-``Tensile/BenchmarkProblems.py:657``.
+``tensilelite/BenchmarkProblems.py:657``.
 
 Branch 6ff09bcdcc5703903cfcdef2e13b07dfd86ec4fb.
 

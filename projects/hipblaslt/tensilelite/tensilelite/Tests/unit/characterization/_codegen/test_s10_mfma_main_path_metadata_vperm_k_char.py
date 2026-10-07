@@ -7,7 +7,7 @@
 Drives the designed sparse metadata config
 (``data/test_data/_designed/gfx942/s10_mfma_main_path_metadata_vperm_k.yaml``)
 through the config-driven emit harness. Targets the ``numSplitMetadata`` block
-in ``Tensile/Components/LocalRead.py`` (1428-1534) plus the surrounding
+in ``tensilelite/Components/LocalRead.py`` (1428-1534) plus the surrounding
 metadata VPerm K-packing arms:
 
   - reach ``elif lrvwTile > 1 and not UseF32XEmulation`` (LR:1412) with sparse

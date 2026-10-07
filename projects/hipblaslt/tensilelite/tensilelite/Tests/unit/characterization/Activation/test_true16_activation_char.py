@@ -1,6 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""True16 half-select emit characterization for Tensile/Activation.py.
+"""True16 half-select emit characterization for tensilelite/Activation.py.
 
 The existing Activation characterization tests only initialize a gfx942 (legacy
 SDWA) ISA, so the new true16 code paths added on `users/ericwan/true16-half-sel`

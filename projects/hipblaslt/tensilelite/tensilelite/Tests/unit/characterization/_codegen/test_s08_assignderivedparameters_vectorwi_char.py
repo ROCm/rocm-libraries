@@ -7,7 +7,7 @@
 Drives the designed gfx950 XF32-emulation NT config
 (``data/test_data/_designed/gfx950/s08_assignderivedparameters_vectorwi.yaml``)
 through the config-driven emit harness. The coverage target is
-``Tensile/SolutionStructs/Solution.py`` lines 2494-2498, the
+``tensilelite/SolutionStructs/Solution.py`` lines 2494-2498, the
 ``UseF32XEmulation`` + TLUA + ``numSubTiles>1`` VectorWidth adjustment
 (including the ``SourceSwap`` StoreVectorWidth clamp at 2498).
 

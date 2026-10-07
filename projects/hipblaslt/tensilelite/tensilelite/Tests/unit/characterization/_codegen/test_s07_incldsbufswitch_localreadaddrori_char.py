@@ -8,7 +8,7 @@ Drives the designed IncLdsBufSwitch config
 (``data/test_data/_designed/gfx942/s07_incldsbufswitch_localreadaddrori.yaml``)
 through the config-driven emit harness. Targets the
 ``self.states.IncLdsBufSwitch`` backup of ``startVgprLocalReadAddrOrig`` for
-the A/B arms in ``Tensile/KernelWriter.py`` (lines 8690-8697).
+the A/B arms in ``tensilelite/KernelWriter.py`` (lines 8690-8697).
 
 ``IncLdsBufSwitch`` is derived True when ``NumLdsBlk >= 3`` (KernelWriter.py),
 which follows from ``PrefetchGlobalRead >= 3`` with the DirectToLds recipe.

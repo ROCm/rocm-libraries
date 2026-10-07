@@ -4,7 +4,7 @@
 ################################################################################
 """R4 — LocalRead.py CheckValue1 debug path + MFMA lrvwTile>1 characterization.
 
-Target missing ranges in Tensile/Components/LocalRead.py:
+Target missing ranges in tensilelite/Components/LocalRead.py:
   - 117-151 : CheckValue1A/B debug instrumentation inside LocalReadVALU.__call__
                (dbgVgpr extraction, SWaitCnt, data-type dispatch for Half/BF16/
                Int8/Single). Gated on writer.db["CheckValue1A"/"CheckValue1B"].

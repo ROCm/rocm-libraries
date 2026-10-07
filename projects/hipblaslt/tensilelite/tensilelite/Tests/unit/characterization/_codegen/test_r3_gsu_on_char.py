@@ -4,7 +4,7 @@
 ################################################################################
 """P4 — gfx942 GSUOn arm characterization (add-only, CPU-only).
 
-Exercises the GSUOn class methods in Tensile/Components/GSU.py that are NOT
+Exercises the GSUOn class methods in tensilelite/Components/GSU.py that are NOT
 reached by the existing test_r2_gsu_char.py (which only emits GSU=1 / GSUOff
 kernels because the BBS+Bias+Activation ProblemType rejects GlobalSplitU>1).
 

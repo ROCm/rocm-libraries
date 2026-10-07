@@ -6,7 +6,7 @@
 Characterisation test — branch_id 6c1a009494a8fc7621b802253026a798f5e94f76
 
 Predicate : kernel["HalfPLRB"]   (bare dict lookup, truthy boolean)
-Site      : Tensile/KernelWriter.py:4152
+Site      : tensilelite/KernelWriter.py:4152
 Solver    : exhaustive enumeration — SAT (both polarities reachable)
 
 Derivation

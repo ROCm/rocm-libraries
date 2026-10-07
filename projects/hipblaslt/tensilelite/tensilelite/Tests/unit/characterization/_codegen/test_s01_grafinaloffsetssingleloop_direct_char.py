@@ -7,7 +7,7 @@ Drives the designed DirectToLds + UseInstOffsetForGRO config
 (``data/test_data/_designed/gfx942/s01_grafinaloffsetssingleloop_direct.yaml``)
 through the config-driven emit harness. Targets the scalar arm of
 ``graFinalOffsetsSingleLoop`` (``computeScalarGroImpl``) in
-``Tensile/KernelWriterAssembly.py``:
+``tensilelite/KernelWriterAssembly.py``:
 
   - 4444 : ``if DirectToLds%tc and UseInstOffsetForGRO`` guard, and
   - 4457 : ``ldsInc = (ldsInc*graIdx) % buff_load_inst_offset_max`` pad math.

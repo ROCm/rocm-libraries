@@ -9,7 +9,7 @@ Directly instantiates and invokes ``LraTileAssignmentTransposedMFMA``,
 and ``LraTileAssignmentTransposedMFMAF6`` with a minimal mock writer, bypassing
 the ``Component.find()`` asmCaps dispatch filter.
 
-Target missing ranges in Tensile/Components/LraTileAssignment.py:
+Target missing ranges in tensilelite/Components/LraTileAssignment.py:
   144-249  : LraTileAssignmentTransposedMFMA.__call__
              (BF16, enableLDSTr=True, isM=False, wave-offset branch num1DWaves>1)
   285-409  : LraTileAssignmentTransposedMFMAB8.__call__

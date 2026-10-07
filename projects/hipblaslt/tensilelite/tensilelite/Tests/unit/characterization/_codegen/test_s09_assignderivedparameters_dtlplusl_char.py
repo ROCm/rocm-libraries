@@ -4,7 +4,7 @@
 
 Reachable-invalid (category A): the bf16 TN MFMA config forks
 PrefetchGlobalRead:[2,3] with DirectToLdsA/B enabled and large DepthU. During
-Tensile/SolutionStructs/Solution.py:assignDerivedParameters the PGR>=3 fork
+tensilelite/SolutionStructs/Solution.py:assignDerivedParameters the PGR>=3 fork
 walks the DtlPlusLdsBuf LDS-budget path, then the feature combination is
 rejected, so no valid solution survives.
 

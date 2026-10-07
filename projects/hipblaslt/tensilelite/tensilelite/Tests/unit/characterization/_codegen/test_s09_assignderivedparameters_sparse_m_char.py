@@ -7,7 +7,7 @@
 Drives the designed Sparse==2 (SparseB) config
 (``data/test_data/_designed/gfx942/s09_assignderivedparameters_sparse_m.yaml``)
 through the config-driven emit harness. The coverage target is
-``Tensile/SolutionStructs/Solution.py`` ``assignDerivedParameters``: the
+``tensilelite/SolutionStructs/Solution.py`` ``assignDerivedParameters``: the
 Sparse==2 GRVW/GLT derivation, the partialM branch, the ``<glvwMlimit`` GRVW
 fallback sub-branch, and the DirectToLdsMetadata block for ``sparseTc='B'``.
 

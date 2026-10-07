@@ -7,7 +7,7 @@
 Drives the designed gfx1250 absolute-base config
 (``data/test_data/_designed/gfx1250/s07_swinstructionprefetch_abs_base_s.yaml``)
 through the config-driven emit harness. Targets the SwInstructionPrefetch
-absolute-base SGPR reservation block in ``Tensile/KernelWriter.py``:
+absolute-base SGPR reservation block in ``tensilelite/KernelWriter.py``:
 
   - the abs-base guard gated on ``swpAbsRequested`` (Absolute prefetch resolved
     for gfx1250 non-StreamK non-f64) and version == (12,5,0), and

@@ -7,7 +7,7 @@
 Drives the designed alpha-before-loadC config
 (``data/test_data/_designed/gfx942/s11a_prolog_alpha_before_loadc_packe.yaml``)
 through the config-driven emit harness. Targets the ``_prolog`` alpha handling in
-``Tensile/Components/GlobalWriteBatch.py``:
+``tensilelite/Components/GlobalWriteBatch.py``:
 
   - the ``codeMulAlpha`` not-None branch (int8 MI-out -> fp32 replaceHolder):
     line 836 (``srcRegName = rh.getParams()[2].getCompleteRegName()``) and

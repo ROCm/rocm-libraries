@@ -7,7 +7,7 @@
 Drives the designed PrefetchGlobalRead>=3 config
 (``data/test_data/_designed/gfx950/s01_openloop_pgr_3_early_exit_noglob.yaml``)
 through the config-driven emit harness. Targets the ``openLoop`` PGR>=3 arm in
-``Tensile/KernelWriterAssembly.py``:
+``tensilelite/KernelWriterAssembly.py``:
 
   - line 7835: ``endCounter = PGR-1`` first early-exit inside ``if PGR>=3``, and
   - line 7846: the ``SCmpLeU32`` second early-exit (loopCounter<=PGR).

@@ -7,7 +7,7 @@
 Drives the designed gfx950 MXFP8 auto-LRVW config
 (``data/test_data/_designed/gfx950/s08_callrvwfor950mx_gfx950_mx_auto_l.yaml``)
 through the config-driven emit harness. Targets the AUTO branch of
-``calLRVWFor950MX`` in ``Tensile/SolutionStructs/Solution.py`` (line 3659),
+``calLRVWFor950MX`` in ``tensilelite/SolutionStructs/Solution.py`` (line 3659),
 reached only when the ISA is gfx950 AND (MXBlockA or MXBlockB) AND
 ``LocalReadVectorWidth{A,B} == -1``. Existing gfx950 MX designed configs pin
 ``LocalReadVectorWidth=16`` and take the ``!= -1`` validation arm instead, so

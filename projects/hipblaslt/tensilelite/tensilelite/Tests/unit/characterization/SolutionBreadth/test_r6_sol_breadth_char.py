@@ -4,7 +4,7 @@
 ################################################################################
 """R6 — Solution derivation breadth sweep (P4 coverage round 6).
 
-TARGET: Tensile/SolutionStructs/Solution.py — derivation/validity arms
+TARGET: tensilelite/SolutionStructs/Solution.py — derivation/validity arms
 reached by gfx942 MFMA kernels that existing tests miss.
 
 PRIMARY MISS RANGES (62% line coverage, ~1165 uncovered):

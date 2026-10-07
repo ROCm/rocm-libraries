@@ -8,7 +8,7 @@ Drives the designed config
 (``data/test_data/_designed/gfx1250/s08_depthuiteration_multi_du_fp6_lds.yaml``)
 through the config-driven emit harness. The emit path runs
 ``assignDerivedParameters`` before emission, so the ``depthUIteration`` cluster
-in ``Tensile/SolutionStructs/Solution.py`` (~3081-3093) fires during the emit
+in ``tensilelite/SolutionStructs/Solution.py`` (~3081-3093) fires during the emit
 call. The config combines a TDM auto (-1) iterate-mode resolution group, a
 TDM explicit-mask reject group, and an fp6 LdsPad clamp/reject group so the
 derivation exercises the currently-missing arms of that block.

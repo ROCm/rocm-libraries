@@ -6,7 +6,7 @@
 Characterisation test — branch_id e85e407ea3082d913528ced06c6d634c43e5ef22
 
 Predicate : tailLoop
-Site      : Tensile/KernelWriterAssembly.py:7475  (function closeLoop)
+Site      : tensilelite/KernelWriterAssembly.py:7475  (function closeLoop)
 Solver    : z3 4.16.0 — SAT (fully-static)
 
 Background

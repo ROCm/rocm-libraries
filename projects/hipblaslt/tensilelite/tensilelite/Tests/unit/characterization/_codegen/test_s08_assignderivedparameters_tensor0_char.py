@@ -7,7 +7,7 @@
 Drives the designed Sparse=2 (2:4 sparse B) config
 (``data/test_data/_designed/gfx942/s08_assignderivedparameters_tensor0.yaml``)
 through the config-driven emit harness. Targets the sparse-B metadata cluster in
-``Tensile/SolutionStructs/Solution.py`` ``assignDerivedParameters``:
+``tensilelite/SolutionStructs/Solution.py`` ``assignDerivedParameters``:
 
   - line 2069: ``Sparse==2 and DirectToVgprSparseMetadata`` reject arm (Sparse B
     does not support DTVSM), hit by the ``DirectToVgprSparseMetadata:True`` fork,

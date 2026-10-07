@@ -7,7 +7,7 @@
 Drives the designed F32X UsePLRPack config
 (``data/test_data/_designed/gfx950/s06_loopbody_dtv_pack_bufferidx_off.yaml``)
 through the config-driven emit harness. Targets the main-loop body block in
-``Tensile/KernelWriter.py`` (~4515-4711) plus the ``doFullPackCodePrefetch`` /
+``tensilelite/KernelWriter.py`` (~4515-4711) plus the ``doFullPackCodePrefetch`` /
 ``usePLRPack`` ripple:
 
   - the SubTileIdx / DTV pack bufferIdx offset arms (~4516-4520, 4629, 4709,

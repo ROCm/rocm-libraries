@@ -7,7 +7,7 @@
 Drives the designed TF32-emulation config
 (``data/test_data/_designed/gfx950/s06_usef32xemulation_usetailloopinnl.yaml``)
 through the config-driven emit harness. Targets the noLoadLoopBody
-TF32-pack-after-ShiftK block in ``Tensile/KernelWriter.py``
+TF32-pack-after-ShiftK block in ``tensilelite/KernelWriter.py``
 (``if kernel["UseF32XEmulation"] and useTailloopInNll:``) that interleaves the
 packA/packB Pre + pack items with searchStrings ``__TF32_1``/``__TF32_2``.
 

@@ -8,7 +8,7 @@ Reachable-invalid (category A): the FP16 NN config forks a single gfx1250
 HasWMMA_V3 solution with TransposeLDS=1 and explicit
 LocalReadVectorWidthA/B=4 (non-max; maxLRVW=8 for FP16 under the 16-byte
 MAX_NUM_DS_LOAD_BYTES cap). Derivation runs assignDerivedParameters, which
-calls calLRVW in Tensile/SolutionStructs/Solution.py; the explicit-LRVW !=
+calls calLRVW in tensilelite/SolutionStructs/Solution.py; the explicit-LRVW !=
 maxLRVW guard rejects. No valid solution survives.
 
 Solution.py lines that fire during the rejected derivation (probe-confirmed):

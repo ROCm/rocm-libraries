@@ -7,7 +7,7 @@
 Drives the designed non-StridedBatched config
 (``data/test_data/_designed/gfx942/s00_loadbatchedaddress_non_stridedba.yaml``)
 through the config-driven emit harness. Targets ``loadBatchedAddress`` in
-``Tensile/KernelWriterAssembly.py``, which is emitted only when
+``tensilelite/KernelWriterAssembly.py``, which is emitted only when
 ``not kernel["ProblemType"]["StridedBatched"]`` and dereferences an array of
 buffer pointers for C/D, Beta-C (UseBeta), and A/B.
 

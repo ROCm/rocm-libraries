@@ -7,7 +7,7 @@
 Drives the designed non-BufferLoad flat global-read config
 (``data/test_data/_designed/gfx942/s02b_globalreadbody_non_guardk_prefet.yaml``)
 through the config-driven emit harness. Targets the ``globalReadDo`` (mode=1)
-prefetch load arms in ``Tensile/KernelWriterAssembly.py``, specifically the
+prefetch load arms in ``tensilelite/KernelWriterAssembly.py``, specifically the
 non-BufferLoad flat global-read address path (line 11810).
 
 The ``config_harness`` derives only ``BenchmarkProblems[0]``; the leading entry

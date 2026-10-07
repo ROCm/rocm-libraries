@@ -8,10 +8,10 @@ Targets the TDM-subtile iterate-mode global-read emit added by the
 "subtile tdm iterate mode for large depthu" feature (#9410,
 24975741a1e). No prior char config paired UseSubtileImpl with TDMInst at a
 DepthU large enough to trip the iterate predicate, so
-Tensile/Components/Subtile/SubtileGREmit.py's iterate arms (around lines
+tensilelite/Components/Subtile/SubtileGREmit.py's iterate arms (around lines
 1155-1210) were never emitted by the characterization lane.
 
-isSubtileIterateMode(state, tc) (Tensile/SolutionStructs/Utilities.py) is:
+isSubtileIterateMode(state, tc) (tensilelite/SolutionStructs/Utilities.py) is:
 
     UseSubtileImpl AND enableTDM<tc> AND DepthU * DataType<tc>.numBytes() > 1024
 

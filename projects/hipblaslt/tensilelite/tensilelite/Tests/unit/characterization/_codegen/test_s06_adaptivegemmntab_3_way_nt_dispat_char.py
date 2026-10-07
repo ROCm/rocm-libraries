@@ -7,7 +7,7 @@
 Drives the designed AdaptiveGemmNTAB config
 (``data/test_data/_designed/gfx942/s06_adaptivegemmntab_3_way_nt_dispat.yaml``)
 through the config-driven emit harness. Targets the ``kernelBody``
-AdaptiveGemmNTAB!=0 branch in ``Tensile/KernelWriter.py``:
+AdaptiveGemmNTAB!=0 branch in ``tensilelite/KernelWriter.py``:
 
   - builds the 3-way NT combo dispatch ``[[0,0],[0,4],[4,0]]``,
   - emits the bit-extract SAndB32,

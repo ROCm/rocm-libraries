@@ -7,7 +7,7 @@
 Drives the designed DirectToVgprA config
 (``data/test_data/_designed/gfx942/s01_tailloopallocdtvvgpr_directtovgp.yaml``)
 through the config-driven emit harness. Targets ``tailLoopAllocDTVVgpr`` in
-``Tensile/KernelWriterAssembly.py`` -- the packDTVA/convDTVA branch (A side) and
+``tensilelite/KernelWriterAssembly.py`` -- the packDTVA/convDTVA branch (A side) and
 the ``vgprBaseA`` checkout, plus the DirectToVgpr emit arms those RegSets feed.
 
 Reachability: ``TransposeA=False`` gives ``TLUA=True``; with ``TransposeLDS=1``
