@@ -28,7 +28,7 @@ instance list is untouched.
 | aiter_kernels_commit | `8253efc4059516f492df597b80ce5311e9fda8bd` |
 | rocm_version | `7.13.0` |
 | generic_target_shim | `chipset=gfx1100` |
-| inputs_sha256 | `a589d332c987ceda03ee3c4fad9468e4f369eb624b731a5f41452ead3ca2cece` |
+| inputs_sha256 | `c992263a196c80f6f1ae640e3c8a7c62e9c37bc255dcbf7ba8f72b69368cb6d8` |
 
 ## Instances
 
@@ -37,34 +37,34 @@ changes when the object does. The full record is `gfx11-generic/manifest.json`.
 
 | Instance | Priority | VGPRs | LDS | SHA256 |
 | --- | ---: | ---: | ---: | --- |
-| `sdpa_bf16_d64_causal0_bm128_bn32` | 100 | 148 | 8704 | `a52d77f9cfa14515` |
+| `sdpa_bf16_d64_causal0_bm64_bn32` | 100 | 148 | 8704 | `0f2a4742c6459dc5` |
 | `sdpa_bf16_d64_causal0_bm128_bn32_bias1` | 100 | 163 | 8704 | `ba16d8806862f692` |
-| `sdpa_bf16_d64_causal1_bm128_bn32` | 100 | 168 | 8704 | `208346f231d0f9dc` |
+| `sdpa_bf16_d64_causal1_bm64_bn32` | 100 | 165 | 8704 | `340b3d0e0b4621a9` |
 | `sdpa_bf16_d64_causal1_bm128_bn32_bias1` | 100 | 164 | 8704 | `15f216c11049b3d4` |
 | `sdpa_bf16_d96_causal0_bm128_bn32` | 100 | 222 | 12800 | `8fccf001220f7023` |
 | `sdpa_bf16_d96_causal0_bm128_bn32_bias1` | 100 | 228 | 12800 | `f69e18447cb09200` |
 | `sdpa_bf16_d96_causal1_bm128_bn32` | 100 | 223 | 12800 | `9a7b33e043dd19bb` |
 | `sdpa_bf16_d96_causal1_bm128_bn32_bias1` | 100 | 229 | 12800 | `efd354ddc949ce37` |
-| `sdpa_bf16_d128_causal0_bm128_bn32` | 100 | 249 | 16896 | `dbc4728cf34b662c` |
+| `sdpa_bf16_d128_causal0_bm64_bn32` | 100 | 250 | 16896 | `27232fddee59f41e` |
 | `sdpa_bf16_d128_causal0_bm128_bn32_bias1` | 100 | 222 | 16896 | `46db1ccd1600719d` |
 | `sdpa_bf16_d128_causal1_bm128_bn32` | 100 | 250 | 16896 | `9341db6cd89c29cc` |
 | `sdpa_bf16_d128_causal1_bm128_bn32_bias1` | 100 | 198 | 16896 | `cf1748067d354270` |
-| `sdpa_bf16_d256_causal0_bm128_bn32_dv2` | 100 | 191 | 33280 | `368ce7823f56eceb` |
-| `sdpa_bf16_d256_causal0_bm128_bn32_dv2_bias1` | 100 | 191 | 33280 | `81bf6ebc3685aa68` |
-| `sdpa_bf16_d256_causal1_bm128_bn32_dv2` | 100 | 185 | 33280 | `09d866256969a601` |
-| `sdpa_bf16_d256_causal1_bm128_bn32_dv2_bias1` | 100 | 191 | 33280 | `f4a57ee3bda25d33` |
+| `sdpa_bf16_d256_causal0_bm64_bn32_pair1` | 100 | 256 | 49664 | `9261092127403f3a` |
+| `sdpa_bf16_d256_causal0_bm64_bn32_bias1_pair1` | 100 | 256 | 49664 | `e6f5a2063a65d7ec` |
+| `sdpa_bf16_d256_causal1_bm64_bn32_pair1` | 100 | 256 | 49664 | `b8b8f1546601b7bb` |
+| `sdpa_bf16_d256_causal1_bm64_bn32_bias1_pair1` | 100 | 256 | 49664 | `3b7310180c45fcc9` |
 | `sdpa_bf16_dgeneric_causal0_bm128_bn32_dmax64` | 40 | 148 | 8704 | `5feae5f7e0871fa8` |
 | `sdpa_bf16_dgeneric_causal1_bm128_bn32_dmax64` | 40 | 168 | 8704 | `f7aec5284ceb2332` |
 | `sdpa_bf16_dgeneric_causal0_bm128_bn32_dmax96` | 30 | 222 | 12800 | `ddeb886990ba4f0f` |
 | `sdpa_bf16_dgeneric_causal1_bm128_bn32_dmax96` | 30 | 223 | 12800 | `e506438ebb9028ac` |
 | `sdpa_bf16_dgeneric_causal0_bm128_bn32_dmax128` | 20 | 249 | 16896 | `9ab4aa362fbdb7b3` |
 | `sdpa_bf16_dgeneric_causal1_bm128_bn32_dmax128` | 20 | 250 | 16896 | `79bb5a92e892e3b2` |
-| `sdpa_bf16_dgeneric_causal0_bm128_bn32_dv2_dmax160` | 15 | 179 | 20992 | `5760f5b501268195` |
-| `sdpa_bf16_dgeneric_causal1_bm128_bn32_dv2_dmax160` | 15 | 186 | 20992 | `d5eef9bcceb6aa1b` |
-| `sdpa_bf16_dgeneric_causal0_bm128_bn32_dv2_dmax224` | 12 | 218 | 29184 | `43aa905cdb90cceb` |
-| `sdpa_bf16_dgeneric_causal1_bm128_bn32_dv2_dmax224` | 12 | 225 | 29184 | `e222a31d9914621c` |
-| `sdpa_bf16_dgeneric_causal0_bm128_bn32_dv4_dmax256` | 10 | 166 | 33280 | `54670d6a537fa0fc` |
-| `sdpa_bf16_dgeneric_causal1_bm128_bn32_dv4_dmax256` | 10 | 164 | 33280 | `e86352a2b4480f7c` |
+| `sdpa_bf16_dgeneric_causal0_bm64_bn32_dmax160_pair1` | 15 | 173 | 37376 | `e3d7c7219511d187` |
+| `sdpa_bf16_dgeneric_causal1_bm64_bn32_dmax160_pair1` | 15 | 167 | 37376 | `ad4f6e7eebcfdc9a` |
+| `sdpa_bf16_dgeneric_causal0_bm64_bn32_dmax224_pair1` | 12 | 249 | 45568 | `ffac15daf2fe45df` |
+| `sdpa_bf16_dgeneric_causal1_bm64_bn32_dmax224_pair1` | 12 | 256 | 45568 | `c6136ab5993026d6` |
+| `sdpa_bf16_dgeneric_causal0_bm64_bn32_dv2_dmax256_pair1` | 10 | 194 | 49664 | `439be7bd62d51bc9` |
+| `sdpa_bf16_dgeneric_causal1_bm64_bn32_dv2_dmax256_pair1` | 10 | 194 | 49664 | `f0ff76aa6e83c9c6` |
 | `sdpa_bf16_d64_causal0_bm16_bn32_decode1` | 150 | 168 | 17408 | `e384e92ab9b7e478` |
 | `sdpa_bf16_d64_causal0_bm16_bn32_bias1_decode1` | 150 | 153 | 17408 | `9c7c4c069c09a46d` |
 | `sdpa_bf16_d64_causal1_bm16_bn32_decode1` | 150 | 168 | 17408 | `112fe7c14d366173` |
@@ -85,34 +85,34 @@ changes when the object does. The full record is `gfx11-generic/manifest.json`.
 | `sdpa_bf16_dgeneric_causal1_bm16_bn32_dmax96_decode1` | 145 | 218 | 25600 | `beff9f7db8cc8031` |
 | `sdpa_bf16_dgeneric_causal0_bm16_bn32_dv2_dmax256_decode1` | 140 | 194 | 33792 | `7b4c99301a46cd56` |
 | `sdpa_bf16_dgeneric_causal1_bm16_bn32_dv2_dmax256_decode1` | 140 | 194 | 33792 | `be2c356ccbf69007` |
-| `sdpa_f16_d64_causal0_bm128_bn32` | 100 | 156 | 8704 | `0f09a4e93552915c` |
+| `sdpa_f16_d64_causal0_bm64_bn32` | 100 | 156 | 8704 | `cba88ef5b66a885a` |
 | `sdpa_f16_d64_causal0_bm128_bn32_bias1` | 100 | 166 | 8704 | `41fdea835daa056d` |
-| `sdpa_f16_d64_causal1_bm128_bn32` | 100 | 165 | 8704 | `1b474f2c85d6e033` |
+| `sdpa_f16_d64_causal1_bm64_bn32` | 100 | 166 | 8704 | `fdcad18ff7eefb73` |
 | `sdpa_f16_d64_causal1_bm128_bn32_bias1` | 100 | 167 | 8704 | `da5f8347bb2af451` |
 | `sdpa_f16_d96_causal0_bm128_bn32` | 100 | 222 | 12800 | `6c4a045b759178f6` |
 | `sdpa_f16_d96_causal0_bm128_bn32_bias1` | 100 | 225 | 12800 | `2ed258250e9c536b` |
 | `sdpa_f16_d96_causal1_bm128_bn32` | 100 | 223 | 12800 | `93f56bf665bd8e76` |
 | `sdpa_f16_d96_causal1_bm128_bn32_bias1` | 100 | 230 | 12800 | `c0cfa634ac1687ad` |
-| `sdpa_f16_d128_causal0_bm128_bn32` | 100 | 242 | 16896 | `8b809205f0eb1c9f` |
+| `sdpa_f16_d128_causal0_bm64_bn32` | 100 | 248 | 16896 | `06a20c6f5207ecf9` |
 | `sdpa_f16_d128_causal0_bm128_bn32_bias1` | 100 | 191 | 16896 | `25c35fbd90dcca6b` |
 | `sdpa_f16_d128_causal1_bm128_bn32` | 100 | 248 | 16896 | `4e6e9afca670486f` |
 | `sdpa_f16_d128_causal1_bm128_bn32_bias1` | 100 | 196 | 16896 | `c60e5e400b0f62c1` |
-| `sdpa_f16_d256_causal0_bm128_bn32_dv2` | 100 | 198 | 33280 | `5b8b821e6129dcbe` |
-| `sdpa_f16_d256_causal0_bm128_bn32_dv2_bias1` | 100 | 213 | 33280 | `8e048a9cb58adad0` |
-| `sdpa_f16_d256_causal1_bm128_bn32_dv2` | 100 | 199 | 33280 | `109a8e207433e1e3` |
-| `sdpa_f16_d256_causal1_bm128_bn32_dv2_bias1` | 100 | 214 | 33280 | `14437e422c80dcf1` |
+| `sdpa_f16_d256_causal0_bm64_bn32_pair1` | 100 | 256 | 49664 | `bc1cc4e40abbe52f` |
+| `sdpa_f16_d256_causal0_bm64_bn32_bias1_pair1` | 100 | 256 | 49664 | `eeff5273237fc99e` |
+| `sdpa_f16_d256_causal1_bm64_bn32_pair1` | 100 | 256 | 49664 | `fa2ceb46a457694b` |
+| `sdpa_f16_d256_causal1_bm64_bn32_bias1_pair1` | 100 | 256 | 49664 | `5d4023a6c67c306e` |
 | `sdpa_f16_dgeneric_causal0_bm128_bn32_dmax64` | 40 | 156 | 8704 | `d2e5d5ba10c759d7` |
 | `sdpa_f16_dgeneric_causal1_bm128_bn32_dmax64` | 40 | 165 | 8704 | `ef0c64edcb2275ef` |
 | `sdpa_f16_dgeneric_causal0_bm128_bn32_dmax96` | 30 | 222 | 12800 | `4bf1f6c11a3fc8b4` |
 | `sdpa_f16_dgeneric_causal1_bm128_bn32_dmax96` | 30 | 223 | 12800 | `8f951fdb4c4a3324` |
 | `sdpa_f16_dgeneric_causal0_bm128_bn32_dmax128` | 20 | 242 | 16896 | `168d5740fca81e81` |
 | `sdpa_f16_dgeneric_causal1_bm128_bn32_dmax128` | 20 | 248 | 16896 | `41ee3b6b2e8b7e11` |
-| `sdpa_f16_dgeneric_causal0_bm128_bn32_dv2_dmax160` | 15 | 184 | 20992 | `ce24a3ae0c85f38e` |
-| `sdpa_f16_dgeneric_causal1_bm128_bn32_dv2_dmax160` | 15 | 187 | 20992 | `1535bdc3a4ddc0aa` |
-| `sdpa_f16_dgeneric_causal0_bm128_bn32_dv2_dmax224` | 12 | 214 | 29184 | `8b2c98e9b3e5e50e` |
-| `sdpa_f16_dgeneric_causal1_bm128_bn32_dv2_dmax224` | 12 | 224 | 29184 | `d0685c3fd5bff0ab` |
-| `sdpa_f16_dgeneric_causal0_bm128_bn32_dv4_dmax256` | 10 | 170 | 33280 | `2c8bcbdf5ddc1d50` |
-| `sdpa_f16_dgeneric_causal1_bm128_bn32_dv4_dmax256` | 10 | 167 | 33280 | `3c9d40402e575936` |
+| `sdpa_f16_dgeneric_causal0_bm64_bn32_dmax160_pair1` | 15 | 165 | 37376 | `b147dbca0222e094` |
+| `sdpa_f16_dgeneric_causal1_bm64_bn32_dmax160_pair1` | 15 | 167 | 37376 | `22b5885efdaea0c1` |
+| `sdpa_f16_dgeneric_causal0_bm64_bn32_dmax224_pair1` | 12 | 243 | 45568 | `130cb436a8b2f522` |
+| `sdpa_f16_dgeneric_causal1_bm64_bn32_dmax224_pair1` | 12 | 254 | 45568 | `81ee5f4fbd79d0f9` |
+| `sdpa_f16_dgeneric_causal0_bm64_bn32_dv2_dmax256_pair1` | 10 | 194 | 49664 | `54c2bb0aee7e4dc2` |
+| `sdpa_f16_dgeneric_causal1_bm64_bn32_dv2_dmax256_pair1` | 10 | 194 | 49664 | `719c7002b3ca2231` |
 | `sdpa_f16_d64_causal0_bm16_bn32_decode1` | 150 | 166 | 17408 | `ae96ed94835b645f` |
 | `sdpa_f16_d64_causal0_bm16_bn32_bias1_decode1` | 150 | 151 | 17408 | `7074f910f8203160` |
 | `sdpa_f16_d64_causal1_bm16_bn32_decode1` | 150 | 166 | 17408 | `a34146f4fcdfa4c8` |

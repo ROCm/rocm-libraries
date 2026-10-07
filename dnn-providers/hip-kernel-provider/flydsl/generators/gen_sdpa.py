@@ -171,10 +171,16 @@ _DECODE_WAVES = 4
 
 # Launch geometry the native dispatch handler reproduces: one workgroup per
 # (batch, query tile of block_m rows, query head, output-column tile of
-# head_dim / dv_split), `block_m / 16` waves of 32.
+# head_dim / dv_split), `block_m / 16` waves of 32 -- twice that for an hd_pair
+# object, whose waves share each 16 rows in pairs.
 _GRID_RULE = "batch_x_qtiles_x_heads_x_dv_split"
 _WAVE_ROWS = 16
 _WAVE_SIZE = 32
+
+
+def _prefill_block_threads(knobs: dict) -> int:
+    return knobs["block_m"] // _WAVE_ROWS * _WAVE_SIZE * (2 if knobs["hd_pair"] else 1)
+
 
 # LLVM codegen options per target, added to the kernel's own (its launcher
 # carries `compile_hints["llvm_options"]`) for every instance built for it; the
@@ -293,11 +299,17 @@ def _build_one(
         dv_split=knobs["dv_split"],
         has_bias=bool(knobs["has_bias"]),
         generic_head_dim=generic,
+        hd_pair=bool(knobs["hd_pair"]),
     )
     if launch.dv_split != knobs["dv_split"]:
         raise GeneratorError(
             f"{instance.name}: kernel built with dv_split {launch.dv_split}, "
             f"instance declares {knobs['dv_split']}"
+        )
+    if launch.block_size != _prefill_block_threads(knobs):
+        raise GeneratorError(
+            f"{instance.name}: kernel built with {launch.block_size} threads, "
+            f"the dispatcher launches {_prefill_block_threads(knobs)}"
         )
 
     # Placeholders only: every value below is a runtime kernel argument, so none
@@ -390,10 +402,9 @@ def generate(arch: str, out_root: Path, keep_ir: Path | None = None) -> Path:
         else:
             described = describe(blob, where)
             _verify(described, instance, arch, where)
-            block_m = instance.knobs["block_m"]
             record.update(
                 {
-                    "block": [block_m // _WAVE_ROWS * _WAVE_SIZE, 1, 1],
+                    "block": [_prefill_block_threads(instance.knobs), 1, 1],
                     "grid_rule": _GRID_RULE,
                     "args": arg_records(_SEMANTIC_ARG_NAMES, described["signature"]),
                 }

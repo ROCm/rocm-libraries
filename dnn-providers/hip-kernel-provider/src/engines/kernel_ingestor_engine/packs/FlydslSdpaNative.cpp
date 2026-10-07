@@ -98,6 +98,9 @@ constexpr std::string_view DECODE_FIELD = "decode";
 /// The decode object's second kernel, which combines its KV splits. Same code object, so
 /// it is loaded from the same archive entry by this symbol.
 constexpr std::string_view MERGE_SYMBOL_FIELD = "merge_symbol";
+/// 0 or 1: whether the prefill object's waves work in head-dim pairs, two to each 16 query
+/// rows, so its workgroup has twice the waves its block_m alone implies.
+constexpr std::string_view HD_PAIR_FIELD = "hd_pair";
 
 /// The decode kernel packs the GQA group's query heads and the query positions into 16-row
 /// tiles, one workgroup per tile along the grid's second dimension. Each tile re-reads the
@@ -116,6 +119,11 @@ constexpr int64_t DECODE_MIN_TILES_PER_WAVE = 8;
 constexpr int64_t DECODE_MAX_SPLITS = 64;
 /// Compute units assumed when the device does not report its count.
 constexpr int64_t DECODE_FALLBACK_COMPUTE_UNITS = 32;
+/// Decode workgroups to aim for per reported unit. RDNA reports workgroup processors --
+/// two CUs each -- in multiProcessorCount, so one workgroup per unit leaves half the
+/// device idle at small batch; two fill it, and more splits than that cost more in the
+/// merge and the shorter KV runs than they recover (measured on gfx1151).
+constexpr int64_t DECODE_WORKGROUPS_PER_UNIT = 2;
 
 /// A generic object's head_dim: it reads the real one at runtime.
 constexpr int64_t GENERIC_HEAD_DIM = 0;
@@ -832,6 +840,8 @@ struct SdpaTile
     int64_t blockM = 0;
     int64_t blockN = 0;
     int64_t dvSplit = 1;
+    /// Waves per 16 query rows: 2 for an hd_pair object, else 1.
+    int64_t wavesPerRowTile = 1;
 };
 
 std::optional<SdpaTile> candidateTile(const KernelDefinition& kernel)
@@ -839,12 +849,14 @@ std::optional<SdpaTile> candidateTile(const KernelDefinition& kernel)
     const auto blockM = integerMetadata(kernel, BLOCK_M_FIELD);
     const auto blockN = integerMetadata(kernel, BLOCK_N_FIELD);
     const auto dvSplit = integerMetadata(kernel, DV_SPLIT_FIELD);
+    const auto hdPair = integerMetadata(kernel, HD_PAIR_FIELD);
     if(!blockM.has_value() || !blockN.has_value() || !dvSplit.has_value() || *blockM <= 0
-       || *blockM % WAVE_ROWS != 0 || *blockN <= 0 || *blockN % KV_SUB_TILE != 0 || *dvSplit <= 0)
+       || *blockM % WAVE_ROWS != 0 || *blockN <= 0 || *blockN % KV_SUB_TILE != 0 || *dvSplit <= 0
+       || !hdPair.has_value() || (*hdPair != 0 && *hdPair != 1))
     {
         return std::nullopt;
     }
-    return SdpaTile{*blockM, *blockN, *dvSplit};
+    return SdpaTile{*blockM, *blockN, *dvSplit, *hdPair == 1 ? 2 : 1};
 }
 
 /// The workgroup count `batch_x_qtiles_x_heads_x_dv_split`, or nullopt past int32.
@@ -875,13 +887,14 @@ int64_t decodeRowTiles(const SdpaProblem& problem, bool rowTiled)
                     : 1;
 }
 
-/// How many KV splits a decode launch uses: enough workgroups to roughly fill the device's
-/// compute units, but no split so short that its waves have little to stream, and at most
+/// How many KV splits a decode launch uses: enough workgroups to roughly fill the device
+/// (DECODE_WORKGROUPS_PER_UNIT per reported unit), but no split so short that its waves have little to stream, and at most
 /// DECODE_MAX_SPLITS. Deterministic in the problem and the device, so workspaceBytes and
 /// prepare agree.
 int64_t decodeSplits(const SdpaProblem& problem, int64_t rowTiles, int computeUnits)
 {
-    const int64_t units = computeUnits > 0 ? computeUnits : DECODE_FALLBACK_COMPUTE_UNITS;
+    const int64_t units = (computeUnits > 0 ? computeUnits : DECODE_FALLBACK_COMPUTE_UNITS)
+                          * DECODE_WORKGROUPS_PER_UNIT;
     const int64_t groups = std::max<int64_t>(1, problem.batch * problem.numKvHeads * rowTiles);
     const int64_t tiles = (problem.seqLenKv + DECODE_TILE - 1) / DECODE_TILE;
     const int64_t byWork = std::max<int64_t>(1, tiles / (DECODE_WAVES * DECODE_MIN_TILES_PER_WAVE));
@@ -1385,8 +1398,10 @@ public:
                     "flydsl_sdpa: launch grid exceeds int32 for kernel '"
                         + toString(kernel.kernelId) + "'");
             }
-            code.setBlockSize(
-                static_cast<unsigned int>(tile->blockM / WAVE_ROWS * WAVE_SIZE), 1, 1);
+            code.setBlockSize(static_cast<unsigned int>(tile->blockM / WAVE_ROWS
+                                                        * tile->wavesPerRowTile * WAVE_SIZE),
+                              1,
+                              1);
             code.setGridSize(static_cast<unsigned int>(*gridX), 1, 1);
         }
 

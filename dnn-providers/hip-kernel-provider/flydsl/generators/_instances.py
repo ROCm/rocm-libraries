@@ -87,6 +87,7 @@ _ABBREV = {
     "has_bias": "bias",
     "head_dim_max": "dmax",
     "decode": "decode",
+    "hd_pair": "pair",
 }
 
 # Knobs omitted from an instance's name when they add nothing to it; see
@@ -96,6 +97,7 @@ _NAME_OMITTED_WHEN = {
     "has_bias": lambda knobs: knobs["has_bias"] == 0,
     "head_dim_max": lambda knobs: knobs["head_dim_max"] == knobs["head_dim"],
     "decode": lambda knobs: knobs["decode"] == 0,
+    "hd_pair": lambda knobs: knobs["hd_pair"] == 0,
     # A symbol, not a choice: the object's name already says it is a decode one.
     "merge_symbol": lambda knobs: True,
 }
@@ -189,16 +191,43 @@ def sdpa_dv_split(head_dim: int) -> int:
     return 2 if head_dim > 128 else 1
 
 
+# A prefill object's schedule: (block_m, dv_split, hd_pair). Launch geometry, not
+# correctness, chosen per class by measurement on gfx1151:
+# - 64-row tiles launch twice the workgroups of 128-row ones and win wherever the
+#   kernel still holds Q in registers at that size: d64, and d128 without a causal
+#   bound or a bias. A 64-row d128 causal or bias object has to re-read Q per
+#   K-step to fit, and that costs more than the tile saves.
+# - Above 128, waves work in head-dim pairs (kernel modification 18), which
+#   computes QK^T once per row rather than once per column workgroup, at 64 rows so
+#   the thread count stays 256.
+def sdpa_prefill_schedule(head_dim: int, causal: int, has_bias: int) -> tuple:
+    if head_dim > 128:
+        return 64, 1, 1
+    if head_dim == 64 and not has_bias:
+        return 64, 1, 0
+    if head_dim == 128 and not causal and not has_bias:
+        return 64, 1, 0
+    return SDPA_BLOCK_M, sdpa_dv_split(head_dim), 0
+
+
 # The generic tier: any head_dim that is a multiple of 8, read at runtime, by an
 # object built for the largest it serves (kernel modification 15). An object
 # runs at its largest head's cost, so the tiers are cut where the odd head dims
 # models use fall: up to 64 (40, 48, 56), 96 (72, 80, 88), 128, 160 (136-160),
-# 224 (168-224) and 256. Each maps to its output-column split; the 256 one splits
-# four ways, because its masked loads on top of the d256 schedule do not fit the
-# register file at two, which is why 224 is a tier of its own. Below the
-# specialized tier in priority, and each narrower one above the wider, so the
-# narrowest object that serves a head is the one chosen.
-SDPA_GENERIC_HEAD_DIM_MAX = {64: 1, 96: 1, 128: 1, 160: 2, 224: 2, 256: 4}
+# 224 (168-224) and 256. Each maps to its schedule (block_m, dv_split, hd_pair):
+# above 128 the waves work in head-dim pairs, and the 256 one also splits its
+# columns across two workgroups, because its masked loads on top of the d256
+# schedule do not fit the register file in one, which is why 224 is a tier of its
+# own. Below the specialized tier in priority, and each narrower one above the
+# wider, so the narrowest object that serves a head is the one chosen.
+SDPA_GENERIC_HEAD_DIM_MAX = {
+    64: (128, 1, 0),
+    96: (128, 1, 0),
+    128: (128, 1, 0),
+    160: (64, 1, 1),
+    224: (64, 1, 1),
+    256: (64, 2, 1),
+}
 PRIORITY_SDPA_GENERIC = {
     64: 40,
     96: 30,
@@ -256,6 +285,9 @@ def sdpa_instances() -> list[Instance]:
         for head_dim in SDPA_HEAD_DIMS:
             for causal in SDPA_CAUSAL:
                 for has_bias in SDPA_HAS_BIAS:
+                    block_m, dv_split, hd_pair = sdpa_prefill_schedule(
+                        head_dim, causal, has_bias
+                    )
                     instances.append(
                         Instance(
                             op="sdpa",
@@ -264,19 +296,21 @@ def sdpa_instances() -> list[Instance]:
                             knobs={
                                 "head_dim": head_dim,
                                 "causal": causal,
-                                "block_m": SDPA_BLOCK_M,
+                                "block_m": block_m,
                                 "block_n": SDPA_BLOCK_N,
-                                "dv_split": sdpa_dv_split(head_dim),
+                                "dv_split": dv_split,
                                 "has_bias": has_bias,
                                 "head_dim_max": head_dim,
                                 "decode": 0,
                                 "merge_symbol": "",
+                                "hd_pair": hd_pair,
                             },
                         )
                     )
         # Generic head_dim, without a bias: a bias on a head no specialized
         # object serves declines.
-        for head_dim_max, dv_split in SDPA_GENERIC_HEAD_DIM_MAX.items():
+        for head_dim_max, schedule in SDPA_GENERIC_HEAD_DIM_MAX.items():
+            block_m, dv_split, hd_pair = schedule
             for causal in SDPA_CAUSAL:
                 instances.append(
                     Instance(
@@ -286,13 +320,14 @@ def sdpa_instances() -> list[Instance]:
                         knobs={
                             "head_dim": None,
                             "causal": causal,
-                            "block_m": SDPA_BLOCK_M,
+                            "block_m": block_m,
                             "block_n": SDPA_BLOCK_N,
                             "dv_split": dv_split,
                             "has_bias": 0,
                             "head_dim_max": head_dim_max,
                             "decode": 0,
                             "merge_symbol": "",
+                            "hd_pair": hd_pair,
                         },
                     )
                 )
@@ -314,6 +349,7 @@ def sdpa_instances() -> list[Instance]:
                                 "head_dim_max": head_dim,
                                 "decode": 1,
                                 "merge_symbol": SDPA_DECODE_MERGE_SYMBOL,
+                                "hd_pair": 0,
                             },
                         )
                     )
@@ -334,6 +370,7 @@ def sdpa_instances() -> list[Instance]:
                             "head_dim_max": head_dim_max,
                             "decode": 1,
                             "merge_symbol": SDPA_DECODE_MERGE_SYMBOL,
+                            "hd_pair": 0,
                         },
                     )
                 )

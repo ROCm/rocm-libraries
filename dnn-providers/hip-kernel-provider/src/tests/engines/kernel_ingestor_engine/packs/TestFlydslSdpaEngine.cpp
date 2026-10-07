@@ -92,7 +92,8 @@ KernelDefinition makeFlydslSdpaKernel(const std::string& dtype,
                                       int64_t dvSplit = 1,
                                       int64_t hasBias = 0,
                                       std::optional<int64_t> headDimMax = std::nullopt,
-                                      int64_t decode = 0)
+                                      int64_t decode = 0,
+                                      int64_t hdPair = 0)
 {
     KernelDefinition kernel;
     kernel.name = "sdpa_" + dtype + "_d" + std::to_string(headDim);
@@ -106,7 +107,8 @@ KernelDefinition makeFlydslSdpaKernel(const std::string& dtype,
                        {FLYDSL_SDPA_HEAD_DIM_MAX_FIELD, headDimMax.value_or(headDim)},
                        {FLYDSL_SDPA_DECODE_FIELD, decode},
                        {FLYDSL_SDPA_MERGE_SYMBOL_FIELD,
-                        std::string(decode != 0 ? "flash_attn_decode_merge_gfx11_kernel_1" : "")}};
+                        std::string(decode != 0 ? "flash_attn_decode_merge_gfx11_kernel_1" : "")},
+                       {FLYDSL_SDPA_HD_PAIR_FIELD, hdPair}};
     kernel.priority = 100;
     return kernel;
 }
@@ -444,6 +446,26 @@ TEST(TestFlydslSdpaKernelMatch, DeclinesACandidateWhoseTileIsNotOneTheKernelBuil
         FLYDSL_SDPA, fixture.context(), makeFlydslSdpaKernel("bf16", 64, 0, 120, 32), bound));
     EXPECT_FALSE(matchesKernel(
         FLYDSL_SDPA, fixture.context(), makeFlydslSdpaKernel("bf16", 64, 0, 128, 48), bound));
+}
+
+TEST(TestFlydslSdpaKernelMatch, AdmitsHeadDimPairsAndDeclinesAnyOtherWaveCount)
+{
+    SdpaGraphSpec spec;
+    spec.headDim = 256;
+    const GraphFixture fixture(buildFlydslSdpaGraph(spec));
+    const auto bound = bindingsFor(spec);
+
+    // hd_pair is 0 or 1: the dispatcher launches block_m / 16 waves, or twice that.
+    EXPECT_TRUE(
+        matchesKernel(FLYDSL_SDPA,
+                      fixture.context(),
+                      makeFlydslSdpaKernel("bf16", 256, 0, 64, 32, 1, 0, std::nullopt, 0, 1),
+                      bound));
+    EXPECT_FALSE(
+        matchesKernel(FLYDSL_SDPA,
+                      fixture.context(),
+                      makeFlydslSdpaKernel("bf16", 256, 0, 64, 32, 1, 0, std::nullopt, 0, 2),
+                      bound));
 }
 
 TEST(TestFlydslSdpaKernelMatch, AdmitsAColumnSplitThatDividesTheHead)

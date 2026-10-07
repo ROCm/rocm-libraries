@@ -13,6 +13,7 @@
     "dv_split",
     "has_bias",
     "head_dim_max",
-    "decode"
+    "decode",
+    "hd_pair"
   ]
 }

@@ -59,6 +59,7 @@ constexpr const char* FLYDSL_SDPA_HAS_BIAS_FIELD = "has_bias";
 constexpr const char* FLYDSL_SDPA_HEAD_DIM_MAX_FIELD = "head_dim_max";
 constexpr const char* FLYDSL_SDPA_DECODE_FIELD = "decode";
 constexpr const char* FLYDSL_SDPA_MERGE_SYMBOL_FIELD = "merge_symbol";
+constexpr const char* FLYDSL_SDPA_HD_PAIR_FIELD = "hd_pair";
 
 /// The stats token's value when the graph asks for no LSE output.
 constexpr int64_t FLYDSL_SDPA_NO_STATS = -1;

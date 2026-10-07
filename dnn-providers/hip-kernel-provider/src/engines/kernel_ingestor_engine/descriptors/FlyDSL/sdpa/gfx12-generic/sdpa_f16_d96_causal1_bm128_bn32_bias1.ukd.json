@@ -21,7 +21,8 @@
     "has_bias": 1,
     "head_dim_max": 96,
     "decode": 0,
-    "merge_symbol": ""
+    "merge_symbol": "",
+    "hd_pair": 0
   },
   "priority": 100,
   "provenance": {
@@ -42,7 +43,8 @@
             "has_bias",
             "head_dim_max",
             "decode",
-            "merge_symbol"
+            "merge_symbol",
+            "hd_pair"
           ],
           "bindings": {},
           "vocabulary": {}

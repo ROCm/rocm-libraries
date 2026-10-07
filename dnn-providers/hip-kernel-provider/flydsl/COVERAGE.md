@@ -209,7 +209,7 @@ whose header lists every modification). The native half is
 | dtype (`bf16`, `f16`) | batch |
 | `head_dim` | `seq_len_q`, `seq_len_kv` — independently, any value |
 | causal variant: a right bound is applied, or not | query heads, and the GQA/MQA group size |
-| tile (`block_m` 128, `block_n` 32), and at `head_dim` 256 the output-column split (`dv_split` 2) | every operand's (batch, sequence, head) stride |
+| schedule: tile (`block_m` 64 or 128, `block_n` 32), output-column split (`dv_split`), head-dim pairs (`hd_pair`) | every operand's (batch, sequence, head) stride |
 | whether an additive bias is applied (`has_bias`) | the bias's (batch, head, query, key) strides — 0 on a broadcast axis |
 | | softmax scale |
 | | `right_bound`, `left_bound`, diagonal alignment |
@@ -225,15 +225,26 @@ one with:
 | bf16 | causal, non-causal | causal, non-causal | causal, non-causal | causal, non-causal |
 | f16 | causal, non-causal | causal, non-causal | causal, non-causal | causal, non-causal |
 
-`head_dim` 256 is a schedule of its own (kernel modification 13). Up to 128 each
-wave holds its Q rows and every O accumulator in registers; at 256 those two
-alone would fill the 256-VGPR file. So the 256 objects re-read Q from memory one
-K-step ahead instead of holding it, and split the output columns across two
-workgroups (`dv_split`), each computing the whole of QK^T and the softmax but
-half of O. The grid doubles; the dispatcher reads `dv_split` from the metadata.
-The cost is the repeated QK^T and Q reads, so 256 runs below 128's throughput;
-splitting the head dimension across a pair of waves instead would avoid the
-recompute.
+The schedule is launch geometry, chosen per class by measurement; the dispatcher
+reads it from the metadata. Each schedule below was measured against the one it
+replaced on the same inputs, correct to the same error, and kept only where it
+won:
+
+| Class | `block_m` | `dv_split` | `hd_pair` | Why |
+|---|---|---|---|---|
+| `head_dim` 64, no bias | 64 | 1 | 0 | twice the workgroups of a 128-row tile, with Q still in registers |
+| `head_dim` 128, non-causal, no bias | 64 | 1 | 0 | the same; most visible on short and BHSD-layout prefill |
+| `head_dim` 96; 128 causal or with a bias; 64 with a bias | 128 | 1 | 0 | a 64-row object here has to re-read Q per K-step to fit, which costs more than the tile saves |
+| `head_dim` 256 | 64 | 1 | 1 | head-dim pairs, below |
+
+`head_dim` 256 is a schedule of its own (kernel modifications 13 and 18). Up to
+128 each wave holds its Q rows and every O accumulator in registers; at 256 those
+two alone would fill the 256-VGPR file. So two waves share each 16 query rows:
+each computes QK^T over half of the head dimension, re-reading its half of Q one
+K-step ahead, the two halves are summed through LDS, and each accumulates half of
+O's columns. QK^T is computed once per row, at 256 threads per workgroup. (The
+earlier schedule split the output columns across two workgroups that each
+recomputed the whole of QK^T.)
 
 **Every other head_dim** that is a multiple of 8, up to 256, is served by a
 generic tier (kernel modification 15): twenty-four more objects, bf16 and f16 ×
@@ -242,13 +253,13 @@ head_dim is a runtime argument; Q and K columns past it are zeroed as they load
 and O columns past it are not stored, so the tensors are read exactly as wide as
 they are. A generic object computes at its largest width, so the tiers are cut
 where the odd head dims models use fall: 40, 48 and 56 run at 64; 72, 80 and 88
-at 96; 136 to 160 at 160 and 168 to 224 at 224 (two output-column tiles each).
-They rank below the specialized objects, each narrower tier above the wider
-(`priority` 40, 30, 20, 15, 12, 10), so 64/96/128/256 always run their own object
-and the narrowest generic tier takes the rest. The 256 tier splits its output
-columns four ways to fit the register file (two spill), so 232 to 248 run at
-about half the speed of the 224 tier. A bias on a
-head no specialized object serves declines.
+at 96; 136 to 160 at 160 and 168 to 224 at 224. The tiers above 128 use head-dim
+pairs, as the 256 object does; the 256 tier also splits its columns across two
+workgroups (`dv_split` 2), because its masked loads on top of the pair schedule do
+not fit the register file in one. They rank below the specialized objects, each
+narrower tier above the wider (`priority` 40, 30, 20, 15, 12, 10), so 64/96/128/256
+always run their own object and the narrowest generic tier takes the rest. A bias
+on a head no specialized object serves declines.
 
 The causal variant is the one that applies a right bound — top-left or
 bottom-right causal, and any band to the right of the diagonal. It is two
@@ -269,11 +280,12 @@ so a graph reads each KV head once per tile rather than once per query head. It 
 across 128 rows, are faster. The bias objects take one tile (16 rows): at `head_dim`
 128 and up they already fill the register file, and a tiled launch's row index spills. It splits the keys a row can see --
 from the window's edge to the diagonal -- across workgroups, which the dispatcher
-sizes to the device's compute units; and merges the splits by their LSEs with a
+sizes to the device: two workgroups per unit the device reports, because RDNA reports
+workgroup processors of two CUs each; and merges the splits by their LSEs with a
 second kernel compiled into the same object. They rank above the prefill objects
 (`priority` 150), so such a graph runs here. At `head_dim` 256 two workgroups share
-each split's rows, one per half of the output columns (`dv_split` 2), as the prefill
-object does, to fit the register file. The bias objects read the same broadcast bias
+each split's rows, one per half of the output columns (`dv_split` 2), to fit the
+register file. The bias objects read the same broadcast bias
 as the prefill ones, each lane its own (head, position) row of the GQA group's slice.
 Every other head_dim that is a multiple of 8 runs on a generic decode object -- up to
 96, or above it up to 256 with the column split -- that reads it at runtime and never
@@ -341,8 +353,9 @@ at `check_support()`, never at `execute()`.
 | **Other architectures** | see below | The objects are `gfx11-generic` and `gfx12-generic` builds, so every RDNA3 / RDNA3.5 / RDNA4 part is served. |
 
 **Every gfx11 generic member** (gfx1100–gfx1103, gfx1150–gfx1153) is served by
-the one object set; execution is verified on gfx1151, and the other seven rest on
-the loader's generic-target rule, the ELF machine check and the shard check.
+the one object set; the GPU suites (`TestGpuFlydsl*`) pass on gfx1100, gfx1101
+and gfx1151, and the other five members rest on the loader's generic-target rule,
+the ELF machine check and the shard check.
 FlyDSL 0.3.4 needs the `_generic_targets.py` shim to lower for a generic target
 (REGEN.md §3), and the SDPA objects are built with `amdgpu-use-amdgpu-trackers`,
 without which d128 causal spills a few VGPRs: the generic ISA lacks gfx115x's
@@ -351,9 +364,8 @@ scalar-float instructions. **gfx1170/gfx1171** need `gfx11-7-generic` objects.
 sources: its WMMA operand layout differs, so one object cannot span both families,
 but each kernel branches on the layout at the few sites that depend on it
 (modification 17). The gfx12 set compiles with no spill, its argument layouts and
-ELF target are checked, and its shards are checked in a gfx1200/gfx1201 build;
-**its numerics have not been run on a gfx12 device yet** -- the GPU suites
-(`TestGpuFlydsl*`) on gfx1200/gfx1201 are what verifies them.
+ELF target are checked, and the GPU suites pass on gfx1201; gfx1200 runs the same
+objects.
 
 ### 5.5 Where each claim is checked
 
@@ -412,6 +424,7 @@ recorded here is the decision and the gate it passed.
 | Additive bias | per-score loads and an add in the inner loop | compile-time by the rule (`has_bias`); its arguments are appended to every object's list, and the plain objects' instructions are unchanged | baked axis, +16 |
 | Additive bias on the decode objects | per-score loads and an add in the inner loop | tried as a runtime argument (a uniform branch skipped with no bias bound): `head_dim` 64 slower with no bias, beyond noise with a repeating sign; testing it once and running one of two copies of the KV loop instead spills at 128 and 256, the register allocation being the larger copy's | baked axis, +16 |
 | Row tiles on the decode objects (groups over 16 rows) | the row tile as the grid's second dimension; no work per score | 0 VGPRs; time within noise on every decode shape (computing the tile from the block index instead cost a few percent on short d64 decode, sign repeating). The bias objects are left one tile: theirs spill 2 VGPRs at `head_dim` 128 and up with it | runtime, not on the bias objects |
+| Head-dim pairs (`hd_pair`) | a schedule, not a feature: the partial-score exchange through LDS, behind the barrier that already publishes V | compile-time by the rule; objects without it compile to identical code | baked, replaces `dv_split` above 128 |
 | Idle-wave skip (rows past `seq_len_q`) | one branch per KV tile | removing it gains a few percent on small f16 non-causal prefill (`head_dim` 64) and nothing elsewhere, and roughly doubles every partly empty tile the decode objects do not take — K and V with different head counts, chunked prefill of fewer than 128 rows, a bias on a generic head_dim | kept, re-measured with the decode family in place |
 
 ### 6.2 Instance ledger
@@ -433,7 +446,8 @@ shard, so the shipped count per arch is the same as the authored count.
 | SDPA decode, additive f32 bias | one bias object beside each of the 16 above (`has_bias`) | 16 | shipped, `gfx11-generic`; the 16 plain decode objects compile to identical code with the bias arguments appended, the 40 prefill objects are unchanged |
 | SDPA decode, generic head_dim | dtype (2) × causal (2) × largest head {96, 256}; head_dim a runtime argument (appended to both kernels), K/V columns past it never fetched; no bias | 8 | shipped, `gfx11-generic`; the 32 decode objects above compile to identical code with the head_dim argument appended, the prefill objects are unchanged |
 | **Total, gfx11-generic** | | **108** | |
-| **gfx12-generic** | the same table, built from the same sources for RDNA4 | **108** | built and checked; not yet run on gfx12 hardware |
+| SDPA prefill schedules (§5.1) | not an axis: `block_m` 64 for `head_dim` 64 and non-causal 128 without a bias, and head-dim pairs (`hd_pair`) for 256 and the generic tiers above 128, replace the schedules of the same classes | ±0 | shipped; the 70 objects whose schedule did not change rebuilt byte-identical with kernel modification 18 in the source |
+| **gfx12-generic** | the same table, built from the same sources for RDNA4 | **108** | shipped; GPU suites pass on gfx1201 |
 | **Total, both families** | | **216** | |
 
 Adding a row here, with its gate result in §6.1 where it introduces a runtime

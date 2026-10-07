@@ -21,7 +21,8 @@
     "has_bias": 0,
     "head_dim_max": 96,
     "decode": 1,
-    "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+    "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+    "hd_pair": 0
   },
   "priority": 150,
   "provenance": {
@@ -42,7 +43,8 @@
             "has_bias",
             "head_dim_max",
             "decode",
-            "merge_symbol"
+            "merge_symbol",
+            "hd_pair"
           ],
           "bindings": {},
           "vocabulary": {}

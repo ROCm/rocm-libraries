@@ -97,6 +97,15 @@
 #      loaded 8 wide at K offset 8*(l/16), P^T fed straight from the S
 #      accumulator, kv indexed as r + 8*(l/16) in the mask and the bias, and O
 #      stored with no trade. Every other modification applies to both.
+#  18. Head-dim pairs (hd_pair): two adjacent waves share each 16 query rows.
+#      Each computes QK^T over its half of head_dim, publishes its partial
+#      scores to LDS behind the barrier that already publishes V (which moves
+#      ahead of the softmax), adds its partner's, runs the same softmax, and
+#      accumulates half of O's columns. QK^T is then computed once per row
+#      rather than once per output-column workgroup (dv_split), at the same
+#      thread count when block_m halves. The pair index is read from the first
+#      lane so the column offsets it feeds stay scalar. Above 128 this replaces
+#      most of dv_split's recomputation; objects without it build as before.
 #
 # Upstream-first: prefer landing these changes in AITER/FlyDSL; this copy exists
 # so the provider is not blocked on that.
@@ -107,9 +116,11 @@ Uses 16x16x16 WMMA, online softmax and pipelined V loads. Requires
 ``head_dim >= 64`` and ``head_dim % 32 == 0``.
 
 Baked per object: ``head_dim``, ``causal`` (whether a right bound is applied),
-``dtype``, tile sizes, whether an additive bias is applied, and the
+``dtype``, tile sizes, whether an additive bias is applied, the
 output-column split (the grid is
-``batch * ceil(seq_len_q / block_m) * num_heads * dv_split``). Runtime: batch, both sequence lengths, head counts,
+``batch * ceil(seq_len_q / block_m) * num_heads * dv_split``), and whether
+waves work in head-dim pairs (``block_m / 16 * (2 if hd_pair else 1)`` waves
+of 32). Runtime: batch, both sequence lengths, head counts,
 strides, scale, mask bounds and alignment, and the optional LSE output.
 """
 
@@ -148,6 +159,7 @@ def build_flash_attn_func_module(
     dv_split=None,
     has_bias=False,
     generic_head_dim=False,
+    hd_pair=False,
 ):
     """Build the gfx11 Flash Attention launcher.
 
@@ -174,8 +186,19 @@ def build_flash_attn_func_module(
     # both, since 0 * NaN read from a neighbouring row is still NaN -- and not
     # stored from O.
     GENERIC_D = bool(generic_head_dim)
+    # Head-dim pairs (hd_pair): two waves share each 16 query rows. Each computes
+    # QK^T over its half of head_dim, the halves are summed through LDS, and each
+    # accumulates half of O's columns -- so QK^T is computed once rather than once
+    # per output-column workgroup, and each wave holds half of Q.
+    # A pair re-reads its half of Q per K-step: held, it and the exchange push the
+    # half-width O accumulators into spills.
+    HD_PAIR = bool(hd_pair)
+    PAIR = 2 if HD_PAIR else 1
+    QK_DIM = head_dim // PAIR
     if q_resident is None:
-        Q_RESIDENT = head_dim < 128 or (head_dim == 128 and not HAS_BIAS)
+        Q_RESIDENT = not HD_PAIR and (
+            head_dim < 128 or (head_dim == 128 and not HAS_BIAS)
+        )
     else:
         Q_RESIDENT = bool(q_resident)
     WARP_SIZE = 32
@@ -199,7 +222,7 @@ def build_flash_attn_func_module(
     NUM_S_ACCS = N_SUB_TILES * 2
     NUM_S_VALS = NUM_S_ACCS * 8
 
-    NUM_WAVES = BLOCK_M // ROWS_PER_WAVE
+    NUM_WAVES = BLOCK_M // ROWS_PER_WAVE * PAIR
     if flat_work_group_size is None:
         flat_work_group_size = NUM_WAVES * WARP_SIZE
     BLOCK_SIZE = flat_work_group_size
@@ -211,16 +234,23 @@ def build_flash_attn_func_module(
 
     K_STEP_QK = WMMA_K
     K_STEPS_QK = head_dim // K_STEP_QK
+    # The K-steps one wave computes: all of them, or its half with hd_pair.
+    K_STEPS_QK_WAVE = K_STEPS_QK // PAIR
 
     D_CHUNK = WMMA_N
     D_CHUNKS = head_dim // D_CHUNK
     # The output columns may be split across workgroups: each computes the whole
     # of QK^T and the softmax but only DV_TILE columns of O, so it holds O_CHUNKS
     # accumulators instead of D_CHUNKS, and the grid grows by DV_SPLIT. Above 128
-    # that, with Q re-read per K-step, is what fits the register file.
-    DV_SPLIT = (2 if head_dim > 128 else 1) if dv_split is None else int(dv_split)
-    assert D_CHUNKS % DV_SPLIT == 0
-    O_CHUNKS = D_CHUNKS // DV_SPLIT
+    # that, with Q re-read per K-step, is what fits the register file. hd_pair
+    # halves each wave's columns again, inside the workgroup.
+    if dv_split is None:
+        DV_SPLIT = 2 if head_dim > 128 and not HD_PAIR else 1
+    else:
+        DV_SPLIT = int(dv_split)
+    assert D_CHUNKS % (DV_SPLIT * PAIR) == 0
+    assert K_STEPS_QK % PAIR == 0
+    O_CHUNKS = D_CHUNKS // (DV_SPLIT * PAIR)
     DV_TILE = O_CHUNKS * D_CHUNK
 
     PV_K_STEP = WMMA_K
@@ -280,9 +310,23 @@ def build_flash_attn_func_module(
     elem_numeric_cls = _NUMERIC_MAP[dtype_str]
     ELEM_BYTES = (elem_numeric_cls.width + 7) // 8
 
-    @fx.struct
-    class SharedStorage:
-        kv: fx.Array[elem_numeric_cls, LDS_KV_TOTAL_SIZE, 16]
+    # hd_pair: each lane's partial scores, NUM_S_VALS f32 per lane per wave, laid
+    # out as 4-wide pieces lane-contiguous so a wave's stores and its partner's
+    # loads are conflict-free.
+    LDS_XS_SIZE = NUM_WAVES * WARP_SIZE * NUM_S_VALS
+
+    if HD_PAIR:
+
+        @fx.struct
+        class SharedStorage:
+            kv: fx.Array[elem_numeric_cls, LDS_KV_TOTAL_SIZE, 16]
+            xs: fx.Array[fx.Float32, LDS_XS_SIZE, 16]
+
+    else:
+
+        @fx.struct
+        class SharedStorage:
+            kv: fx.Array[elem_numeric_cls, LDS_KV_TOTAL_SIZE, 16]
 
     @flyc.kernel(known_block_size=[BLOCK_SIZE, 1, 1])
     def flash_attn_func_gfx1151_kernel(
@@ -410,12 +454,30 @@ def build_flash_attn_func_module(
         lane16 = lane % 16
         klane = lane // 16
 
-        wave_q_offset = wave_id * ROWS_PER_WAVE
+        if const_expr(HD_PAIR):
+            # Partners are adjacent waves: pair_idx picks the head-dim half. Read
+            # from the first lane, so it and every column offset it feeds are
+            # known wave-uniform and stay scalar.
+            pair_idx = fx.Int64(
+                fx.Int32(
+                    fx.rocdl.readfirstlane(
+                        fx.Int32.ir_type, fx.Int32(wave_id % PAIR).ir_value()
+                    )
+                )
+            )
+            wave_q_offset = (wave_id // PAIR) * ROWS_PER_WAVE
+            qk_col_base = pair_idx * QK_DIM
+            lds_xs = lds.xs.ptr
+        else:
+            wave_q_offset = wave_id * ROWS_PER_WAVE
 
         # Output-column tile innermost: the workgroups sharing a Q tile run back to
         # back and share its K/V reads in L2.
         dv_idx = block_id % DV_SPLIT
-        dv_col_base = dv_idx * DV_TILE
+        if const_expr(HD_PAIR):
+            dv_col_base = (dv_idx * PAIR + pair_idx) * DV_TILE
+        else:
+            dv_col_base = dv_idx * DV_TILE
         block_rest = block_id // DV_SPLIT
         head_idx = block_rest % num_heads_v
         batch_q_tile_id = block_rest // num_heads_v
@@ -647,10 +709,16 @@ def build_flash_attn_func_module(
         # on gfx12, the 8 at 8*(l/16).
         c_zero_v16 = Vec.filled(16, 0.0, elem_dtype)
 
+        def qk_col(offset):
+            # Head-dim column `offset` of this wave's QK^T share.
+            if const_expr(HD_PAIR):
+                return qk_col_base + fx.Int64(offset)
+            return fx.Int64(offset)
+
         def load_q_pack(ks):
             if const_expr(WMMA_V8):
                 # gfx12: this lane's 8 head-dim values of the K-step, at 8*(l/16).
-                col = fx.Int64(ks * K_STEP_QK) + klane * 8
+                col = qk_col(ks * K_STEP_QK) + klane * 8
                 if const_expr(GENERIC_D):
                     col_ok = q_in_bounds & (col < fx.Int64(head_dim_rt))
                     safe = col_ok.select(col, fx.Int64(0))
@@ -665,7 +733,7 @@ def build_flash_attn_func_module(
                 # an out half reads column 0 instead, so nothing reads past a row.
                 halves = []
                 for half in range_constexpr(2):
-                    col = fx.Int64(ks * K_STEP_QK + half * 8)
+                    col = qk_col(ks * K_STEP_QK + half * 8)
                     col_ok = q_in_bounds & (col < fx.Int64(head_dim_rt))
                     safe = col_ok.select(col, fx.Int64(0))
                     raw = Vec(
@@ -677,13 +745,13 @@ def build_flash_attn_func_module(
                     + [Vec(halves[1])[i] for i in range(8)],
                     elem_dtype,
                 )
-            q_col = fx.Int64(ks * K_STEP_QK)
+            q_col = qk_col(ks * K_STEP_QK)
             raw = _load_global_half_vec(q_elem_ptr, q_idx(q_row_safe, q_col), 16)
             return q_in_bounds.select(raw, c_zero_v16)
 
         q_b_packs = []
         if const_expr(Q_RESIDENT):
-            for ks in range_constexpr(K_STEPS_QK):
+            for ks in range_constexpr(K_STEPS_QK_WAVE):
                 q_b_packs.append(load_q_pack(ks))
 
         c_neg_inf = fx.Float32(float("-inf"))
@@ -807,8 +875,8 @@ def build_flash_attn_func_module(
             if wave_needs_kv_tile:
                 if const_expr(not Q_RESIDENT):
                     q_next = load_q_pack(0)
-                for ks in range_constexpr(K_STEPS_QK):
-                    k_col = fx.Int64(ks * K_STEP_QK)
+                for ks in range_constexpr(K_STEPS_QK_WAVE):
+                    k_col = qk_col(ks * K_STEP_QK)
                     if const_expr(Q_RESIDENT):
                         q_pack = q_b_packs[ks]
                     else:
@@ -816,7 +884,7 @@ def build_flash_attn_func_module(
                         # scheduler issues all of Q's loads at once and holds
                         # them, which is the register cost this path avoids.
                         q_pack = q_next
-                        if const_expr(ks + 1 < K_STEPS_QK):
+                        if const_expr(ks + 1 < K_STEPS_QK_WAVE):
                             q_next = load_q_pack(ks + 1)
 
                     for st_idx in range_constexpr(N_SUB_TILES):
@@ -849,6 +917,44 @@ def build_flash_attn_func_module(
                         )
                     if const_expr(not Q_RESIDENT):
                         fx.rocdl.sched_barrier(0)
+
+            if const_expr(HD_PAIR):
+                # Publish this wave's partial scores, then stage V: the barrier
+                # that publishes V also publishes them, and the partner's are
+                # added in after it. Unconditional: a wave without the tile
+                # publishes zeros, and its partner shares its rows, so skips it too.
+                def _xs_index(wave, piece):
+                    return (
+                        wave * fx.Int64(NUM_S_ACCS * 2) + fx.Int64(piece)
+                    ) * fx.Int64(WARP_SIZE * 4) + lane * fx.Int64(4)
+
+                for st in range_constexpr(NUM_S_ACCS):
+                    for h in range_constexpr(2):
+                        piece = Vec.from_elements(
+                            [Vec(s_accs[st])[h * 4 + j] for j in range(4)], fx.Float32
+                        )
+                        fx.make_view(
+                            lds_xs + fx.Int32(_xs_index(wave_id, st * 2 + h)),
+                            fx.make_layout(4, 1),
+                        ).store(piece)
+                coop_store_v_lds(_v_vecs_tile, 0)
+                gpu.barrier()
+                partner = wave_id + fx.Int64(1) - pair_idx * fx.Int64(2)
+                for st in range_constexpr(NUM_S_ACCS):
+                    halves = []
+                    for h in range_constexpr(2):
+                        halves.append(
+                            Vec(
+                                fx.make_view(
+                                    lds_xs + fx.Int32(_xs_index(partner, st * 2 + h)),
+                                    fx.make_layout(4, 1),
+                                ).load()
+                            )
+                        )
+                    peer_s = Vec.from_elements(
+                        [halves[j // 4][j % 4] for j in range(8)], fx.Float32
+                    )
+                    s_accs[st] = Vec(s_accs[st]) + peer_s
 
             # Element r of accumulator a holds kv = kv_start + 16a + 2r + klane
             # (gfx12: + r + 8*klane) for this lane's query row. Mask the kv tail and, when causal, the
@@ -922,8 +1028,9 @@ def build_flash_attn_func_module(
             for dc in range_constexpr(O_CHUNKS):
                 o_accs[dc] = _fmul(o_accs[dc], corr_vec)
 
-            coop_store_v_lds(_v_vecs_tile, 0)
-            gpu.barrier()
+            if const_expr(not HD_PAIR):
+                coop_store_v_lds(_v_vecs_tile, 0)
+                gpu.barrier()
 
             # B operand of O^T += V^T @ P^T: lane l needs query row l%16 and, on
             # gfx11, all 16 kv values of the step. It holds the even (klane 0) or
@@ -1219,4 +1326,5 @@ def build_flash_attn_func_module(
     launch_flash_attn_func.block_m = BLOCK_M
     launch_flash_attn_func.block_size = BLOCK_SIZE
     launch_flash_attn_func.dv_split = DV_SPLIT
+    launch_flash_attn_func.hd_pair = int(HD_PAIR)
     return launch_flash_attn_func

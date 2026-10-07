@@ -9,11 +9,11 @@
     "aiter_kernels_commit": "8253efc4059516f492df597b80ce5311e9fda8bd",
     "rocm_version": "7.13.0",
     "generic_target_shim": "chipset=gfx1100",
-    "inputs_sha256": "a589d332c987ceda03ee3c4fad9468e4f369eb624b731a5f41452ead3ca2cece"
+    "inputs_sha256": "c992263a196c80f6f1ae640e3c8a7c62e9c37bc255dcbf7ba8f72b69368cb6d8"
   },
   "instances": [
     {
-      "name": "sdpa_bf16_d64_causal0_bm128_bn32",
+      "name": "sdpa_bf16_d64_causal0_bm64_bn32",
       "op": "sdpa",
       "dtype": "bf16",
       "priority": 100,
@@ -21,16 +21,17 @@
       "knobs": {
         "head_dim": 64,
         "causal": 0,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
         "dv_split": 1,
         "has_bias": 0,
         "head_dim_max": 64,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
-        256,
+        128,
         1,
         1
       ],
@@ -73,10 +74,10 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_bf16_d64_causal0_bm128_bn32.hsaco",
+      "file": "sdpa_bf16_d64_causal0_bm64_bn32.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
-      "bytes": 16576,
-      "sha256": "a52d77f9cfa1451591d2a8fc09b4d11ebced2f10f8081d666b2639a4594b90e6",
+      "bytes": 16448,
+      "sha256": "0f2a4742c6459dc513863e3ed7dcfff487b2caddfbcc1796543174b8f7c61f6c",
       "kernarg_segment_size": 248,
       "lds_bytes": 8704,
       "vgprs": 148,
@@ -102,7 +103,8 @@
         "has_bias": 1,
         "head_dim_max": 64,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -163,7 +165,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_bf16_d64_causal1_bm128_bn32",
+      "name": "sdpa_bf16_d64_causal1_bm64_bn32",
       "op": "sdpa",
       "dtype": "bf16",
       "priority": 100,
@@ -171,16 +173,17 @@
       "knobs": {
         "head_dim": 64,
         "causal": 1,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
         "dv_split": 1,
         "has_bias": 0,
         "head_dim_max": 64,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
-        256,
+        128,
         1,
         1
       ],
@@ -223,13 +226,13 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_bf16_d64_causal1_bm128_bn32.hsaco",
+      "file": "sdpa_bf16_d64_causal1_bm64_bn32.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
-      "bytes": 16704,
-      "sha256": "208346f231d0f9dcc6e357f6f9d7f61d746599ffade7ac8a55ee93d130dcfc4a",
+      "bytes": 16576,
+      "sha256": "340b3d0e0b4621a9bcd6c6e82448e438a4332f01cd2252bce9c436c6158bd3bf",
       "kernarg_segment_size": 248,
       "lds_bytes": 8704,
-      "vgprs": 168,
+      "vgprs": 165,
       "llvm_options": {
         "enable-post-misched": false,
         "lsr-drop-solution": true,
@@ -252,7 +255,8 @@
         "has_bias": 1,
         "head_dim_max": 64,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -327,7 +331,8 @@
         "has_bias": 0,
         "head_dim_max": 96,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -402,7 +407,8 @@
         "has_bias": 1,
         "head_dim_max": 96,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -477,7 +483,8 @@
         "has_bias": 0,
         "head_dim_max": 96,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -552,7 +559,8 @@
         "has_bias": 1,
         "head_dim_max": 96,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -613,7 +621,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_bf16_d128_causal0_bm128_bn32",
+      "name": "sdpa_bf16_d128_causal0_bm64_bn32",
       "op": "sdpa",
       "dtype": "bf16",
       "priority": 100,
@@ -621,16 +629,17 @@
       "knobs": {
         "head_dim": 128,
         "causal": 0,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
         "dv_split": 1,
         "has_bias": 0,
         "head_dim_max": 128,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
-        256,
+        128,
         1,
         1
       ],
@@ -673,13 +682,13 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_bf16_d128_causal0_bm128_bn32.hsaco",
+      "file": "sdpa_bf16_d128_causal0_bm64_bn32.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
-      "bytes": 21056,
-      "sha256": "dbc4728cf34b662c98442b921479bb094316fbd2192c92d6044d25fcfc1fb47e",
+      "bytes": 21440,
+      "sha256": "27232fddee59f41e81663b69b3bd79b4e165735193ac313ea4fa439461067629",
       "kernarg_segment_size": 248,
       "lds_bytes": 16896,
-      "vgprs": 249,
+      "vgprs": 250,
       "llvm_options": {
         "enable-post-misched": false,
         "lsr-drop-solution": true,
@@ -702,7 +711,8 @@
         "has_bias": 1,
         "head_dim_max": 128,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -777,7 +787,8 @@
         "has_bias": 0,
         "head_dim_max": 128,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -852,7 +863,8 @@
         "has_bias": 1,
         "head_dim_max": 128,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -913,7 +925,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_bf16_d256_causal0_bm128_bn32_dv2",
+      "name": "sdpa_bf16_d256_causal0_bm64_bn32_pair1",
       "op": "sdpa",
       "dtype": "bf16",
       "priority": 100,
@@ -921,13 +933,14 @@
       "knobs": {
         "head_dim": 256,
         "causal": 0,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
-        "dv_split": 2,
+        "dv_split": 1,
         "has_bias": 0,
         "head_dim_max": 256,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 1
       },
       "block": [
         256,
@@ -973,13 +986,13 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_bf16_d256_causal0_bm128_bn32_dv2.hsaco",
+      "file": "sdpa_bf16_d256_causal0_bm64_bn32_pair1.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
       "bytes": 21696,
-      "sha256": "368ce7823f56ecebe16350997d83e35a7376f737073797b20f0b27a02ed96ab8",
+      "sha256": "9261092127403f3ad221e6bfdc56fd98f36362c31ebef7759cc83d9b7b673e0d",
       "kernarg_segment_size": 248,
-      "lds_bytes": 33280,
-      "vgprs": 191,
+      "lds_bytes": 49664,
+      "vgprs": 256,
       "llvm_options": {
         "enable-post-misched": false,
         "lsr-drop-solution": true,
@@ -988,7 +1001,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_bf16_d256_causal0_bm128_bn32_dv2_bias1",
+      "name": "sdpa_bf16_d256_causal0_bm64_bn32_bias1_pair1",
       "op": "sdpa",
       "dtype": "bf16",
       "priority": 100,
@@ -996,13 +1009,14 @@
       "knobs": {
         "head_dim": 256,
         "causal": 0,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
-        "dv_split": 2,
+        "dv_split": 1,
         "has_bias": 1,
         "head_dim_max": 256,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 1
       },
       "block": [
         256,
@@ -1048,13 +1062,13 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_bf16_d256_causal0_bm128_bn32_dv2_bias1.hsaco",
+      "file": "sdpa_bf16_d256_causal0_bm64_bn32_bias1_pair1.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
       "bytes": 22208,
-      "sha256": "81bf6ebc3685aa68c3fb0eb2d9ec597383269d34a0b93db6be3657f9f0d35112",
+      "sha256": "e6f5a2063a65d7eca85c627fbd684df849ad7c28d0f1158eb3e9374c8f30967d",
       "kernarg_segment_size": 248,
-      "lds_bytes": 33280,
-      "vgprs": 191,
+      "lds_bytes": 49664,
+      "vgprs": 256,
       "llvm_options": {
         "enable-post-misched": false,
         "lsr-drop-solution": true,
@@ -1063,7 +1077,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_bf16_d256_causal1_bm128_bn32_dv2",
+      "name": "sdpa_bf16_d256_causal1_bm64_bn32_pair1",
       "op": "sdpa",
       "dtype": "bf16",
       "priority": 100,
@@ -1071,13 +1085,14 @@
       "knobs": {
         "head_dim": 256,
         "causal": 1,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
-        "dv_split": 2,
+        "dv_split": 1,
         "has_bias": 0,
         "head_dim_max": 256,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 1
       },
       "block": [
         256,
@@ -1123,13 +1138,13 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_bf16_d256_causal1_bm128_bn32_dv2.hsaco",
+      "file": "sdpa_bf16_d256_causal1_bm64_bn32_pair1.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
       "bytes": 21696,
-      "sha256": "09d866256969a601480271ca5999a6659965da61080c702c82bff3c9755c75e8",
+      "sha256": "b8b8f1546601b7bb097055de607ba4875393d8486fc58752c5c503537c71f635",
       "kernarg_segment_size": 248,
-      "lds_bytes": 33280,
-      "vgprs": 185,
+      "lds_bytes": 49664,
+      "vgprs": 256,
       "llvm_options": {
         "enable-post-misched": false,
         "lsr-drop-solution": true,
@@ -1138,7 +1153,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_bf16_d256_causal1_bm128_bn32_dv2_bias1",
+      "name": "sdpa_bf16_d256_causal1_bm64_bn32_bias1_pair1",
       "op": "sdpa",
       "dtype": "bf16",
       "priority": 100,
@@ -1146,13 +1161,14 @@
       "knobs": {
         "head_dim": 256,
         "causal": 1,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
-        "dv_split": 2,
+        "dv_split": 1,
         "has_bias": 1,
         "head_dim_max": 256,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 1
       },
       "block": [
         256,
@@ -1198,13 +1214,13 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_bf16_d256_causal1_bm128_bn32_dv2_bias1.hsaco",
+      "file": "sdpa_bf16_d256_causal1_bm64_bn32_bias1_pair1.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
       "bytes": 22208,
-      "sha256": "f4a57ee3bda25d33cb667e2a5651b2107114ebdfa806bbbf68c8001acc877417",
+      "sha256": "3b7310180c45fcc9ac70e1beb010bb990305e9fff09d246c561e12987f545b12",
       "kernarg_segment_size": 248,
-      "lds_bytes": 33280,
-      "vgprs": 191,
+      "lds_bytes": 49664,
+      "vgprs": 256,
       "llvm_options": {
         "enable-post-misched": false,
         "lsr-drop-solution": true,
@@ -1227,7 +1243,8 @@
         "has_bias": 0,
         "head_dim_max": 64,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -1302,7 +1319,8 @@
         "has_bias": 0,
         "head_dim_max": 64,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -1377,7 +1395,8 @@
         "has_bias": 0,
         "head_dim_max": 96,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -1452,7 +1471,8 @@
         "has_bias": 0,
         "head_dim_max": 96,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -1527,7 +1547,8 @@
         "has_bias": 0,
         "head_dim_max": 128,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -1602,7 +1623,8 @@
         "has_bias": 0,
         "head_dim_max": 128,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -1663,7 +1685,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_bf16_dgeneric_causal0_bm128_bn32_dv2_dmax160",
+      "name": "sdpa_bf16_dgeneric_causal0_bm64_bn32_dmax160_pair1",
       "op": "sdpa",
       "dtype": "bf16",
       "priority": 15,
@@ -1671,13 +1693,14 @@
       "knobs": {
         "head_dim": null,
         "causal": 0,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
-        "dv_split": 2,
+        "dv_split": 1,
         "has_bias": 0,
         "head_dim_max": 160,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 1
       },
       "block": [
         256,
@@ -1723,13 +1746,89 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_bf16_dgeneric_causal0_bm128_bn32_dv2_dmax160.hsaco",
+      "file": "sdpa_bf16_dgeneric_causal0_bm64_bn32_dmax160_pair1.hsaco",
+      "symbol": "flash_attn_func_gfx1151_kernel_0",
+      "bytes": 19520,
+      "sha256": "e3d7c7219511d1872914e09728568f3bf976647011aa4f022c73b8d8c87dd0d1",
+      "kernarg_segment_size": 248,
+      "lds_bytes": 37376,
+      "vgprs": 173,
+      "llvm_options": {
+        "enable-post-misched": false,
+        "lsr-drop-solution": true,
+        "amdgpu-use-amdgpu-trackers": true
+      },
+      "named_args": 0
+    },
+    {
+      "name": "sdpa_bf16_dgeneric_causal1_bm64_bn32_dmax160_pair1",
+      "op": "sdpa",
+      "dtype": "bf16",
+      "priority": 15,
+      "tier": "generic",
+      "knobs": {
+        "head_dim": null,
+        "causal": 1,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 160,
+        "decode": 0,
+        "merge_symbol": "",
+        "hd_pair": 1
+      },
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "grid_rule": "batch_x_qtiles_x_heads_x_dv_split",
+      "args": [
+        {"name": "Q", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "K", "kind": "global_buffer", "size": 8, "offset": 8},
+        {"name": "V", "kind": "global_buffer", "size": 8, "offset": 16},
+        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 32},
+        {"name": "seq_len_q", "kind": "by_value", "size": 4, "offset": 40},
+        {"name": "seq_len_kv", "kind": "by_value", "size": 4, "offset": 44},
+        {"name": "num_heads", "kind": "by_value", "size": 4, "offset": 48},
+        {"name": "kv_group", "kind": "by_value", "size": 4, "offset": 52},
+        {"name": "right_bound", "kind": "by_value", "size": 4, "offset": 56},
+        {"name": "left_bound", "kind": "by_value", "size": 4, "offset": 60},
+        {"name": "align_bottom_right", "kind": "by_value", "size": 4, "offset": 64},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 68},
+        {"name": "scale", "kind": "by_value", "size": 4, "offset": 72},
+        {"name": "q_stride_b", "kind": "by_value", "size": 8, "offset": 80},
+        {"name": "q_stride_s", "kind": "by_value", "size": 8, "offset": 88},
+        {"name": "q_stride_h", "kind": "by_value", "size": 8, "offset": 96},
+        {"name": "k_stride_b", "kind": "by_value", "size": 8, "offset": 104},
+        {"name": "k_stride_s", "kind": "by_value", "size": 8, "offset": 112},
+        {"name": "k_stride_h", "kind": "by_value", "size": 8, "offset": 120},
+        {"name": "v_stride_b", "kind": "by_value", "size": 8, "offset": 128},
+        {"name": "v_stride_s", "kind": "by_value", "size": 8, "offset": 136},
+        {"name": "v_stride_h", "kind": "by_value", "size": 8, "offset": 144},
+        {"name": "o_stride_b", "kind": "by_value", "size": 8, "offset": 152},
+        {"name": "o_stride_s", "kind": "by_value", "size": 8, "offset": 160},
+        {"name": "o_stride_h", "kind": "by_value", "size": 8, "offset": 168},
+        {"name": "lse_stride_b", "kind": "by_value", "size": 8, "offset": 176},
+        {"name": "lse_stride_s", "kind": "by_value", "size": 8, "offset": 184},
+        {"name": "lse_stride_h", "kind": "by_value", "size": 8, "offset": 192},
+        {"name": "BIAS", "kind": "global_buffer", "size": 8, "offset": 200},
+        {"name": "bias_stride_b", "kind": "by_value", "size": 8, "offset": 208},
+        {"name": "bias_stride_h", "kind": "by_value", "size": 8, "offset": 216},
+        {"name": "bias_stride_q", "kind": "by_value", "size": 8, "offset": 224},
+        {"name": "bias_stride_k", "kind": "by_value", "size": 8, "offset": 232},
+        {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
+        {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
+      ],
+      "file": "sdpa_bf16_dgeneric_causal1_bm64_bn32_dmax160_pair1.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
       "bytes": 19392,
-      "sha256": "5760f5b501268195125662b247cccd290510bb8820540b36a6afa235cdfff0be",
+      "sha256": "ad4f6e7eebcfdc9aac0d0d7acc6d78f0d7f504ea679964ba358d18b3a88e7c4e",
       "kernarg_segment_size": 248,
-      "lds_bytes": 20992,
-      "vgprs": 179,
+      "lds_bytes": 37376,
+      "vgprs": 167,
       "llvm_options": {
         "enable-post-misched": false,
         "lsr-drop-solution": true,
@@ -1738,82 +1837,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_bf16_dgeneric_causal1_bm128_bn32_dv2_dmax160",
-      "op": "sdpa",
-      "dtype": "bf16",
-      "priority": 15,
-      "tier": "generic",
-      "knobs": {
-        "head_dim": null,
-        "causal": 1,
-        "block_m": 128,
-        "block_n": 32,
-        "dv_split": 2,
-        "has_bias": 0,
-        "head_dim_max": 160,
-        "decode": 0,
-        "merge_symbol": ""
-      },
-      "block": [
-        256,
-        1,
-        1
-      ],
-      "grid_rule": "batch_x_qtiles_x_heads_x_dv_split",
-      "args": [
-        {"name": "Q", "kind": "global_buffer", "size": 8, "offset": 0},
-        {"name": "K", "kind": "global_buffer", "size": 8, "offset": 8},
-        {"name": "V", "kind": "global_buffer", "size": 8, "offset": 16},
-        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 24},
-        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 32},
-        {"name": "seq_len_q", "kind": "by_value", "size": 4, "offset": 40},
-        {"name": "seq_len_kv", "kind": "by_value", "size": 4, "offset": 44},
-        {"name": "num_heads", "kind": "by_value", "size": 4, "offset": 48},
-        {"name": "kv_group", "kind": "by_value", "size": 4, "offset": 52},
-        {"name": "right_bound", "kind": "by_value", "size": 4, "offset": 56},
-        {"name": "left_bound", "kind": "by_value", "size": 4, "offset": 60},
-        {"name": "align_bottom_right", "kind": "by_value", "size": 4, "offset": 64},
-        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 68},
-        {"name": "scale", "kind": "by_value", "size": 4, "offset": 72},
-        {"name": "q_stride_b", "kind": "by_value", "size": 8, "offset": 80},
-        {"name": "q_stride_s", "kind": "by_value", "size": 8, "offset": 88},
-        {"name": "q_stride_h", "kind": "by_value", "size": 8, "offset": 96},
-        {"name": "k_stride_b", "kind": "by_value", "size": 8, "offset": 104},
-        {"name": "k_stride_s", "kind": "by_value", "size": 8, "offset": 112},
-        {"name": "k_stride_h", "kind": "by_value", "size": 8, "offset": 120},
-        {"name": "v_stride_b", "kind": "by_value", "size": 8, "offset": 128},
-        {"name": "v_stride_s", "kind": "by_value", "size": 8, "offset": 136},
-        {"name": "v_stride_h", "kind": "by_value", "size": 8, "offset": 144},
-        {"name": "o_stride_b", "kind": "by_value", "size": 8, "offset": 152},
-        {"name": "o_stride_s", "kind": "by_value", "size": 8, "offset": 160},
-        {"name": "o_stride_h", "kind": "by_value", "size": 8, "offset": 168},
-        {"name": "lse_stride_b", "kind": "by_value", "size": 8, "offset": 176},
-        {"name": "lse_stride_s", "kind": "by_value", "size": 8, "offset": 184},
-        {"name": "lse_stride_h", "kind": "by_value", "size": 8, "offset": 192},
-        {"name": "BIAS", "kind": "global_buffer", "size": 8, "offset": 200},
-        {"name": "bias_stride_b", "kind": "by_value", "size": 8, "offset": 208},
-        {"name": "bias_stride_h", "kind": "by_value", "size": 8, "offset": 216},
-        {"name": "bias_stride_q", "kind": "by_value", "size": 8, "offset": 224},
-        {"name": "bias_stride_k", "kind": "by_value", "size": 8, "offset": 232},
-        {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
-        {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
-      ],
-      "file": "sdpa_bf16_dgeneric_causal1_bm128_bn32_dv2_dmax160.hsaco",
-      "symbol": "flash_attn_func_gfx1151_kernel_0",
-      "bytes": 19264,
-      "sha256": "d5eef9bcceb6aa1b8d91aeb5250b80b6010ee6852560f16c7c47bad1b0ca848a",
-      "kernarg_segment_size": 248,
-      "lds_bytes": 20992,
-      "vgprs": 186,
-      "llvm_options": {
-        "enable-post-misched": false,
-        "lsr-drop-solution": true,
-        "amdgpu-use-amdgpu-trackers": true
-      },
-      "named_args": 0
-    },
-    {
-      "name": "sdpa_bf16_dgeneric_causal0_bm128_bn32_dv2_dmax224",
+      "name": "sdpa_bf16_dgeneric_causal0_bm64_bn32_dmax224_pair1",
       "op": "sdpa",
       "dtype": "bf16",
       "priority": 12,
@@ -1821,13 +1845,14 @@
       "knobs": {
         "head_dim": null,
         "causal": 0,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
-        "dv_split": 2,
+        "dv_split": 1,
         "has_bias": 0,
         "head_dim_max": 224,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 1
       },
       "block": [
         256,
@@ -1873,88 +1898,13 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_bf16_dgeneric_causal0_bm128_bn32_dv2_dmax224.hsaco",
-      "symbol": "flash_attn_func_gfx1151_kernel_0",
-      "bytes": 22720,
-      "sha256": "43aa905cdb90cceb774c268a339c39403152a2ed55320bb948c71197d17ecf59",
-      "kernarg_segment_size": 248,
-      "lds_bytes": 29184,
-      "vgprs": 218,
-      "llvm_options": {
-        "enable-post-misched": false,
-        "lsr-drop-solution": true,
-        "amdgpu-use-amdgpu-trackers": true
-      },
-      "named_args": 0
-    },
-    {
-      "name": "sdpa_bf16_dgeneric_causal1_bm128_bn32_dv2_dmax224",
-      "op": "sdpa",
-      "dtype": "bf16",
-      "priority": 12,
-      "tier": "generic",
-      "knobs": {
-        "head_dim": null,
-        "causal": 1,
-        "block_m": 128,
-        "block_n": 32,
-        "dv_split": 2,
-        "has_bias": 0,
-        "head_dim_max": 224,
-        "decode": 0,
-        "merge_symbol": ""
-      },
-      "block": [
-        256,
-        1,
-        1
-      ],
-      "grid_rule": "batch_x_qtiles_x_heads_x_dv_split",
-      "args": [
-        {"name": "Q", "kind": "global_buffer", "size": 8, "offset": 0},
-        {"name": "K", "kind": "global_buffer", "size": 8, "offset": 8},
-        {"name": "V", "kind": "global_buffer", "size": 8, "offset": 16},
-        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 24},
-        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 32},
-        {"name": "seq_len_q", "kind": "by_value", "size": 4, "offset": 40},
-        {"name": "seq_len_kv", "kind": "by_value", "size": 4, "offset": 44},
-        {"name": "num_heads", "kind": "by_value", "size": 4, "offset": 48},
-        {"name": "kv_group", "kind": "by_value", "size": 4, "offset": 52},
-        {"name": "right_bound", "kind": "by_value", "size": 4, "offset": 56},
-        {"name": "left_bound", "kind": "by_value", "size": 4, "offset": 60},
-        {"name": "align_bottom_right", "kind": "by_value", "size": 4, "offset": 64},
-        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 68},
-        {"name": "scale", "kind": "by_value", "size": 4, "offset": 72},
-        {"name": "q_stride_b", "kind": "by_value", "size": 8, "offset": 80},
-        {"name": "q_stride_s", "kind": "by_value", "size": 8, "offset": 88},
-        {"name": "q_stride_h", "kind": "by_value", "size": 8, "offset": 96},
-        {"name": "k_stride_b", "kind": "by_value", "size": 8, "offset": 104},
-        {"name": "k_stride_s", "kind": "by_value", "size": 8, "offset": 112},
-        {"name": "k_stride_h", "kind": "by_value", "size": 8, "offset": 120},
-        {"name": "v_stride_b", "kind": "by_value", "size": 8, "offset": 128},
-        {"name": "v_stride_s", "kind": "by_value", "size": 8, "offset": 136},
-        {"name": "v_stride_h", "kind": "by_value", "size": 8, "offset": 144},
-        {"name": "o_stride_b", "kind": "by_value", "size": 8, "offset": 152},
-        {"name": "o_stride_s", "kind": "by_value", "size": 8, "offset": 160},
-        {"name": "o_stride_h", "kind": "by_value", "size": 8, "offset": 168},
-        {"name": "lse_stride_b", "kind": "by_value", "size": 8, "offset": 176},
-        {"name": "lse_stride_s", "kind": "by_value", "size": 8, "offset": 184},
-        {"name": "lse_stride_h", "kind": "by_value", "size": 8, "offset": 192},
-        {"name": "BIAS", "kind": "global_buffer", "size": 8, "offset": 200},
-        {"name": "bias_stride_b", "kind": "by_value", "size": 8, "offset": 208},
-        {"name": "bias_stride_h", "kind": "by_value", "size": 8, "offset": 216},
-        {"name": "bias_stride_q", "kind": "by_value", "size": 8, "offset": 224},
-        {"name": "bias_stride_k", "kind": "by_value", "size": 8, "offset": 232},
-        {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
-        {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
-      ],
-      "file": "sdpa_bf16_dgeneric_causal1_bm128_bn32_dv2_dmax224.hsaco",
+      "file": "sdpa_bf16_dgeneric_causal0_bm64_bn32_dmax224_pair1.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
       "bytes": 22464,
-      "sha256": "e222a31d9914621c8ade141707523202c779392ee2117ea0e7ff5ec9f1cdeb7a",
+      "sha256": "ffac15daf2fe45df2598e552f03c202be0ccaf1fba80a74952ca07ea4d94e114",
       "kernarg_segment_size": 248,
-      "lds_bytes": 29184,
-      "vgprs": 225,
+      "lds_bytes": 45568,
+      "vgprs": 249,
       "llvm_options": {
         "enable-post-misched": false,
         "lsr-drop-solution": true,
@@ -1963,7 +1913,83 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_bf16_dgeneric_causal0_bm128_bn32_dv4_dmax256",
+      "name": "sdpa_bf16_dgeneric_causal1_bm64_bn32_dmax224_pair1",
+      "op": "sdpa",
+      "dtype": "bf16",
+      "priority": 12,
+      "tier": "generic",
+      "knobs": {
+        "head_dim": null,
+        "causal": 1,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 224,
+        "decode": 0,
+        "merge_symbol": "",
+        "hd_pair": 1
+      },
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "grid_rule": "batch_x_qtiles_x_heads_x_dv_split",
+      "args": [
+        {"name": "Q", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "K", "kind": "global_buffer", "size": 8, "offset": 8},
+        {"name": "V", "kind": "global_buffer", "size": 8, "offset": 16},
+        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 32},
+        {"name": "seq_len_q", "kind": "by_value", "size": 4, "offset": 40},
+        {"name": "seq_len_kv", "kind": "by_value", "size": 4, "offset": 44},
+        {"name": "num_heads", "kind": "by_value", "size": 4, "offset": 48},
+        {"name": "kv_group", "kind": "by_value", "size": 4, "offset": 52},
+        {"name": "right_bound", "kind": "by_value", "size": 4, "offset": 56},
+        {"name": "left_bound", "kind": "by_value", "size": 4, "offset": 60},
+        {"name": "align_bottom_right", "kind": "by_value", "size": 4, "offset": 64},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 68},
+        {"name": "scale", "kind": "by_value", "size": 4, "offset": 72},
+        {"name": "q_stride_b", "kind": "by_value", "size": 8, "offset": 80},
+        {"name": "q_stride_s", "kind": "by_value", "size": 8, "offset": 88},
+        {"name": "q_stride_h", "kind": "by_value", "size": 8, "offset": 96},
+        {"name": "k_stride_b", "kind": "by_value", "size": 8, "offset": 104},
+        {"name": "k_stride_s", "kind": "by_value", "size": 8, "offset": 112},
+        {"name": "k_stride_h", "kind": "by_value", "size": 8, "offset": 120},
+        {"name": "v_stride_b", "kind": "by_value", "size": 8, "offset": 128},
+        {"name": "v_stride_s", "kind": "by_value", "size": 8, "offset": 136},
+        {"name": "v_stride_h", "kind": "by_value", "size": 8, "offset": 144},
+        {"name": "o_stride_b", "kind": "by_value", "size": 8, "offset": 152},
+        {"name": "o_stride_s", "kind": "by_value", "size": 8, "offset": 160},
+        {"name": "o_stride_h", "kind": "by_value", "size": 8, "offset": 168},
+        {"name": "lse_stride_b", "kind": "by_value", "size": 8, "offset": 176},
+        {"name": "lse_stride_s", "kind": "by_value", "size": 8, "offset": 184},
+        {"name": "lse_stride_h", "kind": "by_value", "size": 8, "offset": 192},
+        {"name": "BIAS", "kind": "global_buffer", "size": 8, "offset": 200},
+        {"name": "bias_stride_b", "kind": "by_value", "size": 8, "offset": 208},
+        {"name": "bias_stride_h", "kind": "by_value", "size": 8, "offset": 216},
+        {"name": "bias_stride_q", "kind": "by_value", "size": 8, "offset": 224},
+        {"name": "bias_stride_k", "kind": "by_value", "size": 8, "offset": 232},
+        {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
+        {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
+      ],
+      "file": "sdpa_bf16_dgeneric_causal1_bm64_bn32_dmax224_pair1.hsaco",
+      "symbol": "flash_attn_func_gfx1151_kernel_0",
+      "bytes": 22464,
+      "sha256": "c6136ab5993026d6780c1c538e89c0125b6a541199218c52ad58afcee74e9a77",
+      "kernarg_segment_size": 248,
+      "lds_bytes": 45568,
+      "vgprs": 256,
+      "llvm_options": {
+        "enable-post-misched": false,
+        "lsr-drop-solution": true,
+        "amdgpu-use-amdgpu-trackers": true
+      },
+      "named_args": 0
+    },
+    {
+      "name": "sdpa_bf16_dgeneric_causal0_bm64_bn32_dv2_dmax256_pair1",
       "op": "sdpa",
       "dtype": "bf16",
       "priority": 10,
@@ -1971,13 +1997,14 @@
       "knobs": {
         "head_dim": null,
         "causal": 0,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
-        "dv_split": 4,
+        "dv_split": 2,
         "has_bias": 0,
         "head_dim_max": 256,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 1
       },
       "block": [
         256,
@@ -2023,13 +2050,13 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_bf16_dgeneric_causal0_bm128_bn32_dv4_dmax256.hsaco",
+      "file": "sdpa_bf16_dgeneric_causal0_bm64_bn32_dv2_dmax256_pair1.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
-      "bytes": 19776,
-      "sha256": "54670d6a537fa0fc52e690d0e0433a0b22fd7051c3e7c6aa4577ffde9def5527",
+      "bytes": 18112,
+      "sha256": "439be7bd62d51bc9587fe2ff5abc75c4579a338b15d275fe8baa71986add2de4",
       "kernarg_segment_size": 248,
-      "lds_bytes": 33280,
-      "vgprs": 166,
+      "lds_bytes": 49664,
+      "vgprs": 194,
       "llvm_options": {
         "enable-post-misched": false,
         "lsr-drop-solution": true,
@@ -2038,7 +2065,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_bf16_dgeneric_causal1_bm128_bn32_dv4_dmax256",
+      "name": "sdpa_bf16_dgeneric_causal1_bm64_bn32_dv2_dmax256_pair1",
       "op": "sdpa",
       "dtype": "bf16",
       "priority": 10,
@@ -2046,13 +2073,14 @@
       "knobs": {
         "head_dim": null,
         "causal": 1,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
-        "dv_split": 4,
+        "dv_split": 2,
         "has_bias": 0,
         "head_dim_max": 256,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 1
       },
       "block": [
         256,
@@ -2098,13 +2126,13 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_bf16_dgeneric_causal1_bm128_bn32_dv4_dmax256.hsaco",
+      "file": "sdpa_bf16_dgeneric_causal1_bm64_bn32_dv2_dmax256_pair1.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
-      "bytes": 19648,
-      "sha256": "e86352a2b4480f7cd72302ca977a81322da81d7513de2ebab6f425e807a9e2aa",
+      "bytes": 17984,
+      "sha256": "f0ff76aa6e83c9c6b7c6495e37a68429b0f317279a93a873d9b8880dfc49257c",
       "kernarg_segment_size": 248,
-      "lds_bytes": 33280,
-      "vgprs": 164,
+      "lds_bytes": 49664,
+      "vgprs": 194,
       "llvm_options": {
         "enable-post-misched": false,
         "lsr-drop-solution": true,
@@ -2127,7 +2155,8 @@
         "has_bias": 0,
         "head_dim_max": 64,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -2222,7 +2251,8 @@
         "has_bias": 1,
         "head_dim_max": 64,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -2317,7 +2347,8 @@
         "has_bias": 0,
         "head_dim_max": 64,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -2412,7 +2443,8 @@
         "has_bias": 1,
         "head_dim_max": 64,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -2507,7 +2539,8 @@
         "has_bias": 0,
         "head_dim_max": 96,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -2602,7 +2635,8 @@
         "has_bias": 1,
         "head_dim_max": 96,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -2697,7 +2731,8 @@
         "has_bias": 0,
         "head_dim_max": 96,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -2792,7 +2827,8 @@
         "has_bias": 1,
         "head_dim_max": 96,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -2887,7 +2923,8 @@
         "has_bias": 0,
         "head_dim_max": 128,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -2982,7 +3019,8 @@
         "has_bias": 1,
         "head_dim_max": 128,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -3077,7 +3115,8 @@
         "has_bias": 0,
         "head_dim_max": 128,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -3172,7 +3211,8 @@
         "has_bias": 1,
         "head_dim_max": 128,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -3267,7 +3307,8 @@
         "has_bias": 0,
         "head_dim_max": 256,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -3362,7 +3403,8 @@
         "has_bias": 1,
         "head_dim_max": 256,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -3457,7 +3499,8 @@
         "has_bias": 0,
         "head_dim_max": 256,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -3552,7 +3595,8 @@
         "has_bias": 1,
         "head_dim_max": 256,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -3647,7 +3691,8 @@
         "has_bias": 0,
         "head_dim_max": 96,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -3742,7 +3787,8 @@
         "has_bias": 0,
         "head_dim_max": 96,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -3837,7 +3883,8 @@
         "has_bias": 0,
         "head_dim_max": 256,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -3932,7 +3979,8 @@
         "has_bias": 0,
         "head_dim_max": 256,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -4013,7 +4061,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_f16_d64_causal0_bm128_bn32",
+      "name": "sdpa_f16_d64_causal0_bm64_bn32",
       "op": "sdpa",
       "dtype": "f16",
       "priority": 100,
@@ -4021,16 +4069,17 @@
       "knobs": {
         "head_dim": 64,
         "causal": 0,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
         "dv_split": 1,
         "has_bias": 0,
         "head_dim_max": 64,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
-        256,
+        128,
         1,
         1
       ],
@@ -4073,10 +4122,10 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_f16_d64_causal0_bm128_bn32.hsaco",
+      "file": "sdpa_f16_d64_causal0_bm64_bn32.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
-      "bytes": 14016,
-      "sha256": "0f09a4e93552915c4e2d4d1eb2fddaabf1c8140750c12293441b5cacb6d1a696",
+      "bytes": 13888,
+      "sha256": "cba88ef5b66a885a442784ec6ab45e9b040fcc8461482db339fc1724ab24068b",
       "kernarg_segment_size": 248,
       "lds_bytes": 8704,
       "vgprs": 156,
@@ -4102,7 +4151,8 @@
         "has_bias": 1,
         "head_dim_max": 64,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -4163,7 +4213,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_f16_d64_causal1_bm128_bn32",
+      "name": "sdpa_f16_d64_causal1_bm64_bn32",
       "op": "sdpa",
       "dtype": "f16",
       "priority": 100,
@@ -4171,16 +4221,17 @@
       "knobs": {
         "head_dim": 64,
         "causal": 1,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
         "dv_split": 1,
         "has_bias": 0,
         "head_dim_max": 64,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
-        256,
+        128,
         1,
         1
       ],
@@ -4223,13 +4274,13 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_f16_d64_causal1_bm128_bn32.hsaco",
+      "file": "sdpa_f16_d64_causal1_bm64_bn32.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
-      "bytes": 14272,
-      "sha256": "1b474f2c85d6e033d53c714e522529bfc279d22d51d50ed26ab4eb5a46d59c1f",
+      "bytes": 14016,
+      "sha256": "fdcad18ff7eefb7343e88c4c08031a2eae7fb9cf9cfd282b3e7bbd1a94dbd1fd",
       "kernarg_segment_size": 248,
       "lds_bytes": 8704,
-      "vgprs": 165,
+      "vgprs": 166,
       "llvm_options": {
         "enable-post-misched": false,
         "lsr-drop-solution": true,
@@ -4252,7 +4303,8 @@
         "has_bias": 1,
         "head_dim_max": 64,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -4327,7 +4379,8 @@
         "has_bias": 0,
         "head_dim_max": 96,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -4402,7 +4455,8 @@
         "has_bias": 1,
         "head_dim_max": 96,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -4477,7 +4531,8 @@
         "has_bias": 0,
         "head_dim_max": 96,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -4552,7 +4607,8 @@
         "has_bias": 1,
         "head_dim_max": 96,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -4613,7 +4669,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_f16_d128_causal0_bm128_bn32",
+      "name": "sdpa_f16_d128_causal0_bm64_bn32",
       "op": "sdpa",
       "dtype": "f16",
       "priority": 100,
@@ -4621,16 +4677,17 @@
       "knobs": {
         "head_dim": 128,
         "causal": 0,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
         "dv_split": 1,
         "has_bias": 0,
         "head_dim_max": 128,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
-        256,
+        128,
         1,
         1
       ],
@@ -4673,13 +4730,13 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_f16_d128_causal0_bm128_bn32.hsaco",
+      "file": "sdpa_f16_d128_causal0_bm64_bn32.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
-      "bytes": 17344,
-      "sha256": "8b809205f0eb1c9f6c8b9c9def0eae6b6853b596cbeb03e1dca691c7280c5eca",
+      "bytes": 17600,
+      "sha256": "06a20c6f5207ecf9f103983c5b73335600ff8bb6e9ab92b9e524d0f0d308f7c6",
       "kernarg_segment_size": 248,
       "lds_bytes": 16896,
-      "vgprs": 242,
+      "vgprs": 248,
       "llvm_options": {
         "enable-post-misched": false,
         "lsr-drop-solution": true,
@@ -4702,7 +4759,8 @@
         "has_bias": 1,
         "head_dim_max": 128,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -4777,7 +4835,8 @@
         "has_bias": 0,
         "head_dim_max": 128,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -4852,7 +4911,8 @@
         "has_bias": 1,
         "head_dim_max": 128,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -4913,7 +4973,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_f16_d256_causal0_bm128_bn32_dv2",
+      "name": "sdpa_f16_d256_causal0_bm64_bn32_pair1",
       "op": "sdpa",
       "dtype": "f16",
       "priority": 100,
@@ -4921,13 +4981,14 @@
       "knobs": {
         "head_dim": 256,
         "causal": 0,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
-        "dv_split": 2,
+        "dv_split": 1,
         "has_bias": 0,
         "head_dim_max": 256,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 1
       },
       "block": [
         256,
@@ -4973,13 +5034,13 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_f16_d256_causal0_bm128_bn32_dv2.hsaco",
+      "file": "sdpa_f16_d256_causal0_bm64_bn32_pair1.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
-      "bytes": 17600,
-      "sha256": "5b8b821e6129dcbe1f8746d126a782a9027f443a8c22eb2cf8c555e16e4205d1",
+      "bytes": 17856,
+      "sha256": "bc1cc4e40abbe52ff88be8326dc369b412199437df3ec6e2c849220356e74fcd",
       "kernarg_segment_size": 248,
-      "lds_bytes": 33280,
-      "vgprs": 198,
+      "lds_bytes": 49664,
+      "vgprs": 256,
       "llvm_options": {
         "enable-post-misched": false,
         "lsr-drop-solution": true,
@@ -4988,7 +5049,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_f16_d256_causal0_bm128_bn32_dv2_bias1",
+      "name": "sdpa_f16_d256_causal0_bm64_bn32_bias1_pair1",
       "op": "sdpa",
       "dtype": "f16",
       "priority": 100,
@@ -4996,13 +5057,14 @@
       "knobs": {
         "head_dim": 256,
         "causal": 0,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
-        "dv_split": 2,
+        "dv_split": 1,
         "has_bias": 1,
         "head_dim_max": 256,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 1
       },
       "block": [
         256,
@@ -5048,13 +5110,13 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_f16_d256_causal0_bm128_bn32_dv2_bias1.hsaco",
+      "file": "sdpa_f16_d256_causal0_bm64_bn32_bias1_pair1.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
       "bytes": 18368,
-      "sha256": "8e048a9cb58adad0bf0f8be7fed4c3b2a92268c3ee1ba87c134cbd781a860966",
+      "sha256": "eeff5273237fc99e687c77ae15b008f1ccc28466185c829c129a5a6620ba2a9f",
       "kernarg_segment_size": 248,
-      "lds_bytes": 33280,
-      "vgprs": 213,
+      "lds_bytes": 49664,
+      "vgprs": 256,
       "llvm_options": {
         "enable-post-misched": false,
         "lsr-drop-solution": true,
@@ -5063,7 +5125,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_f16_d256_causal1_bm128_bn32_dv2",
+      "name": "sdpa_f16_d256_causal1_bm64_bn32_pair1",
       "op": "sdpa",
       "dtype": "f16",
       "priority": 100,
@@ -5071,13 +5133,14 @@
       "knobs": {
         "head_dim": 256,
         "causal": 1,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
-        "dv_split": 2,
+        "dv_split": 1,
         "has_bias": 0,
         "head_dim_max": 256,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 1
       },
       "block": [
         256,
@@ -5123,13 +5186,13 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_f16_d256_causal1_bm128_bn32_dv2.hsaco",
+      "file": "sdpa_f16_d256_causal1_bm64_bn32_pair1.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
-      "bytes": 17600,
-      "sha256": "109a8e207433e1e3e27912b65aa780df5a5381859496c8693fd004b2f33892c0",
+      "bytes": 17856,
+      "sha256": "fa2ceb46a457694b24722e300612dafa9f952abce1b58a770c6ab09f300d91b1",
       "kernarg_segment_size": 248,
-      "lds_bytes": 33280,
-      "vgprs": 199,
+      "lds_bytes": 49664,
+      "vgprs": 256,
       "llvm_options": {
         "enable-post-misched": false,
         "lsr-drop-solution": true,
@@ -5138,7 +5201,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_f16_d256_causal1_bm128_bn32_dv2_bias1",
+      "name": "sdpa_f16_d256_causal1_bm64_bn32_bias1_pair1",
       "op": "sdpa",
       "dtype": "f16",
       "priority": 100,
@@ -5146,13 +5209,14 @@
       "knobs": {
         "head_dim": 256,
         "causal": 1,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
-        "dv_split": 2,
+        "dv_split": 1,
         "has_bias": 1,
         "head_dim_max": 256,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 1
       },
       "block": [
         256,
@@ -5198,13 +5262,13 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_f16_d256_causal1_bm128_bn32_dv2_bias1.hsaco",
+      "file": "sdpa_f16_d256_causal1_bm64_bn32_bias1_pair1.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
       "bytes": 18240,
-      "sha256": "14437e422c80dcf1f40073bea3f1e06d850d133fd87e82e1b0dfbd73fe8dcd59",
+      "sha256": "5d4023a6c67c306e34fbeccedac228e1e875dfbb29e9bee129ca5928f89e6e17",
       "kernarg_segment_size": 248,
-      "lds_bytes": 33280,
-      "vgprs": 214,
+      "lds_bytes": 49664,
+      "vgprs": 256,
       "llvm_options": {
         "enable-post-misched": false,
         "lsr-drop-solution": true,
@@ -5227,7 +5291,8 @@
         "has_bias": 0,
         "head_dim_max": 64,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -5302,7 +5367,8 @@
         "has_bias": 0,
         "head_dim_max": 64,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -5377,7 +5443,8 @@
         "has_bias": 0,
         "head_dim_max": 96,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -5452,7 +5519,8 @@
         "has_bias": 0,
         "head_dim_max": 96,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -5527,7 +5595,8 @@
         "has_bias": 0,
         "head_dim_max": 128,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -5602,7 +5671,8 @@
         "has_bias": 0,
         "head_dim_max": 128,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 0
       },
       "block": [
         256,
@@ -5663,7 +5733,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_f16_dgeneric_causal0_bm128_bn32_dv2_dmax160",
+      "name": "sdpa_f16_dgeneric_causal0_bm64_bn32_dmax160_pair1",
       "op": "sdpa",
       "dtype": "f16",
       "priority": 15,
@@ -5671,13 +5741,14 @@
       "knobs": {
         "head_dim": null,
         "causal": 0,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
-        "dv_split": 2,
+        "dv_split": 1,
         "has_bias": 0,
         "head_dim_max": 160,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 1
       },
       "block": [
         256,
@@ -5723,13 +5794,13 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_f16_dgeneric_causal0_bm128_bn32_dv2_dmax160.hsaco",
+      "file": "sdpa_f16_dgeneric_causal0_bm64_bn32_dmax160_pair1.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
       "bytes": 16704,
-      "sha256": "ce24a3ae0c85f38ebfb11b4969fbe41b0833adb26fd494108b6bb7084ec8c2a7",
+      "sha256": "b147dbca0222e094029c75810e62088aa78e9f897aae022677048348144bb1b0",
       "kernarg_segment_size": 248,
-      "lds_bytes": 20992,
-      "vgprs": 184,
+      "lds_bytes": 37376,
+      "vgprs": 165,
       "llvm_options": {
         "enable-post-misched": false,
         "lsr-drop-solution": true,
@@ -5738,7 +5809,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_f16_dgeneric_causal1_bm128_bn32_dv2_dmax160",
+      "name": "sdpa_f16_dgeneric_causal1_bm64_bn32_dmax160_pair1",
       "op": "sdpa",
       "dtype": "f16",
       "priority": 15,
@@ -5746,13 +5817,14 @@
       "knobs": {
         "head_dim": null,
         "causal": 1,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
-        "dv_split": 2,
+        "dv_split": 1,
         "has_bias": 0,
         "head_dim_max": 160,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 1
       },
       "block": [
         256,
@@ -5798,13 +5870,13 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_f16_dgeneric_causal1_bm128_bn32_dv2_dmax160.hsaco",
+      "file": "sdpa_f16_dgeneric_causal1_bm64_bn32_dmax160_pair1.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
       "bytes": 16576,
-      "sha256": "1535bdc3a4ddc0aa3d168bb36d9f5da84fc9ccbc1a2c6c0bc110c2e07523b045",
+      "sha256": "22b5885efdaea0c1f159518ac5817f005b07d7ce2f460e8fbe11bcfde595a85b",
       "kernarg_segment_size": 248,
-      "lds_bytes": 20992,
-      "vgprs": 187,
+      "lds_bytes": 37376,
+      "vgprs": 167,
       "llvm_options": {
         "enable-post-misched": false,
         "lsr-drop-solution": true,
@@ -5813,7 +5885,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_f16_dgeneric_causal0_bm128_bn32_dv2_dmax224",
+      "name": "sdpa_f16_dgeneric_causal0_bm64_bn32_dmax224_pair1",
       "op": "sdpa",
       "dtype": "f16",
       "priority": 12,
@@ -5821,13 +5893,14 @@
       "knobs": {
         "head_dim": null,
         "causal": 0,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
-        "dv_split": 2,
+        "dv_split": 1,
         "has_bias": 0,
         "head_dim_max": 224,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 1
       },
       "block": [
         256,
@@ -5873,88 +5946,13 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_f16_dgeneric_causal0_bm128_bn32_dv2_dmax224.hsaco",
-      "symbol": "flash_attn_func_gfx1151_kernel_0",
-      "bytes": 19136,
-      "sha256": "8b2c98e9b3e5e50e8de870ab90c5b37324d82afbac6b55b2043faf531d2f6c4a",
-      "kernarg_segment_size": 248,
-      "lds_bytes": 29184,
-      "vgprs": 214,
-      "llvm_options": {
-        "enable-post-misched": false,
-        "lsr-drop-solution": true,
-        "amdgpu-use-amdgpu-trackers": true
-      },
-      "named_args": 0
-    },
-    {
-      "name": "sdpa_f16_dgeneric_causal1_bm128_bn32_dv2_dmax224",
-      "op": "sdpa",
-      "dtype": "f16",
-      "priority": 12,
-      "tier": "generic",
-      "knobs": {
-        "head_dim": null,
-        "causal": 1,
-        "block_m": 128,
-        "block_n": 32,
-        "dv_split": 2,
-        "has_bias": 0,
-        "head_dim_max": 224,
-        "decode": 0,
-        "merge_symbol": ""
-      },
-      "block": [
-        256,
-        1,
-        1
-      ],
-      "grid_rule": "batch_x_qtiles_x_heads_x_dv_split",
-      "args": [
-        {"name": "Q", "kind": "global_buffer", "size": 8, "offset": 0},
-        {"name": "K", "kind": "global_buffer", "size": 8, "offset": 8},
-        {"name": "V", "kind": "global_buffer", "size": 8, "offset": 16},
-        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 24},
-        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 32},
-        {"name": "seq_len_q", "kind": "by_value", "size": 4, "offset": 40},
-        {"name": "seq_len_kv", "kind": "by_value", "size": 4, "offset": 44},
-        {"name": "num_heads", "kind": "by_value", "size": 4, "offset": 48},
-        {"name": "kv_group", "kind": "by_value", "size": 4, "offset": 52},
-        {"name": "right_bound", "kind": "by_value", "size": 4, "offset": 56},
-        {"name": "left_bound", "kind": "by_value", "size": 4, "offset": 60},
-        {"name": "align_bottom_right", "kind": "by_value", "size": 4, "offset": 64},
-        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 68},
-        {"name": "scale", "kind": "by_value", "size": 4, "offset": 72},
-        {"name": "q_stride_b", "kind": "by_value", "size": 8, "offset": 80},
-        {"name": "q_stride_s", "kind": "by_value", "size": 8, "offset": 88},
-        {"name": "q_stride_h", "kind": "by_value", "size": 8, "offset": 96},
-        {"name": "k_stride_b", "kind": "by_value", "size": 8, "offset": 104},
-        {"name": "k_stride_s", "kind": "by_value", "size": 8, "offset": 112},
-        {"name": "k_stride_h", "kind": "by_value", "size": 8, "offset": 120},
-        {"name": "v_stride_b", "kind": "by_value", "size": 8, "offset": 128},
-        {"name": "v_stride_s", "kind": "by_value", "size": 8, "offset": 136},
-        {"name": "v_stride_h", "kind": "by_value", "size": 8, "offset": 144},
-        {"name": "o_stride_b", "kind": "by_value", "size": 8, "offset": 152},
-        {"name": "o_stride_s", "kind": "by_value", "size": 8, "offset": 160},
-        {"name": "o_stride_h", "kind": "by_value", "size": 8, "offset": 168},
-        {"name": "lse_stride_b", "kind": "by_value", "size": 8, "offset": 176},
-        {"name": "lse_stride_s", "kind": "by_value", "size": 8, "offset": 184},
-        {"name": "lse_stride_h", "kind": "by_value", "size": 8, "offset": 192},
-        {"name": "BIAS", "kind": "global_buffer", "size": 8, "offset": 200},
-        {"name": "bias_stride_b", "kind": "by_value", "size": 8, "offset": 208},
-        {"name": "bias_stride_h", "kind": "by_value", "size": 8, "offset": 216},
-        {"name": "bias_stride_q", "kind": "by_value", "size": 8, "offset": 224},
-        {"name": "bias_stride_k", "kind": "by_value", "size": 8, "offset": 232},
-        {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
-        {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
-      ],
-      "file": "sdpa_f16_dgeneric_causal1_bm128_bn32_dv2_dmax224.hsaco",
+      "file": "sdpa_f16_dgeneric_causal0_bm64_bn32_dmax224_pair1.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
       "bytes": 19008,
-      "sha256": "d0685c3fd5bff0abb8064a828e82ac33531ac9dd75b58807a0b3a6f8093acdd6",
+      "sha256": "130cb436a8b2f522087dce9f9f7a09b0aa1e13d73187922f74adbb9fa9687ee8",
       "kernarg_segment_size": 248,
-      "lds_bytes": 29184,
-      "vgprs": 224,
+      "lds_bytes": 45568,
+      "vgprs": 243,
       "llvm_options": {
         "enable-post-misched": false,
         "lsr-drop-solution": true,
@@ -5963,7 +5961,83 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_f16_dgeneric_causal0_bm128_bn32_dv4_dmax256",
+      "name": "sdpa_f16_dgeneric_causal1_bm64_bn32_dmax224_pair1",
+      "op": "sdpa",
+      "dtype": "f16",
+      "priority": 12,
+      "tier": "generic",
+      "knobs": {
+        "head_dim": null,
+        "causal": 1,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 224,
+        "decode": 0,
+        "merge_symbol": "",
+        "hd_pair": 1
+      },
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "grid_rule": "batch_x_qtiles_x_heads_x_dv_split",
+      "args": [
+        {"name": "Q", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "K", "kind": "global_buffer", "size": 8, "offset": 8},
+        {"name": "V", "kind": "global_buffer", "size": 8, "offset": 16},
+        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 32},
+        {"name": "seq_len_q", "kind": "by_value", "size": 4, "offset": 40},
+        {"name": "seq_len_kv", "kind": "by_value", "size": 4, "offset": 44},
+        {"name": "num_heads", "kind": "by_value", "size": 4, "offset": 48},
+        {"name": "kv_group", "kind": "by_value", "size": 4, "offset": 52},
+        {"name": "right_bound", "kind": "by_value", "size": 4, "offset": 56},
+        {"name": "left_bound", "kind": "by_value", "size": 4, "offset": 60},
+        {"name": "align_bottom_right", "kind": "by_value", "size": 4, "offset": 64},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 68},
+        {"name": "scale", "kind": "by_value", "size": 4, "offset": 72},
+        {"name": "q_stride_b", "kind": "by_value", "size": 8, "offset": 80},
+        {"name": "q_stride_s", "kind": "by_value", "size": 8, "offset": 88},
+        {"name": "q_stride_h", "kind": "by_value", "size": 8, "offset": 96},
+        {"name": "k_stride_b", "kind": "by_value", "size": 8, "offset": 104},
+        {"name": "k_stride_s", "kind": "by_value", "size": 8, "offset": 112},
+        {"name": "k_stride_h", "kind": "by_value", "size": 8, "offset": 120},
+        {"name": "v_stride_b", "kind": "by_value", "size": 8, "offset": 128},
+        {"name": "v_stride_s", "kind": "by_value", "size": 8, "offset": 136},
+        {"name": "v_stride_h", "kind": "by_value", "size": 8, "offset": 144},
+        {"name": "o_stride_b", "kind": "by_value", "size": 8, "offset": 152},
+        {"name": "o_stride_s", "kind": "by_value", "size": 8, "offset": 160},
+        {"name": "o_stride_h", "kind": "by_value", "size": 8, "offset": 168},
+        {"name": "lse_stride_b", "kind": "by_value", "size": 8, "offset": 176},
+        {"name": "lse_stride_s", "kind": "by_value", "size": 8, "offset": 184},
+        {"name": "lse_stride_h", "kind": "by_value", "size": 8, "offset": 192},
+        {"name": "BIAS", "kind": "global_buffer", "size": 8, "offset": 200},
+        {"name": "bias_stride_b", "kind": "by_value", "size": 8, "offset": 208},
+        {"name": "bias_stride_h", "kind": "by_value", "size": 8, "offset": 216},
+        {"name": "bias_stride_q", "kind": "by_value", "size": 8, "offset": 224},
+        {"name": "bias_stride_k", "kind": "by_value", "size": 8, "offset": 232},
+        {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
+        {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
+      ],
+      "file": "sdpa_f16_dgeneric_causal1_bm64_bn32_dmax224_pair1.hsaco",
+      "symbol": "flash_attn_func_gfx1151_kernel_0",
+      "bytes": 18752,
+      "sha256": "81ee5f4fbd79d0f9c0ed55ed29c025e6f5fd3f79f4d5a1947658bcb6b62ed08e",
+      "kernarg_segment_size": 248,
+      "lds_bytes": 45568,
+      "vgprs": 254,
+      "llvm_options": {
+        "enable-post-misched": false,
+        "lsr-drop-solution": true,
+        "amdgpu-use-amdgpu-trackers": true
+      },
+      "named_args": 0
+    },
+    {
+      "name": "sdpa_f16_dgeneric_causal0_bm64_bn32_dv2_dmax256_pair1",
       "op": "sdpa",
       "dtype": "f16",
       "priority": 10,
@@ -5971,13 +6045,14 @@
       "knobs": {
         "head_dim": null,
         "causal": 0,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
-        "dv_split": 4,
+        "dv_split": 2,
         "has_bias": 0,
         "head_dim_max": 256,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 1
       },
       "block": [
         256,
@@ -6023,13 +6098,13 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_f16_dgeneric_causal0_bm128_bn32_dv4_dmax256.hsaco",
+      "file": "sdpa_f16_dgeneric_causal0_bm64_bn32_dv2_dmax256_pair1.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
-      "bytes": 17088,
-      "sha256": "2c8bcbdf5ddc1d504023d1b2ef1680063b28fcec7a30e3dcfb10e816f9bc3903",
+      "bytes": 15552,
+      "sha256": "54c2bb0aee7e4dc24d2676bf8aea437b0abb2d97e25f96164ae406247c03b7bc",
       "kernarg_segment_size": 248,
-      "lds_bytes": 33280,
-      "vgprs": 170,
+      "lds_bytes": 49664,
+      "vgprs": 194,
       "llvm_options": {
         "enable-post-misched": false,
         "lsr-drop-solution": true,
@@ -6038,7 +6113,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_f16_dgeneric_causal1_bm128_bn32_dv4_dmax256",
+      "name": "sdpa_f16_dgeneric_causal1_bm64_bn32_dv2_dmax256_pair1",
       "op": "sdpa",
       "dtype": "f16",
       "priority": 10,
@@ -6046,13 +6121,14 @@
       "knobs": {
         "head_dim": null,
         "causal": 1,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
-        "dv_split": 4,
+        "dv_split": 2,
         "has_bias": 0,
         "head_dim_max": 256,
         "decode": 0,
-        "merge_symbol": ""
+        "merge_symbol": "",
+        "hd_pair": 1
       },
       "block": [
         256,
@@ -6098,13 +6174,13 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_f16_dgeneric_causal1_bm128_bn32_dv4_dmax256.hsaco",
+      "file": "sdpa_f16_dgeneric_causal1_bm64_bn32_dv2_dmax256_pair1.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
-      "bytes": 16960,
-      "sha256": "3c9d40402e575936c9cbfb8f0bb635d58240340b5d90149482dbf9c7d37607de",
+      "bytes": 15424,
+      "sha256": "719c7002b3ca2231996bca454b3e11e47a898e22219387d12f81abf926d70281",
       "kernarg_segment_size": 248,
-      "lds_bytes": 33280,
-      "vgprs": 167,
+      "lds_bytes": 49664,
+      "vgprs": 194,
       "llvm_options": {
         "enable-post-misched": false,
         "lsr-drop-solution": true,
@@ -6127,7 +6203,8 @@
         "has_bias": 0,
         "head_dim_max": 64,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -6222,7 +6299,8 @@
         "has_bias": 1,
         "head_dim_max": 64,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -6317,7 +6395,8 @@
         "has_bias": 0,
         "head_dim_max": 64,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -6412,7 +6491,8 @@
         "has_bias": 1,
         "head_dim_max": 64,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -6507,7 +6587,8 @@
         "has_bias": 0,
         "head_dim_max": 96,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -6602,7 +6683,8 @@
         "has_bias": 1,
         "head_dim_max": 96,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -6697,7 +6779,8 @@
         "has_bias": 0,
         "head_dim_max": 96,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -6792,7 +6875,8 @@
         "has_bias": 1,
         "head_dim_max": 96,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -6887,7 +6971,8 @@
         "has_bias": 0,
         "head_dim_max": 128,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -6982,7 +7067,8 @@
         "has_bias": 1,
         "head_dim_max": 128,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -7077,7 +7163,8 @@
         "has_bias": 0,
         "head_dim_max": 128,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -7172,7 +7259,8 @@
         "has_bias": 1,
         "head_dim_max": 128,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -7267,7 +7355,8 @@
         "has_bias": 0,
         "head_dim_max": 256,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -7362,7 +7451,8 @@
         "has_bias": 1,
         "head_dim_max": 256,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -7457,7 +7547,8 @@
         "has_bias": 0,
         "head_dim_max": 256,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -7552,7 +7643,8 @@
         "has_bias": 1,
         "head_dim_max": 256,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -7647,7 +7739,8 @@
         "has_bias": 0,
         "head_dim_max": 96,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -7742,7 +7835,8 @@
         "has_bias": 0,
         "head_dim_max": 96,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -7837,7 +7931,8 @@
         "has_bias": 0,
         "head_dim_max": 256,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
@@ -7932,7 +8027,8 @@
         "has_bias": 0,
         "head_dim_max": 256,
         "decode": 1,
-        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1"
+        "merge_symbol": "flash_attn_decode_merge_gfx11_kernel_1",
+        "hd_pair": 0
       },
       "block": [
         128,
