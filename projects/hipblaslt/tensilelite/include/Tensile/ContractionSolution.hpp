@@ -206,6 +206,7 @@ namespace TensileLite
         PersistentGrid,
         PersistentWithBatch,
         PersistentNoBatch,
+        TilesYGSU,
         ComputeUnits,
         CustomGridSize_Count,
     };
