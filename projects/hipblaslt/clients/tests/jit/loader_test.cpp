@@ -1,81 +1,28 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 #include "hipblaslt-jit-loader.hpp"
-#include "test_helpers.hpp"
+#include "library_fixture.hpp"
+#include "solution_entry.hpp"
+#include <Tensile/hip/HipHardware.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include <Tensile/hip/HipHardware.hpp>
 #include <algorithm>
 #include <filesystem>
-#include <iostream>
-#include <sstream>
 #include <string>
+#include <vector>
 
-// Builds the plain and plain-pair bundles of the current device's architecture
-// with comgr for the device, loads them through the TensileLite loader and checks
-// which solution their libraries select for each GEMM: plain's one solution for
-// the FP16 GEMM it was generated for, plain-pair's first solution when K is a
-// multiple of 512 and its second otherwise, and nothing for a transposed A.
-// Also checks that the loader rejects entries whose solutions and kernels do
-// not match. Launches nothing.
+// Loads the JIT solution library written for this device and finds the
+// pre-generated kernel. Also checks that an entry whose solutions are not
+// 0 to N-1 is rejected. Launches nothing.
 namespace
 {
     namespace fs = std::filesystem;
     namespace hj = hipblaslt_jit;
     using hipblaslt_jit_test::require;
 
-    // FP16 A, B, C and D with FP32 alpha, beta and accumulation, as the bundles' entries expect.
-    TensileLite::ContractionProblemGemm gemm(bool transA, size_t K)
-    {
-        constexpr size_t M = 256, N = 128;
-        const auto       half = rocisa::DataType::Half;
-        const size_t     lda  = transA ? K : M;
-        auto problem = TensileLite::ContractionProblemGemm::GEMM_Strides(
-            transA, false, half, half, half, half, M, N, K, 1, lda, lda * (transA ? M : K), K,
-            K * N, M, M * N, M, M * N, 0.5);
-        problem.setComputeInputTypeA(half);
-        problem.setComputeInputTypeB(half);
-        problem.setAlphaType(rocisa::DataType::Float);
-        problem.setBetaType(rocisa::DataType::Float);
-        problem.setHighPrecisionAccumulate(true);
-        problem.setStridedBatched(true);
-        problem.setUseDeviceUserArguments(false);
-        problem.setAlphaRestriction(TensileLite::toScalarValueEnum(1.25));
-        problem.setBetaRestriction(TensileLite::toScalarValueEnum(0.5));
-        problem.setCEqualsD(false);
-        return problem;
-    }
-
-    std::string whyNot(const hj::TensileBundle&                   bundle,
-                       int                                        index,
-                       const TensileLite::ContractionProblemGemm& problem)
-    {
-        std::ostringstream reason;
-        const auto&        solution = *bundle.library->solutions.at(index);
-        solution.hardwarePredicate->debugEval(*bundle.hardware, reason);
-        solution.problemPredicate->debugEval(problem, reason);
-        return reason.str();
-    }
-
-    // Requires that the library selects local solution index, or nothing when index is -1.
-    void select(const hj::TensileBundle& bundle, bool transA, size_t K, int index)
-    {
-        const auto problem  = gemm(transA, K);
-        const auto selected = bundle.library->findBestSolution(problem, *bundle.hardware);
-        const auto what     = std::string(transA ? "a transposed A" : "the GEMM") + " with K="
-                          + std::to_string(K);
-        if(index < 0)
-            require(selected == nullptr, "The library selects a solution for " + what);
-        else
-            require(selected == bundle.library->solutions.at(index),
-                    "The library does not select solution " + std::to_string(index) + " for "
-                        + what + ": " + whyNot(bundle, index, problem));
-    }
-
-    // The entry with every index 1 encoded as index 2, so that its solutions are 0 and 2.
     std::vector<uint8_t> skipIndexOne(std::vector<uint8_t> entry)
     {
-        const std::vector<uint8_t> from{0xa5, 'i', 'n', 'd', 'e', 'x', 1}; // MsgPack "index": 1
+        const std::vector<uint8_t> from{0xa5, 'i', 'n', 'd', 'e', 'x', 1};
         auto                       at = entry.begin();
         while((at = std::search(at, entry.end(), from.begin(), from.end())) != entry.end())
             *(at += from.size() - 1) = 2;
@@ -83,64 +30,74 @@ namespace
     }
 }
 
-TEST_CASE("the TensileLite loader selects the written bundles", "[jit-gpu]")
+TEST_CASE("the loader reads the JIT solution library", "[jit-gpu]")
 {
-    const auto scratch = fs::u8path(HIPBLASLT_JIT_SCRATCH);
-    fs::remove_all(scratch);
-    fs::create_directories(scratch);
-
     int             device = 0;
     hipDeviceProp_t properties{};
     require(hipGetDevice(&device) == hipSuccess
                 && hipGetDeviceProperties(&properties, device) == hipSuccess,
             "Cannot query the current HIP device");
-    const auto hardware = TensileLite::hip::GetDevice(properties, device);
-    const auto bundles  = hipblaslt_jit_test::deviceBundles(fs::u8path(HIPBLASLT_JIT_BUNDLES),
-                                                           properties.gcnArchName);
+    const std::string target(properties.gcnArchName);
+    const auto        arch     = target.substr(0, target.find(':'));
+    const auto        hardware = TensileLite::hip::GetDevice(properties, device);
+    const auto        key      = hipblaslt_jit_test::pregeneratedKey(properties);
+    hj::JitLibrary    library(fs::u8path(HIPBLASLT_JIT_LIBRARY));
 
-    const auto load = [&](const std::string& name, hj::BuiltSolution& built) {
-        const auto read   = hj::readTensileSourceBundle(bundles / name);
-        const auto status = hj::makeComgrBuilder()->build(
-            read.solution, {properties.gcnArchName, hj::jitCodeObjectVersion, scratch}, built);
-        require(status.ok(), std::string("The build for ") + properties.gcnArchName
-                                 + " failed: " + status.message);
-        auto bundle = hj::parseTensileBundle(built, hardware);
-        hj::loadTensileBundle(*bundle, built);
-        std::cout << "PASS loaded " << name << " with " << bundle->library->solutions.size()
-                  << " solutions and " << bundle->kernels.size() << " kernel on "
-                  << properties.gcnArchName << '\n';
-        return bundle;
-    };
+    const auto prepared = hipblaslt_jit_test::prepareSolutions(fs::u8path(HIPBLASLT_JIT_DATA));
+    const hipblaslt_jit_test::Prepared* plain = nullptr;
+    const hipblaslt_jit_test::Prepared* pair  = nullptr;
+    bool                                loaded = false;
+    for(const auto& item : prepared)
+    {
+        if(item.arch != arch)
+            continue;
+        if(item.name == "plain")
+            plain = &item;
+        if(item.name == "plain-pair")
+            pair = &item;
+        for(const auto& publication : item.publications)
+        {
+            std::vector<int32_t> indices;
+            const auto           problem = hipblaslt_jit_test::fp16Gemm(false, publication.k);
+            const auto           status
+                = library.lookup(key, device, problem, *hardware, 4, {}, indices);
+            require(status.ok(), "lookup K=" + std::to_string(publication.k) + ": " + status.message);
+            require(indices.size() == 1 && hj::isJitIndex(indices[0]),
+                    item.name + " K=" + std::to_string(publication.k)
+                        + " is not one JIT solution index");
+            hj::Status why;
+            const auto solution = library.solutionByIndex(device, *hardware, indices[0], why);
+            require(solution != nullptr, "Cannot load solution: " + why.message);
+            require(solution->kernelName == publication.kernel,
+                    "Found kernel " + solution->kernelName + ", expected " + publication.kernel);
+            require(solution->solutionName == publication.solutionName,
+                    "Found solution " + solution->solutionName + ", expected "
+                        + publication.solutionName);
+            require(solution->index == indices[0], "The loaded solution has another index");
+            if(!loaded)
+            {
+                const auto view = library.resolve(device, indices[0], why);
+                require(view.master && view.adapter, "resolve: " + why.message);
+                const auto object = library.directory(key)
+                                    / fs::u8path(std::string(solution->codeObjectFilename.load()));
+                require(view.adapter->loadCodeObjectFile(object.string()) == hipSuccess,
+                        "Cannot load " + object.u8string());
+                require(view.adapter->initKernel(solution->kernelName) == hipSuccess,
+                        "Cannot resolve " + solution->kernelName);
+                loaded = true;
+            }
+        }
+    }
+    require(plain && pair && loaded, "This device has no committed plain kernel");
 
-    hj::BuiltSolution built;
-    const auto        plain = load("plain", built);
-    select(*plain, false, 512, 0);
-    select(*plain, true, 512, -1);
-    std::cout << "PASS plain selects its solution for the GEMM it was generated for and "
-                 "nothing for a transposed A\n";
+    std::vector<int32_t> transposed;
+    const auto           status = library.lookup(
+        key, device, hipblaslt_jit_test::fp16Gemm(true, 512), *hardware, 4, {}, transposed);
+    require(status.ok() && transposed.empty(), "A transposed A found a published solution");
 
-    const auto pair = load("plain-pair", built);
-    require(pair->library->solutions.size() == 2 && pair->kernels.size() == 1,
-            "plain-pair is not two solutions of one kernel");
-    select(*pair, false, 512, 0);
-    select(*pair, false, 256, 1);
-    select(*pair, true, 512, -1);
-    std::cout << "PASS plain-pair selects solution 0 for K=512, 1 for K=256 and nothing for "
-                 "a transposed A\n";
-
-    const auto reject = [&](hj::BuiltSolution damaged, const std::string& what) {
-        hipblaslt_jit_test::reject([&] { hj::parseTensileBundle(damaged, hardware); },
-                                   "The loader accepted " + what);
-    };
-    auto gap            = built;
-    gap.generated.entry = skipIndexOne(gap.generated.entry);
-    reject(gap, "solutions 0 and 2");
-    auto unnamed                  = built;
-    unnamed.generated.kernelNames = {};
-    reject(unnamed, "solutions whose kernel the build does not define");
-    auto unused = built;
-    unused.generated.kernelNames.push_back("hipblaslt_jit_loader_test_unused");
-    reject(unused, "a built kernel no solution names");
-    std::cout << "PASS the loader rejects solutions 0 and 2, an undefined kernel and an "
-                 "unused kernel\n";
+    hj::BuiltSolution damaged;
+    damaged.generated            = pair->solution;
+    damaged.generated.entry      = skipIndexOne(std::move(damaged.generated.entry));
+    hipblaslt_jit_test::reject([&] { hj::parseTensileBundle(damaged, hardware); },
+                               "The loader accepted solutions 0 and 2");
 }

@@ -7,10 +7,15 @@ enable_testing()
 
 set(hipblaslt_jit_source "${PROJECT_SOURCE_DIR}/library/src/amd_detail")
 set(hipblaslt_jit_scratch "${CMAKE_CURRENT_BINARY_DIR}/scratch")
-# The jit-bundles test writes each bundle that bundle_writer.cpp describes here,
-# under its architecture, with its library entry and manifest; data/README.md
-# lists how the assembly was generated.
-set(hipblaslt_jit_bundles "${hipblaslt_jit_scratch}/bundles")
+# The publish test writes the JIT solution library here. data/README.md lists
+# how the committed assembly was generated.
+set(hipblaslt_jit_library "${hipblaslt_jit_scratch}/library")
+set(hipblaslt_jit_library_sources
+    "${hipblaslt_jit_source}/hipblaslt-jit-code-object.cpp"
+    "${hipblaslt_jit_source}/hipblaslt-jit-fs.cpp"
+    "${hipblaslt_jit_source}/hipblaslt-jit-library.cpp"
+    "${hipblaslt_jit_source}/hipblaslt-jit-msgpack.cpp"
+    "${hipblaslt_jit_source}/hipblaslt-jit-problem-type.cpp")
 
 find_package(Catch2 3 CONFIG QUIET)
 if(NOT Catch2_FOUND)
@@ -47,17 +52,9 @@ if(NOT HIPBLASLT_ENABLE_JIT)
     return()
 endif()
 
-# Writes the bundles. CTest runs it before each test that reads one.
-add_executable(hipblaslt-jit-bundle-writer bundle_writer.cpp)
-target_compile_definitions(hipblaslt-jit-bundle-writer PRIVATE
-    "HIPBLASLT_JIT_DATA=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
-    "HIPBLASLT_JIT_OUT=\"${hipblaslt_jit_scratch}/bundles\"")
-hipblaslt_jit_test(jit-bundles jit-cpu hipblaslt-jit-bundle-writer)
-set_tests_properties(jit-bundles PROPERTIES FIXTURES_SETUP jit-bundles)
-
 # Compiles the comgr builder directly and builds a hand-written HIP kernel and
-# every written bundle for its target. Needs no GPU, so every architecture runs
-# it.
+# every committed assembly file for its target. Needs no GPU, so every
+# architecture runs it.
 add_executable(hipblaslt-jit-builder-test
     builder_test.cpp
     "${hipblaslt_jit_source}/hipblaslt-jit-builder.cpp"
@@ -67,14 +64,13 @@ target_include_directories(hipblaslt-jit-builder-test PRIVATE
 target_link_libraries(hipblaslt-jit-builder-test PRIVATE
     roc::hipblaslt amd_comgr hip::host)
 target_compile_definitions(hipblaslt-jit-builder-test PRIVATE
-    "HIPBLASLT_JIT_BUNDLES=\"${hipblaslt_jit_bundles}\""
+    "HIPBLASLT_JIT_DATA=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
     "HIPBLASLT_JIT_KERNEL=\"${CMAKE_CURRENT_SOURCE_DIR}/builder_test_kernel.hip\""
     "HIPBLASLT_JIT_SCRATCH=\"${hipblaslt_jit_scratch}/builder\"")
 hipblaslt_jit_test(jit-builder jit-cpu hipblaslt-jit-builder-test)
-set_tests_properties(jit-builder PROPERTIES FIXTURES_REQUIRED jit-bundles)
 
-# The GPU tests run the bundles of the device's architecture, so they need a GPU
-# target with committed bundles. A YAML build cannot read the MsgPack entries.
+# The GPU tests publish and load the committed assembly of the device's
+# architecture. A YAML build cannot read the MsgPack entries.
 set(hipblaslt_jit_gpu OFF)
 foreach(target IN LISTS GPU_TARGETS)
     string(REGEX REPLACE ":.*" "" architecture "${target}")
@@ -86,18 +82,34 @@ if(NOT hipblaslt_jit_gpu OR HIPBLASLT_ENABLE_YAML)
     return()
 endif()
 
-# Compiles the comgr builder and the TensileLite loader directly.
+# Publishes the device's committed kernels into the JIT solution library.
+# CTest runs it before the loader.
+add_executable(hipblaslt-jit-library-writer
+    library_writer.cpp
+    "${hipblaslt_jit_source}/hipblaslt-jit-builder.cpp"
+    ${hipblaslt_jit_library_sources})
+target_include_directories(hipblaslt-jit-library-writer PRIVATE
+    "${hipblaslt_jit_source}" "${hipblaslt_jit_source}/rocblaslt/src/include")
+target_link_libraries(hipblaslt-jit-library-writer PRIVATE
+    roc::hipblaslt roc::tensilelite-host ${hipblaslt_msgpack_target} amd_comgr hip::device)
+target_compile_definitions(hipblaslt-jit-library-writer PRIVATE
+    "HIPBLASLT_JIT_DATA=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
+    "HIPBLASLT_JIT_LIBRARY=\"${hipblaslt_jit_library}\""
+    "HIPBLASLT_JIT_SCRATCH=\"${hipblaslt_jit_scratch}/publish\"")
+hipblaslt_jit_test(jit-publish jit-gpu hipblaslt-jit-library-writer)
+set_tests_properties(jit-publish PROPERTIES FIXTURES_SETUP jit-publish)
+
+# Loads that library and resolves the pre-generated kernel.
 add_executable(hipblaslt-jit-loader-test
     loader_test.cpp
-    "${hipblaslt_jit_source}/hipblaslt-jit-builder.cpp"
-    "${hipblaslt_jit_source}/hipblaslt-jit-code-object.cpp"
-    "${hipblaslt_jit_source}/hipblaslt-jit-loader.cpp")
+    "${hipblaslt_jit_source}/hipblaslt-jit-loader.cpp"
+    ${hipblaslt_jit_library_sources})
 target_include_directories(hipblaslt-jit-loader-test PRIVATE
     "${hipblaslt_jit_source}" "${hipblaslt_jit_source}/rocblaslt/src/include")
 target_link_libraries(hipblaslt-jit-loader-test PRIVATE
-    roc::hipblaslt roc::tensilelite-host amd_comgr hip::device)
+    roc::hipblaslt roc::tensilelite-host ${hipblaslt_msgpack_target} amd_comgr hip::device)
 target_compile_definitions(hipblaslt-jit-loader-test PRIVATE
-    "HIPBLASLT_JIT_BUNDLES=\"${hipblaslt_jit_bundles}\""
-    "HIPBLASLT_JIT_SCRATCH=\"${hipblaslt_jit_scratch}/loader\"")
+    "HIPBLASLT_JIT_DATA=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
+    "HIPBLASLT_JIT_LIBRARY=\"${hipblaslt_jit_library}\"")
 hipblaslt_jit_test(jit-loader jit-gpu hipblaslt-jit-loader-test)
-set_tests_properties(jit-loader PROPERTIES FIXTURES_REQUIRED jit-bundles)
+set_tests_properties(jit-loader PROPERTIES FIXTURES_REQUIRED jit-publish)

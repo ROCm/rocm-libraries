@@ -23,23 +23,23 @@ namespace hipblaslt_jit
                 throw std::runtime_error(std::string(operation) + ": " + hipGetErrorString(status));
         }
 
-        std::shared_ptr<TensileLibrary> readEntry(const std::vector<uint8_t>& entry)
-        {
-            auto library = std::dynamic_pointer_cast<TensileLibrary>(
-                TensileLite::LoadLibraryData<TensileLite::ContractionProblemGemm>(entry));
-            require(library && !library->solutions.empty(),
-                    "Expected a non-lazy library containing local solutions");
-            int expected = 0;
-            for(const auto& [index, solution] : library->solutions)
-                require(index == expected++ && solution && solution->index == index,
-                        "Expected local solutions 0 to N-1");
-            return library;
-        }
-
         bool contains(const std::vector<std::string>& names, const std::string& name)
         {
             return std::find(names.begin(), names.end(), name) != names.end();
         }
+    }
+
+    std::shared_ptr<TensileLibrary> loadGemmLibrary(const std::vector<uint8_t>& entry)
+    {
+        auto library = std::dynamic_pointer_cast<TensileLibrary>(
+            TensileLite::LoadLibraryData<TensileLite::ContractionProblemGemm>(entry));
+        require(library && !library->solutions.empty(),
+                "Expected a non-lazy library containing local solutions");
+        int expected = 0;
+        for(const auto& [index, solution] : library->solutions)
+            require(index == expected++ && solution && solution->index == index,
+                    "Expected local solutions 0 to N-1");
+        return library;
     }
 
     TensileSource readTensileSourceBundle(const std::filesystem::path& bundle)
@@ -48,7 +48,7 @@ namespace hipblaslt_jit
         auto          sources = artifacts::readSourceBundle(bundle);
         TensileSource result;
         result.solution.entry = std::move(sources.library);
-        result.library        = readEntry(result.solution.entry);
+        result.library        = loadGemmLibrary(result.solution.entry);
         for(const auto& [index, solution] : result.library->solutions)
             if(!contains(result.solution.kernelNames, solution->kernelName))
                 result.solution.kernelNames.push_back(solution->kernelName);
@@ -71,7 +71,7 @@ namespace hipblaslt_jit
         auto bundle      = std::make_shared<TensileBundle>();
         bundle->hardware = std::move(hardware);
         bundle->kernels  = built.generated.kernelNames;
-        bundle->library  = readEntry(built.generated.entry);
+        bundle->library  = loadGemmLibrary(built.generated.entry);
         std::vector<std::string> used;
         for(const auto& [index, solution] : bundle->library->solutions)
         {

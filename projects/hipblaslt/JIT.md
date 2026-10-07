@@ -11,7 +11,8 @@ integration is undecided.
 It describes what the code implements today. "Implemented" means present in the
 source, not released or approved as product naming. A JIT backend is the
 generator that turns a request into kernel sources; this page describes the
-parts of hipBLASLt that build and load what a backend generates. The
+parts of hipBLASLt that build and load what a backend generates, and the
+JIT solution library that stores a built kernel for a later load. The
 [JIT test guide](clients/tests/jit/README.md) covers building and running the
 tests.
 
@@ -21,10 +22,11 @@ hipBLASLt runs a GEMM with a kernel from its pre-tuned library, so a problem
 that the library serves poorly, or not at all, has no better kernel available.
 JIT generation produces kernels for a problem when they are needed. This page
 describes the parts that turn generated kernel sources into a loaded
-TensileLite solution: a comgr code-object builder, a source bundle reader and a
-TensileLite loader. The library does not call them yet; the JIT tests build and
-load a pre-generated source bundle with them. No generator backend is
-implemented, and no API reaches JIT.
+TensileLite solution: a comgr code-object builder, a source bundle reader, a
+TensileLite loader and a JIT solution library. The library does not call them
+yet. The JIT tests build the committed assembly and publish it into the JIT
+solution library, and the loader test reads that library back. No generator
+backend is implemented, and no API reaches JIT.
 
 ## Current behavior
 
@@ -89,6 +91,17 @@ carries the first error line of the comgr log, and the builder appends the full
 log to `comgr.log` in `BuildRequest::scratch` and names that file in the
 message.
 
+### JIT solution library
+
+`JitLibrary` in `hipblaslt-jit-library.{hpp,cpp}` is a TensileLite
+lazy-loading library on disk. Indices start at `2^30` (`jitIndexBase`). Each
+cache-key directory holds a master library, an index mapping, one entry file
+and one code object per published solution. A row matches the solution's
+problem type and its exact sizes. Publishing replaces files atomically, in an
+order that never leaves a reference to a missing file. `readTensileSourceBundle`
+still returns a `TensileSource` when a caller has a source directory; the tests
+publish and load the JIT solution library instead of that directory.
+
 ### Loading a built solution
 
 `hipblaslt-jit-loader.{hpp,cpp}` turns a built TensileLite entry into a loaded
@@ -133,10 +146,9 @@ the file count (1024), each file (64 MiB) and the sources in total (256 MiB).
 The JIT tests use one kernel, generated for gfx90a, gfx942 and gfx950, in
 `clients/tests/jit/data`, of which only the assembly is committed. The assembly
 records the kernel-argument and persistent-loop argument layout versions of the
-generator that wrote it. The `jit-bundles` test writes source bundles from it
-for each architecture, each with the library entry and manifest built from the
-assembly and a description of each solution: `plain` with one solution and
-`plain-pair` with two. The tests that need a GPU run the bundles of its
-architecture.
+generator that wrote it. `jit-publish` builds that assembly for the current
+device and publishes it into a JIT solution library: `plain` as one solution
+and `plain-pair` as two. `jit-loader` reads that library and resolves the
+pre-generated kernel.
 [The data README](clients/tests/jit/data/README.md) gives the command that
 generated the assembly.

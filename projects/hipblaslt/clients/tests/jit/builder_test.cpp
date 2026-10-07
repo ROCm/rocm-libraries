@@ -1,22 +1,19 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 #include "hipblaslt-jit-code-object.hpp"
-#include "hipblaslt-jit-component.hpp"
-#include "hipblaslt-jit-source-bundle.hpp"
-#include "test_helpers.hpp"
+#include "solution_entry.hpp"
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <filesystem>
 #include <iostream>
-#include <regex>
+#include <map>
 #include <string>
 #include <vector>
 
-// Builds the hand-written HIP kernel with comgr for each written bundle's
-// target, then every written bundle with that kernel linked into its code
-// object, and checks that the code object defines every expected kernel. Needs
-// no GPU.
+// Builds the hand-written HIP kernel with comgr for each committed assembly
+// target, then that assembly linked with the kernel, and checks that the code
+// object defines every expected kernel. Needs no GPU.
 namespace
 {
     namespace fs = std::filesystem;
@@ -25,34 +22,6 @@ namespace
 
     const char* const kernelName = "hipblaslt_jit_builder_test_scale";
 
-    // The string value of key in the manifest's object named owner.
-    std::string field(const std::string& manifest, const std::string& owner, const std::string& key)
-    {
-        std::smatch      match;
-        const std::regex pattern("\"" + owner + "\": *\\{[^}]*\"" + key + "\": *\"([^\"]*)\"");
-        require(std::regex_search(manifest, match, pattern), "The manifest has no " + owner + "." + key);
-        return match[1].str();
-    }
-
-    // The strings of the manifest's array named key.
-    std::vector<std::string> strings(const std::string& manifest, const std::string& key)
-    {
-        std::smatch match;
-        require(std::regex_search(manifest, match, std::regex("\"" + key + "\": *\\[([^\\]]*)\\]")),
-                "The manifest has no " + key);
-        const auto               list = match[1].str();
-        std::vector<std::string> result;
-        const std::regex         item("\"([^\"]*)\"");
-        for(auto at = std::sregex_iterator(list.begin(), list.end(), item);
-            at != std::sregex_iterator();
-            ++at)
-            result.push_back((*at)[1].str());
-        require(!result.empty(), "The manifest's " + key + " is empty");
-        return result;
-    }
-
-    // Builds solution for targetId and checks that the code object defines its
-    // kernels and kernelName.
     void build(hj::GeneratedSolution& solution,
                const std::string&     targetId,
                const fs::path&        scratch,
@@ -87,26 +56,23 @@ namespace
         std::cout << "PASS comgr built the HIP kernel for " << targetId << '\n';
     }
 
-    void buildBundle(const fs::path& bundle, const hj::BuildUnit& kernel, const fs::path& scratch)
+    void buildAssembly(const fs::path&        file,
+                       const hj::BuildUnit&   kernel,
+                       const fs::path&        scratch,
+                       const std::string&     kernelNameFromSource,
+                       const std::string&     targetId)
     {
-        const auto bytes    = hj::source_bundle::readArtifact(bundle / "manifest.json");
-        const auto manifest = std::string(bytes.begin(), bytes.end());
-        auto       sources  = hj::source_bundle::readSourceBundle(bundle);
-        require(sources.hip.empty(), "Expected only assembly in " + bundle.u8string());
-
+        const auto text = hipblaslt_jit_test::readFile(file);
         hj::GeneratedSolution solution;
-        solution.entry       = std::move(sources.library);
-        solution.kernelNames = strings(manifest, "main_kernels");
-        for(auto& file : sources.assembly)
-            solution.units.push_back(
-                {std::move(file.name), std::move(file.bytes), hj::BuildUnit::Kind::Assembly, {}});
+        solution.kernelNames = {kernelNameFromSource};
+        solution.units.push_back({file.filename().u8string(),
+                                  std::vector<uint8_t>(text.begin(), text.end()),
+                                  hj::BuildUnit::Kind::Assembly,
+                                  {}});
         solution.units.push_back(kernel);
-
-        const auto        targetId = field(manifest, "architecture", "compiler_target");
         hj::BuiltSolution built;
         build(solution, targetId, scratch, built);
-        std::cout << "PASS comgr built " << bundle.filename().u8string() << ", "
-                  << solution.kernelNames.size() << " main kernel(s) and the HIP kernel, for "
+        std::cout << "PASS comgr built " << file.filename().u8string() << " and the HIP kernel for "
                   << targetId << '\n';
 
         solution.kernelNames.push_back("hipblaslt_jit_builder_test_missing");
@@ -119,9 +85,8 @@ namespace
     }
 }
 
-TEST_CASE("comgr builds the HIP kernel and every written bundle", "[jit-cpu]")
+TEST_CASE("comgr builds the HIP kernel and every committed assembly file", "[jit-cpu]")
 {
-    const auto bundles = fs::u8path(HIPBLASLT_JIT_BUNDLES);
     const auto source  = hipblaslt_jit_test::readFile(fs::u8path(HIPBLASLT_JIT_KERNEL));
     const auto scratch = fs::u8path(HIPBLASLT_JIT_SCRATCH);
     fs::remove_all(scratch);
@@ -130,16 +95,36 @@ TEST_CASE("comgr builds the HIP kernel and every written bundle", "[jit-cpu]")
                                std::vector<uint8_t>(source.begin(), source.end()),
                                hj::BuildUnit::Kind::Hip,
                                {}};
-    int built = 0;
-    for(const auto& target : fs::directory_iterator(bundles))
+
+    std::map<std::string, std::vector<std::pair<fs::path, std::string>>> byTarget;
+    for(const auto& arch : fs::directory_iterator(fs::u8path(HIPBLASLT_JIT_DATA)))
     {
-        buildKernel(target.path().filename().u8string(), kernel, scratch);
-        for(const auto& bundle : fs::directory_iterator(target))
+        if(!arch.is_directory())
+            continue;
+        for(const auto& sources : fs::directory_iterator(arch))
         {
-            buildBundle(bundle.path(), kernel, scratch);
+            if(!sources.is_directory())
+                continue;
+            for(const auto& file : fs::directory_iterator(sources.path() / "sources"))
+            {
+                if(file.path().extension() != ".s")
+                    continue;
+                const auto assembly
+                    = hipblaslt_jit_test::readAssembly(hipblaslt_jit_test::readFile(file.path()));
+                byTarget[assembly.target].push_back({file.path(), assembly.kernel});
+            }
+        }
+    }
+    int built = 0;
+    for(const auto& [targetId, files] : byTarget)
+    {
+        buildKernel(targetId, kernel, scratch);
+        for(const auto& [file, kernelFromSource] : files)
+        {
+            buildAssembly(file, kernel, scratch, kernelFromSource, targetId);
             ++built;
         }
     }
-    require(built > 0, "No bundle in " + bundles.u8string());
-    std::cout << "PASS the build of every bundle fails when a kernel name is not defined\n";
+    require(built > 0, "No committed assembly under the data directory");
+    std::cout << "PASS the build of every assembly file fails when a kernel name is not defined\n";
 }

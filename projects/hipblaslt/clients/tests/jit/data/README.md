@@ -1,37 +1,29 @@
-# Pre-generated JIT test bundles
+# Pre-generated JIT test kernels
 
 Each directory under an architecture, `gfx90a/`, `gfx942/` or `gfx950/`, holds
 generated kernel sources for that processor. Only the generated sources are
-committed, not the generator's library entry or manifest. The `jit-bundles`
-test (`bundle_writer.cpp`) writes each source bundle it describes into the
-build directory: the input a JIT backend returns and the comgr builder builds.
-A bundle copies the sources of one directory here and adds those two files, so
-the JIT tests need neither Python nor a generator:
+committed, not a library entry. `jit-publish` (`library_writer.cpp`) builds
+the committed assembly for the current device and publishes the solutions
+described in `solution_entry.hpp` into the JIT solution library, so the JIT
+tests need neither Python nor a generator:
 
 | Path | Contents |
 | --- | --- |
 | `sources/<kernel>.s` | The main kernel assembly; one or more. Committed |
-| `library/TensileLibrary.dat` | The library entry (MsgPack), with one solution per description, best first. Written |
-| `manifest.json` | The kernels, the solutions, the target and the provenance. Written |
 
-The writer reads each kernel's name (`.amdhsa_kernel`), the target
+The publisher reads each kernel's name (`.amdhsa_kernel`), the target
 (`.amdgcn_target`) and the argument layout versions (`KernArgsVersion`, and
 `PersistentLoopArgsVersion` for DataParallel kernels, in the `custom.config`
-block) from the assembly. The descriptions in `bundle_writer.cpp`, one per
-solution of each bundle and architecture, give the rest: the problem type, the
-tile, split-K and scheduling values TensileLite chose for the kernel, any extra
-problem predicates, and the provenance. The manifest records `main_kernels`,
-`solutions` (index, name and kernel of each), `architecture.compiler_target`
-and, under `provenance`, `source_revision`, `config_sha256`,
-`kernargs_version` and `persistent_loop_args_version`.
+block) from the assembly. The descriptions in `solution_entry.hpp`, one per
+solution and architecture, give the rest: the problem type, the tile, split-K
+and scheduling values TensileLite chose for the kernel, and any extra problem
+predicates. `plain` is one solution, published for K=512. `plain-pair` is the
+plain kernel as two solutions: the first only when K is a multiple of 512,
+with WorkGroupMapping 8, published for K=1024, and the second for any K, with
+WorkGroupMapping 1, published for K=256. Adding an architecture needs its
+`plain` sources and the plain kernel's description for it.
 
-The writer writes `plain` and `plain-pair` for each architecture with `plain`
-sources. `plain-pair` runs the plain kernel as two solutions: the first only
-when K is a multiple of 512, with WorkGroupMapping 8, and the second for any K,
-with WorkGroupMapping 1. Adding an architecture needs its `plain` sources and
-the plain kernel's description for it.
-
-| Bundle | Problem and execution policy | Generator command |
+| Sources | Problem and execution policy | Generator command |
 | --- | --- | --- |
 | `<architecture>/plain` | FP16 A, B, C and D, FP32 compute, A and B not transposed; one wave64 per 16x16 tile, K in steps of 16, no prefetch; GlobalSplitU=1, TileProcessingStrategy=None | `python -m Tensile.SingleSolution ../clients/tests/jit/data/plain.yaml OUT --architecture <architecture> --cxx-compiler amdclang++ --source-only` (`OUT/bundle`) |
 
@@ -44,12 +36,12 @@ loop, which is 0 on gfx90a. The command runs in
 `projects/hipblaslt/tensilelite` with `OUT` a fresh directory and `PYTHONPATH`
 naming the `tensilelite/rocisa` and `tensilelite` directories of a hipBLASLt
 build and then `projects/hipblaslt/tensilelite`. Copy only `sources/*.s` from
-the bundle under `OUT`. When its compressed library entry,
-`library/TensileLibrary.dat.zlib`, has a value that differs from what the
-writer writes for that architecture's `plain`, update the description.
+`OUT`. The build does not run that command. When the generated kernel's
+argument layout differs from the description for that architecture's `plain`,
+update the description.
 
-A bundle goes stale when the `KernArgsVersion` or `PersistentLoopArgsVersion`
-in its assembly differs from the one in
+The assembly is stale when the `KernArgsVersion` or `PersistentLoopArgsVersion`
+in it differs from the one in
 `tensilelite/Tensile/Common/GlobalParameters.py`, or the code-object version it
 was generated for differs from the version the JIT builder uses. Regenerate it
 with the change that made it stale.

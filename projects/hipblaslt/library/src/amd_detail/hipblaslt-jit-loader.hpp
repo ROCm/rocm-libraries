@@ -21,6 +21,9 @@ namespace hipblaslt_jit
         std::vector<std::string>                           kernels; // every main kernel
     };
 
+    // Loads a GEMM library entry. Throws unless it holds local solutions 0 to N-1.
+    std::shared_ptr<TensileLibrary> loadGemmLibrary(const std::vector<uint8_t>& entry);
+
     // A source bundle and the library parsed from its entry. The library is the
     // parse of solution.entry, so a caller keeps it instead of reading those
     // bytes again.
@@ -44,4 +47,32 @@ namespace hipblaslt_jit
     // Loads the built code object into a new adapter and resolves every main
     // kernel. Throws on failure.
     void loadTensileBundle(TensileBundle& bundle, const BuiltSolution& built);
+
+    // One solution of a TensileLite bundle as the GEMM API runs it.
+    struct TensileGemmBundle final : KernelBundle
+    {
+        using Diagnostics = hipblaslt_ext::experimental::jit::Diagnostics;
+
+        std::shared_ptr<const TensileBundle> tensile;
+        int                                  index = 0; // the local solution index
+
+        std::string_view operationKind() const noexcept override;
+        int              solutionIndex() const noexcept override
+        {
+            return index;
+        }
+        std::string name() const override
+        {
+            return tensile->library->solutions.at(index)->solutionName;
+        }
+        std::string kernelNames() const override
+        {
+            return tensile->library->solutions.at(index)->kernelName;
+        }
+        hipblasStatus_t
+            support(const OperationRequest&, size_t, size_t&, Diagnostics&) const override;
+    };
+
+    // Loads CustomKernel entries from any backend into TensileGemmBundles.
+    std::shared_ptr<const SolutionLoader> makeTensileLoader();
 }

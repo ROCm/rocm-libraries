@@ -1,11 +1,11 @@
 # Validate the JIT implementation
 
-The JIT tests check the comgr code-object builder, the source bundle reader
-and the TensileLite loader. The JIT headers are not installed. The
-tests include them from `library/src/amd_detail`. They build the gfx90a,
-gfx942 and gfx950 kernel assembly committed in [`data`](data/README.md), as the
-bundles that the `jit-bundles` test writes with their library entries and
-manifests, so they need neither Python nor a generator.
+The JIT tests check the comgr code-object builder, the source bundle reader,
+the JIT solution library and the TensileLite loader. The JIT headers are not
+installed. The tests include them from `library/src/amd_detail`. They build the
+gfx90a, gfx942 and gfx950 kernel assembly committed in [`data`](data/README.md)
+and publish it into a JIT solution library, so they need neither Python nor a
+generator.
 
 ## Build and run from a checkout
 
@@ -22,31 +22,33 @@ ctest --test-dir "$project_build/clients/tests/jit" -L jit-gpu --output-on-failu
 ```
 
 `-L jit-cpu` runs the tests that need no GPU. `-L jit-gpu` runs the tests that
-need device 0, which must be a gfx90a, gfx942 or gfx950; they run the bundles of
-its architecture. Each test empties its own directory
-under `clients/tests/jit/scratch` in the build directory before it runs.
+need device 0, which must be a gfx90a, gfx942 or gfx950; they publish and load
+the committed assembly of its architecture. Each test empties its own directory
+under `clients/tests/jit/scratch` in the build directory before it runs, except
+`jit-loader`, which reads the library `jit-publish` wrote.
 
 The CTest tests are:
 
-- `jit-cpu`: `jit-bundles`, `jit-source-bundle` and `jit-builder`. A build
-  with `HIPBLASLT_ENABLE_JIT=OFF` has `jit-source-bundle`. CTest runs
-  `jit-bundles` before each test that reads a bundle.
-- `jit-gpu`: `jit-loader`, when `GPU_TARGETS` include an architecture with
-  committed bundles. A build with `HIPBLASLT_ENABLE_YAML=ON` does not have it,
+- `jit-cpu`: `jit-source-bundle` and `jit-builder`. A build with
+  `HIPBLASLT_ENABLE_JIT=OFF` has `jit-source-bundle`.
+- `jit-gpu`: `jit-publish` and `jit-loader`, when `GPU_TARGETS` include an
+  architecture with committed assembly. CTest runs `jit-publish` before
+  `jit-loader`. A build with `HIPBLASLT_ENABLE_YAML=ON` does not have them,
   because the library entry is MsgPack.
 
 ## What each test checks
 
 | CTest test | Behavior under test |
 | --- | --- |
-| `jit-bundles` | Writes each bundle that `bundle_writer.cpp` describes under `clients/tests/jit/scratch/bundles/<architecture>` in the build directory: the committed assembly, and a library entry and manifest built from it and from the description of each solution. `plain` has one solution; `plain-pair` has two that run the plain kernel, the first for K a multiple of 512 and the second for any K |
 | `jit-source-bundle` | The source bundle reader: assembly, HIP sources and headers sorted by name, relative paths, symbolic links that escape the bundle, size limits, and a library entry that is missing, empty or not named `library/TensileLibrary.dat` |
-| `jit-builder` | The comgr builder, without a GPU, building the hand-written HIP kernel `builder_test_kernel.hip` for each written bundle's target, then each bundle's assembly linked with that kernel into one code object; each code object defines its kernels and has the builder's code-object version, and a kernel name it does not define fails the build |
-| `jit-loader` | `plain` and `plain-pair` built with comgr for device 0 and loaded through the TensileLite loader. `plain` selects its solution for the FP16 GEMM it was generated for; `plain-pair` selects its first solution for K=512 and its second for K=256; neither selects anything for a transposed A. The loader rejects an entry with solutions 0 and 2, a solution whose kernel was not built, and a built kernel no solution names. Launches no kernel |
+| `jit-builder` | The comgr builder, without a GPU, building the hand-written HIP kernel `builder_test_kernel.hip` for each committed assembly target, then each assembly file linked with that kernel into one code object; each code object defines its kernels and has the builder's code-object version, and a kernel name it does not define fails the build |
+| `jit-publish` | Builds the device's committed assembly and publishes it into the JIT solution library: `plain` for K=512, and `plain-pair`'s two solutions for K=1024 and K=256. Indices are at least `2^30` |
+| `jit-loader` | Loads that library, finds each published solution and the pre-generated kernel, resolves the kernel from its code object, and finds nothing for a transposed A. An entry whose solutions are not 0 to N-1 is rejected. Launches no kernel |
 
 ## Test arguments
 
 The tests are Catch2 executables. CMake compiles in the data directory, the
-scratch directory and the HIP kernel path, so a developer runs the staged
-binary with no arguments. `hipblaslt-jit-loader-test` checks the bundles of
-device 0's architecture with FP16 problems with M=256, N=128 and K=512 or 256.
+library directory and the HIP kernel path, so a developer runs the staged
+binary with no arguments. Run `jit-publish` before `jit-loader`; the loader
+reads the library the publisher wrote. Problems are FP16 with M=256, N=128
+and K=512, 1024 or 256.

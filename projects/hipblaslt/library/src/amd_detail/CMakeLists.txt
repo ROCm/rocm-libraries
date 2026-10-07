@@ -14,9 +14,14 @@ target_sources(hipblaslt
 if(HIPBLASLT_ENABLE_JIT)
     find_package(amd_comgr CONFIG REQUIRED)
     target_link_libraries(hipblaslt PRIVATE amd_comgr)
+    target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_JIT)
     target_sources(hipblaslt PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-code-object.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-fs.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-msgpack.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-library.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-builder.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-problem-type.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-loader.cpp")
 endif()
 

@@ -1,13 +1,14 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+#pragma once
+
+#include "hipblaslt-jit-component.hpp"
 #include "test_helpers.hpp"
-#include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
 #include <filesystem>
-#include <iostream>
 #include <map>
 #include <sstream>
 #include <string>
@@ -15,17 +16,12 @@
 #include <variant>
 #include <vector>
 
-// Writes each bundle described below to OUT/<target>/<name>: the committed
-// sources of DATA/<target>/<sources>, a MsgPack library entry with one solution
-// per description, best first, and the manifest the tests read. Both are built
-// from the descriptions and from what the assembly records: the kernels, the
-// target and the argument layout versions.
-//
-// usage: hipblaslt-jit-bundle-writer DATA OUT
-namespace
+// Builds TensileLite solution entries for the committed assembly under data/.
+// The tests publish those entries into the JIT solution library. This is not a
+// source-bundle writer.
+namespace hipblaslt_jit_test
 {
     namespace fs = std::filesystem;
-    using hipblaslt_jit_test::require;
 
     // What a main kernel's assembly records about itself: the kernel, the
     // target it was generated for, and the argument layout versions of its
@@ -38,7 +34,7 @@ namespace
         int         persistentLoopArgsVersion = 0; // written for DataParallel kernels only
     };
 
-    Assembly readAssembly(const std::string& text)
+    inline Assembly readAssembly(const std::string& text)
     {
         // Whether line starts with prefix; rest is what follows it.
         const auto after = [](const std::string& line, const std::string& prefix, std::string& rest) {
@@ -80,7 +76,7 @@ namespace
     using Array = Value::Array;
     using Map   = Value::Map;
 
-    void encode(const Value& value, std::vector<uint8_t>& out)
+    inline void encode(const Value& value, std::vector<uint8_t>& out)
     {
         const auto put = [&](uint8_t marker, uint64_t n, int bytes) {
             out.push_back(marker);
@@ -150,7 +146,7 @@ namespace
         std::string configSha256   = "4bba1b64f758a4d69c2dfe21113edca0e6f1008b573c0b3c3d5cadc48ade0c41";
     };
 
-    Value predicate(const char* type, Value value)
+    inline Value predicate(const char* type, Value value)
     {
         return Map{{"type", type}, {"value", std::move(value)}};
     }
@@ -162,6 +158,7 @@ namespace
         std::string kernel; // its .amdhsa_kernel; may be empty when the sources hold one kernel
         std::string nameSuffix; // appended to the kernel name to name the solution
         Array       predicates; // problem predicates beyond the problem type's
+        size_t      publishK = 512; // exact K published into the JIT solution library
     };
 
     // A written bundle: the committed sources it copies and its solutions, best first.
@@ -174,7 +171,7 @@ namespace
     // The plain kernel's description on an architecture: gfx950's, except for
     // TensileLite's cycle estimate of the unrolled loop, which it does not
     // model for gfx90a.
-    Description plainOn(int mathClocksUnrolledLoop)
+    inline Description plainOn(int mathClocksUnrolledLoop)
     {
         Description values;
         values.mathClocksUnrolledLoop = mathClocksUnrolledLoop;
@@ -182,13 +179,13 @@ namespace
     }
 
     // The plain kernel's description on each architecture that has its sources.
-    const std::map<std::string, Description> plain{
+    inline const std::map<std::string, Description> plain{
         {"gfx90a", plainOn(0)}, {"gfx942", plainOn(256)}, {"gfx950", plainOn(288)}};
 
     // Every architecture's plain bundle, and plain-pair: the plain kernel as two
     // solutions, the first for K a multiple of 512 with WorkGroupMapping 8, the
     // second for any K with WorkGroupMapping 1.
-    std::map<std::pair<std::string, std::string>, Bundle> describe()
+    inline std::map<std::pair<std::string, std::string>, Bundle> describe()
     {
         std::map<std::pair<std::string, std::string>, Bundle> bundles;
         for(const auto& [target, values] : plain)
@@ -199,20 +196,22 @@ namespace
             any.workGroupMapping      = 1;
             const Value kMultiple
                 = Map{{"type", "BoundSizeMultiple"}, {"index", 0}, {"value", 512}};
-            bundles[{target, "plain-pair"}]
+            auto& pair = bundles[{target, "plain-pair"}]
                 = {"plain", {{multiple, "", "_K512_WGM8", {kMultiple}}, {any, "", "_WGM1", {}}}};
+            pair.solutions[0].publishK = 1024;
+            pair.solutions[1].publishK = 256;
         }
         return bundles;
     }
 
     template <size_t N>
-    Value array(const std::array<int, N>& values)
+    inline Value array(const std::array<int, N>& values)
     {
         return Array(values.begin(), values.end());
     }
 
     // The entry's solution at index, and the problem predicate of its row.
-    std::pair<Value, Value> solutionEntry(const Solution& s, const Assembly& kernel, int index)
+    inline std::pair<Value, Value> solutionEntry(const Solution& s, const Assembly& kernel, int index)
     {
         const auto& d         = s.values;
         const auto  operation = std::string("Contraction_l_") + (d.transA ? "Alik" : "Ailk")
@@ -281,7 +280,7 @@ namespace
 
     // The entry of bundle, whose solution i runs kernels[i]: one Problem row per
     // solution, in order.
-    std::vector<uint8_t> libraryEntry(const Bundle& bundle, const std::vector<Assembly>& kernels)
+    inline std::vector<uint8_t> libraryEntry(const Bundle& bundle, const std::vector<Assembly>& kernels)
     {
         Array solutions, rows;
         for(size_t i = 0; i < kernels.size(); ++i)
@@ -298,57 +297,51 @@ namespace
         return bytes;
     }
 
-    // The generator's manifest.json keys for what the descriptions and the
-    // assembly record, plus the solutions. The provenance is the first solution's.
-    std::string manifest(const Bundle& bundle, const std::vector<Assembly>& kernels)
-    {
-        const auto&              d = bundle.solutions.front().values;
-        const auto&              first = kernels.front();
-        std::vector<std::string> main;
-        std::ostringstream       solutions;
-        for(size_t i = 0; i < kernels.size(); ++i)
-        {
-            const auto& kernel = kernels[i].kernel;
-            if(std::find(main.begin(), main.end(), kernel) == main.end())
-                main.push_back(kernel);
-            solutions << (i ? ",\n" : "") << "    {\"index\": " << i << ", \"name\": \"" << kernel
-                      << bundle.solutions[i].nameSuffix << "\", \"kernel\": \"" << kernel << "\"}";
-        }
-        std::ostringstream json;
-        json << "{\n"
-             << "  \"architecture\": {\"compiler_target\": \"" << first.target << "\"},\n"
-             << "  \"main_kernels\": [";
-        for(size_t i = 0; i < main.size(); ++i)
-            json << (i ? ", " : "") << '"' << main[i] << '"';
-        json << "],\n"
-             << "  \"solutions\": [\n"
-             << solutions.str() << "\n  ],\n"
-             << "  \"provenance\": {\n"
-             << "    \"source_revision\": \"" << d.sourceRevision << "\",\n"
-             << "    \"config_sha256\": \"" << d.configSha256 << "\",\n"
-             << "    \"kernargs_version\": " << first.kernArgsVersion << ",\n"
-             << "    \"persistent_loop_args_version\": " << first.persistentLoopArgsVersion << "\n"
-             << "  }\n"
-             << "}\n";
-        return json.str();
-    }
 
-    // Copies the committed bundle at sources to copy and adds the library entry
-    // and manifest of bundle's solutions.
-    void write(const fs::path&    sources,
-               const Bundle&      bundle,
-               const std::string& target,
-               const fs::path&    copy)
+    // One solution published for an exact K, and the name recorded in the entry.
+    struct Publication
     {
-        std::map<std::string, Assembly> assembly; // by kernel
+        int         local = 0;
+        size_t      k     = 0;
+        std::string kernel;
+        std::string solutionName;
+    };
+
+    // A described solution set: its entry, the assembly units, and the K values
+    // at which the JIT solution library should hold each solution.
+    struct Prepared
+    {
+        std::string                         arch;
+        std::string                         name;
+        std::string                         compilerTarget;
+        hipblaslt_jit::GeneratedSolution    solution;
+        std::vector<Publication>            publications;
+    };
+
+    inline Prepared prepare(const fs::path&    sources,
+                            const Bundle&      bundle,
+                            const std::string& target,
+                            const std::string& name)
+    {
+        std::map<std::string, Assembly> assembly;
+        std::vector<hipblaslt_jit::BuildUnit> units;
         for(const auto& file : fs::directory_iterator(sources / "sources"))
-            if(file.path().extension() == ".s")
-            {
-                const auto kernel = readAssembly(hipblaslt_jit_test::readFile(file.path()));
-                require(kernel.target.substr(0, kernel.target.find(':')) == target,
-                        file.path().filename().u8string() + " is not " + target + " assembly");
-                assembly.emplace(kernel.kernel, kernel);
-            }
+        {
+            if(file.path().extension() != ".s")
+                continue;
+            const auto text   = readFile(file.path());
+            const auto kernel = readAssembly(text);
+            require(kernel.target.substr(0, kernel.target.find(':')) == target,
+                    file.path().filename().u8string() + " is not " + target + " assembly");
+            assembly.emplace(kernel.kernel, kernel);
+            units.push_back({file.path().filename().u8string(),
+                             std::vector<uint8_t>(text.begin(), text.end()),
+                             hipblaslt_jit::BuildUnit::Kind::Assembly,
+                             {}});
+        }
+        std::sort(units.begin(), units.end(), [](const auto& a, const auto& b) {
+            return a.name < b.name;
+        });
         std::vector<Assembly> kernels;
         for(const auto& solution : bundle.solutions)
         {
@@ -360,45 +353,59 @@ namespace
             kernels.push_back(found->second);
         }
 
-        fs::create_directories(copy / "library");
-        fs::copy(sources, copy, fs::copy_options::recursive);
-        const auto entry = libraryEntry(bundle, kernels);
-        hipblaslt_jit_test::writeFile(copy / "library" / "TensileLibrary.dat",
-                                      std::string(entry.begin(), entry.end()));
-        hipblaslt_jit_test::writeFile(copy / "manifest.json", manifest(bundle, kernels));
-    }
-}
-
-TEST_CASE("the bundle writer records each described solution", "[jit-cpu]")
-{
-    const auto data = fs::u8path(HIPBLASLT_JIT_DATA), out = fs::u8path(HIPBLASLT_JIT_OUT);
-    fs::remove_all(out);
-    const auto bundles = describe();
-    for(const auto& target : fs::directory_iterator(data))
-    {
-        if(!target.is_directory())
-            continue;
-        const auto name = target.path().filename().u8string();
-        for(const auto& sources : fs::directory_iterator(target))
+        Prepared prepared;
+        prepared.arch            = target;
+        prepared.name            = name;
+        prepared.compilerTarget  = kernels.front().target;
+        prepared.solution.entry  = libraryEntry(bundle, kernels);
+        for(const auto& kernel : kernels)
+            if(std::find(prepared.solution.kernelNames.begin(),
+                         prepared.solution.kernelNames.end(),
+                         kernel.kernel)
+               == prepared.solution.kernelNames.end())
+                prepared.solution.kernelNames.push_back(kernel.kernel);
+        prepared.solution.units = std::move(units);
+        for(size_t i = 0; i < bundle.solutions.size(); ++i)
         {
-            const auto used = sources.path().filename().u8string();
-            require(std::any_of(bundles.begin(),
-                                bundles.end(),
-                                [&](const auto& bundle) {
-                                    return bundle.first.first == name
-                                           && bundle.second.sources == used;
-                                }),
-                    "No description of the bundle " + name + '/' + used);
+            Publication publication;
+            publication.local        = static_cast<int>(i);
+            publication.k            = bundle.solutions[i].publishK;
+            publication.kernel       = kernels[i].kernel;
+            publication.solutionName = kernels[i].kernel + bundle.solutions[i].nameSuffix;
+            prepared.publications.push_back(std::move(publication));
         }
+        return prepared;
     }
-    for(const auto& [key, bundle] : bundles)
+
+    inline std::vector<Prepared> prepareSolutions(const fs::path& data)
     {
-        const auto& [target, name] = key;
-        write(data / fs::u8path(target) / fs::u8path(bundle.sources),
-              bundle,
-              target,
-              out / fs::u8path(target) / fs::u8path(name));
-        std::cout << "PASS wrote " << target << '/' << name << " with "
-                  << bundle.solutions.size() << " solutions\n";
+        const auto bundles = describe();
+        for(const auto& target : fs::directory_iterator(data))
+        {
+            if(!target.is_directory())
+                continue;
+            const auto name = target.path().filename().u8string();
+            for(const auto& sources : fs::directory_iterator(target))
+            {
+                const auto used = sources.path().filename().u8string();
+                require(std::any_of(bundles.begin(),
+                                    bundles.end(),
+                                    [&](const auto& bundle) {
+                                        return bundle.first.first == name
+                                               && bundle.second.sources == used;
+                                    }),
+                        "No description of the committed sources " + name + '/' + used);
+            }
+        }
+        std::vector<Prepared> prepared;
+        for(const auto& [key, bundle] : bundles)
+        {
+            const auto& [target, name] = key;
+            prepared.push_back(prepare(data / fs::u8path(target) / fs::u8path(bundle.sources),
+                                       bundle,
+                                       target,
+                                       name));
+        }
+        return prepared;
     }
 }
