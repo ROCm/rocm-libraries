@@ -324,6 +324,17 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT MiopenEngine::getPredict
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
     try
     {
+        // Models are measured with MIOpen's tuning search off (MIOPEN_SELECTOR_POLICY_REVISION).
+        // With it on, MIOpen may run a different solution, so an estimate or a description
+        // would stand for a run other than this one.
+        HipdnnMiopenSettings executionSettings;
+        initializeMiopenSettings(config, executionSettings);
+        if(executionSettings.benchmarkingEnabled())
+        {
+            result.reason = "MIOpen benchmarking is enabled; this engine's estimates describe "
+                            "untuned selection only";
+            return result;
+        }
         const auto& device = hipdnn_plugin_sdk::heuristics::predictionDevice(handle.getStream());
         const auto features = hipdnn_plugin_sdk::heuristics::engineFeatures(graph, config, device);
         auto prediction = _l1Models.predict(
