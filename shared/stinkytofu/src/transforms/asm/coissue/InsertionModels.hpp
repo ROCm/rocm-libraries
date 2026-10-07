@@ -91,6 +91,9 @@ struct PredictedBlock {
     /// The only instruction whose position differs from the base order's (Fidelity::ExactBase),
     /// when the caller knows it; models may then reuse what they planned for the base.
     const StinkyInstruction* movedFromBase = nullptr;
+    /// predict() stopped early: more bank switches than its limit allows. Then only
+    /// counts.bankSwitches is set.
+    bool overLimit = false;
 };
 
 /// How exact a prediction has to be.
@@ -148,9 +151,12 @@ class InsertionPipeline {
     ~InsertionPipeline();
 
     /// The scope with everything the later passes insert, for `orders` (one per block).
+    /// With `limit`, it stops as soon as the bank switches, which no later pass adds or
+    /// removes, are more than the limit's.
     PredictedBlock predict(const std::vector<std::vector<const StinkyInstruction*>>& orders,
                            Fidelity fidelity = Fidelity::Exact,
-                           const StinkyInstruction* movedFromBase = nullptr);
+                           const StinkyInstruction* movedFromBase = nullptr,
+                           const InsertedCounts* limit = nullptr);
 
     InstructionPool& pool() {
         return *pool_;

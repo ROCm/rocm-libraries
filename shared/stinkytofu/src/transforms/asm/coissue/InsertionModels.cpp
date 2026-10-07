@@ -427,7 +427,9 @@ class CoexecNopModel : public InsertionModel {
             all.push_back(&bb);
             work_[&bb] = irOrder(bb);
         }
-        planCoexecNops(hw_, all, work_, *pool_.vnop());
+        // A reorder keeps the kinds, and the passes in between add none of these.
+        producers_ = coexecProducersIn(work_);
+        planCoexecNops(hw_, all, work_, *pool_.vnop(), &producers_);
     }
     const char* name() const override {
         return "CoexecNop";
@@ -442,7 +444,7 @@ class CoexecNopModel : public InsertionModel {
             return;
         }
         for (size_t b = 0; b < block.blocks.size(); ++b) work_[block.blocks[b]] = block.seqs[b];
-        const auto plan = planCoexecNops(hw_, block.blocks, work_, *pool_.vnop());
+        const auto plan = planCoexecNops(hw_, block.blocks, work_, *pool_.vnop(), &producers_);
         for (size_t b = 0; b < block.blocks.size(); ++b) block.seqs[b] = work_[block.blocks[b]];
         if (fidelity == Fidelity::ExactBase) {
             base_.clear();
@@ -470,6 +472,7 @@ class CoexecNopModel : public InsertionModel {
     const HWModel& hw_;
     InstructionPool& pool_;
     BlockSequences work_;
+    CoexecProducers producers_;
     std::unordered_map<const StinkyInstruction*, int> base_;
     bool hasBase_ = false;
 };
@@ -615,7 +618,7 @@ InsertionPipeline::~InsertionPipeline() = default;
 
 PredictedBlock InsertionPipeline::predict(
     const std::vector<std::vector<const StinkyInstruction*>>& orders, Fidelity fidelity,
-    const StinkyInstruction* movedFromBase) {
+    const StinkyInstruction* movedFromBase, const InsertedCounts* limit) {
     PredictedBlock block;
     block.blocks = scope_;
     block.seqs = orders;
@@ -626,6 +629,18 @@ PredictedBlock InsertionPipeline::predict(
         models_[m]->apply(block, fidelity);
         modelSeconds_[m] +=
             std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        // The first model is VgprMsb: its switches are final.
+        if (m == 0 && limit != nullptr) {
+            int switches = 0;
+            for (const Sequence& seq : block.seqs)
+                for (const StinkyInstruction* inst : seq)
+                    switches += inst->getUnifiedOpcode() == GFX::s_set_vgpr_msb;
+            if (switches > limit->bankSwitches) {
+                block.counts.bankSwitches = switches;
+                block.overLimit = true;
+                return block;
+            }
+        }
     }
     for (const Sequence& seq : block.seqs) {
         for (const StinkyInstruction* inst : seq) {

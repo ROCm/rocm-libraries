@@ -100,17 +100,13 @@ using EntryMemo = std::vector<std::pair<const BasicBlock*, int>>;
 
 class Planner {
    public:
-    Planner(const HWModel& hw, BlockSequences& seqs) : hw_(hw), seqs_(seqs) {
-        // A kind no instruction of the sequences can produce never needs a scan.
-        for (const auto& [bb, seq] : seqs_) {
-            (void)bb;
-            for (const StinkyInstruction* inst : seq) {
-                hasTrans_ |= isTranscendental(*inst);
-                hasDgemm_ |= isDGEMMProducer(*inst);
-                hasPerm_ |= isTensorLUT(*inst);
-            }
-        }
-    }
+    // A kind no instruction of the sequences can produce never needs a scan.
+    Planner(const HWModel& hw, BlockSequences& seqs, const CoexecProducers& producers)
+        : hw_(hw),
+          seqs_(seqs),
+          hasTrans_(producers.trans),
+          hasDgemm_(producers.dgemm),
+          hasPerm_(producers.perm) {}
 
     // V_NOPs a consumer needs behind a matched producer.
     int required(ProducerKind kind, int slots, bool consumerIsWmma) const {
@@ -213,8 +209,9 @@ class Planner {
     // (deliberate, scheduler-placed) fillers and tops up the shortfall.
     std::vector<CoexecNopInsertion> planBlock(const BasicBlock* bb, const StinkyInstruction& vnop) {
         std::vector<CoexecNopInsertion> out;
-        for (size_t i = 0; i < seqs_.at(bb).size(); ++i) {
-            const StinkyInstruction& inst = *seqs_.at(bb)[i];
+        auto& seq = seqs_.at(bb);
+        for (size_t i = 0; i < seq.size(); ++i) {
+            const StinkyInstruction& inst = *seq[i];
             if (isPseudoInst(&inst) || &inst == &vnop) continue;
 
             int toInsert = 0;
@@ -233,7 +230,6 @@ class Planner {
             }
 
             if (toInsert > 0) {
-                auto& seq = seqs_.at(bb);
                 seq.insert(seq.begin() + static_cast<long>(i), static_cast<size_t>(toInsert), &vnop);
                 i += static_cast<size_t>(toInsert);
                 out.push_back({&inst, toInsert});
@@ -249,17 +245,30 @@ class Planner {
     const HWModel& hw_;
     BlockSequences& seqs_;
     EntryMemo minExisting_;
-    bool hasTrans_ = false;
-    bool hasDgemm_ = false;
-    bool hasPerm_ = false;
+    bool hasTrans_;
+    bool hasDgemm_;
+    bool hasPerm_;
 };
 
 }  // namespace
 
+CoexecProducers coexecProducersIn(const BlockSequences& seqs) {
+    CoexecProducers p;
+    for (const auto& [bb, seq] : seqs) {
+        (void)bb;
+        for (const StinkyInstruction* inst : seq) {
+            p.trans |= isTranscendental(*inst);
+            p.dgemm |= isDGEMMProducer(*inst);
+            p.perm |= isTensorLUT(*inst);
+        }
+    }
+    return p;
+}
+
 std::vector<std::vector<CoexecNopInsertion>> planCoexecNops(
     const HWModel& hw, const std::vector<const BasicBlock*>& blocks, BlockSequences& seqs,
-    const StinkyInstruction& vnop) {
-    Planner planner(hw, seqs);
+    const StinkyInstruction& vnop, const CoexecProducers* producers) {
+    Planner planner(hw, seqs, producers != nullptr ? *producers : coexecProducersIn(seqs));
     std::vector<std::vector<CoexecNopInsertion>> out;
     out.reserve(blocks.size());
     for (const BasicBlock* bb : blocks) out.push_back(planner.planBlock(bb, vnop));

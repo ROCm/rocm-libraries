@@ -205,11 +205,12 @@ class Evaluator {
                         const StinkyInstruction* moved = nullptr) {
         Evaluation e;
         const PredictedBlock predicted =
-            pipeline_.predict(blockSequences(layout_, order), fidelity, moved);
+            pipeline_.predict(blockSequences(layout_, order), fidelity, moved, limit);
         e.counts = predicted.counts;
-        if (limit != nullptr &&
-            (e.counts.bankSwitches > limit->bankSwitches || e.counts.waitAlus > limit->waitAlus ||
-             e.counts.nops > limit->nops)) {
+        if (predicted.overLimit ||
+            (limit != nullptr &&
+             (e.counts.bankSwitches > limit->bankSwitches || e.counts.waitAlus > limit->waitAlus ||
+              e.counts.nops > limit->nops))) {
             e.limited = true;
             return e;
         }
@@ -529,7 +530,15 @@ class CoissueRepairPassImpl : public Pass {
         size_t tried = 0;
         size_t limited = 0;
         std::vector<Move> candidates;
+        using Clock = std::chrono::steady_clock;
+        double tRound = 0, tLegal = 0, tMove = 0, tScreen = 0, tExact = 0, tBase = 0;
+        size_t nScreen = 0, nExact = 0, nRounds = 0;
+        auto since = [](Clock::time_point t) {
+            return std::chrono::duration<double>(Clock::now() - t).count();
+        };
         while (static_cast<int>(moves) < f.maxMoves) {
+            ++nRounds;
+            const auto tr = Clock::now();
             std::vector<const TimedInst*> timedOrder;
             for (StinkyInstruction* inst : order) timedOrder.push_back(&cache.get(*inst));
             std::vector<Placement> planByOrder;
@@ -547,6 +556,7 @@ class CoissueRepairPassImpl : public Pass {
             view.checker = &checker;
             view.radius = f.searchRadius;
             view.damage = &report;
+            tRound += since(tr);
 
             bool accepted = false;
             for (const WindowDamage* damage : report.damaged) {
@@ -554,19 +564,27 @@ class CoissueRepairPassImpl : public Pass {
                     candidates.clear();
                     rule->propose(*damage, view, candidates);
                     for (const Move& m : candidates) {
-                        if (!checker.legal(order, m.from, m.to)) {
+                        const auto tl = Clock::now();
+                        const bool isLegal = checker.legal(order, m.from, m.to);
+                        tLegal += since(tl);
+                        if (!isLegal) {
                             PASS_DEBUG(std::cerr << "[CoissueRepair]   " << m.rule << " " << m.from
                                                  << " -> " << m.to << " illegal\n");
                             continue;
                         }
+                        const auto tm = Clock::now();
                         Order next = moved(order, m.from, m.to);
+                        tMove += since(tm);
                         if (options_.prototypeWaitAluRule &&
                             !prototypeWaitAluSafe(next, m.to < m.from ? m.to : m.to - 1, cache))
                             continue;
                         // Screen with the current order's s_wait_alu, then confirm exactly.
                         const StinkyInstruction* movedInst = order[m.from];
+                        const auto ts = Clock::now();
                         Evaluation e =
                             ev.evaluate(next, &best, &limit, false, Fidelity::Screen, movedInst);
+                        tScreen += since(ts);
+                        ++nScreen;
                         ++tried;
                         if (e.limited) {
                             ++limited;
@@ -584,7 +602,10 @@ class CoissueRepairPassImpl : public Pass {
                             std::cerr << "\n";
                         });
                         if (e.rejected || !(sum(e.costs) < sum(best))) continue;
+                        const auto te = Clock::now();
                         e = ev.evaluate(next, &best, &limit, false, Fidelity::Exact, movedInst);
+                        tExact += since(te);
+                        ++nExact;
                         limited += e.limited;
                         if (e.limited || e.rejected || !(sum(e.costs) < sum(best))) continue;
                         std::vector<int> gains;
@@ -601,7 +622,9 @@ class CoissueRepairPassImpl : public Pass {
                         const int block = layout.blockOf[m.from];
                         order = std::move(next);
                         checker.update(order, block);
+                        const auto tb = Clock::now();
                         current = ev.evaluate(order, nullptr, nullptr, true, Fidelity::ExactBase);
+                        tBase += since(tb);
                         best = current.costs;
                         accepted = true;
                         break;
@@ -636,6 +659,10 @@ class CoissueRepairPassImpl : public Pass {
         os << ", " << std::setprecision(1) << ms << " ms";
         emitRemark(passCtx, {OptimizationRemark::Kind::Analysis, kPassName, "Loop", os.str()});
         PASS_DEBUG({
+            std::cerr << "[CoissueRepair] " << label << ": rounds " << nRounds << " " << tRound
+                      << " s, legal " << tLegal << " s, move " << tMove << " s, screen " << nScreen
+                      << " " << tScreen << " s, exact " << nExact << " " << tExact << " s, base "
+                      << tBase << " s\n";
             std::cerr << "[CoissueRepair] " << label << ": timeline " << ev.timelineSeconds << " s ("
                       << ev.timelineCalls << " trips, at most " << ev.timelinePlacements
                       << " placements)";
