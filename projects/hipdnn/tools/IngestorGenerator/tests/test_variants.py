@@ -238,6 +238,86 @@ class TestArchAndTarget:
             _load(tmp_path, raw)
 
 
+class TestShapeAxes:
+    """`shape_axes` crosses every shape with a grid stated once, first axis
+    outermost, so a list every shape shares is not copied per shape."""
+
+    def _axes_kernels(self, tmp_path, shape_axes, shapes=None, **overrides):
+        return _kernels(
+            tmp_path,
+            shape_axes=shape_axes,
+            shapes=shapes or [{"knobs": "pair", "resolved": {"use_exp2_fast": 1}}],
+            **overrides,
+        )
+
+    def test_axes_cross_every_shape_first_axis_outermost(self, tmp_path):
+        kernels = self._axes_kernels(
+            tmp_path, {"dtype": ["bf16", "fp16"], "seqlen_q": [512, 1024]}
+        )
+        assert [
+            (
+                k.kernel_source.spec["dtype"],
+                k.kernel_source.spec["seqlen_q"],
+                k.kernel_source.spec["block_m"],
+            )
+            for k in kernels
+        ] == [
+            ("bf16", 512, 128),
+            ("bf16", 512, 256),
+            ("bf16", 1024, 128),
+            ("bf16", 1024, 256),
+            ("fp16", 512, 128),
+            ("fp16", 512, 256),
+            ("fp16", 1024, 128),
+            ("fp16", 1024, 256),
+        ]
+
+    def test_axes_combine_with_shape_fields(self, tmp_path):
+        kernels = self._axes_kernels(
+            tmp_path,
+            {"seqlen_q": [512, 1024]},
+            shapes=[
+                {"dtype": "bf16", "knobs": "pair", "resolved": {"use_exp2_fast": 1}}
+            ],
+        )
+        assert [k.metadata["seqlen_q"] for k in kernels] == [512, 512, 1024, 1024]
+        assert {k.metadata["dtype"] for k in kernels} == {"BF16"}
+
+    def test_a_shape_restating_an_axis_field_is_rejected(self, tmp_path):
+        with pytest.raises(ConfigError, match="already supply"):
+            self._axes_kernels(
+                tmp_path,
+                {"seqlen_q": [512]},
+                shapes=[
+                    {
+                        "dtype": "bf16",
+                        "seqlen_q": 512,
+                        "knobs": "pair",
+                        "resolved": {"use_exp2_fast": 1},
+                    }
+                ],
+            )
+
+    @pytest.mark.parametrize("values", [[], 512, None])
+    def test_an_axis_must_be_a_non_empty_list(self, tmp_path, values):
+        axes = {"dtype": ["bf16"], "seqlen_q": values}
+        with pytest.raises(ConfigError, match="non-empty list"):
+            self._axes_kernels(tmp_path, axes)
+
+    @pytest.mark.parametrize("axis", ["knobs", "seqlenq"])
+    def test_an_axis_must_name_a_spec_field(self, tmp_path, axis):
+        with pytest.raises(ConfigError, match="shape_axes names"):
+            self._axes_kernels(
+                tmp_path,
+                {"dtype": ["bf16"], axis: [512]},
+                spec_order=["dtype", "seqlen_q", "block_m"],
+            )
+
+    def test_shape_axes_must_be_a_mapping(self, tmp_path):
+        with pytest.raises(ConfigError):
+            self._axes_kernels(tmp_path, [512])
+
+
 class TestTriState:
     """The spec decides the binary (ABSENT means the kernel's policy resolves it at
     build time), the metadata is what the matcher compares, and the KMD `default_value`

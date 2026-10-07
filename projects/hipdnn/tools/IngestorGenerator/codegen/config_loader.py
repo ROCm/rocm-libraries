@@ -665,6 +665,33 @@ def _expand_one_variant_group(
                 f"instead of failing here."
             )
 
+    # Spec values every shape is crossed with, first axis outermost, so a list
+    # shared by every shape (a head-size bucket list) is stated once instead of
+    # being copied into one shape entry per value.
+    if group.get("shape_axes") is not None:
+        _require_mapping(group["shape_axes"], f"{where} shape_axes")
+    shape_axes = dict(group.get("shape_axes") or {})
+    for axis, values in shape_axes.items():
+        if axis in _SHAPE_CONTROL_KEYS or (
+            spec_order and axis not in spec_order and axis not in spec_defaults
+        ):
+            raise ConfigError(
+                f"{where} shape_axes names '{axis}', which is not a field named in "
+                f"this group's spec_order. An axis value is written into every "
+                f"shape's spec, so a control key or a misspelled field would change "
+                f"the binary the descriptor names."
+            )
+        if not isinstance(values, list) or not values:
+            raise ConfigError(
+                f"{where} shape_axes['{axis}'] must be a non-empty list of values, "
+                f"got {values!r}. An empty axis expands every shape to ZERO kernels "
+                f"instead of failing here."
+            )
+    axis_points = [
+        dict(zip(shape_axes, point))
+        for point in itertools.product(*shape_axes.values())
+    ]
+
     # A group-level arch restricts every kernel the group expands to, the same
     # as a hand-authored kernel's own `arch`: it must stay within the pack's,
     # and an absent one inherits the pack's.
@@ -700,31 +727,40 @@ def _expand_one_variant_group(
             _require_mapping(shape["resolved"], f"{shape_where} resolved")
         resolved = dict(shape.get("resolved") or {})
         ordinal = shape.get("ordinal", 0)
-        shape_spec = {
-            **spec_defaults,
-            **{
-                key: value
-                for key, value in shape.items()
-                if key not in _SHAPE_CONTROL_KEYS
-            },
-        }
-        for arm in knob_sets[set_name]:
-            kernel = _expand_one_arm(
-                arm,
-                shape_spec,
-                resolved,
-                ordinal,
-                name_template,
-                metadata_fields,
-                vocabulary,
-                policy_knobs,
-                spec_order,
-                shape_where,
-                kmd_field_names,
-            )
-            if group_arch:
-                kernel["arch"] = list(group_arch)
-            expanded.append(kernel)
+        for point in axis_points:
+            overlap = sorted(set(point) & set(shape))
+            if overlap:
+                raise ConfigError(
+                    f"{shape_where} states {overlap}, which this group's shape_axes "
+                    f"already supply. Either the axis or the shape decides a field, "
+                    f"never both."
+                )
+            shape_spec = {
+                **spec_defaults,
+                **point,
+                **{
+                    key: value
+                    for key, value in shape.items()
+                    if key not in _SHAPE_CONTROL_KEYS
+                },
+            }
+            for arm in knob_sets[set_name]:
+                kernel = _expand_one_arm(
+                    arm,
+                    shape_spec,
+                    resolved,
+                    ordinal,
+                    name_template,
+                    metadata_fields,
+                    vocabulary,
+                    policy_knobs,
+                    spec_order,
+                    shape_where,
+                    kmd_field_names,
+                )
+                if group_arch:
+                    kernel["arch"] = list(group_arch)
+                expanded.append(kernel)
     return expanded
 
 
@@ -985,6 +1021,7 @@ _KNOWN_VARIANT_GROUP = frozenset(
         "policy_knobs",
         "spec_defaults",
         "spec_order",
+        "shape_axes",
     }
 )
 _KNOWN_KERNEL = frozenset({"name", "kernel_source", "metadata", "priority", "arch"})

@@ -427,6 +427,13 @@ own resolved values for the fields the dispatcher derives.
 **It is not a grid.** Each shape names its own knob set; on the shipped sets most shapes
 carry four arms and 63 carry six.
 
+**Shared shape lists.** Where every shape of a group repeats the same values, the group's
+`shape_axes` states them once: a mapping of spec field to a non-empty value list, crossed
+with each shape first axis outermost (`shape_axes: {dtype: [fp16, bf16], head_size: [64,
+128]}` with one shape `{knobs: rt}` expands to four shapes). An axis must name a spec field
+of the group, and a shape may not restate an axis field.
+`configs/gfx1151_wmma_attention.yaml` keeps its head-size bucket list there.
+
 **The tri-state.** An omitted or null policy knob retains the builder's policy intent, not
 an explicit false. `resolved` supplies an authored metadata projection, not compiler
 evidence; final composition includes pack defaults before projection, and the producing

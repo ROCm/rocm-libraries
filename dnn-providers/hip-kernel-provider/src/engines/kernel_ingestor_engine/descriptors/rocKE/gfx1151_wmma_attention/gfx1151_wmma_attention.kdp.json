@@ -22,7 +22,10 @@
             "query_tail",
             "kv_tail",
             "block_n",
-            "num_waves"
+            "num_waves",
+            "runtime_head_dims",
+            "use_attn_bias",
+            "bias_dtype"
           ],
           "matcher_only_fields": [],
           "bindings": {
@@ -49,6 +52,15 @@
             },
             "num_waves": {
               "field": "num_waves"
+            },
+            "runtime_head_dims": {
+              "field": "runtime_head_dims"
+            },
+            "use_attn_bias": {
+              "field": "use_attn_bias"
+            },
+            "bias_dtype": {
+              "field": "bias_dtype"
             }
           },
           "vocabulary": {
@@ -64,8 +76,8 @@
   "kernelDescriptors": [
     {
       "version": "1.0",
-      "id": "38aaf730-c954-4fb0-96b5-69d3ac05cae5",
-      "name": "wmma_generic.fp16_d64_none.gfx1151",
+      "id": "3a44dcf2-787a-4371-bb04-19c72a644e29",
+      "name": "wmma_generic.fp16_dmax64_none.gfx1151",
       "kernel_source": {
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
@@ -94,7 +106,8 @@
           "causal_tile_skip": false,
           "v_head_size": 0,
           "use_attn_bias": false,
-          "bias_dtype": "f32"
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
         }
       },
       "metadata": {
@@ -105,61 +118,17 @@
         "query_tail": 1,
         "kv_tail": 1,
         "block_n": 32,
-        "num_waves": 1
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
       },
       "priority": 0
     },
     {
       "version": "1.0",
-      "id": "78801529-6a5e-4b95-8aea-7d8a017f832d",
-      "name": "wmma_generic.fp16_d64_causal.gfx1151",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
-        "builder": "build_wmma_fmha_fwd",
-        "target": "generic",
-        "spec": {
-          "head_size": 64,
-          "dtype": "fp16",
-          "mask_mode": "causal",
-          "v_lds_stage": false,
-          "name": "rocke_wmma_fmha_fwd",
-          "query_tail": true,
-          "kv_tail": true,
-          "use_softcap": false,
-          "use_sinks": false,
-          "use_alibi": false,
-          "use_qq_bias": false,
-          "layout": "dense",
-          "page_block_size": 0,
-          "kv_dtype": "",
-          "transposed_qk": false,
-          "block_n": 32,
-          "num_waves": 1,
-          "scheduler_strategy": "max-ilp",
-          "value_tile_size": 0,
-          "causal_tile_skip": false,
-          "v_head_size": 0,
-          "use_attn_bias": false,
-          "bias_dtype": "f32"
-        }
-      },
-      "metadata": {
-        "dtype": "FP16",
-        "head_size": 64,
-        "mask_mode": "causal",
-        "transposed_qk": 0,
-        "query_tail": 1,
-        "kv_tail": 1,
-        "block_n": 32,
-        "num_waves": 1
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "494829ff-a9f2-4b49-9538-20c49a71ea56",
-      "name": "wmma_generic.fp16_d64_window.gfx1151",
+      "id": "2b818133-61f1-4799-b4a6-e1439f604f23",
+      "name": "wmma_generic.fp16_dmax64_window.gfx1151",
       "kernel_source": {
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
@@ -188,7 +157,8 @@
           "causal_tile_skip": false,
           "v_head_size": 0,
           "use_attn_bias": false,
-          "bias_dtype": "f32"
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
         }
       },
       "metadata": {
@@ -199,14 +169,527 @@
         "query_tail": 1,
         "kv_tail": 1,
         "block_n": 32,
-        "num_waves": 1
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
       },
       "priority": 0
     },
     {
       "version": "1.0",
-      "id": "b43e8eb2-8aea-4417-a226-4da1d9c718ce",
-      "name": "wmma_generic.bf16_d64_none.gfx1151",
+      "id": "86817848-0e2b-4c7c-ae12-cfb78168ad57",
+      "name": "wmma_generic.fp16_dmax64_window_bias_f32.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 64,
+          "dtype": "fp16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": true,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 1,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "e3223e74-7ff8-4c48-930b-417fac5ee63d",
+      "name": "wmma_generic.fp16_dmax64_window_bias_q.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 64,
+          "dtype": "fp16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": true,
+          "bias_dtype": "q",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 1,
+        "bias_dtype": "q"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "70fa434f-f23f-4c95-8d7b-1b0e601ff3ef",
+      "name": "wmma_generic.fp16_dmax96_none.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 96,
+          "dtype": "fp16",
+          "mask_mode": "none",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": false,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 96,
+        "mask_mode": "none",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "b0de9002-bcb4-4351-8840-36ccfbae63e2",
+      "name": "wmma_generic.fp16_dmax96_window.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 96,
+          "dtype": "fp16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": false,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 96,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "45371761-a024-4b95-b68d-2274dfd42a39",
+      "name": "wmma_generic.fp16_dmax96_window_bias_f32.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 96,
+          "dtype": "fp16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": true,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 96,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 1,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "41b39ebf-067f-4ae8-84c3-e87d4e77dea0",
+      "name": "wmma_generic.fp16_dmax96_window_bias_q.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 96,
+          "dtype": "fp16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": true,
+          "bias_dtype": "q",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 96,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 1,
+        "bias_dtype": "q"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ae930b5e-b827-4bc1-ae87-cb94bc91f7fb",
+      "name": "wmma_generic.fp16_dmax128_none.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 128,
+          "dtype": "fp16",
+          "mask_mode": "none",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": false,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "mask_mode": "none",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "894c6c01-9867-4160-984d-85fe4d6f88cf",
+      "name": "wmma_generic.fp16_dmax128_window.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 128,
+          "dtype": "fp16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": false,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "19f50cce-2a3f-4c96-aa2a-ecc45936e297",
+      "name": "wmma_generic.fp16_dmax128_window_bias_f32.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 128,
+          "dtype": "fp16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": true,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 1,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "1f36d86d-0a25-4ebb-b518-77b21ef5a897",
+      "name": "wmma_generic.fp16_dmax128_window_bias_q.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 128,
+          "dtype": "fp16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": true,
+          "bias_dtype": "q",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 1,
+        "bias_dtype": "q"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "10049ddd-656b-4c2b-81d9-8d5c1d0e079f",
+      "name": "wmma_generic.bf16_dmax64_none.gfx1151",
       "kernel_source": {
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
@@ -235,7 +718,8 @@
           "causal_tile_skip": false,
           "v_head_size": 0,
           "use_attn_bias": false,
-          "bias_dtype": "f32"
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
         }
       },
       "metadata": {
@@ -246,61 +730,17 @@
         "query_tail": 1,
         "kv_tail": 1,
         "block_n": 32,
-        "num_waves": 1
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
       },
       "priority": 0
     },
     {
       "version": "1.0",
-      "id": "f74938da-edda-4f93-8690-57a5255030e0",
-      "name": "wmma_generic.bf16_d64_causal.gfx1151",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
-        "builder": "build_wmma_fmha_fwd",
-        "target": "generic",
-        "spec": {
-          "head_size": 64,
-          "dtype": "bf16",
-          "mask_mode": "causal",
-          "v_lds_stage": false,
-          "name": "rocke_wmma_fmha_fwd",
-          "query_tail": true,
-          "kv_tail": true,
-          "use_softcap": false,
-          "use_sinks": false,
-          "use_alibi": false,
-          "use_qq_bias": false,
-          "layout": "dense",
-          "page_block_size": 0,
-          "kv_dtype": "",
-          "transposed_qk": false,
-          "block_n": 32,
-          "num_waves": 1,
-          "scheduler_strategy": "max-ilp",
-          "value_tile_size": 0,
-          "causal_tile_skip": false,
-          "v_head_size": 0,
-          "use_attn_bias": false,
-          "bias_dtype": "f32"
-        }
-      },
-      "metadata": {
-        "dtype": "BF16",
-        "head_size": 64,
-        "mask_mode": "causal",
-        "transposed_qk": 0,
-        "query_tail": 1,
-        "kv_tail": 1,
-        "block_n": 32,
-        "num_waves": 1
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "b0c06790-79ed-4deb-9bd1-ca4c0f16a5b1",
-      "name": "wmma_generic.bf16_d64_window.gfx1151",
+      "id": "fa2de59e-3f81-4342-887c-c955402bb03a",
+      "name": "wmma_generic.bf16_dmax64_window.gfx1151",
       "kernel_source": {
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
@@ -329,7 +769,8 @@
           "causal_tile_skip": false,
           "v_head_size": 0,
           "use_attn_bias": false,
-          "bias_dtype": "f32"
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
         }
       },
       "metadata": {
@@ -340,116 +781,25 @@
         "query_tail": 1,
         "kv_tail": 1,
         "block_n": 32,
-        "num_waves": 1
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
       },
       "priority": 0
     },
     {
       "version": "1.0",
-      "id": "b48a0e11-6de6-4fed-8c6c-7a37fa86fc7b",
-      "name": "wmma_generic.fp16_d96_none.gfx1151",
+      "id": "3496b8fe-f6c3-4626-a976-5c227c0e2dd4",
+      "name": "wmma_generic.bf16_dmax64_window_bias_f32.gfx1151",
       "kernel_source": {
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
         "target": "generic",
         "spec": {
-          "head_size": 96,
-          "dtype": "fp16",
-          "mask_mode": "none",
-          "v_lds_stage": false,
-          "name": "rocke_wmma_fmha_fwd",
-          "query_tail": true,
-          "kv_tail": true,
-          "use_softcap": false,
-          "use_sinks": false,
-          "use_alibi": false,
-          "use_qq_bias": false,
-          "layout": "dense",
-          "page_block_size": 0,
-          "kv_dtype": "",
-          "transposed_qk": false,
-          "block_n": 32,
-          "num_waves": 1,
-          "scheduler_strategy": "max-ilp",
-          "value_tile_size": 0,
-          "causal_tile_skip": false,
-          "v_head_size": 0,
-          "use_attn_bias": false,
-          "bias_dtype": "f32"
-        }
-      },
-      "metadata": {
-        "dtype": "FP16",
-        "head_size": 96,
-        "mask_mode": "none",
-        "transposed_qk": 0,
-        "query_tail": 1,
-        "kv_tail": 1,
-        "block_n": 32,
-        "num_waves": 1
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "53df8cc5-9c18-4547-bc8f-fbec9154c394",
-      "name": "wmma_generic.fp16_d96_causal.gfx1151",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
-        "builder": "build_wmma_fmha_fwd",
-        "target": "generic",
-        "spec": {
-          "head_size": 96,
-          "dtype": "fp16",
-          "mask_mode": "causal",
-          "v_lds_stage": false,
-          "name": "rocke_wmma_fmha_fwd",
-          "query_tail": true,
-          "kv_tail": true,
-          "use_softcap": false,
-          "use_sinks": false,
-          "use_alibi": false,
-          "use_qq_bias": false,
-          "layout": "dense",
-          "page_block_size": 0,
-          "kv_dtype": "",
-          "transposed_qk": false,
-          "block_n": 32,
-          "num_waves": 1,
-          "scheduler_strategy": "max-ilp",
-          "value_tile_size": 0,
-          "causal_tile_skip": false,
-          "v_head_size": 0,
-          "use_attn_bias": false,
-          "bias_dtype": "f32"
-        }
-      },
-      "metadata": {
-        "dtype": "FP16",
-        "head_size": 96,
-        "mask_mode": "causal",
-        "transposed_qk": 0,
-        "query_tail": 1,
-        "kv_tail": 1,
-        "block_n": 32,
-        "num_waves": 1
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "89b71206-0b90-4e5c-9044-508875e0c052",
-      "name": "wmma_generic.fp16_d96_window.gfx1151",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
-        "builder": "build_wmma_fmha_fwd",
-        "target": "generic",
-        "spec": {
-          "head_size": 96,
-          "dtype": "fp16",
+          "head_size": 64,
+          "dtype": "bf16",
           "mask_mode": "window",
           "v_lds_stage": false,
           "name": "rocke_wmma_fmha_fwd",
@@ -469,26 +819,81 @@
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
-          "use_attn_bias": false,
-          "bias_dtype": "f32"
+          "use_attn_bias": true,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
         }
       },
       "metadata": {
-        "dtype": "FP16",
-        "head_size": 96,
+        "dtype": "BF16",
+        "head_size": 64,
         "mask_mode": "window",
         "transposed_qk": 0,
         "query_tail": 1,
         "kv_tail": 1,
         "block_n": 32,
-        "num_waves": 1
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 1,
+        "bias_dtype": "f32"
       },
       "priority": 0
     },
     {
       "version": "1.0",
-      "id": "73257de2-0cb4-4f06-abfc-34178c29d66e",
-      "name": "wmma_generic.bf16_d96_none.gfx1151",
+      "id": "80d4ee2d-4141-4e0f-b5f8-144fdbaf4766",
+      "name": "wmma_generic.bf16_dmax64_window_bias_q.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 64,
+          "dtype": "bf16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": true,
+          "bias_dtype": "q",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 1,
+        "bias_dtype": "q"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "b196f16c-abc4-4d58-bb52-ddac408a9866",
+      "name": "wmma_generic.bf16_dmax96_none.gfx1151",
       "kernel_source": {
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
@@ -517,7 +922,8 @@
           "causal_tile_skip": false,
           "v_head_size": 0,
           "use_attn_bias": false,
-          "bias_dtype": "f32"
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
         }
       },
       "metadata": {
@@ -528,61 +934,17 @@
         "query_tail": 1,
         "kv_tail": 1,
         "block_n": 32,
-        "num_waves": 1
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
       },
       "priority": 0
     },
     {
       "version": "1.0",
-      "id": "e5310ce9-81eb-4f1d-b21f-989d6beddf49",
-      "name": "wmma_generic.bf16_d96_causal.gfx1151",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
-        "builder": "build_wmma_fmha_fwd",
-        "target": "generic",
-        "spec": {
-          "head_size": 96,
-          "dtype": "bf16",
-          "mask_mode": "causal",
-          "v_lds_stage": false,
-          "name": "rocke_wmma_fmha_fwd",
-          "query_tail": true,
-          "kv_tail": true,
-          "use_softcap": false,
-          "use_sinks": false,
-          "use_alibi": false,
-          "use_qq_bias": false,
-          "layout": "dense",
-          "page_block_size": 0,
-          "kv_dtype": "",
-          "transposed_qk": false,
-          "block_n": 32,
-          "num_waves": 1,
-          "scheduler_strategy": "max-ilp",
-          "value_tile_size": 0,
-          "causal_tile_skip": false,
-          "v_head_size": 0,
-          "use_attn_bias": false,
-          "bias_dtype": "f32"
-        }
-      },
-      "metadata": {
-        "dtype": "BF16",
-        "head_size": 96,
-        "mask_mode": "causal",
-        "transposed_qk": 0,
-        "query_tail": 1,
-        "kv_tail": 1,
-        "block_n": 32,
-        "num_waves": 1
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "59baf1ae-3819-4a85-abf7-503199767f9b",
-      "name": "wmma_generic.bf16_d96_window.gfx1151",
+      "id": "7f20817d-7c71-45e0-966e-e5c4420a44e1",
+      "name": "wmma_generic.bf16_dmax96_window.gfx1151",
       "kernel_source": {
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
@@ -611,7 +973,8 @@
           "causal_tile_skip": false,
           "v_head_size": 0,
           "use_attn_bias": false,
-          "bias_dtype": "f32"
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
         }
       },
       "metadata": {
@@ -622,116 +985,25 @@
         "query_tail": 1,
         "kv_tail": 1,
         "block_n": 32,
-        "num_waves": 1
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
       },
       "priority": 0
     },
     {
       "version": "1.0",
-      "id": "ac4fdcfb-e4ee-4334-9f14-a3f56be24166",
-      "name": "wmma_generic.fp16_d128_none.gfx1151",
+      "id": "a25ac64d-778e-4d5b-9161-02e05d76012e",
+      "name": "wmma_generic.bf16_dmax96_window_bias_f32.gfx1151",
       "kernel_source": {
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
         "builder": "build_wmma_fmha_fwd",
         "target": "generic",
         "spec": {
-          "head_size": 128,
-          "dtype": "fp16",
-          "mask_mode": "none",
-          "v_lds_stage": false,
-          "name": "rocke_wmma_fmha_fwd",
-          "query_tail": true,
-          "kv_tail": true,
-          "use_softcap": false,
-          "use_sinks": false,
-          "use_alibi": false,
-          "use_qq_bias": false,
-          "layout": "dense",
-          "page_block_size": 0,
-          "kv_dtype": "",
-          "transposed_qk": false,
-          "block_n": 32,
-          "num_waves": 1,
-          "scheduler_strategy": "max-ilp",
-          "value_tile_size": 0,
-          "causal_tile_skip": false,
-          "v_head_size": 0,
-          "use_attn_bias": false,
-          "bias_dtype": "f32"
-        }
-      },
-      "metadata": {
-        "dtype": "FP16",
-        "head_size": 128,
-        "mask_mode": "none",
-        "transposed_qk": 0,
-        "query_tail": 1,
-        "kv_tail": 1,
-        "block_n": 32,
-        "num_waves": 1
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "29dbb798-4a6d-47fe-a7ce-a8352009e450",
-      "name": "wmma_generic.fp16_d128_causal.gfx1151",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
-        "builder": "build_wmma_fmha_fwd",
-        "target": "generic",
-        "spec": {
-          "head_size": 128,
-          "dtype": "fp16",
-          "mask_mode": "causal",
-          "v_lds_stage": false,
-          "name": "rocke_wmma_fmha_fwd",
-          "query_tail": true,
-          "kv_tail": true,
-          "use_softcap": false,
-          "use_sinks": false,
-          "use_alibi": false,
-          "use_qq_bias": false,
-          "layout": "dense",
-          "page_block_size": 0,
-          "kv_dtype": "",
-          "transposed_qk": false,
-          "block_n": 32,
-          "num_waves": 1,
-          "scheduler_strategy": "max-ilp",
-          "value_tile_size": 0,
-          "causal_tile_skip": false,
-          "v_head_size": 0,
-          "use_attn_bias": false,
-          "bias_dtype": "f32"
-        }
-      },
-      "metadata": {
-        "dtype": "FP16",
-        "head_size": 128,
-        "mask_mode": "causal",
-        "transposed_qk": 0,
-        "query_tail": 1,
-        "kv_tail": 1,
-        "block_n": 32,
-        "num_waves": 1
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "10681ea8-a4b7-44e1-91fb-a4b575223ea8",
-      "name": "wmma_generic.fp16_d128_window.gfx1151",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
-        "builder": "build_wmma_fmha_fwd",
-        "target": "generic",
-        "spec": {
-          "head_size": 128,
-          "dtype": "fp16",
+          "head_size": 96,
+          "dtype": "bf16",
           "mask_mode": "window",
           "v_lds_stage": false,
           "name": "rocke_wmma_fmha_fwd",
@@ -751,26 +1023,81 @@
           "value_tile_size": 0,
           "causal_tile_skip": false,
           "v_head_size": 0,
-          "use_attn_bias": false,
-          "bias_dtype": "f32"
+          "use_attn_bias": true,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
         }
       },
       "metadata": {
-        "dtype": "FP16",
-        "head_size": 128,
+        "dtype": "BF16",
+        "head_size": 96,
         "mask_mode": "window",
         "transposed_qk": 0,
         "query_tail": 1,
         "kv_tail": 1,
         "block_n": 32,
-        "num_waves": 1
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 1,
+        "bias_dtype": "f32"
       },
       "priority": 0
     },
     {
       "version": "1.0",
-      "id": "d134a9cf-06ea-47bf-b6f2-2ad8ca800674",
-      "name": "wmma_generic.bf16_d128_none.gfx1151",
+      "id": "b2ad7859-a08a-45b3-9b9a-9325dd639196",
+      "name": "wmma_generic.bf16_dmax96_window_bias_q.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 96,
+          "dtype": "bf16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": true,
+          "bias_dtype": "q",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 96,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 1,
+        "bias_dtype": "q"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f5b0f3af-08e2-4636-a8b9-0ad571bc4213",
+      "name": "wmma_generic.bf16_dmax128_none.gfx1151",
       "kernel_source": {
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
@@ -799,7 +1126,8 @@
           "causal_tile_skip": false,
           "v_head_size": 0,
           "use_attn_bias": false,
-          "bias_dtype": "f32"
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
         }
       },
       "metadata": {
@@ -810,61 +1138,17 @@
         "query_tail": 1,
         "kv_tail": 1,
         "block_n": 32,
-        "num_waves": 1
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
       },
       "priority": 0
     },
     {
       "version": "1.0",
-      "id": "7dbbca78-05ab-4102-9d07-2942d70fcaee",
-      "name": "wmma_generic.bf16_d128_causal.gfx1151",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
-        "builder": "build_wmma_fmha_fwd",
-        "target": "generic",
-        "spec": {
-          "head_size": 128,
-          "dtype": "bf16",
-          "mask_mode": "causal",
-          "v_lds_stage": false,
-          "name": "rocke_wmma_fmha_fwd",
-          "query_tail": true,
-          "kv_tail": true,
-          "use_softcap": false,
-          "use_sinks": false,
-          "use_alibi": false,
-          "use_qq_bias": false,
-          "layout": "dense",
-          "page_block_size": 0,
-          "kv_dtype": "",
-          "transposed_qk": false,
-          "block_n": 32,
-          "num_waves": 1,
-          "scheduler_strategy": "max-ilp",
-          "value_tile_size": 0,
-          "causal_tile_skip": false,
-          "v_head_size": 0,
-          "use_attn_bias": false,
-          "bias_dtype": "f32"
-        }
-      },
-      "metadata": {
-        "dtype": "BF16",
-        "head_size": 128,
-        "mask_mode": "causal",
-        "transposed_qk": 0,
-        "query_tail": 1,
-        "kv_tail": 1,
-        "block_n": 32,
-        "num_waves": 1
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "e063de58-32ad-4276-9b26-810b599d6713",
-      "name": "wmma_generic.bf16_d128_window.gfx1151",
+      "id": "9bc49eac-1446-4eb5-8490-593836054fe6",
+      "name": "wmma_generic.bf16_dmax128_window.gfx1151",
       "kernel_source": {
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_fwd.py",
@@ -893,7 +1177,8 @@
           "causal_tile_skip": false,
           "v_head_size": 0,
           "use_attn_bias": false,
-          "bias_dtype": "f32"
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
         }
       },
       "metadata": {
@@ -904,7 +1189,1285 @@
         "query_tail": 1,
         "kv_tail": 1,
         "block_n": 32,
-        "num_waves": 1
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "fd4590ee-d7b3-48b9-94fe-cb53c3d3252c",
+      "name": "wmma_generic.bf16_dmax128_window_bias_f32.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 128,
+          "dtype": "bf16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": true,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 1,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "cb076534-6eaa-46d1-9001-e4d49c007e98",
+      "name": "wmma_generic.bf16_dmax128_window_bias_q.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 128,
+          "dtype": "bf16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": true,
+          "bias_dtype": "q",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 1,
+        "bias_dtype": "q"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "3924f0b1-e8dd-43d5-a793-6d22c7ca0415",
+      "name": "wmma_generic.fp16_dmax160_none.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 160,
+          "dtype": "fp16",
+          "mask_mode": "none",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": false,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 160,
+        "mask_mode": "none",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "d1d8f2a5-6e69-4556-9fe4-3bc628986ab6",
+      "name": "wmma_generic.fp16_dmax160_causal.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 160,
+          "dtype": "fp16",
+          "mask_mode": "causal",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": true,
+          "v_head_size": 0,
+          "use_attn_bias": false,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 160,
+        "mask_mode": "causal",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "e9470436-c940-45cc-aaab-c4b83533bee8",
+      "name": "wmma_generic.fp16_dmax160_window.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 160,
+          "dtype": "fp16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": false,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 160,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6ecc6d14-7aaa-4b50-9ac0-270300e5d053",
+      "name": "wmma_generic.fp16_dmax160_window_bias_f32.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 160,
+          "dtype": "fp16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": true,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 160,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 1,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "42aa3ba4-3e80-4d0d-845b-6de078632984",
+      "name": "wmma_generic.fp16_dmax160_window_bias_q.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 160,
+          "dtype": "fp16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": true,
+          "bias_dtype": "q",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 160,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 1,
+        "bias_dtype": "q"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ae92e746-ff6e-420e-83b5-a10df7646528",
+      "name": "wmma_generic.fp16_dmax256_none.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 256,
+          "dtype": "fp16",
+          "mask_mode": "none",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": false,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "mask_mode": "none",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "09433903-06d7-4e34-af50-d3b6cc009104",
+      "name": "wmma_generic.fp16_dmax256_causal.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 256,
+          "dtype": "fp16",
+          "mask_mode": "causal",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": true,
+          "v_head_size": 0,
+          "use_attn_bias": false,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "mask_mode": "causal",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "dcee2b36-8c08-49a1-9d79-496ad263cea2",
+      "name": "wmma_generic.fp16_dmax256_window.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 256,
+          "dtype": "fp16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": false,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "12864f7e-754f-4617-9402-be59819fc5be",
+      "name": "wmma_generic.fp16_dmax256_window_bias_f32.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 256,
+          "dtype": "fp16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": true,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 1,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "b9f39dff-023e-4313-9c8b-5811c9b0fda0",
+      "name": "wmma_generic.fp16_dmax256_window_bias_q.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 256,
+          "dtype": "fp16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": true,
+          "bias_dtype": "q",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 1,
+        "bias_dtype": "q"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "e0702870-6a18-4e33-99c6-33d698fbe6b5",
+      "name": "wmma_generic.bf16_dmax160_none.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 160,
+          "dtype": "bf16",
+          "mask_mode": "none",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": false,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 160,
+        "mask_mode": "none",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a3a810f6-67a2-4a39-a0a9-059f08a3569c",
+      "name": "wmma_generic.bf16_dmax160_causal.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 160,
+          "dtype": "bf16",
+          "mask_mode": "causal",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": true,
+          "v_head_size": 0,
+          "use_attn_bias": false,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 160,
+        "mask_mode": "causal",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "e76a20a3-b808-41ae-b94d-800901d084ed",
+      "name": "wmma_generic.bf16_dmax160_window.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 160,
+          "dtype": "bf16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": false,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 160,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "11ebd246-5227-4fd6-90f8-c285595a8f89",
+      "name": "wmma_generic.bf16_dmax160_window_bias_f32.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 160,
+          "dtype": "bf16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": true,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 160,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 1,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2a86e5dc-d0bf-4c89-9484-f36ecb701ec4",
+      "name": "wmma_generic.bf16_dmax160_window_bias_q.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 160,
+          "dtype": "bf16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": true,
+          "bias_dtype": "q",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 160,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 1,
+        "bias_dtype": "q"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "559661c6-1a32-4a5c-a3f0-7eb4b3403f86",
+      "name": "wmma_generic.bf16_dmax256_none.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 256,
+          "dtype": "bf16",
+          "mask_mode": "none",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": false,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "mask_mode": "none",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "201163a7-097e-4505-851a-b7c29e833606",
+      "name": "wmma_generic.bf16_dmax256_causal.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 256,
+          "dtype": "bf16",
+          "mask_mode": "causal",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": true,
+          "v_head_size": 0,
+          "use_attn_bias": false,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "mask_mode": "causal",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "4ff37895-5854-49ed-a743-78eb2921eed9",
+      "name": "wmma_generic.bf16_dmax256_window.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 256,
+          "dtype": "bf16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": false,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "d3027531-e4c3-41ac-894a-0c496f66b183",
+      "name": "wmma_generic.bf16_dmax256_window_bias_f32.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 256,
+          "dtype": "bf16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": true,
+          "bias_dtype": "f32",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 1,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a6dca341-5183-44c0-a145-a4061636c757",
+      "name": "wmma_generic.bf16_dmax256_window_bias_q.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 256,
+          "dtype": "bf16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": true,
+          "bias_dtype": "q",
+          "runtime_head_dims": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 1,
+        "use_attn_bias": 1,
+        "bias_dtype": "q"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "c9907bb5-f367-447b-a485-366ba554f1ce",
+      "name": "wmma_generic.fp16_d192_none.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 192,
+          "dtype": "fp16",
+          "mask_mode": "none",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": false,
+          "bias_dtype": "f32",
+          "runtime_head_dims": false
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 192,
+        "mask_mode": "none",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 0,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2215f245-df5d-438c-9a3b-bd1ea4cb6281",
+      "name": "wmma_generic.fp16_d192_causal.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 192,
+          "dtype": "fp16",
+          "mask_mode": "causal",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": true,
+          "v_head_size": 0,
+          "use_attn_bias": false,
+          "bias_dtype": "f32",
+          "runtime_head_dims": false
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 192,
+        "mask_mode": "causal",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 0,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "3df1dcfc-54b5-48c2-857b-a0992e23f95e",
+      "name": "wmma_generic.fp16_d192_window.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 192,
+          "dtype": "fp16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": false,
+          "bias_dtype": "f32",
+          "runtime_head_dims": false
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 192,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 0,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
       },
       "priority": 0
     },
@@ -940,7 +2503,8 @@
           "causal_tile_skip": false,
           "v_head_size": 0,
           "use_attn_bias": false,
-          "bias_dtype": "f32"
+          "bias_dtype": "f32",
+          "runtime_head_dims": false
         }
       },
       "metadata": {
@@ -951,7 +2515,10 @@
         "query_tail": 1,
         "kv_tail": 1,
         "block_n": 32,
-        "num_waves": 1
+        "num_waves": 1,
+        "runtime_head_dims": 0,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
       },
       "priority": 0
     },
@@ -984,10 +2551,11 @@
           "num_waves": 1,
           "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
-          "causal_tile_skip": false,
+          "causal_tile_skip": true,
           "v_head_size": 0,
           "use_attn_bias": false,
-          "bias_dtype": "f32"
+          "bias_dtype": "f32",
+          "runtime_head_dims": false
         }
       },
       "metadata": {
@@ -998,7 +2566,10 @@
         "query_tail": 1,
         "kv_tail": 1,
         "block_n": 32,
-        "num_waves": 1
+        "num_waves": 1,
+        "runtime_head_dims": 0,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
       },
       "priority": 0
     },
@@ -1034,7 +2605,8 @@
           "causal_tile_skip": false,
           "v_head_size": 0,
           "use_attn_bias": false,
-          "bias_dtype": "f32"
+          "bias_dtype": "f32",
+          "runtime_head_dims": false
         }
       },
       "metadata": {
@@ -1045,7 +2617,163 @@
         "query_tail": 1,
         "kv_tail": 1,
         "block_n": 32,
-        "num_waves": 1
+        "num_waves": 1,
+        "runtime_head_dims": 0,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "e4c318ad-4188-4699-9f85-7c941a60edf2",
+      "name": "wmma_generic.bf16_d192_none.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 192,
+          "dtype": "bf16",
+          "mask_mode": "none",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": false,
+          "bias_dtype": "f32",
+          "runtime_head_dims": false
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 192,
+        "mask_mode": "none",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 0,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "39155f8c-64bc-4a2a-8172-7edf74a35fbc",
+      "name": "wmma_generic.bf16_d192_causal.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 192,
+          "dtype": "bf16",
+          "mask_mode": "causal",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": true,
+          "v_head_size": 0,
+          "use_attn_bias": false,
+          "bias_dtype": "f32",
+          "runtime_head_dims": false
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 192,
+        "mask_mode": "causal",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 0,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "c43ace3f-bd94-430f-b627-7d7738b594e2",
+      "name": "wmma_generic.bf16_d192_window.gfx1151",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
+        "builder": "build_wmma_fmha_fwd",
+        "target": "generic",
+        "spec": {
+          "head_size": 192,
+          "dtype": "bf16",
+          "mask_mode": "window",
+          "v_lds_stage": false,
+          "name": "rocke_wmma_fmha_fwd",
+          "query_tail": true,
+          "kv_tail": true,
+          "use_softcap": false,
+          "use_sinks": false,
+          "use_alibi": false,
+          "use_qq_bias": false,
+          "layout": "dense",
+          "page_block_size": 0,
+          "kv_dtype": "",
+          "transposed_qk": false,
+          "block_n": 32,
+          "num_waves": 1,
+          "scheduler_strategy": "max-ilp",
+          "value_tile_size": 0,
+          "causal_tile_skip": false,
+          "v_head_size": 0,
+          "use_attn_bias": false,
+          "bias_dtype": "f32",
+          "runtime_head_dims": false
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 192,
+        "mask_mode": "window",
+        "transposed_qk": 0,
+        "query_tail": 1,
+        "kv_tail": 1,
+        "block_n": 32,
+        "num_waves": 1,
+        "runtime_head_dims": 0,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
       },
       "priority": 0
     },
@@ -1081,7 +2809,8 @@
           "causal_tile_skip": false,
           "v_head_size": 0,
           "use_attn_bias": false,
-          "bias_dtype": "f32"
+          "bias_dtype": "f32",
+          "runtime_head_dims": false
         }
       },
       "metadata": {
@@ -1092,7 +2821,10 @@
         "query_tail": 1,
         "kv_tail": 1,
         "block_n": 32,
-        "num_waves": 1
+        "num_waves": 1,
+        "runtime_head_dims": 0,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
       },
       "priority": 0
     },
@@ -1125,10 +2857,11 @@
           "num_waves": 1,
           "scheduler_strategy": "max-ilp",
           "value_tile_size": 0,
-          "causal_tile_skip": false,
+          "causal_tile_skip": true,
           "v_head_size": 0,
           "use_attn_bias": false,
-          "bias_dtype": "f32"
+          "bias_dtype": "f32",
+          "runtime_head_dims": false
         }
       },
       "metadata": {
@@ -1139,7 +2872,10 @@
         "query_tail": 1,
         "kv_tail": 1,
         "block_n": 32,
-        "num_waves": 1
+        "num_waves": 1,
+        "runtime_head_dims": 0,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
       },
       "priority": 0
     },
@@ -1175,7 +2911,8 @@
           "causal_tile_skip": false,
           "v_head_size": 0,
           "use_attn_bias": false,
-          "bias_dtype": "f32"
+          "bias_dtype": "f32",
+          "runtime_head_dims": false
         }
       },
       "metadata": {
@@ -1186,7 +2923,10 @@
         "query_tail": 1,
         "kv_tail": 1,
         "block_n": 32,
-        "num_waves": 1
+        "num_waves": 1,
+        "runtime_head_dims": 0,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
       },
       "priority": 0
     },
@@ -1222,7 +2962,8 @@
           "causal_tile_skip": false,
           "v_head_size": 0,
           "use_attn_bias": false,
-          "bias_dtype": "f32"
+          "bias_dtype": "f32",
+          "runtime_head_dims": false
         }
       },
       "metadata": {
@@ -1233,7 +2974,10 @@
         "query_tail": 0,
         "kv_tail": 0,
         "block_n": 32,
-        "num_waves": 1
+        "num_waves": 1,
+        "runtime_head_dims": 0,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
       },
       "priority": 0,
       "arch": [
@@ -1279,7 +3023,8 @@
           "causal_tile_skip": false,
           "v_head_size": 0,
           "use_attn_bias": false,
-          "bias_dtype": "f32"
+          "bias_dtype": "f32",
+          "runtime_head_dims": false
         }
       },
       "metadata": {
@@ -1290,121 +3035,10 @@
         "query_tail": 0,
         "kv_tail": 0,
         "block_n": 32,
-        "num_waves": 1
-      },
-      "priority": 0,
-      "arch": [
-        "gfx1100",
-        "gfx1101",
-        "gfx1102",
-        "gfx1103",
-        "gfx1150",
-        "gfx1151",
-        "gfx1152",
-        "gfx1153"
-      ]
-    },
-    {
-      "version": "1.0",
-      "id": "0b860c4a-d42a-4967-a0ca-e9c98a940734",
-      "name": "wmma_swapqk.fp16_d64_none_bn64_w2.gfx1151",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
-        "builder": "build_wmma_fmha_fwd",
-        "target": "generic",
-        "spec": {
-          "head_size": 64,
-          "dtype": "fp16",
-          "mask_mode": "none",
-          "v_lds_stage": false,
-          "name": "rocke_wmma_fmha_fwd",
-          "query_tail": false,
-          "kv_tail": false,
-          "use_softcap": false,
-          "use_sinks": false,
-          "use_alibi": false,
-          "use_qq_bias": false,
-          "layout": "dense",
-          "page_block_size": 0,
-          "kv_dtype": "",
-          "transposed_qk": true,
-          "block_n": 64,
-          "num_waves": 2,
-          "scheduler_strategy": null,
-          "value_tile_size": 0,
-          "causal_tile_skip": false,
-          "v_head_size": 0,
-          "use_attn_bias": false,
-          "bias_dtype": "f32"
-        }
-      },
-      "metadata": {
-        "dtype": "FP16",
-        "head_size": 64,
-        "mask_mode": "none",
-        "transposed_qk": 1,
-        "query_tail": 0,
-        "kv_tail": 0,
-        "block_n": 64,
-        "num_waves": 2
-      },
-      "priority": 0,
-      "arch": [
-        "gfx1100",
-        "gfx1101",
-        "gfx1102",
-        "gfx1103",
-        "gfx1150",
-        "gfx1151",
-        "gfx1152",
-        "gfx1153"
-      ]
-    },
-    {
-      "version": "1.0",
-      "id": "51940ddb-c4ae-433c-855b-ce72b282becf",
-      "name": "wmma_swapqk.fp16_d64_causal_bn64_w2.gfx1151",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
-        "builder": "build_wmma_fmha_fwd",
-        "target": "generic",
-        "spec": {
-          "head_size": 64,
-          "dtype": "fp16",
-          "mask_mode": "causal",
-          "v_lds_stage": false,
-          "name": "rocke_wmma_fmha_fwd",
-          "query_tail": false,
-          "kv_tail": false,
-          "use_softcap": false,
-          "use_sinks": false,
-          "use_alibi": false,
-          "use_qq_bias": false,
-          "layout": "dense",
-          "page_block_size": 0,
-          "kv_dtype": "",
-          "transposed_qk": true,
-          "block_n": 64,
-          "num_waves": 2,
-          "scheduler_strategy": null,
-          "value_tile_size": 0,
-          "causal_tile_skip": false,
-          "v_head_size": 0,
-          "use_attn_bias": false,
-          "bias_dtype": "f32"
-        }
-      },
-      "metadata": {
-        "dtype": "FP16",
-        "head_size": 64,
-        "mask_mode": "causal",
-        "transposed_qk": 1,
-        "query_tail": 0,
-        "kv_tail": 0,
-        "block_n": 64,
-        "num_waves": 2
+        "num_waves": 1,
+        "runtime_head_dims": 0,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
       },
       "priority": 0,
       "arch": [
@@ -1450,7 +3084,8 @@
           "causal_tile_skip": false,
           "v_head_size": 0,
           "use_attn_bias": false,
-          "bias_dtype": "f32"
+          "bias_dtype": "f32",
+          "runtime_head_dims": false
         }
       },
       "metadata": {
@@ -1461,7 +3096,10 @@
         "query_tail": 0,
         "kv_tail": 0,
         "block_n": 32,
-        "num_waves": 1
+        "num_waves": 1,
+        "runtime_head_dims": 0,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
       },
       "priority": 0,
       "arch": [
@@ -1507,7 +3145,8 @@
           "causal_tile_skip": false,
           "v_head_size": 0,
           "use_attn_bias": false,
-          "bias_dtype": "f32"
+          "bias_dtype": "f32",
+          "runtime_head_dims": false
         }
       },
       "metadata": {
@@ -1518,121 +3157,10 @@
         "query_tail": 0,
         "kv_tail": 0,
         "block_n": 32,
-        "num_waves": 1
-      },
-      "priority": 0,
-      "arch": [
-        "gfx1100",
-        "gfx1101",
-        "gfx1102",
-        "gfx1103",
-        "gfx1150",
-        "gfx1151",
-        "gfx1152",
-        "gfx1153"
-      ]
-    },
-    {
-      "version": "1.0",
-      "id": "7bc27a95-b068-484e-8e3c-7d019ef1ecd5",
-      "name": "wmma_swapqk.bf16_d64_none_bn64_w2.gfx1151",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
-        "builder": "build_wmma_fmha_fwd",
-        "target": "generic",
-        "spec": {
-          "head_size": 64,
-          "dtype": "bf16",
-          "mask_mode": "none",
-          "v_lds_stage": false,
-          "name": "rocke_wmma_fmha_fwd",
-          "query_tail": false,
-          "kv_tail": false,
-          "use_softcap": false,
-          "use_sinks": false,
-          "use_alibi": false,
-          "use_qq_bias": false,
-          "layout": "dense",
-          "page_block_size": 0,
-          "kv_dtype": "",
-          "transposed_qk": true,
-          "block_n": 64,
-          "num_waves": 2,
-          "scheduler_strategy": null,
-          "value_tile_size": 0,
-          "causal_tile_skip": false,
-          "v_head_size": 0,
-          "use_attn_bias": false,
-          "bias_dtype": "f32"
-        }
-      },
-      "metadata": {
-        "dtype": "BF16",
-        "head_size": 64,
-        "mask_mode": "none",
-        "transposed_qk": 1,
-        "query_tail": 0,
-        "kv_tail": 0,
-        "block_n": 64,
-        "num_waves": 2
-      },
-      "priority": 0,
-      "arch": [
-        "gfx1100",
-        "gfx1101",
-        "gfx1102",
-        "gfx1103",
-        "gfx1150",
-        "gfx1151",
-        "gfx1152",
-        "gfx1153"
-      ]
-    },
-    {
-      "version": "1.0",
-      "id": "89484618-4816-4cf8-a4eb-692946273cc0",
-      "name": "wmma_swapqk.bf16_d64_causal_bn64_w2.gfx1151",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
-        "builder": "build_wmma_fmha_fwd",
-        "target": "generic",
-        "spec": {
-          "head_size": 64,
-          "dtype": "bf16",
-          "mask_mode": "causal",
-          "v_lds_stage": false,
-          "name": "rocke_wmma_fmha_fwd",
-          "query_tail": false,
-          "kv_tail": false,
-          "use_softcap": false,
-          "use_sinks": false,
-          "use_alibi": false,
-          "use_qq_bias": false,
-          "layout": "dense",
-          "page_block_size": 0,
-          "kv_dtype": "",
-          "transposed_qk": true,
-          "block_n": 64,
-          "num_waves": 2,
-          "scheduler_strategy": null,
-          "value_tile_size": 0,
-          "causal_tile_skip": false,
-          "v_head_size": 0,
-          "use_attn_bias": false,
-          "bias_dtype": "f32"
-        }
-      },
-      "metadata": {
-        "dtype": "BF16",
-        "head_size": 64,
-        "mask_mode": "causal",
-        "transposed_qk": 1,
-        "query_tail": 0,
-        "kv_tail": 0,
-        "block_n": 64,
-        "num_waves": 2
+        "num_waves": 1,
+        "runtime_head_dims": 0,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
       },
       "priority": 0,
       "arch": [
@@ -1678,7 +3206,8 @@
           "causal_tile_skip": false,
           "v_head_size": 0,
           "use_attn_bias": false,
-          "bias_dtype": "f32"
+          "bias_dtype": "f32",
+          "runtime_head_dims": false
         }
       },
       "metadata": {
@@ -1689,7 +3218,10 @@
         "query_tail": 0,
         "kv_tail": 0,
         "block_n": 32,
-        "num_waves": 1
+        "num_waves": 1,
+        "runtime_head_dims": 0,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
       },
       "priority": 0,
       "arch": [
@@ -1735,7 +3267,8 @@
           "causal_tile_skip": false,
           "v_head_size": 0,
           "use_attn_bias": false,
-          "bias_dtype": "f32"
+          "bias_dtype": "f32",
+          "runtime_head_dims": false
         }
       },
       "metadata": {
@@ -1746,121 +3279,10 @@
         "query_tail": 0,
         "kv_tail": 0,
         "block_n": 32,
-        "num_waves": 1
-      },
-      "priority": 0,
-      "arch": [
-        "gfx1100",
-        "gfx1101",
-        "gfx1102",
-        "gfx1103",
-        "gfx1150",
-        "gfx1151",
-        "gfx1152",
-        "gfx1153"
-      ]
-    },
-    {
-      "version": "1.0",
-      "id": "acf1e3bd-f33f-49e1-8a74-9d4a07768394",
-      "name": "wmma_swapqk.fp16_d128_none_bn64_w2.gfx1151",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
-        "builder": "build_wmma_fmha_fwd",
-        "target": "generic",
-        "spec": {
-          "head_size": 128,
-          "dtype": "fp16",
-          "mask_mode": "none",
-          "v_lds_stage": false,
-          "name": "rocke_wmma_fmha_fwd",
-          "query_tail": false,
-          "kv_tail": false,
-          "use_softcap": false,
-          "use_sinks": false,
-          "use_alibi": false,
-          "use_qq_bias": false,
-          "layout": "dense",
-          "page_block_size": 0,
-          "kv_dtype": "",
-          "transposed_qk": true,
-          "block_n": 64,
-          "num_waves": 2,
-          "scheduler_strategy": null,
-          "value_tile_size": 0,
-          "causal_tile_skip": false,
-          "v_head_size": 0,
-          "use_attn_bias": false,
-          "bias_dtype": "f32"
-        }
-      },
-      "metadata": {
-        "dtype": "FP16",
-        "head_size": 128,
-        "mask_mode": "none",
-        "transposed_qk": 1,
-        "query_tail": 0,
-        "kv_tail": 0,
-        "block_n": 64,
-        "num_waves": 2
-      },
-      "priority": 0,
-      "arch": [
-        "gfx1100",
-        "gfx1101",
-        "gfx1102",
-        "gfx1103",
-        "gfx1150",
-        "gfx1151",
-        "gfx1152",
-        "gfx1153"
-      ]
-    },
-    {
-      "version": "1.0",
-      "id": "527f9ea4-3fe3-4094-aabd-7cdda611f1c4",
-      "name": "wmma_swapqk.fp16_d128_causal_bn64_w2.gfx1151",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
-        "builder": "build_wmma_fmha_fwd",
-        "target": "generic",
-        "spec": {
-          "head_size": 128,
-          "dtype": "fp16",
-          "mask_mode": "causal",
-          "v_lds_stage": false,
-          "name": "rocke_wmma_fmha_fwd",
-          "query_tail": false,
-          "kv_tail": false,
-          "use_softcap": false,
-          "use_sinks": false,
-          "use_alibi": false,
-          "use_qq_bias": false,
-          "layout": "dense",
-          "page_block_size": 0,
-          "kv_dtype": "",
-          "transposed_qk": true,
-          "block_n": 64,
-          "num_waves": 2,
-          "scheduler_strategy": null,
-          "value_tile_size": 0,
-          "causal_tile_skip": false,
-          "v_head_size": 0,
-          "use_attn_bias": false,
-          "bias_dtype": "f32"
-        }
-      },
-      "metadata": {
-        "dtype": "FP16",
-        "head_size": 128,
-        "mask_mode": "causal",
-        "transposed_qk": 1,
-        "query_tail": 0,
-        "kv_tail": 0,
-        "block_n": 64,
-        "num_waves": 2
+        "num_waves": 1,
+        "runtime_head_dims": 0,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
       },
       "priority": 0,
       "arch": [
@@ -1906,7 +3328,8 @@
           "causal_tile_skip": false,
           "v_head_size": 0,
           "use_attn_bias": false,
-          "bias_dtype": "f32"
+          "bias_dtype": "f32",
+          "runtime_head_dims": false
         }
       },
       "metadata": {
@@ -1917,7 +3340,10 @@
         "query_tail": 0,
         "kv_tail": 0,
         "block_n": 32,
-        "num_waves": 1
+        "num_waves": 1,
+        "runtime_head_dims": 0,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
       },
       "priority": 0,
       "arch": [
@@ -1963,7 +3389,8 @@
           "causal_tile_skip": false,
           "v_head_size": 0,
           "use_attn_bias": false,
-          "bias_dtype": "f32"
+          "bias_dtype": "f32",
+          "runtime_head_dims": false
         }
       },
       "metadata": {
@@ -1974,121 +3401,10 @@
         "query_tail": 0,
         "kv_tail": 0,
         "block_n": 32,
-        "num_waves": 1
-      },
-      "priority": 0,
-      "arch": [
-        "gfx1100",
-        "gfx1101",
-        "gfx1102",
-        "gfx1103",
-        "gfx1150",
-        "gfx1151",
-        "gfx1152",
-        "gfx1153"
-      ]
-    },
-    {
-      "version": "1.0",
-      "id": "80d268d8-82fd-45a7-a5f9-00e8dc6b7789",
-      "name": "wmma_swapqk.bf16_d128_none_bn64_w2.gfx1151",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
-        "builder": "build_wmma_fmha_fwd",
-        "target": "generic",
-        "spec": {
-          "head_size": 128,
-          "dtype": "bf16",
-          "mask_mode": "none",
-          "v_lds_stage": false,
-          "name": "rocke_wmma_fmha_fwd",
-          "query_tail": false,
-          "kv_tail": false,
-          "use_softcap": false,
-          "use_sinks": false,
-          "use_alibi": false,
-          "use_qq_bias": false,
-          "layout": "dense",
-          "page_block_size": 0,
-          "kv_dtype": "",
-          "transposed_qk": true,
-          "block_n": 64,
-          "num_waves": 2,
-          "scheduler_strategy": null,
-          "value_tile_size": 0,
-          "causal_tile_skip": false,
-          "v_head_size": 0,
-          "use_attn_bias": false,
-          "bias_dtype": "f32"
-        }
-      },
-      "metadata": {
-        "dtype": "BF16",
-        "head_size": 128,
-        "mask_mode": "none",
-        "transposed_qk": 1,
-        "query_tail": 0,
-        "kv_tail": 0,
-        "block_n": 64,
-        "num_waves": 2
-      },
-      "priority": 0,
-      "arch": [
-        "gfx1100",
-        "gfx1101",
-        "gfx1102",
-        "gfx1103",
-        "gfx1150",
-        "gfx1151",
-        "gfx1152",
-        "gfx1153"
-      ]
-    },
-    {
-      "version": "1.0",
-      "id": "03af1897-bd35-49d4-874f-238f0e5691f4",
-      "name": "wmma_swapqk.bf16_d128_causal_bn64_w2.gfx1151",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd.py",
-        "builder": "build_wmma_fmha_fwd",
-        "target": "generic",
-        "spec": {
-          "head_size": 128,
-          "dtype": "bf16",
-          "mask_mode": "causal",
-          "v_lds_stage": false,
-          "name": "rocke_wmma_fmha_fwd",
-          "query_tail": false,
-          "kv_tail": false,
-          "use_softcap": false,
-          "use_sinks": false,
-          "use_alibi": false,
-          "use_qq_bias": false,
-          "layout": "dense",
-          "page_block_size": 0,
-          "kv_dtype": "",
-          "transposed_qk": true,
-          "block_n": 64,
-          "num_waves": 2,
-          "scheduler_strategy": null,
-          "value_tile_size": 0,
-          "causal_tile_skip": false,
-          "v_head_size": 0,
-          "use_attn_bias": false,
-          "bias_dtype": "f32"
-        }
-      },
-      "metadata": {
-        "dtype": "BF16",
-        "head_size": 128,
-        "mask_mode": "causal",
-        "transposed_qk": 1,
-        "query_tail": 0,
-        "kv_tail": 0,
-        "block_n": 64,
-        "num_waves": 2
+        "num_waves": 1,
+        "runtime_head_dims": 0,
+        "use_attn_bias": 0,
+        "bias_dtype": "f32"
       },
       "priority": 0,
       "arch": [

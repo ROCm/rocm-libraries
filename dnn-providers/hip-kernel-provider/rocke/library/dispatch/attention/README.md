@@ -435,11 +435,13 @@ cached and stream handles are forwarded. Use `fence=False` for asynchronous or
 graph-captured launches, then release retained owners after the appropriate
 synchronization and graph-destruction boundary.
 
-The shipped `hipkernel:Gfx1151WmmaAttention` catalog uses the same dense ABI
-and packages reusable FP16/BF16 D64/D96/D128/D256 objects for no-mask,
-causal, and two-sided-window requests, compiled for each shard's generic target
-(gfx11 shards include the transposed-QK objects; gfx12 shards do not). Runtime
-dimensions and strides do not multiply the AOT object count.
+The shipped `hipkernel:Gfx1151WmmaAttention` catalog uses the same dense ABI:
+FP16/BF16 `runtime_head_dims` buckets (D64/D96/D128/D160/D256) of no-mask,
+band (no-mask/causal/window) and band-plus-additive-bias objects, with causal
+objects in the D160/D256 buckets, plus exact D192/D256 no-mask, causal and band
+objects, compiled for each shard's generic target (gfx11 shards add exact
+D64/D128 transposed-QK objects; gfx12 shards do not). Runtime dimensions, head
+widths within a bucket and strides do not multiply the AOT object count.
 See the [RDNA WMMA ABI, tensor-layout and generic-target guide](../../builders/gfx1151/attention/README.md).
 
 ## Capability versus support

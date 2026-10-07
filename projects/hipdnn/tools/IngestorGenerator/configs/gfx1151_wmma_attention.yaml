@@ -3,14 +3,29 @@
 # The rocKE builder emits runtime-shape kernels: batch, sequence lengths,
 # query/KV head counts, diagonal-window bounds, LSE selection and all dense
 # tensor strides are launch arguments. The AOT catalog therefore varies only
-# dtype, head dimension, mask class and algorithm geometry.
+# dtype, head-dimension bucket, mask class, additive bias and algorithm geometry.
+#
+# Standard-path objects come in two kinds. A runtime_head_dims object treats
+# head_size as a bucket maximum: the Q/K and V/O head widths (any multiples of
+# 16 up to the bucket) and the V head count are launch arguments. An exact
+# object serves only its own head_size. Measured on gfx1151, runtime widths
+# cost little up to the 128 bucket (where the "window" band object also serves
+# causal requests at no measurable cost) but the band transform is costly at
+# 160 and the large buckets run well behind exact objects at 192/256, hence:
+# - runtime buckets 64/96/128: no mask, band, band + bias (FP32 or Q dtype);
+# - runtime buckets 160/256: those plus a causal object with tile skipping;
+# - exact 192/256: no mask, causal (tile skipping) and band, no bias.
+# The native matcher prefers the transposed-QK path, then the tightest bucket,
+# then an exact object, then a mask-specialized object over the band object.
+# The transposed-QK (wmma_swapqk) objects stay exact-size and are the
+# single-wave 32-key geometry only.
 #
 # Every kernel compiles for its shard's LLVM generic processor (target:
 # generic): each RDNA3/3.5 shard ships gfx11-generic objects and each RDNA4
 # shard gfx12-generic ones, so one kernel set serves the whole family. The
-# transposed-QK (wmma_swapqk) kernels rely on the gfx11 WMMA operand layout and
-# are restricted to the gfx11 shards. Kernel names keep their historical
-# .gfx1151 suffix.
+# transposed-QK kernels rely on the gfx11 WMMA operand layout and are
+# restricted to the gfx11 shards. Kernel names keep their historical .gfx1151
+# suffix.
 
 dialect: packaged
 authored_subpath: rocKE/gfx1151_wmma_attention
@@ -42,6 +57,15 @@ kmd_fields:
 - name: num_waves
   type: int
   default_value: 1
+- name: runtime_head_dims
+  type: int
+  default_value: 0
+- name: use_attn_bias
+  type: int
+  default_value: 0
+- name: bias_dtype
+  type: string
+  default_value: f32
 
 specialization:
   metadata_fields:
@@ -53,6 +77,9 @@ specialization:
   - kv_tail
   - block_n
   - num_waves
+  - runtime_head_dims
+  - use_attn_bias
+  - bias_dtype
   matcher_only_fields: []
   vocabulary:
     dtype: {bf16: BF16, fp16: FP16}
@@ -65,6 +92,9 @@ specialization:
     kv_tail: {field: kv_tail}
     block_n: {field: block_n}
     num_waves: {field: num_waves}
+    runtime_head_dims: {field: runtime_head_dims}
+    use_attn_bias: {field: use_attn_bias}
+    bias_dtype: {field: bias_dtype}
 
 kernel_source_kind: rocke
 workspace_policy: none
@@ -77,11 +107,11 @@ packs:
     builder: build_wmma_fmha_fwd
     target: generic
   variants:
-  - name: wmma_generic.{dtype}_d{head_size}_{mask_mode}.gfx1151
-    metadata: [dtype, head_size, mask_mode, transposed_qk, query_tail, kv_tail, block_n, num_waves]
+  - name: wmma_generic.{dtype}_dmax{head_size}_{tag}.gfx1151
+    metadata: [dtype, head_size, mask_mode, transposed_qk, query_tail, kv_tail, block_n, num_waves, runtime_head_dims, use_attn_bias, bias_dtype]
     vocabulary:
       dtype: {bf16: BF16, fp16: FP16}
-    spec_order: [head_size, dtype, mask_mode, v_lds_stage, name, query_tail, kv_tail, use_softcap, use_sinks, use_alibi, use_qq_bias, layout, page_block_size, kv_dtype, transposed_qk, block_n, num_waves, scheduler_strategy, value_tile_size, causal_tile_skip, v_head_size, use_attn_bias, bias_dtype]
+    spec_order: [head_size, dtype, mask_mode, v_lds_stage, name, query_tail, kv_tail, use_softcap, use_sinks, use_alibi, use_qq_bias, layout, page_block_size, kv_dtype, transposed_qk, block_n, num_waves, scheduler_strategy, value_tile_size, causal_tile_skip, v_head_size, use_attn_bias, bias_dtype, runtime_head_dims]
     spec_defaults:
       name: rocke_wmma_fmha_fwd
       v_lds_stage: false
@@ -103,26 +133,105 @@ packs:
       v_head_size: 0
       use_attn_bias: false
       bias_dtype: f32
+      runtime_head_dims: true
+    # Small runtime buckets: each object serves Q/K and V/O widths up to its
+    # head_size; the band object also serves causal requests.
+    shape_axes:
+      dtype: [fp16, bf16]
+      head_size: [64, 96, 128]
     knob_sets:
-      masks:
+      runtime:
       - {mask_mode: none, tag: none}
-      - {mask_mode: causal, tag: causal}
       - {mask_mode: window, tag: window}
+      - {mask_mode: window, use_attn_bias: true, bias_dtype: f32, tag: window_bias_f32}
+      - {mask_mode: window, use_attn_bias: true, bias_dtype: q, tag: window_bias_q}
     shapes:
-    - {dtype: fp16, head_size: 64, knobs: masks}
-    - {dtype: bf16, head_size: 64, knobs: masks}
-    - {dtype: fp16, head_size: 96, knobs: masks}
-    - {dtype: bf16, head_size: 96, knobs: masks}
-    - {dtype: fp16, head_size: 128, knobs: masks}
-    - {dtype: bf16, head_size: 128, knobs: masks}
-    - {dtype: fp16, head_size: 256, knobs: masks}
-    - {dtype: bf16, head_size: 256, knobs: masks}
-  - name: wmma_swapqk.{dtype}_d{head_size}_{mask_mode}_bn{block_n}_w{num_waves}.gfx1151
-    arch: [gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153]
-    metadata: [dtype, head_size, mask_mode, transposed_qk, query_tail, kv_tail, block_n, num_waves]
+    - {knobs: runtime}
+  - name: wmma_generic.{dtype}_dmax{head_size}_{tag}.gfx1151
+    metadata: [dtype, head_size, mask_mode, transposed_qk, query_tail, kv_tail, block_n, num_waves, runtime_head_dims, use_attn_bias, bias_dtype]
     vocabulary:
       dtype: {bf16: BF16, fp16: FP16}
-    spec_order: [head_size, dtype, mask_mode, v_lds_stage, name, query_tail, kv_tail, use_softcap, use_sinks, use_alibi, use_qq_bias, layout, page_block_size, kv_dtype, transposed_qk, block_n, num_waves, scheduler_strategy, value_tile_size, causal_tile_skip, v_head_size, use_attn_bias, bias_dtype]
+    spec_order: [head_size, dtype, mask_mode, v_lds_stage, name, query_tail, kv_tail, use_softcap, use_sinks, use_alibi, use_qq_bias, layout, page_block_size, kv_dtype, transposed_qk, block_n, num_waves, scheduler_strategy, value_tile_size, causal_tile_skip, v_head_size, use_attn_bias, bias_dtype, runtime_head_dims]
+    spec_defaults:
+      name: rocke_wmma_fmha_fwd
+      v_lds_stage: false
+      query_tail: true
+      kv_tail: true
+      use_softcap: false
+      use_sinks: false
+      use_alibi: false
+      use_qq_bias: false
+      layout: dense
+      page_block_size: 0
+      kv_dtype: ""
+      transposed_qk: false
+      block_n: 32
+      num_waves: 1
+      scheduler_strategy: max-ilp
+      value_tile_size: 0
+      causal_tile_skip: false
+      v_head_size: 0
+      use_attn_bias: false
+      bias_dtype: f32
+      runtime_head_dims: true
+    # Large runtime buckets, where the band transform is costly, so causal
+    # requests get their own tile-skipping object.
+    shape_axes:
+      dtype: [fp16, bf16]
+      head_size: [160, 256]
+    knob_sets:
+      runtime:
+      - {mask_mode: none, tag: none}
+      - {mask_mode: causal, causal_tile_skip: true, tag: causal}
+      - {mask_mode: window, tag: window}
+      - {mask_mode: window, use_attn_bias: true, bias_dtype: f32, tag: window_bias_f32}
+      - {mask_mode: window, use_attn_bias: true, bias_dtype: q, tag: window_bias_q}
+    shapes:
+    - {knobs: runtime}
+  - name: wmma_generic.{dtype}_d{head_size}_{tag}.gfx1151
+    metadata: [dtype, head_size, mask_mode, transposed_qk, query_tail, kv_tail, block_n, num_waves, runtime_head_dims, use_attn_bias, bias_dtype]
+    vocabulary:
+      dtype: {bf16: BF16, fp16: FP16}
+    spec_order: [head_size, dtype, mask_mode, v_lds_stage, name, query_tail, kv_tail, use_softcap, use_sinks, use_alibi, use_qq_bias, layout, page_block_size, kv_dtype, transposed_qk, block_n, num_waves, scheduler_strategy, value_tile_size, causal_tile_skip, v_head_size, use_attn_bias, bias_dtype, runtime_head_dims]
+    spec_defaults:
+      name: rocke_wmma_fmha_fwd
+      v_lds_stage: false
+      query_tail: true
+      kv_tail: true
+      use_softcap: false
+      use_sinks: false
+      use_alibi: false
+      use_qq_bias: false
+      layout: dense
+      page_block_size: 0
+      kv_dtype: ""
+      transposed_qk: false
+      block_n: 32
+      num_waves: 1
+      scheduler_strategy: max-ilp
+      value_tile_size: 0
+      causal_tile_skip: false
+      v_head_size: 0
+      use_attn_bias: false
+      bias_dtype: f32
+      runtime_head_dims: false
+    # Exact-size objects for the widths where runtime buckets measure slow.
+    shape_axes:
+      dtype: [fp16, bf16]
+      head_size: [192, 256]
+    knob_sets:
+      exact:
+      - {mask_mode: none, tag: none}
+      - {mask_mode: causal, causal_tile_skip: true, tag: causal}
+      - {mask_mode: window, tag: window}
+    shapes:
+    - {knobs: exact}
+  - name: wmma_swapqk.{dtype}_d{head_size}_{mask_mode}_bn{block_n}_w{num_waves}.gfx1151
+    arch: [gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153]
+    metadata: [dtype, head_size, mask_mode, transposed_qk, query_tail, kv_tail, block_n, num_waves, runtime_head_dims, use_attn_bias, bias_dtype]
+    vocabulary:
+      dtype: {bf16: BF16, fp16: FP16}
+    spec_order: [head_size, dtype, mask_mode, v_lds_stage, name, query_tail, kv_tail, use_softcap, use_sinks, use_alibi, use_qq_bias, layout, page_block_size, kv_dtype, transposed_qk, block_n, num_waves, scheduler_strategy, value_tile_size, causal_tile_skip, v_head_size, use_attn_bias, bias_dtype, runtime_head_dims]
     spec_defaults:
       name: rocke_wmma_fmha_fwd
       v_lds_stage: false
@@ -142,12 +251,11 @@ packs:
       v_head_size: 0
       use_attn_bias: false
       bias_dtype: f32
+      runtime_head_dims: false
     knob_sets:
       fast:
       - {mask_mode: none, block_n: 32, num_waves: 1, tag: none_bn32_w1}
       - {mask_mode: causal, block_n: 32, num_waves: 1, tag: causal_bn32_w1}
-      - {mask_mode: none, block_n: 64, num_waves: 2, tag: none_bn64_w2}
-      - {mask_mode: causal, block_n: 64, num_waves: 2, tag: causal_bn64_w2}
     shapes:
     - {dtype: fp16, head_size: 64, knobs: fast}
     - {dtype: bf16, head_size: 64, knobs: fast}

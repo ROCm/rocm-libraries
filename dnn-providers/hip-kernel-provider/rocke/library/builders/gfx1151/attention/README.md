@@ -103,19 +103,38 @@ positive non-overlapping element strides; compact storage is not required.
 compact rank-3 forms. Each element is the natural-log log-sum-exp of that row.
 
 `hipkernel:Gfx1151WmmaAttention` is the packaged hipDNN engine for this dense
-surface. Its authored catalog contains 40 reusable variants: generic kernels
-for FP16/BF16, D64/D96/D128/D256, and no-mask/causal/window modes, plus aligned
-transposed-QK kernels for FP16/BF16 D64/D128. Every variant is compiled for the
-shard's generic processor (`kernel_source.target: generic`): the gfx1100,
-gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152 and gfx1153 shards carry
-`gfx11-generic` objects, and the gfx1200 and gfx1201 shards carry
-`gfx12-generic` objects without the transposed-QK variants. The standard
-variants carry `scheduler_strategy: max-ilp`, the spec public dispatch selects
-for the same requests (see "RDNA generic targets"). `hkp_packaging_product`
-lowers them to the per-architecture `.kpack`; runtime shapes, bounds, strides,
-and LSE selection are not descriptor dimensions. The packaged catalog
-intentionally excludes ragged/paged layouts, FP8 KV, and auxiliary score
-features, which remain available through direct rocKE dispatch.
+surface. Per FP16/BF16 dtype its authored catalog holds three kinds of
+standard object:
+
+- `runtime_head_dims` buckets D64/D96/D128: no mask, a "window" band object
+  that serves no-mask, causal and window requests through runtime bounds, and
+  the band object with an additive bias in FP32 or in the Q dtype;
+- `runtime_head_dims` buckets D160/D256: the same four plus a causal object
+  with `causal_tile_skip`, since the band transform is costly at these widths;
+- exact-size D192/D256 (no runtime widths): no mask, causal with
+  `causal_tile_skip`, and band, without bias.
+
+A bucket object serves any Q/K and V/O widths that are multiples of 16 up to
+its bucket and any V head count dividing the query heads; an exact object
+serves only its own width with V sharing the K heads. The native matcher
+prefers the transposed-QK path, then the smallest covering head size, then an
+exact object over a bucket object of the same size, then a mask-specialized
+object over the band object. The gfx11 shards add exact-size transposed-QK
+objects for FP16/BF16 D64/D128, no mask and causal, in the 32-key single-wave
+geometry. Every variant is compiled for the shard's generic processor
+(`kernel_source.target: generic`): the gfx1100, gfx1101, gfx1102, gfx1103,
+gfx1150, gfx1151, gfx1152 and gfx1153 shards carry 64 `gfx11-generic`
+objects, and the gfx1200 and gfx1201 shards carry 56 `gfx12-generic` objects
+without the transposed-QK variants. The standard variants carry
+`scheduler_strategy: max-ilp`, the spec public dispatch selects for the same
+requests (see "RDNA generic targets").
+`hkp_packaging_product` lowers them to the per-architecture `.kpack`; runtime
+shapes, head widths, bounds, strides, and LSE selection are not descriptor
+dimensions. hipDNN's `attn_mask` maps to the bias objects when it is a rank-4
+`[B|1, H|1, Sq|1, Sk]` device tensor with a unit-stride key axis; other mask
+forms are declined. The packaged catalog intentionally excludes ragged/paged
+layouts, FP8 KV, and the remaining auxiliary score features, which remain
+available through direct rocKE dispatch.
 
 ### Output-column tiling
 
@@ -305,6 +324,20 @@ tail bounds, both V-staging choices, and the score features above.
   256. The transposed-QK specialization stays restricted to equal D64/D128;
   every other width pair uses the standard path. Output-column tiling applies
   to the V/O width.
+- **Runtime head widths.** `runtime_head_dims=True` (default off) turns
+  `head_size` and the V/O width into bucket maxima, so one object serves every
+  runtime `head_dim_q` and `head_dim_v` that is a multiple of 16 in
+  `[16, maximum]`. Three I32 arguments, `head_dim_q`, `head_dim_v` and
+  `num_v_heads`, follow the LSE strides. Head-dim tiles past `head_dim_q`
+  contribute zero to QK, and V/O columns past `head_dim_v` are never stored.
+  V heads are addressed as `head / (num_query_heads / num_v_heads)`, so V may
+  carry its own head count. The flag adds an `rtdim` name token and is
+  rejected with the transposed-QK path and output-column tiling. Public
+  dispatch keeps exact widths; the flag is for AOT catalogs and explicit specs.
+  Dense 16-bit K/V load every head-dim tile at a constant offset through
+  buffer resources bounded at each batch's last live element, so tiles past
+  the runtime width cost no extra addressing and never read past the tensor.
+  Ragged, paged and FP8 KV read dead tiles at clamped in-bounds offsets.
 - **Causal tile skipping.** `causal_tile_skip` bounds the K loop at the causal
   diagonal of the standard path (either runtime alignment), so fully masked
   key tiles are never loaded. It is a default-off spec flag; dispatch sets it
@@ -328,7 +361,7 @@ tail bounds, both V-staging choices, and the score features above.
   gated on the device compute-unit count (`num_cus`; zero uses the reference
   part) instead of a fixed query-group limit.
 
-The composed native struct ABI is `rocke-attention-gfx1151/v5`. Rebuild native
+The composed native struct ABI is `rocke-attention-gfx1151/v6`. Rebuild native
 callers and initialize the struct with `rocke_wmma_fmha_fwd_spec_default()`.
 
 ### Public library selection and launch
@@ -386,7 +419,8 @@ generic processors are catalog rows (`arch_specs.json`, mirrored in the C++
 engine) with ISA backends in both engines, so lowering a spec for
 `gfx11-generic` emits the same LLVM IR bytes as for `gfx1151`; parity configs
 136-142 of `gfx1151_wmma_fmha_fwd_emit` replay representative configs at
-`gfx11-generic` and must hash identically.
+`gfx11-generic` and must hash identically. Configs 143-156 cover
+`runtime_head_dims` on `gfx1151`, `gfx11-generic` and `gfx12-generic`.
 
 Toolchain and runtime requirements:
 
