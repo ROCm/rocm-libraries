@@ -19,6 +19,13 @@ including padding, with these bounds:
 - query-to-KV head ratio in 1/2/4/8/16;
 - contiguous Q and output `[B, Hq, D]`, on the same device as KV and metadata.
 
+The selected segment and reducer must each fit the target's LDS capacity.
+Admission uses the resolved tile dimensions and LDS allocation dtypes. In
+particular, automatic gfx942 D256/block64 selection requires 74,752 bytes,
+exceeding its 65,536-byte capacity, and is rejected before compilation. An
+explicit smaller tile is checked using its actual footprint; selection does
+not silently resize it. gfx950 D256/block64 fits its target capacity.
+
 Capacity need not be a page or tile multiple. Device `seqused_k` is contiguous
 int32 `[B]`, with each value in `[0, problem.max_seqlen_k]`, and
 `problem.max_seqlen_k <= capacity`. Device `cu_seqlens_q` is contiguous int32

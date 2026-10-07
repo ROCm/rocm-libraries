@@ -12,6 +12,7 @@ KV tensors, after rounding inputs to the tested fp16/bf16 dtype.
 
 import math
 import os
+from dataclasses import replace
 
 import pytest
 
@@ -86,6 +87,95 @@ def _paged_cache(torch, logical, block_size):
         batch, blocks
     )
     return pages.cuda(), table.cuda()
+
+
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize(
+    "dim,block,tile",
+    [(256, 16, None), (256, 32, None), (128, 64, None), (256, 64, 16), (256, 64, None)],
+)
+def test_strided_lds_admission_numeric(gpu, dtype, dim, block, tile, monkeypatch):
+    from dispatch.attention import AttentionRequest, dispatch_attention
+    from dispatch.attention.common import _problem
+    from kernels.common import attention_unified as au
+
+    torch, arch = gpu
+    request = AttentionRequest(
+        batch=3,
+        nhead_q=8,
+        nhead_k=2,
+        seqlen_q=1,
+        seqlen_k=65,
+        hdim_q=dim,
+        hdim_v=dim,
+        arch=arch,
+        dtype=dtype,
+        kv_layout="strided",
+        kv_block_size=block,
+        target_ctas=8,
+    )
+    problem = _problem(request)
+    torch.manual_seed(314)
+    storage_dtype = torch.float16 if dtype == "fp16" else torch.bfloat16
+    q_cpu = torch.randn(3, 8, dim).to(storage_dtype)
+    k_cpu = torch.randn(3, 2, 65, dim).to(storage_dtype)
+    v_cpu = torch.randn(3, 2, 65, dim).to(storage_dtype)
+    lengths = [0, 64, 65]
+    reference = _reference(torch, q_cpu, k_cpu, v_cpu, lengths, 0)
+    tensors = dict(
+        q=q_cpu.cuda(),
+        k=_cache(torch, k_cpu, "bshd"),
+        v=_cache(torch, v_cpu, "bhsd"),
+        out=torch.empty_like(q_cpu).cuda(),
+        cu_seqlens_q=torch.arange(4, dtype=torch.int32).cuda(),
+        seqused_k=torch.tensor(lengths, dtype=torch.int32).cuda(),
+    )
+    spec = None
+    if tile is not None or (arch == "gfx942" and dim == 256 and block == 64):
+        supported = dispatch_attention(replace(request, kv_block_size=32)).spec
+        spec = replace(
+            supported,
+            kernel_spec=replace(
+                supported.kernel_spec, block_size=block, tile_size_override=tile or 32
+            ),
+        )
+    kwargs = dict(
+        problem=problem,
+        **tensors,
+        block_table=None,
+        softmax_scale=1 / math.sqrt(dim),
+        softcap=0,
+        kv_layout="strided",
+    )
+    if arch == "gfx942" and dim == 256 and block == 64 and tile is None:
+        monkeypatch.setattr(
+            au,
+            "compile_kernel",
+            lambda *a, **kw: pytest.fail("must reject before compile"),
+        )
+        with pytest.raises(ValueError, match="74752 B LDS"):
+            dispatch_attention(request)
+        for explicit in (None, spec):
+            with pytest.raises(ValueError, match="74752 B LDS"):
+                au.run_unified_attention_torch(**kwargs, tuning_spec=explicit)
+        return
+    if tile is None:
+        selected = dispatch_attention(request)
+        binding = selected.candidate.bind_torch(
+            request, selected.spec, dict(problem=problem, **tensors)
+        )
+        binding.launch()
+    else:
+        au.run_unified_attention_torch(**kwargs, tuning_spec=spec)
+    atol, rtol = (0.003, 0.005) if dtype == "fp16" else (0.01, 0.02)
+    torch.testing.assert_close(
+        tensors["out"].cpu().float(), reference, atol=atol, rtol=rtol
+    )
+    if tile is None:
+        au.run_unified_attention_torch(**kwargs)
+        torch.testing.assert_close(
+            tensors["out"].cpu().float(), reference, atol=atol, rtol=rtol
+        )
 
 
 # Distinct batches, empty/partial segments, both physical orders, independent

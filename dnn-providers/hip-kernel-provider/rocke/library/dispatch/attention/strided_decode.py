@@ -44,7 +44,14 @@ def make_candidate() -> KernelCandidate:
             return False, "unknown strided decode tuning_id"
         if req.tuning_knobs:
             return False, "strided decode does not accept tuning_knobs"
-        return _selector_matches(req, candidate)
+        ok, why = _selector_matches(req, candidate)
+        if not ok:
+            return ok, why
+        try:
+            _strided_3d_specs_from_problem(_problem(req), arch=req.arch.lower())
+        except ValueError as exc:
+            return False, str(exc)
+        return True, "supported"
 
     def select(req):
         ok, why = candidate.admits(req)

@@ -3180,6 +3180,47 @@ def _tiled_3d_spec_from_problem(
     return _impl(problem)
 
 
+def _tiled_3d_segment_lds_bytes(spec) -> int:
+    """Q[M,D], K/V[2,T,D], P[M,T] in the gfx942/gfx950 3D schedule.
+
+    These tiles overlap in lifetime. Supported tile dimensions need no
+    inter-allocation padding; the lowering aligns the final pool to 16 bytes.
+    Use the LDS allocation type, not the global KV storage encoding.
+    """
+    from rocke.core.dtypes import dtype_info
+
+    bits = dtype_info(spec.dtype_ir.name).encoded_bits
+    if bits % 8:
+        raise ValueError("tiled 3D LDS requires byte-addressable scalar elements")
+    m, d, t = spec.block_m, spec.head_size, spec.tile_size
+    size = (m * d + 4 * t * d + m * t) * (bits // 8)
+    return (size + 15) & ~15
+
+
+def _tiled_3d_reduce_lds_bytes(spec) -> int:
+    """The reducer stores one F32 softmax factor per segment in LDS."""
+    from rocke.core.dtypes import dtype_info
+
+    size = spec.num_segments * (dtype_info(F32.name).encoded_bits // 8)
+    return (size + 15) & ~15
+
+
+def _validate_strided_3d_lds(segment, reduce, *, arch: str) -> None:
+    from rocke.core.arch import ArchTarget
+
+    target = ArchTarget.from_gfx(arch)
+    for kind, used in (
+        ("segment", _tiled_3d_segment_lds_bytes(segment)),
+        ("reducer", _tiled_3d_reduce_lds_bytes(reduce)),
+    ):
+        if not target.fits_lds(used):
+            raise ValueError(
+                f"strided 3D {kind} requires {used} B LDS, exceeding "
+                f"{arch} capacity {target.lds_capacity_bytes} B "
+                f"(head_size={segment.head_size}, tile_size={segment.tile_size})"
+            )
+
+
 def _strided_3d_specs_from_problem(problem: UnifiedAttentionProblem, *, arch: str):
     """One spec policy for direct and dispatched non-paged decode."""
     if arch not in ("gfx942", "gfx950"):
@@ -3218,6 +3259,7 @@ def _strided_3d_specs_from_problem(problem: UnifiedAttentionProblem, *, arch: st
         num_segments=segment.num_segments,
         waves_per_eu=waves,
     )
+    _validate_strided_3d_lds(segment, reduce, arch=arch)
     return segment, reduce
 
 
@@ -3255,6 +3297,7 @@ def _validate_strided_3d_spec(problem: UnifiedAttentionProblem, tuning_spec) -> 
     ):
         if getattr(reduce, name) != getattr(segment, name):
             raise ValueError(f"strided reduce_spec.{name} disagrees with segment")
+    _validate_strided_3d_lds(segment, reduce, arch=tuning_spec.arch)
 
 
 def _tiled_3d_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
@@ -4525,6 +4568,8 @@ def run_unified_attention_torch(
             raise ValueError("strided softcap enablement disagrees with problem")
         if tuning_spec is not None:
             _validate_strided_3d_spec(problem, tuning_spec)
+        else:
+            _strided_3d_specs_from_problem(problem, arch=_resolve_attention_arch())
         arch = _resolve_attention_arch()
         if problem.clamp_arch not in (None, arch):
             raise ValueError(
