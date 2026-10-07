@@ -49,45 +49,77 @@ _Q_TILES_PER_WG = 2
 # CUs per XCD on CDNA3 (MI300A has 6 XCDs, MI300X 8).
 _CUS_PER_XCD = 38
 
+# The agpr_acc layout (32 rows per wave, one workgroup per CU) is selected only
+# for key ranges at least this long, and only when its workgroups fill every
+# CU at least once. Shorter ranges are dominated by the per-workgroup absorb
+# and W_UV, which a second workgroup per CU hides; fewer workgroups than CUs
+# leave CUs idle that the 16-row layout, with twice the workgroups, uses.
+_AGPR_MIN_KEYS = 4096
+# Test hook: True / False forces the agpr_acc choice, None applies the rule.
+_AGPR_FORCE = None
 
-def _resolve_num_xcds(req: MLARequest) -> int:
-    """XCD count for the workgroup reorder, or 0 to keep launch order.
+
+def _resolve_num_cus(req: MLARequest) -> int:
+    """Device CU count, or 0 when unknown.
 
     Taken from ``req.num_cus`` when the caller sets it, else from the live
     device -- but only when the build box is the requested arch, so a
-    cross-compile never bakes another part's count into the kernel. A CU count
-    that is not a whole number of CDNA3 XCDs (a partitioned device, an
-    unknown part) keeps launch order; a single XCD needs no reorder.
+    cross-compile never bakes another part's count into the kernel.
     """
     n = int(req.num_cus)
-    if n <= 0:
-        try:
-            from rocke.runtime.hip_module import get_device_arch, get_device_num_cus
+    if n > 0:
+        return n
+    try:
+        from rocke.runtime.hip_module import get_device_arch, get_device_num_cus
 
-            if (get_device_arch() or "").split(":")[0] == req.arch.split(":")[0]:
-                n = int(get_device_num_cus() or 0)
-        except Exception:
-            n = 0
-    if n <= 0 or n % _CUS_PER_XCD:
+        if (get_device_arch() or "").split(":")[0] == req.arch.split(":")[0]:
+            return int(get_device_num_cus() or 0)
+    except Exception:
+        pass
+    return 0
+
+
+def _num_xcds(num_cus: int) -> int:
+    """XCD count for the workgroup reorder, or 0 to keep launch order.
+
+    A CU count that is not a whole number of CDNA3 XCDs (a partitioned device,
+    an unknown part) keeps launch order; a single XCD needs no reorder.
+    """
+    if num_cus <= 0 or num_cus % _CUS_PER_XCD:
         return 0
-    xcds = n // _CUS_PER_XCD
+    xcds = num_cus // _CUS_PER_XCD
     return xcds if xcds > 1 else 0
+
+
+def _use_agpr_layout(req: MLARequest, num_cus: int) -> bool:
+    """Long key ranges with at least one workgroup per CU; see _AGPR_MIN_KEYS."""
+    if _AGPR_FORCE is not None:
+        return _AGPR_FORCE
+    if num_cus <= 0 or req.max_seqlen_k < _AGPR_MIN_KEYS:
+        return False
+    wgs = (req.total_q // (32 * _Q_TILES_PER_WG)) * (req.num_heads // _HEADS_PER_WG)
+    return wgs >= num_cus
 
 
 def _spec_for(req: MLARequest) -> MlaPrefillSpec:
     """Build the spec dispatch ships for ``req``.
 
-    The one-wave-per-head layout with two heads x two 16-query tiles per
+    The one-wave-per-head layout with two heads x two query tiles per
     workgroup: each pair of waves shares its head's W_UK / W_UV fetches and
-    epilogue staging, halving the per-row weight traffic of four heads x one
-    tile, and each staged key tile still feeds 64 query rows. (One head x four
-    tiles cuts the weights further but measured a large regression on some
-    chunked shapes.) The
-    workgroup order is made XCD-aware when the device's XCD count is known
-    (:func:`_resolve_num_xcds`). If the head count does not divide or
-    admission refuses the layout, the remaining levers stay at their
-    :class:`MlaPrefillSpec` defaults, the single-head layout. Nothing else is
-    tuned per request.
+    epilogue staging, and each staged key tile feeds every row of the
+    workgroup. (One head x four tiles cuts the weights further but measured a
+    large regression on some chunked shapes.) Two variants:
+
+    * ``agpr_acc`` -- 32 rows per wave, the latent accumulator in AGPRs, one
+      workgroup per CU, DMA'd double-buffered key tiles -- for long key ranges
+      that fill the device (:func:`_use_agpr_layout`); its admission refuses
+      the llvm20 flavor;
+    * otherwise 16 rows per wave at two workgroups per CU.
+
+    The workgroup order is XCD-aware when the device's XCD count is known. If
+    the head count does not divide or admission refuses both, the remaining
+    levers stay at their :class:`MlaPrefillSpec` defaults, the single-head
+    layout. Nothing else is tuned per request.
     """
     base = MlaPrefillSpec(
         num_heads=req.num_heads,
@@ -100,16 +132,22 @@ def _spec_for(req: MLARequest) -> MlaPrefillSpec:
         dtype=req.dtype.lower(),
     )
     if req.num_heads % _HEADS_PER_WG == 0:
-        packed = dataclasses.replace(
-            base,
-            heads_per_wg=_HEADS_PER_WG,
-            q_tiles_per_wg=_Q_TILES_PER_WG,
-            num_warps=_HEADS_PER_WG * _Q_TILES_PER_WG,
-            block_q=16 * _Q_TILES_PER_WG,
-            num_xcds=_resolve_num_xcds(req),
-        )
-        if supports_mla_prefill(packed, arch=req.arch)[0]:
-            return packed
+        num_cus = _resolve_num_cus(req)
+        layouts = [False]
+        if _use_agpr_layout(req, num_cus):
+            layouts.insert(0, True)
+        for agpr in layouts:
+            packed = dataclasses.replace(
+                base,
+                heads_per_wg=_HEADS_PER_WG,
+                q_tiles_per_wg=_Q_TILES_PER_WG,
+                num_warps=_HEADS_PER_WG * _Q_TILES_PER_WG,
+                block_q=(32 if agpr else 16) * _Q_TILES_PER_WG,
+                agpr_acc=agpr,
+                num_xcds=_num_xcds(num_cus),
+            )
+            if supports_mla_prefill(packed, arch=req.arch)[0]:
+                return packed
     return base
 
 

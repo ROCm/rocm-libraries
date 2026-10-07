@@ -275,6 +275,33 @@ class TestDispatchResult(unittest.TestCase):
         self.assertEqual(fallback.q_tiles_per_wg, 1)
         self.assertEqual(fallback.num_xcds, 0)
 
+    def test_agpr_layout_for_long_keys_that_fill_the_device(self):
+        import os
+
+        old = os.environ.get("ROCKE_LLVM_FLAVOR")
+        try:
+            os.environ["ROCKE_LLVM_FLAVOR"] = "llvm22"
+            long_full = dispatch_mla(_req(total_q=8192, max_seqlen_k=8192)).spec
+            self.assertTrue(long_full.agpr_acc)
+            self.assertEqual(long_full.block_q, 64)
+            # Too few workgroups to fill 228 CUs, or too short a key range.
+            self.assertFalse(
+                dispatch_mla(_req(total_q=128, max_seqlen_k=32768)).spec.agpr_acc
+            )
+            self.assertFalse(
+                dispatch_mla(_req(total_q=8192, max_seqlen_k=2048)).spec.agpr_acc
+            )
+            # llvm20 refuses agpr_acc; dispatch falls back to 16 rows per wave.
+            os.environ["ROCKE_LLVM_FLAVOR"] = "llvm20"
+            fallback = dispatch_mla(_req(total_q=8192, max_seqlen_k=8192)).spec
+            self.assertFalse(fallback.agpr_acc)
+            self.assertEqual(fallback.block_q, 32)
+        finally:
+            if old is None:
+                os.environ.pop("ROCKE_LLVM_FLAVOR", None)
+            else:
+                os.environ["ROCKE_LLVM_FLAVOR"] = old
+
     def test_xcd_count_from_cu_count(self):
         # 38 CUs per CDNA3 XCD: MI300A (228) has 6, MI300X (304) 8. Anything
         # else -- one XCD, a partitioned or unknown part -- keeps launch order.
