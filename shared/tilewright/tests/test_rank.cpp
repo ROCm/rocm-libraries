@@ -506,6 +506,9 @@ TEST_CASE("CandidateSet::rank is bitwise identical to rank_configs", "[rank]") {
         check_structure(expect, pool.size());
         REQUIRE(same_results(set.rank(p, hw, min_scored), expect));
         REQUIRE(same_results(set.rank(p, hw, min_scored), expect));
+        const std::vector<tw::Result> scored(
+            expect.begin(), expect.begin() + static_cast<std::ptrdiff_t>(count_scored(expect)));
+        REQUIRE(same_results(set.rank_scored(p, hw, {}, min_scored), scored));
       }
     }
   }
