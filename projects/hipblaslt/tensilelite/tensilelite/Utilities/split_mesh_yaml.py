@@ -1,12 +1,12 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Split MeshBased YAML logic files into kernel YAML + companion .csv.gz table.
+"""Split MeshBased YAML logic files into kernel YAML + companion .csv.xz table.
 
 Usage:
     python split_mesh_yaml.py <directory_or_file> [...]
 
-For each MeshBased YAML found, creates a companion .csv.gz containing the
+For each MeshBased YAML found, creates a companion .csv.xz containing the
 ExactLogic table and rewrites the YAML with ExactLogic set to null.
 
 Uses the same YAML loader and data layout as LibraryIO.parseLibraryLogicFile.
@@ -14,7 +14,7 @@ Uses the same YAML loader and data layout as LibraryIO.parseLibraryLogicFile.
 
 import argparse
 import csv
-import gzip
+import lzma
 import os
 import sys
 
@@ -49,8 +49,8 @@ def _clear_exact_logic(data, fmt):
         data[7] = None
 
 
-def _write_csv_gz(exact_logic, out_path):
-    with gzip.open(out_path, "wt", newline="") as f:
+def _write_csv_xz(exact_logic, out_path):
+    with lzma.open(out_path, "wt", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["M", "N", "batch", "K", "solutionIdx"])
         for entry in exact_logic:
@@ -74,8 +74,8 @@ def process_file(yaml_path):
         print("  Skipping (ExactLogic is empty/null)")
         return
 
-    csv_path = yaml_path + ".csv.gz"
-    _write_csv_gz(exact_logic, csv_path)
+    csv_path = yaml_path + ".csv.xz"
+    _write_csv_xz(exact_logic, csv_path)
 
     _clear_exact_logic(data, fmt)
     with open(yaml_path, "w") as f:
@@ -85,7 +85,7 @@ def process_file(yaml_path):
     csv_size = os.path.getsize(csv_path)
     print(f"  Original:  {orig_size:>12,} bytes")
     print(f"  New YAML:  {new_size:>12,} bytes")
-    print(f"  CSV.gz:    {csv_size:>12,} bytes")
+    print(f"  CSV.xz:    {csv_size:>12,} bytes")
     print(f"  Entries:   {len(exact_logic):>12,}")
     print(f"  Savings:   {orig_size - new_size - csv_size:>12,} bytes")
 
