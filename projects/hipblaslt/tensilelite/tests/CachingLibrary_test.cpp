@@ -7,6 +7,7 @@
 #include <atomic>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <Tensile/AMDGPU.hpp>
@@ -381,30 +382,129 @@ TEST(CachingLibraryTest, FindTopSolutionsDoesNotCacheEmptyResults)
     EXPECT_EQ(sub->topCalls.load(), 2);
 }
 
-// Once TopSolutionsCapacity problems are cached, further problems are passed
-// through and the cached ones are kept.
-TEST(CachingLibraryTest, FindTopSolutionsCacheIsBounded)
+namespace
 {
     using Caching = CachingLibrary<ContractionProblemGemm>;
-    auto sub      = std::make_shared<TopCountingSubLibrary>();
-    auto caching  = std::make_shared<Caching>(sub);
 
-    const AMDGPU device    = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
-    auto         problemAt = [](size_t i) {
+    ContractionProblemGemm problemAt(size_t i)
+    {
         auto problem = dummyProblem();
         problem.setWorkspaceSize(i);
         return problem;
+    }
+
+    // findTopSolutions names its solution after the problem's workspace size.
+    class KeyedTopSubLibrary : public TopCountingSubLibrary
+    {
+    public:
+        SolutionVector<ContractionSolution> findTopSolutions(ContractionProblemGemm const& problem,
+                                                             Hardware const&,
+                                                             int) const override
+        {
+            ++topCalls;
+            lastAll = true;
+            return {makeSolution(std::to_string(problem.workspaceSize()), 0)};
+        }
     };
-    for(size_t i = 0; i < Caching::TopSolutionsCapacity; ++i)
+} // namespace
+
+// At TopSolutionsCapacity problems, a new problem replaces the least recently
+// used one and is served from the cache afterwards.
+TEST(CachingLibraryTest, FindTopSolutionsEvictsTheLeastRecentlyUsed)
+{
+    auto         sub     = std::make_shared<TopCountingSubLibrary>();
+    auto         caching = std::make_shared<Caching>(sub);
+    const AMDGPU device  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    auto const   cap     = Caching::TopSolutionsCapacity;
+    auto         calls   = [&] { return static_cast<size_t>(sub->topCalls.load()); };
+
+    for(size_t i = 0; i < cap; ++i)
         caching->findTopSolutions(problemAt(i), device, 1);
-    ASSERT_EQ(sub->topCalls.load(), static_cast<int>(Caching::TopSolutionsCapacity));
+    ASSERT_EQ(calls(), cap);
 
-    auto extra = problemAt(Caching::TopSolutionsCapacity);
-    caching->findTopSolutions(extra, device, 1);
-    caching->findTopSolutions(extra, device, 1);
-    EXPECT_EQ(sub->topCalls.load(), static_cast<int>(Caching::TopSolutionsCapacity) + 2);
+    caching->findTopSolutions(problemAt(cap), device, 1);
+    caching->findTopSolutions(problemAt(cap), device, 1);
+    EXPECT_EQ(calls(), cap + 1);
 
+    caching->findTopSolutions(problemAt(1), device, 1);
+    EXPECT_EQ(calls(), cap + 1);
     caching->findTopSolutions(problemAt(0), device, 1);
-    caching->findTopSolutions(problemAt(Caching::TopSolutionsCapacity - 1), device, 1);
-    EXPECT_EQ(sub->topCalls.load(), static_cast<int>(Caching::TopSolutionsCapacity) + 2);
+    EXPECT_EQ(calls(), cap + 2);
+
+    caching->findTopSolutions(problemAt(cap - 1), device, 1);
+    caching->findTopSolutions(problemAt(cap), device, 1);
+    caching->findTopSolutions(problemAt(3), device, 1);
+    EXPECT_EQ(calls(), cap + 2);
+    caching->findTopSolutions(problemAt(2), device, 1);
+    EXPECT_EQ(calls(), cap + 3);
+    caching->findTopSolutions(problemAt(4), device, 1);
+    EXPECT_EQ(calls(), cap + 4);
+    for(size_t i : {size_t(0), size_t(1), size_t(2), size_t(3), cap - 1, cap})
+        caching->findTopSolutions(problemAt(i), device, 1);
+    EXPECT_EQ(calls(), cap + 4);
+}
+
+// A hit, or a lookup that asks the sub-library for more solutions, makes the
+// problem the most recently used.
+TEST(CachingLibraryTest, FindTopSolutionsUseRefreshesRecency)
+{
+    auto         sub     = std::make_shared<TopCountingSubLibrary>();
+    auto         caching = std::make_shared<Caching>(sub);
+    const AMDGPU device  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    auto const   cap     = Caching::TopSolutionsCapacity;
+    auto         calls   = [&] { return static_cast<size_t>(sub->topCalls.load()); };
+
+    for(size_t i = 0; i < cap; ++i)
+        caching->findTopSolutions(problemAt(i), device, 1);
+    auto first = caching->findTopSolutions(problemAt(0), device, 1);
+    caching->findTopSolutions(problemAt(1), device, 2);
+    ASSERT_EQ(calls(), cap + 1);
+
+    for(size_t i = cap; i < 2 * cap - 2; ++i)
+        caching->findTopSolutions(problemAt(i), device, 1);
+    ASSERT_EQ(calls(), 2 * cap - 1);
+
+    EXPECT_EQ(caching->findTopSolutions(problemAt(0), device, 1), first);
+    EXPECT_EQ(caching->findTopSolutions(problemAt(1), device, 2).size(), 2u);
+    EXPECT_EQ(calls(), 2 * cap - 1);
+    caching->findTopSolutions(problemAt(2), device, 1);
+    EXPECT_EQ(calls(), 2 * cap);
+}
+
+// Threads cycling through more problems than the cache holds always get the
+// solutions of the problem they asked for.
+TEST(CachingLibraryTest, FindTopSolutionsLruIsThreadSafe)
+{
+    auto         sub     = std::make_shared<KeyedTopSubLibrary>();
+    auto         caching = std::make_shared<Caching>(sub);
+    const AMDGPU device  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    size_t const span    = Caching::TopSolutionsCapacity + Caching::TopSolutionsCapacity / 2;
+
+    constexpr int            numThreads = 8;
+    std::atomic<int>         wrong{0};
+    std::vector<std::thread> workers;
+    workers.reserve(numThreads);
+    for(int t = 0; t < numThreads; ++t)
+    {
+        workers.emplace_back([&, t]() {
+            for(size_t j = 0; j < 2 * span; ++j)
+            {
+                size_t i   = (j * 7 + static_cast<size_t>(t) * 977) % span;
+                auto   top = caching->findTopSolutions(problemAt(i), device, 1);
+                if(top.size() != 1 || top[0]->solutionName != std::to_string(i))
+                    ++wrong;
+            }
+        });
+    }
+    for(auto& worker : workers)
+        worker.join();
+
+    EXPECT_EQ(wrong.load(), 0);
+    for(size_t i = 0; i < 4; ++i)
+        EXPECT_EQ(caching->findTopSolutions(problemAt(i), device, 1)[0]->solutionName,
+                  std::to_string(i));
+    int calls = sub->topCalls.load();
+    for(size_t i = 0; i < 4; ++i)
+        caching->findTopSolutions(problemAt(i), device, 1);
+    EXPECT_EQ(sub->topCalls.load(), calls);
 }
