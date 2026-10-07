@@ -65,9 +65,9 @@ Known bugs:
   - { name: matmul_fast_check_streamk_batches, function: matmul, a_type: bf16_r, known_bug_platforms: "gfx942, gfx950" }
   # ROCM-32277: two f32 Stream-K solutions on gfx950 sometimes write wrong values in
   # the last partial M tile (rows 4096 to 4098 at M = 4099); the case fails about 1
-  # run in 8.
+  # run in 8. The M = 1031 case passed 60 of 60 runs, so it stays active.
   # REMOVE this entry in the PR that fixes ROCM-32277. Review by 2026-11-01.
-  - { name: matmul_fast_check_streamk_batches, function: matmul, a_type: f32_r, known_bug_platforms: gfx950 }
+  - { name: matmul_fast_check_streamk_batches, function: matmul, a_type: f32_r, M: 4099, known_bug_platforms: gfx950 }
   # ROCM-32062: the client CPU reference (cast_mul in cblas_interface.cpp) applies
   # scaleAlpha_vector to the wrong rows of A when lda exceeds A's row count, so
   # unit_check fails a correct GPU result. Host-side, so every platform is affected
