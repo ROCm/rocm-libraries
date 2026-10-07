@@ -22,8 +22,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
-#include <vector>
 #include <thread>
+#include <vector>
 
 namespace
 {
@@ -790,8 +790,12 @@ namespace
                               hipblaslt_initialization::integer_exact,
                               false,
                               d.buf(),
-                              64, 64, 64,
-                              HIP_R_32F, 0, 1);
+                              64,
+                              64,
+                              64,
+                              HIP_R_32F,
+                              0,
+                              1);
         std::vector<float> h(64 * 64);
         ASSERT_EQ(hipMemcpy(h.data(), d.buf(), h.size() * sizeof(float), hipMemcpyDeviceToHost),
                   hipSuccess);
