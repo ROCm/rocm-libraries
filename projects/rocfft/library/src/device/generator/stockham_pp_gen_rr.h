@@ -48,6 +48,12 @@ struct StockhamPartialPassKernelRR : public StockhamPartialPassKernel
                                  ? PartialPassSteps::STEPS_1_2
                                  : PartialPassSteps::STEPS_3_4;
 
+        // steps 3/4 and the C2Real pre-process run from LDS before the transform,
+        // so a direct-to-register load would leave that LDS unpopulated
+        if(partial_pass_steps == PartialPassSteps::STEPS_3_4 && direct_to_from_reg)
+            throw std::runtime_error(
+                "partial-pass steps 3/4 are incompatible with direct-to-register loads");
+
         R.size = Expression{std::max(
             nregisters, compute_nregisters(pp_factors_prod, factors_pp, threads_per_transform_pp))};
     }
