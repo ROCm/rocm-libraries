@@ -417,6 +417,10 @@ set_target_properties(rocthrust_generate_resource_spec PROPERTIES
   OUTPUT_NAME "generate_resource_spec"
 )
 target_link_libraries(rocthrust_generate_resource_spec PRIVATE hip::host)
+# This helper only enumerates devices through the HIP host API, so it does not need ASAN. It is run
+# at CTest setup time, where the ASAN runtime library might not be on the loader path.
+target_compile_options(rocthrust_generate_resource_spec PRIVATE "-fno-sanitize=address")
+target_link_options(rocthrust_generate_resource_spec PRIVATE "-fno-sanitize=address")
 
 # Install the executable using the standard install command instead of rocm_install
 # since we want to put it in a custom DESTINATION (rocm_install does not support
