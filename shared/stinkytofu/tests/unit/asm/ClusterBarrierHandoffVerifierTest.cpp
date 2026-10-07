@@ -33,7 +33,10 @@ class ClusterBarrierHandoffVerifierTest : public ::testing::Test {
         inst->addSrcReg(StinkyRegister(id));
         return inst;
     }
-    void join() { signal(-1); wait(-1); }
+    void join() {
+        signal(-1);
+        wait(-1);
+    }
     void label(const char* name) {
         AsmIRBuilder builder(*bb, arch);
         builder.createLabel(name);
@@ -73,8 +76,12 @@ class ClusterBarrierHandoffVerifierTest : public ::testing::Test {
         label("exit");
         end();
     }
-    void end() { instruction(GFX::s_endpgm); }
-    std::string verify() { return verifyClusterBarrierHandoffs(*func); }
+    void end() {
+        instruction(GFX::s_endpgm);
+    }
+    std::string verify() {
+        return verifyClusterBarrierHandoffs(*func);
+    }
     void runPass() {
         PassContext context;
         AnalysisManager analyses;
@@ -235,7 +242,7 @@ TEST_F(ClusterBarrierHandoffVerifierTest, ZeroTripWaitCannotReachMainLoopSignal)
 // The nonzero entry path must not inherit the later zero-trip bypass. Once
 // that counter is overwritten, both outcomes are possible and the gap is real.
 class ClusterBarrierNonzeroGuardTest : public ClusterBarrierHandoffVerifierTest,
-                                      public testing::WithParamInterface<bool> {};
+                                       public testing::WithParamInterface<bool> {};
 
 TEST_P(ClusterBarrierNonzeroGuardTest, RequiresJoinOnEveryFeasiblePath) {
     compare(11, 0);
@@ -257,7 +264,8 @@ TEST_P(ClusterBarrierNonzeroGuardTest, RequiresJoinOnEveryFeasiblePath) {
     EXPECT_EQ(verify().empty(), !GetParam());
 }
 
-INSTANTIATE_TEST_SUITE_P(CounterWrites, ClusterBarrierNonzeroGuardTest, testing::Values(false, true));
+INSTANTIATE_TEST_SUITE_P(CounterWrites, ClusterBarrierNonzeroGuardTest,
+                         testing::Values(false, true));
 
 TEST_F(ClusterBarrierHandoffVerifierTest, CounterWriteInvalidatesZeroTripFact) {
     zeroTripPrefix();
@@ -347,7 +355,7 @@ TEST_F(ClusterBarrierHandoffVerifierTest, InlineLabelDefinesActualBranchDestinat
     wait(-3);
     branch("target");
     bb = func->createBasicBlock("target");
-    join(); // A late insertion ahead of the inline label cannot cover the jump.
+    join();  // A late insertion ahead of the inline label cannot cover the jump.
     label("target");
     signal(-3);
     EXPECT_NE(verify().find("without a workgroup signal/wait pair"), std::string::npos);

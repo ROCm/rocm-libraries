@@ -104,8 +104,12 @@ struct FinalControlFlow {
 class ClusterBarrierHandoffVerifierPass : public Pass {
    public:
     static char ID;
-    PassID getPassID() const override { return &ID; }
-    const char* getName() const override { return "ClusterBarrierHandoffVerifier"; }
+    PassID getPassID() const override {
+        return &ID;
+    }
+    const char* getName() const override {
+        return "ClusterBarrierHandoffVerifier";
+    }
     PreservedAnalyses run(Function& func, PassContext&, AnalysisManager&) override {
         const std::string error = verifyClusterBarrierHandoffs(func);
         if (!error.empty()) report_fatal_error(error.c_str());
@@ -152,8 +156,8 @@ std::string verifyClusterBarrierHandoffs(Function& func) {
         State state = *incoming[index][phase];
         const auto& inst = *cfg.instructions[index];
         auto error = [&](const std::string& reason) {
-            const std::string origin = state.phase == Joined ? "entry" :
-                "wait at " + cfg.location(state.clusterWait);
+            const std::string origin =
+                state.phase == Joined ? "entry" : "wait at " + cfg.location(state.clusterWait);
             return "cluster handoff: " + func.getName() + ": " + origin + " reaches " +
                    cfg.location(index) + " " + reason;
         };
