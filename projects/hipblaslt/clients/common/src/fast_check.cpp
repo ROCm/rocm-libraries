@@ -1854,6 +1854,8 @@ FastCheckResult fast_check_activation_device(const FastCheckMatrix& d,
                                              double*                amax)
 {
     FastCheckResult   result;
+    if(amax)
+        *amax = std::numeric_limits<double>::quiet_NaN();
     std::vector<char> hd = host_region(d, batch_count, stream);
     std::vector<char> he = host_region(e, batch_count, stream);
     if(hd.empty() || he.empty())
