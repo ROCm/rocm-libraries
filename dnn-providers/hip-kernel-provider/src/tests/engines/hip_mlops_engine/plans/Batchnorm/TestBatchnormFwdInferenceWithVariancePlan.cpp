@@ -308,11 +308,11 @@ TEST(TestBatchnormFwdInferenceWithVariancePlanFp32, CompileDefaultSetsCorrectDef
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_RUNNING_RESULT=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_N=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_C=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_HW=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_INHW=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NHW=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_CHW=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NCHW=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_L=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_INL=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NL=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_CL=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NCL=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP0=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP1=256"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP2=1"));
@@ -321,7 +321,7 @@ TEST(TestBatchnormFwdInferenceWithVariancePlanFp32, CompileDefaultSetsCorrectDef
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAXN=768"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDS_SIZE=256"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_VEC_SIZE=4"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAXHW=2500"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAXL=2500"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NODPP=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDSGCN_SIZE=16"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_USESAVED=0"));
@@ -473,7 +473,7 @@ TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileNchwLayoutSetsCorrectDefi
                != capturedOptions.end();
     };
 
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYOUT_NHWC=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYOUT_CHANNEL_LAST=0"));
 }
 
 TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileNhwcLayoutSetsCorrectDefine)
@@ -504,16 +504,16 @@ TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileNhwcLayoutSetsCorrectDefi
                != capturedOptions.end();
     };
 
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYOUT_NHWC=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYOUT_CHANNEL_LAST=1"));
 }
 
 TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileWithUnsupportedDimensionThrows)
 {
     const MockKernelCompiler mockCompiler;
 
-    // 3D tensor is not supported
+    // 2D tensor is not supported
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph(
-        {12, 4, 1}, {1, 3, 4}, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+        {4, 1}, {1, 4}, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 

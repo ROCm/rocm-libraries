@@ -29,7 +29,7 @@ enum class neuron_op_type : int
 namespace detail
 {
 
-template <int LayoutNHWC,
+template <int LayoutChannelLast,
           int SaveMeanVariance,
           int RunningResult,
           int UseFp16,
@@ -40,8 +40,8 @@ template <int LayoutNHWC,
           int NrnOpId>
 struct proto_config
 {
-    static_assert(LayoutNHWC == 0 || LayoutNHWC == 1,
-                  "LayoutNHWC (HIP_PLUGIN_LAYOUT_NHWC) must be 0 or 1");
+    static_assert(LayoutChannelLast == 0 || LayoutChannelLast == 1,
+                  "LayoutChannelLast (HIP_PLUGIN_LAYOUT_CHANNEL_LAST) must be 0 or 1");
     static_assert(SaveMeanVariance == 0 || SaveMeanVariance == 1,
                   "SaveMeanVariance must be 0 or 1");
     static_assert(RunningResult == 0 || RunningResult == 1, "SaveMeanVariance must be 0 or 1");
@@ -55,7 +55,7 @@ struct proto_config
     static_assert(NrnOpId >= 0 && NrnOpId <= 10,
                   "NrnOpId can only be interger between 0-10 (inclusive)");
 
-    static constexpr bool layout_nhwc = static_cast<bool>(LayoutNHWC);
+    static constexpr bool layout_channel_last = static_cast<bool>(LayoutChannelLast);
     static constexpr bool save_mean_variance = static_cast<bool>(SaveMeanVariance);
     static constexpr bool running_result = static_cast<bool>(RunningResult);
     static constexpr type_strategy input_type_strategy
@@ -68,7 +68,7 @@ struct proto_config
 
 } // namespace detail
 
-using config = detail::proto_config<HIP_PLUGIN_LAYOUT_NHWC,
+using config = detail::proto_config<HIP_PLUGIN_LAYOUT_CHANNEL_LAST,
                                     HIP_PLUGIN_BN_SAVE_MEAN_VARIANCE,
                                     HIP_PLUGIN_BN_RUNNING_RESULT,
                                     HIP_PLUGIN_USE_FP16,
@@ -155,29 +155,29 @@ template <typename HipKernelConfig,
           typename LaunchDim,
           typename Architecture,
           int Variant,
-          int NCHW,
+          int NCL,
           int NElements,
           int N,
           int C,
-          int HW,
-          int NHW,
-          int CHW,
+          int L,
+          int NL,
+          int CL,
           int VecSize,
           int StashMethod,
           int LoopUnrollMaxN,
-          int LoopUnrollMaxHW,
+          int LoopUnrollMaxL,
           int LDSGCNSize,
           int LDSSize,
           int UseNodpp>
 struct proto_config
 {
     static_assert(UseNodpp == 0 || UseNodpp == 1, "UseNodpp must be 0 or 1");
-    static_assert(NCHW >= 0, "HIP_PLUGIN_BN_NCHW should be always >= 0");
+    static_assert(NCL >= 0, "HIP_PLUGIN_BN_NCL should be always >= 0");
     static_assert(C >= 0, "HIP_PLUGIN_BN_C should be always >= 0");
     static_assert(N >= 0, "HIP_PLUGIN_BN_N should be always >= 0");
-    static_assert(HW >= 0, "HIP_PLUGIN_BN_HW should be always >= 0");
-    static_assert(NHW >= 0, "HIP_PLUGIN_BN_NHW should be always >= 0");
-    static_assert(CHW >= 0, "HIP_PLUGIN_BN_CHW should be always >= 0");
+    static_assert(L >= 0, "HIP_PLUGIN_BN_L should be always >= 0");
+    static_assert(NL >= 0, "HIP_PLUGIN_BN_NL should be always >= 0");
+    static_assert(CL >= 0, "HIP_PLUGIN_BN_CL should be always >= 0");
 
     static constexpr auto input_type_strategy = HipKernelConfig::input_type_strategy;
 
@@ -198,7 +198,7 @@ struct proto_config
                      : Bf16Max::
                            value); // According to the old FloatTypes mechanism (on which this is based), for mixed-precision cases the max value is defined as the max of the smaller type
     static constexpr auto launch_dim = LaunchDim{};
-    static constexpr unsigned int nchw = static_cast<unsigned int>(NCHW);
+    static constexpr unsigned int ncl = static_cast<unsigned int>(NCL);
 
     // `max_n` is a limit on the number of batch elements from the x tensor that can be cached in per-thread memory as part of
     // variant 3 kernels. If batchsize (n_elements) exceeds this limit then the kernel doesn't cache the global memory accesses.
@@ -210,12 +210,12 @@ struct proto_config
     static constexpr unsigned int n_elements = static_cast<unsigned int>(NElements);
     static constexpr unsigned int n = static_cast<unsigned int>(N);
     static constexpr unsigned int c = static_cast<unsigned int>(C);
-    static constexpr unsigned int hw = static_cast<unsigned int>(HW);
-    static constexpr unsigned int nhw = static_cast<unsigned int>(NHW);
-    static constexpr unsigned int chw = static_cast<unsigned int>(CHW);
+    static constexpr unsigned int l = static_cast<unsigned int>(L);
+    static constexpr unsigned int nl = static_cast<unsigned int>(NL);
+    static constexpr unsigned int cl = static_cast<unsigned int>(CL);
     static constexpr int stash_method = StashMethod;
     static constexpr int loop_unroll_max_n = LoopUnrollMaxN;
-    static constexpr int loop_unroll_max_hw = LoopUnrollMaxHW;
+    static constexpr int loop_unroll_max_l = LoopUnrollMaxL;
     static constexpr unsigned int lds_gcn_size = static_cast<unsigned int>(LDSGCNSize);
     static constexpr unsigned int lds_size = static_cast<unsigned int>(LDSSize);
     static constexpr bool use_nodpp
@@ -230,12 +230,12 @@ struct proto_config
     static constexpr unsigned int vec_size = VecSize;
     static constexpr bool vectorize = VecSize > 1;
     static constexpr unsigned int vec_size_x
-        = vectorize && HipKernelConfig::layout_nhwc ? vec_size : 1;
+        = vectorize && HipKernelConfig::layout_channel_last ? vec_size : 1;
     static constexpr unsigned int vec_size_y
-        = vectorize && !HipKernelConfig::layout_nhwc ? vec_size : 1;
+        = vectorize && !HipKernelConfig::layout_channel_last ? vec_size : 1;
 
     using fp_prec_c_type =
-        typename std::conditional<vectorize && HipKernelConfig::layout_nhwc,
+        typename std::conditional<vectorize && HipKernelConfig::layout_channel_last,
                                   typename mapped_vector_type<fp_prec_type, vec_size>::type,
                                   fp_prec_type>::type;
 
@@ -245,7 +245,7 @@ struct proto_config
                                   fp_prec_type>::type;
 
     using fp_c_type =
-        typename std::conditional<vectorize && HipKernelConfig::layout_nhwc,
+        typename std::conditional<vectorize && HipKernelConfig::layout_channel_last,
                                   typename mapped_vector_type<fp_type, vec_size>::type,
                                   fp_type>::type;
 
@@ -253,7 +253,7 @@ struct proto_config
         conditional<vectorize, typename mapped_vector_type<fp_type, vec_size>::type, fp_type>::type;
 
     using fp_accum_c_type =
-        typename std::conditional<vectorize && HipKernelConfig::layout_nhwc,
+        typename std::conditional<vectorize && HipKernelConfig::layout_channel_last,
                                   typename mapped_vector_type<fp_accum_type, vec_size>::type,
                                   fp_accum_type>::type;
 
@@ -277,17 +277,17 @@ using config = hip_kernel_provider::batchnorm::detail::proto_config<
                                                                 HIP_PLUGIN_GFX120X,
                                                                 HIP_PLUGIN_GFX115X>,
     HIP_PLUGIN_BN_VARIANT,
-    HIP_PLUGIN_BN_NCHW,
+    HIP_PLUGIN_BN_NCL,
     HIP_PLUGIN_BN_N_ELEMENTS,
     HIP_PLUGIN_BN_N,
     HIP_PLUGIN_BN_C,
-    HIP_PLUGIN_BN_HW,
-    HIP_PLUGIN_BN_NHW,
-    HIP_PLUGIN_BN_CHW,
+    HIP_PLUGIN_BN_L,
+    HIP_PLUGIN_BN_NL,
+    HIP_PLUGIN_BN_CL,
     HIP_PLUGIN_BN_VEC_SIZE,
     HIP_PLUGIN_BN_STASH_METHOD,
     HIP_PLUGIN_BN_LOOP_UNROLL_MAXN,
-    HIP_PLUGIN_BN_LOOP_UNROLL_MAXHW,
+    HIP_PLUGIN_BN_LOOP_UNROLL_MAXL,
     HIP_PLUGIN_BN_LDSGCN_SIZE,
     HIP_PLUGIN_BN_LDS_SIZE,
     HIP_PLUGIN_BN_NODPP>;

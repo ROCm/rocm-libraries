@@ -32,22 +32,29 @@ static ProblemDescription extractProblemDescription(const BatchnormBwdParams& pa
     const auto* xDims = params.x()->dims();
     size_t n = 0;
     size_t c = 0;
-    size_t h = 0;
-    size_t w = 0;
-    if(xDims->size() == 4)
+    size_t l = 0;
+    if(xDims->size() == 3)
     {
         n = static_cast<size_t>(xDims->Get(0));
         c = static_cast<size_t>(xDims->Get(1));
-        h = static_cast<size_t>(xDims->Get(2));
-        w = static_cast<size_t>(xDims->Get(3));
+        l = static_cast<size_t>(xDims->Get(2));
+    }
+    else if(xDims->size() == 4)
+    {
+        n = static_cast<size_t>(xDims->Get(0));
+        c = static_cast<size_t>(xDims->Get(1));
+        const auto h = static_cast<size_t>(xDims->Get(2));
+        const auto w = static_cast<size_t>(xDims->Get(3));
+        l = h * w;
     }
     else if(xDims->size() == 5)
     {
         n = static_cast<size_t>(xDims->Get(0));
         c = static_cast<size_t>(xDims->Get(1));
         const auto d = static_cast<size_t>(xDims->Get(2));
-        h = d * static_cast<size_t>(xDims->Get(3));
-        w = static_cast<size_t>(xDims->Get(4));
+        const auto h = static_cast<size_t>(xDims->Get(3));
+        const auto w = static_cast<size_t>(xDims->Get(4));
+        l = d * h * w;
     }
     else
     {
@@ -56,15 +63,8 @@ static ProblemDescription extractProblemDescription(const BatchnormBwdParams& pa
                                                            + std::to_string(xDims->size()));
     }
 
-    return {n,
-            c,
-            h,
-            w,
-            isChannelLastLayout(params.x()),
-            useFp16Mix,
-            useBfp16Mix,
-            Direction::BACKWARD,
-            1};
+    return {
+        n, c, l, isChannelLastLayout(params.x()), useFp16Mix, useBfp16Mix, Direction::BACKWARD, 1};
 }
 
 BatchnormBwdParams::BatchnormBwdParams(
@@ -212,7 +212,7 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
     }
 
     _kernelVariant = config.variant;
-    _invInNhw = 1.0f / static_cast<float>(problem.inNhw());
+    _invInNl = 1.0f / static_cast<float>(problem.inNl());
 
     size_t xlocalsize = config.xlocalsize;
     const size_t ylocalsize = config.ylocalsize;
@@ -247,10 +247,10 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
     options.update("HIP_PLUGIN_BN_USESAVED", _usesSavedStats);
     options.update("HIP_PLUGIN_BN_N", problem.n());
     options.update("HIP_PLUGIN_BN_C", problem.c());
-    options.update("HIP_PLUGIN_BN_HW", problem.inCstride());
-    options.update("HIP_PLUGIN_BN_NHW", problem.inNhw());
-    options.update("HIP_PLUGIN_BN_CHW", problem.inChw());
-    options.update("HIP_PLUGIN_BN_NCHW", problem.inNchw());
+    options.update("HIP_PLUGIN_BN_L", problem.inCstride());
+    options.update("HIP_PLUGIN_BN_NL", problem.inNl());
+    options.update("HIP_PLUGIN_BN_CL", problem.inCl());
+    options.update("HIP_PLUGIN_BN_NCL", problem.inNcl());
     options.update("HIP_PLUGIN_BN_VARIANT", _kernelVariant);
 
     if(_kernelVariant != 2)
@@ -277,7 +277,7 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
     }
     else
     {
-        if(problem.isLayoutNHWC())
+        if(problem.isLayoutChannelLast())
         {
             xgridsize
                 = xlocalsize * ((problem.c() / config.vectorsize + xlocalsize - 1) / xlocalsize);
@@ -294,7 +294,7 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
         stashMethod
             = getStashMethod(problem, stashValuesBwd, ylocalsize, zlocalsize, config.nelements);
 
-        if(problem.isLayoutNHWC() && problem.c() % 2 == 0 && xlocalsize % 2 == 0)
+        if(problem.isLayoutChannelLast() && problem.c() % 2 == 0 && xlocalsize % 2 == 0)
         {
             xlocalsizeFinal = 2;
             zlocalsizeFinal = zgridsize / zlocalsize * zlocalsize;
@@ -416,7 +416,7 @@ void BatchnormBwdPlan::execute(const Handle& handle,
                                         dbiasBuffer.ptr,
                                         savedMeanPtr,
                                         savedInvVariancePtr,
-                                        _invInNhw,
+                                        _invInNl,
                                         _activationAlpha,
                                         _activationBeta);
         }
@@ -431,7 +431,7 @@ void BatchnormBwdPlan::execute(const Handle& handle,
                                         dscaleBuffer.ptr,
                                         dbiasBuffer.ptr,
                                         _epsilon,
-                                        _invInNhw,
+                                        _invInNl,
                                         _activationAlpha,
                                         _activationBeta);
         }
@@ -462,14 +462,14 @@ void BatchnormBwdPlan::execute(const Handle& handle,
                                     dbiasBuffer.ptr,
                                     savedMeanPtr,
                                     savedInvVariancePtr,
-                                    _invInNhw,
+                                    _invInNl,
                                     _activationAlpha,
                                     _activationBeta);
     }
     else
     {
         _runnableKernels[0]->launch(handle.getStream(), xBuffer.ptr, dxBuffer.ptr);
-        _runnableKernels[1]->launch(handle.getStream(), dxBuffer.ptr, _invInNhw, _epsilon);
+        _runnableKernels[1]->launch(handle.getStream(), dxBuffer.ptr, _invInNl, _epsilon);
         _runnableKernels[2]->launch(handle.getStream(),
                                     xBuffer.ptr,
                                     dyBuffer.ptr,
@@ -488,7 +488,7 @@ void BatchnormBwdPlan::execute(const Handle& handle,
                                     biasPtr,
                                     dscaleBuffer.ptr,
                                     dbiasBuffer.ptr,
-                                    _invInNhw,
+                                    _invInNl,
                                     _activationAlpha,
                                     _activationBeta);
     }

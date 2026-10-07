@@ -119,7 +119,7 @@ private:
 
     // Kernel launch parameters computed during compile()
     int _kernelVariant = -1;
-    float _invInNhw;
+    float _invInNl;
 };
 
 } // namespace batchnorm

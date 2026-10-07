@@ -125,37 +125,48 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
 
     int n = 0;
     int c = 0;
-    int h = 0;
-    int w = 0;
+    int l = 0;
     int nStride = 0;
     int cStride = 0;
-    int wStride = 0;
+    int lStride = 0;
 
-    // Check if 4D (NCHW/NHWC) or 5D (NCDHW/NDHWC)
-    if(xDims->size() == 4)
+    // Check if 3D (NCL/NLC), 4D (NCHW/NHWC) or 5D (NCDHW/NDHWC)
+    if(xDims->size() == 3)
     {
         n = checkedNarrowToInt(xDims->Get(0), "n");
         c = checkedNarrowToInt(xDims->Get(1), "c");
-        h = checkedNarrowToInt(xDims->Get(2), "h");
-        w = checkedNarrowToInt(xDims->Get(3), "w");
+        l = checkedNarrowToInt(xDims->Get(2), "l");
 
         nStride = checkedNarrowToInt(xStrides->Get(0), "nStride");
         cStride = checkedNarrowToInt(xStrides->Get(1), "cStride");
-        wStride = checkedNarrowToInt(xStrides->Get(3), "wStride");
+        lStride = checkedNarrowToInt(xStrides->Get(2), "lStride");
+    }
+    else if(xDims->size() == 4)
+    {
+        n = checkedNarrowToInt(xDims->Get(0), "n");
+        c = checkedNarrowToInt(xDims->Get(1), "c");
+        auto h = checkedNarrowToInt(xDims->Get(2), "h");
+        auto w = checkedNarrowToInt(xDims->Get(3), "w");
+        // For 4D, combine H*W into spatial dimension
+        l = h * w;
+
+        nStride = checkedNarrowToInt(xStrides->Get(0), "nStride");
+        cStride = checkedNarrowToInt(xStrides->Get(1), "cStride");
+        lStride = checkedNarrowToInt(xStrides->Get(3), "lStride");
     }
     else if(xDims->size() == 5)
     {
         n = checkedNarrowToInt(xDims->Get(0), "n");
         c = checkedNarrowToInt(xDims->Get(1), "c");
         auto d = checkedNarrowToInt(xDims->Get(2), "d");
-        h = checkedNarrowToInt(xDims->Get(3), "h");
-        w = checkedNarrowToInt(xDims->Get(4), "w");
+        auto h = checkedNarrowToInt(xDims->Get(3), "h");
+        auto w = checkedNarrowToInt(xDims->Get(4), "w");
         // For 5D, combine D*H*W into spatial dimension
-        h = d * h;
+        l = d * h * w;
 
         nStride = checkedNarrowToInt(xStrides->Get(0), "nStride");
         cStride = checkedNarrowToInt(xStrides->Get(1), "cStride");
-        wStride = checkedNarrowToInt(xStrides->Get(4), "wStride");
+        lStride = checkedNarrowToInt(xStrides->Get(4), "lStride");
     }
     else
     {
@@ -164,12 +175,12 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
                                                            + std::to_string(xDims->size()));
     }
 
-    auto inCstride = static_cast<unsigned int>(h * w);
+    auto inCstride = static_cast<unsigned int>(l);
 
-    const bool isLayoutNhwc = isChannelLastLayout(_inferenceParams.x());
+    const bool isLayoutChannelLast = isChannelLastLayout(_inferenceParams.x());
 
     // Calculate vector size based on layout
-    auto vectorsize = computeVectorSize(isLayoutNhwc, c, inCstride);
+    auto vectorsize = computeVectorSize(isLayoutChannelLast, c, inCstride);
 
     // Calculate block and grid dimensions
     size_t xlocalsize = 0;
@@ -180,7 +191,7 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
     size_t zgridsize = 0;
     const size_t maxLocalsize = 256;
 
-    if(isLayoutNhwc)
+    if(isLayoutChannelLast)
     {
         xlocalsize = std::min(static_cast<size_t>(c) / vectorsize, maxLocalsize);
         xgridsize
@@ -252,7 +263,7 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
     _inCstride = inCstride;
     _batchCount = static_cast<unsigned int>(n);
     _cStride = static_cast<unsigned int>(cStride);
-    _hwStride = static_cast<unsigned int>(wStride);
+    _lStride = static_cast<unsigned int>(lStride);
     _batchStride = static_cast<unsigned int>(nStride);
 }
 
@@ -305,7 +316,7 @@ void BatchnormFwdInferencePlan::execute(const Handle& handle,
                                 _inCstride,
                                 _batchCount,
                                 _cStride,
-                                _hwStride,
+                                _lStride,
                                 _batchStride,
                                 activationAlpha,
                                 activationBeta);
@@ -326,7 +337,7 @@ void BatchnormFwdInferencePlan::execute(const Handle& handle,
                                 _inCstride,
                                 _batchCount,
                                 _cStride,
-                                _hwStride,
+                                _lStride,
                                 _batchStride,
                                 activationAlpha,
                                 activationBeta);
