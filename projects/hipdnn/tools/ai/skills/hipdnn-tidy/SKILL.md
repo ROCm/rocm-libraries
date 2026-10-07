@@ -79,9 +79,8 @@ Infer from the user request:
    ```
 
    `<skill-directory>` is the directory of the skill you were invoked from;
-   use the scripts bundled there. Keep full
-   output in a log when the run is large, and show the diagnostics rather than
-   the progress lines.
+   use the scripts bundled there. Keep full output in a log when the run is
+   large, and show the diagnostics rather than the progress lines.
 
 3. Report the selected translation unit count against the database total, then
    the diagnostics. Group repeated header diagnostics: a defect in a header is
