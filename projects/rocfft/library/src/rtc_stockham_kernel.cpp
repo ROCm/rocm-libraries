@@ -100,6 +100,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
             pp_params.pp_factors_other.assign(kernel->pp_params.pp_factors_other.begin(),
                                               kernel->pp_params.pp_factors_other.end());
             pp_params.parent_length.assign(node.length.begin(), node.length.end());
+            pp_params.node_length = pp_params.parent_length;
         }
 
         break;

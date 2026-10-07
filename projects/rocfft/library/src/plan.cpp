@@ -5379,11 +5379,6 @@ bool TreeNode::isOutArrayTypeAllowed(rocfft_array_type oArrayType) const
     return allowedOutArrayTypes.count(oArrayType) > 0;
 }
 
-bool TreeNode::isRootNode() const
-{
-    return parent == nullptr;
-}
-
 bool TreeNode::isLeafNode() const
 {
     return nodeType == NT_LEAF;
@@ -5938,14 +5933,6 @@ void TreeNode::RecursiveInsertNode(TreeNode* pos, std::unique_ptr<TreeNode>& new
     }
 }
 
-const TreeNode* TreeNode::GetPlanRoot() const
-{
-    if(isRootNode())
-        return this;
-
-    return parent->GetPlanRoot();
-}
-
 TreeNode* TreeNode::GetFirstLeaf()
 {
     return (nodeType == NT_LEAF) ? this : childNodes.front()->GetFirstLeaf();
@@ -5981,43 +5968,6 @@ TreeNode* TreeNode::GetPartialPassAncestor() const
         return parent;
 
     return parent->GetPartialPassAncestor();
-}
-
-bool TreeNode::IsRootPlanC2CTransform() const
-{
-    auto root = GetPlanRoot();
-    return (root->inArrayType != rocfft_array_type_real)
-           && (root->outArrayType != rocfft_array_type_real);
-}
-
-bool TreeNode::IsRootPlanR2CTransform() const
-{
-    auto root = GetPlanRoot();
-    return (root->inArrayType == rocfft_array_type_real)
-           && (root->outArrayType != rocfft_array_type_real);
-}
-
-bool TreeNode::IsRootPlanC2RTransform() const
-{
-    auto root = GetPlanRoot();
-    return (root->inArrayType != rocfft_array_type_real)
-           && (root->outArrayType == rocfft_array_type_real);
-}
-
-rocfft_transform_type TreeNode::GetRootPlanTransformType() const
-{
-    const auto root = GetPlanRoot();
-
-    if(IsRootPlanC2CTransform() && root->direction == -1)
-        return rocfft_transform_type_complex_forward;
-    else if(IsRootPlanC2CTransform() && root->direction == 1)
-        return rocfft_transform_type_complex_inverse;
-    else if(IsRootPlanR2CTransform())
-        return rocfft_transform_type_real_forward;
-    else if(IsRootPlanC2RTransform())
-        return rocfft_transform_type_real_inverse;
-    else
-        throw std::runtime_error("Unknown root plan transform type");
 }
 
 // remove a leaf node from the plan completely - plan optimization

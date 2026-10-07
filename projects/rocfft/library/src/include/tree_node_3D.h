@@ -230,7 +230,7 @@ protected:
     }
 
 public:
-    bool UseOutputLengthForPadding() override
+    bool UseOutputLengthForPadding() const override
     {
         return true;
     }
@@ -258,7 +258,7 @@ protected:
     }
 
 public:
-    bool UseOutputLengthForPadding() override
+    bool UseOutputLengthForPadding() const override
     {
         return true;
     }
@@ -288,7 +288,7 @@ protected:
 
 public:
     bool CreateDevKernelArgs() override;
-    bool UseOutputLengthForPadding() override
+    bool UseOutputLengthForPadding() const override
     {
         return true;
     }

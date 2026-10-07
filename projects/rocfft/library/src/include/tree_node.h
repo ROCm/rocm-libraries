@@ -720,7 +720,10 @@ public:
     bool isPlacementAllowed(rocfft_result_placement) const;
     bool isOutBufAllowed(OperatingBuffer oB) const;
     bool isOutArrayTypeAllowed(rocfft_array_type) const;
-    bool isRootNode() const;
+    bool isRootNode() const
+    {
+        return parent == nullptr;
+    }
     bool isLeafNode() const;
     // Get the current node downcasted to a LeafNode.  Throws bad_cast
     // if this node isn't actually a leaf.
@@ -804,7 +807,13 @@ public:
     void RecursiveInsertNode(TreeNode* pos, std::unique_ptr<TreeNode>& newNode);
 
     // Get root node of plan
-    const TreeNode* GetPlanRoot() const;
+    const TreeNode* GetPlanRoot() const
+    {
+        if(isRootNode())
+            return this;
+
+        return parent->GetPlanRoot();
+    }
     // If 'this' is a leaf, return it.  Otherwise, return the first
     // leaf node under 'this' in the execution sequence.
     TreeNode* GetFirstLeaf();
@@ -816,12 +825,41 @@ public:
     TreeNode* GetRealEvenAncestor();
 
     // Return true if the root plan is C2C, R2C, or C2R
-    bool IsRootPlanC2CTransform() const;
-    bool IsRootPlanR2CTransform() const;
-    bool IsRootPlanC2RTransform() const;
+    bool IsRootPlanC2CTransform() const
+    {
+        auto root = GetPlanRoot();
+        return (root->inArrayType != rocfft_array_type_real)
+               && (root->outArrayType != rocfft_array_type_real);
+    }
+    bool IsRootPlanR2CTransform() const
+    {
+        auto root = GetPlanRoot();
+        return (root->inArrayType == rocfft_array_type_real)
+               && (root->outArrayType != rocfft_array_type_real);
+    }
+    bool IsRootPlanC2RTransform() const
+    {
+        auto root = GetPlanRoot();
+        return (root->inArrayType != rocfft_array_type_real)
+               && (root->outArrayType == rocfft_array_type_real);
+    }
 
     // Return the transform type of the root plan.
-    virtual rocfft_transform_type GetRootPlanTransformType() const;
+    rocfft_transform_type GetRootPlanTransformType() const
+    {
+        const auto root = GetPlanRoot();
+
+        if(IsRootPlanC2CTransform() && root->direction == -1)
+            return rocfft_transform_type_complex_forward;
+        else if(IsRootPlanC2CTransform() && root->direction == 1)
+            return rocfft_transform_type_complex_inverse;
+        else if(IsRootPlanR2CTransform())
+            return rocfft_transform_type_real_forward;
+        else if(IsRootPlanC2RTransform())
+            return rocfft_transform_type_real_inverse;
+        else
+            throw std::runtime_error("Unknown root plan transform type");
+    }
 
     // Return ancestor node of 'this' that is partial-pass, or
     // nullptr if there is no such ancestor
@@ -841,7 +879,7 @@ public:
     // Padding needs matching stride + length to make its decisions.
     // For most nodes, outStride + length can be used together.  For
     // some nodes, outputLength is what matches outStride.
-    virtual bool UseOutputLengthForPadding()
+    virtual bool UseOutputLengthForPadding() const
     {
         return false;
     }
@@ -1079,7 +1117,11 @@ public:
         // launch (see powX.cpp) and don't affect kernel index arithmetic.
         const auto& io_stride = io == io_data_label::INPUT ? inStride : outStride;
         const auto& io_dist   = io == io_data_label::INPUT ? iDist : oDist;
-        const auto  io_length = io == io_data_label::INPUT ? length : GetOutputLength();
+        // outputLength is in plan order for nodes like SBCC, whose length is
+        // rotated in lockstep with the strides, so it only pairs with
+        // outStride on the nodes that say so.
+        const auto out_length = UseOutputLengthForPadding() ? GetOutputLength() : length;
+        const auto io_length  = io == io_data_label::INPUT ? length : out_length;
 
         // compute_ptrdiff returns the buffer size (one-past-the-end).
         auto ptrdiff = compute_ptrdiff(io_length, io_stride, batch, io_dist) - 1;
@@ -1135,6 +1177,11 @@ public:
 
     virtual void GetKernelFactors();
     virtual void GetKernelPartialPassFactors();
+
+    // Allocate the twiddle tables a partial-pass kernel needs.  The caller
+    // resolves off_dim_length because ppOffDim indexes the plan's dimensions,
+    // which do not always line up with this node's length vector.
+    bool CreatePartialPassDeviceResources(size_t off_dim_length);
 };
 
 /*****************************************************

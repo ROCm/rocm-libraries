@@ -48,19 +48,31 @@ struct StockhamPartialPassKernel : public StockhamKernel
         , params(params)
         , lds_column_pattern(lds_column_pattern)
     {
-        // off_dim is a plan dimension.  The SBRR's parent_length is in plan
-        // order, but the SBCC's is rotated so that its own transform dimension
-        // comes first, which shifts the off-dimension one slot to the right.
-        off_dim_index            = lds_column_pattern == LDSColumnPattern::NON_INTERLEAVED
-                                       ? params.off_dim
-                                       : (params.off_dim + 1) % params.parent_length.size();
-        length_pp                = params.parent_length[off_dim_index];
         factors_pp               = params.pp_factors_curr;
         factors_pp_other         = params.pp_factors_other;
         pp_factors_prod          = product(factors_pp.begin(), factors_pp.end());
         pp_factors_other_prod    = product(factors_pp_other.begin(), factors_pp_other.end());
         threads_per_transform_pp = params.pp_threads_per_transform;
         transforms_per_block_pp  = workgroup_size / threads_per_transform_pp;
+
+        // the two kernels split the off-dimension between them, so their
+        // factors multiply out to its length
+        length_pp = pp_factors_prod * pp_factors_other_prod;
+
+        if(params.node_length.empty())
+            throw std::runtime_error("partial pass node_length is not set");
+
+        // off_dim is a plan dimension, and node_length is in this kernel's node
+        // ordering: plan order for the SBRR, rotated one slot to the right for
+        // the SBCC so its own transform dimension comes first.  If the
+        // off-dimension length is not where that puts it, the caller built
+        // node_length in the wrong order.
+        const auto off_dim_index = lds_column_pattern == LDSColumnPattern::NON_INTERLEAVED
+                                       ? params.off_dim
+                                       : (params.off_dim + 1) % params.node_length.size();
+        if(params.node_length[off_dim_index] != length_pp)
+            throw std::runtime_error(
+                "partial pass node_length is not in the ordering this kernel expects");
 
         // the interleaved layout addresses LDS per transform point, so a thread
         // has to own a whole number of off-dimension transforms
@@ -78,7 +90,6 @@ struct StockhamPartialPassKernel : public StockhamKernel
 
     StockhamPartialPassParams params;
 
-    unsigned int              off_dim_index;
     unsigned int              pp_factors_prod;
     unsigned int              pp_factors_other_prod;
     std::vector<unsigned int> factors_pp_other;
@@ -964,9 +975,9 @@ struct StockhamPartialPassKernel : public StockhamKernel
 
         StatementList& body = f.body;
 
-        auto len_1 = params.parent_length[2];
-        auto len_2 = params.parent_length[1];
-        auto len_3 = params.parent_length[0];
+        auto len_1 = params.node_length[2];
+        auto len_2 = params.node_length[1];
+        auto len_3 = params.node_length[0];
 
         auto len_1_2_3 = len_1 * len_2 * len_3;
         auto len_1_2   = len_1 * len_2;

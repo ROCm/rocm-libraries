@@ -63,9 +63,8 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
                 "StockhamPartialPassKernelCC:: partial-passes along x not currently supported");
             break;
         case 1:
-            num_blocks_per_batch
-                = (params.parent_length[1] - 1) / transforms_per_block_unscaled + 1;
-            num_blocks_per_batch *= params.parent_length[off_dim_index] / pp_factors_prod;
+            num_blocks_per_batch = (params.node_length[1] - 1) / transforms_per_block_unscaled + 1;
+            num_blocks_per_batch *= length_pp / pp_factors_prod;
             break;
         case 2:
             throw std::runtime_error(
@@ -507,7 +506,7 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
         return work;
     }
 
-    Function generate_lds_to_reg_input_function()
+    Function generate_lds_to_reg_input_function() override
     {
         std::string function_name = "lds_to_reg_input_length" + std::to_string(length) + "_device";
 
@@ -535,7 +534,7 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
         return f;
     }
 
-    Function generate_lds_from_reg_output_function()
+    Function generate_lds_from_reg_output_function() override
     {
         std::string function_name
             = "lds_from_reg_output_length" + std::to_string(length) + "_device";
@@ -624,7 +623,7 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
         return args;
     }
 
-    Function generate_device_function()
+    Function generate_device_function() override
     {
         std::string function_name
             = "forward_full_pass_length" + std::to_string(length) + "_" + tiling_name() + "_device";

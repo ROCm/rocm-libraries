@@ -19,6 +19,7 @@
 // THE SOFTWARE.
 
 #include "tree_node.h"
+#include "../../shared/arithmetic.h"
 #include "../../shared/precision_type.h"
 #include "../../shared/ptrdiff.h"
 #include "function_pool.h"
@@ -63,6 +64,16 @@ TreeNode::~TreeNode()
     {
         Repo::ReleaseTwiddle1D(twiddles_large);
         twiddles_large = nullptr;
+    }
+    if(twiddles_off_dim)
+    {
+        Repo::ReleaseTwiddle1D(twiddles_off_dim);
+        twiddles_off_dim = nullptr;
+    }
+    if(twiddles_pp)
+    {
+        Repo::ReleaseTwiddlePP(twiddles_pp);
+        twiddles_pp = nullptr;
     }
     if(chirp)
     {
@@ -301,6 +312,25 @@ bool LeafNode::CreateDeviceResources()
     }
 
     return CreateLargeTwdTable();
+}
+
+bool LeafNode::CreatePartialPassDeviceResources(size_t off_dim_length)
+{
+    twd_attach_halfN = (ebtype != EmbeddedType::NONE);
+
+    // Create twiddle tables for partial pass along ppOffDim
+    std::tie(twiddles_off_dim, twiddles_off_dim_size)
+        = Repo::GetTwiddles1D(product(kernelFactorsPP.begin(), kernelFactorsPP.end()),
+                              GetTwiddleTableLengthLimit(),
+                              precision,
+                              deviceProp,
+                              0,
+                              twd_attach_halfN,
+                              kernelFactorsPP);
+    std::tie(twiddles_pp, twiddles_pp_size)
+        = Repo::GetTwiddlesPP(off_dim_length, precision, deviceProp);
+
+    return LeafNode::CreateDeviceResources();
 }
 
 void LeafNode::SetupGridParam(GridParam& gp)

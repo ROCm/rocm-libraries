@@ -259,6 +259,16 @@ void output_json(const std::vector<GeneratedLauncher>& launchers,
     output << "]";
 }
 
+// Give the params the node ordering an SBCC kernel generates against, which
+// rotates the parent length so the SBCC's own transform dimension comes first.
+// parent_length itself stays in plan order because it is the function-pool key.
+static StockhamPartialPassParams pp_params_sbcc(StockhamPartialPassParams params)
+{
+    std::rotate(
+        params.node_length.rbegin(), params.node_length.rbegin() + 1, params.node_length.rend());
+    return params;
+}
+
 // Render stockham partial-pass kernel generated launchers in JSON format.
 void stockham_partial_pass_variants(const std::string&               kernel_name,
                                     const StockhamGeneratorSpecs&    specs1,
@@ -289,7 +299,7 @@ void stockham_partial_pass_variants(const std::string&               kernel_name
                           params_1.off_dim,
                           launchers);
 
-            StockhamPartialPassKernelCC kernelCC(specs2, params_2, false);
+            StockhamPartialPassKernelCC kernelCC(specs2, pp_params_sbcc(params_2), false);
             make_launcher(specs2.precision,
                           *specs2.transform_type,
                           {{"pp_sbcc", specs2.scheme, "", ""}},
@@ -319,7 +329,7 @@ void stockham_partial_pass_variants(const std::string&               kernel_name
                           params_1.off_dim,
                           launchers);
 
-            StockhamPartialPassKernelCC kernelRR(specs2, params_2, false);
+            StockhamPartialPassKernelCC kernelRR(specs2, pp_params_sbcc(params_2), false);
             make_launcher(specs2.precision,
                           *specs2.transform_type,
                           {{"pp_stoc", specs2.scheme, "", ""}},
