@@ -812,11 +812,7 @@ Solutions:
   tailLoopOptMXSA: false
   tailLoopOptMXSB: false
 IndexOrder: [2, 3, 0, 1]
-ExactLogic:
-- - [4096, 4096, 1, 65536]
-  - [0, 0.0]
-- - [16, 65536, 1, 65536]
-  - [1, 0.0]
+ExactLogic: null
 RangeLogic: null
 TileSelectionIndices: null
 PerfMetric: DeviceEfficiency

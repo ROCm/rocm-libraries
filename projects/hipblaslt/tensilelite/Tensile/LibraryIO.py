@@ -26,6 +26,7 @@ from .CustomKernels import getCustomKernelConfig
 from .ExecutionPolicy import normalize_execution_policy_with_defaults
 from rocisa.enum import DataTypeEnum
 from . import SolutionLibrary
+from . import ExactLogicSidecar
 from .CustomYamlLoader import load_yaml_stream
 from . import __version__
 from .Common import printExit, printWarning, print2, \
@@ -430,6 +431,15 @@ def readYAML(filename):
     return data
 
 
+def readLibraryLogic(filename, customizedLoader=False):
+    """Read a library logic file, restoring an ExactLogic table kept in a sidecar.
+
+    See :mod:`Tensile.ExactLogicSidecar`. Use this, not :func:`read`, for any
+    logic file whose ``ExactLogic`` table is consumed.
+    """
+    return ExactLogicSidecar.attachSidecar(read(filename, customizedLoader), filename)
+
+
 def readJson(filename):
     """Reads and returns JSON data from file."""
     with open(filename, "r") as f:
@@ -554,7 +564,7 @@ def parseLibraryLogicFile(
     ):
     """Wrapper function to read and parse a library logic file."""
     return parseLibraryLogicData(
-               read(filename, True),
+               readLibraryLogic(filename, True),
                filename,
                assembler,
                splitGSU,

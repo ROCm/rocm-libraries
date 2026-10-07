@@ -384,9 +384,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 IndexOrder: [2, 3, 0, 1]
-ExactLogic:
-- - [1, 1, 1, 1]
-  - [0, 0]
+ExactLogic: null
 RangeLogic: null
 TileSelectionIndices: null
 PerfMetric: DeviceEfficiency
