@@ -20,7 +20,7 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-from ..ExecutionPolicy import isPersistent, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment, usesStreamKArrivalFixup
+from ..ExecutionPolicy import isPersistent, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment, usesStreamKArrivalFixup, usesStreamKDynamicParallel
 from rocisa.enum import CacheScope
 from rocisa.code import Module, Label
 from rocisa.container import vgpr, sgpr, mgpr, SMEMModifiers, MUBUFModifiers, DSModifiers, replaceHolder, EXEC, VOP3PModifiers, ContinuousRegister
@@ -80,12 +80,29 @@ from copy import deepcopy
 #     in storeBranches) are of this form; SK5's skTileIndex additionally
 #     pre-masks with 0x8000001F for the SKTiles-overlay reason below.
 #   * SK5 aliases sgprSKTiles onto sgprMagicShiftItersPerTile. Every SKTiles
-#     read is on the dynamic (SK4-style) arm, and the host never sets bit 29 on
-#     the dynamic sub-path -- it packs skTiles | 0x40000000 and asserts
-#     (skTiles & 0xE0000000) == 0 (ContractionSolution.cpp). So the alias only
-#     ever sees a clean tile count.
+#     read is on the dynamic (SK4-style) arm. There the host packs
+#     skTiles | 0x40000000, plus bit 29 meaning "parallel reduction" (not USO)
+#     for kernels with SupportStreamKDynamicParallel, and asserts
+#     (skTiles & 0xE0000000) == 0 (ContractionSolution.cpp). The dynamic
+#     preLoop moves bit 29 into WorkAssignmentMode and clears it
+#     (StreamKHybrid.extractDynamicParallelMode) before any SKTiles read, and
+#     no USO test (emitUsoBranchToGlobal) is emitted on the dynamic arm, so the
+#     alias only ever sees a clean tile count.
 #   * _emitModeExtraction touches bit 30 only.
 _SK_USO_BIT = 29
+
+# SK5 dynamic sub-path: the same bit of the same slot (SKTiles there) selects
+# the parallel (PostGSU) reduction, so it is defined as _SK_USO_BIT (one source
+# for bit 29; the host packs it as 0x20000000 for both meanings). The host sets it only for kernels that advertise
+# SupportStreamKDynamicParallel and only when every tile is split; it never
+# coexists with the USO meaning of bit 29, which only the static sub-path reads.
+# The dynamic preLoop moves it into WorkAssignmentMode and clears it from
+# SKTiles before anything reads the tile count.
+_SK5_DYNAMIC_PARALLEL_BIT = _SK_USO_BIT
+# WorkAssignmentMode values: 0 static, 1 dynamic, 3 dynamic with parallel
+# reduction. Every hybrid dispatch tests WorkAssignmentMode == 0, so 3 still
+# selects the dynamic sub-path everywhere.
+_SK5_MODE_DYNAMIC_PARALLEL = 3
 
 
 
@@ -921,6 +938,13 @@ class StreamK(TileProcessingStrategy):
         # Check for parallel reduction
         # Paralell reduction stores to SrdD in split format, fixup happens in post kernel
         skSplitSrd = Label("SK_SplitSrd", "")
+        # SK5 dynamic parallel reduction: always split (the host packs a split
+        # of at least 2), SkPartialIdx set per work item by activateWorkItem.
+        dynamicParallel = self.usesDynamicParallel(writer, kernel)
+        if dynamicParallel:
+            skParallelSrd = Label(writer.labels.getNameInc("SK_ParallelSrd"), "")
+            self.emitDynamicParallelBranch(writer, kernel, module, skParallelSrd,
+                                           "dynamic parallel reduction: per-part output buffer")
         module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
         module.add(SCBranchSCC0(labelName=skSplitSrd.getLabelName(), comment="Skip this block if using single-kernel stream-k fixup"))
         # Alpha/Beta will be applied in post kernel if necessary
@@ -936,6 +960,8 @@ class StreamK(TileProcessingStrategy):
         module.add(SCmpEQU32(src0=sgpr(sSkt), src1=1, comment="split == 1 ?"))
         writer.releasePersistentConstSgpr(sSkt)
         module.add(SCBranchSCC1(labelName=skSplitSrd.getLabelName(), comment="branch if split == 1"))
+        if dynamicParallel:
+            module.add(skParallelSrd)
         # Parallel reduction: adjust output buffer address to per split buffer
         with writer.allocTmpSgpr(4, alignment=1, tag="computeStoreSrdStartCommon_tmpSgprInfo") as tmpSgprInfo:
             if tmpSgprInfo.idx % 2 == 0:
@@ -1562,6 +1588,31 @@ class StreamK(TileProcessingStrategy):
         arrival (StreamKHybrid.emitArrival) instead of per-part ready flags.
         Only StreamKHybrid implements it."""
         return False
+
+    def usesDynamicParallel(self, writer, kernel):
+        """True when the dynamic sub-path can run the parallel (PostGSU)
+        reduction (WorkAssignmentMode == _SK5_MODE_DYNAMIC_PARALLEL). Only
+        StreamKHybrid implements it."""
+        return False
+
+    def emitDynamicParallelBranch(self, writer, kernel, module, label, comment=""):
+        """Branch to ``label`` on the dynamic sub-path with parallel
+        reduction. Emits nothing for kernels without it, so their code is
+        unchanged."""
+        if not self.usesDynamicParallel(writer, kernel):
+            return
+        module.add(SCmpEQU32(src0=sgpr("WorkAssignmentMode"), src1=_SK5_MODE_DYNAMIC_PARALLEL,
+                             comment="SK5 dynamic with parallel reduction?"))
+        module.add(SCBranchSCC1(labelName=label.getLabelName(), comment=comment))
+
+    def emitDynamicParallelLongBranch(self, writer, kernel, module, label, comment=""):
+        """emitDynamicParallelBranch with a long branch (targets beyond the
+        s_cbranch range, e.g. PersistentLoopClose from the GSU0 store)."""
+        if not self.usesDynamicParallel(writer, kernel):
+            return
+        module.add(SCmpEQU32(src0=sgpr("WorkAssignmentMode"), src1=_SK5_MODE_DYNAMIC_PARALLEL,
+                             comment="SK5 dynamic with parallel reduction?"))
+        module.add(writer.longBranchScc1(label, posNeg=0, comment=comment))
 
     def partialsWriteProcedure(self, writer, kernel, vectorWidths, elements, alpha, beta, edge, tmpVgpr, cvtVgprStruct, endLabel):
         module = Module("StreamK Common partialsWriteProcedure")
@@ -3731,6 +3782,7 @@ class StreamKHybrid(StreamK):
     def initializePartition(self, writer, kernel):
         module = Module("StreamK hybrid partition")
         def emitDynamicPreLoop(mod):
+            mod.add(self.extractDynamicParallelMode(writer, kernel))
             sk4InitDone = Label(writer.labels.getNameInc("SK_InitDone"), "")
             mod.add(sk4InitDone)
 
@@ -4003,12 +4055,19 @@ class StreamKHybrid(StreamK):
         mod = Module("StreamK hybrid partition activation")
 
         mod.add(self._computeNextTileIdentity(writer, kernel, sWorkItemIdx))
+        mod.add(self.selectDynamicParallelSlot(writer, kernel))
 
         # alpha == 0 short-circuit
         alphaLabelD = Label(writer.labels.getNameInc("SKAlphaCheck"), "")
         mod.add(BranchIfNotZero("Alpha",
                                    kernel["ProblemType"]["ComputeDataType"].toEnum(),
                                    alphaLabelD))
+        # Parallel reduction: every part must write its slot, which the PostGSU
+        # kernel reads whatever alpha is, so no part skips its store. With
+        # alpha == 0 the main loop runs no iterations (calculateLoopNumIter), so
+        # the part stores zeros and the PostGSU kernel leaves beta*C.
+        self.emitDynamicParallelBranch(writer, kernel, mod, alphaLabelD,
+                                       "parallel: every part stores its slot")
         mod.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0,
                              comment="does wg start tile?"))
         skCloseLoopLabelD = Label("PersistentLoopClose", "")
@@ -4192,6 +4251,62 @@ class StreamKHybrid(StreamK):
     # (((p0 + p1) + p2) + ...), so the result does not depend on which part
     # arrived last.
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Dynamic parallel reduction (PostGSU).
+    #
+    # When every tile is split the host may set bit 29 of the SKTiles argument
+    # (dynamic sub-path only). Every work item is then one part of a tile and
+    # stores its unscaled partial through the GSU store branch to the M x N
+    # workspace slot of its part, exactly as the static parallel reduction
+    # does; the PostGSU kernel sums the slots in part order and applies
+    # alpha/beta/bias/activation. The main loop is the same, no work item
+    # waits on another and the sum is deterministic. The mode lives in
+    # WorkAssignmentMode == 3; the GSU store branch then returns to the work
+    # queue instead of ending the kernel.
+    # ------------------------------------------------------------------
+    def extractDynamicParallelMode(self, writer, kernel):
+        """Dynamic preLoop (WorkAssignmentMode is 1 here): when bit
+        _SK5_DYNAMIC_PARALLEL_BIT of SKTiles is set, select
+        WorkAssignmentMode = _SK5_MODE_DYNAMIC_PARALLEL (3); then clear the bit
+        from SKTiles unconditionally. Must run before anything reads the tile
+        count. Emits nothing for kernels without usesDynamicParallel."""
+        mod = Module("SK5 dynamic parallel mode")
+        if not self.usesDynamicParallel(writer, kernel):
+            return mod
+        mod.add(SBitcmp1B32(src0=sgpr("SKTiles"), src1=_SK5_DYNAMIC_PARALLEL_BIT,
+                            comment="SK5 dynamic: parallel reduction bit"))
+        mod.add(SCSelectB32(dst=sgpr("WorkAssignmentMode"), src0=_SK5_MODE_DYNAMIC_PARALLEL,
+                            src1=sgpr("WorkAssignmentMode"),
+                            comment="WorkAssignmentMode = 3 for dynamic parallel reduction"))
+        mod.add(SAndB32(dst=sgpr("SKTiles"), src0=sgpr("SKTiles"),
+                        src1=hex(~(1 << _SK5_DYNAMIC_PARALLEL_BIT) & 0xFFFFFFFF),
+                        comment="clear the parallel reduction bit from SKTiles"))
+        return mod
+
+    def selectDynamicParallelSlot(self, writer, kernel):
+        """Per work item: with the parallel reduction the part stores to the
+        workspace slot of its part (computeStoreSrdStartCommon), indexed by
+        SkPartialIdx like the static parallel path. SkPartialIdx aliases Beta,
+        which no parallel store reads (the PostGSU kernel applies beta)."""
+        mod = Module("SK5 dynamic parallel slot")
+        if not self.usesDynamicParallel(writer, kernel):
+            return mod
+        mod.add(SCmpEQU32(src0=sgpr("WorkAssignmentMode"), src1=_SK5_MODE_DYNAMIC_PARALLEL,
+                          comment="SK5 dynamic with parallel reduction?"))
+        mod.add(SCSelectB32(dst=sgpr("SkPartialIdx"), src0=sgpr("StreamKPartialIdx"),
+                            src1=sgpr("SkPartialIdx"), comment="parallel: output slot = part"))
+        return mod
+
+    def usesDynamicParallel(self, writer, kernel):
+        uses = usesStreamKDynamicParallel(kernel.get("DebugStreamK", 0), kernel.get("StreamKAtomic", 0),
+                                          writer.isPrefetchAcrossPersistentEnabled(kernel))
+        # The host sets the parallel bit only when the solution advertises this
+        # (InternalArgsSupport::dynamicParallel); the two must agree.
+        advertised = kernel.get("InternalSupportParams", {}).get("SupportStreamKDynamicParallel")
+        assert advertised is None or bool(advertised) == uses, \
+            "SupportStreamKDynamicParallel=%s disagrees with the emitted dynamic reduction" % advertised
+        return uses
+
     def usesArrivalFixup(self, writer, kernel):
         # The arrival broadcast borrows LDS[0, 64*4) and restores it, which is
         # only safe when nothing in LDS is in flight across the epilogue (no

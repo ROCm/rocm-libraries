@@ -488,6 +488,14 @@ defaultInternalSupportParams = {
     # run. Derived in Solution.py from usesStreamKArrivalFixup(); default False
     # so older/custom kernels keep every dynamic tile whole.
     "SupportStreamKArrivalFixup": False,
+    # Pure CAPABILITY: "this StreamK Hybrid kernel honours bit 29 of the
+    # SKTiles argument on its dynamic sub-path as 'parallel reduction': every
+    # work item stores its partial to the M x N workspace slot of its part and
+    # a PostGSU kernel sums them", so the host may launch it that way when
+    # every tile is split. Derived in Solution.py from
+    # usesStreamKDynamicParallel(); default False so older/custom kernels never
+    # receive the bit.
+    "SupportStreamKDynamicParallel": False,
     # Use GG as G's backend
     "UseUniversalArgs": True,
     "UseSFC": False,
