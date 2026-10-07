@@ -598,11 +598,11 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["TransOpWait"]        = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
     rv["SDWAWait"]           = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
     rv["VgprBank"]           = checkInList(isaVersion[0], {10, 11, 12});
-    rv["DSLow16NotPreserve"] = isaVersion[0] == 12 || checkInList(isaVersion, {{11, 7, 0}, {11, 7, 1}, {11, 7, 2}});
+    rv["DSLow16NotPreserve"] = isaVersion[0] == 12 || checkInList(isaVersion, {{11, 7, 0}, {11, 7, 1}});
     rv["WorkGroupIdFromTTM"] = isaVersion[0] == 12;
     rv["NoSDWA"]             = checkInList(isaVersion[0], {11, 12});
-    rv["VOP3ByteSel"]        = isaVersion[0] == 12 || checkInList(isaVersion, {{11, 7, 0}, {11, 7, 1}, {11, 7, 2}});
-    rv["HasFP8_OCP"]         = isaVersion[0] == 12 || checkInList(isaVersion, {{11, 7, 0}, {11, 7, 1}, {11, 7, 2}});
+    rv["VOP3ByteSel"]        = isaVersion[0] == 12 || checkInList(isaVersion, {{11, 7, 0}, {11, 7, 1}});
+    rv["HasFP8_OCP"]         = isaVersion[0] == 12 || checkInList(isaVersion, {{11, 7, 0}, {11, 7, 1}});
     rv["HasWmmaArbStallBit"] = isaVersion[0] == 12 && isaVersion[1] == 5;
     // Bit position of DISABLE_XDL_ARB_STALL within SCHED_MODE (HWREG 26).
     // -1 where the field does not exist; 0 would alias DEP_MODE's LSB.
