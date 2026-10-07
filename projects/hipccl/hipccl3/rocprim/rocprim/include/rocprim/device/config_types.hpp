@@ -581,13 +581,104 @@ struct target
     }
 };
 
+constexpr target_arch current_arch()
+{
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+    return target_arch::gfx1250;
+#elif defined(__gfx950__)
+    return target_arch::gfx950;
+#elif defined(__gfx942__)
+    return target_arch::gfx942;
+#elif defined(__gfx90a__)
+    return target_arch::gfx90a;
+#elif defined(__gfx908__)
+    return target_arch::gfx908;
+#elif defined(__gfx906__)
+    return target_arch::gfx906;
+#elif defined(__gfx900__)
+    return target_arch::gfx900;
+#elif defined(__gfx803__)
+    return target_arch::gfx803;
+#elif defined(__gfx1201__)
+    return target_arch::gfx1201;
+#elif defined(__gfx1200__)
+    return target_arch::gfx1200;
+#elif defined(__gfx1153__)
+    return target_arch::gfx1153;
+#elif defined(__gfx1152__)
+    return target_arch::gfx1152;
+#elif defined(__gfx1151__)
+    return target_arch::gfx1151;
+#elif defined(__gfx1150__)
+    return target_arch::gfx1150;
+#elif defined(__gfx1103__)
+    return target_arch::gfx1103;
+#elif defined(__gfx1102__)
+    return target_arch::gfx1102;
+#elif defined(__gfx1101__)
+    return target_arch::gfx1101;
+#elif defined(__gfx1100__)
+    return target_arch::gfx1100;
+#elif defined(__gfx1030__)
+    return target_arch::gfx1030;
+#elif defined(__gfx1012__)
+    return target_arch::gfx1012;
+#elif defined(__gfx1011__)
+    return target_arch::gfx1011;
+#elif defined(__gfx1010__)
+    return target_arch::gfx1010;
+#else
+    return target_arch::unknown;
+#endif
+}
+
 template<typename... Ts>
 struct comp_targets
 {
     template<typename F>
     static constexpr void for_each(F f)
     {
-        (f(Ts{}), ...);
+        (call_if_selected<Ts>(f), ...);
+    }
+
+private:
+    static constexpr target_arch cur_arch = current_arch();
+    static constexpr gen         cur_gen  = gen_from_target_arch(cur_arch);
+
+    static constexpr bool has_arch_match = ((Ts{}.i == cur_arch) || ...);
+    static constexpr bool has_gen_match  = ((Ts{}.g == cur_gen) || ...);
+
+    template<typename T, typename F>
+    static constexpr void call_if_selected(F& f)
+    {
+        constexpr T t{};
+
+        if constexpr(cur_arch == target_arch::unknown)
+        {
+            // Host pass / unrecognized arch: nothing to filter against.
+            f(t);
+        }
+        else if constexpr(has_arch_match)
+        {
+            // 1. Exact arch match exists: only build the entries with that arch.
+            if constexpr(t.i == cur_arch)
+            {
+                f(t);
+            }
+        }
+        else if constexpr(has_gen_match)
+        {
+            // 2. No arch match, but the generation matches: build all entries of that gen.
+            if constexpr(t.g == cur_gen)
+            {
+                f(t);
+            }
+        }
+        else
+        {
+            // 3. Neither matches: build everything.
+            f(t);
+        }
     }
 
     template<typename F>
