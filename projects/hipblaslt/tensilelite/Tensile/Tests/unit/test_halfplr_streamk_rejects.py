@@ -253,27 +253,23 @@ def test_halfplr_pap_rejects_without_force_dp_only(
         AssertSummationElementMultiple=256,
     )
     assert sol.get("Valid") is False
-    assert ("HalfPLR + PrefetchAcrossPersistent currently requires StreamK = 3 "
-            "and StreamKForceDPOnly = 1") in out
+    assert "HalfPLR + PrefetchAcrossPersistent requires DataParallel/StaticGrid" in out
 
 
-def test_halfplr_pap_rejects_on_other_streamk_modes(
-    _gp_gfx1250, gfx1250_iim, assembler, capsys
+@pytest.mark.parametrize("streamk", [1, 2])
+def test_halfplr_pap_rejects_retired_streamk_modes(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, streamk
 ):
-    # The StreamK term of the HalfPLR guard is a backstop: on any other non-zero
-    # StreamK mode the generic PAP guard rejects first and returns before the
-    # HalfPLR block runs. (StreamK=0 rejects nothing at all -- it silently clears
-    # PrefetchAcrossPersistent along with the rest of the StreamK settings.)
-    sol, out = _derive(
-        gfx1250_iim,
-        assembler,
-        capsys,
-        PrefetchAcrossPersistent=1,
-        StreamK=2,
-        AssertSummationElementMultiple=256,
-    )
-    assert sol.get("Valid") is False
-    assert "PrefetchAcrossPersistent is currently supported only with StreamK=3" in out
+    # Retired modes fail at input normalization before HalfPLR/PAP derivation.
+    with pytest.raises(ValueError, match="modes 1 and 2 are retired"):
+        _derive(
+            gfx1250_iim,
+            assembler,
+            capsys,
+            PrefetchAcrossPersistent=1,
+            StreamK=streamk,
+            AssertSummationElementMultiple=256,
+        )
 
 
 def test_halfplr_pap_is_cleared_without_streamk(
@@ -304,7 +300,7 @@ def test_halfplr_streamk_rejects_non_stinkytofu_sia(
     # StreamK combination that pins it to 4.
     sol, out = _derive(gfx1250_iim, assembler, capsys, ScheduleIterAlg=0)
     assert sol.get("Valid") is False
-    assert "HalfPLR on StreamK requires ScheduleIterAlg = 4" in out
+    assert "HalfPLR with persistence requires ScheduleIterAlg = 4" in out
 
 
 # ---------------------------------------------------------------------------
@@ -316,3 +312,35 @@ def test_halfplr_rejects_use_subtile_impl(
     sol, out = _derive(gfx1250_iim, assembler, capsys, UseSubtileImpl=True)
     assert sol.get("Valid") is False
     assert "HalfPLR is not supported with UseSubtileImpl" in out
+
+
+# ---------------------------------------------------------------------------
+# Guard 4: HalfPLR + TDMFuse=1 at a divergent pair. The increment mask rides
+# in the module the single-buffered fill relocation moves.
+# ---------------------------------------------------------------------------
+def test_halfplr_rejects_tdmfuse1_at_a_divergent_pair(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys
+):
+    sol, out = _derive(
+        gfx1250_iim,
+        assembler,
+        capsys,
+        TDMFuse=1,
+        PrefetchGlobalReadA=1,
+        PrefetchGlobalReadB=2,
+        mi=[16, 16, 128, 1, 1, 2, 16, 2, 2],
+        WorkGroup=[32, 4, 1],
+        MXScaleFormat="InMemorySwizzle",
+        LDSTrInst=True,
+        ProblemType={
+            "MacDataTypeA": "F8",
+            "MacDataTypeB": "F4",
+            "DestDataType": "s",
+            "MXBlockA": 32,
+            "MXBlockB": 32,
+            "DataTypeMXSA": "E8",
+            "DataTypeMXSB": "E8",
+        },
+    )
+    assert sol.get("Valid") is False
+    assert "TDMFuse=1 requires HalfPLR=0 at a divergent decoupled pair" in out

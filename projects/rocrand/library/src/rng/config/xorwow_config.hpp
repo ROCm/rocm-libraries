@@ -49,6 +49,7 @@ struct generator_config_selector<ROCRAND_RNG_PSEUDO_XORWOW, T>
             case target_arch::gfx906: return 256;
             case target_arch::gfx1150: return 1024;
             case target_arch::gfx1201: return 1024;
+            case target_arch::gfx950: return 1024;
             default: return generator_config_defaults<ROCRAND_RNG_PSEUDO_XORWOW, T>::threads;
         }
     }
@@ -68,6 +69,7 @@ struct generator_config_selector<ROCRAND_RNG_PSEUDO_XORWOW, T>
             case target_arch::gfx906: return 560;
             case target_arch::gfx1150: return 128;
             case target_arch::gfx1201: return 256;
+            case target_arch::gfx950: return 512;
             default: return generator_config_defaults<ROCRAND_RNG_PSEUDO_XORWOW, T>::blocks;
         }
     }

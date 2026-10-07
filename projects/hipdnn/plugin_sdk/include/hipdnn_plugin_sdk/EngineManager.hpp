@@ -5,6 +5,8 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -55,15 +57,17 @@ public:
      * every UED in a name collision before it reaches this list, but two hand-written
      * engines have no such gate, and refusing both here would take a working engine down
      * to punish one duplicate.
+     *
+     * @param name Optional declared name, used to identify the loser in that log. Only the
+     * caller can supply it for a runtime-discovered engine, which has no registry entry.
      */
-    void addEngine(std::unique_ptr<Engine> engine)
+    void addEngine(std::unique_ptr<Engine> engine, std::string_view name = {})
     {
         auto id = engine->id();
         if(!_engines.emplace(id, std::move(engine)).second)
         {
-            // Hex id only: getEngineNameFromId would throw for this unregistered id.
             HIPDNN_PLUGIN_LOG_ERROR("engine manager: an engine with id "
-                                    << hipdnn_data_sdk::utilities::formatEngineIdHex(id)
+                                    << describeEngine(id, name)
                                     << " is already registered; the duplicate is discarded");
         }
     }
@@ -134,6 +138,28 @@ protected:
     }
 
 private:
+    /// Renders an engine as its id, suffixed with a name when one can be had. The id is never
+    /// dropped: it is what correlates the line with the admission and resolution logs.
+    static std::string describeEngine(int64_t id, std::string_view name)
+    {
+        auto label = hipdnn_data_sdk::utilities::formatEngineIdHex(id);
+        if(name.empty())
+        {
+            const auto& idToName = hipdnn_data_sdk::utilities::getEngineIdToNameMap();
+            if(const auto it = idToName.find(id); it != idToName.end())
+            {
+                name = it->second;
+            }
+        }
+        if(!name.empty())
+        {
+            label += " (";
+            label += name;
+            label += ")";
+        }
+        return label;
+    }
+
     std::unordered_map<int64_t, std::unique_ptr<Engine>> _engines;
 };
 

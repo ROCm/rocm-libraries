@@ -8,6 +8,7 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn-gpu-ref/GpuReferenceValidationFactory.hpp>
 
 #include <cmath>
@@ -19,6 +20,10 @@ using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::types;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_gpu_ref;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
+
+using HalfType = hipdnn_data_sdk::types::half;
+using BFloat16Type = hipdnn_data_sdk::types::bfloat16;
 
 namespace
 {
@@ -32,7 +37,7 @@ class TestGpuFpValidation : public ::testing::Test
 {
 };
 
-using FpTypes = ::testing::Types<float, half, bfloat16, double>;
+using FpTypes = ::testing::Types<float, HalfType, BFloat16Type, double>;
 TYPED_TEST_SUITE(TestGpuFpValidation, FpTypes, );
 
 TYPED_TEST(TestGpuFpValidation, ExactMatchPasses)
@@ -42,7 +47,10 @@ TYPED_TEST(TestGpuFpValidation, ExactMatchPasses)
     Tensor<TypeParam> ref({2, 3, 4});
     Tensor<TypeParam> impl({2, 3, 4});
 
-    ref.fillWithRandomValues(static_cast<TypeParam>(-1.0f), static_cast<TypeParam>(1.0f), 42);
+    fillWithRandomValues(ref, static_cast<TypeParam>(-1.0f), static_cast<TypeParam>(1.0f), 42);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    ref.memory().hostData();
 
     // Copy ref data into impl so they are identical
     const auto* refHost = ref.memory().hostData();
@@ -63,7 +71,10 @@ TYPED_TEST(TestGpuFpValidation, WithinTolerancePasses)
     Tensor<TypeParam> ref({4, 4});
     Tensor<TypeParam> impl({4, 4});
 
-    ref.fillWithRandomValues(static_cast<TypeParam>(-1.0f), static_cast<TypeParam>(1.0f), 42);
+    fillWithRandomValues(ref, static_cast<TypeParam>(-1.0f), static_cast<TypeParam>(1.0f), 42);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    ref.memory().hostData();
 
     const auto* refHost = ref.memory().hostData();
     auto* implHost = impl.memory().hostData();
@@ -339,6 +350,26 @@ TYPED_TEST(TestGpuIntValidation, EmptyTensorsPasses)
     ASSERT_TRUE(validator.allClose(ref, impl));
 }
 
+// Tensor::fillWithSentinelValue() leaves the type's maximum in an unwritten integer
+// output. If neither the engine nor the reference wrote an element, both sides hold it
+// and are equal, and the comparison must still fail, as CpuIntReferenceValidation does.
+TYPED_TEST(TestGpuIntValidation, SentinelValueFails)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<TypeParam> ref({4});
+    Tensor<TypeParam> impl({4});
+    ref.fillWithValue(static_cast<TypeParam>(1));
+    impl.fillWithValue(static_cast<TypeParam>(1));
+    ref.memory().hostData()[2] = std::numeric_limits<TypeParam>::max();
+    impl.memory().hostData()[2] = std::numeric_limits<TypeParam>::max();
+
+    const GpuIntReferenceValidation<TypeParam> gpu;
+    const CpuIntReferenceValidation<TypeParam> cpu;
+    EXPECT_FALSE(gpu.allClose(ref, impl));
+    EXPECT_FALSE(cpu.allClose(ref, impl));
+}
+
 // ============================================================================
 // Factory function tests
 // ============================================================================
@@ -490,7 +521,7 @@ class TestGpuVsCpuValidation : public ::testing::Test
 {
 };
 
-using GpuCpuFpTypes = ::testing::Types<float, half, bfloat16>;
+using GpuCpuFpTypes = ::testing::Types<float, HalfType, BFloat16Type>;
 TYPED_TEST_SUITE(TestGpuVsCpuValidation, GpuCpuFpTypes, );
 
 TYPED_TEST(TestGpuVsCpuValidation, AgreeOnPass)
@@ -500,7 +531,10 @@ TYPED_TEST(TestGpuVsCpuValidation, AgreeOnPass)
     Tensor<TypeParam> ref({8, 8});
     Tensor<TypeParam> impl({8, 8});
 
-    ref.fillWithRandomValues(static_cast<TypeParam>(-1.0f), static_cast<TypeParam>(1.0f), 42);
+    fillWithRandomValues(ref, static_cast<TypeParam>(-1.0f), static_cast<TypeParam>(1.0f), 42);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    ref.memory().hostData();
 
     const auto* refHost = ref.memory().hostData();
     auto* implHost = impl.memory().hostData();
@@ -562,7 +596,10 @@ TEST(TestGpuFpValidationLargeTensor, LargeTensorExactMatch)
     Tensor<float> ref({64, 32, 32});
     Tensor<float> impl({64, 32, 32});
 
-    ref.fillWithRandomValues(-1.0f, 1.0f, 42);
+    fillWithRandomValues(ref, -1.0f, 1.0f, 42);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    ref.memory().hostData();
 
     const auto* refHost = ref.memory().hostData();
     auto* implHost = impl.memory().hostData();
@@ -690,6 +727,33 @@ TYPED_TEST(TestGpuFpStridedValidation, RefPackedImplStridedPasses)
     }
 
     // Copy by logical index so impl has the same logical values in NHWC layout
+    copyByLogicalIndex(impl, ref);
+
+    const GpuFpReferenceValidation<TypeParam> validator(0.0f, 0.0f);
+    ASSERT_TRUE(validator.allClose(ref, impl));
+}
+
+// NCHW-packed and NHWC-packed are both packed, but pair different logical elements at
+// the same memory offset. Only identical strides may take the linear fast path.
+TYPED_TEST(TestGpuFpStridedValidation, DifferentlyPackedLayoutsCompareLogically)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::vector<int64_t> dims = {2, 3, 4, 5};
+    const std::vector<int64_t> nhwcStrides = {60, 1, 15, 3};
+    Tensor<TypeParam> ref(dims); // packed NCHW
+    Tensor<TypeParam> impl(dims, nhwcStrides); // packed NHWC
+
+    ASSERT_TRUE(ref.isPacked());
+    ASSERT_TRUE(impl.isPacked());
+
+    std::vector<int64_t> indices(4, 0);
+    for(size_t i = 0; i < ref.elementCount(); ++i)
+    {
+        ref(indices) = static_cast<TypeParam>(static_cast<float>(i) * 0.1f);
+
+        incrementIndices(indices, dims);
+    }
     copyByLogicalIndex(impl, ref);
 
     const GpuFpReferenceValidation<TypeParam> validator(0.0f, 0.0f);

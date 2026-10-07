@@ -59,7 +59,19 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 #Set Clang C++ flags.
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O2") # clang++ crashes without -O2
 set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} -O2 -DNDEBUG") # clang++ failed to build the project with the default -Os
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --driver-mode=g++ -Xclang -fallow-half-arguments-and-returns -D__HIP_HCC_COMPAT_MODE__=1 -Wno-format-nonliteral -parallel-jobs=4 -fclang-abi-compat=17")
+# Parallel offload compilation is spelled --offload-jobs= from LLVM 21 on and -parallel-jobs= before it.
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag("--offload-jobs=4" CXX_COMPILER_SUPPORTS_OFFLOAD_JOBS)
+if(CXX_COMPILER_SUPPORTS_OFFLOAD_JOBS)
+  set(ROCWMMA_OFFLOAD_JOBS_FLAG "--offload-jobs=4")
+else()
+  check_cxx_compiler_flag("-parallel-jobs=4" CXX_COMPILER_SUPPORTS_PARALLEL_JOBS)
+  if(CXX_COMPILER_SUPPORTS_PARALLEL_JOBS)
+    set(ROCWMMA_OFFLOAD_JOBS_FLAG "-parallel-jobs=4")
+  endif()
+endif()
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --driver-mode=g++ -D__HIP_HCC_COMPAT_MODE__=1 -Wno-format-nonliteral ${ROCWMMA_OFFLOAD_JOBS_FLAG} -fclang-abi-compat=17")
 
 # Top level configs
 if( CMAKE_PROJECT_NAME STREQUAL "rocwmma" )
@@ -176,10 +188,12 @@ endif()
 
 if(TARGET OpenMP::omp)
   set(ROCWMMA_OPENMP_LIBRARY OpenMP::omp)
+  set(ROCWMMA_OPENMP_DEPENDENCY openmp CONFIG PATHS "\"\${PACKAGE_PREFIX_DIR}/lib/llvm/lib/cmake/openmp\"")
   set(ROCWMMA_OPENMP_INSTALL_RPATH "\$ORIGIN/../llvm/${openmp_LIB_DIR}")
   set(ROCWMMA_OPENMP_BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}")
 else()
   set(ROCWMMA_OPENMP_LIBRARY OpenMP::OpenMP_CXX)
+  set(ROCWMMA_OPENMP_DEPENDENCY OpenMP MODULE COMPONENTS CXX)
   set(ROCWMMA_OPENMP_INSTALL_RPATH "\$ORIGIN/../llvm/lib")
   set(ROCWMMA_OPENMP_BUILD_RPATH "${HIP_CLANG_ROOT}/lib")
 endif()
@@ -237,6 +251,10 @@ set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 rocm_export_targets(
   TARGETS roc::rocwmma
   NAMESPACE roc::
+  # Discover OpenMP before HIP, which can change PACKAGE_PREFIX_DIR in older CMake versions.
+  DEPENDS
+    PACKAGE ${ROCWMMA_OPENMP_DEPENDENCY}
+    PACKAGE hip
 )
 
 rocm_create_package(

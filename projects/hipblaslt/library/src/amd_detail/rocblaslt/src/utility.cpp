@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 #include "utility.hpp"
+#include <hipblaslt/hipblaslt-opt-in-features.h>
 #include <sys/types.h>
 #include <time.h>
 
@@ -92,6 +93,12 @@ const char* hipDataType_to_string(hipDataType type)
         return "R_8F_E5M2";
     case HIP_R_8I:
         return "R_8I";
+    case HIP_R_32I:
+        return "R_32I";
+    case HIP_C_32F:
+        return "C_32F";
+    case HIP_C_64F:
+        return "C_64F";
     case static_cast<hipDataType>(HIP_R_6F_E2M3):
         return "R_6F_E2M3";
     case static_cast<hipDataType>(HIP_R_6F_E3M2):
@@ -278,6 +285,12 @@ const char* rocblaslt_matmul_desc_attributes_to_string(rocblaslt_matmul_desc_att
         return "MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT";
     case ROCBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT:
         return "MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT";
+    case ROCBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT:
+        return "MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT";
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    case ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE:
+        return "MATMUL_DESC_FUSED_EPILOGUE";
+#endif
     case ROCBLASLT_MATMUL_DESC_MAX:
         return "MATMUL_DESC_MAX";
     case ROCBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE:

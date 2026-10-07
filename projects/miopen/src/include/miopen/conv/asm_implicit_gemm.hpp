@@ -27,6 +27,7 @@
 #define CK_ASM_IMPLICITGEMM_HPP_
 
 #include <miopen/config.h>
+#include <miopen/conv/problem_description.hpp>
 
 #include <string>
 #include <cmath>
@@ -234,6 +235,44 @@ HeuristicInitMacroTileNoPadGemmK(size_t gemm_m,
         return std::make_tuple(0, 0, 0);
 }
 
+// The ASM-GTC NHWC solvers originate in the (now unmaintained) MISA project and address
+// global tensor memory with 32-bit BYTE offsets. AllTensorsDimsFitIntoInt() only validates
+// that each individual length/stride fits in int32; it does NOT bound the flattened tensor
+// size. A tensor whose total size in bytes exceeds the addressable range therefore overflows
+// the kernel's 32-bit addressing and silently returns wrong results, so gate the solver off
+// such shapes and let a large-tensor-capable solver be selected instead.
+//
+// The bound is expressed in BYTES, not elements: these kernels index memory by byte offset,
+// so an element-count bound would admit shapes up to sizeof(T) times the addressable size.
+//
+// Forward and backward-data: each kernel addresses a full 4 GiB window per dispatch slice and
+// correctly advances its base pointer per batch-split, so the input and output tensors are
+// handled by the split mechanism and need no bound here. The weight base is advanced per group
+// with 64-bit arithmetic, so the per-group weight size is the only quantity that must fit the
+// window.
+//
+// Backward-weights is deliberately stricter, and the asymmetry is NOT an oversight. 292 of its
+// 900 kernels ignore the batch-split dimension entirely and compute only the first slice however
+// many were requested. The int32 bound is what holds backward-weights to a single split;
+// relaxing it to match the other two directions turns on a silent wrong-result path. See
+// https://github.com/ROCm/rocm-libraries/issues/11805. Do not align these branches until those
+// kernels are split-aware.
+static inline bool
+igemm_tensor_size_exceeds_asm_gtc_addressing(const miopen::conv::ProblemDescription& problem)
+{
+    if(problem.IsDirectionBackwardWrW())
+    {
+        constexpr std::size_t max_int32 = static_cast<std::size_t>(std::numeric_limits<int>::max());
+        return problem.GetIn().GetNumBytes() > max_int32 ||
+               problem.GetOut().GetNumBytes() > max_int32 ||
+               problem.GetWeights().GetNumBytes() > max_int32;
+    }
+
+    constexpr std::size_t max_uint32 = 0xffffffffULL;
+    const auto group_count           = static_cast<std::size_t>(problem.GetGroupCount());
+    return problem.GetWeights().GetNumBytes() / group_count > max_uint32;
+}
+
 // This is to support big tensor > 4G. Need to decide how many splits needed.
 // Return the number of splits.
 static inline int igemm_split_batch_size(const int hi,
@@ -266,7 +305,7 @@ static inline int igemm_split_batch_size(const int hi,
     {
         // find the smallest multiple m of n such that (n / m) * image_size <= max_tensor_size.
         // once m is known, max_n := (n / m)
-        size_t m       = std::ceil(n / max_n); // m >= n * (image_size / max_tensor_size)
+        size_t m       = (static_cast<size_t>(n) + max_n - 1) / max_n;
         size_t _sqrt_n = std::sqrt(n);
         while(n % max_n != 0)
         {

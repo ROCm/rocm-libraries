@@ -74,7 +74,8 @@ namespace hipblaslt_ext
          *  \brief This function sets the maximum workspace size.
          *
          *  @param[in]
-         *  workspaceBytes  Set the maximum workspace size in bytes.
+         *  workspaceBytes  Set the maximum workspace size in bytes. Above ``UINT32_MAX``
+         *  (4 GiB - 1), algoGetHeuristic returns HIPBLAS_STATUS_INVALID_VALUE.
          */
         HIPBLASLT_EXPORT void setMaxWorkspaceBytes(size_t workspaceBytes);
 
@@ -108,6 +109,13 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setStreamKTileSchedulingMode(hipblasLtStreamKTileSchedulingMode_t mode);
 
         /*! \ingroup library_module
+         *  \brief Enable uniform summation order for this Gemm.
+         *
+         *  See ``HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT``.
+         */
+        HIPBLASLT_EXPORT void setUniformSummationOrder(bool value);
+
+        /*! \ingroup library_module
          *  \brief This function returns the maximum workspace size that was set.
          *
          *  \retval size_t Returns the set max workspace size.
@@ -120,6 +128,12 @@ namespace hipblaslt_ext
          *  ``HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF``.
          */
         HIPBLASLT_EXPORT hipblasLtStreamKTileSchedulingMode_t getStreamKTileSchedulingMode() const;
+
+        /*! \ingroup library_module
+         *  \brief Return the uniform-summation-order request set via
+         *  ``setUniformSummationOrder``. Defaults to ``false``.
+         */
+        HIPBLASLT_EXPORT bool getUniformSummationOrder() const;
 
     private:
         friend GemmInstance;
@@ -417,11 +431,12 @@ namespace hipblaslt_ext
         *  @param[out]
         *  heuristicResults    The algorithm heuristic vector.
         *
-        *  \retval HIPBLAS_STATUS_SUCCESS           If the query was successful. Verifies whether
-        * heuristicResults.size > 0 but could have heuristicResults.size < requestedAlgoCount
-        * as a valid state for the status. \retval HIPBLAS_STATUS_NOT_SUPPORTED
+        *  \retval HIPBLAS_STATUS_SUCCESS           If the query was successful.
+        * heuristicResults can hold fewer than requestedAlgoCount results, and is empty when
+        * no solution is found. \retval HIPBLAS_STATUS_NOT_SUPPORTED
         * If no heuristic function is available for the current configuration.
-        * \retval HIPBLAS_STATUS_INVALID_VALUE If no solution is found.
+        * \retval HIPBLAS_STATUS_INVALID_VALUE If no problem has been set on this object,
+        * requestedAlgoCount is less than 1, or the solution library could not be loaded.
         */
         HIPBLASLT_EXPORT
         hipblasStatus_t
@@ -475,7 +490,8 @@ namespace hipblaslt_ext
          *  \brief This function sets the maximum workspace size.
          *
          *  @param[in]
-         *  workspaceBytes  Sets the maximum workspace size in bytes.
+         *  workspaceBytes  Sets the maximum workspace size in bytes. Above ``UINT32_MAX``
+         *  (4 GiB - 1), initialize returns HIPBLAS_STATUS_INVALID_VALUE.
          */
         HIPBLASLT_EXPORT void setMaxWorkspaceBytes(size_t workspaceBytes);
 
@@ -596,6 +612,7 @@ namespace hipblaslt_ext
 
         size_t  m_workspace_bytes        = 0;
         int32_t m_streamk_tile_scheduling_mode = HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF;
+        bool    m_uniform_summation_order = false;
     };
 
     /*! \ingroup types_module
@@ -1080,11 +1097,11 @@ namespace hipblaslt_ext
      *  @param[out]
      *  heuristicResults The algorithm heuristic vector.
      *
-     *  \retval HIPBLAS_STATUS_SUCCESS           If the query was successful. Verifies that
-     * returnedAlgoCount > 0 to determine the status of the
-     * results. \retval HIPBLAS_STATUS_NOT_SUPPORTED     If no heuristic function is
+     *  \retval HIPBLAS_STATUS_SUCCESS           If the query was successful.
+     * heuristicResults is empty when no solution is found.
+     * \retval HIPBLAS_STATUS_NOT_SUPPORTED     If no heuristic function is
      * available for the current configuration. \retval HIPBLAS_STATUS_INVALID_VALUE If
-     * no solution is found.
+     * the solution library could not be loaded.
      */
     HIPBLASLT_EXPORT
     hipblasStatus_t getAllAlgos(hipblasLtHandle_t                              handle,

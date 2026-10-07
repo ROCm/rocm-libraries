@@ -3,7 +3,7 @@
 //   clang -x assembler -target amdgcn-amd-amdhsa -mcpu=gfx950 -c file.s -o file.o
 //   ld.lld -shared -o file.co file.o
 
-// Note: Target is specified via -mcpu= command line flag
+.amdgcn_target "amdgcn-amd-amdhsa--gfx950"
 
 .set .amdgcn.next_free_vgpr, 0
 .set .amdgcn.next_free_sgpr, 0
@@ -3502,6 +3502,7 @@ custom.config:
     threads: [256, 1, 1]
     grid: [TilesX, TilesY, One]
   MatrixInstruction: [16, 16, 128, 1]
+  StaggerU: 0
   EnableMatrixInstruction: True
   MIWaveTile: [8, 8]
   AssertFree0ElementMultiple: 256

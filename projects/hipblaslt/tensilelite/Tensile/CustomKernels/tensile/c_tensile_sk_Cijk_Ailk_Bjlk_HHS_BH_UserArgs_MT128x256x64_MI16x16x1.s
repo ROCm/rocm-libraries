@@ -95,7 +95,7 @@ custom.config:
             { type: uint32, semantic: SKTilesAndSplit } ]
     macrotile: [128, 256, 64]
     threads: [256, 1, 1]
-    grid: [TilesXYBatch, One, One]
+    grid: [StreamKWithBatch, One, One]
     workspaceType: StreamK
     workspaceSizePerElemC: 4
     workspaceSizePerElemBias: 4
@@ -465,7 +465,7 @@ label_ASM_Start:  /// Main body of the asm kernel
 .set SrdShiftLeftB, 8
 /* 2GB limit - set offsets to -1 to exceed this and clamp */
 .set BufferLimit, 0xffffffff
-.set BufferOOB, 0x80000000
+.set BufferOOB, 0xfffff000
 
 /******************************************/
 /* Bits 127:96 of SRD.                    */

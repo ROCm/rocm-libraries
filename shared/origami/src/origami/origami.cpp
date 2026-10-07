@@ -139,16 +139,12 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
       wgmxccchunk = 0;
       wgmxcc      = 0;
       wgm         = 1;
-    }
-    // This gives a nice strided read pattern for batched GEMMs
-    else if (numMTs % numXCD == 0) {
-      wgmxccchunk = 0;
-      wgmxcc      = 0;
-      wgm         = 1;
     } else {
       wgmxccchunk = (numCUsPerXCD / numMTs) * numMTs;
       wgmxcc      = numXCD;
       wgm         = 1;
+      if (numMT_M > 1 && numMT_N > 1)
+        wgm = std::min(defaultWGM, static_cast<int32_t>(numMT_N));
     }
 
     if (sk_has_partial_tiles) wgmxccchunk = 0;
@@ -636,7 +632,9 @@ void log_config_rejection(const config_t& config, const char* reason) {
 double compute_ranked_latency(const problem_t& problem,
                               const hardware_t& hardware,
                               const config_t& config,
-                              model_t model) {
+                              model_t model,
+                              bool non_temporal_a_available = true,
+                              bool non_temporal_b_available = true) {
   if (model == model_t::attention) {
     if (!attention::check_rf_capacity(hardware, config.mt, problem.a_dtype)) {
       log_config_rejection(config, "Register File (RF) capacity exceeded");
@@ -653,7 +651,8 @@ double compute_ranked_latency(const problem_t& problem,
     log_config_rejection(config, "LDS capacity exceeded");
     return kRejectedLatency;
   }
-  return gemm::compute_total_latency(problem, hardware, config);
+  return gemm::compute_total_latency(
+      problem, hardware, config, non_temporal_a_available, non_temporal_b_available);
 }
 
 }  // namespace
@@ -674,8 +673,16 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
   valid_configs.reserve(configs.size());
   invalid_configs.reserve(configs.size());
 
+  bool non_temporal_a_available = false;
+  bool non_temporal_b_available = false;
+  for (const auto& config : configs) {
+    non_temporal_a_available |= config.cache_hints_a == 4;
+    non_temporal_b_available |= config.cache_hints_b == 4;
+  }
+
   for (auto& config : configs) {
-    const double latency = compute_ranked_latency(problem, hardware, config, model);
+    const double latency = compute_ranked_latency(
+        problem, hardware, config, model, non_temporal_a_available, non_temporal_b_available);
 
     if (latency != kRejectedLatency) {
       valid_configs.push_back({latency, std::cref(config)});
@@ -711,6 +718,19 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
 
     if (memory_traffic == 0.0) return 0.0;
     return flops / memory_traffic;
+  };
+
+  // Occupancy the workload can use: grid waves/CU, clamped.  Small grids favor
+  // low occupancy (fatter waves); saturated grids favor high occupancy (latency
+  // hiding).  Used only as a final tie-break among bit-identical macrotiles.
+  const size_t occ_n_cu = std::max<size_t>(hardware.N_CU, 1);
+  auto occ_need = [&](const config_t& c) -> double {
+    constexpr double CAP = 4.0;
+    const size_t tiles = math::safe_ceil_div(problem.size.m, std::max<size_t>(c.mt.m, 1)) *
+                         math::safe_ceil_div(problem.size.n, std::max<size_t>(c.mt.n, 1)) *
+                         std::max<size_t>(problem.batch, 1);
+    const double waves_per_cu = std::ceil(static_cast<double>(tiles) / static_cast<double>(occ_n_cu));
+    return std::clamp(waves_per_cu, 1.0, CAP);
   };
 
   // Apply tie-breaking logic for configs with similar latency
@@ -800,13 +820,18 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
       // This ensures deterministic selection regardless of input order
       std::stable_sort(results.begin(),
                        results.begin() + num_same_ai,
-                       [](const prediction_result_t& a, const prediction_result_t& b) {
+                       [&occ_need](const prediction_result_t& a, const prediction_result_t& b) {
                          // Prefer larger MT_M first
                          if (a.config.mt.m != b.config.mt.m) return a.config.mt.m > b.config.mt.m;
                          // If MT_M is same, prefer larger MT_N
                          if (a.config.mt.n != b.config.mt.n) return a.config.mt.n > b.config.mt.n;
-                         // If both MT_M and MT_N are same, prefer larger MT_K
-                         return a.config.mt.k > b.config.mt.k;
+                         // If MT_M and MT_N are same, prefer larger MT_K
+                         if (a.config.mt.k != b.config.mt.k) return a.config.mt.k > b.config.mt.k;
+                         // Bit-identical macrotile: prefer the occupancy variant that
+                         // best matches the workload (never changes which tile wins).
+                         const double need = occ_need(a.config);  // == occ_need(b): same MT
+                         return std::abs(static_cast<double>(a.config.occupancy) - need) <
+                                std::abs(static_cast<double>(b.config.occupancy) - need);
                        });
     }
   }

@@ -6,23 +6,14 @@
 #
 ################################################################################
 
-import importlib.util
 from pathlib import Path
 
 import pytest
 
-# Load KnownBugs.py without importing TensileLogic/__init__.py (avoids rocisa in CI).
-def _known_bugs_mod():
-    kb_path = Path(__file__).resolve().parents[2] / "TensileLogic" / "KnownBugs.py"
-    spec = importlib.util.spec_from_file_location("KnownBugs_under_test", kb_path)
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+from Tensile.TensileLogic import KnownBugs as _kb
 
-
-_kb = _known_bugs_mod()
 is_known_bug = _kb.is_known_bug
+load_bundled_known_bugs = _kb.load_bundled_known_bugs
 load_known_bugs = _kb.load_known_bugs
 normalize_logic_relative_path = _kb.normalize_logic_relative_path
 
@@ -33,6 +24,25 @@ def test_normalize_logic_relative_path():
 
 def test_load_known_bugs_missing_file(tmp_path):
     assert load_known_bugs(tmp_path / "none.yaml") == frozenset()
+
+
+def test_load_known_bugs_none_does_not_read_bundled_resource(monkeypatch):
+    def fail_if_called():
+        raise AssertionError("bundled resource should require an explicit opt-in")
+
+    monkeypatch.setattr(_kb, "known_bugs_text", fail_if_called)
+
+    assert load_known_bugs(None) == frozenset()
+
+
+def test_load_bundled_known_bugs_uses_resource(monkeypatch):
+    monkeypatch.setattr(
+        _kb,
+        "known_bugs_text",
+        lambda: "skips:\n  - path: bundled/logic.yaml\n    solution_name: NameA\n",
+    )
+
+    assert load_bundled_known_bugs() == frozenset({("bundled/logic.yaml", "NameA")})
 
 
 def test_load_known_bugs_roundtrip(tmp_path):

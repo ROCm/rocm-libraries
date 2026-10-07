@@ -1,5 +1,5 @@
 TestParameters:
-  marks: [skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported yet
+  marks: [skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict] # not supported yet
 
 GlobalParameters:
   SyncsPerBenchmark: 0
@@ -32,6 +32,7 @@ BenchmarkProblems:
       UseE: True
       UseBias:       1
       Activation:    True
+      ActivationType: hipblaslt_all
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -81,6 +82,7 @@ BenchmarkProblems:
       UseE: True
       UseBias:       1
       Activation:    True
+      ActivationType: hipblaslt_all
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
       BenchmarkCommonParameters:

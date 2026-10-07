@@ -32,7 +32,7 @@ pytestmark = pytest.mark.unit
 
 # The cluster multicast is derived from ClusterDim (StreamK==3 and
 # ClusterDim[0] > 1) via this helper rather than stored as a state key.
-from Tensile.Common import streamKMulticast
+from Tensile.Common import streamKCluster, streamKMulticast
 
 _DESIGNED = os.path.join(
     os.path.dirname(__file__), "characterization",
@@ -71,12 +71,19 @@ def _write_variant(tmp_path, name, *, fork_overrides=None):
     list; an existing fork entry is replaced, otherwise appended.
     """
     from Tensile import LibraryIO
+    from Tensile.ExecutionPolicy import ALIASES
     import yaml
 
     cfg = copy.deepcopy(LibraryIO.read(_STREAMK_MULTICAST))
     if fork_overrides:
         fork = cfg["BenchmarkProblems"][0][1]["ForkParameters"]
         for key, val in fork_overrides.items():
+            # Replace the inherited spelling before adding the explicit override.
+            aliases = {old for old, new in ALIASES.items() if new == key}
+            for entry in fork:
+                for alias in aliases:
+                    entry.pop(alias, None)
+            fork[:] = [entry for entry in fork if entry]
             replaced = False
             for entry in fork:
                 if key in entry:
@@ -102,8 +109,8 @@ def _derive_states(cfg_path):
 
 def _mc_state(**overrides):
     st = {
-        "StreamK": 3, "StreamKForceDPOnly": 1,
-        "StreamKAtomic": 0, "StreamKXCCMapping": 0, "ClusterDim": [4, 1],
+        "TileProcessingStrategy": "DataParallel", "WorkAssignment": "StaticGrid",
+        "StreamKAtomic": 0, "PersistentXCCMapping": 0, "ClusterDim": [4, 1],
         "ISA": [12, 5, 0], "TDMInst": 3, "PrefetchGlobalRead": 1,
     }
     st.update(overrides)
@@ -128,6 +135,7 @@ class TestValidation:
         states = _derive_states(cfg)
         assert states, "expected >=1 derived solution for the valid config"
         for st in states:
+            assert streamKCluster(st)
             assert streamKMulticast(st)
             assert st["Multicast"] is True, st["Multicast"]
             assert st["ClusterDim"] == [4, 1]
@@ -158,27 +166,28 @@ class TestValidation:
             assert streamKMulticast(st)
 
     def test_xcc_mapping_forced_to_zero(self, tmp_path):
-        """StreamKXCCMapping is coerced to 0 (not rejected) under StreamK+ClusterDim.
+        """PersistentXCCMapping is coerced to 0 (not rejected) under StreamK+ClusterDim.
 
         The general Stream-K + ClusterDim reconciliation force-sets
-        StreamKXCCMapping = 0 (the WGM/XCC WorkGroup0 remap has no cluster
+        PersistentXCCMapping = 0 (the WGM/XCC WorkGroup0 remap has no cluster
         awareness) *before* _validateStreamKMulticast runs. That coerced value is
         exactly what StreamKMulticast requires (XCC == 0), so the solution is
         accepted with the remap disabled rather than rejected. Our
         _validateStreamKMulticast XCC check remains as redundant safety."""
         cfg = _write_variant(tmp_path, "xcc.yaml",
-                             fork_overrides={"StreamKXCCMapping": [3]})
+                             fork_overrides={"PersistentXCCMapping": [3]})
         states = _derive_states(cfg)
         assert states, "expected the XCC=3 config to be accepted with XCC coerced to 0"
         for st in states:
+            assert streamKCluster(st)
             assert streamKMulticast(st)
-            assert st["StreamKXCCMapping"] == 0, st["StreamKXCCMapping"]
+            assert st["PersistentXCCMapping"] == 0, st["PersistentXCCMapping"]
 
     def test_ck_greater_than_one_also_multicasts_a(self, tmp_path):
         # ClusterDim = [2, 2] adds Ck = 2 N-axis peers on top of the Cs = 2 M-axis
         # peers, so A is multicast as well as B. It is the same cluster shape with
         # Ck > 1, accepted by the same validator.
-        from Tensile.Common import streamK2DMulticast
+        from Tensile.Common import streamK2DCluster
         cfg = _write_variant(tmp_path, "cd22.yaml",
                              fork_overrides={"ClusterDim": [[2, 2]]})
         states = _derive_states(cfg)
@@ -186,7 +195,7 @@ class TestValidation:
         for st in states:
             assert st["ClusterDim"] == [2, 2]
             assert streamKMulticast(st)
-            assert streamK2DMulticast(st)
+            assert streamK2DCluster(st)
 
     def test_reject_non_pow2_cluster(self, tmp_path):
         cfg = _write_variant(tmp_path, "cd3.yaml",
@@ -200,7 +209,7 @@ class TestValidation:
     # --- direct _validateStreamKMulticast reject branches ------------------
     # Several reject branches are unreachable through the config-derivation path
     # (the collapse only auto-derives StreamKMulticast for SK3 and force-coerces
-    # StreamKXCCMapping=0, and the designed configs are always gfx1250 with full
+    # PersistentXCCMapping=0, and the designed configs are always gfx1250 with full
     # caps), so drive them directly with the module-level hand-built state
     # (_mc_state / _isa_map) -- the same pattern test_accept_pgr2 uses.
     def test_streamk_not_3_is_not_multicast_path(self):
@@ -210,14 +219,15 @@ class TestValidation:
         # ClusterDim is rejected by the general Stream-K reconciliation (cluster
         # support is SK3-only), not by this validator.
         from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
-        st = _mc_state(StreamK=4)
+        st = _mc_state(TileProcessingStrategy="StreamK", WorkAssignment="DynamicWorkQueue")
+        assert streamKCluster(st) is False
         assert streamKMulticast(st) is False
         assert _validateStreamKMulticast(st, False, _isa_map()) is True
 
     def test_reject_xcc_mapping_direct(self):
         from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
         assert _validateStreamKMulticast(
-            _mc_state(StreamKXCCMapping=3), False, _isa_map()) is False
+            _mc_state(PersistentXCCMapping=3), False, _isa_map()) is False
 
     def test_reject_non_gfx1250_isa(self):
         # The ISA gate rejects before indexing isaInfoMap, so a foreign ISA need
@@ -235,6 +245,16 @@ class TestValidation:
         from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
         assert _validateStreamKMulticast(
             _mc_state(), False, _isa_map(has_cluster_barrier=False)) is False
+
+    def test_reject_space_filling_algo(self):
+        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        assert _validateStreamKMulticast(
+            _mc_state(SpaceFillingAlgo=[1]), False, _isa_map()) is False
+
+    def test_reject_reuse_across_persistent(self):
+        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        assert _validateStreamKMulticast(
+            _mc_state(ReuseAcrossPersistent=1), False, _isa_map()) is False
 
 
 class TestTDMInstValidation:
@@ -255,6 +275,31 @@ class TestTDMInstValidation:
         assert _validateStreamKMulticast(st, False, _isa_map()) is True
 
 
+class TestMulticastGate:
+    """TDM-multicast waits follow streamKMulticast, not the cluster alone."""
+
+    def test_multicast_defaults_on_when_flag_unspecified(self):
+        st = _mc_state()
+        assert streamKCluster(st)
+        assert streamKMulticast(st)
+
+    def test_multicast_off_when_flag_false(self):
+        st = _mc_state(Multicast=False)
+        assert streamKCluster(st)
+        assert streamKMulticast(st) is False
+
+    def test_multicast_on_when_flag_true(self):
+        st = _mc_state(Multicast=True)
+        assert streamKMulticast(st)
+
+    def test_next_tile_arrive_inert_without_cluster(self):
+        from Tensile.Components.WorkAssignment import StaticGrid
+        mod = StaticGrid().persistentClusterNextTileArrive(
+            writer=None, kernel=_mc_state(ClusterDim=[1, 1]))
+        items = mod.flatitems() if hasattr(mod, "flatitems") else mod.items()
+        assert list(items) == []
+
+
 # --- emitted assembly ------------------------------------------------------
 
 class TestEmit:
@@ -266,6 +311,39 @@ class TestEmit:
         from config_harness import emit_kernels_from_config
         return emit_kernels_from_config(cfg, limit=8, arch=_ARCH,
                                         cluster_dim=_CK1_CLUSTER)
+
+    @pytest.mark.parametrize("pgr", [1, 2])
+    def test_shadow_init_zero_iterations_consume_cluster_arrive(self, tmp_path, pgr):
+        # K < DepthU (or alpha == 0) skips the initial TDM load. Shadow init
+        # still initializes C before exiting the prefetch region, so that skip
+        # edge must consume the cluster arrive before branching past the load.
+        from config_harness import (
+            assert_assembles, assert_real_gfx1250_kernels,
+            derive_states, emit_kernels_from_config,
+        )
+
+        cfg = _write_variant(tmp_path, "shadow.yaml", fork_overrides={
+            "ForceDisableShadowInit": [False], "ClusterDim": [[2, 2]],
+            "PrefetchGlobalRead": [pgr],
+        })
+        states = derive_states(cfg, arch=_ARCH, limit_solutions=1)
+        assert len(states) == 1
+        assert not states[0]["ForceDisableShadowInit"]
+        assert states[0]["PrefetchGlobalRead"] == pgr
+        results = emit_kernels_from_config(cfg, limit=1, arch=_ARCH)
+        assert_real_gfx1250_kernels(results)
+        for base, src, _err in results:
+            assert_assembles(src, base)
+            first_load = src.index("tensor_load_to_lds")
+            skip_load = src.index("s_cbranch_scc1 label_ShadowInitStart")
+            prefetch_guard = src[:skip_load]
+            assert "label_PersistentMC_SkipZeroIterClusterWait" in prefetch_guard, (
+                "zero-iteration shadow-init edge bypasses the first-load cluster wait"
+            )
+            guard = prefetch_guard.rsplit("s_cbranch_scc0 label_PersistentMC_SkipZeroIterClusterWait", 1)
+            assert len(guard) == 2
+            assert guard[1].count("s_barrier_wait -3") == 1
+            assert skip_load < first_load
 
     def test_broadcast_mask_value(self):
         """maskB = (1<<Cs)-1 = 0xf for Cs=4; maskA = self bit (shift of 0x1)."""

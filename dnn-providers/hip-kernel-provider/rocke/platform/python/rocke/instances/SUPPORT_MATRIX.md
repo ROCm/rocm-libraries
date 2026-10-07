@@ -42,6 +42,12 @@ These emit generic AMDGPU IR; arch only sets the comgr target triple.
 
 ---
 
+## gfx1250 native scaled GEMM
+
+`block_scaled_gemm` supports homogeneous FP8 E4M3, BF8 E5M2, FP6 E2M3, FP6 E3M2,
+and FP4 E2M1 through SCALE and SCALE16 with LLVM 23 and E8M0 scales.
+See the [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
+
 ## GEMM family
 
 | Instance | gfx942 | gfx950 | gfx1151 | Notes |
@@ -67,6 +73,7 @@ These emit generic AMDGPU IR; arch only sets the comgr target triple.
 | `conv_implicit_gemm_auto` | ✅ | ✅ | ❌ | MFMA-specialized autotuned path (raw `MfmaAtom`, K=32 kpack); not ported to WMMA |
 | `direct_conv_16c` | ❌ | ✅ | ❌ | `fold_k32` needs 16x16x32 atom (CDNA4) |
 | `direct_conv_4c` | ✅ | ✅ | ❌ | 4x4x4 MFMA atom not in WMMA catalog |
+| `conv_direct_nongrouped` | ✅ | ✅ | ❌ | `groups=1`; gfx942 uses 32x32x8 / 16x16x16 atoms, gfx950 also 32x32x16 / 16x16x32; MFMA-only. Built from `library/kernels`; not yet wired into dispatch |
 
 ---
 
@@ -89,6 +96,25 @@ These emit generic AMDGPU IR; arch only sets the comgr target triple.
 | `unified_attention_3d` | ✅ | ✅ | ✅ | scalar |
 | `unified_attention_reduce` | ✅ | ✅ | ✅ | scalar |
 
+---
+
+## Linear attention (chunkwise gated delta rule)
+
+Not part of the 2026-05-29 sweep above; added with the KDA family and verified
+as described in the notes.
+
+| Instance | gfx942 | gfx950 | gfx1151 | Notes |
+|---|:--:|:--:|:--:|---|
+| `kda_chunk_fused` | ✅ | ✅ | ❌ | bf16 only; fused prefill; gfx942 partitions V, gfx950 owns a full head |
+| `kda_chunk_prep` | ✅ | ✅ | ❌ | bf16 only; split path phase 1, one workgroup per chunk |
+| `kda_chunk_scan` | ✅ | ✅ | ❌ | bf16 only; split path phase 2, consumes what prep wrote |
+
+## Linear attention / recurrent-state decode
+
+| Instance | gfx942 | gfx950 | gfx1151 | Notes |
+|---|:--:|:--:|:--:|---|
+| `gdn_decode` | ❌ | ✅ | ❌ | gated delta rule, single-token decode over a paged recurrent state; no softmax |
+| `gdn_prefill` | ❌ | ✅ | ❌ | gated delta rule, chunkwise prefill, **bf16 only**; the KDA chunkwise pair in `gate_kind="gdn"` mode, two launches (`chunk_prep` then `chunk_scan`), no fused default |
 ---
 
 ## Arch-specific native instances
@@ -137,8 +163,25 @@ These emit generic AMDGPU IR; arch only sets the comgr target triple.
   supported. fp8/bf8 output needs the CDNA-only `v_cvt_pk_{fp8,bf8}_f32`
   conversion, so fp8/bf8 specs are rejected by the validator on non-CDNA
   families.
+- **KDA (`kda_chunk_*`)** has separate gfx942 and gfx950 emitters, each with an
+  architecture gate and schedule matched to that ISA. gfx942 partitions a
+  logical value head into 64-channel workgroups to fit its LDS budget; gfx950
+  uses CDNA4 K-packed bf16 atoms and supports both full-head and value-split
+  scans. Both ✅ columns are GPU-numeric-verified by their architecture-specific
+  tests, and their emitted IR is pinned by `test_kda_gfx942_golden.py` and
+  `test_kda_gfx950_golden.py`. gfx1151 remains an explicit refusal, not an
+  untested gap.
 - All other ✅ cells remain compile-verified only (HSACO produced for the
   target; not yet GPU-numeric-verified).
 - gfx942/gfx950 cells use a portable f16 16x16x16 config; an instance marked ❌
   for a CDNA arch lacks the specific atom that config selects (e.g. `mfma_gemm`
   and `direct_conv_16c` need the CDNA4 16x16x32 atom absent on gfx942).
+- **`gdn_decode` dispatch is gfx950-only by registration and a wave64 target
+  match.** Its candidates are registered only for gfx950 and create a default
+  `GdnDecodeSpec` with `wave_size=64`. `is_valid_spec` requires that value to
+  match the target's hardware wave size, rejecting wave32 targets before it
+  considers the thread-block limit. The lane mapping and XOR butterfly depend
+  on this match. Adding an arch requires a new module under
+  `library/dispatch/gdn/` plus a tuning run. This instance is GPU-numeric-verified on
+  gfx950 against an fp32 reference, covering both the output and the in-place
+  recurrent-state update.

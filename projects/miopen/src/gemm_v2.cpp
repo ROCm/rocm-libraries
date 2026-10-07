@@ -358,7 +358,9 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
                                   Data_t C,
                                   std::size_t c_offset,
                                   hipDataType hip_type_C,
-                                  bool skip_batches)
+                                  bool skip_batches,
+                                  Data_t user_workspace,
+                                  std::size_t user_workspace_size)
 {
     HipBLASLtMemoryHandles hipBLASLtHandles;
 
@@ -443,32 +445,56 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
     check_hipblas_status(hipblasLtMatmulDescSetAttribute(
         hipBLASLtHandles.matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE, &epilogue, sizeof(epilogue)));
 
-    /// \todo Need to request additional workspace for optimal gemm performance, and pass down
-    /// workspace size & pointer. --BrianHarrisonAMD June 2024
-    size_t max_workspace_size = 0;
-    void* workspace           = nullptr;
+    size_t max_workspace_size =
+        (user_workspace != nullptr && !gemm_desc.deterministic) ? user_workspace_size : 0;
+    void* workspace = (max_workspace_size != 0) ? user_workspace : nullptr;
     check_hipblas_status(hipblasLtMatmulPreferenceCreate(&hipBLASLtHandles.pref));
-    check_hipblas_status(
-        hipblasLtMatmulPreferenceSetAttribute(hipBLASLtHandles.pref,
-                                              HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
-                                              &max_workspace_size,
-                                              sizeof(max_workspace_size)));
 
-    const int requestSolutions = 1;
+    constexpr int requestSolutions = 8;
     hipblasLtMatmulHeuristicResult_t heuristicResult[requestSolutions];
-    int returnedAlgoCount = 0;
-    check_hipblas_status(hipblasLtMatmulAlgoGetHeuristic(handle.HipblasLtHandle().get(),
-                                                         hipBLASLtHandles.matmul,
-                                                         hipBLASLtHandles.matA,
-                                                         hipBLASLtHandles.matB,
-                                                         hipBLASLtHandles.matC,
-                                                         hipBLASLtHandles.matD,
-                                                         hipBLASLtHandles.pref,
-                                                         requestSolutions,
-                                                         heuristicResult,
-                                                         &returnedAlgoCount));
 
-    if(returnedAlgoCount == 0)
+    // The chosen algorithm's own workspace requirement is what gets handed to hipblasLtMatmul
+    // below, so it has to be checked against the buffer the caller actually allocated rather
+    // than trusted to respect the budget the preference asked for.
+    const auto first_fitting_algo = [&](std::size_t budget) {
+        check_hipblas_status(
+            hipblasLtMatmulPreferenceSetAttribute(hipBLASLtHandles.pref,
+                                                  HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                                                  &budget,
+                                                  sizeof(budget)));
+        int count = 0;
+        check_hipblas_status(hipblasLtMatmulAlgoGetHeuristic(handle.HipblasLtHandle().get(),
+                                                             hipBLASLtHandles.matmul,
+                                                             hipBLASLtHandles.matA,
+                                                             hipBLASLtHandles.matB,
+                                                             hipBLASLtHandles.matC,
+                                                             hipBLASLtHandles.matD,
+                                                             hipBLASLtHandles.pref,
+                                                             requestSolutions,
+                                                             heuristicResult,
+                                                             &count));
+        for(int i = 0; i < count; ++i)
+        {
+            if(heuristicResult[i].workspaceSize <= budget)
+                return i;
+        }
+        return -1;
+    };
+
+    int chosen_algo = first_fitting_algo(max_workspace_size);
+
+    // A workspace is an offer, not a requirement, so a problem whose solutions all want more than
+    // was granted still runs on the workspace-free set.
+    if(chosen_algo < 0 && max_workspace_size != 0)
+    {
+        MIOPEN_LOG_I2("hipBLASLt: no solution fits " << max_workspace_size
+                                                     << " bytes, retrying without a workspace");
+        max_workspace_size = 0;
+        workspace          = nullptr;
+        chosen_algo        = first_fitting_algo(0);
+    }
+
+    if(chosen_algo < 0)
     {
         MIOPEN_THROW(miopenStatusInternalError,
                      "no solution found for hipBLASLt hipBLASLtHandles.matmul");
@@ -480,6 +506,10 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
     const void* bData = static_cast<const DataTypeAB*>(B) + b_offset;
     const void* cData = static_cast<const DataTypeC*>(C) + c_offset;
     void* dData       = static_cast<DataTypeC*>(C) + c_offset;
+
+    // hipblasLtMatmul wants the size the chosen algorithm asked for, not the whole budget on
+    // offer. Handing it the budget makes large-K solutions fail with an internal error.
+    const std::size_t algo_workspace_size = heuristicResult[chosen_algo].workspaceSize;
 
     {
         HipEventProfiler profiler(handle);
@@ -495,9 +525,9 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
                                              hipBLASLtHandles.matC,
                                              dData,
                                              hipBLASLtHandles.matD,
-                                             &heuristicResult[0].algo,
+                                             &heuristicResult[chosen_algo].algo,
                                              workspace,
-                                             max_workspace_size,
+                                             algo_workspace_size,
                                              handle.GetStream()));
     }
 }
@@ -510,7 +540,9 @@ static void call_miopen_hipblasLt_gemm(const miopen::Handle& handle,
                                        std::size_t b_offset,
                                        Data_t C,
                                        std::size_t c_offset,
-                                       bool skip_batches)
+                                       bool skip_batches,
+                                       Data_t user_workspace           = nullptr,
+                                       std::size_t user_workspace_size = 0)
 {
     switch(gemm_desc.dataType)
     {
@@ -533,7 +565,9 @@ static void call_miopen_hipblasLt_gemm(const miopen::Handle& handle,
                                                             C,
                                                             c_offset,
                                                             HIP_R_16F,
-                                                            skip_batches);
+                                                            skip_batches,
+                                                            user_workspace,
+                                                            user_workspace_size);
     }
     break;
     case miopenBFloat16: {
@@ -547,7 +581,9 @@ static void call_miopen_hipblasLt_gemm(const miopen::Handle& handle,
                                                                     C,
                                                                     c_offset,
                                                                     HIP_R_16BF,
-                                                                    skip_batches);
+                                                                    skip_batches,
+                                                                    user_workspace,
+                                                                    user_workspace_size);
     }
     break;
     case miopenFloat: {
@@ -561,7 +597,9 @@ static void call_miopen_hipblasLt_gemm(const miopen::Handle& handle,
                                                               C,
                                                               c_offset,
                                                               HIP_R_32F,
-                                                              skip_batches);
+                                                              skip_batches,
+                                                              user_workspace,
+                                                              user_workspace_size);
     }
     break;
     case miopenFloat8_fnuz: {
@@ -578,7 +616,9 @@ static void call_miopen_hipblasLt_gemm(const miopen::Handle& handle,
                                                                         C,
                                                                         c_offset,
                                                                         HIP_R_8F_E4M3_FNUZ,
-                                                                        skip_batches);
+                                                                        skip_batches,
+                                                                        user_workspace,
+                                                                        user_workspace_size);
         }
         else
         {
@@ -602,7 +642,9 @@ static void call_miopen_hipblasLt_gemm(const miopen::Handle& handle,
                                                                           C,
                                                                           c_offset,
                                                                           HIP_R_8F_E5M2_FNUZ,
-                                                                          skip_batches);
+                                                                          skip_batches,
+                                                                          user_workspace,
+                                                                          user_workspace_size);
 #else
             MIOPEN_THROW(
                 miopenStatusInternalError,
@@ -664,7 +706,9 @@ miopenStatus_t CallGemm(const Handle& handle,
                         std::size_t b_offset,
                         Data_t C,
                         std::size_t c_offset,
-                        GemmBackend_t gemm_backend)
+                        GemmBackend_t gemm_backend,
+                        Data_t workspace,
+                        std::size_t workspace_size)
 {
     MIOPEN_LOG_I2("gemm_desc: " << gemm_desc);
 
@@ -704,8 +748,6 @@ miopenStatus_t CallGemm(const Handle& handle,
         switch(gemm_desc.dataType)
         {
         case miopenInt8: {
-            assert(gemm_desc.k % 4 == 0);
-
             auto alpha = int(gemm_desc.alpha);
             auto beta  = int(gemm_desc.beta);
 
@@ -914,9 +956,21 @@ miopenStatus_t CallGemm(const Handle& handle,
     }
     case GemmBackend_t::hipblaslt: {
 #if MIOPEN_USE_HIPBLASLT
-        call_miopen_hipblasLt_gemm(handle, gemm_desc, A, a_offset, B, b_offset, C, c_offset, true);
+        call_miopen_hipblasLt_gemm(handle,
+                                   gemm_desc,
+                                   A,
+                                   a_offset,
+                                   B,
+                                   b_offset,
+                                   C,
+                                   c_offset,
+                                   true,
+                                   workspace,
+                                   workspace_size);
         return miopenStatusSuccess;
 #else
+        std::ignore = workspace;
+        std::ignore = workspace_size;
         return miopenStatusNotImplemented;
 #endif
     }
@@ -1084,7 +1138,6 @@ miopenStatus_t CallGemmStridedBatched(const Handle& handle,
         switch(gemm_desc.dataType)
         {
         case miopenInt8: {
-            assert(gemm_desc.k % 4 == 0);
 
             auto alpha = int(gemm_desc.alpha);
             auto beta  = int(gemm_desc.beta);
@@ -1732,10 +1785,11 @@ miopenStatus_t CallGemmStridedBatchedSequential(const Handle& handle,
 }
 
 // y = w * Im2Col(x)
-GemmDescriptor CreateGemmDescriptorConvFwd(const TensorDescriptor& wDesc,
-                                           const TensorDescriptor& xDesc,
-                                           const TensorDescriptor& yDesc)
+GemmDescriptor CreateGemmDescriptorConvFwd(const conv::ProblemDescription& problem)
 {
+    decltype(auto) xDesc = problem.GetIn();
+    decltype(auto) wDesc = problem.GetWeights();
+    decltype(auto) yDesc = problem.GetOut();
 #ifndef NDEBUG
     assert(wDesc.GetType() == xDesc.GetType());
     if(wDesc.GetType() != miopenInt8)
@@ -1750,9 +1804,9 @@ GemmDescriptor CreateGemmDescriptorConvFwd(const TensorDescriptor& wDesc,
     auto out_spatial =
         yDesc.GetLengths() | std::views::drop(2) | std::views::take(yDesc.GetLengths().size() - 2);
 
-    bool isColMajor = false;
-    bool transA     = false;
-    bool transB     = (wDesc.GetType() == miopenInt8);
+    bool isColMajor = problem.IsLayoutNHWC();
+    bool transA     = isColMajor;
+    bool transB     = problem.IsLayoutNHWC() ? false : (wDesc.GetType() == miopenInt8);
     int m           = wei_k;
     int n           = static_cast<int>(std::accumulate(
         out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
@@ -1761,8 +1815,8 @@ GemmDescriptor CreateGemmDescriptorConvFwd(const TensorDescriptor& wDesc,
                                                     std::size_t{1},
                                                     std::multiplies<std::size_t>()));
     int lda         = k;
-    int ldb         = wDesc.GetType() == miopenInt8 ? k : n;
-    int ldc         = n;
+    int ldb         = problem.IsLayoutNHWC() ? k : wDesc.GetType() == miopenInt8 ? k : n;
+    int ldc         = problem.IsLayoutNHWC() ? m : n;
     int batch_count = 1;
     auto strideA    = static_cast<long long>(0);
     auto strideB    = static_cast<long long>(0);
@@ -1790,10 +1844,11 @@ GemmDescriptor CreateGemmDescriptorConvFwd(const TensorDescriptor& wDesc,
 }
 
 // dx = Col2Im(transpose(w) * dy)
-GemmDescriptor CreateGemmDescriptorConvBwdData(const TensorDescriptor& wDesc,
-                                               const TensorDescriptor& dyDesc,
-                                               const TensorDescriptor& dxDesc)
+GemmDescriptor CreateGemmDescriptorConvBwdData(const conv::ProblemDescription& problem)
 {
+    decltype(auto) dyDesc = problem.GetIn();
+    decltype(auto) wDesc  = problem.GetWeights();
+    decltype(auto) dxDesc = problem.GetOut();
 #ifndef NDEBUG
     assert(wDesc.GetType() == dxDesc.GetType() && wDesc.GetType() == dyDesc.GetType());
 #endif
@@ -1806,8 +1861,8 @@ GemmDescriptor CreateGemmDescriptorConvBwdData(const TensorDescriptor& wDesc,
     auto out_spatial = dyDesc.GetLengths() | std::views::drop(2) |
                        std::views::take(dyDesc.GetLengths().size() - 2);
 
-    bool isColMajor = false;
-    bool transA     = true;
+    bool isColMajor = problem.IsLayoutNHWC();
+    bool transA     = !problem.IsLayoutNHWC();
     bool transB     = false;
     int m           = in_c * static_cast<int>(std::accumulate(wei_spatial.begin(),
                                                     wei_spatial.end(),
@@ -1817,8 +1872,8 @@ GemmDescriptor CreateGemmDescriptorConvBwdData(const TensorDescriptor& wDesc,
         out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
     int k           = wei_k;
     int lda         = m;
-    int ldb         = n;
-    int ldc         = n;
+    int ldb         = problem.IsLayoutNHWC() ? k : n;
+    int ldc         = problem.IsLayoutNHWC() ? m : n;
     int batch_count = 1;
     auto strideA    = static_cast<long long>(0);
     auto strideB    = static_cast<long long>(0);
@@ -1846,10 +1901,11 @@ GemmDescriptor CreateGemmDescriptorConvBwdData(const TensorDescriptor& wDesc,
 }
 
 // dw = dy * transpose(Im2Col(x))
-GemmDescriptor CreateGemmDescriptorConvBwdWeight(const TensorDescriptor& dyDesc,
-                                                 const TensorDescriptor& xDesc,
-                                                 const TensorDescriptor& dwDesc)
+GemmDescriptor CreateGemmDescriptorConvBwdWeight(const conv::ProblemDescription& problem)
 {
+    const auto& dyDesc = problem.GetIn();
+    const auto& dwDesc = problem.GetWeights();
+    const auto& xDesc  = problem.GetOut();
 #ifndef NDEBUG
     assert(dwDesc.GetType() == xDesc.GetType() && dwDesc.GetType() == dyDesc.GetType());
 #endif
@@ -1863,8 +1919,8 @@ GemmDescriptor CreateGemmDescriptorConvBwdWeight(const TensorDescriptor& dyDesc,
                        std::views::take(dyDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
-    bool transA     = false;
-    bool transB     = true;
+    bool transA     = problem.IsLayoutNHWC();
+    bool transB     = !problem.IsLayoutNHWC();
     int m           = wei_k;
     int n =
         static_cast<int>(in_c) * static_cast<int>(std::accumulate(wei_spatial.begin(),
@@ -1873,8 +1929,8 @@ GemmDescriptor CreateGemmDescriptorConvBwdWeight(const TensorDescriptor& dyDesc,
                                                                   std::multiplies<std::size_t>()));
     int k           = static_cast<int>(std::accumulate(
         out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
-    int lda         = k;
-    int ldb         = k;
+    int lda         = problem.IsLayoutNHWC() ? m : k;
+    int ldb         = problem.IsLayoutNHWC() ? n : k;
     int ldc         = n;
     int batch_count = 1;
     auto strideA    = static_cast<long long>(0);
@@ -2177,14 +2233,12 @@ GemmDescriptor CreateGemmStridedBatchedDescriptorConv1x1BwdWeight(const TensorDe
 }
 
 // y = w * Im2Col(x)
-GemmDescriptor CreateGemmDescriptorGroupConvFwd(const TensorDescriptor& wDesc,
-                                                const TensorDescriptor& xDesc,
-                                                const TensorDescriptor& yDesc,
-                                                int groupCount)
+GemmDescriptor CreateGemmDescriptorGroupConvFwd(const conv::ProblemDescription& problem)
 {
-#ifndef NDEBUG
-    assert(wDesc.GetType() == xDesc.GetType() && wDesc.GetType() == yDesc.GetType());
-#endif
+    decltype(auto) xDesc = problem.GetIn();
+    decltype(auto) wDesc = problem.GetWeights();
+    decltype(auto) yDesc = problem.GetOut();
+    const int groupCount = problem.GetGroupCount();
 
     int in_c  = xDesc.GetLengths()[1];
     int wei_k = wDesc.GetLengths()[0];
@@ -2194,8 +2248,8 @@ GemmDescriptor CreateGemmDescriptorGroupConvFwd(const TensorDescriptor& wDesc,
     auto out_spatial =
         yDesc.GetLengths() | std::views::drop(2) | std::views::take(yDesc.GetLengths().size() - 2);
 
-    bool isColMajor = false;
-    bool transA     = false;
+    bool isColMajor = problem.IsLayoutNHWC();
+    bool transA     = isColMajor;
     bool transB     = false;
     int m           = wei_k / groupCount;
     int n           = static_cast<int>(std::accumulate(
@@ -2205,12 +2259,12 @@ GemmDescriptor CreateGemmDescriptorGroupConvFwd(const TensorDescriptor& wDesc,
                                                                    std::size_t{1},
                                                                    std::multiplies<std::size_t>()));
     int lda         = k;
-    int ldb         = n;
-    int ldc         = n;
+    int ldb         = problem.IsLayoutNHWC() ? k : n;
+    int ldc         = problem.IsLayoutNHWC() ? m * groupCount : n;
     int batch_count = groupCount;
     auto strideA    = static_cast<long long>(m) * k;
     auto strideB    = static_cast<long long>(k) * n;
-    auto strideC    = static_cast<long long>(m) * n;
+    auto strideC    = problem.IsLayoutNHWC() ? m : static_cast<long long>(m) * n;
     float alpha     = 1.;
     float beta      = 0.;
 
@@ -2234,11 +2288,12 @@ GemmDescriptor CreateGemmDescriptorGroupConvFwd(const TensorDescriptor& wDesc,
 }
 
 // dx = Col2Im(transpose(w) * dy)
-GemmDescriptor CreateGemmDescriptorGroupConvBwdData(const TensorDescriptor& wDesc,
-                                                    const TensorDescriptor& dyDesc,
-                                                    const TensorDescriptor& dxDesc,
-                                                    int groupCount)
+GemmDescriptor CreateGemmDescriptorGroupConvBwdData(const conv::ProblemDescription& problem)
 {
+    decltype(auto) dyDesc = problem.GetIn();
+    decltype(auto) wDesc  = problem.GetWeights();
+    decltype(auto) dxDesc = problem.GetOut();
+    const int groupCount  = problem.GetGroupCount();
 #ifndef NDEBUG
     assert(wDesc.GetType() == dxDesc.GetType() && wDesc.GetType() == dyDesc.GetType());
 #endif
@@ -2251,8 +2306,8 @@ GemmDescriptor CreateGemmDescriptorGroupConvBwdData(const TensorDescriptor& wDes
     auto out_spatial = dyDesc.GetLengths() | std::views::drop(2) |
                        std::views::take(dyDesc.GetLengths().size() - 2);
 
-    bool isColMajor = false;
-    bool transA     = true;
+    bool isColMajor = problem.IsLayoutNHWC();
+    bool transA     = !problem.IsLayoutNHWC();
     bool transB     = false;
     int m           = (in_c / groupCount) * static_cast<int>(std::accumulate(wei_spatial.begin(),
                                                                    wei_spatial.end(),
@@ -2262,11 +2317,11 @@ GemmDescriptor CreateGemmDescriptorGroupConvBwdData(const TensorDescriptor& wDes
         out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
     int k           = wei_k / groupCount;
     int lda         = m;
-    int ldb         = n;
-    int ldc         = n;
+    int ldb         = problem.IsLayoutNHWC() ? groupCount * k : n;
+    int ldc         = problem.IsLayoutNHWC() ? m : n;
     int batch_count = groupCount;
     auto strideA    = static_cast<long long>(m) * k;
-    auto strideB    = static_cast<long long>(k) * n;
+    auto strideB    = problem.IsLayoutNHWC() ? k : static_cast<long long>(k) * n;
     auto strideC    = static_cast<long long>(m) * n;
     float alpha     = 1.;
     float beta      = 0.;
@@ -2291,11 +2346,13 @@ GemmDescriptor CreateGemmDescriptorGroupConvBwdData(const TensorDescriptor& wDes
 }
 
 // dw = dy * transpose(Im2Col(x))
-GemmDescriptor CreateGemmDescriptorGroupConvBwdWeight(const TensorDescriptor& dyDesc,
-                                                      const TensorDescriptor& xDesc,
-                                                      const TensorDescriptor& dwDesc,
-                                                      int groupCount)
+GemmDescriptor CreateGemmDescriptorGroupConvBwdWeight(const conv::ProblemDescription& problem)
 {
+    const auto& dyDesc     = problem.GetIn();
+    const auto& dwDesc     = problem.GetWeights();
+    const auto& xDesc      = problem.GetOut();
+    const auto& conv       = problem.GetConv();
+    const auto group_count = conv.group_count;
 #ifndef NDEBUG
     assert(dwDesc.GetType() == xDesc.GetType() && dwDesc.GetType() == dyDesc.GetType());
 #endif
@@ -2309,20 +2366,21 @@ GemmDescriptor CreateGemmDescriptorGroupConvBwdWeight(const TensorDescriptor& dy
                        std::views::take(dyDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
-    bool transA     = false;
-    bool transB     = true;
-    int m           = wei_k / groupCount;
-    int n           = (in_c / groupCount) * static_cast<int>(std::accumulate(wei_spatial.begin(),
-                                                                   wei_spatial.end(),
-                                                                   std::size_t{1},
-                                                                   std::multiplies<std::size_t>()));
+    bool transA     = problem.IsLayoutNHWC();
+    bool transB     = !problem.IsLayoutNHWC();
+    int m           = wei_k / group_count;
+    int n =
+        (in_c / group_count) * static_cast<int>(std::accumulate(wei_spatial.begin(),
+                                                                wei_spatial.end(),
+                                                                std::size_t{1},
+                                                                std::multiplies<std::size_t>()));
     int k           = static_cast<int>(std::accumulate(
         out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
-    int lda         = k;
-    int ldb         = k;
+    int lda         = problem.IsLayoutNHWC() ? m * group_count : k;
+    int ldb         = problem.IsLayoutNHWC() ? n : k;
     int ldc         = n;
-    int batch_count = groupCount;
-    auto strideA    = static_cast<long long>(m) * k;
+    int batch_count = group_count;
+    auto strideA    = problem.IsLayoutNHWC() ? m : static_cast<long long>(m) * k;
     auto strideB    = static_cast<long long>(k) * n;
     auto strideC    = static_cast<long long>(m) * n;
     float alpha     = 1.;

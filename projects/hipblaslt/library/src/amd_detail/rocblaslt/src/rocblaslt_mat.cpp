@@ -25,8 +25,10 @@
  * ************************************************************************ */
 
 #include "check_numerics_matrix.hpp"
+#include "check_synchronizer.hpp"
 #include "definitions.h"
 #include "handle.h"
+#include "rocblaslt_fused_a2a_validate.hpp"
 #include "rocblaslt_mat_utils.hpp"
 #include "tensile_host.hpp"
 #include <array>
@@ -171,6 +173,17 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     {
         workspaceSizeInBytes = std::min<size_t>(workspaceSizeInBytes, algo->max_workspace_bytes);
     }
+
+    void*                  streamKFlags = nullptr;
+    const rocblaslt_status skStatus     = handle->streamKFlagsForStream(stream, 0, &streamKFlags);
+    if(skStatus != rocblaslt_status_success)
+    {
+        log_error(__func__,
+                  "no Stream-K flag region left: this handle has already handed one to "
+                  "c_syncSkStreamSlots distinct streams");
+        return skStatus;
+    }
+
     RocblasltContractionProblem problem{opA,
                                         opB,
                                         m,
@@ -236,12 +249,30 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         batch_mode,
                                         matmul_descr->bias_stride,
                                         matmul_descr->streamk_tile_scheduling_ext,
-                                        effective_sm_count_target(handle, matmul_descr, nullptr)};
+                                        effective_sm_count_target(handle, matmul_descr, nullptr),
+                                        effective_uniform_summation_order(handle, matmul_descr)};
+    problem.streamKFlags = streamKFlags;
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    problem.fused_epilogue      = matmul_descr->fused_epilogue;
+    problem.fused_a2a_world     = handle->device_comm_world;
+    problem.fused_a2a_rank      = handle->device_comm_rank;
+    problem.fused_a2a_peer_flag = handle->device_comm_peer_flags;
+
+    if(auto gate = validate_fused_a2a(handle, problem); gate != rocblaslt_status_success)
+        return gate;
+
+    if(fused_a2a_lacks_sdma_queues(problem))
+        return rocblaslt_status_invalid_value;
+#endif
 
     rocblaslt_status st = runContractionProblem(handle, algo, problem, gemmData);
 
     if(st == rocblaslt_status_success)
     {
+        // No-op unless HIPBLASLT_CHECK_SYNCHRONIZER is set.
+        hipblaslt_check_synchronizer_scan(handle, stream, "rocblaslt_matmul_impl");
+
         const uint32_t call_id = hipblaslt_check_numerics_begin_call(handle);
         if(call_id != 0)
         {
@@ -432,7 +463,21 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
                                         batch_mode,
                                         matmul_descr->bias_stride,
                                         matmul_descr->streamk_tile_scheduling_ext,
-                                        effective_sm_count_target(handle, matmul_descr, nullptr)};
+                                        effective_sm_count_target(handle, matmul_descr, nullptr),
+                                        effective_uniform_summation_order(handle, matmul_descr)};
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    problem.fused_epilogue = matmul_descr->fused_epilogue;
+
+    // The all-to-all stage is available through hipblasLtMatmul only.
+    RocblasltFusedEpilogueInfo fused_info;
+    if(rocblaslt_resolve_fused_epilogue(problem.fused_epilogue, fused_info)
+       && fused_info.hasA2APrefix)
+    {
+        log_error(__func__, "fused all-to-all is not available through the extension GEMM API");
+        return rocblaslt_status_invalid_value;
+    }
+#endif
+
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -724,13 +769,18 @@ rocblaslt_status
                                         matmul_descr[i]->act0,
                                         matmul_descr[i]->act1,
                                         0,
-                                        (char*)handle->Synchronizer + (409600 * i * sizeof(int)),
+                                        // GSU region, per problem, shared across
+                                        // streams, null past the last slot. The
+                                        // separate Stream-K region is bound per
+                                        // stream in makeArgument().
+                                        handle->gsuFlagsForProblem(i),
                                         swizzleA,
                                         swizzleB,
                                         hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED,
                                         matmul_descr[i]->bias_stride,
                                         matmul_descr[i]->streamk_tile_scheduling_ext,
-                                        effective_sm_count_target(handle, matmul_descr[i], nullptr)});
+                                        effective_sm_count_target(handle, matmul_descr[i], nullptr),
+                                        effective_uniform_summation_order(handle, matmul_descr[i])});
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
 }
@@ -779,6 +829,9 @@ rocblaslt_status rocblaslt_matmul(rocblaslt_handle             handle,
         log_error(__func__, "invalid workspace pointer");
         return rocblaslt_status_invalid_pointer;
     }
+    if(auto status = validateWorkspaceSize(__func__, workspaceSizeInBytes);
+       status != rocblaslt_status_success)
+        return status;
 
     if(matC->type != matD->type)
     {
@@ -1078,7 +1131,9 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
         swizzleB,
         HIPBLASLT_BATCH_MODE_STRIDED,
         0,
-        0}; // streamk_tile_scheduling_ext: OFF (matches struct default)
+        0, // streamk_tile_scheduling_ext: OFF (matches struct default)
+        effective_sm_count_target(handle, nullptr, nullptr),
+        effective_uniform_summation_order(handle, nullptr)};
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -1399,12 +1454,17 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                         rocEpilogue[iIdx].act0,
                                         rocEpilogue[iIdx].act1,
                                         0,
-                                        (char*)handle->Synchronizer + (409600 * i * sizeof(int)),
+                                        // GSU region, per problem and null past
+                                        // the last slot; Stream-K is bound per
+                                        // stream in makeArgument().
+                                        handle->gsuFlagsForProblem(i),
                                         swizzleA,
                                         swizzleB,
                                         hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED,
                                         0,
-                                        0}); // streamk_tile_scheduling_ext: OFF (matches struct default)
+                                        0, // streamk_tile_scheduling_ext: OFF (matches struct default)
+                                        effective_sm_count_target(handle, nullptr, nullptr),
+                                        effective_uniform_summation_order(handle, nullptr)});
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
 }
@@ -1557,6 +1617,9 @@ rocblaslt_status rocblaslt_makeArgument_cpp(rocblaslt_handle              handle
                                             hipStream_t                   stream,
                                             std::shared_ptr<void>         gemmData)
 {
+    if(auto status = validateWorkspaceSize(__func__, workspaceSizeInBytes);
+       status != rocblaslt_status_success)
+        return status;
     return makeArgument(handle,
                         gemmType,
                         algo,

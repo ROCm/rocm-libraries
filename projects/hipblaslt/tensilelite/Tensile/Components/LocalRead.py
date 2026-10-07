@@ -620,9 +620,21 @@ class LocalReadMFMA(LocalRead):
         bpr              = 4 # bytes/register
 
         vectorWidth      = kernel["VectorWidth%s"%tc]
-        mxUnit: int      = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{mxTc}"]
+        mxBlock: int     = kernel["ProblemType"][f"MXBlock{mxTc}"]
+        mxUnit: int      = kernel["MatrixInstK"] // mxBlock
+        if mxUnit <= 0:
+            raise RuntimeError(
+                "localReadMX: invalid MX scale unit for tc=%s "
+                "(MatrixInstK=%s < MXBlock%s=%s => mxUnit=%s)"
+                % (tc, kernel["MatrixInstK"], mxTc, mxBlock, mxUnit))
         stridePerRead    = instruction.blockWidth * bpr
         tilePerRead      = stridePerRead // mxUnit
+        if tilePerRead == 0:
+            raise RuntimeError(
+                "localReadMX: unsupported MX-scale local read for tc=%s "
+                "(blockWidth=%s stridePerRead=%s < mxUnit=%s => tilePerRead=0); "
+                "MXBlock%s requires a scale layout with at least one tile per read"
+                % (tc, instruction.blockWidth, stridePerRead, mxUnit, mxTc))
         MIWaveGroupShape = [ kernel["MatrixInstM"] * kernel["MatrixInstBM"] * kernel["MIWaveGroup"][0] * kernel["VectorWidthA"], \
                             kernel["MatrixInstN"] * kernel["MatrixInstBN"] * kernel["MIWaveGroup"][1] * kernel["VectorWidthB"]]
         tileSpanInfo = self.getMxsTileSpanInfo(kernel, tc, tile01, writer.states.asmCaps)
@@ -1651,20 +1663,38 @@ class LocalReadMFMA(LocalRead):
                                 # boundary. Split it into within-component (vCols) + component jump
                                 # (segCompByteOff, added post-pad below).
                                 segCompByteOff = 0
-                                _portSplitA = (kernel.get("LDSSegmentInterleave") == 1 and tc == "A"
-                                               and kernel["LDSSegInterleaveOffsets"].get("portSplitA", False))
-                                if _portSplitA:
-                                    # Fine A: drop the wave-group factor from the per-vIdx column stride so
-                                    # the two vIdx stay within this port's segment; the A0->A1 segment jump
+                                # port-split with VW==WaveTile/2: the per-vIdx column stride carries the
+                                # within-port offset. With VW==WaveTile (numVectorsPerTile==1) the whole
+                                # segment jump is on the wave axis (LraTileAssignment), so it takes the
+                                # normal per-vIdx path below (its segCompByteOff stays 0 within a wave).
+                                _portSplit = (kernel.get("LDSSegmentInterleave") == 1
+                                              and ((tc == "A" and kernel["LDSSegInterleaveOffsets"].get("portSplitA", False))
+                                                or (tc == "B" and kernel["LDSSegInterleaveOffsets"].get("portSplitB", False)))
+                                              and numVectorsPerTile > 1)
+                                _segOff = kernel["LDSSegInterleaveOffsets"] if kernel.get("LDSSegmentInterleave") == 1 else {}
+                                _componentSplit = (_segOff.get("componentSplit", False)
+                                             and _segOff.get("activeTC") == tc
+                                             and numVectorsPerTile > 1)
+                                if _portSplit:
+                                    # Drop the wave-group factor from the per-vIdx column stride so the
+                                    # two vIdx stay within this port's segment; the A0->A1 segment jump
                                     # is on the wave stride, not here.
                                     _shape = MIWaveGroupShape[tile01] // kernel["MIWaveGroup"][tile01]
                                     vCols = (vIdx * numOffsets + oIdx) * _shape
+                                elif _componentSplit:
+                                    # Divide the per-vIdx stride by wavesPerComp to match the write
+                                    # boundary (tdmSplitLdsBoundary); the match needs numOffsets==1, bpeGR==bpeDS.
+                                    assert numOffsets == 1
+                                    assert tP["bpeGR"] == tP["bpeDS"]
+                                    _wavesPerComp = max(1, kernel["MIWaveGroup"][tile01] // (kernel["NumWaves"] // 2))
+                                    vCols = (vIdx * numOffsets + oIdx) * (MIWaveGroupShape[tile01] // _wavesPerComp)
                                 else:
                                     vCols = (vIdx * numOffsets + oIdx) * MIWaveGroupShape[tile01]
-                                    if (kernel.get("LDSSegmentInterleave") == 1
-                                            and kernel["LDSSegInterleaveOffsets"].get("footprintPacked")
-                                            and (tc == "A" or (tc == "B"
-                                                 and not kernel["LDSSegInterleaveOffsets"].get("bBaseline", False)))):
+                                    _segActiveLR = (kernel.get("LDSSegmentInterleave") == 1
+                                        and ((tc == "A" and not kernel["LDSSegInterleaveOffsets"].get("aBaseline", False))
+                                          or (tc == "B" and not kernel["LDSSegInterleaveOffsets"].get("bBaseline", False))))
+                                    if (_segActiveLR
+                                            and kernel["LDSSegInterleaveOffsets"].get("footprintPacked")):
                                         numComp  = kernel["NumWaves"] // 2
                                         compCols = kernel["MacroTile%u" % tile01] // numComp
                                         if compCols > 0 and MIWaveGroupShape[tile01] > 0:
@@ -1776,7 +1806,7 @@ class LocalReadMFMA(LocalRead):
                             # would tag every read half0 and leave the half1 tensor_load un-waited.
                             # Such reads' combined region depends on BOTH half loads -> carry both
                             # half tokens.
-                            tdmBothHalves = (kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"]
+                            tdmBothHalves = (kernel["TDMSplit"]
                                              and not tP.get("isM", False) and numVectorsPerTile == 1)
                             self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds, module=localReadCodeT, ldsByteOffset=tdmFullLdsOffset, bothHalves=tdmBothHalves, comment=comment)
                             # TODO - handle vector-load

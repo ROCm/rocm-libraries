@@ -43,9 +43,8 @@ namespace ckc
  * at the end exactly like Python's self.lines / self.smem_decls lists.
  *
  * `arena` (borrowed from the builder) backs the per-handler temporaries and the
- * two strbuf-vectors. `err`/`status` are the sticky error channel; the first
- * failing handler sets them and every later handler/_emit becomes a no-op, so
- * handlers can be written straight-line and checked once by the driver. */
+ * two strbuf-vectors. Failures throw a ckc::Error to the public lowerer boundary;
+ * `err`/`status` remain initialized compatibility fields, not an error latch. */
 typedef struct rocke_h_lowerer
 {
     const rocke_kernel_def_t* kernel;
@@ -57,7 +56,7 @@ typedef struct rocke_h_lowerer
     int indent; /* current indent depth (starts at 1)  */
     int smem_counter; /* mirrors Python self._smem_counter   */
 
-    rocke_status_t status; /* sticky; ROCKE_OK until first failure   */
+    rocke_status_t status; /* ROCKE_OK; failures unwind via exceptions */
     char err[ROCKE_ERR_MSG_CAP];
 } rocke_h_lowerer_t;
 
@@ -147,8 +146,8 @@ const char* rocke_h_name(rocke_h_lowerer_t* lw, const rocke_value_t* v);
  *   vec<elem x n> -> "f16xN"/"bf16xN"/"f32xN"/"i32xN"/"i16xN"/"i8xN"
  *                    (fp8e4m3/bf8e5m2 -> "i8xN"; i1 -> "boolxN")
  *   smem<elem,...> -> "<elem>*"
- * Returns an arena-owned string. Sets the sticky error and returns "" for an
- * unmappable type (Python KeyError parity). */
+ * Returns an arena-owned string. Throws for an unmappable HIP type (Python
+ * KeyError parity), including logical types without direct HIP lowering. */
 const char* rocke_h_type_to_hip(rocke_h_lowerer_t* lw, const rocke_type_t* t);
 
 /* Map a scalar IR type *name* ("i32","f16",...) to its HIP scalar spelling
@@ -164,6 +163,14 @@ const char* rocke_h_hip_scalar(const char* ir_scalar_name);
  * 2-entry {f16,bf16} map (false, used by global_load_vN etc.) and the full
  * 8-entry map including f32/i32/i16/i8/fp8/bf8 (true, used by smem_store_vN). */
 const char* rocke_h_vec_prefix(const char* ir_scalar_name, bool full_map);
+
+/* Same map, but an element name outside it raises (mirroring Python
+ * _vec_prefix) instead of silently resolving to "f16x". Used by the handlers
+ * whose Python counterparts validate: the smem and global vN load/store ops. */
+const char* rocke_h_vec_prefix_checked(rocke_h_lowerer_t* lw,
+                                       const char* ir_scalar_name,
+                                       bool full_map,
+                                       const char* op_desc);
 
 /* --------------------------------------------------------- literals / encode */
 
@@ -187,8 +194,8 @@ int rocke_h_encode_waitcnt_gfx11(int vmcnt, int expcnt, int lgkmcnt);
 /* --------------------------------------------------------- arch gates */
 
 /* Python _require_wmma_arch: error out if WMMA is requested on a target with no
- * WMMA instruction (CDNA/MFMA). Returns ROCKE_OK if allowed, else sets the sticky
- * error (ROCKE_ERR_NOTIMPL) and returns it. `op_id` is the atom id for the message.
+ * WMMA instruction (CDNA/MFMA). Returns ROCKE_OK if allowed, otherwise throws
+ * ROCKE_ERR_NOTIMPL. `op_id` is the atom id for the message.
  * NOTE(port): Python keys off the ArchTarget MMA catalog (mma.by_op_id); that
  * catalog is not ported, so this uses lw->arch.has_wmma instead. */
 rocke_status_t rocke_h_require_wmma_arch(rocke_h_lowerer_t* lw, const char* op_id);

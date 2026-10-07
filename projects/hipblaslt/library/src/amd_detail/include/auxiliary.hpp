@@ -397,13 +397,3 @@ __host__ __device__ inline bool hipblaslt_isinf(hipblasLtHalf arg)
     } x = {arg};
     return (~x.data & 0x7c00) == 0 && (x.data & 0x3ff) == 0;
 }
-
-/*******************************************************************************
- * \brief  returns true if arg is zero
- ********************************************************************************/
-
-template <typename T>
-__host__ __device__ inline bool hipblaslt_iszero(T arg)
-{
-    return arg == 0;
-}

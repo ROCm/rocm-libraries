@@ -32,6 +32,7 @@ import pytest
 
 from Tensile.SolutionStructs.Problem import ProblemType
 import Tensile.SolutionStructs.Naming as N
+from Tensile.Common.Constants import MAX_FILENAME_LENGTH
 
 pytestmark = pytest.mark.unit
 
@@ -139,6 +140,26 @@ def test_name_custom_kernel_early_return(make_state, snapshot):
         "full": N.getSolutionNameFull(s, splitGSU=False),
         "kernel": N.getKernelNameMin(s, splitGSU=False),
     } == snapshot
+
+
+def test_generated_solution_name_keeps_runtime_tokens(make_state):
+    # A generated CustomKernel stamp is the assembly identity. Kernel names
+    # stay that stamp. Solution names fall through and pick up the same
+    # runtime dispatch tokens as an unstamped solution.
+    plain = make_state()
+    generated = make_state(CustomKernel={"name": "stamped_kernel", "generated": True})
+    handwritten = make_state(CustomKernel={"name": "hand_ck"})
+
+    assert N.getKernelNameMin(generated, splitGSU=False) == "stamped_kernel"
+    assert N.getSolutionNameMin(generated, splitGSU=False) == N.getSolutionNameMin(plain, splitGSU=False)
+    assert N.getSolutionNameFull(generated, splitGSU=False) == N.getSolutionNameFull(plain, splitGSU=False)
+
+    tokens = set(N.getSolutionNameMin(generated, splitGSU=False).split("_"))
+    for token in ("WGM1", "WGMXCCG0", "SU0", "SUM0", "SUS0", "GSUC0", "GSUWGMRR0"):
+        assert token in tokens
+
+    assert N.getSolutionNameMin(handwritten, splitGSU=False) == "hand_ck"
+    assert N.getKernelNameMin(handwritten, splitGSU=False) == "hand_ck"
 
 
 def test_name_with_thread_tile_no_matrix_inst(make_state, snapshot):
@@ -261,3 +282,83 @@ def test_kernel_file_base_custom(snapshot):
 def test_kernel_file_base_generated(make_state, snapshot):
     # No CustomKernelName -> falls through to shortenFileBase(getKernelNameMin).
     assert N.getKernelFileBase(False, make_state()) == snapshot
+
+
+class _StateWrapper:
+    def __init__(self, state):
+        self._state = state
+
+
+def test_key_no_internal_args_accepts_solution_wrapper(make_state):
+    state = make_state()
+    assert N.getKeyNoInternalArgs(_StateWrapper(state), True) == N.getKeyNoInternalArgs(
+        state, True
+    )
+
+
+def test_grouped_gemm_mask_depends_on_user_args_and_restores_state(make_state):
+    grouped = make_state()
+    grouped["ProblemType"]["GroupedGemm"] = True
+    plain = make_state()
+    plain["ProblemType"]["GroupedGemm"] = False
+
+    grouped["ProblemType"]["SupportUserArgs"] = False
+    plain["ProblemType"]["SupportUserArgs"] = False
+    assert N.getKeyNoInternalArgs(grouped, True) == N.getKeyNoInternalArgs(plain, True)
+    assert grouped["ProblemType"]["GroupedGemm"] is True
+
+    grouped["ProblemType"]["SupportUserArgs"] = True
+    plain["ProblemType"]["SupportUserArgs"] = True
+    assert N.getKeyNoInternalArgs(grouped, True) != N.getKeyNoInternalArgs(plain, True)
+    assert "_GG_" in N.getKeyNoInternalArgs(grouped, True)
+
+
+def test_split_gsu_masks_dynamic_values_in_key(make_state):
+    keys = {
+        N.getKeyNoInternalArgs(make_state(GlobalSplitU=value), True)
+        for value in (2, 10, -1)
+    }
+    assert len(keys) == 1
+
+
+def test_key_restores_workgroup_mapping_without_pollution(make_state):
+    state = make_state(WorkGroupMappingXCC=5)
+    state_keys = set(state)
+    problem_keys = set(state["ProblemType"])
+
+    N.getKeyNoInternalArgs(state, True)
+
+    assert state["WorkGroupMappingXCC"] == 5
+    assert set(state) == state_keys
+    assert set(state["ProblemType"]) == problem_keys
+
+
+def test_solution_name_uses_thread_tile_without_matrix_instruction(make_state):
+    state = make_state()
+    for key in ("MatrixInstM", "MatrixInstN", "MatrixInstB", "MIWaveTile"):
+        state.pop(key, None)
+    state["ThreadTile"] = [4, 4]
+    assert "TT4_4" in N.getSolutionNameMin(state, splitGSU=False)
+
+
+def test_solution_name_formats_isa_patch_as_hex(make_state):
+    name = N.getSolutionNameMin(make_state(ISA=(9, 4, 10)), splitGSU=False)
+    assert "ISA94a" in name
+    assert "ISA9410" not in name
+
+
+def test_shorten_file_base_preserves_exact_length_boundary(monkeypatch):
+    base = "x" * MAX_FILENAME_LENGTH
+    monkeypatch.setattr(N, "getKernelNameMin", lambda kernel, split_gsu: base)
+    assert N.shortenFileBase(False, {}) == base
+
+
+def test_workgroup_mapping_xcc_key_folds_fixed_but_preserves_auto(make_state):
+    fixed_five = N.getKeyNoInternalArgs(make_state(WorkGroupMappingXCC=5), True)
+    fixed_eight = N.getKeyNoInternalArgs(make_state(WorkGroupMappingXCC=8), True)
+    automatic = N.getKeyNoInternalArgs(make_state(WorkGroupMappingXCC=-1), True)
+
+    assert fixed_five == fixed_eight
+    assert automatic != fixed_eight
+    assert "_WGMXCC1_" in fixed_eight
+    assert "_WGMXCCn1_" in automatic

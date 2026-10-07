@@ -52,7 +52,8 @@ Notes:
     - Each test method spawns 2 or 3 fresh Python subprocesses (one per
       path). They inherit ``PYTHONPATH`` from the parent runner. Backend
       selection is via the ``ROCISA_BACKEND`` env var only.
-    - We always call ``rocIsa.getInstance().init(arch, "")`` then
+    - We resolve ``amdclang++`` from the selected ROCm installation, call
+      ``rocIsa.getInstance().init(arch, assembler)`` and then
       ``setKernel(arch, 64)`` in the preamble. ``init`` alone registers ISA
       metadata (caps); ``setKernel`` installs the per-thread ``KernelInfo``
       whose ``isaVersion`` ``ReadWriteInstruction::typeConvert()`` uses for
@@ -60,16 +61,19 @@ Notes:
       Path (2) still needs caps for ``getAsmCaps()``; paths (1) and (3) need
       the active ISA for byte-identical ``toString`` / lowering.
     - ``s_set_vgpr_msb`` (gfx1250 VGPR-MSB workaround) is *not* triggered
-      under the current gfx1250 caps snapshot for VGPR indices < 256.
-      Once we promote tests that touch VGPRs >= 256 OR enable the
-      ``HasVgprMSB`` cap, the adapter shim's ``CommonInstruction.__str__``
-      will need to grow ``setMsb`` to keep path (1) == (3); the left-path
-      side is already covered by ``InsertVgprMsbPass`` in stinkytofu.
+      for VGPR indices < 256, even though probed gfx1250 caps report
+      ``HasVgprMSB=1``. Once we promote tests that touch VGPRs >= 256, the
+      adapter shim's ``CommonInstruction.__str__`` will need to grow
+      ``setMsb`` to keep path (1) == (3); the left-path side is already
+      covered by ``InsertVgprMsbPass`` in stinkytofu.
 """
 
 from __future__ import annotations
 
+import base64
 import os
+import pickle
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -94,6 +98,31 @@ try:
     _STINKY_OK = True
 except ImportError:
     _STINKY_OK = False
+
+
+def _assembler_path():
+    """Locate an assembler for ``rocIsa.init``.
+
+    Unlike the string-only unit tests, ``rocIsa::init`` here cannot take an
+    empty path: ``initAsmCaps`` execs the assembler once per cap probe and
+    ``hardware_caps.hpp`` raises on exit code 127, so every path would fail
+    before building a Module. Probing also gives the *real* gfx1250 caps,
+    which is what paths (1) and (2) must be compared under.
+    """
+    rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+    search_path = os.pathsep.join(
+        [
+            os.path.join(rocm_path, "bin"),
+            os.path.join(rocm_path, "lib", "llvm", "bin"),
+            os.environ.get("PATH", ""),
+        ]
+    )
+    return shutil.which("amdclang++", path=search_path)
+
+
+_ASM_PATH = _assembler_path()
+_ASM_OK = _ASM_PATH is not None
+_PATHS_OK = _STINKY_OK and _ASM_OK
 
 
 # ===========================================================================
@@ -128,8 +157,10 @@ def _run_in_subproc(script: str, *, backend, timeout: float = 30) -> str:
     # PYTHONPATH is inherited from the parent runner (the test.sh wrapper
     # in this directory sets it; manual ``python3`` invocations need to
     # set it themselves).
+    # Ignore site initialization so an editable-install import hook cannot
+    # take precedence over the binding root supplied by test.sh via PYTHONPATH.
     proc = subprocess.run(
-        [sys.executable, "-c", script],
+        [sys.executable, "-S", "-c", script],
         env=env,
         capture_output=True,
         text=True,
@@ -161,11 +192,54 @@ def _run_in_subproc(script: str, *, backend, timeout: float = 30) -> str:
 # ``toString`` type suffixes) matches ``arch_tuple`` — same as real KernelWriter
 # flows (see ``KernelWriter`` / unit tests calling ``setKernel`` after ``init``).
 _INIT_PREAMBLE = textwrap.dedent("""\
+    import os
+    import shutil
     import rocisa
+    _rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+    _search_path = os.pathsep.join([
+        os.path.join(_rocm_path, "bin"),
+        os.path.join(_rocm_path, "lib", "llvm", "bin"),
+    ])
+    _assembler = shutil.which("amdclang++", path=_search_path) or "amdclang++"
     _ri = rocisa.rocIsa.getInstance()
-    _ri.init({arch_tuple}, "", False)
+    _ri.init({arch_tuple}, _assembler, False)
     _ri.setKernel({arch_tuple}, 64)
 """)
+
+
+# ``initAsmCaps`` execs the assembler once per cap probe, so a real ``init``
+# costs ~1min. Each test method spawns 2-3 subprocesses, which would put the
+# suite in the multi-hour range. rocIsa exposes getData/setData (its pickling
+# hooks), so probe once per arch here and inject the result instead.
+_PROBE_SCRIPT = textwrap.dedent("""\
+    import base64, pickle, sys
+    import rocisa
+    _ri = rocisa.rocIsa.getInstance()
+    _ri.init({arch_tuple}, {asm_path!r}, False)
+    sys.stdout.write({begin!r})
+    sys.stdout.write(base64.b64encode(pickle.dumps(_ri.getData())).decode())
+    sys.stdout.write({end!r})
+    sys.stdout.flush()
+""")
+
+_CAPS_CACHE: dict = {}
+
+
+def _caps_blob(arch_tuple) -> str:
+    """base64 pickle of probed rocIsa state for @p arch_tuple.
+
+    Probed in a subprocess so the parent runner's rocIsa singleton stays
+    untouched (sibling test modules register their own ISAs).
+    """
+    key = tuple(arch_tuple)
+    if key not in _CAPS_CACHE:
+        _CAPS_CACHE[key] = _run_in_subproc(
+            _PROBE_SCRIPT.format(arch_tuple=key, asm_path=_ASM_PATH,
+                                 begin=_BEGIN, end=_END),
+            backend=None,
+            timeout=600,
+        )
+    return _CAPS_CACHE[key]
 
 
 # ===========================================================================
@@ -215,7 +289,8 @@ def emit_path1_rocisa_tostring(build_snippet: str, *,
                                arch_tuple=(12, 5, 0)) -> str:
     """Path 1 -- default rocisa native + ``str(module)``."""
     script = (
-        _INIT_PREAMBLE.format(arch_tuple=arch_tuple)
+        _INIT_PREAMBLE.format(arch_tuple=arch_tuple,
+                              caps_blob=_caps_blob(arch_tuple))
         + build_snippet
         + "\n_payload = str(module)\n"
         + _EMIT_TAIL
@@ -234,7 +309,8 @@ def emit_path2_rocisa_stinkyasm(build_snippet: str, *,
     compared.
     """
     script = (
-        _INIT_PREAMBLE.format(arch_tuple=arch_tuple)
+        _INIT_PREAMBLE.format(arch_tuple=arch_tuple,
+                              caps_blob=_caps_blob(arch_tuple))
         + build_snippet
         + textwrap.dedent(f"""\
 
@@ -264,7 +340,8 @@ def emit_path2_rocisa_stinkyasm(build_snippet: str, *,
 
 
 def emit_path3_adapter_logical(build_snippet: str, *,
-                               arch_tuple=(12, 5, 0)) -> str:
+                               arch_tuple=(12, 5, 0),
+                               force_scaled: bool = False) -> str:
     """Path 3 -- stinkytofu adapter + logical IR pipeline + ``emitAssembly``.
 
     ``ROCISA_BACKEND=stinkytofu`` swaps ``rocisa.*`` for our adapter, so
@@ -272,9 +349,15 @@ def emit_path3_adapter_logical(build_snippet: str, *,
     ``VMovB32`` / ``vgpr`` objects. ``to_stinky_asm(list(arch))`` runs
     the C++ ``CompositeInstructionLoweringPass`` + ``ToStinkyAsmPass``
     via ``lower_logical_module``.
+
+    ``force_scaled`` drives ``rocIsa::setForceScaledWMMA`` (the gfx1250
+    low-precision scaled-WMMA toggle): True reproduces the strict/v0
+    build, False (default) the base gfx1250 build.
     """
     script = (
-        _INIT_PREAMBLE.format(arch_tuple=arch_tuple)
+        _INIT_PREAMBLE.format(arch_tuple=arch_tuple,
+                              caps_blob=_caps_blob(arch_tuple))
+        + f"_ri.setForceScaledWMMA({bool(force_scaled)})\n"
         + build_snippet
         + textwrap.dedent(f"""\
 
@@ -309,8 +392,8 @@ class _ThreePathEqualityCase:
     ARCH_TUPLE: tuple = (12, 5, 0)
     KERNEL_NAME: str = "k"
 
-    @unittest.skipUnless(_STINKY_OK,
-                         "path-3 needs the stinkytofu Python binding")
+    @unittest.skipUnless(_PATHS_OK,
+                         "path-3 needs the stinkytofu binding and an assembler")
     def test_path1_equals_path3(self):
         """Native ``toString`` == adapter logical-IR pipeline emit.
 
@@ -327,8 +410,8 @@ class _ThreePathEqualityCase:
             f"\n[path-3 adapter   ] {b!r}",
         )
 
-    @unittest.skipUnless(_STINKY_OK,
-                         "path-2 needs stinkytofu compiled into rocisa")
+    @unittest.skipUnless(_PATHS_OK,
+                         "path-2 needs stinkytofu in rocisa and an assembler")
     def test_path1_equals_path2(self):
         """Native ``toString`` == native ``toStinkyTofuModule`` body.
 
@@ -345,8 +428,8 @@ class _ThreePathEqualityCase:
             f"\n[path-2 stinky-asm] {b!r}",
         )
 
-    @unittest.skipUnless(_STINKY_OK,
-                         "paths 2 and 3 need the stinkytofu binding")
+    @unittest.skipUnless(_PATHS_OK,
+                         "paths 2 and 3 need the stinkytofu binding and an assembler")
     def test_path2_equals_path3(self):
         """Native ``toStinkyTofuModule`` body == adapter logical-IR emit.
 
@@ -1558,7 +1641,13 @@ class TestDSStoreB96Emission(unittest.TestCase, _ThreePathEqualityCase):
 
 
 class TestWmmaF6Gfx1250Scaled(unittest.TestCase):
-    """gfx1250 F6 WMMA lowers to the forceScaledWMMA form.
+    """gfx1250 F6 WMMA mnemonic is gated on the forceScaledWMMA toggle.
+
+    All three gfx1250 steppings share ISA (12,5,0) and the same caps, so the
+    only thing that selects the scaled form is ``rocIsa::setForceScaledWMMA``
+    (true for gfx1250-strict / gfx1250v0, false for base gfx1250). This pins
+    the adapter mnemonic against *both* toggle values so the base-vs-strict
+    split can't silently regress back to always-scaled.
 
     Three-path equality is *not* usable here: native rocisa probes the
     assembler for ``HasWMMA_f8f6f4`` / ``HasWMMA_V3`` and reports 0 in a
@@ -1582,17 +1671,141 @@ class TestWmmaF6Gfx1250Scaled(unittest.TestCase):
             neg=False, comment="wmma f6 probe"))
     """)
 
-    EXPECTED = (
+    # Strict/v0: forceScaledWMMA on -> v_wmma_scale_* with ", 0, 0" scales.
+    EXPECTED_SCALED = (
         "v_wmma_scale_f32_16x16x128_f8f6f4 v[0:7], v[8:15], v[16:23], v[0:7], "
         "0, 0 matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP6"
         " // wmma f6 probe\n"
     )
 
+    # Base gfx1250: toggle off -> plain v_wmma_*, no scale operands. The
+    # matrix_*_fmt modifiers are caps-gated (HasWMMA_f8f6f4), so they stay.
+    EXPECTED_PLAIN = (
+        "v_wmma_f32_16x16x128_f8f6f4 v[0:7], v[8:15], v[16:23], v[0:7]"
+        " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP6"
+        " // wmma f6 probe\n"
+    )
+
     @unittest.skipUnless(_STINKY_OK, "needs the stinkytofu Python binding")
     def test_adapter_emits_forced_scaled_wmma(self):
+        """Strict/v0 build (toggle on) keeps the scaled mnemonic."""
         got = emit_path3_adapter_logical(
-            self.BUILD_MODULE_SNIPPET, arch_tuple=self.ARCH_TUPLE)
-        self.assertEqual(got, self.EXPECTED, f"\n[adapter] {got!r}")
+            self.BUILD_MODULE_SNIPPET, arch_tuple=self.ARCH_TUPLE,
+            force_scaled=True)
+        self.assertEqual(got, self.EXPECTED_SCALED, f"\n[adapter] {got!r}")
+
+    @unittest.skipUnless(_STINKY_OK, "needs the stinkytofu Python binding")
+    def test_adapter_base_gfx1250_emits_plain_wmma(self):
+        """Base gfx1250 (toggle off) emits the plain, unscaled mnemonic."""
+        got = emit_path3_adapter_logical(
+            self.BUILD_MODULE_SNIPPET, arch_tuple=self.ARCH_TUPLE,
+            force_scaled=False)
+        self.assertEqual(got, self.EXPECTED_PLAIN, f"\n[adapter] {got!r}")
+
+    @unittest.skipUnless(_STINKY_OK, "needs the stinkytofu Python binding")
+    def test_toggle_changes_mnemonic(self):
+        """The toggle actually flips the output (regression guard)."""
+        self.assertNotEqual(self.EXPECTED_SCALED, self.EXPECTED_PLAIN)
+
+
+# ===========================================================================
+# true16 half-select (gfx1250 is NoSDWA, so these take the true16 encoding)
+# ===========================================================================
+#
+# These are the cases that pin the adaptor's own
+# ``t16 -> _apply_true16 -> to_stinky_logical`` chain against both native
+# paths: path 3 carries the half on the operand, re-hangs it on the logical
+# instruction as True16Modifiers, and must come back out of ``emitAssembly``
+# as the same ``.l``/``.h`` text the native ``toString`` prints.
+#
+# The legacy (SDWA) encoding of the same helpers is not three-path testable --
+# stinkytofu only registers a gfx1250 backend, so path 3 has nothing to lower
+# to on gfx9/gfx10. It is covered instead by ``tests/test_true16.py``, which
+# pins both targets' text directly.
+
+
+class TestECvtF16toF32True16Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_cvt_f32_f16 v0, v1.h`` -- half on the f16 *source*."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.container import vgpr
+        from rocisa.enum import HighBitSel
+        from rocisa.instruction import ECvtF16toF32
+        module = Module("k")
+        module.add(ECvtF16toF32(dst=vgpr(0), src=vgpr(1), sel=HighBitSel.HIGH))
+    """)
+
+
+class TestECvtF32toF16True16Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_cvt_f16_f32 v0.h, v1`` -- half on the f16 *destination*."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.container import vgpr
+        from rocisa.enum import HighBitSel
+        from rocisa.instruction import ECvtF32toF16
+        module = Module("k")
+        module.add(ECvtF32toF16(dst=vgpr(0), src=vgpr(1), sel=HighBitSel.HIGH))
+    """)
+
+
+class TestECvtF32toF16DefaultHalfEmission(unittest.TestCase,
+                                          _ThreePathEqualityCase):
+    """``sel`` omitted: both sides must fall back to the low half.
+
+    A suffix-less 16-bit destination is illegal on NoSDWA, so this pins the
+    two implementations to the *same* default rather than letting one emit a
+    bare ``v0``.
+    """
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.container import vgpr
+        from rocisa.instruction import ECvtF32toF16
+        module = Module("k")
+        module.add(ECvtF32toF16(dst=vgpr(0), src=vgpr(1)))
+    """)
+
+
+class TestVMaxF16True16Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_max_f16 v0.l, v1.l, v2.h`` -- t16-tagged binary f16 ALU."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.container import vgpr
+        from rocisa.enum import HighBitSel
+        from rocisa.instruction import VMaxF16, t16
+        module = Module("k")
+        module.add(VMaxF16(
+            dst=t16(vgpr(0), HighBitSel.LOW),
+            src0=t16(vgpr(1), HighBitSel.LOW),
+            src1=t16(vgpr(2), HighBitSel.HIGH),
+        ))
+    """)
+
+
+class TestVCndMaskB16True16Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_cndmask_b16`` -- t16-tagged select whose mask src has no half.
+
+    The mask is passed explicitly: left implicit, path 1 prints ``vcc`` while
+    path 3 prints ``vcc_lo``, a pre-existing naming divergence in the shim's
+    default that has nothing to do with the half-select under test here.
+    """
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.container import sgpr, vgpr
+        from rocisa.enum import HighBitSel
+        from rocisa.instruction import VCndMaskB16, t16
+        module = Module("k")
+        module.add(VCndMaskB16(
+            dst=t16(vgpr(0), HighBitSel.LOW),
+            src0=t16(vgpr(1), HighBitSel.LOW),
+            src1=t16(vgpr(2), HighBitSel.HIGH),
+            src2=sgpr(0),
+        ))
+    """)
 
 
 ## DSBPermuteB32 emission consistency is skipped: native rocisa path-1 toString()

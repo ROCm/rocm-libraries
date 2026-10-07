@@ -165,6 +165,38 @@ class TestGetMxsTileSpanInfoGate:
         assert info == {"vectorWidth": 1, "numGroups": 4}
 
 
+class TestLocalReadMXGuards:
+    def test_rejects_nonpositive_mx_unit_before_division(self):
+        kernel = {
+            "VectorWidthMXSA": 1,
+            "MatrixInstK": 128,
+            "ProblemType": {"MXBlockA": 256},
+        }
+        tensor_parameters = {
+            "tensorChar": "MXSA",
+            "tile01Idx": 0,
+            "localReadInstruction": object(),
+        }
+
+        with pytest.raises(RuntimeError, match=r"invalid MX scale unit"):
+            LocalReadMFMA().localReadMX(None, kernel, 0, 0, 0, tensor_parameters)
+
+    def test_rejects_read_narrower_than_one_mx_scale_block(self):
+        kernel = {
+            "VectorWidthMXSA": 1,
+            "MatrixInstK": 128,
+            "ProblemType": {"MXBlockA": 32},
+        }
+        tensor_parameters = {
+            "tensorChar": "MXSA",
+            "tile01Idx": 0,
+            "localReadInstruction": types.SimpleNamespace(blockWidth=0.25),
+        }
+
+        with pytest.raises(RuntimeError, match=r"unsupported MX-scale local read"):
+            LocalReadMFMA().localReadMX(None, kernel, 0, 0, 0, tensor_parameters)
+
+
 class TestGetMxsTileSpanInfoAxisNeutral:
     """The gate is axis-neutral: tile01 selects axis, MatrixInst, and wave group."""
 

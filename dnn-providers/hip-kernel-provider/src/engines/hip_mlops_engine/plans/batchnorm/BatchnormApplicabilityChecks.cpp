@@ -502,17 +502,27 @@ void checkActivationModeSupported(
        == (isBwd ? hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD
                  : hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD))
     {
-        if(!activAttr.relu_lower_clip_slope())
+        if(activAttr.relu_lower_clip_slope().has_value())
         {
-            return;
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Batchnorm fused activation does not support Leaky ReLU.");
         }
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Batchnorm fused activation does not support Leaky ReLU.");
+        if(activAttr.relu_lower_clip().has_value() && activAttr.relu_lower_clip().value() != 0.0f
+           && !activAttr.relu_upper_clip().has_value())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Batchnorm fused activation does not support standard ReLU with a non-zero "
+                "lower_clip.");
+        }
+        return;
     }
 
+    const std::string activationModeName(EnumNamePointwiseMode(activAttr.operation()));
     throw hipdnn_plugin_sdk::HipdnnPluginException(
-        HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Unsupported activation mode for batchnorm fusion.");
+        HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+        "Unsupported activation mode for batchnorm fusion: " + activationModeName + ".");
 }
 
 } // namespace

@@ -1,0 +1,45 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+"""S01 - KernelWriterAssembly tailLoopAllocDTVVgpr (DirectToVgprA) characterization.
+
+Drives the designed DirectToVgprA config
+(``data/test_data/_designed/gfx942/s01_tailloopallocdtvvgpr_directtovgp.yaml``)
+through the config-driven emit harness. Targets ``tailLoopAllocDTVVgpr`` in
+``Tensile/KernelWriterAssembly.py`` -- the packDTVA/convDTVA branch (A side) and
+the ``vgprBaseA`` checkout, plus the DirectToVgpr emit arms those RegSets feed.
+
+Reachability: ``TransposeA=False`` gives ``TLUA=True``; with ``TransposeLDS=1``
+that forces ``UnrollMajorLDSA=False`` so ``lrvwTileA=VectorWidthA=2 (>1)``. bf16
+(``numBytes<4``) + TLUA takes the DTV pack path, and ``DirectToVgprA=True`` with
+``lrvwTileA>1`` and ``MIInputPerThread=4 (>1)`` makes ``packDTVA`` True, arming
+the A-side alloc branch. ``emit`` runs assignDerivedParameters + emission, so the
+target lines fire during the emit call.
+
+CPU-only; no GPU, no compile, no hardware. pytestmark = pytest.mark.unit.
+"""
+
+import os
+
+import pytest
+
+from config_harness import assert_config_emits
+
+pytestmark = pytest.mark.unit
+
+_ARCH = "gfx942"
+
+_CONFIG = os.path.join(
+    os.path.dirname(__file__),
+    "data",
+    "test_data",
+    "_designed",
+    "gfx942",
+    "s01_tailloopallocdtvvgpr_directtovgp.yaml",
+)
+
+
+def test_s01_tailloopallocdtvvgpr_directtovgp_emits():
+    """The selected configuration emits valid assembly."""
+    assert_config_emits(_CONFIG, _ARCH, limit=8, validate_source=True)

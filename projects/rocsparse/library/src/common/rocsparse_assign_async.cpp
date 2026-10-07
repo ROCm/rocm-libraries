@@ -88,7 +88,7 @@ rocsparse_status rocsparse::assign_max_async(int64_t             n,
                                              void*               dest,
                                              hipStream_t         stream)
 {
-    switch(indextype)
+    switch(static_cast<int>(indextype))
     {
     case rocsparse_indextype_i32:
     {

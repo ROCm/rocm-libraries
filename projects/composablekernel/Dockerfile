@@ -1,7 +1,7 @@
 
 FROM ubuntu:24.04
 ARG DEBIAN_FRONTEND=noninteractive
-ARG ROCMVERSION=7.14
+ARG ROCMVERSION=10.0
 
 # TheRock nightly tarball configuration.
 # By default, discovers the latest tarball from the nightlies index.
@@ -42,10 +42,10 @@ RUN if [ "$compiler_version" = "therock" ]; then \
         tar -xzf /tmp/rocm.tar.gz -C /opt/rocm --strip-components=1 && \
         rm /tmp/rocm.tar.gz ; \
     else echo "using the release compiler" && \
-        wget https://repo.amd.com/rocm/tarball-multi-arch/therock-dist-linux-multiarch-7.14.0.tar.gz && \
+        wget -O therock-dist-linux.tar.gz https://stable.repo.amd.com/rocm/core/tarball/therock-dist-linux-multiarch-10.0.0.tar.gz && \
         rm -rf /opt/rocm && mkdir /opt/rocm && \
-        tar -xzf therock-dist-linux-multiarch-7.14.0.tar.gz -C /opt/rocm --strip-components=1 && \
-        rm therock-dist-linux-multiarch-7.14.0.tar.gz && \
+        tar -xzf therock-dist-linux.tar.gz -C /opt/rocm --strip-components=1 && \
+        rm therock-dist-linux.tar.gz && \
         wget https://repo.radeon.com/amdgpu-install/31.40/ubuntu/noble/amdgpu-install_31.40.314000-1_all.deb && \
         apt install ./amdgpu-install_31.40.314000-1_all.deb -y; \
     fi
@@ -100,7 +100,10 @@ RUN set -x && \
     wget https://github.com/Yelp/dumb-init/releases/download/v1.2.0/dumb-init_1.2.0_amd64.deb && \
     dpkg -i dumb-init_*.deb && rm dumb-init_*.deb && \
 # Install packages for processing the performance results
-    pip3 install --break-system-packages --upgrade pytest pymysql pandas==2.2.3 sqlalchemy==2.0.3 setuptools-rust setuptools sshtunnel==0.4.0 && \
+# ml_dtypes==0.6.0 is pinned because it provides both OCP (float8_e4m3fn/e5m2)
+# and FNUZ (float8_e4m3fnuz/e5m2fnuz) fp8 variants used by the dispatcher
+# correctness tests. An unpinned upgrade could silently change reference values.
+    pip3 install --break-system-packages --upgrade pytest pymysql pandas==2.2.3 sqlalchemy==2.0.3 setuptools-rust setuptools sshtunnel==0.4.0 ml_dtypes==0.6.0 && \
 # Add render group
     groupadd -f render && \
 # Install the new rocm-cmake version

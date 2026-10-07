@@ -1,5 +1,5 @@
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict] # not supported by arch
 
 GlobalParameters:
   SyncsPerBenchmark: 0
@@ -35,6 +35,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1, 1, 1, 1]
@@ -52,7 +53,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - TransposeLDS: [1]
         - StaggerU: [0]
-        - StreamK: [0]
+        - TileProcessingStrategy: ["None"]
         - DirectToLds: [1,2,3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -62,6 +63,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 2, 2, 2, 2]
@@ -79,7 +81,8 @@ BenchmarkProblems:
         - TransposeLDS: [1]
         - StaggerU: [0]
         - TailloopInNll: [false, true]
-        - StreamK: [0,3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - DirectToLds: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -105,6 +108,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1, 1, 1, 1]
@@ -125,7 +129,8 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - StaggerU: [0]
         - TailloopInNll: [false, true]
-        - StreamK: [0,3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - DirectToLds: [1, 2, 3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -150,6 +155,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,   1, 1,  1,1 ]
@@ -219,6 +225,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,   1, 1,  1,1 ]
@@ -277,6 +284,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,   1, 1,  1,1 ]
@@ -343,6 +351,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
@@ -389,6 +398,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,   1, 1,  1,1 ]
@@ -453,6 +463,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,   1, 1,  1,1 ]
@@ -524,6 +535,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
@@ -572,6 +584,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,   1, 1,  1,1 ]
@@ -642,6 +655,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           #- [32, 32, 16, 1, 1, 2, 2, 2, 2 ]
@@ -669,7 +683,8 @@ BenchmarkProblems:
         - LDSTrInst: [false, true]
         - SourceSwap: [true]
         - TailloopInNll: [false, true]
-        - StreamK: [0,3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -682,6 +697,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 8, 8, 2, 2 ]
@@ -711,6 +727,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [32, 32, 16, 1, 1, 1, 1, 2, 2 ]
@@ -727,7 +744,8 @@ BenchmarkProblems:
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - 1LDSBuffer: [-1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - LDSTrInst: [true]
         - UseSgprForGRO: [1]
         - SourceSwap: [true]
@@ -758,6 +776,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
@@ -793,6 +812,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 1, 1, 2, 2 ]
@@ -813,7 +833,8 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - SourceSwap: [true]
         - TailloopInNll: [false, true]
-        - StreamK: [0,3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - DtlPlusLdsBuf: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -823,6 +844,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
@@ -870,6 +892,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
@@ -894,7 +917,8 @@ BenchmarkProblems:
         - GlobalSplitU: [1, 2]
         - SourceSwap: [true]
         - TailloopInNll: [false, true]
-        - StreamK: [0,3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -924,6 +948,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           #- [32, 32, 16, 1, 1, 2, 2, 2, 2 ]
@@ -954,6 +979,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
@@ -1002,6 +1028,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           #- [32, 32, 16, 1, 1, 2, 2, 2, 2 ]
@@ -1039,6 +1066,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 8, 8, 2, 2 ]
@@ -1060,7 +1088,8 @@ BenchmarkProblems:
         - SourceSwap: [true]
         - LDSTrInst: [false, true]
         - TailloopInNll: [false, true]
-        - StreamK: [0,3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -1069,6 +1098,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 1, 1, 2, 2 ]
@@ -1093,6 +1123,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
@@ -1139,6 +1170,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
            - [16, 16, 32, 1,  1, 2, 1,  4, 1 ]
@@ -1155,7 +1187,8 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [2]
         - ClusterLocalRead: [0]#[0,1]
         - DirectToLds: [1, 2, 3]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - LdsPadA: [0] #[-1]
         - LdsPadB: [8] #[-1]
         - StaggerU: [0]
@@ -1187,6 +1220,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
            - [16, 16, 32, 1, 1, 12, 4, 2, 2]
@@ -1202,8 +1236,9 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [8]
         - ClusterLocalRead: [0]
         - DirectToLds: [1]
-        - StreamK: [3]
-        - StreamKXCCMapping: [8]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
+        - PersistentXCCMapping: [8]
         - StaggerU: [0]
         - WorkGroupMapping: [8]
         - WorkGroupMappingXCC: [4]

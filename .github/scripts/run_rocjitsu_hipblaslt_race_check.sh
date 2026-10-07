@@ -14,7 +14,8 @@ set -euo pipefail
 #   1. Use the TheRock artifact tree unpacked at ROCM_PATH.
 #   2. Build rocjitsu from the rocm-systems checkout in ROCJITSU_SOURCE_DIR.
 #   3. Select a rocjitsu config for gfx942 or gfx950.
-#   4. Run hipblaslt-bench and a reduced TensileLite smoke under RJ_RACE=1.
+#   4. Run hipblaslt-bench and a reduced TensileLite smoke with the race and
+#      logging plugins enabled in per-workload configs.
 
 # These defaults match the GitHub Actions workspace layout: ROCM_PATH is the
 # unpacked TheRock artifact tree, ROCJITSU_SOURCE_DIR is the checked-out
@@ -53,7 +54,7 @@ select_rocjitsu_target() {
       ;;
     gfx950*)
       ROCJITSU_GPU_TARGET="gfx950"
-      default_config="${ROCJITSU_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json"
+      default_config="${ROCJITSU_SOURCE_DIR}/configs/gfx950_mi355x_kmd.json"
       ;;
     *)
       echo "Unsupported rocjitsu race-check target: ${target_selector}" >&2
@@ -209,8 +210,8 @@ echo "PYTHONPATH=${PYTHONPATH}"
 # TODO(newling): Track migration to a packaged rocjitsu once TheRock provides a
 # complete runnable artifact. Until then, build rocjitsu from the rocm-systems
 # checkout selected by the workflow so this job controls the tool source.
-# Build only the CLI and its LD_PRELOAD runtime; this keeps the job independent
-# of full rocm-systems packaging.
+# Build only the CLI, its LD_PRELOAD runtime, and the two plugins used below;
+# this keeps the job independent of full rocm-systems packaging.
 #
 # The warning suppressions keep the local rocjitsu build from failing on
 # compiler/header warning mismatches. `nested-anon-types` is a Clang warning for
@@ -238,11 +239,15 @@ cmake_args+=(
 
 run_timed "configure rocjitsu" cmake "${cmake_args[@]}"
 
-# The pinned source revision exposes stable targets for the CLI launcher and its
-# LD_PRELOAD runtime. Both are required to execute the workloads below.
+# The pinned source revision exposes stable targets for the CLI launcher, its
+# LD_PRELOAD runtime, and the separately loaded race and logging plugins.
 run_timed "build rocjitsu" \
   cmake --build "${ROCJITSU_BUILD_DIR}" \
-  --target rocjitsu_bin rocjitsu_shared
+  --target \
+    rocjitsu_bin \
+    rocjitsu_shared \
+    rocjitsu_plugin_race_so \
+    rocjitsu_plugin_logging_so
 
 ROCJITSU_BIN="${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu"
 if [[ ! -x "${ROCJITSU_BIN}" ]]; then
@@ -250,51 +255,131 @@ if [[ ! -x "${ROCJITSU_BIN}" ]]; then
   exit 1
 fi
 
+ROCJITSU_PLUGINS=(
+  "${ROCJITSU_BUILD_DIR}/librocjitsu_plugin_race.so"
+  "${ROCJITSU_BUILD_DIR}/librocjitsu_plugin_logging.so"
+)
+for plugin in "${ROCJITSU_PLUGINS[@]}"; do
+  if [[ ! -s "${plugin}" ]]; then
+    echo "rocjitsu plugin not found after build: ${plugin}" >&2
+    exit 1
+  fi
+done
+
 show_rocjitsu_version() {
   echo "rocjitsu version:"
   "${ROCJITSU_BIN}" --version
 }
 
+write_rocjitsu_run_config() {
+  local output_config="$1"
+  local sink_dir="$2"
+
+  python3 - "${ROCJITSU_CONFIG}" "${output_config}" "${sink_dir}" <<'PY'
+import json
+import sys
+
+base_config, output_config, sink_dir = sys.argv[1:]
+with open(base_config, encoding="utf-8") as stream:
+    config = json.load(stream)
+
+plugins = config.setdefault("plugins", {})
+if not isinstance(plugins, dict):
+    raise TypeError("rocjitsu config 'plugins' entry must be an object")
+plugins["race"] = {}
+plugins["logging"] = {}
+config["sinks"] = {"types": ["stderr", "file"], "dir": sink_dir}
+
+with open(output_config, "w", encoding="utf-8") as stream:
+    json.dump(config, stream, indent=2)
+    stream.write("\n")
+PY
+}
+
+validate_race_check_output() {
+  local label="$1"
+  local command_status="$2"
+  local output_log="$3"
+  local race_log="$4"
+  local logging_log="$5"
+  local failed=0
+
+  if [[ "${command_status}" -ne 0 ]]; then
+    echo "${label} command failed with status ${command_status}" >&2
+    failed=1
+  fi
+
+  if [[ ! -s "${output_log}" ]]; then
+    echo "${label} produced no workload log: ${output_log}" >&2
+    failed=1
+  fi
+
+  if [[ ! -s "${race_log}" ]]; then
+    echo "${label} produced no race-detector sink log: ${race_log}" >&2
+    failed=1
+  else
+    if ! grep -Fq "[rocjitsu] Kernel dispatch:" "${race_log}"; then
+      echo "${label} race-detector sink contains no kernel dispatch evidence" >&2
+      failed=1
+    fi
+    if grep -q '^RACE ' "${race_log}"; then
+      echo "rocjitsu race detector reported a race in ${label}:" >&2
+      cat "${race_log}" >&2
+      failed=1
+    fi
+  fi
+
+  if [[ ! -s "${logging_log}" ]]; then
+    echo "${label} produced no logging-plugin sink log: ${logging_log}" >&2
+    failed=1
+  elif ! grep -Fq "[rocjitsu] mfma detected in dispatch " "${logging_log}"; then
+    echo "${label} did not reach an MFMA dispatch under rocjitsu; detector result is inconclusive" >&2
+    failed=1
+  fi
+
+  return "${failed}"
+}
+
 run_hipblaslt_bench_check() {
-  mkdir -p "${RACE_REPORT_DIR}/hipblaslt-bench"
+  local report_dir="${RACE_REPORT_DIR}/hipblaslt-bench"
+  local run_config="${report_dir}/rocjitsu.json"
+  local output_log="${RACE_REPORT_DIR}/hipblaslt-bench.log"
+  local race_log="${report_dir}/race.log"
+  local logging_log="${report_dir}/logging.log"
+  mkdir -p "${report_dir}"
+  rm -f "${race_log}" "${logging_log}"
+  if ! write_rocjitsu_run_config "${run_config}" "${report_dir}"; then
+    echo "failed to create hipblaslt-bench rocjitsu config" >&2
+    return 1
+  fi
+
   echo "running hipblaslt-bench under rocjitsu race detection"
-  # Use zero initialization because HPL initialization currently triggers a
-  # separate device-fill kernel LDS race. Keep this check scoped to the
-  # hipBLASLt GEMM dispatch path while that issue is investigated separately.
+  # Exercise the normal device-side HPL initialization path as well as the GEMM.
+  # Current rocjitsu models same-wave LDS ordering used by these fill kernels.
   timeout "${RACE_TIMEOUT_SECONDS}" \
     env \
       HSA_ENABLE_SDMA=1 \
-      RJ_RACE=1 \
-      RJ_LOG=1 \
-      RJ_SINKS=stderr,file \
-      RJ_SINK_DIR="${RACE_REPORT_DIR}/hipblaslt-bench" \
       "${ROCJITSU_BIN}" \
-        --config "${ROCJITSU_CONFIG}" \
+        --config "${run_config}" \
         -- "${HIPBLASLT_BENCH}" \
           --precision f32_r \
-          --initialization zero \
+          --initialization hpl \
           --verify \
           -m 128 \
           -n 128 \
           -k 128 \
           --iters 1 \
           --cold_iters 0 \
-    2>&1 | tee "${RACE_REPORT_DIR}/hipblaslt-bench.log"
+    2>&1 | tee "${output_log}"
   local status=$?
-  if [[ "${status}" -ne 0 ]]; then
-    echo "hipblaslt-bench race check command failed with status ${status}" >&2
-    return "${status}"
+  local validation_status=0
+
+  if ! validate_race_check_output "hipblaslt-bench race check" \
+    "${status}" "${output_log}" "${race_log}" "${logging_log}"; then
+    validation_status=1
   fi
 
-  # rocjitsu writes race findings to its sink directory. The application may
-  # still exit normally, so explicitly inspect race.log and make any report a CI
-  # failure with the report echoed into the job log.
-  if [[ -f "${RACE_REPORT_DIR}/hipblaslt-bench/race.log" ]] &&
-    grep -q '^RACE ' "${RACE_REPORT_DIR}/hipblaslt-bench/race.log"; then
-    echo "rocjitsu race detector reported a race in hipblaslt-bench:" >&2
-    cat "${RACE_REPORT_DIR}/hipblaslt-bench/race.log" >&2
-    return 1
-  fi
+  return "${validation_status}"
 }
 
 
@@ -370,8 +455,17 @@ run_tensilelite_client_check() {
   local test_dir="${RACE_REPORT_DIR}/tensilelite"
   local output_dir="${test_dir}/output"
   local sink_dir="${test_dir}/sinks"
+  local run_config="${test_dir}/rocjitsu.json"
+  local output_log="${RACE_REPORT_DIR}/tensilelite-client.log"
+  local race_log="${sink_dir}/race.log"
+  local logging_log="${sink_dir}/logging.log"
   local yaml="${test_dir}/f32_nt_32x32.yaml"
   mkdir -p "${output_dir}" "${sink_dir}"
+  rm -f "${race_log}" "${logging_log}"
+  if ! write_rocjitsu_run_config "${run_config}" "${sink_dir}"; then
+    echo "failed to create tensilelite-client rocjitsu config" >&2
+    return 1
+  fi
   write_tensilelite_check_yaml "${yaml}"
 
   local tensile_args=(
@@ -393,33 +487,24 @@ run_tensilelite_client_check() {
   timeout "${TENSILELITE_TIMEOUT_SECONDS}" \
     env \
       HSA_ENABLE_SDMA=1 \
-      RJ_RACE=1 \
-      RJ_LOG=1 \
-      RJ_SINKS=stderr,file \
-      RJ_SINK_DIR="${sink_dir}" \
       "${ROCJITSU_BIN}" \
-        --config "${ROCJITSU_CONFIG}" \
+        --config "${run_config}" \
         -- python3 "${TENSILE_DRIVER}" "${tensile_args[@]}" \
-    2>&1 | tee "${RACE_REPORT_DIR}/tensilelite-client.log"
+    2>&1 | tee "${output_log}"
   local status=$?
-  if [[ "${status}" -ne 0 ]]; then
-    echo "tensilelite-client race check command failed with status ${status}" >&2
-    return "${status}"
-  fi
+  local validation_status=0
 
-  if ! grep -q "PASSED" "${RACE_REPORT_DIR}/tensilelite-client.log"; then
+  if ! grep -q "PASSED" "${output_log}"; then
     echo "tensilelite-client race check did not report validation success" >&2
-    return 1
+    validation_status=1
   fi
 
-  # As above, client success and race-detector success are distinct signals.
-  # Require both: the client must finish cleanly, and rocjitsu must leave the
-  # race sink free of RACE records.
-  if [[ -f "${sink_dir}/race.log" ]] && grep -q '^RACE ' "${sink_dir}/race.log"; then
-    echo "rocjitsu race detector reported a race in tensilelite-client:" >&2
-    cat "${sink_dir}/race.log" >&2
-    return 1
+  if ! validate_race_check_output "tensilelite-client race check" \
+    "${status}" "${output_log}" "${race_log}" "${logging_log}"; then
+    validation_status=1
   fi
+
+  return "${validation_status}"
 }
 
 run_timed "rocjitsu version" show_rocjitsu_version

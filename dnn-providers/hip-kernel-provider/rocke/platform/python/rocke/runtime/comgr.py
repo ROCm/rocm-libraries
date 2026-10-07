@@ -62,15 +62,27 @@ def _load_lib() -> ctypes.CDLL:
     # ``_torch_bundled_lib`` in ``runtime_coexistence`` for why a
     # torch-shipped libamd_comgr is preferred over /opt/rocm when torch is
     # in the process.
-    err = None
+    # Every candidate's failure is kept rather than overwritten. Which paths were
+    # tried, in order, is the whole diagnosis when resolution lands somewhere
+    # unexpected, and the interesting failure is usually the first -- the library
+    # that was supposed to load -- not the last.
+    failures: List[Tuple[str, OSError]] = []
     for p in _candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"]):
         try:
             _add_dll_dir(p)
             return ctypes.CDLL(p)
         except OSError as e:
-            err = e
+            failures.append((p, e))
     name = "amd_comgr.dll" if _IS_WINDOWS else "libamd_comgr.so"
-    raise ComgrError(f"cannot load {name} ({err!r})")
+    if not failures:
+        raise ComgrError(
+            f"cannot load {name}: no candidate path was produced. Set "
+            f"ROCKE_COMGR_LIB to an explicit library, or make one discoverable."
+        )
+    tried = "\n".join(f"  {path}: {exc}" for path, exc in failures)
+    raise ComgrError(
+        f"cannot load {name}; {len(failures)} candidate(s) failed:\n{tried}"
+    )
 
 
 # Lazy: resolved on first call so that rocke and torch can be imported

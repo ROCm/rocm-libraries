@@ -226,19 +226,52 @@ inline Error
                                                    "tensor byte alignment"));
     }
 
-    // Link the ragged-offset aux tensor by UID so the lowered graph carries the
-    // ragged-tensor relationship. The aux tensor is gathered alongside node I/O
-    // (see BaseNode::gather_hipdnn_tensors), so its UID is assigned before
-    // lowering begins.
+    // Only send the ragged-offset multiplier when non-default. Sending it
+    // unconditionally would break lowering against a pre-1.4.0 backend that doesn't
+    // recognize HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_MULTIPLIER (same rationale as alignment).
+    if(tensor->get_ragged_offset_multiplier() != DEFAULT_RAGGED_OFFSET_MULTIPLIER)
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(desc.get(),
+                                                   HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_MULTIPLIER,
+                                                   HIPDNN_TYPE_INT64,
+                                                   tensor->get_ragged_offset_multiplier(),
+                                                   "tensor ragged offset multiplier"));
+    }
+
+    // Lower the ragged-offset aux as its own tensor descriptor and link it, so the
+    // backend can resolve the aux's dims/strides/dtype rather than a bare UID.
+    // createOrFindTensorDesc dedups a shared or also-an-input aux by UID and
+    // finalizes it before it is referenced here.
     if(tensor->has_ragged_offset())
     {
-        const auto raggedOffset = tensor->get_ragged_offset();
+        const auto& raggedOffset = tensor->get_ragged_offset();
+
+        // The aux must have backing storage and must not itself be ragged.
+        // Rejecting a nested aux also breaks any offset cycle (every node in a
+        // cycle is ragged, so the first hop is rejected) before the recursion
+        // below could overflow the stack. Mirrors the backend deserialize
+        // enforcement in GraphDescriptor::relinkRaggedOffsets.
+        if(raggedOffset->get_is_virtual())
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Ragged-offset aux tensor " + std::to_string(raggedOffset->get_uid())
+                        + " of tensor " + std::to_string(uid) + " must not be virtual"};
+        }
+        if(raggedOffset->has_ragged_offset())
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Ragged-offset aux tensor " + std::to_string(raggedOffset->get_uid())
+                        + " of tensor " + std::to_string(uid)
+                        + " must not itself carry a ragged offset"};
+        }
+
+        HIPDNN_CHECK_ERROR(createOrFindTensorDesc(tensorDescs, raggedOffset));
         HIPDNN_CHECK_ERROR(
-            setDescriptorAttrScalar(desc.get(),
-                                    HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC,
-                                    HIPDNN_TYPE_INT64,
-                                    raggedOffset->get_uid(),
-                                    "tensor ragged offset UID " + std::to_string(uid)));
+            setDescriptorAttrTensorRef(desc.get(),
+                                       HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC,
+                                       raggedOffset->get_uid(),
+                                       tensorDescs,
+                                       "tensor ragged offset " + std::to_string(uid)));
     }
 
     if(!std::holds_alternative<std::monostate>(tensor->get_value_variant()))

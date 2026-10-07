@@ -11,7 +11,6 @@ add_subdirectory(hip)
 
 target_sources(tensilelite-host
     PRIVATE
-        #"${CMAKE_CURRENT_SOURCE_DIR}/ArithmeticUnitTypes.cpp" # this file isn't built in existing src tree
         "${CMAKE_CURRENT_SOURCE_DIR}/Activation.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AMDGPU.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ContractionProblem.cpp"

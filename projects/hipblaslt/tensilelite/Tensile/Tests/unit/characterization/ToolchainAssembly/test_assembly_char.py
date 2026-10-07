@@ -20,8 +20,10 @@ pytestmark = pytest.mark.unit
 class _StubLinker:
     def __init__(self):
         self.calls = []
+        self.input_types = []
 
     def __call__(self, objFiles, coFileRaw):
+        self.input_types.append(type(objFiles))
         self.calls.append((list(objFiles), coFileRaw))
         Path(coFileRaw).write_text("raw")  # create the raw file for the move path
 
@@ -97,3 +99,23 @@ def test_build_honors_validate_metadata(tmp_path, monkeypatch, validate):
 
     assert seen == ([1] if validate else [])
     assert sorted(p.name for p in out) == ["TensileLibrary_gfx942.co"]
+
+def test_explicit_code_object_link_inputs_are_sorted_and_stable(tmp_path):
+    asmDir, destDir = tmp_path / "asm", tmp_path / "dest"
+    asmDir.mkdir(); destDir.mkdir()
+    observed = []
+    observed_types = []
+
+    for bases in (("z", "a", "m"), ("m", "z", "a")):
+        linker = _StubLinker()
+        kernels = [_kernel(base, coFile="CustomCO") for base in bases]
+        buildAssemblyCodeObjectFiles(
+            linker, _StubBundler(), kernels, destDir, asmDir, compress=True
+        )
+        assert len(linker.calls) == 1
+        observed.append(linker.calls[0][0])
+        observed_types.append(linker.input_types[0])
+
+    expected = [str(asmDir / f"{base}.o") for base in ("a", "m", "z")]
+    assert observed == [expected, expected]
+    assert observed_types == [list, list]

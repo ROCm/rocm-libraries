@@ -1,5 +1,5 @@
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250-strict] # not supported by arch
 
 GlobalParameters:
   SyncsPerBenchmark: 0
@@ -75,14 +75,15 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
         - ExpandPointerSwap: [false]
         - TransposeLDS: [-1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
-        - 1LDSBuffer: [-1]
+        - 1LDSBuffer: [0]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - SourceSwap: [false]
@@ -125,6 +126,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
+        - LDSTrInst: [True, False]
         - MatrixInstruction:
           # - [16, 16, 32, 1, 1, 2, 2, 2, 2]
           # - [16, 16, 32, 1, 1, 2, 1, 1, 2]
@@ -137,14 +139,15 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
         - ExpandPointerSwap: [false]
         - TransposeLDS: [-1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
-        - 1LDSBuffer: [-1]
+        - 1LDSBuffer: [0]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - SourceSwap: [false]
@@ -187,6 +190,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
+        - LDSTrInst: [True, False]
         - MatrixInstruction:
           # - [16, 16, 32, 1, 1, 2, 2, 2, 2]
           # - [16, 16, 32, 1, 1, 2, 1, 1, 2]
@@ -199,14 +203,15 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
         - ExpandPointerSwap: [false]
         - TransposeLDS: [-1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
-        - 1LDSBuffer: [-1]
+        - 1LDSBuffer: [0]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - SourceSwap: [false]
@@ -249,6 +254,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
+        - LDSTrInst: [True, False]
         - MatrixInstruction:
           # - [16, 16, 32, 1, 1, 2, 2, 2, 2]
           # - [16, 16, 32, 1, 1, 2, 1, 1, 2]
@@ -261,14 +267,15 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
         - ExpandPointerSwap: [false]
         - TransposeLDS: [-1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
-        - 1LDSBuffer: [-1]
+        - 1LDSBuffer: [0]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - SourceSwap: [false]

@@ -830,6 +830,14 @@ MIT-licensed source. Without correct attribution this is a license violation.
   derived from NVIDIA cuDNN frontend, used under the MIT license", with the
   upstream copyright notice preserved.
 - Legal review before initial merge.
+- **Resolution**: every file derived from cuDNN frontend carries a
+  "Portions derived from NVIDIA cuDNN frontend" header after the AMD
+  copyright and SPDX lines, naming the upstream files and preserving their
+  NVIDIA copyright notice. `frontend/THIRD_PARTY_LICENSES.md` records the
+  pinned upstream version and the full MIT license text, and installs to
+  `share/doc/hipdnn_frontend`. The cuDNN backend C-API identifiers in
+  `cudnn.h`, `cudnn_status.h`, and `cudnn_runtime_version.h` are declared
+  for source compatibility and make no MIT claim.
 
 ### 6.5 Maintenance burden
 

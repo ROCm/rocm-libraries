@@ -74,9 +74,9 @@ custom.config:
   EnableMatrixInstruction: True
   MIWaveGroup: [2, 2]
   MIWaveTile: [8, 8]
-  MIInputPerThread: 32
-  MIInputPerThreadA: 32
-  MIInputPerThreadB: 32
+  MIInputPerThread: 8
+  MIInputPerThreadA: 8
+  MIInputPerThreadB: 8
   DepthU: 32
   DirectToLds: 1
   LocalReadVectorWidth: 4
@@ -432,7 +432,7 @@ label_ASM_Start:  /// Main body of the asm kernel
 .set SrdShiftLeftB, 4
 /* 2GB limit - set offsets to -1 to exceed this and clamp */
 .set BufferLimit, 0xffffffff
-.set BufferOOB, 0x80000000
+.set BufferOOB, 0xfffff000
 
 /******************************************/
 /* Bits 127:96 of SRD.                    */

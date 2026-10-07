@@ -6,6 +6,7 @@
 #   - TileConfig dataclass for parameterized tile configurations
 #   - Mock/kernel creation helpers (_mock_dtype, _create_kernel, create_writer)
 #   - rocIsa initialization (init_rocisa)
+#   - Scoped rocIsa state preservation (preserve_rocisa_kernel_state)
 #   - Unified kernel asm generator (generate_kernel_asm)
 #   - Prologue builder (generate_load_params) and export epilogue (generate_export_epilogue)
 #   - Assembly & GPU execution (assemble_kernel, assemble_and_run)
@@ -49,6 +50,7 @@ from rocisa.enum import RegisterType
 from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16, AB_B8
 from Tensile.Components.Subtile.SubtileGREmit import graTileAssignment, globalReadDTLInitCommonSgpr, globalReadDoSubtile
 from Tensile.Components.Subtile.SubtileLREmit import lraTileAssignment, localReadDoSubtile
+from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 # ---- GPU target detection ----
 def _detect_gfx_target():
@@ -191,6 +193,8 @@ def _create_kernel(cfg, mi_wave_group=None, inst_k=32, bpe=2):
         "ISA": (9, 5, 0),
         "NonTemporalA": 0,
         "NonTemporalB": 0,
+        # RAP off by default; the beta store path reads this key unconditionally.
+        "ReuseAcrossPersistent": 0,
         "enableTDMA": False,
         "enableTDMB": False,
         "enableTDMMetadata": False,
@@ -198,6 +202,8 @@ def _create_kernel(cfg, mi_wave_group=None, inst_k=32, bpe=2):
             "DataTypeA": dtype,
             "DataTypeB": dtype,
             "ComputeDataType": _mock_dtype(4),
+            # Non-fused store-D default; GlobalWriteBatch reads this key unconditionally.
+            "FusedGemmA2A": False,
         },
     }
 
@@ -713,6 +719,37 @@ def assemble_and_run(asm, tmp_path, label, output_size, inputs=(), scalars=(), l
         f.write(asm)
     assemble_kernel(asm, co_path)
     return run_on_gpu(co_path, output_size, inputs=inputs, scalars=scalars, lds_size=lds_size, num_threads=num_threads)
+
+
+
+def run_scalar_kernel(writer, instructions, inputs, outputs, tmp_path):
+    """Execute scalar control flow and return each output SGPR from all 64 lanes.
+
+    The caller maps symbolic registers in writer.sgprs and reserves s[0:5]
+    for launch arguments, v0 for the lane ID, and v1/v2 for result export.
+    Inputs map SGPR names to u32 kernel arguments; outputs list SGPR names.
+    """
+    args = [("output", 8, "global_buffer", "u32")]
+    loads = [(4, 2, 0, "output pointer")]
+    for i, name in enumerate(inputs):
+        args.append((f"input_{i}", 4, "by_value", "u32"))
+        loads.append((name, 1, 8 + 4 * i, name))
+    export = []
+    for i, name in enumerate(outputs):
+        export.extend([
+            "s_waitcnt vmcnt(0)",
+            "v_lshlrev_b32 v1, 2, v0",
+            f"v_add_u32 v1, {i * 64 * 4}, v1",
+            f"v_mov_b32 v2, s[sgpr{name}]",
+            "global_store_dword v1, v2, s[4:5]",
+        ])
+    inner = str(generate_load_params(loads)) + "\n" + str(instructions)
+    inner += "\n" + "\n".join(export)
+    asm = generate_kernel_asm(inner, writer, args, num_threads=64)
+    raw = assemble_and_run(asm, tmp_path, "scalar", len(outputs) * 64 * 4,
+                           scalars=tuple(inputs.values()), num_threads=64)
+    words = struct.unpack(f"<{len(outputs) * 64}I", raw)
+    return {name: words[i * 64:(i + 1) * 64] for i, name in enumerate(outputs)}
 
 
 

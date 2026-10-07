@@ -263,7 +263,9 @@ def _stub_main(monkeypatch, results, *, verbose=2, known_bugs=frozenset(),
                kb_raises=None, files=None):
     if files is None:
         files = [Path("lib/a.yaml")]
-    args = SimpleNamespace(KnownBugs=None, Verbose=verbose)
+    args = SimpleNamespace(
+        KnownBugs=None, Verbose=verbose, Architecture="all"
+    )
     check = Run.Check(OnlyCustomKernels=False, All=True)
     monkeypatch.setattr(
         Run, "_setup",

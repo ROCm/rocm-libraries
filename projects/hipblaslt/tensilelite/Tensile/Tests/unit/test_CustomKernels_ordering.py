@@ -32,6 +32,14 @@ def test_names_drop_the_dot_s_suffix_and_ignore_other_files(tmp_path):
     assert getAllCustomKernelNames(directory=str(tmp_path)) == ["kernel"]
 
 
+def test_names_include_subdirectory_kernels(tmp_path):
+    (tmp_path / "tensile").mkdir()
+    (tmp_path / "top.s").write_text("s_endpgm\n", encoding="utf-8")
+    (tmp_path / "tensile" / "nested.s").write_text("s_endpgm\n", encoding="utf-8")
+
+    assert getAllCustomKernelNames(directory=str(tmp_path)) == ["nested", "top"]
+
+
 def test_bundled_custom_kernel_names_are_sorted():
     names = getAllCustomKernelNames()
 

@@ -33,10 +33,11 @@
 
 #include "rocrand/rocrandapi.h"
 
+#include <hip/hip_runtime.h>
+#include <hip/hip_vector_types.h>
+
 #if defined(__cplusplus)
     #include <hip/hip_fp16.h>
-    #include <hip/hip_runtime.h>
-    #include <hip/hip_vector_types.h>
 #else
     #include <stddef.h>
     #include <stdint.h>
@@ -44,19 +45,6 @@
     #if !defined(HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP16_H)
 typedef unsigned short __half;
     #endif // if !defined(HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP16_H)
-
-    #if !(defined(HIP_INCLUDE_HIP_AMD_DETAIL_HIP_RUNTIME_H) \
-          || defined(HIP_INCLUDE_HIP_HIP_RUNTIME_API_H))
-struct ihipStream_t;
-typedef struct ihipStream_t* hipStream_t;
-    #endif // if !defined(HIP_INCLUDE_HIP_AMD_DETAIL_HIP_RUNTIME_H)
-
-    #if !defined(HIP_INCLUDE_HIP_AMD_DETAIL_HIP_VECTOR_TYPES_H)
-typedef struct
-{
-    uint32_t x, y, z, w;
-} uint4;
-    #endif // if !defined(HIP_INCLUDE_HIP_AMD_DETAIL_HIP_VECTOR_TYPES_H)
 #endif
 
 /// \cond ROCRAND_DOCS_TYPEDEFS

@@ -59,6 +59,13 @@ from typing import Any
 
 from rocke.assets import shape_utils_dir
 
+from benchmarks.common.attention_sweep import (
+    all_variant_keys,
+    expand_variant_keys,
+    record_sweep_entries,
+    run_sweep,
+)
+
 DEFAULT_SHAPE_UTILS = shape_utils_dir()
 
 ARCH = "gfx942"
@@ -747,9 +754,43 @@ def main() -> int:
         "--variants",
         nargs="+",
         default=None,
-        help="rocke variants to sweep: prod combo combo_nw1 combo_nw2 fallback. "
+        help="rocke variants to sweep: prod combo combo_nw1 combo_nw2 fallback sweep. "
         "Defaults to [prod, combo, fallback] for fp16/all, [prod, fallback] for bf16 "
-        "(combo is fp16-only on gfx942).",
+        "(combo is fp16-only on gfx942). 'sweep' times every engine the dispatcher "
+        "registry offers for each problem (one entry per launched path).",
+    )
+    ap.add_argument(
+        "--sweep-candidate-prefix",
+        default="",
+        help="restrict the 'sweep' lane to candidates whose name starts with this "
+        "(e.g. attention_gfx942_u2d_transposed_x8).",
+    )
+    ap.add_argument(
+        "--sweep-level",
+        choices=("production", "full"),
+        default="production",
+        help="production walks the curated unified-tuning stacks in the 'sweep' "
+        "lane (unified specs only; dense runs in the combo / table sweeps). "
+        "full samples every kernel knob; see --sweep-tuning-sample",
+    )
+    ap.add_argument(
+        "--sweep-tuning-sample",
+        type=int,
+        default=256,
+        help="with --sweep-level full: random legal specs per tuning candidate "
+        "(0 = the full stream). Ignored for production",
+    )
+    ap.add_argument("--sweep-seed", type=int, default=0)
+    ap.add_argument(
+        "--sweep-tuning-id-prefix",
+        default="",
+        help="restrict the 'sweep' lane to tuning ids with this prefix",
+    )
+    ap.add_argument(
+        "--sweep-limit",
+        type=int,
+        default=0,
+        help="cap how many specs the 'sweep' lane times per shape (0 = no cap)",
     )
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--stride", type=int, default=1, help="subsample every Nth shape")
@@ -893,6 +934,40 @@ def main() -> int:
         best = None
         for v in args.variants:
             try:
+                if v == "sweep":
+                    # Multi-engine lane: time every engine the registry offers for
+                    # this problem (one entry per launched path). Emitted as
+                    # "sweep:<path>" sub-records so each is comparable to the
+                    # single-kernel variants above.
+                    sweep_entries = run_sweep(
+                        shape,
+                        data,
+                        sw,
+                        is_fp8,
+                        bench,
+                        arch=ARCH,
+                        stream_handle=_bench_stream_handle(),
+                        warmup=args.warmup,
+                        iters=args.iterations,
+                        candidate_prefix=args.sweep_candidate_prefix,
+                        tuning_id_prefix=args.sweep_tuning_id_prefix,
+                        limit=args.sweep_limit,
+                        tuning_sample=args.sweep_tuning_sample,
+                        seed=args.sweep_seed,
+                        sweep_level=args.sweep_level,
+                    )
+                    if not sweep_entries:
+                        print(f"  [sweep] no eligible engines for {tag} sw={sw}")
+                    best = record_sweep_entries(
+                        rec,
+                        sweep_entries,
+                        tri_out=tri_out,
+                        tri_ms=tri_ms,
+                        tol=args.tol,
+                        compare=_compare,
+                        best=best,
+                    )
+                    continue
                 if v in ("prod", "ck3d"):
                     ck_out, ck_ms, kname = _run_prod(
                         shape,
@@ -964,7 +1039,9 @@ def main() -> int:
 
         tri_str = f"tri={tri_ms * 1000:.1f}us" if tri_ms else "tri=N/A"
         aot_str = f"aot={aot_ms * 1000:.1f}us" if aot_ms else "aot=N/A"
-        vs = "  ".join(_fmt_variant(v) for v in args.variants)
+        vs = "  ".join(
+            _fmt_variant(v) for v in expand_variant_keys(args.variants, rec["variants"])
+        )
         best_str = f"{best_ms * 1000:.1f}us" if best_ms is not None else "N/A"
         tf_str = f" {rec['best_tflops']:.1f}TF" if rec.get("best_tflops") else ""
         fly_str = ""
@@ -1027,7 +1104,7 @@ def main() -> int:
             f"  {dtype_label:4s}  {sw_label:4s}  n={len(rs):3d}  {lat_part}{tf_part}{tri_part}{aot_part}{fly_part}"
         )
     print("\n=== per-variant geomean (correct shapes only) ===")
-    for v in args.variants:
+    for v in all_variant_keys(args.variants, results):
         sp = [
             r["variants"][v]["speedup"]
             for r in results

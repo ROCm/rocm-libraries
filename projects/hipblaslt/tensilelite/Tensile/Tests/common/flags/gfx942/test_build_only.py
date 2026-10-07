@@ -94,11 +94,18 @@ def _write_config(path: str) -> None:
 def test_compile(tensile_args: list[str], tmp_path: Path) -> None:
     """
     Compile the kernel. This can run on any machine.
+
+    Explicitly pins --gpu-targets to gfx942, overriding any --gpu-targets
+    tensile_args may have forwarded from the harness (e.g. tox injects one
+    for the host's detected revision target). --gpu-targets takes priority
+    over the config's own ISA in Tensile.py, so without this the test would
+    silently compile for the host's architecture instead of gfx942.
     """
     config_path = str(tmp_path / "config.yaml")
     _write_config(config_path)
     output_dir = str(tmp_path / "output")
-    Tensile.Tensile([config_path, output_dir, "--build-only", *tensile_args])
+    Tensile.Tensile([config_path, output_dir, "--build-only", *tensile_args,
+                      "--gpu-targets", "gfx942"])
 
 
 @pytest.mark.skipif(not _HAS_GFX942, reason="gfx942 GPU not available")
@@ -111,7 +118,9 @@ def test_use_cache(tensile_args: list[str], tmp_path: Path) -> None:
     output_dir = str(tmp_path / "output")
 
     # First run: compile only
-    Tensile.Tensile([config_path, output_dir, "--build-only", *tensile_args])
+    Tensile.Tensile([config_path, output_dir, "--build-only", *tensile_args,
+                      "--gpu-targets", "gfx942"])
 
     # Second run: use cache
-    Tensile.Tensile([config_path, output_dir, "--use-cache", *tensile_args])
+    Tensile.Tensile([config_path, output_dir, "--use-cache", *tensile_args,
+                      "--gpu-targets", "gfx942"])

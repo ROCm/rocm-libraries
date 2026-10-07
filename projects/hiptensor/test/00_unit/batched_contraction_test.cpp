@@ -34,6 +34,7 @@ namespace
     constexpr int32_t mMode = 'm';
     constexpr int32_t nMode = 'n';
     constexpr int32_t kMode = 'k';
+    constexpr int32_t pMode = 'p';
 } // namespace
 
 TEST(BatchedContractionTest, BinaryBatchedReturnsNotSupported)
@@ -174,6 +175,174 @@ TEST(BatchedContractionTest, TrinaryBatchedReturnsNotSupported)
         GTEST_SKIP() << "HIPTENSOR_STATUS_ARCH_MISMATCH: unsupported host device";
     EXPECT_EQ(status, HIPTENSOR_STATUS_NOT_SUPPORTED);
 
+    hiptensorDestroyTensorDescriptor(descA);
+    hiptensorDestroyTensorDescriptor(descB);
+    hiptensorDestroyTensorDescriptor(descC);
+    hiptensorDestroyTensorDescriptor(descE);
+    hiptensorDestroy(handle);
+}
+
+// A trinary contraction runs as T = A * B followed by E = T * C. Mode 'b' is
+// carried by A, B and C but not by E, so it is contracted away in the second
+// step while batching the first one. Comparing A, B and E alone cannot see it.
+TEST(BatchedContractionTest, TrinaryFirstStepBatchedReturnsNotSupported)
+{
+    hiptensorHandle_t handle{};
+    ASSERT_EQ(hiptensorCreate(&handle), HIPTENSOR_STATUS_SUCCESS);
+
+    int64_t lensA[3] = {2, 3, 4};
+    int64_t lensB[3] = {2, 4, 5};
+    int64_t lensC[3] = {2, 5, 6};
+    int64_t lensE[2] = {3, 6};
+    int32_t modeA[3] = {bMode, mMode, kMode};
+    int32_t modeB[3] = {bMode, kMode, nMode};
+    int32_t modeC[3] = {bMode, nMode, pMode};
+    int32_t modeE[2] = {mMode, pMode};
+
+    hiptensorTensorDescriptor_t descA{}, descB{}, descC{}, descE{};
+    ASSERT_EQ(hiptensorCreateTensorDescriptor(handle, &descA, 3, lensA, nullptr, HIPTENSOR_R_32F, 4),
+              HIPTENSOR_STATUS_SUCCESS);
+    ASSERT_EQ(hiptensorCreateTensorDescriptor(handle, &descB, 3, lensB, nullptr, HIPTENSOR_R_32F, 4),
+              HIPTENSOR_STATUS_SUCCESS);
+    ASSERT_EQ(hiptensorCreateTensorDescriptor(handle, &descC, 3, lensC, nullptr, HIPTENSOR_R_32F, 4),
+              HIPTENSOR_STATUS_SUCCESS);
+    ASSERT_EQ(hiptensorCreateTensorDescriptor(handle, &descE, 2, lensE, nullptr, HIPTENSOR_R_32F, 4),
+              HIPTENSOR_STATUS_SUCCESS);
+
+    hiptensorOperationDescriptor_t opDesc{};
+    auto status = hiptensorCreateContractionTrinary(handle,
+                                                    &opDesc,
+                                                    descA,
+                                                    modeA,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    descB,
+                                                    modeB,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    descC,
+                                                    modeC,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    nullptr,
+                                                    nullptr,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    descE,
+                                                    modeE,
+                                                    HIPTENSOR_COMPUTE_DESC_16F);
+    if(status == HIPTENSOR_STATUS_ARCH_MISMATCH)
+        GTEST_SKIP() << "HIPTENSOR_STATUS_ARCH_MISMATCH: unsupported host device";
+    EXPECT_EQ(status, HIPTENSOR_STATUS_NOT_SUPPORTED);
+
+    hiptensorDestroyTensorDescriptor(descA);
+    hiptensorDestroyTensorDescriptor(descB);
+    hiptensorDestroyTensorDescriptor(descC);
+    hiptensorDestroyTensorDescriptor(descE);
+    hiptensorDestroy(handle);
+}
+
+// Mode 'b' is carried by A, C and E but not by B, so it never appears in the
+// intersection of the first step's inputs, yet it batches E = T * C.
+TEST(BatchedContractionTest, TrinarySecondStepBatchedReturnsNotSupported)
+{
+    hiptensorHandle_t handle{};
+    ASSERT_EQ(hiptensorCreate(&handle), HIPTENSOR_STATUS_SUCCESS);
+
+    int64_t lensA[3] = {2, 3, 4};
+    int64_t lensB[2] = {4, 5};
+    int64_t lensC[3] = {2, 5, 6};
+    int64_t lensE[3] = {2, 3, 6};
+    int32_t modeA[3] = {bMode, mMode, kMode};
+    int32_t modeB[2] = {kMode, nMode};
+    int32_t modeC[3] = {bMode, nMode, pMode};
+    int32_t modeE[3] = {bMode, mMode, pMode};
+
+    hiptensorTensorDescriptor_t descA{}, descB{}, descC{}, descE{};
+    ASSERT_EQ(hiptensorCreateTensorDescriptor(handle, &descA, 3, lensA, nullptr, HIPTENSOR_R_32F, 4),
+              HIPTENSOR_STATUS_SUCCESS);
+    ASSERT_EQ(hiptensorCreateTensorDescriptor(handle, &descB, 2, lensB, nullptr, HIPTENSOR_R_32F, 4),
+              HIPTENSOR_STATUS_SUCCESS);
+    ASSERT_EQ(hiptensorCreateTensorDescriptor(handle, &descC, 3, lensC, nullptr, HIPTENSOR_R_32F, 4),
+              HIPTENSOR_STATUS_SUCCESS);
+    ASSERT_EQ(hiptensorCreateTensorDescriptor(handle, &descE, 3, lensE, nullptr, HIPTENSOR_R_32F, 4),
+              HIPTENSOR_STATUS_SUCCESS);
+
+    hiptensorOperationDescriptor_t opDesc{};
+    auto status = hiptensorCreateContractionTrinary(handle,
+                                                    &opDesc,
+                                                    descA,
+                                                    modeA,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    descB,
+                                                    modeB,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    descC,
+                                                    modeC,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    nullptr,
+                                                    nullptr,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    descE,
+                                                    modeE,
+                                                    HIPTENSOR_COMPUTE_DESC_16F);
+    if(status == HIPTENSOR_STATUS_ARCH_MISMATCH)
+        GTEST_SKIP() << "HIPTENSOR_STATUS_ARCH_MISMATCH: unsupported host device";
+    EXPECT_EQ(status, HIPTENSOR_STATUS_NOT_SUPPORTED);
+
+    hiptensorDestroyTensorDescriptor(descA);
+    hiptensorDestroyTensorDescriptor(descB);
+    hiptensorDestroyTensorDescriptor(descC);
+    hiptensorDestroyTensorDescriptor(descE);
+    hiptensorDestroy(handle);
+}
+
+// Neither step carries a batch mode, so the two-step check must let this
+// through: E{m,p} = (A{m,k} * B{k,n}) * C{n,p}.
+TEST(BatchedContractionTest, TrinaryNonBatchedIsSupported)
+{
+    hiptensorHandle_t handle{};
+    ASSERT_EQ(hiptensorCreate(&handle), HIPTENSOR_STATUS_SUCCESS);
+
+    int64_t lensA[2] = {3, 4};
+    int64_t lensB[2] = {4, 5};
+    int64_t lensC[2] = {5, 6};
+    int64_t lensE[2] = {3, 6};
+    int32_t modeA[2] = {mMode, kMode};
+    int32_t modeB[2] = {kMode, nMode};
+    int32_t modeC[2] = {nMode, pMode};
+    int32_t modeE[2] = {mMode, pMode};
+
+    hiptensorTensorDescriptor_t descA{}, descB{}, descC{}, descE{};
+    ASSERT_EQ(hiptensorCreateTensorDescriptor(handle, &descA, 2, lensA, nullptr, HIPTENSOR_R_32F, 4),
+              HIPTENSOR_STATUS_SUCCESS);
+    ASSERT_EQ(hiptensorCreateTensorDescriptor(handle, &descB, 2, lensB, nullptr, HIPTENSOR_R_32F, 4),
+              HIPTENSOR_STATUS_SUCCESS);
+    ASSERT_EQ(hiptensorCreateTensorDescriptor(handle, &descC, 2, lensC, nullptr, HIPTENSOR_R_32F, 4),
+              HIPTENSOR_STATUS_SUCCESS);
+    ASSERT_EQ(hiptensorCreateTensorDescriptor(handle, &descE, 2, lensE, nullptr, HIPTENSOR_R_32F, 4),
+              HIPTENSOR_STATUS_SUCCESS);
+
+    hiptensorOperationDescriptor_t opDesc{};
+    auto status = hiptensorCreateContractionTrinary(handle,
+                                                    &opDesc,
+                                                    descA,
+                                                    modeA,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    descB,
+                                                    modeB,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    descC,
+                                                    modeC,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    nullptr,
+                                                    nullptr,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    descE,
+                                                    modeE,
+                                                    HIPTENSOR_COMPUTE_DESC_16F);
+    if(status == HIPTENSOR_STATUS_ARCH_MISMATCH)
+        GTEST_SKIP() << "HIPTENSOR_STATUS_ARCH_MISMATCH: unsupported host device";
+    EXPECT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
+
+    if(opDesc)
+        hiptensorDestroyOperationDescriptor(opDesc);
     hiptensorDestroyTensorDescriptor(descA);
     hiptensorDestroyTensorDescriptor(descB);
     hiptensorDestroyTensorDescriptor(descC);

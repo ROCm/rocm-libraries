@@ -13,6 +13,13 @@ if _CODEGEN_DIR not in sys.path:
     sys.path.insert(0, _CODEGEN_DIR)
 
 from streamk5_test_helpers import mock_streamk_writer  # noqa: F401
+from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+
+
+@pytest.fixture(autouse=True)
+def _isolate_rocisa_state():
+    with preserve_rocisa_kernel_state():
+        yield
 
 
 @pytest.fixture(autouse=True)

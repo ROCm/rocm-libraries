@@ -8,6 +8,7 @@
 #include <ostream>
 #endif
 
+#include "ck/host_utility/device_prop.hpp"
 #include "ck/tensor_description/multi_index_transform_helper.hpp"
 #include "ck/tensor_description/tensor_descriptor.hpp"
 #include "ck/tensor_description/tensor_descriptor_helper.hpp"
@@ -26,6 +27,7 @@
 #include "ck/tensor_operation/gpu/thread/threadwise_tensor_slice_transfer.hpp"
 #include "ck/utility/common_header.hpp"
 #include "ck/utility/env.hpp"
+#include "ck/tensor_operation/gpu/grid/epilogue_cshuffle_v3_wmma.hpp"
 
 namespace ck {
 
@@ -81,7 +83,9 @@ template <typename ALayout,
           bool PermuteB,
           bool IsBPreShuffled          = false,
           bool ForceThreadTileTransfer = false, // only needed for convolution (limitation)
-          bool IsFusedKernel           = false>
+          bool IsFusedKernel           = false,
+          bool UseLdsTranspose         = false,
+          bool TransposeC              = false>
 struct GridwiseGemm_wmma_cshuffle_v3_base
 {
 
@@ -215,8 +219,20 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
     static constexpr bool UseDirectStore            = false;
 #endif
 
+#if defined(__gfx1250__)
+    static constexpr bool UseLdsTransposeA =
+        UseLdsTranspose && !is_same_v<ALayout, tensor_layout::gemm::RowMajor>;
+    static constexpr bool UseLdsTransposeB =
+        UseLdsTranspose && !is_same_v<BLayout, tensor_layout::gemm::ColumnMajor>;
+#else
+    static constexpr bool UseLdsTransposeA = false;
+    static constexpr bool UseLdsTransposeB = false;
+#endif
+
     static constexpr bool UseBlockPaddingA =
         ABlockLdsExtraM || BlkGemmPipelineVer == BlockGemmPipelineVersion::v4;
+    static_assert(!UseLdsTransposeA ||
+                  (UseBlockPaddingA && AK1Value == 8 && NumATensor == 1 && sizeof(LDSTypeA) == 2));
     using ATransfer = typename std::conditional<
         IsAWaveTransferApplicable,
         ATransferWaveTiles,
@@ -239,10 +255,13 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
                               ABlockTransferSrcVectorDim,
                               ABlockTransferSrcScalarPerVector,
                               ABlockTransferDstScalarPerVector_AK1,
-                              AThreadTransferSrcResetCoordinateAfterRun>>::type;
+                              AThreadTransferSrcResetCoordinateAfterRun,
+                              UseLdsTransposeA>>::type;
 
     static constexpr bool UseBlockPaddingB =
         BBlockLdsExtraN || BlkGemmPipelineVer == BlockGemmPipelineVersion::v4;
+    static_assert(!UseLdsTransposeB ||
+                  (UseBlockPaddingB && BK1Value == 8 && NumBTensor == 1 && sizeof(LDSTypeB) == 2));
     using BTransfer = typename std::conditional<
         IsBPreShuffled,
         ABTransferThreadTilesPreShuffle<BLayout,
@@ -291,7 +310,8 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
                                   BBlockTransferSrcVectorDim,
                                   BBlockTransferSrcScalarPerVector,
                                   BBlockTransferDstScalarPerVector_BK1,
-                                  BThreadTransferSrcResetCoordinateAfterRun>>::type>::type;
+                                  BThreadTransferSrcResetCoordinateAfterRun,
+                                  UseLdsTransposeB>>::type>::type;
 
     static_assert(!(is_same_v<remove_cvref_t<LDSTypeB>, pk_i4_t> &&
                     GemmSpec != tensor_operation::device::GemmSpecialization::Default),
@@ -690,8 +710,10 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
                                                            NRepeat,
                                                            KPack,
                                                            KInner,
-                                                           false,
-                                                           IsBPreShuffled>())>;
+                                                           TransposeC,
+                                                           IsBPreShuffled,
+                                                           UseLdsTransposeA,
+                                                           UseLdsTransposeB>())>;
 
     struct Traits
     {
@@ -826,6 +848,33 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
         return true;
     }
 
+    __host__ static index_t GetSharedMemoryNumberOfByteOnHost()
+    {
+        // Note: using cshuffle epilogue to get shared memory on host is a way to be conservative on
+        // gfx12 that also supports direct store epilogue and it doesn't matter for other archs that
+        // only use cshuffle The cshuffle LDS shouldn't be a problem anyway
+        using EpilogueCShuffle = EpilogueCShuffle<
+            DsDataType,
+            EDataType,
+            AccDataType,
+            CShuffleDataType,
+            MPerBlock,
+            NPerBlock,
+            MPerWmma,
+            NPerWmma,
+            MRepeat,
+            NRepeat,
+            CShuffleMRepeatPerShuffle,
+            CShuffleNRepeatPerShuffle,
+            CDEShuffleBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,
+            CDEShuffleBlockTransferScalarPerVectors,
+            CDEElementwiseOperation,
+            ThisThreadBlock,
+            BlockwiseGemmPipe>;
+
+        return GetSharedMemoryNumberOfByte<EpilogueCShuffle>();
+    }
+
     // block_id to matrix tile idx (m0, n0) mapping are controlled by {M01, N01}
     template <typename Argument>
     __host__ static constexpr bool CheckValidity(const Argument& karg,
@@ -834,6 +883,82 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
         static_assert((MPerBlock % (MPerWmma * MRepeat) == 0) &&
                           (NPerBlock % (NPerWmma * NRepeat)) == 0,
                       "Invalid tuning param!");
+
+        constexpr index_t ldsBufferCount =
+            BlkGemmPipelineVer == BlockGemmPipelineVersion::v4 ? 2 : 1;
+        if(GetSharedMemoryNumberOfByteOnHost() * ldsBufferCount > get_lds_size())
+        {
+            if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+            {
+                std::cout << "Instance tile too large for LDS size of target device! In "
+                          << __FILE__ << ":" << __LINE__ << ", in function: " << __func__
+                          << std::endl;
+            }
+            return false;
+        }
+
+        if constexpr(sizeof(ComputeTypeA) == 2 && sizeof(ComputeTypeB) == 2)
+        {
+            if(is_gfx125_supported())
+            {
+                if constexpr(KPerBlock % 32 != 0)
+                {
+                    if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                    {
+                        std::cout << "KPerBlock must be a multiple of 32 for 16bit types "
+                                     "GEMM on gfx125x. KPerBlock: "
+                                  << KPerBlock << " " << __FILE__ << ":" << __LINE__
+                                  << ", in function: " << __func__ << std::endl;
+                    }
+                    return false;
+                }
+            }
+            else
+            {
+                if constexpr(KPerBlock % 16 != 0)
+                {
+                    if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                    {
+                        std::cout << "KPerBlock must be a multiple of 16 for 16bit types "
+                                     "GEMM on gfx11x/gfx12x. KPerBlock: "
+                                  << KPerBlock << " " << __FILE__ << ":" << __LINE__
+                                  << ", in function: " << __func__ << std::endl;
+                    }
+                    return false;
+                }
+            }
+        }
+        else if constexpr(sizeof(ComputeTypeA) == 1 && sizeof(ComputeTypeB) == 1)
+        {
+            if(is_gfx125_supported())
+            {
+                if constexpr(KPerBlock % 64 != 0)
+                {
+                    if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                    {
+                        std::cout << "KPerBlock must be a multiple of 64 for 8bit types "
+                                     "GEMM on gfx125x. KPerBlock: "
+                                  << KPerBlock << " " << __FILE__ << ":" << __LINE__
+                                  << ", in function: " << __func__ << std::endl;
+                    }
+                    return false;
+                }
+            }
+            else
+            {
+                if constexpr(KPerBlock % 16 != 0)
+                {
+                    if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                    {
+                        std::cout << "KPerBlock must be a multiple of 16 for 8bit types "
+                                     "GEMM on gfx12x. KPerBlock: "
+                                  << KPerBlock << " " << __FILE__ << ":" << __LINE__
+                                  << ", in function: " << __func__ << std::endl;
+                    }
+                    return false;
+                }
+            }
+        }
 
         if constexpr(!(GemmSpec == tensor_operation::device::GemmSpecialization::MPadding ||
                        GemmSpec == tensor_operation::device::GemmSpecialization::MNPadding ||
@@ -1069,7 +1194,7 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
     }
 
     template <typename Epilogue>
-    __device__ static constexpr index_t GetSharedMemoryNumberOfByte()
+    __host__ __device__ static constexpr index_t GetSharedMemoryNumberOfByte()
     {
         // LDS allocation for A and B: be careful of alignment
         constexpr auto a_block_desc_ak0_m_ak1 = ATransfer::GetBlockDescriptor();

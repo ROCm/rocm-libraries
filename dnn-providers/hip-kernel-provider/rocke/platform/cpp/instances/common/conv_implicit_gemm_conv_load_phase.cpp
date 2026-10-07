@@ -32,9 +32,21 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <string.h> /* strcmp */
 
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_choose_load_vec */
 #include "rocke/instance_conv_implicit_gemm_internal.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
+
+/* The split A/B address forms (defined after the descriptors that call them). */
+static rocke_value_t* conv_a_offset_split(rocke_conv_build_ctx_t* ctx,
+                                          rocke_value_t* m_val,
+                                          rocke_value_t* k_val,
+                                          rocke_value_t** out_valid);
+static rocke_value_t* conv_b_offset_split(rocke_conv_build_ctx_t* ctx,
+                                          rocke_value_t* k_out,
+                                          rocke_value_t* kg,
+                                          rocke_value_t** out_valid);
 
 /* ===================================================================== *
  *  _choose_load_vec -- pick the widest fp16 load vector width.
@@ -57,6 +69,29 @@ int rocke_conv_choose_load_vec(const rocke_implicit_gemm_conv_spec_t* spec)
     if(st != ROCKE_OK)
         return out_vec;
     return out_vec;
+}
+
+/* ===================================================================== *
+ *  The default sync load width (Python _sync_load_vecs without an explicit
+ *  vector_size_*): the tile-geometry width clamped by the largest power of two
+ *  dividing the per-group channel count (A and B both stride over cpg). For
+ *  groups==1 cpg==C. For C=3 this yields 1; without the clamp the tile picker
+ *  returns a wider width Python never uses (e.g. the ImageNet-stem C3 conv).
+ *  Returns 0 when the tile admits no width at all.
+ * ===================================================================== */
+int rocke_conv_default_load_vec(const rocke_implicit_gemm_conv_spec_t* spec)
+{
+    int load_vec = rocke_conv_choose_load_vec(spec);
+    bool is_fp32 = (spec->dtype_a && strcmp(spec->dtype_a, "fp32") == 0);
+    int max_elem = is_fp32 ? 4 : 8;
+    int c_dim = rocke_conv_problem_cpg(&spec->problem);
+    int max_ab = (c_dim % max_elem == 0) ? max_elem
+                 : (c_dim % 4 == 0)      ? 4
+                 : (c_dim % 2 == 0)      ? 2
+                                         : 1;
+    if(load_vec > max_ab)
+        load_vec = max_ab;
+    return load_vec;
 }
 
 /* ===================================================================== *
@@ -164,6 +199,9 @@ rocke_value_t* rocke_conv_a_descriptor(rocke_ir_builder_t* b,
     else
         m_val = rocke_b_add(b, ctx->block_m_off_v, row);
 
+    if(ctx->split_ab)
+        return conv_a_offset_split(ctx, m_val, k_val, out_valid);
+
     if(ctx->group_idx != NULL)
     {
         /* A_desc.offset(b_, m=m_val, k=k_val, group=group_idx) */
@@ -186,6 +224,124 @@ rocke_value_t* rocke_conv_a_descriptor(rocke_ir_builder_t* b,
         *out_valid = valid;
         return off;
     }
+}
+
+/* ===================================================================== *
+ *  mul_u24 / magic_divmod -- Python _conv_implicit_gemm_common helpers.
+ *
+ *  Every operand is bound to a temporary in Python's left-to-right order: C
+ *  leaves argument evaluation order unspecified and the SSA ids follow it.
+ * ===================================================================== */
+rocke_value_t* rocke_conv_mul_u24(rocke_ir_builder_t* b, rocke_value_t* x, rocke_value_t* y)
+{
+    rocke_value_t* c24 = rocke_b_const_i32(b, 0xFFFFFF);
+    rocke_value_t* xm = rocke_b_land(b, x, c24);
+    rocke_value_t* ym = rocke_b_land(b, y, c24);
+    return rocke_b_mul(b, xm, ym);
+}
+
+void rocke_conv_magic_divmod(rocke_ir_builder_t* b,
+                             rocke_value_t* val,
+                             rocke_value_t* mult,
+                             rocke_value_t* shift,
+                             rocke_value_t* dim,
+                             bool u24,
+                             rocke_value_t** quot,
+                             rocke_value_t** rem)
+{
+    /* do_magic_division_dynamic: umul_hi, add, lshr */
+    rocke_value_t* tmp = rocke_b_umul_hi_i32(b, val, mult);
+    rocke_value_t* summed = rocke_b_add(b, tmp, val);
+    rocke_value_t* q = rocke_b_lshr(b, summed, shift);
+    rocke_value_t* prod = u24 ? rocke_conv_mul_u24(b, q, dim) : rocke_b_mul(b, q, dim);
+    *quot = q;
+    *rem = rocke_b_sub(b, val, prod);
+}
+
+/* Python k_decode (fwd): k -> (y, x, c) through the runtime magic pairs for
+ * cpg and X, with 24-bit remainder products. */
+static void conv_k_decode(rocke_conv_build_ctx_t* ctx,
+                          rocke_value_t* k_val,
+                          rocke_value_t** y,
+                          rocke_value_t** x,
+                          rocke_value_t** c)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* q_c = NULL;
+    rocke_conv_magic_divmod(
+        b, k_val, ctx->p_magic_k_cpg_mult, ctx->p_magic_k_cpg_shift, ctx->p_cpg, true, &q_c, c);
+    rocke_conv_magic_divmod(
+        b, q_c, ctx->p_magic_k_X_mult, ctx->p_magic_k_X_shift, ctx->p_X, true, y, x);
+}
+
+/* Python a_offset_split: the row part (m -> (n, ho, wo), the (hi, wi) origin,
+ * the base offset) and the k part (y, x, c), with the strides distributed so
+ * the row part is loop-invariant. */
+static rocke_value_t* conv_a_offset_split(rocke_conv_build_ctx_t* ctx,
+                                          rocke_value_t* m_val,
+                                          rocke_value_t* k_val,
+                                          rocke_value_t** out_valid)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t *q_wo, *wo, *n, *ho;
+    rocke_conv_magic_divmod(
+        b, m_val, ctx->p_magic_m_Wo_mult, ctx->p_magic_m_Wo_shift, ctx->p_Wo, false, &q_wo, &wo);
+    rocke_conv_magic_divmod(
+        b, q_wo, ctx->p_magic_m_Ho_mult, ctx->p_magic_m_Ho_shift, ctx->p_Ho, false, &n, &ho);
+    rocke_value_t* ho_s = rocke_b_mul(b, ho, ctx->p_sH);
+    rocke_value_t* hi0 = rocke_b_add(b, ho_s, ctx->split_neg_pH);
+    rocke_value_t* wo_s = rocke_b_mul(b, wo, ctx->p_sW);
+    rocke_value_t* wi0 = rocke_b_add(b, wo_s, ctx->split_neg_pW);
+    rocke_value_t* n_off = rocke_b_mul(b, n, ctx->p_A_stride_n);
+    rocke_value_t* hi_off = rocke_b_mul(b, hi0, ctx->p_A_stride_hi);
+    rocke_value_t* base = rocke_b_add(b, n_off, hi_off);
+    rocke_value_t* wi_off = rocke_b_mul(b, wi0, ctx->p_A_stride_wi);
+    base = rocke_b_add(b, base, wi_off);
+    if(ctx->split_group_base != NULL)
+        base = rocke_b_add(b, base, ctx->split_group_base);
+
+    rocke_value_t *y, *x, *c;
+    conv_k_decode(ctx, k_val, &y, &x, &c);
+    rocke_value_t* y_dh = rocke_b_mul(b, y, ctx->p_dH);
+    rocke_value_t* hi = rocke_b_add(b, hi0, y_dh);
+    rocke_value_t* x_dw = rocke_b_mul(b, x, ctx->p_dW);
+    rocke_value_t* wi = rocke_b_add(b, wi0, x_dw);
+    rocke_value_t* hi_ge = rocke_b_cmp_ge(b, hi, ctx->c0);
+    rocke_value_t* hi_lt = rocke_b_cmp_lt(b, hi, ctx->p_Hi);
+    rocke_value_t* hi_ok = rocke_b_land(b, hi_ge, hi_lt);
+    rocke_value_t* wi_ge = rocke_b_cmp_ge(b, wi, ctx->c0);
+    rocke_value_t* wi_lt = rocke_b_cmp_lt(b, wi, ctx->p_Wi);
+    rocke_value_t* wi_ok = rocke_b_land(b, wi_ge, wi_lt);
+    rocke_value_t* ok = rocke_b_land(b, hi_ok, wi_ok);
+    rocke_value_t* y_ok = rocke_b_cmp_lt(b, y, ctx->p_Y);
+    ok = rocke_b_land(b, ok, y_ok);
+    rocke_value_t* y_off = rocke_b_mul(b, y, ctx->split_ystep);
+    rocke_value_t* off = rocke_b_add(b, base, y_off);
+    rocke_value_t* x_off = rocke_b_mul(b, x, ctx->split_xstep);
+    off = rocke_b_add(b, off, x_off);
+    off = rocke_b_add(b, off, c);
+    *out_valid = ok;
+    return off;
+}
+
+/* Python b_offset_split: k_out*stride_k + y*stride_y + x*stride_x + c, the
+ * filter strides through 24-bit multiplies. */
+static rocke_value_t* conv_b_offset_split(rocke_conv_build_ctx_t* ctx,
+                                          rocke_value_t* k_out,
+                                          rocke_value_t* kg,
+                                          rocke_value_t** out_valid)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* base = rocke_b_mul(b, k_out, ctx->p_B_stride_k);
+    rocke_value_t *y, *x, *c;
+    conv_k_decode(ctx, kg, &y, &x, &c);
+    rocke_value_t* y_off = rocke_conv_mul_u24(b, y, ctx->p_B_stride_y);
+    rocke_value_t* off = rocke_b_add(b, base, y_off);
+    rocke_value_t* x_off = rocke_conv_mul_u24(b, x, ctx->p_B_stride_x);
+    off = rocke_b_add(b, off, x_off);
+    off = rocke_b_add(b, off, c);
+    *out_valid = rocke_b_cmp_lt(b, y, ctx->p_Y);
+    return off;
 }
 
 /* ===================================================================== *
@@ -221,6 +377,9 @@ rocke_value_t* rocke_conv_b_descriptor(rocke_ir_builder_t* b,
         *out_valid = rocke_b_land(b, k_ok, c_ok);
         return off;
     }
+
+    if(ctx->split_ab)
+        return conv_b_offset_split(ctx, k_out, kg, out_valid);
 
     const char* names[2] = {"k_out", "k_gemm"};
     rocke_value_t* vals[2] = {k_out, kg};
@@ -262,13 +421,15 @@ void rocke_conv_emit_load_phase(rocke_conv_build_ctx_t* ctx,
          * prefetch; streaming keeps the loads from evicting useful cache lines.
          * (Python imports CACHE_STREAM from ...core.ir; the C enum value is
          * ROCKE_CACHE_STREAM.) */
+        rocke_loads_descriptor_fn a_fn
+            = (ctx->a_descriptor_fn != NULL) ? ctx->a_descriptor_fn : rocke_conv_a_descriptor;
         rocke_async_tile_loader_slot_t a_slot;
         rocke_async_tile_loader_bind(b, &ctx->a_loader, A_dst, ctx->warp_id, &a_slot);
         rocke_async_tile_loader_slot_issue(b,
                                            &a_slot,
                                            ctx->tid,
                                            ctx->a_rsrc,
-                                           rocke_conv_a_descriptor,
+                                           a_fn,
                                            ctx,
                                            0x7FFFFFFF, /* oob_sentinel default = (1 << 31) - 1 */
                                            ROCKE_CACHE_STREAM);
@@ -310,61 +471,4 @@ void rocke_conv_emit_load_phase(rocke_conv_build_ctx_t* ctx,
         rocke_coalesced_tile_loader_load(
             b, &ctx->b_sync_loader, ctx->tid, B_dst, b_fn, ctx, ctx->b_rsrc, NULL);
     }
-}
-
-/* ===================================================================== *
- *  rocke_conv_emit_global_read -- split load, phase 1 of 2.
- *
- *  Mirrors Python emit_global_read(k_off) -> (k_off, a_staged, b_staged).
- *  Sets ctx->k_off_capture = k_off (so the descriptor closures see the
- *  correct tile offset during load_global), then issues only the
- *  buffer_load_vN ops for A and B into VGPR SSA values stored in
- *  *a_staged / *b_staged. The smem_store_vN ops are deferred to
- *  rocke_conv_emit_lds_write. Only valid on the sync (non-async-DMA) path.
- * ===================================================================== */
-void rocke_conv_emit_global_read(rocke_conv_build_ctx_t* ctx,
-                                 rocke_value_t* k_off,
-                                 rocke_ctl_staged_t* a_staged,
-                                 rocke_ctl_staged_t* b_staged)
-{
-    rocke_ir_builder_t* b = ctx->b;
-    /* k_off_capture[0] = k_off */
-    ctx->k_off_capture = k_off;
-    rocke_coalesced_tile_loader_load_global(b,
-                                            &ctx->a_sync_loader,
-                                            ctx->tid,
-                                            rocke_conv_a_descriptor,
-                                            ctx,
-                                            ctx->a_rsrc,
-                                            NULL,
-                                            a_staged);
-    rocke_coalesced_tile_loader_load_global(b,
-                                            &ctx->b_sync_loader,
-                                            ctx->tid,
-                                            rocke_conv_b_descriptor,
-                                            ctx,
-                                            ctx->b_rsrc,
-                                            NULL,
-                                            b_staged);
-}
-
-/* ===================================================================== *
- *  rocke_conv_emit_lds_write -- split load, phase 2 of 2.
- *
- *  Mirrors Python emit_lds_write(staged_tuple, A_dst, B_dst).
- *  Restores ctx->k_off_capture = k_off (from the staged tuple's recorded
- *  offset), then emits smem_store_vN for the VGPRs staged by a prior
- *  rocke_conv_emit_global_read call.
- * ===================================================================== */
-void rocke_conv_emit_lds_write(rocke_conv_build_ctx_t* ctx,
-                               rocke_value_t* k_off,
-                               const rocke_ctl_staged_t* a_staged,
-                               const rocke_ctl_staged_t* b_staged,
-                               rocke_value_t* A_dst,
-                               rocke_value_t* B_dst)
-{
-    rocke_ir_builder_t* b = ctx->b;
-    ctx->k_off_capture = k_off;
-    rocke_coalesced_tile_loader_store_lds(b, &ctx->a_sync_loader, A_dst, a_staged);
-    rocke_coalesced_tile_loader_store_lds(b, &ctx->b_sync_loader, B_dst, b_staged);
 }

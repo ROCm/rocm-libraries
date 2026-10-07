@@ -1969,6 +1969,7 @@ custom.config:
     threads: [256, 4, 1]
     grid: [TilesY, TilesX, One]
   MatrixInstruction: [16, 16, 32, 1]
+  StaggerU: 0
   EnableMatrixInstruction: True
   MIWaveTile: [4, 4]
   WavefrontSize: 64

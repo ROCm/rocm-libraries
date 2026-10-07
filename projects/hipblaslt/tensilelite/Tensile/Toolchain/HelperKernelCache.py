@@ -61,7 +61,7 @@ def _computeCacheKey(kernelPath, includeDir, cmdlineArchs, compiler):
 def _checkCache(cacheDir, cacheKey):
     """Check if a valid cache entry exists. Returns list of .hsaco Paths or None.
 
-    Walks one level: cache entries are organized as <key>/<base-arch>/<*.hsaco>
+    Walks one level: cache entries are organized as <key>/<arch>/<*.hsaco>
     to mirror the on-disk install layout. A flat <key>/<*.hsaco> entry from an
     older cache version is treated as missing so it gets rewritten in the new
     structure on the next store.
@@ -76,12 +76,7 @@ def _checkCache(cacheDir, cacheKey):
 
 
 def _populateCache(cacheDir, cacheKey, hsacoFiles):
-    """Atomically populate a cache entry. Safe under concurrent writes.
-
-    hsacoFiles are full destination paths whose parent directory name is the
-    per-base arch subdir. The cache mirrors that structure as
-    <cacheDir>/<key>/<base-arch>/<name>.
-    """
+    """Atomically populate a cache entry. Safe under concurrent writes."""
     cacheDir = Path(cacheDir)
     finalDir = cacheDir / cacheKey
     if finalDir.exists():
@@ -138,14 +133,14 @@ class HelperKernelCache:
         _evictStale(self.dir, self._MAX_AGE_DAYS)
 
     def restore(self, kernelPath, includeDir, cmdlineArchs, compiler, destRoot):
-        """Try to restore cached .hsaco files into per-base subdirs under destRoot.
+        """Restore cached .hsaco files (organized as <key>/<arch>/<*.hsaco>) into
+        <destRoot>/<arch>/<name>.
 
-        Cache entries are organized as <key>/<base-arch>/<*.hsaco>; restore copies
-        each file to <destRoot>/<base-arch>/<name>, recreating subdirs as needed.
+        The key covers cmdlineArchs, so architectures sharing an ISA -- gfx1250
+        and gfx1250-strict -- get separate entries and the subtree names round
+        trip unchanged.
 
-        Returns (hit: bool, coPaths: List[str]).
-        On hit, coPaths contains the copied file paths. On miss, coPaths is empty.
-        No-op (returns False, []) if cache is disabled.
+        Returns (hit, coPaths): copied paths on hit, [] on miss or when disabled.
         """
         if not self.enabled:
             return False, []

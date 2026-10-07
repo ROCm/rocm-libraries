@@ -636,6 +636,18 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::SBfmB32& self, nb::dict&) { return new rocisa::SBfmB32(self); });
 
+    nb::class_<rocisa::SBfmB64, rocisa::CommonInstruction>(m_common, "SBfmB64")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::SBfmB64& self, nb::dict&) { return new rocisa::SBfmB64(self); });
+
     nb::class_<rocisa::SFlbitI32B32, rocisa::CommonInstruction>(m_common, "SFlbitI32B32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,
@@ -1978,6 +1990,21 @@ void common_inst(nb::module_ m_common)
              nb::arg("comment") = "")
         .def("__deepcopy__", [](const rocisa::VCndMaskB32& self, nb::dict&) {
             return new rocisa::VCndMaskB32(self);
+        });
+
+    nb::class_<rocisa::VCndMaskB16, rocisa::CommonInstruction>(m_common, "VCndMaskB16")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::shared_ptr<rocisa::Container>&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("src2")    = std::make_shared<rocisa::VCC>(),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::VCndMaskB16& self, nb::dict&) {
+            return new rocisa::VCndMaskB16(self);
         });
 
     nb::class_<rocisa::VLShiftLeftB16, rocisa::CommonInstruction>(m_common, "VLShiftLeftB16")

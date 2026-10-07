@@ -80553,6 +80553,7 @@ custom.config:
     threads: [256, 1, 1]
     grid: [TilesX, TilesY, Batch]
   MatrixInstruction: [16, 16, 16, 1]
+  StaggerU: 0
   EnableMatrixInstruction: True
   MIWaveTile: [2, 2]
   WavefrontSize: 64

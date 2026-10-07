@@ -142,6 +142,12 @@ namespace TensileLite
                 // Match DataInitialization MX gate.
                 if(!isMXProblem(*gemm))
                     return;
+                // Only recompute when DataInitialization actually refreshes MX
+                // inputs for this solution (solution-dependent HostPreSwizzle).
+                // Otherwise the preProblem reference is unchanged, so reuse it
+                // instead of paying a full dense reference GEMM per solution.
+                if(!m_dataInit->referenceNeedsPerSolutionRecompute(*gemm, solution))
+                    return;
                 ScopedTimer timer("cpu_reference_gemm_per_solution");
                 SolveCPU(m_problem, m_referenceInputs.get(), m_elementsToValidate);
             }
