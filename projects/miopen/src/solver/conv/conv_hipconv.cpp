@@ -316,8 +316,8 @@ static std::string HipConvConfigRecord(hipconv::ConvKernelHandle kernel)
 static bool HasCurrentConfigVersion(std::string_view record)
 {
     const auto version = hipconv::config_version();
-    return version != "unknown" && record.size() > version.size() &&
-           record.substr(0, version.size()) == version && record[version.size()] == ':';
+    return version != "unknown" && record.starts_with(version) && record.size() > version.size() &&
+           record[version.size()] == ':';
 }
 
 // Resolve `config.descriptor` (a perf-db record) to `config.index` for this
