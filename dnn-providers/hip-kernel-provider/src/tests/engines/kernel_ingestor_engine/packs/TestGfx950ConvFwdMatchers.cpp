@@ -418,20 +418,6 @@ TEST(TestGfx950ConvFwdGraphMatcher, RefusesUnsupportedGraphsBeforeReadingTheirGe
              s.tensors[1].strides = {108, 1, 36, 12};
          }},
         {"output channels do not divide into groups", [](auto& s) { s = groupedSpec(30, 8); }},
-        {"grouped pointwise",
-         [](auto& s) {
-             s = groupedSpec(32, 8);
-             s.tensors[1].dims = {32, 8, 1, 1};
-             s.tensors[1].strides = {8, 1, 8, 8};
-             s.prePadding = s.postPadding = {0, 0};
-         }},
-        {"depthwise pointwise",
-         [](auto& s) {
-             s = groupedSpec(32, 1);
-             s.tensors[1].dims = {32, 1, 1, 1};
-             s.tensors[1].strides = {1, 1, 1, 1};
-             s.prePadding = s.postPadding = {0, 0};
-         }},
         {"NCHW input", [](auto& s) { s.tensors[0].strides = {6272, 196, 14, 1}; }},
         {"KCYX filter", [](auto& s) { s.tensors[1].strides = {288, 9, 3, 1}; }},
         {"nonpacked input", [](auto& s) { s.tensors[0].strides[0] += 32; }},
@@ -480,10 +466,11 @@ TEST(TestGfx950ConvFwdGraphMatcher, AcceptsGroupedAndDepthwiseFilters)
     }
 }
 
-TEST(TestGfx950ConvFwdGraphMatcher, GroupedOneByOneIsAcceptedOnlyOffThePointwiseShortcut)
+TEST(TestGfx950ConvFwdGraphMatcher, GroupedOneByOneGraphsAreMatched)
 {
-    // A 1x1 filter with padding or a non-unit stride is not rocKE's pointwise shortcut,
-    // so the grouped kernel indexes it correctly.
+    // rocKE's pointwise shortcut ignores groups, but no packaged pointwise binary is
+    // grouped: a grouped 1x1 graph, padded, strided or neither, is served by grouped
+    // binaries built against a non-pointwise problem (see the kernel matcher tests).
     const std::vector<std::function<void(GraphSpec&)>> cases{
         [](auto&) {},
         [](auto& s) {
@@ -505,9 +492,7 @@ TEST(TestGfx950ConvFwdGraphMatcher, GroupedOneByOneIsAcceptedOnlyOffThePointwise
         spec.tensors[2].omitDims = true;
         spec.tensors[2].omitStrides = true;
         const GraphFixture fixture(buildGraph(spec), gfx950Properties());
-        // Only the last case, unit stride and no padding, takes the pointwise shortcut.
-        EXPECT_EQ(matchesGraph(GFX950_CONV_FWD, fixture.context()).has_value(),
-                  i + 1 != cases.size());
+        EXPECT_TRUE(matchesGraph(GFX950_CONV_FWD, fixture.context()));
     }
 }
 
@@ -573,8 +558,12 @@ TEST(TestGfx950ConvFwdKernelMatcher, BothTileKVariantsMatchOnlyTheirStorageType)
     }
 }
 
-TEST(TestGfx950ConvFwdKernelMatcher, EveryBakedShapeAttributeMustMatch)
+TEST(TestGfx950ConvFwdKernelMatcher, ServesEveryShapeItsCapabilitiesAdmit)
 {
+    // rocKE's AOT kernels take the problem as kernel arguments: a kernel built for another
+    // batch, image, channel count, filter, stride, padding or dilation still serves the
+    // smoke graph, because none of them changes a capability the graph needs (C + 1 and
+    // K + 1 only narrow the baked widths to 1).
     const GraphFixture fixture(buildGraph(), gfx950Properties());
     for(const auto* field :
         {"N", "C", "K", "Hi", "Wi", "Y", "X", "sH", "sW", "pH", "pW", "dH", "dW"})
@@ -582,8 +571,74 @@ TEST(TestGfx950ConvFwdKernelMatcher, EveryBakedShapeAttributeMustMatch)
         SCOPED_TRACE(field);
         auto kernel = smokeKernel();
         kernel.metadata[field] = kernel.getIntMetadata(field) + 1;
-        EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), kernel));
+        EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD, fixture.context(), kernel));
     }
+}
+
+/// The smoke kernel compiled for build channels @p c / @p k (groups 1).
+KernelDefinition builtFor(int64_t c, int64_t k, const std::string& epilogue = "cshuffle")
+{
+    auto kernel = smokeKernel();
+    kernel.metadata["C"] = c;
+    kernel.metadata["K"] = k;
+    kernel.metadata["epilogue"] = epilogue;
+    return kernel;
+}
+
+TEST(TestGfx950ConvFwdKernelMatcher, BakedWidthsMustDivideTheGraphsChannelRuns)
+{
+    // The load width is the build C's default (8, 4, 2 or 1) clamped by the tile, here
+    // 8; the cshuffle store width is the build K's default. A 12-in, 20-out graph admits
+    // loads up to 4 and stores up to 4.
+    const ConvShape shape{2, 12, 20, 1, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1};
+    const GraphFixture fixture(buildGraph(convSpec(shape)), gfx950Properties());
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), builtFor(32, 32)));
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD, fixture.context(), builtFor(12, 20)));
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), builtFor(24, 20)));
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), builtFor(12, 40)));
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD, fixture.context(), builtFor(36, 60)));
+    // The default epilogue stores scalars, which serve any K.
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD, fixture.context(), builtFor(12, 33, "default")));
+}
+
+TEST(TestGfx950ConvFwdKernelMatcher, PointwiseBinaryServesOnlyPointwiseGraphs)
+{
+    auto pointwise = smokeKernel();
+    pointwise.metadata["Y"] = pointwise.metadata["X"] = int64_t{1};
+    pointwise.metadata["pH"] = pointwise.metadata["pW"] = int64_t{0};
+
+    const GraphFixture spatial(buildGraph(), gfx950Properties());
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, spatial.context(), pointwise));
+
+    // Another batch, image and channel counts: the flat GEMM takes them all at runtime.
+    const ConvShape oneByOne{4, 64, 16, 1, 7, 9, 1, 1, 1, 1, 0, 0, 1, 1};
+    const GraphFixture fixture(buildGraph(convSpec(oneByOne)), gfx950Properties());
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD, fixture.context(), pointwise));
+    // A non-pointwise binary serves a pointwise graph through its descriptors.
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD, fixture.context(), smokeKernel()));
+
+    auto strided = oneByOne;
+    strided.sH = strided.sW = 2;
+    const GraphFixture stridedFixture(buildGraph(convSpec(strided)), gfx950Properties());
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, stridedFixture.context(), pointwise));
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD, stridedFixture.context(), smokeKernel()));
+}
+
+TEST(TestGfx950ConvFwdKernelMatcher, GroupedOneByOneIsServedOnlyByGroupedNonPointwiseBinaries)
+{
+    auto spec = groupedSpec(32, 8);
+    spec.tensors[1].dims = {32, 8, 1, 1};
+    spec.tensors[1].strides = {8, 1, 8, 8};
+    spec.prePadding = spec.postPadding = {0, 0};
+    spec.tensors[2].omitDims = true;
+    spec.tensors[2].omitStrides = true;
+    const GraphFixture fixture(buildGraph(spec), gfx950Properties());
+    ASSERT_TRUE(matchesGraph(GFX950_CONV_FWD, fixture.context()));
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD, fixture.context(), groupedKernel(32, 4)));
+    auto pointwise = smokeKernel();
+    pointwise.metadata["Y"] = pointwise.metadata["X"] = int64_t{1};
+    pointwise.metadata["pH"] = pointwise.metadata["pW"] = int64_t{0};
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), pointwise));
 }
 
 TEST(TestGfx950ConvFwdKernelMatcher, MissingOrWronglyTypedMetadataDeclinesCleanly)
@@ -601,20 +656,26 @@ TEST(TestGfx950ConvFwdKernelMatcher, MissingOrWronglyTypedMetadataDeclinesCleanl
     }
 }
 
-TEST(TestGfx950ConvFwdKernelMatcher, GroupCountMustMatchTheGraph)
+TEST(TestGfx950ConvFwdKernelMatcher, GroupedGraphsNeedTheGroupedPathAndFittingWidths)
 {
+    // Graph: 32 channels in 4 groups of 8, K / groups = 8. Any grouped binary whose baked
+    // widths divide 8 serves it, whatever group count it was built for.
     const GraphFixture grouped(buildGraph(groupedSpec(32, 8)), gfx950Properties());
     EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD, grouped.context(), groupedKernel(32, 4)));
     EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, grouped.context(), smokeKernel()));
-    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, grouped.context(), groupedKernel(32, 2)));
-    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, grouped.context(), groupedKernel(32, 8)));
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD, grouped.context(), groupedKernel(32, 2)));
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD, grouped.context(), groupedKernel(32, 8)));
 
+    // Graph: depthwise with a channel multiplier of 2 (C / groups = 1, K / groups = 2).
     const GraphFixture depthwise(buildGraph(groupedSpec(64, 1)), gfx950Properties());
     EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD, depthwise.context(), groupedKernel(64, 32)));
     EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, depthwise.context(), groupedKernel(64, 1)));
+    // Built for C / groups = 2, so it loads two channels at a time.
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, depthwise.context(), groupedKernel(64, 16)));
 
+    // The grouped code path computes groups == 1 as well.
     const GraphFixture ungrouped(buildGraph(), gfx950Properties());
-    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, ungrouped.context(), groupedKernel(32, 4)));
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD, ungrouped.context(), groupedKernel(32, 4)));
 }
 
 TEST(TestGfx950ConvFwdKernelMatcher, AcceptsSweptTuningForTheMatchedGeometry)
@@ -676,9 +737,6 @@ TEST(TestGfx950ConvFwdKernelMatcher, DeclinesUnreviewedLaunchContractAndUnpackag
     EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), kernel));
     kernel = smokeKernel();
     kernel.metadata["epilogue"] = std::string("relu");
-    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), kernel));
-    kernel = smokeKernel();
-    kernel.metadata["groups"] = int64_t{2};
     EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), kernel));
     kernel = smokeKernel();
     kernel.metadata["layout"] = std::string("NCHW");
@@ -821,21 +879,35 @@ TEST(TestGfx950ConvFwdKernelMatcher, DirectKernelsMatchTheGuardedDepthwiseCatalo
     }
 }
 
-TEST(TestGfx950ConvFwdKernelMatcher, DirectKernelsMustMatchEveryBakedShapeAttribute)
+TEST(TestGfx950ConvFwdKernelMatcher, DirectKernelsServeAnyImageButOnlyTheirFilter)
 {
+    // N, Hi, Wi and the group count are kernel arguments for both variants; the filter,
+    // stride, padding and dilation are compiled in.
     const auto shape = depthwiseShape(32, 14, 14, 3, 1, 1);
     const GraphFixture fixture(buildGraph(convSpec(shape)), gfx950Properties());
     for(const auto& base : {spatialKernel(shape), stdKernel(shape)})
     {
+        const bool spatial = base.getStringMetadata("direct_variant") == "spatial";
+        SCOPED_TRACE(spatial ? "spatial" : "std");
         ASSERT_TRUE(matchesKernel(GFX950_CONV_FWD, fixture.context(), base));
-        for(const auto* field :
-            {"N", "C", "K", "Hi", "Wi", "Y", "X", "sH", "sW", "pH", "pW", "dH", "dW", "groups"})
+        for(const auto* field : {"N", "Hi", "Wi"})
+        {
+            SCOPED_TRACE(field);
+            auto kernel = base;
+            kernel.metadata[field] = kernel.getIntMetadata(field) + 7;
+            EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD, fixture.context(), kernel));
+        }
+        for(const auto* field : {"Y", "X", "sH", "sW", "pH", "pW", "dH", "dW"})
         {
             SCOPED_TRACE(field);
             auto kernel = base;
             kernel.metadata[field] = kernel.getIntMetadata(field) + 1;
             EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), kernel));
         }
+        auto regrouped = base;
+        regrouped.metadata["C"] = regrouped.metadata["K"] = regrouped.metadata["groups"]
+            = int64_t{16};
+        EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD, fixture.context(), regrouped));
         for(const auto& field : base.metadata)
         {
             SCOPED_TRACE(field.first);

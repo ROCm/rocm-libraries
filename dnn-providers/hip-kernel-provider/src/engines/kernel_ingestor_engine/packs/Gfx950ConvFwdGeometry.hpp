@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -366,6 +367,114 @@ inline DirectKernargs directKernargs(const Problem& problem, const Geometry& geo
                           i32(problem.k)};
 }
 
+/// ConvProblem.is_pointwise: a 1x1, unit-stride, unpadded convolution, which rocKE builds
+/// as a flat GEMM instead of through the coordinate transforms.
+inline bool isPointwise(const Problem& problem)
+{
+    return problem.y == 1 && problem.x == 1 && problem.strideH == 1 && problem.strideW == 1
+           && problem.padH == 0 && problem.padW == 0;
+}
+
+/// The widest of 8, 4, 2, 1 that divides @p extent: rocKE's
+/// ImplicitGemmConvSpec.default_vector_sizes for 2-byte elements.
+inline int64_t defaultVectorWidth(int64_t extent)
+{
+    for(const int64_t width : {8, 4, 2})
+    {
+        if(extent % width == 0)
+        {
+            return width;
+        }
+    }
+    return 1;
+}
+
+/// rocke.helpers.spec.choose_load_vec for 2-byte elements: the widest width up to 8 that
+/// divides tile_k and spreads both tiles' loads evenly over the block's threads.
+inline std::optional<int64_t>
+    tileLoadWidth(int64_t tileM, int64_t tileN, int64_t tileK, int64_t blockSize)
+{
+    if(tileM <= 0 || tileN <= 0 || tileK <= 0 || blockSize <= 0)
+    {
+        return std::nullopt;
+    }
+    for(int64_t width = 8; width >= 1; width /= 2)
+    {
+        if(tileK % width != 0)
+        {
+            continue;
+        }
+        const auto aLoads = tileM * tileK / width;
+        const auto bLoads = tileN * tileK / width;
+        if(aLoads >= blockSize && bLoads >= blockSize && aLoads % blockSize == 0
+           && bLoads % blockSize == 0)
+        {
+            return width;
+        }
+    }
+    return std::nullopt;
+}
+
+/// What an AOT implicit-GEMM binary keeps from the problem it was compiled for. Every
+/// extent, stride, padding, dilation and channel count is a kernel argument; these are
+/// the only build-time decisions that bound which problems the binary computes.
+struct ImplicitGemmCapabilities
+{
+    /// A and B load width: the builder's default for the build C / groups, clamped by the
+    /// tile (ImplicitGemmConvSpec._sync_load_vecs). Both run along C / groups.
+    int64_t loadWidth;
+    /// The cshuffle store width (default_vector_sizes for the build K / groups); 1 for
+    /// the default epilogue, which stores scalars.
+    int64_t storeWidth;
+    /// Built as the flat pointwise GEMM, which computes only pointwise problems.
+    bool pointwise;
+    /// Built on the grouped code path, which computes groups == 1 as well.
+    bool grouped;
+};
+
+/// The capabilities of a binary compiled for @p build with the given tile, or
+/// std::nullopt when no load width fits the tile (rocKE would not have built it).
+inline std::optional<ImplicitGemmCapabilities> implicitGemmCapabilities(const Problem& build,
+                                                                        int64_t tileM,
+                                                                        int64_t tileN,
+                                                                        int64_t tileK,
+                                                                        int64_t warpM,
+                                                                        int64_t warpN,
+                                                                        bool cshuffleEpilogue)
+{
+    if(build.groups <= 0 || build.c % build.groups != 0 || build.k % build.groups != 0)
+    {
+        return std::nullopt;
+    }
+    const auto tileWidth = tileLoadWidth(tileM, tileN, tileK, warpM * warpN * 64);
+    if(!tileWidth)
+    {
+        return std::nullopt;
+    }
+    return ImplicitGemmCapabilities{
+        std::min(defaultVectorWidth(build.c / build.groups), *tileWidth),
+        cshuffleEpilogue ? defaultVectorWidth(build.k / build.groups) : 1,
+        isPointwise(build),
+        build.groups > 1};
+}
+
+/// Whether a binary with @p capabilities computes @p problem. The forward subset of
+/// rocKE's KernelCache.supports_problem: the baked load width divides C / groups and the
+/// store width K / groups (a wider access would straddle a group's slab), a grouped
+/// problem needs the grouped code path, and the pointwise GEMM serves only pointwise
+/// problems. A non-pointwise binary serves pointwise problems through its descriptors.
+inline bool implicitGemmServes(const ImplicitGemmCapabilities& capabilities, const Problem& problem)
+{
+    if(problem.groups <= 0 || problem.c % problem.groups != 0 || problem.k % problem.groups != 0)
+    {
+        return false;
+    }
+    return (problem.groups == 1 || capabilities.grouped)
+           && (!capabilities.pointwise || isPointwise(problem))
+           && (problem.c / problem.groups) % capabilities.loadWidth == 0
+           && (problem.k / problem.groups) % capabilities.storeWidth == 0;
+}
+
 /// The kernel_family metadata value, also the engine knob that forces a family.
 /// Mirrors KERNEL_FAMILY_* in rocke/library/builders/common/convolution_forward.py.
 enum class KernelFamily : int64_t
@@ -464,6 +573,19 @@ inline bool directProblemSupported(const Problem& problem)
            && problem.strideH == problem.strideW && problem.padH == problem.padW
            && problem.dilationH == 1 && problem.dilationW == 1 && directPaddingSupported(problem)
            && directRowsCovered(problem);
+}
+
+/// Whether a direct depthwise binary compiled for @p build computes @p problem, which
+/// directProblemSupported already admitted. N, Hi, Wi and the group count are kernel
+/// arguments for both variants (the spatial one derives its 64 / groups columns per
+/// wave at runtime); the filter, stride and padding shape the unrolled tap loop and are
+/// compiled in, so they (and the dilation the kernels do not take) must be the build's.
+inline bool directServes(const Problem& build, const Problem& problem)
+{
+    return build.y == problem.y && build.x == problem.x && build.strideH == problem.strideH
+           && build.strideW == problem.strideW && build.padH == problem.padH
+           && build.padW == problem.padW && build.dilationH == problem.dilationH
+           && build.dilationW == problem.dilationW;
 }
 
 /// Grid and block for a direct depthwise kernel. Mirrors Gfx950ConvFwdSpec.grid()/block()

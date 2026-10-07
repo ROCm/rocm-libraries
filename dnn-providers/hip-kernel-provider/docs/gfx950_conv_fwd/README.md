@@ -7,8 +7,14 @@ channels-last storage, FP16 or BF16 storage, FP32 accumulation, and symmetric
 padding. Grouped convolution, including depthwise and channel-multiplier
 depthwise, is supported: the group count is inferred as X channels divided by
 W dimension 1, and each group runs on grid z. Grouped pointwise convolution
-(1x1 filter, stride 1, no padding, groups > 1) is declined because the
-kernel's flat pointwise path does not select the group's channel slabs. See [the graph contract](graph_contract.md) for the exact
+(1x1 filter, stride 1, no padding, groups > 1) is served by grouped kernels
+built against a non-pointwise problem; no kernel is built for it, because
+rocKE's flat pointwise path does not select the group's channel slabs.
+
+rocKE's AOT kernels take the problem as kernel arguments, so a packaged kernel
+serves every graph its build-time capabilities admit, not only the shape it
+was compiled for: see [which kernels serve a graph](graph_contract.md#7-which-kernels-serve-a-graph).
+See [the graph contract](graph_contract.md) for the exact
 dimension/stride mapping and rejection rules, and [kernel mining](mining.md)
 for the ABI and compile-time constraints.
 
@@ -43,10 +49,11 @@ integration end to end; catalogs for real workloads are generated and packed
 outside the source tree, as described in
 [private workload catalogs](#private-workload-catalogs).
 
-This is a specialized catalog, not a general convolution engine. An otherwise
-valid request needs a matching compiled entry. Grouped pointwise, 3D, fused,
-channels-first, and other dtypes are integration gaps; they are not claims
-about rocKE's broader capabilities.
+The catalog decides coverage through capabilities, not shapes: a graph is
+served when at least one packaged kernel's capabilities admit it, whatever
+its batch, image size, channel counts, filter, stride, padding or dilation.
+3D, fused, channels-first, and other dtypes are integration gaps; they are not
+claims about rocKE's broader capabilities.
 [Verification and coverage](coverage.md) records what the shipped catalog is
 verified against.
 

@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 from builders.common.convolution_forward import (
+    gfx950_conv_fwd_capabilities,
+    gfx950_conv_fwd_serves,
     KERNEL_FAMILY_DIRECT_DEPTHWISE,
     KERNEL_FAMILY_IMPLICIT_GEMM,
     Gfx950ConvFwdSpec,
@@ -1112,3 +1114,185 @@ def test_direct_spec_has_no_implicit_gemm_instance_and_vice_versa():
         direct.to_instance_spec()
     with pytest.raises(ValueError, match="no direct depthwise instance"):
         gfx950_conv_fwd_spec_for_request(_dw_request()).to_direct_spec()
+
+
+# ---------------------------------------------------------------------------
+# Runtime coverage: a packaged binary serves every problem its capabilities admit
+# ---------------------------------------------------------------------------
+
+
+def _shipped_specs():
+    kernels = json.loads(_KDP_PATH.read_text())["kernelDescriptors"]
+    return [Gfx950ConvFwdSpec(**k["kernel_source"]["spec"]) for k in kernels]
+
+
+def _ir(kernel) -> str:
+    return _lower_kernel_to_llvm_python(
+        kernel, arch="gfx950", llvm_flavor="llvm22"
+    ).replace(kernel.name, "@K")
+
+
+# Problems an implicit-GEMM binary is rebuilt against: every runtime field varies,
+# with channel counts that are multiples of the binary's widths.
+_RUNTIME_GEOMETRIES = (
+    dict(N=5, Hi=23, Wi=17, Y=3, X=3, sH=2, sW=2, pH=1, pW=1, dH=1, dW=1),
+    dict(N=1, Hi=9, Wi=31, Y=5, X=3, sH=1, sW=2, pH=4, pW=2, dH=2, dW=2),
+    dict(N=2, Hi=14, Wi=9, Y=2, X=2, sH=1, sW=1, pH=0, pW=0, dH=1, dW=1),
+)
+
+
+def test_implicit_gemm_binaries_are_the_kernel_for_every_problem_they_serve():
+    """The binary for a build problem is byte-for-byte the kernel rocKE emits for any
+    other problem the capabilities admit, with the widths pinned to the binary's.
+
+    This is what makes the runtime match sound: only the capabilities differ between
+    problems. A grouped binary on groups == 1, and a non-pointwise binary on a pointwise
+    problem, take another build path in rocKE and are covered on the GPU instead.
+    """
+    shipped = [s for s in _shipped_specs() if not s.is_direct]
+    # One binary per distinct capability set and tile.
+    seen, sample = set(), []
+    for spec in shipped:
+        caps = gfx950_conv_fwd_capabilities(spec)
+        key = (caps, spec.tile_k, spec.epilogue, spec.dtype)
+        if key not in seen:
+            seen.add(key)
+            sample.append((spec, caps))
+    assert len(sample) >= 8
+    for spec, caps in sample:
+        widths = dict(
+            vector_size_a=caps.load_width,
+            vector_size_b=caps.load_width,
+            vector_size_c=caps.store_width,
+        )
+        base = spec.to_instance_spec()
+        reference = _ir(build_implicit_gemm_conv(base, arch="gfx950"))
+        assert (
+            _ir(build_implicit_gemm_conv(replace(base, **widths), arch="gfx950"))
+            == reference
+        )
+        for factor, geometry in enumerate(_RUNTIME_GEOMETRIES, start=2):
+            groups = spec.groups * factor if caps.grouped else 1
+            if caps.pointwise:
+                geometry = dict(geometry, Y=1, X=1, sH=1, sW=1, pH=0, pW=0, dH=1, dW=1)
+            problem = replace(
+                spec,
+                C=groups * caps.load_width * factor,
+                K=groups * caps.store_width * (factor + 1),
+                groups=groups,
+                **geometry,
+            )
+            assert gfx950_conv_fwd_serves(spec, problem) == (True, "ok"), problem
+            other = replace(base, problem=problem.to_problem(), groups=groups, **widths)
+            assert _ir(build_implicit_gemm_conv(other, arch="gfx950")) == reference, (
+                spec,
+                problem,
+            )
+
+
+def test_direct_binaries_are_the_kernel_for_every_image_they_serve():
+    for spec in (s for s in _shipped_specs() if s.is_direct):
+        build = (
+            build_direct_depthwise_spatial
+            if spec.direct_variant == "spatial"
+            else build_direct_depthwise
+        )
+        reference = _ir(build(spec.to_direct_spec(), arch="gfx950"))
+        # The spatial variant derives its columns per wave from the runtime groups,
+        # which only have to stay below 64.
+        groups = (
+            spec.groups + 2 if spec.direct_variant == "spatial" else spec.groups * 2
+        )
+        other = replace(
+            spec, N=3, Hi=spec.Hi + 9, Wi=spec.Wi + 5, C=groups, K=groups, groups=groups
+        )
+        assert gfx950_conv_fwd_serves(spec, other) == (True, "ok")
+        assert _ir(build(other.to_direct_spec(), arch="gfx950")) == reference
+
+
+def test_every_catalog_kernel_serves_its_own_build_problem():
+    for spec in _shipped_specs():
+        assert gfx950_conv_fwd_serves(spec, spec) == (True, "ok"), spec
+
+
+def test_served_problems_agree_with_kernel_cache_supports_problem():
+    """For implicit GEMM the predicate is the forward subset of rocKE's AOT cache."""
+    from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
+    from benchmarks.common.kernel_sweep import current_llvm_flavor
+
+    cache = KernelCache.__new__(KernelCache)
+    compared = served = 0
+    for spec in (s for s in _shipped_specs() if not s.is_direct):
+        caps = gfx950_conv_fwd_capabilities(spec)
+        identity = KernelIdentity(
+            arch="gfx950",
+            direction="fwd",
+            algorithm="implicit_gemm",
+            dtype_a=spec.dtype,
+            dtype_b=spec.dtype,
+            dtype_d=spec.dtype,
+            tile_m=spec.tile_m,
+            tile_n=spec.tile_n,
+            tile_k=spec.tile_k,
+            warp_m=spec.warp_m,
+            warp_n=spec.warp_n,
+            warp_tile_m=spec.warp_tile_m,
+            warp_tile_n=spec.warp_tile_n,
+            warp_tile_k=spec.warp_tile_k,
+            pipeline=spec.pipeline,
+            epilogue=spec.epilogue,
+            wave_size=spec.wave_size,
+            vector_size_a=caps.load_width,
+            vector_size_b=caps.load_width,
+            vector_size_c=caps.store_width,
+            grouped=caps.grouped,
+            is_pointwise=caps.pointwise,
+            llvm_flavor=current_llvm_flavor(),
+        )
+        for groups, cpg, kpg, filt in (
+            (1, 32, 32, 3),
+            (1, 12, 20, 3),
+            (4, 8, 8, 3),
+            (32, 1, 1, 3),
+            (16, 1, 2, 3),
+            (1, 64, 48, 1),
+            (8, 8, 8, 1),
+            (3, 6, 10, 5),
+        ):
+            problem = replace(
+                spec,
+                N=2,
+                Hi=14,
+                Wi=14,
+                C=groups * cpg,
+                K=groups * kpg,
+                Y=filt,
+                X=filt,
+                sH=1,
+                sW=1,
+                pH=filt // 2,
+                pW=filt // 2,
+                dH=1,
+                dW=1,
+                groups=groups,
+            )
+            ours, _ = gfx950_conv_fwd_serves(spec, problem)
+            theirs, why = cache.supports_problem(identity, problem.to_problem())
+            assert ours == theirs, (spec, problem, why)
+            compared += 1
+            served += ours
+    assert compared > 500 and 0 < served < compared
+
+
+def test_grouped_one_by_one_problems_are_served_only_by_grouped_non_pointwise_binaries():
+    problem = Gfx950ConvFwdSpec(N=2, Hi=10, Wi=10, C=64, K=64, Y=1, X=1, groups=8)
+    servers = [s for s in _shipped_specs() if gfx950_conv_fwd_serves(s, problem)[0]]
+    assert servers
+    for spec in servers:
+        caps = gfx950_conv_fwd_capabilities(spec)
+        assert caps.grouped and not caps.pointwise and not spec.is_direct
+    # The exact-shape factory still declines to build one.
+    with pytest.raises(ValueError, match="grouped pointwise"):
+        gfx950_conv_fwd_spec_for_request(
+            _request(Y=1, X=1, pad_h=0, pad_w=0, C=64, K=64, G=8)
+        )
