@@ -3074,4 +3074,350 @@ namespace
             EXPECT_EQ(solution->partialTileSize(slots), slots * solution->partialTileSize(1));
     }
 
+    // Parallel (PostGSU) reduction on the dynamic path: where the static path
+    // reduces in parallel (origami select_reduction: at most CUs / 4 tiles of
+    // at least 64 iterations) every tile is split as the static grid splits it
+    // (one part per CU, at least 8 iterations each), with no flag bound, and
+    // the parts are summed by a separate kernel.
+    TensileLite::StreamKDynamicSplitInputs parallelSplitInputs(size_t tiles, size_t itersPerTile)
+    {
+        auto in          = dynamicSplitInputs(tiles, itersPerTile);
+        in.allowParallel = true;
+        return in;
+    }
+
+    TEST(StreamKDynamicSplit_pre_checkin, ParallelSplitFollowsTheStaticPath)
+    {
+        // I = 20480: one part per CU, beyond the tree factors.
+        const auto d = TensileLite::streamKDynamicSplit(parallelSplitInputs(1, 20480));
+        EXPECT_TRUE(d.parallel);
+        EXPECT_EQ(d.skTiles, 1u);
+        EXPECT_EQ(d.skSplit, 256u);
+        EXPECT_EQ(d.skItersPerWI, 80u);
+        EXPECT_EQ(d.totalItems, 256u);
+        EXPECT_EQ(d.grid, 256u);
+
+        // 12 tiles: 21 parts each, one wave.
+        const auto e = TensileLite::streamKDynamicSplit(parallelSplitInputs(12, 4096));
+        EXPECT_TRUE(e.parallel);
+        EXPECT_EQ(e.skTiles, 12u);
+        EXPECT_EQ(e.skSplit, 21u);
+        EXPECT_EQ(e.totalItems, 252u);
+
+        // Without the capability the same problem takes the arrival fixup.
+        auto in          = parallelSplitInputs(1, 20480);
+        in.allowParallel = false;
+        const auto a     = TensileLite::streamKDynamicSplit(in);
+        EXPECT_FALSE(a.parallel);
+        EXPECT_EQ(a.skSplit, 16u);
+    }
+
+    TEST(StreamKDynamicSplit_pre_checkin, ParallelKeepsManyTilesWholeAndMinIters)
+    {
+        const auto d = TensileLite::streamKDynamicSplit(parallelSplitInputs(256, 4096));
+        EXPECT_EQ(d.skTiles, 0u);
+        EXPECT_FALSE(d.parallel) << "whole tiles need no reduction";
+        EXPECT_EQ(d.totalItems, 256u);
+
+        // 200 tiles: a second part would not fit one wave.
+        EXPECT_EQ(TensileLite::streamKDynamicSplit(parallelSplitInputs(200, 4096)).skTiles, 0u);
+
+        // I = 64: at most 8 parts of 8 iterations.
+        const auto m = TensileLite::streamKDynamicSplit(parallelSplitInputs(1, 64));
+        EXPECT_TRUE(m.parallel);
+        EXPECT_EQ(m.skSplit, 8u);
+        EXPECT_GE(m.skItersPerWI, TensileLite::StreamKDynamicMinItersPerWI);
+        EXPECT_EQ(TensileLite::streamKDynamicSplit(parallelSplitInputs(1, 15)).skTiles, 0u);
+    }
+
+    TEST(StreamKDynamicSplit_pre_checkin, ParallelFitsTheWorkspaceNotTheFlags)
+    {
+        // The parallel reduction uses no per-part flags: 7 tiles x 36 parts
+        // with only 20 flag slots.
+        auto fl      = parallelSplitInputs(7, 262144);
+        fl.flagSlots = 20;
+        const auto f = TensileLite::streamKDynamicSplit(fl);
+        EXPECT_TRUE(f.parallel);
+        EXPECT_EQ(f.skSplit, 36u);
+
+        // Workspace: tiles * partialTileBytes + parallelBytesPerSplit per part,
+        // plus parallelFixedBytes.
+        auto in                  = parallelSplitInputs(2, 262144);
+        in.parallelBytesPerSplit = 1000;
+        in.parallelFixedBytes    = 12345;
+        const size_t perSplit    = 2 * in.partialTileBytes + in.parallelBytesPerSplit;
+        in.workspaceBytes        = 50 * perSplit + in.parallelFixedBytes;
+        const auto d             = TensileLite::streamKDynamicSplit(in);
+        EXPECT_TRUE(d.parallel);
+        EXPECT_EQ(d.skSplit, 50u);
+        in.workspaceBytes -= 1;
+        EXPECT_EQ(TensileLite::streamKDynamicSplit(in).skSplit, 49u) << "shrink, not fall back";
+
+        // Room for one part only: the arrival fixup cannot fit either.
+        in.workspaceBytes = perSplit + in.parallelFixedBytes;
+        EXPECT_EQ(TensileLite::streamKDynamicSplit(in).skTiles, 0u);
+    }
+
+    TEST(StreamKDynamicSplit_pre_checkin, ParallelWithoutTheArrivalFixup)
+    {
+        // A kernel can support the parallel reduction without the arrival
+        // fixup (e.g. no scalar atomics): it still splits, in parallel.
+        auto in       = parallelSplitInputs(1, 20480);
+        in.allowSplit = false;
+        const auto d  = TensileLite::streamKDynamicSplit(in);
+        EXPECT_TRUE(d.parallel);
+        EXPECT_EQ(d.skSplit, 256u);
+    }
+
+    // The static path's choice of reduction (origami select_reduction): parallel
+    // for at most CUs / 4 tiles with at least 64 iterations each, tree (here
+    // the arrival fixup) otherwise.
+    TEST(StreamKDynamicSplit_pre_checkin, ParallelOnlyWhereTheStaticPathTakesIt)
+    {
+        // 64 tiles = 256 / 4: parallel, 4 parts each.
+        const auto p = TensileLite::streamKDynamicSplit(parallelSplitInputs(64, 4096));
+        EXPECT_TRUE(p.parallel);
+        EXPECT_EQ(p.skSplit, 4u);
+
+        // 65 and 128 tiles: the arrival fixup with the tree factors.
+        const auto a = TensileLite::streamKDynamicSplit(parallelSplitInputs(65, 4096));
+        EXPECT_FALSE(a.parallel);
+        EXPECT_EQ(a.skSplit, 3u);
+        auto       in = parallelSplitInputs(128, 4096);
+        const auto b  = TensileLite::streamKDynamicSplit(in);
+        EXPECT_FALSE(b.parallel);
+        EXPECT_EQ(b.skTiles, 128u);
+        EXPECT_EQ(b.skSplit, 2u);
+
+        // Without the arrival fixup those tiles stay whole.
+        in.allowSplit = false;
+        EXPECT_EQ(TensileLite::streamKDynamicSplit(in).skTiles, 0u);
+
+        // Fewer than 64 iterations per tile: the arrival fixup.
+        const auto s = TensileLite::streamKDynamicSplit(parallelSplitInputs(1, 63));
+        EXPECT_FALSE(s.parallel);
+        EXPECT_EQ(s.skSplit, 6u);
+
+        // A workspace with room for fewer than two parallel parts: the
+        // arrival fixup, as a static parallel grid below two workgroups per
+        // tile is demoted to tree.
+        auto ws               = parallelSplitInputs(12, 4096);
+        ws.parallelFixedBytes = 25 * ws.partialTileBytes;
+        ws.workspaceBytes     = 36 * ws.partialTileBytes;
+        const auto w          = TensileLite::streamKDynamicSplit(ws);
+        EXPECT_FALSE(w.parallel);
+        EXPECT_EQ(w.skTiles, 12u);
+        EXPECT_EQ(w.skSplit, 3u);
+    }
+
+    TEST(StreamKDynamicSplit_pre_checkin, ParallelOnlyWhenEveryTileIsSplit)
+    {
+        // Debug overrides: every tile split -> parallel; a DP + SK mix keeps
+        // the arrival fixup (the PostGSU kernel sums every tile).
+        auto in          = parallelSplitInputs(4, 262144);
+        in.overrideTiles = 4;
+        in.overrideSplit = 16;
+        auto d           = TensileLite::streamKDynamicSplit(in);
+        EXPECT_TRUE(d.parallel);
+        EXPECT_EQ(d.skTiles, 4u);
+        EXPECT_EQ(d.skSplit, 16u);
+
+        in.overrideTiles = 3;
+        d                = TensileLite::streamKDynamicSplit(in);
+        EXPECT_FALSE(d.parallel);
+        EXPECT_EQ(d.skTiles, 3u);
+        EXPECT_EQ(d.totalItems, 1u + 3u * 16u);
+
+        // Split 1 is no split: whole tiles, no reduction.
+        in.overrideTiles = 4;
+        in.overrideSplit = 1;
+        d                = TensileLite::streamKDynamicSplit(in);
+        EXPECT_FALSE(d.parallel);
+    }
+
+    std::shared_ptr<TensileLite::ContractionSolution> dynamicParallelSolution()
+    {
+        auto solution                                 = dynamicSplitSolution();
+        solution->internalArgsSupport.dynamicParallel = true;
+        return solution;
+    }
+
+    // Only kernels that advertise the dynamic parallel reduction get it, never
+    // with PAP, uniform summation order or atomic StreamK.
+    TEST(StreamKDynamicSplit_pre_checkin, ParallelNeedsTheCapability)
+    {
+        auto         device  = uniformitySteeringDevice();
+        auto         problem = dynamicSplitGemm(128, 128, 262144, 1);
+        auto         capable = dynamicParallelSolution();
+        const size_t tiles   = problem.getNumTiles(capable->sizeMapping, 1);
+        const auto   d       = capable->streamKDynamicDecomposition(problem, device, tiles);
+        EXPECT_TRUE(d.parallel);
+        EXPECT_EQ(d.skTiles, tiles);
+
+        auto older = dynamicSplitSolution();
+        EXPECT_FALSE(older->streamKDynamicDecomposition(problem, device, tiles).parallel)
+            << "logic without the capability keeps the arrival fixup";
+
+        auto pap                                  = dynamicParallelSolution();
+        pap->sizeMapping.prefetchAcrossPersistent = 1;
+        EXPECT_EQ(pap->streamKDynamicDecomposition(problem, device, tiles).skTiles, 0u);
+
+        auto atomic                       = dynamicParallelSolution();
+        atomic->sizeMapping.streamKAtomic = 1;
+        EXPECT_FALSE(atomic->streamKDynamicDecomposition(problem, device, tiles).parallel);
+
+        auto uso = problem;
+        uso.setParams().setUniformSummationOrder(true);
+        EXPECT_EQ(capable->streamKDynamicDecomposition(uso, device, tiles).skTiles, 0u);
+    }
+
+    // The parallel workspace is static parallel reduction's sizing for skSplit
+    // slots, and query, launch, launch summary and solve() agree on it, batched
+    // or not. The launch is the GEMM plus a PostGSU kernel with gsu = skSplit.
+    TEST(StreamKDynamicSplit_pre_checkin, ParallelWorkspaceAndLaunchAgree)
+    {
+        auto solution = dynamicParallelSolution();
+        auto device   = uniformitySteeringDevice();
+        for(size_t batch : {size_t{1}, size_t{4}})
+        {
+            SCOPED_TRACE("batch " + std::to_string(batch));
+            auto problem = dynamicSplitGemm(128, 128, 262144, batch);
+            ASSERT_TRUE(solution->streamK5EffectiveDynamic(problem, device));
+            const size_t tiles = problem.getNumTiles(solution->sizeMapping, 1);
+            ASSERT_EQ(tiles, batch);
+
+            const auto wanted = solution->streamKDynamicDecomposition(problem, device, tiles);
+            ASSERT_TRUE(wanted.parallel);
+            ASSERT_EQ(wanted.skTiles, tiles);
+            ASSERT_GT(wanted.skSplit, 1u);
+            // No bias gradient / amaxD here: one partial tile per part.
+            EXPECT_EQ(wanted.workspaceBytes, solution->partialTileSize(wanted.partialSlots()));
+
+            const size_t required = solution->requiredWorkspaceSize(problem, device);
+            EXPECT_EQ(required, wanted.workspaceBytes);
+            EXPECT_EQ(solution->computeStreamKDecisions(problem, device).requiredWorkspaceBytes,
+                      required);
+            EXPECT_EQ(solution->computeStreamKDecisions(problem, device).reduction,
+                      origami::reduction_t::parallel);
+
+            problem.setWorkspaceSize(required);
+            expectSameSplit(solution->streamKDynamicDecomposition(problem, device, tiles), wanted);
+            EXPECT_EQ(solution->requiredWorkspaceSize(problem, device), required);
+
+            const auto launch = solution->resolvePersistentSettings(problem, device);
+            ASSERT_TRUE(launch.dynamicSplit.has_value());
+            expectSameSplit(*launch.dynamicSplit, wanted);
+            EXPECT_TRUE(launch.dynamicSplit->parallel);
+            EXPECT_EQ(launch.reduction, origami::reduction_t::parallel);
+            EXPECT_EQ(launch.workspaceBytes, required);
+            EXPECT_EQ(launch.grid, wanted.grid);
+
+            const auto invocations = solveWithWorkspace(*solution, problem, device);
+            ASSERT_EQ(invocations.size(), 2u) << "GEMM + PostGSU";
+            EXPECT_EQ(invocations[0].numWorkGroups.x, wanted.grid);
+            EXPECT_NE(invocations[1].kernelName.find("_PostGSU"), std::string::npos);
+
+            // One byte short: the split shrinks to what fits.
+            problem.setWorkspaceSize(required - 1);
+            const auto shorter = solution->streamKDynamicDecomposition(problem, device, tiles);
+            EXPECT_LT(shorter.skSplit, wanted.skSplit);
+            EXPECT_LE(shorter.workspaceBytes, required - 1);
+        }
+    }
+
+    // More than CUs / 4 tiles on a kernel with both reductions take the
+    // arrival fixup, and the workspace query, launch summary and launch agree
+    // on it.
+    TEST(StreamKDynamicSplit_pre_checkin, ManyTilesQueryAndLaunchTakeTheArrivalFixup)
+    {
+        auto         solution = dynamicParallelSolution();
+        auto         device   = uniformitySteeringDevice();
+        const size_t mtx      = solution->sizeMapping.macroTile.x;
+        const size_t mty      = solution->sizeMapping.macroTile.y;
+        auto         problem  = dynamicSplitGemm(16 * mtx, 8 * mty, 4096, 1);
+        const size_t tiles    = problem.getNumTiles(solution->sizeMapping, 1);
+        ASSERT_EQ(tiles, 128u);
+
+        const auto wanted = solution->streamKDynamicDecomposition(problem, device, tiles);
+        ASSERT_EQ(wanted.skTiles, tiles);
+        ASSERT_EQ(wanted.skSplit, 2u);
+        EXPECT_FALSE(wanted.parallel);
+        const size_t required = solution->requiredWorkspaceSize(problem, device);
+        EXPECT_EQ(required, solution->partialTileSize(wanted.partialSlots()));
+        EXPECT_EQ(solution->computeStreamKDecisions(problem, device).requiredWorkspaceBytes,
+                  required);
+
+        problem.setWorkspaceSize(required);
+        expectSameSplit(solution->streamKDynamicDecomposition(problem, device, tiles), wanted);
+        EXPECT_FALSE(solution->streamKDynamicDecomposition(problem, device, tiles).parallel);
+        const auto launch = solution->resolvePersistentSettings(problem, device);
+        ASSERT_TRUE(launch.dynamicSplit.has_value());
+        expectSameSplit(*launch.dynamicSplit, wanted);
+        EXPECT_NE(launch.reduction, origami::reduction_t::parallel);
+        EXPECT_EQ(launch.workspaceBytes, required);
+        EXPECT_EQ(solveWithWorkspace(*solution, problem, device).size(), 1u) << "no PostGSU";
+
+        // Without the arrival fixup the same problem keeps its tiles whole.
+        auto parallelOnly                              = dynamicParallelSolution();
+        parallelOnly->internalArgsSupport.arrivalFixup = false;
+        problem.setWorkspaceSize(size_t{1} << 30);
+        const auto p = parallelOnly->streamKDynamicDecomposition(problem, device, tiles);
+        EXPECT_FALSE(p.parallel);
+        EXPECT_EQ(p.skTiles, 0u);
+        EXPECT_EQ(solveWithWorkspace(*parallelOnly, problem, device).size(), 1u);
+    }
+
+    // The packed kernel arguments: bit 29 of the SKTiles slot set, D/C the
+    // workspace, Flags still the Synchronizer (work queues), and the PostGSU
+    // kernel's gsu the split, not grid / tiles.
+    TEST(StreamKDynamicSplit_pre_checkin, ParallelKernelArguments)
+    {
+        auto         solution = dynamicParallelSolution();
+        auto         device   = uniformitySteeringDevice();
+        auto         problem  = dynamicSplitGemm(128, 128, 262144, 1);
+        const size_t tiles    = problem.getNumTiles(solution->sizeMapping, 1);
+        const auto   d        = solution->streamKDynamicDecomposition(problem, device, tiles);
+        ASSERT_TRUE(d.parallel);
+
+        void* const                    fake = reinterpret_cast<void*>(0x1000);
+        void* const                    ws   = reinterpret_cast<void*>(0x5000);
+        void* const                    sync = reinterpret_cast<void*>(0x9000);
+        TensileLite::ContractionInputs inputs;
+        inputs.a = inputs.b = inputs.c = inputs.d = fake;
+        inputs.ws                                 = ws;
+        inputs.Synchronizer                       = sync;
+        inputs.alpha                              = static_cast<float>(1);
+        inputs.beta                               = static_cast<float>(1);
+        inputs.workspaceSize                      = problem.workspaceSize();
+        const auto inv = solution->solve(problem, inputs, device);
+        ASSERT_EQ(inv.size(), 2u);
+
+        auto words = [](TensileLite::KernelArguments const& args) {
+            std::vector<uint32_t> w(args.size() / 4);
+            std::memcpy(w.data(), args.data(), w.size() * 4);
+            return w;
+        };
+        const auto gemm = words(inv[0].args);
+        const auto hasWord = [&](uint32_t v) {
+            return std::find(gemm.begin(), gemm.end(), v) != gemm.end();
+        };
+        // SKTiles | mode bit (30) | parallel bit (29), then SKSplit.
+        const uint32_t packed = d.skTiles | 0x40000000u | 0x20000000u;
+        auto           it     = std::find(gemm.begin(), gemm.end(), packed);
+        ASSERT_NE(it, gemm.end()) << "SKTiles slot carries the parallel bit";
+        ASSERT_NE(std::next(it), gemm.end());
+        EXPECT_EQ(*std::next(it), d.skSplit);
+        EXPECT_TRUE(hasWord(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sync))))
+            << "Flags stay the Synchronizer for the work queues";
+
+        // Without the capability (arrival fixup) the bit is never sent.
+        auto       older = dynamicSplitSolution();
+        const auto inv2  = older->solve(problem, inputs, device);
+        ASSERT_EQ(inv2.size(), 1u) << "no PostGSU kernel for the arrival fixup";
+        const auto gemm2 = words(inv2[0].args);
+        for(uint32_t w : gemm2)
+            if((w & 0x40000000u) != 0 && (w & 0x1FFFFFFFu) == tiles)
+                EXPECT_EQ(w & 0x20000000u, 0u);
+    }
+
 } // namespace
