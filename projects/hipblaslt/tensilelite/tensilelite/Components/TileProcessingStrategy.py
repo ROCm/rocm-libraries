@@ -58,6 +58,11 @@ class TileProcessingStrategy(Component):
         writePartials."""
         return False
 
+    def usesDynamicParallel(self, writer, kernel):
+        """True when split tiles of the dynamic work queue can be reduced in
+        parallel by the PostGSU kernel (StreamKHybrid)."""
+        return False
+
     @abc.abstractmethod
     def __call__(self):
         pass
