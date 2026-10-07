@@ -77,8 +77,18 @@ if(ENABLE_HIP_FLASH2_ENGINE)
     endif()
 endif()
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    # The knobs suite is compiled whenever the product root carries the bundle, on any
+    # build arch, so a binary from a non-gfx950 build still runs it against another
+    # build's gfx950 content, and it GTEST_SKIPs on other devices. The predicate is
+    # arch-agnostic and lives in HkpPackaging.cmake, which only an ingestor build
+    # includes -- hence this guard.
+    hkp_product_offers_engine(_hkp_knobs_bundle "hipkernel:Gfx950AttentionDense")
+    if(_hkp_knobs_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx950AttentionDenseKnobs.cpp
+        )
+    endif()
     target_sources(hip_kernel_provider_integration_tests PRIVATE
-        kernel_ingestor_engine/IntegrationGpuGfx950AttentionDenseKnobs.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
         kernel_ingestor_engine/IntegrationGraphVerificationContext.cpp
@@ -185,7 +195,6 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     hkp_gfx950_attention_dense_available(_hkp_gfx950_attention_dense)
 endif()
 if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
-   AND HIPKERNELPROVIDER_ENABLE_ROCKE
    AND _hkp_gfx950_attention_dense
    AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
     # Routed into the gfx950 shard, not the common arch-neutral directory: the handler
@@ -211,6 +220,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
         ${_gfx950_shard_args}
         REFERENCE_EXECUTOR gpu
         GTEST_FILTER "quick_SdpaFwd_bshd_*:standard_SdpaFwd_bshd_*"
+        ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
     )
 endif()
 
@@ -224,5 +234,7 @@ if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA
         REFERENCE_EXECUTOR gpu
         GTEST_FILTER
             Smoke/IntegrationGpuSdpaFwdBfp16.Correctness/*
+        ENVIRONMENT_MODIFICATION
+            ${TEST_ENVIRONMENT_MODIFICATION}
     )
 endif()

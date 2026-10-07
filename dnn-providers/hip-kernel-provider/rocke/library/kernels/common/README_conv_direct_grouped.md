@@ -59,6 +59,9 @@ The fixed-`cpg` variants in the table require `kpg = cpg`.  The generic
 positive multiple of 4.  If neither fits, use the implicit-GEMM kernel
 ([`conv_implicit_gemm.py`](conv_implicit_gemm.py)).
 
+For `groups == 1` these variants degenerate to one wave per output row; use the
+non-grouped direct conv instead ([`README_conv_direct_nongrouped.md`](README_conv_direct_nongrouped.md)).
+
 ### cpg = 1 — Depthwise (`DirectDepthwiseSpec`)
 
 Each output channel is computed independently using scalar FMA.  The kernel
@@ -70,6 +73,28 @@ Tunable parameters:
 - `block_waves` — waves per workgroup (default 2; swept: 1, 2, 4).
 
 Launch grid: `(ceil(W / block_w), ceil(groups / block_ch), N)`.
+
+### cpg = 1 — Column-streamed depthwise (`DirectDepthwiseColSpec`)
+
+Same work as `DirectDepthwiseSpec` with the loop order flipped: the `KW` filter
+columns are a runtime loop, and the input rows and `KH` filter rows of one
+output-row tile are unrolled.  Only one filter column is live at a time, so the
+per-lane register cost is `block_h * block_w + KH` rather than
+`KH * KW + KH * block_w`.  That makes it the variant for large filters, and it
+takes any `stride >= 1`, any `PAD < min(KH, KW)` (with `Ho <= H`), and
+fp16/bf16 through its own `dtype` field.
+
+Tunable parameters:
+- `block_h` — output rows per block (default 16; swept: 8, 16, 32).  The row
+  loop is unrolled at build time, so this is the AOT capability; the image
+  height is a kernarg.
+- `block_w` — output W positions per block (default 1; swept: 1, 2, 4).
+- `block_waves` — waves per workgroup (default 1; swept: 1, 2, 4).
+
+Pairs whose band exceeds the arch's live-f32 budget (3/8 of the VGPR file) are
+rejected by `is_valid_depthwise_col_spec`.
+
+Launch grid: `(ceil(Wo / block_w), ceil(groups / block_ch), N * ceil(Ho / block_h))`.
 
 ### cpg = 4 — `DirectConv4cSpec`
 
@@ -359,6 +384,15 @@ grid  = (ceil(W / block_w), ceil(groups / block_ch), N)
 block = (spec.threads_per_block, 1, 1)
 ```
 
+The column-streamed variant tiles output rows too; the kernel decodes
+`block_id_z = n * ceil(Ho / block_h) + h_tile`, deriving the tile count from
+the `p_Ho` kernarg:
+
+```
+grid  = (ceil(Wo / block_w), ceil(groups / block_ch), N * ceil(Ho / block_h))
+block = (spec.threads_per_block, 1, 1)
+```
+
 ### Wgrad
 
 ```
@@ -429,6 +463,7 @@ For a backward-weights pass on gfx942 use the implicit-GEMM wgrad kernel
 | Depthwise (`cpg = 1`, `stride = 1`) | Direct-conv depthwise |
 | Backward-weights, gfx950, `cpg` and `kpg` ≥ 16, `stride = 1` | Direct-conv wgrad |
 | Backward-weights, anything else | Implicit-GEMM wgrad |
+| Non-grouped (`groups = 1`), `stride ≤ 2` | Sweep `conv_direct_nongrouped` and implicit-GEMM, keep the faster ([`README_conv_direct_nongrouped.md`](README_conv_direct_nongrouped.md)) |
 
 ---
 
