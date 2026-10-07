@@ -7225,6 +7225,22 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                    self.states.archCaps["EnableXnackReplay"]),
                               }
 
+      # mxUnit = MatrixInstK / MXBlockK. 1 is MX128. The MX unit-1 ds_load
+      # order (parent tier + pack-by-pack priority) runs only when every
+      # present MX side is mxUnit 1. MX16/MX32 and non-MX keep the older order.
+      def _mx_unit(side):
+        block = kernel["ProblemType"].get("MXBlock%s" % side) or 0
+        if isinstance(block, (list, tuple)):
+          # Raw spelling is [k] or [free, k]. ProblemType normally splits this
+          # into an int before KernelWriter; keep the K element if it did not.
+          block = block[-1] if block else 0
+        block = int(block)
+        if block <= 0:
+          return 0
+        return int(kernel["MatrixInstK"]) // block
+      mx_units = [u for u in (_mx_unit("A"), _mx_unit("B")) if u]
+      stinky_module_options["MxUnit1Scheduling"] = bool(mx_units) and all(u == 1 for u in mx_units)
+
       # Region-clone jobs for StinkyTofu RegionClonePass.
       cloneList = []
       if kernel.get("InitCIterWmma", 0) == 1:

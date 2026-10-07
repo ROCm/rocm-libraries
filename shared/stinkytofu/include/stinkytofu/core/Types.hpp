@@ -193,6 +193,11 @@ struct PassFeatureConfig {
         /// Mirrors ModuleOptions::WarGateWmmas. WMMAs a ds_load waits before
         /// overwriting a vgpr a WMMA read (WmmaVgprSrcToDsWrite); <= 0 = derived.
         int warGateWmmas = 0;
+        /// Mirrors ModuleOptions::MxUnit1Scheduling. When set, dsReadPriority
+        /// orders DS loads pack by pack, parent-VALU inputs first (MX128 /
+        /// mxUnit==1). When clear, DS priority stays affinity / DsReadOrder
+        /// (MX16 / MX32).
+        bool mxUnit1Scheduling = false;
     };
 
     LoopConfig loopConfig;

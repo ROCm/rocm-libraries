@@ -198,8 +198,8 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--prefetch-lead-wmmas=") ||
                 arg.starts_with("--prefetch-lead-min-stage-wmmas=") ||
                 arg.starts_with("--war-gate-wmmas=") || arg == "--ds-slot-first" ||
-                arg.starts_with("--vgpr-msb-mode=") || arg == "--from-label" ||
-                arg == "--to-label" || isKernelConfigArg(arg))
+                arg == "--mx-unit1-scheduling" || arg.starts_with("--vgpr-msb-mode=") ||
+                arg == "--from-label" || arg == "--to-label" || isKernelConfigArg(arg))
                 continue;
             // Two-arg flags: skip both the flag and its value so the value
             // doesn't get mistaken for a pass name and the flag doesn't get
@@ -590,6 +590,8 @@ int main(int argc, char** argv) {
             passFeatureConfig.dagFeatures.warGateWmmas = std::stoi(a.substr(17));
         } else if (a == "--ds-slot-first") {
             passFeatureConfig.dagFeatures.dsSlotFirst = true;
+        } else if (a == "--mx-unit1-scheduling") {
+            passFeatureConfig.dagFeatures.mxUnit1Scheduling = true;
         } else if (a.starts_with("--merge-barrier-threshold=")) {
             passFeatureConfig.dagFeatures.mergeBarrierThreshold = std::stoi(a.substr(26));
         }

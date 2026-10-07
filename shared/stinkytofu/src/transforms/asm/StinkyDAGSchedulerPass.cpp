@@ -22,8 +22,12 @@
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
 
+#include <algorithm>
 #include <climits>
 #include <iterator>
+#include <map>
+#include <set>
+#include <unordered_set>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/BBIndexAnalysis.hpp"
@@ -309,6 +313,67 @@ static void applyClusterBarrierSccRule(
     }
 }
 
+// VGPR indices of one WMMA input family (A, B, MXSA, or MXSB) so a parent VALU
+// that touches any register of the family can boost every ds_load of that family.
+static void addVgprIdxs(const StinkyRegister& r, std::unordered_set<uint32_t>& out) {
+    if (!r.isRegister() || isPseudoReg(r)) return;
+    if (r.reg.type != RegType::V && r.reg.type != RegType::A && r.reg.type != RegType::AGPR &&
+        r.reg.type != RegType::ACC)
+        return;
+    for (unsigned off = 0; off < r.reg.num; ++off) out.insert(r.reg.idx + off);
+}
+
+static bool instVgprsOverlap(const StinkyInstruction& inst, bool useDest,
+                             const std::unordered_set<uint32_t>& vgprs) {
+    if (vgprs.empty()) return false;
+    const auto& regs = useDest ? inst.getDestRegs() : inst.getSrcRegs();
+    for (const StinkyRegister& r : regs) {
+        if (!r.isRegister() || isPseudoReg(r)) continue;
+        for (unsigned off = 0; off < r.reg.num; ++off) {
+            if (vgprs.count(r.reg.idx + off)) return true;
+        }
+    }
+    return false;
+}
+
+// WMMA input families used to boost ds_loads. Order matches the default
+// remaining issue order A → B → MXSA → MXSB (not ISA src order).
+enum DsInputKind : unsigned { kDsA = 0, kDsB, kDsMxsa, kDsMxsb, kDsNumKinds };
+
+static int matrixInputKindOfVgprs(const StinkyInstruction& matrix,
+                                  const std::unordered_set<uint32_t>& vgprs) {
+    if (vgprs.empty()) return -1;
+    const auto& srcs = matrix.getSrcRegs();
+    auto overlaps = [&](const StinkyRegister& r) {
+        if (!r.isRegister() || isPseudoReg(r)) return false;
+        for (unsigned off = 0; off < r.reg.num; ++off)
+            if (vgprs.count(r.reg.idx + off)) return true;
+        return false;
+    };
+    // gfx1250 MX WMMA srcs: B, A, C, MXSB, MXSA. Non-MX WMMA: A, B, C.
+    if (isMXWMMA(matrix)) {
+        if (srcs.size() >= 5) {
+            if (overlaps(srcs[4])) return static_cast<int>(kDsMxsa);
+            if (overlaps(srcs[3])) return static_cast<int>(kDsMxsb);
+        }
+        if (srcs.size() >= 2) {
+            if (overlaps(srcs[1])) return static_cast<int>(kDsA);
+            if (overlaps(srcs[0])) return static_cast<int>(kDsB);
+        }
+    } else {
+        if (!srcs.empty() && overlaps(srcs[0])) return static_cast<int>(kDsA);
+        if (srcs.size() >= 2 && overlaps(srcs[1])) return static_cast<int>(kDsB);
+    }
+    return -1;
+}
+
+static int matrixInputKindOfValu(const StinkyInstruction& matrix, const StinkyInstruction& valu) {
+    std::unordered_set<uint32_t> vgprs;
+    for (const StinkyRegister& r : valu.getDestRegs()) addVgprIdxs(r, vgprs);
+    for (const StinkyRegister& r : valu.getSrcRegs()) addVgprIdxs(r, vgprs);
+    return matrixInputKindOfVgprs(matrix, vgprs);
+}
+
 // --- Region scheduler (does NOT move fences) ---
 //
 // Build a DAG within a region and perform a stable topological schedule.
@@ -361,24 +426,173 @@ static void scheduleRegionWithMovableSideEffects(
     if (readyQueue.clusterBarrierEnabled())
         applyClusterBarrierSccRule(dagNodes, instToId, dagGraph, cumCycles[regionSize]);
 
-    // Pre-scan: assign dsReadPriority to each ds_read based on WMMA affinity
-    // and DsReadOrder config. Lower priority = pick first.
+    // The parent-family DS tier and pack-by-pack dsReadPriority are the
+    // mxUnit==1 (MX128) schedule. MX16/MX32 keep affinity / DsReadOrder only.
+    const bool mxUnit1Scheduling =
+        readyQueue.getPassContext().getPassFeatureConfig().dagFeatures.mxUnit1Scheduling;
+
+    // Pre-scan: mark VALU/transcendental nodes that directly feed a matrix op.
+    // CDNA5ReadyQueue routes feedsWmma nodes to wmmaParentValuQueue (Phase B).
+    // Must run before dsReadPriority: parent-VALU inputs are the first DS tier.
+    for (unsigned i = 0; i < regionSize; ++i) {
+        if (!isVectorALU(*dagNodes[i].inst) && !isTranscendental(*dagNodes[i].inst)) continue;
+        for (unsigned succId : dagGraph[i]) {
+            if (isMatrixInstruction(*dagNodes[succId].inst)) {
+                dagNodes[i].feedsWmma = true;
+                break;
+            }
+        }
+    }
+
+    // Group matrix ops into accumulator packs. Tensile emits one pack as a run
+    // over disjoint C destinations, then starts the next pack by reusing C+0.
+    // dsReadPriority orders DS inputs pack by pack.
+    unsigned wmmaPack = 0;
+    std::vector<StinkyRegister> packDests;
+    int priorMatrixDest = -1;
+    for (unsigned i = 0; i < regionSize; ++i) {
+        StinkyInstruction& inst = *dagNodes[i].inst;
+        if (!isMatrixInstruction(inst)) continue;
+
+        bool startsNextPack = false;
+        int matrixDest = -1;
+        for (const StinkyRegister& dst : inst.getDestRegs()) {
+            if (!dst.isRegister() || isPseudoReg(dst)) continue;
+            if (matrixDest < 0) matrixDest = static_cast<int>(dst.reg.idx);
+            for (const StinkyRegister& prior : packDests) {
+                if (dst.isOverlap(prior)) {
+                    startsNextPack = true;
+                    break;
+                }
+            }
+            if (startsNextPack) break;
+        }
+        // A region can begin halfway through a pack, so its next pack may wrap
+        // from C+56 to C+0 without overlapping a destination seen in-region.
+        if (matrixDest >= 0 && priorMatrixDest >= 0 && matrixDest < priorMatrixDest)
+            startsNextPack = true;
+        if (startsNextPack) {
+            ++wmmaPack;
+            packDests.clear();
+        }
+        dagNodes[i].wmmaPack = wmmaPack;
+        priorMatrixDest = matrixDest;
+        for (const StinkyRegister& dst : inst.getDestRegs())
+            if (dst.isRegister() && !isPseudoReg(dst)) packDests.push_back(dst);
+    }
+
+    // Pre-scan: assign dsReadPriority. Lower = pick first.
+    // If any feedsWmma (wmmaParentValuQueue) node touches an input family
+    // (A / B / MXSA / MXSB), every ds_load of those families is issued first
+    // within its accumulator pack so splat v_perm can start without waiting
+    // dscnt 0. Remaining loads keep the
+    // existing DsReadOrder (default A→B→MXSA→MXSB). Within each tier the same
+    // affinity / srcReg sort as before is reused — that is what yields
+    // MXSA→A→B→MXSB vs MXSA→MXSB→A→B vs A→MXSA→B→MXSB from the parent set.
     {
         using DsReadOrder = PassFeatureConfig::DsReadOrder;
         const auto dsOrder =
             readyQueue.getPassContext().getPassFeatureConfig().dagFeatures.dsReadOrder;
 
-        // Collect ds_reads with their affinity and operand type (src register).
+        std::unordered_set<uint32_t> kindVgprs[kDsNumKinds];
+        for (unsigned i = 0; i < regionSize; ++i) {
+            const StinkyInstruction& inst = *dagNodes[i].inst;
+            if (!isMatrixInstruction(inst)) continue;
+            const auto& srcs = inst.getSrcRegs();
+            if (isMXWMMA(inst)) {
+                if (srcs.size() >= 2) {
+                    addVgprIdxs(srcs[0], kindVgprs[kDsB]);
+                    addVgprIdxs(srcs[1], kindVgprs[kDsA]);
+                }
+                if (srcs.size() >= 5) {
+                    addVgprIdxs(srcs[3], kindVgprs[kDsMxsb]);
+                    addVgprIdxs(srcs[4], kindVgprs[kDsMxsa]);
+                }
+            } else {
+                if (!srcs.empty()) addVgprIdxs(srcs[0], kindVgprs[kDsA]);
+                if (srcs.size() >= 2) addVgprIdxs(srcs[1], kindVgprs[kDsB]);
+            }
+        }
+
+        // Parent-family DS boost is the mxUnit==1 (MX128) schedule. MX16/MX32
+        // keep affinity / DsReadOrder only, so parentKindMask stays 0.
+        unsigned parentKindMask = 0;
+        if (mxUnit1Scheduling) {
+            for (unsigned i = 0; i < regionSize; ++i) {
+                if (!dagNodes[i].feedsWmma) continue;
+                // WMMA itself can be IF_VALU with a matrix successor (C-chain).
+                // Only splat/pack VALUs should boost ds_load families.
+                if (isMatrixInstruction(*dagNodes[i].inst)) continue;
+                const StinkyInstruction& inst = *dagNodes[i].inst;
+                for (unsigned k = 0; k < kDsNumKinds; ++k) {
+                    if (instVgprsOverlap(inst, /*useDest=*/false, kindVgprs[k]) ||
+                        instVgprsOverlap(inst, /*useDest=*/true, kindVgprs[k]))
+                        parentKindMask |= (1u << k);
+                }
+            }
+        }
+
+        PASS_DEBUG({
+            std::cerr << "[DAG schedule] kind sizes A/B/MXSA/MXSB=" << kindVgprs[kDsA].size() << "/"
+                      << kindVgprs[kDsB].size() << "/" << kindVgprs[kDsMxsa].size() << "/"
+                      << kindVgprs[kDsMxsb].size() << "\n";
+            for (unsigned i = 0; i < regionSize; ++i) {
+                if (!isMatrixInstruction(*dagNodes[i].inst)) continue;
+                std::cerr << "  matrix dagId=" << i << " mx=" << isMXWMMA(*dagNodes[i].inst)
+                          << " nsrc=" << dagNodes[i].inst->getSrcRegs().size() << " srcs=";
+                for (const StinkyRegister& s : dagNodes[i].inst->getSrcRegs()) {
+                    if (s.isRegister())
+                        std::cerr << " t" << (int)s.reg.type << ":" << s.reg.idx << "+"
+                                  << s.reg.num;
+                    else
+                        std::cerr << " imm";
+                }
+                std::cerr << "\n";
+            }
+        });
+
         struct DsInfo {
-            unsigned idx, affinity, srcReg;
+            unsigned idx, affinity, srcReg, kindRank, consumer;
         };
-        std::vector<DsInfo> dsReads;
+
+        // DAG id of the earliest in-region matrix op fed by ds_load \p i, directly
+        // or through a parent VALU. UINT_MAX for a next-iteration preload: its
+        // consumers lie in a later trip, so nothing in this region waits on it.
+        auto earliestRegionMatrixConsumer = [&](unsigned i) {
+            unsigned consumer = UINT_MAX;
+            for (unsigned succId : dagGraph[i]) {
+                const DAGNode& succ = dagNodes[succId];
+                if (isMatrixInstruction(*succ.inst)) {
+                    consumer = std::min(consumer, succId);
+                    continue;
+                }
+                if (!succ.feedsWmma) continue;
+                for (unsigned mId : dagGraph[succId])
+                    if (isMatrixInstruction(*dagNodes[mId].inst))
+                        consumer = std::min(consumer, mId);
+            }
+            return consumer;
+        };
+
+        auto dsKindOf = [&](const StinkyInstruction& inst) -> int {
+            for (unsigned k = 0; k < kDsNumKinds; ++k)
+                if (instVgprsOverlap(inst, /*useDest=*/true, kindVgprs[k]))
+                    return static_cast<int>(k);
+            return -1;
+        };
+
+        std::vector<DsInfo> parentFed;
+        std::vector<DsInfo> rest;
 
         for (unsigned i = 0; i < regionSize; ++i) {
             if (!isDSRead(*dagNodes[i].inst)) continue;
 
             unsigned affinity = UINT_MAX;
+            bool userIsParentValu = false;
+            int inferredKind = -1;
             // BFS through users, skip PHIs, find earliest WMMA consumer.
+            // Walk past waitcnt region splits: a ds_load may feed a v_perm that
+            // lives in a later region (e.g. X1 MXS splat after s_wait_dscnt).
             std::vector<StinkyInstruction*> q(dagNodes[i].inst->getUsers().begin(),
                                               dagNodes[i].inst->getUsers().end());
             std::unordered_set<StinkyInstruction*> seen;
@@ -392,6 +606,24 @@ static void scheduleRegionWithMovableSideEffects(
                 }
                 auto it = wmmaIndex.find(u);
                 if (it != wmmaIndex.end()) affinity = std::min(affinity, it->second);
+                if (!mxUnit1Scheduling) continue;
+                auto uit = instToId.find(u);
+                if (uit != instToId.end() && dagNodes[uit->second].feedsWmma &&
+                    !isMatrixInstruction(*u))
+                    userIsParentValu = true;
+                if (isVectorALU(*u) || isTranscendental(*u)) {
+                    if (isMatrixInstruction(*u)) continue;
+                    for (StinkyInstruction* uu : u->getUsers()) {
+                        if (uu->getUnifiedOpcode() == GFX::PHI) {
+                            for (auto* pu : uu->getUsers()) q.push_back(pu);
+                            continue;
+                        }
+                        if (!isMatrixInstruction(*uu)) continue;
+                        userIsParentValu = true;
+                        const int k = matrixInputKindOfValu(*uu, *u);
+                        if (k >= 0 && (inferredKind < 0 || k < inferredKind)) inferredKind = k;
+                    }
+                }
             }
 
             unsigned srcReg = 0;
@@ -401,17 +633,48 @@ static void scheduleRegionWithMovableSideEffects(
                     break;
                 }
 
-            dsReads.push_back({i, affinity, srcReg});
+            const int destKind = dsKindOf(*dagNodes[i].inst);
+            const int kind = destKind >= 0 ? destKind : inferredKind;
+            const bool feedsParentKind = parentKindMask && kind >= 0 &&
+                                         (parentKindMask & (1u << static_cast<unsigned>(kind)));
+            const unsigned kindRank = kind >= 0 ? static_cast<unsigned>(kind) : kDsNumKinds;
+            DsInfo info{i, affinity, srcReg, kindRank, earliestRegionMatrixConsumer(i)};
+            if (feedsParentKind || userIsParentValu)
+                parentFed.push_back(info);
+            else
+                rest.push_back(info);
         }
 
-        // Sort by affinity, then by DAG id.
-        std::sort(dsReads.begin(), dsReads.end(), [](const DsInfo& a, const DsInfo& b) {
-            return a.affinity != b.affinity ? a.affinity < b.affinity : a.idx < b.idx;
-        });
+        auto assignPriorities = [&](std::vector<DsInfo>& dsReads, unsigned& pri, bool parentTier) {
+            if (dsReads.empty()) return;
 
-        if (dsOrder == DsReadOrder::ProgramOrder) {
-            for (auto& d : dsReads) dagNodes[d.idx].dsReadPriority = d.idx;
-        } else {
+            if (parentTier) {
+                // Parent-VALU inputs: A → B → MXSA → MXSB, then affinity / program order.
+                std::sort(dsReads.begin(), dsReads.end(), [](const DsInfo& a, const DsInfo& b) {
+                    if (a.kindRank != b.kindRank) return a.kindRank < b.kindRank;
+                    if (a.affinity != b.affinity) return a.affinity < b.affinity;
+                    return a.idx < b.idx;
+                });
+                for (auto& d : dsReads) dagNodes[d.idx].dsReadPriority = pri++;
+                return;
+            }
+
+            // Sort by affinity, then by DAG id.
+            std::sort(dsReads.begin(), dsReads.end(), [](const DsInfo& a, const DsInfo& b) {
+                return a.affinity != b.affinity ? a.affinity < b.affinity : a.idx < b.idx;
+            });
+
+            if (dsOrder == DsReadOrder::ProgramOrder) {
+                // mxUnit==1 shares one counter with the parent tier. Otherwise
+                // priority is the DAG id, as before 3dd555..HEAD.
+                if (!mxUnit1Scheduling) {
+                    for (auto& d : dsReads) dagNodes[d.idx].dsReadPriority = d.idx;
+                } else {
+                    for (auto& d : dsReads) dagNodes[d.idx].dsReadPriority = pri++;
+                }
+                return;
+            }
+
             // For AscendingCache: find first single-operand affinity group,
             // then zigzag backward through mixed groups.
             // For Ascending: all groups use ascending order.
@@ -452,7 +715,6 @@ static void scheduleRegionWithMovableSideEffects(
 
             // Assign priority. Within each group, sort by DAG id
             // (ascending or descending per groupAsc).
-            unsigned pri = 0;
             unsigned prevAff = UINT_MAX;
             std::vector<DsInfo*> group;
             auto flushGroup = [&]() {
@@ -476,19 +738,39 @@ static void scheduleRegionWithMovableSideEffects(
                 group.push_back(&d);
             }
             flushGroup();
-        }
-    }
+        };
 
-    // Pre-scan: mark VALU/transcendental nodes that directly feed a matrix op.
-    // CDNA5ReadyQueue routes feedsWmma nodes to wmmaParentValuQueue (Phase B).
-    for (unsigned i = 0; i < regionSize; ++i) {
-        if (!isVectorALU(*dagNodes[i].inst) && !isTranscendental(*dagNodes[i].inst)) continue;
-        for (unsigned succId : dagGraph[i]) {
-            if (isMatrixInstruction(*dagNodes[succId].inst)) {
-                dagNodes[i].feedsWmma = true;
-                break;
+        unsigned pri = 0;
+        if (mxUnit1Scheduling) {
+            // Accumulator packs read separate buffers (X1, X2, ...). LDS returns in
+            // order, so a later pack's load issued ahead of this pack's remaining
+            // loads would be waited out by this pack's consumers. Order packs first;
+            // the parent tier still leads within each pack. Loads with no in-region
+            // matrix consumer (next-trip preloads) go last.
+            std::map<unsigned, std::pair<std::vector<DsInfo>, std::vector<DsInfo>>> byPack;
+            auto packOf = [&](const DsInfo& d) {
+                return d.consumer == UINT_MAX ? UINT_MAX : dagNodes[d.consumer].wmmaPack;
+            };
+            for (const DsInfo& d : parentFed) byPack[packOf(d)].first.push_back(d);
+            for (const DsInfo& d : rest) byPack[packOf(d)].second.push_back(d);
+            for (auto& [pack, tiers] : byPack) {
+                assignPriorities(tiers.first, pri, /*parentTier=*/true);
+                assignPriorities(tiers.second, pri, /*parentTier=*/false);
             }
+        } else {
+            assignPriorities(parentFed, pri, /*parentTier=*/true);
+            assignPriorities(rest, pri, /*parentTier=*/false);
         }
+
+        PASS_DEBUG({
+            std::cerr << "[DAG schedule] dsReadPriority parentKindMask=" << parentKindMask
+                      << " parentFed=" << parentFed.size() << " rest=" << rest.size() << "\n";
+            for (unsigned i = 0; i < regionSize; ++i) {
+                if (!isDSRead(*dagNodes[i].inst) && !dagNodes[i].feedsWmma) continue;
+                std::cerr << "  dagId=" << i << " pri=" << dagNodes[i].dsReadPriority
+                          << " feedsWmma=" << dagNodes[i].feedsWmma << "\n";
+            }
+        });
     }
 
     // Pre-scan: flag producers feeding a hazarded consumer, per the arch's hazard rule
