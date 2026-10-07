@@ -205,8 +205,17 @@ from .common.conv_direct_grouped import (  # noqa: F401
     DirectConvProblem,
     DirectConv4cSpec,
     DirectConv16cSpec,
+    DirectDepthwiseSpec,
+    DirectDepthwiseSpatialSpec,
+    DirectDepthwiseColSpec,
     build_direct_conv_4c,
     build_direct_conv_16c,
+    build_direct_depthwise,
+    build_direct_depthwise_spatial,
+    build_direct_depthwise_col,
+    is_valid_depthwise_spec,
+    is_valid_depthwise_spatial_spec,
+    is_valid_depthwise_col_spec,
 )
 from .common.img2col import (  # noqa: F401
     Img2ColSpec,

@@ -495,7 +495,22 @@ int main(int argc, char** argv) noexcept
                 std::move(engineNamesById));
         }
 
-        hipdnn_integration_tests::bundle::registerBundleTests();
+        // Owns the rocRAND generator used to fill large inputs on the device. Created
+        // here so it is destroyed when this scope ends, while HIP and rocRAND are still
+        // loaded, and not with the registered tests, which GTest keeps until static
+        // destruction. The tests hold it weakly.
+        //
+        // Device-filled inputs differ from the host fill's, so a failure seen with them
+        // is reproduced bit-for-bit only on the same path. HIPDNN_TEST_HOST_INPUT_FILL=1
+        // withholds the filler, which makes every input a host fill.
+        const auto hostInputFill
+            = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_HOST_INPUT_FILL");
+        const bool forceHostInputFill = !hostInputFill.empty() && hostInputFill != "0";
+        const auto deviceFiller
+            = forceHostInputFill ? std::shared_ptr<hipdnn_integration_tests::DeviceInputFiller>()
+                                 : std::make_shared<hipdnn_integration_tests::DeviceInputFiller>();
+        const auto registrationStats
+            = hipdnn_integration_tests::bundle::registerBundleTests(deviceFiller);
 
         const int result = RUN_ALL_TESTS();
 
@@ -595,14 +610,18 @@ int main(int argc, char** argv) noexcept
             // neither is allowed to run empty.
             if(hipdnn_integration_tests::TestConfig::get().hasEngineName() || dataDirFound)
             {
-                // Print the counts, not a guess: "0 registered" is a build or
-                // discovery problem, "N registered, 0 selected" is a filter
-                // problem. They have different fixes and these numbers are the
+                // Print the counts, not a guess. "0 discovered" is a build or
+                // discovery problem; "N discovered, all excluded by the filter" is a
+                // filter problem. They have different fixes and these numbers are the
                 // only way to tell them apart from a CI log.
                 const int suiteCount = unitTest->total_test_suite_count();
+                const auto& registration = registrationStats;
                 std::cerr << "Error: zero tests ran.\n"
                           << "  registered:      " << unitTest->total_test_count() << " test(s) in "
                           << suiteCount << " suite(s)\n"
+                          << "  discovered:      " << registration.discovered << " bundle test(s), "
+                          << registration.excludedByFilter
+                          << " excluded by --gtest_filter before loading\n"
                           << "  selected:        0 (nothing matched --gtest_filter)\n"
                           << "  gtest_filter:    " << GTEST_FLAG_GET(filter) << "\n"
                           << "  bundle data dir: " << dataDir

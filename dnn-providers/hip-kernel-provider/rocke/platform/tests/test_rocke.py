@@ -5824,6 +5824,45 @@ class TestHipLoweringCoverage(unittest.TestCase):
         self.assertIn("void bare(", out)
 
 
+class TestLauncherBind(unittest.TestCase):
+    """:meth:`KernelLauncher.bind` packs once and then only enqueues.
+
+    No GPU is required: the launcher is built without loading a module and
+    the runtime is replaced by a fake that records ``prepare_launch``.
+    """
+
+    def test_bind_packs_once_and_enqueues_per_call(self):
+        from unittest import mock
+
+        import rocke.runtime.launcher as L
+
+        packed = []
+        enqueued = []
+
+        def packer(values):
+            packed.append(dict(values))
+            return b"\x01\x02"
+
+        class FakeRuntime:
+            def prepare_launch(self, fn, grid, block, args, *, shared_bytes, stream):
+                self.prepared = (fn, grid, block, args, shared_bytes, stream)
+                return lambda: enqueued.append(1)
+
+        launcher = L.KernelLauncher.__new__(L.KernelLauncher)
+        launcher._fn = "fn"
+        launcher._packer = packer
+        rt = FakeRuntime()
+        cfg = L.LaunchConfig(grid=(2, 1, 1), block=(64, 1, 1), stream=7)
+        with mock.patch.object(L, "_runtime", return_value=rt):
+            run = launcher.bind({"a": 1}, config=cfg)
+        for _ in range(3):
+            run()
+
+        self.assertEqual(packed, [{"a": 1}])
+        self.assertEqual(len(enqueued), 3)
+        self.assertEqual(rt.prepared, ("fn", (2, 1, 1), (64, 1, 1), b"\x01\x02", 0, 7))
+
+
 class TestLauncherFenceContract(unittest.TestCase):
     """Per-launch event-fence policy in :mod:`rocke.runtime.launcher`.
 
