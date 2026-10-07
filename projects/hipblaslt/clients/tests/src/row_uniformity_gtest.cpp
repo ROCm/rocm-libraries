@@ -3369,11 +3369,15 @@ namespace
         ASSERT_TRUE(d.parallel);
 
         void* const                    fake = reinterpret_cast<void*>(0x1000);
+        void* const                    cPtr = reinterpret_cast<void*>(0x3000);
+        void* const                    dPtr = reinterpret_cast<void*>(0x4000);
         void* const                    ws   = reinterpret_cast<void*>(0x5000);
         void* const                    sync = reinterpret_cast<void*>(0x9000);
         TensileLite::ContractionInputs inputs;
-        inputs.a = inputs.b = inputs.c = inputs.d = fake;
-        inputs.ws                                 = ws;
+        inputs.a = inputs.b = fake;
+        inputs.c            = cPtr;
+        inputs.d            = dPtr;
+        inputs.ws           = ws;
         inputs.Synchronizer                       = sync;
         inputs.alpha                              = static_cast<float>(1);
         inputs.beta                               = static_cast<float>(1);
@@ -3398,6 +3402,59 @@ namespace
         EXPECT_EQ(*std::next(it), d.skSplit);
         EXPECT_TRUE(hasWord(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sync))))
             << "Flags stay the Synchronizer for the work queues";
+
+        // The GEMM kernel writes its parts to the workspace: D and C (ws_d,
+        // ws_c) are both the workspace, and neither the user's D nor C is
+        // passed to it.
+        const auto ptrs = [](TensileLite::KernelArguments const& args) {
+            std::vector<uint64_t> p(args.size() / 8);
+            std::memcpy(p.data(), args.data(), p.size() * 8);
+            return p;
+        };
+        const auto asU64   = [](void* p) { return static_cast<uint64_t>(reinterpret_cast<uintptr_t>(p)); };
+        const auto gemmP   = ptrs(inv[0].args);
+        const auto wsFirst = std::find(gemmP.begin(), gemmP.end(), asU64(ws));
+        ASSERT_NE(wsFirst, gemmP.end()) << "GEMM ws_d is the workspace";
+        ASSERT_NE(std::next(wsFirst), gemmP.end());
+        EXPECT_EQ(*std::next(wsFirst), asU64(ws)) << "GEMM ws_c is the workspace";
+        EXPECT_EQ(std::count(gemmP.begin(), gemmP.end(), asU64(dPtr)), 0) << "GEMM never sees D";
+        EXPECT_EQ(std::count(gemmP.begin(), gemmP.end(), asU64(cPtr)), 0) << "GEMM never sees C";
+
+        // The PostGSU kernel reads the slots from that workspace and writes
+        // the user's D: its arguments start D, WS, C.
+        const auto post = ptrs(inv[1].args);
+        ASSERT_GE(post.size(), 3u);
+        EXPECT_EQ(post[0], asU64(dPtr)) << "PostGSU D";
+        EXPECT_EQ(post[1], asU64(ws)) << "PostGSU WS is the GEMM's D (ws_d)";
+        EXPECT_EQ(post[2], asU64(cPtr)) << "PostGSU C";
+
+        // ... and sums gsu = skSplit slots. gsu follows the output sizes
+        // (M, N, batch). A split whose parts exceed the grid (debug override)
+        // makes grid / tiles differ from skSplit.
+        const auto gsuOf = [&](TensileLite::KernelInvocation const& postGSU) {
+            const auto w = words(postGSU.args);
+            const std::vector<uint32_t> sizes
+                = {static_cast<uint32_t>(problem.d().sizes()[0]),
+                   static_cast<uint32_t>(problem.d().sizes()[1]),
+                   static_cast<uint32_t>(problem.d().sizes()[2])};
+            auto at = std::search(w.begin(), w.end(), sizes.begin(), sizes.end());
+            EXPECT_NE(at, w.end()) << "PostGSU output sizes";
+            if(at == w.end() || at + 3 == w.end())
+                return uint32_t{0};
+            return *(at + 3);
+        };
+        EXPECT_EQ(gsuOf(inv[1]), d.skSplit);
+
+        auto overridden    = device;
+        overridden.skTiles = static_cast<int>(tiles);
+        overridden.skSplit = 1000;
+        const auto o       = solution->streamKDynamicDecomposition(problem, overridden, tiles);
+        ASSERT_TRUE(o.parallel);
+        ASSERT_NE(o.grid / tiles, size_t{o.skSplit});
+        const auto invO = solution->solve(problem, inputs, overridden);
+        ASSERT_EQ(invO.size(), 2u);
+        EXPECT_EQ(invO[0].numWorkGroups.x, o.grid);
+        EXPECT_EQ(gsuOf(invO[1]), o.skSplit) << "gsu is skSplit, not grid / tiles";
 
         // Without the capability (arrival fixup) the bit is never sent.
         auto       older = dynamicSplitSolution();

@@ -1,0 +1,99 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Dynamic StreamK (SK5 Hybrid, DynamicWorkQueue sub-path) with the parallel
+# (PostGSU) reduction of split tiles and alpha = 0, beta = 2: the
+# sk_hybrid_dynamic_parallel.yaml problems with only beta*C, bias,
+# scaleAlphaVec and the activation left for the PostGSU kernel.
+#
+# With alpha = 0 the main loop runs no iterations, but every work item still
+# stores its (zero) partial to the workspace slot of its part, because the
+# PostGSU kernel reads every slot; a part that skipped its store would leave
+# that slot holding whatever the workspace held before. The client does not
+# fill the workspace before a launch, so such a slot only shows up here when it
+# holds stale nonzero data; this config mainly checks the alpha = 0 epilogue.
+# Both raw-rank queue regimes are built.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict]
+
+GlobalParameters:
+  Architecture: gfx950
+  HybridAssignmentPolicy: [DynamicWorkQueue]
+  NumElementsToValidate: -1
+  BoundsCheck: 0
+  KernelTime: False
+  CpuThreads: 8
+  # alpha = 0, beta = 2; constant bias and scaleAlphaVec (2).
+  DataInitTypeAlpha: 0
+  DataInitTypeBeta: 2
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeC: 12
+  DataInitTypeBias: 2
+  DataInitTypeScaleAlphaVec: 2
+  MaxWorkspaceSize: 134217728
+  SyncsPerBenchmark: 0
+  NumWarmups: 2
+  NumBenchmarks: 2
+  SleepPercent: 0
+
+BenchmarkProblems:
+  - - OperationType: GEMM
+      DataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+      BiasDataTypeList: [s]
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 1
+    - BenchmarkCommonParameters:
+        - KernelLanguage: [Assembly]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [Hybrid]
+        - GlobalSplitU: [0]
+        - DepthU: [16]
+        # MT 64x64.
+        - MatrixInstruction: [[16, 16, 4, 1, 1, 2, 2, 2, 2]]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - LocalReadVectorWidth: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - MIArchVgpr: [False]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - 1LDSBuffer: [1]
+        - ExpandPointerSwap: [False]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [True]
+        - StoreRemapVectorWidth: [0]
+        - TransposeLDS: [0]
+        - WorkGroupMapping: [1]
+        - StaggerU: [0]
+      ForkParameters:
+        - Groups:
+          - # Auto WGMXCC (resolved to NUM_XCD at launch).
+            - WorkGroupMappingXCC: -1
+              PersistentXCCMapping: 0
+            # SKXCC remap with WGMXCC > 1.
+            - WorkGroupMappingXCC: 8
+              PersistentXCCMapping: 8
+        - ActivationFuncCall: [False]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # 1 tile, long K.
+          - Exact: [64, 64, 1, 65536]
+          # 12 edge tiles.
+          - Exact: [200, 130, 1, 16384]
+          # 3 batches x 4 tiles: workspace slots span the batches.
+          - Exact: [96, 96, 3, 32768]
+          # 64 tiles (CUs / 4) of 64 iterations: 4 parts each.
+          - Exact: [512, 512, 1, 1024]
+          # 4 batches of one tile, very long K.
+          - Exact: [32, 32, 4, 262144]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: gelu]
