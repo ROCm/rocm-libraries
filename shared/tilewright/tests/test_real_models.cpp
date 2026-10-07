@@ -192,7 +192,8 @@ TEST_CASE("shipped models rank repeated kernels like kernels scored one by one",
         for (std::size_t k : {64, 8192})
           for (std::size_t b : {1, 2}) {
             const tw::Problem p = make_problem(m, n, k, b, tw::DataType::BFloat16);
-            for (std::size_t min_scored : {std::size_t{0}, std::size_t{1000}}) {
+            for (std::size_t min_scored :
+                 {std::size_t{0}, std::size_t{1}, std::size_t{32}, std::size_t{1000}}) {
               const std::vector<tw::Result> expect = tw::detail::rank_keys(*model,
                                                                            p,
                                                                            hw,
@@ -204,6 +205,8 @@ TEST_CASE("shipped models rank repeated kernels like kernels scored one by one",
                                                                            nullptr);
               REQUIRE(same_results(set.rank(p, hw, min_scored), expect));
               REQUIRE(same_results(tw::rank_configs(*model, p, hw, pool, min_scored), expect));
+              REQUIRE(same_results(set.rank_top(p, hw, {}, min_scored),
+                                   scored_prefix(expect, min_scored)));
               const std::vector<tw::Result> none = set.rank(p, hw, budget, min_scored);
               for (std::size_t j = 0; j < none.size(); ++j) {
                 REQUIRE_FALSE(none[j].scored);
@@ -239,7 +242,7 @@ TEST_CASE("shipped cells whose occupancy never varied score unseen occupancies a
         for (std::size_t k : {16, 1000, 16384}) {
           const tw::Problem p = make_problem(m, n, k, 1, tw::DataType::BFloat16);
           const int cell      = tw::route(*model, p);
-          if (cell < 0 || !model->weights(static_cast<std::size_t>(cell)).i_constant[kOccupancy])
+          if (cell < 0 || !model->weights(static_cast<std::size_t>(cell))->i_constant[kOccupancy])
             continue;
           ++constant_cells;
           std::vector<double> score(pool.size(), std::nan(""));

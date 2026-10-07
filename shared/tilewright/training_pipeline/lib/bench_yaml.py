@@ -227,6 +227,61 @@ def shape_of_line(line: str) -> Optional[Tuple[int, int, int, int]]:
     return (vals["M"], vals["N"], vals["K"], vals.get("batch_count", 1))
 
 
+# ── knob rewriting ───────────────────────────────────────────────────────────
+#
+# `solution_index_list` values are flow sequences (`[1, 2, 3]`), the only
+# values holding commas; the patterns below match them whole.
+
+_LIST_VALUE = r"\[[^\]]*\]"
+_SCALAR_VALUE = r"[^,}\[]*"
+
+
+def _knob_re(key: str) -> re.Pattern:
+    return re.compile(
+        rf"(?<![\w]){re.escape(key)}:\s*(?:{_LIST_VALUE}|{_SCALAR_VALUE})"
+    )
+
+
+def set_line_knob(line: str, key: str, value: Any) -> str:
+    """`line` with `key: value` replaced, or appended when absent."""
+    nl = "\n" if line.endswith("\n") else ""
+    body = line.rstrip("\n")
+    pat = _knob_re(key)
+    if pat.search(body):
+        body = pat.sub(lambda _: f"{key}: {value}", body, count=1)
+    else:
+        body = body.rstrip().rstrip("}") + f", {key}: {value}}}"
+    return body + nl
+
+
+def drop_line_knob(line: str, key: str) -> str:
+    """`line` without `key` (unchanged when absent)."""
+    pat = re.compile(
+        rf",\s*(?<![\w]){re.escape(key)}:\s*(?:{_LIST_VALUE}|{_SCALAR_VALUE})"
+    )
+    return pat.sub("", line, count=1)
+
+
+def format_solution_list(ids: Iterable[int]) -> str:
+    return "[" + ", ".join(str(int(i)) for i in ids) + "]"
+
+
+def line_solution_list(line: str) -> Optional[List[int]]:
+    """The `solution_index_list` of a bench line, or None without one."""
+    m = re.search(rf"(?<![\w])solution_index_list:\s*({_LIST_VALUE})", line)
+    if m is None:
+        return None
+    inner = m.group(1)[1:-1].strip()
+    return [int(t) for t in inner.split(",") if t.strip()] if inner else []
+
+
+def line_has_prescreen(line: str) -> bool:
+    """The line asks the bench to warm up every candidate before timing any
+    (`skip_screen_prepass`)."""
+    m = re.search(r"(?<![\w])skip_screen_prepass:\s*(\w+)", line)
+    return m is not None and m.group(1).lower() in ("true", "1")
+
+
 def parse_shapes_yaml(path: Path) -> List[Tuple[int, int, int, int]]:
     """(M, N, K, batch) of every entry of a bench yaml, in file order."""
     out: List[Tuple[int, int, int, int]] = []

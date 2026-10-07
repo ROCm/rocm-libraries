@@ -22,12 +22,14 @@ add_executable(tilewright-tests)
 target_sources(
     tilewright-tests
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/model_writer.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/test_cache.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/test_concurrency.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/test_env.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/test_loader.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/test_pool.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/test_rank.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/test_real_models.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/test_v3.cpp"
 )
 # White-box tests (kernel variants, CRC) include the engine's private headers.
 target_include_directories(tilewright-tests PRIVATE "${tilewright_SOURCE_DIR}/src/tilewright")
@@ -45,13 +47,16 @@ catch_discover_tests(tilewright-tests TEST_SPEC "~[env]" DISCOVERY_MODE PRE_TEST
 add_test(NAME tilewright-env-forced COMMAND tilewright-tests "[env]")
 set_tests_properties(
     tilewright-env-forced
-    PROPERTIES ENVIRONMENT "TILEWRIGHT_FORCE_CELL=1;TILEWRIGHT_PICK_LOG=1;TILEWRIGHT_DIAG=1"
+    PROPERTIES ENVIRONMENT
+               "TILEWRIGHT_FORCE_CELL=1;TILEWRIGHT_PICK_LOG=1;TILEWRIGHT_DIAG=1;TILEWRIGHT_CACHE_MB=7"
 )
 add_test(NAME tilewright-env-out-of-range COMMAND tilewright-tests "[env]")
 set_tests_properties(
-    tilewright-env-out-of-range PROPERTIES ENVIRONMENT "TILEWRIGHT_FORCE_CELL=96;TILEWRIGHT_PICK_LOG=0"
+    tilewright-env-out-of-range
+    PROPERTIES ENVIRONMENT "TILEWRIGHT_FORCE_CELL=96;TILEWRIGHT_PICK_LOG=0;TILEWRIGHT_CACHE_MB=0"
 )
 add_test(NAME tilewright-env-invalid COMMAND tilewright-tests "[env]")
 set_tests_properties(
-    tilewright-env-invalid PROPERTIES ENVIRONMENT "TILEWRIGHT_FORCE_CELL=1x;TILEWRIGHT_DIAG="
+    tilewright-env-invalid
+    PROPERTIES ENVIRONMENT "TILEWRIGHT_FORCE_CELL=1x;TILEWRIGHT_DIAG=;TILEWRIGHT_CACHE_MB=12x"
 )

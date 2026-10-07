@@ -551,3 +551,198 @@ def test_pick_lines_without_the_pool_position_fail(tmp_path, deployed, monkeypat
     assert par["n_cpp_picks"] == 0
     summ = json.loads((out / "summary.json").read_text())
     assert any("top1_index" in f for f in summ["failures"])
+
+
+def test_bench_yamls_with_the_same_name_keep_separate_results():
+    paths = [Path("a/w.yaml"), Path("b/w.yaml"), Path("x.yaml"), Path("c/w.yaml")]
+    assert s7.yaml_tags(paths) == ["w", "w_2", "x", "w_3"]
+    assert s7.yaml_tags([Path("w_2.yaml"), Path("w.yaml"), Path("b/w.yaml")]) == [
+        "w_2",
+        "w",
+        "w_3",
+    ]
+
+
+def _rank_row(m, ranked, reason="ok"):
+    return dict(
+        _py(m, (1,) * 8, ranked[0] if ranked else None, reason=reason), ranked=ranked
+    )
+
+
+def test_compare_orders_categories():
+    problems = [entry(m, 1, 1) for m in range(1, 9)]
+    position_of = {100 + i: i for i in range(10)}
+    sids = {
+        1: [100, 101, 102],
+        2: [100, 102, 103],
+        3: [100, 102, 103],
+        4: [101, 100, 102],
+        5: [100, 107, 101],
+        6: [109],
+        7: [100, 101, 108],
+    }
+    runtime = {(m, 1, 1, 1, "T", "N"): v for m, v in sids.items()}
+    py = [_rank_row(m, [0, 1, 2, 3]) for m in range(1, 6)]
+    py += [_rank_row(6, [], reason="no_model"), _rank_row(7, [0, 1, 2, 3])]
+    py += [_rank_row(8, [0, 1])]
+    measured = {(3, 1, 1, 1, "T", "N"): {101}}
+    r = s7.compare_orders(problems, runtime, py, position_of, measured)
+    assert [row["result"] for row in r["per_problem"]] == [
+        "match",
+        "predicate_skips",
+        "order_mismatch",
+        "order_mismatch",
+        "order_mismatch",
+        "agree_unscored",
+        "match",
+        "no_runtime_list",
+    ]
+    rows = {row["m"]: row for row in r["per_problem"]}
+    assert rows[2]["left_out"] == [1] and rows[7]["n_filled"] == 1
+    assert r["n_agree"] == 4 and r["match_rate"] == pytest.approx(4 / 8)
+
+
+def test_runtime_selection_joins_the_picks_to_bench_timings():
+    pool = [{"sol_idx_global": 100 + i} for i in range(4)]
+    problems = [entry(m, 1, 1) for m in range(1, 7)]
+    cands = [
+        {"sol_idx_global": 100, "us": 10.0, "is_skip": False},
+        {"sol_idx_global": 101, "us": 20.0, "is_skip": False},
+        {"sol_idx_global": 102, "us": 40.0, "is_skip": True},
+    ]
+    timings = {
+        (m, 1, 1, 1, "T", "N"): {"candidates": cands, "winner_us": 10.0}
+        for m in range(1, 6)
+    }
+    cpp = [_cpp(1, (1,) * 8, 0), _cpp(2, (1,) * 8, 1), _cpp(3, (1,) * 8, 2)]
+    cpp += [_cpp(4, (1,) * 8, 3), _cpp(5, (1,) * 8, 7), _cpp(6, (1,) * 8, 0)]
+    got = s7.runtime_selection(problems, cpp, pool, timings, "timed", bootstrap=50)
+    assert got["n_evaluated"] == 3 and got["n_miss"] == 1
+    assert got["sel_eff"] == pytest.approx((1.0 * 0.5 * 0.25) ** (1 / 3))
+    assert (got["n_top1_without_row"], got["n_outside_the_pool"]) == (1, 1)
+    assert got["n_without_timings"] == 1 and got["sel_eff_ci95"] is not None
+    warm = s7.runtime_selection(problems, cpp, pool, timings, "any")
+    assert warm["n_miss"] == 0
+    assert warm["sel_eff"] == pytest.approx((1.0 * 0.5 * 0.25) ** (1 / 3))
+
+
+def test_paired_timing_tells_first_calls_into_a_cell_apart():
+    off = [100.0, 10.0, 20.0, 30.0, 40.0]
+    on = [101.0, 50.0, 12.0, 31.0, 41.0]
+    cells = {(i, 1, 1, 1, "T", "N"): c for i, c in enumerate("AABAB")}
+    st = s7.paired_timing([(_log(on), _log(off))] * 3, cell_of=cells, bootstrap=20)
+    assert st["first_in_cell"]["n_problems"] == 1
+    assert st["first_in_cell"]["ml_on_us"]["max"] == 12.0
+    assert st["warm"]["n_problems"] == 3
+    assert st["warm"]["delta_us"]["p50"] == pytest.approx(1.0)
+    assert st["delta_us"]["p50_ci95"] is not None
+    assert "first_in_cell" not in s7.paired_timing([(_log(on), _log(off))])
+
+
+def write_timings(path, deployed_problems):
+    lines = ["m,n,k,batch_count,transA,transB,sol_idx_global,us,is_skip"]
+    for m, n, k in deployed_problems:
+        for s in fh.kernels_grid():
+            us = fh.kernel_time_us(m, n, k, 1, s["sizeMapping"])
+            lines.append(f"{m},{n},{k},1,T,N,{s['index']},{us},False")
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "chunk_0000.csv").write_text("\n".join(lines) + "\n")
+    return path
+
+
+KEPT = ((1024, 2048, 4096), (256, 384, 256), (4096, 4096, 1024))
+
+
+def test_order_parity_and_runtime_selection(tmp_path, deployed, monkeypatch):
+    pytest.importorskip("tilewright")
+    out = tmp_path / "s7"
+    timings = write_timings(tmp_path / "timings", KEPT)
+    rc = run_stage07(
+        deployed, out, monkeypatch, "--no-timing", "--timings-csv-dir", str(timings)
+    )
+    assert rc == 0
+    par = json.loads((out / "work" / "parity_rsn8" / "parity.json").read_text())
+    assert par["ok"] and par["requested_solution_num"] == 8
+    assert par["top1"]["counts"] == {"match": 3}
+    assert par["order"]["counts"] == {"match": 3}
+    bench = yaml.safe_load((out / "work" / "parity_rsn8" / "bench.yaml").read_text())
+    assert {e["requested_solution_num"] for e in bench} == {8}
+    assert all(e["print_kernel_info"] == 1 for e in bench)
+    summ = json.loads((out / "summary.json").read_text())
+    sel = summ["per_yaml"]["work"]["parity"]["runtime_selection"]
+    assert sel["n_evaluated"] == 3 and sel["n_miss"] == 0
+    assert 0 < sel["sel_eff"] <= 1.0
+    assert summ["per_yaml"]["work"]["parity_top_k"]["ok"]
+
+
+def test_order_parity_catches_a_reordered_list(tmp_path, deployed, monkeypatch):
+    pytest.importorskip("tilewright")
+    monkeypatch.setenv("FAKE_ORDER_SWAP", "1")
+    out = tmp_path / "s7"
+    assert run_stage07(deployed, out, monkeypatch, "--no-timing") == 1
+    par = json.loads((out / "work" / "parity_rsn8" / "parity.json").read_text())
+    assert par["order"]["counts"] == {"order_mismatch": 3}
+    assert par["top1"]["counts"] == {"match": 3}
+    summ = json.loads((out / "summary.json").read_text())
+    assert any("order parity" in f for f in summ["failures"])
+
+
+def test_order_parity_and_left_out_kernels(tmp_path, deployed, monkeypatch):
+    pytest.importorskip("tilewright")
+    monkeypatch.setenv("FAKE_DROP_RANK", "1")
+    out = tmp_path / "s7"
+    assert run_stage07(deployed, out, monkeypatch, "--no-timing") == 0
+    par = json.loads((out / "work" / "parity_rsn8" / "parity.json").read_text())
+    assert par["order"]["counts"] == {"predicate_skips": 3}
+    timings = write_timings(tmp_path / "timings", KEPT)
+    out2 = tmp_path / "s7b"
+    rc = run_stage07(
+        deployed, out2, monkeypatch, "--no-timing", "--timings-csv-dir", str(timings)
+    )
+    assert rc == 1
+    par = json.loads((out2 / "work" / "parity_rsn8" / "parity.json").read_text())
+    assert par["order"]["counts"] == {"order_mismatch": 3}
+    out3 = tmp_path / "s7c"
+    assert (
+        run_stage07(deployed, out3, monkeypatch, "--no-timing", "--parity-top-k", "1")
+        == 0
+    )
+    assert not (out3 / "work" / "parity_rsn8").exists()
+
+
+def test_timing_splits_first_calls_and_prints_the_reference_on_request(
+    tmp_path, deployed, monkeypatch, capsys
+):
+    pytest.importorskip("tilewright")
+    out = tmp_path / "s7"
+    monkeypatch.setenv("FAKE_LIBRARY_STEM", bf.LIBRARY_STEM)
+    argv = [
+        "--config-yaml",
+        str(deployed["cfg"]),
+        "--build-dir",
+        str(deployed["build"]),
+        "--deploy-record",
+        str(deployed["record"]),
+        "--bench-yaml",
+        str(deployed["yaml"]),
+        "--no-parity",
+        "--bootstrap",
+        "20",
+    ]
+    capsys.readouterr()
+    assert s7.main(argv + ["--out-dir", str(out / "a")]) == 0
+    plain = capsys.readouterr().out
+    assert (
+        "ML-on selection time per problem" in plain
+        and "first call into a cell" in plain
+    )
+    assert "ML-off" not in plain and "origami" not in plain.lower()
+    t = json.loads((out / "a" / "summary.json").read_text())["per_yaml"]["work"][
+        "timing"
+    ]
+    for rsn in ("rsn1", "rsn4"):
+        assert t[rsn]["first_in_cell"]["n_problems"] == 1
+        assert t[rsn]["warm"]["n_problems"] == 1
+        assert t[rsn]["ml_on_us"]["p50_ci95"] is not None
+    assert s7.main(argv + ["--out-dir", str(out / "b"), "--origami-reference"]) == 0
+    assert "[reference] ML-on minus ML-off" in capsys.readouterr().out

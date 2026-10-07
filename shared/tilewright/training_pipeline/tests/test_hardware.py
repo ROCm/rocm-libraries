@@ -170,3 +170,16 @@ def test_config_block_wins_and_completes(topology, tmp_path):
         hw.device_hardware({"hardware": {"cu_count": 7}}, 0, topology)
     with pytest.raises(RuntimeError):
         hw.device_hardware(partial, 0, tmp_path / "absent")
+
+
+def test_pci_chip_id_from_config_or_kfd(topology, tmp_path):
+    (topology / "1" / "properties").write_text(
+        (topology / "1" / "properties").read_text() + "device_id 30112\n"
+    )
+    assert hw.device_pci_chip_id({}, 0, topology) == 0x75A0
+    assert hw.device_pci_chip_id({}, 1, topology) is None
+    cfg = {"hardware": {"pci_chip_id": 0x75A8}}
+    assert hw.device_pci_chip_id(cfg, 1, topology) == 0x75A8
+    assert hw.device_pci_chip_id({}, 0, tmp_path / "absent") is None
+    full = {"hardware": {"n_cu": 7, "lds_bytes": 1, "l2_bytes": 2, "pci_chip_id": 1}}
+    assert hw.device_hardware(full, 0, tmp_path / "absent").n_cu == 7

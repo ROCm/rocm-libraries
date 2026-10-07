@@ -13,3 +13,7 @@ add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../.." tilewright EXCLUDE_FROM_
 add_executable(bench_selection_time bench_selection_time.cpp)
 target_link_libraries(bench_selection_time PRIVATE roc::tilewright)
 target_compile_features(bench_selection_time PRIVATE cxx_std_17)
+
+add_executable(bench_shipped_rank bench_shipped_rank.cpp)
+target_link_libraries(bench_shipped_rank PRIVATE roc::tilewright)
+target_compile_features(bench_shipped_rank PRIVATE cxx_std_17)

@@ -72,6 +72,8 @@ def test_render_warmup_line():
     assert "adaptive" not in out and "measure_time" not in out
     assert s03.render_warmup_line("- not a mapping") is None
     assert s03.render_warmup_line("- {a 1}") is None
+    prescreen = line.replace("}", ", skip_screen_prepass: true}")
+    assert s03.render_warmup_line(prescreen) is None
 
 
 def test_stream_split_routes_the_first_problem_to_the_warmup_log():

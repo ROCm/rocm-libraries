@@ -274,11 +274,15 @@ namespace TensileLite
             std::vector<size_t> positions;
             try
             {
-                auto const ranked = m_candidates.rank_scored(
+                auto const ranked = m_candidates.rank(
                     tilewrightProblem, tilewrightHardware, executionContext(problem), depth);
                 positions.reserve(ranked.size());
                 for(auto const& r : ranked)
+                {
+                    if(!r.scored)
+                        break;
                     positions.push_back(r.config_index);
+                }
             }
             catch(std::exception const&)
             {

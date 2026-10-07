@@ -14,7 +14,10 @@ with a deterministic synthetic cost model. Without tilewright the candidates
 come in "Origami" order (a fixed analytical guess, so rank 0 is the Origami
 pick); with TENSILE_USE_TILEWRIGHT=1 they come in the order the deployed
 model ranks them (through the tilewright Python module when it is installed,
-otherwise unchanged). The output follows testing_matmul.hpp: an optional
+otherwise unchanged). A `solution_index_list` replaces the candidates by the
+listed solutions in list order, `algo_method: 1` takes them in library order,
+and `skip_screen_prepass` screens against the fastest of all candidates
+instead of the fastest so far. The output follows testing_matmul.hpp: an optional
 `Solution selection time` line per problem (TENSILE_DB=0x10000), `Is
 supported`, one result block per timed candidate, `Skip solution` lines for
 pruned ones and a `Winner:` block. TILEWRIGHT_DIAG and TILEWRIGHT_PICK_LOG
@@ -23,8 +26,19 @@ print the engine's diagnostic lines.
 FAKE_HW ("n_cu,lds_bytes,l2_bytes") is the hardware the fake runtime passes
 to the engine. As a broken integration would, FAKE_PICK_RANK=k makes the pick
 log report the k-th ranked kernel instead of the first, FAKE_PICK_TIE=last
-the last of the kernels tied with the first, and FAKE_PICK_NO_INDEX=1 drops
-its `top1_index` field.
+the last of the kernels tied with the first, FAKE_PICK_NO_INDEX=1 drops its
+`top1_index` field, and FAKE_ORDER_SWAP=1 returns the first two ranked
+kernels swapped. FAKE_DROP_RANK=k leaves the k-th ranked kernel out of the
+returned list, as a runtime does with a kernel whose predicates fail, and
+FAKE_UNSUPPORTED (comma-separated solution indices) leaves those kernels out
+of an explicit `solution_index_list`.
+
+`--sm_count_target N` narrows the machine width of the cost model to N CUs
+(so winners move with the CU budget); `--hybrid_assignment_policy` is
+accepted and ignored. `<root>/clients/hipblaslt-cotenant` stands in for the
+cotenant launcher: it logs its `--cus` to `--log`, prints launcher lines and
+runs the command after `--`, with HIP_VISIBLE_DEVICES set to its `--device`
+as the real launcher does.
 """
 from __future__ import annotations
 
@@ -94,6 +108,22 @@ def write_fake_build(
         "sys.exit(bench_main(sys.argv[1:]))\n"
     )
     exe.chmod(exe.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    cot = clients / "hipblaslt-cotenant"
+    cot.write_text(
+        f"#!{sys.executable}\n"
+        "import sys\n"
+        f"sys.path.insert(0, {str(TESTS_DIR)!r})\n"
+        "from fake_hipblaslt import cotenant_main\n"
+        "sys.exit(cotenant_main(sys.argv[1:]))\n"
+    )
+    cot.chmod(cot.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    kernel = clients / "hipblaslt-cotenant-kernel"
+    kernel.write_text("#!/bin/sh\nexit 0\n")
+    kernel.chmod(kernel.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    (clients / "hipblaslt_common.yaml").write_text(
+        "Arguments:\n  - solution_index_list: c_int32*4096\n"
+        "  - skip_screen_prepass: c_bool\n"
+    )
     (root / "CMakeCache.txt").write_text("# fake build\n")
     return root
 
@@ -103,14 +133,23 @@ def _field(line: str, key: str, default: Optional[str] = None) -> Optional[str]:
     return m.group(1).strip() if m else default
 
 
-def kernel_time_us(m: int, n: int, k: int, b: int, sm: Dict[str, object]) -> float:
-    """Synthetic latency: tile-quantized work over a fixed machine width plus
-    a per-tile overhead that favors big tiles on big problems; a workgroup
-    mapping other than 8 costs 2% more."""
+def _solution_list(line: str) -> Optional[List[int]]:
+    m = re.search(r"(?<![\w])solution_index_list:\s*\[([^\]]*)\]", line)
+    if m is None:
+        return None
+    return [int(t) for t in m.group(1).split(",") if t.strip()]
+
+
+def kernel_time_us(
+    m: int, n: int, k: int, b: int, sm: Dict[str, object], width: int = 64
+) -> float:
+    """Synthetic latency: tile-quantized work over a machine `width` CUs wide
+    plus a per-tile overhead that favors big tiles on big problems; a
+    workgroup mapping other than 8 costs 2% more."""
     mt0, mt1 = sm["macroTile"][0], sm["macroTile"][1]
     mi = sm["matrixInstruction"]
     tiles = math.ceil(m / mt0) * math.ceil(n / mt1) * b
-    waves = math.ceil(tiles / 64)
+    waves = math.ceil(tiles / max(int(width), 1))
     eff = 1.0 if mi[0] == 32 else 0.92
     work = waves * mt0 * mt1 * max(k, 1) / (2.0e5 * eff)
     wgm = 1.0 if sm.get("workGroupMapping", 8) == 8 else 1.02
@@ -151,8 +190,36 @@ def _indexed_model(libdir: Path, stem: str) -> Optional[Path]:
     return None
 
 
+def unhide_devices(monkeypatch) -> None:
+    """Drop the HIP / CUDA device lists that hide the GPUs from the tests: a
+    context wrapper refuses a device index outside them."""
+    for var in ("HIP_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES"):
+        monkeypatch.delenv(var, raising=False)
+
+
+def cotenant_main(argv: List[str]) -> int:
+    sep = argv.index("--")
+    opts, cmd = argv[:sep], argv[sep + 1 :]
+
+    def opt(name: str) -> Optional[str]:
+        return opts[opts.index(name) + 1] if name in opts else None
+
+    cus = int(opt("--cus"))
+    if opt("--log"):
+        Path(opt("--log")).write_text(f"cus {cus} device {opt('--device')}\n")
+    print(f"launching cotenant on {cus} CUs", flush=True)
+    print("running: " + " ".join(cmd), flush=True)
+    env = dict(os.environ)
+    if opt("--device") is not None:
+        env["HIP_VISIBLE_DEVICES"] = opt("--device")
+    os.execve(cmd[0], cmd, env)
+
+
 def bench_main(argv: List[str]) -> int:
     yaml_path = argv[argv.index("--yaml") + 1]
+    width = 64
+    if "--sm_count_target" in argv:
+        width = int(argv[argv.index("--sm_count_target") + 1]) or width
     libdir = Path(
         os.environ.get("HIPBLASLT_TENSILE_LIBPATH") or os.environ["FAKE_LIBRARY_DIR"]
     )
@@ -188,15 +255,14 @@ def bench_main(argv: List[str]) -> int:
                 from lib.hardware import DeviceHardware
 
                 model = evaluate.load_model_bytes(data, tilewright)
-                cs = evaluate.candidate_set(
-                    tilewright, model, evaluate.pool_from_kernels(kernels)
-                )
                 n_cu, lds, l2 = (
                     int(v) for v in os.environ.get("FAKE_HW", FAKE_HW).split(",")
                 )
-                hw = evaluate.make_hardware(
-                    tilewright, DeviceHardware(n_cu=n_cu, lds_bytes=lds, l2_bytes=l2)
+                device = DeviceHardware(n_cu=n_cu, lds_bytes=lds, l2_bytes=l2)
+                cs = evaluate.candidate_set(
+                    tilewright, model, evaluate.pool_from_kernels(kernels), device
                 )
+                hw = evaluate.make_hardware(tilewright, device)
             except ImportError:
                 model = None
     lines = [
@@ -217,8 +283,20 @@ def bench_main(argv: List[str]) -> int:
         )
         rsn = int(_field(line, "requested_solution_num", "-1"))
         ssr = float(_field(line, "skip_slow_solution_ratio", "0") or 0)
+        listed = _solution_list(line)
+        algo_method = int(_field(line, "algo_method", "0"))
+        prescreen = _field(line, "skip_screen_prepass", "false") in ("true", "1")
         order = origami_order(g.m, g.n, g.k, g.batch, sols)
-        if model is not None:
+        if listed is not None:
+            pos = {int(sol["index"]): i for i, sol in enumerate(sols)}
+            unsupported = {
+                int(t) for t in os.environ.get("FAKE_UNSUPPORTED", "").split(",") if t
+            }
+            order = [pos[i] for i in listed if i in pos and i not in unsupported]
+            rsn = -1
+        elif algo_method == 1:
+            order = list(range(len(sols)))
+        elif model is not None:
             from lib import evaluate
 
             row = {
@@ -244,6 +322,11 @@ def bench_main(argv: List[str]) -> int:
             if scored:
                 rest = [i for i in order if i not in scored]
                 order = scored + rest
+                if os.environ.get("FAKE_ORDER_SWAP") == "1" and len(scored) > 1:
+                    order[0], order[1] = order[1], order[0]
+                drop = os.environ.get("FAKE_DROP_RANK")
+                if drop is not None and len(scored) > int(drop):
+                    order.pop(int(drop))
                 if pick_log:
                     shown = int(os.environ.get("FAKE_PICK_RANK", "0"))
                     pick = scored[min(shown, len(scored) - 1)]
@@ -281,9 +364,27 @@ def bench_main(argv: List[str]) -> int:
         print(f"Is supported {n} / Total solutions: {n}", flush=True)
         best = None
         best_us = None
+        screen_us = None
+        if prescreen and ssr > 0 and n:
+            screen_us = min(
+                kernel_time_us(g.m, g.n, g.k, g.batch, sols[si]["sizeMapping"], width)
+                for si in order[:n]
+            )
         for rank, si in enumerate(order[:n]):
-            us = kernel_time_us(g.m, g.n, g.k, g.batch, sols[si]["sizeMapping"])
-            if best_us is not None and ssr > 0 and us * ssr > best_us:
+            us = kernel_time_us(g.m, g.n, g.k, g.batch, sols[si]["sizeMapping"], width)
+            if screen_us is not None and us * ssr > screen_us:
+                print(
+                    f"Skip solution: {rank} (best warm-up = {screen_us:.2f} us , warm-up = "
+                    f"{us:.2f} us, skip ratio = {ssr}, solution index = {sols[si]['index']})",
+                    flush=True,
+                )
+                continue
+            if (
+                screen_us is None
+                and best_us is not None
+                and ssr > 0
+                and us * ssr > best_us
+            ):
                 print(
                     f"Skip solution: {rank} (best warm-up = {best_us:.2f} us , warm-up = "
                     f"{us:.2f} us, skip ratio = {ssr}, solution index = {sols[si]['index']})",

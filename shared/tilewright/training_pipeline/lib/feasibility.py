@@ -10,11 +10,18 @@ subset benched for one GEMM: a candidate set without any `cache_hints == 4`
 variant of an operand must not require one. Hints 1..3 are temporal hints and
 do not count as availability.
 
+The LDS fit always applies. The leading-free-dimension validity rule reads
+the global-read vector widths, which MLREC_v3 models do not read: v2 models
+apply it, v3 models leave it to the integration's kernel predicates. The
+small-batched one-tile, Dot2 and non-temporal rules are soft: MLREC_v2 models
+apply the first two and switch the third, MLREC_v3 models switch each by
+their serving flags (`soft_rules`).
+
 Dtypes are catalog names (`lib.features.normalize_dtype_name`).
 """
 from __future__ import annotations
 
-from typing import Any, Iterable, Mapping, Tuple
+from typing import Any, Dict, Iterable, Mapping, Tuple
 
 from .features import normalize_dtype_name
 
@@ -124,6 +131,10 @@ def is_kernel_feasible(
     grvw_b: int,
     nt_a_available: bool,
     nt_b_available: bool,
+    non_temporal_rule: bool = True,
+    small_batched_rule: bool = True,
+    dot2_rule: bool = True,
+    leading_free_rule: bool = True,
 ) -> bool:
     M, N, K, B = int(m), int(n), int(k), int(batch)
     MT_M, MT_N, MT_K = int(mt_m), int(mt_n), int(mt_k)
@@ -132,19 +143,20 @@ def is_kernel_feasible(
     a_trans, b_trans = _is_t(trans_a), _is_t(trans_b)
     a_bits, b_bits = rule_bits(a_dtype), rule_bits(b_dtype)
 
-    # Small batched problems must fit in one tile.
-    if M <= 256 and N <= 256 and K < 1024 and B != 1 and (MT_M < M or MT_N < N):
+    small_batched = M <= 256 and N <= 256 and K < 1024 and B != 1
+    if small_batched_rule and small_batched and (MT_M < M or MT_N < N):
         return False
-    # Dot2 kernels are only correct for M < 3.
-    if MI_M == 1 and MI_N == 1 and MI_K == 64 and M > 2:
+    if dot2_rule and MI_M == 1 and MI_N == 1 and MI_K == 64 and M > 2:
         return False
     # A contiguous free dimension holds one global-read vector (TensileLite's
     # LeadingFree0/1SizesGreaterOrEqual; not emitted for Int8x4).
-    if normalize_dtype_name(a_dtype) != "int8x4":
+    if leading_free_rule and normalize_dtype_name(a_dtype) != "int8x4":
         if not a_trans and M < int(grvw_a):
             return False
         if b_trans and N < int(grvw_b):
             return False
+    if not non_temporal_rule:
+        return True
     if (K * a_bits) % 1024 == 0 and (MT_K * a_bits) % 1024 == 0:
         if M <= MT_M * 2 and not b_trans and (N * b_bits) // max(M * a_bits, 1) > 5:
             if nt_b_available and chb != NON_TEMPORAL:
@@ -166,6 +178,10 @@ def passes_gates(
     lds_bytes: int,
     nt_a_available: bool,
     nt_b_available: bool,
+    non_temporal_rule: bool = True,
+    small_batched_rule: bool = True,
+    dot2_rule: bool = True,
+    leading_free_rule: bool = True,
 ) -> bool:
     """LDS gate then feasibility rule, on `lib.features` problem / config
     kwargs dicts (`problem_kwargs_from_row` / `config_kwargs_from_row`)."""
@@ -199,4 +215,27 @@ def passes_gates(
         grvw_b=config["grvw_b"],
         nt_a_available=nt_a_available,
         nt_b_available=nt_b_available,
+        non_temporal_rule=non_temporal_rule,
+        small_batched_rule=small_batched_rule,
+        dot2_rule=dot2_rule,
+        leading_free_rule=leading_free_rule,
     )
+
+
+def soft_rules(serving: Mapping[str, Any], version: int) -> Dict[str, bool]:
+    """`passes_gates` rule keywords of a model's serving options: v2 applies
+    small-batched and Dot2 and the non-temporal rule unless switched off; v3
+    applies only those its serving options switch on, and not the
+    leading-free rule."""
+    if version == 3:
+        return {
+            "leading_free_rule": False,
+            "small_batched_rule": bool(serving.get("small_batched_rule", False)),
+            "dot2_rule": bool(serving.get("dot2_rule", False)),
+            "non_temporal_rule": bool(serving.get("non_temporal_rule", False)),
+        }
+    return {
+        "small_batched_rule": True,
+        "dot2_rule": True,
+        "non_temporal_rule": bool(serving.get("non_temporal_rule", True)),
+    }

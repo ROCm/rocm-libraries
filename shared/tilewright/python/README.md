@@ -57,6 +57,31 @@ pool = tw.CandidateSet(model, configs, tie_break=tw.TieBreak.Prior)
 results = pool.rank(problem, hardware, prior=[0.5] * len(configs))
 ```
 
+`rank_top` returns only the best `k` scored results, `prepare` builds at load
+time what the first rankings of each cell would build, and the cache limit
+bounds the memory of expanded cell weights and per-cell caches:
+
+```python
+best = pool.rank_top(problem, hardware, 1)  # at most one Result
+pool.prepare()  # every cell; prepare(cells=[...]) or prepare(problem=p, hardware=h) for fewer
+tw.set_cache_limit(256 << 20)
+tw.describe(model).provenance.config_id  # what an MLREC_v3 file records, else ""
+```
+
+An MLREC_v3 model trained with a launch model records its id
+(`provenance.launch_model`); `CandidateSet` then raises `ValueError` unless
+`launch` has that `id` attribute:
+
+```python
+class Launch:
+    id = "hipblaslt:gfx950:1"
+
+    def plan(self, config, problem, context):
+        return tw.LaunchPlan()
+
+pool = tw.CandidateSet(model, configs, launch=Launch())
+```
+
 `context=None` means exclusive use of the device. Attribute names must be
 strings and values `int64` integers (`TypeError` otherwise); `CandidateSet` and
 `rank_configs` raise `ValueError` for an empty attribute name and for a prior of

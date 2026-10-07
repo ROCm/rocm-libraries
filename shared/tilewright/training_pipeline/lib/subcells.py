@@ -240,6 +240,45 @@ def resolve_model_cell(leaf: str, models: Container[str]) -> Optional[str]:
     return cur
 
 
+def _tier_coords(index: int) -> Tuple[int, int, int, int]:
+    return (index // 24, index // 6 % 4, index // 2 % 3, index % 2)
+
+
+def base_fallback_order(base_label: str, present: Iterable[str]) -> List[str]:
+    """Base labels of `present` other than `base_label`, nearest first: the
+    sum of tier differences on M, N, K and batch, ties to the lower grid
+    index. An MLREC_v3 model serves a problem whose base cell has no trained
+    cell through the first of them that has one."""
+    labels = _grid.all_cell_labels()
+    index = {lbl: i for i, lbl in enumerate(labels)}
+    cb = _tier_coords(index[base_label])
+    others = sorted({index[p] for p in present if p in index} - {index[base_label]})
+    dist = [(sum(abs(a - b) for a, b in zip(cb, _tier_coords(o))), o) for o in others]
+    return [labels[o] for _d, o in sorted(dist)]
+
+
+def v3_serving_cell(
+    m: int,
+    n: int,
+    k: int,
+    batch: int,
+    tree: Dict[str, SplitRule],
+    models: Container[str],
+) -> Optional[str]:
+    """The cell an MLREC_v3 model with `models` and split `tree` scores this
+    shape with: the v2 route, else the nearest base label with a trained
+    cell (`base_fallback_order`) routed by the same shape."""
+    leaf, cell = route(m, n, k, batch, tree, models)
+    if cell is not None:
+        return cell
+    present = {base_cell(lbl) for lbl in list(models) + list(tree)}
+    for other in base_fallback_order(base_cell(leaf), present):
+        cell = resolve_model_cell(assign_subcell(other, m, n, k, batch, tree), models)
+        if cell is not None:
+            return cell
+    return None
+
+
 def route(
     m: int,
     n: int,

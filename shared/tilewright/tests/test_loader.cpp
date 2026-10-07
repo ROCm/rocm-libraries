@@ -185,13 +185,13 @@ TEST_CASE("structural header defects are rejected", "[loader]") {
     extra.bytes.push_back(0);
     CHECK(mentions(load_error(extra), "file size"));
   }
-  SECTION("weight dtype and reserved bytes") {
+  SECTION("weight dtype and serving flags") {
     Image bad                            = good;
     bad.bytes[bad.at.at("weight_dtype")] = 4;
     CHECK(mentions(load_error(bad), "weight_dtype"));
-    Image res                            = good;
-    res.bytes[res.at.at("reserved") + 2] = 1;
-    CHECK(mentions(load_error(res), "reserved"));
+    Image res                             = good;
+    res.bytes[res.at.at("serving_flags")] = 2;
+    CHECK(mentions(load_error(res), "serving flags"));
   }
   SECTION("feature dims") {
     for (const char* dim : {"q_dim", "i_dim", "x_dim"}) {

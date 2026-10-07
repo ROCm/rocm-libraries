@@ -71,6 +71,13 @@ long long forced_cell(const char* v) {
 
 }  // namespace
 
+TEST_CASE("the cache limit starts at TILEWRIGHT_CACHE_MB", "[env]") {
+  const char* v       = std::getenv("TILEWRIGHT_CACHE_MB");
+  const long long mib = v == nullptr || v[0] == '\0' ? -1 : forced_cell(v);
+  CHECK(tw::cache_limit() ==
+        (mib >= 0 ? static_cast<std::size_t>(mib) << 20 : std::size_t{1} << 30));
+}
+
 TEST_CASE("environment knobs", "[env]") {
 #if !TILEWRIGHT_TEST_CAPTURE
   SKIP("stderr capture is not available on this platform");

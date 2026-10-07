@@ -28,8 +28,11 @@ from __future__ import annotations
 
 import hashlib
 import math
+import re
+import struct
 from collections import OrderedDict
-from typing import Any, Dict, List, Mapping, Tuple
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from .hardware import ArchConstants, DeviceHardware
 
@@ -664,3 +667,511 @@ def split_features(feats: Any) -> Tuple[List[float], List[float], List[float]]:
     it = [feats[n] for n in item_feature_names()]
     ix = [feats[n] for n in interaction_feature_names()]
     return q, it, ix
+
+
+# ── catalog v3 (MLREC_v3) ────────────────────────────────────────────────────
+#
+# Framework-neutral: a kernel is its signature (MT m/n/k, MI m/n/k,
+# cache_hints_a/b), the parameters every GEMM framework has, and its launch
+# for a problem (`LaunchPlan`), which the integration supplies. v2's
+# features of the signature, the problem and the execution context, with the
+# usable CUs (N_eff) wherever v2 uses the device's CU count; no occupancy,
+# vector-width or `bw_occ` feature. A model's attribute spec may add item
+# features of named kernel attributes (Config.attributes); only parameters
+# every targeted framework defines belong there, and each one declared joins
+# the view key.
+
+SCHEDULES: Tuple[str, ...] = ("default", "dynamic", "auto")
+
+
+@dataclass(frozen=True)
+class ExecutionContext:
+    """Where the ranked kernels run (tilewright.ExecutionContext): `cu_budget`
+    CUs (0, or at least the device's, means every CU) and the tile
+    scheduling (`SCHEDULES`)."""
+
+    cu_budget: int = 0
+    schedule: str = "default"
+
+    def __post_init__(self) -> None:
+        if isinstance(self.cu_budget, bool) or not isinstance(self.cu_budget, int):
+            raise ValueError(f"cu_budget must be an int: {self.cu_budget!r}")
+        if self.cu_budget < 0:
+            raise ValueError(f"cu_budget must be >= 0: {self.cu_budget}")
+        if self.schedule not in SCHEDULES:
+            raise ValueError(f"schedule {self.schedule!r} is not one of {SCHEDULES}")
+
+    def effective_cus(self, n_cu: int) -> int:
+        return self.cu_budget if 0 < self.cu_budget < n_cu else n_cu
+
+    def is_exclusive(self, n_cu: Optional[int] = None) -> bool:
+        """Every CU with the default schedule. Without `n_cu`, only a zero
+        budget counts as every CU."""
+        every = self.cu_budget == 0 or (n_cu is not None and self.cu_budget >= n_cu)
+        return every and self.schedule == "default"
+
+
+EXCLUSIVE = ExecutionContext()
+
+ATTRIBUTE_TRANSFORMS: Tuple[str, ...] = ("identity", "log2p1", "nonzero", "onehot")
+MAX_ATTRIBUTES = 64
+MAX_ONEHOT_VALUES = 64
+_INT64_MIN, _INT64_MAX = -(1 << 63), (1 << 63) - 1
+
+
+@dataclass(frozen=True)
+class AttributeFeature:
+    """One entry of an item-attribute spec: the kernel attribute `name`
+    (`default` when a kernel lacks it) as one or more item features:
+
+      identity  x
+      log2p1    log2(1 + max(x, 0))
+      nonzero   1 if x != 0 else 0
+      onehot    1 if x == v else 0, for each v of `values`"""
+
+    name: str
+    default: int = 0
+    transform: str = "identity"
+    values: Tuple[int, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not re.fullmatch(r"[\x21-\x7e]{1,65535}", str(self.name)):
+            raise ValueError(
+                f"attribute name {self.name!r} must be printable ASCII without spaces"
+            )
+        if self.transform not in ATTRIBUTE_TRANSFORMS:
+            raise ValueError(
+                f"attribute {self.name}: transform {self.transform!r} is not one of "
+                f"{ATTRIBUTE_TRANSFORMS}"
+            )
+        for v in (self.default, *self.values):
+            if (
+                isinstance(v, bool)
+                or not isinstance(v, int)
+                or not _INT64_MIN <= v <= _INT64_MAX
+            ):
+                raise ValueError(f"attribute {self.name}: {v!r} is not an int64")
+        if self.transform == "onehot":
+            if not 1 <= len(self.values) <= MAX_ONEHOT_VALUES:
+                raise ValueError(
+                    f"attribute {self.name}: onehot needs 1..{MAX_ONEHOT_VALUES} values"
+                )
+            if len(set(self.values)) != len(self.values):
+                raise ValueError(f"attribute {self.name}: onehot values repeat")
+        elif self.values:
+            raise ValueError(f"attribute {self.name}: only onehot takes values")
+
+    def feature_names(self) -> List[str]:
+        if self.transform == "identity":
+            return [f"attr_{self.name}"]
+        if self.transform == "log2p1":
+            return [f"attr_log2p1_{self.name}"]
+        if self.transform == "nonzero":
+            return [f"attr_nz_{self.name}"]
+        return [f"attr_{self.name}_eq_{v}" for v in self.values]
+
+    def features(self, x: int) -> List[float]:
+        if self.transform == "identity":
+            return [float(x)]
+        if self.transform == "log2p1":
+            return [math.log2(1.0 + max(float(x), 0.0))]
+        if self.transform == "nonzero":
+            return [1.0 if x != 0 else 0.0]
+        return [1.0 if x == v else 0.0 for v in self.values]
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "name": self.name,
+            "default": self.default,
+            "transform": self.transform,
+        }
+        if self.values:
+            out["values"] = list(self.values)
+        return out
+
+
+AttributeSpec = Tuple[AttributeFeature, ...]
+
+# Empty: a v3 kernel is its signature. Framework-specific kernel knobs
+# (workgroup mapping, stagger, prefetch, vector widths, ...) do not belong in
+# a spec.
+DEFAULT_ATTRIBUTE_SPEC: AttributeSpec = ()
+
+
+def parse_attribute_spec(raw: Any) -> AttributeSpec:
+    """An attribute spec from a list of {name, default, transform, values}
+    mappings (a config's `train.attribute_spec`, or a JSON/YAML file's
+    content). ValueError for an invalid or duplicated entry."""
+    if isinstance(raw, Mapping) and "attributes" in raw:
+        raw = raw["attributes"]
+    if not isinstance(raw, (list, tuple)):
+        raise ValueError(
+            "an attribute spec is a list of {name, default, transform, values}"
+        )
+    out: List[AttributeFeature] = []
+    for entry in raw:
+        if isinstance(entry, AttributeFeature):
+            out.append(entry)
+            continue
+        if not isinstance(entry, Mapping):
+            raise ValueError(f"attribute spec entry {entry!r} is not a mapping")
+        unknown = set(entry) - {"name", "default", "transform", "values"}
+        if unknown:
+            raise ValueError(f"attribute spec entry has unknown keys {sorted(unknown)}")
+        out.append(
+            AttributeFeature(
+                name=str(entry["name"]),
+                default=int(entry.get("default", 0)),
+                transform=str(entry.get("transform", "identity")),
+                values=tuple(int(v) for v in entry.get("values", ()) or ()),
+            )
+        )
+    names = [a.name for a in out]
+    if len(set(names)) != len(names):
+        raise ValueError("attribute spec names repeat")
+    if len(out) > MAX_ATTRIBUTES:
+        raise ValueError(f"attribute spec has more than {MAX_ATTRIBUTES} entries")
+    return tuple(out)
+
+
+V3_QUERY_EXTRA: Tuple[str, ...] = (
+    "cu_fraction",
+    "schedule_default",
+    "schedule_dynamic",
+    "schedule_auto",
+)
+V3_ITEM: Tuple[str, ...] = (
+    "log2_mt_m",
+    "log2_mt_n",
+    "log2_mt_k",
+    "log2_mi_m",
+    "log2_mi_n",
+    "log2_mi_k",
+    "nta_norm",
+    "ntb_norm",
+)
+V3_INTERACTION: Tuple[str, ...] = tuple(
+    n
+    for n in FEATURE_GROUPS["interaction"]
+    if n not in ("log2_grvw_a_bytes", "log2_grvw_b_bytes")
+)
+V3_HW_PROXIES: Tuple[str, ...] = (
+    "ai_tile",
+    "l_mi_cycles",
+    "log2_l_mt_cycles",
+    "active_cus_norm",
+)
+V3_LAUNCH: Tuple[str, ...] = (
+    "is_dynamic",
+    "log2_grid",
+    "log2_grid_per_cu",
+    "log2_wg_waves",
+    "wg_wave_eff",
+    "log2_tiles_per_wg",
+    "uneven_work",
+    "reduction_tree",
+    "reduction_parallel",
+    "reduction_atomic",
+)
+
+
+def v3_query_feature_names() -> List[str]:
+    return query_feature_names() + list(V3_QUERY_EXTRA)
+
+
+def v3_item_feature_names(spec: AttributeSpec = ()) -> List[str]:
+    return list(V3_ITEM) + [n for a in spec for n in a.feature_names()]
+
+
+def v3_interaction_feature_names() -> List[str]:
+    return list(V3_INTERACTION) + list(V3_HW_PROXIES) + list(V3_LAUNCH)
+
+
+def v3_catalog_hash() -> str:
+    """Hash of the v3 base names (no attribute features); MLREC_v3 files
+    carry it and the attribute spec's own hash."""
+    names = (
+        v3_query_feature_names()
+        + v3_item_feature_names()
+        + v3_interaction_feature_names()
+    )
+    return hashlib.sha256("\n".join(names).encode("utf-8")).hexdigest()[:16]
+
+
+_FNV_OFFSET = 0xCBF29CE484222325
+_FNV_PRIME = 0x100000001B3
+_U64 = (1 << 64) - 1
+
+
+def _fnv1a(data: bytes, h: int = _FNV_OFFSET) -> int:
+    for b in data:
+        h = ((h ^ b) * _FNV_PRIME) & _U64
+    return h
+
+
+def attribute_spec_hash(spec: AttributeSpec, catalog_hash: Optional[str] = None) -> int:
+    """FNV-1a 64 of "<catalog hash>\\n" and one line per entry,
+    "<name>\\t<default>\\t<transform>" with "\\t<v1>,<v2>,..." for onehot."""
+    text = (catalog_hash or v3_catalog_hash()) + "\n"
+    for a in spec:
+        text += f"{a.name}\t{a.default}\t{a.transform}"
+        if a.transform == "onehot":
+            text += "\t" + ",".join(str(v) for v in a.values)
+        text += "\n"
+    return _fnv1a(text.encode("ascii"))
+
+
+def attribute_reads(spec: AttributeSpec) -> List[Tuple[str, int]]:
+    """(name, default) of every attribute a v3 model reads, in view-key
+    order."""
+    return [(a.name, a.default) for a in spec]
+
+
+SIGNATURE_FIELDS: Tuple[str, ...] = (
+    "mt_m",
+    "mt_n",
+    "mt_k",
+    "mi_m",
+    "mi_n",
+    "mi_k",
+    "cache_hints_a",
+    "cache_hints_b",
+)
+
+
+def v3_view_key(
+    config_kwargs: Mapping[str, Any],
+    attributes: Optional[Mapping[str, int]],
+    spec: AttributeSpec,
+) -> Tuple[int, ...]:
+    """The engine's view key of a config for a v3 model: the signature
+    (`SIGNATURE_FIELDS` as given, no clamping), then `attribute_reads`.
+    Kernels with equal keys are one candidate to a v3 model."""
+    attrs = attributes or {}
+    head = tuple(int(config_kwargs[k]) for k in SIGNATURE_FIELDS)
+    return head + tuple(int(attrs.get(n, d)) for n, d in attribute_reads(spec))
+
+
+def v3_candidate_key(
+    config_kwargs: Mapping[str, Any],
+    attributes: Optional[Mapping[str, int]],
+    spec: AttributeSpec,
+    launch: Optional[Any] = None,
+) -> Tuple[int, ...]:
+    """The engine's grouping of a config for a v3 model ranked with launch
+    model `launch`: the view key, then the launch key (`launch.launch_key(
+    config_kwargs, attributes)`, 0 without one). Configs with equal keys are
+    one candidate and share a score; whitelists still match the view key."""
+    key_of = getattr(launch, "launch_key", None)
+    lk = int(key_of(config_kwargs, attributes)) & _U64 if key_of is not None else 0
+    return v3_view_key(config_kwargs, attributes, spec) + (lk,)
+
+
+def view_key_hash(key: Sequence[int]) -> int:
+    """FNV-1a 64 of the key's values as 8-byte little-endian two's
+    complement: what MLREC_v3 keyed whitelists list."""
+    return _fnv1a(b"".join(struct.pack("<Q", int(v) & _U64) for v in key))
+
+
+PARTIAL_REDUCTIONS: Tuple[str, ...] = ("none", "tree", "parallel", "atomic")
+
+
+@dataclass(frozen=True)
+class LaunchPlan:
+    """How a kernel is launched for one problem (tilewright.LaunchPlan):
+    whether workgroups take output tiles from a shared queue, the workgroups
+    launched (0: one per output tile) and how the workgroups that split an
+    output tile combine their partial results (`PARTIAL_REDUCTIONS`; "none"
+    when no tile is split). The default is the engine's plan without a
+    LaunchModel."""
+
+    dynamic_queue: bool = False
+    grid_wgs: int = 0
+    partial_reduction: str = "none"
+
+    def __post_init__(self) -> None:
+        if isinstance(self.grid_wgs, bool) or not isinstance(self.grid_wgs, int):
+            raise ValueError(f"grid_wgs must be an int: {self.grid_wgs!r}")
+        if not 0 <= self.grid_wgs < (1 << 64):
+            raise ValueError(f"grid_wgs {self.grid_wgs} is out of range")
+        if self.partial_reduction not in PARTIAL_REDUCTIONS:
+            raise ValueError(
+                f"partial_reduction {self.partial_reduction!r} is not one of "
+                f"{PARTIAL_REDUCTIONS}"
+            )
+
+
+DEFAULT_LAUNCH = LaunchPlan()
+
+# A catalog's source of launch plans: (problem kwargs, config kwargs, kernel
+# attributes, execution context, device CUs) -> LaunchPlan.
+LaunchSource = Callable[
+    [
+        Mapping[str, Any],
+        Mapping[str, Any],
+        Optional[Mapping[str, int]],
+        ExecutionContext,
+        int,
+    ],
+    LaunchPlan,
+]
+
+
+def _ceil_div(n: int, d: int) -> int:
+    return 0 if d == 0 else -(-n // d)
+
+
+def output_tiles(
+    problem_kwargs: Mapping[str, Any], config_kwargs: Mapping[str, Any]
+) -> int:
+    """Output macro tiles of a pair, batch included."""
+    mt_m = max(int(config_kwargs.get("mt_m", 1)), 1)
+    mt_n = max(int(config_kwargs.get("mt_n", 1)), 1)
+    return (
+        _ceil_div(int(problem_kwargs["m"]), mt_m)
+        * _ceil_div(int(problem_kwargs["n"]), mt_n)
+        * int(problem_kwargs.get("batch", 1))
+    )
+
+
+def launch_features(
+    problem_kwargs: Mapping[str, Any],
+    config_kwargs: Mapping[str, Any],
+    plan: LaunchPlan,
+    n_eff: int,
+) -> List[float]:
+    """`V3_LAUNCH` of a pair launched as `plan` on `n_eff` usable CUs."""
+    tiles = output_tiles(problem_kwargs, config_kwargs)
+    wgs = plan.grid_wgs if plan.grid_wgs > 0 else tiles
+    grid = float(wgs)
+    n_eff_f = float(n_eff)
+    waves = math.ceil(grid / n_eff_f)
+    return [
+        1.0 if plan.dynamic_queue else 0.0,
+        math.log2(max(grid, 1.0)),
+        math.log2(max(grid / n_eff_f, 0.001)),
+        math.log2(max(float(waves), 1.0)),
+        grid / (waves * n_eff_f) if waves > 0 else 1.0,
+        math.log2(max(float(tiles) / max(grid, 1.0), 0.001)),
+        1.0 if wgs > 0 and tiles % wgs != 0 else 0.0,
+        1.0 if plan.partial_reduction == "tree" else 0.0,
+        1.0 if plan.partial_reduction == "parallel" else 0.0,
+        1.0 if plan.partial_reduction == "atomic" else 0.0,
+    ]
+
+
+def v3_feature_vectors(
+    problem_kwargs: Mapping[str, Any],
+    config_kwargs: Mapping[str, Any],
+    attributes: Optional[Mapping[str, int]] = None,
+    *,
+    hardware: DeviceHardware,
+    constants: ArchConstants,
+    context: ExecutionContext = EXCLUSIVE,
+    spec: AttributeSpec = (),
+    plan: LaunchPlan = DEFAULT_LAUNCH,
+) -> Tuple[List[float], List[float], List[float]]:
+    """(query, item, interaction) vectors of one pair under the v3 catalog,
+    in `v3_*_feature_names` order, for a kernel launched as `plan`.
+    `config_kwargs` as `config_kwargs_from_row` gives them; only the
+    signature fields are read."""
+    n_cu = int(hardware.n_cu)
+    n_eff = context.effective_cus(n_cu)
+    usable = DeviceHardware(
+        n_cu=n_eff, lds_bytes=hardware.lds_bytes, l2_bytes=hardware.l2_bytes
+    )
+    full = compute_generic_features(
+        **problem_kwargs,
+        **config_kwargs,
+        hardware=usable,
+        constants=constants,
+        as_dict=True,
+    )
+    q = [full[n] for n in query_feature_names()]
+    q += [
+        float(n_eff) / float(n_cu),
+        1.0 if context.schedule == "default" else 0.0,
+        1.0 if context.schedule == "dynamic" else 0.0,
+        1.0 if context.schedule == "auto" else 0.0,
+    ]
+    attrs = attributes or {}
+    it = [full[n] for n in V3_ITEM]
+    for a in spec:
+        it += a.features(int(attrs.get(a.name, a.default)))
+    x = [full[n] for n in V3_INTERACTION]
+    x += [full[n] for n in V3_HW_PROXIES]
+    x += launch_features(problem_kwargs, config_kwargs, plan, n_eff)
+    return q, it, x
+
+
+@dataclass(frozen=True)
+class Catalog:
+    """A feature catalog the engine computes: "v2" (MLREC_v2), or "v3"
+    (MLREC_v3) with its item-attribute spec and the source of its kernels'
+    launch plans (None: `DEFAULT_LAUNCH`, the engine's plan without a
+    LaunchModel)."""
+
+    name: str = "v2"
+    spec: AttributeSpec = ()
+    launch: Optional[LaunchSource] = field(default=None, compare=False)
+
+    def __post_init__(self) -> None:
+        if self.name not in ("v2", "v3"):
+            raise ValueError(f"unknown feature catalog {self.name!r} (v2 or v3)")
+        if self.name == "v2" and self.spec:
+            raise ValueError("the v2 catalog has no attribute spec")
+
+    @property
+    def version(self) -> int:
+        return 3 if self.name == "v3" else 2
+
+    def names(self) -> Tuple[List[str], List[str], List[str]]:
+        if self.name == "v2":
+            return (
+                query_feature_names(),
+                item_feature_names(),
+                interaction_feature_names(),
+            )
+        return (
+            v3_query_feature_names(),
+            v3_item_feature_names(self.spec),
+            v3_interaction_feature_names(),
+        )
+
+    def hash(self) -> str:
+        return feature_names_hash() if self.name == "v2" else v3_catalog_hash()
+
+    def vectors(
+        self,
+        problem_kwargs: Mapping[str, Any],
+        config_kwargs: Mapping[str, Any],
+        attributes: Optional[Mapping[str, int]] = None,
+        *,
+        hardware: DeviceHardware,
+        constants: ArchConstants,
+        context: ExecutionContext = EXCLUSIVE,
+    ) -> Tuple[List[float], List[float], List[float]]:
+        """(query, item, interaction) vectors of one pair; v2 reads neither
+        attributes, the context nor a launch."""
+        if self.name == "v2":
+            return feature_vectors(
+                problem_kwargs, config_kwargs, hardware=hardware, constants=constants
+            )
+        plan = DEFAULT_LAUNCH
+        if self.launch is not None:
+            plan = self.launch(
+                problem_kwargs, config_kwargs, attributes, context, int(hardware.n_cu)
+            )
+        return v3_feature_vectors(
+            problem_kwargs,
+            config_kwargs,
+            attributes,
+            hardware=hardware,
+            constants=constants,
+            context=context,
+            spec=self.spec,
+            plan=plan,
+        )
+
+
+V2_CATALOG = Catalog()

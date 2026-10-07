@@ -112,6 +112,17 @@ inline bool same_results(const std::vector<tilewright::Result>& a,
   return true;
 }
 
+// The scored results among the first k of `r`.
+inline std::vector<tilewright::Result> scored_prefix(const std::vector<tilewright::Result>& r,
+                                                     std::size_t k) {
+  std::vector<tilewright::Result> out;
+  for (const tilewright::Result& x : r) {
+    if (!x.scored || out.size() == k) break;
+    out.push_back(x);
+  }
+  return out;
+}
+
 inline std::vector<std::size_t> scored_indices(const std::vector<tilewright::Result>& r) {
   std::vector<std::size_t> out;
   for (const tilewright::Result& x : r)

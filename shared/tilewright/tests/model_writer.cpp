@@ -3,9 +3,12 @@
 
 #include "model_writer.hpp"
 
+#include "features.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 
 namespace tilewright_test {
 namespace {
@@ -169,33 +172,35 @@ std::vector<float> roundtrip(tilewright::WeightType wt, const std::vector<float>
 
 }  // namespace
 
-CellTensors tensors_of(const CellSpec& cell) {
+CellTensors tensors_of(const CellSpec& cell) { return tensors_of(cell, kQ, kI, kX); }
+
+CellTensors tensors_of(const CellSpec& cell, std::size_t q, std::size_t i, std::size_t x) {
   Rng rng{cell.seed * 0x2545F4914F6CDD1Dull + 17};
   const std::size_t e = cell.embed_dim, h = cell.hidden_dim, ih = cell.inter_hidden;
   CellTensors t;
   t.temperature = 0.75f + 0.25f * rng.uniform();
-  t.q_mean      = fill(rng, kQ, 2.0f);
-  t.q_std       = fill_std(rng, kQ);
-  t.i_mean      = fill(rng, kI, 0.5f);
-  t.i_std       = fill_std(rng, kI);
-  t.x_mean      = fill(rng, kX, 2.0f);
-  t.x_std       = fill_std(rng, kX);
+  t.q_mean      = fill(rng, q, 2.0f);
+  t.q_std       = fill_std(rng, q);
+  t.i_mean      = fill(rng, i, 0.5f);
+  t.i_std       = fill_std(rng, i);
+  t.x_mean      = fill(rng, x, 2.0f);
+  t.x_std       = fill_std(rng, x);
   // Exercise the std < 1e-6 -> 1 whitening rule; an item feature with a std
   // below 1e-3 is constant instead (the constant-feature tests set one).
   t.q_std[3] = 1e-7f;
   t.i_std[1] = 1.0f;
   t.x_std[5] = 1e-8f;
-  t.q_w0     = fill(rng, h * kQ, 0.2f);
+  t.q_w0     = fill(rng, h * q, 0.2f);
   t.q_b0     = fill(rng, h, 0.1f);
   t.q_w2     = fill(rng, h * h, 0.3f);
   t.q_b2     = fill(rng, h, 0.1f);
   t.q_w4     = fill(rng, e * h, 0.3f);
   t.q_b4     = fill(rng, e, 0.1f);
-  t.i_w0     = fill(rng, h * kI, 0.5f);
+  t.i_w0     = fill(rng, h * i, 0.5f);
   t.i_b0     = fill(rng, h, 0.1f);
   t.i_w2     = fill(rng, e * h, 0.3f);
   t.i_b2     = fill(rng, e, 0.1f);
-  t.x_w0     = fill(rng, ih * kX, 0.2f);
+  t.x_w0     = fill(rng, ih * x, 0.2f);
   t.x_b0     = fill(rng, ih, 0.1f);
   t.x_w2     = fill(rng, ih, 0.3f);
   t.x_b2     = fill(rng, 1, 0.1f);
@@ -206,8 +211,9 @@ CellTensors tensors_of(const CellSpec& cell) {
 Image write_model(const ModelSpec& spec) {
   Image image;
   Writer w(image);
+  const bool v3 = spec.version == 3;
   w.mark("magic");
-  w.raw("MLREC_v2", 8);
+  w.raw(v3 ? "MLREC_v3" : "MLREC_v2", 8);
   w.mark("endian");
   w.u32(0x01020304u);
   w.mark("header_size");
@@ -218,10 +224,10 @@ Image write_model(const ModelSpec& spec) {
   w.u32(0);
   w.mark("weight_dtype");
   w.u8(static_cast<std::uint8_t>(spec.weight_type));
-  w.mark("reserved");
-  w.u8(0);
-  w.u8(0);
-  w.u8(0);
+  w.mark("serving_flags");
+  w.u8(spec.serving_flags);
+  w.mark("cascade_keys");
+  w.u16(spec.cascade_keys);
   w.mark("q_dim");
   w.u32(spec.q_dim);
   w.mark("i_dim");
@@ -234,16 +240,22 @@ Image write_model(const ModelSpec& spec) {
   w.u32(static_cast<std::uint32_t>(spec.splits.size()));
   w.mark("hash");
   w.lenstr(spec.feature_hash);
+  if (v3) {
+    w.mark("spec_hash");
+    w.u64(spec.spec_hash_override != 0 ? spec.spec_hash_override : spec_hash(spec.attributes));
+  }
   w.mark("arch");
   w.lenstr(spec.arch);
   w.mark("parallel_mi_cu");
   w.f64(spec.parallel_mi_cu);
-  w.mark("bw_c0");
-  w.f64(spec.bw[0]);
-  w.mark("bw_c1");
-  w.f64(spec.bw[1]);
-  w.mark("bw_c2");
-  w.f64(spec.bw[2]);
+  if (!v3) {
+    w.mark("bw_c0");
+    w.f64(spec.bw[0]);
+    w.mark("bw_c1");
+    w.f64(spec.bw[1]);
+    w.mark("bw_c2");
+    w.f64(spec.bw[2]);
+  }
   w.mark("mi_default");
   w.f64(spec.mi_default_cycles);
   w.mark("n_mi");
@@ -261,6 +273,48 @@ Image write_model(const ModelSpec& spec) {
     w.i32(r.dtype);
     w.mark(p + "cycles");
     w.f64(r.cycles);
+  }
+  if (v3) {
+    w.mark("v3_serving_flags");
+    w.u32(spec.v3_serving_flags);
+    w.mark("v3_cascade_keys");
+    w.u32(spec.v3_cascade_keys);
+    w.mark("min_cu_fraction");
+    w.f64(spec.min_cu_fraction);
+    w.mark("max_cu_fraction");
+    w.f64(spec.max_cu_fraction);
+    w.mark("schedules");
+    w.u8(spec.schedules);
+    w.mark("clip");
+    w.u8(spec.clip);
+    w.mark("n_attributes");
+    w.u16(static_cast<std::uint16_t>(spec.attributes.size()));
+    for (std::size_t a = 0; a < spec.attributes.size(); ++a) {
+      const std::string p = "attr" + std::to_string(a) + ".";
+      const AttrSpec& at  = spec.attributes[a];
+      w.mark(p + "name");
+      w.lenstr(at.name);
+      w.mark(p + "default");
+      w.u64(static_cast<std::uint64_t>(at.default_value));
+      w.mark(p + "transform");
+      w.u8(at.transform);
+      if (at.transform == 3) {
+        w.mark(p + "n_values");
+        w.u16(static_cast<std::uint16_t>(at.values.size()));
+        for (std::int64_t v : at.values) w.u64(static_cast<std::uint64_t>(v));
+      }
+    }
+    if (!spec.provenance.empty()) {
+      w.mark("n_provenance");
+      w.u16(static_cast<std::uint16_t>(spec.provenance.size()));
+      for (std::size_t i = 0; i < spec.provenance.size(); ++i) {
+        w.mark("provenance" + std::to_string(i) + ".key");
+        w.lenstr(spec.provenance[i].first);
+        w.mark("provenance" + std::to_string(i) + ".value");
+        w.lenstr(spec.provenance[i].second);
+      }
+    }
+    for (unsigned char b : spec.header_extra) w.u8(b);
   }
   image.header_size = w.size();
 
@@ -283,7 +337,7 @@ Image write_model(const ModelSpec& spec) {
   for (std::size_t c = 0; c < spec.cells.size(); ++c) {
     const std::string p  = "cell" + std::to_string(c) + ".";
     const CellSpec& cell = spec.cells[c];
-    const CellTensors t  = tensors_of(cell);
+    const CellTensors t  = tensors_of(cell, spec.q_dim, spec.i_dim, spec.x_dim);
     w.mark(p + "label");
     w.lenstr(cell.label);
     w.mark(p + "embed_dim");
@@ -304,11 +358,31 @@ Image write_model(const ModelSpec& spec) {
       w.mark(p + v.first);
       w.f32s(*v.second);
     }
+    if (v3 && spec.clip != 0) {
+      const float inf  = std::numeric_limits<float>::infinity();
+      const auto bound = [&](const std::vector<float>& b, std::size_t n, float none) {
+        for (std::size_t j = 0; j < n; ++j) w.f32(b.empty() ? none : b[j]);
+      };
+      w.mark(p + "q_lo");
+      bound(cell.q_lo, spec.q_dim, -inf);
+      bound(cell.q_hi, spec.q_dim, inf);
+      w.mark(p + "i_lo");
+      bound(cell.i_lo, spec.i_dim, -inf);
+      bound(cell.i_hi, spec.i_dim, inf);
+      w.mark(p + "x_lo");
+      bound(cell.x_lo, spec.x_dim, -inf);
+      bound(cell.x_hi, spec.x_dim, inf);
+    }
     w.mark(p + "n_sk");
     w.u32(static_cast<std::uint32_t>(cell.signatures.size()));
     w.mark(p + "signatures");
     for (const Signature& s : cell.signatures)
       for (int x : s) w.i32(x);
+    if (v3) {
+      w.mark(p + "n_vk");
+      w.u32(static_cast<std::uint32_t>(cell.view_key_hashes.size()));
+      for (std::uint64_t h : cell.view_key_hashes) w.u64(h);
+    }
     const std::pair<const char*, const std::vector<float>*> tensors[] = {{"q_w0", &t.q_w0},
                                                                          {"q_b0", &t.q_b0},
                                                                          {"q_w2", &t.q_w2},
@@ -387,6 +461,42 @@ ModelSpec dequantized(const ModelSpec& spec) {
     };
   }
   return out;
+}
+
+std::vector<tilewright::detail::AttributeFeature> attribute_features(
+    const std::vector<AttrSpec>& attributes) {
+  std::vector<tilewright::detail::AttributeFeature> spec;
+  for (const AttrSpec& a : attributes) {
+    tilewright::detail::AttributeFeature f;
+    f.name          = a.name;
+    f.default_value = a.default_value;
+    f.transform     = static_cast<tilewright::detail::AttributeTransform>(a.transform);
+    f.values        = a.values;
+    f.read          = spec.size();
+    spec.push_back(f);
+  }
+  return spec;
+}
+
+std::uint64_t spec_hash(const std::vector<AttrSpec>& attributes) {
+  return tilewright::detail::feature_spec_hash(attribute_features(attributes));
+}
+
+std::uint32_t attribute_dims(const std::vector<AttrSpec>& attributes) {
+  std::uint32_t n = 0;
+  for (const AttrSpec& a : attributes)
+    n += a.transform == 3 ? static_cast<std::uint32_t>(a.values.size()) : 1;
+  return n;
+}
+
+ModelSpec as_v3(ModelSpec spec, std::vector<AttrSpec> attributes) {
+  spec.version      = 3;
+  spec.feature_hash = kV3Hash;
+  spec.q_dim        = kV3Q;
+  spec.i_dim        = kV3I + attribute_dims(attributes);
+  spec.x_dim        = kV3X;
+  spec.attributes   = std::move(attributes);
+  return spec;
 }
 
 std::string base_label(std::size_t m, std::size_t n, std::size_t k, std::size_t batch) {

@@ -3,8 +3,9 @@
 
 """stage06: deploy a trained model into a rocm-libraries checkout.
 
-Packs `<train-dir>/models.pt` into one MLREC_v2 file that carries the model
-constants of the config's arch (`lib.hardware.arch_constants`) and stages it
+Packs `<train-dir>/models.pt` into one model file (MLREC_v2, or MLREC_v3 for
+a bundle trained with the v3 catalog) that carries the model constants of the
+config's arch (`lib.hardware.arch_constants`) and stages it
 under `<out-dir>/staged_for_deploy/`. With --apply-patch the file is installed
 into `shared/tilewright/weights/hipblaslt/<t>/<t>/` for every deploy target
 `t` (`deploy.targets`, default: the config's arch) and the library stem is
@@ -23,11 +24,28 @@ recorded as built but unverified (`colocation: "unverified"`).
 The model is loaded back with the tilewright Python module before anything is
 staged; with --apply-patch the module is required.
 
+Deploy gate (--gate-csv-dir): the model file, exactly the bytes that would be
+installed, is evaluated (lib/evaluate.py) on enriched GEMMs its bundle never
+trained on (stage04b's gate/ of the round). With --gate-target T it is
+installed only when its selection efficiency there reaches T; with
+--gate-fallback not-worse a model below T is still installed when no
+--gate-baseline-train-dir is given (nothing deployed yet), or when it is at
+least as good as that baseline bundle on the same gate GEMMs. With
+--rebench-misses every miss of the model (and of the baseline) is re-benched
+on the GPUs and charged by its measured ratio to the winner
+(lib/miss_rebench.py); the decision uses those numbers and gate.json keeps
+the configured rule's as `pre_rebench`. A model the
+gate keeps out is still staged; `deploy_record.json` says `deployed: false`
+and why. Origami's numbers on the gate GEMMs are recorded and printed only
+with --origami-reference.
+
 Outputs (run directory only):
     staged_for_deploy/   the files to install, per-target index fragments and
                          INSTALL.md
     manifest.json        cells, splits and file hash of the model
     summary.txt          the split tree
+    gate.json            with --gate-csv-dir: the model's own numbers on the
+                         gate GEMMs, overall and per cell, and the baseline's
     deploy_record.json   what was written where; stage07 checks the runtime
                          against it
     build.log            build output, one section per step
@@ -39,6 +57,7 @@ import contextlib
 import fcntl
 import hashlib
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -54,6 +73,8 @@ THIS_DIR = Path(__file__).resolve().parent
 PIPELINE_ROOT = THIS_DIR.parent
 if str(PIPELINE_ROOT) not in sys.path:
     sys.path.insert(0, str(PIPELINE_ROOT))
+if str(THIS_DIR) not in sys.path:
+    sys.path.insert(0, str(THIS_DIR))
 
 import yaml  # noqa: E402
 
@@ -61,6 +82,7 @@ from lib import evaluate as ev  # noqa: E402
 from lib import features as fs  # noqa: E402
 from lib import grid  # noqa: E402
 from lib import hardware  # noqa: E402
+from lib import miss_rebench as mr  # noqa: E402
 from lib import mlrec  # noqa: E402
 from lib import subcells as sc  # noqa: E402
 from lib import ui  # noqa: E402
@@ -368,6 +390,9 @@ def check_catalog(
     """Refuse a bundle trained on a feature catalog the engine does not
     compute."""
     names = [list(bundle.get(k) or []) for k in ("q_names", "i_names", "x_names")]
+    if str(bundle.get("catalog") or "v2") != "v2":
+        check_v3_catalog(bundle, cells_json, names, tw)
+        return
     catalog = [
         fs.query_feature_names(),
         fs.item_feature_names(),
@@ -398,6 +423,41 @@ def check_catalog(
     if engine != want:
         raise DeployError(
             f"tilewright module feature hash {engine} differs from the catalog's {want}"
+        )
+
+
+def check_v3_catalog(
+    bundle: Mapping[str, Any],
+    cells_json: Mapping[str, Any],
+    names: List[List[str]],
+    tw: Optional[Any],
+) -> None:
+    if bundle.get("catalog") != "v3":
+        raise DeployError(f"unknown bundle catalog {bundle.get('catalog')!r}")
+    try:
+        catalog = fs.Catalog(
+            "v3", fs.parse_attribute_spec(bundle.get("attribute_spec") or [])
+        )
+    except ValueError as e:
+        raise DeployError(f"bundle attribute spec: {e}") from None
+    if names != [list(n) for n in catalog.names()]:
+        raise DeployError(
+            "bundle feature names differ from lib/features.py's v3 catalog with "
+            "the bundle's attribute spec"
+        )
+    want = catalog.hash()
+    value = cells_json.get("feature_names_hash")
+    if value is not None and str(value) != want:
+        raise DeployError(f"cells.json feature hash {value} differs from {want}")
+    if tw is None:
+        return
+    hashes = getattr(
+        tw, "feature_catalog_hashes", lambda: [tw.feature_catalog_hash()]
+    )()
+    if want not in list(hashes):
+        raise DeployError(
+            f"the tilewright module computes catalogs {list(hashes)}, not {want}; "
+            f"rebuild it from this checkout"
         )
 
 
@@ -485,7 +545,13 @@ def plan_targets(
 
 
 def install_md(
-    *, stem_by_dir: List[Target], arch: str, dtype: str, n_cells: int, n_splits: int
+    *,
+    stem_by_dir: List[Target],
+    arch: str,
+    dtype: str,
+    n_cells: int,
+    n_splits: int,
+    file_format: str = "MLREC_v2",
 ) -> str:
     files = "\n".join(
         f"    {WEIGHTS_REL / t.dir / t.dir / t.weights_name}\n"
@@ -495,7 +561,7 @@ def install_md(
     stems = "\n".join(f"    {t.dir}: {t.stem}" for t in stem_by_dir)
     return f"""# tilewright model bundle
 
-One MLREC_v2 model for {arch} ({n_cells} cells, {n_splits} splits, {dtype}
+One {file_format} model for {arch} ({n_cells} cells, {n_splits} splits, {dtype}
 weights), registered for these hipBLASLt libraries:
 
 {stems}
@@ -626,6 +692,301 @@ def verify_colocated(
     return problems, checked
 
 
+# ── deploy gate ─────────────────────────────────────────────────────────────
+
+GATE_FALLBACKS = ("none", "not-worse")
+
+
+@dataclass
+class Gate:
+    """Where and how the model is measured before it is installed (see the
+    module docstring)."""
+
+    csv_dirs: List[Path]
+    target: Optional[float] = None
+    fallback: str = "none"
+    baseline_train_dir: Optional[Path] = None
+    plan: Optional[Path] = None
+    hardware_device: int = 0
+    library_dir: Optional[Path] = None
+    pick_measurement: str = "warmup"
+    bootstrap: int = 0
+    rebench: Optional[mr.MissBench] = None
+
+
+def _num(x: Any) -> Optional[float]:
+    if isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x):
+        return float(x)
+    return None
+
+
+def _cell_rows(results: List[ev.GemmResult]) -> Dict[str, Dict[str, Any]]:
+    """Per leaf of the model's split tree: the keys stage04b writes per cell,
+    for the model on the gate GEMMs."""
+    by_leaf: Dict[str, List[ev.GemmResult]] = {}
+    for r in results:
+        by_leaf.setdefault(r.leaf, []).append(r)
+    out: Dict[str, Dict[str, Any]] = {}
+    for leaf in sorted(by_leaf):
+        s = ev.summarize(by_leaf[leaf])
+        has_ori = s["n_origami"] > 0
+        out[leaf] = {
+            "sel_eff_new": _num(s["sel_eff"]),
+            "n_eval": s["n_evaluated"],
+            "n_miss": s["n_miss"],
+            "winner_us_geomean": _num(s["winner_us_geomean"]),
+            "pick_us_geomean": _num(s["pick_us_geomean"]),
+            "paired_sel_eff_new": (
+                _num(s["paired"]["model_sel_eff"]) if has_ori else None
+            ),
+            "origami_sel_eff_new": _num(s["origami_sel_eff"]) if has_ori else None,
+            "origami_n_eval": s["n_origami"],
+            "origami_pick_us_geomean": (
+                _num(s["origami_pick_us_geomean"]) if has_ori else None
+            ),
+        }
+    return out
+
+
+def _gate_gemms(gate: Gate, quiet: bool) -> List[Dict[str, Any]]:
+    import stage05_train as _train
+
+    dirs = [str(d) for d in gate.csv_dirs if any(Path(d).glob("chunk_*.csv"))]
+    if not dirs:
+        return []
+    cells, _ = _train.load_enriched_chunks(dirs, quiet)
+    gemms = [g for gs in cells.values() for g in gs]
+    if gate.plan is not None:
+        try:
+            ev.attach_plan(gemms, json.loads(Path(gate.plan).read_text()))
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            raise DeployError(f"cannot read --gate-plan {gate.plan}: {e!r}") from None
+    return gemms
+
+
+def measure_gate(
+    data: bytes,
+    labels: List[str],
+    *,
+    cfg: Mapping[str, Any],
+    arch: str,
+    dtype: str,
+    stem: str,
+    gate: Gate,
+    tw: Any,
+    quiet: bool,
+) -> Dict[str, Any]:
+    """The model file `data` on the gate GEMMs, and the baseline bundle on
+    the same GEMMs; DeployError when the measurement cannot be made."""
+    if tw is None:
+        raise DeployError(
+            "the deploy gate evaluates the model with the engine; install the "
+            "tilewright module (pip install shared/tilewright/python)"
+        )
+    try:
+        hw = hardware.device_hardware(cfg, gate.hardware_device)
+    except (ValueError, RuntimeError, OSError) as e:
+        raise DeployError(f"deploy gate: no device values ({e})") from None
+    gemms = _gate_gemms(gate, quiet)
+    library = (
+        ev.library_pool(gate.library_dir, stem, cfg, gate.hardware_device)
+        if gate.library_dir is not None
+        else None
+    )
+    pools = ev.pools_for(gemms, library)
+
+    def run(model: bytes, model_labels: List[str], what: str) -> mr.Measured:
+        def evaluate(rule: str) -> ev.Evaluation:
+            out = ev.evaluate_model(
+                model,
+                gemms,
+                hardware=hw,
+                pools=pools,
+                labels=model_labels,
+                tw=tw,
+                pick_measurement=rule,
+            )
+            return ev.require_consistent_routing(out, what)
+
+        try:
+            return mr.measured_evaluation(
+                evaluate, gemms, gate.rebench, gate.pick_measurement, what
+            )
+        except (ev.RoutingMismatchError, RuntimeError, ValueError) as e:
+            raise DeployError(f"deploy gate: {e}") from None
+
+    measured = run(data, labels, "gate") if gemms else None
+    results = measured.evaluation.results if measured is not None else []
+    overall = ev.summarize(results, bootstrap=gate.bootstrap)
+    m: Dict[str, Any] = {
+        "csv_dirs": [str(d) for d in gate.csv_dirs],
+        "weight_dtype": dtype,
+        "pick_measurement": (
+            ev.REBENCH_PICK_MEASUREMENT if gate.rebench else gate.pick_measurement
+        ),
+        "n_gemms": len(gemms),
+        "n_evaluated": overall["n_evaluated"],
+        "n_miss": overall["n_miss"],
+        "sel_eff": _num(overall["sel_eff"]),
+        "n_cells": len({r.leaf for r in results}),
+        "overall": overall,
+        "per_cell": _cell_rows(results),
+        "baseline": None,
+    }
+    if gate.rebench is not None:
+        m.update(_rebench_numbers(measured, gate.pick_measurement))
+    if gate.baseline_train_dir is not None:
+        base: Dict[str, Any] = {"train_dir": str(gate.baseline_train_dir)}
+        try:
+            bundle, _ = load_bundle(Path(gate.baseline_train_dir))
+            base_data = mlrec.write_model(
+                bundle, None, arch, hardware.arch_constants(arch), dtype
+            )
+        except (DeployError, mlrec.FormatError, ValueError) as e:
+            base["error"] = str(e)
+        else:
+            if gemms:
+                theirs = run(base_data, sorted(bundle["models"]), "baseline")
+                other = theirs.evaluation
+                both = [
+                    (a, b)
+                    for a, b in zip(results, other.results)
+                    if a.sel_eff is not None and b.sel_eff is not None
+                ]
+                if gate.rebench is not None:
+                    base.update(_rebench_numbers(theirs, gate.pick_measurement))
+                base.update(
+                    n=len(both),
+                    sel_eff=_num(ev.geomean(b.sel_eff for _, b in both)),
+                    bundle_sel_eff=_num(ev.geomean(a.sel_eff for a, _ in both)),
+                    sha256=sha256_bytes(base_data),
+                )
+        m["baseline"] = base
+    return m
+
+
+def _rebench_numbers(measured: Optional[mr.Measured], rule: str) -> Dict[str, Any]:
+    """The configured rule's numbers and the re-bench counts of a gate
+    evaluation whose misses were re-benched."""
+    if measured is None or measured.record is None:
+        return {"pre_rebench": None, "rebench": None}
+    rec = measured.record
+    return {
+        "pre_rebench": mr.pre_rebench(ev.summarize(measured.pre.results), rule),
+        "n_rebenched": rec["n_rebenched"],
+        "n_rebench_failed": rec["n_rebench_failed"],
+        "n_context_skipped": rec["n_context_skipped"],
+        "rebench": rec,
+    }
+
+
+def _json_ready(obj: Any) -> Any:
+    if isinstance(obj, float) and not math.isfinite(obj):
+        return None
+    if isinstance(obj, dict):
+        return {str(k): _json_ready(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_ready(v) for v in obj]
+    return obj
+
+
+def _gate_record(m: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The gate's headline numbers for the deploy record."""
+    if m is None:
+        return None
+    keys = (
+        "sel_eff",
+        "n_gemms",
+        "n_evaluated",
+        "n_miss",
+        "n_cells",
+        "pick_measurement",
+        "pre_rebench",
+        "n_rebenched",
+        "n_rebench_failed",
+        "n_context_skipped",
+        "target",
+        "fallback",
+        "passed",
+        "reason",
+        "baseline",
+        "csv_dirs",
+    )
+    out = {k: m.get(k) for k in keys}
+    if isinstance(out.get("baseline"), dict):
+        out["baseline"] = {k: v for k, v in out["baseline"].items() if k != "rebench"}
+    out["file"] = "gate.json"
+    return _json_ready(out)
+
+
+def gate_decision(m: Mapping[str, Any], gate: Gate) -> Tuple[bool, str]:
+    """(install the model, why) under the gate's target and fallback."""
+    se = m.get("sel_eff") if m.get("n_evaluated") else None
+    if gate.target is None:
+        return True, "no target"
+    if se is not None and se >= gate.target:
+        return True, f"{se * 100:.2f}% on the gate GEMMs reaches the target"
+    below = (
+        f"{se * 100:.2f}% on the gate GEMMs is below the target"
+        if se is not None
+        else "no gate GEMM measured"
+    )
+    if gate.fallback != "not-worse":
+        return False, below
+    if gate.baseline_train_dir is None:
+        return True, f"{below}; no bundle was deployed before"
+    base = m.get("baseline") or {}
+    mine, theirs = _num(base.get("bundle_sel_eff")), _num(base.get("sel_eff"))
+    if mine is not None and theirs is not None and mine >= theirs:
+        return True, (
+            f"{below}, but not worse than the deployed bundle on the same "
+            f"{base.get('n')} GEMMs ({mine * 100:.2f}% vs {theirs * 100:.2f}%)"
+        )
+    if mine is not None and theirs is not None:
+        return False, (
+            f"{below}, and worse than the deployed bundle on the same "
+            f"{base.get('n')} GEMMs ({mine * 100:.2f}% vs {theirs * 100:.2f}%)"
+        )
+    return False, f"{below}, and not comparable with the deployed bundle"
+
+
+def print_gate(m: Mapping[str, Any], origami_reference: bool) -> None:
+    se = m.get("sel_eff")
+    ui.info(
+        "gate",
+        f"model on {m['n_evaluated']} gate GEMMs ({m['n_cells']} cells, "
+        f"{m['n_miss']} misses): " + (f"{se * 100:.2f}%" if se is not None else "n/a"),
+    )
+    pre = m.get("pre_rebench")
+    if pre:
+        pse = pre.get("sel_eff")
+        ui.info(
+            "gate",
+            f"misses re-benched: {m['n_rebenched']} measured, "
+            f"{m['n_rebench_failed']} failed, {m['n_context_skipped']} context "
+            f"GEMMs skipped; under {pre['pick_measurement']} "
+            + (f"{pse * 100:.2f}%" if pse is not None else "n/a"),
+        )
+    base = m.get("baseline") or {}
+    if base.get("n"):
+        ui.info(
+            "gate",
+            f"deployed bundle on the same {base['n']} GEMMs: "
+            f"{base['sel_eff'] * 100:.2f}% (this model "
+            f"{base['bundle_sel_eff'] * 100:.2f}%)",
+        )
+    elif base.get("error"):
+        ui.warn("gate", f"baseline {base['train_dir']} not measured: {base['error']}")
+    p = (m.get("overall") or {}).get("paired") or {}
+    if origami_reference and p.get("n"):
+        ui.info(
+            "gate",
+            f"[reference] Origami on the same {p['n']} GEMMs: "
+            f"{p['origami_sel_eff'] * 100:.2f}% (this model "
+            f"{p['model_sel_eff'] * 100:.2f}%)",
+        )
+
+
 # ── stage entry point ───────────────────────────────────────────────────────
 
 
@@ -642,6 +1003,8 @@ def deploy(
     build_dir: Optional[Path] = None,
     build_jobs: Optional[int] = None,
     build_target: str = MODELS_TARGET,
+    gate: Optional[Gate] = None,
+    origami_reference: bool = False,
     quiet: bool = False,
 ) -> int:
     try:
@@ -657,6 +1020,8 @@ def deploy(
             build_dir=build_dir,
             build_jobs=build_jobs,
             build_target=build_target,
+            gate=gate,
+            origami_reference=origami_reference,
             quiet=quiet,
         )
     except (DeployError, ConfigError, ValueError, mlrec.FormatError) as e:
@@ -677,6 +1042,8 @@ def _deploy(
     build_dir: Optional[Path],
     build_jobs: Optional[int],
     build_target: str,
+    gate: Optional[Gate],
+    origami_reference: bool,
     quiet: bool,
 ) -> int:
     train_dir, out_dir = train_dir.resolve(), out_dir.resolve()
@@ -717,7 +1084,7 @@ def _deploy(
         ui.info("cfg", f"weight dtype : {dtype}")
         ui.info("cfg", f"checkout     : {repo or '(none: staging only)'}")
 
-    tw = engine_module(required=apply_patch)
+    tw = engine_module(required=apply_patch or gate is not None)
     bundle, cells_json = load_bundle(train_dir)
     check_catalog(bundle, cells_json, tw)
     labels = sorted(bundle["models"])
@@ -733,7 +1100,7 @@ def _deploy(
     if not quiet:
         ui.ok(
             "pack",
-            f"MLREC_v2 {dtype}: {len(data):,} bytes, {n_cells} cells, "
+            f"{parsed['format']} {dtype}: {len(data):,} bytes, {n_cells} cells, "
             f"{n_splits} splits, sha256 {sha[:16]}"
             + (
                 ""
@@ -743,12 +1110,45 @@ def _deploy(
         )
     holes, bare = coverage(labels)
     if holes:
+        served = (
+            "the model scores them with its nearest trained base cell"
+            if parsed["version"] == 3
+            else "problems routed there use the analytical ranking"
+        )
         ui.warn(
             "coverage",
             f"{len(holes)} split-tree leaves have no trained cell in their lineage "
             f"({bare} of {len(grid.all_cell_labels())} base cells have no model); "
-            f"problems routed there use the analytical ranking, e.g. {holes[:3]}",
+            f"{served}, e.g. {holes[:3]}",
         )
+
+    measured: Optional[Dict[str, Any]] = None
+    passed, why = True, "no gate"
+    if gate is not None:
+        measured = measure_gate(
+            data,
+            labels,
+            cfg=cfg,
+            arch=arch,
+            dtype=dtype,
+            stem=stem,
+            gate=gate,
+            tw=tw,
+            quiet=quiet,
+        )
+        passed, why = gate_decision(measured, gate)
+        measured.update(
+            target=gate.target, fallback=gate.fallback, passed=passed, reason=why
+        )
+        write_atomic(
+            out_dir / "gate.json",
+            (json.dumps(_json_ready(measured), indent=2) + "\n").encode(),
+        )
+        if not quiet:
+            print_gate(measured, origami_reference)
+            (ui.ok if passed else ui.warn)(
+                "gate", ("deploying: " if passed else "not deploying: ") + why
+            )
 
     targets = plan_targets(deploy_targets(cfg), repo)
     staging = out_dir / "staged_for_deploy"
@@ -763,6 +1163,7 @@ def _deploy(
             dtype=dtype,
             n_cells=n_cells,
             n_splits=n_splits,
+            file_format=parsed["format"],
         ),
     )
     tree = {r.cell: r for r in parsed["splits"]}
@@ -770,6 +1171,7 @@ def _deploy(
         "config_id": cfg.get("config_id"),
         "arch": arch,
         "weight_dtype": dtype,
+        "format": parsed["format"],
         "feature_catalog_hash": parsed["feature_catalog_hash"],
         "feature_dims": dict(zip(("q", "i", "x"), parsed["dims"])),
         "file": {
@@ -790,6 +1192,7 @@ def _deploy(
                 "hidden_dim": c["hidden_dim"],
                 "inter_hidden": c["inter_hidden"],
                 "n_signatures": len(c["smart_k_signatures"]),
+                "n_view_keys": len(c.get("view_key_hashes") or []),
             }
             for c in parsed["cells"]
         ],
@@ -804,6 +1207,12 @@ def _deploy(
             for r in parsed["splits"]
         ],
     }
+    if parsed["version"] == 3:
+        manifest["feature_spec_hash"] = f"{parsed['feature_spec_hash']:016x}"
+        manifest["attribute_spec"] = [a.to_dict() for a in parsed["attribute_spec"]]
+        manifest["contexts"] = parsed["contexts"]
+        manifest["serving"] = parsed["serving"]
+        manifest["clip"] = parsed["clip"]
     write_atomic(
         out_dir / "manifest.json", (json.dumps(manifest, indent=2) + "\n").encode()
     )
@@ -833,6 +1242,8 @@ def _deploy(
         "staged_model": staged[targets[0].dir],
         "repo": str(repo) if repo else None,
         "engine_checked": engine_ok,
+        "deployed": passed,
+        "gate": _gate_record(measured),
         "applied": False,
         "built": False,
         "colocation": None,
@@ -857,6 +1268,12 @@ def _deploy(
             (json.dumps(record, indent=2) + "\n").encode(),
         )
 
+    if not passed:
+        record["not_deployed"] = why
+        _write_record()
+        if not quiet:
+            ui.ok("stage", f"staged in {staging}; the gate kept it out: {why}")
+        return 0
     if not apply_patch:
         _write_record()
         if not quiet:
@@ -904,6 +1321,7 @@ def _deploy(
         ui.err("deploy", f"restoring the previous files ({e})")
         txn.rollback()
         record["error"] = str(e)
+        record["deployed"] = False
         _write_record()
         raise
     record["applied"] = True
@@ -935,6 +1353,18 @@ def _deploy(
             ),
         )
     return 0
+
+
+def _miss_bench(args: argparse.Namespace) -> Optional[mr.MissBench]:
+    """The gate's MissBench of --rebench-misses (None without it)."""
+    if not args.rebench_misses or not args.gate_csv_dir:
+        return None
+    cfg = yaml.safe_load(args.config_yaml.read_text()) or {}
+    try:
+        n_cu: Optional[int] = hardware.device_hardware(cfg, args.hardware_device).n_cu
+    except (ValueError, RuntimeError, OSError):
+        n_cu = None
+    return mr.from_args(args, cfg, args.out_dir / "rebench", n_cu)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -974,8 +1404,87 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="hipBLASLt build directory (default: <checkout>/projects/hipblaslt/build/release)",
     )
     ap.add_argument("--build-jobs", type=int, default=None)
+    g = ap.add_argument_group("deploy gate")
+    g.add_argument(
+        "--gate-csv-dir",
+        type=Path,
+        action="append",
+        default=None,
+        help="enriched GEMMs the bundle never trained on (repeatable); the "
+        "model is measured on them before it is installed",
+    )
+    g.add_argument(
+        "--gate-target",
+        type=float,
+        default=None,
+        help="install only when the model reaches this selection efficiency "
+        "on the gate GEMMs",
+    )
+    g.add_argument(
+        "--gate-fallback",
+        choices=GATE_FALLBACKS,
+        default="none",
+        help="not-worse: below the target, install when nothing was deployed "
+        "before (no --gate-baseline-train-dir) or when the model is not worse "
+        "than that bundle on the same gate GEMMs",
+    )
+    g.add_argument(
+        "--gate-baseline-train-dir",
+        type=Path,
+        default=None,
+        help="stage05 dir of the bundle deployed before; measured on the "
+        "same gate GEMMs",
+    )
+    g.add_argument(
+        "--gate-plan",
+        type=Path,
+        default=None,
+        help="stage01b plan.json of the gate GEMMs",
+    )
+    g.add_argument("--hardware-device", type=int, default=0)
+    g.add_argument(
+        "--library-dir",
+        type=Path,
+        default=None,
+        help="Tensile library dir holding <library-stem>.dat[.zlib]: the gate's "
+        "kernel pool (default: the kernels measured in the gate data)",
+    )
+    g.add_argument(
+        "--pick-measurement",
+        choices=ev.PICK_MEASUREMENTS,
+        default="warmup",
+        help="warmup: a skip row counts with its warm-up latency and a kernel off the plan's list is a miss; timed: both are misses; any: a skip row counts "
+        "and an off-list kernel is passed over (lib/evaluate.py)",
+    )
+    g.add_argument("--bootstrap", type=int, default=1000)
+    mr.add_arguments(ap)
+    ap.add_argument(
+        "--origami-reference",
+        action="store_true",
+        help="also print Origami's numbers on the gate GEMMs (an external "
+        "reference; they never decide the deploy)",
+    )
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args(argv)
+    gate = None
+    try:
+        rebench = _miss_bench(args)
+    except (OSError, ValueError) as e:
+        ui.err("gate", str(e))
+        return 1
+    if args.gate_csv_dir:
+        gate = Gate(
+            csv_dirs=list(args.gate_csv_dir),
+            target=args.gate_target,
+            fallback=args.gate_fallback,
+            baseline_train_dir=args.gate_baseline_train_dir,
+            plan=args.gate_plan,
+            hardware_device=args.hardware_device,
+            library_dir=args.library_dir,
+            pick_measurement=args.pick_measurement,
+            bootstrap=args.bootstrap,
+            rebench=rebench,
+        )
     return deploy(
         train_dir=args.train_dir,
         config_yaml=args.config_yaml,
@@ -988,6 +1497,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         build_dir=args.build_dir,
         build_jobs=args.build_jobs,
         build_target=args.build_target,
+        gate=gate,
+        origami_reference=args.origami_reference,
         quiet=args.quiet,
     )
 

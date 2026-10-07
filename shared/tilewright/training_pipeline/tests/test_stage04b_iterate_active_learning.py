@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import json
+import math
 import random
 import sys
 
@@ -50,9 +51,8 @@ def run(tmp_path_factory):
     return tmp
 
 
-def stage04b(tmp, out, *extra):
-    run_stage(
-        "stage04b_iterate_active_learning.py",
+def stage04b_args(tmp, out, *extra):
+    return [
         "--models-dir",
         tmp / "round_0" / "stage05",
         "--enriched-csv-dir",
@@ -67,8 +67,14 @@ def stage04b(tmp, out, *extra):
         "bf16",
         "--round-idx",
         1,
-        "--quiet",
         *extra,
+    ]
+
+
+def stage04b(tmp, out, *extra):
+    run_stage(
+        "stage04b_iterate_active_learning.py",
+        *stage04b_args(tmp, out, "--quiet", *extra),
     )
     return json.loads((out / "decisions.json").read_text())
 
@@ -100,6 +106,149 @@ def test_held_out_data_and_outputs(run):
     retrain = (out / "retrain_cells.txt").read_text().split(",")
     assert set(filter(None, retrain)) == set(d["cells_retrain"])
     assert json.loads((out / "splits.json").read_text())["splits"] == {}
+
+
+def _wgeo(pairs):
+    pairs = [(v, n) for v, n in pairs if v is not None and n > 0]
+    return math.exp(sum(math.log(v) * n for v, n in pairs) / sum(n for _, n in pairs))
+
+
+def test_paired_numbers_and_misses(run):
+    d = stage04b(
+        run,
+        run / "round_1" / "paired",
+        "--min-cell-gemms",
+        20,
+        "--pick-measurement",
+        "timed",
+    )
+    agg, rows = d["aggregate"], d["per_cell"]
+    for r in rows:
+        if r.get("origami_n_eval"):
+            assert r["paired_sel_eff_new"] is not None
+    assert agg["n_gemms_paired"] == agg["all_held_out"]["paired"]["n"] > 0
+    assert agg["global_paired_sel_eff_new"] == pytest.approx(
+        _wgeo((r.get("paired_sel_eff_new"), r.get("origami_n_eval") or 0) for r in rows)
+    )
+    assert agg["pick_measurement"] == "timed"
+    assert agg["n_miss_total"] == agg["all_held_out"]["n_miss"] > 0
+    assert agg["n_miss_total"] == sum(r.get("n_miss") or 0 for r in rows)
+    for rule, out in (("warmup", "default"), ("any", "warm")):
+        args = () if rule == "warmup" else ("--pick-measurement", rule)
+        lenient = stage04b(run, run / "round_1" / out, "--min-cell-gemms", 20, *args)
+        assert lenient["aggregate"]["pick_measurement"] == rule
+        assert lenient["aggregate"]["n_miss_total"] == 0
+
+
+def test_thresholds_are_numbers(run, tmp_path):
+    for flag in ("--sel-eff-threshold", "--split-floor"):
+        proc = run_stage(
+            "stage04b_iterate_active_learning.py",
+            *stage04b_args(run, tmp_path / "o", "--quiet", flag, "origami"),
+            expect_rc=2,
+        )
+        assert flag in proc.stderr
+    assert not (tmp_path / "o" / "decisions.json").exists()
+
+
+def test_origami_numbers_print_only_as_a_reference(run):
+    base = run / "round_1"
+    plain = run_stage(
+        "stage04b_iterate_active_learning.py",
+        *stage04b_args(run, base / "plain", "--min-cell-gemms", 20),
+    )
+    assert "origami" not in plain.stdout.lower()
+    ref = run_stage(
+        "stage04b_iterate_active_learning.py",
+        *stage04b_args(
+            run, base / "ref", "--min-cell-gemms", 20, "--origami-reference"
+        ),
+    )
+    assert "[reference] Origami, same GEMMs" in ref.stdout
+    a, b = (
+        json.loads((base / d / "decisions.json").read_text())["per_cell"]
+        for d in ("plain", "ref")
+    )
+    assert [(r["cell"], r["decision"]) for r in a] == [
+        (r["cell"], r["decision"]) for r in b
+    ]
+
+
+def test_plan_lists_the_benched_kernels(run, tmp_path):
+    shapes = shapes_for(11, 45, CELLS3)[:7]
+    plan = tmp_path / "plan.json"
+    plan.write_text(
+        json.dumps(
+            {
+                "shapes": [
+                    {"m": m, "n": n, "k": k, "batch": b, "kernels": [100, 101]}
+                    for m, n, k, b in shapes
+                ]
+            }
+        )
+    )
+    d = stage04b(run, tmp_path / "planned", "--min-cell-gemms", 20, "--plan", plan)
+    assert d["aggregate"]["n_gemms_listed"] == 7
+    plan.write_text("{not json")
+    run_stage(
+        "stage04b_iterate_active_learning.py",
+        *stage04b_args(run, tmp_path / "bad", "--quiet", "--plan", plan),
+        expect_rc=1,
+    )
+
+
+def _keys(folder):
+    import stage05_train as s5
+    from lib import evaluate as ev
+
+    cells, _ = s5.load_enriched_chunks(str(folder), True)
+    return {ev.gemm_key(g) for gs in cells.values() for g in gs}
+
+
+def _rows(folder):
+    return sum(
+        len(p.read_text().splitlines()) - 1 for p in sorted(folder.glob("chunk_*.csv"))
+    )
+
+
+KERNELS = '{"library_stem": null, "attribute_names": ["wave_num"], "kernels": {}}\n'
+
+
+def test_gate_gemms_stay_out_of_this_rounds_training(run):
+    src = run / "round_1" / "stage04"
+    (src / "kernels.json").write_text(KERNELS)
+    try:
+        _check_gate(run, src)
+    finally:
+        (src / "kernels.json").unlink()
+
+
+def _check_gate(run, src):
+    out = run / "round_1" / "gated"
+    d = stage04b(run, out, "--min-cell-gemms", 20, "--gate-frac", 0.2, "--seed", 5)
+    gate = d["gate"]
+    assert gate["frac"] == 0.2 and gate["per_cell"] == {c: 9 for c in CELLS3}
+    assert gate["n_gemms"] == 27 and gate["n_cells"] == 3
+    rows = {r["cell"]: r for r in d["per_cell"]}
+    assert [rows[c]["n_training_gemms"] for c in CELLS3] == [66, 66, 36]
+    assert all(rows[c]["n_gate_gemms"] == 9 and rows[c]["n_eval"] == 45 for c in CELLS3)
+    gate_keys, train_keys = _keys(out / "gate"), _keys(out / "train")
+    assert len(gate_keys) == 27 and not gate_keys & train_keys
+    assert gate_keys | train_keys == _keys(src)
+    assert _rows(out / "gate") == gate["n_rows"]
+    assert _rows(out / "train") == gate["n_training_rows"]
+    assert gate["n_rows"] + gate["n_training_rows"] == _rows(src)
+    for sub in ("gate", "train"):
+        assert (out / sub / "kernels.json").read_text() == KERNELS
+    again = stage04b(
+        run, run / "round_1" / "gated2", "--min-cell-gemms", 20, "--gate-frac", 0.2
+    )
+    assert again["gate"]["n_gemms"] == 27
+    same = stage04b(run, out, "--min-cell-gemms", 20, "--gate-frac", 0.2, "--seed", 5)
+    assert _keys(out / "gate") == gate_keys and same["gate"] == gate
+    off = stage04b(run, out, "--min-cell-gemms", 20)
+    assert off["gate"] is None and not (out / "gate").exists()
+    assert not (out / "train").exists()
 
 
 def test_a_leaf_without_a_model_is_listed_once_trainable(run):
@@ -332,3 +481,45 @@ def test_final_round_never_splits(run):
     )
     assert d["cells_split"] == []
     assert any("final_round_no_split" in r["reason"] for r in d["per_cell"])
+
+
+def test_held_out_contexts_are_reported_per_context(run, tmp_path):
+    from test_stage05_train import write_context_round
+
+    shapes = shapes_for(21, 6, CELLS3[:2])
+    held = write_context_round(tmp_path / "holdout", shapes, 32, "default")
+    data = tmp_path / "round_1c"
+    write_round(data, shapes_for(11, 45, CELLS3))
+    ctx = write_context_round(tmp_path / "ctx", shapes_for(12, 5, CELLS3), 64, "auto")
+    for i, path in enumerate(sorted(ctx.glob("chunk_*.csv"))):
+        path.rename(data / f"chunk_9{i:03d}.csv")
+    d = run_stage(
+        "stage04b_iterate_active_learning.py",
+        "--models-dir",
+        run / "round_0" / "stage05",
+        "--enriched-csv-dir",
+        data,
+        "--out-dir",
+        tmp_path / "out",
+        "--arch",
+        "gfx950",
+        "--config-yaml",
+        run / "config.yaml",
+        "--weight-dtype",
+        "bf16",
+        "--round-idx",
+        1,
+        "--quiet",
+        "--context-holdout-dir",
+        held,
+    )
+    d = json.loads((tmp_path / "out" / "decisions.json").read_text())
+    agg = d["aggregate"]
+    assert set(agg["context_holdout"]) == {"32/default"}
+    assert agg["context_holdout"]["32/default"]["n_gemms"] == len(set(shapes))
+    assert set(agg["by_context"]) == {"0/default", "64/auto"}
+    assert agg["by_context"]["64/auto"]["n_gemms"] == 15
+    assert sum(r["n_eval"] for r in d["per_cell"]) == 135 + 15
+    plain = stage04b(run, tmp_path / "plain", "--min-cell-gemms", 20)
+    assert "context_holdout" not in plain["aggregate"]
+    assert "by_context" not in plain["aggregate"]

@@ -195,6 +195,27 @@ def test_header_layout():
     assert off + 44 + 24 * n_mi == header_size
 
 
+def test_serving_options_round_trip():
+    bundle = dict(random_bundle(LABELS[:1]))
+    plain = mlrec.write_model(bundle, None, "gfx950", arch_constants("gfx950"), "fp32")
+    assert plain[29:32] == b"\0\0\0"
+    assert mlrec.read_model(plain)["serving"] == {
+        "non_temporal_rule": True,
+        "cascade_keys": 0,
+    }
+    bundle["serving"] = {"non_temporal_rule": False, "cascade_keys": 300}
+    data = mlrec.write_model(bundle, None, "gfx950", arch_constants("gfx950"), "fp32")
+    assert data[29] == 1 and data[30:32] == (300).to_bytes(2, "little")
+    assert mlrec.read_model(data)["serving"] == bundle["serving"]
+    assert mlrec.read_header(data)["serving"] == bundle["serving"]
+    assert (
+        mlrec.bundle_from_model(mlrec.read_model(data))["serving"] == bundle["serving"]
+    )
+    bundle["serving"] = {"cascade_keys": 1 << 16}
+    with pytest.raises(ValueError):
+        mlrec.write_model(bundle, None, "gfx950", arch_constants("gfx950"), "fp32")
+
+
 def test_read_rejects_corruption():
     data = mlrec.write_model(
         random_bundle(LABELS[:1]), None, "gfx950", arch_constants("gfx950"), "fp32"
@@ -203,7 +224,7 @@ def test_read_rejects_corruption():
         data[:-1],
         data[:-8] + b"MLRECENX",
         data[:-20] + bytes([data[-20] ^ 1]) + data[-19:],
-        data[:30] + b"\1" + data[31:],
+        data[:29] + b"\2" + data[30:],
         b"MLREC_v3" + data[8:],
         data[:40] + b"\x01\x00\x00\x00" + data[44:],
     ]

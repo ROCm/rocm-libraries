@@ -104,7 +104,7 @@ def test_stage08_rows_read_the_overall_block(tmp_path):
         {"datasets": [stage08_dataset("ds", "per_cell.json")]},
     )
     (row,) = mr.stage08(str(run))
-    assert (row["n"], row["paired_n"]) == (100, 100)
+    assert row["paired_n"] == 100
     assert (row["wins"], row["ties"], row["losses"]) == (10, 85, 5)
     assert row["speedup"] == pytest.approx(2.0**0.1 * 0.5**0.05)
     assert row["model"] == round(0.5**0.05 * 100, 2)
@@ -156,6 +156,7 @@ def make_run(root):
                     "cell": good,
                     "sel_eff_new": 0.86,
                     "n_eval": 20,
+                    "paired_sel_eff_new": 0.855,
                     "origami_sel_eff_new": 0.84,
                     "origami_n_eval": 20,
                     "winner_us_geomean": 10.0,
@@ -181,11 +182,35 @@ def make_run(root):
                         "n_problems": 3,
                         "match_rate": 2 / 3,
                         "counts": {"match": 2, EVIL: 1},
+                        "runtime_selection": {
+                            "pick_measurement": "timed",
+                            "n_problems": 3,
+                            "n_evaluated": 3,
+                            "n_miss": 1,
+                            "sel_eff": 0.9312,
+                            "sel_eff_ci95": [0.9011, 0.9533],
+                        },
                     },
                     "timing": {
                         "rsn1": {
                             "repetitions": 3,
-                            "ml_on_us": {"p50": 23.0},
+                            "ml_on_us": {"n": 2, "p50": 23.0, "p50_ci95": [22.0, 24.0]},
+                            "first_in_cell": {
+                                "n_problems": 1,
+                                "ml_on_us": {
+                                    "n": 1,
+                                    "p50": 31.5,
+                                    "p50_ci95": [30.0, 33.0],
+                                },
+                            },
+                            "warm": {
+                                "n_problems": 1,
+                                "ml_on_us": {
+                                    "n": 1,
+                                    "p50": 6.75,
+                                    "p50_ci95": [6.5, 7.0],
+                                },
+                            },
                             "ml_off_us": {"p50": 20.0},
                             "delta_us": {
                                 "n": 2,
@@ -234,9 +259,25 @@ def test_report_escapes_and_writes_only_its_file(tmp_path):
     assert '<img src=x onerror="alert(2)">' not in page
     assert "\\u003c/script" in page
     assert "onchange=" not in page and "onclick=" not in page
-    assert "3.25" in page and "2 / 3 problems agree" in page
+    assert "2 / 3 problems agree" in page
+    assert "93.12%" in page and "[90.11, 95.33]" in page
+    assert "31.50" in page and "6.75" in page
+    assert "ML-off" not in page and "3.25" not in page
     assert "2.5 MB" in page or '"bin_mb": 2.5' in page
-    assert "Origami" in page
+    assert "origami" not in page.lower()
+    assert "Diagnostics" not in page
+
+    mr.build(str(run), str(out), origami_reference=True)
+    assert files(run) == before
+    page = out.read_text()
+    assert page.count("</script>") == 1
+    assert "<script>alert" not in page
+    ref = page[page.index("External reference: Origami") :]
+    heading = page.index('<h2 id="origami">')
+    assert page.lower().index("origami") == heading + len('<h2 id="')
+    assert page.index("<details", heading) < page.index("Origami %")
+    assert "84.00" in ref and "85.50" in ref
+    assert "3.25" in page and "ML-off" in page
 
 
 def test_report_on_an_empty_run(tmp_path):
@@ -272,3 +313,138 @@ def test_held_out_breakdown_rebuilds_without_parents(tmp_path):
         {"per_cell": [{"cell": parent + "#K<=99", "sel_eff_new": 0.9, "n_eval": 10}]},
     )
     assert list(mr.held_out_breakdown(str(run))) == [parent + "#K<=99"]
+
+
+def stage06_round(rd, gate, deployed=True, reason=None):
+    import run_orchestrator as ro
+
+    (rd / "stage05").mkdir(parents=True, exist_ok=True)
+    (rd / "stage05" / "models.pt").write_bytes(rd.name.encode())
+    rec = {"train_dir": str(rd / "stage05"), "sha256": "ab" * 32, "deployed": deployed}
+    if not deployed:
+        rec.update(not_deployed=reason, gate={"sel_eff": gate["sel_eff"]})
+    write(rd / "stage06" / "deploy_record.json", rec)
+    write(rd / "stage06" / "gate.json", gate)
+    ro.mark_stage_complete(rd / "stage06", None)
+
+
+def gate_json(sel_eff, n, n_miss, passed, base=None):
+    cell = "Large|Large|LargeK|Bnone"
+    return {
+        "n_gemms": n,
+        "n_evaluated": n,
+        "n_miss": n_miss,
+        "sel_eff": sel_eff,
+        "pick_measurement": "timed",
+        "target": 0.95,
+        "passed": passed,
+        "reason": "ok" if passed else "below the bundle it would replace",
+        "baseline": base or {},
+        "per_cell": {
+            cell: {
+                "sel_eff_new": sel_eff,
+                "n_eval": n,
+                "n_miss": n_miss,
+                "paired_sel_eff_new": sel_eff,
+                "origami_sel_eff_new": 0.5,
+                "origami_n_eval": n,
+            }
+        },
+    }
+
+
+def test_headline_is_the_deployed_bundle_not_a_later_staged_one(tmp_path):
+    run = tmp_path / "run"
+    stage06_round(run / "round_0", gate_json(0.9312, 30, 2, True))
+    stage06_round(
+        run / "round_1",
+        gate_json(
+            0.8125,
+            40,
+            9,
+            False,
+            base={
+                "train_dir": str(run / "round_0" / "stage05"),
+                "n": 40,
+                "sel_eff": 0.9001,
+                "bundle_sel_eff": 0.8125,
+            },
+        ),
+        deployed=False,
+        reason="below the bundle it would replace",
+    )
+    sb = mr.shipped_bundle(str(run))
+    assert sb["shipped"]["round"] == "round_0"
+    assert (sb["source"], sb["n_gemms"], sb["n_miss"]) == ("deploy_gate", 30, 2)
+    assert sb["gate"]["sel_eff"] == 0.9312
+    assert sb["final_bundle"]["round"] == "round_1"
+
+    out = tmp_path / "report.html"
+    mr.build(str(run), str(out), bench=False)
+    page = out.read_text()
+    shipped = page[page.index('<h2 id="shipped">') : page.index("<b>Cells</b>")]
+    assert "<b>round_0</b>" in shipped and "93.12" in shipped
+    assert "Not deployed:</b> round_1" in shipped and "81.25" in shipped
+    assert "90.01" not in shipped
+    data = json.loads(page[page.index("const D=") + 8 : page.index(";\nconst TRAJ")])
+    s = data["S"]
+    assert (s["shipped"]["round"], s["shipped"]["sel_eff"]) == ("round_0", 93.12)
+    assert (s["shipped"]["n"], s["shipped"]["n_miss"]) == (30, 2)
+    assert s["not_deployed"]["round"] == "round_1"
+    assert s["pick_measurement"] == "warmup"
+    assert "origami" not in page.lower()
+
+    mr.build(str(run), str(out), bench=False, origami_reference=True)
+    ref = out.read_text()
+    ref = ref[ref.index('<h2 id="origami">') :]
+    assert "50.00" in ref and "93.12" in ref
+
+
+def test_stage04b_results_per_context(tmp_path):
+    from lib import features as fs
+    from lib.run_analysis import context_label
+
+    run = tmp_path / "run"
+    write(
+        run / "round_1" / "stage04b" / "decisions.json",
+        {
+            "aggregate": {
+                "global_sel_eff_new": 0.9,
+                "by_context": {
+                    "0/default": {"n_evaluated": 40, "n_miss": 1, "sel_eff": 0.93},
+                    "128/default": {"n_evaluated": 20, "n_miss": 4, "sel_eff": 0.88},
+                },
+                "context_holdout": {
+                    "64/dynamic": {"n_evaluated": 10, "n_miss": 0, "sel_eff": 0.71}
+                },
+            },
+            "per_cell": [],
+        },
+    )
+    rows = mr.stage04b_contexts(str(run))
+    cu128 = context_label(fs.ExecutionContext(cu_budget=128))
+    held = context_label(fs.ExecutionContext(cu_budget=64, schedule="dynamic"))
+    assert [
+        (r["kind"], r["context"], r["n"], r["n_miss"], r["sel_eff"]) for r in rows
+    ] == [
+        ("trained context", "exclusive", 40, 1, 0.93),
+        ("trained context", cu128, 20, 4, 0.88),
+        ("held-out context", held, 10, 0, 0.71),
+    ]
+    names = mr.context_names(
+        "contexts:\n  list:\n    - {cu_budget: 128, name: half}\n"
+        "  holdout:\n    - {cu_budget: 64, schedule: dynamic}\n"
+    )
+    assert names[cu128] == "half"
+    assert names[held].endswith("held out")
+
+
+def test_diagnostics_flag(tmp_path):
+    run = tmp_path / "empty"
+    run.mkdir()
+    proc = subprocess.run(
+        [sys.executable, str(Path(mr.__file__)), str(run), "--diagnostics"],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr

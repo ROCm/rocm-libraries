@@ -4,6 +4,7 @@
 #include "kernels.hpp"
 #include "model_writer.hpp"
 #include "test_util.hpp"
+#include "tilewright/stage_timers.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -324,6 +325,65 @@ TEST_CASE("feasibility: non-temporal hints, per-operand pool availability", "[fe
                 make_config(64, 256, 40, 16, 16, 32, 0, 4)}) == V{0});
 }
 
+TEST_CASE("cascade: a width covering the pool ranks like the full score", "[rank]") {
+  ModelSpec full_spec     = grid_model();
+  ModelSpec wide          = full_spec;
+  wide.cascade_keys       = 64;
+  const tw::ModelPtr full = load_spec(full_spec);
+  const tw::ModelPtr casc = load_spec(wide);
+  std::vector<tw::Config> pool;
+  for (std::size_t mt : {32, 64, 128, 256})
+    for (std::size_t mi_k : {16, 32}) pool.push_back(make_config(mt, 128, 64, 16, 16, mi_k));
+  for (const tw::Problem& p : {make_problem(4096, 4096, 4096), make_problem(300, 200, 100)})
+    for (std::size_t min_scored : {0, 1, 5})
+      CHECK(same_results(tw::rank_configs(*casc, p, test_hardware(), pool, min_scored),
+                         tw::rank_configs(*full, p, test_hardware(), pool, min_scored)));
+}
+
+TEST_CASE("cascade: the full score goes to the best keys by the embedding term", "[rank]") {
+  const ModelSpec base = grid_model();
+  std::vector<tw::Config> pool;
+  for (std::size_t mt_m : {32, 64, 128, 256})
+    for (std::size_t mt_n : {64, 128}) pool.push_back(make_config(mt_m, mt_n, 64));
+  const tw::Problem p = make_problem(2048, 1024, 512);
+  const std::vector<tw::Result> full =
+      tw::rank_configs(*load_spec(base), p, test_hardware(), pool, 0);
+  std::vector<double> full_score(pool.size(), 0.0);
+  for (const tw::Result& r : full) full_score[r.config_index] = r.score;
+  std::vector<std::size_t> previous;
+  for (std::uint16_t width = 1; width <= pool.size(); ++width) {
+    ModelSpec spec    = base;
+    spec.cascade_keys = width;
+    const std::vector<tw::Result> res =
+        tw::rank_configs(*load_spec(spec), p, test_hardware(), pool, 0);
+    std::vector<std::size_t> scored = sorted(scored_indices(res));
+    REQUIRE(scored.size() == width);
+    for (const tw::Result& r : res)
+      if (r.scored) CHECK(r.score == full_score[r.config_index]);
+    CHECK(std::includes(scored.begin(), scored.end(), previous.begin(), previous.end()));
+    previous = scored;
+  }
+  ModelSpec narrow    = base;
+  narrow.cascade_keys = 2;
+  CHECK(scored_indices(tw::rank_configs(*load_spec(narrow), p, test_hardware(), pool, 5)).size() ==
+        5);
+}
+
+TEST_CASE("serving flag: a model can be served without the non-temporal rule", "[feasibility]") {
+  ModelSpec with_rule                = grid_model();
+  ModelSpec no_rule                  = with_rule;
+  no_rule.serving_flags              = 1;
+  const std::vector<tw::Config> pool = {make_config(256, 256, 64, 16, 16, 32, 0, 0),
+                                        make_config(256, 256, 64, 16, 16, 32, 4, 0),
+                                        make_config(256, 256, 64, 16, 16, 32, 0, 4)};
+  const tw::Problem p                = make_problem(4096, 4096, 4096);
+  using V                            = std::vector<std::size_t>;
+  CHECK(sorted(scored_indices(tw::rank_configs(*load_spec(with_rule), p, test_hardware(), pool))) ==
+        V{0});
+  CHECK(sorted(scored_indices(tw::rank_configs(*load_spec(no_rule), p, test_hardware(), pool))) ==
+        V{0, 1, 2});
+}
+
 TEST_CASE("feasibility: LDS capacity gate", "[feasibility]") {
   const tw::ModelPtr model = load_spec(grid_model());
   const auto scored        = [&](const tw::Problem& p, const std::vector<tw::Config>& pool) {
@@ -486,7 +546,15 @@ TEST_CASE("CandidateSet::rank is bitwise identical to rank_configs", "[rank]") {
     cell.inter_hidden = 21;
     for (const tw::Config& c : random_pool(6)) cell.signatures.push_back(sig(c));
   }
-  for (const ModelSpec& spec : {whitelisted, split_spec(tw::WeightType::Bf16)}) {
+  ModelSpec cascade = grid_model(tw::WeightType::Int4);
+  for (CellSpec& cell : cascade.cells) {
+    cell.embed_dim    = 24;
+    cell.hidden_dim   = 40;
+    cell.inter_hidden = 21;
+  }
+  cascade.cascade_keys  = 3;
+  cascade.serving_flags = 1;
+  for (const ModelSpec& spec : {whitelisted, split_spec(tw::WeightType::Bf16), cascade}) {
     const tw::ModelPtr model = load_spec(spec);
     for (int pool_round = 0; pool_round < 6; ++pool_round) {
       std::vector<tw::Config> pool = random_pool(1 + rng() % 40);
@@ -506,9 +574,6 @@ TEST_CASE("CandidateSet::rank is bitwise identical to rank_configs", "[rank]") {
         check_structure(expect, pool.size());
         REQUIRE(same_results(set.rank(p, hw, min_scored), expect));
         REQUIRE(same_results(set.rank(p, hw, min_scored), expect));
-        const std::vector<tw::Result> scored(
-            expect.begin(), expect.begin() + static_cast<std::ptrdiff_t>(count_scored(expect)));
-        REQUIRE(same_results(set.rank_scored(p, hw, {}, min_scored), scored));
       }
     }
   }
@@ -607,6 +672,88 @@ TEST_CASE("every kernel variant returns identical bits", "[kernels]") {
   if (variants == 0) WARN("only the scalar kernels are available on this host");
 }
 
+TEST_CASE("stage timers report only in builds that enable them", "[timers]") {
+  std::set<std::string> names;
+  for (std::size_t s = 0; s < tw::kStageCount; ++s)
+    names.insert(tw::stage_name(static_cast<tw::Stage>(s)));
+  CHECK(names.size() == tw::kStageCount);
+  CHECK(names.count("") == 0);
+  const tw::ModelPtr m               = load_spec(grid_model());
+  const std::vector<tw::Config> pool = {make_config(64, 64, 64), make_config(32, 32, 32)};
+  tw::reset_stage_times();
+  tw::rank_configs(*m, make_problem(512, 512, 512), test_hardware(), pool, 1);
+  const tw::StageTimes t = tw::stage_times();
+  std::uint64_t ticks    = 0;
+  for (std::uint64_t v : t.ticks) ticks += v;
+  if (tw::stage_timers_enabled()) {
+    CHECK(t.calls == 1);
+    CHECK(ticks > 0);
+    CHECK(tw::stage_tick_ns() > 0.0);
+  } else {
+    CHECK(t.calls == 0);
+    CHECK(ticks == 0);
+    CHECK(tw::stage_tick_ns() == 0.0);
+  }
+}
+
+TEST_CASE("block weights give the bits of their row-major values", "[kernels]") {
+  using tw::detail::Isa;
+  using Type = tw::detail::BlockWeights::Type;
+  std::mt19937 rng(17);
+  std::uniform_real_distribution<float> u(-1.0f, 1.0f);
+  for (Isa isa : {Isa::Scalar, Isa::Avx2, Isa::Avx512}) {
+    const tw::detail::Kernels* k = tw::detail::kernels_for(isa);
+    if (k == nullptr) continue;
+    for (Type type : {Type::F32, Type::Bf16, Type::Int8}) {
+      for (std::size_t m : {1, 3, 4, 7, 8, 9, 15, 16, 17, 33, 80}) {
+        for (std::size_t kk : {0, 1, 5, 8, 15, 16, 17, 31, 33, 59, 64, 192}) {
+          const std::size_t size = (m + 15) / 16 * 16 * kk;
+          std::vector<float> f32(size, 0.0f), wide(m * kk);
+          std::vector<std::uint16_t> bf16(size, 0);
+          std::vector<std::int8_t> int8(size, 0);
+          const float scale = std::ldexp(u(rng), -static_cast<int>(rng() % 9));
+          for (std::size_t i = 0; i < m; ++i) {
+            for (std::size_t j = 0; j < kk; ++j) {
+              const std::size_t at = (i / 16 * kk + j) * 16 + i % 16;
+              float& w             = wide[i * kk + j];
+              if (type == Type::F32) {
+                f32[at] = w = u(rng);
+              } else if (type == Type::Bf16) {
+                std::uint32_t bits;
+                const float v = u(rng);
+                std::memcpy(&bits, &v, sizeof bits);
+                bf16[at] = static_cast<std::uint16_t>(bits >> 16);
+                bits &= 0xFFFF0000u;
+                std::memcpy(&w, &bits, sizeof w);
+              } else {
+                int8[at] = static_cast<std::int8_t>(rng());
+                w        = scale * static_cast<float>(int8[at]);
+              }
+            }
+          }
+          const void* data = type == Type::F32    ? static_cast<const void*>(f32.data())
+                             : type == Type::Bf16 ? static_cast<const void*>(bf16.data())
+                                                  : static_cast<const void*>(int8.data());
+          const tw::detail::BlockWeights W{type, data, scale};
+          std::vector<float> b(m), x(kk), o1(m), o2(m);
+          for (float& v : b) v = u(rng);
+          for (float& v : x) v = (rng() % 7 == 0) ? 0.0f : u(rng);
+          if (m > 2) b[2] = -0.0f;
+          k->linear(wide.data(), b.data(), x.data(), m, kk, o1.data());
+          k->linear_blocks(W, b.data(), x.data(), m, kk, o2.data());
+          REQUIRE(std::memcmp(o1.data(), o2.data(), m * sizeof(float)) == 0);
+          k->linear_relu(wide.data(), b.data(), x.data(), m, kk, o1.data());
+          k->linear_blocks_relu(W, b.data(), x.data(), m, kk, o2.data());
+          REQUIRE(std::memcmp(o1.data(), o2.data(), m * sizeof(float)) == 0);
+          for (std::size_t i = 0; i < m; ++i) o1[i] = k->dot(x.data(), wide.data() + i * kk, kk);
+          k->linear_blocks(W, nullptr, x.data(), m, kk, o2.data());
+          REQUIRE(std::memcmp(o1.data(), o2.data(), m * sizeof(float)) == 0);
+        }
+      }
+    }
+  }
+}
+
 TEST_CASE("the batched interaction kernel scores each column like one input", "[kernels]") {
   using tw::detail::Isa;
   using tw::detail::kBatch;
@@ -617,8 +764,8 @@ TEST_CASE("the batched interaction kernel scores each column like one input", "[
   for (Isa isa : {Isa::Scalar, Isa::Avx2, Isa::Avx512}) {
     const tw::detail::Kernels* k = tw::detail::kernels_for(isa);
     if (k == nullptr) continue;
-    for (std::size_t m : {1, 5, 16, 21, 96})
-      for (std::size_t kk : {0, 3, 16, 37, 50})
+    for (std::size_t m : {1, 5, 6, 7, 10, 16, 21, 96, 112})
+      for (std::size_t kk : {0, 3, 16, 37, 44, 50})
         for (std::size_t nc : {1, 7, 8, 9, 16}) {
           std::vector<float> W(m * kk), b(m), w2(m), X(kk * kBatch), hidden(m * kBatch);
           for (float& v : W) v = u(rng);
@@ -643,6 +790,41 @@ TEST_CASE("the batched interaction kernel scores each column like one input", "[
   }
 }
 
+TEST_CASE("batch whitening gives the bits of whitening one input", "[kernels]") {
+  using tw::detail::Isa;
+  using tw::detail::kBatch;
+  std::mt19937 rng(17);
+  std::uniform_real_distribution<float> u(-4.0f, 4.0f);
+  const float inf        = std::numeric_limits<float>::infinity();
+  const float specials[] = {
+      0.0f, -0.0f, inf, -inf, std::numeric_limits<float>::quiet_NaN(), 1e-40f};
+  for (Isa isa : {Isa::Scalar, Isa::Avx2, Isa::Avx512}) {
+    const tw::detail::Kernels* k = tw::detail::kernels_for(isa);
+    if (k == nullptr) continue;
+    for (const bool bounds : {false, true})
+      for (std::size_t kk : {0, 1, 7, 44}) {
+        std::vector<float> mean(kk), scale(kk), lo(kk), hi(kk), X(kk * kBatch);
+        for (std::size_t j = 0; j < kk; ++j) {
+          mean[j]  = u(rng);
+          scale[j] = j % 3 == 0 ? 1.0f : 0.1f + std::fabs(u(rng));
+          lo[j]    = j % 4 == 1 ? -0.0f : -std::fabs(u(rng));
+          hi[j]    = j % 4 == 1 ? 0.0f : std::fabs(u(rng));
+        }
+        for (std::size_t n = 0; n < X.size(); ++n)
+          X[n] = n % 5 == 0 ? specials[(n / 5) % 6] : 2.0f * u(rng);
+        std::vector<float> got = X;
+        k->whiten_batch(
+            got.data(), mean.data(), scale.data(), bounds ? lo.data() : nullptr, hi.data(), kk);
+        for (std::size_t j = 0; j < kk; ++j)
+          for (std::size_t c = 0; c < kBatch; ++c) {
+            float v = X[j * kBatch + c];
+            if (bounds) v = std::min(std::max(v, lo[j]), hi[j]);
+            const float want = (v - mean[j]) / scale[j];
+            REQUIRE(std::memcmp(&want, &got[j * kBatch + c], sizeof want) == 0);
+          }
+      }
+  }
+}
 TEST_CASE("scores follow the two-tower formula", "[rank]") {
   ModelSpec spec;
   CellSpec cell;

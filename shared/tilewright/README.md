@@ -37,7 +37,7 @@ bank pool.
 | Path | Contents |
 |------|----------|
 | `include/tilewright/` | Public API: `types.hpp` (problem, kernel and device types), `model.hpp` (loading, routing, ranking) |
-| `src/tilewright/` | The engine: `format.cpp` (MLREC_v2 loader, CRC-32, lazy dequantization), `features.cpp` (feature catalogs and their registry, LDS gate, feasibility rules), `kernels.cpp` (fp32 inner-product kernels with run-time ISA selection), `rank.cpp` (routing, execution contexts, view-key grouping, filtering, scoring, tie-breaks, `CandidateSet`), `registry.cpp` (file loading, path deduplication, `tilewright_index`, environment knobs) |
+| `src/tilewright/` | The engine: `format.cpp` (MLREC_v2 and MLREC_v3 loader, CRC-32, lazy dequantization), `features.cpp` (feature catalogs and their registry, LDS gate, feasibility rules), `kernels.cpp` (fp32 inner-product kernels with run-time ISA selection), `rank.cpp` (routing, execution contexts, view-key grouping, filtering, scoring, tie-breaks, `CandidateSet`), `registry.cpp` (file loading, path deduplication, `tilewright_index`, environment knobs), `cache.cpp` (the cache limit) |
 | `python/` | nanobind bindings (`import tilewright`) and their pytest suite |
 | `tests/` | Catch2 suite; `model_writer.*` writes synthetic models so the suite needs no shipped weights |
 | `weights/hipblaslt/<arch>/<arch>/` | Shipped models (`*.tilewright.bin`) and their `tilewright_index` |
@@ -50,10 +50,13 @@ bank pool.
 they may use and the tile scheduling (`ExecutionContext {cu_budget, schedule}`;
 the default is exclusive use of the device with the default schedule). A model
 scores only the contexts it was trained for (`supports(model, context,
-hardware)`). The shipped models were trained with every CU of the device and
-the default schedule: a `cu_budget` below the device's CU count, or a dynamic or
-automatic schedule, leaves every kernel unscored, and TensileLite then uses its
-Origami ranking, which models those cases.
+hardware)`). MLREC_v2 models, the shipped ones included, were trained with every
+CU of the device and the default schedule: a `cu_budget` below the device's CU
+count, or a dynamic or automatic schedule, leaves every kernel unscored, and
+TensileLite then uses its Origami ranking. An MLREC_v3 model declares the range
+of usable-CU fractions (`N_eff / N_CU`, with `N_eff = cu_budget` when
+`0 < cu_budget < N_CU`, else `N_CU`) and the schedules it was trained for, and
+scores every call in them; its features describe the context.
 
 **Routing.** A problem maps to one of 96 base cells
 `<M tier>|<N tier>|<K tier>|<batch tier>`: M and N are `Tiny` (≤ 32), `Small`
@@ -64,41 +67,67 @@ the threshold go to the `lo` child), giving labels such as
 `Large|Large|LargeK|Bnone#N<=10092`. The problem is scored by the leaf's cell,
 or by its nearest trained ancestor (the label with trailing `#...` segments
 removed) when the leaf has no trained cell. With no trained cell at all, every
-kernel is returned unscored.
+kernel of an MLREC_v2 model is returned unscored. An MLREC_v3 model instead
+routes the problem through the other base cells of its split tree, nearest
+first (the sum of the tier differences on M, N, K and batch, ties to the lower
+base index), and scores it with the first trained cell found.
 
 **Filtering.** Each kernel of the pool then passes, in order:
 
 1. an LDS-capacity gate: `mt_m*mt_k*bytes(A) + mt_n*mt_k*bytes(B)` must fit in
    the device's LDS;
-2. a feasibility filter: a small batched problem (M, N ≤ 256, K < 1024,
+2. a feasibility filter. MLREC_v2 models apply its validity rule: an operand
+   whose free dimension is contiguous holds at least one global-read vector
+   along it (M ≥ `grvw_a` when A is not transposed, N ≥ `grvw_b` when B is
+   transposed, except for Int8x4 inputs), as TensileLite's
+   `LeadingFree0/1SizesGreaterOrEqual` predicates require. MLREC_v3 models
+   read no framework-specific parameter and leave that check to the
+   integration, whose own predicates re-check each ranked kernel. Its soft rules are
+   selection heuristics: a small batched problem (M, N ≤ 256, K < 1024,
    batch ≠ 1) must fit in one macro tile; Dot2 kernels (MI 1x1x64) only serve
-   M < 3; an operand whose free dimension is contiguous holds at least one
-   global-read vector along it (M ≥ `grvw_a` when A is not transposed,
-   N ≥ `grvw_b` when B is transposed, except for Int8x4 inputs), as
-   TensileLite's `LeadingFree0/1SizesGreaterOrEqual` predicates require; and
-   hinted kernels (`cache_hints != 0`) are only used when K and the
+   M < 3; and hinted kernels (`cache_hints != 0`) are only used when K and the
    kernel's `mt_k` are both 128-byte aligned in A's element size, where a skinny
    problem requires the non-temporal variant of its large operand
    (`cache_hints == 4`) when the pool contains such a variant for that operand,
-   while every other problem rejects hinted kernels;
-3. the cell's whitelist of kernel signatures
-   `(mt_m, mt_n, mt_k, mi_m, mi_n, mi_k, cache_hints_a, cache_hints_b)`.
+   while every other problem rejects hinted kernels. MLREC_v2 models apply the
+   first two soft rules and the non-temporal rule unless their file says they
+   are served without it; MLREC_v3 models apply each soft rule only when their
+   serving flags switch it on;
+3. the cell's whitelist: kernel signatures
+   `(mt_m, mt_n, mt_k, mi_m, mi_n, mi_k, cache_hints_a, cache_hints_b)` and, in
+   MLREC_v3 files, view-key hashes (see below). An MLREC_v3 model whose serving
+   flags turn the whitelist tier off skips this step.
 
 The feasible whitelisted kernels form tier 1. If the whitelist rejects every
 feasible kernel, all feasible kernels form tier 1. When the caller asks for
 more results than tier 1 holds (`min_scored`), the other feasible kernels are
 scored as tier 2.
 
+A model with a cascade width K (in its file) scores a tier 1 that is not a
+whitelist, and in an MLREC_v3 model also tier 2, in two stages when the tier
+has more than K view-key groups (see below): every group is scored by the
+embedding term of the score, and only the K best by that term get the full
+score, further groups following in embedding-term order while the tiers so far
+keep fewer than `min_scored` configs. A kept group's feasible kernels get the
+full score in all their launch classes (see launch plans). The groups left out
+are unscored. MLREC_v2 models give every group of tier 2 the full score.
+
 **Scoring.** Each cell is a two-tower model. Features are computed in double
 precision and rounded once to float, as in the training pipeline, and are
 whitened with the cell's means and standard deviations, `(x - mean) / std` (a
 standard deviation below 1e-6 counts as 1):
 
-- query features (55) describe the problem and the device;
-- item features (12) describe the kernel;
-- interaction features (37) describe the problem and kernel together, including
-  the matrix-instruction latency, which uses the MI-latency table, the
-  `parallel_mi_cu` and bandwidth constants stored in the model.
+- query features (55 in v2, 59 in v3) describe the problem, the device and,
+  in v3, the execution context;
+- item features (12 in v2; 8 in v3, plus the attribute features of the
+  model's spec) describe the kernel;
+- interaction features (37 in v2, 44 in v3) describe the problem and kernel
+  together, including the matrix-instruction latency, which uses the MI-latency
+  table and the `parallel_mi_cu` constant stored in the model (v2 also uses the
+  bandwidth constants stored in it).
+
+An MLREC_v3 model may store per-feature bounds; every raw feature is then
+clamped to its cell's `[lo, hi]` before whitening.
 
 An item feature whose stored standard deviation is below 1e-3 is treated as
 constant: in training it took a single value, which lies within rounding noise
@@ -113,19 +142,28 @@ features with the same rule.
 score = dot(query_mlp(q), item_mlp(i)) / max(|temperature|, 0.1) + interaction_mlp(x)
 ```
 
-Higher is better. A model file names the feature catalog it was trained on by a
-hash, and the loader selects that catalog; this engine has one catalog,
-`e7fe4b524851e895` (`feature_catalog_hash()`), and rejects other hashes.
+The first term is the embedding term.
 
-**Kernels that score alike.** The catalog reads twelve numeric `Config` fields,
-the kernel's view key: `mt` and `mi` (m, n, k each), `occupancy`,
+Higher is better. A model file names the feature catalog it was trained on by a
+hash, and the loader selects that catalog; this engine computes two,
+`e7fe4b524851e895` (MLREC_v2, `feature_catalog_hash()`) and `b8b9f4a518add96f`
+(MLREC_v3), listed by `feature_catalog_hashes()`, and rejects other hashes.
+
+**Kernels that score alike.** The v2 catalog reads twelve numeric `Config`
+fields, the kernel's view key: `mt` and `mi` (m, n, k each), `occupancy`,
 `cache_hints_a`, `cache_hints_b`, `grvw_a`, `grvw_b` and `gwvw_d`. Kernels with
 equal view keys get identical features, feasibility, whitelist membership and
 scores, so a pool is grouped by view key and each group is filtered and scored
 once; a `CandidateSet` caches item embeddings per group. The result still has
 one entry per kernel, exactly as if every kernel were scored on its own.
-`index` and `attributes` (named integer kernel properties, see the API) are not
-part of the shipped catalog and never change a ranking.
+An MLREC_v3 view key is the kernel's signature, the parameters every GEMM
+kernel framework defines: `mt` and `mi` (m, n, k each), `cache_hints_a` and
+`cache_hints_b`, followed by the attributes of the model's attribute spec, each
+taking its default when the kernel lacks it. Kernels that differ only in other
+fields (`occupancy`, `grvw_a/b`, `gwvw_d`) or other attributes are one
+candidate to a v3 model unless the model serves launch keys and the launch
+model tells their launches apart (see launch plans). `index` and the attributes a model does not read
+(named integer kernel properties, see the API) never change a ranking.
 
 **Result.** `rank` returns one `Result {config_index, score, scored}` per
 input kernel (`config_index` is the kernel's position in the pool): tier 1
@@ -151,7 +189,18 @@ computed in double with the C library's `log2` and rounded once to float. Weight
 packed in memory and a cell's weights are converted to fp32 on the first
 ranking that reaches the cell.
 
+**Memory.** The fp32 weights of the cells in use and the per-cell caches of
+candidate sets (whitelist membership and item embeddings) are kept while their
+total, over every model and candidate set of the process, is within the cache
+limit (`set_cache_limit`; 1 GiB unless `TILEWRIGHT_CACHE_MB` sets it). Past it,
+the least recently used of them are released and built again from the packed
+weights when a ranking needs them, so rankings are the same under any limit;
+only their first use after a release takes longer.
+
 ## Model files (MLREC_v2)
+
+tilewright loads MLREC_v2 and MLREC_v3 files; MLREC_v3 is described after
+MLREC_v2.
 
 A model file is little-endian:
 
@@ -163,7 +212,8 @@ A model file is little-endian:
 | payload_size | `u64` | payload bytes (the trailer excluded) |
 | payload_crc32 | `u32` | CRC-32/ISO-HDLC of the payload |
 | weight_dtype | `u8` | 0 fp32, 1 bf16, 2 int8, 3 int4 |
-| reserved | `u8[3]` | 0 |
+| serving_flags | `u8` | bit 0: served without the non-temporal rule; the other bits are 0 |
+| cascade_keys | `u16` | the cascade width, 0 for none |
 | q_dim, i_dim, x_dim | `u32` each | 55, 12, 37 |
 | n_cells, n_splits | `u32` each | |
 | feature_catalog_hash | `u16` length + ASCII | must equal `feature_catalog_hash()` |
@@ -195,7 +245,118 @@ values, split axes, labels (non-empty printable ASCII without spaces), duplicate
 and split parents, an acyclic split tree, the MI table, and the trailer. MLREC_v1
 files are rejected; convert them with
 `training_pipeline/scripts/convert_mlrec_v1_to_v2.py`. The training pipeline
-writes MLREC_v2 with `training_pipeline/lib/mlrec.py`.
+writes MLREC_v2 and MLREC_v3 with `training_pipeline/lib/mlrec.py`.
+
+## Model files (MLREC_v3)
+
+An MLREC_v3 file keeps the layout of MLREC_v2 with these changes. The fixed
+header has magic `MLREC_v3`, and bytes 29-31 (v2's serving flags and cascade
+width) must be 0. The header tail is:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| feature_catalog_hash | `u16` length + ASCII | `b8b9f4a518add96f` |
+| feature_spec_hash | `u64` | hash of the attribute spec, below |
+| arch | `u16` length + ASCII | |
+| parallel_mi_cu, mi_default_cycles | `f64` each | > 0 |
+| n_mi, MI table | as in v2 | |
+| serving_flags | `u32` | bit 0 small-batched rule, bit 1 Dot2 rule, bit 2 non-temporal rule (each applied when set), bit 3 no whitelist tier, bit 4 launch keys (the pool is grouped by launch key); other bits 0 |
+| cascade_keys | `u32` | the cascade width, 0 for none |
+| min_cu_fraction, max_cu_fraction | `f64` each | `0 < min <= max <= 1`: the `N_eff / N_CU` the model supports |
+| schedules | `u8` | bit 0 Default, bit 1 Dynamic, bit 2 Auto; not 0 |
+| clip | `u8` | 1: cells carry feature bounds |
+| n_attributes | `u16` | at most 64, then per attribute: `u16`+name, `i64` default, `u8` transform (0 identity, 1 log2p1, 2 nonzero, 3 onehot) and, for onehot, `u16` value count (1-64) and distinct `i64` values |
+| provenance | optional | present when header bytes remain: `u16` entry count (1-5), then per entry a `u16`+key and a `u16`+value (printable ASCII without spaces), the keys `config_id`, `training_data_hash`, `source_revision`, `date` and `launch_model`, each at most once |
+
+`i_dim` is 8 plus the attribute features: one per identity, log2p1 and
+nonzero attribute (`x`, `log2(1 + max(x, 0))`, `x != 0`) and one per value of a
+onehot attribute (`x == v`), in spec order; `x` is the kernel's attribute, or
+the default. `feature_spec_hash` is the FNV-1a 64 hash of the text
+`<catalog hash>\nversion\t3\n`, then the feature names in vector order as
+`query\t<name>,<name>,...\n`, `item\t...\n` (the attribute features named
+`attr_<name>`, `attr_log2p1_<name>`, `attr_nz_<name>` or `attr_<name>_eq_<v>`)
+and `interaction\t...\n`, then one line per attribute,
+`<name>\t<default>\t<transform>[\t<v1>,<v2>,...]\n` (values for onehot only,
+decimal), then for each of four fixed golden inputs (`kGoldenCases` in
+`features.cpp`, `_GOLDEN_CASES` in `training_pipeline/lib/mlrec.py`)
+`golden\t<case>\t<bits>\n`, the bits of its query, item and interaction
+features under fixed arch constants as 8-digit lowercase hex, joined by `,`.
+The golden inputs have fixed launch plans (the default, and dynamic queues
+and partial reductions) and execution contexts (exclusive use, CU budgets and
+every schedule), so launch and context features are covered too. Golden case c
+sets attribute j to its one-hot value `(j + c) mod count`, or to
+`(7j + 3c) mod 17 - 4`. A model whose names, spec or feature computation differ
+from the engine's has another hash and is rejected; for the empty spec the hash
+is `640b5d2e92a9f47f`.
+
+Each cell record adds, after the whitening vectors, the bounds when `clip` is
+1 (`f32` q_lo, q_hi, i_lo, i_hi, x_lo, x_hi; infinities allowed, no NaN,
+lo ≤ hi) and, after the signatures, `u32` view-key count and `u64` view-key
+hashes: FNV-1a 64 over the view key's values, each as 8 little-endian bytes.
+
+The v3 features are v2's with `N_eff` wherever v2 uses the device's CU count,
+without `bw_occ` and without what only some frameworks define. The item
+features are v2's eight of the signature (`log2_mt_m/n/k`, `log2_mi_m/n/k`,
+`nta_norm`, `ntb_norm`), then the attribute features; the interaction features
+drop v2's `log2_grvw_a_bytes` and `log2_grvw_b_bytes`. The additions:
+
+- query: `cu_fraction` = `N_eff / N_CU`, and the schedule one-hot
+  `schedule_default`, `schedule_dynamic`, `schedule_auto`;
+- interaction, after `active_cus_norm`: the kernel's launch plan (below). With
+  `tiles` = `ceil(M / mt_m) * ceil(N / mt_n) * batch`, `wgs` = `grid_wgs`, or
+  `tiles` when it is 0, and `waves` = `ceil(wgs / N_eff)`: `is_dynamic` =
+  `dynamic_queue`; `log2_grid` = `log2(max(wgs, 1))`; `log2_grid_per_cu` =
+  `log2(max(wgs / N_eff, 0.001))`; `log2_wg_waves` = `log2(max(waves, 1))`;
+  `wg_wave_eff` = `wgs / (waves * N_eff)` (1 when `waves` is 0);
+  `log2_tiles_per_wg` = `log2(max(tiles / max(wgs, 1), 0.001))`;
+  `uneven_work` = `wgs > 0` and `tiles % wgs != 0`; and `reduction_tree`,
+  `reduction_parallel`, `reduction_atomic`, the one-hot of
+  `partial_reduction` (all 0 for `None`).
+
+**Attribute specs.** A spec may name only parameters that every GEMM kernel
+framework defines; each one joins the view key and splits kernels the
+signature alone would group. Framework-specific knobs (vector widths,
+occupancy, workgroup mapping, stagger, prefetch and the like) never enter a
+spec. The default spec is empty, so a default v3 kernel is its signature.
+
+**Launch plans.** The engine knows no framework's launch rule. An integration
+passes a `LaunchModel` in `PoolOptions::launch`; `plan(config, problem,
+context)` returns `LaunchPlan {dynamic_queue, grid_wgs, partial_reduction}`:
+whether workgroups take output tiles from a shared queue, the workgroups
+launched (0: one per output tile), and how the workgroups that split an output
+tile combine their partial results (`None` when none is split, `Tree`,
+`Parallel`, `Atomic`). Without a launch model every kernel gets `LaunchPlan{}`,
+a static launch of one workgroup per output tile.
+
+`launch_key(config)` names a kernel's launch class, a `u64` the engine only
+compares. The contract: kernels with equal signature, equal spec attributes
+and equal launch key get the same plan for every problem and context. The
+model decides whether keys count: a v3 model whose serving flags ask for
+launch keys (`ModelInfo::launch_keys`) groups its pool by view key and launch
+key, so each group is one candidate with one plan; whitelist hashes cover view
+keys and the cascade's width counts them, so a whitelisted or kept view key
+brings all its launch classes. Any other model groups by view key alone and
+never asks for a key, as if every key were 0: kernels of one view key are one
+candidate, scored with its first member's launch. The default key, 0 for every
+kernel, declares that kernels of one view key launch alike. The engine asks
+for keys once per kernel when a pool of a model with launch keys is grouped,
+and for plans only in rankings of v3 models under a supported
+context, once per group that gets the full score (not for the cascade's
+embedding-only stage), with the group's first config in pool order. Since
+`plan` is on the ranking's path, a launch model should hold what it reads of
+each kernel (by `Config::index`, prepared with the pool, or from the
+framework's own kernel struct) instead of searching `Config::attributes` by
+name per call; `hipblaslt_launch::Launch` takes the pool's configs for this. A model
+must be served with the plans it was trained with;
+the training pipeline computes hipBLASLt's (`training_pipeline/lib/hipblaslt_launch.py`),
+and TensileLite's adapter must return the same plans from TensileLite's launch code.
+`LaunchModel::id()` names the rule and its version (empty by default); the
+pipeline records it as the model's `launch_model` provenance, and a
+`CandidateSet` built on a model that records one throws
+`std::invalid_argument` unless `PoolOptions::launch` has that id. hipBLASLt's
+id is `hipblaslt:<arch>:<RULE_VERSION>`, where `<arch>` is the compiler target
+of the library's stem suffix (`_gfx1250` and `_gfx1250-strict` both give
+`gfx1250`); an adapter returns the id of the rule version it implements.
 
 ## C++ API
 
@@ -227,34 +388,56 @@ if (!tilewright::supports(*model, context, hw)) { /* use another ranking */ }
   interpreted) and `attributes`: further named `int64` properties
   (`Attribute {name, value}`) in any order, with non-empty, unique names. A
   feature catalog reads the attributes it knows; the shipped catalog reads none.
-- `CandidateSet(model, configs, PoolOptions{tie_break})` holds a fixed pool and
-  throws `std::invalid_argument` for a null model or a config with an empty or
-  duplicate attribute name. Whitelist membership and the item embeddings of
+- `CandidateSet(model, configs, PoolOptions{tie_break, launch})` holds a fixed
+  pool and its launch model (`std::shared_ptr<const LaunchModel>`, null for
+  none; see launch plans above), and throws `std::invalid_argument` for a null
+  model or a config with an empty or duplicate attribute name. Whitelist membership and the item embeddings of
   the whitelisted kernels are computed the first time a problem reaches a
   cell, the embeddings of the other kernels the first time a ranking of the
-  cell scores one of them, and all are reused afterwards. The interaction
+  cell scores one of them, and all are reused afterwards within the cache
+  limit. The interaction
   features that depend only on the kernel, the problem's data types and the
   device are computed on the first ranking that scores a kernel and reused for
   problems with those data types on that device. It is safe to share between
-  threads.
+  threads when its launch model's `plan` is; exceptions from `plan` propagate
+  out of `rank`.
   `rank(problem, hardware, min_scored)` ranks for exclusive use of the device;
   `rank(problem, hardware, context, min_scored, prior)` ranks for `context`
   (every kernel unscored unless `supports(model, context, hardware)`) and, with
   `TieBreak::Prior`, orders equal scores by `prior` (a vector with one value per
   kernel, or null; another size throws `std::invalid_argument`).
-  `rank_scored(problem, hardware, context, min_scored, prior)` returns the
-  scored kernels of that ranking only, in the same order, without the work of
-  listing every other kernel of the pool.
-- `rank_configs(model, problem, hardware, configs, min_scored)` and
+  `rank_top(problem, hardware, context, k, prior)` returns only the best `k`
+  kernels: the scored results among the first `k` of
+  `rank(problem, hardware, context, k, prior)`. It orders and writes no other
+  result, so its cost does not include a result per pool kernel; an overload
+  writes into a caller's `std::vector<Result>` and reuses its capacity.
+  `prepare()`, `prepare(cells)` and `prepare(problem, hardware)` build ahead
+  of time what the first rankings of those cells would build (the cells' fp32
+  weights, whitelist membership and the item embeddings of every kernel; with
+  a problem, also the kernel-only interaction features for its data types), so
+  that an integration can pay for it at load time instead of on its first
+  rankings.
+- `rank_configs(model, problem, hardware, configs, min_scored)`,
   `rank_configs(model, problem, hardware, context, configs, min_scored,
-  tie_break, prior)` return the same results as a `CandidateSet` for an ad-hoc
-  list, without caching, and validate attributes the same way.
+  tie_break, prior)` and `rank_configs(model, problem, hardware, context,
+  configs, options, min_scored, prior)` return the same results as a
+  `CandidateSet` with default `PoolOptions`, with `tie_break` or with `options`
+  for an ad-hoc list, without caching, and validate attributes and refuse a
+  launch model the model does not record the same way.
 - `attribute_names(model)` lists the Config attributes the model's feature
-  catalog reads (none for v2 models), so a caller can attach only those.
+  catalog reads (none for v2 models, the attribute spec for v3), so a caller
+  can attach only those.
 - `route(model, problem)` and `cell_label(model, cell)` expose routing;
-  `describe(model)` returns the arch, hash, weight type and sizes;
-  `compute_features(model, problem, config, hardware)` returns the raw
-  (unwhitened) feature vectors.
+  `describe(model)` returns the arch, hash, weight type and sizes, the bytes of
+  the packed weights and of the fp32 weights of every cell, and for v3
+  the spec hash, supported contexts, serving flags, the number of base
+  labels without a trained cell and the provenance the file records;
+  `compute_features(model, problem, config, hardware[, context[, plan]])`
+  returns the raw (unwhitened, unclamped) feature vectors for the config
+  launched as `plan` (default `LaunchPlan{}`).
+- `set_cache_limit(bytes)`, `cache_limit()` and `cache_usage()` set and report
+  the process-wide limit on cached fp32 weights and candidate-set caches (see
+  Memory above); a part in use is kept even when it alone exceeds the limit.
 
 `DataType` values are part of the model format (MI-table keys). They follow
 Origami's enumeration, which has an `Int4` entry that Tensile's does not, so
@@ -281,13 +464,25 @@ ranked = pool.rank(problem, tw.Hardware(N_CU=64, lds_capacity=65536, L2_capacity
 The module mirrors the C++ API. Enumerations are integer enums (`DataType.None`
 is spelled `DataType.None_`), structures accept keyword arguments, and the GIL
 is released while models load and pools rank. `Config.attributes` is a
-`dict[str, int]`; `CandidateSet(model, configs, tie_break=TieBreak.PoolOrder)`,
-`CandidateSet.rank(problem, hardware, min_scored=0, context=None, prior=None)`
+`dict[str, int]`; `CandidateSet(model, configs, tie_break=TieBreak.PoolOrder,
+launch=None)` takes as `launch` a callable `(config, problem, context) ->
+LaunchPlan` (launch key 0), an object with such a `plan` method and
+optionally a `launch_key(config) -> int` method (a `u64`; negative values are
+taken modulo 2**64), or a list of `LaunchPlan` indexed by `Config.index`
+(plans for one problem and context, grouped by identical plan; a missing index
+raises `IndexError`), and errors raised by a launch model reach the caller;
+`compute_features(..., context=None, plan=None)` takes a `LaunchPlan`;
+`CandidateSet.rank(problem, hardware, min_scored=0, context=None, prior=None)`,
+`CandidateSet.rank_top(problem, hardware, k, context=None, prior=None)`,
+`CandidateSet.prepare(cells=None, problem=None, hardware=None)` (every cell
+when given neither cells nor a problem)
 and `rank_configs(model, problem, hardware, configs, min_scored=0, context=None,
-tie_break=TieBreak.PoolOrder, prior=None)` take the context and tie-break
+tie_break=TieBreak.PoolOrder, prior=None, launch=None)` take the context and tie-break
 arguments of the C++ API (`context=None` is exclusive use),
 `supports(model, context, hardware)` reports whether a model scores a context,
-and `attribute_names(model)` lists the attributes it reads.
+`attribute_names(model)` lists the attributes it reads, and
+`set_cache_limit(bytes)`, `cache_limit()` and `cache_usage()` manage the cache
+limit.
 `load_model` and `load_model_from_memory` raise `ValueError` with the loader's
 message when the data is not a valid model, and invalid attribute names or a
 prior of the wrong length raise `ValueError`; `load_model_by_index` returns
@@ -300,9 +495,10 @@ of `0` or an empty value counts as unset.
 
 | Variable | Effect |
 |----------|--------|
-| `TILEWRIGHT_DIAG` | One stderr line per loaded model: `[TILEWRIGHT_DIAG FILE] path=... arch=... qhash=... qdim=55 idim=12 xdim=37 n_cells=N n_splits=N weights=int4`, and `[TILEWRIGHT_DIAG FAIL] <reason>` for a load that fails |
+| `TILEWRIGHT_DIAG` | One stderr line per loaded model: `[TILEWRIGHT_DIAG FILE] path=... arch=... qhash=... qdim=55 idim=12 xdim=37 n_cells=N n_splits=N weights=int4` (the model's dims), and `[TILEWRIGHT_DIAG FAIL] <reason>` for a load that fails |
 | `TILEWRIGHT_PICK_LOG` | One stderr line per ranking that scores a kernel: `[TILEWRIGHT_PICK] m=.. n=.. k=.. b=.. tA=.. tB=.. leaf=<label> top1_sig=(mt_m=..,mt_n=..,mt_k=..,mi_m=..,mi_n=..,mi_k=..,cha=..,chb=..) top1_score=.. top1_index=.. n_configs=..`; `top1_index` is the pool position of the top-ranked kernel |
 | `TILEWRIGHT_FORCE_CELL` | Score every problem with this cell index, for debugging; ignored when it is not a valid index of the model |
+| `TILEWRIGHT_CACHE_MB` | Initial cache limit in MiB (a whole number; anything else leaves the default of 1 GiB); `set_cache_limit` changes it later |
 
 tilewright writes nothing else to stderr. Whether hipBLASLt uses tilewright at
 all is controlled by hipBLASLt (`TENSILE_USE_TILEWRIGHT`).

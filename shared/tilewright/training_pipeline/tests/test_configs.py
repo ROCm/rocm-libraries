@@ -97,7 +97,8 @@ def test_missing_required_key(base_cfg):
         (("train", "epochs"), True, "expected an integer"),
         (("deploy", "apply_patch"), "yes", "expected true or false"),
         (("hipblaslt", "transA"), "X", "is not one of"),
-        (("validate", "sel_eff_threshold"), 1.5, "(0, 1] or 'origami'"),
+        (("validate", "sel_eff_threshold"), 1.5, "a number in (0, 1], got 1.5"),
+        (("validate", "sel_eff_threshold"), "0.9", "a number in (0, 1], got '0.9'"),
         (("deploy", "weight_dtype"), "fp16", "is not one of"),
         (("runtime", "devices"), [], "at least 1"),
         (("deploy", "targets"), ["gfx950/../x"], "invalid target"),
@@ -109,23 +110,27 @@ def test_type_errors(base_cfg, path, value, fragment):
     assert any(fragment in e for e in _errors(cfg)), _errors(cfg)
 
 
-def test_origami_threshold_is_accepted(base_cfg):
+def test_origami_threshold_is_rejected(base_cfg):
     cfg = copy.deepcopy(base_cfg)
     cfg["validate"]["sel_eff_threshold"] = "origami"
-    cfg["validate"]["split_floor"] = "origami"
-    assert _errors(cfg) == []
+    cfg["validate"]["split_floor"] = "Origami"
+    errs = _errors(cfg)
+    for key in ("validate.sel_eff_threshold", "validate.split_floor"):
+        assert any(e.startswith(f"{key}: 'origami' is not accepted") for e in errs)
+    assert ro.cfg_get({}, "validate.sel_eff_threshold") == 0.95
+    assert ro.cfg_get({}, "validate.split_floor") == 0.85
 
 
 def test_split_floor_zero_disables_the_floor(base_cfg):
     cfg = copy.deepcopy(base_cfg)
     cfg["validate"]["split_floor"] = 0
     assert _errors(cfg) == []
-    for bad in (-0.1, 1.5):
+    for bad in (-0.1, 1.5, float("nan")):
         cfg["validate"]["split_floor"] = bad
-        assert any("[0, 1] (0 disables) or 'origami'" in e for e in _errors(cfg))
+        assert any("a number in [0, 1] (0 disables)" in e for e in _errors(cfg))
     cfg["validate"]["split_floor"] = 0.83
     cfg["validate"]["sel_eff_threshold"] = 0
-    assert any("(0, 1] or 'origami'" in e for e in _errors(cfg))
+    assert any("a number in (0, 1]" in e for e in _errors(cfg))
 
 
 def test_split_budget_must_be_feasible(base_cfg):
@@ -152,6 +157,23 @@ def test_apply_patch_needs_a_checkout(base_cfg):
     assert any("requires deploy.rocm_libraries_to_deploy" in e for e in _errors(cfg))
 
 
+def test_deploy_gate_settings(base_cfg):
+    cfg = copy.deepcopy(base_cfg)
+    assert ro.cfg_get(cfg, "deploy.gate_frac") == 0.2
+    assert ro.cfg_get(cfg, "validate.pick_measurement") == "warmup"
+    cfg["deploy"]["gate_frac"] = 0
+    errors, warnings = ro.validate_config(cfg)
+    assert errors == [] and any("deploy.gate_frac is 0" in w for w in warnings)
+    cfg["deploy"]["target_sel_eff"] = None
+    assert not any("gate_frac" in w for w in ro.validate_config(cfg)[1])
+    for bad in (0.6, -0.1):
+        cfg["deploy"]["gate_frac"] = bad
+        assert any(e.startswith("deploy.gate_frac") for e in _errors(cfg))
+    cfg["deploy"]["gate_frac"] = 0.2
+    cfg["validate"]["pick_measurement"] = "fastest"
+    assert any(e.startswith("validate.pick_measurement") for e in _errors(cfg))
+
+
 def test_parity_without_deploy_warns(base_cfg):
     cfg = copy.deepcopy(base_cfg)
     cfg["deploy"]["apply_patch"] = False
@@ -172,6 +194,28 @@ def test_training_gate_above_round0_budget(base_cfg):
     cfg = copy.deepcopy(base_cfg)
     cfg["seed"]["target_per_cell"] = 10
     assert any("round_0 would train no cell" in e for e in _errors(cfg))
+    cfg["seed"]["target_per_cell"] = cfg["train"]["min_cell_gemms"]
+    errors, warnings = ro.validate_config(cfg)
+    assert errors == [] and any("give seed.target_per_cell" in w for w in warnings)
+
+
+@pytest.mark.parametrize("path", CONFIGS, ids=[p.name for p in CONFIGS])
+def test_shipped_configs_leave_round0_slack(path, config_env):
+    cfg = _load(path)
+    assert ro.cfg_get(cfg, "seed.target_per_cell") > ro.cfg_get(
+        cfg, "train.min_cell_gemms"
+    )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [p for p in CONFIGS if p.name.startswith("gfx1250v0_")],
+    ids=lambda p: p.name,
+)
+def test_gfx1250v0_configs_deploy_the_strict_tree(path, config_env):
+    targets = dict(ro.deploy_targets(_load(path)))
+    assert "gfx1250v0" in targets
+    assert targets["gfx1250-strict"].endswith("_gfx1250-strict")
 
 
 def test_deploy_targets_derive_stems(base_cfg):

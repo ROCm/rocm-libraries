@@ -99,6 +99,8 @@ deploy:
   stop_when_target_reached: false
   weight_dtype: int8
   rocm_libraries_to_deploy: ${TILEWRIGHT_DEPLOY_ROOT}
+  # The gfx1250-strict tree holds the library gfx1250v0 is built from.
+  targets: [gfx1250v0, gfx1250-strict]
   apply_patch: false
   build_after_apply: false
   build_jobs: null

@@ -34,6 +34,20 @@ Outputs in `<out-dir>/`, removed and rewritten by every run:
   stage03_summary.json               counts, crash blocks, tolerance, rc
   tmp/                               bench yamls of the running processes,
                                      removed when the stage ends
+  libdir_pool/                       with --pool-only-library: the library
+                                     directory the benches load
+                                     (lib/pool_libdir.py)
+
+A `requested_solution_num: -1` line under TENSILE_PREDICTION_LIB=1 benches
+the pool kernels the Prediction library ranks plus whatever
+getAllSolutions() appends: the rest of the pool and every kernel of the
+problem type's other libraries (such as a _CU256_ exact-match library).
+Those take most of the bench time, stage04 drops their rows, and their
+warm-ups enter the skip screen, so they can screen pool kernels out.
+--pool-only-library STEM (with --library-dir) benches against a copy of
+the library directory in which the problem type's other libraries are
+empty. Planned bench lines (stage01b) list their kernels and need none of
+this.
 
 A crash block is a block that was abandoned and whose unattempted shapes the
 retry pass did not all recover. The stage exits 0 when the number of crash
@@ -67,13 +81,18 @@ if str(PIPELINE_DIR) not in sys.path:
 
 from lib import procs  # noqa: E402
 from lib import ui  # noqa: E402
-from lib.bench_env import bench_env_with  # noqa: E402
+from lib.bench_env import LIBPATH_VAR, bench_env_with  # noqa: E402
 from lib.bench_log import (  # noqa: E402
     LogProbe,
     ProblemBoundaryTracker,
     count_finished_problems,
 )
-from lib.bench_yaml import ADAPTIVE_KEYS, read_bench_lines, shape_of_line  # noqa: E402
+from lib.bench_yaml import (  # noqa: E402
+    ADAPTIVE_KEYS,
+    line_has_prescreen,
+    read_bench_lines,
+    shape_of_line,
+)
 from lib.fs import atomic_write_text, write_json  # noqa: E402
 from lib.procs import file_size  # noqa: E402
 
@@ -168,6 +187,10 @@ def _annotate(log_path: Path, msg: str) -> None:
 # cheapest timing), its output goes to the warm-up log, and the real shapes
 # are screened against resident modules. It has to run in the same process,
 # because module residency does not outlive the process.
+#
+# Lines with `skip_screen_prepass` get no warm-up: the bench then launches
+# every candidate once, untimed, before its screening warm-up, which loads
+# the modules without the library heuristic.
 _WARMUP_DROP_KEYS = frozenset(("adaptive",) + ADAPTIVE_KEYS)
 _WARMUP_FORCE = (
     ("requested_solution_num", "-1"),
@@ -182,8 +205,10 @@ _WARMUP_FORCE = (
 def render_warmup_line(line: str) -> Optional[str]:
     """`line` restamped as the throwaway warm-up shape, or None when it is not
     a flat flow-mapping bench line (`- {k: v, ...}`, no nested braces and no
-    commas inside values). Key order is kept; forced keys not present are
-    appended."""
+    commas inside values) or needs no warm-up (`skip_screen_prepass`). Key
+    order is kept; forced keys not present are appended."""
+    if line_has_prescreen(line):
+        return None
     s = line.strip()
     i, j = s.find("{"), s.rfind("}")
     if i < 0 or j <= i:
@@ -317,7 +342,7 @@ def _run_block_with_recovery(
                         stderr=subprocess.STDOUT,
                         text=True,
                         bufsize=1,
-                        env=bench_env_with(),
+                        env=bench_env_with(BENCH_ENV_EXTRA),
                     )
                     # The split has to run on its own thread: a hung process
                     # keeps its pipe open, and the watchdog below must still
@@ -355,7 +380,7 @@ def _run_block_with_recovery(
                         stdout=lf,
                         stderr=subprocess.STDOUT,
                         text=True,
-                        env=bench_env_with(),
+                        env=bench_env_with(BENCH_ENV_EXTRA),
                     )
                     last_rc, reason = procs.wait_with_stall_watchdog(
                         proc,
@@ -592,6 +617,10 @@ def _retry_pass(
     return len(pending), recovered
 
 
+# Set by --pool-only-library; every bench process of the stage gets it.
+BENCH_ENV_EXTRA: Dict[str, str] = {}
+
+
 def main() -> int:
     args = _parse_args()
     work_dir = args.out_dir / "tmp"
@@ -682,8 +711,42 @@ def _parse_args() -> argparse.Namespace:
         help="crash blocks tolerated before the stage fails (default: one "
         "block in twenty, rounded down).",
     )
+    ap.add_argument(
+        "--pool-only-library",
+        action="append",
+        default=[],
+        metavar="STEM",
+        help="bench against a copy of --library-dir in which the other "
+        "libraries of STEM's problem type are empty (repeat to keep several, "
+        "e.g. the pool and a bank library)",
+    )
+    ap.add_argument(
+        "--library-dir",
+        type=Path,
+        default=None,
+        help="Tensile library directory of the device (<build>/Tensile/library/"
+        "<arch>), for --pool-only-library",
+    )
     ap.add_argument("--quiet", action="store_true")
-    return ap.parse_args()
+    args = ap.parse_args()
+    if args.pool_only_library and args.library_dir is None:
+        ap.error("--pool-only-library needs --library-dir")
+    return args
+
+
+def _pool_libdir(args: argparse.Namespace) -> Path:
+    from lib.pool_libdir import build_pool_libdir
+
+    dst = args.out_dir / "libdir_pool"
+    shutil.rmtree(dst, ignore_errors=True)
+    summary = build_pool_libdir(args.library_dir, args.pool_only_library, dst)
+    if not args.quiet:
+        ui.info(
+            "libdir",
+            f"pool-only library dir {dst}: {len(summary['emptied'])} other "
+            f"librar(ies) of the problem type emptied",
+        )
+    return dst
 
 
 def _run(args: argparse.Namespace, children: procs.ChildGroups, work_dir: Path) -> int:
@@ -721,6 +784,13 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups, work_dir: Path) 
     n_removed = _clean_previous_outputs(args.out_dir, logs_dir)
     shutil.rmtree(work_dir, ignore_errors=True)
     work_dir.mkdir()
+    if args.pool_only_library:
+        try:
+            libdir = _pool_libdir(args)
+        except (OSError, ValueError) as e:
+            ui.err("libdir", str(e))
+            return 1
+        BENCH_ENV_EXTRA[LIBPATH_VAR] = str(libdir)
 
     n_gpus = len(devices)
     target_blocks = max(n_gpus, n_gpus * int(args.blocks_per_gpu))

@@ -418,3 +418,221 @@ def test_engine_loads_the_deployed_bytes(tmp_path, trained):
     info = tilewright.describe(model)
     assert (info.n_cells, info.n_splits) == (3, 1)
     assert info.feature_catalog_hash == rec["feature_catalog_hash"]
+
+
+# ── deploy gate ─────────────────────────────────────────────────────────────
+
+GATE_HW = {"n_cu": 100, "lds_bytes": 65536, "l2_bytes": 4194304}
+
+
+def gate_cfg(path, **deploy):
+    cfg = yaml.safe_load(write_cfg(path).read_text())
+    cfg["hardware"] = dict(GATE_HW)
+    cfg["deploy"].update(deploy)
+    path.write_text(yaml.safe_dump(cfg))
+    return path
+
+
+@pytest.fixture
+def gate_dir(tmp_path):
+    from test_stage05_train import shapes_for, write_round
+
+    return write_round(
+        tmp_path / "round_1" / "stage04b" / "gate",
+        shapes_for(8, 12, ["Large|Large|LargeK|Bnone", "Mid|Large|MidK|Bnone"]),
+    )
+
+
+def test_the_gate_measures_the_bytes_that_ship(tmp_path, trained, gate_dir, capsys):
+    pytest.importorskip("tilewright")
+    import stage05_train as s5
+    from lib import evaluate as ev
+    from lib.hardware import DeviceHardware
+
+    out = tmp_path / "out"
+    gate = s6.Gate(csv_dirs=[gate_dir], bootstrap=0)
+    assert deploy(trained, gate_cfg(tmp_path / "cfg.yaml"), out, gate=gate) == 0
+    rec = json.loads((out / "deploy_record.json").read_text())
+    assert rec["deployed"] is True and rec["gate"]["passed"] is True
+    measured = json.loads((out / "gate.json").read_text())
+    cells, _ = s5.load_enriched_chunks(str(gate_dir), True)
+    gemms = [g for gs in cells.values() for g in gs]
+    data = Path(rec["staged_model"]).read_bytes()
+    want = ev.evaluate_model(
+        data, gemms, hardware=DeviceHardware(**GATE_HW), pick_measurement="warmup"
+    ).summary()
+    assert measured["n_gemms"] == len(gemms) == 24
+    assert measured["sel_eff"] == pytest.approx(want["sel_eff"])
+    assert measured["n_miss"] == want["n_miss"] == rec["gate"]["n_miss"]
+    assert rec["gate"]["sel_eff"] == pytest.approx(want["sel_eff"])
+    assert sum(c["n_eval"] for c in measured["per_cell"].values()) == 24
+    assert set(measured["per_cell"]) <= set(LABELS) | {"Mid|Large|MidK|Bnone"}
+    for c in measured["per_cell"].values():
+        assert {"sel_eff_new", "origami_sel_eff_new", "paired_sel_eff_new"} <= set(c)
+    assert "origami" not in capsys.readouterr().out.lower()
+
+
+def test_the_gate_keeps_a_model_below_the_target_out(
+    tmp_path, trained, checkout, gate_dir
+):
+    pytest.importorskip("tilewright")
+    wd = weights_dir(checkout, "gfx950")
+    before = {p.name: p.read_bytes() for p in wd.iterdir()}
+    out = tmp_path / "out"
+    gate = s6.Gate(csv_dirs=[gate_dir], target=1.01, bootstrap=0)
+    cfg = gate_cfg(tmp_path / "cfg.yaml")
+    rc = deploy(trained, cfg, out, repo=checkout, apply_patch=True, gate=gate)
+    assert rc == 0
+    assert {p.name: p.read_bytes() for p in wd.iterdir()} == before
+    rec = json.loads((out / "deploy_record.json").read_text())
+    assert rec["deployed"] is False and rec["applied"] is False
+    assert "below the target" in rec["not_deployed"]
+    assert Path(rec["staged_model"]).is_file()
+    fallback = s6.Gate(csv_dirs=[gate_dir], target=1.01, fallback="not-worse")
+    out2 = tmp_path / "out2"
+    assert deploy(trained, cfg, out2, gate=fallback) == 0
+    rec = json.loads((out2 / "deploy_record.json").read_text())
+    assert rec["deployed"] and "no bundle was deployed before" in rec["gate"]["reason"]
+    same = s6.Gate(
+        csv_dirs=[gate_dir],
+        target=1.01,
+        fallback="not-worse",
+        baseline_train_dir=trained,
+    )
+    out3 = tmp_path / "out3"
+    assert deploy(trained, cfg, out3, gate=same) == 0
+    rec = json.loads((out3 / "deploy_record.json").read_text())
+    base = rec["gate"]["baseline"]
+    assert base["n"] == 24 and base["sel_eff"] == pytest.approx(base["bundle_sel_eff"])
+    assert rec["deployed"] and "not worse than the deployed bundle" in (
+        rec["gate"]["reason"]
+    )
+
+
+def test_a_gate_without_gemms_measures_nothing(tmp_path, trained):
+    pytest.importorskip("tilewright")
+    (tmp_path / "empty").mkdir()
+    gate = s6.Gate(csv_dirs=[tmp_path / "empty"], target=0.5)
+    out = tmp_path / "out"
+    assert deploy(trained, gate_cfg(tmp_path / "cfg.yaml"), out, gate=gate) == 0
+    rec = json.loads((out / "deploy_record.json").read_text())
+    assert rec["gate"]["n_gemms"] == 0 and rec["gate"]["sel_eff"] is None
+    assert rec["deployed"] is False and rec["not_deployed"] == "no gate GEMM measured"
+
+
+def test_gate_decision():
+    m = {"sel_eff": 0.9, "n_evaluated": 10}
+    gate = s6.Gate(csv_dirs=[], target=0.95)
+    assert s6.gate_decision(m, s6.Gate(csv_dirs=[])) == (True, "no target")
+    assert s6.gate_decision(dict(m, sel_eff=0.96), gate)[0]
+    assert s6.gate_decision(m, gate) == (
+        False,
+        "90.00% on the gate GEMMs is below the target",
+    )
+    assert not s6.gate_decision(dict(m, n_evaluated=0), gate)[0]
+    fb = s6.Gate(csv_dirs=[], target=0.95, fallback="not-worse")
+    assert s6.gate_decision(m, fb)[0]
+    fb.baseline_train_dir = Path("b")
+    worse = dict(m, baseline={"n": 10, "sel_eff": 0.92, "bundle_sel_eff": 0.9})
+    ok, why = s6.gate_decision(worse, fb)
+    assert not ok and "worse than the deployed bundle" in why
+    better = dict(m, baseline={"n": 10, "sel_eff": 0.88, "bundle_sel_eff": 0.9})
+    assert s6.gate_decision(better, fb)[0]
+    ok, why = s6.gate_decision(dict(m, baseline={"error": "x"}), fb)
+    assert not ok and "not comparable" in why
+
+
+def test_the_gate_needs_the_engine(tmp_path, trained, gate_dir, monkeypatch):
+    def missing():
+        raise RuntimeError("no module named tilewright")
+
+    monkeypatch.setattr(s6.ev, "tilewright_module", missing)
+    gate = s6.Gate(csv_dirs=[gate_dir])
+    cfg = gate_cfg(tmp_path / "cfg.yaml")
+    assert deploy(trained, cfg, tmp_path / "o", gate=gate) == 1
+    assert not (tmp_path / "o" / "deploy_record.json").exists()
+
+
+def test_the_external_reference_prints_only_on_request(
+    tmp_path, trained, gate_dir, capsys
+):
+    pytest.importorskip("tilewright")
+    from test_stage05_train import shapes_for, write_round
+
+    write_round(gate_dir, shapes_for(9, 6, ["Large|Large|LargeK|Bnone"]))
+    gate = s6.Gate(csv_dirs=[gate_dir], bootstrap=0)
+    cfg = gate_cfg(tmp_path / "cfg.yaml")
+    capsys.readouterr()
+    assert (
+        s6.deploy(train_dir=trained, config_yaml=cfg, out_dir=tmp_path / "a", gate=gate)
+        == 0
+    )
+    plain = capsys.readouterr().out
+    assert "[gate] model on" in plain and "origami" not in plain.lower()
+    assert (
+        s6.deploy(
+            train_dir=trained,
+            config_yaml=cfg,
+            out_dir=tmp_path / "b",
+            gate=gate,
+            origami_reference=True,
+        )
+        == 0
+    )
+    assert "[reference] Origami on the same" in capsys.readouterr().out
+
+
+def write_v3_bundle(d, labels, **extra):
+    import torch
+
+    from test_v3 import v3_bundle
+
+    from lib import features as fs
+
+    bundle = v3_bundle(labels=labels, clip=True, **extra)
+    q, i, x = fs.Catalog("v3", fs.DEFAULT_ATTRIBUTE_SPEC).names()
+    bundle.update(q_names=q, i_names=i, x_names=x)
+    for entry in bundle["models"].values():
+        entry["state_dict"] = {
+            k: torch.tensor(v) for k, v in entry["state_dict"].items()
+        }
+        entry["view_key_hashes"] = [7, 2**63 + 5]
+    d.mkdir(parents=True, exist_ok=True)
+    torch.save(bundle, d / "models.pt")
+    return bundle
+
+
+def test_deploys_a_v3_bundle(tmp_path):
+    from lib import features as fs
+
+    train = tmp_path / "v3" / "stage05"
+    write_v3_bundle(train, LABELS)
+    out = tmp_path / "out"
+    assert deploy(train, write_cfg(tmp_path / "cfg.yaml", dtype="bf16"), out) == 0
+    rec = json.loads((out / "deploy_record.json").read_text())
+    data = Path(rec["staged_model"]).read_bytes()
+    parsed = mlrec.read_model(data)
+    assert parsed["format"] == "MLREC_v3" and len(parsed["cells"]) == 3
+    assert all(c["view_key_hashes"] == [7, 2**63 + 5] for c in parsed["cells"])
+    manifest = json.loads((out / "manifest.json").read_text())
+    assert manifest["format"] == "MLREC_v3"
+    assert manifest["feature_spec_hash"] == (
+        f"{mlrec.feature_spec_hash(fs.DEFAULT_ATTRIBUTE_SPEC):016x}"
+    )
+    assert manifest["contexts"]["schedules"] == ["default", "dynamic"]
+    assert manifest["cells"][0]["n_view_keys"] == 2
+    install = (out / "staged_for_deploy" / "INSTALL.md").read_text()
+    assert "One MLREC_v3 model" in install
+    tw = pytest.importorskip("tilewright")
+    info = tw.describe(tw.load_model_from_memory(data))
+    assert info.format_version == 3 and info.n_cells == 3
+
+
+def test_a_v3_bundle_with_another_spec_is_refused(tmp_path):
+    train = tmp_path / "v3" / "stage05"
+    bundle = write_v3_bundle(train, LABELS)
+    import torch
+
+    bundle["attribute_spec"] = bundle["attribute_spec"] + [{"name": "param_a"}]
+    torch.save(bundle, train / "models.pt")
+    assert deploy(train, write_cfg(tmp_path / "cfg.yaml"), tmp_path / "o") == 1

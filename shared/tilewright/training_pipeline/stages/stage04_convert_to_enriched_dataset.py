@@ -5,9 +5,10 @@
 """stage04_convert_to_enriched_dataset -- hipblaslt-bench block logs ->
 chunked CSV of enriched training rows.
 
-Reads every `block_*.log` / `line*.log` in --log-dir: stage03's block logs,
-including its retry pass (`block_retry_gpuD.log`). The log format is
-described in lib/bench_log.py. Per problem:
+Reads every `block_*.log` / `line*.log` in each --log-dir (the option
+repeats): stage03's block logs, including its retry pass
+(`block_retry_gpuD.log`). The log format is described in lib/bench_log.py.
+Per problem:
 
   * Only complete problems are kept: the bench printed `Winner:` or reported
     every rank of `Is supported N`. A problem cut short by a crash would get a
@@ -26,7 +27,22 @@ described in lib/bench_log.py. Per problem:
     parameters keep their own rows and latencies.
   * is_winner marks the fastest tested row. is_origami_pick marks the tested
     row of rank 0, the library's own pick: the Origami ranking, because
-    training benches run with tilewright off (lib/bench_env.py).
+    training benches run with tilewright off (lib/bench_env.py). GEMMs of a
+    --plan were benched in the planner's order, so none of their rows is
+    marked.
+  * cu_budget / schedule: the execution context the bench ran under
+    (--cu-budget, --schedule); 0 / default, or the columns' absence in older
+    CSVs, mean exclusive use of the device. --context-log-dir BUDGET SCHEDULE
+    DIR reads DIR's logs as benched under that context instead, so one run
+    enriches the logs of several contexts (each (shape, context) is its own
+    GEMM downstream); --context-plan BUDGET SCHEDULE PLAN gives a context
+    its own plan instead of --plan.
+  * With --plan (stage01b's plan.json), per GEMM of the plan: is_planned is 1
+    for a solution on its kernel list and n_planned is the list length; a
+    GEMM benched exhaustively (no list) or outside the plan gets is_planned 1
+    and an empty n_planned, as does every row without --plan.
+  * --extra-library-stem adds libraries whose rows are kept as well (the
+    planner's bank kernels); kernels.json still names --library-stem.
 
 Output in --out-dir (previous outputs are removed first):
   chunk_NNNN.csv        --rows-per-chunk rows each, columns OUT_FIELDS
@@ -63,6 +79,7 @@ from lib.dat import (  # noqa: E402
     write_kernel_attributes,
 )
 from lib.fs import write_json  # noqa: E402
+from lib.planner import ShapeKey, plan_lookup  # noqa: E402
 
 # Bench columns kept, by header name.
 DATA_FIELDS = [
@@ -116,6 +133,9 @@ CONFIG_FIELDS = [
     "grvw_b",
     "gwvw_d",
 ]
+CONTEXT_FIELDS = ["cu_budget", "schedule"]
+SCHEDULES = ("default", "dynamic", "auto")
+PLAN_FIELDS = ["is_planned", "n_planned"]
 OUT_FIELDS = (
     [
         "is_winner",
@@ -128,6 +148,8 @@ OUT_FIELDS = (
     + DATA_FIELDS
     + NOISE_FIELDS
     + CONFIG_FIELDS
+    + CONTEXT_FIELDS
+    + PLAN_FIELDS
 )
 
 _MT_NAME_RE = re.compile(r"_MT(\d+)x(\d+)x(\d+)_")
@@ -191,8 +213,20 @@ def _blank_if_none(v: Any) -> Any:
     return "" if v is None else v
 
 
+def _plan_entry(
+    prob: Problem, plan: Optional[Dict[ShapeKey, Dict[str, Any]]]
+) -> Optional[Dict[str, Any]]:
+    if not plan:
+        return None
+    shape = prob.shape()
+    return plan.get(shape) if shape is not None else None
+
+
 def problem_rows(
-    prob: Problem, enricher: Enricher, counters: Counter
+    prob: Problem,
+    enricher: Enricher,
+    counters: Counter,
+    plan: Optional[Dict[ShapeKey, Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """Enriched rows of one complete problem."""
     base = next((t.fields for t in prob.tested if t.fields), None)
@@ -200,6 +234,19 @@ def problem_rows(
         counters["problems_without_tested_row"] += 1
         return []
     problem_cols = {f: base.get(f, "") for f in PROBLEM_FIELDS}
+    entry = _plan_entry(prob, plan)
+    listed: Optional[Set[int]] = None
+    if entry is not None and entry.get("kernels") is not None:
+        listed = {int(s) for s in entry["kernels"]}
+    n_planned = "" if listed is None else len(listed)
+    rank0_is_origami = entry is None
+
+    def plan_cols(sol_index: int) -> Dict[str, Any]:
+        planned = listed is None or int(sol_index) in listed
+        if not planned:
+            counters["rows_unplanned"] += 1
+        return {"is_planned": 1 if planned else 0, "n_planned": n_planned}
+
     rows: List[Dict[str, Any]] = []
     for t in prob.tested:
         if t.sol_index is None:
@@ -214,12 +261,13 @@ def problem_rows(
         row.update(
             is_winner="False",
             is_skip="False",
-            is_origami_pick=1 if t.rank == 0 else 0,
+            is_origami_pick=1 if (rank0_is_origami and t.rank == 0) else 0,
             rank=t.rank,
             sol_idx_global=t.sol_index,
             sol_idx_local=_blank_if_none(cfg.get("sol_idx_local")),
         )
         row.update({f: cfg[f] for f in CONFIG_FIELDS})
+        row.update(plan_cols(t.sol_index))
         rows.append(row)
     for s in prob.skipped:
         if s.sol_index is None:
@@ -247,6 +295,7 @@ def problem_rows(
             }
         )
         row.update({f: cfg[f] for f in CONFIG_FIELDS})
+        row.update(plan_cols(s.sol_index))
         rows.append(row)
     rows.sort(key=lambda r: int(r["rank"]))
     tested = [r for r in rows if r["is_skip"] == "False" and _us_value(r)]
@@ -254,6 +303,8 @@ def problem_rows(
         counters["problems_without_measured_tested_row"] += 1
         return []
     min(tested, key=_us_value)["is_winner"] = "True"
+    if entry is not None:
+        counters["gemms_in_plan"] += 1
     return rows
 
 
@@ -263,6 +314,7 @@ def process_log_file(
     counters: Counter,
     stats: LogStats,
     max_problems: Optional[int] = None,
+    plan: Optional[Dict[ShapeKey, Dict[str, Any]]] = None,
 ) -> Tuple[List[Dict[str, Any]], int]:
     """Enriched rows of every complete problem in one log, and the number of
     problems that produced rows (at most `max_problems`)."""
@@ -282,7 +334,7 @@ def process_log_file(
                     )
                 ] += 1
                 continue
-            rows = problem_rows(prob, enricher, counters)
+            rows = problem_rows(prob, enricher, counters, plan)
             if not rows:
                 counters["problems_without_rows"] += 1
                 continue
@@ -371,12 +423,54 @@ class _ColumnCheck:
 # ── main ─────────────────────────────────────────────────────────────────────
 
 
+def _context_arg(values: List[str]) -> Tuple[str, int, str]:
+    """(path, cu_budget, schedule) of a --context-log-dir / --context-plan
+    value (CU_BUDGET SCHEDULE PATH)."""
+    budget, schedule, path = values
+    try:
+        b = int(budget)
+    except ValueError:
+        raise ValueError(f"cu budget {budget!r} is not an integer") from None
+    if b < 0:
+        raise ValueError(f"cu budget {b} must be >= 0")
+    if schedule not in SCHEDULES:
+        raise ValueError(f"schedule {schedule!r} is not one of {SCHEDULES}")
+    return path, b, schedule
+
+
+def _read_plan(path: str) -> Dict[ShapeKey, Dict[str, Any]]:
+    with open(path) as f:
+        return plan_lookup(json.load(f))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="hipblaslt-bench block logs -> chunked enriched CSV folder",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    ap.add_argument("--log-dir", required=True, help="directory with block_*.log")
+    ap.add_argument(
+        "--log-dir",
+        action="append",
+        default=[],
+        help="directory with block_*.log; repeat to read several",
+    )
+    ap.add_argument(
+        "--context-log-dir",
+        nargs=3,
+        action="append",
+        default=[],
+        metavar=("CU_BUDGET", "SCHEDULE", "DIR"),
+        help="directory with block_*.log benched under this execution "
+        "context (repeatable)",
+    )
+    ap.add_argument(
+        "--context-plan",
+        nargs=3,
+        action="append",
+        default=[],
+        metavar=("CU_BUDGET", "SCHEDULE", "PLAN"),
+        help="plan.json of one context's benches, instead of --plan " "(repeatable)",
+    )
     ap.add_argument("--out-dir", required=True, help="output dir for chunk_NNNN.csv")
     ap.add_argument(
         "--dat-dir",
@@ -400,6 +494,31 @@ def main() -> int:
         "are loaded (the gfx1250 MX and non-MX F8 TN libraries share one "
         "dtype/layout); with it, a conflicting library is an error.",
     )
+    ap.add_argument(
+        "--cu-budget",
+        type=int,
+        default=0,
+        help="CUs the benched kernels could use (0: every CU)",
+    )
+    ap.add_argument(
+        "--schedule",
+        choices=SCHEDULES,
+        default="default",
+        help="tile scheduling the bench requested",
+    )
+    ap.add_argument(
+        "--extra-library-stem",
+        action="append",
+        default=[],
+        help="with --library-stem: also keep rows of this library's solutions "
+        "(repeatable)",
+    )
+    ap.add_argument(
+        "--plan",
+        default=None,
+        help="stage01b plan.json: fill is_planned / n_planned and leave "
+        "is_origami_pick unset for its GEMMs",
+    )
     ap.add_argument("--rows-per-chunk", type=int, default=10_000)
     ap.add_argument(
         "--max-gemms",
@@ -412,27 +531,62 @@ def main() -> int:
     )
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args()
+    if args.cu_budget < 0:
+        ap.error("--cu-budget must be >= 0")
+    if not args.log_dir and not args.context_log_dir:
+        ap.error("give --log-dir or --context-log-dir")
+    try:
+        log_sources = [(d, args.cu_budget, args.schedule) for d in args.log_dir]
+        log_sources += [_context_arg(v) for v in args.context_log_dir]
+        context_plans = {_context_arg(v)[1:]: v[2] for v in args.context_plan}
+    except ValueError as e:
+        ap.error(str(e))
+    context = {"cu_budget": args.cu_budget, "schedule": args.schedule}
 
     t0 = time.time()
     if not args.quiet:
         ui.banner("hipblaslt-bench logs  ->  enriched chunked CSV")
         ui.info("cfg", f"log_dir        : {args.log_dir}")
+        for budget, schedule, d in args.context_log_dir:
+            ui.info("cfg", f"context logs   : {budget}/{schedule} {d}")
         ui.info("cfg", f"out_dir        : {args.out_dir}")
         ui.info("cfg", f"dat_dir        : {args.dat_dir}")
         ui.info("cfg", f"library_stem   : {args.library_stem}")
+        if args.extra_library_stem:
+            ui.info("cfg", f"extra stems    : {args.extra_library_stem}")
+        if args.plan:
+            ui.info("cfg", f"plan           : {args.plan}")
         ui.info("cfg", f"scale_mode     : {args.scale_mode}")
         ui.info("cfg", f"rows_per_chunk : {args.rows_per_chunk:,}")
+        ui.info("cfg", f"context        : {context}")
 
-    if not os.path.isdir(args.log_dir):
-        ui.err("err", f"--log-dir does not exist: {args.log_dir}")
-        return 1
-    log_files = sorted(
-        f
-        for f in os.listdir(args.log_dir)
-        if f.endswith(".log") and (f.startswith("block_") or f.startswith("line"))
-    )
+    log_files: List[str] = []
+    file_context: Dict[str, Tuple[int, str]] = {}
+    for log_dir, budget, schedule in log_sources:
+        if not os.path.isdir(log_dir):
+            ui.err("err", f"log directory does not exist: {log_dir}")
+            return 1
+        for f in sorted(os.listdir(log_dir)):
+            if f.endswith(".log") and (f.startswith("block_") or f.startswith("line")):
+                path = os.path.join(log_dir, f)
+                log_files.append(path)
+                file_context[path] = (budget, schedule)
     if not log_files:
-        ui.err("err", f"no block_*.log files in {args.log_dir}")
+        dirs = ", ".join(d for d, _, _ in log_sources)
+        ui.err("err", f"no block_*.log files in {dirs}")
+        return 1
+    if args.extra_library_stem and not args.library_stem:
+        ui.err("err", "--extra-library-stem needs --library-stem")
+        return 1
+    plan: Optional[Dict[ShapeKey, Dict[str, Any]]] = None
+    plans_by_context: Dict[Tuple[int, str], Dict[ShapeKey, Dict[str, Any]]] = {}
+    try:
+        if args.plan:
+            plan = _read_plan(args.plan)
+        for ctx_key, path in context_plans.items():
+            plans_by_context[ctx_key] = _read_plan(path)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        ui.err("err", f"cannot read a plan: {exc}")
         return 1
 
     try:
@@ -453,6 +607,14 @@ def main() -> int:
         index = load_kernel_index(
             args.dat_dir, library_stem=args.library_stem, scale_mode=args.scale_mode
         )
+        for stem in args.extra_library_stem:
+            extra = load_kernel_index(args.dat_dir, library_stem=stem)
+            index.files += extra.files
+            for sid, info in extra.by_index.items():
+                if sid in index.by_index:
+                    index.duplicate_indices += 1
+                else:
+                    index.by_index[sid] = info
     except (FileNotFoundError, ValueError) as exc:
         ui.err("err", str(exc))
         return 1
@@ -503,22 +665,28 @@ def main() -> int:
     written: Set[int] = set()
     last_progress = time.time()
     total_kept = 0
+    gemms_by_context: Counter = Counter()
     try:
-        for i, fname in enumerate(log_files, 1):
+        for i, path in enumerate(log_files, 1):
+            fname = os.path.basename(path)
             remaining = (
                 None if args.max_gemms is None else max(0, args.max_gemms - total_kept)
             )
             if remaining == 0:
                 break
             t_file = time.time()
+            budget, schedule = file_context[path]
             rows, kept = process_log_file(
-                os.path.join(args.log_dir, fname),
+                path,
                 enricher,
                 counters,
                 stats,
                 max_problems=remaining,
+                plan=plans_by_context.get((budget, schedule), plan),
             )
+            gemms_by_context[f"{budget}/{schedule}"] += kept
             for r in rows:
+                r.update({"cu_budget": budget, "schedule": schedule})
                 writer.write(r)
                 columns.add(r)
                 written.add(int(r["sol_idx_global"]))
@@ -548,10 +716,14 @@ def main() -> int:
     summary = {
         "log_files": len(log_files),
         "library_stem": args.library_stem,
+        "extra_library_stems": args.extra_library_stem,
+        "plan": args.plan,
         "library_files": index.files,
         "invalid_library_files": index.invalid,
         "n_library_solutions": len(index.by_index),
         "missing_size_mapping_keys": index.missing_keys,
+        "context": context,
+        "gemms_by_context": dict(sorted(gemms_by_context.items())),
         "gemms": total_kept,
         "rows": total_rows,
         "chunks": n_chunks,

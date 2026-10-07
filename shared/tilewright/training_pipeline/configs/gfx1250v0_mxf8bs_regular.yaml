@@ -99,8 +99,9 @@ deploy:
   stop_when_target_reached: false
   weight_dtype: int8
   rocm_libraries_to_deploy: ${TILEWRIGHT_DEPLOY_ROOT}
-  # One model serves the library of every directory listed here.
-  targets: [gfx1250v0, gfx1250]
+  # One model serves the library of every directory listed here; the
+  # gfx1250-strict tree holds the library gfx1250v0 is built from.
+  targets: [gfx1250v0, gfx1250, gfx1250-strict]
   apply_patch: true
   build_after_apply: true
   build_jobs: null

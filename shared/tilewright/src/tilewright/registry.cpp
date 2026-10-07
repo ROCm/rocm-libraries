@@ -11,6 +11,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <mutex>
 #include <new>
 #include <sstream>
@@ -28,8 +29,9 @@ bool flag_set(const char* name) {
   return v != nullptr && v[0] != '\0' && std::strcmp(v, "0") != 0;
 }
 
-long long cell_override() {
-  const char* v = std::getenv("TILEWRIGHT_FORCE_CELL");
+// A whole non-negative decimal number, else -1.
+long long count_knob(const char* name) {
+  const char* v = std::getenv(name);
   if (v == nullptr || v[0] == '\0') return -1;
   errno               = 0;
   char* end           = nullptr;
@@ -56,9 +58,9 @@ void diag_loaded(const Model& m) {
                m.path.c_str(),
                m.arch.c_str(),
                m.feature_hash.c_str(),
-               m.catalog->query_dim,
-               m.catalog->item_dim,
-               m.catalog->inter_dim,
+               m.query_dim,
+               m.item_dim,
+               m.inter_dim,
                m.cells.size(),
                m.splits.size(),
                weight_type_name(m.weight_type));
@@ -128,7 +130,8 @@ std::shared_ptr<const Model> read_model_file(const std::string& path, std::strin
     *error = path + ": read error";
     return nullptr;
   }
-  if (head_size < sizeof head || std::memcmp(head, "MLREC_v2", 8) != 0)
+  if (head_size < sizeof head ||
+      (std::memcmp(head, "MLREC_v2", 8) != 0 && std::memcmp(head, "MLREC_v3", 8) != 0))
     return parse_image(head, head_size, path, error);
   std::uint64_t header_size = 0, payload_size = 0;
   for (int b = 3; b >= 0; --b) header_size = (header_size << 8) | head[12 + b];
@@ -168,7 +171,12 @@ const EnvKnobs& env_knobs() noexcept {
     EnvKnobs k;
     k.diag       = flag_set("TILEWRIGHT_DIAG");
     k.pick_log   = flag_set("TILEWRIGHT_PICK_LOG");
-    k.force_cell = cell_override();
+    k.force_cell = count_knob("TILEWRIGHT_FORCE_CELL");
+    // Values whose bytes do not fit a size_t count as unset.
+    const long long mib = count_knob("TILEWRIGHT_CACHE_MB");
+    if (mib >= 0 &&
+        static_cast<unsigned long long>(mib) <= (std::numeric_limits<std::size_t>::max() >> 20))
+      k.cache_mib = mib;
     return k;
   }();
   return knobs;

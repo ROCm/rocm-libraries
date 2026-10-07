@@ -121,3 +121,59 @@ def test_missing_probe_keys_fail(tmp_path, monkeypatch):
     argv += ["--config-yaml", cfg, "--bench-binary", tmp_path, "--quiet"]
     monkeypatch.setattr(sys, "argv", [str(a) for a in argv])
     assert s02.main() == 1
+
+
+def _plan_file(path, probes):
+    shapes = [
+        {"m": g.m, "n": g.n, "k": g.k, "batch": g.batch, "probe": p} for g, p in probes
+    ]
+    path.write_text(json.dumps({"version": 1, "shapes": shapes}))
+    return path
+
+
+def test_planned_probe_lines_time_the_plan_kernels(tmp_path):
+    listed = bench_line(GEMMS[0]).replace(
+        "}", ", solution_index_list: [7, 8, 9], skip_screen_prepass: true}"
+    )
+    exhaustive = bench_line(GEMMS[1]).replace(
+        "}", ", algo_method: 1, skip_screen_prepass: true}"
+    )
+    lines = [listed, exhaustive, bench_line(GEMMS[2])]
+    probes = s02.load_plan_probes(
+        _plan_file(tmp_path / "plan.json", [(GEMMS[0], [8, 7]), (GEMMS[1], [5])])
+    )
+    per_dev, _ = s02._build_probe_yamls(lines, [0], 5, 5, 3, 3, probes)
+    a, b, c = per_dev[0]
+    assert "solution_index_list: [8, 7]" in a and "[7, 8, 9]" not in a
+    assert "solution_index_list: [5]" in b
+    assert "skip_slow_solution_ratio: 0" in a and "skip_screen_prepass" not in a
+    # No probe kernels for this shape: library order, never the heuristic.
+    assert "algo_method: 1" in c and "requested_solution_num: 3" in c
+    assert "solution_index_list" not in c
+    plain, _ = s02._build_probe_yamls(lines, [0], 5, 5, 3, 3)
+    assert "solution_index_list: [7, 8, 9]" in plain[0][0]
+
+
+def test_planned_probe_keeps_the_bench_lines(tmp_path, monkeypatch):
+    in_dir = tmp_path / "stage01b"
+    in_dir.mkdir()
+    listed = bench_line(GEMMS[0]).replace(
+        "}", ", solution_index_list: [7, 8, 9], skip_screen_prepass: true}"
+    )
+    exhaustive = bench_line(GEMMS[2]).replace(
+        "}", ", algo_method: 1, skip_screen_prepass: true}"
+    )
+    (in_dir / "shapes.yaml").write_text(listed + "\n" + exhaustive + "\n")
+    plan = _plan_file(in_dir / "plan.json", [(GEMMS[0], [8]), (GEMMS[2], [1, 2])])
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(yaml.safe_dump({"probe": PROBE}))
+    out = tmp_path / "stage02"
+    argv = ["stage02", "--in-dir", in_dir, "--out-dir", out, "--config-yaml", cfg]
+    argv += ["--bench-binary", write_fake_bench(tmp_path), "--devices", "0"]
+    argv += ["--plan", plan, "--quiet"]
+    monkeypatch.setattr(sys, "argv", [str(a) for a in argv])
+    assert s02.main() == 0
+    a, b = read_bench_lines(out / "shapes_probed.yaml")
+    assert "solution_index_list: [7, 8, 9]" in a and "skip_screen_prepass: true" in a
+    assert "algo_method: 1" in b and "solution_index_list" not in b
+    assert "skip_slow_solution_ratio: 0.3" in a

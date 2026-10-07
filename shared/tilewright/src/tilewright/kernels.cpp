@@ -6,8 +6,11 @@
 
 #include "kernels.hpp"
 
+#include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <initializer_list>
+#include <vector>
 
 // __builtin_cpu_supports needs compiler-rt's CPU model, which MSVC-target links
 // do not provide; Windows uses the scalar kernels.
@@ -55,6 +58,45 @@ void linear_scalar(const float* W,
   }
 }
 
+float block_at(const BlockWeights& W, std::size_t e) {
+  switch (W.type) {
+    case BlockWeights::Type::F32: return static_cast<const float*>(W.data)[e];
+    case BlockWeights::Type::Bf16: {
+      const std::uint32_t bits =
+          static_cast<std::uint32_t>(static_cast<const std::uint16_t*>(W.data)[e]) << 16;
+      float v;
+      std::memcpy(&v, &bits, sizeof v);
+      return v;
+    }
+    case BlockWeights::Type::Int8:
+      return W.scale * static_cast<float>(static_cast<const std::int8_t*>(W.data)[e]);
+  }
+  return 0.0f;
+}
+
+// One row at a time through an fp32 kernel, whose rows do not depend on how
+// many it is given.
+template <
+    void (*Linear)(const float*, const float*, const float*, std::size_t, std::size_t, float*),
+    float (*Dot)(const float*, const float*, std::size_t)>
+void linear_block_rows(const BlockWeights& W,
+                       const float* b,
+                       const float* x,
+                       std::size_t m,
+                       std::size_t k,
+                       float* out) {
+  thread_local std::vector<float> row;
+  row.resize(k);
+  for (std::size_t i = 0; i < m; ++i) {
+    const std::size_t base = (i / 16) * k * 16 + i % 16;
+    for (std::size_t j = 0; j < k; ++j) row[j] = block_at(W, base + j * 16);
+    if (b == nullptr)
+      out[i] = Dot(row.data(), x, k);
+    else
+      Linear(row.data(), b + i, x, 1, k, out + i);
+  }
+}
+
 float dot_scalar(const float* a, const float* b, std::size_t n) {
   const std::size_t nv = n & ~static_cast<std::size_t>(15);
   float acc[16]        = {};
@@ -97,11 +139,29 @@ void interaction_batch_scalar(const float* W,
   }
 }
 
+void whiten_batch_scalar(float* X,
+                         const float* mean,
+                         const float* scale,
+                         const float* lo,
+                         const float* hi,
+                         std::size_t k) {
+  for (std::size_t j = 0; j < k; ++j) {
+    float* row = X + j * kBatch;
+    for (std::size_t c = 0; c < kBatch; ++c) {
+      const float v = lo != nullptr ? std::min(std::max(row[c], lo[j]), hi[j]) : row[c];
+      row[c]        = (v - mean[j]) / scale[j];
+    }
+  }
+}
+
 const Kernels kScalar = {Isa::Scalar,
                          &linear_scalar<false>,
                          &linear_scalar<true>,
+                         &linear_block_rows<&linear_scalar<false>, &dot_scalar>,
+                         &linear_block_rows<&linear_scalar<true>, &dot_scalar>,
                          &dot_scalar,
-                         &interaction_batch_scalar};
+                         &interaction_batch_scalar,
+                         &whiten_batch_scalar};
 
 #if TILEWRIGHT_X86_DISPATCH
 
@@ -195,6 +255,8 @@ TILEWRIGHT_AVX2 float dot_avx2(const float* a, const float* b, std::size_t n) {
   return s;
 }
 
+// Rows are processed eight, then four at a time for instruction-level
+// parallelism; each row's arithmetic is the same as in the one-row loop.
 template <bool Relu>
 TILEWRIGHT_AVX512 void linear_avx512(const float* W,
                                      const float* b,
@@ -204,6 +266,22 @@ TILEWRIGHT_AVX512 void linear_avx512(const float* W,
                                      float* out) {
   const std::size_t kv = k & ~static_cast<std::size_t>(15);
   std::size_t i        = 0;
+  for (; i + 8 <= m; i += 8) {
+    const float* w = W + i * k;
+    __m512 a[8];
+    for (int r = 0; r < 8; ++r) a[r] = _mm512_setzero_ps();
+    for (std::size_t j = 0; j < kv; j += 16) {
+      const __m512 xv = _mm512_loadu_ps(x + j);
+      for (int r = 0; r < 8; ++r) a[r] = _mm512_fmadd_ps(_mm512_loadu_ps(w + r * k + j), xv, a[r]);
+    }
+    float v[8];
+    for (int r = 0; r < 8; ++r) v[r] = b[i + r] + reduce_avx512(a[r]);
+    for (std::size_t j = kv; j < k; ++j) {
+      const float xj = x[j];
+      for (int r = 0; r < 8; ++r) v[r] = v[r] + w[r * k + j] * xj;
+    }
+    for (int r = 0; r < 8; ++r) out[i + r] = finish<Relu>(v[r]);
+  }
   for (; i + 4 <= m; i += 4) {
     const float* w0 = W + i * k;
     const float* w1 = w0 + k;
@@ -244,6 +322,82 @@ TILEWRIGHT_AVX512 void linear_avx512(const float* W,
   }
 }
 
+// Entries e .. e + 15 of a BlockWeights matrix: one column of a block.
+struct F32Blocks {
+  const float* p;
+  TILEWRIGHT_AVX512 __m512 v(std::size_t e) const { return _mm512_loadu_ps(p + e); }
+};
+
+struct Bf16Blocks {
+  const std::uint16_t* p;
+  TILEWRIGHT_AVX512 __m512 v(std::size_t e) const {
+    const __m256i h = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p + e));
+    return _mm512_castsi512_ps(_mm512_slli_epi32(_mm512_cvtepu16_epi32(h), 16));
+  }
+};
+
+struct Int8Blocks {
+  const std::int8_t* p;
+  float scale;
+  TILEWRIGHT_AVX512 __m512 v(std::size_t e) const {
+    const __m128i q = _mm_loadu_si128(reinterpret_cast<const __m128i*>(p + e));
+    return _mm512_mul_ps(_mm512_set1_ps(scale), _mm512_cvtepi32_ps(_mm512_cvtepi8_epi32(q)));
+  }
+};
+
+// One block of 16 rows per vector, lane r holding row r: accumulator l takes
+// the columns j = l mod 16 in order, the accumulators are summed in the
+// reduce16 order, then the bias (if any) and the remaining columns are
+// added, so each lane has the arithmetic of its row in the row kernels.
+template <bool Relu, class Blocks>
+TILEWRIGHT_AVX512 void linear_blocks_avx512_t(const Blocks& w,
+                                              const float* b,
+                                              const float* x,
+                                              std::size_t m,
+                                              std::size_t k,
+                                              float* out) {
+  const std::size_t kv = k & ~static_cast<std::size_t>(15);
+  for (std::size_t i = 0; i < m; i += 16) {
+    const std::size_t rows = m - i < 16 ? m - i : 16;
+    const __mmask16 mask   = static_cast<__mmask16>((1u << rows) - 1u);
+    const std::size_t base = i * k;
+    __m512 a[16];
+    for (int l = 0; l < 16; ++l) a[l] = _mm512_setzero_ps();
+    for (std::size_t j = 0; j < kv; j += 16)
+      for (int l = 0; l < 16; ++l)
+        a[l] = _mm512_fmadd_ps(w.v(base + (j + l) * 16), _mm512_set1_ps(x[j + l]), a[l]);
+    for (int l = 0; l < 8; ++l) a[l] = _mm512_add_ps(a[l], a[l + 8]);
+    for (int l = 0; l < 4; ++l) a[l] = _mm512_add_ps(a[l], a[l + 4]);
+    __m512 v = _mm512_add_ps(_mm512_add_ps(a[0], a[2]), _mm512_add_ps(a[1], a[3]));
+    if (b != nullptr) v = _mm512_add_ps(_mm512_maskz_loadu_ps(mask, b + i), v);
+    for (std::size_t j = kv; j < k; ++j)
+      v = _mm512_add_ps(v, _mm512_mul_ps(w.v(base + j * 16), _mm512_set1_ps(x[j])));
+    // max(v, 0) is 0 for NaN and -0, as finish<true> is.
+    if (Relu) v = _mm512_max_ps(v, _mm512_setzero_ps());
+    _mm512_mask_storeu_ps(out + i, mask, v);
+  }
+}
+
+template <bool Relu>
+TILEWRIGHT_AVX512 void linear_blocks_avx512(const BlockWeights& W,
+                                            const float* b,
+                                            const float* x,
+                                            std::size_t m,
+                                            std::size_t k,
+                                            float* out) {
+  switch (W.type) {
+    case BlockWeights::Type::F32:
+      return linear_blocks_avx512_t<Relu>(
+          F32Blocks{static_cast<const float*>(W.data)}, b, x, m, k, out);
+    case BlockWeights::Type::Bf16:
+      return linear_blocks_avx512_t<Relu>(
+          Bf16Blocks{static_cast<const std::uint16_t*>(W.data)}, b, x, m, k, out);
+    case BlockWeights::Type::Int8:
+      return linear_blocks_avx512_t<Relu>(
+          Int8Blocks{static_cast<const std::int8_t*>(W.data), W.scale}, b, x, m, k, out);
+  }
+}
+
 TILEWRIGHT_AVX512 float dot_avx512(const float* a, const float* b, std::size_t n) {
   const std::size_t nv = n & ~static_cast<std::size_t>(15);
   __m512 acc           = _mm512_setzero_ps();
@@ -279,6 +433,26 @@ TILEWRIGHT_AVX2 inline __m256 lane_dot_avx2(const float* w,
   for (std::size_t j = nv; j < n; ++j)
     v = _mm256_add_ps(v, _mm256_mul_ps(_mm256_set1_ps(w[j]), _mm256_loadu_ps(rows + j * kBatch)));
   return v;
+}
+
+// std::max(v, lo) is lo > v ? lo : v, and std::min(v, hi) is hi < v ? hi : v,
+// which _mm*_max_ps(lo, v) and _mm*_min_ps(hi, v) return.
+TILEWRIGHT_AVX2 void whiten_batch_avx2(float* X,
+                                       const float* mean,
+                                       const float* scale,
+                                       const float* lo,
+                                       const float* hi,
+                                       std::size_t k) {
+  for (std::size_t j = 0; j < k; ++j) {
+    float* row      = X + j * kBatch;
+    const __m256 mu = _mm256_set1_ps(mean[j]), sd = _mm256_set1_ps(scale[j]);
+    for (std::size_t c = 0; c < kBatch; c += 8) {
+      __m256 v = _mm256_loadu_ps(row + c);
+      if (lo != nullptr)
+        v = _mm256_min_ps(_mm256_set1_ps(hi[j]), _mm256_max_ps(_mm256_set1_ps(lo[j]), v));
+      _mm256_storeu_ps(row + c, _mm256_div_ps(_mm256_sub_ps(v, mu), sd));
+    }
+  }
 }
 
 TILEWRIGHT_AVX2 void interaction_batch_avx2(const float* W,
@@ -371,6 +545,68 @@ TILEWRIGHT_AVX512 inline void lane_dot2_avx512(const float* w0,
   *v1 = r1;
 }
 
+TILEWRIGHT_AVX512 void whiten_batch_avx512(float* X,
+                                           const float* mean,
+                                           const float* scale,
+                                           const float* lo,
+                                           const float* hi,
+                                           std::size_t k) {
+  for (std::size_t j = 0; j < k; ++j) {
+    float* row = X + j * kBatch;
+    __m512 v   = _mm512_loadu_ps(row);
+    if (lo != nullptr)
+      v = _mm512_min_ps(_mm512_set1_ps(hi[j]), _mm512_max_ps(_mm512_set1_ps(lo[j]), v));
+    _mm512_storeu_ps(
+        row, _mm512_div_ps(_mm512_sub_ps(v, _mm512_set1_ps(mean[j])), _mm512_set1_ps(scale[j])));
+  }
+}
+
+// lane_dot2_avx512 of R rows, w + r * k for r < R, with the bias b[r] and
+// shared loads of `rows`; the remaining columns are added to the rows side by
+// side.
+template <int R>
+TILEWRIGHT_AVX512 inline void lane_dotn_avx512(const float* w,
+                                               std::size_t k,
+                                               const float* rows,
+                                               const float* b,
+                                               __m512* v) {
+  const std::size_t nv = k & ~static_cast<std::size_t>(15);
+  __m512 s[R][4];
+  for (std::size_t l = 0; l < 4; ++l) {
+    __m512 half[R];
+    for (std::size_t p = 0; p < 2; ++p) {
+      __m512 a0[R], a1[R];
+      for (int r = 0; r < R; ++r) a0[r] = a1[r] = _mm512_setzero_ps();
+      for (std::size_t j = 0; j < nv; j += 16) {
+        const std::size_t c0 = j + l + 4 * p, c1 = c0 + 8;
+        const __m512 x0 = _mm512_loadu_ps(rows + c0 * kBatch);
+        const __m512 x1 = _mm512_loadu_ps(rows + c1 * kBatch);
+        for (int r = 0; r < R; ++r) {
+          a0[r] = _mm512_fmadd_ps(_mm512_set1_ps(w[r * k + c0]), x0, a0[r]);
+          a1[r] = _mm512_fmadd_ps(_mm512_set1_ps(w[r * k + c1]), x1, a1[r]);
+        }
+      }
+      for (int r = 0; r < R; ++r) {
+        const __m512 t = _mm512_add_ps(a0[r], a1[r]);
+        if (p == 0)
+          half[r] = t;
+        else
+          s[r][l] = _mm512_add_ps(half[r], t);
+      }
+    }
+  }
+  for (int r = 0; r < R; ++r) {
+    const __m512 t =
+        _mm512_add_ps(_mm512_add_ps(s[r][0], s[r][2]), _mm512_add_ps(s[r][1], s[r][3]));
+    v[r] = _mm512_add_ps(_mm512_set1_ps(b[r]), t);
+  }
+  for (std::size_t j = nv; j < k; ++j) {
+    const __m512 x = _mm512_loadu_ps(rows + j * kBatch);
+    for (int r = 0; r < R; ++r)
+      v[r] = _mm512_add_ps(v[r], _mm512_mul_ps(_mm512_set1_ps(w[r * k + j]), x));
+  }
+}
+
 TILEWRIGHT_AVX512 void interaction_batch_avx512(const float* W,
                                                 const float* b,
                                                 const float* w2,
@@ -380,7 +616,14 @@ TILEWRIGHT_AVX512 void interaction_batch_avx512(const float* W,
                                                 std::size_t nc,
                                                 float* hidden,
                                                 float* out) {
-  std::size_t i = 0;
+  constexpr int kRows = 8;
+  std::size_t i       = 0;
+  for (; i + kRows <= m; i += kRows) {
+    __m512 v[kRows];
+    lane_dotn_avx512<kRows>(W + i * k, k, X, b + i, v);
+    for (int r = 0; r < kRows; ++r)
+      _mm512_storeu_ps(hidden + (i + r) * kBatch, _mm512_max_ps(v[r], _mm512_setzero_ps()));
+  }
   for (; i + 2 <= m; i += 2) {
     __m512 v0, v1;
     lane_dot2_avx512(W + i * k, W + (i + 1) * k, X, k, b[i], b[i + 1], &v0, &v1);
@@ -398,13 +641,19 @@ TILEWRIGHT_AVX512 void interaction_batch_avx512(const float* W,
 const Kernels kAvx2   = {Isa::Avx2,
                          &linear_avx2<false>,
                          &linear_avx2<true>,
+                         &linear_block_rows<&linear_avx2<false>, &dot_avx2>,
+                         &linear_block_rows<&linear_avx2<true>, &dot_avx2>,
                          &dot_avx2,
-                         &interaction_batch_avx2};
+                         &interaction_batch_avx2,
+                         &whiten_batch_avx2};
 const Kernels kAvx512 = {Isa::Avx512,
                          &linear_avx512<false>,
                          &linear_avx512<true>,
+                         &linear_blocks_avx512<false>,
+                         &linear_blocks_avx512<true>,
                          &dot_avx512,
-                         &interaction_batch_avx512};
+                         &interaction_batch_avx512,
+                         &whiten_batch_avx512};
 
 bool cpu_supports(Isa isa) {
   __builtin_cpu_init();
