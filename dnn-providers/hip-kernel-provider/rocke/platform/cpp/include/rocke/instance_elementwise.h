@@ -8,7 +8,7 @@
  * Emits a single AMDGPU kernel that walks one contiguous N-element tensor with
  * vectorised global loads/stores and applies a fused unary or binary operation
  * per element. Compute is f32 internally for f16 or bf16 I/O; f64 I/O computes
- * natively (exact ops only, vec=2).
+ * in f64 (native f64 ops only, vec=2).
  *
  *   Python (elementwise.py)               C99 (this header)
  *   -----------------------------------   --------------------------------------

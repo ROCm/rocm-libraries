@@ -100,7 +100,7 @@ zero_vec(elem, n)          # f32 / f16 / bf16
 ```text
 add, sub, mul, div, mod                    # integer arithmetic
 fadd, fsub, fmul, fdiv, fneg               # f32 arithmetic
-fmax, fmin                                 # llvm.maxnum / llvm.minnum (f32/f16/bf16/f64)
+fmax, fmin                                 # llvm.maxnum / llvm.minnum (f32/f64/f16/bf16)
 fcmp(pred, a, b)                           # pred in {olt,ole,ogt,oge,oeq,one,ord,uno}
 cmp_lt, cmp_le, cmp_gt, cmp_ge, cmp_eq, cmp_ne   # integer compare (-> i1)
 land, lor, lnot                            # bitwise + i1 logic

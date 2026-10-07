@@ -85,8 +85,8 @@ TOL: Dict[str, Tol] = {
     "fp32": Tol(rtol=1e-5, atol=1e-6),
     "fp16": Tol(rtol=1e-2, atol=1e-2),
     "bf16": Tol(rtol=1.5e-2, atol=1e-2),
-    # fp64 computes natively; the elementwise inputs are exact in f64, so only
-    # reassociation in reductions contributes error (see _ROW_TOL_FP64).
+    # fp64 computes natively; each elementwise op rounds like the reference, so
+    # only reassociation in reductions contributes error (see _ROW_TOL_FP64).
     "fp64": Tol(rtol=1e-12, atol=1e-12),
 }
 
@@ -553,7 +553,7 @@ ELEM_CONFIGS: List[ElemCfg] = [
     ElemCfg("add_bf16_128k", 2048 * 64, "add", "bf16"),
     ElemCfg("silu_bf16_128k", 2048 * 64, "silu", "bf16"),
     ElemCfg("tanh_bf16_128k", 2048 * 64, "tanh", "bf16"),
-    # f64: exact ops only, vec=2 (256*2 = 512 elems/block).
+    # f64: native f64 ops only, vec=2 (256*2 = 512 elems/block).
     ElemCfg("add_f64_128k", 2048 * 64, "add", "f64", vec=2),
     ElemCfg("mul_f64_128k", 2048 * 64, "mul", "f64", vec=2),
     ElemCfg("min_f64_128k", 2048 * 64, "min", "f64", vec=2),
@@ -644,12 +644,15 @@ def run_elementwise_config(cfg: ElemCfg, arch: str = "gfx950") -> NumericResult:
     td = _torch_dtype(torch, tol_key)
     torch.manual_seed(0xC0FFEE)
     input_device = "cpu" if cfg.op == "tanh" else "cuda"
-    A = (
-        torch.randint(-4, 5, (cfg.n,), device=input_device, dtype=torch.int32).to(
-            torch.float32
-        )
-        * 0.5
-    ).to(td)
+    if td == torch.float64:
+        A = torch.randn((cfg.n,), device=input_device, dtype=td)
+    else:
+        A = (
+            torch.randint(-4, 5, (cfg.n,), device=input_device, dtype=torch.int32).to(
+                torch.float32
+            )
+            * 0.5
+        ).to(td)
     if cfg.op == "tanh":
         edge_values = torch.tensor(
             [
@@ -673,7 +676,9 @@ def run_elementwise_config(cfg: ElemCfg, arch: str = "gfx950") -> NumericResult:
         A = A.to(device="cuda")
     is_binary = spec.is_binary()
     B = None
-    if is_binary:
+    if is_binary and td == torch.float64:
+        B = torch.randn((cfg.n,), device="cuda", dtype=td)
+    elif is_binary:
         B = (
             torch.randint(-4, 5, (cfg.n,), device="cuda", dtype=torch.int32).to(
                 torch.float32
@@ -1067,10 +1072,12 @@ def run_row_config(cfg: RowCfg, arch: str = "gfx950") -> NumericResult:
     res.extra["kernel_name"] = art.kernel_name
     res.extra["hsaco_bytes"] = art.hsaco_bytes
 
-    # --- deterministic inputs + torch reference (all in f32) ---
+    # --- deterministic inputs + torch reference (f32, or f64 for fp64) ---
     torch.manual_seed(0xC0FFEE)
     # small magnitudes so f16/bf16 round-trips and accumulation are tame
-    X = (torch.randn((cfg.m, cfg.n), device="cuda", dtype=torch.float32) * 0.5).to(td)
+    X = (
+        torch.randn((cfg.m, cfg.n), device="cuda", dtype=_ref_dtype(torch, td)) * 0.5
+    ).to(td)
     x_ref = X.to(_ref_dtype(torch, td))
     grid = grid_fn(cfg.m, spec)
     block = (spec.block_size, 1, 1)

@@ -565,11 +565,11 @@ bool rocke_ll_is_constant(const rocke_value_t* v);
  * + returns 0 if not a constant. */
 int64_t rocke_ll_eval_constant(rocke_lower_t* L, const rocke_value_t* v);
 
-/* fp32 / fp16 LLVM hex constant spellings (Python _fp32_hex / _fp16_hex).
- * Arena-owned. */
+/* fp32 / fp64 / fp16 LLVM hex constant spellings (Python _fp32_hex / _fp64_hex /
+ * _fp16_hex). Arena-owned. */
 const char* rocke_ll_fp32_hex(rocke_lower_t* L, double x);
-const char* rocke_ll_fp16_hex(rocke_lower_t* L, double x);
 const char* rocke_ll_fp64_hex(rocke_lower_t* L, double x);
+const char* rocke_ll_fp16_hex(rocke_lower_t* L, double x);
 
 /* Escape a string for an LLVM asm/string literal (Python
  * _escape_llvm_asm_string): printable ASCII verbatim, else \XX hex. */

@@ -413,13 +413,13 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "rsqrt.f32": "declare float @llvm.amdgcn.rsq.f32(float)",
     "rcp.f32": "declare float @llvm.amdgcn.rcp.f32(float)",
     "maxnum.f32": "declare float @llvm.maxnum.f32(float, float)",
+    "maxnum.f64": "declare double @llvm.maxnum.f64(double, double)",
     "maxnum.f16": "declare half @llvm.maxnum.f16(half, half)",
     "maxnum.bf16": "declare bfloat @llvm.maxnum.bf16(bfloat, bfloat)",
-    "maxnum.f64": "declare double @llvm.maxnum.f64(double, double)",
     "minnum.f32": "declare float @llvm.minnum.f32(float, float)",
+    "minnum.f64": "declare double @llvm.minnum.f64(double, double)",
     "minnum.f16": "declare half @llvm.minnum.f16(half, half)",
     "minnum.bf16": "declare bfloat @llvm.minnum.bf16(bfloat, bfloat)",
-    "minnum.f64": "declare double @llvm.minnum.f64(double, double)",
     "fabs.f32": "declare float @llvm.fabs.f32(float)",
     "fabs.f16": "declare half @llvm.fabs.f16(half)",
     "fabs.bf16": "declare bfloat @llvm.fabs.bf16(bfloat)",
@@ -1553,10 +1553,10 @@ class _Lowerer:
             val = op.attrs["value"]
             if ity == "f32":
                 return _fp32_hex(val)
-            if ity == "f16":
-                return _fp16_hex(val)
             if ity == "f64":
                 return _fp64_hex(val)
+            if ity == "f16":
+                return _fp16_hex(val)
             return str(int(val))
         return v.name
 
@@ -2235,15 +2235,15 @@ class _Lowerer:
         # silently mis-typed half operands as float and broke comgr.
         llvm_ty = {
             "f32": "float",
+            "f64": "double",
             "f16": "half",
             "bf16": "bfloat",
-            "f64": "double",
         }.get(ty_name)
         intrin_key = {
             "f32": "maxnum.f32",
+            "f64": "maxnum.f64",
             "f16": "maxnum.f16",
             "bf16": "maxnum.bf16",
-            "f64": "maxnum.f64",
         }.get(ty_name)
         if llvm_ty is None or intrin_key is None:
             raise NotImplementedError(f"fmax: unsupported FP type {ty_name!r}")
@@ -2258,15 +2258,15 @@ class _Lowerer:
         ty_name = a.type.name
         llvm_ty = {
             "f32": "float",
+            "f64": "double",
             "f16": "half",
             "bf16": "bfloat",
-            "f64": "double",
         }.get(ty_name)
         intrin_key = {
             "f32": "minnum.f32",
+            "f64": "minnum.f64",
             "f16": "minnum.f16",
             "bf16": "minnum.bf16",
-            "f64": "minnum.f64",
         }.get(ty_name)
         if llvm_ty is None or intrin_key is None:
             raise NotImplementedError(f"fmin: unsupported FP type {ty_name!r}")
@@ -6360,6 +6360,14 @@ def _fp32_hex(x: float) -> str:
     return f"0x{bits:016X}"
 
 
+def _fp64_hex(x: float) -> str:
+    # LLVM textual IR spells `double` hex constants as the raw IEEE-754 bits.
+    import struct
+
+    bits = struct.unpack("<Q", struct.pack("<d", float(x)))[0]
+    return f"0x{bits:016X}"
+
+
 def _fp16_hex(x: float) -> str:
     # LLVM IR accepts fp16 constants as `half 0xH<4 hex digits>`. We use
     # a numerically-correct rounding via the struct module.
@@ -6367,14 +6375,6 @@ def _fp16_hex(x: float) -> str:
 
     bits = struct.unpack("<H", struct.pack("<e", float(x)))[0]
     return f"0xH{bits:04X}"
-
-
-def _fp64_hex(x: float) -> str:
-    # LLVM textual IR spells `double` hex constants as the raw IEEE-754 bits.
-    import struct
-
-    bits = struct.unpack("<Q", struct.pack("<d", float(x)))[0]
-    return f"0x{bits:016X}"
 
 
 def _lower_kernel_to_llvm_python(

@@ -1673,10 +1673,10 @@ class IRBuilder:
         """Vectorised global load of N consecutive values.
 
         Supports f16/bf16/i16 (N in {2, 4, 6, 8, 16}), f32/i32/tf32
-        (N in {2, 3, 4, 8}), fp8e4m3/bf8e5m2/i8 (N in {2, 4, 8, 12, 16}), and
-        f64 (N = 2). Loads exactly N elements. Instruction selection depends on
-        target and alignment; 96-bit payloads do not require a 96-bit scalar
-        type.
+        (N in {2, 3, 4, 8}), f64 (N = 2), and fp8e4m3/bf8e5m2/i8
+        (N in {2, 4, 8, 12, 16}). Loads exactly N elements. Instruction
+        selection depends on target and alignment; 96-bit payloads do not
+        require a 96-bit scalar type.
 
         Default alignment is the payload size for power-of-two loads, and
         element alignment for 12-byte loads. An explicit alignment is a caller
@@ -1705,21 +1705,21 @@ class IRBuilder:
                 raise ValueError(
                     f"unsupported vector width for {dtype.name} global_load_vN: {n}"
                 )
-        elif dtype.name in ("fp8e4m3", "bf8e5m2", "i8"):
-            elem_bytes = 1
-            if n not in (2, 4, 8, 12, 16):
-                raise ValueError(
-                    f"unsupported vector width for {dtype.name} global_load_vN: {n}"
-                )
         elif dtype.name == "f64":
             elem_bytes = 8
             if n != 2:
                 raise ValueError(
                     f"unsupported vector width for {dtype.name} global_load_vN: {n}"
                 )
+        elif dtype.name in ("fp8e4m3", "bf8e5m2", "i8"):
+            elem_bytes = 1
+            if n not in (2, 4, 8, 12, 16):
+                raise ValueError(
+                    f"unsupported vector width for {dtype.name} global_load_vN: {n}"
+                )
         else:
             raise ValueError(
-                "global_load_vN supports f16/bf16/i16/f32/i32/tf32/fp8e4m3/bf8e5m2/i8/f64, "
+                "global_load_vN supports f16/bf16/i16/f32/i32/tf32/f64/fp8e4m3/bf8e5m2/i8, "
                 f"got {dtype.name}"
             )
         attrs = {
@@ -1953,14 +1953,14 @@ class IRBuilder:
             "f32",
             "i32",
             "tf32",
+            "f64",
             "fp8e4m3",
             "bf8e5m2",
             "i8",
-            "f64",
         ):
             raise ValueError(
-                "smem_load_vN supports f16 / bf16 / f32 / i32 / tf32 / fp8e4m3 / "
-                f"bf8e5m2 / i8 / f64, got {dtype.name}"
+                "smem_load_vN supports f16 / bf16 / f32 / i32 / tf32 / f64 / "
+                f"fp8e4m3 / bf8e5m2 / i8, got {dtype.name}"
             )
         if dtype.name in ("fp8e4m3", "bf8e5m2", "i8"):
             allowed_n = (1, 2, 4, 8, 12, 16)
@@ -4357,8 +4357,8 @@ class IRBuilder:
 
         Supports the full element-type catalog the LLVM lowering already
         emits: ``f16`` / ``bf16`` / ``i16`` (2-byte), ``f32`` / ``i32`` / ``tf32``
-        (4-byte), ``i8`` / ``fp8e4m3`` / ``bf8e5m2`` (1-byte), ``f64``
-        (8-byte, N in {1, 2}). Lowers to
+        (4-byte), ``f64`` (8-byte, N in {1, 2}), ``i8`` / ``fp8e4m3`` /
+        ``bf8e5m2`` (1-byte). Lowers to
         a single ``store <N x elem>`` with the supplied address alignment.
         Payload width and address alignment are independent; target and
         alignment determine whether the transfer uses one machine instruction.
@@ -4384,15 +4384,15 @@ class IRBuilder:
             elem_bytes = 4
             if n == 16:
                 raise ValueError(f"global_store_vN n=16 not supported for {elem_name}")
-        elif elem_name in ("i8", "fp8e4m3", "bf8e5m2"):
-            elem_bytes = 1
         elif elem_name == "f64":
             elem_bytes = 8
             if n > 2:
                 raise ValueError(f"global_store_vN n={n} not supported for {elem_name}")
+        elif elem_name in ("i8", "fp8e4m3", "bf8e5m2"):
+            elem_bytes = 1
         else:
             raise ValueError(
-                "global_store_vN supports f16/bf16/i16/f32/i32/tf32/i8/fp8e4m3/bf8e5m2/f64, "
+                "global_store_vN supports f16/bf16/i16/f32/i32/tf32/f64/i8/fp8e4m3/bf8e5m2, "
                 f"got {elem_name}"
             )
         attrs = {

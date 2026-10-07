@@ -720,7 +720,7 @@ const char* rocke_ll_smem_storage_type(rocke_lower_t* L, const rocke_type_t* sme
 }
 
 /* ====================================================================== */
-/* FP hex constants (Python _fp32_hex / _fp16_hex / _fp64_hex)            */
+/* FP hex constants (Python _fp32_hex / _fp64_hex / _fp16_hex)            */
 /* ====================================================================== */
 
 const char* rocke_ll_fp32_hex(rocke_lower_t* L, double x)
@@ -898,17 +898,17 @@ const char* rocke_ll_operand(rocke_lower_t* L, const rocke_value_t* v)
             rocke_attr_get_float(&op->attrs, "value", &fv);
             return rocke_ll_fp32_hex(L, fv);
         }
-        if(strcmp(ity, "f16") == 0)
-        {
-            double fv = 0.0;
-            rocke_attr_get_float(&op->attrs, "value", &fv);
-            return rocke_ll_fp16_hex(L, fv);
-        }
         if(strcmp(ity, "f64") == 0)
         {
             double fv = 0.0;
             rocke_attr_get_float(&op->attrs, "value", &fv);
             return rocke_ll_fp64_hex(L, fv);
+        }
+        if(strcmp(ity, "f16") == 0)
+        {
+            double fv = 0.0;
+            rocke_attr_get_float(&op->attrs, "value", &fv);
+            return rocke_ll_fp16_hex(L, fv);
         }
         int64_t iv = 0;
         if(!rocke_attr_get_int(&op->attrs, "value", &iv))

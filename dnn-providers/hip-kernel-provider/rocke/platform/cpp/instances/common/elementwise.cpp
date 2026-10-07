@@ -139,8 +139,8 @@ static bool rocke_ew_reason(char* reason, size_t cap, const char* msg)
     return false;
 }
 
-/* _F64_OPS: ops computed exactly in the I/O type; the exp2-based activations
- * are f32-only, so f64 is limited to this set. */
+/* _F64_OPS: ops with a native f64 lowering; the exp2-based activations are
+ * f32-only, so f64 is limited to this set. */
 static bool rocke_ew_is_f64_op(const char* op)
 {
     return rocke_ew_streq(op, "copy") || rocke_ew_streq(op, "neg") || rocke_ew_streq(op, "abs")

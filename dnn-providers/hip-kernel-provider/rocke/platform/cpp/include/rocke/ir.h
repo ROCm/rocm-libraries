@@ -103,7 +103,6 @@ typedef enum rocke_scalar_kind
     ROCKE_SCALAR_BF16,
     ROCKE_SCALAR_F16,
     ROCKE_SCALAR_F32,
-    ROCKE_SCALAR_F64,
     ROCKE_SCALAR_FP8E4M3,
     ROCKE_SCALAR_BF8E5M2,
     ROCKE_SCALAR_FP4E2M1,
@@ -112,6 +111,7 @@ typedef enum rocke_scalar_kind
     ROCKE_SCALAR_E8M0,
     ROCKE_SCALAR_E5M3,
     ROCKE_SCALAR_TF32,
+    ROCKE_SCALAR_F64,
     ROCKE_SCALAR__COUNT
 } rocke_scalar_kind_t;
 

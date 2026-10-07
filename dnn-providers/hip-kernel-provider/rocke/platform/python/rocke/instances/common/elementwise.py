@@ -14,7 +14,7 @@ What we cover today:
   ``tanh``
 * Binary ops: ``add``, ``sub``, ``mul``, ``max``, ``min``
 * Dtypes: ``f16`` and ``bf16`` for I/O (compute is f32 internally), and
-  ``f64`` (computed natively; exact ops only, ``vec=2``)
+  ``f64`` (native f64 ops only, ``vec=2``)
 
 The kernel processes the buffer as a single contiguous run of ``numel``
 elements; multi-dimensional torch tensors must be ``contiguous()``. This
@@ -80,8 +80,8 @@ UnaryOp = Literal[
 BinaryOp = Literal["add", "sub", "mul", "max", "min", "swiglu", "geglu"]
 DType = Literal["f16", "bf16", "f64"]
 
-# Ops computed exactly in the I/O type; the exp2-based activations are
-# f32-only, so f64 is limited to this set.
+# Ops with a native f64 lowering; the exp2-based activations are f32-only,
+# so f64 is limited to this set.
 _F64_OPS = ("copy", "neg", "abs", "relu", "add", "sub", "mul", "max", "min")
 
 
