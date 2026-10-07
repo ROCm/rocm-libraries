@@ -74,7 +74,8 @@ namespace rocblaslt
 
     int OnlineTuner::selectCandidateImpl(size_t                  problemKey,
                                          size_t                  problem,
-                                         const std::vector<int>& rankedSolutionIndices)
+                                         const std::vector<int>& rankedSolutionIndices,
+                                         bool                    capturing)
     {
         if(rankedSolutionIndices.empty())
             return -1;
@@ -86,6 +87,28 @@ namespace rocblaslt
             if(iter != m_problems.end() && iter->second.m_resolved)
                 return positionOf(rankedSolutionIndices, iter->second.m_winner);
         }
+
+        // A capture is not a dispatch, and what it writes down is permanent.
+        //
+        // Deliberately below the resolved branch above and not above it. A
+        // resolved problem has a measured winner, and a graph is exactly where
+        // that answer belongs: it is the same kernel cache mode would replay,
+        // chosen the same way, and baking it in is the outcome the feature
+        // exists to produce. What must not be baked in is a PROBE. Exploration
+        // deliberately dispatches a candidate it does not believe is best, on
+        // the understanding that the next visit reconsiders -- and a captured
+        // graph never comes back through selection, so the next visit never
+        // arrives. The caller replays a knowingly non-optimal kernel for the
+        // life of the graph with no path to correction.
+        //
+        // It is also pure loss for the exploration: the measurement hook
+        // refuses a capturing stream, correctly, since an event recorded into
+        // a capture can be neither queried nor read back. So a probe issued
+        // here buys no sample. Returning before the visit is counted is what
+        // stops a captured shape spending a budget it can never pay for -- the
+        // same reason a merged sibling spends none below.
+        if(capturing)
+            return -1;
 
         std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
 

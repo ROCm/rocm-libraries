@@ -325,15 +325,21 @@ namespace rocblaslt
      * register owns the exploration and every other is left its own ordering
      * until there is a measured winner to serve it. See
      * ProblemState::m_problem.
+     *
+     * capturing says the caller's dispatch is being recorded into a HIP graph
+     * rather than executed. Such a caller is never offered a probe candidate;
+     * it is served a measured winner if there is one, and otherwise left its
+     * own ordering. See selectCandidateImpl() for why.
      */
         int selectCandidate(size_t                  problemKey,
                             size_t                  problem,
-                            const std::vector<int>& rankedSolutionIndices)
+                            const std::vector<int>& rankedSolutionIndices,
+                            bool                    capturing = false)
         {
             if(!m_enabled)
                 return -1;
 
-            return selectCandidateImpl(problemKey, problem, rankedSolutionIndices);
+            return selectCandidateImpl(problemKey, problem, rankedSolutionIndices, capturing);
         }
 
         /**
@@ -480,7 +486,8 @@ namespace rocblaslt
 
         int  selectCandidateImpl(size_t                  problemKey,
                                  size_t                  problem,
-                                 const std::vector<int>& rankedSolutionIndices);
+                                 const std::vector<int>& rankedSolutionIndices,
+                                 bool                    capturing);
         void harvestPendingImpl(size_t problemKey);
         bool beginMeasurementImpl(size_t      problemKey,
                                   int         solutionIndex,

@@ -6869,6 +6869,12 @@ inline void recordOnlineTuningWinner(const RocblasltContractionProblem&         
 //
 // Candidates the caller's workspace cannot cover are withheld from the tuner:
 // they rank, but runContractionProblem refuses to dispatch them.
+//
+// A caller recording into a HIP graph is told so, and is never offered a probe
+// candidate as a result -- only a measured winner, if there is one. The
+// measurement hook already refuses a capturing stream; this is the other half
+// of the same rule, and the half that decides what the graph keeps. See
+// OnlineTuner::selectCandidateImpl().
 inline void promoteOnlineTuningCandidate(
     std::vector<std::shared_ptr<TensileLite::ContractionSolution>>& solutions,
     const TensileLite::ContractionProblemGemm&                      tensile_prob,
@@ -6901,7 +6907,8 @@ inline void promoteOnlineTuningCandidate(
     const size_t problemIdentity = std::hash<TensileLite::ContractionProblemGemm>{}(tensile_prob);
 
     auto&     tuner = rocblaslt::OnlineTuner::getInstance();
-    const int promote = tuner.selectCandidate(problemKey, problemIdentity, rankedSolutionIndices);
+    const int promote = tuner.selectCandidate(
+        problemKey, problemIdentity, rankedSolutionIndices, streamIsCapturing(prob.stream));
     if(promote < 0)
         return;
 
