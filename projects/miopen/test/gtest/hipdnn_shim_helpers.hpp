@@ -80,8 +80,9 @@ inline tensor<float> MakeFilled(const std::vector<std::size_t>& lengths)
     return t;
 }
 
-// So an ASSERT_* that ends a test early does not leak the handle.
-template <class T, miopenStatus_t (*Destroy)(T)>
+// So an ASSERT_* that ends a test early does not leak the handle. Destroy may return either a
+// miopenStatus_t or a hipError_t; success is zero in both.
+template <class T, auto Destroy>
 struct Owned
 {
     Owned()                        = default;
@@ -90,7 +91,7 @@ struct Owned
     ~Owned()
     {
         if(handle != nullptr)
-            EXPECT_EQ(Destroy(handle), miopenStatusSuccess);
+            EXPECT_EQ(Destroy(handle), decltype(Destroy(handle)){});
     }
 
     T handle = nullptr;

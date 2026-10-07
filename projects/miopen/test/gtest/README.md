@@ -126,9 +126,9 @@ a test, the devices the gap is open on (`all`, or a comma-separated list of gfx 
 divergence is printed and tolerated; anything else still fails.
 
 The device a run used comes from the test binary itself: a shim test binary records MIOpen's
-device name as the `forwarding_parity_device` property of its report. The comparison refuses to
-run when the two reports name different devices, and when neither names one while the list has
-entries, because then no line can be matched to the run.
+device name as the `forwarding_parity_device` property of its report. The comparison stops if the
+two reports name different devices. It also stops if neither report names a device and the list
+has entries. In that case no line can match the run.
 
 Three rules make the list safe to have:
 

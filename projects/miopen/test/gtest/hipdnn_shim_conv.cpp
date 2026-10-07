@@ -8,6 +8,7 @@
 
 #include <hip/hip_runtime_api.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -35,9 +36,12 @@ auto FusedElementGenerator()
 // implementation actually has a kernel for varies by device, and adding one is a line here.
 // Sizes are small so the doubled replay stays cheap.
 //
-// Only the three-dimensional shape is listed. The two-dimensional NHWC equivalent is served
-// by MIOpen on gfx90a but disagrees with the CPU reference by far more than half-precision
-// rounding, while the reference is the same code that agrees on the three-dimensional shape.
+// The second shape has more output than input channels, so a bias add indexed by the wrong
+// channel cannot pass both.
+//
+// Only three-dimensional shapes are listed. The two-dimensional NHWC equivalent is served by
+// MIOpen on gfx90a but disagrees with the CPU reference by far more than half-precision
+// rounding, while the reference is the same code that agrees on the three-dimensional shapes.
 // That is a convolution bug to raise on its own, not something this test should carry.
 struct FusedCase
 {
@@ -54,6 +58,11 @@ std::vector<FusedCase> FusedCases()
              miopenTensorNDHWC,
              {1, 4, 14, 11, 1},
              {4, 4, 3, 3, 3},
+             {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}}},
+            {"3d-ndhwc-8-out",
+             miopenTensorNDHWC,
+             {1, 4, 14, 11, 1},
+             {8, 4, 3, 3, 3},
              {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}}}};
 }
 
@@ -192,23 +201,8 @@ protected:
     }
 };
 
-template <class T, hipError_t (*Destroy)(T)>
-struct OwnedHip
-{
-    OwnedHip()                           = default;
-    OwnedHip(const OwnedHip&)            = delete;
-    OwnedHip& operator=(const OwnedHip&) = delete;
-    ~OwnedHip()
-    {
-        if(handle != nullptr)
-            EXPECT_EQ(Destroy(handle), hipSuccess);
-    }
-
-    T handle = nullptr;
-};
-
-using OwnedStream = OwnedHip<hipStream_t, hipStreamDestroy>;
-using OwnedEvent  = OwnedHip<hipEvent_t, hipEventDestroy>;
+using OwnedStream = Owned<hipStream_t, hipStreamDestroy>;
+using OwnedEvent  = Owned<hipEvent_t, hipEventDestroy>;
 
 // Holds back the work queued on a stream after Close() until Open(), so a test can order work
 // across streams without relying on timing.
@@ -279,6 +273,19 @@ private:
 // still use.
 TEST_F(GPU_HipdnnShimConvFwdApi_FP32, FindAndForwardMatchCpuReference)
 {
+    const auto result = FindAndRun(Direction::Forward, conv.handle, x, w, y);
+    ASSERT_NO_FATAL_FAILURE(AssertServed(result));
+    CheckMatchesCpuReference(x, w, y);
+}
+
+// The one convolution attribute the forwarded path does not decline: its non-default value only
+// allows TF32. The inputs are small whole numbers, which TF32 holds exactly, so the result must
+// match the reference whichever precision ran.
+TEST_F(GPU_HipdnnShimConvFwdApi_FP32, MathTypeDefaultMatchesCpuReference)
+{
+    ASSERT_EQ(miopenSetConvolutionAttribute(
+                  conv.handle, MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, miopenMathDefault),
+              miopenStatusSuccess);
     const auto result = FindAndRun(Direction::Forward, conv.handle, x, w, y);
     ASSERT_NO_FATAL_FAILURE(AssertServed(result));
     CheckMatchesCpuReference(x, w, y);
@@ -371,9 +378,7 @@ TEST(GPU_HipdnnShimConvStreamSwitch_FP32, CallAfterStreamSwitchWaitsForOldStream
     OwnedStream stream_b;
     ASSERT_EQ(hipStreamCreate(&stream_a.handle), hipSuccess);
     ASSERT_EQ(hipStreamCreate(&stream_b.handle), hipSuccess);
-    OwnedEvent event_a;
     OwnedEvent event_b;
-    ASSERT_EQ(hipEventCreate(&event_a.handle), hipSuccess);
     ASSERT_EQ(hipEventCreate(&event_b.handle), hipSuccess);
 
     // Its own handle, since the test changes its stream. Declared after the streams so it is
@@ -456,57 +461,77 @@ TEST(GPU_HipdnnShimConvStreamSwitch_FP32, CallAfterStreamSwitchWaitsForOldStream
     };
 
     // Warm up on each stream. Building the plan or growing the workspace during the gated part
-    // would make the host wait, which hides the race.
+    // would make the host wait, which hides the race. Stream B's call runs alone so it can be
+    // timed.
     ASSERT_EQ(forward(x1, x1_dev, y1, y1_dev, workspace_a), miopenStatusSuccess);
-    ASSERT_EQ(miopenSetStream(handle, stream_b.handle), miopenStatusSuccess);
-    ASSERT_EQ(forward(x2, x2_dev, y2, y2_dev, workspace_b), miopenStatusSuccess);
-    ASSERT_EQ(miopenSetStream(handle, stream_a.handle), miopenStatusSuccess);
     ASSERT_EQ(hipStreamSynchronize(stream_a.handle), hipSuccess);
+    ASSERT_EQ(miopenSetStream(handle, stream_b.handle), miopenStatusSuccess);
+    const auto b_start = std::chrono::steady_clock::now();
+    ASSERT_EQ(forward(x2, x2_dev, y2, y2_dev, workspace_b), miopenStatusSuccess);
     ASSERT_EQ(hipStreamSynchronize(stream_b.handle), hipSuccess);
+    const auto b_call_time = std::chrono::steady_clock::now() - b_start;
+    ASSERT_EQ(miopenSetStream(handle, stream_a.handle), miopenStatusSuccess);
     // So the result checks see only what the gated calls wrote.
     ResetAfterFind(y1_dev, y1);
     ResetAfterFind(y2_dev, y2);
+
+    // A call on stream B that does not wait for stream A finishes while the gate is closed, in
+    // about the time the warm-up call took. The gate stays closed for 50 times that, so a slow
+    // device cannot hide a wrong order. The 500 ms floor covers timing noise on a fast device, and
+    // the 10 s cap stops one slow warm-up from stalling the test.
+    const std::chrono::steady_clock::duration gate_limit =
+        std::clamp<std::chrono::steady_clock::duration>(
+            50 * b_call_time, std::chrono::milliseconds(500), std::chrono::seconds(10));
 
     StreamGate gate;
     ASSERT_NO_FATAL_FAILURE(gate.Close(stream_a.handle));
 
     // Started before the gated calls, so a call that makes the host wait for stream A returns
-    // once the gate opens instead of hanging, and `opened` shows it waited. Nothing may return
-    // before the join.
+    // once the gate opens instead of hanging, and `opened` shows it waited. It opens the gate
+    // when stream B's call finishes or `gate_limit` passes; if B waits for A, as it should, the
+    // limit always comes first. Nothing may return before the join.
+    std::atomic<bool> b_recorded{false};
     std::atomic<bool> opened{false};
-    std::thread opener([&gate, &opened] {
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    bool b_finished_first = false;
+    std::thread opener([&gate, &opened, &b_recorded, &b_finished_first, &event_b, gate_limit] {
+        const auto deadline = std::chrono::steady_clock::now() + gate_limit;
+        while(std::chrono::steady_clock::now() < deadline)
+        {
+            // An event that was never recorded reports itself as finished.
+            if(b_recorded && hipEventQuery(event_b.handle) == hipSuccess)
+            {
+                b_finished_first = true;
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
         opened = true;
         gate.Open();
     });
 
     const miopenStatus_t status1  = forward(x1, x1_dev, y1, y1_dev, workspace_a);
-    const hipError_t record_a     = hipEventRecord(event_a.handle, stream_a.handle);
     const miopenStatus_t switched = miopenSetStream(handle, stream_b.handle);
     const miopenStatus_t status2  = forward(x2, x2_dev, y2, y2_dev, workspace_b);
     const hipError_t record_b     = hipEventRecord(event_b.handle, stream_b.handle);
-    const bool host_waited        = opened;
-
-    const hipError_t waited_b = hipEventSynchronize(event_b.handle);
-    const hipError_t a_done   = hipEventQuery(event_a.handle);
+    // Read before the opener can see B's event, so only the time limit can have set it.
+    const bool host_waited = opened;
+    b_recorded             = true;
 
     opener.join();
     ASSERT_EQ(hipStreamSynchronize(stream_a.handle), hipSuccess);
     ASSERT_EQ(hipStreamSynchronize(stream_b.handle), hipSuccess);
 
     ASSERT_EQ(status1, miopenStatusSuccess);
-    ASSERT_EQ(record_a, hipSuccess);
     ASSERT_EQ(switched, miopenStatusSuccess);
     ASSERT_EQ(status2, miopenStatusSuccess);
     ASSERT_EQ(record_b, hipSuccess);
-    ASSERT_EQ(waited_b, hipSuccess);
 
     // MIOpen uses each caller's own workspace, so natively B may finish first.
     if(ForwardingEnabled())
     {
         EXPECT_FALSE(host_waited)
             << "a gated call made the host wait for stream A, which hides whether stream B waits";
-        EXPECT_EQ(a_done, hipSuccess)
+        EXPECT_FALSE(b_finished_first)
             << "the call on stream B finished while the call on stream A was still waiting";
     }
 
@@ -939,6 +964,33 @@ TEST_F(GPU_HipdnnShimConvDeclined_FP32, UnsupportedProblemsAreDeclinedWithReason
         tensor<float> transposed_y{transposed_lengths};
         expect_declined_because(forward(&kOne, &kZero, x, w, transposed.handle, transposed_y),
                                 "transposed convolution is not forwarded");
+    }
+
+    struct AttributeCase
+    {
+        miopenConvolutionAttrib_t attribute;
+        int value;
+        const char* reason;
+    };
+    for(const AttributeCase& attribute_case :
+        {AttributeCase{MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC,
+                       1,
+                       "non-default MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC"},
+         AttributeCase{MIOPEN_CONVOLUTION_ATTRIB_FP16_ALT_IMPL,
+                       1,
+                       "non-default MIOPEN_CONVOLUTION_ATTRIB_FP16_ALT_IMPL"},
+         AttributeCase{MIOPEN_CONVOLUTION_ATTRIB_FP8_ROUNDING_MODE,
+                       miopenF8RoundingModeStandard,
+                       "non-default MIOPEN_CONVOLUTION_ATTRIB_FP8_ROUNDING_MODE"}})
+    {
+        OwnedConvDescriptor with_attribute;
+        ASSERT_NO_FATAL_FAILURE(InitConvDescriptor(with_attribute));
+        ASSERT_EQ(miopenSetConvolutionAttribute(
+                      with_attribute.handle, attribute_case.attribute, attribute_case.value),
+                  miopenStatusSuccess)
+            << attribute_case.reason;
+        expect_declined_because(forward(&kOne, &kZero, x, w, with_attribute.handle, y),
+                                attribute_case.reason);
     }
 
     CallResult fused;

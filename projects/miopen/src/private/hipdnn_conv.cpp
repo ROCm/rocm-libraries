@@ -52,7 +52,10 @@ struct ConvInfo
     std::vector<int64_t> strides;
     std::vector<int64_t> dilations;
     miopenConvolutionMode_t mode{};
-    int groupCount = 1;
+    int groupCount      = 1;
+    int fp16AltImpl     = -1;
+    int deterministic   = 0;
+    int fp8RoundingMode = miopenF8RoundingModeStochastic;
 };
 
 // Tensors in node order: the two convolution inputs, the result, then the bias
@@ -158,6 +161,14 @@ miopenStatus_t ReadConvolution(miopenConvolutionDescriptor_t desc, ConvInfo& out
     if(miopenGetConvolutionGroupCount_impl(desc, &groupCount) != miopenStatusSuccess)
         return miopenStatusInvalidValue;
 
+    const auto readAttribute = [desc](miopenConvolutionAttrib_t attribute, int& value) {
+        return miopenGetConvolutionAttribute_impl(desc, attribute, &value) == miopenStatusSuccess;
+    };
+    if(!readAttribute(MIOPEN_CONVOLUTION_ATTRIB_FP16_ALT_IMPL, out.fp16AltImpl) ||
+       !readAttribute(MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, out.deterministic) ||
+       !readAttribute(MIOPEN_CONVOLUTION_ATTRIB_FP8_ROUNDING_MODE, out.fp8RoundingMode))
+        return miopenStatusInvalidValue;
+
     out.pads.assign(pads.begin(), pads.end());
     out.strides.assign(strides.begin(), strides.end());
     out.dilations.assign(dilations.begin(), dilations.end());
@@ -208,6 +219,21 @@ const char* CheckSupported(const std::vector<TensorInfo>& tensors, const ConvInf
     // backward-data node and is a different graph.
     if(conv.mode == miopenTranspose)
         return "transposed convolution is not forwarded to hipDNN";
+    // hipDNN has no setting for these, so a forwarded call would ignore them. Any
+    // non-default value is declined: whether it changes the result depends on the
+    // data type and device, and copying MIOpen's rules for that here would drift.
+    if(conv.deterministic != 0)
+        return "a non-default MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC is not forwarded to hipDNN";
+    if(conv.fp16AltImpl != -1)
+        return "a non-default MIOPEN_CONVOLUTION_ATTRIB_FP16_ALT_IMPL is not forwarded to hipDNN";
+    if(conv.fp8RoundingMode != miopenF8RoundingModeStochastic)
+        return "a non-default MIOPEN_CONVOLUTION_ATTRIB_FP8_ROUNDING_MODE is not forwarded to "
+               "hipDNN";
+    // MATH_TYPE is not checked: its non-default value only allows TF32, so the
+    // full-precision result the default asks for satisfies both values. The
+    // graph never uses TF32, though, so a caller who allows it gets no speed-up.
+    // A tensor's cast type is not checked either: no public getter reports it.
+    // A forwarded call with one runs in the data type instead of the cast type.
     return nullptr;
 }
 
