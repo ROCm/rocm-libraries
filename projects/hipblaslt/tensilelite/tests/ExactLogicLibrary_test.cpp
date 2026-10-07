@@ -434,6 +434,77 @@ TEST(ExactLogicLibraryTest, RowKindsSkipTheSameRowsAsTheirTypeNames)
     EXPECT_EQ(prepared.rowKind(4), LibraryRowKind::FreeSizeMatching);
 }
 
+TEST(ExactLogicLibraryTest, HardwareRowsSelectLikeRowsAddedOneByOne)
+{
+    using Rows = std::vector<ContractionHardwareSelectionLibrary::Row>;
+    auto row   = [](HardwarePredicate predicate, std::string const& name, int index) {
+        return ContractionHardwareSelectionLibrary::Row(
+            std::move(predicate), std::make_shared<StubTopLibrary>(makeSolution(name, index)));
+    };
+    Rows const rows{row(makeHwPred(AMDGPU::Processor::gfx950, _MI355_CHIP_ID), "mi355", 1),
+                    row(makeHwPred(AMDGPU::Processor::gfx950, _MI350_CHIP_ID, _SPX_CU), "spx", 2),
+                    row(makeHwPred(AMDGPU::Processor::gfx950, _MI350_CHIP_ID, _CPX_CU), "cpx", 3),
+                    row(makeHwPred(AMDGPU::Processor::gfx950, _MI350_CHIP_ID), "mi350", 4),
+                    row(makeHwPred(AMDGPU::Processor::gfx942), "gfx942", 5)};
+
+    ContractionHardwareSelectionLibrary prepared(rows);
+    ContractionHardwareSelectionLibrary added;
+    for(auto const& r : rows)
+        added.rows.push_back(r);
+
+    auto const problem = dummyProblem();
+    for(auto const& device : {makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx"),
+                              makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx"),
+                              makeDevice(_MI355_CHIP_ID, _SPX_CU, "mi355spx"),
+                              makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx")})
+    {
+        SCOPED_TRACE(device.deviceName + " " + std::to_string(device.computeUnitCount));
+        // Twice: the second call reads the rows remembered for the device.
+        for(int repeat = 0; repeat < 2; repeat++)
+        {
+            EXPECT_EQ(solutionNames(prepared.findTopSolutions(problem, device, 5)),
+                      solutionNames(added.findTopSolutions(problem, device, 5)));
+            EXPECT_EQ(prepared.findBestSolution(problem, device)->solutionName,
+                      added.findBestSolution(problem, device)->solutionName);
+        }
+    }
+    EXPECT_EQ(solutionNames(prepared.findTopSolutions(
+                  problem, makeDevice(_MI355_CHIP_ID, _SPX_CU, "mi355spx"), 5)),
+              (std::vector<std::string>{"mi355", "spx", "mi350"}));
+}
+
+TEST(ExactLogicLibraryTest, HardwareRowsReadingMoreThanTheDeviceAreEvaluatedEveryCall)
+{
+    struct NamedDevice : public Predicates::Predicate_CRTP<NamedDevice, AMDGPU>
+    {
+        enum
+        {
+            HasIndex = false,
+            HasValue = false
+        };
+        static std::string Type()
+        {
+            return "NamedDevice";
+        }
+        bool operator()(AMDGPU const& gpu) const override
+        {
+            return gpu.deviceName == "first";
+        }
+    };
+
+    ContractionHardwareSelectionLibrary lib(std::vector<ContractionHardwareSelectionLibrary::Row>{
+        {HardwarePredicate(std::make_shared<Predicates::IsSubclass<Hardware, AMDGPU>>(
+             std::make_shared<NamedDevice>())),
+         std::make_shared<StubTopLibrary>(makeSolution("named", 1))}});
+
+    auto const problem = dummyProblem();
+    EXPECT_EQ(solutionNames(
+                  lib.findTopSolutions(problem, makeDevice(_MI350_CHIP_ID, _SPX_CU, "first"), 1)),
+              (std::vector<std::string>{"named"}));
+    EXPECT_TRUE(
+        lib.findTopSolutions(problem, makeDevice(_MI350_CHIP_ID, _SPX_CU, "second"), 1).empty());
+}
+
 TEST(ProblemMapLibraryTest, OperationIdentifierKeyFindsTheSameLibrary)
 {
     auto problem = dummyProblem();

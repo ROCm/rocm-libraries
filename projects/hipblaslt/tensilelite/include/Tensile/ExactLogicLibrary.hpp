@@ -30,6 +30,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <string>
@@ -37,6 +38,7 @@
 #include <vector>
 
 #include <Tensile/AMDGPU.hpp>
+#include <Tensile/AMDGPUPredicates.hpp>
 #include <Tensile/ContractionProblemPredicates.hpp>
 #include <Tensile/Debug.hpp>
 #include <Tensile/PredicateDebugger.hpp>
@@ -98,6 +100,68 @@ namespace TensileLite
     using LibraryRowTypes = std::array<rocisa::DataType, 6>;
 
     /**
+ * Which rows of a library match a device, remembered for a few devices, for
+ * rows whose predicates read only the fields AMDGPU::operator== compares.
+ * Bit i of a mask is row i.
+ */
+    class LibraryRowsByDevice
+    {
+    public:
+        template <typename Compute>
+        uint64_t matches(AMDGPU const& device, Compute&& compute) const
+        {
+            Device const key{device.processor, device.computeUnitCount, device.pciChipId()};
+            int const    known = m_count.load(std::memory_order_acquire);
+            for(int i = 0; i < known; i++)
+            {
+                if(m_entries[i].device == key)
+                    return m_entries[i].rows;
+            }
+
+            uint64_t const              rows = compute();
+            std::lock_guard<std::mutex> lock(m_guard);
+            int const                   count = m_count.load(std::memory_order_relaxed);
+            for(int i = 0; i < count; i++)
+            {
+                if(m_entries[i].device == key)
+                    return m_entries[i].rows;
+            }
+            if(count < Capacity)
+            {
+                m_entries[count] = {key, rows};
+                m_count.store(count + 1, std::memory_order_release);
+            }
+            return rows;
+        }
+
+    private:
+        struct Device
+        {
+            AMDGPU::Processor  processor        = AMDGPU::Processor::gfx900;
+            int                computeUnitCount = 0;
+            std::optional<int> pciChipId;
+
+            bool operator==(Device const& other) const
+            {
+                return processor == other.processor && computeUnitCount == other.computeUnitCount
+                       && pciChipId == other.pciChipId;
+            }
+        };
+
+        struct Entry
+        {
+            Device   device;
+            uint64_t rows = 0;
+        };
+
+        static constexpr int Capacity = 4;
+
+        mutable std::array<Entry, Capacity> m_entries;
+        mutable std::atomic<int>            m_count{0};
+        mutable std::mutex                  m_guard;
+    };
+
+    /**
  * Represents a set of sub-libraries, each with associated predicates. It
  * should be placed in order of best to worst solutions. We assume the best
  * solution is the first one where we match the predicates.
@@ -126,15 +190,21 @@ namespace TensileLite
         }
 
         /// Caches the kind of every row and, when every row predicate starts
-        /// with a TypesEqual term, indexes the rows by those types. `rows` must
-        /// not change afterwards, except by appending rows, which then go
-        /// unindexed.
+        /// with a TypesEqual term, indexes the rows by those types; when every
+        /// row predicate reads only the device, remembers which rows match a
+        /// device. `rows` must not change afterwards, except by appending rows,
+        /// which then go unindexed.
         void prepareRows()
         {
             rowKinds.clear();
             rowKinds.reserve(rows.size());
             for(auto const& row : rows)
                 rowKinds.push_back(libraryRowKind(row.first));
+
+            rowsSelectDevices = !rows.empty() && rows.size() <= 64
+                                && std::all_of(rows.begin(), rows.end(), [](Row const& row) {
+                                       return row.first.readsOnlyTheDevice();
+                                   });
 
             rowsByTypes.clear();
             rowsByTypes.reserve(rows.size());
@@ -187,7 +257,8 @@ namespace TensileLite
         {
             std::shared_ptr<MySolution> fallbackRv;
             const bool                  streamK = Debug::Instance().useExperimentalSelection() == 2;
-            const bool                  rowDebug = MyPredicate::debugging();
+            const bool                  rowDebug   = MyPredicate::debugging();
+            auto const                  deviceRows = rowsMatchingDevice(hardware, rowDebug);
 
             // Return exact match immediately; otherwise keep first successful fallback.
             auto visit = [&](size_t i) {
@@ -195,7 +266,7 @@ namespace TensileLite
                 if(rowKind(i) == LibraryRowKind::ExperimentalStreamK && !streamK)
                     return false;
 
-                if(!rowMatches(row, problem, hardware, rowDebug))
+                if(!rowMatches(i, problem, hardware, rowDebug, deviceRows))
                     return false;
 
                 bool const equality = rowKind(i) == LibraryRowKind::EqualityMatching;
@@ -317,10 +388,11 @@ namespace TensileLite
                                                             int numSolutions) const override
         {
             SolutionVector<MySolution> rv, solutions;
-            Debug const&               settings = Debug::Instance();
-            const bool                 debug    = settings.printPropertyEvaluation();
-            const bool                 streamK  = settings.useExperimentalSelection() == 2;
-            const bool                 rowDebug = MyPredicate::debugging();
+            Debug const&               settings   = Debug::Instance();
+            const bool                 debug      = settings.printPropertyEvaluation();
+            const bool                 streamK    = settings.useExperimentalSelection() == 2;
+            const bool                 rowDebug   = MyPredicate::debugging();
+            auto const                 deviceRows = rowsMatchingDevice(hardware, rowDebug);
 
             const auto forceDynamic = settings.streamK5ForceMode();
             const bool effectiveDynamic = 
@@ -353,7 +425,7 @@ namespace TensileLite
                        || kind == LibraryRowKind::FreeSizeMatching))
                     return false;
 
-                if(!rowMatches(row, problem, hardware, rowDebug))
+                if(!rowMatches(i, problem, hardware, rowDebug, deviceRows))
                     return false;
 
                 solutions
@@ -402,12 +474,41 @@ namespace TensileLite
         }
 
     private:
-        static bool rowMatches(Row const&       row,
-                               MyProblem const& problem,
-                               Hardware const&  hardware,
-                               bool             rowDebug)
+        // Bit i set when row i matches `hardware`; nullopt when the rows are
+        // not looked up by device.
+        std::optional<uint64_t> rowsMatchingDevice(Hardware const& hardware, bool rowDebug) const
         {
-            return rowDebug ? row.first(problem, hardware) : row.first.evaluate(problem, hardware);
+            if constexpr(MyPredicate::SelectsHardware)
+            {
+                if(!rowsSelectDevices || rowDebug || rowKinds.size() != rows.size())
+                    return std::nullopt;
+                auto const* device = dynamic_cast<AMDGPU const*>(&hardware);
+                if(device == nullptr)
+                    return std::nullopt;
+                return devices.matches(*device, [&]() {
+                    uint64_t matching = 0;
+                    for(size_t i = 0; i < rows.size(); i++)
+                    {
+                        if(rows[i].first.evaluate(hardware, hardware))
+                            matching |= uint64_t(1) << i;
+                    }
+                    return matching;
+                });
+            }
+            return std::nullopt;
+        }
+
+        template <typename Any>
+        bool rowMatches(size_t                         i,
+                        Any const&                     problem,
+                        Hardware const&                hardware,
+                        bool                           rowDebug,
+                        std::optional<uint64_t> const& deviceRows) const
+        {
+            if(deviceRows)
+                return (*deviceRows >> i) & 1;
+            return rowDebug ? rows[i].first(problem, hardware)
+                            : rows[i].first.evaluate(problem, hardware);
         }
 
         // Calls visit(i) for the rows that can match `problem`, in row order,
@@ -475,6 +576,8 @@ namespace TensileLite
 
         std::vector<LibraryRowKind>                     rowKinds;
         std::vector<std::pair<LibraryRowTypes, size_t>> rowsByTypes;
+        bool                                            rowsSelectDevices = false;
+        LibraryRowsByDevice                             devices;
     };
 
     struct HardwarePredicate
@@ -518,6 +621,8 @@ namespace TensileLite
             return rv;
         }
 
+        static constexpr bool SelectsHardware = true;
+
         /// Whether operator() prints its evaluation.
         static bool debugging()
         {
@@ -529,6 +634,13 @@ namespace TensileLite
         bool evaluate(Any const&, Hardware const& hardware) const
         {
             return (*value)(hardware);
+        }
+
+        /// Whether the predicate reads no more of the hardware than the fields
+        /// AMDGPU::operator== compares.
+        bool readsOnlyTheDevice() const
+        {
+            return readsOnlyTheDevice(value.get());
         }
 
         std::optional<LibraryRowTypes> leadingTypes() const
@@ -555,6 +667,51 @@ namespace TensileLite
                 return false;
 
             return targetPciChipIds.count(gpuChipId.value()) == 0;
+        }
+
+    private:
+        template <typename Terms>
+        static bool readsOnlyTheDeviceInAll(Terms const& terms)
+        {
+            return std::all_of(terms.begin(), terms.end(), [](auto const& term) {
+                return readsOnlyTheDevice(term.get());
+            });
+        }
+
+        static bool readsOnlyTheDevice(Predicates::Predicate<Hardware> const* predicate)
+        {
+            using namespace Predicates;
+            if(dynamic_cast<True<Hardware> const*>(predicate)
+               || dynamic_cast<False<Hardware> const*>(predicate))
+                return true;
+            if(auto const* all = dynamic_cast<And<Hardware> const*>(predicate))
+                return readsOnlyTheDeviceInAll(all->value);
+            if(auto const* any = dynamic_cast<Or<Hardware> const*>(predicate))
+                return readsOnlyTheDeviceInAll(any->value);
+            if(auto const* negated = dynamic_cast<Not<Hardware> const*>(predicate))
+                return readsOnlyTheDevice(negated->value.get());
+            if(auto const* gpu = dynamic_cast<IsSubclass<Hardware, AMDGPU> const*>(predicate))
+                return readsOnlyTheDevice(gpu->value.get());
+            return false;
+        }
+
+        static bool readsOnlyTheDevice(Predicates::Predicate<AMDGPU> const* predicate)
+        {
+            using namespace Predicates;
+            if(dynamic_cast<True<AMDGPU> const*>(predicate)
+               || dynamic_cast<False<AMDGPU> const*>(predicate)
+               || dynamic_cast<GPU::ProcessorEqual const*>(predicate)
+               || dynamic_cast<GPU::CUCountEqual const*>(predicate)
+               || dynamic_cast<GPU::PciChipIdEqual const*>(predicate)
+               || dynamic_cast<GPU::RunsKernelTargeting const*>(predicate))
+                return true;
+            if(auto const* all = dynamic_cast<And<AMDGPU> const*>(predicate))
+                return readsOnlyTheDeviceInAll(all->value);
+            if(auto const* any = dynamic_cast<Or<AMDGPU> const*>(predicate))
+                return readsOnlyTheDeviceInAll(any->value);
+            if(auto const* negated = dynamic_cast<Not<AMDGPU> const*>(predicate))
+                return readsOnlyTheDevice(negated->value.get());
+            return false;
         }
     };
 
@@ -611,6 +768,8 @@ namespace TensileLite
             return rv;
         }
 
+        static constexpr bool SelectsHardware = false;
+
         /// Whether operator() prints its evaluation.
         static bool debugging()
         {
@@ -621,6 +780,11 @@ namespace TensileLite
         bool evaluate(MyProblem const& problem, Hardware const&) const
         {
             return (*value)(problem);
+        }
+
+        bool readsOnlyTheDevice() const
+        {
+            return false;
         }
 
         /// The types an And predicate whose first term is TypesEqual requires;
