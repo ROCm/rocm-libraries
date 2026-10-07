@@ -56,6 +56,30 @@ struct DeviceCopy
                                                                  num_buffers,
                                                                  stream));
     }
+
+    template<typename T_In,
+             typename Extents_In,
+             typename Layout_In,
+             typename Accessor_In,
+             typename T_Out,
+             typename Extents_Out,
+             typename Layout_Out,
+             typename Accessor_Out>
+    [[nodiscard]]
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t
+        Copy(void*                                                             d_temp_storage,
+             size_t&                                                           temp_storage_bytes,
+             _HIPCUB_STD::mdspan<T_In, Extents_In, Layout_In, Accessor_In>     mdspan_in,
+             _HIPCUB_STD::mdspan<T_Out, Extents_Out, Layout_Out, Accessor_Out> mdspan_out,
+             hipStream_t                                                       stream = nullptr)
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceCopy::Copy(d_temp_storage,
+                                                              temp_storage_bytes,
+                                                              mdspan_in,
+                                                              mdspan_out,
+                                                              stream));
+    }
 };
 
 END_HIPCUB_NAMESPACE
