@@ -144,6 +144,8 @@ set(rocrefact_test_source
 set(rocunit_test_source
   # gemm
   unit/gemm_gtest.cpp
+  # gemv workspace sizing
+  unit/gemv_mem_gtest.cpp
   # generate helpers
   unit/gerand_gtest.cpp
   unit/herand_gtest.cpp

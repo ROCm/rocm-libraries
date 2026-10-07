@@ -227,20 +227,24 @@ void rocsolver_larf_getMemorySize(const rocblas_side side,
         *size_Abyx = std::max(m, n);
     *size_Abyx *= sizeof(T) * batch_count;
 
-    // rocBLAS gates its fast transposed-gemv kernel (rocblas_gemvt_sn_kernel, which
-    // splits m across many workgroups) on receiving a scratch buffer; without one it
-    // falls back to the column-parallel rocblas_gemvt_kernel. The requirement is 0
-    // unless the shape is tall-skinny. It is appended to Abyx, past the order *
-    // batch_count elements holding W, so that the callers of this function do not have
-    // to thread an additional buffer through. rocsolver_larf_template does the split.
+    // rocBLAS gates its optimized gemv kernels on receiving scratch space; without it
+    // the slower general kernel runs instead. The requirement is appended to Abyx, past
+    // the order * batch_count elements holding W, so that the callers of this function
+    // do not have to thread an additional buffer through; rocsolver_larf_template does
+    // the split.
+    //
+    // The blocked factorizations call larf on a sequence of shrinking panels while
+    // sizing this workspace once from the full (m, n), and the rocBLAS gates are not
+    // monotonic in m and n, so a panel can need scratch where the full problem needs
+    // none. Bound the requirement over every subproblem rather than querying (m, n).
     rocblas_operation trans = rocblas_operation_none;
     if(side == rocblas_side_left)
         trans = rocblas_is_complex<T> ? rocblas_operation_conjugate_transpose
                                       : rocblas_operation_transpose;
 
     size_t size_gemv_work;
-    rocblasCall_gemv_mem<BATCHED, T>(trans, rocblas_int(m), rocblas_int(n),
-                                     rocblas_int(batch_count), &size_gemv_work);
+    rocblasCall_gemv_mem_max<BATCHED, T>(trans, rocblas_int(m), rocblas_int(n),
+                                         rocblas_int(batch_count), &size_gemv_work);
     *size_Abyx += size_gemv_work;
 }
 
