@@ -1,0 +1,134 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# DESIGNED gfx950 MXF4 subtile config — host-pre-swizzled B characterization.
+#
+# SwizzleTensorB means the host has already interleaved B into the MFMA-friendly
+# 16-row layout, so TileInfo.isPreShuffled is True and the global-read and
+# local-read emitters take a different arm at every point where they would
+# otherwise apply the LDS swizzle or scale a row offset by StrideB1J. Before
+# this config nothing in the unit suite set isPreShuffled: the existing
+# SwizzleTensorB coverage (s09_assignderivedparameters_swizzlet.yaml,
+# test_r7_gsu_reduce_char.py) is all on the classic DirectToVgpr path, which
+# never constructs a subtile TileInfo, so every pre-shuffled arm emitted untested.
+#
+# The two problem groups are a matched pair and must stay that way:
+#
+#   index 0  SwizzleTensorB: True  — isPreShuffled is True for B and False for
+#            A, which is the asymmetric case the emitters actually ship: the
+#            swizzle-skip has to apply per tensor, not per kernel.
+#   index 1  SwizzleTensorB: False — identical in every other respect, so any
+#            pre-shuffled code that leaks out of the isPreShuffled checks shows
+#            up as a difference between the two.
+#
+# Solution parameters mirror the shipped swizzled-B logic (Logic/asm_full/
+# gfx950/gfx950/Origami/gfx950_Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_STB_BH_
+# Bias_HA_S_SAB_SAV_UserArgs.yaml) and the GPU test config
+# Tests/common/gemm/gfx950/subtile_mxfp4_swizzleb.yaml, so the characterized
+# kernels are the ones that actually ship.
+#
+# DirectToVgprB is deliberately left off. On the classic path SwizzleTensorB
+# requires it, and Solution.py rejects the solution without it; the subtile
+# global-read emitter walks the swizzled layout itself, so it is exempt. Leaving
+# it off is therefore what pins that exemption — if it regresses, this config
+# stops producing solutions at all.
+#
+# CPU-only. No GPU, no compile, no hardware access.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  SleepPercent: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  Device: 0
+  MXScaleFormat: 1
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # [0] MXF4 -> BF16, host-pre-swizzled B : isPreShuffled True for B only
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: B
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      SwizzleTensorB: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 16, 4, 1, 4]   # MIWT 16x4, WG 1x4, MT256x256
+        - DepthU: [256]
+        - AssertSummationElementMultiple: [256]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - TransposeLDS: [1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [SingleBuffer]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - InnerUnroll: [1]
+        - UseSubtileImpl: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+
+  ########################################
+  # [1] MXF4 -> BF16, ordinary B : scoping control, isPreShuffled False
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: B
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 16, 4, 1, 4]   # MIWT 16x4, WG 1x4, MT256x256
+        - DepthU: [256]
+        - AssertSummationElementMultiple: [256]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - TransposeLDS: [1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [SingleBuffer]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - InnerUnroll: [1]
+        - UseSubtileImpl: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
