@@ -357,6 +357,9 @@ namespace TensileLite
             if(end != sk5Force && *end == '\0' && val >= -1 && val <= 1)
                 m_streamK5ForceMode = static_cast<int>(val);
         }
+
+        const char* preciseSMTarget = std::getenv("TENSILE_PRECISE_SM_TARGET");
+        m_usePreciseSMTarget        = preciseSMTarget && strtol(preciseSMTarget, nullptr, 0) != 0;
     }
 
 } // namespace TensileLite

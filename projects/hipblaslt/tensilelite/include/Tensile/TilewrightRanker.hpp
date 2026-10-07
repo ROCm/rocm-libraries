@@ -28,6 +28,8 @@
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/Debug.hpp>
+#include <Tensile/DefaultPersistentLaunch.hpp>
+#include <Tensile/Utils.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 
 #include <origami/hardware.hpp>
@@ -245,6 +247,11 @@ namespace TensileLite
      * persistent settings of the device, no uniform summation order and a
      * workspace that holds every partial tile. The device is the one of the
      * TilewrightLaunchScope of the thread, else the one given here.
+     *
+     * When followsRule() holds for the kernel and the device, plan() hands
+     * what it recorded of each kernel to resolveDefaultPersistentLaunch(), the
+     * function resolvePersistentSettings() decides that launch with; otherwise
+     * it calls resolvePersistentSettings(), as resolvedPlan() does.
      */
     template <typename MySolution>
     class TilewrightLaunch : public tilewright::LaunchModel
@@ -266,15 +273,7 @@ namespace TensileLite
         {
             m_kernels.reserve(m_solutions.size());
             for(auto const& solution : m_solutions)
-            {
-                auto const& sm = solution->sizeMapping;
-                m_kernels.push_back(
-                    {.key         = launchKey(launchInputs(sm)),
-                     .persistent  = sm.isPersistent(),
-                     .batchInGrid = !sm.persistentKernelAlongBatch && !sm.packBatchDims,
-                     .streamK     = sm.isStreamK(),
-                     .atomic      = sm.streamKAtomic != 0});
-            }
+                m_kernels.push_back(kernelLaunch(*solution));
         }
 
         std::string id() const override
@@ -332,13 +331,231 @@ namespace TensileLite
                                     tilewright::ExecutionContext const& context) const override
         {
             checkIndex(config.index);
-            auto const&     solution = *m_solutions[config.index];
-            auto const&     kernel   = m_kernels[config.index];
             Scope const*    scope    = Scope::active();
-            Hardware const* hardware = scope ? &scope->hardware() : m_device.get();
-            if(hardware == nullptr)
-                throw std::logic_error("tilewright launch: no device to plan the launch for");
+            Hardware const& hardware = deviceOf(scope);
+            auto const&     kernel   = m_kernels[config.index];
+            if(kernel.rule)
+            {
+                if(!kernel.persistent)
+                    return {.dynamic_queue = false, .grid_wgs = outputTiles(kernel, problem)};
+                DeviceLaunch const device
+                    = scope ? scopeDeviceLaunch(*scope) : deviceLaunch(hardware);
+                if(device.rule)
+                    return rulePlan(kernel, device, problem, context);
+            }
+            return resolvedPlan(config.index, scope, hardware, problem, context);
+        }
 
+        // The plan resolvePersistentSettings() launches with, which plan()
+        // returns whatever followsRule() says.
+        tilewright::LaunchPlan resolvedPlan(tilewright::Config const&           config,
+                                            tilewright::Problem const&          problem,
+                                            tilewright::ExecutionContext const& context) const
+        {
+            checkIndex(config.index);
+            Scope const* scope = Scope::active();
+            return resolvedPlan(config.index, scope, deviceOf(scope), problem, context);
+        }
+
+        // Whether plan() evaluates the launch of the kernel at pool position
+        // `index` on `hardware` from its record rather than through
+        // resolvePersistentSettings(). It does unless the kernel is laid out
+        // in a way the record does not hold (handwritten, packed batch, a
+        // DataParallel cluster, an execution policy TensileLite rejects) or
+        // the launch reads a setting other than its default: a fixed grid, a
+        // grid selection other than k_split_aware or a CU cap among the
+        // device's persistent settings, an unrounded CU budget, or a debug
+        // setting of defaultPersistentLaunchDebug().
+        bool followsRule(size_t index, Hardware const& hardware) const
+        {
+            checkIndex(index);
+            auto const& kernel = m_kernels[index];
+            return kernel.rule && (!kernel.persistent || deviceLaunch(hardware).rule);
+        }
+
+    private:
+        // What plan() and launch_key() read of a kernel. The fields from
+        // config to name hold only when `rule` does, and config only for a
+        // persistent kernel.
+        struct KernelLaunch
+        {
+            std::uint64_t     key         = 0;
+            origami::config_t config      = {};
+            std::uint32_t     tileM       = 0;
+            std::uint32_t     tileN       = 0;
+            std::uint32_t     depthU      = 0;
+            std::uint32_t     threads     = 1;
+            int               occupancy   = 0;
+            WorkAssignment    assignment  = WorkAssignment::StaticGrid;
+            char const*       name        = "";
+            bool              persistent  = false;
+            bool              batchInGrid = false;
+            bool              streamK     = false;
+            bool              atomic      = false;
+            bool              rule        = false;
+        };
+
+        // What plan() reads of the device and of the debug settings.
+        struct DeviceLaunch
+        {
+            bool                       rule         = false;
+            size_t                     computeUnits = 0;
+            origami::hardware_t const* analytical   = nullptr;
+        };
+
+        static KernelLaunch kernelLaunch(MySolution const& solution)
+        {
+            auto const&  sm = solution.sizeMapping;
+            KernelLaunch kernel{.key         = launchKey(launchInputs(sm)),
+                                .assignment  = sm.workAssignment,
+                                .persistent  = sm.isPersistent(),
+                                .batchInGrid = !sm.persistentKernelAlongBatch && !sm.packBatchDims,
+                                .streamK     = sm.isStreamK(),
+                                .atomic      = sm.streamKAtomic != 0};
+
+            size_t const threads = sm.workGroupSize.x * sm.workGroupSize.y * sm.workGroupSize.z;
+            size_t const limit   = std::numeric_limits<std::uint32_t>::max();
+            if(sm.macroTile.x == 0 || sm.macroTile.y == 0 || sm.depthU == 0
+               || sm.macroTile.x > limit || sm.macroTile.y > limit || sm.depthU > limit
+               || threads > limit || sm.packBatchDims != 0
+               || (!solution.customKernel.name.empty() && !solution.customKernel.generated))
+                return kernel;
+            if(kernel.persistent)
+            {
+                if(!solution.followsDefaultPersistentLaunch())
+                    return kernel;
+                try
+                {
+                    solution.validatePersistentLoopArgsVersion();
+                    kernel.config = solution.persistentLaunchConfig();
+                }
+                catch(std::exception const&)
+                {
+                    return kernel;
+                }
+            }
+            kernel.tileM     = static_cast<std::uint32_t>(sm.macroTile.x);
+            kernel.tileN     = static_cast<std::uint32_t>(sm.macroTile.y);
+            kernel.depthU    = static_cast<std::uint32_t>(sm.depthU);
+            kernel.threads   = static_cast<std::uint32_t>(threads);
+            kernel.occupancy = sm.CUOccupancy;
+            kernel.name      = solution.kernelName.c_str();
+            kernel.rule      = true;
+            return kernel;
+        }
+
+        // rulePlan() passes the default debug settings, and rounds the CU budget
+        // as ContractionProblem::setSmCountTarget() does without
+        // TENSILE_PRECISE_SM_TARGET.
+        static DeviceLaunch deviceLaunch(Hardware const& hardware)
+        {
+            if(!hasDefaultPersistentSettings(hardware) || Debug::Instance().usePreciseSMTarget()
+               || !defaultPersistentLaunchDebug().unset())
+                return {};
+            auto const& device = static_cast<hip::HipAMDGPU const&>(hardware);
+            return {.rule         = true,
+                    .computeUnits = static_cast<size_t>(device.computeUnitCount),
+                    .analytical   = device.analyticalHardware.get()};
+        }
+
+        // deviceLaunch() of the scope's device, reused by the plans of one
+        // ranking.
+        static DeviceLaunch scopeDeviceLaunch(Scope const& scope)
+        {
+            static thread_local std::uint64_t id = 0;
+            static thread_local DeviceLaunch  device;
+            if(id != scope.id())
+            {
+                device = deviceLaunch(scope.hardware());
+                id     = scope.id();
+            }
+            return device;
+        }
+
+        Hardware const& deviceOf(Scope const* scope) const
+        {
+            if(scope)
+                return scope->hardware();
+            if(m_device == nullptr)
+                throw std::logic_error("tilewright launch: no device to plan the launch for");
+            return *m_device;
+        }
+
+        // getNumTiles() of a kernel without packed batch dimensions, with the
+        // batch.
+        static size_t outputTiles(KernelLaunch const& kernel, tilewright::Problem const& problem)
+        {
+            return CeilDivide(problem.size.m, size_t{kernel.tileM})
+                   * CeilDivide(problem.size.n, size_t{kernel.tileN}) * problem.batch;
+        }
+
+        static tilewright::LaunchPlan launchPlan(KernelLaunch const&  kernel,
+                                                 WorkAssignment       effectiveWorkAssignment,
+                                                 size_t               grid,
+                                                 size_t               tiles,
+                                                 origami::reduction_t reduction)
+        {
+            bool const dynamic = effectiveWorkAssignment == WorkAssignment::DynamicWorkQueue;
+            tilewright::LaunchPlan plan{.dynamic_queue = dynamic, .grid_wgs = grid};
+            if(kernel.streamK && !dynamic && grid > 0 && tiles % grid != 0)
+                plan.partial_reduction = kernel.atomic ? tilewright::PartialReduction::Atomic
+                                         : reduction == origami::reduction_t::parallel
+                                             ? tilewright::PartialReduction::Parallel
+                                             : tilewright::PartialReduction::Tree;
+            return plan;
+        }
+
+        // resolvePersistentSettings() of a persistent kernel whose `rule` holds,
+        // on a device whose `rule` holds.
+        static tilewright::LaunchPlan rulePlan(KernelLaunch const&                 kernel,
+                                               DeviceLaunch const&                 device,
+                                               tilewright::Problem const&          problem,
+                                               tilewright::ExecutionContext const& context)
+        {
+            size_t const tiles            = outputTiles(kernel, problem);
+            auto const   computeInputType = problem.mi_dtype == tilewright::DataType::XFloat32
+                                                ? problem.a_dtype
+                                                : problem.mi_dtype;
+
+            DefaultPersistentLaunchInputs inputs;
+            inputs.m                = problem.size.m;
+            inputs.n                = problem.size.n;
+            inputs.k                = problem.size.k;
+            inputs.batch            = problem.batch;
+            inputs.transA           = problem.a_transpose == tilewright::Transpose::T;
+            inputs.transB           = problem.b_transpose == tilewright::Transpose::T;
+            inputs.aType            = tilewrightToRocisaDatatype(problem.a_dtype);
+            inputs.bType            = tilewrightToRocisaDatatype(problem.b_dtype);
+            inputs.computeInputType = tilewrightToRocisaDatatype(computeInputType);
+            inputs.tiles            = tiles;
+            inputs.itersPerTile     = CeilDivide(problem.size.k, size_t{kernel.depthU});
+            inputs.workspaceSize    = std::numeric_limits<size_t>::max();
+            inputs.smCountTarget    = static_cast<int>(
+                std::min<size_t>(context.cu_budget, std::numeric_limits<int>::max()) / 32 * 32);
+            inputs.schedulingMode = schedulingMode(context.schedule);
+            inputs.kernel         = &kernel.config;
+            inputs.threads        = kernel.threads;
+            inputs.occupancy      = kernel.occupancy;
+            inputs.workAssignment = kernel.assignment;
+            inputs.streamK        = kernel.streamK;
+            inputs.atomic         = kernel.atomic;
+            inputs.kernelName     = kernel.name;
+            inputs.hardware       = device.analytical;
+            inputs.computeUnits   = device.computeUnits;
+
+            auto const launch = resolveDefaultPersistentLaunch(inputs);
+            return launchPlan(
+                kernel, launch.effectiveWorkAssignment, launch.grid, tiles, launch.reduction);
+        }
+
+        tilewright::LaunchPlan resolvedPlan(size_t                              index,
+                                            Scope const*                        scope,
+                                            Hardware const&                     hardware,
+                                            tilewright::Problem const&          problem,
+                                            tilewright::ExecutionContext const& context) const
+        {
+            auto const& solution      = *m_solutions[index];
+            auto const& kernel        = m_kernels[index];
             auto const& launchProblem = launchProblemOf(scope, problem, context);
             size_t      tiles         = launchProblem.getNumTiles(solution.sizeMapping, 1);
             if(!kernel.persistent)
@@ -351,31 +568,13 @@ namespace TensileLite
                 return {.dynamic_queue = false, .grid_wgs = tiles};
             }
 
-            auto const launch  = solution.resolvePersistentSettings(launchProblem, *hardware);
-            bool const dynamic = launch.effectiveWorkAssignment == WorkAssignment::DynamicWorkQueue;
-            tilewright::LaunchPlan plan{.dynamic_queue = dynamic, .grid_wgs = launch.grid};
-            if(kernel.streamK && !dynamic && launch.grid > 0
-               && launch.totalTiles % launch.grid != 0)
-            {
-                plan.partial_reduction = kernel.atomic ? tilewright::PartialReduction::Atomic
-                                         : launch.reduction == origami::reduction_t::parallel
-                                             ? tilewright::PartialReduction::Parallel
-                                             : tilewright::PartialReduction::Tree;
-            }
-            return plan;
+            auto const launch = solution.resolvePersistentSettings(launchProblem, hardware);
+            return launchPlan(kernel,
+                              launch.effectiveWorkAssignment,
+                              launch.grid,
+                              launch.totalTiles,
+                              launch.reduction);
         }
-
-    private:
-        // What plan() and launch_key() read of a kernel, besides what
-        // getNumTiles() and resolvePersistentSettings() read of the solution.
-        struct KernelLaunch
-        {
-            std::uint64_t key         = 0;
-            bool          persistent  = false;
-            bool          batchInGrid = false;
-            bool          streamK     = false;
-            bool          atomic      = false;
-        };
 
         void checkIndex(size_t index) const
         {

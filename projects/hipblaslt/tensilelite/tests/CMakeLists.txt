@@ -66,6 +66,8 @@ if(NOT HIPBLASLT_ENABLE_YAML)
             # The indexed library layout is msgpack-only: its solution blob is a
             # msgpack BIN, and mapRawBytes has no YAML implementation.
             "${CMAKE_CURRENT_SOURCE_DIR}/IndexedLibraryLoad_test.cpp"
+            # Loads library files through msgpack to read their kernels without a device.
+            "${CMAKE_CURRENT_SOURCE_DIR}/TilewrightLaunchLibrary_test.cpp"
     )
 endif()
 

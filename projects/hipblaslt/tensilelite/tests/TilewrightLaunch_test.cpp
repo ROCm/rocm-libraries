@@ -13,20 +13,24 @@
 
 #if defined(TENSILELITE_HAS_TILEWRIGHT)
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <map>
 #include <memory>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include <Tensile/ContractionLibrary.hpp>
 #include <Tensile/ContractionSolution.hpp>
+#include <Tensile/Debug.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/SolutionBlobCache.hpp>
 #include <Tensile/Tensile.hpp>
@@ -67,12 +71,15 @@ namespace
 
     struct Kernel
     {
-        int    occupancy = 1;
-        int    strategy  = 0;
-        int    assign    = 0;
-        int    atomic    = 0;
-        size_t wgX       = 256;
-        size_t wgY       = 1;
+        int    occupancy     = 1;
+        int    strategy      = 0;
+        int    assign        = 0;
+        int    atomic        = 0;
+        size_t wgX           = 256;
+        size_t wgY           = 1;
+        size_t packBatchDims = 0;
+        size_t clusterX      = 1;
+        bool   handwritten   = false;
     };
 
     std::shared_ptr<ContractionSolution> makeSolution(Kernel const& k)
@@ -85,13 +92,16 @@ namespace
         sm.macroTile              = TensileLite::dim3(128, 128, 1);
         sm.workGroupSize          = TensileLite::dim3(k.wgX, k.wgY, 1);
         sm.threadTile             = TensileLite::dim3(1, 1, 1);
-        sm.clusterDim             = TensileLite::dim3(1, 1, 1);
+        sm.clusterDim             = TensileLite::dim3(k.clusterX, 1, 1);
         sm.depthU                 = 64;
         sm.matrixInstruction      = {16, 16, 32, 1};
         sm.CUOccupancy            = k.occupancy;
         sm.workspaceSizePerElemC  = 4;
         sm.workGroupMapping       = 1;
         sm.globalSplitU           = 1;
+        sm.packBatchDims          = k.packBatchDims;
+        if(k.handwritten)
+            solution->customKernel.name = "tilewright-launch-test-kernel";
         return solution;
     }
 
@@ -280,6 +290,217 @@ TEST(TilewrightLaunchTest, LaunchKeysMatchThePipeline)
     outside.index = 1;
     EXPECT_THROW(Launch("gfx950", {makeSolution(hybrid(2))}).launch_key(outside),
                  std::out_of_range);
+}
+
+namespace
+{
+    bool samePlan(tilewright::LaunchPlan const& a, tilewright::LaunchPlan const& b)
+    {
+        return a.dynamic_queue == b.dynamic_queue && a.grid_wgs == b.grid_wgs
+               && a.partial_reduction == b.partial_reduction;
+    }
+
+    bool samePlans(std::vector<tilewright::LaunchPlan> const& a,
+                   std::vector<tilewright::LaunchPlan> const& b)
+    {
+        return std::equal(a.begin(), a.end(), b.begin(), b.end(), samePlan);
+    }
+
+    // Sets `name` (unsets it for nullptr) and re-reads the debug settings for
+    // the lifetime of the object.
+    class ScopedDebugEnv
+    {
+    public:
+        ScopedDebugEnv(char const* name, char const* value)
+            : m_name(name)
+        {
+            if(char const* previous = std::getenv(name))
+                m_previous = previous;
+            set(value);
+        }
+
+        ~ScopedDebugEnv()
+        {
+            set(m_previous ? m_previous->c_str() : nullptr);
+        }
+
+    private:
+        void set(char const* value)
+        {
+            if(value)
+                setenv(m_name.c_str(), value, 1);
+            else
+                unsetenv(m_name.c_str());
+            Debug::Instance().reloadDebugBitsForTest();
+        }
+
+        std::string                m_name;
+        std::optional<std::string> m_previous;
+    };
+
+    std::vector<Kernel> persistentKernels()
+    {
+        return {hybrid(1),
+                hybrid(4),
+                {.occupancy = 2, .strategy = 2, .assign = 0},
+                {.occupancy = 2, .strategy = 2, .assign = 1},
+                {.occupancy = 1, .strategy = 2, .assign = 0, .atomic = 1},
+                {.occupancy = 2, .strategy = 1, .assign = 0}};
+    }
+
+    std::vector<std::pair<tilewright::Problem, tilewright::ExecutionContext>> probes()
+    {
+        std::vector<std::pair<tilewright::Problem, tilewright::ExecutionContext>> out;
+        for(auto const& problem : {bf16Problem(4096, 4096, 512),
+                                   bf16Problem(128 * 20, 128, 64 * 96),
+                                   bf16Problem(256, 256, 64 * 64),
+                                   bf16Problem(128 * 4500, 128, 512),
+                                   bf16Problem(1024, 1024, 512, 16),
+                                   bf16Problem(128 * 1884, 128, 512)})
+            for(size_t const budget : {0, 224, 240})
+                for(auto const schedule : {tilewright::Schedule::Default,
+                                           tilewright::Schedule::Dynamic,
+                                           tilewright::Schedule::Auto})
+                    out.emplace_back(problem, context(budget, schedule));
+        return out;
+    }
+
+    // The plans of `kernels` at every probe on `device`, each checked against
+    // resolvedPlan(), with followsRule() expected to be `rule`.
+    std::vector<tilewright::LaunchPlan> checkedPlans(std::vector<Kernel> const&      kernels,
+                                                     std::shared_ptr<hip::HipAMDGPU> device,
+                                                     bool                            rule)
+    {
+        std::vector<tilewright::LaunchPlan> plans;
+        for(auto const& kernel : kernels)
+        {
+            Launch const launch("gfx950", {makeSolution(kernel)}, device);
+            EXPECT_EQ(launch.followsRule(0, *device), rule)
+                << "strategy " << kernel.strategy << " assignment " << kernel.assign;
+            for(auto const& [problem, ctx] : probes())
+            {
+                auto const plan = launch.plan(tilewright::Config{}, problem, ctx);
+                EXPECT_TRUE(samePlan(plan, launch.resolvedPlan(tilewright::Config{}, problem, ctx)))
+                    << "strategy " << kernel.strategy << " assignment " << kernel.assign << " m "
+                    << problem.size.m << " cu_budget " << ctx.cu_budget << " schedule "
+                    << static_cast<int>(ctx.schedule);
+                plans.push_back(plan);
+            }
+        }
+        return plans;
+    }
+}
+
+TEST(TilewrightLaunchTest, PlansFromRecordsOnlyUnderDefaultLaunchSettings)
+{
+    auto const kernels  = persistentKernels();
+    auto const defaults = checkedPlans(kernels, makeDevice(AMDGPU::Processor::gfx950, 256), true);
+
+    auto const offDefault = [&](char const* what, auto&& change) {
+        auto device = makeDevice(AMDGPU::Processor::gfx950, 256);
+        change(*device);
+        EXPECT_FALSE(samePlans(checkedPlans(kernels, device, false), defaults)) << what;
+    };
+    offDefault("fixed grid", [](hip::HipAMDGPU& d) { d.persistentFixedGrid = 64; });
+    offDefault("CU-count grid", [](hip::HipAMDGPU& d) { d.persistentDynamicGrid = 0; });
+    offDefault("min-resources grid", [](hip::HipAMDGPU& d) { d.persistentDynamicGrid = 1; });
+    offDefault("CU cap", [](hip::HipAMDGPU& d) { d.persistentMaxCUs = 128; });
+
+    auto multiplied                      = makeDevice(AMDGPU::Processor::gfx950, 256);
+    multiplied->persistentGridMultiplier = 4;
+    EXPECT_TRUE(samePlans(checkedPlans(kernels, multiplied, true), defaults));
+
+    auto fewerCus              = makeDevice(AMDGPU::Processor::gfx950, 256);
+    fewerCus->computeUnitCount = 240;
+    EXPECT_FALSE(samePlans(checkedPlans(kernels, fewerCus, true), defaults));
+
+    // The launch reads the force mode of the library's Debug, which
+    // reloadDebugBitsForTest() here does not reach, so only the CU budget's
+    // rounding, read on this side, changes its plans.
+    for(auto const* value : {"0", "1", "-1"})
+    {
+        ScopedDebugEnv const env("TENSILE_STREAMK5_FORCE_MODE", value);
+        EXPECT_TRUE(samePlans(
+            checkedPlans(kernels, makeDevice(AMDGPU::Processor::gfx950, 256), true), defaults));
+    }
+    {
+        ScopedDebugEnv const env("TENSILE_PRECISE_SM_TARGET", "1");
+        EXPECT_FALSE(samePlans(
+            checkedPlans(kernels, makeDevice(AMDGPU::Processor::gfx950, 256), false), defaults));
+    }
+
+    auto unmodelled                = makeDevice(AMDGPU::Processor::gfx950, 256);
+    unmodelled->analyticalHardware = nullptr;
+    EXPECT_FALSE(Launch("gfx950", {makeSolution(hybrid(2))}).followsRule(0, *unmodelled));
+    EXPECT_FALSE(Launch("gfx950", {makeSolution(hybrid(2))}).followsRule(0, AMDGPU()));
+    EXPECT_TRUE(Launch("gfx950", {makeSolution({.occupancy = 2})}).followsRule(0, *unmodelled));
+}
+
+TEST(TilewrightLaunchTest, PlansFromRecordsOnlyKernelsTheRecordHolds)
+{
+    auto const device = makeDevice(AMDGPU::Processor::gfx950, 256);
+    auto const plans  = [&](Kernel const& kernel, tilewright::Problem const& problem, bool rule) {
+        Launch const launch("gfx950", {makeSolution(kernel)}, device);
+        EXPECT_EQ(launch.followsRule(0, *device), rule);
+        auto const plan = launch.plan(tilewright::Config{}, problem, context(0));
+        EXPECT_TRUE(samePlan(plan, launch.resolvedPlan(tilewright::Config{}, problem, context(0))));
+        return plan;
+    };
+
+    auto const batched = bf16Problem(1000, 128, 512, 16);
+    for(Kernel kernel : {Kernel{.occupancy = 2}, hybrid(2)})
+    {
+        auto const unpacked  = plans(kernel, batched, true);
+        kernel.packBatchDims = 1;
+        EXPECT_FALSE(samePlan(plans(kernel, batched, false), unpacked)) << kernel.strategy;
+    }
+    plans({.occupancy = 2, .strategy = 1, .packBatchDims = 1}, batched, false);
+
+    plans({.occupancy = 2, .strategy = 1, .clusterX = 2}, bf16Problem(4096, 4096, 512), false);
+    plans({.occupancy = 2, .strategy = 1, .clusterX = 1}, bf16Problem(4096, 4096, 512), true);
+    plans({.occupancy = 2, .strategy = 2, .clusterX = 2}, bf16Problem(4096, 4096, 512), true);
+
+    auto handwritten               = makeSolution(hybrid(2));
+    handwritten->customKernel.name = "tilewright-launch-test-kernel";
+    EXPECT_FALSE(Launch("gfx950", {handwritten}, device).followsRule(0, *device));
+    handwritten->customKernel.generated = true;
+    EXPECT_TRUE(Launch("gfx950", {handwritten}, device).followsRule(0, *device));
+
+    Launch const rejected("gfx950", {makeSolution({.strategy = 1, .assign = 2})}, device);
+    EXPECT_FALSE(rejected.followsRule(0, *device));
+    EXPECT_THROW(rejected.plan(tilewright::Config{}, bf16Problem(4096, 4096, 512), context(0)),
+                 std::runtime_error);
+}
+
+TEST(TilewrightLaunchTest, ScopesOfOneThreadPlanForTheirOwnDevice)
+{
+    auto const fixed           = makeDevice(AMDGPU::Processor::gfx950, 256);
+    fixed->persistentFixedGrid = 64;
+    auto const usual           = makeDevice(AMDGPU::Processor::gfx950, 256);
+    Launch     launch("gfx950", {makeSolution(hybrid(2))});
+
+    auto gemm = ContractionProblemGemm::GEMM(
+        false, false, 4096, 4096, 512, 4096, 512, 4096, 1.0, false, 1);
+    gemm.setComputeInputTypeA(rocisa::DataType::BFloat16);
+    gemm.setComputeInputTypeB(rocisa::DataType::BFloat16);
+    auto const problem = bf16Problem(4096, 4096, 512);
+    for(int round = 0; round < 2; ++round)
+    {
+        {
+            TilewrightLaunchScope<ContractionProblemGemm> scope(gemm, *fixed);
+            auto const plan = launch.plan(tilewright::Config{}, problem, context(0));
+            EXPECT_EQ(plan.grid_wgs, 64u);
+            EXPECT_TRUE(
+                samePlan(plan, launch.resolvedPlan(tilewright::Config{}, problem, context(0))));
+        }
+        {
+            TilewrightLaunchScope<ContractionProblemGemm> scope(gemm, *usual);
+            auto const plan = launch.plan(tilewright::Config{}, problem, context(0));
+            EXPECT_EQ(plan.grid_wgs, 512u);
+            EXPECT_TRUE(
+                samePlan(plan, launch.resolvedPlan(tilewright::Config{}, problem, context(0))));
+        }
+    }
 }
 
 // Pool file: "library <dir>/<stem>" lines (the logic file without .dat[.zlib];
