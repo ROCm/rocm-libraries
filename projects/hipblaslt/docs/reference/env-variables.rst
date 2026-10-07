@@ -105,11 +105,18 @@ later visit to the same problem, and pins the fastest for every call after that.
 where the library chooses the kernel, so an explicitly supplied algorithm is never overridden, and
 it leaves a shape the cache file already serves to the cache.
 
-``cache`` and ``tune`` mode write a few notices without any logging variable, because tuning can
-block the first call on a new shape for minutes and a silent pause looks like a hang. The notices are
-bounded: one line naming the mode and what loaded, one start and one result per shape that is
-actually tuned, and one closing summary. Replaying a cache adds no output per call. Where the notices
-go depends on logging:
+A pinned winner is appended to ``HIPBLASLT_TUNING_CACHE_PATH`` as it is pinned, in the same row
+format ``tune`` writes and ``cache`` replays, so a file filled online is replayed by ``cache`` mode
+like any other. The row records which mode measured it, and the two are never compared against each
+other: an online winner is timed on a live dispatch in place, while a ``tune`` winner is timed on
+library scratch over a rotating buffer with the instruction cache flushed between launches, so
+neither one's counts say anything about the other's.
+
+Every mode that can pause or change what a call launches writes a few notices without any logging
+variable, because tuning can block the first call on a new shape for minutes and a silent pause
+looks like a hang. The notices are bounded: one line naming the mode and what loaded, one start and
+one result per shape that ``tune`` actually tunes, one line per shape ``online`` pins, and one
+closing summary. Replaying a cache adds no output per call. Where the notices go depends on logging:
 
 * No level or mask: stderr. ``HIPBLASLT_LOG_FILE`` alone does not open a log file.
 * ``HIPBLASLT_LOG_LEVEL`` 1 to 3, or a mask without the info bit: the stream logging already opened,
