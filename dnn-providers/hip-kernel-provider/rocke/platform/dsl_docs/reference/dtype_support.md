@@ -442,6 +442,7 @@ The original basis snapshot, with the gfx942 XF32 addition noted below:
 | `gfx1201` | `wmma_gfx12_f32_16x16x16_{f16,bf16}` | f16, bf16 |
 | `gfx1250` | `wmma_gfx1250_f32_16x16x4_f32`, `..._16x16x32_{f16,bf16}`, `..._16x16x64_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_scale_f32_16x16x128_fp8_fp8`, `wmma_scale16_f32_16x16x128_fp8_fp8` | f32, f16, bf16, fp8, bf8 (+ fp8 block-scaled) |
 | `gfx11-generic` | same as `gfx1151` | f16, bf16, iu8, iu4 |
+| `gfx12-generic` | same as `gfx1201` | f16, bf16 |
 
 - The `gfx1250` catalog entry defines its target family, memory model, limits,
   and nine matrix atoms, including FP8 `SCALE`/`SCALE16` forms. §4C.1 lists the

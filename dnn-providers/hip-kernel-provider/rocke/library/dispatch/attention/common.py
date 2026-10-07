@@ -307,8 +307,17 @@ def _request_errors(
             errors.append(f"{field} must be -1 (unbounded) or a nonnegative I32")
     if explicit_left and int(req.sliding_window) != 0:
         errors.append("sliding_window cannot be combined with explicit window_left")
-    if explicit_left and mask_type != AttentionMaskType.SLIDING_WINDOW:
-        errors.append("explicit window_left requires mask_type=SLIDING_WINDOW")
+    # A causal mask plus a left bound is the cuDNN spelling of a causal sliding
+    # window: the bounds become (window_left, 0) on the causal diagonal.
+    if explicit_left and mask_type not in (
+        AttentionMaskType.SLIDING_WINDOW,
+        AttentionMaskType.TOP_LEFT_CAUSAL,
+        AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+    ):
+        errors.append(
+            "explicit window_left requires mask_type SLIDING_WINDOW, "
+            "TOP_LEFT_CAUSAL, or BOTTOM_RIGHT_CAUSAL"
+        )
     if explicit_right and mask_type not in (
         AttentionMaskType.NO_MASK,
         AttentionMaskType.SLIDING_WINDOW,

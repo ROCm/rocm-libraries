@@ -14,7 +14,12 @@ from .hip_compile import (
     hip_variant_key,
 )
 from .hsaco_source import hsaco_file_identity, hsaco_variant_key, resolve_hsaco_file
-from .rocke_compile import compile_rocke_variant, rocke_variant_key
+from .rocke_compile import (
+    ROCKE_TARGET_NATIVE,
+    compile_rocke_variant,
+    rocke_compile_arch,
+    rocke_variant_key,
+)
 from .descriptors import (
     KPACK_DIR_NAME,
     arch_matches,
@@ -58,6 +63,9 @@ class InlineUKD:
     consumers: list = field(default_factory=list)
     # hsaco only: the authored file's resolved root-relative identity.
     rel_file: object = None
+    # rocke only: the processor the code object was compiled for -- the shard
+    # arch for target "native", its LLVM generic processor for "generic".
+    compile_target: object = None
 
 
 @dataclass
@@ -265,6 +273,7 @@ def _compile_ukd_variant(
         source = ks["source"]
         builder = ks["builder"]
         spec = ks["spec"]
+        target = ks.get("target", ROCKE_TARGET_NATIVE)
         vk = _variant_key_for(ukd, rel_dir)
         if vk not in variant_co:
             co_path, captured, observations = compile_rocke_variant(
@@ -275,6 +284,7 @@ def _compile_ukd_variant(
                 inter_arch_dir,
                 observation_requests.get(vk, {}),
                 origins,
+                target,
             )
             variant_co[vk] = co_path
             variant_symbol[vk] = captured
@@ -284,10 +294,19 @@ def _compile_ukd_variant(
         # A reused compile result is checked as hard as a fresh one, for EVERY
         # consumer: the first's agreement says nothing about a second completing
         # different metadata from the same decisions.
+        # The shard binding stays the shard arch even for a generic compile: the
+        # object is packed for, and its evidence bound to, this shard alone.
         if observations.get("arch") != arch:
             raise HkpPackError(
                 f"{where}: compile observations were taken for "
                 f"'{observations.get('arch')}', not '{arch}'"
+            )
+        compile_target = rocke_compile_arch(arch, target)
+        if observations.get("compile_target") != compile_target:
+            raise HkpPackError(
+                f"{where}: compile observations were compiled for "
+                f"'{observations.get('compile_target')}', not '{compile_target}' "
+                f"(kernel_source.target '{target}' on shard '{arch}')"
             )
         if observations.get("symbol") != symbol:
             raise HkpPackError(
@@ -309,6 +328,7 @@ def _compile_ukd_variant(
             "builder": builder,
             "spec": spec,
             "observations": observations,
+            "compile_target": compile_target,
             "consumers": consumers,
         }
     elif kind == "hsaco":
@@ -593,6 +613,7 @@ def _compile_one_variant(job):
                 job.out_dir,
                 job.requests,
                 origins,
+                ks.get("target", ROCKE_TARGET_NATIVE),
             )
         else:
             # Unreachable while `_variant_key_for` keys only these two kinds. A
@@ -753,7 +774,12 @@ def _variant_key_for(ukd, rel_dir):
     if kind == "hip":
         return hip_variant_key(hip_source_relpath(rel_dir, ks["source"]), ks["build"])
     if kind == "rocke":
-        return rocke_variant_key(ks["source"], ks["builder"], ks["spec"])
+        return rocke_variant_key(
+            ks["source"],
+            ks["builder"],
+            ks["spec"],
+            ks.get("target", ROCKE_TARGET_NATIVE),
+        )
     return None
 
 
@@ -1100,6 +1126,9 @@ def _rewrite_ukd_kpack(
             "source": ukd.source,
             "builder": ukd.builder,
             "spec": ukd.spec,
+            # The processor the shipped object was built for: the shard arch for a
+            # native compile, the family's generic processor for a generic one.
+            "compile_target": ukd.compile_target,
         }
     elif ukd.origin_kind == "hsaco":
         provenance = {
@@ -1273,6 +1302,7 @@ def pack_arch(
                 ukd.source,
                 ukd.builder,
                 json.dumps(ukd.spec, sort_keys=True),
+                ukd.compile_target,
             )
         elif ukd.origin_kind == "hsaco":
             sig = ("hsaco", ukd.rel_file)

@@ -1,3 +1,4 @@
+import copy
 import dataclasses
 import hashlib
 import json
@@ -177,7 +178,7 @@ STUB_ARGUMENTS = [
 
 
 def _patch_compiler(monkeypatch, name="stub_symbol", data=None):
-    """Stub the comgr entry, recording the backend the producer requested.
+    """Stub the comgr entry, recording the backend and arch the producer requested.
 
     The recorder exists so a test can assert the producer PINS the backend
     rather than merely tolerating one. Without it, dropping the pin would leave
@@ -199,6 +200,7 @@ def _patch_compiler(monkeypatch, name="stub_symbol", data=None):
 
     def _fake_compile(kernel, *, arch, capture_ir_text=False, backend=None):
         seen["backend"] = backend
+        seen.setdefault("arches", []).append(arch)
         return _FakeArtifact(name, data)
 
     monkeypatch.setattr(
@@ -758,3 +760,240 @@ def test_rocke_toc_key_collision_is_detected(tmp_path, monkeypatch, rocm_kpack_d
             rocm_kpack_dir=rocm_kpack_dir,
             inter_root=tmp_path / "inter",
         )
+
+
+# --- F. kernel_source.target: native vs generic compile target ---------------
+_TARGET_STUB = """
+    import dataclasses
+
+    SEEN = []
+
+    @dataclasses.dataclass
+    class StubSpec:
+        n: int
+
+    def is_valid_spec(spec, arch):
+        SEEN.append(("predicate", arch))
+        return True
+
+    def build_stub(spec: StubSpec, *, arch="gfx1151"):
+        SEEN.append(("builder", arch))
+        return ("kernel", spec, arch)
+"""
+
+
+def _target_kdp(src, arches, target, ukd_arch=None):
+    ks = {"kind": "rocke", "source": src, "builder": "build_stub", "spec": {"n": 1}}
+    if target is not None:
+        ks["target"] = target
+    ukd = {
+        "version": "0.1",
+        "id": "ukd-target",
+        "name": "Target",
+        "kernel_source": ks,
+        "metadata": {},
+        "priority": 0,
+    }
+    if ukd_arch is not None:
+        ukd["arch"] = ukd_arch
+    return {
+        "version": "0.1",
+        "id": "kdp-target",
+        "name": "Target",
+        "arch": list(arches),
+        "matchers": [],
+        "engine": None,
+        "dispatch": None,
+        "kernelDescriptors": [ukd],
+    }
+
+
+def _write_target_root(tmp_path, kdp):
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "target.kdp.json").write_text(json.dumps(kdp), encoding="utf-8")
+    return root
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "shard, generic", [("gfx1151", "gfx11-generic"), ("gfx1201", "gfx12-generic")]
+)
+def test_generic_target_compiles_for_the_generic_processor(
+    tmp_path, monkeypatch, rocke_importable, shard, generic
+):
+    """The predicate, the builder and comgr all see the generic processor, while
+    the observations stay bound to the shard the object is packed for."""
+    import importlib
+
+    pkg = f"targetpkg_{shard}"
+    src = _write_stub_pkg(tmp_path, _TARGET_STUB, pkg=pkg)
+    _name, _data, seen = _patch_compiler(monkeypatch, data=b"\x7fELF-stub")
+    co, _symbol, observations = compile_rocke_variant(
+        src, "build_stub", {"n": 1}, shard, tmp_path / "co", target="generic"
+    )
+    module = importlib.import_module(f"{pkg}.sub.mod")
+    assert module.SEEN == [("predicate", generic), ("builder", generic)]
+    assert seen["arches"] == [generic]
+    assert observations["arch"] == shard
+    assert observations["compile_target"] == generic
+    # A generic object is a different variant from a native compile of one spec.
+    assert co.name == f"{rocke_variant_key(src, 'build_stub', {'n': 1}, 'generic')}.co"
+    assert rocke_variant_key(src, "build_stub", {"n": 1}, "generic") != (
+        rocke_variant_key(src, "build_stub", {"n": 1})
+    )
+
+
+@pytest.mark.quick
+def test_native_target_is_the_default_and_keeps_its_key(tmp_path, monkeypatch):
+    src = _write_stub_pkg(tmp_path, _TARGET_STUB, pkg="targetpkg_native")
+    _name, _data, seen = _patch_compiler(monkeypatch, data=b"\x7fELF-stub")
+    co, _symbol, observations = compile_rocke_variant(
+        src, "build_stub", {"n": 1}, "gfx1151", tmp_path / "co"
+    )
+    assert seen["arches"] == ["gfx1151"]
+    assert observations["compile_target"] == "gfx1151"
+    # "native" stays out of the key payload, so pre-existing keys are unchanged.
+    assert rocke_variant_key(src, "build_stub", {"n": 1}, "native") == (
+        rocke_variant_key(src, "build_stub", {"n": 1})
+    )
+    assert co.name == f"{rocke_variant_key(src, 'build_stub', {'n': 1})}.co"
+
+
+@pytest.mark.quick
+def test_generic_target_rejects_a_shard_without_a_generic_processor(
+    tmp_path, monkeypatch, rocke_importable
+):
+    src = _write_stub_pkg(tmp_path, _TARGET_STUB, pkg="targetpkg_nogeneric")
+    _name, _data, seen = _patch_compiler(monkeypatch, data=b"\x7fELF-stub")
+    with pytest.raises(HkpPackError, match="no LLVM generic processor target"):
+        compile_rocke_variant(
+            src, "build_stub", {"n": 1}, "gfx950", tmp_path / "co", target="generic"
+        )
+    assert "arches" not in seen, "nothing may compile for a shard it cannot serve"
+
+
+@pytest.mark.quick
+def test_unknown_target_is_rejected_by_the_producer(tmp_path, monkeypatch):
+    src = _write_stub_pkg(tmp_path, _TARGET_STUB, pkg="targetpkg_unknown")
+    _patch_compiler(monkeypatch, data=b"\x7fELF-stub")
+    with pytest.raises(HkpPackError, match="kernel_source.target 'gfx11-generic'"):
+        compile_rocke_variant(
+            src,
+            "build_stub",
+            {"n": 1},
+            "gfx1151",
+            tmp_path / "co",
+            target="gfx11-generic",
+        )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("target", ["Generic", "gfx11-generic", "", 1, None])
+def test_unknown_target_is_rejected_at_load(tmp_path, target):
+    kdp = _target_kdp("pkg/sub/mod.py", ["gfx1151"], target)
+    kdp["kernelDescriptors"][0]["kernel_source"]["target"] = target
+    root = _write_target_root(tmp_path, kdp)
+    with pytest.raises(HkpPackError, match="invalid target"):
+        load_flat_input(root)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("target", ["native", "generic"])
+def test_known_targets_load(tmp_path, target):
+    root = _write_target_root(
+        tmp_path, _target_kdp("pkg/sub/mod.py", ["gfx1151"], target)
+    )
+    load_flat_input(root)
+
+
+@pytest.mark.quick
+def test_generic_target_records_compile_target_per_shard(
+    tmp_path, monkeypatch, rocke_importable
+):
+    """The walk carries the compile target per shard, and an arch-restricted UKD
+    never reaches a shard its arch list excludes."""
+    from hkp_pack import pipeline
+
+    src = _write_stub_pkg(tmp_path, _TARGET_STUB, pkg="targetpkg_walk")
+    # In-process compiles, so the stubbed comgr entry is the one that runs.
+    monkeypatch.setenv("HKP_PACK_JOBS", "1")
+    _name, _data, seen = _patch_compiler(monkeypatch)
+    kdp = _target_kdp(src, ["gfx1151", "gfx1201"], "generic")
+    restricted = copy.deepcopy(kdp["kernelDescriptors"][0])
+    restricted.update(id="ukd-target-gfx11", name="Target gfx11", arch=["gfx1151"])
+    restricted["kernel_source"]["spec"] = {"n": 2}
+    kdp["kernelDescriptors"].append(restricted)
+    root = _write_target_root(tmp_path, kdp)
+    flat = load_flat_input(root)
+
+    expected = {
+        "gfx1151": ("gfx11-generic", {"ukd-target", "ukd-target-gfx11"}),
+        "gfx1201": ("gfx12-generic", {"ukd-target"}),
+    }
+    for shard, (generic, ids) in expected.items():
+        inter = pipeline.compile_intermediate(
+            flat, root, shard, "hipcc-not-invoked", tmp_path / "inter" / shard
+        )
+        records = [u for k in inter.kdps for u in k.ukds]
+        assert {u.id for u in records} == ids
+        for record in records:
+            assert record.compile_target == generic
+            assert record.observations["arch"] == shard
+            assert record.observations["compile_target"] == generic
+    assert sorted(set(seen["arches"])) == ["gfx11-generic", "gfx12-generic"]
+
+
+@pytest.mark.quick
+def test_generic_target_provenance_names_the_compile_target(
+    tmp_path, monkeypatch, rocm_kpack_dir, rocke_importable
+):
+    """The shipped provenance tells a reader which processor the object was built
+    for, and the compiler's evidence binds that same value to the shard."""
+    from hkp_pack import agreement, pipeline
+
+    src = _write_stub_pkg(tmp_path, _TARGET_STUB, pkg="targetpkg_pack")
+    monkeypatch.setenv("HKP_PACK_JOBS", "1")
+    _patch_compiler(monkeypatch)
+    native = copy.deepcopy(_target_kdp(src, ["gfx1151"], None))
+    root = _write_target_root(
+        tmp_path, _target_kdp(src, ["gfx1151", "gfx1201"], "generic")
+    )
+    native["id"] = "kdp-native"
+    native["kernelDescriptors"][0].update(id="ukd-native", name="Native")
+    native["kernelDescriptors"][0]["kernel_source"]["spec"] = {"n": 3}
+    (root / "native.kdp.json").write_text(json.dumps(native), encoding="utf-8")
+
+    pipeline.run_pipeline(
+        source_root=root,
+        arches=["gfx1151", "gfx1201"],
+        out_root=tmp_path / "out",
+        hipcc="hipcc-not-invoked",
+        rocm_kpack_dir=rocm_kpack_dir,
+        inter_root=tmp_path / "inter",
+    )
+    for shard, generic in (("gfx1151", "gfx11-generic"), ("gfx1201", "gfx12-generic")):
+        ukd = _read(tmp_path / "out" / shard / "target.kdp.json")["kernelDescriptors"][
+            0
+        ]
+        assert ukd["arch"] == [shard]
+        assert ukd["provenance"]["compile_target"] == generic
+        observations = ukd["provenance"]["effective_spec"]["observations"]
+        assert observations["arch"] == shard
+        assert observations["compile_target"] == generic
+        payload = _kpack_archive(rocm_kpack_dir, tmp_path / "out", shard).get_kernel(
+            ukd["kernel_source"]["toc_key"], shard
+        )
+        agreement.verify(ukd, [], payload)
+        # Relabelling a generic object as native breaks the evidence binding.
+        forged = copy.deepcopy(ukd)
+        forged["provenance"]["compile_target"] = shard
+        forged["provenance"]["effective_spec"]["descriptor_digest"] = (
+            agreement.descriptor_binding(forged)
+        )
+        with pytest.raises(HkpPackError, match="compile-target binding"):
+            agreement.verify(forged, [], payload)
+    native_ukd = _read(tmp_path / "out" / "gfx1151" / "native.kdp.json")[
+        "kernelDescriptors"
+    ][0]
+    assert native_ukd["provenance"]["compile_target"] == "gfx1151"

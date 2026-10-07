@@ -280,10 +280,23 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "gfx950, so its census is not registered.")
     endif()
 
+    # One generic kernel set ships in every RDNA3/3.5 and RDNA4 shard; the census checks
+    # each wired one against its own inventory (gfx11 shards: standard + transposed-QK
+    # kernels, gfx12 shards: standard kernels only).
     hkp_register_census_tests(
         TARGET hip_kernel_provider_census_tests
         PACK_NAME product
-        ARCHES gfx1151
+        ARCHES
+            gfx1100
+            gfx1101
+            gfx1102
+            gfx1103
+            gfx1150
+            gfx1151
+            gfx1152
+            gfx1153
+            gfx1200
+            gfx1201
         SUITES TestGfx1151WmmaAttentionPacks
         EXPECTED_CASES
             LoadsExactlyTheEmittedPacks

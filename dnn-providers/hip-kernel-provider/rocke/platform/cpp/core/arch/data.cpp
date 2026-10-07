@@ -2134,14 +2134,29 @@ static const rocke_arch_target_t k_target_gfx11_generic = {
     {1024, 256, 0, 106},
 };
 
+/* gfx12-generic (RDNA4): the same WMMA atoms as gfx1201, so it shares that
+ * catalog. */
+static const rocke_arch_target_t k_target_gfx12_generic = {
+    "gfx12-generic",
+    "rdna",
+    "gfx12_rdna",
+    32,
+    65536,
+    6,
+    {k_mma_gfx1201, K_NUM(k_mma_gfx1201)},
+    {false, false, 4},
+    {1024, 256, 0, 106},
+};
+
 /* =========================================================================
  * Shared registry + known-arches (sorted by gfx token).
  * =========================================================================
  *
  * Python known_arches() returns tuple(sorted(specs)); sorted() on the gfx
- * strings yields: "gfx11-generic", "gfx1151", "gfx1201", "gfx90a", "gfx942",
- * "gfx950". ('-' (0x2D) < '1' (0x31), so "gfx11-generic" sorts before
- * "gfx1151"; '0' < '4' so "gfx90a" sorts before "gfx942".)
+ * strings yields: "gfx11-generic", "gfx1151", "gfx12-generic", "gfx1201",
+ * "gfx1250", "gfx90a", "gfx942", "gfx950". ('-' (0x2D) < digits, so a generic
+ * name sorts before its family's processors; '0' < '4' so "gfx90a" sorts
+ * before "gfx942".)
  * The registry is kept in this same sorted order so rocke_known_arches can return
  * rocke_ati_known_arches directly.
  */
@@ -2149,6 +2164,7 @@ static const rocke_arch_target_t k_target_gfx11_generic = {
 const rocke_ati_arch_row_t rocke_ati_arch_registry[] = {
     {"gfx11-generic", &k_target_gfx11_generic},
     {"gfx1151", &k_target_gfx1151},
+    {"gfx12-generic", &k_target_gfx12_generic},
     {"gfx1201", &k_target_gfx1201},
     {"gfx1250", &k_target_gfx1250},
     {"gfx90a", &k_target_gfx90a},
@@ -2157,15 +2173,42 @@ const rocke_ati_arch_row_t rocke_ati_arch_registry[] = {
     {NULL, NULL}, /* terminator */
 };
 
-const int rocke_ati_arch_registry_len = 7;
+const int rocke_ati_arch_registry_len = 8;
 
 const char* const rocke_ati_known_arches[] = {
     "gfx11-generic",
     "gfx1151",
+    "gfx12-generic",
     "gfx1201",
     "gfx1250",
     "gfx90a",
     "gfx942",
     "gfx950",
     NULL,
+};
+
+/* Mirror of arch_specs.json "generic_targets": each catalogued LLVM generic
+ * processor followed by the concrete processors that load its code objects. */
+static const char* const k_generic_gfx11_members[] = {
+    "gfx1100",
+    "gfx1101",
+    "gfx1102",
+    "gfx1103",
+    "gfx1150",
+    "gfx1151",
+    "gfx1152",
+    "gfx1153",
+    NULL,
+};
+
+static const char* const k_generic_gfx12_members[] = {
+    "gfx1200",
+    "gfx1201",
+    NULL,
+};
+
+const rocke_ati_generic_row_t rocke_ati_generic_targets[] = {
+    {"gfx11-generic", k_generic_gfx11_members},
+    {"gfx12-generic", k_generic_gfx12_members},
+    {NULL, NULL}, /* terminator */
 };

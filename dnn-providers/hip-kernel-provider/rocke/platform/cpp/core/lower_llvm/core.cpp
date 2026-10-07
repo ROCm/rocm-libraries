@@ -568,6 +568,8 @@ static const rocke_isa_backend_t LL_BACKEND_GFX1151 = {.gfx = "gfx1151", LL_BACK
 static const rocke_isa_backend_t LL_BACKEND_GFX1201 = {.gfx = "gfx1201", LL_BACKEND_RDNA_DEFAULTS};
 static const rocke_isa_backend_t LL_BACKEND_GFX11_GENERIC
     = {.gfx = "gfx11-generic", LL_BACKEND_RDNA_DEFAULTS};
+static const rocke_isa_backend_t LL_BACKEND_GFX12_GENERIC
+    = {.gfx = "gfx12-generic", LL_BACKEND_RDNA_DEFAULTS};
 
 /* gfx1250 (Python Gfx1250Backend, which derives from Gfx12RdnaBackend). It is a
  * CDNA part programmed on the GFX12 model: wave32, WMMA-only, with the K=32
@@ -631,6 +633,10 @@ const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t
     else if(strcmp(arch, "gfx11-generic") == 0)
     {
         base = &LL_BACKEND_GFX11_GENERIC;
+    }
+    else if(strcmp(arch, "gfx12-generic") == 0)
+    {
+        base = &LL_BACKEND_GFX12_GENERIC;
     }
     else if(strcmp(arch, "gfx1250") == 0)
     {

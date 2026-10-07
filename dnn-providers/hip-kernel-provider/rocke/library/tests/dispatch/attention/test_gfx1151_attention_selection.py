@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Public gfx1151 selection, unsupported requests, and cross-architecture isolation."""
 
+import dataclasses
 import unittest
 from unittest import mock
 
@@ -28,6 +29,69 @@ def _request(**changes):
 
 
 class TestGfx1151AttentionSelection(unittest.TestCase):
+    def test_generic_target_shares_kernels_with_gfx1151_except_tuned_tiles(self):
+        for changes in (
+            dict(seqlen_q=1024, seqlen_k=1024, hdim_q=64, hdim_v=64),
+            dict(seqlen_q=37, seqlen_k=53, mask_type=AttentionMaskType.TOP_LEFT_CAUSAL),
+            dict(hdim_q=256, hdim_v=256, batch=1, nhead_q=4, nhead_k=4),
+            dict(hdim_q=64, hdim_v=128),
+            dict(layout="paged", kv_block_size=16, use_fp8=True),
+        ):
+            with self.subTest(**changes):
+                native = dispatch_attention(_request(**changes)).spec
+                generic = dispatch_attention(_request(arch="gfx11-generic", **changes))
+                self.assertEqual(generic.candidate.name, "attention_gfx1151_wmma")
+                self.assertEqual(
+                    dataclasses.replace(
+                        generic.spec,
+                        block_n=native.block_n,
+                        value_tile_size=native.value_tile_size,
+                    ),
+                    native,
+                )
+
+    def test_generic_target_prefers_narrow_wide_launches_and_wide_output_tiles(self):
+        wide = dict(seqlen_q=1024, seqlen_k=1024, hdim_q=128, hdim_v=128)
+        native = dispatch_attention(_request(**wide)).spec
+        generic = dispatch_attention(_request(arch="gfx11-generic", **wide)).spec
+        self.assertEqual((native.block_n, native.num_waves), (64, 2))
+        self.assertEqual((generic.block_n, generic.num_waves), (32, 2))
+        noncausal_d256 = dict(hdim_q=256, hdim_v=256, batch=1, nhead_q=4, nhead_k=4)
+        for arch, tile in (
+            ("gfx1151", 32),
+            ("gfx11-generic", 64),
+            ("gfx12-generic", 32),
+        ):
+            with self.subTest(arch=arch):
+                spec = dispatch_attention(_request(arch=arch, **noncausal_d256)).spec
+                self.assertEqual(spec.value_tile_size, tile)
+
+    def test_gfx12_targets_run_the_standard_wmma_path(self):
+        for arch in ("gfx12-generic", "gfx1201"):
+            for changes in (
+                dict(seqlen_q=1024, seqlen_k=1024, hdim_q=64, hdim_v=64),
+                dict(
+                    hdim_q=128, hdim_v=128, mask_type=AttentionMaskType.TOP_LEFT_CAUSAL
+                ),
+                dict(hdim_q=256, hdim_v=256, batch=1, nhead_q=4, nhead_k=4),
+                dict(hdim_q=64, hdim_v=128),
+            ):
+                with self.subTest(arch=arch, **changes):
+                    result = dispatch_attention(_request(arch=arch, **changes))
+                    self.assertEqual(result.candidate.name, "attention_gfx1151_wmma")
+                    self.assertFalse(result.spec.transposed_qk)
+                    ok, why = is_valid_spec(result.spec, arch=arch)
+                    self.assertTrue(ok, why)
+
+    def test_fp8_value_staging_follows_the_wmma_generation(self):
+        paged_fp8 = dict(layout="paged", kv_block_size=16, use_fp8=True)
+        gfx11 = dispatch_attention(_request(arch="gfx11-generic", **paged_fp8)).spec
+        gfx12 = dispatch_attention(_request(arch="gfx12-generic", **paged_fp8)).spec
+        self.assertTrue(gfx11.v_lds_stage)
+        self.assertFalse(gfx12.v_lds_stage)
+        self.assertIsNone(gfx11.scheduler_strategy)
+        self.assertIsNone(gfx12.scheduler_strategy)
+
     def test_auto_and_explicit_selectors_reach_the_executable_kernel(self):
         for selectors in (
             {},
@@ -284,23 +348,33 @@ class TestGfx1151AttentionSelection(unittest.TestCase):
         self.assertGreater(spec.value_tile_size, 0)
 
     def test_live_device_compute_units_are_doubled_for_wgp_mode(self):
-        # A device reporting 20 WGPs is 40 CUs (tiles); one reporting 16 is 32 CUs
-        # (128 groups no longer fit, so the full-head kernel is kept).
+        # HIP reports WGPs on RDNA: 20 WGPs is 40 CUs (tiles); 16 is 32 CUs (128
+        # groups no longer fit, so the full-head kernel is kept). Any device of
+        # the request's generic family supplies the live count.
+        for device, arch in (("gfx1151", "gfx1151"), ("gfx1100", "gfx11-generic")):
+            request = dataclasses.replace(self._unset_cu_request(), arch=arch)
+            with self.subTest(device=device, arch=arch), mock.patch(
+                "rocke.runtime.hip_module.get_device_target_id", return_value=device
+            ):
+                with mock.patch(
+                    "dispatch.attention.gfx1151._device_num_cus", return_value=20
+                ):
+                    self.assertGreater(
+                        dispatch_attention(request).spec.value_tile_size, 0
+                    )
+                with mock.patch(
+                    "dispatch.attention.gfx1151._device_num_cus", return_value=16
+                ):
+                    self.assertEqual(
+                        dispatch_attention(request).spec.value_tile_size, 0
+                    )
+
+    def test_device_outside_the_requested_family_keeps_the_reference_count(self):
+        request = dataclasses.replace(self._unset_cu_request(), arch="gfx11-generic")
         with mock.patch(
-            "rocke.runtime.hip_module.get_device_arch", return_value="gfx1151"
-        ):
-            with mock.patch(
-                "dispatch.attention.gfx1151._device_num_cus", return_value=20
-            ):
-                self.assertGreater(
-                    dispatch_attention(self._unset_cu_request()).spec.value_tile_size, 0
-                )
-            with mock.patch(
-                "dispatch.attention.gfx1151._device_num_cus", return_value=16
-            ):
-                self.assertEqual(
-                    dispatch_attention(self._unset_cu_request()).spec.value_tile_size, 0
-                )
+            "rocke.runtime.hip_module.get_device_target_id", return_value="gfx942"
+        ), mock.patch("dispatch.attention.gfx1151._device_num_cus", return_value=16):
+            self.assertGreater(dispatch_attention(request).spec.value_tile_size, 0)
 
     def test_sweep_space_offers_distinct_valid_variants_baseline_first(self):
         for changes in (

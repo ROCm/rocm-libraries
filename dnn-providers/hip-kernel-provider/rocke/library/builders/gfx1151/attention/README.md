@@ -25,11 +25,13 @@ absorbed-attention or backward benchmark.
 - Every run prints a per-case record, a grouped table, provenance, and
   `METRIC` lines; `coverage_passed` is the primary metric.
 
-Run on a gfx1151 device with the platform Python package and library on
-`PYTHONPATH`:
+Run on any gfx11 (RDNA3/3.5) or gfx12 (RDNA4) device with the platform Python
+package and library on `PYTHONPATH`. The benchmark compiles for the device's
+generic target by default; `--arch gfx1151` builds processor-specific objects
+on a gfx1151 device:
 
 ```bash
-python -m benchmarks.gfx1151.attention.benchmark_sdpa
+python -m benchmarks.gfx1151.attention.benchmark_sdpa [--arch gfx1151]
 ```
 
 ### Dense forward dtype support
@@ -65,11 +67,13 @@ The implementation specializes the transposed-QK design from
 pre-transposed-V or experimental scheduling variants.
 
 `block_n` accepts 32 or 64; `num_waves` accepts 1 or 2. Each wave writes
-16 query rows. Dispatch uses `(block_n=64, num_waves=2)` when the query length
-is at least 512 and divisible by 32 and the KV length is divisible by 64;
-otherwise it uses `(32,1)`. Direct spec callers must satisfy the selected
-query-group and KV-tile alignment. The grid helper and tensor binding reject
-partial groups/tiles rather than silently dropping them.
+16 query rows. When the query length is at least 512 and divisible by 32 and
+the KV length is divisible by 64, dispatch uses two waves: `block_n=64` for
+processor-specific gfx1151 objects and `block_n=32` for `gfx11-generic` objects
+(see [RDNA generic targets](#rdna-generic-targets)); otherwise it uses `(32,1)`.
+Direct spec callers must satisfy the selected query-group and KV-tile
+alignment. The grid helper and tensor binding reject partial groups/tiles
+rather than silently dropping them.
 
 Bottom-right alignment shifts the visible-key bound by `Sk-Sq`. Empty query
 groups skip the KV loop. True negative-infinity initialization and safe
@@ -99,13 +103,38 @@ positive non-overlapping element strides; compact storage is not required.
 compact rank-3 forms. Each element is the natural-log log-sum-exp of that row.
 
 `hipkernel:Gfx1151WmmaAttention` is the packaged hipDNN engine for this dense
-surface. Its authored catalog contains 40 reusable variants: generic kernels
-for FP16/BF16, D64/D96/D128/D256, and no-mask/causal/window modes, plus aligned
-transposed-QK kernels for FP16/BF16 D64/D128. `hkp_packaging_product` lowers
-them to the per-architecture `.kpack`; runtime shapes, bounds, strides, and LSE
-selection are not descriptor dimensions. The packaged catalog intentionally
-excludes ragged/paged layouts, FP8 KV, and auxiliary score features, which
-remain available through direct rocKE dispatch.
+surface. Per FP16/BF16 dtype its authored catalog holds three kinds of
+standard object:
+
+- `runtime_head_dims` buckets D64/D96/D128: no mask, a "window" band object
+  that serves no-mask, causal and window requests through runtime bounds, and
+  the band object with an additive bias in FP32 or in the Q dtype;
+- `runtime_head_dims` buckets D160/D256: the same four plus a causal object
+  with `causal_tile_skip`, since the band transform is costly at these widths;
+- exact-size D192/D256 (no runtime widths): no mask, causal with
+  `causal_tile_skip`, and band, without bias.
+
+A bucket object serves any Q/K and V/O widths that are multiples of 16 up to
+its bucket and any V head count dividing the query heads; an exact object
+serves only its own width with V sharing the K heads. The native matcher
+prefers the transposed-QK path, then the smallest covering head size, then an
+exact object over a bucket object of the same size, then a mask-specialized
+object over the band object. The gfx11 shards add exact-size transposed-QK
+objects for FP16/BF16 D64/D128, no mask and causal, in the 32-key single-wave
+geometry. Every variant is compiled for the shard's generic processor
+(`kernel_source.target: generic`): the gfx1100, gfx1101, gfx1102, gfx1103,
+gfx1150, gfx1151, gfx1152 and gfx1153 shards carry 64 `gfx11-generic`
+objects, and the gfx1200 and gfx1201 shards carry 56 `gfx12-generic` objects
+without the transposed-QK variants. The standard variants carry
+`scheduler_strategy: max-ilp`, the spec public dispatch selects for the same
+requests (see "RDNA generic targets").
+`hkp_packaging_product` lowers them to the per-architecture `.kpack`; runtime
+shapes, head widths, bounds, strides, and LSE selection are not descriptor
+dimensions. hipDNN's `attn_mask` maps to the bias objects when it is a rank-4
+`[B|1, H|1, Sq|1, Sk]` device tensor with a unit-stride key axis; other mask
+forms are declined. The packaged catalog intentionally excludes ragged/paged
+layouts, FP8 KV, and the remaining auxiliary score features, which remain
+available through direct rocKE dispatch.
 
 ### Output-column tiling
 
@@ -124,12 +153,16 @@ their existing meanings. The knob is independent of sequence tails but cannot
 be combined with `transposed_qk`.
 
 Public dispatch uses this profile for dense D256 requests with Q-matched KV
-storage, no extra score features or window, at least 128 KV tokens, and at most
-128 query workgroups before output tiling. Noncausal prefill uses 32-column tiles with
-V-LDS staging; causal prefill uses 64-column tiles with direct V gathers.
-Queries of at most 16 rows use 64-column tiles with V-LDS staging. Other
-requests retain their existing policy. The tile width is part of the cache
-identity; native consumers must rebuild against the extended spec header.
+storage and for dense D128 requests with FP8 KV storage, with no extra score
+features or window, at least 128 KV tokens, and few enough query workgroups to
+underfill the device before output tiling (`query_groups * 5 <= CUs * 16`, the
+live CU count of a device of the request's family, or 40). D128 FP8 uses
+32-column tiles. D256 noncausal prefill uses 32-column tiles with V-LDS staging
+for processor-specific gfx1151 objects and 64-column tiles for generic objects;
+causal prefill uses 64-column tiles with direct V gathers; queries of at most
+16 rows use 64-column tiles with V-LDS staging. Other requests retain their
+existing policy. The tile width is part of the cache identity; native consumers
+must rebuild against the extended spec header.
 
 Numeric regressions place all QK signal in the final head dimension, so an
 incorrectly shortened QK reduction fails even in the first output partition.
@@ -291,6 +324,20 @@ tail bounds, both V-staging choices, and the score features above.
   256. The transposed-QK specialization stays restricted to equal D64/D128;
   every other width pair uses the standard path. Output-column tiling applies
   to the V/O width.
+- **Runtime head widths.** `runtime_head_dims=True` (default off) turns
+  `head_size` and the V/O width into bucket maxima, so one object serves every
+  runtime `head_dim_q` and `head_dim_v` that is a multiple of 16 in
+  `[16, maximum]`. Three I32 arguments, `head_dim_q`, `head_dim_v` and
+  `num_v_heads`, follow the LSE strides. Head-dim tiles past `head_dim_q`
+  contribute zero to QK, and V/O columns past `head_dim_v` are never stored.
+  V heads are addressed as `head / (num_query_heads / num_v_heads)`, so V may
+  carry its own head count. The flag adds an `rtdim` name token and is
+  rejected with the transposed-QK path and output-column tiling. Public
+  dispatch keeps exact widths; the flag is for AOT catalogs and explicit specs.
+  Dense 16-bit K/V load every head-dim tile at a constant offset through
+  buffer resources bounded at each batch's last live element, so tiles past
+  the runtime width cost no extra addressing and never read past the tensor.
+  Ragged, paged and FP8 KV read dead tiles at clamped in-bounds offsets.
 - **Causal tile skipping.** `causal_tile_skip` bounds the K loop at the causal
   diagonal of the standard path (either runtime alignment), so fully masked
   key tiles are never loaded. It is a default-off spec flag; dispatch sets it
@@ -309,27 +356,32 @@ tail bounds, both V-staging choices, and the score features above.
   gated on the device compute-unit count (`num_cus`; zero uses the reference
   part) instead of a fixed query-group limit.
 
-The composed native struct ABI is `rocke-attention-gfx1151/v5`. Rebuild native
+The composed native struct ABI is `rocke-attention-gfx1151/v6`. Rebuild native
 callers and initialize the struct with `rocke_wmma_fmha_fwd_spec_default()`.
 
 ### Public library selection and launch
 
-`dispatch.attention.AttentionRequest(arch="gfx1151", ...)` auto-selects
-`attention_gfx1151_wmma` for supported requests. Set `layout` explicitly to
-`dense`, `ragged`, or `paged`; `auto` resolves to dense on this candidate and
-preserves legacy conventions on other architectures. `use_fp8`,
-`use_softcap`, `use_sinks`, `use_alibi`, `use_qq_bias`, and `use_attn_bias` describe required
-features before selection, not features inferred silently at bind time.
+`dispatch.attention.AttentionRequest(arch="gfx11-generic", ...)` (any gfx11
+device), `arch="gfx12-generic"` (any gfx12 device), or a processor name such as
+`gfx1151` auto-selects `attention_gfx1151_wmma` for supported requests. Set
+`layout` explicitly to `dense`, `ragged`, or `paged`; `auto` resolves to dense
+on this candidate and preserves legacy conventions on other architectures.
+`use_fp8`, `use_softcap`, `use_sinks`, `use_alibi`, `use_qq_bias`, and
+`use_attn_bias` describe required features before selection, not features
+inferred silently at bind time.
 
-For FP16 D64 ragged causal requests and dense query/KV-tail requests without
-additional score features or an explicit window, dispatch uses V-LDS staging
-and `max-ilp`. Causal profiles use an effective window spanning both advertised
-maximum sequence lengths, preserving every causally-visible key for either
-alignment, including top-left `Sq > Sk`. Unmasked profiles keep the window
-disabled. Those maxima must bound the device-resident sequence lengths.
-The profile admits maxima up to `2**30` to keep context/window arithmetic
-within I32; other requests retain their existing policy. No sequence metadata
-is copied to the host to choose the profile.
+The standard (non-transposed) path compiles with the `max-ilp` machine
+scheduler unless the KV storage is FP8 or the request is a noncausal
+output-tiled one. FP16 D64 ragged causal requests and dense query/KV-tail
+requests without additional score features or an explicit window also stage V
+through LDS, and so does untiled FP8 KV storage on gfx11 targets. Causal
+profiles use an effective window spanning both advertised maximum sequence
+lengths, preserving every causally-visible key for either alignment, including
+top-left `Sq > Sk`. Unmasked profiles keep the window disabled. Those maxima
+must bound the device-resident sequence lengths. The profile admits maxima up
+to `2**30` to keep context/window arithmetic within I32; other requests retain
+their existing policy. No sequence metadata is copied to the host to choose the
+profile.
 
 `dispatch_attention(request).bind_torch(tensors, **scalars)` accepts caller-owned
 `q`, `k`, `v`, `out` and the selected metadata/auxiliary tensors. Despite the
@@ -345,6 +397,122 @@ After external stream synchronization, call
 `rocke.runtime.launcher.release_retained_for_stream(stream)` to release retained
 tensor owners. Captured launch owners must remain alive until their graphs
 are destroyed. The benchmark drains them at that boundary, outside timing.
+
+## RDNA generic targets
+
+One kernel set serves each RDNA generation; no per-processor kernels are
+authored or shipped:
+
+| Generation | Generic target | Devices | WMMA atom | Transposed QK |
+|---|---|---|---|---|
+| RDNA3/3.5 | `gfx11-generic` | gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153 | `wmma_f32_16x16x16_{f16,bf16}` (operands duplicated across lane halves) | yes |
+| RDNA4 | `gfx12-generic` | gfx1200, gfx1201 | `wmma_gfx12_f32_16x16x16_{f16,bf16}` (K split across lane halves) | no |
+
+rocKE IR names no processor: the LLVM module carries only the
+`amdgcn-amd-amdhsa` triple, and the comgr ISA name chooses the processor. Both
+generic processors are catalog rows (`arch_specs.json`, mirrored in the C++
+engine) with ISA backends in both engines, so lowering a spec for
+`gfx11-generic` emits the same LLVM IR bytes as for `gfx1151`; parity configs
+136-142 of `gfx1151_wmma_fmha_fwd_emit` replay representative configs at
+`gfx11-generic` and must hash identically. Configs 143-156 cover
+`runtime_head_dims` on `gfx1151`, `gfx11-generic` and `gfx12-generic`.
+
+Toolchain and runtime requirements:
+
+- Compile: an LLVM 20 or newer comgr, the oldest flavor rocKE supports.
+  Generic processors need code object v6, which the validated LLVM 22 and 23
+  comgrs emit (generic version 1). The LLVM 20 clang of ROCm 7.1 accepts
+  `gfx11-generic`, `gfx12-generic`, `gfx1152` and `gfx1153`. A toolchain that
+  cannot name a newer member such as gfx1152 or gfx1153 still builds the generic
+  object; only processor-specific builds need the name.
+- Load: the HIP runtime must accept generic code objects. Observed: ROCm 7.0.2
+  (gfx1100), 7.2.0 and the 7.13 and 10.0 core builds load them; ROCm 6.4.0 on a
+  gfx1151 rejected them (`hipErrorNoBinaryForGpu`) while loading a v6
+  processor-specific gfx1151 object built by the same toolchain. Treat ROCm 7.0
+  as the minimum; no gfx12 device with a runtime older than 7.2 was available.
+- Hardware coverage: gfx1100, gfx1101, gfx1150, gfx1151, gfx1200 and gfx1201
+  were run. gfx1102, gfx1103, gfx1152 and gfx1153 are covered only by the LLVM
+  generic-processor definition and have not been run.
+
+Nothing in the kernel names a processor:
+
+- The WMMA atom comes from the target's MMA catalog
+  (`helpers.mfma_attention._wmma_attn_op_id`): the split-K gfx12 atom when the
+  catalog lists it, otherwise the gfx11 atom.
+- The transposed-QK body relies on the gfx11 operand duplication, so it is
+  valid on any gfx11 row and rejected on gfx12 rows; dispatch sends gfx12
+  requests for those shapes down the standard path. Every other feature
+  (dtypes, head widths, masks, windows, score features, LSE, additive bias,
+  dense/BHSD/ragged/paged layouts, FP8 KV, output-column tiling, distinct V
+  widths) runs on both generations.
+- `rocke.core.arch.generic_arch_from_target_id()` maps a device name to its
+  generic target. Tests, the benchmark and hip-kernel-provider packaging use it;
+  `base_arch_from_target_id()` is unchanged, so `arch="gfx1151"` still builds
+  processor-specific objects.
+- CU-aware selection reads the live CU count from any device of the request's
+  generic family (HIP reports WGPs on RDNA, so the count is doubled). The
+  output-column tiling gate therefore scales with the device: a 96-CU gfx1100
+  admits more query groups than the 40-CU gfx1151 the gate was tuned on. The
+  40-CU default applies only when the request names no count and no device of
+  its family is visible (cross-compiles and AOT packaging).
+
+The generic register model differs from gfx1151's: generic code allocates fewer
+VGPRs and the default machine scheduler keeps fewer V gathers in flight. The
+selection policy therefore compiles the standard path with `max-ilp`, and
+gfx11-generic objects use `block_n=32` for wide transposed launches and
+64-column D256 noncausal output tiles. These choices come from per-knob sweeps
+of the benchmark suite on gfx1100, gfx1101, gfx1150, gfx1151, gfx1200 and
+gfx1201; each knob only changes performance. They live in the selection policy
+(`dispatch.attention.gfx1151._wmma_fwd_spec`) and the packaged catalog, not in
+the kernel builder: a caller that constructs a `WmmaFmhaFwdSpec` directly for a
+generic target gets the builder defaults and must set them itself.
+
+## Results: RDNA generic targets
+
+Scope: relative timing of this selection policy against the #12710 selection
+policy (its gfx1151-tuned profiles applied to the same kernels, with the
+transposed-QK profile limited to gfx11), on the 54-case inference suite of
+`benchmarks/gfx1151/attention` through public dispatch. Both arms compile for
+the device's generic target unless the target column says otherwise.
+
+Method: every arm of every run passed the suite's correctness gate against its
+independent FP64 oracle (maximum absolute error `2e-2` for FP16 and `4e-2` for
+BF16), 54 of 54 cases. Each arm ran twice in ABBA order in one exclusive
+allocation per device; each run times HIP-graph replays of 32 launches and
+takes the median of 7 batches. The table reports the geometric mean over the 54
+cases of the per-case ratio of medians (this policy / #12710 policy; lower is
+faster) and the per-case range. Repeated runs of one arm agreed within 3%
+geometric mean. Kernels were compiled with an LLVM 22 comgr on gfx1100, gfx1150
+and gfx1201 and an LLVM 23 comgr on gfx1101, gfx1151 and gfx1200; one device of
+each processor was measured.
+
+| Device | Code object target | Geomean ratio | Per-case range |
+|---|---|---:|---:|
+| gfx1100 | `gfx11-generic` | 0.84 | 0.43-1.03 |
+| gfx1101 | `gfx11-generic` | 0.82 | 0.37-1.02 |
+| gfx1150 | `gfx11-generic` | 0.87 | 0.39-1.08 |
+| gfx1151 | `gfx11-generic` | 0.85 | 0.39-1.16 |
+| gfx1151 | `gfx1151` | 0.90 | 0.49-1.03 |
+| gfx1200 | `gfx12-generic` | 0.69 | 0.32-1.03 |
+| gfx1201 | `gfx12-generic` | 0.63 | 0.29-1.08 |
+
+On the gfx1151 device in the same allocation, `gfx11-generic` objects with this
+policy measured a geometric-mean ratio of 0.90 (per case 0.48-1.05) against
+processor-specific `gfx1151` objects with the #12710 policy, and 0.99 (per
+case 0.71-1.07) against processor-specific objects with this policy. Under the
+#12710 policy alone the generic objects measured 1.06 (per case 0.78-2.26)
+against processor-specific ones, which motivated the generic-object choices
+above.
+
+Caveats: results hold at these measured configurations only, for inference
+forward attention. The largest gains come from the `max-ilp` scheduler on
+standard-path cases (tails, packed layouts, score features, decode shapes, and
+on gfx12 every dense case); on gfx11, aligned dense cases served by the
+transposed-QK kernel change little apart from wide launches. Individual cases
+can regress: the per-case range above reaches 1.08 on gfx1150 and gfx1201 and
+1.16 on gfx1151, so a geometric-mean win does not imply every shape is faster.
+
+## Historical gfx1151 optimization campaign
 
 The sections below are a historical campaign, not results for this benchmark.
 

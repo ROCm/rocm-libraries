@@ -52,12 +52,14 @@ int main(int argc, char** argv)
     {
         for(int i = 1; i < argc; ++i)
         {
-            char target[1024], base[1024], compiler[1024], arch[1024];
+            char target[1024], base[1024], compiler[1024], arch[1024], generic[1024];
             rocke_target_id_from_isa(argv[i], target, sizeof(target));
             rocke_base_arch_from_target_id(target, base, sizeof(base));
             rocke_compiler_target_from_target_id(target, compiler, sizeof(compiler));
             rocke_arch_from_isa(argv[i], arch, sizeof(arch));
-            printf("%s\t%s\t%s\t%s\n", target, base, compiler, arch);
+            if(rocke_generic_arch_from_target_id(target, generic, sizeof(generic)) == NULL)
+                strcpy(generic, "-");
+            printf("%s\t%s\t%s\t%s\t%s\n", target, base, compiler, arch, generic);
         }
         return 0;
     }
@@ -86,5 +88,13 @@ int main(int argc, char** argv)
     check(rocke_base_arch_from_target_id, "", "");
     check(rocke_compiler_target_from_target_id, "", "");
     check(rocke_arch_from_isa, "", "");
+    check(rocke_generic_arch_from_target_id, "gfx1100", "gfx11-generic");
+    check(rocke_generic_arch_from_target_id, "gfx1151-strict:xnack-", "gfx11-generic");
+    check(rocke_generic_arch_from_target_id, "gfx11-generic", "gfx11-generic");
+    char generic[32] = "#";
+    if(rocke_generic_arch_from_target_id("gfx942", generic, sizeof(generic)) != NULL
+       || rocke_generic_arch_from_target_id("gfx11000", generic, sizeof(generic)) != NULL
+       || generic[0] != '#')
+        ++failures;
     return failures == 0 ? 0 : 1;
 }

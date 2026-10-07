@@ -624,6 +624,26 @@ def _dense_axis_order(request, q) -> tuple[int, int, str]:
     return candidates[0]
 
 
+def _gfx1151_runtime_head_dim(value: Any, bucket: int, name: str) -> int:
+    """A runtime head width served by a ``runtime_head_dims`` bucket object."""
+    value = int(value)
+    if value < 16 or value > bucket or value % 16:
+        raise ValueError(
+            f"{name}={value} must be a multiple of 16 in [16, {bucket}] for this "
+            "runtime-head-dim kernel"
+        )
+    return value
+
+
+def _gfx1151_v_heads(num_v_heads: int, num_query_heads: int) -> int:
+    if num_v_heads <= 0 or num_query_heads % num_v_heads:
+        raise ValueError(
+            f"V head count {num_v_heads} must divide the query head count "
+            f"{num_query_heads}"
+        )
+    return _fits_i32(num_v_heads, "num_v_heads")
+
+
 def _gfx1151_validate_and_collect(
     request, spec, tensors: Mapping[str, Any]
 ) -> Dict[str, Any]:
@@ -665,6 +685,14 @@ def _gfx1151_validate_and_collect(
     _check_gfx1151_device(tensors)
     for name, tensor in (("q", q), ("k", k), ("v", v), ("out", out)):
         _check_max_element_offset_i32(tensor, name)
+    # A runtime_head_dims object takes its Q/K and V/O widths (within the
+    # compiled maxima) and its V head count from the launch.
+    runtime_dims = bool(spec.runtime_head_dims)
+    head_q, head_v = int(spec.head_size), int(spec.v_dim)
+    if runtime_dims:
+        head_q = _gfx1151_runtime_head_dim(request.hdim_q, head_q, "hdim_q")
+        head_v = _gfx1151_runtime_head_dim(request.hdim_v, head_v, "hdim_v")
+    num_v_heads = int(request.nhead_k)
 
     mask_type = AttentionMaskType(int(request.mask_type))
     windowed = (
@@ -731,10 +759,14 @@ def _gfx1151_validate_and_collect(
                 raise ValueError(f"{name} dtype must be {kind}, got {actual}")
             _check_gfx1151_storage(tensor, name, 1 if kind == "fp8" else 2)
 
-        validate_dense(q, "q", q_kind, seqlen_q, int(request.nhead_q), spec.head_size)
-        validate_dense(out, "out", q_kind, seqlen_q, int(request.nhead_q), spec.v_dim)
-        validate_dense(k, "k", kv_kind, seqlen_k, int(request.nhead_k), spec.head_size)
-        validate_dense(v, "v", kv_kind, seqlen_k, int(request.nhead_k), spec.v_dim)
+        if runtime_dims:
+            num_v_heads = _gfx1151_v_heads(
+                _shape(v, "v")[head_axis], int(request.nhead_q)
+            )
+        validate_dense(q, "q", q_kind, seqlen_q, int(request.nhead_q), head_q)
+        validate_dense(out, "out", q_kind, seqlen_q, int(request.nhead_q), head_v)
+        validate_dense(k, "k", kv_kind, seqlen_k, int(request.nhead_k), head_q)
+        validate_dense(v, "v", kv_kind, seqlen_k, num_v_heads, head_v)
         values.update(
             {
                 "stride_q_batch": _fits_i32(q.stride(0), "stride_q_batch"),
@@ -783,13 +815,20 @@ def _gfx1151_validate_and_collect(
                 }
             )
     else:
-        _check_gfx1151_qo(q, "q", q_kind, int(request.nhead_q), spec.head_size)
-        _check_gfx1151_qo(out, "out", q_kind, int(request.nhead_q), spec.v_dim)
-        _check_gfx1151_qo(k, "k", kv_kind, int(request.nhead_k), spec.head_size)
-        _check_gfx1151_qo(v, "v", kv_kind, int(request.nhead_k), spec.v_dim)
+        if runtime_dims:
+            num_v_heads = _gfx1151_v_heads(_shape(v, "v")[-2], int(request.nhead_q))
+        _check_gfx1151_qo(q, "q", q_kind, int(request.nhead_q), head_q)
+        _check_gfx1151_qo(out, "out", q_kind, int(request.nhead_q), head_v)
+        _check_gfx1151_qo(k, "k", kv_kind, int(request.nhead_k), head_q)
+        _check_gfx1151_qo(v, "v", kv_kind, num_v_heads, head_v)
         if _shape(out, "out")[:-1] != _shape(q, "q")[:-1]:
             raise ValueError("out shape must match q shape except the head dim")
-        if _shape(v, "v")[:-1] != _shape(k, "k")[:-1]:
+        if runtime_dims:
+            if _shape(v, "v")[:-2] != _shape(k, "k")[:-2]:
+                raise ValueError(
+                    "v shape must match k shape except the head count and dim"
+                )
+        elif _shape(v, "v")[:-1] != _shape(k, "k")[:-1]:
             raise ValueError("v shape must match k shape except the head dim")
         for name, tensor, itemsize in (
             ("q", q, 2),
@@ -980,6 +1019,10 @@ def _gfx1151_validate_and_collect(
             values[key] = (
                 0 if bias_shape[axis] == 1 else _fits_i32(attn_bias.stride(axis), key)
             )
+    if runtime_dims:
+        values["head_dim_q"] = head_q
+        values["head_dim_v"] = head_v
+        values["num_v_heads"] = num_v_heads
 
     return values
 
@@ -997,7 +1040,10 @@ def bind_gfx1151_attention_torch(
     ``[B,H,S]`` / ``[H,total_q]`` layouts and layout-shaped forms. Runtime
     scalar kwargs are ``softmax_scale`` (default ``1/sqrt(D)``), ``softcap``
     (required and positive when enabled), ``k_scale``/``v_scale`` for FP8 KV,
-    ``stream``, and ``fence``.
+    ``stream``, and ``fence``. A ``runtime_head_dims`` spec takes its Q/K and
+    V/O widths from ``request.hdim_q``/``hdim_v`` (multiples of 16 within the
+    compiled maxima) and its V head count from the ``v`` tensor (dividing
+    ``nhead_q``); ``D`` in the default scale is then ``hdim_q``.
 
     Metadata validation (shapes/dtypes/strides) happens once here, at bind
     time; it never reads ``cu_seqlens*``/``seqused_k``/``block_table``
@@ -1018,9 +1064,8 @@ def bind_gfx1151_attention_torch(
     block = (int(spec.block_size), 1, 1)
 
     kv_dtype = spec.kv_dtype
-    softmax_scale_default = float(
-        kwargs.get("softmax_scale", 1.0 / math.sqrt(int(spec.head_size)))
-    )
+    head_q = int(base_values.get("head_dim_q", spec.head_size))
+    softmax_scale_default = float(kwargs.get("softmax_scale", 1.0 / math.sqrt(head_q)))
     softcap_default = kwargs.get("softcap")
     if spec.use_softcap and softcap_default is None:
         raise ValueError("spec.use_softcap requires kwargs['softcap']")

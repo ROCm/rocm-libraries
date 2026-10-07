@@ -383,11 +383,15 @@ In every case the coverage tests in
 `tests/dispatch/attention/test_tuning_space.py` fail until the new field sits
 on an axis or in an exemption.
 
-## gfx1151 inference
+## RDNA WMMA inference (gfx11 and gfx12)
 
-`attention_gfx1151_wmma` is the gfx1151 auto route and an execution candidate.
-Its explicit selectors are `algorithm="wmma_fmha_fwd"` and
-`spec_id="gfx1151_wmma_fmha_fwd"`. Other architecture defaults are unchanged.
+`attention_gfx1151_wmma` is the RDNA auto route and an execution candidate for
+`gfx11-generic`, `gfx1151`, `gfx12-generic` and `gfx1201` requests. Requests for
+a generic target compile one code object set that loads on every device of the
+generation (gfx1100-gfx1153, or gfx1200/gfx1201); map a device name with
+`rocke.core.arch.generic_arch_from_target_id`. Its explicit selectors are
+`algorithm="wmma_fmha_fwd"` and `spec_id="gfx1151_wmma_fmha_fwd"`. Other
+architecture defaults are unchanged.
 
 The request describes layout (`dense`, `ragged`, or `paged`) and score features
 (`use_softcap`, `use_sinks`, `use_alibi`, `use_qq_bias`, legacy
@@ -407,7 +411,7 @@ requires a caller-owned FP32 `lse` tensor; direct dispatch accepts
 contract uses rank-4 stats. Fully masked rows store `-inf`.
 Explicit layout or feature requirements reject candidates that do not declare
 them; `layout="auto"` retains legacy layout conventions and resolves to dense
-on gfx1151.
+on this candidate.
 
 The dense binding accepts either BSHD or BHSD shapes (`tensor_layout` disambiguates
 equal sequence/head extents) and preserves independently padded, non-overlapping
@@ -417,18 +421,22 @@ to receive row-wise log-sum-exp values. The binding otherwise takes `q`, `k`,
 metadata. Runtime kwargs are `softmax_scale`, positive `softcap` when selected,
 and explicit FP32 `k_scale`/`v_scale` for FP8 storage.
 
-Aligned dense FP16 and BF16 D64/D128 requests use the transposed-QK fast path.
+Aligned dense FP16 and BF16 D64/D128 requests use the transposed-QK fast path on
+gfx11 targets; gfx12 targets run the standard path for them.
 Its compiled identity excludes sequence lengths, query/KV head counts, and
 window widths; these and all dense strides are runtime arguments. Modules are
 cached and stream handles are forwarded. Use `fence=False` for asynchronous or
 graph-captured launches, then release retained owners after the appropriate
 synchronization and graph-destruction boundary.
 
-The shipped `hipkernel:Gfx1151WmmaAttention` catalog uses the same dense ABI
-and packages reusable FP16/BF16 D64/D96/D128/D256 objects for no-mask,
-causal, and two-sided-window requests. Runtime dimensions and strides do not
-multiply the AOT object count.
-See the [gfx1151 ABI and tensor-layout guide](../../builders/gfx1151/attention/README.md).
+The shipped `hipkernel:Gfx1151WmmaAttention` catalog uses the same dense ABI:
+FP16/BF16 `runtime_head_dims` buckets (D64/D96/D128/D160/D256) of no-mask,
+band (no-mask/causal/window) and band-plus-additive-bias objects, with causal
+objects in the D160/D256 buckets, plus exact D192/D256 no-mask, causal and band
+objects, compiled for each shard's generic target (gfx11 shards add exact
+D64/D128 transposed-QK objects; gfx12 shards do not). Runtime dimensions, head
+widths within a bucket and strides do not multiply the AOT object count.
+See the [RDNA WMMA ABI, tensor-layout and generic-target guide](../../builders/gfx1151/attention/README.md).
 
 ## Capability versus support
 

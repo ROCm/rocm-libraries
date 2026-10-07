@@ -55,7 +55,14 @@ ARCH_PREFIXES = (
     ("gfx950_", "gfx950"),
 )
 DEFAULT_ARCH = "gfx950"
-CANDIDATE_ARCHES = ("gfx950", "gfx942", "gfx1201", "gfx1151", "gfx11-generic")
+CANDIDATE_ARCHES = (
+    "gfx950",
+    "gfx942",
+    "gfx1201",
+    "gfx1151",
+    "gfx11-generic",
+    "gfx12-generic",
+)
 
 
 def primary_arch(family):

@@ -28,6 +28,7 @@
  *   target_id_from_isa(isa)           rocke_target_id_from_isa()
  *   base_arch_from_target_id(id)      rocke_base_arch_from_target_id()
  *   compiler_target_from_target_id(id) rocke_compiler_target_from_target_id()
+ *   generic_arch_from_target_id(id)   rocke_generic_arch_from_target_id()
  *
  * The Python loader reads core/arch/data/arch_specs.json at import time. The C99
  * port embeds that frozen SSOT as static tables (libc-only: no JSON parser), so
@@ -358,6 +359,11 @@ const char* rocke_base_arch_from_target_id(const char* target_id, char* out, siz
 /* Remove profiles but preserve compiler features: gfx1250-strict:xnack-
  * becomes gfx1250:xnack-. */
 const char* rocke_compiler_target_from_target_id(const char* target_id, char* out, size_t out_cap);
+
+/* Catalogued LLVM generic processor whose code objects load on target_id:
+ * gfx1100 and gfx1151:xnack- become gfx11-generic; a generic name maps to
+ * itself. Returns NULL (out untouched) when no generic target covers it. */
+const char* rocke_generic_arch_from_target_id(const char* target_id, char* out, size_t out_cap);
 
 /* Extract the target ID from an ISA name, then derive its base architecture. */
 const char* rocke_arch_from_isa(const char* isa, char* out, size_t out_cap);

@@ -59,6 +59,27 @@ is the only check; no in-tree load test covers `hsaco`. The shipped provenance r
 toolchain claim. As for `hip`, the specialization contract must declare
 `metadata_fields: []`: no compiler ran whose specialization a binding could observe.
 
+`rocke` compiles a builder: `kernel_source: {kind: "rocke", source, builder, spec}` plus
+an optional `target`, which chooses the processor the object is compiled for and never
+the shard it ships in:
+
+| `target` | Compiles for |
+|---|---|
+| `"native"` (default, also when absent) | the shard arch itself |
+| `"generic"` | the shard arch's LLVM generic processor, from rocKE's `generic_arch_from_target_id` (`gfx1100`..`gfx1153` -> `gfx11-generic`, `gfx1200`/`gfx1201` -> `gfx12-generic`) |
+
+Any other value fails at load. A `generic` UKD reaching a shard arch with no generic
+processor is a hard error, never a quiet native fallback. The builder's support
+predicate, the builder and comgr all receive the compile processor; shards stay concrete
+and each keeps its own archive, so a generic object is compiled once per shard rather
+than shared across shards. Restrict a kernel that only some family members can run (for
+example a gfx11-only WMMA layout under a gfx11+gfx12 KDP) with the UKD's own `arch`. A
+non-native target is part of the variant key, so a native and a generic compile of one
+spec never collide. Shipped provenance records `compile_target` -- the shard arch, or the
+generic processor -- and the compiler evidence binds the same value beside the shard
+`arch`, so a reader can tell a generic object from a native one and a relabelled one fails
+the agreement check.
+
 ## Compiler-bound specialization agreement
 
 Packaging consumes UKD `provenance.specialization_contract` as data. It binds no
@@ -103,7 +124,8 @@ overwrite fresh observations during UKD rewriting or final publication, and pack
 validation reads the actual packed record rather than recompiling authored input. The
 schema-versioned producing-build record binds effective values and observation requests,
 the canonical authored-input digest, observed builder/spec/accessor identities and
-origins, consumer UKD/engine/KMD/KDP IDs, KDP/effective architecture and the actual
+origins, consumer UKD/engine/KMD/KDP IDs, KDP/effective architecture, the compile target
+(`compile_target`, matched against provenance) and the actual
 library/toc-key/symbol/payload SHA256. Each consumer's engine, KMD, KDP header, completed
 metadata and declaration are bound by **content digest** rather than carried whole: the
 checker rebuilds them from the descriptors in front of it. The binding digest excludes

@@ -165,6 +165,159 @@ class TestExpansion:
         assert len(_load(tmp_path, raw).packs[0].kernels) == 1
 
 
+class TestArchAndTarget:
+    """A group-level arch restricts what it expands to; a pack-level target reaches
+    every kernel's kernel_source."""
+
+    def _two_arch_config(self, **group_overrides) -> dict:
+        raw = _config(
+            arch=["gfx1151", "gfx1201"],
+            variants=[_group(**group_overrides)],
+        )
+        raw["packs"][0]["kernel_defaults"]["target"] = "generic"
+        return raw
+
+    def test_group_arch_is_each_kernels_arch(self, tmp_path):
+        kernels = (
+            _load(tmp_path, self._two_arch_config(arch=["gfx1151"])).packs[0].kernels
+        )
+        assert kernels and all(k.arch == ["gfx1151"] for k in kernels)
+
+    def test_a_group_without_arch_inherits_the_pack(self, tmp_path):
+        kernels = _load(tmp_path, self._two_arch_config()).packs[0].kernels
+        assert all(k.arch == [] for k in kernels)
+
+    def test_group_arch_must_stay_within_the_pack(self, tmp_path):
+        with pytest.raises(ConfigError, match="reaches past the pack's arch"):
+            _load(tmp_path, self._two_arch_config(arch=["gfx1100"]))
+
+    def test_group_arch_must_be_a_list(self, tmp_path):
+        with pytest.raises(ConfigError):
+            _load(tmp_path, self._two_arch_config(arch="gfx1151"))
+
+    def test_pack_target_reaches_every_kernel(self, tmp_path):
+        kernels = _load(tmp_path, self._two_arch_config()).packs[0].kernels
+        assert {k.kernel_source.target for k in kernels} == {"generic"}
+        assert all(
+            k.kernel_source.as_document()["target"] == "generic" for k in kernels
+        )
+
+    def test_a_kernel_without_target_emits_none(self, tmp_path):
+        kernels = _kernels(tmp_path)
+        assert all("target" not in k.kernel_source.as_document() for k in kernels)
+
+    @pytest.mark.parametrize("target", ["Generic", "gfx11-generic", "", None, 1])
+    def test_an_unknown_target_is_rejected(self, tmp_path, target):
+        raw = self._two_arch_config()
+        raw["packs"][0]["kernel_defaults"]["target"] = target
+        with pytest.raises(ConfigError, match="kernel_source.target"):
+            _load(tmp_path, raw)
+
+    def test_target_on_a_non_rocke_kind_is_rejected(self, tmp_path):
+        raw = _config(
+            kernel_defaults={},
+            kernels=[
+                {
+                    "name": "hip.kernel",
+                    "kernel_source": {
+                        "kind": "hip",
+                        "source": "k.hip",
+                        "entry": "k",
+                        "target": "generic",
+                    },
+                    "metadata": {
+                        "dtype": "BF16",
+                        "block_m": 256,
+                        "seqlen_q": 1,
+                        "use_exp2_fast": 0,
+                    },
+                }
+            ],
+        )
+        with pytest.raises(ConfigError, match=r"\['target'\], which kind 'hip'"):
+            _load(tmp_path, raw)
+
+
+class TestShapeAxes:
+    """`shape_axes` crosses every shape with a grid stated once, first axis
+    outermost, so a list every shape shares is not copied per shape."""
+
+    def _axes_kernels(self, tmp_path, shape_axes, shapes=None, **overrides):
+        return _kernels(
+            tmp_path,
+            shape_axes=shape_axes,
+            shapes=shapes or [{"knobs": "pair", "resolved": {"use_exp2_fast": 1}}],
+            **overrides,
+        )
+
+    def test_axes_cross_every_shape_first_axis_outermost(self, tmp_path):
+        kernels = self._axes_kernels(
+            tmp_path, {"dtype": ["bf16", "fp16"], "seqlen_q": [512, 1024]}
+        )
+        assert [
+            (
+                k.kernel_source.spec["dtype"],
+                k.kernel_source.spec["seqlen_q"],
+                k.kernel_source.spec["block_m"],
+            )
+            for k in kernels
+        ] == [
+            ("bf16", 512, 128),
+            ("bf16", 512, 256),
+            ("bf16", 1024, 128),
+            ("bf16", 1024, 256),
+            ("fp16", 512, 128),
+            ("fp16", 512, 256),
+            ("fp16", 1024, 128),
+            ("fp16", 1024, 256),
+        ]
+
+    def test_axes_combine_with_shape_fields(self, tmp_path):
+        kernels = self._axes_kernels(
+            tmp_path,
+            {"seqlen_q": [512, 1024]},
+            shapes=[
+                {"dtype": "bf16", "knobs": "pair", "resolved": {"use_exp2_fast": 1}}
+            ],
+        )
+        assert [k.metadata["seqlen_q"] for k in kernels] == [512, 512, 1024, 1024]
+        assert {k.metadata["dtype"] for k in kernels} == {"BF16"}
+
+    def test_a_shape_restating_an_axis_field_is_rejected(self, tmp_path):
+        with pytest.raises(ConfigError, match="already supply"):
+            self._axes_kernels(
+                tmp_path,
+                {"seqlen_q": [512]},
+                shapes=[
+                    {
+                        "dtype": "bf16",
+                        "seqlen_q": 512,
+                        "knobs": "pair",
+                        "resolved": {"use_exp2_fast": 1},
+                    }
+                ],
+            )
+
+    @pytest.mark.parametrize("values", [[], 512, None])
+    def test_an_axis_must_be_a_non_empty_list(self, tmp_path, values):
+        axes = {"dtype": ["bf16"], "seqlen_q": values}
+        with pytest.raises(ConfigError, match="non-empty list"):
+            self._axes_kernels(tmp_path, axes)
+
+    @pytest.mark.parametrize("axis", ["knobs", "seqlenq"])
+    def test_an_axis_must_name_a_spec_field(self, tmp_path, axis):
+        with pytest.raises(ConfigError, match="shape_axes names"):
+            self._axes_kernels(
+                tmp_path,
+                {"dtype": ["bf16"], axis: [512]},
+                spec_order=["dtype", "seqlen_q", "block_m"],
+            )
+
+    def test_shape_axes_must_be_a_mapping(self, tmp_path):
+        with pytest.raises(ConfigError):
+            self._axes_kernels(tmp_path, [512])
+
+
 class TestTriState:
     """The spec decides the binary (ABSENT means the kernel's policy resolves it at
     build time), the metadata is what the matcher compares, and the KMD `default_value`

@@ -25,7 +25,7 @@ _ROCKE_ROOT = pathlib.Path(__file__).resolve().parents[2] / "python" / "rocke"
 class TestArchTarget(unittest.TestCase):
     def test_known_arches(self):
         # CDNA MFMA (gfx90a CDNA2, gfx942/gfx950 CDNA3/4) + RDNA WMMA/wave32
-        # (gfx1151 RDNA3.5, gfx1201 RDNA4, gfx11-generic) + gfx1250-class
+        # (gfx1151 RDNA3.5, gfx1201 RDNA4, gfx11-generic, gfx12-generic) + gfx1250-class
         # CDNA/GFX12 WMMA.
         self.assertEqual(
             set(known_arches()),
@@ -37,6 +37,7 @@ class TestArchTarget(unittest.TestCase):
                 "gfx1201",
                 "gfx1250",
                 "gfx11-generic",
+                "gfx12-generic",
             },
         )
 

@@ -2273,6 +2273,23 @@ def cases():
     )
     add(
         "deep_fused_conv",
+        "deep/gfx12_generic/h16w16_k32",
+        "gfx12-generic",
+        build_deep(
+            "gfx1201",
+            "gfx12-generic",
+            h=16,
+            w=16,
+            c=16,
+            k0=32,
+            k1=32,
+            pool_tile_h=4,
+            pool_tile_w=4,
+            epilogue="cshuffle",
+        ),
+    )
+    add(
+        "deep_fused_conv",
         "deep/gfx1151/native_h16w16",
         "gfx1151",
         build_deep(

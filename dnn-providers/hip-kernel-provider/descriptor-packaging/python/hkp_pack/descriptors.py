@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PureWindowsPath
 
 from .errors import HkpPackError
+from .rocke_compile import ROCKE_TARGETS
 
 KDP_TYPE = "kdp"
 UKD_TYPE = "ukd"
@@ -200,6 +201,20 @@ def validate_rocke_spec(spec, where):
         raise HkpPackError(f"{where} has invalid spec (not an object)")
 
 
+def validate_rocke_target(ks, where):
+    """An optional rocke `kernel_source.target` names a known compile target.
+
+    Checked at load time, not first at compile: an unknown value must not pack
+    as native under a spelling that claims otherwise. Whether the shard arch has
+    a generic processor is per shard and is checked by the producer.
+    """
+    if "target" in ks and ks["target"] not in ROCKE_TARGETS:
+        raise HkpPackError(
+            f"{where} kernel_source has invalid target {ks['target']!r} "
+            f"(expected one of {list(ROCKE_TARGETS)})"
+        )
+
+
 def _reject_nonbare_arch(archs, where):
     """Reject any arch entry that is not a bare gfx base target id.
 
@@ -317,6 +332,7 @@ def _validate_ukd_fields(ukd, where, log=print):
     elif kind == "rocke":
         _require(ks, ["source", "builder", "spec"], where)
         validate_rocke_spec(ks["spec"], where)
+        validate_rocke_target(ks, where)
     elif kind == "hsaco":
         _require(ks, ["file", "symbol"], where)
         for field_name in ("file", "symbol"):

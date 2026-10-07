@@ -578,6 +578,23 @@ const char* rocke_compiler_target_from_target_id(const char* target_id, char* ou
     return out;
 }
 
+const char* rocke_generic_arch_from_target_id(const char* target_id, char* out, size_t out_cap)
+{
+    if(!target_id || !out || out_cap == 0)
+        return NULL;
+    size_t base_len = rocke_base_arch_length(target_id);
+    for(const rocke_ati_generic_row_t* row = rocke_ati_generic_targets; row->generic != NULL; ++row)
+    {
+        bool match
+            = strlen(row->generic) == base_len && strncmp(target_id, row->generic, base_len) == 0;
+        for(const char* const* member = row->members; !match && *member != NULL; ++member)
+            match = strlen(*member) == base_len && strncmp(target_id, *member, base_len) == 0;
+        if(match)
+            return rocke_copy_target(row->generic, strlen(row->generic), out, out_cap);
+    }
+    return NULL;
+}
+
 const char* rocke_arch_from_isa(const char* isa, char* out, size_t out_cap)
 {
     if(!isa || !out || out_cap == 0)

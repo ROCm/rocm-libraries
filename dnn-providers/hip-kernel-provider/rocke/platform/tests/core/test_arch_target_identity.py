@@ -13,6 +13,7 @@ from rocke.core.arch import (
     arch_from_isa,
     base_arch_from_target_id,
     compiler_target_from_target_id,
+    generic_arch_from_target_id,
     known_arches,
     target_id_from_isa,
 )
@@ -69,6 +70,39 @@ def test_arch_target_uses_base_architecture_rows() -> None:
         ArchTarget.from_gfx("gfx1250-strict")
 
 
+@pytest.mark.parametrize(
+    ("target_id", "generic"),
+    [
+        ("gfx1100", "gfx11-generic"),
+        ("gfx1103:xnack-", "gfx11-generic"),
+        ("gfx1151", "gfx11-generic"),
+        ("gfx1153-strict", "gfx11-generic"),
+        ("gfx11-generic", "gfx11-generic"),
+        ("gfx1010", None),
+        ("gfx942", None),
+        ("gfx11000", None),
+        ("", None),
+    ],
+)
+def test_generic_arch_covers_family_members(target_id: str, generic) -> None:
+    assert generic_arch_from_target_id(target_id) == generic
+
+
+def test_generic_targets_are_catalogued_and_disjoint() -> None:
+    from rocke.core.arch.target import _load_generic_targets
+
+    seen = set()
+    for generic, members in _load_generic_targets().items():
+        target = ArchTarget.from_gfx(generic)
+        assert members and seen.isdisjoint(members)
+        seen.update(members)
+        for member in members:
+            if member in known_arches():
+                member_target = ArchTarget.from_gfx(member)
+                assert member_target.target_family == target.target_family
+                assert member_target.wave_size == target.wave_size
+
+
 def test_cpp_target_identity_matches_python() -> None:
     """Compare the native CTest executable with Python when a build is supplied."""
     executable = os.environ.get("ROCKE_ARCH_TARGET_TEST_EXE")
@@ -77,6 +111,9 @@ def test_cpp_target_identity_matches_python() -> None:
     targets = [
         *known_arches(),
         "gfx00a",
+        "gfx1100",
+        "gfx1102",
+        "gfx1010",
         "unexpected-target",
         "",
         "gfx",
@@ -103,6 +140,7 @@ def test_cpp_target_identity_matches_python() -> None:
                 base_arch_from_target_id(target),
                 compiler_target_from_target_id(target),
                 arch_from_isa(isa),
+                generic_arch_from_target_id(target) or "-",
             )
         )
     assert actual == expected

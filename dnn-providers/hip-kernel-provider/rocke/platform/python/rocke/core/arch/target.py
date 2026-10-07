@@ -571,8 +571,8 @@ def _wmma_b_16x16_iu4(builder, lane, slot):
 # ``<8 x half>`` per lane (not <16 x half>), and the K dimension is split across
 # the two lane-halves (lanes 0-15 carry K 0..7, lanes 16-31 carry K 8..15). The
 # accumulator is column-distributed (CDNA/MFMA-style): lanes index columns,
-# registers index rows. These maps are the *hypothesis* verified empirically by
-# examples/gfx1201/wmma_probe.py before matmul_nbits is trusted on gfx1201.
+# registers index rows. The WMMA attention numeric suite exercises these maps on
+# gfx1200/gfx1201 hardware; examples/gfx1201/wmma_probe.py probes single atoms.
 def _wmma_gfx12_acc_16x16(builder, lane, slot):
     """RDNA4 WMMA 16x16x16 accumulator (wave32): ``<8 x float>`` per lane;
     slot ``i`` -> ``(row (lane // 16) * 8 + i, col lane % 16)``. Returns
@@ -1236,12 +1236,25 @@ class ArchTarget:
 
 
 @lru_cache(maxsize=1)
-def _load_specs() -> Dict[str, dict]:
+def _load_doc() -> dict:
     # Pin UTF-8: the embedded interpreter defaults to the ASCII codec, and
     # arch_specs.json contains non-ASCII bytes.
     with open(_DATA_FILE, encoding="utf-8") as fh:
-        doc = json.load(fh)
-    return doc["arches"]
+        return json.load(fh)
+
+
+@lru_cache(maxsize=1)
+def _load_specs() -> Dict[str, dict]:
+    return _load_doc()["arches"]
+
+
+@lru_cache(maxsize=1)
+def _load_generic_targets() -> Dict[str, Tuple[str, ...]]:
+    return {
+        generic: tuple(members)
+        for generic, members in _load_doc()["generic_targets"].items()
+        if not generic.startswith("_")
+    }
 
 
 @lru_cache(maxsize=1)
@@ -1453,6 +1466,26 @@ def compiler_target_from_target_id(target_id: str) -> str:
     if separator:
         return f"{target_without_features}:{features}"
     return target_without_features
+
+
+def generic_arch_from_target_id(target_id: str) -> Optional[str]:
+    """Return the catalogued LLVM generic target that runs on ``target_id``.
+
+    A code object built for the returned generic processor loads on the device
+    named by ``target_id``. ``gfx1100`` and ``gfx1151:xnack-`` both become
+    ``gfx11-generic``, and a generic name maps to itself. Returns ``None`` when
+    no catalogued generic target covers the processor.
+
+    This only converts the string; it never queries a GPU. Unlike
+    :func:`base_arch_from_target_id`, it deliberately replaces a concrete name,
+    so call it only where one generic code object should serve the family.
+    """
+
+    base_arch = base_arch_from_target_id(target_id)
+    for generic, members in _load_generic_targets().items():
+        if base_arch == generic or base_arch in members:
+            return generic
+    return None
 
 
 def arch_from_isa(isa: str) -> str:

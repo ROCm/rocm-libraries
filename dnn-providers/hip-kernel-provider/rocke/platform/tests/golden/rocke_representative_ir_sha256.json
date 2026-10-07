@@ -898,6 +898,14 @@
           "sha256": "c8f3bee16186da4bdc383c2eba992d26d348c3625dbd61e88bf58b3854b6660c",
           "status": "ok"
         },
+        "deep/gfx12_generic/h16w16_k32": {
+          "arch": "gfx12-generic",
+          "bytes": 73896,
+          "family": "deep_fused_conv",
+          "kernel_name": "rocke_gfx1201_deep_fused_conv_pool_N1H16W16C16_K32Y3X3_t64x32x16_w2x1_a16x16x16_mem_cshuffle_epi_relu",
+          "sha256": "b673409ceddc0a1ff69a10b91d7d090db02d22818ee02bea9dbce572d87ad610",
+          "status": "ok"
+        },
         "deep/gfx950/h16w16_k32": {
           "arch": "gfx950",
           "bytes": 33559,
@@ -1225,6 +1233,7 @@
         "arches": {
           "gfx11-generic": 1,
           "gfx1151": 10,
+          "gfx12-generic": 1,
           "gfx1201": 7,
           "gfx1250": 4,
           "gfx90a": 5,
@@ -1244,13 +1253,13 @@
           "conv_wgrad": 13,
           "conv_wgrad_reduce": 3,
           "conv_wgrad_two_stage": 2,
-          "deep_fused_conv": 9,
+          "deep_fused_conv": 10,
           "gemm": 13,
           "grouped_gemm": 1,
           "kda_chunkwise": 13,
           "moe": 9
         },
-        "ok_cases": 150
+        "ok_cases": 151
       }
     },
     "llvm22": {
@@ -2151,6 +2160,14 @@
           "sha256": "05f72082ef9c67a1b041247e2306ebd21366b47e5422abd8d2e9933dd1bebeda",
           "status": "ok"
         },
+        "deep/gfx12_generic/h16w16_k32": {
+          "arch": "gfx12-generic",
+          "bytes": 74083,
+          "family": "deep_fused_conv",
+          "kernel_name": "rocke_gfx1201_deep_fused_conv_pool_N1H16W16C16_K32Y3X3_t64x32x16_w2x1_a16x16x16_mem_cshuffle_epi_relu",
+          "sha256": "6b760b3a7608deb2267ff2a77daa33f8a6be5929040d75302cb07dff2aad5914",
+          "status": "ok"
+        },
         "deep/gfx950/h16w16_k32": {
           "arch": "gfx950",
           "bytes": 33733,
@@ -2478,6 +2495,7 @@
         "arches": {
           "gfx11-generic": 1,
           "gfx1151": 10,
+          "gfx12-generic": 1,
           "gfx1201": 7,
           "gfx1250": 4,
           "gfx90a": 5,
@@ -2497,13 +2515,13 @@
           "conv_wgrad": 13,
           "conv_wgrad_reduce": 3,
           "conv_wgrad_two_stage": 2,
-          "deep_fused_conv": 9,
+          "deep_fused_conv": 10,
           "gemm": 13,
           "grouped_gemm": 1,
           "kda_chunkwise": 13,
           "moe": 9
         },
-        "ok_cases": 150
+        "ok_cases": 151
       }
     },
     "llvm23": {
@@ -3404,6 +3422,14 @@
           "sha256": "0e86fb325744a215675a2f6052a537babc86749e8cdff3d70aa058f787b819f3",
           "status": "ok"
         },
+        "deep/gfx12_generic/h16w16_k32": {
+          "arch": "gfx12-generic",
+          "bytes": 74147,
+          "family": "deep_fused_conv",
+          "kernel_name": "rocke_gfx1201_deep_fused_conv_pool_N1H16W16C16_K32Y3X3_t64x32x16_w2x1_a16x16x16_mem_cshuffle_epi_relu",
+          "sha256": "f56c31e8e7b5f54443c42d3de3318ec7bdccb4e7bc11f7058ef6dd2a4cac97a6",
+          "status": "ok"
+        },
         "deep/gfx950/h16w16_k32": {
           "arch": "gfx950",
           "bytes": 33797,
@@ -3746,6 +3772,7 @@
         "arches": {
           "gfx11-generic": 1,
           "gfx1151": 10,
+          "gfx12-generic": 1,
           "gfx1201": 7,
           "gfx1250": 8,
           "gfx90a": 5,
@@ -3765,13 +3792,13 @@
           "conv_wgrad": 13,
           "conv_wgrad_reduce": 3,
           "conv_wgrad_two_stage": 2,
-          "deep_fused_conv": 9,
+          "deep_fused_conv": 10,
           "gemm": 17,
           "grouped_gemm": 1,
           "kda_chunkwise": 13,
           "moe": 9
         },
-        "ok_cases": 154
+        "ok_cases": 155
       }
     }
   },

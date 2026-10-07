@@ -128,6 +128,21 @@ and no maps — and then raises `NotImplementedError: no verified 'a' layout map
 MMA op_id ...` the first time a kernel asks for it. Emission for a genuinely new
 atom shape also lands in [`cpp/core/lower_llvm/mma.cpp`](../../cpp/core/lower_llvm/mma.cpp).
 
+### Generic processors
+
+An LLVM generic processor (`gfx11-generic`, `gfx12-generic`) is catalogued like
+any other target: an `arches` row whose facts and `mma` atoms are the common
+subset of its members, plus the two backend rows. Its code objects (code object
+v6) load on every member device, so one build serves the family. The
+`generic_targets` section of `arch_specs.json` lists each catalogued generic
+processor's members, mirrored by `rocke_ati_generic_targets` in
+[`cpp/core/arch/data.cpp`](../../cpp/core/arch/data.cpp).
+`generic_arch_from_target_id()` (C++: `rocke_generic_arch_from_target_id()`)
+maps a device or processor name to that generic target; it never changes what
+`base_arch_from_target_id()` returns, so an explicit processor name still builds
+processor-specific code. Capability tables (`intrinsic_arch_domain.*.json`) need
+the new column, regenerated per LLVM flavor with `tools/gen_arch_domain.py`.
+
 ## 2 · ISA backend
 
 Add one row to `BACKEND_REGISTRY` in
