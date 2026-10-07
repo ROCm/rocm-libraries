@@ -874,6 +874,12 @@ namespace TensileLite
         bool                 deviceScalarAlphaSupported(Problem const& problem) const;
         bool                 deviceScalarAlphaSupported(std::vector<Problem> const& problems) const;
         size_t               partialTileSize(size_t skGrid) const;
+        // StreamK::Dynamic::computeSplit() for this solution, problem and hardware.
+        // Every consumer of the dynamic decomposition calls it, so they agree.
+        // Handwritten kernels (handwrittenCustomKernel()) keep every tile whole.
+        StreamK::Dynamic::KernelArguments streamKDynamicDecomposition(Problem const&  problem,
+                                                                      Hardware const& hardware,
+                                                                      size_t          tiles) const;
 
         // Compute the StreamK launch-parameter DECISIONS for this solution on the
         // given problem/hardware. solve() does NOT consume this on the hot path:

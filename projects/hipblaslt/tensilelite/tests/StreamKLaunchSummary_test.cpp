@@ -9,11 +9,9 @@
 // launch-parameter path -- without needing a GPU. Host-only: mock AMDGPU and
 // hip::HipAMDGPU devices, no device library required.
 //
-// The partials-workspace behaviour asserted below is that the dynamic (SK4 /
-// SK5-dynamic) path reserves the partials region based on tiles%grid
-// divisibility, NOT on the skTiles*skSplit slot count. The tests near the bottom
-// pin that relationship between dynamicPartialsSlots, tiles%grid divisibility,
-// and whether a partials workspace is reserved.
+// The partials-workspace behaviour asserted below: the dynamic work-queue path
+// reserves one partial tile per part (skTiles*skSplit) when it splits tiles,
+// and otherwise by tiles%grid divisibility.
 
 #include <array>
 #include <cstdlib>
@@ -25,6 +23,7 @@
 #include <sstream>
 #include <string>
 #include <variant>
+#include <vector>
 
 #include <hip/hip_runtime.h>
 
@@ -871,13 +870,10 @@ TEST(PersistentLaunchSummaryTest, CompiledDataParallelDiffersFromStreamKWorkspac
 // ---------------------------------------------------------------------------
 // Dynamic-path partials-workspace reservation rule.
 //
-// The dynamic (SK4 / SK5-dynamic) path reserves the partials workspace under the
-// same guard the static path uses -- reduction==parallel OR tiles%grid!=0 -- and
-// the dynamic path is always tree reduction, so divisibility alone decides. The
-// reservation is independent of dynamicPartialsSlots (skTiles*skSplit). The three
-// tests below pin that by varying dynamicPartialsSlots (0 vs >0) against tiles%grid
-// (==0 vs !=0); the fourth combination (slots>0 and tiles%grid!=0) adds nothing,
-// since indivisibility alone already forces the reservation.
+// A dynamic split (dynamicPartialsSlots > 0) reserves one partial tile per
+// part, whatever the grid; otherwise the dynamic path (always tree) reserves
+// iff tiles%grid!=0. The three tests below vary dynamicPartialsSlots (0 vs >0)
+// against tiles%grid (==0 vs !=0); slots>0 with tiles%grid!=0 adds nothing.
 //
 // All three use a plain mock AMDGPU with no analyticalHardware, so
 // StreamK::Dynamic::bakedQueueCount() is 0 and solve() would reject this device/solution pair
@@ -940,10 +936,9 @@ TEST(StreamKLaunchSummaryTest, DynamicNoSlotsAndDivisible_NoWorkspace)
     EXPECT_EQ(d.requiredWorkspaceBytes, solution.requiredWorkspaceSize(problem, device));
 }
 
-// Case C: dynamicSlots > 0 (skTiles override) BUT tiles % grid == 0.
-// No workspace is reserved, because tiles%grid==0 gates the partials reservation
-// independent of the positive dynamic slot count.
-TEST(StreamKLaunchSummaryTest, DynamicSlotsPositiveButDivisible_NoWorkspace)
+// Case C: dynamicSlots > 0 (skTiles override) AND tiles % grid == 0.
+// Workspace IS reserved, one partial tile per part, even though tiles%grid==0.
+TEST(StreamKLaunchSummaryTest, DynamicSlotsPositiveAndDivisible_ReservesPerPartWorkspace)
 {
     ContractionSolution solution;
     initStreamKSolution(solution, 4); // dynamic
@@ -972,10 +967,9 @@ TEST(StreamKLaunchSummaryTest, DynamicSlotsPositiveButDivisible_NoWorkspace)
     EXPECT_EQ(d.skSplit(), 4u) << "itersPerTile=8, skSplit override 4 -> 4 work items per tile";
     EXPECT_EQ(d.totalItems(), 1792u);
 
-    // No workspace reserved despite dynamicSlots>0, because tiles%grid==0 gates
-    // the partials reservation. requiredWorkspaceSize agrees (also 0).
-    EXPECT_FALSE(d.workspaceAllocated);
-    EXPECT_EQ(d.requiredWorkspaceBytes, 0u);
+    // One partial tile per part despite tiles%grid==0; requiredWorkspaceSize agrees.
+    EXPECT_TRUE(d.workspaceAllocated);
+    EXPECT_EQ(d.requiredWorkspaceBytes, solution.partialTileSize(d.dynamicPartialsSlots));
     EXPECT_EQ(d.requiredWorkspaceBytes, solution.requiredWorkspaceSize(problem, device));
 }
 
@@ -2317,4 +2311,101 @@ TEST_F(ClusterStreamKTest, ParallelAlignmentPreservesIntegralSplits)
     expectLaunch(35, 36, 0);
     EXPECT_EQ(solution.resolvePersistentSettings(problem, env.device).reduction,
               origami::reduction_t::tree);
+}
+
+// ---------------------------------------------------------------------------
+// Dynamic work-queue decomposition (StreamK::Dynamic::computeSplit), case by case.
+// ---------------------------------------------------------------------------
+namespace
+{
+    StreamK::Dynamic::SplitInputs dynamicSplitInputs(size_t tiles, size_t itersPerTile)
+    {
+        StreamK::Dynamic::SplitInputs in;
+        in.tiles            = tiles;
+        in.itersPerTile     = itersPerTile;
+        in.maxGrid          = 256;
+        in.flagSlots        = 1792;
+        in.workspaceBytes   = size_t{1} << 30;
+        in.partialTileBytes = 192 * 224 * 4;
+        return in;
+    }
+} // namespace
+
+TEST(StreamKDynamicSplitTest, TilesStayWholeByDefault)
+{
+    const auto d = StreamK::Dynamic::computeSplit(dynamicSplitInputs(300, 128));
+    EXPECT_EQ(d.tiles, 0u);
+    // Whole tiles are packed with split 2.
+    EXPECT_EQ(d.split, 2u);
+    EXPECT_EQ(d.itersPerWI, 64u);
+    EXPECT_EQ(d.totalItems, 300u);
+    EXPECT_EQ(d.grid, 256u);
+    EXPECT_EQ(d.partialSlots(), 0u);
+
+    const auto e = StreamK::Dynamic::computeSplit(dynamicSplitInputs(1, 262144));
+    EXPECT_EQ(e.tiles, 0u);
+    EXPECT_EQ(e.totalItems, 1u);
+    EXPECT_EQ(e.grid, 1u);
+}
+
+TEST(StreamKDynamicSplitTest, DebugOverridesReplaceThePolicy)
+{
+    auto in          = dynamicSplitInputs(1, 262144);
+    in.overrideTiles = 1;
+    in.overrideSplit = 64;
+    auto d           = StreamK::Dynamic::computeSplit(in);
+    EXPECT_EQ(d.tiles, 1u);
+    EXPECT_EQ(d.split, 64u);
+    EXPECT_EQ(d.totalItems, 64u);
+    EXPECT_EQ(d.grid, 64u);
+
+    // Split alone keeps the default of no stream-k tiles.
+    auto s          = dynamicSplitInputs(1, 262144);
+    s.overrideSplit = 64;
+    d               = StreamK::Dynamic::computeSplit(s);
+    EXPECT_EQ(d.tiles, 0u);
+    EXPECT_EQ(d.split, 64u);
+    EXPECT_EQ(d.totalItems, 1u);
+
+    // Partials that do not fit the workspace are not written past it.
+    in.workspaceBytes = 10 * in.partialTileBytes;
+    d                 = StreamK::Dynamic::computeSplit(in);
+    EXPECT_EQ(d.tiles, 0u);
+    EXPECT_EQ(d.partialSlots(), 0u);
+}
+
+TEST(StreamKDynamicSplitTest, PartsStartOnAKUnit)
+{
+    // 129 iterations pad to 130 in units of 2; 4 parts of ceil(130/4) = 33 round
+    // up to 34, so the parts start at 0, 34, 68, 102 and the device clamps the
+    // last one to the real 129.
+    auto in          = dynamicSplitInputs(10, 129);
+    in.kGranularity  = 2;
+    in.overrideTiles = 3;
+    in.overrideSplit = 4;
+    auto d           = StreamK::Dynamic::computeSplit(in);
+    EXPECT_EQ(d.itersPerWI, 34u);
+    EXPECT_EQ(d.itersPerWI % in.kGranularity, 0u);
+    EXPECT_EQ(d.split, 4u);
+    EXPECT_EQ(d.totalItems, 7u + 3u * 4u);
+    EXPECT_EQ(d.partialSlots(), 12u);
+
+    // Rounding a part up to the unit can leave fewer parts than asked for:
+    // 20 iterations pad to 24 in units of 8, 6 parts of 4 become parts of 8,
+    // and only 3 of them exist.
+    in               = dynamicSplitInputs(10, 20);
+    in.kGranularity  = 8;
+    in.overrideTiles = 10;
+    in.overrideSplit = 6;
+    d                = StreamK::Dynamic::computeSplit(in);
+    EXPECT_EQ(d.itersPerWI, 8u);
+    EXPECT_EQ(d.split, 3u);
+    EXPECT_EQ(d.totalItems, 30u);
+
+    // A unit of one is the plain decomposition.
+    in.kGranularity = 1;
+    d               = StreamK::Dynamic::computeSplit(in);
+    EXPECT_EQ(d.itersPerWI, 4u);
+    EXPECT_EQ(d.split, 5u);
+    EXPECT_EQ(d.totalItems, 50u);
 }

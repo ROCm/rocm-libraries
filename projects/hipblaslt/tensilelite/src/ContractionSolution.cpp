@@ -1072,8 +1072,9 @@ namespace TensileLite
 
                 auto itersPerTile = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
                 auto tiles = problem.getNumTiles(sizeMapping, 1);
+                // SKTiles, SKSplit and work items, debug overrides included.
                 const auto dynamicStreamkItems
-                    = StreamK::Dynamic::items(*hardware, tiles, itersPerTile, skKGranularity());
+                    = streamKDynamicDecomposition(problem, *hardware, tiles);
 
                 args.template append<uint32_t>("ItersPerTile", itersPerTile);
                 args.template append<uint32_t>("TotalItems", dynamicStreamkItems.totalItems);
@@ -1105,8 +1106,7 @@ namespace TensileLite
                 if(effectiveDynamic)
                 {
                     const auto dynamicStreamkItems
-                        = StreamK::Dynamic::items(
-                            *hardware, sk3_tiles, sk3_itersPerTile, skKGranularity());
+                        = streamKDynamicDecomposition(problem, *hardware, sk3_tiles);
 
                     // Slot 2 aliases MagicShiftItersPerTile on the static
                     // sub-path, whose top three bits are abit(31), the SK5 mode
@@ -5826,6 +5826,14 @@ namespace TensileLite
                 const bool effectiveDynamic = (sizeMapping.hasHybridAssignment())
                                                   ? streamK5EffectiveDynamic(problem, hardware)
                                                   : false;
+                // A dynamic split reserves one partial tile per part (see
+                // computeStreamKDecisions).
+                const StreamK::Dynamic::KernelArguments dyn
+                    = StreamK::Dynamic::usesQueue(sizeMapping, effectiveDynamic)
+                          ? streamKDynamicDecomposition(problem, hardware, tiles)
+                          : StreamK::Dynamic::KernelArguments{};
+                if(dyn.tiles > 0)
+                    return size + partialTileSize(dyn.partialSlots());
                 // getSKReduction() decides here for every StreamK mode, unlike
                 // resolveStreamKSettings() / computeStreamKDecisions(), which pin
                 // SK4 and SK5-dynamic to tree, so this query can report the
@@ -6558,6 +6566,18 @@ namespace TensileLite
         // below so that fallback sees the reduction the launch will use.
         sk.reduction = StreamK::reconcileReduction(sk.reduction, sk.grid, tiles);
 
+        // A dynamic split reserves one partial tile per part (see computeStreamKDecisions).
+        if(StreamK::Dynamic::usesQueue(sizeMapping, effectiveDynamic))
+        {
+            const StreamK::Dynamic::KernelArguments dyn
+                = streamKDynamicDecomposition(problem, hardware, tiles);
+            if(dyn.tiles > 0)
+            {
+                sk.workspaceBytes = partialTileSize(dyn.partialSlots());
+                return sk;
+            }
+        }
+
         const bool streamKDP   = Debug::Instance().useStreamKDataParrallel();
         const bool forceDPOnly = sizeMapping.isPersistentDataParallel();
         const size_t itersPerTile
@@ -7074,10 +7094,8 @@ namespace TensileLite
                 // tile stays data-parallel, i.e. the packed SKTiles is 0.
                 if(sizeMapping.hasDynamicAssignment() || effectiveDynamic)
                 {
-                    AMDGPU const*  pAMDGPU       = dynamic_cast<AMDGPU const*>(&hardware);
-                    const int      overrideTiles = pAMDGPU != nullptr ? pAMDGPU->skTiles : -1;
                     const uint32_t skTiles
-                        = overrideTiles > -1 ? static_cast<uint32_t>(overrideTiles) : 0u;
+                        = streamKDynamicDecomposition(problem, hardware, tiles).tiles;
                     if(skTiles != 0)
                         return refuse("DynamicQueueSKTiles",
                                       "the dynamic-queue StreamK path is packing SKTiles="
@@ -7253,21 +7271,8 @@ namespace TensileLite
             {
                 if(self.sizeMapping.hasDynamicAssignment() || sk5DynamicSubMode())
                 {
-                    // Limit workgroups per CU to 3
-                    // TODO Verify this limit is best
-                    const size_t occupancy
-                        = std::max(self.sizeMapping.CUOccupancy, static_cast<int>(1));
-                    auto kernelOccupancy = std::min(occupancy, size_t{3});
-                    auto maxGrid         = cuCount * kernelOccupancy;
-                    if(pAMDGPU->persistentMaxCUs > 0)
-                    {
-                        maxGrid = std::min(maxGrid, static_cast<size_t>(pAMDGPU->persistentMaxCUs));
-                    }
-                    // TODO Calculate total work items when dynamic queue works with stream-k
-                    // For now, all work items are full tiles
-                    auto workItems = tiles;
-                    // Select grid to use all CUs, unless number of work items is less
-                    grid = std::min(workItems, maxGrid);
+                    // Use all CUs (up to 3 workgroups each), capped by the work items.
+                    grid = self.streamKDynamicDecomposition(problem, hardware, tiles).grid;
                 }
                 else
                 {
@@ -7560,12 +7565,8 @@ namespace TensileLite
             // before outSelectedGrid.
             if(grid > 0 && StreamK::Dynamic::usesQueue(self.sizeMapping, sk5DynamicSubMode()))
             {
-                const size_t totalItems = StreamK::Dynamic::items(hardware,
-                                                             tiles,
-                                                             problem.getItersPerTile(
-                                                                 self.sizeMapping),
-                                                             self.skKGranularity())
-                                              .totalItems;
+                const size_t totalItems
+                    = self.streamKDynamicDecomposition(problem, hardware, tiles).totalItems;
                 const size_t minGrid = std::min(totalItems, StreamK::Dynamic::bakedQueueCount(hardware));
                 if(grid < minGrid)
                 {
@@ -7666,6 +7667,8 @@ namespace TensileLite
             // per-XCD work-queue counters, so they index fewer entries than the
             // region holds. The rest index from 0 and keep all of them;
             // tightening every path would cost them grid they are entitled to.
+            // Those paths index it by partial index; StreamK::Dynamic::computeSplit()
+            // keeps skTiles * skSplit within it, so the grid bound is a backstop there.
             size_t flagEntries = StreamKFlagElements;
             // The && short-circuits, so a launch that never reaches the flags
             // does not pay for resolving the SK5 sub-mode.
@@ -7725,6 +7728,41 @@ namespace TensileLite
         return size;
     }
 
+    StreamK::Dynamic::KernelArguments ContractionSolution::streamKDynamicDecomposition(
+        Problem const& problem, Hardware const& hardware, size_t tiles) const
+    {
+        AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
+        // Handwritten kernels size their workspace from their own metadata, which
+        // holds no split partials, so they keep every tile whole, overrides included.
+        const bool handwritten = handwrittenCustomKernel();
+
+        StreamK::Dynamic::SplitInputs in;
+        in.tiles        = tiles;
+        in.itersPerTile = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
+        in.kGranularity = skKGranularity();
+        if(pAMDGPU != nullptr)
+        {
+            // Workgroups the dynamic grid launches at most: up to 3 per CU.
+            // TODO Verify this limit is best
+            const size_t occupancy = std::max(sizeMapping.CUOccupancy, 1);
+            in.maxGrid             = pAMDGPU->computeUnitCount * std::min(occupancy, size_t{3});
+            if(pAMDGPU->persistentMaxCUs > 0)
+                in.maxGrid = std::min(in.maxGrid, static_cast<size_t>(pAMDGPU->persistentMaxCUs));
+            if(!handwritten)
+            {
+                in.overrideTiles = pAMDGPU->skTiles;
+                in.overrideSplit = pAMDGPU->skSplit;
+            }
+        }
+        // Arrival counters (and per-part flags) start after the queue counters.
+        const size_t prefixEntries = StreamK::Dynamic::queueRegionBytes(hardware) / sizeof(int);
+        in.flagSlots
+            = prefixEntries < StreamKFlagElements ? StreamKFlagElements - prefixEntries : 0;
+        in.workspaceBytes   = problem.workspaceSize();
+        in.partialTileBytes = partialTileSize(1);
+        return StreamK::Dynamic::computeSplit(in);
+    }
+
     // Single source of truth for the StreamK launch decisions. The reduction, grid,
     // and workspace/DP fallback computed here are the values solve() launches with:
     // solve() reads them straight out of the returned snapshot into StreamKSettings
@@ -7736,14 +7774,13 @@ namespace TensileLite
     //   * the reserve-or-not workspace rule below duplicates the one in
     //     ContractionSolution::requiredWorkspaceSize(), which is what the caller
     //     allocates from;
-    //   * skTiles/skSplit/totalItems duplicate the kernel-arg packing in makeArgs().
+    //   * skTiles/skSplit/totalItems duplicate the kernel-arg packing in makeArgs();
+    //     the dynamic path reads streamKDynamicDecomposition(), as makeArgs() does.
     //
-    // The partials-workspace guard reserves iff (reduction==parallel ||
+    // The partials-workspace guard reserves partialTileSize(dynamicPartialsSlots)
+    // when the dynamic path splits tiles, and otherwise iff (reduction==parallel ||
     // StreamK::straddlesTiles(itersPerTile, grid, tiles)), sized as
-    // partialTileSize(grid); the reservation does not depend on
-    // dynamicPartialsSlots. The
-    // dynamicPartialsSlots field is still populated (skTiles*skSplit, computed
-    // locally) purely for reporting.
+    // partialTileSize(grid).
     StreamK::Decisions
         ContractionSolution::computeStreamKDecisions(Problem const&  problem,
                                                      Hardware const& hardware) const
@@ -7850,16 +7887,25 @@ namespace TensileLite
         // on; also reused by the skTiles / skSplit mirror further down.
         const size_t itersPerTile = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
 
-        // Workspace / DP fallback. Reserve iff (reduction==parallel ||
-        // the grid can straddle a tile), sized by grid (not by dynamicSlots).
-        // This is the same reserve-or-not rule requiredWorkspaceSize()
-        // implements independently, so the two must be changed together.
+        // Workspace / DP fallback. A dynamic split reserves one partial tile per
+        // part, indexed by partial index and already fitted to the workspace;
+        // otherwise reserve iff (reduction==parallel || the grid can straddle a
+        // tile), sized by grid. requiredWorkspaceSize() and resolveStreamKSettings()
+        // implement the same rule, so change all three together.
         size_t idealWorkspace = 0;
         bool   needPartials   = false;
-        if(grid > 0
-           && (reduction == origami::reduction_t::parallel
-               || (StreamK::straddlesTiles(itersPerTile, grid, tiles) && !streamKDP
-                   && !forceDPOnly)))
+        const StreamK::Dynamic::KernelArguments dyn
+            = isDynamic ? streamKDynamicDecomposition(problem, hardware, tiles)
+                        : StreamK::Dynamic::KernelArguments{};
+        if(dyn.tiles > 0)
+        {
+            needPartials   = true;
+            idealWorkspace = partialTileSize(dyn.partialSlots());
+        }
+        else if(grid > 0
+                && (reduction == origami::reduction_t::parallel
+                    || (StreamK::straddlesTiles(itersPerTile, grid, tiles) && !streamKDP
+                        && !forceDPOnly)))
         {
             needPartials = true;
             // The workspace holds the partial tiles only. The per-XCD work-queue
@@ -7884,8 +7930,7 @@ namespace TensileLite
         // makeArgs, using the FINAL (post-fallback) grid and reduction.
         if(isDynamic)
         {
-            d.slots.words
-                = StreamK::Dynamic::items(hardware, tiles, itersPerTile, skKGranularity());
+            d.slots.words = dyn;
         }
         else if(reduction == origami::reduction_t::parallel && tiles > 0)
         {
@@ -7917,11 +7962,8 @@ namespace TensileLite
         }
         d.setGrid(grid);
 
-        // Informational only (see field doc): skTiles*skSplit slot count for the
-        // dynamic path. It does NOT feed the allocation guard above.
-        if(auto const* dynamicStreamkArgs
-           = std::get_if<StreamK::Dynamic::KernelArguments>(&d.slots.words))
-            d.dynamicPartialsSlots = size_t{dynamicStreamkArgs->tiles} * dynamicStreamkArgs->split;
+        // Sizes the workspace above when tiles are split.
+        d.dynamicPartialsSlots = dyn.partialSlots();
 
         d.partialsPresent = d.skTiles() > 0;
         return d;
