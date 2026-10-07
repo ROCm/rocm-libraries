@@ -361,12 +361,24 @@ def lower_kernel_via_backend(
     if chosen == BACKEND_CPP:
         try:
             ir_text = serialize(kernel)
-            return _lower_via_cpp_engine(ir_text, _arch, llvm_flavor)
+            out = _lower_via_cpp_engine(ir_text, _arch, llvm_flavor)
         except BaseException as e:  # noqa: BLE001 -- includes BackendError
             if _cpp_strict():
                 raise
             _record_fallback(name, f"{type(e).__name__}: {e}")
+            # The fallback runs the Python lowerer, whose `_need` already runs
+            # the arch-domain lane. No post-pass here, or the one path that
+            # has the lane would be the one that warns twice.
             return python_lower(kernel, llvm_flavor=llvm_flavor, arch=arch)
+        # Only this branch needs it. The lane lives in `_Lowerer._need`, so
+        # every other path through this function has already run it; a
+        # successful C++ lowering is the single way out of here that never
+        # touched the Python lowerer, and it is also the default, which is
+        # what made the gap matter.
+        from .lower_llvm import check_arch_domain_in_ir
+
+        check_arch_domain_in_ir(out, _arch, llvm_flavor)
+        return out
 
     # both: differential gate, and the one mode that never falls back. Handing
     # back ``py_ll`` when the C++ engine failed would report a kernel nothing

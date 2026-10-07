@@ -1174,6 +1174,74 @@ _INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = {
 }
 
 
+def _decls_for_flavor(flavor: str) -> Dict[str, str]:
+    """The declaration table a lowering at ``flavor`` resolves against.
+
+    Insertion order of ``_INTRINSIC_DECLS`` is preserved deliberately -- it
+    drives the emit order in ``finalize``, so the result is byte-significant
+    and not merely a lookup.
+
+    One copy, because there are now two readers: ``_Lowerer.__init__`` and
+    :func:`check_arch_domain_in_ir`, which has to resolve the same table
+    without a lowerer to ask. A second hand-rolled merge is how the two would
+    drift the moment a flavor gains an override rung.
+    """
+    decls = dict(_INTRINSIC_DECLS)
+    if flavor == LLVM_FLAVOR_LLVM22:
+        decls.update(_INTRINSIC_DECLS_LLVM22_OVERRIDES)
+    elif flavor == LLVM_FLAVOR_LLVM23:
+        decls.update(_INTRINSIC_DECLS_LLVM23_OVERRIDES)
+    return decls
+
+
+def check_arch_domain_in_ir(ir_text: str, arch: str, flavor: Optional[str]) -> None:
+    """Run the arch-domain lane over already-emitted IR.
+
+    The lane proper lives in ``_Lowerer._need``, which is the right place for
+    it and reaches exactly one backend: the Python one. The default backend is
+    the C++ engine, which returns finished IR without the Python lowerer ever
+    running, so for most users the lane was dead -- a kernel could demand an
+    intrinsic the table records as ``arch_absent`` on its target and nothing
+    would say so. A requirement enforced on one of two backends is not a
+    requirement; this is the same defect the explicit-target check two
+    screens down in ``lower_kernel_to_llvm`` was moved to the chokepoint to
+    fix, and it gets the same treatment.
+
+    Checking the emitted text rather than mirroring the lane into C++ is the
+    cheaper half of that and also the more honest one: ``_need`` vets what the
+    emitter *intended* to declare, while this vets what actually came out, so
+    it cannot be bypassed by an engine that reaches a declare another way.
+
+    The mapping back to table keys is exact, not heuristic. ``finalize``
+    emits declares verbatim from the flavor's table, and the C++ engine is
+    held to byte-identity with it, so a declare line either *is* a table value
+    -- and names its key -- or belongs to something the table never measured
+    (the dynamically registered ``llvm.smax.v<N>i<W>`` declares, say), which
+    is silence by the same rule as everywhere else in this lane.
+    """
+    if _arch_domain_mode() == _ARCH_DOMAIN_OFF:
+        return
+    from .arch import domain as arch_domain
+
+    table = arch_domain.load(flavor if flavor is not None else _resolve_llvm_flavor())
+    if table is None:
+        return
+    by_decl = {decl: key for key, decl in _decls_for_flavor(table.flavor).items()}
+    for line in ir_text.splitlines():
+        if not line.startswith("declare "):
+            continue
+        key = by_decl.get(line.strip())
+        if key is None:
+            continue
+        cell = table.lookup(key, arch)
+        if cell is None or not arch_domain.is_negative(cell.status):
+            continue
+        warnings.warn(
+            ArchDomainWarning(key, arch, table.flavor, cell.status, cell.evidence),
+            stacklevel=4,
+        )
+
+
 def _llvm_type(t: Type) -> str:
     """Map an IR Type to its LLVM IR textual form."""
     if isinstance(t, PtrType):
@@ -1654,13 +1722,7 @@ class _Lowerer:
         if flavor not in LLVM_FLAVORS:
             raise ValueError(f"unknown LLVM flavor {flavor!r}")
         self._flavor: str = flavor
-        # Preserve insertion order of ``_INTRINSIC_DECLS`` -- it drives
-        # the emit order in ``finalize``.
-        self._decls: Dict[str, str] = dict(_INTRINSIC_DECLS)
-        if flavor == LLVM_FLAVOR_LLVM22:
-            self._decls.update(_INTRINSIC_DECLS_LLVM22_OVERRIDES)
-        elif flavor == LLVM_FLAVOR_LLVM23:
-            self._decls.update(_INTRINSIC_DECLS_LLVM23_OVERRIDES)
+        self._decls: Dict[str, str] = _decls_for_flavor(flavor)
         self._needs_intrin: Dict[str, bool] = {}
         # Set when an f32 global atomic-add is lowered with the
         # native-hardware-fadd metadata (no.fine.grained / no.remote

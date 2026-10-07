@@ -324,6 +324,131 @@ def test_a_misspelled_lane_setting_raises(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 # --------------------------------------------------------------------------
+# the lane reaches the default backend
+# --------------------------------------------------------------------------
+
+
+def _negative_declare() -> tuple[str, str, str, str]:
+    """A (declare line, key, arch, flavor) the table calls arch_absent.
+
+    Built from the flavor's own declaration table so the line is byte-for-byte
+    what ``finalize`` emits -- the post-pass maps declares back to keys by
+    exact match, and a hand-written approximation would pass this test while
+    the real thing silently matched nothing.
+    """
+    from rocke.core.lower_llvm import _decls_for_flavor
+
+    key, arch, flavor = _a_negative_cell()
+    return _decls_for_flavor(flavor)[key], key, arch, flavor
+
+
+def test_the_post_pass_warns_on_a_negative_declare() -> None:
+    """The positive control for the whole post-pass."""
+    from rocke.core.lower_llvm import check_arch_domain_in_ir
+
+    decl, key, arch, flavor = _negative_declare()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        check_arch_domain_in_ir(f"{decl}\n", arch, flavor)
+    got = [w.message for w in caught if isinstance(w.message, ArchDomainWarning)]
+    assert [(w.key, w.arch) for w in got] == [(key, arch)]
+
+
+def test_the_post_pass_is_silent_on_an_unmeasured_declare() -> None:
+    """A declare the table never measured is not evidence of anything.
+
+    ``llvm.smax.v<N>i<W>`` is registered dynamically at lowering time and so
+    appears in no column. Silence is the rule everywhere else in this lane and
+    has to hold here too, or the default backend becomes the noisy one.
+    """
+    from rocke.core.lower_llvm import check_arch_domain_in_ir
+
+    _decl, _key, arch, flavor = _negative_declare()
+    ir = "declare <4 x i32> @llvm.smax.v4i32(<4 x i32>, <4 x i32>)\n"
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        check_arch_domain_in_ir(ir, arch, flavor)
+    assert not [w for w in caught if isinstance(w.message, ArchDomainWarning)]
+
+
+def test_the_post_pass_honours_the_off_switch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unlike ``test_lane_can_be_switched_off``, this input provably warns when
+    the lane is on, so the assertion is about the switch and not about a kernel
+    that had nothing to say."""
+    from rocke.core.lower_llvm import _ARCH_DOMAIN_ENV, check_arch_domain_in_ir
+
+    decl, _key, arch, flavor = _negative_declare()
+    monkeypatch.setenv(_ARCH_DOMAIN_ENV, "off")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        check_arch_domain_in_ir(f"{decl}\n", arch, flavor)
+    assert not [w for w in caught if isinstance(w.message, ArchDomainWarning)]
+
+
+def test_the_cpp_backend_runs_the_lane(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The default backend warns, which is the whole point of the post-pass.
+
+    The C++ engine is stubbed rather than required: this asserts that a
+    *successful* cpp lowering is vetted, and on a host without the extension
+    built the real call would fall back to the Python lowerer -- which runs the
+    lane via ``_need`` and would make the test pass while proving nothing.
+    """
+    from rocke.core import backend as B
+
+    decl, key, arch, flavor = _negative_declare()
+    monkeypatch.setenv("ROCKE_BACKEND", "cpp")
+    monkeypatch.setattr(B, "_lower_via_cpp_engine", lambda *a, **k: f"{decl}\n")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        out = B.lower_kernel_via_backend(
+            _a_kernel(),
+            llvm_flavor=flavor,
+            arch=arch,
+            python_lower=lambda *a, **k: pytest.fail("python lowerer must not run"),
+        )
+    assert out == f"{decl}\n"
+    got = [w.message for w in caught if isinstance(w.message, ArchDomainWarning)]
+    assert [w.key for w in got] == [key]
+
+
+def test_the_cpp_fallback_does_not_warn_twice(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When cpp fails, the Python lowerer runs and its ``_need`` is the lane.
+
+    Adding the post-pass to that path too would double every warning on the
+    one path that already had them.
+    """
+    from rocke.core import backend as B
+
+    decl, key, arch, flavor = _negative_declare()
+    monkeypatch.setenv("ROCKE_BACKEND", "cpp")
+    monkeypatch.setenv("ROCKE_CPP_QUIET_FALLBACK", "1")
+
+    def _boom(*a, **k):
+        raise B.BackendError("stubbed engine failure")
+
+    monkeypatch.setattr(B, "_lower_via_cpp_engine", _boom)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        B.lower_kernel_via_backend(
+            _a_kernel(),
+            llvm_flavor=flavor,
+            arch=arch,
+            # Stands in for the Python lowerer, which would have warned once
+            # from `_need`; emitting the warning here keeps the count honest
+            # without depending on a kernel that demands this key.
+            python_lower=lambda *a, **k: (
+                warnings.warn(
+                    ArchDomainWarning(key, arch, flavor, "arch_absent", ""),
+                    stacklevel=2,
+                ),
+                f"{decl}\n",
+            )[1],
+        )
+    got = [w.message for w in caught if isinstance(w.message, ArchDomainWarning)]
+    assert len(got) == 1, "the fallback path warned twice"
+
+
+# --------------------------------------------------------------------------
 # the lane matches its allowlist
 # --------------------------------------------------------------------------
 
