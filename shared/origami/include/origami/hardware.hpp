@@ -132,7 +132,7 @@ class ORIGAMI_EXPORT hardware_t {
     std::tuple<double, double, double>
         mem_bw_per_wg_coefficients;  ///< Memory bandwidth coefficients per workgroup
     double mem_clock_ratio;          ///< Memory clock ratio relative to compute clock
-    size_t simds_per_cu;   ///< SIMD32 units per Compute Unit (CDNA=4, RDNA3/4=2)
+    size_t simds_per_cu;   ///< SIMD units per Compute Unit (CDNA: 4 SIMD16, RDNA3/4: 2 SIMD32)
     size_t l1_capacity;    ///< L1 data cache capacity per CU in bytes (shared across all SIMDs)
 
     constexpr architecture_constants(double mem1_perf_ratio,
@@ -155,15 +155,15 @@ class ORIGAMI_EXPORT hardware_t {
 
   /**
    * MALL value for those architectures that do not support it.
-   * The value '1000' is just a big number.
    */
   static constexpr double NO_MALL_AVAILABLE = 1.21875121875121875122 * 1000;
 
   /**
    * @brief Return the number of SIMD units per Compute Unit for a given architecture.
    *
-   * CDNA (gfx90a/942/950/1250): 4 SIMD32 per CU.
+   * CDNA (gfx90a/942/950): 4 SIMD16 per CU.
    * RDNA3/4 (gfx11xx/gfx12xx): 2 SIMD32 per CU.
+   * gfx1250: 4 SIMD32 per CU.
    */
   static constexpr size_t get_simds_per_cu(architecture_t arch) noexcept {
     return get_arch_constants(arch).simds_per_cu;
@@ -173,6 +173,98 @@ class ORIGAMI_EXPORT hardware_t {
    * @brief SIMD units per Compute Unit for this hardware instance's architecture.
    */
   constexpr size_t simds_per_cu() const noexcept { return get_simds_per_cu(arch); }
+
+  /**
+   * @brief Threads per wavefront for a given architecture.
+   */
+  static constexpr size_t get_wavefront_size(architecture_t arch) noexcept {
+    switch (arch) {
+      case architecture_t::gfx1250: return 32;
+      default: return 64;
+    }
+  }
+
+  /**
+   * @brief Threads per wavefront for this hardware instance's architecture.
+   */
+  constexpr size_t wavefront_size() const noexcept { return get_wavefront_size(arch); }
+
+  /**
+   * @brief Lanes per SIMD: 16 on CDNA (gfx90a/942/950), 32 on RDNA and gfx1250.
+   */
+  static constexpr size_t get_simd_lanes(architecture_t arch) noexcept {
+    switch (arch) {
+      case architecture_t::gfx90a:
+      case architecture_t::gfx942:
+      case architecture_t::gfx950: return 16;
+      default: return 32;
+    }
+  }
+
+  /**
+   * @brief Lanes per SIMD for this hardware instance's architecture.
+   */
+  constexpr size_t simd_lanes() const noexcept { return get_simd_lanes(arch); }
+
+  /**
+   * @brief Clocks one vector-ALU instruction of a wavefront occupies its SIMD.
+   *
+   * wave64 on SIMD16 (gfx950) takes 4; wave32 on SIMD32 (gfx1250) takes 1.
+   */
+  static constexpr size_t get_valu_cycles_per_instruction(architecture_t arch) noexcept {
+    return get_wavefront_size(arch) / get_simd_lanes(arch);
+  }
+
+  /**
+   * @brief Vector-ALU clocks per wavefront instruction for this hardware instance.
+   */
+  constexpr size_t valu_cycles_per_instruction() const noexcept {
+    return get_valu_cycles_per_instruction(arch);
+  }
+
+  /**
+   * @brief Whether matrix results land in separate accumulation registers that the
+   *        epilogue has to copy out (CDNA's AccVGPRs).
+   *
+   * gfx1250 keeps them in its unified VGPR file, so it has no such copy.
+   */
+  static constexpr bool get_has_accumulation_registers(architecture_t arch) noexcept {
+    return arch != architecture_t::gfx1250;
+  }
+
+  /**
+   * @brief Whether this hardware instance copies matrix results out of accumulation registers.
+   */
+  constexpr bool has_accumulation_registers() const noexcept {
+    return get_has_accumulation_registers(arch);
+  }
+
+  /**
+   * @brief Probability that another streaming (non-temporal) store reaching a partly written
+   *        128-B L2 line costs that line one more write-back, at a full tile.
+   *
+   * L2 merges the stores that build a line only while the line stays resident, and streamed
+   * lines don't stay.  Measured on gfx950 from L2 write-back counters on kernel pairs that
+   * differ only in NonTemporalD, by D element size and VectorWidthA.  0 where unmeasured, so
+   * no streaming-D kernel is rejected for it.
+   */
+  static constexpr double get_streaming_store_miss_share(architecture_t arch,
+                                                         size_t elem_bytes,
+                                                         size_t vector_width) noexcept {
+    if (arch != architecture_t::gfx950) return 0.0;
+    if (elem_bytes >= 4) return vector_width >= 4 ? 0.07 : (vector_width >= 2 ? 0.14 : 0.305);
+    return vector_width >= 8 ? 0.505
+                             : (vector_width >= 4 ? 0.165 : (vector_width >= 2 ? 0.125 : 0.09));
+  }
+
+  /**
+   * @brief Streaming-store miss share of this hardware instance.
+   * @see get_streaming_store_miss_share
+   */
+  constexpr double streaming_store_miss_share(size_t elem_bytes,
+                                              size_t vector_width) const noexcept {
+    return get_streaming_store_miss_share(arch, elem_bytes, vector_width);
+  }
 
   /**
    * @brief gfx950-only architecture constants from optional PCI chip id.
@@ -956,6 +1048,20 @@ class ORIGAMI_EXPORT hardware_t {
    */
   static constexpr size_t get_l1_capacity(architecture_t arch) noexcept {
     return get_arch_constants(arch).l1_capacity;
+  }
+
+  /**
+   * @brief Return the LDS read bandwidth per CU in bytes per clock.
+   *
+   * 32 four-byte banks (128 B/clk) through CDNA3 and on RDNA; CDNA4 doubles the
+   * bank count and read bandwidth to 256 B/clk, and gfx1250 keeps 64 banks.
+   */
+  static constexpr size_t get_lds_read_bytes_per_clk(architecture_t arch) noexcept {
+    switch (arch) {
+      case architecture_t::gfx950:
+      case architecture_t::gfx1250: return 256;
+      default: return 128;
+    }
   }
 
   /**
