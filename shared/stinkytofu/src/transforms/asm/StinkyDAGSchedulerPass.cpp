@@ -920,4 +920,20 @@ namespace stinkytofu {
 std::unique_ptr<Pass> createStinkyDAGSchedulerPass() {
     return std::make_unique<StinkyDAGSchedulerPass>();
 }
+
+namespace {
+std::function<void(const SchedulerPickEvent&)>& pickObserverStorage() {
+    static std::function<void(const SchedulerPickEvent&)> observer;
+    return observer;
+}
+}  // namespace
+
+void setSchedulerPickObserver(std::function<void(const SchedulerPickEvent&)> observer) {
+    pickObserverStorage() = std::move(observer);
+}
+
+const std::function<void(const SchedulerPickEvent&)>* schedulerPickObserver() {
+    const auto& observer = pickObserverStorage();
+    return observer ? &observer : nullptr;
+}
 }  // namespace stinkytofu

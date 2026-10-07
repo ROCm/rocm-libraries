@@ -43,6 +43,9 @@ class Pass;
 ///
 /// State is reset to MSB=0 at every label boundary (matching the convention
 /// in InsertVgprMsbPass).
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createRaiseVgprMsbPass();
+///
+/// With \p keepSetters the s_set_vgpr_msb instructions stay in place, so a timing model
+/// can read a lowered kernel exactly as it runs (stinkytofu-opt: --RaiseVgprMsbPass=keep).
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createRaiseVgprMsbPass(bool keepSetters = false);
 
 }  // namespace stinkytofu

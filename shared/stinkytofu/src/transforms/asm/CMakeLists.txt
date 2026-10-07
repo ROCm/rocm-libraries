@@ -56,7 +56,10 @@ target_sources(stinkytofu_objs PRIVATE
     StinkyWmmaVgprReorderPass.cpp
     FlattenCalleesPass.cpp
     CoissueRepairPass.cpp
+    CoissueAuditPass.cpp
+    coissue/LoopScope.cpp
     coissue/TimingProfile.cpp
+    coissue/IssueTimeline.cpp
 )
 
 add_subdirectory(ra)

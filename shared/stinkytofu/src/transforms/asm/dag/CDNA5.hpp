@@ -53,6 +53,7 @@
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/transforms/asm/InsertWaitAluPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
 #include "stinkytofu/transforms/asm/dag/HazardRules.hpp"
 
 namespace {
@@ -782,6 +783,26 @@ class CDNA5ReadyQueue : public ReadyQueue {
 
     DAGNode* lastPickedNode_ = nullptr;
 
+    // Passive pick observer (setSchedulerPickObserver): what the next report carries.
+    // Never read by a scheduling decision.
+    bool observedSkip_ = false;
+    bool observedRegionStart_ = true;
+    void notifyPick(const StinkyInstruction* inst, int issueClock) {
+        if (const auto* observer = schedulerPickObserver())
+            (*observer)({inst, issueClock, clock_, observedSkip_, observedRegionStart_});
+        observedSkip_ = false;
+        observedRegionStart_ = false;
+    }
+    // Cycles from the current window position to the first cycle a VALU may issue on
+    // (the slot computeValuAdvanceCycles issues it on).
+    int valuSlotDelay() const {
+        int pos = coIssueCyclePos_;
+        while (pos < activeWmmaLatency_ &&
+               (activeWindowSlots_[pos] & (kValuSlot | kBlockedSlot)) != kValuSlot)
+            ++pos;
+        return pos - coIssueCyclePos_;
+    }
+
     // Set by decidePromote() each pick: which phase is forced (None = normal
     // selection) and the exact node that phase will issue. Read via isPromote()
     // to gate the phases.
@@ -1269,7 +1290,10 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
     // (A) RAW: stamp this producer's dest data-ready latency (e.g. ds_load).
     // (B) elapse: record the timeline touch for all operands (dst + src).
     touchOperands(*node->inst);
+    const bool isValuPick = isVectorALU(*node->inst) || isTranscendental(*node->inst);
+    const int issueClock = clock_ + (isValuPick ? valuSlotDelay() : 0);
     updateWMMAStatus(node);
+    notifyPick(node->inst, issueClock);
     stampDataReady(*node->inst);
     // Advance the tracked MSB bank; ops with no opinion (-1) leave it unchanged.
     if (node->requiredMsb != -1) currentMsb_ = node->requiredMsb;
@@ -1590,7 +1614,9 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     // Advance by WMMA issue cycles after opening a new timeline window.
     // This keeps coIssueCyclePos_ aligned with elapsed cycles right after WMMA
     // issue.
+    const int issueClock = clock_;
     advanceTime(node->inst->issueCycles, TimeKind::Issue);
+    notifyPick(node->inst, issueClock);
     wmmaIssueConfig.issuedCount--;
 
     if (deferHeadBalanceThisRegion_) deferFirstHeadWmmaActive_ = false;
@@ -2547,6 +2573,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             // Only to the oldest queued WMMA's end: the queue is not drained (depth 1: window end).
             advanceTime(std::min(activeWmmaLatency_ - coIssueCyclePos_, soonestQueueEnd()),
                         TimeKind::Elapsed);
+            observedSkip_ = true;
         }
 
         // Phase D — outside WMMA latency.
@@ -2601,7 +2628,9 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             barrierQueue.pop();
         }
         if (barrier) {
+            const int issueClock = clock_;
             updateWMMAStatus(barrier);
+            notifyPick(barrier->inst, issueClock);
             PASS_DEBUG(std::cerr << "[DAG CDNA5 pickOne] barrier dagId=" << barrier->id
                                  << " promoted=" << (promotedPhase_ == PromotePhase::Barrier)
                                  << "\n";
@@ -2622,6 +2651,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         int realWait = fallbackWait;
         if (fallbackKind == kGlobalRead && globalReadQueueFull())
             realWait = std::max(realWait, globalReadInflight_.minResidual());
+        if (realWait > fallbackWait) observedSkip_ = true;
         if (realWait > 0) advanceTime(realWait, TimeKind::Elapsed);
 
         int throttleWait = 0;
@@ -2906,6 +2936,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     // pipeOpGates_ NOT cleared here — they persist across regions (cleared per-BB). A later
     // WMMA region still needs them, and a WMMA-free region defers a gated ds_load to its end.
     clock_ = 0;
+    observedRegionStart_ = true;
+    observedSkip_ = false;
     // Per-region: MSB state is not carried across a region boundary (side-effect
     // cut).
     currentMsb_ = -1;

@@ -4,6 +4,7 @@
 #pragma once
 
 #include <array>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -13,6 +14,14 @@
 #include "stinkytofu/core/Types.hpp"
 
 namespace stinkytofu {
+class Pass;
+
+/// Debug pass that reports the co-issue timing of the code as it stands. With
+/// `printTimeline`, it prints the steady trip of every innermost loop that has matrix ops,
+/// under each profile of PassFeatureConfig::CoissueFeatures::profileSet; with
+/// `traceProfile`, also the issue cycle of every instruction under that profile.
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createCoissueAuditPass(bool printTimeline = false,
+                                                               std::string traceProfile = "");
 
 /// The Coissue* module options, as the pass reads them.
 STINKYTOFU_EXPORT PassFeatureConfig::CoissueFeatures coissueFeaturesFromModuleOptions(

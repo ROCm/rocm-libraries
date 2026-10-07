@@ -39,9 +39,13 @@ std::vector<HazardGap> hazardGapsOf(const HWModel& hw) {
     std::vector<HazardGap> gaps;
     for (int i = 0; i < hw.hazards.numRules; ++i) {
         const HazardRule& rule = hw.hazards.rules[i];
-        if (rule.unit == HazardUnit::Cycles && rule.dir == HazardDir::WriteThenRead &&
-            rule.distance > 0)
-            gaps.push_back({i, rule.distance, rule.name});
+        if (rule.unit != HazardUnit::Cycles || rule.dir != HazardDir::WriteThenRead ||
+            rule.distance <= 0)
+            continue;
+        const LatencyReg reg = rule.regType == RegType::S   ? LatencyReg::Sgpr
+                               : rule.regType == RegType::V ? LatencyReg::Vgpr
+                                                            : LatencyReg::Any;
+        gaps.push_back({i, rule.distance, reg, rule.name});
     }
     return gaps;
 }

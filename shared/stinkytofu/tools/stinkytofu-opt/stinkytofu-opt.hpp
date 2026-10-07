@@ -39,6 +39,7 @@
 #include "stinkytofu/transforms/asm/AsmMovePropagationPass.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
+#include "stinkytofu/transforms/asm/CoissueRepairPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/DefUseAnalysisCleanup.hpp"
 #include "stinkytofu/transforms/asm/EpilogueStoreSinkPass.hpp"
@@ -393,7 +394,14 @@ const std::vector<PassInfo> availablePasses = {
     {"LoopRegionRemarkPass", [](const auto&) { return createLoopRegionRemarkPass(); }},
     {"MemTokenConsistencyCheckPass",
      [](const auto&) { return createMemTokenConsistencyCheckPass(); }},
-    {"RaiseVgprMsbPass", [](const auto&) { return createRaiseVgprMsbPass(); }},
+    {"CoissueAuditPass",
+     [](const std::vector<std::string>& args) {
+         return createCoissueAuditPass(hasPassArg(args, "timeline"), passArgValue(args, "trace"));
+     }},
+    {"RaiseVgprMsbPass",
+     [](const std::vector<std::string>& args) {
+         return createRaiseVgprMsbPass(/*keepSetters=*/hasPassArg(args, "keep"));
+     }},
     {"InsertVgprMsbPass", [](const auto&) { return createInsertVgprMsbPass(); }},
     {"InsertInitialUnclausedVmemPass",
      [](const auto&) { return createInsertInitialUnclausedVmemPass(); }},

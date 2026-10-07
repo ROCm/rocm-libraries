@@ -88,6 +88,8 @@ class RaiseVgprMsbPassImpl : public Pass {
    public:
     static char ID;
 
+    explicit RaiseVgprMsbPassImpl(bool keepSetters) : keepSetters_(keepSetters) {}
+
     const char* getName() const override {
         return "RaiseVgprMsbPass";
     }
@@ -137,7 +139,10 @@ class RaiseVgprMsbPassImpl : public Pass {
                                << "[RaiseVgprMsb]   absorb s_set_vgpr_msb -> currentMsb=0x"
                                << std::hex << currentMsb << std::dec << "\n");
                     ++absorbedSetters;
-                    it = bb.eraseIR(it);
+                    if (keepSetters_)
+                        ++it;
+                    else
+                        it = bb.eraseIR(it);
                     continue;
                 }
 
@@ -159,6 +164,9 @@ class RaiseVgprMsbPassImpl : public Pass {
                              << " raised_insts=" << raisedInsts << "\n");
         return preserveCFGAnalyses();
     }
+
+   private:
+    bool keepSetters_;
 };
 
 char RaiseVgprMsbPassImpl::ID = 0;
@@ -166,7 +174,7 @@ char RaiseVgprMsbPassImpl::ID = 0;
 }  // namespace
 
 namespace stinkytofu {
-std::unique_ptr<Pass> createRaiseVgprMsbPass() {
-    return std::make_unique<RaiseVgprMsbPassImpl>();
+std::unique_ptr<Pass> createRaiseVgprMsbPass(bool keepSetters) {
+    return std::make_unique<RaiseVgprMsbPassImpl>(keepSetters);
 }
 }  // namespace stinkytofu

@@ -41,6 +41,8 @@ struct CostRule {
 struct HazardGap {
     int ruleIndex = 0;
     int cycles = 0;
+    /// The register class the rule tracks.
+    LatencyReg reg = LatencyReg::Any;
     const char* name = "";
 };
 
