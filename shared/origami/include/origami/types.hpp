@@ -444,6 +444,8 @@ struct tensile_params_t {
 
   /// Prefetch global read depth
   int prefetch_global_read = 2;
+  bool buffer_load = true;
+  bool buffer_store = true;
 
   /// Math clocks per unrolled loop iteration (0 = auto-calculate)
   int math_clocks_unrolled_loop = 0;
@@ -469,6 +471,8 @@ struct tensile_params_t {
            num_loads_coalesced_b == o.num_loads_coalesced_b && wave_num == o.wave_num &&
            wave_group_m == o.wave_group_m && wave_group_n == o.wave_group_n &&
            prefetch_global_read == o.prefetch_global_read &&
+           buffer_load == o.buffer_load &&
+           buffer_store == o.buffer_store &&
            math_clocks_unrolled_loop == o.math_clocks_unrolled_loop && swizzle_a == o.swizzle_a &&
            swizzle_b == o.swizzle_b && workgroup_mapping_xcc == o.workgroup_mapping_xcc &&
            workgroup_mapping_xcc_group == o.workgroup_mapping_xcc_group &&
@@ -492,6 +496,8 @@ struct tensile_params_t {
                               wave_group_m,
                               wave_group_n,
                               prefetch_global_read,
+                              buffer_load,
+                              buffer_store,
                               math_clocks_unrolled_loop,
                               swizzle_a,
                               swizzle_b,

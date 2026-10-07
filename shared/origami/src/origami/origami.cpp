@@ -66,13 +66,13 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
 
   // Default values
   // Honor the caller's CU budget (problem.num_cus); 0 means use all CUs.
-  size_t  numCUs              = resolve_num_cus(problem.num_cus, hardware.N_CU);
-  size_t  numXCD              = hardware.NUM_XCD;
-  size_t  numCUsPerXCD        = numCUs / numXCD;
-  size_t  defaultWGMXCCSPLITK = 0;
-  size_t  defaultWGMXCCCHUNK  = 0;
-  size_t  defaultWGMXCC       = hardware.NUM_XCD;
-  int32_t defaultWGM          = ceil(std::sqrt(numCUsPerXCD));
+  size_t numCUs              = resolve_num_cus(problem.num_cus, hardware.N_CU);
+  size_t numXCD              = hardware.NUM_XCD;
+  size_t numCUsPerXCD        = numCUs / numXCD;
+  size_t defaultWGMXCCSPLITK = 0;
+  size_t defaultWGMXCCCHUNK  = 0;
+  size_t defaultWGMXCC       = hardware.NUM_XCD;
+  int32_t defaultWGM         = ceil(std::sqrt(numCUsPerXCD));
 
   // Number of output MTs per split and batch
   size_t numMT_M = math::safe_ceil_div(M, MT_M);
@@ -107,20 +107,24 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
     bool use_chunk =
         use_wgmxcc && ((numMTs < numCUs && numMTs % numXCD == 0) || (numMTs % numCUs == 0));
 
-    // If we are using chunking, we use the minimum of the number of tiles per XCD and the number of CUs per XCD.
-    size_t out_wgmxccchunk = use_chunk ? std::min(math::safe_ceil_div(numMTs, numXCD), numCUsPerXCD) : 0;
+    // If we are using chunking, we use the minimum of the number of tiles per XCD and the number of
+    // CUs per XCD.
+    size_t out_wgmxccchunk =
+        use_chunk ? std::min(math::safe_ceil_div(numMTs, numXCD), numCUsPerXCD) : 0;
     if (sk_has_partial_tiles) out_wgmxccchunk = 0;
     // If we are using wgmxcc, we use the number of XCDs.
     size_t out_wgmxcc = use_wgmxcc ? numXCD : 1;
     // If we are using wgm, we use the number of tiles in the smaller dimension.
     // The reason is that nontemporal dimension always load for all L2 tiles, so we can only
     // maximize the reuse in the other dimension.
-    if(nta > 3 && ntb < 4)
-      return workgroup_mapping_t{0, out_wgmxccchunk, out_wgmxcc, use_wgm ? static_cast<int>(numMT_N) : 1};
-    else if(nta < 4 && ntb > 3)
+    if (nta > 3 && ntb < 4)
+      return workgroup_mapping_t{
+          0, out_wgmxccchunk, out_wgmxcc, use_wgm ? static_cast<int>(numMT_N) : 1};
+    else if (nta < 4 && ntb > 3)
       // We use negative value here
-      return workgroup_mapping_t{0, out_wgmxccchunk, out_wgmxcc, use_wgm ? -static_cast<int>(numMT_M) : 1};
-    else if(nta > 3 && ntb > 3)
+      return workgroup_mapping_t{
+          0, out_wgmxccchunk, out_wgmxcc, use_wgm ? -static_cast<int>(numMT_M) : 1};
+    else if (nta > 3 && ntb > 3)
       // Nothing to do in this case.
       return workgroup_mapping_t{0, 0, numXCD, 1};
   }
@@ -143,8 +147,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
       wgmxccchunk = (numCUsPerXCD / numMTs) * numMTs;
       wgmxcc      = numXCD;
       wgm         = 1;
-      if (numMT_M > 1 && numMT_N > 1)
-        wgm = std::min(defaultWGM, static_cast<int32_t>(numMT_N));
+      if (numMT_M > 1 && numMT_N > 1) wgm = std::min(defaultWGM, static_cast<int32_t>(numMT_N));
     }
 
     if (sk_has_partial_tiles) wgmxccchunk = 0;
@@ -174,12 +177,12 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   size_t out_wgmxccsplitk = defaultWGMXCCSPLITK;
   {
     constexpr size_t kCoherentMinBytesPerKIter = 64;
-    double elemBytes = std::max(data_type_to_bytes(problem.a_dtype),
-                                data_type_to_bytes(problem.b_dtype));
+    double elemBytes =
+        std::max(data_type_to_bytes(problem.a_dtype), data_type_to_bytes(problem.b_dtype));
     size_t bytesPerKIter = static_cast<size_t>(MT_K * elemBytes);
 
-    if (split_factor > 1 && bytesPerKIter >= kCoherentMinBytesPerKIter
-        && !sk_has_partial_tiles && skGrid <= numCUs) {
+    if (split_factor > 1 && bytesPerKIter >= kCoherentMinBytesPerKIter && !sk_has_partial_tiles &&
+        skGrid <= numCUs) {
       // Use floor division: K * MN <= skGrid.  Tail WGs are identity-mapped.
       out_wgmxccsplitk = numMTs > 0 ? skGrid / numMTs : 0;
     }
@@ -197,17 +200,17 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
     //
     // For small MN (MN <= maxChunk): chunk = MN * num_k_per_chunk.
     // For large MN: chunk is a partial set of MN tiles at one k-level.
-    constexpr size_t cacheLineBytes = 128;
+    constexpr size_t cacheLineBytes            = 128;
     constexpr size_t kCoherentMinBytesPerKIter = 64;
-    double elemBytes = std::max(data_type_to_bytes(problem.a_dtype),
-                                data_type_to_bytes(problem.b_dtype));
+    double elemBytes =
+        std::max(data_type_to_bytes(problem.a_dtype), data_type_to_bytes(problem.b_dtype));
     size_t bytesPerKIter = static_cast<size_t>(MT_K * elemBytes);
     size_t maxChunk      = numXCD > 0 ? skGrid / numXCD : 0;
 
     if (numMTs > 0 && numMTs <= maxChunk) {
       size_t minKPerChunk = (bytesPerKIter >= kCoherentMinBytesPerKIter)
-          ? 1
-          : math::safe_ceil_div(cacheLineBytes, bytesPerKIter);
+                                ? 1
+                                : math::safe_ceil_div(cacheLineBytes, bytesPerKIter);
       size_t maxKPerChunk = maxChunk / numMTs;
       size_t numK         = (maxKPerChunk / minKPerChunk) * minKPerChunk;
       if (numK == 0) numK = minKPerChunk;
@@ -237,13 +240,13 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   if (split_factor % numXCD == 0) {
     // The hardware round-robin dispatch already distributes k-splits evenly.
     // No mapping needed (and K-Coherent would just add overhead).
-    out_wgmxcc = 0;
+    out_wgmxcc       = 0;
     out_wgmxccsplitk = 0;
     out_wgmxccchunk  = 0;
   } else if (split_factor < numXCD && numXCD % split_factor != 0) {
     out_wgmxccsplitk = 0;
     out_wgmxccchunk  = 0;
-    out_wgmxcc = numXCD;
+    out_wgmxcc       = numXCD;
   } else if (out_wgmxccsplitk > 1) {
     // K-Coherent always needs XCC mapping active for the chunked distribution.
     out_wgmxcc = numXCD;
@@ -292,11 +295,11 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
     r      = numWGs % numXCD;
 
     // Loop through all WGM values and find the best one
-    int bestWGM = 1;
-    int bestL2  = std::numeric_limits<int>::max();
+    int bestWGM                                = 1;
+    int bestL2                                 = std::numeric_limits<int>::max();
     constexpr size_t kCoherentMinBytesPerKIter = 64;
-    double elemBytes = std::max(data_type_to_bytes(problem.a_dtype),
-                                data_type_to_bytes(problem.b_dtype));
+    double elemBytes =
+        std::max(data_type_to_bytes(problem.a_dtype), data_type_to_bytes(problem.b_dtype));
     size_t bytesPerKIter = static_cast<size_t>(MT_K * elemBytes);
 
     // L2 ties are order-sensitive. Wider WGM can improve reuse order, but a
@@ -386,8 +389,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
         bestL2  = wgmL2Estimate;
         bestWGM = wgm;
       } else if (wgmL2Estimate == bestL2) {
-        if ((preferLargerWGMTie && wgm > bestWGM) ||
-            (!preferLargerWGMTie && wgm < bestWGM))
+        if ((preferLargerWGMTie && wgm > bestWGM) || (!preferLargerWGMTie && wgm < bestWGM))
           bestWGM = wgm;
       }
     }
@@ -724,12 +726,13 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
   // low occupancy (fatter waves); saturated grids favor high occupancy (latency
   // hiding).  Used only as a final tie-break among bit-identical macrotiles.
   const size_t occ_n_cu = std::max<size_t>(hardware.N_CU, 1);
-  auto occ_need = [&](const config_t& c) -> double {
+  auto occ_need         = [&](const config_t& c) -> double {
     constexpr double CAP = 4.0;
-    const size_t tiles = math::safe_ceil_div(problem.size.m, std::max<size_t>(c.mt.m, 1)) *
+    const size_t tiles   = math::safe_ceil_div(problem.size.m, std::max<size_t>(c.mt.m, 1)) *
                          math::safe_ceil_div(problem.size.n, std::max<size_t>(c.mt.n, 1)) *
                          std::max<size_t>(problem.batch, 1);
-    const double waves_per_cu = std::ceil(static_cast<double>(tiles) / static_cast<double>(occ_n_cu));
+    const double waves_per_cu =
+        std::ceil(static_cast<double>(tiles) / static_cast<double>(occ_n_cu));
     return std::clamp(waves_per_cu, 1.0, CAP);
   };
 
@@ -765,6 +768,18 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
 
   // Sort top candidates by arithmetic intensity (descending - highest first)
   if (num_the_same > 1) {
+    if (results.front().config.has_tensile_params()) {
+      std::stable_sort(
+          results.begin(),
+          results.begin() + num_the_same,
+          [](const prediction_result_t& a, const prediction_result_t& b) {
+            auto rank = [](bool bufferLoad, bool bufferStore) {
+              return (static_cast<int>(!bufferLoad) << 1) | static_cast<int>(!bufferStore);
+            };
+            return rank(a.config.tensile().buffer_load, a.config.tensile().buffer_store) <
+                   rank(b.config.tensile().buffer_load, b.config.tensile().buffer_store);
+          });
+    }
     std::stable_sort(results.begin(),
                      results.begin() + num_the_same,
                      [&compute_arithmetic_intensity](const prediction_result_t& a,

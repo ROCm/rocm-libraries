@@ -567,6 +567,110 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
   }
 }
 
+// Identical macrotiles keep latency, arithmetic intensity, and the later
+// dimension/occupancy tie-breaks from reordering. The buffer-load/store
+// stable_sort is then the only step that changes order.
+TEST_CASE("Origami: buffer load/store tie-break", "[origami]") {
+  auto with_buffer_flags = [](bool buffer_load, bool buffer_store, size_t index) {
+    auto config                   = make_config(128, 128, 64, 32, 32, 8, false, 1, 6, 0, 0);
+    config.index                  = index;
+    config.tensile().buffer_load  = buffer_load;
+    config.tensile().buffer_store = buffer_store;
+    return config;
+  };
+
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - buffer load/store tie-break") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(1024, 1024, 1024);
+
+      // Reverse of the preferred order, so a passing result cannot be input order.
+      std::vector<origami::config_t> configs;
+      configs.push_back(with_buffer_flags(false, false, 0));
+      configs.push_back(with_buffer_flags(false, true, 1));
+      configs.push_back(with_buffer_flags(true, false, 2));
+      configs.push_back(with_buffer_flags(true, true, 3));
+
+      auto results = origami::rank_configs(problem, hardware, configs);
+      REQUIRE(results.size() == configs.size());
+      for (const auto& result : results) { REQUIRE(result.latency == results.front().latency); }
+      REQUIRE(results[0].config.index == 3);
+      REQUIRE(results[1].config.index == 2);
+      REQUIRE(results[2].config.index == 1);
+      REQUIRE(results[3].config.index == 0);
+      REQUIRE(results[0].config.tensile().buffer_load);
+      REQUIRE(results[0].config.tensile().buffer_store);
+      REQUIRE(results[1].config.tensile().buffer_load);
+      REQUIRE_FALSE(results[1].config.tensile().buffer_store);
+      REQUIRE_FALSE(results[2].config.tensile().buffer_load);
+      REQUIRE(results[2].config.tensile().buffer_store);
+      REQUIRE_FALSE(results[3].config.tensile().buffer_load);
+      REQUIRE_FALSE(results[3].config.tensile().buffer_store);
+
+      // A higher-arithmetic-intensity tile outranks buffer preference inside the
+      // latency tie. Its flags are buffer load on and buffer store off, which is
+      // only the second buffer rank, so it finishes first because the
+      // arithmetic-intensity sort runs after the buffer sort. Equal-intensity
+      // tiles keep the buffer order established above.
+      auto arithmetic_intensity = [](const origami::config_t& config) {
+        const double flops          = 2.0 * config.mt.m * config.mt.n * config.mt.k;
+        const double memory_traffic = static_cast<double>(
+            config.mt.m * config.mt.k + config.mt.n * config.mt.k + config.mt.m * config.mt.n);
+        return flops / memory_traffic;
+      };
+      auto higher_ai = with_buffer_flags(true, false, 4);
+      higher_ai.mt   = {128, 256, 64};
+      auto higher_ai2 = with_buffer_flags(false, false, 5);
+      higher_ai2.mt   = {128, 256, 64};
+      REQUIRE(arithmetic_intensity(higher_ai) > arithmetic_intensity(configs.front()));
+
+      std::vector<origami::config_t> with_higher_ai = configs;
+      with_higher_ai.push_back(higher_ai);
+      with_higher_ai.push_back(higher_ai2);
+      const double saved_variance = origami::runtime_options::get().heuristics_variance;
+      origami::runtime_options::get().heuristics_variance = 10.0;
+      auto ranked_ai = origami::rank_configs(problem, hardware, with_higher_ai);
+      origami::runtime_options::get().heuristics_variance = saved_variance;
+      REQUIRE(ranked_ai.size() == with_higher_ai.size());
+      REQUIRE(ranked_ai[0].config.index == 4);
+      REQUIRE(ranked_ai[0].config.mt.n == 256);
+      REQUIRE(ranked_ai[0].config.tensile().buffer_load);
+      REQUIRE_FALSE(ranked_ai[0].config.tensile().buffer_store);
+      REQUIRE(ranked_ai[1].config.index == 5);
+      REQUIRE(ranked_ai[2].config.index == 3);
+      REQUIRE(ranked_ai[3].config.index == 2);
+      REQUIRE(ranked_ai[4].config.index == 1);
+      REQUIRE(ranked_ai[5].config.index == 0);
+
+      // Equal buffer ranks keep their incoming order.
+      std::vector<origami::config_t> tied;
+      tied.push_back(with_buffer_flags(true, true, 20));
+      tied.push_back(with_buffer_flags(true, true, 10));
+      tied.push_back(with_buffer_flags(false, false, 1));
+      auto stable = origami::rank_configs(problem, hardware, tied);
+      REQUIRE(stable.size() == tied.size());
+      REQUIRE(stable[0].config.index == 20);
+      REQUIRE(stable[1].config.index == 10);
+      REQUIRE(stable[2].config.index == 1);
+
+      // The sorter runs only when the leading candidate has Tensile params.
+      // A plain config in front leaves the tied group in input order.
+      std::vector<origami::config_t> plain;
+      auto first  = make_config(128, 128, 64, 32, 32, 8, false, 1, 6, 0, 0);
+      first.index = 7;
+      plain.push_back(first);
+      plain.push_back(with_buffer_flags(false, false, 1));
+      plain.push_back(with_buffer_flags(true, true, 2));
+      auto skipped = origami::rank_configs(problem, hardware, plain);
+      REQUIRE(skipped.size() == plain.size());
+      for (const auto& result : skipped) { REQUIRE(result.latency == skipped.front().latency); }
+      REQUIRE(skipped[0].config.index == 7);
+      REQUIRE(skipped[1].config.index == 1);
+      REQUIRE(skipped[2].config.index == 2);
+    }
+  }
+}
+
 TEST_CASE("Origami: select_topk_configs unit test", "[origami]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - select_topk_configs unit test") {
