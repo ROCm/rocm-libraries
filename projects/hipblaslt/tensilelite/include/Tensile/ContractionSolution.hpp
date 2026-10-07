@@ -1171,6 +1171,9 @@ namespace TensileLite
             // tiles split into exactly the parts asked for. Older/custom kernels
             // decode equal parts and leave this false.
             bool dynamicUnevenParts = false;
+            // SupportStreamKDynamicParallel (GlobalParameters.py): the parallel
+            // bit is set only for these. Older/custom kernels leave this false.
+            bool dynamicParallel = false;
             // Kernel takes the ProbeAddr/ProbeEpoch/ProbeGrid tail args (CU-occupancy probe).
             bool occupancyProbe     = false;
             bool useUniversalArgs   = true;

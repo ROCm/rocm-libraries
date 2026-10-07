@@ -311,6 +311,7 @@ namespace
         EXPECT_EQ(ia.perTileExtraIters, ib.perTileExtraIters);
         EXPECT_EQ(ia.arrivalFixup, ib.arrivalFixup);
         EXPECT_EQ(ia.dynamicUnevenParts, ib.dynamicUnevenParts);
+        EXPECT_EQ(ia.dynamicParallel, ib.dynamicParallel);
         EXPECT_EQ(ia.useUniversalArgs, ib.useUniversalArgs);
         EXPECT_EQ(ia.useSFC, ib.useSFC);
 

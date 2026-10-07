@@ -1763,6 +1763,7 @@ namespace TensileLite
             rv.perTileExtraIters         = isp.truthy("SupportStreamKPerTileExtraIters", false);
             rv.arrivalFixup              = isp.truthy("SupportStreamKArrivalFixup", false);
             rv.dynamicUnevenParts        = isp.truthy("SupportStreamKDynamicUnevenParts", false);
+            rv.dynamicParallel           = isp.truthy("SupportStreamKDynamicParallel", false);
             rv.occupancyProbe            = isp.truthy("SupportOccupancyProbe", false);
             rv.useUniversalArgs          = isp.truthy("UseUniversalArgs");
             rv.useSFC                    = useSFC;
