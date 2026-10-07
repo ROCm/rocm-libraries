@@ -190,10 +190,23 @@ PROBE_TIMEOUT_S = 60
 # Probe module synthesis
 # --------------------------------------------------------------------------
 
-# Parameter attributes that may appear between the type and the comma. They are
-# legal on a declare but carry no meaning for us, and `immarg` is the only one
-# that changes what we must pass at the call site.
-_PARAM_ATTRS = ("nocapture", "readnone", "readonly", "writeonly", "immarg")
+# What a type may begin with, for both the return and the parameter side.
+#
+# An allowlist of type openers rather than a blocklist of attributes, on
+# purpose. The attribute set is open-ended and grows with every LLVM release
+# (`noundef`, `align N`, `dereferenceable(N)`, `range(...)`, `nofpclass(...)`,
+# and LLVM 21 respelling `nocapture` as `captures(none)`); the set of things a
+# type can start with is closed and has been stable for years. A blocklist
+# silently leaks the next new attribute into a kernel-argument type, a call
+# operand and an `addrspacecast`, which turns the whole row into probe_error --
+# exactly the failure this replaced.
+_TYPE_OPENER_RE = re.compile(
+    r"^(?:void|i\d+|half|bfloat|float|double|x86_fp80|fp128|ppc_fp128"
+    r"|ptr|metadata|token|label|[<{\[])"
+)
+
+_BRACKET_OPEN = "<{["
+_BRACKET_CLOSE = ">}]"
 
 
 def _split_params(params: str) -> list[str]:
@@ -221,29 +234,46 @@ def _split_params(params: str) -> list[str]:
 
 
 def _param_type(param: str) -> tuple[str, bool]:
-    """Strip parameter attributes, returning (type, is_immarg)."""
-    is_imm = "immarg" in param
-    ty = param
-    for attr in _PARAM_ATTRS:
-        ty = ty.replace(attr, "")
-    return " ".join(ty.split()), is_imm
+    """The parameter's type and whether it is an ``immarg``.
 
+    A parameter may carry attributes on *both* sides of its type -- `align 8
+    ptr nocapture`, `noundef i32`, `ptr addrspace(8) readonly` -- so finding
+    the type means finding where it starts and where it ends, not deleting the
+    attributes we happen to know the names of. Deleting known names is what
+    this used to do, and it leaked every attribute outside that list straight
+    into the probe: `i1 immarg zeroext` became the type `i1 zeroext`, which is
+    not a type, so the kernel signature and the call built from it were
+    malformed and the whole row measured probe_error. `zeroext`, `signext`,
+    `noundef`, `nonnull`, `nofpclass(...)` and LLVM 21's `captures(none)` were
+    all already outside it.
 
-# What a type may begin with. Return attributes precede the type (`declare
-# noundef i32 @f()`), unlike parameter attributes, which follow it -- so the
-# split has to be made on the type side.
-#
-# This is an allowlist of type openers rather than a blocklist of attributes on
-# purpose. The attribute set is open-ended and grows with every LLVM release
-# (`noundef`, `align N`, `dereferenceable(N)`, `range(...)`, `nofpclass(...)`);
-# the set of things a type can start with is closed and has been stable for
-# years. Blocklisting would silently leak the next new attribute into the
-# `store` and turn the whole row into probe_error, which is exactly the failure
-# this replaced.
-_TYPE_OPENER_RE = re.compile(
-    r"^(?:void|i\d+|half|bfloat|float|double|x86_fp80|fp128|ppc_fp128"
-    r"|ptr|metadata|token|label|[<{\[])"
-)
+    So: skip forward to the first token that opens a type (same allowlist the
+    return side uses), take the type, and drop whatever follows. An aggregate
+    or vector runs to its closing bracket, and `ptr` absorbs a following
+    `addrspace(N)` because that is part of the type rather than an attribute.
+    A parameter with no recognisable type opener is returned whole, so it
+    fails loudly in the probe rather than silently becoming something else.
+    """
+    toks = param.split()
+    # `immarg` is read off the tokens rather than the raw text so that an
+    # attribute argument that merely contains the word cannot fake one.
+    is_imm = "immarg" in toks
+    start = next((i for i, tok in enumerate(toks) if _TYPE_OPENER_RE.match(tok)), None)
+    if start is None:
+        return " ".join(toks), is_imm
+
+    end = start + 1
+    if toks[start][0] in _BRACKET_OPEN:
+        depth = 0
+        for end in range(start, len(toks)):
+            depth += sum(c in _BRACKET_OPEN for c in toks[end])
+            depth -= sum(c in _BRACKET_CLOSE for c in toks[end])
+            if depth == 0:
+                break
+        end += 1
+    elif end < len(toks) and toks[end].startswith("addrspace("):
+        end += 1
+    return " ".join(toks[start:end]), is_imm
 
 
 def _return_type(ret: str) -> str:

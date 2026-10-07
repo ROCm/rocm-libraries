@@ -416,6 +416,152 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(G._IMMARG_PROBE_VALUES, (1, 2, 4, 12, 16))
 
 
+class DeclareParseTest(unittest.TestCase):
+    """Every probe is built from a declare, so the parse is the whole table.
+
+    Since generator 5 the probe module is synthesised from the declare `opt`
+    hands back, rather than from a hand-written signature. That makes these
+    three functions load-bearing for all 166 keys at once: the type they
+    return becomes a kernel-argument type, a call operand and sometimes an
+    `addrspacecast`, so an attribute that leaks into one is not a wrong answer
+    for one cell -- it is malformed IR, and the entire row measures
+    probe_error. A row of probe_error is a committed artifact saying nothing
+    while looking authoritative, which is the failure mode this file exists to
+    prevent.
+
+    Attributes are the moving part. LLVM adds them freely (`noundef`,
+    `range(...)`, `nofpclass(...)`, and LLVM 21 respelling `nocapture` as
+    `captures(none)`), and they sit on both sides of a parameter's type, so
+    the cases below are mostly attributes the current toolchains do not emit
+    yet. That is the point: the parse has to survive the attribute nobody has
+    written down, because the first sign that it did not would be an artifact
+    regenerated from malformed IR.
+    """
+
+    def test_return_attributes_are_dropped_and_the_type_kept(self):
+        for ret, want in (
+            ("i32", "i32"),
+            ("void", "void"),
+            ("noundef i32", "i32"),
+            ("align 4 ptr", "ptr"),
+            # `range` and `nofpclass` take arguments that contain type names
+            # and spaces of their own -- the reason this is a scan for the
+            # type rather than a strip of the attributes.
+            ("range(i32 0, 1024) i32", "i32"),
+            ("range(i64 -1, 100) i64", "i64"),
+            ("nofpclass(nan inf) float", "float"),
+            ("dereferenceable(16) noundef align 8 ptr", "ptr"),
+            ("noundef zeroext i1", "i1"),
+            # Aggregates and vectors: the type is more than one token.
+            ("<2 x i32>", "<2 x i32>"),
+            ("align 8 <4 x float>", "<4 x float>"),
+            ("{ i32, i32 }", "{ i32, i32 }"),
+            ("[2 x i64]", "[2 x i64]"),
+            ("ptr addrspace(8)", "ptr addrspace(8)"),
+        ):
+            with self.subTest(ret=ret):
+                self.assertEqual(G._return_type(ret), want)
+
+    def test_parameter_attributes_are_dropped_from_both_sides(self):
+        """Parameter attributes come before *and* after the type.
+
+        The earlier implementation deleted a fixed list of attribute names,
+        which handled the five it knew and let every other one through: `i1
+        immarg zeroext` parsed as the type `i1 zeroext`. That is not a type,
+        so the probe kernel built from it did not assemble and the key's whole
+        row recorded probe_error -- a measurement failure presented as data.
+        """
+        for param, want in (
+            ("ptr nocapture readonly", ("ptr", False)),
+            ("i32 immarg", ("i32", True)),
+            ("noundef i32", ("i32", False)),
+            ("align 8 ptr nocapture", ("ptr", False)),
+            # Attributes outside any list this file could keep.
+            ("i1 immarg zeroext", ("i1", True)),
+            ("float nofpclass(nan)", ("float", False)),
+            ("ptr captures(none)", ("ptr", False)),
+            ("i32 immarg range(i32 0, 4)", ("i32", True)),
+            # `addrspace(N)` is part of the type, not an attribute, and the
+            # probe branches on it to emit an addrspacecast.
+            ("ptr addrspace(8)", ("ptr addrspace(8)", False)),
+            ("ptr addrspace(8) nocapture readonly", ("ptr addrspace(8)", False)),
+            # Aggregates and vectors, attributed on the right.
+            ("<2 x i32>", ("<2 x i32>", False)),
+            ("<4 x float> noundef", ("<4 x float>", False)),
+            ("{ i32, i32 }", ("{ i32, i32 }", False)),
+            ("[2 x i64] align 8", ("[2 x i64]", False)),
+            ("metadata", ("metadata", False)),
+        ):
+            with self.subTest(param=param):
+                self.assertEqual(G._param_type(param), want)
+
+    def test_an_unrecognised_type_is_handed_back_whole(self):
+        """Fail loudly, not quietly.
+
+        If a future type opener is missed, returning a prefix would produce IR
+        that assembles into something subtly different. Returning the string
+        unchanged produces IR that does not assemble, which is a diagnostic.
+        """
+        self.assertEqual(G._return_type("mysterytype"), "mysterytype")
+        self.assertEqual(G._param_type("mysterytype attr"), ("mysterytype attr", False))
+
+    def test_top_level_commas_split_but_nested_ones_do_not(self):
+        for params, want in (
+            ("", []),
+            ("i32", ["i32"]),
+            ("i32, i32", ["i32", "i32"]),
+            ("{ i32, i32 }, ptr", ["{ i32, i32 }", "ptr"]),
+            ("<2 x i32>, i32 immarg", ["<2 x i32>", "i32 immarg"]),
+            ("ptr addrspace(8), i32, i32", ["ptr addrspace(8)", "i32", "i32"]),
+            ("range(i32 0, 4) i32, ptr", ["range(i32 0, 4) i32", "ptr"]),
+        ):
+            with self.subTest(params=params):
+                self.assertEqual(G._split_params(params), want)
+
+    def test_an_attributed_declare_builds_a_probe_that_assembles(self):
+        """End to end, because the three parsers only matter together.
+
+        Asserting on the synthesised text rather than on the parts: a leaked
+        attribute shows up here as `i1 zeroext %a3` in a kernel signature,
+        which is what the toolchain would have choked on.
+        """
+        decl = (
+            "declare range(i32 0, 1024) noundef i32 @llvm.amdgcn.probe."
+            "example(ptr addrspace(8) nocapture readonly, "
+            "i32 immarg zeroext, <2 x i32> noundef)"
+        )
+        text, err = G._probe_module(decl, "e-p:64:64", imm_int=4)
+        self.assertEqual(err, "")
+        self.assertIn("%r = call i32 @llvm.amdgcn.probe.example(", text)
+        # The buffer fat pointer is the one operand still passed poison; the
+        # `immarg` takes the swept value; everything else becomes a kernel arg.
+        self.assertIn("ptr addrspace(8) poison", text)
+        self.assertIn("i32 4", text)
+        self.assertIn("<2 x i32> %a2", text)
+        self.assertIn("store volatile i32 %r", text)
+        for leaked in ("zeroext", "noundef", "nocapture", "readonly", "range("):
+            with self.subTest(attr=leaked):
+                self.assertNotIn(leaked, text.split("define", 1)[1])
+
+    def test_an_attributed_addrspace_param_still_takes_the_cast_branch(self):
+        """`ptr addrspace(N)` must survive its attributes as one type.
+
+        The probe branches on the exact string `ptr addrspace(N)` to emit an
+        `addrspacecast`. A trailing attribute left on the type misses that
+        branch and silently falls through to the kernel-argument case, which
+        is a different probe than the one intended -- and a pointer parameter
+        that arrives as a kernel argument is not the same question.
+        """
+        decl = (
+            "declare void @llvm.amdgcn.probe.cast("
+            "ptr addrspace(1) nocapture writeonly, noundef i32)"
+        )
+        text, err = G._probe_module(decl, "e-p:64:64")
+        self.assertEqual(err, "")
+        self.assertIn("%p0 = addrspacecast ptr %base to ptr addrspace(1)", text)
+        self.assertIn("call void @llvm.amdgcn.probe.cast(ptr addrspace(1) %p0,", text)
+
+
 class ImmargSweepTest(unittest.TestCase):
     """A negative must survive being asked with a legal operand value.
 
