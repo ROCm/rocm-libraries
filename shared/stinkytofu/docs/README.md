@@ -20,7 +20,7 @@
 - [Adding Intrinsics](developer/adding-intrinsics.md) -- Define reusable high-level operations
 - [Pattern Grammar Reference](developer/pattern-grammar.md) -- Complete syntax for the pattern language
 - [Wait-Aware Schedule Repair Pass](developer/wait-aware-schedule-repair-pass.md) -- Reopen WMMA issue windows after final wait insertion, leaving wait immediates untouched
-- [Co-issue Repair Pass](developer/coissue-repair-pass.md) -- Reorder loop fillers so the bank switches, s_wait_alu and nops the later passes insert cost less matrix-pipe time
+- [Co-issue Repair Pass](developer/coissue-repair-pass.md) -- Reorder loop fillers so the bank switches, s_wait_alu and nops the later passes insert cost less matrix-pipe time (off by default; no gain measured on hardware)
 - [SSA representation](developer/ssa-representation.md) -- SSA value/use-list model on Function, BasicBlock, and StinkyInstruction
 - [Lift Asm Registers to SSA Pass](developer/lift-asm-registers-to-ssa-pass.md) -- Physical VGPR/SGPR lift to attached SSA on Function
 - [Register Allocation](developer/register-allocation.md) -- Allocator interface, live intervals, region scope, arch-dependent rules, and verification on attached SSA

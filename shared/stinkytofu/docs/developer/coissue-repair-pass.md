@@ -11,6 +11,11 @@ that has matrix ops, so that what the passes after it insert (bank switches,
 `s_wait_alu`, `v_nop`, the prefetch bridge) costs less matrix-pipe time. It runs
 on gfx1250 only.
 
+On hardware the pass gives no measurable gain on the jichang kernels, and it makes
+one of them slower when forced (see [Hardware A/B](#hardware-ab)). Leave it off;
+do not enable apply mode until a calibrated form passes the A/B described in
+[Calibrating a Matrix Form](#calibrating-a-matrix-form).
+
 ## The Problem
 
 A `v_wmma` occupies the matrix pipe for several cycles. While it runs, the wave
@@ -352,6 +357,44 @@ the deviations below. Started from the prototype's input (the final loop with th
 inserted instructions stripped, `scripts/coissue_dev_repair.sh`) and with
 `prototypeWaitAlu`, the pass finds 2 and 15.
 
+### Hardware A/B
+
+Measured on one idle gfx1250 GPU: time per launch from the benchmark client, 10
+rounds per kernel with the two variants interleaved, medians (lower is better).
+The base is the pass off, byte-identical to develop `85553d8e26`. The repair is
+apply mode; for the maf kernels also with `CoissueTrustUncalibrated` and margin 0,
+so that every move the search finds is written back. Both variants pass
+validation (4,096 elements).
+
+| Kernel | Predicted gain per trip (measured profile) | Base (µs) | Repair (µs) | Change | Repair slower in |
+|---|---|---|---|---|---|
+| `maf-MXFP8` | 0.5% | 277.71 | 277.91 | +0.07% | 7 of 10 rounds |
+| `maf-bf16` | 0% | 700.75 | 700.73 | 0.00% | 4 of 10 |
+| `maf-NVFP4` | 2.4% | 149.91 | 149.00 | −0.61% | 4 of 10 |
+| `maf-MXFP4` | 1.2% | 139.91 | 141.14 | +0.88% | 10 of 10 |
+| `maf-FP8` | 0.1% | 247.59 | 247.80 | +0.08% | 7 of 10 |
+| `mab-MXFP8` (default apply) | 1.8% | 133.88 | 133.79 | −0.06% | 3 of 10 |
+| `medium-MXFP8` (default apply) | 1.7% | 118.45 | 118.61 | +0.13% | 7 of 10 |
+
+No kernel gets measurably faster. The `maf-NVFP4` median moves, but within a round
+the two variants differ by 0.12 µs, inside the base's own spread of about ±1 µs.
+`maf-MXFP4` is slower in every round.
+
+Why the predicted gains do not show:
+
+- **The queue absorbs what the pass removes.** The model times one wave. On
+  hardware the wave runs ahead of the matrix pipe into a queue of about three
+  matrix ops, and most issue-side delays (bank switches, `s_wait_alu`, waits) are
+  used up there. A study of the `maf-MXFP8` loop with ATT traces and cycle
+  counters measured the hardware 3 to 10 times less sensitive to those delays than
+  the compiler's model; the measured profile's queue covers only part of that.
+- **The matrix time is lost elsewhere.** In that loop the pipe is idle 12.5% of
+  each iteration on hardware. Most of it is in the barrier windows (waves waiting
+  for each other, about 262 cycles per iteration) and the two mid-loop clusters
+  (about 69). Moving single fillers does not reach those.
+- **FP4 forms run with FP8 facts.** The measured facts come from the FP8 form. On
+  the FP4 forms the moves remove idle that is not there, and cost time.
+
 ## Deviations From the Prototype
 
 - **Per-op LDS latency.** The prototype used 56 cycles for every `ds_load`; the
@@ -384,9 +427,12 @@ inserted instructions stripped, `scripts/coissue_dev_repair.sh`) and with
 
 ## Limitations
 
-- One matrix form is calibrated, from one kernel. The measured facts may not hold
-  for other forms; that is what the calibrated scope is for.
-- The hardware A/B of the written-back kernels is still to be done.
+- No measurable gain on hardware (see [Hardware A/B](#hardware-ab)): the pass
+  targets issue-side delays the matrix-op queue mostly absorbs, while the loops
+  lose their matrix time at barriers and in dependency chains.
+- One matrix form is in the calibrated scope, from facts measured on one kernel.
+  It does not meet the A/B bar of [Calibrating a Matrix Form](#calibrating-a-matrix-form):
+  apply mode gains nothing beyond noise on `mab-MXFP8` and `medium-MXFP8`.
 - The search is greedy (first improvement): the order it reaches depends on the
   order rules are tried in, and a better order may exist.
 - Large loops cost compile time: thousands of candidates, each predicted and
