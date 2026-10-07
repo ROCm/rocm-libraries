@@ -97,6 +97,48 @@ struct RaggedIterationInfo
     std::vector<int64_t> rowOffsets;
     int seqAxis;
     int64_t seqStride;
+
+    /**
+     * @brief Number of sequence rows stored for batch `b`.
+     *
+     * @param b Batch index.
+     * @return `(rowOffsets[b+1] - rowOffsets[b]) / seqStride`, or 0 when `b` is outside
+     *         `[0, B)`.
+     */
+    int64_t seqExtent(int64_t b) const
+    {
+        if(b < 0 || (b + 1) >= static_cast<int64_t>(rowOffsets.size()))
+        {
+            return 0;
+        }
+        const auto bIdx = static_cast<size_t>(b);
+        return (rowOffsets[bIdx + 1] - rowOffsets[bIdx]) / seqStride;
+    }
+
+    /**
+     * @brief Whether a logical index lies past its batch's stored sequence rows.
+     *
+     * Out-of-block positions have no storage of their own: they alias another batch's
+     * rows or run past the end of the buffer, so they must not be dereferenced.
+     *
+     * @param indices Full logical index; `indices[0]` is the batch.
+     * @return True if `indices[seqAxis] >= seqExtent(indices[0])`.
+     */
+    bool isOutOfBlock(const std::vector<int64_t>& indices) const
+    {
+        return indices[static_cast<size_t>(seqAxis)] >= seqExtent(indices[0]);
+    }
+
+    bool operator==(const RaggedIterationInfo& other) const
+    {
+        return rowOffsets == other.rowOffsets && seqAxis == other.seqAxis
+               && seqStride == other.seqStride;
+    }
+
+    bool operator!=(const RaggedIterationInfo& other) const
+    {
+        return !(*this == other);
+    }
 };
 
 template <bool IsConst = false>
@@ -312,18 +354,15 @@ public:
      *
      * Walks each batch's full per-batch range `[ragged_offset[b], ragged_offset[b+1])`
      * in turn, visiting exactly `ragged_offset[B]` physical elements. The traversal
-     * state (`rowOffsets`, `seqAxis`, `seqStride`) is snapshotted once via
-     * `RaggedIterationInfo` at `begin()`/`end()`, so traversal performs no per-step
-     * aux reads.
+     * state is snapshotted once as `info` at `begin()`/`end()`, so traversal performs
+     * no per-step aux reads.
      */
     struct RaggedCompositeIndex
     {
-        RaggedCompositeIndex(TensorType tensor, RaggedIterationInfo info, bool isEnd)
+        RaggedCompositeIndex(TensorType tensor, RaggedIterationInfo iterationInfo, bool isEnd)
             : indices(tensor.get().dims().size(), 0)
-            , rowOffsets(std::move(info.rowOffsets))
+            , info(std::move(iterationInfo))
             , tensor(tensor)
-            , seqAxis(info.seqAxis)
-            , seqStride(info.seqStride)
         {
             const int64_t batchCount = numBatches();
             if(isEnd)
@@ -336,7 +375,7 @@ public:
             else
             {
                 // Skip leading empty batches so begin() lands on a real element.
-                while(indices[0] < batchCount && seqExtent(indices[0]) == 0)
+                while(indices[0] < batchCount && info.seqExtent(indices[0]) == 0)
                 {
                     ++indices[0];
                 }
@@ -362,7 +401,8 @@ public:
             {
                 const auto dimIdx = static_cast<size_t>(dim);
                 ++indices[dimIdx];
-                const int64_t bound = (dim == seqAxis) ? seqExtent(indices[0]) : dims[dimIdx];
+                const int64_t bound
+                    = (dim == info.seqAxis) ? info.seqExtent(indices[0]) : dims[dimIdx];
                 if(indices[dimIdx] < bound)
                 {
                     return *this;
@@ -375,7 +415,7 @@ public:
             do
             {
                 ++indices[0];
-            } while(indices[0] < batchCount && seqExtent(indices[0]) == 0);
+            } while(indices[0] < batchCount && info.seqExtent(indices[0]) == 0);
             return *this;
         }
 
@@ -407,26 +447,13 @@ public:
         }
 
         std::vector<int64_t> indices;
-        std::vector<int64_t> rowOffsets;
+        RaggedIterationInfo info;
         TensorType tensor;
-        int seqAxis{1};
-        int64_t seqStride{1};
 
     private:
         int64_t numBatches() const
         {
-            return static_cast<int64_t>(rowOffsets.size()) - 1;
-        }
-
-        // Per-batch sequence extent: number of sequence rows in batch b.
-        int64_t seqExtent(int64_t b) const
-        {
-            if(b < 0 || (b + 1) >= static_cast<int64_t>(rowOffsets.size()))
-            {
-                return 0;
-            }
-            const auto bIdx = static_cast<size_t>(b);
-            return (rowOffsets[bIdx + 1] - rowOffsets[bIdx]) / seqStride;
+            return static_cast<int64_t>(info.rowOffsets.size()) - 1;
         }
     };
 
