@@ -53,7 +53,8 @@ IssueClass classify(const StinkyInstruction& inst) {
 
 int firstLiteral(const StinkyInstruction& inst) {
     for (const StinkyRegister& r : inst.getSrcRegs())
-        if (r.dataType == StinkyRegister::Type::LiteralInt) return static_cast<int>(r.getLiteralInt());
+        if (r.dataType == StinkyRegister::Type::LiteralInt)
+            return static_cast<int>(r.getLiteralInt());
     return -1;
 }
 
@@ -176,12 +177,13 @@ const TimedInst& TimedInstCache::get(const StinkyInstruction& inst) {
         if (store_.size() * 2 > table_.size()) {
             // Grow and re-insert, keeping the load under one half.
             std::vector<std::pair<const StinkyInstruction*, uint32_t>> old(table_.size() * 2,
-                                                                            {nullptr, 0});
+                                                                           {nullptr, 0});
             old.swap(table_);
             const size_t m = table_.size() - 1;
             for (const auto& e : old) {
                 if (e.first == nullptr) continue;
-                size_t j = ((reinterpret_cast<uintptr_t>(e.first) >> 4) * 0x9E3779B97F4A7C15ULL) & m;
+                size_t j =
+                    ((reinterpret_cast<uintptr_t>(e.first) >> 4) * 0x9E3779B97F4A7C15ULL) & m;
                 while (table_[j].first != nullptr) j = (j + 1) & m;
                 table_[j] = e;
             }
@@ -270,9 +272,9 @@ int IssueTimeline::dataReady(const TimedInst& inst) const {
             lat = rule.cycles;
             break;
         }
-        ready = std::max(ready, profile_.gapsFromIssueEnd
-                                    ? p.after + std::max(0, lat - p.inst->issue)
-                                    : p.at + lat);
+        ready =
+            std::max(ready, profile_.gapsFromIssueEnd ? p.after + std::max(0, lat - p.inst->issue)
+                                                      : p.at + lat);
     }
     if (inst.hazardConsumer != 0) {
         for (size_t g = 0; g < profile_.hazardGaps.size(); ++g) {
@@ -307,7 +309,8 @@ Placement IssueTimeline::place(const TimedInst& in, int notBefore) {
             winMask_ = in.coIssueMask;
             winBlocked_ = in.blockedMask;
             ++window_;
-            t_ = roll(at + (profile_.matrixIssueCycles > 0 ? profile_.matrixIssueCycles : in.issue));
+            t_ =
+                roll(at + (profile_.matrixIssueCycles > 0 ? profile_.matrixIssueCycles : in.issue));
             break;
         }
         case IssueClass::Valu: {
@@ -384,8 +387,8 @@ TripTiming steadyTrip(const std::vector<const TimedInst*>& body, const TimingPro
     return steadyTrip(body, tl, true, trips);
 }
 
-TripTiming steadyTrip(const std::vector<const TimedInst*>& body, IssueTimeline& tl,
-                      bool placements, int trips, std::optional<int> idleBound) {
+TripTiming steadyTrip(const std::vector<const TimedInst*>& body, IssueTimeline& tl, bool placements,
+                      int trips, std::optional<int> idleBound) {
     tl.reset();
     TripTiming out;
     if (placements) out.placements.resize(body.size());
@@ -405,7 +408,8 @@ TripTiming steadyTrip(const std::vector<const TimedInst*>& body, IssueTimeline& 
             if (!last) continue;
             if (idleBound && !body[i]->isLabel && body[i]->kind == IssueClass::Matrix) {
                 const auto& ops = tl.pipe();
-                if (ops.size() >= 2 && ops.size() - 1 >= (lastTripFirstOp > 0 ? lastTripFirstOp : 1))
+                if (ops.size() >= 2 &&
+                    ops.size() - 1 >= (lastTripFirstOp > 0 ? lastTripFirstOp : 1))
                     idleSoFar += std::max(0, ops.back().start - ops[ops.size() - 2].end);
                 if (idleSoFar > *idleBound) {
                     out.overBound = true;

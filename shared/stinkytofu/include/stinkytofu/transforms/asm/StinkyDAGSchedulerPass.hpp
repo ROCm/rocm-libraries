@@ -52,7 +52,8 @@ struct SchedulerPickEvent {
 
 /// Install a passive observer of CDNA5ReadyQueue picks, for timing-model tests; an
 /// empty function removes it. It never changes a scheduling decision.
-STINKYTOFU_EXPORT void setSchedulerPickObserver(std::function<void(const SchedulerPickEvent&)> observer);
+STINKYTOFU_EXPORT void setSchedulerPickObserver(
+    std::function<void(const SchedulerPickEvent&)> observer);
 /// The installed observer, or null.
 STINKYTOFU_EXPORT const std::function<void(const SchedulerPickEvent&)>* schedulerPickObserver();
 

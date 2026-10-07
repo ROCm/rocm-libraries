@@ -40,7 +40,8 @@ namespace {
 constexpr std::array<int, 3> kArch{12, 5, 0};
 
 std::string readFilecheck(const std::string& name) {
-    const auto path = std::filesystem::path(__FILE__).parent_path() / ".." / ".." / "filecheck" / name;
+    const auto path =
+        std::filesystem::path(__FILE__).parent_path() / ".." / ".." / "filecheck" / name;
     std::ifstream in(path);
     std::stringstream ss;
     ss << in.rdbuf();
@@ -108,8 +109,9 @@ void checkCase(const Case& c) {
     for (size_t f = 0; f < forPass.functions.size(); ++f) {
         const std::string& name = forPass.functions[f]->funcName;
         Function passFunc(name), modelFunc(name);
-        ASSERT_EQ(StinkyIRConverter::populateFunctionFromParsed(*forPass.functions[f], passFunc, arch),
-                  StinkyErrorCode::SUCCESS);
+        ASSERT_EQ(
+            StinkyIRConverter::populateFunctionFromParsed(*forPass.functions[f], passFunc, arch),
+            StinkyErrorCode::SUCCESS);
         ASSERT_EQ(
             StinkyIRConverter::populateFunctionFromParsed(*forModel.functions[f], modelFunc, arch),
             StinkyErrorCode::SUCCESS);
@@ -244,10 +246,8 @@ st.func @before_loop() {
 }
 
 TEST(InsertionModelTest, CoexecNopMatchesPass) {
-    checkCase({"InsertCoexecHazardPass_test.stir", false,
-               [] { return createInsertCoexecHazardPass(); },
-               [](Function& func, const std::vector<const BasicBlock*>&, const PassContext& ctx,
-                  InstructionPool& pool) {
-                   return makeCoexecNopModel(func, ctx.getHWModel(), pool);
-               }});
+    checkCase(
+        {"InsertCoexecHazardPass_test.stir", false, [] { return createInsertCoexecHazardPass(); },
+         [](Function& func, const std::vector<const BasicBlock*>&, const PassContext& ctx,
+            InstructionPool& pool) { return makeCoexecNopModel(func, ctx.getHWModel(), pool); }});
 }

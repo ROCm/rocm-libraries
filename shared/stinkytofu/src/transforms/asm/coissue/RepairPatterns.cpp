@@ -27,9 +27,10 @@ bool writesScc(const TimedInst& t) {
 int switchCostAfter(const TimingProfile& p, IssueClass prev) {
     for (const CostRule& r : p.costRules) {
         const bool inst = r.inst.opcode == GFX::s_set_vgpr_msb ||
-                          (r.inst.opcode < 0 && (r.inst.cls == IssueClass::Any ||
-                                                 r.inst.cls == IssueClass::Inserted));
-        const bool after = r.after.opcode < 0 && (r.after.cls == IssueClass::Any || r.after.cls == prev);
+                          (r.inst.opcode < 0 &&
+                           (r.inst.cls == IssueClass::Any || r.inst.cls == IssueClass::Inserted));
+        const bool after =
+            r.after.opcode < 0 && (r.after.cls == IssueClass::Any || r.after.cls == prev);
         if (inst && after) return r.cycles;
     }
     return 1;
@@ -51,7 +52,8 @@ class HoistCompare : public RepairRule {
                  std::vector<Move>& out) const override {
         const int win = damage.window;
         const size_t start = view.windowStart[win];
-        const size_t next = win + 1 < view.windows() ? view.windowStart[win + 1] : view.order->size();
+        const size_t next =
+            win + 1 < view.windows() ? view.windowStart[win + 1] : view.order->size();
         for (size_t b = start + 2; b < next; ++b) {
             const TimedInst& branch = *view.timed[b];
             if (branch.isLabel || !branch.isBranch || !readsScc(branch)) continue;
@@ -80,11 +82,13 @@ class SwitchAfterLoad : public RepairRule {
                  std::vector<Move>& out) const override {
         const int win = damage.window;
         const size_t start = view.windowStart[win];
-        const size_t next = win + 1 < view.windows() ? view.windowStart[win + 1] : view.order->size();
+        const size_t next =
+            win + 1 < view.windows() ? view.windowStart[win + 1] : view.order->size();
         for (size_t v = start + 2; v < next; ++v) {
             const TimedInst& valu = *view.timed[v];
             if (valu.isLabel || valu.kind != IssueClass::Valu || !view.switchBefore[v]) continue;
-            if (view.timed[v - 1]->isLabel || view.timed[v - 1]->kind != IssueClass::LdsLoad) continue;
+            if (view.timed[v - 1]->isLabel || view.timed[v - 1]->kind != IssueClass::LdsLoad)
+                continue;
             // A scalar of this window goes between the load and the switch.
             for (size_t s = start + 1; s < next; ++s) {
                 if (s == v || view.timed[s]->isLabel || view.timed[s]->kind != IssueClass::Salu ||
@@ -135,7 +139,8 @@ std::optional<std::string> enabledPatterns(GfxArchID arch, const std::string& sp
     for (const std::string& name : names) {
         bool known = false;
         for (const std::string& r : registered) known |= r == name;
-        if (!known) return "CoissuePatterns: '" + name + "' is not a pattern registered for this arch";
+        if (!known)
+            return "CoissuePatterns: '" + name + "' is not a pattern registered for this arch";
         if (name == "hoist-compare") out.push_back(std::make_unique<HoistCompare>());
         if (name == "switch-after-load") out.push_back(std::make_unique<SwitchAfterLoad>());
     }

@@ -83,7 +83,8 @@ class BridgeModel : public InsertionModel {
                 if (!isGlobalPrefetch(*inst)) continue;
                 for (const StinkyRegister& r : inst->getSrcRegs()) {
                     if (!r.isRegister() || isPseudoReg(r) || r.reg.type != RegType::V) continue;
-                    for (unsigned off = 0; off < r.reg.num; ++off) addrRegs_.insert(r.reg.idx + off);
+                    for (unsigned off = 0; off < r.reg.num; ++off)
+                        addrRegs_.insert(r.reg.idx + off);
                 }
             }
         // The planner only reads the events, so every block keeps just those.
@@ -102,8 +103,8 @@ class BridgeModel : public InsertionModel {
         if (required_ <= 0 || addrRegs_.empty()) return;
         // The plan only depends on where the prefetches, the LDS ops and the writes of a
         // prefetch address sit relative to each other; reuse it while those stay put.
-        const bool movedNonEvent = block.movedFromBase != nullptr && basePlanned_ &&
-                                   !isEvent(*block.movedFromBase);
+        const bool movedNonEvent =
+            block.movedFromBase != nullptr && basePlanned_ && !isEvent(*block.movedFromBase);
         if (movedNonEvent) {
             if (!(planned_ && lastIsBase_)) {
                 chosen_ = baseChosen_;
@@ -200,8 +201,9 @@ bool waitAluRelevant(const StinkyInstruction& inst) {
     if (!scalar) return true;
     for (const auto* regs : {&inst.getDestRegs(), &inst.getSrcRegs()})
         for (const StinkyRegister& r : *regs)
-            if (r.isRegister() && (r.reg.type == RegType::V || r.reg.type == RegType::EXEC ||
-                                   r.reg.type == RegType::EXEC_LO || r.reg.type == RegType::EXEC_HI))
+            if (r.isRegister() &&
+                (r.reg.type == RegType::V || r.reg.type == RegType::EXEC ||
+                 r.reg.type == RegType::EXEC_LO || r.reg.type == RegType::EXEC_HI))
                 return true;
     return false;
 }
@@ -385,8 +387,8 @@ class WaitAluModel : public InsertionModel {
                         // A hold_cnt-only survivor right in front folds into the new wait.
                         int hold = -1;
                         if (prev != nullptr && isHoldOnlyWaitAlu(*prev))
-                            hold = static_cast<int>(
-                                prev->getModifier<SWaitAluData>()->getField(SWaitAluData::HOLD_CNT));
+                            hold = static_cast<int>(prev->getModifier<SWaitAluData>()->getField(
+                                SWaitAluData::HOLD_CNT));
                         waits_[inst] = {need.vaVdst, need.vmVsrc, hold};
                     }
                     prev = inst;
@@ -420,7 +422,8 @@ class WaitAluModel : public InsertionModel {
 
 class CoexecNopModel : public InsertionModel {
    public:
-    CoexecNopModel(Function& func, const HWModel& hw, InstructionPool& pool) : hw_(hw), pool_(pool) {
+    CoexecNopModel(Function& func, const HWModel& hw, InstructionPool& pool)
+        : hw_(hw), pool_(pool) {
         // Blocks outside the scope keep the v_nops the pass gives them for their IR order.
         std::vector<const BasicBlock*> all;
         for (BasicBlock& bb : func) {
@@ -455,14 +458,16 @@ class CoexecNopModel : public InsertionModel {
     }
 
    private:
-    void insertNops(PredictedBlock& block, const std::unordered_map<const StinkyInstruction*, int>& nops) {
+    void insertNops(PredictedBlock& block,
+                    const std::unordered_map<const StinkyInstruction*, int>& nops) {
         if (nops.empty()) return;
         for (Sequence& seq : block.seqs) {
             Sequence out;
             out.reserve(seq.size() + 4);
             for (const StinkyInstruction* inst : seq) {
                 auto it = nops.find(inst);
-                if (it != nops.end()) out.insert(out.end(), static_cast<size_t>(it->second), pool_.vnop());
+                if (it != nops.end())
+                    out.insert(out.end(), static_cast<size_t>(it->second), pool_.vnop());
                 out.push_back(inst);
             }
             seq.swap(out);
@@ -550,9 +555,9 @@ const StinkyInstruction* InstructionPool::waitAlu(int vaVdst, int vmVsrc, int ho
     auto it = waitAlus_.find(key);
     if (it != waitAlus_.end()) return it->second;
     StinkyInstruction* inst = create(GFX::s_wait_alu);
-    inst->addModifier<SWaitAluData>(
-        SWaitAluData(vaVdst, /*va_sdst=*/-1, /*va_ssrc=*/-1, holdCnt, vmVsrc, /*va_vcc=*/-1,
-                     /*sa_sdst=*/-1));
+    inst->addModifier<SWaitAluData>(SWaitAluData(vaVdst, /*va_sdst=*/-1, /*va_ssrc=*/-1, holdCnt,
+                                                 vmVsrc, /*va_vcc=*/-1,
+                                                 /*sa_sdst=*/-1));
     waitAlus_[key] = inst;
     return inst;
 }

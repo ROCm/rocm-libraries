@@ -22,7 +22,8 @@ const PipeOp& QueueModel::push(int issue, int latency) {
 int afterBarrierWait(SyncModel sync, int t, const QueueModel& queue) {
     // Conservative: the release comes no earlier than the end of the queued matrix work, so
     // every compute change before a barrier counts in full.
-    if (sync == SyncModel::Conservative && !queue.ops().empty()) return std::max(t, queue.pipeFree());
+    if (sync == SyncModel::Conservative && !queue.ops().empty())
+        return std::max(t, queue.pipeFree());
     return t;
 }
 

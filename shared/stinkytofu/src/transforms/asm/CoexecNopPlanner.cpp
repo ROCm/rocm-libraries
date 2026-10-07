@@ -194,7 +194,8 @@ class Planner {
     }
 
     int hazardFor(const BasicBlock* bb, size_t index, ProducerKind kind, bool consumerIsWmma) {
-        if ((kind == ProducerKind::TRANS && !hasTrans_) || (kind == ProducerKind::DGEMM && !hasDgemm_) ||
+        if ((kind == ProducerKind::TRANS && !hasTrans_) ||
+            (kind == ProducerKind::DGEMM && !hasDgemm_) ||
             (kind == ProducerKind::PERM && !hasPerm_))
             return 0;
         ConsumerCtx ctx{kind, consumerIsWmma, seqs_.at(bb)[index]};
@@ -230,7 +231,8 @@ class Planner {
             }
 
             if (toInsert > 0) {
-                seq.insert(seq.begin() + static_cast<long>(i), static_cast<size_t>(toInsert), &vnop);
+                seq.insert(seq.begin() + static_cast<long>(i), static_cast<size_t>(toInsert),
+                           &vnop);
                 i += static_cast<size_t>(toInsert);
                 out.push_back({&inst, toInsert});
                 PASS_DEBUG(std::cerr << "[InsertCoexecHazard]   inserted " << toInsert

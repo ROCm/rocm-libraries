@@ -41,7 +41,8 @@ class MakeRoom : public RepairRule {
                  std::vector<Move>& out) const override {
         const int win = damage.window;
         const size_t start = view.windowStart[win];
-        const size_t next = win + 1 < view.windows() ? view.windowStart[win + 1] : view.order->size();
+        const size_t next =
+            win + 1 < view.windows() ? view.windowStart[win + 1] : view.order->size();
         for (size_t i = start + 1; i < next; ++i) {
             if (!view.movable(i)) continue;
             for (int d = 1; d <= view.radius; ++d)

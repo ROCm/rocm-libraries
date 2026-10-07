@@ -142,7 +142,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
 
     // Insertion-aware co-issue repair (CoissueRepairMode, off by default). A bad knob is an
     // error even when the mode is off.
-    const PassFeatureConfig::CoissueFeatures coissue = coissueFeaturesFromModuleOptions(moduleOptions);
+    const PassFeatureConfig::CoissueFeatures coissue =
+        coissueFeaturesFromModuleOptions(moduleOptions);
     if (auto err = validateCoissueFeatures(coissue, module.getArch())) report_fatal_error(*err);
     const bool coissueRepair = runScheduler && coissue.repairMode != "off";
     // StinkyTofuDebugPass='CoissueAuditPass' compares the repair's predictions with what the

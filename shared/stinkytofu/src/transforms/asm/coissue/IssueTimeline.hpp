@@ -94,10 +94,10 @@ class TimedInstCache {
 };
 
 struct Placement {
-    int cycle = 0;   ///< issue cycle
-    int window = -1; ///< index of the matrix op whose window the instruction sits in
-    int pos = 0;     ///< cycles after that matrix op's issue
-    int stall = 0;   ///< cycles a wait held the wave beyond its own cost
+    int cycle = 0;    ///< issue cycle
+    int window = -1;  ///< index of the matrix op whose window the instruction sits in
+    int pos = 0;      ///< cycles after that matrix op's issue
+    int stall = 0;    ///< cycles a wait held the wave beyond its own cost
 };
 
 class IssueTimeline {

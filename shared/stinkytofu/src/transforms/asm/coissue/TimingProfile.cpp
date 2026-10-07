@@ -77,13 +77,20 @@ std::vector<std::string> splitEntries(const std::string& spec) {
 
 std::optional<IssueClass> parseClass(const std::string& name) {
     static const std::pair<const char*, IssueClass> kNames[] = {
-        {"any", IssueClass::Any},          {"*", IssueClass::Any},
-        {"matrix", IssueClass::Matrix},    {"valu", IssueClass::Valu},
-        {"salu", IssueClass::Salu},        {"branch", IssueClass::Branch},
-        {"lds", IssueClass::LdsLoad},      {"ds_load", IssueClass::LdsLoad},
-        {"lds_store", IssueClass::LdsStore}, {"ds_store", IssueClass::LdsStore},
-        {"memory", IssueClass::Memory},    {"wait", IssueClass::MemWait},
-        {"barrier", IssueClass::Barrier},  {"inserted", IssueClass::Inserted},
+        {"any", IssueClass::Any},
+        {"*", IssueClass::Any},
+        {"matrix", IssueClass::Matrix},
+        {"valu", IssueClass::Valu},
+        {"salu", IssueClass::Salu},
+        {"branch", IssueClass::Branch},
+        {"lds", IssueClass::LdsLoad},
+        {"ds_load", IssueClass::LdsLoad},
+        {"lds_store", IssueClass::LdsStore},
+        {"ds_store", IssueClass::LdsStore},
+        {"memory", IssueClass::Memory},
+        {"wait", IssueClass::MemWait},
+        {"barrier", IssueClass::Barrier},
+        {"inserted", IssueClass::Inserted},
     };
     for (const auto& [n, c] : kNames)
         if (name == n) return c;
@@ -116,11 +123,16 @@ std::string matchName(const OpMatch& m, GfxArchID arch) {
 
 const char* regName(LatencyReg reg) {
     switch (reg) {
-        case LatencyReg::Any: return "any";
-        case LatencyReg::Scc: return "scc";
-        case LatencyReg::Vcc: return "vcc";
-        case LatencyReg::Sgpr: return "sgpr";
-        case LatencyReg::Vgpr: return "vgpr";
+        case LatencyReg::Any:
+            return "any";
+        case LatencyReg::Scc:
+            return "scc";
+        case LatencyReg::Vcc:
+            return "vcc";
+        case LatencyReg::Sgpr:
+            return "sgpr";
+        case LatencyReg::Vgpr:
+            return "vgpr";
     }
     return "?";
 }
@@ -134,17 +146,28 @@ TimingProfile withName(TimingProfile p, const char* name) {
 
 const char* issueClassName(IssueClass cls) {
     switch (cls) {
-        case IssueClass::Any: return "any";
-        case IssueClass::Matrix: return "matrix";
-        case IssueClass::Valu: return "valu";
-        case IssueClass::Salu: return "salu";
-        case IssueClass::Branch: return "branch";
-        case IssueClass::LdsLoad: return "lds";
-        case IssueClass::LdsStore: return "lds_store";
-        case IssueClass::Memory: return "memory";
-        case IssueClass::MemWait: return "wait";
-        case IssueClass::Barrier: return "barrier";
-        case IssueClass::Inserted: return "inserted";
+        case IssueClass::Any:
+            return "any";
+        case IssueClass::Matrix:
+            return "matrix";
+        case IssueClass::Valu:
+            return "valu";
+        case IssueClass::Salu:
+            return "salu";
+        case IssueClass::Branch:
+            return "branch";
+        case IssueClass::LdsLoad:
+            return "lds";
+        case IssueClass::LdsStore:
+            return "lds_store";
+        case IssueClass::Memory:
+            return "memory";
+        case IssueClass::MemWait:
+            return "wait";
+        case IssueClass::Barrier:
+            return "barrier";
+        case IssueClass::Inserted:
+            return "inserted";
     }
     return "?";
 }
@@ -231,12 +254,18 @@ std::optional<std::string> parseScalarLatency(const std::string& spec,
         if (colon != std::string::npos) {
             const std::string r = trim(consumer.substr(colon + 1));
             consumer = trim(consumer.substr(0, colon));
-            if (r == "scc") reg = LatencyReg::Scc;
-            else if (r == "vcc") reg = LatencyReg::Vcc;
-            else if (r == "sgpr") reg = LatencyReg::Sgpr;
-            else if (r == "vgpr") reg = LatencyReg::Vgpr;
-            else if (r == "any" || r == "*") reg = LatencyReg::Any;
-            else return "CoissueScalarLatency: unknown register class '" + r + "'";
+            if (r == "scc")
+                reg = LatencyReg::Scc;
+            else if (r == "vcc")
+                reg = LatencyReg::Vcc;
+            else if (r == "sgpr")
+                reg = LatencyReg::Sgpr;
+            else if (r == "vgpr")
+                reg = LatencyReg::Vgpr;
+            else if (r == "any" || r == "*")
+                reg = LatencyReg::Any;
+            else
+                return "CoissueScalarLatency: unknown register class '" + r + "'";
         }
         const auto producer = parseClass(trim(entry.substr(0, gt)));
         const auto consumerCls = parseClass(consumer);

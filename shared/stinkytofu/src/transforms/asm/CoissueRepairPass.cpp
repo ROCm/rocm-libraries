@@ -19,8 +19,8 @@
 #include "stinkytofu/transforms/asm/CoissueRepairPass.hpp"
 
 #include <chrono>
-#include <iostream>
 #include <iomanip>
+#include <iostream>
 #include <numeric>
 #include <sstream>
 
@@ -195,7 +195,8 @@ class Evaluator {
           set_(set),
           planProfile_(std::move(planProfile)),
           planTimeline_(planProfile_) {
-        for (const TimingProfile& p : set_.profiles) timelines_.push_back(std::make_unique<IssueTimeline>(p));
+        for (const TimingProfile& p : set_.profiles)
+            timelines_.push_back(std::make_unique<IssueTimeline>(p));
     }
 
     // Time `order` under every profile. With `bound`, stop at the first profile it is slower
@@ -317,7 +318,8 @@ class Evaluator {
                 --skip;
                 continue;
             }
-            const StinkyInstruction* canonical = pool.originalOf(inst) ? pool.originalOf(inst) : inst;
+            const StinkyInstruction* canonical =
+                pool.originalOf(inst) ? pool.originalOf(inst) : inst;
             while (k < order.size() && firstOf(k) != canonical) ++k;
             if (k == order.size()) break;
             e.streamIndex[k] = s;
@@ -493,7 +495,8 @@ class CoissueRepairPassImpl : public Pass {
                 for (uint16_t slot : t.defs) gating[slot] = true;
             };
             for (const StinkyInstruction* inst : order) {
-                if (const auto* g = isExecMaskGroup(*inst) ? inst->getModifier<ExecGroupData>() : nullptr)
+                if (const auto* g =
+                        isExecMaskGroup(*inst) ? inst->getModifier<ExecGroupData>() : nullptr)
                     for (const StinkyInstruction* child : g->children) mark(*child);
                 else
                     mark(*inst);
@@ -619,13 +622,13 @@ class CoissueRepairPassImpl : public Pass {
                         for (size_t p = 0; p < e.cycles.size(); ++p)
                             gains.push_back(current.cycles[p] - e.cycles[p]);
                         ++moves;
-                        emitRemark(passCtx,
-                                   {OptimizationRemark::Kind::Passed, kPassName, "Move",
-                                    "loop " + label + " move " + std::to_string(moves) + ": " +
-                                        m.rule + " window " + std::to_string(m.fromWindow) +
-                                        " -> " + std::to_string(m.toWindow) + " (" + m.place +
-                                        ") gains " + list(gains) + "  " +
-                                        toAssembly(*order[m.from])});
+                        emitRemark(
+                            passCtx,
+                            {OptimizationRemark::Kind::Passed, kPassName, "Move",
+                             "loop " + label + " move " + std::to_string(moves) + ": " + m.rule +
+                                 " window " + std::to_string(m.fromWindow) + " -> " +
+                                 std::to_string(m.toWindow) + " (" + m.place + ") gains " +
+                                 list(gains) + "  " + toAssembly(*order[m.from])});
                         const int block = layout.blockOf[m.from];
                         order = std::move(next);
                         checker.update(order, block);
@@ -644,13 +647,15 @@ class CoissueRepairPassImpl : public Pass {
         }
 
         in.moves = moves;
-        for (size_t p = 0; p < startCycles.size(); ++p) in.gains.push_back(startCycles[p] - current.cycles[p]);
+        for (size_t p = 0; p < startCycles.size(); ++p)
+            in.gains.push_back(startCycles[p] - current.cycles[p]);
         in.loopCycles = startCycles[set.primary];
         const PolicyDecision decision = decide(in);
         if (decision.writeBack) writeBack(layout, order);
 
         const double ms =
-            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0)
+                .count();
         std::ostringstream os;
         os << "loop " << label << ": moves " << moves << "  gains " << list(in.gains) << "  worst "
            << decision.worstGain << " (" << std::fixed << std::setprecision(2)
@@ -665,8 +670,8 @@ class CoissueRepairPassImpl : public Pass {
                       << " s, legal " << tLegal << " s, move " << tMove << " s, screen " << nScreen
                       << " " << tScreen << " s, exact " << nExact << " " << tExact << " s, base "
                       << tBase << " s\n";
-            std::cerr << "[CoissueRepair] " << label << ": timeline " << ev.timelineSeconds << " s ("
-                      << ev.timelineCalls << " trips, at most " << ev.timelinePlacements
+            std::cerr << "[CoissueRepair] " << label << ": timeline " << ev.timelineSeconds
+                      << " s (" << ev.timelineCalls << " trips, at most " << ev.timelinePlacements
                       << " placements)";
             for (size_t m = 0; m < pipeline.models().size(); ++m)
                 std::cerr << ", " << pipeline.models()[m]->name() << " "
@@ -681,7 +686,8 @@ class CoissueRepairPassImpl : public Pass {
                 pipeline.predict(blockSequences(layout, inIR), Fidelity::Exact);
             PredictedLoop record;
             for (const auto& seq : predicted.seqs)
-                for (const StinkyInstruction* inst : seq) record.signatures.push_back(auditSignature(*inst));
+                for (const StinkyInstruction* inst : seq)
+                    record.signatures.push_back(auditSignature(*inst));
             recordPrediction(func.getName(), label, std::move(record));
         }
 

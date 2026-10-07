@@ -29,7 +29,9 @@ class CoissueAuditPassImpl : public Pass {
     static char ID;
 
     CoissueAuditPassImpl(bool printTimeline, std::string traceProfile, bool compare)
-        : printTimeline_(printTimeline), traceProfile_(std::move(traceProfile)), compare_(compare) {}
+        : printTimeline_(printTimeline),
+          traceProfile_(std::move(traceProfile)),
+          compare_(compare) {}
 
     const char* getName() const override {
         return "CoissueAuditPass";
@@ -98,15 +100,16 @@ class CoissueAuditPassImpl : public Pass {
             bool first = true;
             for (const char* kind : {"s_set_vgpr_msb", "s_wait_alu", "s_nop", "v_nop",
                                      "flat_prefetch_b8", "s_delay_alu"}) {
-                os << (first ? " " : ", ") << kind << " " << count(predicted->signatures, kind) << "/"
-                   << count(actual, kind);
+                os << (first ? " " : ", ") << kind << " " << count(predicted->signatures, kind)
+                   << "/" << count(actual, kind);
                 first = false;
             }
             size_t mismatch = 0;
             const size_t n = std::max(actual.size(), predicted->signatures.size());
             size_t firstAt = n;
             for (size_t i = 0; i < n; ++i) {
-                const std::string* p = i < predicted->signatures.size() ? &predicted->signatures[i] : nullptr;
+                const std::string* p =
+                    i < predicted->signatures.size() ? &predicted->signatures[i] : nullptr;
                 const std::string* a = i < actual.size() ? &actual[i] : nullptr;
                 if (p && a && *p == *a) continue;
                 ++mismatch;

@@ -138,7 +138,8 @@ TEST_F(IssueTimelineTest, CompilerWaitTakesValuSlot) {
 TEST_F(IssueTimelineTest, CompilerBankSwitches) {
     build(R"(
         "st.s_set_vgpr_msb"(10)
-    )" + wmma("v[34:41]") + R"(
+    )" + wmma("v[34:41]") +
+          R"(
         "st.s_set_vgpr_msb"(2754)
         v[874:877] = "st.ds_load_b128"(v550) { mod.ds = { na = 1, offset = 128, gds = false } }
         v[878:881] = "st.ds_load_b128"(v550) { mod.ds = { na = 1, offset = 160, gds = false } }
@@ -191,7 +192,7 @@ TEST_F(IssueTimelineTest, MeasuredClusterWindow130) {
     const std::vector<int> m = cycles(measured());
     EXPECT_EQ(m, (std::vector<int>{0, 2, 3, 3, 4, 5, 6, 7, 8, 9, 10, 10, 13, 15}));
     const std::vector<int> c = cycles(compiler());
-    EXPECT_EQ(c[6], 8);   // s_cmov: 2 cycles of latency, then the blocked cycle
+    EXPECT_EQ(c[6], 8);  // s_cmov: 2 cycles of latency, then the blocked cycle
     EXPECT_EQ(c[12], 14);
 }
 
@@ -420,8 +421,8 @@ TEST_F(IssueTimelineTest, RobustSetAndKnobs) {
 // pick must land on the clock the queue had; where the queue skipped ahead by policy, the
 // skip is the lower bound.
 TEST_F(IssueTimelineTest, SchedulerPresetMatchesCdna5Clock) {
-    const std::string ir = wmma("v[0:7]") + wmma("v[8:15]") + wmma("v[16:23]") +
-                           wmma("v[24:31]") + R"(
+    const std::string ir = wmma("v[0:7]") + wmma("v[8:15]") + wmma("v[16:23]") + wmma("v[24:31]") +
+                           R"(
         v[420:423] = "st.ds_load_b128"(v38) { mod.ds = { na = 1, offset = 128, gds = false }, mod.memtoken = { tokens = [0] } }
         v[424:427] = "st.ds_load_b128"(v38) { mod.ds = { na = 1, offset = 160, gds = false }, mod.memtoken = { tokens = [0] } }
         v[428:431] = "st.ds_load_b128"(v39) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }

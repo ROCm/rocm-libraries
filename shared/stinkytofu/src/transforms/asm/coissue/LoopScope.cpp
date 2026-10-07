@@ -15,7 +15,8 @@ namespace stinkytofu::coissue {
 std::vector<LoopScope> innermostLoops(Function& func, const std::vector<Loop>& loops) {
     // Merge the back edges of one header, keeping headers in layout order.
     std::map<BasicBlock*, std::unordered_set<BasicBlock*>> bodies;
-    for (const Loop& loop : loops) bodies[loop.headerBB].insert(loop.bodyBBs.begin(), loop.bodyBBs.end());
+    for (const Loop& loop : loops)
+        bodies[loop.headerBB].insert(loop.bodyBBs.begin(), loop.bodyBBs.end());
 
     std::vector<LoopScope> out;
     for (BasicBlock& bb : func) {
