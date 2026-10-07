@@ -585,18 +585,18 @@ namespace
                 {
                     std::vector<uint8_t> data(rows * cols), scale(rows * cols / 32 + 64);
                     std::vector<float>   ref = generateMXInput(type,
-                                                               HIP_R_8U,
-                                                               data.data(),
-                                                               scale.data(),
-                                                               rows,
-                                                               cols,
-                                                               rows,
-                                                               transpose,
-                                                               32,
-                                                               1,
-                                                               isMatrixA,
-                                                               MXScaleLayout::None,
-                                                               "integer_exact");
+                                                             HIP_R_8U,
+                                                             data.data(),
+                                                             scale.data(),
+                                                             rows,
+                                                             cols,
+                                                             rows,
+                                                             transpose,
+                                                             32,
+                                                             1,
+                                                             isMatrixA,
+                                                             MXScaleLayout::None,
+                                                             "integer_exact");
                     ASSERT_EQ(ref.size(), rows * cols);
                     bool sawLargeScale = false, sawUnitScale = false, sawNegative = false;
                     for(float v : ref)
