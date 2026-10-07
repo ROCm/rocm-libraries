@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Bounded packaged-kernel experiment for the advisory rocJITsu race-check job."""
+"""Run packaged solution entries for the advisory rocJITsu race-check job."""
 
 import argparse
 from collections import Counter
@@ -90,7 +90,9 @@ def render_report(manifest, summary):
         f"Seed: `{cell(manifest['seed'])}`; policy: `{cell(manifest['policy'])}`; "
         f"inventory/preparation: {manifest['preparation_seconds']:.2f} s.",
         f"Artifact fingerprint: `{manifest['artifact_fingerprint']}`.",
-        f"Selected solutions: {len(manifest['jobs'])}; eligible/inventory kernel names: "
+        f"Selected solutions: {len(manifest['jobs'])}; eligible/inventory solutions: "
+        f"{inventory.get('eligible_solutions', '?')}/{inventory.get('solutions', '?')}; "
+        f"eligible/inventory kernel names: "
         f"{inventory.get('eligible_kernel_names', '?')}/{inventory.get('unique_kernel_names', '?')}.",
         "",
         "PASS requires all planned cases, matching identities/dispatches, no races or warnings, and a successful exit. "
@@ -146,7 +148,7 @@ def prepare(args):
         args.library_dir,
         args.target,
         base["vm"]["gpu"]["device"],
-        args.kernels,
+        args.solutions,
         args.seed,
         args.solution_indices,
     )
@@ -841,7 +843,17 @@ def main():
     parser.add_argument("--target", choices=("gfx942", "gfx950"), required=True)
     parser.add_argument("--workers", type=int, default=4)
     selection = parser.add_mutually_exclusive_group()
-    selection.add_argument("--kernels", type=int, default=100)
+    selection.add_argument(
+        "--solutions",
+        type=int,
+        default=100,
+        help="Select this many eligible solution entries (default: 100)",
+    )
+    selection.add_argument(
+        "--all-solutions",
+        action="store_true",
+        help="Select every eligible solution index in stable priority order",
+    )
     selection.add_argument(
         "--solution-index",
         dest="solution_indices",
@@ -854,7 +866,7 @@ def main():
         "--known-failures",
         type=Path,
         default=Path(__file__).with_name("known_failures.yaml"),
-        help="Versioned list of named solution configurations and cases to skip",
+        help="Versioned list of kernel names and cases to skip across their solutions",
     )
     parser.add_argument(
         "--rocjitsu-revision",
@@ -869,7 +881,7 @@ def main():
     parser.add_argument(
         "--seed",
         required=True,
-        help="Seed for deterministic kernel ranking; CI always uses 0",
+        help="Seed for deterministic solution-name ranking; CI always uses 0",
     )
     parser.add_argument("--timeout", type=float, default=120)
     parser.add_argument(
@@ -881,14 +893,16 @@ def main():
     args = parser.parse_args()
     if (
         not 1 <= args.workers <= 4
-        or not 1 <= args.kernels <= 100
+        or args.solutions < 1
         or not 0 < args.timeout <= 120
         or not 0 < args.suite_timeout <= 1500
     ):
         parser.error(
-            "Prototype limits: 1–4 workers, 1–100 kernels, process timeout at most "
+            "Limits: 1–4 workers, a positive solution count, process timeout at most "
             "120 seconds, suite timeout at most 1500 seconds"
         )
+    if args.all_solutions:
+        args.solutions = None
     for key in ("rocjitsu", "client", "config", "library_dir", "reports"):
         setattr(args, key, getattr(args, key).resolve())
     return run(args)

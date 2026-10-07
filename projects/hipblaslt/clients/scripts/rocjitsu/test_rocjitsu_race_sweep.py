@@ -105,7 +105,7 @@ def bench_log(j=None):
 
 def failure_list():
     return {
-        "version": 2,
+        "version": 3,
         "rocjitsu_revision": "a" * 40,
         "case_policy": plan.POLICY,
         "failures": [
@@ -118,14 +118,14 @@ def failure_list():
                 "target": "gfx942",
                 "backends": ["tensile", "bench"],
                 "cases": [c["id"] for c in job()["cases"]],
-                "solution_names": ["solution-7"],
+                "kernel_names": ["kernel-7"],
             }
         ],
     }
 
 
 class SweepTests(unittest.TestCase):
-    def test_known_failures_follow_solution_names_across_artifact_changes(self):
+    def test_known_failures_follow_kernel_names_across_artifact_changes(self):
         j = job()
         j["code_objects"] = ["kernel.co"]
         original = {
@@ -144,6 +144,7 @@ class SweepTests(unittest.TestCase):
             "metadata",
             "code",
             "solution",
+            "kernel",
             "target",
             "backend",
             "planning",
@@ -158,6 +159,8 @@ class SweepTests(unittest.TestCase):
                     manifest["input_sha256"]["kernel.co"] = "3" * 64
                 elif difference == "solution":
                     manifest["jobs"][0]["solutions"][0]["name"] = "different-settings"
+                elif difference == "kernel":
+                    manifest["jobs"][0]["solutions"][0]["kernel"] = "different-kernel"
                 elif difference == "target":
                     manifest["target"] = "gfx950"
                 elif difference == "backend":
@@ -171,7 +174,7 @@ class SweepTests(unittest.TestCase):
                     [c["id"] for c in cases if c.get("skip")],
                     (
                         ["tile"]
-                        if difference in (None, "index", "metadata", "code")
+                        if difference in (None, "index", "metadata", "code", "solution")
                         else []
                     ),
                 )
@@ -182,6 +185,28 @@ class SweepTests(unittest.TestCase):
                     before,
                     "skips must not replace or reshape selections",
                 )
+
+    def test_kernel_skip_applies_to_every_solution_using_the_name(self):
+        jobs = [job(), job(), job()]
+        for i, j in enumerate(jobs):
+            j["id"] = i
+            j["solutions"][0].update(index=7 + i, name=f"solution-{7 + i}")
+        jobs[1]["cases"][0]["shape"] = [128, 192, 1, 256]
+        jobs[2]["solutions"][0]["kernel"] = "different-kernel"
+        manifest = {
+            "target": "gfx942",
+            "backend": "tensile",
+            "policy": plan.POLICY,
+            "jobs": jobs,
+        }
+        data = failure_list()
+        data["failures"][0]["cases"] = ["tile"]
+        apply_known_failures(manifest, yaml.safe_dump(data), "a" * 40)
+        self.assertEqual(manifest["known_failures"]["skipped_cases"], 2)
+        self.assertEqual(
+            [[c["id"] for c in j["cases"] if c.get("skip")] for j in jobs],
+            [["tile"], ["tile"], []],
+        )
 
     def test_known_failure_schema_revision_and_overlap_guards(self):
         for change in (
@@ -198,7 +223,7 @@ class SweepTests(unittest.TestCase):
                 elif change == "bad_case":
                     entry["cases"] = ["typo"]
                 elif change == "bad_name":
-                    entry["solution_names"] = [7]
+                    entry["kernel_names"] = [7]
                 else:
                     entry["case"] = ["tile"]
                 with self.assertRaises(ValueError):
@@ -253,7 +278,7 @@ class SweepTests(unittest.TestCase):
             seed="test",
             target="gfx942",
             library_dir=root,
-            kernels=100,
+            solutions=100,
             solution_indices=list(indices),
             config=config,
             rocjitsu=code_object,
@@ -466,48 +491,123 @@ class SweepTests(unittest.TestCase):
         self.assertFalse(plan.matches_hardware(predicate, "gfx950", device))
         self.assertFalse(plan.matches_hardware({"type": "Unknown"}, "gfx942", device))
 
-    def test_sample_is_seeded_distinct_order_independent_and_extensible(self):
+    def test_sample_is_seeded_order_independent_and_reaches_every_index(self):
         solutions = [solution(i) for i in range(100)]
         alias = copy.deepcopy(solutions[0])
         alias["index"] = 1000
         solutions.append(alias)
+        same_kernel = copy.deepcopy(alias)
+        same_kernel.update(index=1001, name="another-solution")
+        same_kernel["sizeMapping"]["globalSplitU"] = 4
+        solutions.append(same_kernel)
 
         def choose(seed, values, count=10):
-            sampler = plan.KernelSample(count, seed)
-            for s in values:
-                sampler.consider(Path("library.dat"), s)
-            return [(s["kernelName"], s["index"]) for _, s in sampler.selected()]
+            entries = ((Path("library.dat"), s) for s in values)
+            return [s["index"] for _, s in plan.select_solutions(entries, count, seed)]
 
         self.assertEqual(choose("0", solutions), choose("0", list(reversed(solutions))))
         self.assertNotEqual(choose("0", solutions), choose("1", solutions))
-        self.assertEqual(len({name for name, _ in choose("0", solutions)}), 10)
         self.assertEqual(choose("0", solutions), choose("0", solutions, 20)[:10])
-        self.assertEqual(
-            {name for name, _ in choose("0", solutions, 100)},
-            {s["kernelName"] for s in solutions},
-        )
-        sampler = plan.KernelSample(2, "seed")
-        for s in [solution(0), alias]:
-            sampler.consider(Path("library.dat"), s)
-        with self.assertRaisesRegex(ValueError, "found only 1"):
-            sampler.selected()
+        all_indices = choose("0", solutions, None)
+        self.assertEqual(set(all_indices), {s["index"] for s in solutions})
+        self.assertEqual(len(all_indices), len(solutions))
+        self.assertEqual(choose("0", solutions, 102), all_indices)
+        self.assertEqual(choose("0", solutions, 101), all_indices[:101])
+        with self.assertRaisesRegex(ValueError, "found only 102"):
+            choose("0", solutions, 103)
+        with self.assertRaisesRegex(ValueError, "No eligible solutions"):
+            choose("0", [], None)
 
-    def test_solution_representative_survives_index_renumbering(self):
-        solutions = [solution(7), solution(8)]
-        solutions[1]["kernelName"] = solutions[0]["kernelName"]
+    def test_selection_survives_renumbering_and_repackaging_with_repeated_names(self):
+        solutions = [solution(i) for i in range(7, 16)]
+        for s in solutions:
+            s["internalArgsSupport"] = {"version": 0}
+            s["taskPredicate"] = {"type": "True"}
+        for i, s in enumerate(solutions[1:], 1):
+            s["name"] = solutions[0]["name"]
+            s["kernelName"] = solutions[0]["kernelName"]
+            # A solution name need not describe all execution metadata.
+            if i == 1:
+                s["sizeMapping"]["globalSplitU"] = 4
+            elif i == 2:
+                s["problemType"]["useScaleAB"] = "Vector"
+            elif i == 3:
+                s["hardwarePredicate"] = {"type": "True"}
+            elif i == 4:
+                s["problemPredicate"] = {"type": "True"}
+            elif i == 5:
+                s["kernelName"] = "alternate-kernel"
+            elif i == 6:
+                s["internalArgsSupport"]["version"] = 1
+            elif i == 7:
+                s["taskPredicate"] = {"type": "False"}
+            # The last entry is identical apart from its numeric index.
 
-        def selected_name(values):
-            sampler = plan.KernelSample(1, "0")
-            for value in values:
-                sampler.consider(Path("library.dat"), value)
-            return sampler.selected()[0][1]["name"]
+        def configurations(values, library, count):
+            return [
+                {
+                    k: v
+                    for k, v in s.items()
+                    if k not in ("index", "libraryLogicIndex", "ideals", "linearModel")
+                }
+                for _, s in plan.select_solutions(
+                    ((Path(library), s) for s in values), count, "0"
+                )
+            ]
 
         renamed = copy.deepcopy(solutions)
-        renamed[0]["index"], renamed[1]["index"] = 8, 7
-        self.assertEqual(selected_name(solutions), selected_name(renamed))
-        self.assertEqual(
-            selected_name(solutions), selected_name(list(reversed(renamed)))
-        )
+        for i, s in enumerate(renamed):
+            s["index"] = 100 - i
+            s["libraryLogicIndex"] = i * 10
+            s["ideals"] = {1: float(i)}
+            s["linearModel"] = {"slope": i}
+            s["sizeMapping"] = dict(reversed(list(s["sizeMapping"].items())))
+        for count in range(1, len(solutions) + 1):
+            with self.subTest(count=count):
+                self.assertEqual(
+                    configurations(solutions, "first.dat", count),
+                    configurations(reversed(renamed), "repacked.dat.zlib", count),
+                )
+
+    def test_cli_accepts_larger_counts_and_all_solution_selection(self):
+        required = [
+            "sweep",
+            "--backend",
+            "tensile",
+            "--target",
+            "gfx942",
+            "--seed",
+            "0",
+            "--rocjitsu-revision",
+            "a" * 40,
+        ]
+        for name in ("rocjitsu", "client", "config", "library-dir", "reports"):
+            required += ["--" + name, "."]
+        for flags, count in (
+            ([], 100),
+            (["--solutions", "101"], 101),
+            (["--all-solutions"], None),
+        ):
+            with (
+                self.subTest(flags=flags),
+                patch.object(sys, "argv", required + flags),
+                patch.object(sweep, "run", return_value=0) as run,
+            ):
+                self.assertEqual(sweep.main(), 0)
+                self.assertEqual(run.call_args.args[0].solutions, count)
+        for flags in (
+            ["--solutions", "0"],
+            ["--all-solutions", "--solution-index", "7"],
+        ):
+            with (
+                self.subTest(flags=flags),
+                patch.object(sys, "argv", required + flags),
+                patch.object(sys, "stderr", io.StringIO()),
+                patch.object(sweep, "run") as run,
+            ):
+                with self.assertRaises(SystemExit):
+                    sweep.main()
+                run.assert_not_called()
 
     def test_shapes_follow_each_kernels_tile_and_depth(self):
         first, second = plan.derive_cases(solution(0)), plan.derive_cases(
@@ -576,6 +676,7 @@ class SweepTests(unittest.TestCase):
             root = Path(tmp)
             first, alias, unsupported = solution(7), solution(8), solution(9)
             alias["kernelName"] = first["kernelName"]
+            alias["name"] = first["name"]
             unsupported["problemType"]["groupedGemm"] = True
             (root / "library_gfx942.dat").write_bytes(
                 msgpack.packb(
@@ -595,6 +696,15 @@ class SweepTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValueError, "indices not found:.*10"):
                 plan.make_plan(root, "gfx942", {}, 100, "seed", [7, 10])
+            all_eligible = plan.make_plan(root, "gfx942", {}, None, "seed")
+            self.assertEqual(all_eligible["selection"], "all-eligible-solutions")
+            self.assertEqual(all_eligible["solutions"], 2)
+            self.assertEqual(all_eligible["kernels"], 1)
+            self.assertEqual(all_eligible["planned_cases"], 8)
+            self.assertEqual(
+                {j["solutions"][0]["index"] for j in all_eligible["jobs"]}, {7, 8}
+            )
+            self.assertEqual(all_eligible["inventory"]["outside_adapter_scope"], 1)
 
     def test_native_metadata_stays_authoritative_for_each_adapter(self):
         j = job()

@@ -7,7 +7,7 @@ set -euo pipefail
 # TODO(newling) Until rocjitsu is packaged as a complete runnable TheRock
 # artifact, we build the rocjitsu CLI locally. Monitor progress on packaging rocjitsu.
 #
-# Run independent four-worker / 100-kernel GEMM sweeps through both clients.
+# Run independent four-worker / 100-solution GEMM sweeps through both clients.
 #
 # Basic flow:
 #   1. Use the TheRock artifact tree unpacked at ROCM_PATH.
@@ -266,7 +266,7 @@ check_status=0
 # Both run even after an earlier failure, with at most four workers at once.
 # Each gets 25 minutes; the remaining step budget covers setup and reporting.
 # Fix the seed so unchanged artifacts keep the same sample across PR revisions.
-# Increase the kernel count to extend the sample; use the CLI to try other seeds.
+# Increase the solution count to extend the sample; use the CLI to try other seeds.
 for backend in tensile bench; do
   client="${TENSILELITE_CLIENT}"
   [[ "${backend}" == bench ]] && client="${HIPBLASLT_BENCH}"
@@ -278,7 +278,7 @@ for backend in tensile bench; do
       --config "${ROCJITSU_CONFIG}" --target "${ROCJITSU_GPU_TARGET}" \
       --library-dir "${ROCM_PATH}/lib/hipblaslt/library" \
       --reports "${RACE_REPORT_DIR}/sweep-${backend}" \
-      --workers 4 --kernels 100 --timeout 120 --suite-timeout 1500; then
+      --workers 4 --solutions 100 --timeout 120 --suite-timeout 1500; then
     :
   else
     echo "${backend} sampled race sweep failed with status $?" >&2

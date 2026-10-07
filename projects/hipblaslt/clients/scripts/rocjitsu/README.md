@@ -21,25 +21,31 @@ hardware predicates and size constraints. Compressed metadata uses the same
 strict framing as the native loader. No maintained inventory or previous
 manifest is an input. Indices are specific to the tested artifact.
 
-CI uses the fixed seed `0` for both backends. The sample contains 100 distinct
-eligible kernel names, with one solution index chosen for each. Several solution
-indices can refer to the same kernel name; those aliases do not increase that
-kernel's sampling weight.
+CI uses the fixed seed `0` for both backends and selects 100 eligible solution
+entries. A kernel name can have several solution names with different launch
+settings, and a solution name can occur at several indices. Every entry is
+retained, including repeated kernel names, repeated solution names and identical
+configurations at different indices.
 
-Each name receives the priority `SHA256(seed + "\0" + kernel_name)`. The 100 names
-with the smallest priorities are selected in priority order. Within each name,
-the representative solution has the smallest
-`SHA256(seed + "\0" + solution_name)`. The solution name identifies the kernel and
-its launch settings, so index renumbering preserves the chosen configuration.
-Identical names use metadata basename and index only to choose an executable handle.
-Selection is independent of traversal order, backend and case generation.
-For an unchanged eligible inventory, a fixed seed preserves the selection across
-PR revisions. Increasing the count extends the same ordered sample. Selecting
-every kernel name would still choose one representative index per name.
+Entries are ranked by `SHA256(seed + "\0" + solution_name)`, then by solution name
+and canonical JSON of the solution's configuration metadata. This includes the
+kernel name, problem type, size mapping, predicates and kernel argument format;
+index/logic bookkeeping and performance models are excluded. JSON keys are sorted,
+so dictionary insertion order does not affect selection. The numeric index breaks
+ties only when these names and configuration fields are identical. The first 100
+entries are selected in this order, independently of metadata filenames,
+traversal order, backend and case generation. Index renumbering preserves the chosen configurations; naming
+or configuration changes can change the selection. Adding or removing entries
+can change which fall within the selected prefix.
+
+Increasing `--solutions N` extends the same ordered prefix for an unchanged
+eligible inventory, even beyond the number of distinct kernel names.
+`--all-solutions` selects every eligible index. Process and stage time limits
+still apply; explicit indices can partition larger inventories into separate runs.
 
 The CLI requires `--seed`; use `--seed 0` to reproduce CI or an explicit alternate
 seed for local exploration. To reproduce specific indices, repeat
-`--solution-index N` instead of `--kernels N`. Explicit selection retains aliases,
+`--solution-index N` instead of `--solutions N`. Explicit selection retains aliases,
 reports unsupported solutions and rejects missing indices.
 
 The initial adapters support ordinary GEMM with matching C/D types, optional
@@ -75,13 +81,14 @@ cases still accounted for. It does not require another runner or scheduler.
 
 [`known_failures.yaml`](known_failures.yaml) is the executable skip list. After
 selection and shape generation, the runner matches each case by architecture,
-backend, solution name and case ID. The solution name identifies the kernel and
-its launch configuration. An entry covers only that named configuration, not
-every solution sharing its kernel. The current numeric index is resolved from
-the artifact, so renumbering or rebuilding a metadata/code-object file does not
-by itself remove the skip. File hashes remain in `manifest.json`'s `input_sha256`
-map for reproduction. The original selection and all four planned cases stay in
-the manifest.
+backend, exact kernel name and case ID. An entry covers all selected solution
+names, indices and launch configurations using that kernel. This intentionally
+coarse scope keeps the list independent of solution naming and index assignment;
+it can also skip configurations that would pass. Rebuilding a metadata/code-object
+file does not by itself remove the skip, although a changed kernel name no longer
+matches. File hashes remain in `manifest.json`'s `input_sha256` map for reproduction.
+The original selection and all four planned cases stay in the manifest, with no
+replacement solutions selected for skipped cases.
 
 Each failure has a description, tracking links and a review date. Its `cases`
 list can name a subset of `tile`, `multi_tile`, `mn_edge` and `k_remainder`; listing
@@ -176,12 +183,12 @@ python3 -B "$sweep/rocjitsu_race_sweep.py" \
   --config "$ROCJITSU_SOURCE_DIR/configs/gfx942_cdna3_kmd.json" \
   --library-dir "$ROCM_PATH/lib/hipblaslt/library" \
   --target gfx942 --reports "$RACE_REPORT_DIR/sweep-tensile" \
-  --workers 4 --kernels 100 --timeout 120 --suite-timeout 1500
+  --workers 4 --solutions 100 --timeout 120 --suite-timeout 1500
 ```
 
 For bench, change `--backend` to `bench`, `--client` to
 `$ROCM_PATH/bin/hipblaslt-bench` and use a fresh `--reports` directory. For specific
-solutions, replace `--kernels 100` with e.g. `--solution-index 7 --solution-index 9`.
+solutions, replace `--solutions 100` with e.g. `--solution-index 7 --solution-index 9`.
 For source-tree development, put `projects/hipblaslt/tensilelite` on `PYTHONPATH`
 and use this directory as `sweep`.
 
