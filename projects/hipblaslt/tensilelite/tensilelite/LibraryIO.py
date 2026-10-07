@@ -568,17 +568,17 @@ def parseLibraryLogicFile(
            )
 
 
-def _companionCsvGzPath(yamlPath):
-    p = yamlPath + ".csv.gz"
+def _companionCsvXzPath(yamlPath):
+    p = yamlPath + ".csv.xz"
     return p if os.path.isfile(p) else None
 
 
-def _loadMeshTableFromCsvGz(csvGzPath):
+def _loadMeshTableFromCsvXz(csvXzPath):
     import csv as _csv
-    import gzip
+    import lzma
 
     table = []
-    with gzip.open(csvGzPath, "rt") as f:
+    with lzma.open(csvXzPath, "rt") as f:
         reader = _csv.reader(f)
         next(reader)
         for row in reader:
@@ -723,9 +723,9 @@ def parseLibraryLogicData(
     if (data.get("Library", {}).get("distance") == "MeshBased"
             and not data.get("Library", {}).get("table")
             and srcFile):
-        companion = _companionCsvGzPath(srcFile)
+        companion = _companionCsvXzPath(srcFile)
         if companion:
-            data["Library"]["table"] = _loadMeshTableFromCsvGz(companion)
+            data["Library"]["table"] = _loadMeshTableFromCsvXz(companion)
             data["ExactLogic"] = data["Library"]["table"]
 
     if "CUCount" not in data:

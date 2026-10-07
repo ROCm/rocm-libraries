@@ -4,7 +4,7 @@
 """Unit tests for Tensile.Utilities.split_mesh_yaml."""
 
 import csv
-import gzip
+import lzma
 
 import pytest
 
@@ -12,7 +12,7 @@ from Tensile.Utilities.split_mesh_yaml import (
     _clear_exact_logic,
     _get_exact_logic,
     _get_library_type,
-    _write_csv_gz,
+    _write_csv_xz,
 )
 
 pytestmark = pytest.mark.unit
@@ -67,16 +67,16 @@ class TestClearExactLogic:
         assert data[7] is None
 
 
-class TestWriteCsvGz:
+class TestWriteCsvXz:
     def test_round_trip(self, tmp_path):
         exact_logic = [
             [[128, 256, 1, 512], [7, 0.0]],
             [[64, 64, 2, 1024], [3, 0.0]],
         ]
-        out_path = str(tmp_path / "test.csv.gz")
-        _write_csv_gz(exact_logic, out_path)
+        out_path = str(tmp_path / "test.csv.xz")
+        _write_csv_xz(exact_logic, out_path)
 
-        with gzip.open(out_path, "rt") as f:
+        with lzma.open(out_path, "rt") as f:
             reader = csv.reader(f)
             header = next(reader)
             assert header == ["M", "N", "batch", "K", "solutionIdx"]
