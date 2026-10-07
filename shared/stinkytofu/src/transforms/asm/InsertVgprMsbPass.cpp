@@ -34,22 +34,10 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/VgprMsbEncoding.hpp"
+#include "stinkytofu/transforms/asm/VgprMsbPlanner.hpp"
 
 namespace stinkytofu {
 namespace {
-enum VgprMsbState : int {
-    NOT_REQUIRED = -1,
-    LABEL_BEGIN = -2,
-};
-
-bool isMsbComputableClass(const StinkyInstruction& inst) {
-    return !(inst.is(InstFlag::IF_SALU) || inst.is(InstFlag::IF_SMemLoad) ||
-             inst.is(InstFlag::IF_SMemStore) || inst.is(InstFlag::IF_SMemAtomic) ||
-             inst.is(InstFlag::IF_Branch) || inst.is(InstFlag::IF_Call) ||
-             inst.is(InstFlag::IF_Barrier) || inst.is(InstFlag::IF_WaitCnt) ||
-             inst.is(InstFlag::IF_HasSideEffect));
-}
-
 // Set offset = -msb*256 on each VGPR operand so the emitter prints byte form
 // (`v[idx + offset]` evaluates to idx ≤ 255).
 void encodeVgprOperands(StinkyInstruction* inst) {
@@ -66,42 +54,25 @@ void encodeVgprOperands(StinkyInstruction* inst) {
     for (auto& dst : const_cast<std::vector<StinkyRegister>&>(inst->getDestRegs())) rewrite(dst);
 }
 
-bool emitVgprMsbIfNeeded(int requiredSetVal, bool hasVgpr, int& currentMsb, AsmIRBuilder& irBuilder,
-                         GfxArchID archId, IRBase* insertBefore, VgprMsbMode msbMode) {
-    if (!hasVgpr || requiredSetVal == currentMsb) {
-        if (currentMsb == VgprMsbState::LABEL_BEGIN) currentMsb = VgprMsbState::NOT_REQUIRED;
-        return false;
-    }
-
-    if (currentMsb == VgprMsbState::LABEL_BEGIN) {
+void emitVgprMsb(const VgprMsbInsertion& insertion, AsmIRBuilder& irBuilder, GfxArchID archId,
+                 IRBase* insertBefore) {
+    if (insertion.nopFirst) {
         StinkyInstruction* nopInst =
             irBuilder.create(getMCIDByUOp(GFX::s_nop, archId), insertBefore);
         nopInst->addSrcReg(StinkyRegister(0));
     }
 
-    int combinedSetVal = requiredSetVal;
-    if (msbMode == VgprMsbMode::Msb16 && currentMsb != VgprMsbState::NOT_REQUIRED &&
-        currentMsb != VgprMsbState::LABEL_BEGIN) {
-        combinedSetVal += (currentMsb << 8);
-    }
-
     const HwInstDesc* desc = getMCIDByUOp(GFX::s_set_vgpr_msb, archId);
     assert(desc != nullptr && "s_set_vgpr_msb is not supported on this architecture");
     StinkyInstruction* msbInst = irBuilder.create(desc, insertBefore);
-    msbInst->addSrcReg(StinkyRegister(combinedSetVal));
+    msbInst->addSrcReg(StinkyRegister(insertion.immediate));
 
+    const int requiredSetVal = insertion.requiredMsb;
     std::string msbComment = "src0: " + std::to_string(decodeVgprMsbForSlot(requiredSetVal, 0)) +
                              ", src1: " + std::to_string(decodeVgprMsbForSlot(requiredSetVal, 1)) +
                              ", src2: " + std::to_string(decodeVgprMsbForSlot(requiredSetVal, 2)) +
                              ", dst: " + std::to_string(decodeVgprMsbForSlot(requiredSetVal, 3));
     msbInst->addModifier<CommentData>(CommentData{msbComment});
-    currentMsb = requiredSetVal;
-    return true;
-}
-
-bool preferInsertAfter(const StinkyInstruction& inst) {
-    return isVectorALU(inst) || (isScalarALU(inst) && !isBarrier(inst)) ||
-           isMatrixInstruction(inst);
 }
 
 class InsertVgprMsbPassImpl : public Pass {
@@ -128,56 +99,23 @@ class InsertVgprMsbPassImpl : public Pass {
     }
 
    private:
+    // The plan comes from planVgprMsb (shared with the co-issue repair's insertion model);
+    // this pass only emits it and re-encodes the operands.
     static void runOnFunction(Function& func, GfxArchID archId, VgprMsbMode msbMode) {
-        for (auto bbIt = func.begin(); bbIt != func.end(); ++bbIt) {
-            BasicBlock& bb = *bbIt;
+        for (BasicBlock& bb : func) {
+            std::vector<StinkyInstruction*> insts;
+            for (IRBase& node : bb)
+                if (auto* inst = dyn_cast<StinkyInstruction>(&node)) insts.push_back(inst);
+            const std::vector<const StinkyInstruction*> view(insts.begin(), insts.end());
+            const std::vector<VgprMsbInsertion> plan = planVgprMsb(view, msbMode);
+
             AsmIRBuilder irBuilder(bb, archId);
-            int currentMsb = VgprMsbState::NOT_REQUIRED;
-            IRBase* preferredInsertBefore = nullptr;
-            auto findNextInstructionAnchor = [&](BasicBlock::iterator from) -> IRBase* {
-                for (auto scanIt = from; scanIt != bb.end(); ++scanIt) {
-                    if (dyn_cast<StinkyInstruction>(scanIt.getNodePtr()))
-                        return scanIt.getNodePtr();
-                }
-                return nullptr;
-            };
-
-            for (auto it = bb.begin(); it != bb.end(); ++it) {
-                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                if (!inst) continue;
-
-                if (inst->getUnifiedOpcode() == GFX::LABEL) {
-                    currentMsb = VgprMsbState::LABEL_BEGIN;
-                    preferredInsertBefore = nullptr;
+            for (const VgprMsbInsertion& insertion : plan)
+                emitVgprMsb(insertion, irBuilder, archId, insts[insertion.before]);
+            for (StinkyInstruction* inst : insts) {
+                if (inst->getUnifiedOpcode() == GFX::LABEL || isPseudoInst(inst) || isCall(*inst))
                     continue;
-                }
-
-                if (isPseudoInst(inst)) continue;
-
-                // A call (e.g. s_swappc_b64) transfers to a callee that may leave
-                // the VGPR MSB hardware register in an unknown state. Reset the
-                // tracked value so the next VGPR op re-establishes MSB — matching
-                // the single-function pipeline, which re-established MSB after the
-                // call because the call ended a basic block.
-                if (isCall(*inst)) {
-                    currentMsb = VgprMsbState::NOT_REQUIRED;
-                    // Never carry a deferred insertion anchor across call boundaries:
-                    // call may clobber VGPR MSB state, so post-call rebuilds must stay post-call.
-                    preferredInsertBefore = nullptr;
-                    continue;
-                }
-
-                IRBase* insertBefore = preferredInsertBefore ? preferredInsertBefore : inst;
-
-                auto [requiredMsb, hasVgpr] = computeRequiredMsb(inst);
-                bool emittedVgprMsb = emitVgprMsbIfNeeded(requiredMsb, hasVgpr, currentMsb,
-                                                          irBuilder, archId, insertBefore, msbMode);
                 encodeVgprOperands(inst);
-                if (emittedVgprMsb || isMsbComputableClass(*inst)) preferredInsertBefore = nullptr;
-
-                if (preferInsertAfter(*inst)) {
-                    preferredInsertBefore = findNextInstructionAnchor(std::next(it));
-                }
             }
         }
     }
