@@ -86,6 +86,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
 
         df.finalizePlan(plan);
 
+        emitPreloadLoadArgsEndKmcntZero(func, passCtx, arch);
         emitWaits(func, passCtx, arch, plan);
         removePHIs(passCtx, rpo);
         return preserveCFGAnalyses();
@@ -93,6 +94,34 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
 
    private:
     WaitCntInsertionOptions options;
+
+    void emitPreloadLoadArgsEndKmcntZero(Function& func, PassContext& passCtx, GfxArchID arch) {
+        BasicBlock* preloadLoadArgsEnd = nullptr;
+        for (BasicBlock& bb : func) {
+            if (bb.getLabel() == "label_Preload_LoadArgsEnd") {
+                preloadLoadArgsEnd = &bb;
+                break;
+            }
+        }
+        if (preloadLoadArgsEnd == nullptr) return;
+        if (!passCtx.shouldProcessBasicBlock(*preloadLoadArgsEnd)) return;
+
+        AsmIRBuilder builder(*preloadLoadArgsEnd, arch);
+        auto it = preloadLoadArgsEnd->begin();
+        while (it != preloadLoadArgsEnd->end()) {
+            auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (inst != nullptr && isPseudoInst(inst)) {
+                ++it;
+                continue;
+            }
+            break;
+        }
+        IRBase* anchor = (it == preloadLoadArgsEnd->end()) ? nullptr : it.getNodePtr();
+
+        WaitCountSpec spec;
+        spec.kmCount = 0;
+        emitOneSpec(builder, arch, anchor, spec);
+    }
 
     void emitWaits(Function& func, PassContext& passCtx, GfxArchID arch,
                    const WaitInsertionPlan& plan) {
@@ -125,7 +154,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         }
     }
 
-    void emitOneSpec(AsmIRBuilder& builder, GfxArchID arch, StinkyInstruction* anchor,
+    void emitOneSpec(AsmIRBuilder& builder, GfxArchID arch, IRBase* anchor,
                      const WaitCountSpec& spec) {
         if (spec.dsCount != WaitCountSpec::kUnused) {
             StinkyInstruction* w = builder.create(getMCIDByUOp(GFX::s_wait_dscnt, arch), anchor);
