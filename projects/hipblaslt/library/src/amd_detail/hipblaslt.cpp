@@ -31,6 +31,7 @@
 #include "handle.h"
 #include "hipblaslt/hipblaslt-ext-op.h"
 #include "hipblaslt_internal.hpp"
+#include "status.h"
 
 #include <hip/hip_runtime_api.h>
 #include <iostream>
@@ -76,6 +77,15 @@ hipblasStatus_t RocBlasLtStatusToHIPStatus(rocblaslt_status_ status)
     default:
         throw HIPBLAS_STATUS_INVALID_ENUM;
     }
+}
+
+// hipblasLtCreate and hipblasLtDestroy report a failing HIP call to their
+// caller as a status. Ending the process there would take down every other
+// thread with it, for an error the caller may be able to handle or retry.
+static hipblasStatus_t HipErrorToHIPStatus(const char* func, const char* call, hipError_t error)
+{
+    log_error(func, call, hipGetErrorString(error));
+    return RocBlasLtStatusToHIPStatus(get_rocblaslt_status_for_hip_status(error));
 }
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
@@ -374,20 +384,6 @@ extern "C" {
         }                                                               \
     }
 
-#ifndef CHECK_HIP_ERROR
-#define CHECK_HIP_ERROR(error)                    \
-    if(error != hipSuccess)                       \
-    {                                             \
-        fprintf(stderr,                           \
-                "Hip error: '%s'(%d) at %s:%d\n", \
-                hipGetErrorString(error),         \
-                error,                            \
-                __FILE__,                         \
-                __LINE__);                        \
-        exit(EXIT_FAILURE);                       \
-    }
-#endif
-
 hipblasStatus_t hipblasLtCreate(hipblasLtHandle_t* handle)
 try
 {
@@ -401,7 +397,6 @@ try
     }
 
     int             deviceId;
-    hipError_t      err;
     hipblasStatus_t retval = HIPBLAS_STATUS_SUCCESS;
     // Two flag regions with different shapes: GSU reduction keeps the large
     // per-problem buffer it has always had, Stream-K gets a small one that can
@@ -411,27 +406,63 @@ try
     void*            d_StreamKFlags = nullptr;
     constexpr size_t gsuBytes = _rocblaslt_handle::c_syncGsuTotalElements * sizeof(int);
     constexpr size_t skBytes  = _rocblaslt_handle::c_syncSkTotalElements * sizeof(int);
-    CHECK_HIP_ERROR(hipMalloc(&d_Synchronizer, gsuBytes));
-    CHECK_HIP_ERROR(hipMemset(d_Synchronizer, 0, gsuBytes));
-    if(hipError_t e = hipMalloc(&d_StreamKFlags, skBytes); e != hipSuccess)
-    {
-        static_cast<void>(hipFree(d_Synchronizer));
-        CHECK_HIP_ERROR(e);
-    }
-    if(hipError_t e = hipMemset(d_StreamKFlags, 0, skBytes); e != hipSuccess)
-    {
-        static_cast<void>(hipFree(d_StreamKFlags));
-        static_cast<void>(hipFree(d_Synchronizer));
-        CHECK_HIP_ERROR(e);
-    }
 
-    err = hipGetDevice(&deviceId);
-    if(err == hipSuccess)
+    // Frees what this call allocated. A failure here is not reported: the call
+    // is already returning the error that brought it here.
+    auto releaseFlags = [&]() {
+        if(d_StreamKFlags != nullptr)
+            static_cast<void>(hipFree(d_StreamKFlags));
+        if(d_Synchronizer != nullptr)
+            static_cast<void>(hipFree(d_Synchronizer));
+    };
+    auto fail = [&](const char* call, hipError_t error) {
+        releaseFlags();
+        rocblaslt::Debug::Instance().markerStop();
+        return HipErrorToHIPStatus("hipblasLtCreate", call, error);
+    };
+
+    if(hipError_t e = hipMalloc(&d_Synchronizer, gsuBytes); e != hipSuccess)
+        return fail("hipMalloc", e);
+    if(hipError_t e = hipMalloc(&d_StreamKFlags, skBytes); e != hipSuccess)
+        return fail("hipMalloc", e);
+
+    // Both regions must start zeroed. They are cleared on a non-blocking stream
+    // of this call's own rather than with hipMemset: hipMemset runs on the
+    // legacy null stream, which HIP can refuse while another stream in the
+    // process is capturing a graph, even another thread's thread-local capture
+    // on a non-blocking stream.
+    hipStream_t clearStream = nullptr;
+    if(hipError_t e = hipStreamCreateWithFlags(&clearStream, hipStreamNonBlocking); e != hipSuccess)
+        return fail("hipStreamCreateWithFlags", e);
+    hipError_t  clearErr  = hipMemsetAsync(d_Synchronizer, 0, gsuBytes, clearStream);
+    const char* clearCall = "hipMemsetAsync";
+    if(clearErr == hipSuccess)
+        clearErr = hipMemsetAsync(d_StreamKFlags, 0, skBytes, clearStream);
+    if(clearErr == hipSuccess)
     {
-        retval = RocBlasLtStatusToHIPStatus(rocblaslt_create((rocblaslt_handle*)handle));
-        (*(rocblaslt_handle*)handle)->Synchronizer = d_Synchronizer;
-        (*(rocblaslt_handle*)handle)->StreamKFlags = d_StreamKFlags;
+        clearErr  = hipStreamSynchronize(clearStream);
+        clearCall = "hipStreamSynchronize";
     }
+    if(hipError_t e = hipStreamDestroy(clearStream); e != hipSuccess && clearErr == hipSuccess)
+    {
+        clearErr  = e;
+        clearCall = "hipStreamDestroy";
+    }
+    if(clearErr != hipSuccess)
+        return fail(clearCall, clearErr);
+
+    if(hipError_t e = hipGetDevice(&deviceId); e != hipSuccess)
+        return fail("hipGetDevice", e);
+
+    retval = RocBlasLtStatusToHIPStatus(rocblaslt_create((rocblaslt_handle*)handle));
+    if(retval != HIPBLAS_STATUS_SUCCESS)
+    {
+        releaseFlags();
+        rocblaslt::Debug::Instance().markerStop();
+        return retval;
+    }
+    (*(rocblaslt_handle*)handle)->Synchronizer = d_Synchronizer;
+    (*(rocblaslt_handle*)handle)->StreamKFlags = d_StreamKFlags;
     rocblaslt::Debug::Instance().markerStop();
     return retval;
 }
@@ -444,13 +475,22 @@ hipblasStatus_t hipblasLtDestroy(const hipblasLtHandle_t handle)
 try
 {
     rocblaslt::Debug::Instance().markerStart("hipblasLtDestroy");
-    if(handle != nullptr and (*(rocblaslt_handle)handle).Synchronizer != nullptr)
+    // A region whose hipFree fails stays on the handle and the handle is kept,
+    // so the caller can call hipblasLtDestroy again once the cause has passed.
+    if(handle != nullptr)
     {
-        CHECK_HIP_ERROR(hipFree((*(rocblaslt_handle)handle).Synchronizer));
-    }
-    if(handle != nullptr and (*(rocblaslt_handle)handle).StreamKFlags != nullptr)
-    {
-        CHECK_HIP_ERROR(hipFree((*(rocblaslt_handle)handle).StreamKFlags));
+        for(void** region :
+            {&((rocblaslt_handle)handle)->Synchronizer, &((rocblaslt_handle)handle)->StreamKFlags})
+        {
+            if(*region == nullptr)
+                continue;
+            if(hipError_t e = hipFree(*region); e != hipSuccess)
+            {
+                rocblaslt::Debug::Instance().markerStop();
+                return HipErrorToHIPStatus(__func__, "hipFree", e);
+            }
+            *region = nullptr;
+        }
     }
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     if(handle != nullptr)
