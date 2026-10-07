@@ -10,6 +10,9 @@ POINT is where the delay goes in each main-loop copy (even and odd waves):
   bar2     right after the second barrier (before the read-address swaps)
   phase1   before the 16th WMMA (middle of phase 1)
   phase2   before the 16th WMMA after the second barrier (middle of phase 2)
+  tcnt     no delay; CYCLES replaces the count of the main-loop s_wait_tensorcnt instead.
+           8 waits for the loads of two iterations back, which times a 3-deep TDM pipeline
+           (results are wrong: the loads overwrite the buffer being read)
 
 The delay is CYCLES/16 copies of `s_nop 15`. Writes logs/<stamp>-inj-NAME/ with the
 patched .s, the code object and a ClientParameters.ini pointing at it, for alt_timing.py.
@@ -49,7 +52,11 @@ def site(a, b):
 
 
 delay = [f"s_nop 15                                           // injected delay ({point})"] * (cycles // 16)
-if point != "none":
+if point == "tcnt":
+    for a, b in zip(starts, ends):
+        at = next(i for i in range(a, b) if lines[i].startswith("s_wait_tensorcnt"))
+        lines[at] = re.sub(r"s_wait_tensorcnt\s+\d+", f"s_wait_tensorcnt {cycles}", lines[at])
+elif point != "none":
     for a, b in sorted(zip(starts, ends), reverse=True):
         at = site(a, b)
         lines[at:at] = delay

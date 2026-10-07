@@ -12,11 +12,11 @@
 #
 ################################################################################
 
-from rocisa.code import Module
+from rocisa.code import Module, TextBlock
 from rocisa.container import RegisterContainer
 from rocisa.instruction import (
-    LocalReadInstruction, MFMAInstruction, MXMFMAInstruction, SWaitAlu,
-    SWaitCnt, VXorB32,
+    LocalReadInstruction, MFMAInstruction, MXMFMAInstruction, SBarrier, SWaitAlu,
+    SWaitCnt, SWaitTensorcnt, VXorB32,
 )
 
 # Number of WMMAs that must issue between a swap XOR and its dependent ds_read
@@ -97,6 +97,71 @@ def insertLRSwapRawWaitAlu(module, writer, kernel):
     result.add(inst)
 
   return result
+
+
+def _isSwapXor(inst):
+  if not isinstance(inst, VXorB32) or not inst.srcs:
+    return False
+  dst = tuple(_vgprIndices(inst.dst))
+  return bool(dst) and dst == tuple(_vgprIndices(inst.srcs[0]))
+
+
+def hoistLRSwapAboveWaitTDM(module, writer, kernel):
+  """Move the LR offset-swap XORs that follow a TDM wait + barrier to before the wait.
+
+  The swaps are per-wave and only redirect the next ds_reads, so they need neither the
+  TDM data nor the barrier; after the barrier they sit on the loop's critical path,
+  before the wait they hide under the TDM latency.  A swap block only moves if every
+  ds_read of the offsets it overwrites is drained by an s_wait_dscnt 0 before the wait
+  (no WAR on SCHED_MODE 2).  TDM kernels only.  Returns a rebuilt Module.
+  """
+  if not (kernel.get("enableTDMA", False) and kernel.get("enableTDMB", False)):
+    return module
+
+  items = list(module.flatitems())
+
+  def _nextInst(i):
+    while i < len(items) and isinstance(items[i], TextBlock):
+      i += 1
+    return i
+
+  def _drained(emitted, dsts):
+    for inst in reversed(emitted):
+      if isinstance(inst, SWaitCnt) and inst.dscnt == 0:
+        return True
+      if isinstance(inst, LocalReadInstruction):
+        params = inst.getParams()
+        addr = params[1] if len(params) > 1 else None
+        if any(idx in dsts for idx in _vgprIndices(addr)):
+          return False
+    return False
+
+  result = []
+  i = 0
+  while i < len(items):
+    inst = items[i]
+    if isinstance(inst, SWaitTensorcnt):
+      b = _nextInst(i + 1)
+      if b < len(items) and isinstance(items[b], SBarrier):
+        end = b + 1
+        while end < len(items) and (isinstance(items[end], TextBlock) or _isSwapXor(items[end])):
+          end += 1
+        while end > b + 1 and isinstance(items[end - 1], TextBlock):
+          end -= 1
+        swaps = items[b + 1:end]
+        dsts = {idx for s in swaps if _isSwapXor(s) for idx in _vgprIndices(s.dst)}
+        if dsts and _drained(result, dsts):
+          result.extend(swaps)
+          result.extend(items[i:b + 1])
+          i = end
+          continue
+    result.append(inst)
+    i += 1
+
+  hoisted = Module(module.name)
+  for inst in result:
+    hoisted.add(inst)
+  return hoisted
 
 
 def insertLRSwapWarWaitAlu(module, writer, kernel):
