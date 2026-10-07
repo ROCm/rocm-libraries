@@ -2218,6 +2218,36 @@ TEST_F(DAGSchedulerPassTest, VgprToGlobalPrefetchHazard_AtLeast16CycleGap) {
                           "vaddr VGPR";
 }
 
+// A lone after-group has no before partner, so overlap placement is none. The
+// half-latency ds_load gap applies only to placement=gap. This kernel must not
+// be held for half the load latency; the token edge still keeps the signal
+// after the load. The WMMAs read the load's VGPR, so they are competing work
+// that cannot pass the load.
+TEST_F(DAGSchedulerPassTest, DsLoadToBarrier_NonePlacementDoesNotForceHalfLatency) {
+    constexpr int kLoadLatency = 32;
+    StinkyInstruction* load = createMovableDsLoad(/*destReg=*/0, /*addrReg=*/200, /*ldsToken=*/0);
+    load->issueCycles = 1;
+    load->latencyCycles = kLoadLatency;
+
+    constexpr int kWmmas = 20;
+    for (int i = 0; i < kWmmas; ++i) createWmmaScaleF8(/*destStart=*/64 + i * 8, /*src0Start=*/0);
+
+    auto [signal, wait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    (void)wait;
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+
+    const int loadPos = positionOf(*bb, load);
+    const int signalPos = positionOf(*bb, signal);
+    ASSERT_GE(loadPos, 0);
+    ASSERT_GT(signalPos, loadPos) << "the LDS token edge still orders the signal after the load";
+}
+
 // ---------------------------------------------------------------------------
 // dsReadQueueDepth / dsReadThrottleLatency / dsReadPerCap: queue-full pacing
 // and in-flight depth control for ds_read_b128 (analogous to global-read

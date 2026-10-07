@@ -733,6 +733,21 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // Per-region; reset each region.
     std::map<int, int> regLastTouch_;
     int clock_ = 0;
+    // Sum of issueCycles of instructions picked in this region. Independent of
+    // clock_, which also burns an unused WMMA co-issue window.
+    int issueCycleCursor_ = 0;
+    // Barrier -> earliest issueCycleCursor_ at which it may issue. Replaced by
+    // each direct ds_load predecessor: the last one sets the deadline to
+    // its own issue point plus half its latencyCycles (integer division).
+    // Only placement=gap barriers are inserted.
+    std::unordered_map<const DAGNode*, int> barrierNotBeforeIssueCycle_;
+    // Barriers whose after/before overlap placement is gap, and that did not
+    // also see a proportional placement. Half the last ds_load latency applies
+    // only here: gap still has a little room to place the barrier, but the
+    // after floor is issue-only and does not reserve drain latency.
+    // placement=none already separated the groups. placement=proportional
+    // splits the region. Neither is held.
+    std::unordered_set<const StinkyInstruction*> gapPlacementBarriers_;
 
     // PipeOps hazard lanes, one per rule (empty for Cycles rules). Per reg key: the
     // pipe-op ordinal at which a rule.isProducer instruction last touched that register.
@@ -852,6 +867,15 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void touchOperands(const StinkyInstruction& inst);
     int getMaxSrcDataWait(DAGNode* node) const;
     int getHazardWait(DAGNode* node) const;
+    // Shortest cycle distance to another eligible barrier's WMMA threshold.
+    // Index delta (threshold - current WMMA count) is multiplied by
+    // wmmaIssueConfig.latency so it matches the ds_load gap's issue-cycles.
+    // Already-due barriers contribute 0. No such barrier → numeric_limits<int>::max.
+    int nearestReadyBarrierWmmaDistance() const;
+    // \p nearestReadyBarrierWmmaDistance is that scan, in issue-cycles. The gap
+    // stays only while it is still longer than the cycles left from the last ds_load.
+    bool barrierHeldForDsLoadGap(const DAGNode* node, int nearestReadyBarrierWmmaDistance) const;
+    void noteDsLoadBarrierGap(DAGNode* node);
     bool destOverlapsActiveWmmaSrc(DAGNode* node) const;
     bool pipeOpGateBlocks(DAGNode* node) const;
     // dagFeatures.prefetchLeadWmmas for this basic block (StageWmmaCounter, set in onInit).
@@ -1365,6 +1389,77 @@ int CDNA5ReadyQueue::getHazardWait(DAGNode* node) const {
     return maxLat;
 }
 
+// Eligible barriers that are not still inside their own ds_load gap. The index
+// delta max(0, threshold - wmmaIssuedCountThisRegion_) is a WMMA count; multiply
+// by this region's WMMA latency so the result is in issue-cycles, same unit as
+// the ds_load gap. A latency of 0 has no scale and is treated as 1. Already-due
+// barriers contribute 0. The held barrier is left out so it is not compared
+// with itself.
+int CDNA5ReadyQueue::nearestReadyBarrierWmmaDistance() const {
+    int nearestCycles = std::numeric_limits<int>::max();
+    const int wmmaLatency = std::max(wmmaIssueConfig.latency, 1);
+    for (const DAGNode* node : barrierQueue) {
+        if (!isBarrierEligibleNow(node)) continue;
+        auto stamp = barrierNotBeforeIssueCycle_.find(node);
+        if (stamp != barrierNotBeforeIssueCycle_.end() && issueCycleCursor_ < stamp->second)
+            continue;
+        auto thIt = barrierWmmaThresholds_.find(node->inst);
+        if (thIt == barrierWmmaThresholds_.end()) continue;
+        const int indexDistance = std::max(0, thIt->second - wmmaIssuedCountThisRegion_);
+        const int cycleDistance = indexDistance > std::numeric_limits<int>::max() / wmmaLatency
+                                      ? std::numeric_limits<int>::max()
+                                      : indexDistance * wmmaLatency;
+        nearestCycles = std::min(nearestCycles, cycleDistance);
+    }
+    return nearestCycles;
+}
+
+// True while a placement=gap barrier's last direct ds_load predecessor was
+// issued fewer than half that load's latencyCycles ago, and no other ready
+// barrier is as close (in cycles) to its WMMA threshold as this barrier still
+// is to that load. placement=none and placement=proportional are never held.
+// \p nearestReadyBarrierWmmaDistance is indexDistance * wmmaIssueConfig.latency.
+// When that is <= the issue-cycles still owed, the gap yields.
+bool CDNA5ReadyQueue::barrierHeldForDsLoadGap(const DAGNode* node,
+                                              int nearestReadyBarrierWmmaDistance) const {
+    if (node->inst == nullptr || !gapPlacementBarriers_.count(node->inst)) return false;
+    auto it = barrierNotBeforeIssueCycle_.find(node);
+    if (it == barrierNotBeforeIssueCycle_.end() || issueCycleCursor_ >= it->second) return false;
+    const int dsLoadToBarrier = it->second - issueCycleCursor_;
+    if (nearestReadyBarrierWmmaDistance <= dsLoadToBarrier) {
+        PASS_DEBUG(std::cerr << "[CDNA5 dsLoadBarrierGap] release gap barrier dagId=" << node->id
+                             << " nearestWmmaCycles=" << nearestReadyBarrierWmmaDistance
+                             << " wmmaLatency=" << wmmaIssueConfig.latency << " dsLoadToBarrier="
+                             << dsLoadToBarrier << " issueCycles=" << issueCycleCursor_ << "\n");
+        return false;
+    }
+    return true;
+}
+
+// A ds_load and the barrier that reclaims its LDS token are a WAR edge. For a
+// placement=gap barrier, the last such load replaces the deadline: half its
+// latencyCycles of later issueCycles (a WMMA counts as 1, not the co-issue
+// window it opens). Odd latencies floor. If nothing else is ready, pickOne
+// still issues the barrier. placement=none and placement=proportional are not
+// stamped.
+void CDNA5ReadyQueue::noteDsLoadBarrierGap(DAGNode* node) {
+    if (regionDag_ == nullptr || node == nullptr || !isDSRead(*node->inst)) return;
+    if (node->id >= regionDag_->graph.size()) return;
+    const int gap = std::max(node->inst->latencyCycles, 0) / 2;
+    for (unsigned succ : regionDag_->graph[node->id]) {
+        const DAGNode& barrier = regionDag_->nodes[succ];
+        if (!isBarrier(*barrier.inst)) continue;
+        if (!gapPlacementBarriers_.count(barrier.inst)) continue;
+        const int notBefore = issueCycleCursor_ + gap;
+        barrierNotBeforeIssueCycle_[&barrier] = notBefore;
+        PASS_DEBUG(std::cerr << "[CDNA5 dsLoadBarrierGap] ds dagId=" << node->id
+                             << " barrier dagId=" << barrier.id
+                             << " latency=" << node->inst->latencyCycles << " gap=" << gap
+                             << " issueCycles=" << issueCycleCursor_ << " notBefore=" << notBefore
+                             << "\n");
+    }
+}
+
 // True if issuing \p node now would risk a co-execution hazard: while the WMMA
 // that opened the current latency window is still in flight, \p node's dest
 // VGPRs overlap that WMMA's src VGPRs, so the write could clobber a source the
@@ -1868,8 +1963,17 @@ void CDNA5ReadyQueue::decidePromote() {
     promotedKind_ = -1;
 
     if (!barrierQueue.empty() && !barrierWmmaThresholds_.empty()) {
+        const int nearestWmmaDistance = nearestReadyBarrierWmmaDistance();
         for (DAGNode* node : barrierQueue) {
             if (!isBarrierEligibleNow(node)) continue;
+            if (barrierHeldForDsLoadGap(node, nearestWmmaDistance)) {
+                PASS_DEBUG(std::cerr << "[CDNA5 dsLoadBarrierGap] hold barrier dagId=" << node->id
+                                     << " issueCycles=" << issueCycleCursor_
+                                     << " notBefore=" << barrierNotBeforeIssueCycle_.at(node)
+                                     << " nearestWmmaCycles=" << nearestWmmaDistance
+                                     << " wmmaLatency=" << wmmaIssueConfig.latency << "\n");
+                continue;
+            }
             auto thIt = barrierWmmaThresholds_.find(node->inst);
             if (thIt != barrierWmmaThresholds_.end() &&
                 wmmaIssuedCountThisRegion_ >= thIt->second) {
@@ -1930,8 +2034,10 @@ DAGNode* CDNA5ReadyQueue::extractForcedBarrier() {
     if (barrierQueue.empty() || barrierWmmaThresholds_.empty()) return nullptr;
 
     DAGNode* forced = nullptr;
+    const int nearestWmmaDistance = nearestReadyBarrierWmmaDistance();
     for (DAGNode* node : barrierQueue) {
         if (!isBarrierEligibleNow(node)) continue;
+        if (barrierHeldForDsLoadGap(node, nearestWmmaDistance)) continue;
         auto thIt = barrierWmmaThresholds_.find(node->inst);
         if (thIt != barrierWmmaThresholds_.end() && wmmaIssuedCountThisRegion_ >= thIt->second) {
             forced = node;
@@ -2417,6 +2523,10 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         }
         lastPickedNode_ = node;
         noteSccChainIssue(node);
+        if (node != nullptr) {
+            issueCycleCursor_ += std::max(node->inst->issueCycles, 0);
+            noteDsLoadBarrierGap(node);
+        }
         return node;
     };
 
@@ -2618,15 +2728,20 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         } else if (clusterBarrierEnabled()) {
             // Skip barriers held back by an open SCC chain; a later phase issues them
             // once the chain's last reader has gone out.
+            const int nearestWmmaDistance = nearestReadyBarrierWmmaDistance();
             for (DAGNode* cand : barrierQueue) {
                 if (!isBarrierEligibleNow(cand)) continue;
+                if (barrierHeldForDsLoadGap(cand, nearestWmmaDistance)) continue;
                 barrier = cand;
                 break;
             }
             if (barrier) barrierQueue.erase(barrier);
         } else {
             barrier = barrierQueue.top();
-            barrierQueue.pop();
+            if (barrierHeldForDsLoadGap(barrier, nearestReadyBarrierWmmaDistance()))
+                barrier = nullptr;
+            else
+                barrierQueue.pop();
         }
         if (barrier) {
             updateWMMAStatus(barrier);
@@ -2661,6 +2776,27 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
                              << " kind=" << fallbackKind << " wait=" << realWait
                              << " throttleWait=" << throttleWait << "\n");
         return rememberPick(popNonWmma(fallback, fallbackKind));
+    }
+
+    // The ds_load→barrier gap still has cycles left, but nothing else can issue.
+    // Issue the barrier anyway so the region finishes; the missing cycles are not
+    // invented as nops.
+    DAGNode* releaseEarly = nullptr;
+    const int nearestWmmaDistance = nearestReadyBarrierWmmaDistance();
+    for (DAGNode* cand : barrierQueue) {
+        if (!isBarrierEligibleNow(cand) || !barrierHeldForDsLoadGap(cand, nearestWmmaDistance))
+            continue;
+        releaseEarly = cand;
+        break;
+    }
+    if (releaseEarly != nullptr) {
+        barrierQueue.erase(releaseEarly);
+        updateWMMAStatus(releaseEarly);
+        PASS_DEBUG(std::cerr << "[CDNA5 dsLoadBarrierGap] release early barrier dagId="
+                             << releaseEarly->id << " issueCycles=" << issueCycleCursor_
+                             << " notBefore=" << barrierNotBeforeIssueCycle_.at(releaseEarly)
+                             << "\n");
+        return rememberPick(releaseEarly);
     }
 
     // Only barriers are left and an SCC chain is still holding them back.
@@ -2934,6 +3070,10 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     // pipeOpGates_ NOT cleared here — they persist across regions (cleared per-BB). A later
     // WMMA region still needs them, and a WMMA-free region defers a gated ds_load to its end.
     clock_ = 0;
+    issueCycleCursor_ = 0;
+    // DAGNode* keys belong to the previous region's freed node list.
+    barrierNotBeforeIssueCycle_.clear();
+    gapPlacementBarriers_.clear();
     // Per-region: MSB state is not carried across a region boundary (side-effect
     // cut).
     currentMsb_ = -1;
@@ -3086,6 +3226,10 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             // spread: the overlap check already reserves
             // BarrierHalfSlack+BarrierHalfSlack+1 windows between the groups.
             bool sawProportionalPlacement = false;
+            // Set when any overlapping pair placed this group as gap. The
+            // ds_load half-latency hold applies only when this is set and
+            // sawProportionalPlacement stayed false.
+            bool sawGapPlacement = false;
         };
         auto setGroupThreshold = [&](const BarrierGroupThresholdSummary& group, int threshold) {
             for (StinkyInstruction* barrier : group.barriers) {
@@ -3321,6 +3465,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                         // TensorLoadDsLoadGapCycles (default 64) worth of WMMA
                         // windows so tensor loads stay off the ds_loads.
                         placement = "gap";
+                        afterGroup.sawGapPlacement = true;
+                        beforeGroup.sawGapPlacement = true;
                         // Do not pull the after barrier earlier than the issue
                         // windows it needs (splitNeeded is wmmaWindowsNeeded, no
                         // drain). The configured gap (TensorLoadDsLoadGapCycles,
@@ -3367,6 +3513,21 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                            << " pendingBeforeThreshold=" << beforeGroup.pendingThreshold << "\n");
             }
         }
+
+        // Record gap barriers only after every pair is classified. A group that
+        // also saw proportional placement is left out: that split already
+        // consumes the region, and the half-slack path treats the group as
+        // proportional.
+        auto noteGapPlacement = [&](const BarrierGroupThresholdSummary& group) {
+            if (!group.sawGapPlacement || group.sawProportionalPlacement) return;
+            for (StinkyInstruction* barrier : group.barriers) {
+                if (!gapPlacementBarriers_.insert(barrier).second) continue;
+                PASS_DEBUG(std::cerr << "[CDNA5 dsLoadBarrierGap] apply gap barrier=" << barrier
+                                     << "\n");
+            }
+        };
+        for (const auto& group : exclusiveAfterGroups) noteGapPlacement(group);
+        for (const auto& group : exclusiveBeforeGroups) noteGapPlacement(group);
 
         for (auto& group : exclusiveAfterGroups) group.threshold = group.pendingThreshold;
         for (auto& group : exclusiveBeforeGroups) group.threshold = group.pendingThreshold;
