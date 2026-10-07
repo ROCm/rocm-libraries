@@ -824,6 +824,39 @@ TEST_F(DAGSchedulerPassTest, WmmaHideBudgetUsesThrottleDistributionWithoutOverla
         EXPECT_EQ(transitionRounded.windows[i].dsLoadBudget, expectedTransitionRounded[i]);
 }
 
+// MX128 LoopEndL: the region's only barrier group owns the next trip's preload,
+// but this trip's remaining X1..X3 loads carry no token tie to it. They still
+// need DS budget from window 0, or they cannot fill any WMMA window and pile up
+// behind the last WMMA.
+TEST_F(DAGSchedulerPassTest, WmmaHideBudgetGivesUnboundDsLoadsBudgetFromFirstWindow) {
+    for (int i = 0; i < 4; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/100 + i * 16,
+                                    /*src0Start=*/200 + i * 16);
+    for (int i = 0; i < 3; ++i)
+        createMovableDsLoad(/*destReg=*/400 + i * 4, /*addrReg=*/80, /*ldsToken=*/0);
+
+    const dag::RegionDAG regionDag = dag::buildRegisterDependencyDAG(bb->begin(), bb->end());
+    const std::vector<WmmaHideBudgetBarrierInfo> barriers{
+        {/*barrier=*/nullptr, WmmaHideBudgetBarrierPosition::Before,
+         /*threshold=*/2, /*dsLoadCount=*/1, /*dsLoadWmmaNeeded=*/0, /*overlap=*/true},
+    };
+
+    const RegionHideBudget budget =
+        analyzeWmmaHideBudget(regionDag, barriers, /*wmmaHideBudgetBase=*/0);
+
+    ASSERT_EQ(budget.dsLoadInstructionCount, 3);
+    const std::vector<int> expected{1, 1, 1, 0};
+    ASSERT_EQ(budget.windows.size(), expected.size());
+    for (size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_EQ(budget.windows[i].dsLoadBudget, expected[i]) << "window " << i;
+        EXPECT_EQ(budget.windows[i].issueBudget, expected[i]) << "window " << i;
+    }
+
+    // Without any barrier the DS budget gate is off, so nothing is assigned.
+    const RegionHideBudget noBarrier = analyzeWmmaHideBudget(regionDag, {}, 0);
+    for (const WmmaWindowBudget& window : noBarrier.windows) EXPECT_EQ(window.dsLoadBudget, 0);
+}
+
 TEST_F(DAGSchedulerPassTest, WmmaHideBudgetCountsSplitBarrierGroupOnce) {
     for (int i = 0; i < 4; ++i)
         createWmmaF32_16x16x16_bf16(/*destStart=*/100 + i * 16,

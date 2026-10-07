@@ -232,6 +232,23 @@ RegionHideBudget analyzeWmmaHideBudget(const dag::RegionDAG& regionDag,
                              << " policy=" << (info.overlap ? "even" : "throttle") << "\n");
     }
 
+    // Step 3.5: DS loads outside every barrier group (no token tie to a region
+    // barrier) are free to issue from window 0. Without a budget they would be
+    // held out of every window and only drain through the scheduler's final
+    // fallback once no WMMA is left to hide them. Only counts are available
+    // here, so a load claimed by two groups shrinks this remainder; that errs
+    // toward the pre-existing behavior.
+    if (!barriers.empty()) {
+        int barrierDsLoads = 0;
+        for (const WmmaHideBudgetBarrierInfo& info : barriers)
+            barrierDsLoads += std::max(0, info.dsLoadCount);
+        const int unboundDsLoads = std::max(0, budget.dsLoadInstructionCount - barrierDsLoads);
+        distributeByThrottle(0, budget.numWindows(), unboundDsLoads);
+        PASS_DEBUG(std::cerr << "[WmmaHideBudgetAnalysis unbound] begin=0"
+                             << " end=" << budget.numWindows() << " dsLoadCount=" << unboundDsLoads
+                             << " policy=throttle\n");
+    }
+
     // Step 4: place remaining non-DS-load instructions in the first 50% of WMMA
     // windows. Walk top-down first and fill each window to wmmaHideBudgetBase.
     // Only after every front-half window reaches the base do we distribute any
