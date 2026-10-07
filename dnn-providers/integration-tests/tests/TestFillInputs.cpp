@@ -4,15 +4,18 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <set>
 #include <vector>
 
+#include <hipdnn_data_sdk/types/Half.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
 #include "harness/input-init/FillInputs.hpp"
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 // NOLINTBEGIN(readability-identifier-naming)
@@ -469,7 +472,65 @@ FillResult runFill(const GraphResult& gr, const std::set<int64_t>& outputUids)
     const auto leafUids = gr.leafInputUids(outputUids);
     auto inputs = makeTensors(leafUids);
     InputFillRecipes recipes;
-    return fillInputs(*gr.graph, inputs, leafUids, recipes);
+    return fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr);
+}
+
+// uids: x=1 (float), w=2 (half), bias=4 (float). x and w are sized from the device
+// threshold, so they are generated on the device; bias is not.
+constexpr int64_t kLargeCols = 128;
+constexpr int64_t kLargeRows
+    = static_cast<int64_t>(DeviceInputFiller::minElements() / kLargeCols) * 2;
+
+GraphResult buildMixedSizeConvBiasGraph()
+{
+    GraphResult r;
+    auto& b = r.builder;
+
+    const std::vector<int64_t> largeDims = {kLargeRows, kLargeCols};
+    const std::vector<int64_t> largeStrides = {kLargeCols, 1};
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 1, "x", DataType::FLOAT, &largeStrides, &largeDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 2, "w", DataType::HALF, &largeStrides, &largeDims));
+    tensors.push_back(CreateTensorAttributesDirect(
+        b, 10, "conv_y", DataType::FLOAT, &largeStrides, &largeDims, true));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 4, "bias", DataType::FLOAT, &kStrides, &kDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 5, "out", DataType::FLOAT, &largeStrides, &largeDims));
+
+    auto conv = CreateConvolutionFwdAttributesDirect(b, 1, 2, 10);
+    auto add = CreatePointwiseAttributes(b,
+                                         PointwiseMode::ADD,
+                                         flatbuffers::nullopt,
+                                         flatbuffers::nullopt,
+                                         flatbuffers::nullopt,
+                                         flatbuffers::nullopt,
+                                         10,
+                                         4,
+                                         flatbuffers::nullopt,
+                                         5);
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(
+        b, "conv", DataType::FLOAT, NodeAttributes::ConvolutionFwdAttributes, conv.Union()));
+    nodes.push_back(CreateNodeDirect(
+        b, "bias_add", DataType::FLOAT, NodeAttributes::PointwiseAttributes, add.Union()));
+
+    auto graph = CreateGraphDirect(
+        b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
+    b.Finish(graph);
+
+    r.graph = GetGraph(b.GetBufferPointer());
+    return r;
+}
+
+template <class T>
+hipdnn_data_sdk::utilities::TensorBase<T>& typedTensor(InputTensorMap& inputs, int64_t uid)
+{
+    return dynamic_cast<hipdnn_data_sdk::utilities::TensorBase<T>&>(*inputs.at(uid));
 }
 
 } // namespace
@@ -509,7 +570,7 @@ TEST(TestFillInputs, RuntimePbvScalarsUseFixedAndDeterministicRandomFills)
 
     auto firstInputs = makeTensorsFromGraph(graph, leafUids);
     InputFillRecipes firstRecipes;
-    const auto firstResult = fillInputs(*graph.graph, firstInputs, leafUids, firstRecipes);
+    const auto firstResult = fillInputs(*graph.graph, firstInputs, leafUids, firstRecipes, nullptr);
     ASSERT_TRUE(firstResult.filled) << firstResult.reason;
 
     EXPECT_FLOAT_EQ(scalarValue(firstInputs, 5), 1e-5f);
@@ -519,7 +580,8 @@ TEST(TestFillInputs, RuntimePbvScalarsUseFixedAndDeterministicRandomFills)
 
     auto secondInputs = makeTensorsFromGraph(graph, leafUids);
     InputFillRecipes secondRecipes;
-    const auto secondResult = fillInputs(*graph.graph, secondInputs, leafUids, secondRecipes);
+    const auto secondResult
+        = fillInputs(*graph.graph, secondInputs, leafUids, secondRecipes, nullptr);
     ASSERT_TRUE(secondResult.filled) << secondResult.reason;
     EXPECT_FLOAT_EQ(scalarValue(secondInputs, 10), firstMomentum);
 }
@@ -567,7 +629,7 @@ TEST(TestFillInputs, MoeGroupedMatmulFillsAllInputs)
     auto inputs = makeTensors(leafUids);
     InputFillRecipes recipes;
 
-    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes);
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr);
 
     EXPECT_TRUE(result.filled) << result.reason;
 }
@@ -585,9 +647,127 @@ TEST(TestFillInputs, MoeGroupedMatmulBwdFillsAllInputs)
     auto inputs = makeTensors(leafUids);
     InputFillRecipes recipes;
 
-    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes);
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr);
 
     EXPECT_TRUE(result.filled) << result.reason;
+}
+
+// A device filler only changes how large tensors are generated. Small ones must take
+// the host path -- no HIP call, so this also runs where there is no GPU -- and come out
+// exactly as a fill without a filler makes them, or the filler would change every small
+// tensor's values.
+TEST(TestFillInputs, DeviceFillerLeavesSmallTensorsOnTheHostPath)
+{
+    const auto graph = buildBatchnormTrainingRuntimePbvGraph();
+    const std::vector<int64_t> leafUids = {1, 3, 4, 5, 8, 9, 10};
+
+    auto hostInputs = makeTensorsFromGraph(graph, leafUids);
+    InputFillRecipes hostRecipes;
+    const auto hostResult = fillInputs(*graph.graph, hostInputs, leafUids, hostRecipes, nullptr);
+    ASSERT_TRUE(hostResult.filled);
+    EXPECT_EQ(hostResult.deviceFilled, 0u);
+
+    auto deviceInputs = makeTensorsFromGraph(graph, leafUids);
+    InputFillRecipes deviceRecipes;
+    DeviceInputFiller device;
+    const auto deviceResult
+        = fillInputs(*graph.graph, deviceInputs, leafUids, deviceRecipes, &device);
+    ASSERT_TRUE(deviceResult.filled);
+    EXPECT_EQ(deviceResult.deviceFilled, 0u);
+
+    for(const int64_t uid : leafUids)
+    {
+        auto& expected = *hostInputs.at(uid);
+        auto& actual = *deviceInputs.at(uid);
+        ASSERT_EQ(expected.elementSpace(), actual.elementSpace()) << "uid " << uid;
+        EXPECT_EQ(std::memcmp(expected.rawHostData(),
+                              actual.rawHostData(),
+                              expected.elementSpace() * expected.elementSize()),
+                  0)
+            << "uid " << uid;
+    }
+}
+
+// Large tensors are generated on the device and are done by the time fillInputs()
+// returns. Dropping `fillPending`, the final wait or the type dispatch each leaves a
+// tensor unfilled or still being written, which only a run on a device can see.
+TEST(TestFillInputs, DeviceFillerFillsLargeTensorsOnTheDeviceWithinRange)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!DeviceInputFiller::isSupported())
+    {
+        GTEST_SKIP() << "rocRAND not available. Skipping test.";
+    }
+
+    const auto graph = buildMixedSizeConvBiasGraph();
+    const std::vector<int64_t> leafUids = {1, 2, 4};
+
+    auto inputs = makeTensorsFromGraph(graph, leafUids);
+    InputFillRecipes recipes;
+    DeviceInputFiller device;
+    const auto result = fillInputs(*graph.graph, inputs, leafUids, recipes, &device);
+    ASSERT_TRUE(result.filled) << result.reason;
+    EXPECT_EQ(result.deviceFilled, 2u);
+
+    auto& x = typedTensor<float>(inputs, 1);
+    auto& w = typedTensor<hipdnn_data_sdk::types::half>(inputs, 2);
+    auto& bias = typedTensor<float>(inputs, 4);
+
+    using hipdnn_data_sdk::utilities::MemoryLocation;
+    EXPECT_EQ(x.memory().location(), MemoryLocation::DEVICE);
+    EXPECT_EQ(w.memory().location(), MemoryLocation::DEVICE);
+    EXPECT_NE(bias.memory().location(), MemoryLocation::DEVICE);
+
+    // The non-const access migrates the device-written data to the host.
+    const float* xData = x.memory().hostData();
+    for(size_t i = 0; i < x.elementSpace(); ++i)
+    {
+        ASSERT_GE(xData[i], -1.0f) << "x[" << i << "]";
+        ASSERT_LE(xData[i], 1.0f) << "x[" << i << "]";
+    }
+
+    const auto* wData = w.memory().hostData();
+    std::set<float> distinct;
+    size_t zeros = 0;
+    for(size_t i = 0; i < w.elementSpace(); ++i)
+    {
+        const auto value = static_cast<float>(wData[i]);
+        ASSERT_GE(value, -1.0f) << "w[" << i << "]";
+        ASSERT_LE(value, 1.0f) << "w[" << i << "]";
+        distinct.insert(value);
+        zeros += value == 0.0f ? 1 : 0;
+    }
+
+    // The host fill draws a float and rounds it to half, which gives thousands of
+    // distinct values over this many elements and essentially never an exact zero.
+    // A 16-bit uniform scaled to [-1, 1] gives about 2000 distinct values and a zero
+    // about every 2700 elements, which is a different distribution of inputs.
+    EXPECT_GT(distinct.size(), 4000u);
+    EXPECT_EQ(zeros, 0u);
+}
+
+// The threshold is inclusive: a tensor of exactly minElements() goes to the device and one
+// element fewer stays on the host, so neither side drifts off the measured crossover.
+TEST(TestFillInputs, DeviceFillerThresholdIsInclusiveOfMinElements)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!DeviceInputFiller::isSupported())
+    {
+        GTEST_SKIP() << "rocRAND not available. Skipping test.";
+    }
+
+    const auto elements = static_cast<int64_t>(DeviceInputFiller::minElements());
+    const std::vector<int64_t> belowDims = {elements - 1};
+    const std::vector<int64_t> atDims = {elements};
+    const std::vector<int64_t> strides = {1};
+    hipdnn_data_sdk::utilities::Tensor<float> below(belowDims, strides);
+    hipdnn_data_sdk::utilities::Tensor<float> at(atDims, strides);
+
+    DeviceInputFiller device;
+    const auto recipe = FillRecipe::free(-1.0f, 1.0f);
+    EXPECT_FALSE(device.tryFill(below, recipe, 1));
+    EXPECT_TRUE(device.tryFill(at, recipe, 1));
+    device.waitForFills();
 }
 
 // NOLINTEND(readability-identifier-naming)

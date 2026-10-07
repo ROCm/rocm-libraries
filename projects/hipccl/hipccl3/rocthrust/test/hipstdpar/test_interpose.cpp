@@ -20,11 +20,23 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <hip/hip_runtime.h>
+
+#include <cerrno>
+#include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
+#include <limits>
 #include <new>
+#include <utility>
 
 #include <malloc.h>
+#include <unistd.h>
+#if defined(__HIPSTDPAR_INTERPOSE_ALLOC_CAN_MMAP__)
+#  include <sys/mman.h>
+#  include <sys/syscall.h>
+#endif
 
 extern "C" void* __libc_calloc(std::size_t, std::size_t);
 extern "C" void __libc_cfree(void*);
@@ -34,107 +46,478 @@ extern "C" void* __libc_memalign(std::size_t, std::size_t);
 extern "C" void* __libc_realloc(void*, std::size_t);
 extern "C" int __posix_memalign(void**, std::size_t, std::size_t);
 
+namespace
+{
+int new_handler_calls{};
+
+void test_new_handler()
+{
+  ++new_handler_calls;
+  std::set_new_handler(nullptr);
+}
+
+// Publishing a pointer keeps the optimizer from eliding the allocation that
+// produced it, which would remove the call before it can be interposed.
+void* volatile published{};
+
+template <class T>
+T* publish(T* p)
+{
+  published = p;
+  return p;
+}
+
+// Allocates and releases a block repeatedly. Returns -1 if an allocation fails,
+// 1 once a released block is handed out again, and 0 if none ever is, as when
+// the deallocation leaks the block instead of releasing it.
+template <class Allocate, class Deallocate>
+int reuse_after_release(Allocate allocate, Deallocate deallocate)
+{
+  auto p = allocate();
+  if (!p)
+  {
+    return -1;
+  }
+  const auto first = reinterpret_cast<std::uintptr_t>(p);
+  deallocate(p);
+  for (int i = 0; i < 64; ++i)
+  {
+    p = allocate();
+    if (!p)
+    {
+      return -1;
+    }
+    const auto again = reinterpret_cast<std::uintptr_t>(p);
+    deallocate(p);
+    if (again == first)
+    {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+// glibc declares memalign with alloc_align, which makes an alignment that is not
+// a power of two undefined at the call site. __libc_memalign is interposed the
+// same way but is declared above without that attribute.
+__attribute__((noinline)) void* runtime_memalign(std::size_t alignment, std::size_t size)
+{
+  return __libc_memalign(alignment, size);
+}
+
+__attribute__((noinline)) void* runtime_aligned_alloc(std::size_t alignment, std::size_t size)
+{
+  return std::aligned_alloc(alignment, size);
+}
+
+__attribute__((noinline)) void runtime_free(void* p)
+{
+  std::free(p);
+}
+
+__attribute__((noinline)) void* runtime_operator_new(std::size_t size)
+{
+  return ::operator new(size);
+}
+
+__attribute__((noinline)) void* runtime_operator_new_aligned(std::size_t size, std::size_t alignment)
+{
+  return ::operator new(size, std::align_val_t{alignment});
+}
+
+__attribute__((noinline)) void runtime_operator_delete(void* p) noexcept
+{
+  ::operator delete(p);
+}
+
+__attribute__((noinline)) void runtime_operator_delete_sized(void* p, std::size_t size) noexcept
+{
+  ::operator delete(p, size);
+}
+
+__attribute__((noinline)) void
+runtime_operator_delete_aligned_sized(void* p, std::size_t size, std::size_t alignment) noexcept
+{
+  ::operator delete(p, size, std::align_val_t{alignment});
+}
+} // namespace
+
 int main()
 {
   try
   {
-    if (auto p = std::aligned_alloc(8u, 42))
+    if (auto p = publish(std::aligned_alloc(8u, 64)))
     {
       std::free(p);
     }
-    if (auto p = std::calloc(1, 42))
+    if (auto p = publish(std::calloc(1, 42)))
     {
       std::free(p);
     }
-    if (auto p = std::malloc(42))
+    if (auto p = publish(std::malloc(42)))
     {
       std::free(p);
     }
-    if (auto p = memalign(8, 42))
+    if (auto p = publish(memalign(8, 42)))
     {
       std::free(p);
     }
-    if (void* p; posix_memalign(&p, 8, 42) == 0)
+    // As in glibc, memalign rounds an alignment that is not a power of two up
+    // instead of rejecting it.
+    const std::pair<std::size_t, std::size_t> rounded_alignments[]{{0, 1}, {3, 4}, {24, 32}};
+    for (const auto& alignment : rounded_alignments)
+    {
+      auto p = runtime_memalign(alignment.first, 42);
+      if (!p || reinterpret_cast<std::uintptr_t>(p) % alignment.second != 0)
+      {
+        std::free(p);
+        return EXIT_FAILURE;
+      }
+      std::free(p);
+    }
+    errno = 0;
+    if (auto p = runtime_memalign((std::numeric_limits<std::size_t>::max)() / 2 + 2, 1))
+    {
+      std::free(p);
+      return EXIT_FAILURE;
+    }
+    if (errno != EINVAL)
+    {
+      return EXIT_FAILURE;
+    }
+    {
+      void* p = nullptr;
+      if (posix_memalign(&p, 64, 42) != 0 || !p || reinterpret_cast<std::uintptr_t>(p) % 64 != 0)
+      {
+        return EXIT_FAILURE;
+      }
+      std::free(p);
+    }
+    {
+      int sentinel{};
+      void* p           = &sentinel;
+      const auto result = posix_memalign(&p, 3, 42);
+      if (result != EINVAL || p != &sentinel)
+      {
+        return EXIT_FAILURE;
+      }
+    }
+    {
+      // A zero-sized request yields a unique pointer, as in glibc.
+      int sentinel{};
+      void* p = &sentinel;
+      if (posix_memalign(&p, alignof(std::max_align_t), 0) != 0 || !p || p == &sentinel)
+      {
+        return EXIT_FAILURE;
+      }
+      std::free(p);
+    }
+    {
+      int sentinel{};
+      void* p = &sentinel;
+      errno   = EDOM;
+      if (posix_memalign(&p, 64, (std::numeric_limits<std::size_t>::max)()) != ENOMEM || p != &sentinel
+          || errno != EDOM)
+      {
+        return EXIT_FAILURE;
+      }
+    }
+    if (auto p = publish(std::realloc(std::malloc(42), 42)))
     {
       std::free(p);
     }
-    if (auto p = std::realloc(std::malloc(42), 42))
+    if (auto p = publish(reallocarray(std::calloc(1, 42), 1, 42)))
     {
       std::free(p);
     }
-    if (auto p = reallocarray(std::calloc(1, 42), 1, 42))
-    {
-      std::free(p);
-    }
-    if (auto p = new std::uint8_t)
+    if (auto p = publish(new std::uint8_t))
     {
       delete p;
     }
-    if (auto p = new (std::align_val_t{8}) std::uint8_t)
+    if (auto p = publish(new (std::align_val_t{8}) std::uint8_t))
     {
       ::operator delete(p, std::align_val_t{8});
     }
-    if (auto p = new (std::nothrow) std::uint8_t)
+    if (auto p = publish(new (std::nothrow) std::uint8_t))
     {
       delete p;
     }
-    if (auto p = new (std::align_val_t{8}, std::nothrow) std::uint8_t)
+    if (auto p = publish(new (std::align_val_t{8}, std::nothrow) std::uint8_t))
     {
       ::operator delete(p, std::align_val_t{8});
     }
-    if (auto p = new std::uint8_t[42])
+    if (auto p = publish(new std::uint8_t[42]))
     {
       delete[] p;
     }
-    if (auto p = new (std::align_val_t{8}) std::uint8_t[42])
+    if (auto p = publish(new (std::align_val_t{8}) std::uint8_t[42]))
     {
       ::operator delete[](p, std::align_val_t{8});
     }
-    if (auto p = new (std::nothrow) std::uint8_t[42])
+    if (auto p = publish(new (std::nothrow) std::uint8_t[42]))
     {
       delete[] p;
     }
-    if (auto p = new (std::align_val_t{8}, std::nothrow) std::uint8_t[42])
+    if (auto p = publish(new (std::align_val_t{8}, std::nothrow) std::uint8_t[42]))
     {
       ::operator delete[](p, std::align_val_t{8});
     }
-    if (auto p = __builtin_calloc(1, 42))
+
+    // Throwing allocation functions must report failure with std::bad_alloc.
+    volatile std::size_t impossible_size = (std::numeric_limits<std::size_t>::max)();
+    const auto previous_new_handler      = std::set_new_handler(test_new_handler);
+    try
+    {
+      auto p = ::operator new(impossible_size);
+      ::operator delete(p);
+      return EXIT_FAILURE;
+    }
+    catch (const std::bad_alloc&)
+    {}
+    if (new_handler_calls != 1)
+    {
+      std::set_new_handler(previous_new_handler);
+      return EXIT_FAILURE;
+    }
+
+    try
+    {
+      auto p = ::operator new(impossible_size, std::align_val_t{64});
+      ::operator delete(p, std::align_val_t{64});
+      return EXIT_FAILURE;
+    }
+    catch (const std::bad_alloc&)
+    {}
+
+    // Nothrow allocation functions must return nullptr rather than falling
+    // through the exception handler.
+    if (::operator new(impossible_size, std::nothrow) != nullptr
+        || ::operator new(impossible_size, std::align_val_t{64}, std::nothrow) != nullptr)
+    {
+      std::set_new_handler(previous_new_handler);
+      return EXIT_FAILURE;
+    }
+    std::set_new_handler(previous_new_handler);
+
+    // operator new(0) must still return a distinct, deletable allocation.
+    auto zero_sized_new = runtime_operator_new(0);
+    if (!zero_sized_new)
+    {
+      return EXIT_FAILURE;
+    }
+    runtime_operator_delete(zero_sized_new);
+
+    // Exercise sized and aligned-sized deallocation explicitly so optimizer
+    // selection of a delete-expression overload cannot hide these paths. The
+    // released block must be reclaimed: v0 serves these sizes from a pool that
+    // hands it out again, while libc makes no such promise for v1.
+#if defined(__HIPSTDPAR_INTERPOSE_ALLOC_V1__)
+    constexpr bool expect_reuse = false;
+#else
+    constexpr bool expect_reuse = true;
+#endif
+    const auto sized_reuse = reuse_after_release(
+      [] {
+        return runtime_operator_new(42);
+      },
+      [](void* p) {
+        runtime_operator_delete_sized(p, 42);
+      });
+    const auto aligned_sized_reuse = reuse_after_release(
+      [] {
+        auto p = runtime_operator_new_aligned(42, 64);
+        return reinterpret_cast<std::uintptr_t>(p) % 64 == 0 ? p : nullptr;
+      },
+      [](void* p) {
+        runtime_operator_delete_aligned_sized(p, 42, 64);
+      });
+    if (sized_reuse < 0 || aligned_sized_reuse < 0 || (expect_reuse && (sized_reuse == 0 || aligned_sized_reuse == 0)))
+    {
+      return EXIT_FAILURE;
+    }
+
+    // free(nullptr) is required to be a no-op.
+    void* volatile null_pointer = nullptr;
+    runtime_free(null_pointer);
+    if (hipPeekAtLastError() != hipSuccess)
+    {
+      return EXIT_FAILURE;
+    }
+
+    // Freeing must not leave a HIP error pending either, including for a
+    // page-aligned block, which v1 fails to un-advise.
+    const auto page_size = static_cast<std::size_t>(sysconf(_SC_PAGESIZE));
+    auto page_aligned    = runtime_aligned_alloc(page_size, page_size);
+    if (!page_aligned)
+    {
+      return EXIT_FAILURE;
+    }
+    runtime_free(page_aligned);
+    if (hipPeekAtLastError() != hipSuccess)
+    {
+      return EXIT_FAILURE;
+    }
+
+    // An error the application has not read yet must still be reported after
+    // such an interposer-internal failure, although HIP replaces its code.
+    static_cast<void>(hipSetDevice(-1));
+    page_aligned = runtime_aligned_alloc(page_size, page_size);
+    if (!page_aligned)
+    {
+      return EXIT_FAILURE;
+    }
+    runtime_free(page_aligned);
+    if (hipGetLastError() == hipSuccess)
+    {
+      return EXIT_FAILURE;
+    }
+
+#if defined(__HIPSTDPAR_INTERPOSE_ALLOC_CAN_MMAP__)
+    // mmap reports failure with MAP_FAILED, not nullptr.
+    errno = 0;
+    if (mmap(nullptr, 4096, PROT_READ, MAP_SHARED, -1, 0) != MAP_FAILED)
+    {
+      return EXIT_FAILURE;
+    }
+
+    auto mapping = mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (mapping == MAP_FAILED)
+    {
+      return EXIT_FAILURE;
+    }
+    static_cast<unsigned char*>(mapping)[0] = 0x5a;
+    if (munmap(mapping, 4096) != 0)
+    {
+      return EXIT_FAILURE;
+    }
+
+    // munmap must release the whole range even when un-advising it fails, as it
+    // does here because the second page is already unmapped, and must not leave
+    // that HIP failure pending.
+    {
+      auto pages = static_cast<unsigned char*>(
+        mmap(nullptr, 2 * page_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+      if (pages == MAP_FAILED || munmap(pages + page_size, page_size) != 0 || munmap(pages, 2 * page_size) != 0)
+      {
+        return EXIT_FAILURE;
+      }
+      unsigned char residency{};
+      if (mincore(pages, page_size, &residency) == 0 || hipPeekAtLastError() != hipSuccess)
+      {
+        return EXIT_FAILURE;
+      }
+    }
+
+    // A MAP_FIXED mapping that the interposer rejects must leave the range
+    // mapped. The reservation bypasses interposition through the raw syscall,
+    // and exceeds system memory so that hipMemAdvise refuses to advise it.
+    // Failing to reserve the range, or hipMemAdvise accepting it, is not an
+    // interposer error, so those cases are reported instead of failed.
+    constexpr std::size_t reservation_size = std::size_t{1} << 44;
+    const auto reservation                 = reinterpret_cast<void*>(
+      syscall(SYS_mmap, nullptr, reservation_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0));
+    if (reservation == MAP_FAILED)
+    {
+      std::fputs("warning: MAP_FIXED rejection not exercised: the address range could not be reserved\n", stderr);
+    }
+    else
+    {
+      errno = 0;
+      const auto fixed_mapping =
+        mmap(reservation, reservation_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1, 0);
+      if (fixed_mapping == MAP_FAILED)
+      {
+        unsigned char residency{};
+        if (errno != ENOMEM || mincore(reservation, 4096, &residency) != 0)
+        {
+          return EXIT_FAILURE;
+        }
+      }
+      else
+      {
+        std::fputs("warning: MAP_FIXED rejection not exercised: hipMemAdvise accepted the range\n", stderr);
+        if (fixed_mapping != reservation)
+        {
+          return EXIT_FAILURE;
+        }
+      }
+      munmap(reservation, reservation_size);
+
+#  if defined(MAP_FIXED_NOREPLACE)
+      // A rejected mapping that replaced nothing must be released instead.
+      // MAP_FIXED_NOREPLACE only maps a free range, even with MAP_FIXED set,
+      // and the range was released just above.
+      errno                    = 0;
+      const auto fresh_mapping = mmap(
+        reservation,
+        reservation_size,
+        PROT_NONE,
+        MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED | MAP_FIXED_NOREPLACE,
+        -1,
+        0);
+      if (fresh_mapping == MAP_FAILED && errno == EEXIST)
+      {
+        std::fputs("warning: MAP_FIXED_NOREPLACE rejection not exercised: the range was taken\n", stderr);
+      }
+      else if (fresh_mapping == MAP_FAILED)
+      {
+        unsigned char residency{};
+        if (errno != ENOMEM || mincore(reservation, 4096, &residency) == 0)
+        {
+          return EXIT_FAILURE;
+        }
+      }
+      else
+      {
+        std::fputs("warning: MAP_FIXED_NOREPLACE rejection not exercised: hipMemAdvise accepted the range\n", stderr);
+        munmap(fresh_mapping, reservation_size);
+      }
+#  endif
+
+      if (hipPeekAtLastError() != hipSuccess)
+      {
+        return EXIT_FAILURE;
+      }
+    }
+#endif
+
+    if (auto p = publish(__builtin_calloc(1, 42)))
     {
       __builtin_free(p);
     }
-    if (auto p = __builtin_malloc(42))
+    if (auto p = publish(__builtin_malloc(42)))
     {
       __builtin_free(p);
     }
-    if (auto p = __builtin_operator_new(42))
+    if (auto p = publish(__builtin_operator_new(42)))
     {
       __builtin_operator_delete(p);
     }
-    if (auto p = __builtin_operator_new(42, std::align_val_t{8}))
+    if (auto p = publish(__builtin_operator_new(42, std::align_val_t{8})))
     {
       __builtin_operator_delete(p, std::align_val_t{8});
     }
-    if (auto p = __builtin_operator_new(42, std::nothrow))
+    if (auto p = publish(__builtin_operator_new(42, std::nothrow)))
     {
       __builtin_operator_delete(p);
     }
-    if (auto p = __builtin_operator_new(42, std::align_val_t{8}, std::nothrow))
+    if (auto p = publish(__builtin_operator_new(42, std::align_val_t{8}, std::nothrow)))
     {
       __builtin_operator_delete(p, std::align_val_t{8});
     }
-    if (auto p = __builtin_realloc(__builtin_malloc(42), 41))
+    if (auto p = publish(__builtin_realloc(__builtin_malloc(42), 41)))
     {
       __builtin_free(p);
     }
-    if (auto p = __libc_calloc(1, 42))
+    if (auto p = publish(__libc_calloc(1, 42)))
     {
       __libc_free(p);
     }
-    if (auto p = __libc_malloc(42))
+    if (auto p = publish(__libc_malloc(42)))
     {
       __libc_free(p);
     }
-    if (auto p = __libc_memalign(8, 42))
+    if (auto p = publish(__libc_memalign(8, 42)))
     {
       __libc_free(p);
     }

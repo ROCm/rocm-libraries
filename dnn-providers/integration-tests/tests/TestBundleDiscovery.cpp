@@ -628,9 +628,11 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundlePopulatesAllFields)
     ASSERT_EQ(bundle.outputTensorUids.size(), 1u);
     EXPECT_EQ(bundle.outputTensorUids.front(), 5);
 
-    ASSERT_TRUE(bundle.tensors.has_value());
-    EXPECT_EQ(bundle.tensors->size(), 6u);
-    EXPECT_NE(bundle.tensors->find(5), bundle.tensors->end());
+    ASSERT_TRUE(bundle.blobs.has_value());
+    EXPECT_TRUE(bundle.hasGoldenOutputs);
+    const auto tensors = bundle.loadTensors();
+    EXPECT_EQ(tensors.size(), 6u);
+    EXPECT_NE(tensors.find(5), tensors.end());
 
     ASSERT_TRUE(bundle.metadata.operation.has_value());
     EXPECT_EQ(*bundle.metadata.operation, "BatchnormInference");
@@ -667,7 +669,7 @@ TEST_F(TestBundleDiscoveryFixture, LoadGraphOnlyBundleMissingMetadataLoads)
     ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
     const auto& bundle = std::get<IntegrationTestBundle>(result);
 
-    EXPECT_FALSE(bundle.tensors.has_value()); // graph-only: no tensor data
+    EXPECT_FALSE(bundle.blobs.has_value()); // graph-only: no tensor data
     EXPECT_FALSE(bundle.hasGoldenOutputs);
     EXPECT_FALSE(bundle.metadata.operation.has_value()); // default-constructed
 }
@@ -743,7 +745,7 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundleMissingBinIsGraphOnly)
     ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
     const auto& bundle = std::get<IntegrationTestBundle>(result);
 
-    EXPECT_FALSE(bundle.tensors.has_value());
+    EXPECT_FALSE(bundle.blobs.has_value());
     EXPECT_EQ(bundle.outputTensorUids.size(), 1u);
 }
 
@@ -761,12 +763,13 @@ TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCasePopulatesExpandedGraphAn
     ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
     const auto& bundle = std::get<IntegrationTestBundle>(result);
 
-    ASSERT_TRUE(bundle.tensors.has_value());
+    ASSERT_TRUE(bundle.blobs.has_value());
     ASSERT_EQ(bundle.outputTensorUids.size(), 1u);
     EXPECT_EQ(bundle.outputTensorUids.front(), 5);
-    EXPECT_EQ(bundle.tensors->at(0)->dims(), (std::vector<int64_t>{2, 3, 4, 5}));
-    EXPECT_EQ(bundle.tensors->at(0)->strides(), (std::vector<int64_t>{60, 20, 5, 1}));
-    EXPECT_EQ(bundle.tensors->at(5)->dims(), (std::vector<int64_t>{2, 3, 4, 5}));
+    const auto tensors = bundle.loadTensors();
+    EXPECT_EQ(tensors.at(0)->dims(), (std::vector<int64_t>{2, 3, 4, 5}));
+    EXPECT_EQ(tensors.at(0)->strides(), (std::vector<int64_t>{60, 20, 5, 1}));
+    EXPECT_EQ(tensors.at(5)->dims(), (std::vector<int64_t>{2, 3, 4, 5}));
 
     const auto tensorAttrMap = bundle.graphWrapper().getTensorMap();
     EXPECT_EQ(tensorAttrMap.at(0)->data_type(),
@@ -797,7 +800,7 @@ TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseWithoutGoldenIsGraphOnly
     auto result = loadIntegrationTestBundle(discovered.front());
     ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
     const auto& bundle = std::get<IntegrationTestBundle>(result);
-    EXPECT_FALSE(bundle.tensors.has_value());
+    EXPECT_FALSE(bundle.blobs.has_value());
 }
 
 // Every case of a sweep shares one sweep.json, and a load pass must parse it once
@@ -948,7 +951,9 @@ TEST_F(TestBundleDiscoveryFixture, LoadDirectBundleWithBakedValueAndRuntimePassB
                  detail::RuntimePassByValueInvariantError);
 }
 
-TEST_F(TestBundleDiscoveryFixture, LoadBundleWrongSizeBinIsTensorLoadError)
+// Registration only records where a bundle's blobs are. A bad blob therefore fails the
+// test that needs it, instead of dropping the bundle from the run when it is loaded.
+TEST_F(TestBundleDiscoveryFixture, LoadBundleWrongSizeBinFailsOnlyWhenTheTensorsAreRead)
 {
     auto dir = _tempDir / "op" / "badbin";
     createLoadableBundle(dir, "badbin");
@@ -956,8 +961,8 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundleWrongSizeBinIsTensorLoadError)
     const auto jsonPath = dir / "badbin.json";
 
     auto result = loadIntegrationTestBundle(jsonPath);
-    ASSERT_TRUE(std::holds_alternative<LoadError>(result));
-    EXPECT_EQ(std::get<LoadError>(result), LoadError::TENSOR_LOAD_FAILED);
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+    EXPECT_THROW(std::get<IntegrationTestBundle>(result).loadTensors(), std::exception);
 }
 
 TEST_F(TestBundleDiscoveryFixture, LoadBundleMissingTensorsKeyIsSchemaError)
@@ -1177,6 +1182,86 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleSetsLocatorForSweepCase)
               discovered.front().jsonPath.parent_path() / "support.json");
     EXPECT_EQ(loaded.claimLocator.caseId, "fp32_nchw");
     EXPECT_TRUE(loaded.claimLocator.isSweep());
+}
+
+// selectBundlesToLoad() is the registration-time filter step. Its counters are the
+// denominators the support-claim summary divides by, so a drift here reattributes every
+// gap line to the wrong cause without failing anything else. Three flat bundles:
+// case_a is selected by the filter and has a claim, case_b is excluded and has a
+// claim, case_c is excluded and has none.
+TEST_F(TestBundleDiscoveryFixture, SelectBundlesToLoadCountsExcludedClaimsWhenObserving)
+{
+    for(const auto* suite : {"case_a", "case_b", "case_c"})
+    {
+        createMinimalBundle(_tempDir / suite, "graph");
+    }
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 3u);
+    for(const auto& bundle : discovered)
+    {
+        if(bundle.suiteName != "case_c")
+        {
+            std::ofstream(supportJsonPath(bundle.diagnosticPath())) << "{}";
+        }
+    }
+
+    BundleRegistrationStats stats;
+    SupportClaimCoverage coverage;
+    const auto selected = detail::selectBundlesToLoad(
+        discovered, "case_a.*", /*writing=*/false, /*observing=*/true, stats, coverage);
+
+    ASSERT_EQ(selected.size(), 1u);
+    EXPECT_EQ(selected.front().suiteName, "case_a");
+    EXPECT_EQ(stats.discovered, 3u);
+    EXPECT_EQ(stats.excludedByFilter, 2u);
+    // Only the two excluded bundles are counted here: the selected one is counted as it
+    // loads.
+    EXPECT_EQ(coverage.graphsFound, 2u);
+    EXPECT_EQ(coverage.graphsWithClaims, 1u);
+}
+
+// Without a named engine nothing is checkable, so the summary must not be handed
+// denominators for claims no run was going to check.
+TEST_F(TestBundleDiscoveryFixture, SelectBundlesToLoadLeavesCoverageAloneWhenNotObserving)
+{
+    createMinimalBundle(_tempDir / "case_a", "graph");
+    createMinimalBundle(_tempDir / "case_b", "graph");
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 2u);
+    for(const auto& bundle : discovered)
+    {
+        std::ofstream(supportJsonPath(bundle.diagnosticPath())) << "{}";
+    }
+
+    BundleRegistrationStats stats;
+    SupportClaimCoverage coverage;
+    const auto selected = detail::selectBundlesToLoad(
+        discovered, "case_a.*", /*writing=*/false, /*observing=*/false, stats, coverage);
+
+    EXPECT_EQ(selected.size(), 1u);
+    EXPECT_EQ(stats.excludedByFilter, 1u);
+    EXPECT_EQ(coverage.graphsFound, 0u);
+    EXPECT_EQ(coverage.graphsWithClaims, 0u);
+}
+
+// --write-support-claims needs every graph loaded: graphsFound is the denominator for
+// the graphs the observer did not see, so a filter that dropped any would shrink it.
+TEST_F(TestBundleDiscoveryFixture, SelectBundlesToLoadKeepsEveryBundleWhenWriting)
+{
+    createMinimalBundle(_tempDir / "case_a", "graph");
+    createMinimalBundle(_tempDir / "case_b", "graph");
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 2u);
+
+    BundleRegistrationStats stats;
+    SupportClaimCoverage coverage;
+    const auto selected = detail::selectBundlesToLoad(
+        discovered, "case_a.*", /*writing=*/true, /*observing=*/false, stats, coverage);
+
+    EXPECT_EQ(selected.size(), 2u);
+    EXPECT_EQ(stats.discovered, 2u);
+    EXPECT_EQ(stats.excludedByFilter, 0u);
+    EXPECT_EQ(coverage.graphsFound, 0u);
 }
 
 // Reuses the baked-value-plus-runtime-pass-by-value corruption from
