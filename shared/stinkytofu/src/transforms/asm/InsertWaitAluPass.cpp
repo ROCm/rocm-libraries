@@ -379,6 +379,11 @@ class WaitcntBrackets {
    public:
     explicit WaitcntBrackets(const WaitAluContext& ctx) : ctx(&ctx) {}
 
+    // Point a copied state at its new owner's context.
+    void rebind(const WaitAluContext& c) {
+        ctx = &c;
+    }
+
     // Aggregate views.
     unsigned getScoreLB(CounterType c) const {
         return c == CT_VA_VDST ? vaPipeSum(vaPipeLB) : vmLB;
@@ -1565,6 +1570,23 @@ WaitAluTracker::WaitAluTracker(const PassContext& passCtx, InsertWaitAluOptions 
     : impl_(std::make_unique<Impl>(passCtx, opts)) {}
 
 WaitAluTracker::~WaitAluTracker() = default;
+
+WaitAluTracker::WaitAluTracker(const WaitAluTracker& other)
+    : impl_(std::make_unique<Impl>(*other.impl_)) {
+    impl_->sb.rebind(impl_->ctx);
+}
+
+WaitAluTracker& WaitAluTracker::operator=(const WaitAluTracker& other) {
+    if (this != &other) {
+        *impl_ = *other.impl_;
+        impl_->sb.rebind(impl_->ctx);
+    }
+    return *this;
+}
+
+bool WaitAluTracker::merge(const WaitAluTracker& other) {
+    return impl_->sb.merge(other.impl_->sb);
+}
 
 WaitAluNeed WaitAluTracker::query(const StinkyInstruction& inst) const {
     WaitAluNeed need;

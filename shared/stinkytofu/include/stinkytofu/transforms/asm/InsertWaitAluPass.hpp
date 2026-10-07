@@ -74,13 +74,16 @@ class STINKYTOFU_EXPORT WaitAluTracker {
    public:
     WaitAluTracker(const PassContext& passCtx, InsertWaitAluOptions opts);
     ~WaitAluTracker();
-    WaitAluTracker(const WaitAluTracker&) = delete;
-    WaitAluTracker& operator=(const WaitAluTracker&) = delete;
+    WaitAluTracker(const WaitAluTracker& other);
+    WaitAluTracker& operator=(const WaitAluTracker& other);
 
     /// The wait `inst` would need if it were issued next.
     WaitAluNeed query(const StinkyInstruction& inst) const;
     /// Issue `inst`: apply the wait it needs, then record what it produces.
     void commit(const StinkyInstruction& inst);
+    /// Widen this state with `other`, as the pass merges a predecessor's exit into a block's
+    /// entry. Returns true if the state changed.
+    bool merge(const WaitAluTracker& other);
 
    private:
     struct Impl;

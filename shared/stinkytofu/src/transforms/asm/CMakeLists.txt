@@ -50,9 +50,11 @@ target_sources(stinkytofu_objs PRIVATE
     LoopRegionRemarkPass.cpp
     RemoveWaitAluPass.cpp
     PrefetchBridgeSubstitutionPass.cpp
+    PrefetchBridgePlanner.cpp
     InsertWaitAluPass.cpp
     EstimateAsmCyclesPass.cpp
     InsertCoexecHazardPass.cpp
+    CoexecNopPlanner.cpp
     EpilogueStoreSinkPass.cpp
     StinkyWmmaVgprReorderPass.cpp
     FlattenCalleesPass.cpp
@@ -61,6 +63,7 @@ target_sources(stinkytofu_objs PRIVATE
     coissue/LoopScope.cpp
     coissue/TimingProfile.cpp
     coissue/IssueTimeline.cpp
+    coissue/InsertionModels.cpp
 )
 
 add_subdirectory(ra)
