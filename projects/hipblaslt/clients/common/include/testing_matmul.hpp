@@ -3140,7 +3140,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         // positive-only so the reference dot products do not cancel toward zero
         // (near-zero outputs inflate the per-element ULP error spuriously).
         set_ulp_positive_init_state(arg.ulp_check);
-        set_integer_exact_pattern_state(iePattern, size_t(K[i]), transA == HIPBLAS_OP_T);
+        set_integer_exact_pattern_state(iePattern, size_t(K[i]), transA != HIPBLAS_OP_N);
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
         hipDeviceProp_t mxProp{};
