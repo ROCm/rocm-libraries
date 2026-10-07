@@ -387,6 +387,12 @@ std::vector<float> generateData(T                           dgen,
 {
     using namespace DGen;
 
+    // The non-K-major reference indexes scales canonically, whereas these device
+    // swizzles use a different grid. Do not return inconsistent exact reference values.
+    if(integerExact && scaleLayout != MXScaleLayout::None && isMatrixA != isTranspose)
+        throw std::runtime_error(
+            "integer_exact MX data with swizzled scales requires K along the stored rows");
+
     dgen.setSeed(seed);
     dgen.generate(sizes, strides, opt);
 

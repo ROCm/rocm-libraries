@@ -648,6 +648,89 @@ namespace
                     }
                 }
     }
+    // The reference must match the actual swizzled scale bytes, or explicitly refuse the
+    // layout. Decode using the documented axis permutations rather than the swizzle helper.
+    TEST(FastCheck_pre_checkin, integer_exact_mx_swizzled_references_match_or_refuse)
+    {
+        for(hipDataType type : {HIP_R_8F_E4M3, HIP_R_8F_E5M2})
+            for(bool isA : {true, false})
+                for(bool transpose : {true, false})
+                    for(MXScaleLayout layout : {MXScaleLayout::GFX950, MXScaleLayout::GFX1250})
+                        for(const auto& shape : {std::pair<size_t, size_t>{64, 256}, {80, 160}})
+                        {
+                            const auto [mn, K]          = shape;
+                            const bool           kMajor = isA == transpose;
+                            const size_t         rows = kMajor ? K : mn, cols = kMajor ? mn : K;
+                            const size_t         blocks = K / 32;
+                            std::vector<uint8_t> data(rows * cols), scale(rows * cols, 0xcc);
+                            std::vector<float>   ref;
+                            try
+                            {
+                                ref = generateMXInput(type,
+                                                      HIP_R_8U,
+                                                      data.data(),
+                                                      scale.data(),
+                                                      rows,
+                                                      cols,
+                                                      rows,
+                                                      transpose,
+                                                      32,
+                                                      1,
+                                                      isA,
+                                                      layout,
+                                                      "integer_exact");
+                            }
+                            catch(const std::runtime_error& e)
+                            {
+                                ASSERT_FALSE(kMajor) << e.what();
+                                EXPECT_NE(std::string(e.what()).find("integer_exact"),
+                                          std::string::npos);
+                                continue;
+                            }
+                            ASSERT_EQ(ref.size(), rows * cols);
+                            for(size_t idx = 0; idx < ref.size(); idx++)
+                            {
+                                const size_t k     = kMajor ? idx % rows : idx / rows;
+                                const size_t m     = kMajor ? idx / rows : idx % rows;
+                                const size_t block = k / 32;
+                                size_t       si;
+                                if(layout == MXScaleLayout::GFX1250)
+                                {
+                                    const size_t fast = kMajor ? blocks : mn;
+                                    const size_t slow = kMajor ? mn : blocks;
+                                    const size_t natural
+                                        = kMajor ? m * blocks + block : block * mn + m;
+                                    const size_t f = natural % fast, s = natural / fast;
+                                    si = (f / 4) * slow * 4 + s * 4 + f % 4;
+                                }
+                                else
+                                {
+                                    const size_t paddedBlocks = (blocks + 7) / 8 * 8;
+                                    si = (((((m / 32) * (paddedBlocks / 8) + block / 8) * 4
+                                            + block % 4)
+                                               * 16
+                                           + m % 16)
+                                              * 2
+                                          + (block / 4) % 2)
+                                             * 2
+                                         + (m / 16) % 2;
+                                }
+                                const uint8_t code = data[idx], magnitude = code & 0x7f;
+                                const uint8_t one = type == HIP_R_8F_E4M3 ? 0x38 : 0x3c;
+                                ASSERT_TRUE(magnitude == 0 || magnitude == one
+                                            || magnitude == 0x40);
+                                const float value = (magnitude == one    ? 1.f
+                                                     : magnitude == 0x40 ? 2.f
+                                                                         : 0.f)
+                                                    * ((code & 0x80) ? -1.f : 1.f);
+                                const float expected
+                                    = value * std::ldexp(1.f, int(scale[si]) - 127);
+                                ASSERT_EQ(ref[idx], expected)
+                                    << "idx=" << idx << " isA=" << isA << " transpose=" << transpose
+                                    << " layout=" << int(layout);
+                            }
+                        }
+    }
 #endif
 
     // ------------------------------------------------------------------------------------------

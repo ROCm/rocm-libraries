@@ -1137,6 +1137,12 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
         if(scaleDataType(arg.scaleA) != HIP_R_8F_UE8M0
            || scaleDataType(arg.scaleB) != HIP_R_8F_UE8M0)
             return "fast_check supports MX scales only in an E8M0 (UE8M0) format";
+        // Other orientations have not established agreement between the generator's
+        // reference and the device scale layout. In particular, the MX caller currently
+        // treats C differently from T even for real inputs. Refuse before allocation.
+        if(char_to_hipblas_operation(arg.transA) != HIPBLAS_OP_T
+           || char_to_hipblas_operation(arg.transB) != HIPBLAS_OP_N)
+            return "fast_check with MX scales requires transA=T and transB=N";
         // The reference recomputes each element's scale as its linear index over the block size,
         // which holds only when no K block is partial.
         if(arg.K[0] % blockSize(arg.scaleA) != 0 || arg.K[0] % blockSize(arg.scaleB) != 0)

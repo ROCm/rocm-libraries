@@ -37,6 +37,36 @@
 namespace
 {
 
+    TEST(FastCheckMx_pre_checkin, unsupported_transpose_layouts_are_refused)
+    {
+        Arguments arg{};
+        arg.init();
+        arg.initialization = hipblaslt_initialization::integer_exact;
+        arg.fast_check     = 1;
+        arg.batch_count    = 1;
+        arg.M[0] = arg.N[0] = 64;
+        arg.K[0]            = 256;
+        arg.scaleA = arg.scaleB = hipblaslt_scaling_format::Block_32_UE8M0;
+        for(char a : {'N', 'T', 'C'})
+            for(char b : {'N', 'T', 'C'})
+            {
+                arg.transA = a;
+                arg.transB = b;
+                auto why   = fast_check_unsupported_reason(arg,
+                                                           HIPBLASLT_BATCH_MODE_STRIDED,
+                                                           false,
+                                                           HIP_R_8F_E4M3,
+                                                           HIP_R_8F_E5M2,
+                                                           HIP_R_32F,
+                                                           HIP_R_32F);
+                if(a == 'T' && b == 'N')
+                    EXPECT_TRUE(why.empty()) << why;
+                else
+                    EXPECT_NE(why.find("transA=T and transB=N"), std::string::npos)
+                        << a << b << ": " << why;
+            }
+    }
+
     // ----------------------------------------------------------------------------
     // matmul
     // ----------------------------------------------------------------------------
