@@ -6,8 +6,9 @@
 # direct grouped convolution parity harness. Selects one of N sampled spec
 # configs by argv[1], builds the DirectConv16cSpec / DirectConv4cSpec /
 # DirectConv8cSpec / DirectConv32cSpec / DirectDepthwiseSpec /
+# DirectDepthwiseColSpec /
 # DirectConvDgradSpec / DirectDepthwiseDgradSpec / DirectConvWgradSpec (and,
-# from index 32, the non-grouped DirectNongroupedConvSpec), builds the kernel
+# from index 42, the non-grouped DirectNongroupedConvSpec), builds the kernel
 # via the matching build_direct_conv_* function (arch=<cfg arch>) and prints
 # _native_lower(arch=<cfg arch>) to stdout so it can be byte-compared with
 # the C emitter conv_direct_grouped_emit.c.
@@ -22,6 +23,7 @@ from kernels.common.conv_direct_grouped import (
     DirectConvWgradSpec,
     DirectDepthwiseSpec,
     DirectDepthwiseSpatialSpec,
+    DirectDepthwiseColSpec,
     DirectConvDgradSpec,
     DirectDepthwiseDgradSpec,
     build_direct_conv_16c,
@@ -31,6 +33,7 @@ from kernels.common.conv_direct_grouped import (
     build_direct_conv_wgrad,
     build_direct_depthwise,
     build_direct_depthwise_spatial,
+    build_direct_depthwise_col,
     build_direct_conv_dgrad,
     build_direct_depthwise_dgrad,
 )
@@ -48,14 +51,14 @@ from rocke.core.verify import verify
 
 
 # ---------------------------------------------------------------------------
-# Non-grouped (groups == 1) DirectNongroupedConvSpec configs, indices 33..47.
+# Non-grouped (groups == 1) DirectNongroupedConvSpec configs, indices 42..56.
 #
 # Each pins one branch of build_direct_conv_nongrouped: the four MFMA atoms,
 # fp16/bf16, stride 1/2, 1x1 / 3x3 / 5x5 filters, partial W/H/K tiles, staging
 # passes that do / do not divide the block evenly (the scratch-tail select),
 # single vs double buffered LDS, chiplet swizzle on/off, iglp and waves_per_eu.
 # ---------------------------------------------------------------------------
-_NONGROUPED_CFG_BASE = 33
+_NONGROUPED_CFG_BASE = 42
 
 
 def _nongrouped_p(N, H, W, C, K, *, KH=3, KW=3, PAD=1, stride=1, dtype="bf16"):
@@ -612,6 +615,112 @@ def _spec(idx: int):
             "gfx950",
         )
     if idx == 32:
+        # column-streamed depthwise, stride=1 fp16, default 16-row tile. Exact
+        # channel and W tiles, but the guards bound against kernargs (AOT), so
+        # they are emitted all the same.
+        p = DirectConvProblem(
+            N=2, H=8, W=8, groups=128, cpg=1, kpg=1, KH=3, KW=3, PAD=1, stride=1
+        )
+        return (
+            "dwcol",
+            DirectDepthwiseColSpec(problem=p, block_w=4, block_waves=2, dtype="fp16"),
+            "gfx950",
+        )
+    if idx == 33:
+        # col stride=2 bf16 with partial channel and W tiles (groups=70 % 64,
+        # Wo=5 % 4) and two-row tiles, so Ho=5 needs a partial last row tile.
+        p = DirectConvProblem(
+            N=1, H=9, W=9, groups=70, cpg=1, kpg=1, KH=3, KW=3, PAD=1, stride=2
+        )
+        return (
+            "dwcol",
+            DirectDepthwiseColSpec(
+                problem=p, block_h=2, block_w=4, block_waves=1, dtype="bf16"
+            ),
+            "gfx950",
+        )
+    if idx == 34:
+        # col stride=3: exercises the (y - r) % stride tap pruning at a stride
+        # no other case reaches.
+        p = DirectConvProblem(
+            N=1, H=16, W=16, groups=64, cpg=1, kpg=1, KH=3, KW=3, PAD=1, stride=3
+        )
+        return (
+            "dwcol",
+            DirectDepthwiseColSpec(problem=p, block_w=4, block_waves=1, dtype="bf16"),
+            "gfx950",
+        )
+    if idx == 35:
+        # col with a large filter (31x31): the regime the variant exists for --
+        # KW rides the runtime loop so only KH weights are live. A 4-row tile
+        # still unrolls (4-1)+31 input rows.
+        p = DirectConvProblem(
+            N=1, H=8, W=8, groups=64, cpg=1, kpg=1, KH=31, KW=31, PAD=15, stride=1
+        )
+        return (
+            "dwcol",
+            DirectDepthwiseColSpec(
+                problem=p, block_h=4, block_w=4, block_waves=1, dtype="fp16"
+            ),
+            "gfx950",
+        )
+    if idx == 36:
+        # col 1x1 / PAD=0 degenerate with a non-power-of-two group count
+        p = DirectConvProblem(
+            N=2, H=6, W=6, groups=3, cpg=1, kpg=1, KH=1, KW=1, PAD=0, stride=1
+        )
+        return (
+            "dwcol",
+            DirectDepthwiseColSpec(problem=p, block_w=2, block_waves=1, dtype="fp16"),
+            "gfx950",
+        )
+    if idx == 37:
+        # col with KH != KW (5x3): separates the unrolled axis from the runtime one
+        p = DirectConvProblem(
+            N=1, H=8, W=8, groups=128, cpg=1, kpg=1, KH=5, KW=3, PAD=2, stride=1
+        )
+        return (
+            "dwcol",
+            DirectDepthwiseColSpec(problem=p, block_w=4, block_waves=2, dtype="bf16"),
+            "gfx950",
+        )
+    if idx == 38:
+        # col stride=2 with valid padding (PAD=0) and an odd 3-row tile
+        p = DirectConvProblem(
+            N=1, H=13, W=13, groups=64, cpg=1, kpg=1, KH=3, KW=3, PAD=0, stride=2
+        )
+        return (
+            "dwcol",
+            DirectDepthwiseColSpec(
+                problem=p, block_h=3, block_w=6, block_waves=1, dtype="fp16"
+            ),
+            "gfx950",
+        )
+    if idx == 39:
+        # col with block_w=1 and a channel tail (groups=100 % 128)
+        p = DirectConvProblem(
+            N=1, H=10, W=10, groups=100, cpg=1, kpg=1, KH=3, KW=3, PAD=1, stride=1
+        )
+        return (
+            "dwcol",
+            DirectDepthwiseColSpec(problem=p, block_w=1, block_waves=2, dtype="bf16"),
+            "gfx950",
+        )
+    if idx == 40:
+        # dwcol PAD-overhang: PAD=2 > (KH-1)/2=1 with stride=2 and two-row
+        # tiles. n_iters = (block_h-1)*stride + KH is cross-verified by the
+        # C/Python byte-identity gate.
+        p = DirectConvProblem(
+            N=1, H=10, W=10, groups=64, cpg=1, kpg=1, KH=3, KW=3, PAD=2, stride=2
+        )
+        return (
+            "dwcol",
+            DirectDepthwiseColSpec(
+                problem=p, block_h=2, block_w=4, block_waves=1, dtype="fp16"
+            ),
+            "gfx950",
+        )
+    if idx == 41:
         # depthwise 7x7 stride 2 bf16: PAD > 1 shifts the row stream's static
         # slots, and stride 2 gates its flushes on the row parity.
         p = DirectConvProblem(
@@ -658,6 +767,8 @@ def main() -> int:
         kernel = build_direct_conv_wgrad(spec, arch=arch)
     elif kind == "spatial":
         kernel = build_direct_depthwise_spatial(spec, arch=arch)
+    elif kind == "dwcol":
+        kernel = build_direct_depthwise_col(spec, arch=arch)
     elif kind == "dgrad":
         kernel = build_direct_conv_dgrad(spec, arch=arch)
     elif kind == "dw_dgrad":

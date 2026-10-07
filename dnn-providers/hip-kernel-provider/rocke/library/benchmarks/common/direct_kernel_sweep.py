@@ -55,9 +55,38 @@ DIRECT_DTYPE = "fp16"  # the default dtype
 BLOCK_Q = (16, 32)
 BLOCK_GROUPS = (1, 2, 4, 8, 16)
 DOUBLE_BUFFER = (True, False)
-# Depthwise forward and dgrad.
-DW_BLOCK_W = (4, 8, 16, 32)
+# Depthwise (cpg == 1) forward and dgrad.
+# block_w=32 is omitted from both directions: across the depthwise corpus, at
+# both dtypes, it never won a single geometry -- every shape whose best config
+# used a wide block_w landed on 8 or 16 -- while still costing a quarter of the
+# candidate builds and tuning launches.
+#
+# The surviving values differ by direction, because the two directions do not
+# have the same fallback.  Forward is overwhelmingly a block_w=4 story: the
+# column-streamed variant (its own grid below) covers the wide-block cases, so
+# the preloading kernel rarely needs to go wide, and the few shapes that do go
+# wide land on 16 rather than 8.  Dropping 8 from the forward grid is therefore
+# free, while dropping 16 is not.  Dgrad has no second variant to fall back on,
+# so its tail keeps both 8 and 16 -- dropping either regresses small-spatial /
+# large-filter shapes, 8 the more severely of the two.  Neither tuple is
+# reducible further without giving up a shape's best config.
+DW_BLOCK_W_FWD = (4, 16)
+DW_BLOCK_W_DGRAD = (4, 8, 16)
 DW_BLOCK_WAVES = (1, 2, 4)
+# Column-streamed depthwise forward. It keeps only ``block_h*block_w + KH`` f32
+# live per lane instead of ``KH*KW + KH*block_w``, so its sweet spot sits at far
+# smaller block_w than the weight-preloading kernel's. block_h is the output-row
+# tile: the row loop is unrolled at build time, so the tile height is a
+# capability while the image height stays a kernarg. Pairs whose band does not
+# fit the arch's live-f32 budget are dropped by the spec validator.
+#
+# Measured on gfx950 over 15 depthwise shapes (3x3..11x11, stride 1 and 2,
+# 7x7..112x112 images, large enough batches to clear launch latency): block_w
+# 8/16/32 never won a shape, and this 3x3x3 grid matches the best of the full
+# 3x6x3 grid on every one. All three block_h values are needed -- dropping 32
+# costs up to 16% on a shape, dropping 8 up to 74%.
+DW_COL_BLOCK_W = (1, 2, 4)
+DW_COL_BLOCK_H = (8, 16, 32)
 # Grouped scalar-FMA dgrad.
 DGRAD_BLOCK_Q = (4, 8, 16, 32)
 # MFMA dgrad fprop pass: output rows per block, then
@@ -118,6 +147,16 @@ def _all_pads(kh: int) -> range:
     return range(kh)
 
 
+def _col_pads(kh: int) -> Tuple[int, ...]:
+    # The column-streamed kernel can compute any PAD in [0, KH-1] (bar stride-1
+    # over-padding, which its validator rejects), but every padding is its own
+    # binary. The cache carries the two networks actually use -- "valid"
+    # (PAD=0) and "same" -- rather than the whole range: the intermediate ones
+    # would be two thirds of the variant's entries for shapes that are rare in
+    # practice. Other paddings still build on demand (the JIT sweep).
+    return tuple(sorted({0, _same_pad(kh)}))
+
+
 # variant -> (direction, capability list). Forward rows only list "same"
 # padding: every forward direct kernel streams input rows and flushes output
 # rows by input-row index, which is only right for PAD == (KH-1)/2 (see
@@ -160,6 +199,17 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
         tuple(
             DirectCaps(KH=k, PAD=_same_pad(k), stride=s, cpg=1, kpg=1)
             for k, s in itertools.product(_DEPTHWISE_FILTERS, _STRIDES)
+        ),
+    ),
+    # Column-streamed depthwise forward: same filters and strides. It bounds
+    # its output rows against p_Ho rather than streaming them by input row, so
+    # unlike the other forward kernels it also serves "valid" padding.
+    "direct_depthwise_col": (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=s, cpg=1, kpg=1)
+            for k, s in itertools.product(_DEPTHWISE_FILTERS, _STRIDES)
+            for pad in _col_pads(k)
         ),
     ),
     # Depthwise dgrad (row-streaming kernel): same filters and strides.
@@ -207,12 +257,20 @@ def _knob_grid(variant: str, arch: str, dtype: str) -> Iterator[dict]:
     elif variant == "direct_grouped":
         for bq, bg, db in itertools.product(BLOCK_Q, BLOCK_GROUPS, DOUBLE_BUFFER):
             yield dict(block_q=bq, block_groups=bg, double_buffer=db)
-    elif variant in ("direct_depthwise", "direct_depthwise_dgrad"):
-        for bw, waves in itertools.product(DW_BLOCK_W, DW_BLOCK_WAVES):
+    elif variant == "direct_depthwise":
+        for bw, waves in itertools.product(DW_BLOCK_W_FWD, DW_BLOCK_WAVES):
             yield dict(block_w=bw, block_waves=waves)
     elif variant == "direct_depthwise_spatial":
         for waves in DW_BLOCK_WAVES:
             yield dict(block_waves=waves)
+    elif variant == "direct_depthwise_dgrad":
+        for bw, waves in itertools.product(DW_BLOCK_W_DGRAD, DW_BLOCK_WAVES):
+            yield dict(block_w=bw, block_waves=waves)
+    elif variant == "direct_depthwise_col":
+        for bh, bw, waves in itertools.product(
+            DW_COL_BLOCK_H, DW_COL_BLOCK_W, DW_BLOCK_WAVES
+        ):
+            yield dict(block_h=bh, block_w=bw, block_waves=waves)
     elif variant == "direct_grouped_dgrad":
         for bq, bg in itertools.product(DGRAD_BLOCK_Q, BLOCK_GROUPS):
             yield dict(block_q=bq, block_groups=bg)
@@ -263,6 +321,15 @@ def make_spec(variant: str, problem, knobs: dict):
     if variant == "direct_depthwise_spatial":
         return dc.DirectDepthwiseSpatialSpec(
             problem=problem, name="rocke_direct_depthwise_spatial", **knobs
+        )
+    if variant == "direct_depthwise_col":
+        # The col spec carries its own element type; a binary serves only the
+        # dtype it was built for, so it follows the problem's.
+        return dc.DirectDepthwiseColSpec(
+            problem=problem,
+            name="rocke_direct_depthwise_col",
+            dtype=problem.dtype,
+            **knobs,
         )
     if variant == "direct_depthwise_dgrad":
         return dc.DirectDepthwiseDgradStreamSpec(
@@ -338,6 +405,9 @@ def validate_spec(variant: str, spec, arch: str) -> Tuple[bool, str]:
             return dc.is_valid_depthwise_spec(spec, arch=arch)
         if variant == "direct_depthwise_spatial":
             return dc.is_valid_depthwise_spatial_spec(spec, arch=arch)
+        if variant == "direct_depthwise_col":
+            spec.validate()
+            return dc.is_valid_depthwise_col_spec(spec, arch=arch)
         if variant == "direct_depthwise_dgrad":
             return dc.is_valid_depthwise_dgrad_stream_spec(spec, arch=arch)
         if variant == "direct_grouped_dgrad":
@@ -359,6 +429,7 @@ def _build_kernel(variant: str, spec, arch: str):
         "direct_grouped_dgrad_mfma": dc.build_direct_conv,
         "direct_depthwise": dc.build_direct_depthwise,
         "direct_depthwise_spatial": dc.build_direct_depthwise_spatial,
+        "direct_depthwise_col": dc.build_direct_depthwise_col,
         "direct_depthwise_dgrad": dc.build_direct_depthwise_dgrad_streaming,
         "direct_grouped_dgrad": dc.build_direct_conv_dgrad,
         _TRANSPOSE: dc.build_direct_transpose_weights_dgrad,

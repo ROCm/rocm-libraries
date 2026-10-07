@@ -37,12 +37,35 @@ def _problem(**kw) -> DirectConvProblem:
     return DirectConvProblem(**shape)
 
 
+# The column-streamed depthwise kernel bounds its output rows against p_Ho
+# instead of streaming them by input row, so it is the one padding-generic
+# forward kernel.
+_PADDING_GENERIC_FWD = {"direct_depthwise_col"}
+
+
 def test_forward_entries_only_use_same_padding(jobs):
     """Forward kernels are wrong for any other padding, so none may be built."""
-    fwd = [j.identity for j in jobs if j.identity.direction == "direct_fwd"]
+    fwd = [
+        j.identity
+        for j in jobs
+        if j.identity.direction == "direct_fwd"
+        and j.identity.algorithm not in _PADDING_GENERIC_FWD
+    ]
     assert fwd
     assert all(i.pad_h == (i.filter_h - 1) // 2 for i in fwd)
     assert all(i.filter_h % 2 == 1 for i in fwd)
+
+
+def test_padding_generic_forward_entries_cover_other_paddings(jobs):
+    pads = {
+        (j.identity.filter_h, j.identity.stride_h, j.identity.pad_h)
+        for j in jobs
+        if j.identity.algorithm in _PADDING_GENERIC_FWD
+    }
+    # "valid" and "same" padding at both strides; intermediate paddings are
+    # not cached.
+    assert {(5, 1, 0), (5, 1, 2), (5, 2, 0), (5, 2, 2)} <= pads
+    assert (5, 2, 1) not in pads
 
 
 def test_every_capability_row_is_built(jobs):
@@ -199,6 +222,26 @@ def test_nongrouped_only_serves_one_group(cache):
     assert plans and _variants(plans) == {"direct_nongrouped"}
 
 
+def test_depthwise_forward_offers_col_alongside_preload(cache):
+    same = _problem(groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=2, stride=2)
+    plans, _ = dks.direct_plans(cache, same, "fwd", _ARCH)
+    # groups == wave_size still leaves the spatial kernel one column per wave.
+    assert _variants(plans) == {
+        "direct_depthwise",
+        "direct_depthwise_spatial",
+        "direct_depthwise_col",
+    }
+    other = _problem(groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=0, stride=2)
+    plans, _ = dks.direct_plans(cache, other, "fwd", _ARCH)
+    assert _variants(plans) == {"direct_depthwise_col"}
+    # The row tile is a capability: the grid follows the runtime height.
+    for plan in plans:
+        (step,) = plan.steps
+        knobs = json.loads(plan.identity.knobs)
+        n_h_tiles = -(-other.Ho // knobs["block_h"])
+        assert step.grid[2] == other.N * n_h_tiles
+
+
 def test_capabilities_outside_the_list_are_not_served(cache):
     assert dks.direct_plans(cache, _problem(cpg=24, kpg=24), "fwd", _ARCH)[0] == []
     # Grouped forward stride 2 has no rocke kernel.
@@ -225,6 +268,8 @@ def test_dgrad_stride1_offers_mfma_pipeline_and_scalar(cache):
         ("fwd", _problem()),
         ("fwd", _problem(groups=1, cpg=128, kpg=96)),
         ("fwd", _problem(groups=64, cpg=1, kpg=1, KH=7, KW=7, PAD=3, stride=2)),
+        # Only the column-streamed kernel serves non-"same" forward padding.
+        ("fwd", _problem(groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=0, stride=2)),
         ("dgrad", _problem(groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=0, stride=2)),
         ("dgrad", _problem(cpg=8, kpg=8, stride=2)),
         ("dgrad", _problem()),
