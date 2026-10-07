@@ -587,6 +587,18 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // Outstanding WMMAs, oldest first, with the window position where each ends.
     std::vector<DAGNode*> queuedWmmas_;
     std::vector<int> queuedEnds_;
+    // Pointer-free copy of each queued WMMA's source registers, so the WAR gate can outlive
+    // the region's DAG nodes (a region cut must not forget a WMMA still reading them).
+    std::vector<std::vector<StinkyRegister>> queuedSrcs_;
+    // Source registers of WMMAs still running when the last region ended: cycles from the
+    // start of this region (compared with clock_) until the pipe has read them.
+    struct CarriedWar {
+        std::vector<StinkyRegister> srcs;
+        int remaining;
+    };
+    std::vector<CarriedWar> carriedWar_;
+    void carryQueuedWar();
+    friend struct CDNA5ReadyQueueTestPeer;
 
     // Non-WMMA fills since the active WMMA opened its window. A dependent next
     // WMMA is held in Phase B until this reaches popcount(coIssueWindow)+1
@@ -1034,6 +1046,23 @@ void CDNA5ReadyQueue::resetActiveWindow() {
     activeWmmaNode_ = nullptr;
     queuedWmmas_.clear();
     queuedEnds_.clear();
+    queuedSrcs_.clear();
+}
+
+// Region cut: the WMMAs still in the pipe keep reading their sources, so remember them for
+// the WAR gate (pointer-free; the nodes die with the region). Queue model only.
+void CDNA5ReadyQueue::carryQueuedWar() {
+    std::vector<CarriedWar> next;
+    if (wmmaQueueCover() > 0) {
+        for (CarriedWar& c : carriedWar_) {
+            if (c.remaining > clock_) next.push_back({std::move(c.srcs), c.remaining - clock_});
+        }
+        for (size_t i = 0; i < queuedEnds_.size(); ++i) {
+            if (queuedEnds_[i] > coIssueCyclePos_)
+                next.push_back({queuedSrcs_[i], queuedEnds_[i] - coIssueCyclePos_});
+        }
+    }
+    carriedWar_ = std::move(next);
 }
 
 // Number of queued WMMAs the pipe has not finished yet.
@@ -1059,6 +1088,7 @@ void CDNA5ReadyQueue::pruneWmmaQueue() {
     while (queuedEnds_.size() > 1 && queuedEnds_.front() <= coIssueCyclePos_) {
         queuedEnds_.erase(queuedEnds_.begin());
         queuedWmmas_.erase(queuedWmmas_.begin());
+        queuedSrcs_.erase(queuedSrcs_.begin());
     }
     constexpr int kCompactAt = 64;
     if (coIssueCyclePos_ >= kCompactAt && coIssueCyclePos_ < activeWmmaLatency_) {
@@ -1086,6 +1116,15 @@ void CDNA5ReadyQueue::advanceTime(int cycles) {
     // there. Roll on to the next issuable cycle instead; the skipped cycles still
     // elapse, the hardware is just spending them itself.
     int landing = coIssueCyclePos_ + cycles;
+    if (wmmaQueueCover() > 0) {
+        // Queued windows are concatenated, so a blocked cycle can lie inside the span: each
+        // one the advance crosses stalls the wave for a cycle.
+        landing = coIssueCyclePos_;
+        for (int c = 0; c < cycles; ++c) {
+            while (isBlockedCycle(landing)) ++landing;
+            ++landing;
+        }
+    }
     while (isBlockedCycle(landing)) ++landing;
     cycles = landing - coIssueCyclePos_;
     coIssueCyclePos_ += cycles;
@@ -1301,7 +1340,18 @@ int CDNA5ReadyQueue::getHazardWait(DAGNode* node) const {
 // VGPRs overlap that WMMA's src VGPRs, so the write could clobber a source the
 // WMMA is still reading.
 bool CDNA5ReadyQueue::destOverlapsActiveWmmaSrc(DAGNode* node) const {
-    if (node == nullptr || activeWmmaNode_ == nullptr) return false;
+    if (node == nullptr) return false;
+    for (const CarriedWar& c : carriedWar_) {
+        if (c.remaining <= clock_) continue;  // finished: sources read
+        for (const StinkyRegister& dstReg : node->inst->getDestRegs()) {
+            if (!dstReg.isRegister() || isPseudoReg(dstReg)) continue;
+            for (const StinkyRegister& srcReg : c.srcs) {
+                if (!srcReg.isRegister() || isPseudoReg(srcReg)) continue;
+                if (dstReg.isOverlap(srcReg)) return true;
+            }
+        }
+    }
+    if (activeWmmaNode_ == nullptr) return false;
     if (coIssueCyclePos_ >= activeWmmaLatency_) return false;
     for (const StinkyRegister& dstReg : node->inst->getDestRegs()) {
         if (!dstReg.isRegister() || isPseudoReg(dstReg)) continue;
@@ -1498,6 +1548,11 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
         queuedEnds_.empty() ? 0 : std::max(0, queuedEnds_.back() - coIssueCyclePos_);
     queuedWmmas_.push_back(node);
     queuedEnds_.push_back(activeWmmaLatency_);
+    {
+        std::vector<StinkyRegister> srcs;
+        for (const StinkyRegister& r : node->inst->getSrcRegs()) srcs.push_back(r);
+        queuedSrcs_.push_back(std::move(srcs));
+    }
     nonWmmaFillsSinceActiveWmma_ = 0;  // new window: restart WMMA->WMMA fill count
     fillsThisWindow_ = 0;
     dsSchedulingBudgetUsed_ = 0;
@@ -2484,7 +2539,8 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     // Phase E — forced WMMA: pick the most-ready WMMA before barriers.
     if (isPromote(PromotePhase::ForcedWmma) && !wmmaQueue.empty()) {
         auto [bestWMMA, bestLatency] = findMostReadyWMMA();
-        (void)bestLatency;
+        // The queued WMMA can only start once its sources arrive: that stall elapses.
+        if (wmmaQueueCover() > 0 && bestLatency > 0) advanceTime(bestLatency);
         DAGNode* node = pickOneFromWMMA(bestWMMA);
         return rememberPick(node);
     }
@@ -2633,6 +2689,7 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     std::fill(pipeOpCount_.begin(), pipeOpCount_.end(), 0);
 
     resetActiveWindow();
+    carriedWar_.clear();
     nonWmmaFillsSinceActiveWmma_ = 0;
     fillsThisWindow_ = 0;
     dsSchedulingBudgetUsed_ = 0;
@@ -2798,6 +2855,7 @@ void CDNA5ReadyQueue::onFinishBB() {
 void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd,
                                    IRList::iterator blockBegin, const RegionDependencies& deps) {
     regionDag_ = &deps.dag;
+    carryQueuedWar();
     wmmaIssuedCountThisRegion_ = 0;
     lastPickedNode_ = nullptr;
     // SCC chain locks are per-region: chain ids index the prior region's
