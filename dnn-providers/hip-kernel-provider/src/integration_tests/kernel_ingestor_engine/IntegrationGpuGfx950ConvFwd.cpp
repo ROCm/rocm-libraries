@@ -400,9 +400,15 @@ protected:
         }
     }
 
-    static int64_t engineId()
+    /// The engine under test; the AOT-instance suite overrides it.
+    virtual const char* engineName() const
     {
-        return hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME);
+        return ENGINE_NAME;
+    }
+
+    int64_t engineId() const
+    {
+        return hipdnn_data_sdk::utilities::engineNameToId(engineName());
     }
 
     void buildAndCompile(Graph& graph, const std::vector<KnobSetting>& knobs)
@@ -413,7 +419,7 @@ protected:
         result = graph.get_ranked_engine_ids(engineIds);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
         ASSERT_NE(std::find(engineIds.begin(), engineIds.end(), engineId()), engineIds.end())
-            << "The installed plugin did not offer " << ENGINE_NAME;
+            << "The installed plugin did not offer " << engineName();
 
         // Hard selection: a preferred-engine hint can fall back silently to another
         // provider. This path must execute this engine even when other engines match.
@@ -469,7 +475,7 @@ protected:
 
     std::optional<ingestor::WinnerRecord> persistedRanking() const
     {
-        const auto path = ingestor::winnerCacheShardPath(ENGINE_NAME, _arch);
+        const auto path = ingestor::winnerCacheShardPath(engineName(), _arch);
         std::ifstream stream(path);
         std::string line;
         std::optional<ingestor::WinnerRecord> ranking;
@@ -491,7 +497,7 @@ protected:
     std::optional<std::pair<ingestor::WinnerKey, ingestor::WinnerRecord>>
         lastPersistedRecord() const
     {
-        std::ifstream stream(ingestor::winnerCacheShardPath(ENGINE_NAME, _arch));
+        std::ifstream stream(ingestor::winnerCacheShardPath(engineName(), _arch));
         std::string line;
         std::optional<std::pair<ingestor::WinnerKey, ingestor::WinnerRecord>> last;
         while(std::getline(stream, line))
@@ -509,7 +515,7 @@ protected:
     void appendPersistedRecord(const ingestor::WinnerKey& key,
                                const ingestor::WinnerRecord& record) const
     {
-        auto [shard, opened] = ingestor::openWinnerCacheShard(ENGINE_NAME, _arch);
+        auto [shard, opened] = ingestor::openWinnerCacheShard(engineName(), _arch);
         ASSERT_EQ(opened, hipdnn_data_sdk::utilities::LineStoreStatus::OK);
         ASSERT_TRUE(shard.has_value());
         ASSERT_EQ(hipdnn_data_sdk::utilities::lockLineStore(*shard),
@@ -837,50 +843,122 @@ TEST_P(IntegrationGpuGfx950ConvFwdDirectDeclined, ImplicitGemmServesTheGraphAlon
 
 class IntegrationGpuGfx950ConvFwdServing : public IntegrationGpuGfx950ConvFwd
 {
+protected:
+    /// Benchmarks the parameter's graph over every kernel that serves it, then serves each
+    /// measured kernel in turn from a record that ranks it first. Benchmarking executes
+    /// only its winner, so this is what runs every serving kernel against the reference.
+    void verifyEveryServingKernel(unsigned int seed, unsigned int armSeed)
+    {
+        const auto& variant = GetParam();
+        const ScopedPluginLogCapture capture(this);
+        auto& recorder = capture.recorder();
+        const std::vector<KnobSetting> knobs{enableBenchmarkingKnob()};
+        const auto candidates = variant.directArms + variant.implicitArms;
+
+        auto graph = buildConvGraph(variant.dtype, variant.problem);
+        ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, knobs));
+        EXPECT_TRUE(recorder.hasLogContaining("will benchmark " + candidateCount(candidates)))
+            << recorder.getRecordedLogsAsString();
+        ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*graph, variant.dtype, seed));
+        graph.reset();
+
+        const auto measured = lastPersistedRecord();
+        ASSERT_TRUE(measured) << "Benchmarking did not persist its measured ranking";
+        const auto& [key, ranking] = *measured;
+        ASSERT_EQ(ranking.size(), candidates);
+
+        for(size_t arm = 0; arm < ranking.size(); ++arm)
+        {
+            auto pinned = ranking;
+            std::rotate(pinned.begin(),
+                        pinned.begin() + static_cast<std::ptrdiff_t>(arm),
+                        pinned.begin() + static_cast<std::ptrdiff_t>(arm) + 1);
+            ASSERT_NO_FATAL_FAILURE(appendPersistedRecord(key, pinned));
+            ASSERT_NO_FATAL_FAILURE(recreateHandle());
+            recorder.clearLogs();
+
+            auto served = buildConvGraph(variant.dtype, variant.problem);
+            ASSERT_NO_FATAL_FAILURE(buildAndCompile(*served, knobs));
+            const auto kernel = ingestor::toString(pinned.front().kernelId);
+            EXPECT_TRUE(recorder.hasLogContaining("served kernel " + kernel + " at rank 0"))
+                << "kernel " << arm << ": " << recorder.getRecordedLogsAsString();
+            EXPECT_FALSE(recorder.hasLogContaining("will benchmark"));
+            ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(
+                *served, variant.dtype, armSeed + static_cast<unsigned int>(arm)));
+        }
+    }
 };
 
+// Every kernel here was compiled for another shape.
 TEST_P(IntegrationGpuGfx950ConvFwdServing, EveryServingKernelMatchesCpuReference)
+{
+    verifyEveryServingKernel(43, 47);
+}
+
+#ifdef HKP_TEST_GFX950_CONV_FWD_AOT
+
+// ---- hipkernel:Gfx950ConvFwdAot: shape-generic AOT instances ----
+//
+// The shipped seed catalog holds 8 instances per dtype, each built once against rocKE's
+// probe problem and matched to a graph by capability. Every variant states how many
+// instances serve it, computed by gfx950_conv_fwd_aot_serves in
+// convolution_forward.py, so the native matcher is checked against the Python one.
+
+namespace
+{
+
+constexpr const char* AOT_ENGINE_NAME = "hipkernel:Gfx950ConvFwdAot";
+
+std::vector<Variant> aotVariants()
+{
+    // Every instance is implicit GEMM, so the count is the implicitArms field.
+    return withBothDtypes({
+        {"Smoke", {}, 0, 8},
+        {"Pointwise", {1, 32, 64, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1}, 0, 8},
+        // An instance is built against a 3x3 probe, so it is never the pointwise GEMM.
+        {"GroupedPointwiseG4", {2, 32, 32, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1, 4}, 0, 8},
+        {"Strided", {2, 32, 64, 17, 19, 3, 3, 2, 2, 1, 1, 1, 1}, 0, 8},
+        {"Dilated", {1, 32, 32, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2}, 0, 8},
+        {"Nonsquare", {2, 32, 64, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1}, 0, 8},
+        // Only the 1/1/1-wide instance divides three channels per group.
+        {"GroupedG4Cpg3", {2, 12, 24, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 4}, 0, 1},
+        {"Depthwise", {2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 0, 1},
+        // C = 12 admits load widths up to 4 and K = 20 store widths up to 4.
+        {"C12K20", {2, 12, 20, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 3},
+        {"C24K40", {2, 24, 40, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 8},
+        {"Wide", {4, 64, 128, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 8},
+    });
+}
+
+} // namespace
+
+class IntegrationGpuGfx950ConvFwdAot : public IntegrationGpuGfx950ConvFwdServing
+{
+protected:
+    const char* engineName() const override
+    {
+        return AOT_ENGINE_NAME;
+    }
+};
+
+TEST_P(IntegrationGpuGfx950ConvFwdAot, EveryServingInstanceMatchesCpuReference)
+{
+    verifyEveryServingKernel(31, 37);
+}
+
+TEST_P(IntegrationGpuGfx950ConvFwdAot, UnbenchmarkedPlanServesACapableInstance)
 {
     const auto& variant = GetParam();
     const ScopedPluginLogCapture capture(this);
     auto& recorder = capture.recorder();
-    const std::vector<KnobSetting> knobs{enableBenchmarkingKnob()};
-    const auto candidates = variant.directArms + variant.implicitArms;
 
     auto graph = buildConvGraph(variant.dtype, variant.problem);
-    ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, knobs));
-    EXPECT_TRUE(recorder.hasLogContaining("will benchmark " + candidateCount(candidates)))
-        << recorder.getRecordedLogsAsString();
-    ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*graph, variant.dtype, 43));
-    graph.reset();
-
-    const auto measured = lastPersistedRecord();
-    ASSERT_TRUE(measured) << "Benchmarking did not persist its measured ranking";
-    const auto& [key, ranking] = *measured;
-    ASSERT_EQ(ranking.size(), candidates);
-
-    // Benchmarking executes only its winner. Serving each kernel in turn from a record
-    // that ranks it first runs every kernel, all compiled for other shapes, on this graph.
-    for(size_t arm = 0; arm < ranking.size(); ++arm)
-    {
-        auto pinned = ranking;
-        std::rotate(pinned.begin(),
-                    pinned.begin() + static_cast<std::ptrdiff_t>(arm),
-                    pinned.begin() + static_cast<std::ptrdiff_t>(arm) + 1);
-        ASSERT_NO_FATAL_FAILURE(appendPersistedRecord(key, pinned));
-        ASSERT_NO_FATAL_FAILURE(recreateHandle());
-        recorder.clearLogs();
-
-        auto served = buildConvGraph(variant.dtype, variant.problem);
-        ASSERT_NO_FATAL_FAILURE(buildAndCompile(*served, knobs));
-        const auto kernel = ingestor::toString(pinned.front().kernelId);
-        EXPECT_TRUE(recorder.hasLogContaining("served kernel " + kernel + " at rank 0"))
-            << "kernel " << arm << ": " << recorder.getRecordedLogsAsString();
-        EXPECT_FALSE(recorder.hasLogContaining("will benchmark"));
-        ASSERT_NO_FATAL_FAILURE(
-            executeAndVerifyStorage(*served, variant.dtype, 47 + static_cast<unsigned int>(arm)));
-    }
+    ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, {disableBenchmarkingKnob()}));
+    EXPECT_FALSE(selectedKernel(recorder).empty()) << recorder.getRecordedLogsAsString();
+    ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*graph, variant.dtype, 41));
 }
+
+#endif // HKP_TEST_GFX950_CONV_FWD_AOT
 
 INSTANTIATE_TEST_SUITE_P(Correctness,
                          IntegrationGpuGfx950ConvFwd,
@@ -907,6 +985,13 @@ INSTANTIATE_TEST_SUITE_P(Uncataloged,
                          IntegrationGpuGfx950ConvFwdServing,
                          ::testing::ValuesIn(uncatalogedVariants()),
                          [](const auto& info) { return info.param.name; });
+
+#ifdef HKP_TEST_GFX950_CONV_FWD_AOT
+INSTANTIATE_TEST_SUITE_P(AotInstances,
+                         IntegrationGpuGfx950ConvFwdAot,
+                         ::testing::ValuesIn(aotVariants()),
+                         [](const auto& info) { return info.param.name; });
+#endif
 
 INSTANTIATE_TEST_SUITE_P(Autotuning,
                          IntegrationGpuGfx950ConvFwdBenchmark,

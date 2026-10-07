@@ -98,6 +98,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         target_sources(hip_kernel_provider_integration_tests PRIVATE
             kernel_ingestor_engine/IntegrationGpuGfx950ConvFwd.cpp
         )
+        # Its AOT-instance suite pins hipkernel:Gfx950ConvFwdAot, a separate bundle.
+        hkp_product_offers_engine(_hkp_conv_fwd_aot_bundle "hipkernel:Gfx950ConvFwdAot")
+        if(_hkp_conv_fwd_aot_bundle)
+            target_compile_definitions(hip_kernel_provider_integration_tests
+                PRIVATE HKP_TEST_GFX950_CONV_FWD_AOT=1
+            )
+        endif()
     endif()
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp

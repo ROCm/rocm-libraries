@@ -341,6 +341,31 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "hkp: this configuration does not ship hipkernel:Gfx950ConvFwd for "
             "gfx950, so its census is not registered.")
     endif()
+
+    # Census for the shape-generic AOT-instance pack, hipkernel:Gfx950ConvFwdAot.
+    hkp_gfx950_conv_fwd_aot_available(_hkp_gfx950_conv_fwd_aot)
+    if(_hkp_gfx950_conv_fwd_aot)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx950
+            SUITES TestGfx950ConvFwdAotPacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx950ConvFwdAot for "
+            "gfx950, so its census is not registered.")
+    endif()
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)

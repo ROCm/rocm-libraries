@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import asdict, dataclass, fields, replace
 
 from dispatch.grouped_convolution import ConvGroupedRequest, dispatch_conv_grouped
@@ -610,7 +611,9 @@ def gfx950_conv_fwd_direct_spec_for_request(
     return spec
 
 
-def _base_spec_for_request(request: ConvGroupedRequest) -> Gfx950ConvFwdSpec:
+def _base_spec_for_request(
+    request: ConvGroupedRequest, *, decline_grouped_pointwise: bool = True
+) -> Gfx950ConvFwdSpec:
     """The request's problem fields under the packaged contract's request checks."""
     if not isinstance(request, ConvGroupedRequest):
         raise TypeError("expected ConvGroupedRequest")
@@ -649,7 +652,7 @@ def _base_spec_for_request(request: ConvGroupedRequest) -> Gfx950ConvFwdSpec:
         dtype=request.dtype.lower(),
         layout=request.layout.upper(),
     )
-    error = _problem_error(base)
+    error = _problem_error(base, decline_grouped_pointwise=decline_grouped_pointwise)
     if error:
         raise ValueError(error)
     return base
@@ -768,6 +771,20 @@ def gfx950_conv_fwd_serves(
                     f"direct kernel compiled for {label} {baked}, problem has {actual}",
                 )
         return True, "ok"
+    return _implicit_gemm_serves(caps, problem, spec.tile_m, spec.tile_n)
+
+
+def _implicit_gemm_serves(
+    caps: Gfx950ConvFwdCapabilities,
+    problem: Gfx950ConvFwdSpec,
+    tile_m: int,
+    tile_n: int,
+) -> tuple[bool, str]:
+    """Whether an implicit-GEMM binary with ``caps`` and this tile computes
+    ``problem``, which already passed the problem checks.
+
+    Shared by :func:`gfx950_conv_fwd_serves` and :func:`gfx950_conv_fwd_aot_serves`.
+    """
     cpg = problem.C // problem.groups
     kpg = problem.K // problem.groups
     if problem.groups > 1 and not caps.grouped:
@@ -780,9 +797,7 @@ def gfx950_conv_fwd_serves(
         return False, f"kpg={kpg} not divisible by the store width {caps.store_width}"
     if problem.Y * problem.X * cpg >= MUL24_REDUCTION_LIMIT:
         return False, "the reduction extent Y*X*C/groups must stay below 2**23"
-    args = ConvArgs.from_problem(
-        problem.to_problem(), tile_m=spec.tile_m, tile_n=spec.tile_n
-    )
+    args = ConvArgs.from_problem(problem.to_problem(), tile_m=tile_m, tile_n=tile_n)
     for axis, extent in zip("xyz", args.grid()):
         if extent > _MAX_GRID_DIM:
             return False, f"grid {axis} = {extent} exceeds {_MAX_GRID_DIM}"
@@ -808,3 +823,303 @@ class _ProblemFields:
     dH: int
     dW: int
     groups: int
+
+
+# ---------------------------------------------------------------------------
+# Shape-generic AOT instances
+# ---------------------------------------------------------------------------
+#
+# rocKE's AOT conv kernels take the problem as kernel arguments, so one binary
+# serves every problem its build-time capabilities admit. An instance is the
+# forward implicit-GEMM subset of rocKE's ``KernelIdentity``
+# (``benchmarks/common/kernel_cache.py``): tuning and capability fields, no
+# problem extents. ``instance_id`` is that identity's ``stable_hash()``; this
+# layer cannot import ``benchmarks``, so the catalog tool computes it and
+# ``library/tests`` checks the correspondence.
+
+#: Vector widths rocKE's AOT sweep builds (``CACHE_VECS``).
+_AOT_VECTOR_WIDTHS = (1, 2, 4, 8)
+#: Pipelines with the packaged launch (see ``_PACKAGED_PIPELINES``).
+_AOT_PIPELINES = _PACKAGED_PIPELINES
+#: ``KernelIdentity.stable_hash()`` is a SHA-1 hex digest.
+_AOT_INSTANCE_ID_LENGTH = 40
+
+
+@dataclass(frozen=True)
+class Gfx950ConvFwdAotSpec:
+    """One shape-generic forward implicit-GEMM instance.
+
+    Booleans are ints (0/1) so every field is a descriptor ``int`` or
+    ``string``. ``async_chunk_a``/``async_chunk_b`` are the async loaders'
+    chunk widths, a capability of an ``async_dma`` binary (0 otherwise).
+    """
+
+    dtype: str
+    tile_m: int
+    tile_n: int
+    tile_k: int
+    warp_m: int
+    warp_n: int
+    warp_tile_m: int
+    warp_tile_n: int
+    warp_tile_k: int
+    wave_size: int
+    pipeline: str
+    epilogue: str
+    vector_size_a: int
+    vector_size_b: int
+    vector_size_c: int
+    unroll_k: int
+    async_dma: int
+    async_chunk_a: int
+    async_chunk_b: int
+    grouped: int
+    instance_id: str
+    layout: str = "NHWC"
+
+    def probe_problem(self) -> _conv.ConvProblem:
+        """The problem rocKE's AOT sweep builds forward kernels against.
+
+        Mirrors ``_probe_problem("fwd", caps)`` in
+        ``benchmarks/common/kernel_sweep.py``. The emitted code does not depend
+        on its extents, only on its capability axes (grouped), so this is what
+        makes the packaged binary the one the sweep benchmarked.
+        """
+        groups = 2 if self.grouped else 1
+        return _conv.ConvProblem(
+            N=1,
+            Hi=16,
+            Wi=16,
+            C=64 * groups,
+            K=64 * groups,
+            Y=3,
+            X=3,
+            sH=1,
+            sW=1,
+            dH=1,
+            dW=1,
+            pH=1,
+            pW=1,
+            groups=groups,
+        )
+
+    def to_instance_spec(self) -> _conv.ImplicitGemmConvSpec:
+        """The rocKE builder spec, as ``kernel_sweep.build_kernel`` makes it."""
+        return _conv.ImplicitGemmConvSpec(
+            problem=self.probe_problem(),
+            name=self.kernel_symbol_prefix(),
+            data=_conv.ConvDataSpec(
+                dtype_a=self.dtype, dtype_b=self.dtype, dtype_d=self.dtype
+            ),
+            tile_m=self.tile_m,
+            tile_n=self.tile_n,
+            tile_k=self.tile_k,
+            warp_m=self.warp_m,
+            warp_n=self.warp_n,
+            warp_tile_m=self.warp_tile_m,
+            warp_tile_n=self.warp_tile_n,
+            warp_tile_k=self.warp_tile_k,
+            pipeline=self.pipeline,
+            epilogue=self.epilogue,
+            wave_size=self.wave_size,
+            vector_size_a=self.vector_size_a,
+            vector_size_b=self.vector_size_b,
+            vector_size_c=self.vector_size_c,
+            unroll_k=bool(self.unroll_k),
+            async_dma=bool(self.async_dma),
+        )
+
+    def kernel_symbol_prefix(self) -> str:
+        # rocKE appends the probe problem and tuning to this; the instance id
+        # alone already makes the symbol unique.
+        return f"hkp_conv_fwd_aot_gfx950_{self.instance_id[:24]}"
+
+    def kernel_name(self) -> str:
+        return self.to_instance_spec().kernel_name()
+
+    def block(self) -> tuple[int, int, int]:
+        return self.warp_m * self.warp_n * self.wave_size, 1, 1
+
+    def grid(self, problem: Gfx950ConvFwdSpec) -> tuple[int, int, int]:
+        """``(K/groups tiles, N*Ho*Wo tiles, groups)`` for ``problem``."""
+        args = self._conv_args(problem)
+        return args.num_pid_n, args.num_pid_m, problem.groups
+
+    def _conv_args(self, problem: Gfx950ConvFwdSpec) -> ConvArgs:
+        return ConvArgs.from_problem(
+            problem.to_problem(), tile_m=self.tile_m, tile_n=self.tile_n
+        )
+
+    def launch_signature(self) -> list[dict]:
+        return conv_args_signature(self.dtype)
+
+    def launch_values(
+        self,
+        problem: Gfx950ConvFwdSpec,
+        a_ptr: int,
+        b_ptr: int,
+        d_ptr: int,
+        a_bytes: int,
+        b_bytes: int,
+        d_bytes: int,
+    ) -> dict[str, int]:
+        """Every kernel argument for ``problem``, from rocKE's ``ConvArgs``."""
+        return self._conv_args(problem).to_launch_values(
+            a_ptr, b_ptr, d_ptr, a_bytes, b_bytes, d_bytes
+        )
+
+
+def _aot_async_chunks(spec: Gfx950ConvFwdAotSpec) -> tuple[int, int]:
+    """The chunk widths the builder picks for ``spec``'s async loaders."""
+    a_loader, b_loader = _conv.async_tile_loaders(spec.to_instance_spec())
+    return a_loader.elems_per_chunk, b_loader.elems_per_chunk
+
+
+def supports_gfx950_conv_fwd_aot(
+    spec: Gfx950ConvFwdAotSpec, *, arch: str = _ARCH
+) -> tuple[bool, str]:
+    """Whether ``spec`` is a packageable instance; rocKE's validators decide last."""
+    if arch != _ARCH:
+        return False, f"this adapter requires arch={_ARCH}, got {arch!r}"
+    if not isinstance(spec, Gfx950ConvFwdAotSpec):
+        return False, "expected Gfx950ConvFwdAotSpec"
+    if spec.dtype not in ("fp16", "bf16"):
+        return False, "the packaged forward contract supports fp16 or bf16 only"
+    if spec.layout != "NHWC":
+        return False, "the packaged forward contract requires dense NHWC storage"
+    for name in (
+        "tile_m",
+        "tile_n",
+        "tile_k",
+        "warp_m",
+        "warp_n",
+        "warp_tile_m",
+        "warp_tile_n",
+        "warp_tile_k",
+    ):
+        value = getattr(spec, name)
+        if type(value) is not int or not 0 < value <= _INT32_MAX:
+            return False, f"{name} must be a positive signed 32-bit integer"
+    if spec.wave_size != _DIRECT_WAVE_SIZE:
+        return False, f"wave_size must be {_DIRECT_WAVE_SIZE} on {_ARCH}"
+    if spec.pipeline not in _AOT_PIPELINES:
+        return False, (
+            f"the packaged forward contract supports pipelines {_AOT_PIPELINES}, "
+            f"got {spec.pipeline!r}"
+        )
+    if spec.epilogue not in ("default", "cshuffle"):
+        return False, "epilogue must be 'default' or 'cshuffle'"
+    for name in ("vector_size_a", "vector_size_b", "vector_size_c"):
+        if getattr(spec, name) not in _AOT_VECTOR_WIDTHS:
+            return False, f"{name} must be one of {_AOT_VECTOR_WIDTHS}"
+    for name in ("unroll_k", "async_dma", "grouped"):
+        value = getattr(spec, name)
+        if type(value) is not int or value not in (0, 1):
+            return False, f"{name} must be 0 or 1"
+    if spec.unroll_k and spec.async_dma:
+        return False, "unroll_k and async_dma are separate K-loop drivers"
+    if (
+        type(spec.instance_id) is not str
+        or len(spec.instance_id) != _AOT_INSTANCE_ID_LENGTH
+        or any(c not in "0123456789abcdef" for c in spec.instance_id)
+    ):
+        return False, "instance_id must be a KernelIdentity.stable_hash() (40 hex)"
+    try:
+        instance = spec.to_instance_spec()
+        instance.validate()
+        ok, reason = _conv.is_valid_spec_for_problem(
+            instance, instance.problem, arch=arch
+        )
+        if not ok:
+            return False, reason
+        if spec.async_dma:
+            chunks = _aot_async_chunks(spec)
+            if chunks != (spec.async_chunk_a, spec.async_chunk_b):
+                return False, (
+                    f"async chunk widths {chunks} differ from the recorded "
+                    f"({spec.async_chunk_a}, {spec.async_chunk_b})"
+                )
+        elif spec.async_chunk_a or spec.async_chunk_b:
+            return False, "async_chunk_a/async_chunk_b are 0 without async_dma"
+    except (TypeError, ValueError, ZeroDivisionError) as exc:
+        return False, str(exc)
+    return True, "ok"
+
+
+def gfx950_conv_fwd_aot_capabilities(
+    spec: Gfx950ConvFwdAotSpec,
+) -> Gfx950ConvFwdCapabilities:
+    """What instance ``spec`` bakes in, as :func:`gfx950_conv_fwd_capabilities` reports it.
+
+    The widths are the identity's own, not derived from a build problem. A and B
+    both run along C/groups, so both divide it exactly when their lcm does. The
+    probe problem is 3x3, so an instance is never the pointwise GEMM.
+    """
+    return Gfx950ConvFwdCapabilities(
+        load_width=math.lcm(spec.vector_size_a, spec.vector_size_b),
+        store_width=spec.vector_size_c,
+        pointwise=False,
+        grouped=bool(spec.grouped),
+    )
+
+
+def gfx950_conv_fwd_aot_serves(
+    spec: Gfx950ConvFwdAotSpec, problem: Gfx950ConvFwdSpec
+) -> tuple[bool, str]:
+    """Whether instance ``spec`` computes ``problem`` (only its problem fields).
+
+    The forward subset of ``KernelCache.supports_problem`` plus the launch
+    bounds ``ConvArgs`` enforces: the vector widths and async chunks divide the
+    contiguous per-group runs (A and B along C/groups, D along K/groups), a
+    grouped problem needs a grouped binary, every grid axis fits 65535, and the
+    reduction extent fits the kernel's 24-bit products. A grouped binary was
+    not built as pointwise, so grouped pointwise problems are served.
+    """
+    error = _problem_error(problem, decline_grouped_pointwise=False)
+    if error:
+        return False, error
+    if problem.dtype != spec.dtype:
+        return False, f"dtype {problem.dtype} != instance dtype {spec.dtype}"
+    cpg = problem.C // problem.groups
+    if spec.async_dma:
+        for chunk in (spec.async_chunk_a, spec.async_chunk_b):
+            if cpg % chunk:
+                return False, f"async chunk {chunk} does not divide cpg={cpg}"
+    return _implicit_gemm_serves(
+        gfx950_conv_fwd_aot_capabilities(spec), problem, spec.tile_m, spec.tile_n
+    )
+
+
+def build_gfx950_conv_fwd_aot(
+    spec: Gfx950ConvFwdAotSpec, *, arch: str = _ARCH
+) -> KernelDef:
+    """The typed ``(spec, *, arch)`` entry point hkp_pack calls for an instance."""
+    ok, reason = supports_gfx950_conv_fwd_aot(spec, arch=arch)
+    if not ok:
+        raise ValueError(f"invalid packaged AOT forward instance: {reason}")
+    return _conv.build_implicit_gemm_conv(spec.to_instance_spec(), arch=arch)
+
+
+def gfx950_conv_fwd_aot_problem_for_request(
+    request: ConvGroupedRequest,
+) -> Gfx950ConvFwdSpec:
+    """The problem hipkernel:Gfx950ConvFwdAot would match for ``request``.
+
+    Instances are chosen per problem by capability, so there is no single spec
+    to resolve; this is the graph side of that match (the profile's
+    ``dispatch``). Raises ``ValueError`` outside the graph contract, which
+    unlike the exact-shape one includes grouped pointwise.
+    """
+    return _base_spec_for_request(request, decline_grouped_pointwise=False)
+
+
+def supports_gfx950_conv_fwd_aot_problem(
+    problem: Gfx950ConvFwdSpec, *, arch: str = _ARCH
+) -> tuple[bool, str]:
+    """The graph contract of hipkernel:Gfx950ConvFwdAot (the profile's predicate)."""
+    if arch != _ARCH:
+        return False, f"this adapter requires arch={_ARCH}, got {arch!r}"
+    if not isinstance(problem, Gfx950ConvFwdSpec):
+        return False, "expected Gfx950ConvFwdSpec"
+    error = _problem_error(problem, decline_grouped_pointwise=False)
+    return (False, error) if error else (True, "ok")
