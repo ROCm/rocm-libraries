@@ -2587,7 +2587,7 @@ class Solution(collections.abc.Mapping):
          and state["_ScheduleIterAlg"] == 3:
         reject(state, printRejectionReason, "Complex WMMA de-interleave does not support ScheduleIterAlg=3")
         return
-      if state["InterleaveAlpha"]:
+      if state["InterleaveAlpha"] == 1:
         reject(state, printRejectionReason, "Matrix instruction doesn't support InterleaveAlpha")
         return
       if state["ProblemType"]["DataType"].isInt8():
@@ -3621,7 +3621,7 @@ class Solution(collections.abc.Mapping):
         "ScheduleGlobalRead": state["ScheduleGlobalRead"] == 1,
         "ScheduleLocalWrite": state["ScheduleLocalWrite"] == 1,
         "GlobalReadPerMfma": state["GlobalReadPerMfma"] == 1,
-        "InterleaveAlpha": not state["InterleaveAlpha"],
+        "InterleaveAlpha": state["InterleaveAlpha"] != 1,
         "DirectToLds": not state["DirectToLds"],
         "UseSgprForGRO": state["UseSgprForGRO"] == -1,
         "UseInstOffsetForGRO": not state["UseInstOffsetForGRO"],

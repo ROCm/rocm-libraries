@@ -966,7 +966,7 @@ class GlobalWriteBatchWriter:
 
     ########################################
     # rC *= alpha
-    if not self.kernel["InterleaveAlpha"] and self.applyAlpha and self.parentWriter.alphaBeforeLoadC:
+    if self.kernel["InterleaveAlpha"] != 1 and self.applyAlpha and self.parentWriter.alphaBeforeLoadC:
       module.addComment1("rC *= alpha batchElements=%s"%self.batchElements)
       if self.codeMulAlpha is None:
         elementIdx = 0
@@ -1290,7 +1290,7 @@ class GlobalWriteBatchWriter:
                     addr0, addr1, soffset=0, offset=addrCalc.globalOffset,
                     comment="load D (atomic) bpm=%u vaw=%u"%(bpm,self.atomicW)))
 
-      if self.kernel["InterleaveAlpha"] and self.applyAlpha:
+      if self.kernel["InterleaveAlpha"] == 1 and self.applyAlpha:
         module.add(self._applyAlpha(self.kernel, self.gwvw, self.ss.elementSumIdx, elementIdx, self.tmpS01))
 
       if not self.kernel["BufferStore"]:
@@ -1412,7 +1412,7 @@ class GlobalWriteBatchWriter:
                                                    self.beta, self.edge, sumIdxGSUSYNC, addrCalc))
 
     # rC *= alpha
-    if not self.kernel["InterleaveAlpha"] and self.applyAlpha and not self.parentWriter.alphaBeforeLoadC:
+    if self.kernel["InterleaveAlpha"] != 1 and self.applyAlpha and not self.parentWriter.alphaBeforeLoadC:
       module.addComment1("rC *= alpha batchElements=%s"%self.batchElements)
       if self.codeMulAlpha is None:
         elementIdx = 0
@@ -4292,11 +4292,14 @@ class GlobalWriteBatchWriter:
     module.add(SBarrier())
 
   def _interleaveAlphaWithPack(self):
-    # Scaling each element right before its own pack lets the previous batch's grouped stores drain:
-    # the pack output overlays the element's first registers, and an up-front scale of all elements
-    # would overwrite the last store's source registers while that store is still waiting to read them.
-    return bool(self.kernel["GroupLoadStore"] and not self.edge and not self.beta and self.gwvw % 8 == 0
-                and self.kernel["ProblemType"]["DestDataType"].isFloat8())
+    # InterleaveAlpha==2: defer each element's alpha multiply to just before its own
+    # conversion+pack (consumed in the store loop) instead of scaling all elements up
+    # front. The deferred multiply is emitted before the beta*C add, bias, activation
+    # and pack, so alpha still lands on the raw MI accumulator in every case. The main
+    # win is register lifetime: an up-front scale of all elements can overwrite a
+    # prior batch's store source registers while that store is still draining
+    # (e.g. fp8 + GroupLoadStore), and this spreads the VALU out instead.
+    return self.kernel["InterleaveAlpha"] == 2
 
   def _applyAlpha(self, kernel, gwvw, elementSumIdx, elementIdx, tmpS01, usePK=False):
     module = Module("applyAlpha")
