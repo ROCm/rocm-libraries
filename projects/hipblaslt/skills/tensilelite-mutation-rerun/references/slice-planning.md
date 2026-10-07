@@ -16,7 +16,7 @@ Record at least:
   "slice_id": "utilities",
   "source_sha": "<full git SHA>",
   "only_mutate": [
-    "Tensile/Common/Utilities.py"
+    "tensilelite/Common/Utilities.py"
   ],
   "test_selection": [
     "tensilelite/Tests/unit/characterization/CommonUtilities"

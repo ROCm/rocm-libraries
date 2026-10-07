@@ -13,7 +13,7 @@ Start with evidence that another developer can review:
 
 1. Search recursively below `tensilelite/Tests/unit/` for
    `test_<Module>.py`. Do not assume the file is directly below `unit/`; for
-   example, the direct tests for `Tensile/Common/Utilities.py` are in
+   example, the direct tests for `tensilelite/Common/Utilities.py` are in
    `tensilelite/Tests/unit/Common/test_Utilities.py`.
 2. Search unit tests and tests that record current behavior for imports or
    references to the target module.
@@ -49,7 +49,7 @@ mkdir -p "$OUT"
 
 set +e
 docker exec -e PYTHONPATH="$PROJ" -w "$PROJ" tl-mut \
-  pytest -p no:cacheprovider -m unit --cov=Tensile/Common \
+  pytest -p no:cacheprovider -m unit --cov=tensilelite/Common \
   --cov-report=term-missing --cov-fail-under=0 \
   tensilelite/Tests/unit/Common/test_Utilities.py \
   tensilelite/Tests/unit/characterization/CommonUtilities \
@@ -72,7 +72,7 @@ Require all four scheduling conditions before starting the mutation run:
 
 1. Pytest exits with status `0`.
 2. The coverage report contains the exact target file, such as
-   `Tensile/Common/Utilities.py`.
+   `tensilelite/Common/Utilities.py`.
 3. That file's executed-line percentage meets the reviewed scheduling
    threshold. Use 80% unless the slice records another value.
 4. The selected list contains at least one explicit test path and is not an
@@ -90,7 +90,7 @@ directory:
 
 ```json
 {
-  "module": "Tensile/Common/Utilities.py",
+  "module": "tensilelite/Common/Utilities.py",
   "source_sha": "<commit>",
   "selected": [
     "tensilelite/Tests/unit/Common/test_Utilities.py",
