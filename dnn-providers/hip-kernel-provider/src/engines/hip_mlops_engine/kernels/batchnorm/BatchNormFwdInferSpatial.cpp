@@ -36,7 +36,7 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
                                                       const ScaleType* bias,
                                                       unsigned int batchSize,
                                                       unsigned int cStride,
-                                                      unsigned int hwStride,
+                                                      unsigned int lStride,
                                                       unsigned int batchStride,
                                                       float alpha,
                                                       float beta)
@@ -53,7 +53,7 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
     {
         // load input value
         const unsigned int batchIndex
-            = (n * batchStride) + (tidx * cStride * vecSizeX) + (tidy * hwStride * vecSizeY);
+            = (n * batchStride) + (tidx * cStride * vecSizeX) + (tidy * lStride * vecSizeY);
 
         *(reinterpret_cast<InputVecType*>(value))
             = *(reinterpret_cast<const InputVecType*>(in + batchIndex));
@@ -105,10 +105,10 @@ extern "C" __global__ void __launch_bounds__(blockSize)
                                 const ScaleType* __restrict bias,
                                 double epsilon,
                                 unsigned int c,
-                                unsigned int hw,
+                                unsigned int l,
                                 unsigned int batchSize,
                                 unsigned int cStride,
-                                unsigned int hwStride,
+                                unsigned int lStride,
                                 unsigned int batchStride,
                                 float alpha,
                                 float beta)
@@ -118,11 +118,11 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     unsigned int tidz = blockIdx.z;
 
     // decide vector sizes based on problem layout
-    constexpr unsigned int vecSizeX = HIP_PLUGIN_LAYOUT_NHWC ? HIP_PLUGIN_BN_VEC_SIZE : 1;
-    constexpr unsigned int vecSizeY = HIP_PLUGIN_LAYOUT_NHWC ? 1 : HIP_PLUGIN_BN_VEC_SIZE;
+    constexpr unsigned int vecSizeX = HIP_PLUGIN_LAYOUT_CHANNEL_LAST ? HIP_PLUGIN_BN_VEC_SIZE : 1;
+    constexpr unsigned int vecSizeY = HIP_PLUGIN_LAYOUT_CHANNEL_LAST ? 1 : HIP_PLUGIN_BN_VEC_SIZE;
 
     // skip execution for out-of-bound threads
-    if(tidx * vecSizeX >= c || tidy * vecSizeY >= hw || tidz >= batchSize)
+    if(tidx * vecSizeX >= c || tidy * vecSizeY >= l || tidz >= batchSize)
     {
         return;
     }
@@ -136,7 +136,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     ScaleType pscale[HIP_PLUGIN_BN_VEC_SIZE];
     ScaleType pbias[HIP_PLUGIN_BN_VEC_SIZE];
     ComputeType invVariance[HIP_PLUGIN_BN_VEC_SIZE];
-    if constexpr(HIP_PLUGIN_LAYOUT_NHWC)
+    if constexpr(HIP_PLUGIN_LAYOUT_CHANNEL_LAST)
     {
         *(reinterpret_cast<MeanVarVecType*>(mean))
             = *(reinterpret_cast<const MeanVarVecType*>(estimatedMean + adjIndex));
@@ -147,7 +147,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
         *(reinterpret_cast<ScaleVecType*>(pbias))
             = *(reinterpret_cast<const ScaleVecType*>(bias + adjIndex));
     }
-    else // NCHW layout
+    else // NCL layout
     {
         const auto mean_val = estimatedMean[adjIndex];
         const auto variance_val = estimatedVariance[adjIndex];
@@ -179,7 +179,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
                                               pbias,
                                               batchSize,
                                               cStride,
-                                              hwStride,
+                                              lStride,
                                               batchStride,
                                               alpha,
                                               beta);
@@ -195,10 +195,10 @@ extern "C" __global__ void __launch_bounds__(blockSize)
                                       const ScaleType* __restrict scale,
                                       const ScaleType* __restrict bias,
                                       unsigned int c,
-                                      unsigned int hw,
+                                      unsigned int l,
                                       unsigned int batchSize,
                                       unsigned int cStride,
-                                      unsigned int hwStride,
+                                      unsigned int lStride,
                                       unsigned int batchStride,
                                       float alpha,
                                       float beta)
@@ -208,11 +208,11 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     unsigned int tidz = blockIdx.z;
 
     // decide vector sizes based on problem layout
-    constexpr unsigned int vecSizeX = HIP_PLUGIN_LAYOUT_NHWC ? HIP_PLUGIN_BN_VEC_SIZE : 1;
-    constexpr unsigned int vecSizeY = HIP_PLUGIN_LAYOUT_NHWC ? 1 : HIP_PLUGIN_BN_VEC_SIZE;
+    constexpr unsigned int vecSizeX = HIP_PLUGIN_LAYOUT_CHANNEL_LAST ? HIP_PLUGIN_BN_VEC_SIZE : 1;
+    constexpr unsigned int vecSizeY = HIP_PLUGIN_LAYOUT_CHANNEL_LAST ? 1 : HIP_PLUGIN_BN_VEC_SIZE;
 
     // skip execution for out-of-bound threads
-    if(tidx * vecSizeX >= c || tidy * vecSizeY >= hw || tidz >= batchSize)
+    if(tidx * vecSizeX >= c || tidy * vecSizeY >= l || tidz >= batchSize)
     {
         return;
     }
@@ -225,7 +225,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     ScaleType pscale[HIP_PLUGIN_BN_VEC_SIZE];
     ScaleType pbias[HIP_PLUGIN_BN_VEC_SIZE];
     MeanVarType invVariance[HIP_PLUGIN_BN_VEC_SIZE];
-    if constexpr(HIP_PLUGIN_LAYOUT_NHWC)
+    if constexpr(HIP_PLUGIN_LAYOUT_CHANNEL_LAST)
     {
         *(reinterpret_cast<MeanVarVecType*>(mean))
             = *(reinterpret_cast<const MeanVarVecType*>(estimatedMean + adjIndex));
@@ -236,7 +236,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
         *(reinterpret_cast<ScaleVecType*>(pbias))
             = *(reinterpret_cast<const ScaleVecType*>(bias + adjIndex));
     }
-    else // NCHW layout
+    else // NCL layout
     {
         const auto mean_val = estimatedMean[adjIndex];
         const auto invVariance_val = estimatedInvVariance[adjIndex];
@@ -262,7 +262,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
                                               pbias,
                                               batchSize,
                                               cStride,
-                                              hwStride,
+                                              lStride,
                                               batchStride,
                                               alpha,
                                               beta);

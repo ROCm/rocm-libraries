@@ -342,11 +342,11 @@ TEST(TestBatchnormFwdTrainingPlan, CompileDefaultSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_RUNNING_RESULT=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_N=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_C=3"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_HW=50176"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_INHW=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NHW=50176"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_CHW=150528"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NCHW=150528"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_L=50176"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_INL=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NL=50176"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_CL=150528"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NCL=150528"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP0_FINAL=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP1_FINAL=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP2_FINAL=1"));
@@ -355,7 +355,7 @@ TEST(TestBatchnormFwdTrainingPlan, CompileDefaultSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAXN=768"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDS_SIZE=1024"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_VEC_SIZE=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAXHW=2500"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAXL=2500"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NODPP=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDSGCN_SIZE=16"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_USESAVED=0"));
@@ -400,7 +400,7 @@ TEST(TestBatchnormFwdTrainingPlan, CompileNchwLayoutSetsCorrectDefine)
                != capturedOptions.end();
     };
 
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYOUT_NHWC=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYOUT_CHANNEL_LAST=0"));
 }
 
 TEST(TestBatchnormFwdTrainingPlan, CompileNhwcLayoutSetsCorrectDefine)
@@ -437,7 +437,7 @@ TEST(TestBatchnormFwdTrainingPlan, CompileNhwcLayoutSetsCorrectDefine)
                != capturedOptions.end();
     };
 
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYOUT_NHWC=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYOUT_CHANNEL_LAST=1"));
 }
 
 TEST(TestBatchnormFwdTrainingPlan, HasNoSaveStatsSetsCorrectDefines)
@@ -475,9 +475,8 @@ TEST(TestBatchnormFwdTrainingPlan, CompileWithUnsupportedDimensionThrows)
 {
     const MockKernelCompiler mockCompiler;
 
-    // 3D tensor is not supported
-    auto builder
-        = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph({12, 4, 1}, {1, 3, 4});
+    // 2D tensor is not supported
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph({4, 1}, {1, 4});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 

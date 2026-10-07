@@ -144,21 +144,21 @@ __forceinline__ __device__ unsigned int getStashIndex(unsigned int vindex,
     if constexpr(HIP_PLUGIN_USE_FPMIX)
     {
         // 2 _FLOAT values are used to store 1 _FLOAT_PREC value.
-        if constexpr(hip_kernel_provider::config::layout_nhwc)
+        if constexpr(hip_kernel_provider::config::layout_channel_last)
         {
             if constexpr(config::c % 2 == 0)
             {
                 // xgrp_sz values are split in two parts: even threads use 2 values at even rows,
                 // odd threads - at odd rows. The only restriction for C and xgrp_sz is that they
                 // must be even.
-                return zgroupoffset * (config::c / config::vec_size_x * config::hw)
+                return zgroupoffset * (config::c / config::vec_size_x * config::l)
                        + (vindex * 2 + xlid % 2) * nstride + ygroupoffset * ystride
                        + (xgrp_sz * xgrp_id + xlid / 2 * 2) * xstride;
             }
             else
             {
                 // Values are stored consecutively in y dim.
-                return zgroupoffset * (config::c / config::vec_size_x * config::hw)
+                return zgroupoffset * (config::c / config::vec_size_x * config::l)
                        + (vindex * 2) * nstride + ygroupoffset * ystride
                        + (xgrp_sz * xgrp_id + xlid) * xstride;
             }
@@ -166,7 +166,7 @@ __forceinline__ __device__ unsigned int getStashIndex(unsigned int vindex,
         else
         {
             // Values are stored consecutively in y dim, indices are aligned up by 2 (_FLOAT_PREC).
-            return zgroupoffset * (config::c / config::vec_size_x * config::hw)
+            return zgroupoffset * (config::c / config::vec_size_x * config::l)
                    + ((vindex * 2) * nstride + ygroupoffset * ystride
                       + (xgrp_sz * xgrp_id + xlid) * xstride + 1)
                          / 2 * 2;
@@ -175,21 +175,21 @@ __forceinline__ __device__ unsigned int getStashIndex(unsigned int vindex,
     else if constexpr(HIP_PLUGIN_USE_BFPMIX)
     {
         // 2 _FLOAT values are used to store 1 _FLOAT_PREC value.
-        if constexpr(hip_kernel_provider::config::layout_nhwc)
+        if constexpr(hip_kernel_provider::config::layout_channel_last)
         {
             if constexpr(config::c % 2 == 0)
             {
                 // xgrp_sz values are split in two parts: even threads use 2 values at even rows,
                 // odd threads - at odd rows. The only restriction for C and xgrp_sz is that they
                 // must be even.
-                return zgroupoffset * (config::c / config::vec_size_x * config::hw)
+                return zgroupoffset * (config::c / config::vec_size_x * config::l)
                        + (vindex * 2 + xlid % 2) * nstride + ygroupoffset * ystride
                        + (xgrp_sz * xgrp_id + xlid / 2 * 2) * xstride;
             }
             else
             {
                 // Values are stored consecutively in y dim.
-                return zgroupoffset * (config::c / config::vec_size_x * config::hw)
+                return zgroupoffset * (config::c / config::vec_size_x * config::l)
                        + (vindex * 2) * nstride + ygroupoffset * ystride
                        + (xgrp_sz * xgrp_id + xlid) * xstride;
             }
@@ -197,7 +197,7 @@ __forceinline__ __device__ unsigned int getStashIndex(unsigned int vindex,
         else
         {
             // Values are stored consecutively in y dim, indices are aligned up by 2 (_FLOAT_PREC).
-            return zgroupoffset * (config::c / config::vec_size_x * config::hw)
+            return zgroupoffset * (config::c / config::vec_size_x * config::l)
                    + ((vindex * 2) * nstride + ygroupoffset * ystride
                       + (xgrp_sz * xgrp_id + xlid) * xstride + 1)
                          / 2 * 2;
@@ -205,7 +205,7 @@ __forceinline__ __device__ unsigned int getStashIndex(unsigned int vindex,
     }
     else
     {
-        return zgroupoffset * (config::c / config::vec_size_x * config::hw) + vindex * nstride
+        return zgroupoffset * (config::c / config::vec_size_x * config::l) + vindex * nstride
                + ygroupoffset * ystride + (xgrp_sz * xgrp_id + xlid) * xstride;
     }
 }
@@ -222,7 +222,7 @@ __forceinline__ __device__ FpPrecType_C loadFromStash(const FpType_C* stash,
                                                       unsigned int xstride)
 {
     unsigned int nstride
-        = config::stash_method == 0 ? ystride : config::c / config::vec_size_x * config::hw;
+        = config::stash_method == 0 ? ystride : config::c / config::vec_size_x * config::l;
 
     unsigned int index = getStashIndex(
         vindex, zgroupoffset, ygroupoffset, ystride, xgrp_sz, xgrp_id, xlid, xstride, nstride);
@@ -253,7 +253,7 @@ __forceinline__ __device__ void storeToStash(FpPrecType_C value,
                                              unsigned int xstride)
 {
     unsigned int nstride
-        = config::stash_method == 0 ? ystride : config::c / config::vec_size_x * config::hw;
+        = config::stash_method == 0 ? ystride : config::c / config::vec_size_x * config::l;
 
     unsigned int index = getStashIndex(
         vindex, zgroupoffset, ygroupoffset, ystride, xgrp_sz, xgrp_id, xlid, xstride, nstride);
@@ -290,10 +290,10 @@ struct StashUpdater
         runningMean = fma(mean, expAvgFactor, newRunningMean);
 
         const FpAccumType_C adjust
-            = (config::nhw == 1)
+            = (config::nl == 1)
                   ? variance
                   : variance
-                        * (cast<FpAccumType_C>(config::nhw) / cast<FpAccumType_C>(config::nhw - 1));
+                        * (cast<FpAccumType_C>(config::nl) / cast<FpAccumType_C>(config::nl - 1));
 
         runningVariance
             = fma(cast<FpAccumType_C>(1.0) - expAvgFactor, runningVariance, expAvgFactor * adjust);

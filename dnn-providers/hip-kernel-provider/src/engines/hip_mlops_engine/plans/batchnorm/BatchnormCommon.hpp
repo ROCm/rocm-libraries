@@ -23,18 +23,16 @@ class ProblemDescription
 public:
     ProblemDescription(size_t n,
                        size_t c,
-                       size_t h,
-                       size_t w,
-                       bool isLayoutNHWC,
+                       size_t l,
+                       bool isLayoutChannelLast,
                        bool useFp16Mix,
                        bool useBfp16Mix,
                        Direction direction,
                        size_t minWorkgroups)
         : _n(n)
         , _c(c)
-        , _h(h)
-        , _w(w)
-        , _isLayoutNHWC(isLayoutNHWC)
+        , _l(l)
+        , _isLayoutChannelLast(isLayoutChannelLast)
         , _useFp16Mix(useFp16Mix)
         , _useBfp16Mix(useBfp16Mix)
         , _direction(direction)
@@ -50,17 +48,13 @@ public:
     {
         return _c;
     }
-    size_t h() const
+    size_t l() const
     {
-        return _h;
+        return _l;
     }
-    size_t w() const
+    bool isLayoutChannelLast() const
     {
-        return _w;
-    }
-    bool isLayoutNHWC() const
-    {
-        return _isLayoutNHWC;
+        return _isLayoutChannelLast;
     }
     bool useFp16Mix() const
     {
@@ -85,27 +79,26 @@ public:
 
     unsigned int inCstride() const
     {
-        return static_cast<unsigned int>(_h * _w);
+        return static_cast<unsigned int>(_l);
     }
-    unsigned int inNhw() const
+    unsigned int inNl() const
     {
-        return static_cast<unsigned int>(_n * _h * _w);
+        return static_cast<unsigned int>(_n * _l);
     }
-    unsigned int inChw() const
+    unsigned int inCl() const
     {
-        return static_cast<unsigned int>(_c * _h * _w);
+        return static_cast<unsigned int>(_c * _l);
     }
-    unsigned int inNchw() const
+    unsigned int inNcl() const
     {
-        return static_cast<unsigned int>(_n * _c * _h * _w);
+        return static_cast<unsigned int>(_n * _c * _l);
     }
 
 private:
     size_t _n;
     size_t _c;
-    size_t _h;
-    size_t _w;
-    bool _isLayoutNHWC;
+    size_t _l;
+    bool _isLayoutChannelLast;
     bool _useFp16Mix;
     bool _useBfp16Mix;
     Direction _direction;
@@ -122,12 +115,12 @@ struct KernelConfig
     size_t nelements = 1;
 };
 
-// Compute workgroup size configuration given a problem (NHWC) and a vectorsize
+// Compute workgroup size configuration given a problem (NLC, NHWC, NDHWC) and a vectorsize
 // It supports only 2D workgroups
-inline void getLocalConfigNHWC(const ProblemDescription& problem,
-                               size_t vectorsize,
-                               size_t& xlocalsize,
-                               size_t& ylocalsize)
+inline void getLocalConfigChannelLast(const ProblemDescription& problem,
+                                      size_t vectorsize,
+                                      size_t& xlocalsize,
+                                      size_t& ylocalsize)
 {
     // Compute workgroup size
     unsigned int xlocalsizeLimit = 64;
@@ -177,14 +170,14 @@ inline void getSpatialMultipleConfig(const ProblemDescription& problem,
 
     const size_t inCstride = problem.inCstride();
 
-    if(problem.isLayoutNHWC())
+    if(problem.isLayoutChannelLast())
     {
         if(problem.c() % vectorsize != 0)
         {
             // xlocalsize and ylocalsize already initialized to 1
             return;
         }
-        getLocalConfigNHWC(problem, vectorsize, xlocalsize, ylocalsize);
+        getLocalConfigChannelLast(problem, vectorsize, xlocalsize, ylocalsize);
     }
     else
     {
@@ -216,7 +209,7 @@ inline bool isSpatialMultipleApplicable(const ProblemDescription& problem,
 {
     const auto inCstride = problem.inCstride();
 
-    if(problem.isLayoutNHWC())
+    if(problem.isLayoutChannelLast())
     {
         // check if the provided vectorsize can be used
         if(problem.c() % vectorsize != 0)
@@ -282,22 +275,22 @@ inline bool isSpatialMultipleApplicable(const ProblemDescription& problem,
 inline bool useMultiple(const ProblemDescription& problem)
 {
     const auto inCstride = problem.inCstride();
-    const auto inNhw = problem.inNhw();
-    const auto thrInNhw = static_cast<unsigned int>(32 * 1024 * 1024);
+    const auto inNl = problem.inNl();
+    const auto thrInNl = static_cast<unsigned int>(32 * 1024 * 1024);
 
-    if(!problem.isLayoutNHWC() && problem.direction() == Direction::BACKWARD)
+    if(!problem.isLayoutChannelLast() && problem.direction() == Direction::BACKWARD)
     {
-        if((inNhw < thrInNhw && inCstride > 1024) || (inNhw < thrInNhw && inCstride > 512)
+        if((inNl < thrInNl && inCstride > 1024) || (inNl < thrInNl && inCstride > 512)
            || inCstride <= 512)
         {
             return false;
         }
     }
 
-    if(!problem.isLayoutNHWC() && problem.direction() == Direction::FORWARD_TRAINING)
+    if(!problem.isLayoutChannelLast() && problem.direction() == Direction::FORWARD_TRAINING)
     {
         const bool condition1
-            = (problem.n() < 3) || (inCstride <= 512) || (inNhw < 33554432 && inCstride > 1024)
+            = (problem.n() < 3) || (inCstride <= 512) || (inNl < 33554432 && inCstride > 1024)
               || (problem.n() >= 256 && inCstride > 60
                   && (problem.useFp16Mix() || problem.useBfp16Mix()))
               || ((problem.useFp16Mix() || problem.useBfp16Mix()) && inCstride > 512);
@@ -334,7 +327,7 @@ inline int getStashMethod(const ProblemDescription& problem,
     {
         stashMethod = 1;
     }
-    if(problem.isLayoutNHWC() && !problem.useFp32() && (problem.c() % 2 != 0)
+    if(problem.isLayoutChannelLast() && !problem.useFp32() && (problem.c() % 2 != 0)
        && (lastZocalsize >= stashValues))
     {
         stashMethod = 2;
@@ -346,7 +339,7 @@ inline void defaultConfigSpatialSingle(const ProblemDescription& problem, Kernel
 {
     const auto n = problem.n();
     const auto inCstride = problem.inCstride();
-    const auto inNhw = problem.inNhw();
+    const auto inNl = problem.inNl();
 
     // NCHW supports also variants 0 and 3 which can be much faster than
     // variant 1 but have more restrictions. Here we decide if we use variant
@@ -356,7 +349,7 @@ inline void defaultConfigSpatialSingle(const ProblemDescription& problem, Kernel
     // we add the latter for tuning to be sure and because it is cheap to run.
     // NOTE: Currently we don't have the tuning infrastructure in place, so we
     // are only selecting one variant to run based on heuristics.
-    if(!problem.isLayoutNHWC())
+    if(!problem.isLayoutChannelLast())
     {
         if(problem.direction() == Direction::BACKWARD)
         {
@@ -367,20 +360,20 @@ inline void defaultConfigSpatialSingle(const ProblemDescription& problem, Kernel
                 return;
             }
 
-            // N*H*W < 32M and H*W > 1024
+            // N*L, N*H*W, N*D*H*W < 32M and L, H*W, D*H*W > 1024
             // use batchnorm variant#1 implementation which parallelize
-            // work groups over channels and loop through NHW.
-            if((inNhw < (32 * 1024 * 1024) && inCstride > 1024))
+            // work groups over channels and loop through NL/NHW/NDHW.
+            if((inNl < (32 * 1024 * 1024) && inCstride > 1024))
             {
                 config.variant = 1;
                 config.vectorsize = 1;
                 return;
             }
 
-            // N*H*W < 32M and H*W > 512
+            // N*L, N*H*W, N*D*H*W < 32M and L, H*W, D*H*W > 512
             // use batchnorm variant#1 or variant#3 implementation which
             // parallelize work groups over channels and loop through N.
-            if(inNhw < (32 * 1024 * 1024) && inCstride > 512)
+            if(inNl < (32 * 1024 * 1024) && inCstride > 512)
             {
                 if(n >= 32)
                 {
@@ -394,9 +387,9 @@ inline void defaultConfigSpatialSingle(const ProblemDescription& problem, Kernel
                 return;
             }
 
-            // H*W < 512
+            // L, H*W, D*H*W < 512
             // use batchnorm variant#0 or variant#3 implementation
-            // based on batch size and H*W
+            // based on batch size and L, H*W, D*H*W
             if(inCstride <= 512)
             {
                 if((n > 64) && (inCstride > 160))
@@ -420,7 +413,7 @@ inline void defaultConfigSpatialSingle(const ProblemDescription& problem, Kernel
                 return;
             }
 
-            if((inNhw < 33554432 && inCstride > 1024)
+            if((inNl < 33554432 && inCstride > 1024)
                || ((n >= 256) && (inCstride > 60)
                    && (problem.useFp16Mix() || problem.useBfp16Mix()))
                || ((inCstride > 512) && (problem.useFp16Mix() || problem.useBfp16Mix())))
@@ -463,7 +456,7 @@ inline void defaultConfigSpatialMultiple(const ProblemDescription& problem,
     size_t vectorsizeDefault = 4;
     const size_t nelementsDefault = problem.n();
 
-    if(problem.isLayoutNHWC())
+    if(problem.isLayoutChannelLast())
     {
         // First add the default instance, which should work well for a large range of problems
         {

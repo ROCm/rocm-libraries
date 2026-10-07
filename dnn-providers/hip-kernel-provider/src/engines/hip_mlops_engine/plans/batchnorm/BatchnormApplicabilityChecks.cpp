@@ -35,6 +35,18 @@ void BatchnormValidator::validateSpatialDimensions(const std::vector<int64_t>& i
     }
 }
 
+void BatchnormValidator::validateDimensionCount(size_t numDims)
+{
+    constexpr size_t MIN_SUPPORTED_DIMS = 3;
+    constexpr size_t MAX_SUPPORTED_DIMS = 5;
+
+    if(numDims < MIN_SUPPORTED_DIMS || numDims > MAX_SUPPORTED_DIMS)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Only 3D, 4D or 5D tensors supported.");
+    }
+}
+
 // --- Component Validators ---
 
 void BatchnormValidator::checkTensorLayoutsAndDimsSupported(const std::vector<int64_t>& tensorIds)

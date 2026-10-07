@@ -111,7 +111,7 @@ private:
     unsigned int _inCstride = 0;
     unsigned int _batchCount = 0;
     unsigned int _cStride = 0;
-    unsigned int _hwStride = 0;
+    unsigned int _lStride = 0;
     unsigned int _batchStride = 0;
 };
 

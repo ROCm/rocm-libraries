@@ -219,25 +219,32 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
 
     size_t n = 0;
     size_t c = 0;
-    size_t h = 0;
-    size_t w = 0;
-    // Check if 4D (NCHW/NHWC) or 5D (NCDHW/NDHWC)
-    if(xDims->size() == 4)
+    size_t l = 0;
+    // Check if 3D (NCL/NLC), 4D (NCHW/NHWC) or 5D (NCDHW/NDHWC)
+    if(xDims->size() == 3)
     {
         n = static_cast<size_t>(xDims->Get(0));
         c = static_cast<size_t>(xDims->Get(1));
-        h = static_cast<size_t>(xDims->Get(2));
-        w = static_cast<size_t>(xDims->Get(3));
+        l = static_cast<size_t>(xDims->Get(2));
+    }
+    else if(xDims->size() == 4)
+    {
+        n = static_cast<size_t>(xDims->Get(0));
+        c = static_cast<size_t>(xDims->Get(1));
+        auto h = static_cast<size_t>(xDims->Get(2));
+        auto w = static_cast<size_t>(xDims->Get(3));
+        // For 4D, combine H*W into spatial dimension
+        l = h * w;
     }
     else if(xDims->size() == 5)
     {
         n = static_cast<size_t>(xDims->Get(0));
         c = static_cast<size_t>(xDims->Get(1));
         auto d = static_cast<size_t>(xDims->Get(2));
-        h = static_cast<size_t>(xDims->Get(3));
-        w = static_cast<size_t>(xDims->Get(4));
+        auto h = static_cast<size_t>(xDims->Get(3));
+        auto w = static_cast<size_t>(xDims->Get(4));
         // For 5D, combine D*H*W into spatial dimension
-        h = d * h;
+        l = d * h * w;
     }
     else
     {
@@ -246,12 +253,12 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
                                                            + std::to_string(xDims->size()));
     }
 
-    auto inCstride = static_cast<unsigned int>(h * w);
-    auto inNhw = static_cast<unsigned int>(n * h * w);
-    auto invInNhw = static_cast<float>(1.0 / inNhw);
+    auto inCstride = static_cast<unsigned int>(l);
+    auto inNl = static_cast<unsigned int>(n * l);
+    auto invInNl = static_cast<float>(1.0 / inNl);
 
     // Detect layout
-    const bool isLayoutNHWC = isChannelLastLayout(_trainingParams.x());
+    const bool isLayoutChannelLast = isChannelLastLayout(_trainingParams.x());
 
     // Kernel launch parameters
     // NOTE: These are generally selected based on heuristics and tuning,
@@ -283,9 +290,8 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     const hip_kernel_provider::batchnorm::ProblemDescription problem(
         n,
         c,
-        h,
-        w,
-        isLayoutNHWC,
+        l,
+        isLayoutChannelLast,
         useFp16Mix,
         useBfp16Mix,
         hip_kernel_provider::batchnorm::Direction::FORWARD_TRAINING,
@@ -332,7 +338,7 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     else
     {
         // Compute grid size
-        if(isLayoutNHWC)
+        if(isLayoutChannelLast)
         {
             xgridsize = xlocalsize * ((c / vectorsize + xlocalsize - 1) / xlocalsize);
             ygridsize = ylocalsize * ((inCstride + ylocalsize - 1) / ylocalsize);
@@ -348,8 +354,8 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
         stashMethod = hip_kernel_provider::batchnorm::getStashMethod(
             problem, stashValuesFwd, ylocalsize, zlocalsize, nelements);
 
-        // WG size for Final kernels (NHWC)
-        if(isLayoutNHWC && c % 2 == 0 && xlocalsize % 2 == 0)
+        // WG size for Final kernels (NLC/NHWC/NDHWC)
+        if(isLayoutChannelLast && c % 2 == 0 && xlocalsize % 2 == 0)
         {
             // increase number of blocks (xgridsize does not change for final kernels)
             // 2 is the lower bound because of stashing
@@ -390,10 +396,10 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     options.update("HIP_PLUGIN_BN_LDSGCN_SIZE", ldsgcn);
     options.update("HIP_PLUGIN_BN_N", n);
     options.update("HIP_PLUGIN_BN_C", c);
-    options.update("HIP_PLUGIN_BN_HW", inCstride);
-    options.update("HIP_PLUGIN_BN_NHW", inNhw);
-    options.update("HIP_PLUGIN_BN_CHW", c * inCstride);
-    options.update("HIP_PLUGIN_BN_NCHW", c * inNhw);
+    options.update("HIP_PLUGIN_BN_L", inCstride);
+    options.update("HIP_PLUGIN_BN_NL", inNl);
+    options.update("HIP_PLUGIN_BN_CL", c * inCstride);
+    options.update("HIP_PLUGIN_BN_NCL", c * inNl);
     options.update("HIP_PLUGIN_BN_N_ELEMENTS", nelements);
     options.update("HIP_PLUGIN_BN_GRP0", xlocalsize);
     options.update("HIP_PLUGIN_BN_GRP1", ylocalsize);
@@ -454,7 +460,7 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
 
     // Store kernel launch parameters
     _kernelVariant = variant;
-    _invInNhw = invInNhw;
+    _invInNl = invInNl;
 }
 
 void BatchnormFwdTrainingPlan::execute(const Handle& handle,
@@ -560,7 +566,7 @@ void BatchnormFwdTrainingPlan::execute(const Handle& handle,
                                         yBuffer.ptr,
                                         scaleBuffer.ptr,
                                         biasBuffer.ptr,
-                                        _invInNhw,
+                                        _invInNl,
                                         expAvgFactor,
                                         prevRunningMeanPtr,
                                         prevRunningVariancePtr,
@@ -579,7 +585,7 @@ void BatchnormFwdTrainingPlan::execute(const Handle& handle,
                                         yBuffer.ptr,
                                         scaleBuffer.ptr,
                                         biasBuffer.ptr,
-                                        _invInNhw,
+                                        _invInNl,
                                         epsilon,
                                         resultSaveMeanPtr,
                                         resultSaveInvVariancePtr,
@@ -593,7 +599,7 @@ void BatchnormFwdTrainingPlan::execute(const Handle& handle,
                                         yBuffer.ptr,
                                         scaleBuffer.ptr,
                                         biasBuffer.ptr,
-                                        _invInNhw,
+                                        _invInNl,
                                         expAvgFactor,
                                         prevRunningMeanPtr,
                                         prevRunningVariancePtr,
@@ -610,7 +616,7 @@ void BatchnormFwdTrainingPlan::execute(const Handle& handle,
                                         yBuffer.ptr,
                                         scaleBuffer.ptr,
                                         biasBuffer.ptr,
-                                        _invInNhw,
+                                        _invInNl,
                                         epsilon,
                                         activationAlpha,
                                         activationBeta);
@@ -626,7 +632,7 @@ void BatchnormFwdTrainingPlan::execute(const Handle& handle,
         {
             _runnableKernels[1]->launch(handle.getStream(),
                                         yBuffer.ptr,
-                                        _invInNhw,
+                                        _invInNl,
                                         expAvgFactor,
                                         prevRunningMeanPtr,
                                         prevRunningVariancePtr,
@@ -640,7 +646,7 @@ void BatchnormFwdTrainingPlan::execute(const Handle& handle,
         {
             _runnableKernels[1]->launch(handle.getStream(),
                                         yBuffer.ptr,
-                                        _invInNhw,
+                                        _invInNl,
                                         epsilon,
                                         resultSaveMeanPtr,
                                         resultSaveInvVariancePtr);
@@ -649,7 +655,7 @@ void BatchnormFwdTrainingPlan::execute(const Handle& handle,
         {
             _runnableKernels[1]->launch(handle.getStream(),
                                         yBuffer.ptr,
-                                        _invInNhw,
+                                        _invInNl,
                                         expAvgFactor,
                                         prevRunningMeanPtr,
                                         prevRunningVariancePtr,
@@ -659,7 +665,7 @@ void BatchnormFwdTrainingPlan::execute(const Handle& handle,
         }
         else
         {
-            _runnableKernels[1]->launch(handle.getStream(), yBuffer.ptr, _invInNhw, epsilon);
+            _runnableKernels[1]->launch(handle.getStream(), yBuffer.ptr, _invInNl, epsilon);
         }
         // 3. BatchNormFwdTrainSpatialNorm kernel
         _runnableKernels[2]->launch(handle.getStream(),
