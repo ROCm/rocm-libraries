@@ -101,8 +101,8 @@ def validate_provenance(snapshot: object) -> dict:
         "umd": sorted(matchers, key=lambda item: item["id"]),
     }
     if "selector_revision" in snapshot:
-        # A descriptor-backed engine may also record its provider build; the loader
-        # checks each independently.
+        # A descriptor-backed engine may also record its selector revision; the loader
+        # checks it independently of the descriptor revisions.
         if (
             not isinstance(snapshot["selector_revision"], str)
             or not snapshot["selector_revision"]
@@ -155,8 +155,8 @@ def compare_provenance(
     trained = validate_provenance(trained)
     actual = validate_provenance(actual)
     recorded_revision = trained.get("selector_revision")
-    # Only when `actual` has one: snapshots built from descriptors never carry the
-    # provider build.
+    # Only when `actual` has one: a snapshot built from descriptors cannot name the
+    # provider's selector revision.
     if (
         recorded_revision is not None
         and "selector_revision" in actual

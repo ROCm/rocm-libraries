@@ -41,6 +41,7 @@
 #include <iostream>
 #include <map>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -1480,10 +1481,16 @@ int runGenerator(const std::vector<std::string>& args)
 
             // Stem must equal manifest `name`: scoring joins bench output by stem.
             const auto name = graph.name + ".fb";
-            std::ofstream problem(root / "graphs" / name, std::ios::binary);
+            const auto graphPath = root / "graphs" / name;
+            std::ofstream problem(graphPath, std::ios::binary);
             problem.write(reinterpret_cast<const char*>(graph.bytes.data()),
                           static_cast<std::streamsize>(graph.bytes.size()));
             problem.close();
+            // The manifest lists this file, so a corpus missing its bytes must not be written.
+            if(!problem)
+            {
+                throw std::runtime_error("Failed to write graph file: " + graphPath.string());
+            }
 
             hipdnn_corpus_gen::ManifestEntry row;
             row.entry = entry;
@@ -1508,7 +1515,7 @@ int runGenerator(const std::vector<std::string>& args)
             {
                 commands << " --plugin-dir " << dir;
             }
-            commands << " --graph " << (root / "graphs" / name).string();
+            commands << " --graph " << graphPath.string();
             if(!options.engineName.empty())
             {
                 commands << " --engine-name " << options.engineName;

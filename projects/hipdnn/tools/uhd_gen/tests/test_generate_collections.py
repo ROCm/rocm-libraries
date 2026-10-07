@@ -78,6 +78,11 @@ def world(tmp_path, monkeypatch):
                     **provenance,
                     "selector_revision": engine["revision"],
                 },
+                **(
+                    {"provider_build": engine["provider_build"]}
+                    if "provider_build" in engine
+                    else {}
+                ),
             },
             "features": {
                 "graph.flops": 2e9 * (graph["size"] + 1),
@@ -259,6 +264,31 @@ def test_the_newest_measurement_of_a_graph_on_a_device_is_the_label(world, evalu
     assert [c["path"] for c in manifest["collections"]] == [str(older), str(newer)]
 
 
+def test_a_rebuilt_provider_measures_repeats_not_another_binding(world, evaluator):
+    """`binding.provider_build` names the loaded binary, not the selector contract."""
+    build = {"name": "provider", "version": "1.0+aaaaaaa", "api_version": "1"}
+    older = _collect(
+        world,
+        "older",
+        collected_at="2026-09-28T10:00:00+00:00",
+        provider_build=build,
+    )
+    newer = _collect(
+        world,
+        "newer",
+        collected_at="2026-09-30T10:00:00+00:00",
+        provider_build={**build, "version": "1.0+bbbbbbb"},
+        scale=2.0,
+    )
+    code, output = _train(world, "rebuilt", evaluator, collections=[older, newer])
+    assert code == 0
+    assert _labels(output) == _labels(newer)
+    manifest = json.loads(
+        (output / "generation_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["superseded_rows"] == GRAPHS
+
+
 def test_a_shape_measured_on_two_gpus_of_the_arch_is_trained_on_once(world, evaluator):
     """Another GPU of the same arch measures the same problem: one label, the newest."""
     older = _collect(
@@ -339,11 +369,16 @@ def test_distinct_configurations_on_one_shape_are_distinct_rows():
         ("b", {"benchmark": "g", "arch": "gfx942"}),
     ]
     assert one_measurement_per_shape(l1) == ([l1[1][1]], 1)
+
     # A repeat under another binding is a revision change, never a silent supersede.
+    def bound(revision, build):
+        binding = {"selector_revision": revision, "provider_build": build}
+        return dict(l1[0][1], binding=json.dumps(binding))
+
     with pytest.raises(ValueError, match="two engine bindings"):
-        one_measurement_per_shape(
-            [("a", dict(l1[0][1], binding="r1")), ("b", dict(l1[1][1], binding="r2"))]
-        )
+        one_measurement_per_shape([("a", bound("r1", "x")), ("b", bound("r2", "x"))])
+    rebuilt = [("a", bound("r1", "x")), ("b", bound("r1", "y"))]
+    assert one_measurement_per_shape(rebuilt) == ([rebuilt[1][1]], 1)
 
 
 @pytest.mark.parametrize(
@@ -551,6 +586,8 @@ def test_a_closed_shape_space_trains_on_every_shape_and_reports_recall(
         (output / "model" / "eval_report.json").read_text(encoding="utf-8")
     )
     assert report["metrics"]["problems_scored"] == GRAPHS, "recall scores every shape"
+    # Scored on its own training shapes, so it never claims a held-out slice.
+    assert report["holdout_integrity"]["status"] == "recall"
 
 
 def test_a_named_evaluation_set_holds_out_exactly_its_graphs(world, evaluator):

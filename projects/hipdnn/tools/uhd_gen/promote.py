@@ -14,7 +14,12 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .artifact import artifact_digest, is_grouped_tree, verify_tree_artifact
+from .artifact import (
+    artifact_digest,
+    is_contained_relative_path,
+    is_grouped_tree,
+    verify_tree_artifact,
+)
 from .correctness import REASON, VERDICT, numerical_reason, numerical_verdict
 from .features import (
     compute_features_hash,
@@ -1006,6 +1011,8 @@ def _validate_descriptor(document: dict, path: Path) -> None:
         "features_hash",
         "categorical_encoding",
         "trained_against",
+        # Free-form authoring notes, which the loader admits at the root and never reads.
+        "provenance",
         *_ADAPTERS,
     }
     if set(document) - known:
@@ -1123,7 +1130,7 @@ def _validate_descriptor(document: dict, path: Path) -> None:
         payload = body.get(key)
         if not isinstance(payload, str) or not payload:
             raise PromoteError(f"{path}: missing {adapter}.{key}")
-        if not _is_contained_relative_path(payload):
+        if not is_contained_relative_path(payload):
             raise PromoteError(
                 f"{path}: {adapter}.{key} {payload!r} must be a relative path inside "
                 "the descriptor's directory"
@@ -1144,26 +1151,6 @@ def _validate_descriptor(document: dict, path: Path) -> None:
             f"{path}: custom_library configuration is not supported; omit config or "
             "leave it an empty object"
         )
-
-
-def _is_contained_relative_path(payload: str) -> bool:
-    """Whether `payload` names a file inside the descriptor's directory, as UhdParser reads it.
-
-    No leading `/` or `\\` (root, UNC), no drive prefix, and the lexically normalised path
-    may neither climb above the directory nor name the directory itself. Both separators
-    count on every platform, so a descriptor resolves the same way wherever it is loaded.
-    """
-    if payload[:1] in ("/", "\\") or re.match(r"[A-Za-z]:", payload):
-        return False
-    depth = 0
-    for segment in re.split(r"[/\\]", payload):
-        if segment == "..":
-            depth -= 1
-            if depth < 0:
-                return False
-        elif segment not in ("", "."):
-            depth += 1
-    return depth > 0
 
 
 def _artifact_path(descriptor, descriptor_path, model_dir):

@@ -234,6 +234,23 @@ def artifact_digest(path: Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def is_contained_relative_path(payload: str) -> bool:
+    """Whether `payload` names a file inside the descriptor's directory, as UhdParser reads it.
+
+    Portable names are '/'-separated on every platform: no leading '/', no '\\', ':' or
+    NUL, and no '..' segment anywhere. The final segment must name a file (neither empty
+    nor '.'); './x' and 'a//b' are admitted.
+    """
+    if (
+        not payload
+        or payload.startswith("/")
+        or any(character in payload for character in "\\:\0")
+    ):
+        return False
+    segments = payload.split("/")
+    return ".." not in segments and segments[-1] not in ("", ".")
+
+
 def _check_trees(trees, num_features: int, where: str) -> None:
     """`TreeDataAdapter::prepareTrees`, check for check, with its reasons."""
     for index, tree in enumerate(trees or []):
@@ -340,9 +357,17 @@ def verify_tree_artifact(
                 f"{path}: grouped model's group_by_feature_index {model.groupByFeatureIndex} "
                 f"is outside the declared feature count {model.numFeatures}"
             )
+        values = set()
         for index, group in enumerate(model.groups):
             if group is None:
                 raise ValueError(f"{path}: null group")
+            # A set of floats treats 0.0 and -0.0 as one value, as the runtime's std::set does.
+            value = float(group.value)
+            if not math.isfinite(value) or value in values:
+                raise ValueError(
+                    f"{path}: group {index} value {value!r} must be finite and unique"
+                )
+            values.add(value)
             _check_trees(group.trees, model.numFeatures, f"{path} group {index}")
     if feature_count is not None:
         verify_feature_count(model.numFeatures, feature_count, path)

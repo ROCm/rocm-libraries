@@ -241,9 +241,9 @@ It validates everything before writing anything, and refuses rather than half-su
 
 - the descriptor must satisfy the canonical schema and its artifact must exist;
   missing or incompatible models otherwise leave runtime selection in fallback. As the
-  runtime parser requires, the `artifact` or `library` path is relative and names a file
-  inside the descriptor's directory (no leading `/` or `\`, no drive prefix, no climbing
-  out with `..`; both separators count on every platform), a declared `hash` is 64
+  runtime parser requires, the `artifact` or `library` path is relative, `/`-separated and
+  names a file inside the descriptor's directory (no leading `/`, no `\`, `:` or NUL, no
+  `..` segment anywhere, and a final segment other than empty or `.`), a declared `hash` is 64
   lowercase hex digits with no prefix, and a `custom_library` body declares its `hash`;
 - the artifact must pass the checks the runtime applies when it loads it: for
   `tree_data`, the declared digest, the `HGBM` file identifier, the FlatBuffers
@@ -475,7 +475,7 @@ is backwards, and `evaluate` fails instead of printing a plausible small number.
 | `metrics.references` | §11.4's `oracle`, `static_order` and `random`, each carrying the same `top1_regret`/`regret_tail`/`topk_recall`/`per_regime` block plus a note on how it was derived |
 | `ties` | tolerance, sigma, whether the noise band applied, and the policy |
 | `model` | artifact, features, what it was trained on, how many rows |
-| `holdout_integrity` | `held_out`, `COMPROMISED`, or `unknown`, with the reason |
+| `holdout_integrity` | `held_out`, `COMPROMISED`, or `unknown`, with the reason; `generate --recall` records `recall` |
 | `not_implemented` | the parts of §11.2/§11.3/§11.4 this command does not compute |
 | `warnings` | every loud condition, in the order printed |
 | `per_problem` | with `--include-per-problem`: key, regime, candidate count, oracle, pick, regret, ranks |
@@ -687,7 +687,12 @@ nothing is injected there.
 bench crashes, or its response fails validation) is skipped for every device and metric
 and recorded with its error under `failed_graphs` in `generation_manifest.json`. Up to
 `--max-graph-failures` of the graphs (a fraction, default `0.05`) may fail; more fails
-the run and lists them, since failures that common are systematic, not incidental.
+the run and lists them, since failures that common are systematic, not incidental. The
+measurements of the graphs that did collect are not lost: the run writes them as a
+collection (`collection_manifest.json`, with every failure under `failed_graphs`) in the
+staging directory it reports, publishes no output directory and trains nothing. After
+investigating the failures, `python -m uhd_gen.dataset add --collection <staging-directory>`
+converts that collection, and `generate --dataset` trains on it without measuring again.
 
 Collection times **one invocation per graph**: `hipdnn_bench enumerate` decides the
 candidate set, then a single `hipdnn_bench --sweep --json` times every candidate in
@@ -767,14 +772,19 @@ python -m uhd_gen generate $COMMON --role predict_engine --output-dir out/l1
 `--engine-id` is the id `hipdnn_list_engines` reports for the engine. `generate` promotes
 into `--descriptor-tree`; `promote` installs a kept model (`out/l1/model_<metric>/`) into
 the source tree, run with `--dry-run` first. `reproduce/compare_engines.py` joins
-several engines' L1 `corpus*.csv` on the corpus manifest's `benchmark` ids and reports
-coverage and per-regime winners over the graphs more than one engine serves.
+several engines' L1 `corpus*.csv` on the corpus manifest's `benchmark` ids and reports,
+per ranking metric, coverage and per-regime winners over the graphs more than one engine
+serves. A row counts only toward the metric its `binding.metric` was collected under, so a
+label may name both of an engine's corpora (`MIOpen=corpus_tflops.csv`,
+`MIOpen=corpus_time.csv`).
 
 ### Engine-level immediate predictions
 
 `predict_engine` trains an engine's **normal untuned performance**, not the best
 configuration found by a sweep. Collection builds only that engine's plan with
-`global.benchmarking=0`, warms it up, and measures ordinary execution with HIP events.
+`global.benchmarking=0`, and `generate` runs the bench with `HIPDNN_FORCE_BENCHMARKING=0` so
+an inherited override cannot turn the search back on; it warms the plan up and measures
+ordinary execution with HIP events.
 It does not enumerate configurations or invoke autotune; normal engine cache behavior is
 unchanged. Full-graph work and elapsed time determine the TFLOPS label; unsupported work
 accounting is not replaced with a guessed label. Only a `tflops` collection needs
@@ -871,9 +881,11 @@ declared id resolves to nothing contributes no score and falls back to static or
 An opaque engine's UHD must not name a descriptor set in `trained_against` -- it has no UED,
 KMD or UMD to be trained against, and one that names them is refused. It must instead record
 `trained_against.selector_revision`: the exact selector-revision string the engine reports in
-its prediction binding, which is the provider build the measurements were taken on. A model
-recording a different revision, or none, is refused -- the engine stays applicable and reports
-UNAVAILABLE naming both revisions.
+its prediction binding, which names the selection logic the measurements were taken under.
+The binding's `provider_build` (the loaded plugin's name, version and API version) is a
+diagnostic, never a compatibility key: measurements from two builds reporting one selector
+revision are repeats of each other. A model recording a different revision, or none, is
+refused -- the engine stays applicable and reports UNAVAILABLE naming both revisions.
 Start a fresh consumer process after installing a model: a compiled model is cached
 for the lifetime of the engine that owns it.
 

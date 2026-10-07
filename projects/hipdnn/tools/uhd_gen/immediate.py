@@ -144,6 +144,17 @@ def validate_binding(value) -> dict:
     return binding
 
 
+def binding_identity(binding: dict, *, include_uhd_id: bool = True) -> dict:
+    """`binding` without `provider_build`: the loaded plugin's name and version, which the
+    runtime reports as a diagnostic and never as a model compatibility key.
+
+    Two measurements whose identities match were taken under one contract, whichever build
+    answered. `include_uhd_id=False` also drops the model id an opaque engine declares.
+    """
+    ignored = ("provider_build",) if include_uhd_id else ("provider_build", "uhd_id")
+    return {key: value for key, value in binding.items() if key not in ignored}
+
+
 def require_binding_metric(
     binding: dict, metric: str, where: str, selector_revision: str | None = None
 ) -> None:
@@ -519,12 +530,8 @@ def prediction_scorer(descriptor: dict, responses: list[dict]):
             response, binding, prediction = selected[key]
             measured_binding = validate_binding(row["binding"])
             if (
-                {key: value for key, value in binding.items() if key != "uhd_id"}
-                != {
-                    key: value
-                    for key, value in measured_binding.items()
-                    if key != "uhd_id"
-                }
+                binding_identity(binding, include_uhd_id=False)
+                != binding_identity(measured_binding, include_uhd_id=False)
                 or response.get("arch") != row["arch"]
                 or _object(response.get("features"), "prediction features")
                 != _object(row["features"], "features")

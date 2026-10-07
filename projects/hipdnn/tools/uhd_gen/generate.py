@@ -40,6 +40,7 @@ from .provenance import ROLES, descriptor_id, snapshot_provenance
 from .immediate import (
     LABEL_STATISTIC,
     ROLE,
+    binding_identity,
     normalize_row,
     normalize_corpus,
     training_binding,
@@ -375,13 +376,19 @@ def one_measurement_per_shape(measured: list) -> tuple[list, int]:
 
     `measured` is `(session, row)` in measurement order; returns (rows, dropped). A repeat
     kept twice is weighted twice and can straddle the holdout split, which keys on device.
-    A repeat under another binding is refused, not superseded, so a mix cannot hide.
+    A repeat under another binding is refused, not superseded, so a mix cannot hide. The
+    binding's `provider_build` is diagnostic: a rebuilt provider's measurement supersedes.
     """
     newest: dict = {}
     binding: dict = {}
     for session, row in measured:
         key = _measurement_key(row)
-        if binding.setdefault(key, row.get("binding")) != row.get("binding"):
+        current = row.get("binding")
+        if current is not None:
+            current = binding_identity(
+                json.loads(current) if isinstance(current, str) else current
+            )
+        if binding.setdefault(key, current) != current:
             raise ValueError(
                 f"{key[0]} on {key[1]} was measured under two engine bindings; "
                 "the selector or descriptor provenance changed between measurements"
@@ -957,6 +964,9 @@ def _measure(
     environment.pop("HIPDNN_DESCRIPTOR_RUNTIME_DIR", None)
     if immediate:
         environment["HIPDNN_DESCRIPTOR_DIR"] = str(tree)
+        # An L1 label is the engine's untuned pick. HIPDNN_FORCE_BENCHMARKING overrides the
+        # bench's global.benchmarking=0 in every provider that implements the knob.
+        environment["HIPDNN_FORCE_BENCHMARKING"] = "0"
     else:
         collection_tree = stage / "collection_descriptors"
         shutil.copytree(tree, collection_tree)
@@ -988,7 +998,7 @@ def _measure(
         }
         graph_inputs.append(graph_input)
         # A failing graph is skipped whole (every device and metric, so all corpora cover
-        # one problem set); the failure budget below catches systematic failures.
+        # one problem set); `run_generate`'s failure budget catches systematic failures.
         try:
             if immediate and not binary:
                 graph_document = json.loads(payload.decode("utf-8"))
@@ -1064,22 +1074,6 @@ def _measure(
         for source in sources:
             rows[source].extend(graph_rows[source])
         published.update(graph_names)
-    if len(failed_graphs) > args.max_graph_failures * len(graphs):
-        _write_json(stage / "failed_graphs.json", failed_graphs)
-        listed = "\n".join(
-            f"  {failure['source']}: {failure['error']}"
-            for failure in failed_graphs[:10]
-        )
-        more = (
-            f"\n  ... and {len(failed_graphs) - 10} more"
-            if len(failed_graphs) > 10
-            else ""
-        )
-        raise ValueError(
-            f"{len(failed_graphs)} of {len(graphs)} graph(s) failed collection, over "
-            f"the --max-graph-failures budget of {args.max_graph_failures:g}:\n"
-            f"{listed}{more}"
-        )
     regimes = corpus_regimes(graphs)
     for source in sources:
         for row in rows[source]:
@@ -1097,6 +1091,31 @@ def _measure(
         "collection_knobs": exposed.get("knobs", []),
         "failed_graphs": failed_graphs,
     }
+
+
+def _over_budget(
+    failed_graphs: list, graph_count: int, budget: float, saved: bool
+) -> ValueError:
+    """The refusal of a run whose failed graphs exceed `--max-graph-failures`, listing them.
+
+    `saved`: the graphs that did measure were written as a collection in the stage.
+    """
+    listed = "\n".join(
+        f"  {failure['source']}: {failure['error']}" for failure in failed_graphs[:10]
+    )
+    more = (
+        f"\n  ... and {len(failed_graphs) - 10} more" if len(failed_graphs) > 10 else ""
+    )
+    recovery = (
+        "\nThe measured graphs are kept as a collection; `python -m uhd_gen.dataset add "
+        "--collection` converts it for `generate --dataset` without measuring again"
+        if saved
+        else ""
+    )
+    return ValueError(
+        f"{len(failed_graphs)} of {graph_count} graph(s) failed collection, over "
+        f"the --max-graph-failures budget of {budget:g}:\n{listed}{more}{recovery}"
+    )
 
 
 def discover_graphs(supplied: list[str]) -> list[Path]:
@@ -1571,7 +1590,15 @@ def run_generate(args: argparse.Namespace) -> int:
         if args.graphs:
             measured = _measure(args, tree, stage, sources, immediate)
             engine_id = args.engine_id
-            if args.collect_only:
+            failed_graphs = measured["failed_graphs"]
+            graph_count = len(measured["graph_inputs"])
+            over_budget = len(failed_graphs) > args.max_graph_failures * graph_count
+            # An over-budget run still records what it measured, as a collection in the
+            # preserved stage, so a dataset can take it without measuring again.
+            saved = (args.collect_only and not over_budget) or (
+                over_budget and any(measured["rows"].values())
+            )
+            if saved:
                 manifest = write_collection(
                     stage,
                     collected_at=measured["collected_at"],
@@ -1589,8 +1616,14 @@ def run_generate(args: argparse.Namespace) -> int:
                     collection_knobs=measured["collection_knobs"],
                     kernel_fields=measured["kernel_fields"],
                     shard=args.shard,
-                    failed_graphs=measured["failed_graphs"],
+                    failed_graphs=failed_graphs,
                 )
+            if over_budget:
+                _write_json(stage / "failed_graphs.json", failed_graphs)
+                raise _over_budget(
+                    failed_graphs, graph_count, args.max_graph_failures, saved
+                )
+            if args.collect_only:
                 stage.rename(output)
                 stage = None
                 print(
@@ -1928,10 +1961,17 @@ def run_generate(args: argparse.Namespace) -> int:
             # Only a holdout run must keep evaluation disjoint from training.
             if not args.recall and training_keys & evaluated_keys:
                 raise ValueError("evaluation includes a problem seen during training")
-            report["holdout_integrity"] = {
-                "status": "held_out",
-                "detail": "Verified disjoint graph/device identities in recorded training and evaluation slices",
-            }
+            report["holdout_integrity"] = (
+                {
+                    "status": "recall",
+                    "detail": "--recall trains on and scores every shape of a closed shape space",
+                }
+                if args.recall
+                else {
+                    "status": "held_out",
+                    "detail": "Verified disjoint graph/device identities in recorded training and evaluation slices",
+                }
+            )
             _write_json(report_path, report)
             models.append(
                 {

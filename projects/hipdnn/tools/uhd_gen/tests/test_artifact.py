@@ -39,7 +39,9 @@ def _stump(left=(1, -1, -1), right=(2, -1, -1)) -> GbdtTreeT:
     return tree
 
 
-def _artifact(path: Path, *, trees=None, grouped=False, identifier=b"HGBM") -> Path:
+def _artifact(
+    path: Path, *, trees=None, grouped=False, identifier=b"HGBM", group_values=(0.0,)
+) -> Path:
     model = GbdtModelT()
     model.trees = trees or [_stump()]
     model.baseScore = 0.0
@@ -47,10 +49,12 @@ def _artifact(path: Path, *, trees=None, grouped=False, identifier=b"HGBM") -> P
     model.featuresHash = "sha256:0123456789abcdef"
     model.groupByFeatureIndex = 1 if grouped else -1
     if grouped:
-        group = GbdtGroupT()
-        group.value = 0.0
-        group.trees = [_stump()]
-        model.groups = [group]
+        model.groups = []
+        for value in group_values:
+            group = GbdtGroupT()
+            group.value = value
+            group.trees = [_stump()]
+            model.groups.append(group)
     builder = flatbuffers.Builder(1024)
     builder.Finish(model.Pack(builder), file_identifier=b"HGBM")
     data = bytearray(builder.Output())
@@ -164,3 +168,78 @@ def test_grouping_is_read_from_the_artifact(tmp_path):
     flat = verify_tree_artifact(_artifact(tmp_path / "flat.bin"), None)
     assert is_grouped_tree(grouped)
     assert not is_grouped_tree(flat)
+
+
+@pytest.mark.parametrize(
+    "values", [(float("inf"),), (float("nan"),), (0.0, -0.0)], ids=str
+)
+def test_a_group_value_the_runtime_cannot_key_is_refused(tmp_path, values):
+    """TreeDataAdapter refuses a nonfinite group value or two groups of one value."""
+    path = _artifact(tmp_path / "model.bin", grouped=True, group_values=values)
+    with pytest.raises(ValueError, match="must be finite and unique"):
+        verify_tree_artifact(path, None)
+    verify_tree_artifact(
+        _artifact(tmp_path / "distinct.bin", grouped=True, group_values=(0.0, 1.0)),
+        None,
+    )
+
+
+def test_an_engine_prediction_model_cannot_be_grouped(tmp_path):
+    """EnginePredictor refuses to bind a grouped artifact to predict_engine."""
+    _artifact(tmp_path / "model.bin", grouped=True)
+    (tmp_path / "heuristic.uhd.json").write_text(
+        json.dumps(
+            {
+                "objective": "max",
+                "score": {"metric": "tflops", "calibrated": True},
+                "trained_against": {"selector_revision": "provider-1"},
+                "features_signature": ["$graph.size", "$graph.group"],
+                "tree_data": {"artifact": "model.bin"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "train_manifest.json").write_text(
+        json.dumps({"role": "predict_engine"}), encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="predict_engine"):
+        load_model(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("payload", "admitted"),
+    [
+        ("./model.bin", True),
+        ("nested/../model.bin", False),
+        ("../model.bin", False),
+        ("nested\\..\\model.bin", False),
+        ("absolute", False),
+        ("C:model.bin", False),
+        ("nested/.", False),
+    ],
+)
+def test_evaluation_opens_only_an_artifact_the_loader_would(
+    tmp_path, payload, admitted
+):
+    """UhdParser reads `tree_data.artifact` only inside the descriptor's directory."""
+    model = tmp_path / "model"
+    (model / "nested").mkdir(parents=True)
+    _artifact(model / "model.bin")
+    _artifact(tmp_path / "model.bin")
+    if payload == "absolute":
+        payload = str((tmp_path / "model.bin").resolve())
+    (model / "heuristic.uhd.json").write_text(
+        json.dumps(
+            {
+                "objective": "max",
+                "tree_data": {"artifact": payload},
+                "features_signature": ["$q.size", "$kernel.group"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    if admitted:
+        assert load_model(model).source == str(model / payload)
+    else:
+        with pytest.raises(ValueError, match="relative path inside"):
+            load_model(model)

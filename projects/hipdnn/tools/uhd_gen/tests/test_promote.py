@@ -206,7 +206,7 @@ def test_role_and_explicit_default_target_preserve_other_maps(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "payload", ["nested/model.bin", "./nested/model.bin", "scratch/../nested/model.bin"]
+    "payload", ["nested/model.bin", "./nested/model.bin", "nested//model.bin"]
 )
 def test_install_rewrites_nested_artifact_path_portably(tmp_path, payload):
     tree = _tree(tmp_path / "tree")
@@ -216,6 +216,18 @@ def test_install_rewrites_nested_artifact_path_portably(tmp_path, payload):
     installed = _read(plan.destination_descriptor)
     artifact = plan.destination_descriptor.parent / installed["tree_data"]["artifact"]
     assert artifact.read_bytes() == _weights()
+
+
+def test_root_provenance_notes_are_admitted_and_installed(tmp_path):
+    """UhdParser admits a root `provenance` it never reads, so promotion keeps it."""
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    document = _read(model / "heuristic.uhd.json")
+    notes = {"collected_on": "board-7", "commit": "a" * 40}
+    _write(model / "heuristic.uhd.json", {**document, "provenance": notes})
+    plan = build_plan(model, tree)
+    _apply(plan)
+    assert _read(plan.destination_descriptor)["provenance"] == notes
 
 
 @pytest.mark.parametrize("binding", ["role", "architecture", "engine"])
@@ -633,9 +645,13 @@ def test_invalid_artifact_destination_or_source_never_writes(tmp_path, payload):
         "C:/model.bin",
         "../model.bin",
         "..\\model.bin",
+        "nested\\model.bin",
         "a/../../model.bin",
+        "scratch/../nested/model.bin",
         ".",
         "nested/..",
+        "nested/",
+        "nested/.",
     ],
 )
 def test_an_artifact_path_leaving_the_descriptors_directory_is_refused(

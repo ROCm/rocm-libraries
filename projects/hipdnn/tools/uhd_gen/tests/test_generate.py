@@ -590,33 +590,89 @@ def test_an_opaque_time_model_over_a_corpus_without_flops_skips_one_bad_graph(
     assert json.loads(installed.read_text(encoding="utf-8"))["id"] == TIME_ID
 
 
-def test_graph_failures_over_the_budget_fail_the_run_with_the_list(
-    monkeypatch, tmp_path, evaluator, caplog
+@pytest.mark.parametrize("collect_only", [False, True])
+def test_graph_failures_over_the_budget_fail_the_run_and_keep_what_measured(
+    monkeypatch, tmp_path, evaluator, caplog, collect_only
 ):
+    """The run fails listing the failures; the graphs that did measure train later, from
+    the collection the run kept, without the bench."""
+    from uhd_gen.dataset import store
+
     tree = _ued_tree(tmp_path / "descriptors")
     _immediate_bench(
         monkeypatch, snapshot_provenance(tree), broken={"graph-3", "graph-4"}
     )
     main = _cli()
-
-    assert (
-        main(
-            _l1_args(
-                _graphs(tmp_path / "graphs"),
-                tree,
-                tmp_path / "out",
-                evaluator,
-                "--max-graph-failures",
-                "0.1",
-            )
-        )
-        == 1
+    graphs = _graphs(tmp_path / "graphs")
+    extra = ["--max-graph-failures", "0.1"] + (
+        ["--collect-only"] if collect_only else []
     )
+    assert main(_l1_args(graphs, tree, tmp_path / "out", evaluator, *extra)) == 1
     assert (
         "2 of 16 graph(s) failed" in caplog.text
         and "3.json" in caplog.text
         and "4.json" in caplog.text
     )
+    assert not (tmp_path / "out").exists()
+
+    [stage] = tmp_path.glob(".uhd-generate-*")
+    manifest = json.loads(
+        (stage / "collection_manifest.json").read_text(encoding="utf-8")
+    )
+    assert sorted(Path(f["source"]).name for f in manifest["failed_graphs"]) == [
+        "3.json",
+        "4.json",
+    ]
+
+    def bench(*args):
+        pytest.fail("training a kept collection ran the bench")
+
+    monkeypatch.setattr("uhd_gen.generate._run_json", bench)
+    dataset = tmp_path / "kept.dataset"
+    store.add(dataset, *store.from_collection(stage))
+    arguments = _l1_args(graphs, tree, tmp_path / "trained", evaluator, "--no-promote")
+    position = arguments.index("--graphs")
+    arguments[position : position + 2] = ["--dataset", str(dataset)]
+    assert main(arguments) == 0
+    corpus = json.loads(
+        (tmp_path / "trained" / "corpus.json").read_text(encoding="utf-8")
+    )
+    assert {row["benchmark"] for row in corpus} == {
+        f"graph-{index}" for index in range(16)
+    } - {"graph-3", "graph-4"}
+
+
+def test_an_l1_measurement_cannot_inherit_a_benchmarking_override(
+    monkeypatch, tmp_path
+):
+    """HIPDNN_FORCE_BENCHMARKING overrides the bench's global.benchmarking=0, so an L1
+    label would otherwise be a searched pick."""
+    main = _cli()
+    tree = _ued_tree(tmp_path / "descriptors")
+    monkeypatch.setenv("HIPDNN_FORCE_BENCHMARKING", "1")
+    seen = []
+
+    def bench(command, environment, *args):
+        seen.append(environment.get("HIPDNN_FORCE_BENCHMARKING"))
+        raise ValueError("stop after observing the child environment")
+
+    monkeypatch.setattr("uhd_gen.generate._run_json", bench)
+    monkeypatch.setattr("uhd_gen.generate.shutil.which", lambda name: name)
+    arguments = [
+        "generate",
+        "--graphs",
+        str(_graphs(tmp_path / "graphs", 1)),
+        "--descriptor-tree",
+        str(tree),
+        "--engine-id",
+        "7",
+        "--role",
+        "predict_engine",
+        "--output-dir",
+        str(tmp_path / "out"),
+    ]
+    assert main(arguments) == 1
+    assert seen == ["0"]
 
 
 @pytest.mark.parametrize(
