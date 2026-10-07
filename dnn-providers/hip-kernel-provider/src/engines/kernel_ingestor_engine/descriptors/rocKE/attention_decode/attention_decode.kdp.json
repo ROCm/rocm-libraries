@@ -1,0 +1,99 @@
+{
+  "version": "1.0",
+  "id": "7cc321b6-8d25-4a72-95cc-ae6031572eb3",
+  "name": "hipkernel:attention_decode",
+  "matchers": [
+    "f35b72ec-f24f-4955-8a63-f658609bd136"
+  ],
+  "engine": "0a912547-b80f-4461-882a-a61678bc276a",
+  "dispatch": "3cb02e21-a0f1-4f58-87b0-8baa7fd66103",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "0a912547-b80f-4461-882a-a61678bc276a",
+          "kmd_id": "c8e184a2-8c66-4c68-974f-460b0cb2d078",
+          "metadata_fields": [
+            "dtype"
+          ],
+          "matcher_only_fields": [],
+          "bindings": {
+            "dtype": {
+              "field": "dtype"
+            }
+          },
+          "vocabulary": {
+            "dtype": {
+              "bf16": "BF16"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "49c0a05f-7a29-4596-b116-7a9ace36da13",
+      "name": "attention_decode.bf16_d128_h8_kv2.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 64,
+          "num_query_heads": 8,
+          "num_kv_heads": 2,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_seqs": 1,
+          "num_warps": 1
+        }
+      },
+      "metadata": {
+        "dtype": "BF16"
+      },
+      "priority": 0,
+      "arch": [
+        "gfx942"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "35bc3fca-53b3-4ddd-85aa-757c18773984",
+      "name": "attention_decode.bf16_d128_h8_kv2.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 64,
+          "num_query_heads": 8,
+          "num_kv_heads": 2,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_seqs": 1,
+          "num_warps": 1
+        }
+      },
+      "metadata": {
+        "dtype": "BF16"
+      },
+      "priority": 0,
+      "arch": [
+        "gfx950"
+      ]
+    }
+  ],
+  "arch": [
+    "gfx942",
+    "gfx950"
+  ]
+}

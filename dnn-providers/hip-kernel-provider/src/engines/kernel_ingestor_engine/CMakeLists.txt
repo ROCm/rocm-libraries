@@ -14,6 +14,7 @@ target_sources(hip_kernel_provider_impl PRIVATE
     # lane points the production source root. Gfx950AttentionDense ships from descriptors/.
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNative.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/AttentionDecodeNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx950AttentionDenseNative.cpp
 )
 

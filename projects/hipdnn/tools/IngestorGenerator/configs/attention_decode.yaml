@@ -1,0 +1,71 @@
+# Minimal contiguous single-token decode; native admission owns the fixed slice.
+dialect: packaged
+authored_subpath: rocKE/attention_decode
+engine:
+  name: hipkernel:AttentionDecode
+  sdk_version: 1.0.0
+  knobs: []
+  heuristic: none
+kmd_fields:
+- name: dtype
+  type: string
+specialization:
+  metadata_fields:
+  - dtype
+  matcher_only_fields: []
+  bindings:
+    dtype:
+      field: dtype
+  vocabulary:
+    dtype:
+      bf16: BF16
+kernel_source_kind: rocke
+workspace_policy: derived
+packs:
+- name: attention_decode
+  arch:
+  - gfx942
+  - gfx950
+  kernels:
+  - name: attention_decode.bf16_d128_h8_kv2.gfx942
+    arch:
+    - gfx942
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx942/attention_tiled_2d.py
+      builder: build_unified_attention_2d_tiled
+      spec:
+        head_size: 128
+        block_size: 64
+        num_query_heads: 8
+        num_kv_heads: 2
+        dtype: bf16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_seqs: 1
+        num_warps: 1
+    metadata:
+      dtype: BF16
+    priority: 0
+  - name: attention_decode.bf16_d128_h8_kv2.gfx950
+    arch:
+    - gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_2d.py
+      builder: build_unified_attention_2d_tiled
+      spec:
+        head_size: 128
+        block_size: 64
+        num_query_heads: 8
+        num_kv_heads: 2
+        dtype: bf16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_seqs: 1
+        num_warps: 1
+    metadata:
+      dtype: BF16
+    priority: 0

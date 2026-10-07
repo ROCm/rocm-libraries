@@ -78,6 +78,7 @@ if(ENABLE_HIP_FLASH2_ENGINE)
 endif()
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_sources(hip_kernel_provider_integration_tests PRIVATE
+        kernel_ingestor_engine/IntegrationGpuAttentionDecode.cpp
         kernel_ingestor_engine/IntegrationGpuGfx950AttentionDenseKnobs.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp

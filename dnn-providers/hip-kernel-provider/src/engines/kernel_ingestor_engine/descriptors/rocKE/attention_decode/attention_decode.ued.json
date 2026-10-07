@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "0a912547-b80f-4461-882a-a61678bc276a",
+  "name": "hipkernel:AttentionDecode",
+  "sdk_version": "1.0.0",
+  "graph_match": {
+    "native": "hipkernel.attention_decode.graph_match"
+  },
+  "metadata": "c8e184a2-8c66-4c68-974f-460b0cb2d078"
+}

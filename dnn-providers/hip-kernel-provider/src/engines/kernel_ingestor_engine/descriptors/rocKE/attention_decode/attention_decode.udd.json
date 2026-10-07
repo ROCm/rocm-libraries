@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "3cb02e21-a0f1-4f58-87b0-8baa7fd66103",
+  "name": "AttentionDecode dispatch",
+  "dispatch_symbol": "hipkernel.attention_decode.dispatch"
+}

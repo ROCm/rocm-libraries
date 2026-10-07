@@ -290,6 +290,27 @@ clang_tidy_check(hip_kernel_provider_tests)
 add_unit_test_target(hip_kernel_provider_tests ${CMAKE_CURRENT_BINARY_DIR})
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    get_property(_decode_arches GLOBAL PROPERTY HKP_PACK_ARCHES_product)
+    get_property(_decode_root GLOBAL PROPERTY HKP_PACK_SOURCE_ROOT_product)
+    set(_decode_shipped_arches)
+    foreach(_decode_arch IN LISTS _decode_arches)
+        _hkp_root_declares_engine_for_arch(_decode_shipped "${_decode_root}"
+                                          "hipkernel:AttentionDecode" "${_decode_arch}")
+        if(_decode_shipped)
+            list(APPEND _decode_shipped_arches "${_decode_arch}")
+        endif()
+    endforeach()
+    if(_decode_shipped_arches)
+        hkp_register_census_tests(TARGET hip_kernel_provider_census_tests
+            PACK_NAME product ARCHES ${_decode_shipped_arches}
+            SUITES TestAttentionDecodePacks
+            EXPECTED_CASES LoadsExactlyTheEmittedPacks LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion ExposesTheConfiguredKnobs
+                ShipsNoHeuristicAndRegistersNoScoreSymbol CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher)
+    endif()
+
     clang_tidy_check(hip_kernel_provider_census_tests)
 
     # Every entry for this binary comes from hkp_register_census_tests() above, each naming

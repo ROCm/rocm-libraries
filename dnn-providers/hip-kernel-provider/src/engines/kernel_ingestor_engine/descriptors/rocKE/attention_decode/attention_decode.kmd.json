@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "id": "c8e184a2-8c66-4c68-974f-460b0cb2d078",
+  "name": "AttentionDecode variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    }
+  ]
+}

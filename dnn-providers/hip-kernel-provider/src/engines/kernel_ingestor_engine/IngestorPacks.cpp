@@ -13,6 +13,9 @@ const std::vector<IngestorPack>& ingestorPacks()
     // Function-local static: entries are plain function pointers, so this cannot fail
     // in a way that matters before main().
     static const std::vector<IngestorPack> s_packs = {
+        {"hipkernel:AttentionDecode",
+         &registerAttentionDecodeSymbols,
+         &resetAttentionDecodeModuleCache},
         {"hipkernel:Pointwise", &registerPointwiseSymbols, &resetPointwiseModuleCache},
         {"hipkernel:ConvFwd", &registerConvFwdSymbols, &resetConvFwdModuleCache},
         {GFX950_ATTENTION_DENSE_ENGINE_NAME,

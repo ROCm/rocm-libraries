@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "f35b72ec-f24f-4955-8a63-f658609bd136",
+  "name": "kernel dtype matches the graph's dtype",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.attention_decode.kernel_match"
+}
