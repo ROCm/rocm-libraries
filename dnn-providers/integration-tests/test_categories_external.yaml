@@ -26,6 +26,7 @@ test_categories:
       - "hipdnn-integration-tests_test_name_validation"
       - "hipdnn_bundle_verifier_python_tests"
       - "hipdnn_support_claim_verifier_python_tests"
+      - "hipdnn_golden_generator_python_tests"
     labels:
       - "quick"
       - "pre-commit"
@@ -36,5 +37,6 @@ test_categories:
       - "hipdnn-integration-tests_test_name_validation"
       - "hipdnn_bundle_verifier_python_tests"
       - "hipdnn_support_claim_verifier_python_tests"
+      - "hipdnn_golden_generator_python_tests"
     labels:
       - "ffm-full"

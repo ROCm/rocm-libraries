@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <string>
 #include <variant>
 #include <vector>
 
@@ -47,6 +48,8 @@ protected:
 
     std::optional<hipdnn_test_sdk::utilities::ScopedDirectory> _scopedDir;
     std::filesystem::path _tempDir;
+    // One load pass's sweep cache, as loadDiscoveredBundles() shares one.
+    SweepManifestCache _sweeps;
 
     void SetUp() override
     {
@@ -319,6 +322,146 @@ TEST_F(TestBundleDiscoveryFixture, TemplateSweepCasesAreExpandedFromManifest)
     EXPECT_EQ(fp16->sweep->caseId, "small_fp16_nchw");
 }
 
+// A bundle root assembled from directory links (say quick/SdpaFwd linked to an
+// installed tree) must discover what a copy of the same tree would, under the link's
+// name, including a sweep that sits further down behind the link.
+TEST_F(TestBundleDiscoveryFixture, DirectorySymlinksInsideTheRootAreFollowed)
+{
+    const auto root = _tempDir / "root";
+    const auto outside = _tempDir / "outside";
+    createMinimalBundle(outside / "Direct" / "nchw" / "Small", "Small");
+    createTemplateSweep(
+        outside / "Swept" / "Inference",
+        {{"small_fp32_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+    std::filesystem::create_directories(root / "quick");
+    try
+    {
+        std::filesystem::create_directory_symlink(outside / "Direct", root / "quick" / "Direct");
+        std::filesystem::create_directory_symlink(outside / "Swept", root / "quick" / "Swept");
+    }
+    catch(const std::filesystem::filesystem_error& e)
+    {
+        GTEST_SKIP() << "cannot create directory symlinks here: " << e.what();
+    }
+
+    const auto result = discoverBundles(root);
+    ASSERT_EQ(result.size(), 2u);
+
+    const auto* direct = findByTest(result, "Small");
+    ASSERT_NE(direct, nullptr);
+    EXPECT_EQ(direct->suiteName, "quick_Direct_nchw_Small");
+    EXPECT_EQ(direct->jsonPath, root / "quick" / "Direct" / "nchw" / "Small" / "Small.json");
+
+    const auto* swept = findByTest(result, "small_fp32_nchw");
+    ASSERT_NE(swept, nullptr);
+    EXPECT_EQ(swept->suiteName, "quick_Swept_Inference");
+}
+
+// A link back to its own ancestor would make the walk revisit the tree forever. It is
+// not descended: discovery finishes and finds each bundle once.
+TEST_F(TestBundleDiscoveryFixture, DirectorySymlinkToAnAncestorIsNotFollowed)
+{
+    createMinimalBundle(_tempDir / "conv" / "good", "good");
+    try
+    {
+        std::filesystem::create_directory_symlink(_tempDir, _tempDir / "conv" / "loop");
+    }
+    catch(const std::filesystem::filesystem_error& e)
+    {
+        GTEST_SKIP() << "cannot create directory symlinks here: " << e.what();
+    }
+
+    const auto result = discoverBundles(_tempDir);
+    ASSERT_EQ(result.size(), 1u);
+    EXPECT_EQ(result.front().suiteName, "conv_good");
+}
+
+// A cycle can span siblings: a/to_b -> b and b/to_a -> a. Neither link points at its
+// own ancestor, but following both returns to a directory the walk is already
+// inside. Discovery must stop there and still find what a copied tree holds: each
+// bundle under its own folder and once more behind the link that reaches it.
+TEST_F(TestBundleDiscoveryFixture, DirectorySymlinkCycleAcrossSiblingsIsNotFollowed)
+{
+    createMinimalBundle(_tempDir / "a" / "good", "good");
+    createMinimalBundle(_tempDir / "b" / "fine", "fine");
+    try
+    {
+        std::filesystem::create_directory_symlink(_tempDir / "b", _tempDir / "a" / "to_b");
+        std::filesystem::create_directory_symlink(_tempDir / "a", _tempDir / "b" / "to_a");
+    }
+    catch(const std::filesystem::filesystem_error& e)
+    {
+        GTEST_SKIP() << "cannot create directory symlinks here: " << e.what();
+    }
+
+    const auto result = discoverBundles(_tempDir);
+    std::vector<std::string> suites;
+    suites.reserve(result.size());
+    for(const auto& bundle : result)
+    {
+        suites.push_back(bundle.suiteName);
+    }
+    std::sort(suites.begin(), suites.end());
+    EXPECT_EQ(suites, (std::vector<std::string>{"a_good", "a_to_b_fine", "b_fine", "b_to_a_good"}));
+}
+
+// A link out of the root to one of the root's own parents (think root/x -> $HOME)
+// leads back to the root. It must not be followed: the walk would cover the whole
+// parent tree first, here a bundle that sits beside the root, before it reached the
+// root again.
+TEST_F(TestBundleDiscoveryFixture, DirectorySymlinkToAParentOfTheRootIsNotFollowed)
+{
+    const auto root = _tempDir / "root";
+    createMinimalBundle(root / "conv" / "good", "good");
+    createMinimalBundle(_tempDir / "beside" / "other", "other");
+    try
+    {
+        std::filesystem::create_directory_symlink(root.parent_path(), root / "conv" / "up");
+    }
+    catch(const std::filesystem::filesystem_error& e)
+    {
+        GTEST_SKIP() << "cannot create directory symlinks here: " << e.what();
+    }
+
+    const auto result = discoverBundles(root);
+    ASSERT_EQ(result.size(), 1u);
+    EXPECT_EQ(result.front().suiteName, "conv_good");
+}
+
+// A directory the run may not list is skipped with a warning. Before, the walk threw
+// on it and discovery failed, losing every bundle in the root.
+TEST_F(TestBundleDiscoveryFixture, UnlistableDirectoryIsSkipped)
+{
+    namespace fs = std::filesystem;
+    createMinimalBundle(_tempDir / "conv" / "good", "good");
+    const auto locked = _tempDir / "locked";
+    createMinimalBundle(locked / "hidden", "hidden");
+    fs::permissions(locked, fs::perms::none);
+    // Give the permissions back on every exit, so the scratch directory can be removed.
+    struct RestorePermissions
+    {
+        fs::path path;
+        ~RestorePermissions()
+        {
+            std::error_code error;
+            fs::permissions(path, fs::perms::owner_all, error);
+        }
+    };
+    const RestorePermissions restore{locked};
+
+    std::error_code probeError;
+    const fs::directory_iterator probe(locked, probeError);
+    if(!probeError)
+    {
+        GTEST_SKIP() << "this process can still list a directory with no permissions";
+    }
+
+    std::vector<DiscoveredBundle> result;
+    ASSERT_NO_THROW(result = discoverBundles(_tempDir));
+    ASSERT_EQ(result.size(), 1u);
+    EXPECT_EQ(result.front().suiteName, "conv_good");
+}
+
 TEST_F(TestBundleDiscoveryFixture, JsonAtRootUsesFolderNameAsSuite)
 {
     // A .json directly at the data root uses the root folder name as suite.
@@ -485,9 +628,11 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundlePopulatesAllFields)
     ASSERT_EQ(bundle.outputTensorUids.size(), 1u);
     EXPECT_EQ(bundle.outputTensorUids.front(), 5);
 
-    ASSERT_TRUE(bundle.tensors.has_value());
-    EXPECT_EQ(bundle.tensors->size(), 6u);
-    EXPECT_NE(bundle.tensors->find(5), bundle.tensors->end());
+    ASSERT_TRUE(bundle.blobs.has_value());
+    EXPECT_TRUE(bundle.hasGoldenOutputs);
+    const auto tensors = bundle.loadTensors();
+    EXPECT_EQ(tensors.size(), 6u);
+    EXPECT_NE(tensors.find(5), tensors.end());
 
     ASSERT_TRUE(bundle.metadata.operation.has_value());
     EXPECT_EQ(*bundle.metadata.operation, "BatchnormInference");
@@ -524,7 +669,7 @@ TEST_F(TestBundleDiscoveryFixture, LoadGraphOnlyBundleMissingMetadataLoads)
     ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
     const auto& bundle = std::get<IntegrationTestBundle>(result);
 
-    EXPECT_FALSE(bundle.tensors.has_value()); // graph-only: no tensor data
+    EXPECT_FALSE(bundle.blobs.has_value()); // graph-only: no tensor data
     EXPECT_FALSE(bundle.hasGoldenOutputs);
     EXPECT_FALSE(bundle.metadata.operation.has_value()); // default-constructed
 }
@@ -577,16 +722,16 @@ TEST_F(TestBundleDiscoveryFixture, PullingGoldenDataNeverSilentlyDropsABundle)
     auto beforePull = loadIntegrationTestBundle(dir / "pullme.json");
     ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(beforePull));
     EXPECT_FALSE(std::get<IntegrationTestBundle>(beforePull).hasGoldenOutputs);
-    EXPECT_TRUE(
-        std::holds_alternative<detail::LoadedBundle>(detail::classifyBundle(discovered.front())));
+    EXPECT_TRUE(std::holds_alternative<detail::LoadedBundle>(
+        detail::classifyBundle(discovered.front(), _sweeps)));
 
     writeGoldenOutputBlob(dir, "pullme"); // post-`dvc pull` state
 
     auto afterPull = loadIntegrationTestBundle(dir / "pullme.json");
     ASSERT_TRUE(std::holds_alternative<LoadError>(afterPull));
     EXPECT_EQ(std::get<LoadError>(afterPull), LoadError::UNVALIDATABLE_GOLDEN_DATA);
-    EXPECT_TRUE(
-        std::holds_alternative<detail::FailedLoad>(detail::classifyBundle(discovered.front())));
+    EXPECT_TRUE(std::holds_alternative<detail::FailedLoad>(
+        detail::classifyBundle(discovered.front(), _sweeps)));
 }
 
 TEST_F(TestBundleDiscoveryFixture, LoadBundleMissingBinIsGraphOnly)
@@ -600,7 +745,7 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundleMissingBinIsGraphOnly)
     ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
     const auto& bundle = std::get<IntegrationTestBundle>(result);
 
-    EXPECT_FALSE(bundle.tensors.has_value());
+    EXPECT_FALSE(bundle.blobs.has_value());
     EXPECT_EQ(bundle.outputTensorUids.size(), 1u);
 }
 
@@ -618,12 +763,13 @@ TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCasePopulatesExpandedGraphAn
     ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
     const auto& bundle = std::get<IntegrationTestBundle>(result);
 
-    ASSERT_TRUE(bundle.tensors.has_value());
+    ASSERT_TRUE(bundle.blobs.has_value());
     ASSERT_EQ(bundle.outputTensorUids.size(), 1u);
     EXPECT_EQ(bundle.outputTensorUids.front(), 5);
-    EXPECT_EQ(bundle.tensors->at(0)->dims(), (std::vector<int64_t>{2, 3, 4, 5}));
-    EXPECT_EQ(bundle.tensors->at(0)->strides(), (std::vector<int64_t>{60, 20, 5, 1}));
-    EXPECT_EQ(bundle.tensors->at(5)->dims(), (std::vector<int64_t>{2, 3, 4, 5}));
+    const auto tensors = bundle.loadTensors();
+    EXPECT_EQ(tensors.at(0)->dims(), (std::vector<int64_t>{2, 3, 4, 5}));
+    EXPECT_EQ(tensors.at(0)->strides(), (std::vector<int64_t>{60, 20, 5, 1}));
+    EXPECT_EQ(tensors.at(5)->dims(), (std::vector<int64_t>{2, 3, 4, 5}));
 
     const auto tensorAttrMap = bundle.graphWrapper().getTensorMap();
     EXPECT_EQ(tensorAttrMap.at(0)->data_type(),
@@ -654,7 +800,62 @@ TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseWithoutGoldenIsGraphOnly
     auto result = loadIntegrationTestBundle(discovered.front());
     ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
     const auto& bundle = std::get<IntegrationTestBundle>(result);
-    EXPECT_FALSE(bundle.tensors.has_value());
+    EXPECT_FALSE(bundle.blobs.has_value());
+}
+
+// Every case of a sweep shares one sweep.json, and a load pass must parse it once
+// rather than once per case: re-parsing it per case cost 5.9 GB of JSON over the
+// checked-in sweeps, and over half an hour before the first test ran on an MI300A
+// host. Shown by breaking the manifest after the first case loads. The second case
+// still loads through the pass's cache; a fresh load sees the broken file, which
+// is the control that the file really is broken.
+TEST_F(TestBundleDiscoveryFixture, SweepCasesInOneLoadPassParseTheManifestOnce)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(
+        sweepDir,
+        {{"case_a_fp32_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}},
+         {"case_b_fp32_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 2u);
+
+    SweepManifestCache sweeps;
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(
+        loadIntegrationTestBundle(discovered[0], sweeps)));
+
+    std::ofstream(sweepDir / "sweep.json", std::ios::trunc) << "{ not json";
+
+    EXPECT_TRUE(std::holds_alternative<IntegrationTestBundle>(
+        loadIntegrationTestBundle(discovered[1], sweeps)));
+
+    const auto fresh = loadIntegrationTestBundle(discovered[1]);
+    ASSERT_TRUE(std::holds_alternative<LoadError>(fresh));
+    EXPECT_EQ(std::get<LoadError>(fresh), LoadError::MALFORMED_JSON);
+}
+
+// The cache holds one sweep at a time. Moving to the next sweep must read that
+// sweep's manifest, or its cases would be looked up in the previous sweep's and
+// come back INVALID_SWEEP_CASE.
+TEST_F(TestBundleDiscoveryFixture, SweepManifestCacheFollowsTheSweepBeingLoaded)
+{
+    createTemplateSweep(
+        _tempDir / "quick" / "BatchnormFwdInference" / "First",
+        {{"first_fp32_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+    createTemplateSweep(
+        _tempDir / "quick" / "BatchnormFwdInference" / "Second",
+        {{"second_fp32_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 2u);
+
+    SweepManifestCache sweeps;
+    for(const auto& bundle : {discovered[0], discovered[1], discovered[0]})
+    {
+        EXPECT_TRUE(std::holds_alternative<IntegrationTestBundle>(
+            loadIntegrationTestBundle(bundle, sweeps)))
+            << bundle.diagnosticPath();
+    }
 }
 
 TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseMissingGoldenPathIsError)
@@ -750,7 +951,9 @@ TEST_F(TestBundleDiscoveryFixture, LoadDirectBundleWithBakedValueAndRuntimePassB
                  detail::RuntimePassByValueInvariantError);
 }
 
-TEST_F(TestBundleDiscoveryFixture, LoadBundleWrongSizeBinIsTensorLoadError)
+// Registration only records where a bundle's blobs are. A bad blob therefore fails the
+// test that needs it, instead of dropping the bundle from the run when it is loaded.
+TEST_F(TestBundleDiscoveryFixture, LoadBundleWrongSizeBinFailsOnlyWhenTheTensorsAreRead)
 {
     auto dir = _tempDir / "op" / "badbin";
     createLoadableBundle(dir, "badbin");
@@ -758,8 +961,8 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundleWrongSizeBinIsTensorLoadError)
     const auto jsonPath = dir / "badbin.json";
 
     auto result = loadIntegrationTestBundle(jsonPath);
-    ASSERT_TRUE(std::holds_alternative<LoadError>(result));
-    EXPECT_EQ(std::get<LoadError>(result), LoadError::TENSOR_LOAD_FAILED);
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+    EXPECT_THROW(std::get<IntegrationTestBundle>(result).loadTensors(), std::exception);
 }
 
 TEST_F(TestBundleDiscoveryFixture, LoadBundleMissingTensorsKeyIsSchemaError)
@@ -949,7 +1152,7 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsLoadedBundleForGoodBundl
     const auto discovered = discoverBundles(_tempDir);
     ASSERT_EQ(discovered.size(), 1u);
 
-    auto outcome = detail::classifyBundle(discovered.front());
+    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
     ASSERT_TRUE(std::holds_alternative<detail::LoadedBundle>(outcome));
     auto& loaded = std::get<detail::LoadedBundle>(outcome);
     EXPECT_EQ(loaded.suiteName, discovered.front().suiteName);
@@ -971,7 +1174,7 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleSetsLocatorForSweepCase)
     const auto discovered = discoverBundles(_tempDir);
     ASSERT_EQ(discovered.size(), 1u);
 
-    auto outcome = detail::classifyBundle(discovered.front());
+    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
     ASSERT_TRUE(std::holds_alternative<detail::LoadedBundle>(outcome));
     auto& loaded = std::get<detail::LoadedBundle>(outcome);
 
@@ -979,6 +1182,86 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleSetsLocatorForSweepCase)
               discovered.front().jsonPath.parent_path() / "support.json");
     EXPECT_EQ(loaded.claimLocator.caseId, "fp32_nchw");
     EXPECT_TRUE(loaded.claimLocator.isSweep());
+}
+
+// selectBundlesToLoad() is the registration-time filter step. Its counters are the
+// denominators the support-claim summary divides by, so a drift here reattributes every
+// gap line to the wrong cause without failing anything else. Three flat bundles:
+// case_a is selected by the filter and has a claim, case_b is excluded and has a
+// claim, case_c is excluded and has none.
+TEST_F(TestBundleDiscoveryFixture, SelectBundlesToLoadCountsExcludedClaimsWhenObserving)
+{
+    for(const auto* suite : {"case_a", "case_b", "case_c"})
+    {
+        createMinimalBundle(_tempDir / suite, "graph");
+    }
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 3u);
+    for(const auto& bundle : discovered)
+    {
+        if(bundle.suiteName != "case_c")
+        {
+            std::ofstream(supportJsonPath(bundle.diagnosticPath())) << "{}";
+        }
+    }
+
+    BundleRegistrationStats stats;
+    SupportClaimCoverage coverage;
+    const auto selected = detail::selectBundlesToLoad(
+        discovered, "case_a.*", /*writing=*/false, /*observing=*/true, stats, coverage);
+
+    ASSERT_EQ(selected.size(), 1u);
+    EXPECT_EQ(selected.front().suiteName, "case_a");
+    EXPECT_EQ(stats.discovered, 3u);
+    EXPECT_EQ(stats.excludedByFilter, 2u);
+    // Only the two excluded bundles are counted here: the selected one is counted as it
+    // loads.
+    EXPECT_EQ(coverage.graphsFound, 2u);
+    EXPECT_EQ(coverage.graphsWithClaims, 1u);
+}
+
+// Without a named engine nothing is checkable, so the summary must not be handed
+// denominators for claims no run was going to check.
+TEST_F(TestBundleDiscoveryFixture, SelectBundlesToLoadLeavesCoverageAloneWhenNotObserving)
+{
+    createMinimalBundle(_tempDir / "case_a", "graph");
+    createMinimalBundle(_tempDir / "case_b", "graph");
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 2u);
+    for(const auto& bundle : discovered)
+    {
+        std::ofstream(supportJsonPath(bundle.diagnosticPath())) << "{}";
+    }
+
+    BundleRegistrationStats stats;
+    SupportClaimCoverage coverage;
+    const auto selected = detail::selectBundlesToLoad(
+        discovered, "case_a.*", /*writing=*/false, /*observing=*/false, stats, coverage);
+
+    EXPECT_EQ(selected.size(), 1u);
+    EXPECT_EQ(stats.excludedByFilter, 1u);
+    EXPECT_EQ(coverage.graphsFound, 0u);
+    EXPECT_EQ(coverage.graphsWithClaims, 0u);
+}
+
+// --write-support-claims needs every graph loaded: graphsFound is the denominator for
+// the graphs the observer did not see, so a filter that dropped any would shrink it.
+TEST_F(TestBundleDiscoveryFixture, SelectBundlesToLoadKeepsEveryBundleWhenWriting)
+{
+    createMinimalBundle(_tempDir / "case_a", "graph");
+    createMinimalBundle(_tempDir / "case_b", "graph");
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 2u);
+
+    BundleRegistrationStats stats;
+    SupportClaimCoverage coverage;
+    const auto selected = detail::selectBundlesToLoad(
+        discovered, "case_a.*", /*writing=*/true, /*observing=*/false, stats, coverage);
+
+    EXPECT_EQ(selected.size(), 2u);
+    EXPECT_EQ(stats.discovered, 2u);
+    EXPECT_EQ(stats.excludedByFilter, 0u);
+    EXPECT_EQ(coverage.graphsFound, 0u);
 }
 
 // Reuses the baked-value-plus-runtime-pass-by-value corruption from
@@ -1009,7 +1292,7 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsFailedLoadForRuntimePass
     const auto discovered = discoverBundles(_tempDir);
     ASSERT_EQ(discovered.size(), 1u);
 
-    auto outcome = detail::classifyBundle(discovered.front());
+    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
     ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(outcome));
     auto& failed = std::get<detail::FailedLoad>(outcome);
     EXPECT_EQ(failed.suiteName, discovered.front().suiteName);
@@ -1038,7 +1321,7 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsSkippedLoadForOrdinaryIn
     const auto discovered = discoverBundles(_tempDir);
     ASSERT_EQ(discovered.size(), 1u);
 
-    auto outcome = detail::classifyBundle(discovered.front());
+    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
     ASSERT_TRUE(std::holds_alternative<detail::SkippedLoad>(outcome));
     auto& skipped = std::get<detail::SkippedLoad>(outcome);
     EXPECT_NE(skipped.message.find(discovered.front().diagnosticPath().string()),
@@ -1059,7 +1342,7 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsFailedLoadForUnvalidatab
     const auto discovered = discoverBundles(_tempDir);
     ASSERT_EQ(discovered.size(), 1u);
 
-    auto outcome = detail::classifyBundle(discovered.front());
+    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
     ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(outcome));
     auto& failed = std::get<detail::FailedLoad>(outcome);
     EXPECT_EQ(failed.suiteName, discovered.front().suiteName);
@@ -1100,8 +1383,10 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleIsolatesFailureAmongMultipleDis
     ASSERT_NE(goodBundle, nullptr);
     ASSERT_NE(badBundle, nullptr);
 
-    EXPECT_TRUE(std::holds_alternative<detail::LoadedBundle>(detail::classifyBundle(*goodBundle)));
-    EXPECT_TRUE(std::holds_alternative<detail::FailedLoad>(detail::classifyBundle(*badBundle)));
+    EXPECT_TRUE(
+        std::holds_alternative<detail::LoadedBundle>(detail::classifyBundle(*goodBundle, _sweeps)));
+    EXPECT_TRUE(
+        std::holds_alternative<detail::FailedLoad>(detail::classifyBundle(*badBundle, _sweeps)));
 }
 
 // Closes the loop between "classifyBundle() decided this bundle failed" and

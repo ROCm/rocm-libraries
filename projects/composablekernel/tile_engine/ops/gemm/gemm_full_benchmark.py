@@ -51,6 +51,7 @@ _THIS_DIR = Path(__file__).resolve().parent
 _COMMON_DIR = _THIS_DIR.parent / "common"
 _DISPATCHER_ROOT = _THIS_DIR.parents[2] / "dispatcher"
 sys.path.insert(0, str(_DISPATCHER_ROOT / "python"))
+sys.path.insert(0, str(_DISPATCHER_ROOT / "codegen"))
 sys.path.insert(0, str(_COMMON_DIR))
 sys.path.insert(0, str(_THIS_DIR))
 
@@ -60,6 +61,7 @@ from gemm_utils import (  # noqa: E402
     setup_multiple_gemm_dispatchers,
 )
 from ctypes_utils import listed_warp_tiles  # noqa: E402
+from gemm_vector_fallback import VectorFallback, add_vector_fallback_arg  # noqa: E402
 from smi_utils import detect_gpu_ids  # noqa: E402
 
 # Config layout. The bridged regular-GEMM path (gemm_universal) keeps its sweep
@@ -384,7 +386,10 @@ def main():
         "--kernel-timeout", type=int, default=30, help="Per-kernel timeout (s)"
     )
     parser.add_argument(
-        "--max-kernels", type=int, default=0, help="Limit to first N kernels (0=all)"
+        "--max-kernels",
+        type=int,
+        default=0,
+        help="Limit to first N kernels plus their vector-width variants (0=all)",
     )
     parser.add_argument(
         "--verify",
@@ -399,6 +404,7 @@ def main():
         help=f"Relative tolerance for --verify (default per dtype: {VERIFY_TOL}, "
         f"else {DEFAULT_VERIFY_TOL})",
     )
+    add_vector_fallback_arg(parser)
     args = parser.parse_args()
     if args.verify_tol is None:
         args.verify_tol = VERIFY_TOL.get(args.dtype, DEFAULT_VERIFY_TOL)
@@ -480,6 +486,12 @@ def main():
         )
         return 1
 
+    problems = load_problems(args.problems, args.variant)
+    vfb = VectorFallback(
+        problems, args.layout, args.dtype, codegen_variant, args.no_vector_fallback,
+        args.tune_c_vector_width,
+    )
+
     all_configs = []
     for cfg_path in config_paths:
         all_configs.extend(
@@ -490,12 +502,13 @@ def main():
                 layout=sweep_layout,
                 variant=codegen_variant,
                 mabd_cli_overrides=(mabd_kwargs or None),
+                **vfb.expand_kwargs,
                 **mabd_kwargs,
             )
         )
+    vfb.report_rejects()
 
-    if args.max_kernels > 0:
-        all_configs = all_configs[: args.max_kernels]
+    all_configs = vfb.limit_base_kernels(all_configs, args.max_kernels)
 
     print(f"  Expanded configs: {len(all_configs)}")
     if not all_configs:
@@ -518,6 +531,7 @@ def main():
     built_kernels = [
         (cfg, lib) for cfg, lib in zip(all_configs, lib_paths) if lib is not None
     ]
+    vfb.report_builds(all_configs, lib_paths)
 
     # Dedupe by .so path (distinct configs can map to the same physical kernel).
     seen_libs = set()
@@ -548,12 +562,9 @@ def main():
     print("Phase 2: Load test problems")
     print(f"{'=' * 80}")
 
-    problems = load_problems(args.problems, args.variant)
-    print(f"  Problems: {len(problems)}")
-    print(
-        f"  Total measurements: {len(built_kernels)} x {len(problems)} = "
-        f"{len(built_kernels) * len(problems)}"
-    )
+    # Pair each problem only with kernels whose vector widths it can satisfy
+    # (without the fallback, keep the old all-pairs behaviour).
+    pairs = vfb.pairs(problems, built_kernels)
 
     # ========================================================================
     # Phase 3: Benchmark across all visible GPUs (subprocess isolation, batched)
@@ -592,14 +603,10 @@ def main():
     # Build a single work queue of (prob_idx, prob_dict, kernel-batch) units and
     # fan them out across device-pinned worker threads.
     work_q = queue.Queue()
-    for prob_idx, prob in enumerate(problems):
+    for prob_idx, (prob, idx) in enumerate(zip(problems, pairs)):
         prob_dict = {"M": int(prob["M"]), "N": int(prob["N"]), "K": int(prob["K"])}
-        for start in range(0, len(built_kernels), args.batch_size):
-            end = min(start + args.batch_size, len(built_kernels))
-            batch = [
-                (start + j, cfg, lib)
-                for j, (cfg, lib) in enumerate(built_kernels[start:end])
-            ]
+        for start in range(0, len(idx), args.batch_size):
+            batch = [(i, *built_kernels[i]) for i in idx[start : start + args.batch_size]]
             work_q.put((prob_idx, prob_dict, batch))
 
     io_lock = threading.Lock()

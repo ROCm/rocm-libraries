@@ -94,6 +94,7 @@ using DeviceConvBwdDataFactoryT = std::tuple<
     // 3x3 stride-1 pad-1 (efficientnet/mobilenet)
     DwBwd<DType, 3, 1, 7, 32, 4, 4, 1, 1>,
     DwBwd<DType, 3, 1, 14, 32, 4, 4, 2, 2>,
+    DwBwd<DType, 3, 1, 28, 32, 4, 4, 4, 4>,
     DwBwd<DType, 3, 1, 56, 8, 7, 8, 8, 8>,
     // 5x5 stride-1 pad-2 (efficientnet/mobilenet)
     DwBwd<DType, 5, 2, 7, 32, 4, 4, 1, 1>,
