@@ -589,15 +589,38 @@ class TestEncodingVersion:
         assert GemmUniversalFeatureEngine.ENCODING_VERSION == 0
         assert GemmUniversalVecFeatureEngine.ENCODING_VERSION == 1
 
-    def test_the_spec_records_the_engines_version(self):
-        from feature_engine_vec import GemmUniversalVecFeatureEngine
-        from train import build_feature_spec
+    @pytest.mark.parametrize(
+        "operation,expected",
+        [("gemm_universal", 0), ("gemm_universal_vec", 1), ("grouped_conv", 0)],
+    )
+    def test_the_spec_records_the_engines_version(self, operation, expected):
+        """Parametrized over engines of DIFFERENT versions: testing only the vec
+        engine let the literal `"feature_encoding_version": 1` this commit
+        removed be put back without failing anything."""
+        from train import build_feature_spec, get_feature_engine
 
-        fe = GemmUniversalVecFeatureEngine()
+        fe = get_feature_engine(operation)
         spec = build_feature_spec(
-            "gemm_universal_vec", fe, "bf16", "gfx950", ["tflops"], ["tflops"], {}
+            operation, fe, "bf16", "gfx950", ["tflops"], ["tflops"], {}
         )
+        assert spec["feature_encoding_version"] == expected
         assert spec["feature_encoding_version"] == fe.ENCODING_VERSION
+
+    @pytest.mark.parametrize("arch", ["gfx950", "gfx942", "gfx1250"])
+    def test_the_spec_records_the_arch(self, arch):
+        """_resolve_arch reads this key; nothing pinned the producer."""
+        from train import build_feature_spec, get_feature_engine
+
+        spec = build_feature_spec(
+            "gemm_universal_vec",
+            get_feature_engine("gemm_universal_vec"),
+            "bf16",
+            arch,
+            ["tflops"],
+            ["tflops"],
+            {},
+        )
+        assert spec["arch"] == arch
 
     def test_a_matching_version_warm_starts(self, tmp_path):
         from feature_engine_vec import GemmUniversalVecFeatureEngine

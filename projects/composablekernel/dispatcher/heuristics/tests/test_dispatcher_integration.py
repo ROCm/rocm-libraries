@@ -189,12 +189,39 @@ class TestFixedWidthKernelsAreRejected:
         feat.update(zip(("vec_a", "vec_b", "vec_c"), vec))
         return feat
 
+    #: Both converters build a spec that cannot carry the widths, so both must
+    #: refuse. Covering only one let the sibling's guard be deleted silently --
+    #: the half commit 9ca4b52 claims to have fixed.
+    CONVERTERS = (
+        lambda feat: feature_dict_to_ml_spec(feat, 1.0),
+        lambda feat: feature_dict_to_dispatcher_config(feat),
+    )
+
+    @pytest.mark.parametrize(
+        "convert", CONVERTERS, ids=["ml_spec", "dispatcher_config"]
+    )
     @pytest.mark.parametrize(
         "vec", [(4, 4, 8), (8, 0, 0), (0, 2, 0), (0, 0, 1)], ids=str
     )
-    def test_any_fixed_width_raises(self, vec):
+    def test_any_fixed_width_raises(self, vec, convert):
         with pytest.raises(ValueError, match="cannot represent"):
-            feature_dict_to_ml_spec(self._fixed(vec), 1.0)
+            convert(self._fixed(vec))
+
+    @pytest.mark.parametrize(
+        "convert", CONVERTERS, ids=["ml_spec", "dispatcher_config"]
+    )
+    @pytest.mark.parametrize(
+        "native",
+        [0, 0.0, "0", "0.0", float("nan"), None, ""],
+        ids=["int", "float", "str", "strfloat", "nan", "none", "empty"],
+    )
+    def test_every_spelling_of_native_still_converts(self, native, convert):
+        """The defect this guard was rewritten for: "0" and NaN are TRUTHY, so a
+        truthiness test reported a NATIVE kernel as fixed-width and named widths
+        it does not have. Every fixture used ints, so reverting survived."""
+        feat = self._fixed((0, 0, 0))
+        feat.update(vec_a=native, vec_b=native, vec_c=native)
+        assert convert(feat) is not None
 
     def test_the_message_names_the_kernel_and_the_widths(self):
         """A pool-level failure is useless without knowing which entry caused
@@ -462,6 +489,30 @@ class TestArchCrossCheck:
 
         p = Predictor(self._model(tmp_path, arch="gfx950"))
         assert _resolve_arch(p, None, self._pool(arch="gfx950")) == "gfx950"
+
+    @pytest.mark.parametrize(
+        "factory", [create_ml_heuristic, create_ranked_heuristic], ids=["ml", "ranked"]
+    )
+    @pytest.mark.parametrize("model_arch", ["gfx950", "gfx1250"])
+    def test_the_resolved_arch_reaches_the_predictor(
+        self, tmp_path, factory, model_arch, monkeypatch
+    ):
+        """_resolve_arch's RESULT must be what the closure sends. Asserting on
+        the helper alone proved the fallback and not the caller it exists to
+        serve: putting `"arch": arch` back in the closure survived."""
+        from predict import Predictor
+
+        seen = {}
+        real = Predictor.rank_kernels
+
+        def spy(self, problem, kernel_configs):
+            seen["arch"] = problem.get("arch")
+            return real(self, problem, kernel_configs)
+
+        monkeypatch.setattr(Predictor, "rank_kernels", spy)
+        h = factory(self._model(tmp_path, arch=model_arch), kernel_pool=self._pool())
+        h(1024, 1024, 1024)
+        assert seen["arch"] == model_arch
 
     def test_the_models_arch_is_used_when_the_caller_names_none(self, tmp_path):
         from dispatcher_integration import _resolve_arch

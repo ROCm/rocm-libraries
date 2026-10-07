@@ -230,7 +230,13 @@ def _extent(problem: dict, kernel: dict, lower: str) -> int:
 
 
 def _required(problem: dict, kernel: dict, key: str) -> str:
-    """A key that must be supplied, searched problem-first then kernel."""
+    """A PROBLEM-describing key that must be supplied, problem-first.
+
+    Use :func:`_kernel_key` for anything that describes the kernel: reading a
+    kernel property problem-first lets a stale value in the problem dict
+    silently override the kernel's own, which for ``epilogue`` changes the C
+    store width.
+    """
     for src in (problem, kernel):
         if src.get(key) is not None:
             return str(src[key])
@@ -358,6 +364,23 @@ def _geom_value(problem: dict, kernel: dict, key: str) -> int:
     )
 
 
+def _kernel_key(problem: dict, kernel: dict, key: str) -> str:
+    """A KERNEL-describing key, kernel-first.
+
+    The nine geometry knobs go through :func:`_geom_value`, which is kernel-first
+    for the same reason; ``epilogue`` belongs with them. The batch path sees one
+    flat row and cannot distinguish the two namespaces anyway, so only the
+    scalar path is affected -- which is production inference.
+    """
+    for src in (kernel, problem):
+        if src.get(key) is not None:
+            return str(src[key])
+    raise KeyError(
+        f"{key!r} is required to compute vector-width features and is absent "
+        "from both the problem and the kernel config"
+    )
+
+
 def _check_layout(layout: str) -> None:
     """Reject a layout neither path can resolve. Shared so they cannot differ."""
     if layout not in _LAYOUTS:
@@ -441,7 +464,7 @@ class GemmUniversalVecFeatureEngine(GemmUniversalFeatureEngine):
             dtype,
             layout,
             _required(problem, kernel, "arch"),
-            _required(problem, kernel, "epilogue"),
+            _kernel_key(problem, kernel, "epilogue"),
             tuple(
                 tuple(_geom_value(problem, kernel, k) for k in group)
                 for group in _GEOMETRY_KEYS

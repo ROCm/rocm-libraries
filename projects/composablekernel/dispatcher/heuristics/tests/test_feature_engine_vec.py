@@ -137,7 +137,18 @@ class TestSchema:
         base = len(GemmUniversalFeatureEngine().get_feature_names())
         ext = GemmUniversalVecFeatureEngine().get_feature_names()
         assert len(ext) == base + 6
-        assert ext[-6:] == VEC_FEATURES
+        assert ext[-6:] == [
+            # Written out, not compared to VEC_FEATURES: the constant is what is
+            # under test. feature_spec.json and Predictor.select_features remap
+            # on these NAMES, so a reordered constant mislabels the positionally
+            # produced values.
+            "vec_a",
+            "vec_b",
+            "vec_c",
+            "vec_frac_a",
+            "vec_frac_b",
+            "vec_frac_c",
+        ]
 
     def test_base_engine_is_untouched(self):
         """train.py's warm-start requires an exact schema match, so a base that
@@ -816,9 +827,25 @@ class TestInputValidation:
 class TestGeometryPrecedence:
     """Geometry describes the kernel, so the kernel dict wins."""
 
+    #: Knobs that DO move the native width at the DISCRIMINATING geometry.
+    #: tile_m and warp_tile_n do not -- an earlier version used those, so
+    #: inverting _geom_value to problem-first survived the whole suite.
+    MOVING = {"warp_m": 999, "tile_k": 4}
+
+    def test_the_chosen_knobs_actually_move_the_result(self):
+        """Guard the guard: if these stop mattering the test below goes vacuous
+        without failing."""
+        fe = GemmUniversalVecFeatureEngine()
+        p = _problem(m=1792, n=1536, k=7168)
+        base = fe.extract(p, _kernel((0, 0, 0), **DISCRIMINATING))[-3:]
+        moved = fe.extract(p, _kernel((0, 0, 0), **{**DISCRIMINATING, **self.MOVING}))[
+            -3:
+        ]
+        assert list(base) != list(moved)
+
     def test_the_kernels_geometry_beats_the_problems(self):
         fe = GemmUniversalVecFeatureEngine()
-        p = {**_problem(m=1792, n=1536, k=7168), "tile_m": 999, "warp_tile_n": 999}
+        p = {**_problem(m=1792, n=1536, k=7168), **self.MOVING}
         k = _kernel((0, 0, 0), **DISCRIMINATING)
         np.testing.assert_allclose(
             fe.extract(p, k), fe.extract(_problem(m=1792, n=1536, k=7168), k)
@@ -831,6 +858,39 @@ class TestGeometryPrecedence:
         k = {kk: v for kk, v in _kernel((0, 0, 0)).items() if kk != "warp_tile_n"}
         with pytest.raises(KeyError, match="warp_tile_n"):
             fe.extract(_problem(), k)
+
+
+class TestKeyPrecedence:
+    """Which dict wins, for each class of key. Nothing pinned these: the kernel
+    fixture carries no m/n/k, so inverting _extent's search order survived, and
+    no test gave the problem a conflicting epilogue."""
+
+    P = dict(m=1792, n=1536, k=7168)
+
+    def test_the_problems_extents_win(self):
+        """m/n/k describe the PROBLEM. A kernel dict carrying them is a merge
+        artefact, not a kernel property."""
+        fe = GemmUniversalVecFeatureEngine()
+        k = _kernel((0, 0, 0), **DISCRIMINATING)
+        honest = fe.extract(_problem(**self.P), k)
+        poisoned = fe.extract(_problem(**self.P), {**k, "m": 64, "n": 64, "k": 64})
+        np.testing.assert_allclose(honest, poisoned)
+
+    def test_the_kernels_epilogue_wins(self):
+        """epilogue describes the KERNEL, like the geometry beside it."""
+        fe = GemmUniversalVecFeatureEngine()
+        k = _kernel((0, 0, 0), **DISCRIMINATING, epilogue="cshuffle")
+        honest = fe.extract(_problem(**self.P), k)
+        poisoned = fe.extract({**_problem(**self.P), "epilogue": "default"}, k)
+        np.testing.assert_allclose(honest, poisoned)
+
+    @pytest.mark.parametrize("key", ["layout", "dtype", "arch", "epilogue"])
+    def test_a_kernel_side_value_is_accepted_when_the_problem_omits_it(self, key):
+        """predict._predict_single hands two dicts; either may carry it."""
+        fe = GemmUniversalVecFeatureEngine()
+        problem = {k: v for k, v in _problem(**self.P).items() if k != key}
+        kernel = {**_kernel((0, 0, 0)), key: _problem(**self.P).get(key, "default")}
+        assert fe.extract(problem, kernel).shape[0] == 78
 
 
 if __name__ == "__main__":

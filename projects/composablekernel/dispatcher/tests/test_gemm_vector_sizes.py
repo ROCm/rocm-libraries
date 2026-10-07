@@ -805,9 +805,12 @@ class TestTileFitsDelegation(unittest.TestCase):
     tiles -- inputs under which a transposition is a no-op. The case below is
     asymmetric on all three axes at once, so any single swap changes the answer.
 
-    The pad booleans are keyword-only in the callee, which makes a pad
-    transposition a TypeError rather than a wrong answer; this still covers the
-    positional extents and tiles, and the pads behaviourally.
+    Keyword-only pads do NOT make a transposition a TypeError -- the call site
+    can pass `pad_m=cfg.pad_n` perfectly legally, so the pads need covering
+    behaviourally like everything else. The dims below therefore include cases
+    where M does not divide tile_m and where N does not divide tile_n, so each
+    pad flag is load-bearing for its own dimension; an earlier version used only
+    exact multiples of both and could not see a pad_m/pad_n swap.
     """
 
     #: ccr checks all three dims, so no swap can hide in an unchecked dimension.
@@ -850,6 +853,8 @@ class TestTileFitsDelegation(unittest.TestCase):
                 self.DIMS,
                 {"m": 256, "n": 512, "k": 256},
                 {"m": 256, "n": 512, "k": 384},
+                {"m": 300, "n": 512, "k": 256},  # M does not divide tile_m
+                {"m": 256, "n": 300, "k": 256},  # N does not divide tile_n
             ):
                 with self.subTest(pads=(pad_m, pad_n, pad_k), dims=dims):
                     self.assertEqual(
