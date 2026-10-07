@@ -204,6 +204,15 @@ namespace TensileLite
         return tilewrightBankSetting().load(std::memory_order_relaxed);
     }
 
+    bool Debug::tilewrightPrepare() const
+    {
+        static bool const prepare = [] {
+            const char* value = std::getenv("TENSILE_TILEWRIGHT_PREPARE");
+            return !value || strtol(value, nullptr, 0) != 0;
+        }();
+        return prepare;
+    }
+
     int Debug::getGridbasedTopSols() const
     {
         return m_gridbasedTopSols;

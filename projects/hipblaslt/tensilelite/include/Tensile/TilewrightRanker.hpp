@@ -4,9 +4,13 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <exception>
 #include <iostream>
 #include <limits>
@@ -14,14 +18,17 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/Debug.hpp>
+#include <Tensile/hip/HipHardware.hpp>
 
 #include <origami/hardware.hpp>
 #include <rocisa/include/enum.hpp>
@@ -83,6 +90,403 @@ namespace TensileLite
         }
     }
 
+    inline rocisa::DataType tilewrightToRocisaDatatype(tilewright::DataType type)
+    {
+        switch(type)
+        {
+        case tilewright::DataType::Float:
+            return rocisa::DataType::Float;
+        case tilewright::DataType::Double:
+            return rocisa::DataType::Double;
+        case tilewright::DataType::ComplexFloat:
+            return rocisa::DataType::ComplexFloat;
+        case tilewright::DataType::ComplexDouble:
+            return rocisa::DataType::ComplexDouble;
+        case tilewright::DataType::Half:
+            return rocisa::DataType::Half;
+        case tilewright::DataType::Int8x4:
+            return rocisa::DataType::Int8x4;
+        case tilewright::DataType::Int32:
+            return rocisa::DataType::Int32;
+        case tilewright::DataType::BFloat16:
+            return rocisa::DataType::BFloat16;
+        case tilewright::DataType::Int8:
+            return rocisa::DataType::Int8;
+        case tilewright::DataType::Int64:
+            return rocisa::DataType::Int64;
+        case tilewright::DataType::XFloat32:
+            return rocisa::DataType::XFloat32;
+        case tilewright::DataType::Float8_fnuz:
+            return rocisa::DataType::Float8_fnuz;
+        case tilewright::DataType::BFloat8_fnuz:
+            return rocisa::DataType::BFloat8_fnuz;
+        case tilewright::DataType::Float8BFloat8_fnuz:
+            return rocisa::DataType::Float8BFloat8_fnuz;
+        case tilewright::DataType::BFloat8Float8_fnuz:
+            return rocisa::DataType::BFloat8Float8_fnuz;
+        case tilewright::DataType::Float8:
+            return rocisa::DataType::Float8;
+        case tilewright::DataType::BFloat8:
+            return rocisa::DataType::BFloat8;
+        case tilewright::DataType::Float8BFloat8:
+            return rocisa::DataType::Float8BFloat8;
+        case tilewright::DataType::BFloat8Float8:
+            return rocisa::DataType::BFloat8Float8;
+        case tilewright::DataType::Float6:
+            return rocisa::DataType::Float6;
+        case tilewright::DataType::BFloat6:
+            return rocisa::DataType::BFloat6;
+        case tilewright::DataType::Float4:
+            return rocisa::DataType::Float4;
+        default:
+            return rocisa::DataType::None;
+        }
+    }
+
+    inline std::int64_t tilewrightAttributeValue(TileProcessingStrategy strategy)
+    {
+        switch(strategy)
+        {
+        case TileProcessingStrategy::None:
+            return 0;
+        case TileProcessingStrategy::DataParallel:
+            return 1;
+        case TileProcessingStrategy::StreamK:
+            return 2;
+        }
+        throw std::runtime_error("Invalid TileProcessingStrategy");
+    }
+
+    inline std::int64_t tilewrightAttributeValue(WorkAssignment assignment)
+    {
+        switch(assignment)
+        {
+        case WorkAssignment::StaticGrid:
+            return 0;
+        case WorkAssignment::DynamicWorkQueue:
+            return 1;
+        case WorkAssignment::Hybrid:
+            return 2;
+        }
+        throw std::runtime_error("Invalid WorkAssignment");
+    }
+
+    /**
+     * The problem and device of the ranking in progress on this thread. The
+     * launch plans that ranking asks for are those of this problem on this
+     * device.
+     */
+    template <typename MyProblem>
+    class TilewrightLaunchScope
+    {
+    public:
+        TilewrightLaunchScope(MyProblem const& problem, Hardware const& hardware)
+            : m_problem(problem)
+            , m_hardware(hardware)
+            , m_id(++counter())
+            , m_previous(current())
+        {
+            current() = this;
+        }
+
+        ~TilewrightLaunchScope()
+        {
+            current() = m_previous;
+        }
+
+        TilewrightLaunchScope(TilewrightLaunchScope const&)            = delete;
+        TilewrightLaunchScope& operator=(TilewrightLaunchScope const&) = delete;
+
+        static TilewrightLaunchScope const* active() noexcept
+        {
+            return current();
+        }
+
+        MyProblem const& problem() const noexcept
+        {
+            return m_problem;
+        }
+
+        Hardware const& hardware() const noexcept
+        {
+            return m_hardware;
+        }
+
+        // Distinct for every scope of the thread.
+        std::uint64_t id() const noexcept
+        {
+            return m_id;
+        }
+
+    private:
+        static TilewrightLaunchScope*& current() noexcept
+        {
+            static thread_local TilewrightLaunchScope* scope = nullptr;
+            return scope;
+        }
+
+        static std::uint64_t& counter() noexcept
+        {
+            static thread_local std::uint64_t count = 0;
+            return count;
+        }
+
+        MyProblem const&       m_problem;
+        Hardware const&        m_hardware;
+        std::uint64_t          m_id;
+        TilewrightLaunchScope* m_previous;
+    };
+
+    /**
+     * TensileLite's launch of the kernels of a tilewright pool (pool position i
+     * is solutions[i]), as the plans that MLREC_v3 models read: the grid, the
+     * work assignment and the partial-tile reduction resolvePersistentSettings()
+     * launches with, for the problem under the execution context, the default
+     * persistent settings of the device, no uniform summation order and a
+     * workspace that holds every partial tile. The device is the one of the
+     * TilewrightLaunchScope of the thread, else the one given here.
+     */
+    template <typename MySolution>
+    class TilewrightLaunch : public tilewright::LaunchModel
+    {
+    public:
+        using MyProblem = typename MySolution::Problem;
+        using Scope     = TilewrightLaunchScope<MyProblem>;
+
+        // RULE_VERSION of training_pipeline/lib/hipblaslt_launch.py, whose
+        // launch_plan() returns the plans this class returns.
+        static constexpr int RuleVersion = 1;
+
+        TilewrightLaunch(std::string                              arch,
+                         std::vector<std::shared_ptr<MySolution>> solutions,
+                         std::shared_ptr<Hardware const>          device = nullptr)
+            : m_arch(std::move(arch))
+            , m_solutions(std::move(solutions))
+            , m_device(std::move(device))
+        {
+            m_kernels.reserve(m_solutions.size());
+            for(auto const& solution : m_solutions)
+            {
+                auto const& sm = solution->sizeMapping;
+                m_kernels.push_back(
+                    {.key         = launchKey(launchInputs(sm)),
+                     .persistent  = sm.isPersistent(),
+                     .batchInGrid = !sm.persistentKernelAlongBatch && !sm.packBatchDims,
+                     .streamK     = sm.isStreamK(),
+                     .atomic      = sm.streamKAtomic != 0});
+            }
+        }
+
+        std::string id() const override
+        {
+            return "hipblaslt:" + m_arch + ":" + std::to_string(RuleVersion);
+        }
+
+        std::uint64_t launch_key(tilewright::Config const& config) const override
+        {
+            checkIndex(config.index);
+            return m_kernels[config.index].key;
+        }
+
+        // launch_key() of training_pipeline/lib/hipblaslt_launch.py: FNV-1a 64
+        // over the 8-byte little-endian launch inputs.
+        static std::uint64_t launchKey(std::array<std::int64_t, 5> const& inputs)
+        {
+            std::uint64_t hash = 0xcbf29ce484222325ull;
+            for(std::int64_t const value : inputs)
+            {
+                auto const bits = static_cast<std::uint64_t>(value);
+                for(int byte = 0; byte < 8; ++byte)
+                {
+                    hash ^= (bits >> (8 * byte)) & 0xffu;
+                    hash *= 0x100000001b3ull;
+                }
+            }
+            return hash;
+        }
+
+        // launch_inputs() of hipblaslt_launch.py: (strategy, assignment,
+        // atomic, threads, occupancy), with the values plan() does not tell
+        // apart made equal.
+        static std::array<std::int64_t, 5> launchInputs(SizeMapping const& sizeMapping)
+        {
+            std::int64_t const strategy
+                = tilewrightAttributeValue(sizeMapping.tileProcessingStrategy);
+            if(strategy != 1 && strategy != 2)
+                return {0, 0, 0, 0, 0};
+            std::int64_t threads = 1;
+            for(auto const size : {sizeMapping.workGroupSize.x,
+                                   sizeMapping.workGroupSize.y,
+                                   sizeMapping.workGroupSize.z})
+                threads *= std::max<std::int64_t>(size, 0);
+            bool const atomic = sizeMapping.streamKAtomic != 0 && strategy == 2;
+            return {strategy,
+                    tilewrightAttributeValue(sizeMapping.workAssignment),
+                    atomic ? 1 : 0,
+                    threads,
+                    std::max<std::int64_t>(sizeMapping.CUOccupancy, 1)};
+        }
+
+        tilewright::LaunchPlan plan(tilewright::Config const&           config,
+                                    tilewright::Problem const&          problem,
+                                    tilewright::ExecutionContext const& context) const override
+        {
+            checkIndex(config.index);
+            auto const&     solution = *m_solutions[config.index];
+            auto const&     kernel   = m_kernels[config.index];
+            Scope const*    scope    = Scope::active();
+            Hardware const* hardware = scope ? &scope->hardware() : m_device.get();
+            if(hardware == nullptr)
+                throw std::logic_error("tilewright launch: no device to plan the launch for");
+
+            auto const& launchProblem = launchProblemOf(scope, problem, context);
+            size_t      tiles         = launchProblem.getNumTiles(solution.sizeMapping, 1);
+            if(!kernel.persistent)
+            {
+                // getNumTiles leaves the batch out of a non-persistent launch,
+                // which takes it as the grid's z dimension.
+                if(kernel.batchInGrid)
+                    for(size_t i = 0; i < launchProblem.batchIndices().size(); ++i)
+                        tiles *= launchProblem.batchSize(i);
+                return {.dynamic_queue = false, .grid_wgs = tiles};
+            }
+
+            auto const launch  = solution.resolvePersistentSettings(launchProblem, *hardware);
+            bool const dynamic = launch.effectiveWorkAssignment == WorkAssignment::DynamicWorkQueue;
+            tilewright::LaunchPlan plan{.dynamic_queue = dynamic, .grid_wgs = launch.grid};
+            if(kernel.streamK && !dynamic && launch.grid > 0
+               && launch.totalTiles % launch.grid != 0)
+            {
+                plan.partial_reduction = kernel.atomic ? tilewright::PartialReduction::Atomic
+                                         : launch.reduction == origami::reduction_t::parallel
+                                             ? tilewright::PartialReduction::Parallel
+                                             : tilewright::PartialReduction::Tree;
+            }
+            return plan;
+        }
+
+    private:
+        // What plan() and launch_key() read of a kernel, besides what
+        // getNumTiles() and resolvePersistentSettings() read of the solution.
+        struct KernelLaunch
+        {
+            std::uint64_t key         = 0;
+            bool          persistent  = false;
+            bool          batchInGrid = false;
+            bool          streamK     = false;
+            bool          atomic      = false;
+        };
+
+        void checkIndex(size_t index) const
+        {
+            if(index >= m_kernels.size())
+                throw std::out_of_range("tilewright launch: no kernel at pool position "
+                                        + std::to_string(index));
+        }
+
+        static bool sameProblem(tilewright::Problem const& a, tilewright::Problem const& b)
+        {
+            return a.size.m == b.size.m && a.size.n == b.size.n && a.size.k == b.size.k
+                   && a.batch == b.batch && a.a_transpose == b.a_transpose
+                   && a.b_transpose == b.b_transpose && a.a_dtype == b.a_dtype
+                   && a.b_dtype == b.b_dtype && a.c_dtype == b.c_dtype && a.d_dtype == b.d_dtype;
+        }
+
+        static MyProblem makeProblem(tilewright::Problem const& p)
+        {
+            bool const   transA = p.a_transpose == tilewright::Transpose::T;
+            bool const   transB = p.b_transpose == tilewright::Transpose::T;
+            size_t const m = p.size.m, n = p.size.n, k = p.size.k;
+            size_t const lda         = transA ? k : m;
+            size_t const ldb         = transB ? n : k;
+            auto const   computeType = tilewrightToRocisaDatatype(
+                p.mi_dtype == tilewright::DataType::XFloat32 ? p.a_dtype : p.mi_dtype);
+            auto problem = MyProblem::GEMM_Strides(transA,
+                                                   transB,
+                                                   tilewrightToRocisaDatatype(p.a_dtype),
+                                                   tilewrightToRocisaDatatype(p.b_dtype),
+                                                   tilewrightToRocisaDatatype(p.c_dtype),
+                                                   tilewrightToRocisaDatatype(p.d_dtype),
+                                                   m,
+                                                   n,
+                                                   k,
+                                                   p.batch,
+                                                   lda,
+                                                   lda * (transA ? m : k),
+                                                   ldb,
+                                                   ldb * (transB ? k : n),
+                                                   m,
+                                                   m * n,
+                                                   m,
+                                                   m * n,
+                                                   0.0);
+            problem.setComputeInputTypeA(computeType);
+            problem.setComputeInputTypeB(computeType);
+            return problem;
+        }
+
+        static int schedulingMode(tilewright::Schedule schedule)
+        {
+            switch(schedule)
+            {
+            case tilewright::Schedule::Dynamic:
+                return 1;
+            case tilewright::Schedule::Auto:
+                return 2;
+            default:
+                return 0;
+            }
+        }
+
+        // The scope's problem, or one made from `problem`, under `context`;
+        // reused by the plans of one ranking.
+        static MyProblem const& launchProblemOf(Scope const*                        scope,
+                                                tilewright::Problem const&          problem,
+                                                tilewright::ExecutionContext const& context)
+        {
+            struct Cached
+            {
+                std::uint64_t            scope = 0;
+                tilewright::Problem      problem{};
+                size_t                   cuBudget = 0;
+                tilewright::Schedule     schedule = tilewright::Schedule::Default;
+                std::optional<MyProblem> launch;
+            };
+            static thread_local Cached cached;
+
+            bool const reuse
+                = cached.launch && cached.cuBudget == context.cu_budget
+                  && cached.schedule == context.schedule
+                  && (scope ? cached.scope == scope->id()
+                            : cached.scope == 0 && sameProblem(cached.problem, problem));
+            if(!reuse)
+            {
+                if(scope)
+                    cached.launch = scope->problem();
+                else
+                    cached.launch = makeProblem(problem);
+                cached.scope    = scope ? scope->id() : 0;
+                cached.problem  = problem;
+                cached.cuBudget = context.cu_budget;
+                cached.schedule = context.schedule;
+
+                auto& launch = *cached.launch;
+                launch.setWorkspaceSize(std::numeric_limits<size_t>::max());
+                auto& params = launch.setParams();
+                params.setUniformSummationOrder(false);
+                params.setSmCountTarget(static_cast<int>(
+                    std::min<size_t>(context.cu_budget, std::numeric_limits<int>::max())));
+                params.setStreamKTileSchedulingMode(schedulingMode(context.schedule));
+            }
+            return *cached.launch;
+        }
+
+        std::string                              m_arch;
+        std::vector<std::shared_ptr<MySolution>> m_solutions;
+        std::vector<KernelLaunch>                m_kernels;
+        std::shared_ptr<Hardware const>          m_device;
+    };
+
     /**
      * Ranks the kernels of a Prediction library with the tilewright model that
      * ships for the library. Pool position i is configs[i].
@@ -90,11 +494,17 @@ namespace TensileLite
     class TilewrightRanker
     {
     public:
-        // Throws std::invalid_argument for a null model or an invalid attribute name.
-        TilewrightRanker(tilewright::ModelPtr model, std::vector<tilewright::Config> configs)
+        // Throws std::invalid_argument for a null model, an invalid attribute
+        // name, or a launch model other than the one the model was trained with.
+        TilewrightRanker(tilewright::ModelPtr                           model,
+                         std::vector<tilewright::Config>                configs,
+                         std::shared_ptr<const tilewright::LaunchModel> launch = nullptr,
+                         std::string                                    arch   = {})
             : m_candidates(std::move(model),
                            std::move(configs),
-                           tilewright::PoolOptions{.tie_break = tilewright::TieBreak::PoolOrder})
+                           tilewright::PoolOptions{.tie_break = tilewright::TieBreak::PoolOrder,
+                                                   .launch    = std::move(launch)})
+            , m_arch(std::move(arch))
         {
         }
 
@@ -116,18 +526,50 @@ namespace TensileLite
             return model;
         }
 
-        // A ranker over `poolSize` kernels whose config i is built from
-        // sizeMapping(i). Throws what the CandidateSet throws.
-        template <typename SizeMappingOf>
-        static std::shared_ptr<const TilewrightRanker>
-            make(tilewright::ModelPtr model, size_t poolSize, SizeMappingOf&& sizeMapping)
+        // A ranker over `poolSize` kernels of `arch` whose kernel i is
+        // solutionAt(i), with its per-cell data built now when `prepare` is
+        // set and TENSILE_TILEWRIGHT_PREPARE does not turn that off. Throws
+        // what the CandidateSet throws.
+        template <typename SolutionAt>
+        static std::shared_ptr<const TilewrightRanker> make(tilewright::ModelPtr model,
+                                                            size_t               poolSize,
+                                                            SolutionAt&&         solutionAt,
+                                                            std::string const&   arch,
+                                                            bool                 prepare = true)
         {
+            using MySolution = typename std::decay_t<decltype(*solutionAt(0))>;
+
             auto const                      names = tilewright::attribute_names(*model);
             std::vector<tilewright::Config> configs;
             configs.reserve(poolSize);
             for(size_t i = 0; i < poolSize; i++)
-                configs.push_back(makeConfig(sizeMapping(i), i, &names));
-            return std::make_shared<const TilewrightRanker>(std::move(model), std::move(configs));
+                configs.push_back(makeConfig(solutionAt(i)->sizeMapping, i, &names));
+
+            std::shared_ptr<const tilewright::LaunchModel> launch;
+            if(tilewright::describe(*model).format_version >= 3)
+            {
+                std::vector<std::shared_ptr<MySolution>> solutions;
+                solutions.reserve(poolSize);
+                for(size_t i = 0; i < poolSize; i++)
+                    solutions.push_back(solutionAt(i));
+                launch = std::make_shared<const TilewrightLaunch<MySolution>>(arch,
+                                                                              std::move(solutions));
+            }
+
+            auto ranker = std::make_shared<const TilewrightRanker>(
+                std::move(model), std::move(configs), std::move(launch), arch);
+            if(prepare && Debug::Instance().tilewrightPrepare())
+            {
+                auto const start = std::chrono::steady_clock::now();
+                ranker->m_candidates.prepare();
+                if(Debug::Instance().printDataInit())
+                    std::cout << "tilewright: prepared " << poolSize << " kernels in "
+                              << std::chrono::duration<double, std::milli>(
+                                     std::chrono::steady_clock::now() - start)
+                                     .count()
+                              << " ms" << std::endl;
+            }
+            return ranker;
         }
 
         // Looks up the stem of `logicFile` in the tilewright_index of its
@@ -142,12 +584,14 @@ namespace TensileLite
             return load(loadModel(logicFile), logicFile, solutions);
         }
 
-        // As above, for the model loadModel(logicFile) returned.
+        // As above, for the model loadModel(logicFile) returned, prepared as
+        // make() prepares.
         template <typename MySolution>
         static std::shared_ptr<const TilewrightRanker>
             load(tilewright::ModelPtr                                            model,
                  std::string const&                                              logicFile,
-                 std::vector<std::pair<int, std::shared_ptr<MySolution>>> const& solutions)
+                 std::vector<std::pair<int, std::shared_ptr<MySolution>>> const& solutions,
+                 bool                                                            prepare = true)
         {
             if(!model)
                 return nullptr;
@@ -156,9 +600,13 @@ namespace TensileLite
             try
             {
                 return make(
-                    std::move(model), solutions.size(), [&](size_t i) -> SizeMapping const& {
-                        return solutions[i].second->sizeMapping;
-                    });
+                    std::move(model),
+                    solutions.size(),
+                    [&](size_t i) -> std::shared_ptr<MySolution> const& {
+                        return solutions[i].second;
+                    },
+                    logicArch(logicFile),
+                    prepare);
             }
             catch(std::exception const& e)
             {
@@ -227,13 +675,15 @@ namespace TensileLite
             };
         }
 
-        // Pool positions of the kernels tilewright scores for `problem`, best
-        // first. Calls outside the execution context the model was trained for
-        // get none.
+        // Pool positions of the numSolutions kernels (every kernel when
+        // negative) tilewright ranks first for `problem` on `device`, best
+        // first; with `everyScored`, every kernel the same ranking scores. Calls
+        // outside the execution contexts the model supports get none.
         template <typename MyProblem>
-        std::vector<size_t> rank(MyProblem const&           problem,
-                                 origami::hardware_t const& hardware,
-                                 int                        numSolutions) const
+        std::vector<size_t> rank(MyProblem const&      problem,
+                                 hip::HipAMDGPU const& device,
+                                 int                   numSolutions,
+                                 bool                  everyScored = false) const
         {
             size_t m     = 1;
             size_t n     = 1;
@@ -263,19 +713,27 @@ namespace TensileLite
                                 ? tilewright::DataType::XFloat32
                                 : datatypeToTilewrightDatatype(problem.computeInputTypeA()),
             };
+            auto const&                hardware           = *device.analyticalHardware;
             tilewright::Hardware const tilewrightHardware = {
                 .N_CU         = hardware.N_CU,
                 .lds_capacity = hardware.lds_capacity,
                 .L2_capacity  = hardware.L2_capacity,
             };
-            size_t const depth = numSolutions < 0 ? std::numeric_limits<size_t>::max()
-                                                  : static_cast<size_t>(numSolutions);
+            size_t const depth   = numSolutions < 0 ? std::numeric_limits<size_t>::max()
+                                                    : static_cast<size_t>(numSolutions);
+            auto const   context = executionContext(problem);
 
-            std::vector<size_t> positions;
+            static thread_local std::vector<tilewright::Result> ranked;
+            std::vector<size_t>                                 positions;
             try
             {
-                auto const ranked = m_candidates.rank(
-                    tilewrightProblem, tilewrightHardware, executionContext(problem), depth);
+                TilewrightLaunchScope<MyProblem> const scope(problem, device);
+                if(everyScored)
+                    ranked
+                        = m_candidates.rank(tilewrightProblem, tilewrightHardware, context, depth);
+                else
+                    m_candidates.rank_top(
+                        tilewrightProblem, tilewrightHardware, context, depth, ranked);
                 positions.reserve(ranked.size());
                 for(auto const& r : ranked)
                 {
@@ -284,12 +742,45 @@ namespace TensileLite
                     positions.push_back(r.config_index);
                 }
             }
-            catch(std::exception const&)
+            catch(std::exception const& e)
             {
-                // Ranking only fails to allocate; origami ranks every kernel then.
+                // Ranking fails only to allocate or to plan a launch; origami
+                // ranks every kernel then.
                 positions.clear();
+                if(diagnostics())
+                    std::cerr << "[TILEWRIGHT_DIAG TENSILELITE] ranking failed (" << e.what()
+                              << "); ranking with origami instead" << std::endl;
+            }
+            if(positions.empty() && diagnostics())
+            {
+                if(auto note = unsupportedContextNote(context, tilewrightHardware))
+                    std::cerr << *note << std::endl;
             }
             return positions;
+        }
+
+        // The TILEWRIGHT_DIAG line for a context the model does not support,
+        // the first time the ranker meets that context; nullopt otherwise.
+        std::optional<std::string>
+            unsupportedContextNote(tilewright::ExecutionContext const& context,
+                                   tilewright::Hardware const&         hardware) const
+        {
+            if(tilewright::supports(m_candidates.model(), context, hardware))
+                return std::nullopt;
+            std::lock_guard<std::mutex> lock(m_reportedMutex);
+            if(!m_reported.emplace(context.cu_budget, static_cast<int>(context.schedule)).second)
+                return std::nullopt;
+            return "[TILEWRIGHT_DIAG TENSILELITE] arch=" + m_arch
+                   + " cu_budget=" + std::to_string(context.cu_budget)
+                   + " schedule=" + std::to_string(static_cast<int>(context.schedule))
+                   + " n_cu=" + std::to_string(hardware.N_CU)
+                   + ": the model does not support this context; ranking with origami";
+        }
+
+        // The architecture of the library's kernels.
+        std::string const& arch() const noexcept
+        {
+            return m_arch;
         }
 
         tilewright::CandidateSet const& candidates() const noexcept
@@ -298,6 +789,38 @@ namespace TensileLite
         }
 
     private:
+        // TILEWRIGHT_DIAG, read as tilewright reads it.
+        static bool diagnostics()
+        {
+            static bool const on = [] {
+                char const* value = std::getenv("TILEWRIGHT_DIAG");
+                return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
+            }();
+            return on;
+        }
+
+        // The architecture a library file holds kernels for: the compiler
+        // target of the last '_' part of its stem, without a stepping
+        // ("-strict") or an ASIC revision ("v0"), as the training pipeline's
+        // launch_arch() names it, so every library one model ships for names
+        // the same launch model.
+        static std::string logicArch(std::string const& logicFile)
+        {
+            std::string const stem = logicStem(logicFile);
+            size_t const      pos  = stem.rfind('_');
+            if(pos == std::string::npos)
+                return {};
+            std::string arch = stem.substr(pos + 1);
+            arch             = arch.substr(0, arch.find(':'));
+            if(arch.rfind("gfx", 0) == 0)
+                arch = arch.substr(0, arch.find('-'));
+            size_t const revision = arch.find_last_not_of("0123456789");
+            if(revision != std::string::npos && revision > 3 && revision + 1 < arch.size()
+               && arch[revision] == 'v')
+                arch.erase(revision);
+            return arch;
+        }
+
         // Logic stems contain no '.', and the file may carry two extensions.
         static std::string logicStem(std::string const& logicFile, std::string* dir = nullptr)
         {
@@ -349,34 +872,6 @@ namespace TensileLite
             }
         }
 
-        static std::int64_t attributeValue(TileProcessingStrategy strategy)
-        {
-            switch(strategy)
-            {
-            case TileProcessingStrategy::None:
-                return 0;
-            case TileProcessingStrategy::DataParallel:
-                return 1;
-            case TileProcessingStrategy::StreamK:
-                return 2;
-            }
-            throw std::runtime_error("Invalid TileProcessingStrategy");
-        }
-
-        static std::int64_t attributeValue(WorkAssignment assignment)
-        {
-            switch(assignment)
-            {
-            case WorkAssignment::StaticGrid:
-                return 0;
-            case WorkAssignment::DynamicWorkQueue:
-                return 1;
-            case WorkAssignment::Hybrid:
-                return 2;
-            }
-            throw std::runtime_error("Invalid WorkAssignment");
-        }
-
         // The training pipeline derives the same names and values from the
         // sizeMapping keys of the library .dat; both sides change together.
         static std::vector<tilewright::Attribute>
@@ -413,8 +908,8 @@ namespace TensileLite
             add("pack_summation_dims", s.packSummationDims);
             add("magic_div_alg", s.magicDivAlg);
             add("stream_k_atomic", s.streamKAtomic);
-            add("tile_processing_strategy", attributeValue(s.tileProcessingStrategy));
-            add("work_assignment", attributeValue(s.workAssignment));
+            add("tile_processing_strategy", tilewrightAttributeValue(s.tileProcessingStrategy));
+            add("work_assignment", tilewrightAttributeValue(s.workAssignment));
             add("prefetch_across_persistent", s.prefetchAcrossPersistent);
             add("persistent_kernel", s.persistentKernel);
             add("persistent_kernel_along_batch", s.persistentKernelAlongBatch);
@@ -455,7 +950,10 @@ namespace TensileLite
             return attributes;
         }
 
-        tilewright::CandidateSet m_candidates;
+        tilewright::CandidateSet                 m_candidates;
+        std::string                              m_arch;
+        mutable std::mutex                       m_reportedMutex;
+        mutable std::set<std::pair<size_t, int>> m_reported;
     };
 
     /**

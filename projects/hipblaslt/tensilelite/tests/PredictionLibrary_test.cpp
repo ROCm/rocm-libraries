@@ -787,18 +787,20 @@ namespace
                / "gfx950_Cijk_Ailk_Bljk_BBS_BH_BiasSB_HAS_SAV_UserArgs.tilewright.bin";
     }
 
-    // Loads `table` and the model at `model` as the library of the probe stem.
+    // Loads `table` and the model at `model` as the library of `stem`.
     void loadWithTilewright(ScratchDir const&                    dir,
                             std::filesystem::path const&         model,
                             std::vector<int> const&              table,
                             SolutionMap<ContractionSolution>&    solutions,
-                            ContractionProblemPredictionLibrary& lib)
+                            ContractionProblemPredictionLibrary& lib,
+                            std::string const& stem = "TensileLibrary_Probe_gfx950")
     {
-        std::filesystem::copy_file(model, dir.path() / "probe.tilewright.bin");
-        std::ofstream(dir.path() / "tilewright_index")
-            << "TensileLibrary_Probe_gfx950\tprobe.tilewright.bin\n";
+        std::filesystem::copy_file(model,
+                                   dir.path() / "probe.tilewright.bin",
+                                   std::filesystem::copy_options::overwrite_existing);
+        std::ofstream(dir.path() / "tilewright_index") << stem << "\tprobe.tilewright.bin\n";
         loadPredictionLibrary(table, solutions, lib);
-        lib.loadTilewright((dir.path() / "TensileLibrary_Probe_gfx950.dat").string());
+        lib.loadTilewright((dir.path() / (stem + ".dat")).string());
     }
 
     std::shared_ptr<ContractionSolution> makeDot2Solution(int index)
@@ -868,7 +870,7 @@ namespace
                             ContractionProblemGemm const&              problem)
     {
         auto const device = makeGfx950Device();
-        EXPECT_TRUE(lib.tilewright_ranker->rank(problem, *device.analyticalHardware, 3).empty());
+        EXPECT_TRUE(lib.tilewright_ranker->rank(problem, device, 3).empty());
 
         auto const origami = origamiOrder(problem);
         EXPECT_NE(origami, tilewrightOrder(lib));
@@ -980,6 +982,86 @@ TEST(PredictionLibraryTest, OrigamiRanksCallsWithACuBudgetBelowTheDevice)
     auto problem = TensileLite::testing::dummyProblem();
     problem.setParams().setSmCountTarget(224);
     expectOrigamiOrder(lib, problem);
+}
+
+TEST(PredictionLibraryTest, TilewrightNamesTheCompilerTargetOfTheLibrary)
+{
+    if(!std::filesystem::exists(shippedGfx950Model()))
+        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
+
+    for(auto const& [suffix, arch] :
+        std::vector<std::pair<std::string, std::string>>{{"gfx950", "gfx950"},
+                                                         {"CU256_ID75a8_gfx950", "gfx950"},
+                                                         {"gfx1250", "gfx1250"},
+                                                         {"gfx1250-strict", "gfx1250"},
+                                                         {"gfx1250v0", "gfx1250"},
+                                                         {"gfx942:xnack+", "gfx942"}})
+    {
+        SolutionMap<ContractionSolution> solutions;
+        addContestedKernels(solutions);
+
+        ScratchDir                          dir("tensilelite_tilewright_arch");
+        ContractionProblemPredictionLibrary lib;
+        loadWithTilewright(dir,
+                           shippedGfx950Model(),
+                           contestedTable,
+                           solutions,
+                           lib,
+                           "TensileLibrary_Probe_" + suffix);
+        ASSERT_NE(lib.tilewright_ranker, nullptr) << suffix;
+        EXPECT_EQ(lib.tilewright_ranker->arch(), arch) << suffix;
+    }
+}
+
+TEST(PredictionLibraryTest, TilewrightNotesEachContextTheModelDoesNotSupportOnce)
+{
+    if(!std::filesystem::exists(shippedGfx950Model()))
+        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
+
+    SolutionMap<ContractionSolution> solutions;
+    addContestedKernels(solutions);
+
+    ScratchDir                          dir("tensilelite_tilewright_unsupported");
+    ContractionProblemPredictionLibrary lib;
+    loadWithTilewright(dir, shippedGfx950Model(), contestedTable, solutions, lib);
+    ASSERT_NE(lib.tilewright_ranker, nullptr);
+
+    tilewright::Hardware const hardware{256, 163840, 4000000};
+    auto const&                ranker = *lib.tilewright_ranker;
+    EXPECT_FALSE(ranker.unsupportedContextNote({}, hardware));
+    EXPECT_FALSE(ranker.unsupportedContextNote({.cu_budget = 256}, hardware));
+
+    auto const note = ranker.unsupportedContextNote({.cu_budget = 224}, hardware);
+    ASSERT_TRUE(note);
+    EXPECT_EQ(*note,
+              "[TILEWRIGHT_DIAG TENSILELITE] arch=gfx950 cu_budget=224 schedule=0 n_cu=256: the "
+              "model does not support this context; ranking with origami");
+    EXPECT_FALSE(ranker.unsupportedContextNote({.cu_budget = 224}, hardware));
+    EXPECT_TRUE(ranker.unsupportedContextNote(
+        {.cu_budget = 224, .schedule = tilewright::Schedule::Dynamic}, hardware));
+}
+
+TEST(PredictionLibraryTest, TilewrightRanksTheTopKernelsOrEveryScoredKernel)
+{
+    if(!std::filesystem::exists(shippedGfx950Model()))
+        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
+
+    SolutionMap<ContractionSolution> solutions;
+    addContestedKernels(solutions);
+
+    ScratchDir                          dir("tensilelite_tilewright_every_scored");
+    ContractionProblemPredictionLibrary lib;
+    loadWithTilewright(dir, shippedGfx950Model(), contestedTable, solutions, lib);
+    ASSERT_NE(lib.tilewright_ranker, nullptr);
+
+    auto const problem = TensileLite::testing::dummyProblem();
+    auto const device  = makeGfx950Device();
+    auto const top     = lib.tilewright_ranker->rank(problem, device, 1);
+    auto const every   = lib.tilewright_ranker->rank(problem, device, 1, true);
+    ASSERT_EQ(top.size(), 1u);
+    ASSERT_EQ(every.size(), tilewrightOrder(lib).size());
+    EXPECT_EQ(every.front(), top.front());
+    EXPECT_EQ(lib.tilewright_ranker->rank(problem, device, 3), every);
 }
 
 TEST(PredictionLibraryTest, TilewrightRanksCallsWithACuBudgetOfTheWholeDevice)
