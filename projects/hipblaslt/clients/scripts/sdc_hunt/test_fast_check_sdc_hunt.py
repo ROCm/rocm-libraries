@@ -151,6 +151,96 @@ class CliTests(unittest.TestCase):
             )
             self.assertEqual(self.invoke(self.args + extra), 1)
 
+    def foreground_tree(self, inherit_output=False, exit_early=False):
+        ready = self.root / f"child-{time.monotonic_ns()}"
+        child = (
+            "import os, signal, sys, time; from pathlib import Path; "
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+            "Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(120)"
+        )
+        redirect = (
+            "" if inherit_output
+            else ", stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL"
+        )
+        parent = (
+            "import subprocess, sys, time\nfrom pathlib import Path\n"
+            "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2]]"
+            + redirect
+            + ")\n"
+            "while not Path(sys.argv[2]).exists(): time.sleep(0.01)\n"
+            + (
+                "print('[  PASSED  ] 1 test.', flush=True)\n" if exit_early
+                else "print('partial output', flush=True)\ntime.sleep(120)\n"
+            )
+        )
+        self.binary.write_text(
+            "#!/bin/sh\nexec "
+            + shlex.join([sys.executable, "-c", parent, child, str(ready)])
+            + "\n"
+        )
+
+        def cleanup():
+            if ready.exists():
+                try:
+                    os.kill(int(ready.read_text()), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+        self.addCleanup(cleanup)
+        return ready
+
+    def wait_for_child(self, ready):
+        deadline = time.monotonic() + 5
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertTrue(ready.exists(), "foreground descendant did not start")
+        return int(ready.read_text())
+
+    def assert_child_stopped(self, ready):
+        pid = self.wait_for_child(ready)
+
+        def running():
+            try:
+                return Path(f"/proc/{pid}/stat").read_text().split()[2] != "Z"
+            except FileNotFoundError:
+                return False
+
+        deadline = time.monotonic() + 2
+        while running() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertFalse(running(), "foreground descendant survived cleanup")
+
+    def test_timeout_stops_foreground_descendants_and_keeps_partial_output(self):
+        for inherit_output in (False, True):
+            with self.subTest(inherit_output=inherit_output):
+                ready = self.foreground_tree(inherit_output=inherit_output)
+                self.assertEqual(self.invoke(self.args + ["--timeout", "1"]), 1)
+                record = json.loads(
+                    (self.root / "results.jsonl").read_text().splitlines()[-1]
+                )
+                self.assertEqual(record["exit_code"], "timeout")
+                self.assertIn("partial output", Path(record["log"]).read_text())
+                self.assert_child_stopped(ready)
+
+    def test_completed_foreground_stops_descendants(self):
+        ready = self.foreground_tree(exit_early=True)
+        self.assertEqual(self.invoke(self.args), 0)
+        self.assert_child_stopped(ready)
+
+    def test_interrupted_or_failed_foreground_stops_descendants(self):
+        for exception in (KeyboardInterrupt, RuntimeError):
+            with self.subTest(exception=exception):
+                ready = self.foreground_tree()
+
+                def interrupt(_process, *args, **kwargs):
+                    self.wait_for_child(ready)
+                    raise exception
+
+                with mock.patch.object(hunt.subprocess.Popen, "communicate", interrupt):
+                    with self.assertRaises(exception):
+                        self.invoke(self.args)
+                self.assert_child_stopped(ready)
+
 
 class ParserTests(unittest.TestCase):
     def test_failure_summary_and_skips(self):

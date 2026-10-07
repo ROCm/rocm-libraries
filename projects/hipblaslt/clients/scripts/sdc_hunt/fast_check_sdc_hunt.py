@@ -228,19 +228,30 @@ def run_once(args: argparse.Namespace, xnack: str, load: str, index: int) -> dic
                 return record
 
         start = time.monotonic()
+        foreground = None
         try:
-            proc = subprocess.run(
+            foreground = subprocess.Popen(
                 cmd,
                 env=env,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=args.timeout,
-                check=False,
+                start_new_session=True,
             )
-            output, code = proc.stdout + proc.stderr, proc.returncode
+            stdout, stderr = foreground.communicate(timeout=args.timeout)
+            output, code = stdout + stderr, foreground.returncode
         except subprocess.TimeoutExpired as e:
             output = as_text(e.stdout) + as_text(e.stderr)
             code = "timeout"
+        finally:
+            if foreground:
+                # A timed-out test or an exited launcher can leave children running. Give
+                # the foreground the same group cleanup as the load on every exit path.
+                try:
+                    stop(foreground)
+                finally:
+                    foreground.stdout.close()
+                    foreground.stderr.close()
         if background:
             # A load that stopped early left part of the run uncontended.
             record["load_ran_throughout"] = background.poll() is None
@@ -276,7 +287,7 @@ def as_text(data) -> str:
 
 
 def stop(process: subprocess.Popen) -> None:
-    """Stops a background load and everything it started (its process group)."""
+    """Stops a process started in its own session and everything in its process group."""
     for sig, wait in ((signal.SIGTERM, 30), (signal.SIGKILL, 5)):
         try:
             os.killpg(process.pid, sig)
