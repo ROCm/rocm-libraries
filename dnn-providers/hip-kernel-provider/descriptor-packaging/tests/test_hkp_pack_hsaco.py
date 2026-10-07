@@ -15,7 +15,6 @@ import json
 import shutil
 
 import pytest
-from conftest import read_shipped
 
 from hkp_pack import pipeline, toolchain
 from hkp_pack.descriptors import load_flat_input
@@ -23,6 +22,7 @@ from hkp_pack.errors import HkpPackError
 from hkp_pack.hsaco_source import hsaco_variant_key
 from hkp_pack.kernel_signature import kernel_signature
 from hkp_pack.pipeline import compile_intermediate, run_pipeline
+from pack_helpers import read_shipped
 
 ARCH = "gfx942"
 OTHER_ARCH = "gfx950"

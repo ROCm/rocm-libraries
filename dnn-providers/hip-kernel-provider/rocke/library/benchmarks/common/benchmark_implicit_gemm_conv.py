@@ -2286,7 +2286,7 @@ def _run_sweep(
                 flush=True,
             )
 
-    _stop = EarlyStop(args.early_stop, args.early_stop_after)
+    _stop = EarlyStop.for_case(args, problem, dtype, "fwd")
     n_run = 0
     for combo, spec, artifact in pending:
         tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn, pipeline, epilogue = combo
@@ -2354,10 +2354,11 @@ def _run_sweep(
             rt.memset(D_dev, 0, D_t.nbytes)
 
         ms = _stop.measure(
-            lambda: launcher(values, config=cfg),
+            launcher.bind(values, config=cfg),
             warmup=args.warmup,
             iters=args.iters,
             stream=stream,
+            passed=kernel_passed,
         )
         if ms is None:
             _stop.report(artifact.kernel_name)
@@ -2414,6 +2415,8 @@ def _run_sweep(
 
     if not results:
         print("No valid configurations found.", file=sys.stderr)
+        if _stop.summary():
+            print(_stop.summary(), file=sys.stderr)
         return 1, []
 
     results.sort(key=lambda r: r.tflops, reverse=True)
@@ -2758,7 +2761,7 @@ def _run_wgrad_sweep(
     # Set of config keys that have been pruned (skip remaining split-K degrees).
     _pruned_configs: set = set()
 
-    _stop = EarlyStop(args.early_stop, args.early_stop_after)
+    _stop = EarlyStop.for_case(args, problem, dtype, "wgrad")
     n_run = 0
     for combo, spec, resolved_split_k, artifact in pending:
         (
@@ -2848,8 +2851,9 @@ def _run_wgrad_sweep(
 
             cfg = LaunchConfig(grid=grid, block=block, stream=stream)
 
+            kernel_passed = None
             if args.verify or args.dump_fail:
-                stopped, _ = _verify_kernel(
+                stopped, kernel_passed = _verify_kernel(
                     rt=rt,
                     launcher=launcher,
                     values=values,
@@ -2884,13 +2888,14 @@ def _run_wgrad_sweep(
             else:
                 _vals_snap = dict(values)
                 _cfg_snap = cfg
-                timed_fn = lambda _v=_vals_snap, _c=_cfg_snap: launcher(_v, config=_c)
+                timed_fn = launcher.bind(_vals_snap, config=_cfg_snap)
 
             ms = _stop.measure(
                 timed_fn,
                 warmup=args.warmup,
                 iters=args.iters,
                 stream=stream,
+                passed=kernel_passed,
             )
             if ms is None:
                 _stop.report(f"{artifact.kernel_name} spk{_launch_sk}")
@@ -3108,8 +3113,9 @@ def _run_wgrad_sweep(
                     _s1(_v1, config=_c1)
                     _s2(_v2, config=_c2)
 
+                kernel_passed = None
                 if args.verify or args.dump_fail:
-                    stopped, _ = _verify_kernel(
+                    stopped, kernel_passed = _verify_kernel(
                         rt=rt2,
                         launch_fn=_launch_two_stage,
                         out_dev=dW_dev2,
@@ -3136,6 +3142,7 @@ def _run_wgrad_sweep(
                     warmup=args.warmup,
                     iters=args.iters,
                     stream=0,
+                    passed=kernel_passed,
                 )
                 if ms is None:
                     _stop.report(f"{s1_art.kernel_name} spk{_launch_sk}")
@@ -3195,6 +3202,8 @@ def _run_wgrad_sweep(
 
     if not results:
         print("No valid wgrad configurations found.", file=sys.stderr)
+        if _stop.summary():
+            print(_stop.summary(), file=sys.stderr)
         return 1, []
 
     results.sort(key=lambda r: r.tflops, reverse=True)
@@ -3400,7 +3409,7 @@ def _run_dgrad_sweep(
                 flush=True,
             )
 
-    _stop = EarlyStop(args.early_stop, args.early_stop_after)
+    _stop = EarlyStop.for_case(args, problem, dtype, "dgrad")
     n_measured = 0
     for _combo, spec, resolved_split_k, artifact in pending:
         sub_gemms = spec.compute_sub_gemms()
@@ -3443,8 +3452,9 @@ def _run_dgrad_sweep(
 
         _zero_init = spec.needs_atomic
 
+        kernel_passed = None
         if args.verify or args.dump_fail:
-            stopped, _ = _verify_kernel(
+            stopped, kernel_passed = _verify_kernel(
                 rt=rt,
                 launcher=launcher,
                 values=values,
@@ -3475,10 +3485,14 @@ def _run_dgrad_sweep(
 
             timed_fn = _launch_atomic
         else:
-            timed_fn = lambda: launcher(values, config=cfg)
+            timed_fn = launcher.bind(values, config=cfg)
 
         ms = _stop.measure(
-            timed_fn, warmup=args.warmup, iters=args.iters, stream=stream
+            timed_fn,
+            warmup=args.warmup,
+            iters=args.iters,
+            stream=stream,
+            passed=kernel_passed,
         )
         if ms is None:
             _stop.report(artifact.kernel_name)
@@ -3534,6 +3548,8 @@ def _run_dgrad_sweep(
 
     if not results:
         print("No valid dgrad configurations found.", file=sys.stderr)
+        if _stop.summary():
+            print(_stop.summary(), file=sys.stderr)
         return 1, []
 
     results.sort(key=lambda r: r.tflops, reverse=True)
@@ -3608,7 +3624,12 @@ def _cache_dispatch(args, arch, target, cases) -> int:
         return rc
 
     cache = KernelCache(Path(args.run_from_cache), arch)
-    rc = describe_cache(cache)
+    # Only the directions this run launches (see _run_from_cache): describing
+    # the whole cache would parse every other direction's entries for nothing.
+    used = directions or sorted(
+        {case[2] if len(case) > 2 else args.direction for case in cases}
+    )
+    rc = describe_cache(cache, directions=used)
     if rc:
         return rc
     return _run_from_cache(args, arch, target, cases, cache, directions)
@@ -3754,7 +3775,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 if args.verify or args.dump_fail
                 else None
             )
-            _stop = EarlyStop(args.early_stop, args.early_stop_after)
+            _stop = EarlyStop.for_case(args, problem, case_dtype, direction)
             n_failed = 0
 
             n_cand = len(candidates)
@@ -3818,7 +3839,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                         ),
                         stream=0,
                     )
-                    run = lambda: launcher(values, config=cfg)  # noqa: E731
+                    run = launcher.bind(values, config=cfg)
                     if direction == "wgrad" and ident.two_stage:
                         # Two-stage is three steps and all of them are the
                         # algorithm's cost: zero the scratch (Stage 1
@@ -3920,6 +3941,8 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 )
             if not results:
                 print("  No successful launches.", flush=True)
+                if _stop.summary():
+                    print(f"  {_stop.summary()}", flush=True)
                 overall_rc = 1
                 continue
 
@@ -3932,6 +3955,9 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     f"{ms:>8.3f} ms  {label}",
                     flush=True,
                 )
+            # The line benchmark_conv_compare.py reads, as the JIT sweep prints.
+            tflops, _, ms, label = results[0]
+            print(f"\nBest: {tflops:.1f} TFLOPS — {label}  {ms:.3f} ms", flush=True)
 
     return overall_rc
 

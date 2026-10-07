@@ -70,6 +70,7 @@ grid: see :mod:`benchmarks.common.direct_kernel_sweep`.
 
 from __future__ import annotations
 
+import gc
 import itertools
 import time
 from concurrent.futures import (
@@ -1291,7 +1292,10 @@ def compile_jobs(
     """
     digest = current_emitter_digest()
     comgr_id = current_comgr_id()
-    index = cache.index()
+    # Only the directions these jobs live in: a shared cache can hold ~10^6
+    # entries of other families, and every one parsed here is resident in the
+    # process the compile workers fork from.
+    index = cache.index({j.identity.direction for j in all_jobs})
 
     def _up_to_date(job) -> bool:
         meta = index.get(job.identity.stable_hash())
@@ -1400,6 +1404,13 @@ def compile_jobs(
         # emit ran (and submitting them all takes seconds by itself). With
         # the window a compile waits behind at most ~2*jobs emits.
         window = 2 * jobs
+        # Forked workers share this process's heap copy-on-write, but a
+        # garbage collection in a worker writes to every tracked object's
+        # header and so copies every page holding one: with a large cache
+        # index resident, each of the 64 workers grew a private copy of it
+        # (GBs apiece) and the run was OOM-killed. Frozen objects are left
+        # alone by the collector.
+        gc.freeze()
         emit_iter = iter(emit_payloads)
         # Work handed over from a pool that broke (see below).
         carry: List[Tuple[str, tuple]] = []
@@ -1521,13 +1532,29 @@ def _launch_values_for(direction, problem, identity, ptrs, sizes, extras):
     )
 
 
-def describe_cache(cache: KernelCache, log=print) -> int:
-    """Print what is in the cache, grouped by direction."""
+def describe_cache(
+    cache: KernelCache, log=print, directions: Optional[Sequence[str]] = None
+) -> int:
+    """Print what is in the cache, grouped by direction.
+
+    ``directions`` limits the listing to the directions a run will use: every
+    entry is a metadata file to parse, and a full implicit-GEMM cache holds
+    hundreds of thousands of them -- reading all of them costs tens of seconds
+    before a run that needs a few hundred.
+    """
     by_direction: Dict[str, int] = {}
-    for identity, _ in cache.list_all():
+    entries = (
+        cache.list_all()
+        if directions is None
+        else [e for d in directions for e in cache.list_all(d)]
+    )
+    for identity, _ in entries:
         by_direction[identity.direction] = by_direction.get(identity.direction, 0) + 1
     if not by_direction:
-        log("AOT cache is empty.")
+        if directions is None:
+            log("AOT cache is empty.")
+        else:
+            log(f"AOT cache has no {', '.join(directions)} kernels.")
         return 2
     stale_by_direction = {}
     for direction, count in sorted(by_direction.items()):

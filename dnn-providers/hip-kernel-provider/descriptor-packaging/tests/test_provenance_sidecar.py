@@ -14,9 +14,9 @@ from pathlib import Path
 
 import pytest
 
-from conftest import is_compact, write_shipped
 from hkp_pack import descriptor_context, pipeline, provenance_sidecar
 from hkp_pack.errors import HkpPackError
+from pack_helpers import is_compact, write_shipped
 
 SHA = "a" * 64
 OTHER_SHA = "b" * 64
