@@ -4,10 +4,11 @@
 # StreamK, WorkAssignment Hybrid, dynamic sub-mode, with split tiles in both
 # raw-rank queue regimes (WorkGroupMappingXCC -1; PersistentXCCMapping with
 # WorkGroupMappingXCC > 1). The host splits every size below without env
-# overrides, covering the queue rank across work items, the arrival counter and
-# fixup, and batch-inclusive partial indexing. Validation after repeated
-# launches: see sk_hybrid.yaml. ActivationFuncCall covers call offsets live
-# across the partials path into the fixup.
+# overrides, covering the queue rank across work items, both reductions (as on
+# the static path: parallel for at most CUs / 4 tiles of at least 64
+# iterations, else the arrival fixup) and batch-inclusive partial indexing.
+# Validation after repeated launches: see sk_hybrid.yaml. ActivationFuncCall
+# covers call offsets live across the partials path into the fixup.
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict]
 
@@ -80,17 +81,22 @@ BenchmarkProblems:
               PersistentXCCMapping: 8
       BenchmarkFinalParameters:
         - ProblemSizes:
-          # 1 tile, long K: split 16.
+          # 1 tile, long K: parallel, 256 parts.
           - Exact: [64, 64, 1, 65536]
-          # 12 edge tiles: split 16.
+          # 12 edge tiles: parallel, 21 parts each.
           - Exact: [200, 130, 1, 16384]
-          # 3 batches x 4 tiles: partial indices span batches.
+          # 3 batches x 4 tiles: parallel, workspace slots span batches.
           - Exact: [96, 96, 3, 32768]
-          # 64 tiles: split 4.
+          # 64 tiles of 32 iterations: split 4, arrival fixup.
           - Exact: [512, 512, 1, 512]
           # Batch > 1 with one tile per batch and a very long K: 4 tiles,
-          # split 16, so 64 partial tiles span the batches.
+          # parallel, 64 parts each, so 256 slots span the batches.
           - Exact: [32, 32, 4, 262144]
+          # 128 tiles (more than CUs / 4): split 2, arrival fixup.
+          - Exact: [1024, 512, 1, 8192]
+          # 3 batches x 4 tiles of 63 iterations: split 6, arrival fixup,
+          # partial tiles span batches.
+          - Exact: [96, 96, 3, 1008]
 
   - - OperationType: GEMM
       DataType: s
@@ -108,5 +114,7 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [64, 64, 1, 65536]
           - Exact: [200, 130, 1, 16384]
+          # Split 2, arrival fixup with the activation call live across it.
+          - Exact: [1024, 512, 1, 8192]
         - ActivationArgs:
           - [Enum: relu]
