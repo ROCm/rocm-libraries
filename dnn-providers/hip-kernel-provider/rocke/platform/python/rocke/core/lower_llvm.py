@@ -102,15 +102,46 @@ _DATALAYOUT_LLVM22 = (
     "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
     "-n32:64-S32-A5-G1-ni:7:8:9"
 )
-# LLVM 23 (ROCm 7.13+): re-derived on an LLVM 23 host (AMD clang 23.0.0git,
-# ROCm 7.13) and found to drift from LLVM 22 by one field -- LLVM 23 emits the
-# ELF symbol-mangling spec ``m:e`` that LLVM 20 and LLVM 22 omit. Otherwise the
-# p8-indexed layout is identical to LLVM 22 for every wired arch. Regenerate via
-# ``test_datalayout_matches_hipcc_emitted_ir`` if a future LLVM 23 build drifts
-# further.
+# Layout emitted for rocKE's ``llvm23`` flavor. Relative to our ``llvm22``
+# constant it adds two independent things:
+#
+#   1. the ELF symbol-mangling spec ``m:e``, which LLVM 20 and LLVM 22 omit;
+#   2. address spaces ``p10``-``p15``, introduced upstream by ``5bf967cb132b``.
+#
+# Both were re-derived from the clang on an amd-staging host and confirmed
+# gfx-invariant there across every wired arch
+# (gfx90a/942/950/1100/1151/1201/1250).
+#
+# This is rocKE's flavor constant, NOT a claim about what every LLVM 23+ /
+# ROCm 7.13+ build emits: compiler builds vary, and older ones -- including some
+# builds numbered LLVM 23 or later -- omit ``p10``-``p15``. The drift guard
+# ``test_datalayout_matches_hipcc_emitted_ir`` accommodates exactly that
+# variation.
+#
+# Why we carry the longer form. LLVM's backend has long rejected a module whose
+# DataLayout is incompatible with the target's ("Can't create a MachineFunction
+# using a Module with a Target-incompatible DataLayout attached" -- the check is
+# already in LLVM 22's MachineFunction.cpp, so it predates ``fc6829a3``). What
+# changed in ``fc6829a3`` ("clang: Do not overwrite a module's DataLayout in the
+# backend") is that clang stopped replacing an explicitly supplied layout, which
+# exposes that pre-existing check to the layout rocKE hands it. On the clang
+# builds we tested, the consequence is concrete:
+#
+#   * against staging clang (post-``fc6829a3``), a module carrying the short
+#     form fails codegen outright, and the long form builds and links;
+#   * against the older ``/opt/rocm`` clang we tested, whose own layout omits
+#     ``p10``-``p15``, the long form is still accepted (rc=0) because that clang
+#     overwrites the supplied layout before codegen.
+#
+# That is an observation about the builds we exercised, not a proof about every
+# toolchain. It is still the right trade: do NOT "fix" a mismatch against an
+# older hipcc by deleting ``p10``-``p15``, since that re-breaks every kernel on a
+# current toolchain. Regenerate via ``test_datalayout_matches_hipcc_emitted_ir``
+# if a future build drifts further.
 _DATALAYOUT_LLVM23 = (
     "e-m:e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-    "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
+    "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-p10:32:32-p11:32:32"
+    "-p12:32:32-p13:32:32-p14:32:32-p15:32:32-i64:64-v16:16-v24:32"
     "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
     "-n32:64-S32-A5-G1-ni:7:8:9"
 )
@@ -720,14 +751,6 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare i32 @llvm.amdgcn.update.dpp.i32("
         "i32, i32, i32 immarg, i32 immarg, i32 immarg, i1 immarg)"
     ),
-    # Packed bf16 atomic add (gfx940+). Two bf16 lanes per atomic transaction.
-    # Used by FMHA-bwd's dQ accumulate path when the caller wants to
-    # land bf16 directly in HBM rather than running a separate f32 -> bf16
-    # cast pass on the workspace.
-    "global.atomic.fadd.v2bf16": (
-        "declare <2 x bfloat> @llvm.amdgcn.global.atomic.fadd.v2bf16.p1("
-        "ptr addrspace(1), <2 x bfloat>)"
-    ),
     # Packed fp16 atomic add (gfx940+). Two fp16 lanes per atomic transaction.
     "global.atomic.fadd.v2f16": (
         "declare <2 x half> @llvm.amdgcn.global.atomic.fadd.v2f16.p1("
@@ -867,17 +890,6 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     ),
     "amdgcn.cvt.scalef32.pk.f32.bf8": (
         "declare <2 x float> @llvm.amdgcn.cvt.scalef32.pk.f32.bf8(i32, float, i1)"
-    ),
-    # Reverse direction: <2 x f32> + scale -> 2 fp8 bytes packed into i32.
-    # First call (i1=false) fills bytes 0,1; second call (i1=true with
-    # the first call's i32 result as the accumulator) fills bytes 2,3.
-    # Saves the host-side rescale + cvt_pk_fp8 + bitshift dance for
-    # output FP8 quantisation paths.
-    "amdgcn.cvt.scalef32.pk.fp8.f32": (
-        "declare i32 @llvm.amdgcn.cvt.scalef32.pk.fp8.f32(i32, <2 x float>, float, i1)"
-    ),
-    "amdgcn.cvt.scalef32.pk.bf8.f32": (
-        "declare i32 @llvm.amdgcn.cvt.scalef32.pk.bf8.f32(i32, <2 x float>, float, i1)"
     ),
     # gfx950 ``ds_swizzle_b32`` — single-instruction intra-32-lane
     # permute. We use it for the softmax XOR-butterfly reduction; the
