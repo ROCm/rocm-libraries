@@ -865,21 +865,29 @@ void rocblasCall_gemv_mem(rocblas_operation transA,
     *w_temp = rocblas_internal_gemv_kernel_workspace_size<T>(transA, m, n, batch_count);
 }
 
-// gemv memory sizes, bounded over every subproblem of (m, n)
+// Number of consecutive zero requirements that ends the search in
+// rocblasCall_gemv_mem_max. rocBLAS only asks for gemv scratch within a bounded range of
+// sizes -- its optimized kernels are selected below a crossover on n, or for a short
+// output m -- and both ranges start at 1 and end well before this many sizes have been
+// examined. Once that many consecutive sizes report nothing, the range is behind us and
+// no larger size can report anything. The search therefore costs a bounded number of
+// queries (about 2200 in the worst case observed) however large m and n are, rather than
+// growing with the matrix.
+static constexpr rocblas_int rocblas_gemv_mem_max_run = 2048;
+
+// gemv memory sizes, bounded over every smaller size
 //
-// Callers that size a workspace once and then issue a sequence of shrinking gemv calls
-// -- the blocked factorizations driving larf panel by panel, for instance -- cannot use
-// the requirement of (m, n) alone. rocBLAS enables its optimized gemv kernels through
-// shape gates that are not monotonic in m and n, so a subproblem can require scratch
-// where the enclosing problem requires none: the skinny-n gate gives up once n reaches
-// its crossover, and the skinny-m gate needs m * n to clear a floor. Taking the maximum
-// over the whole box keeps every subproblem covered.
+// Returns enough scratch for the gemv (transA, m, n) and for every smaller one, meaning
+// every (m', n') with m' <= m and n' <= n. Callers that reserve a workspace once and then
+// issue a sequence of shrinking gemv calls -- the factorizations that drive larf over a
+// shrinking trailing submatrix, for instance -- cannot use the requirement of (m, n)
+// alone, because the requirement is not monotone: rocBLAS selects its optimized gemv
+// kernels through size conditions that a smaller call can satisfy where the enclosing one
+// does not. A smaller call can therefore need scratch where (m, n) needs none.
 //
-// Both gates admit only a narrow band of shapes, so the maximum is found by walking the
-// edge each band peaks on and stopping once the band is behind us: the skinny-n
-// requirement grows with n but vanishes above the crossover, and the skinny-m
-// requirement is confined to short outputs. A shape outside both bands reports zero and
-// costs nothing.
+// The requirement is non-zero only within a bounded range of sizes, so the maximum is
+// found by walking one edge and stopping once that range has been passed; see
+// rocblas_gemv_mem_max_run.
 template <bool BATCHED, typename T>
 void rocblasCall_gemv_mem_max(rocblas_operation transA,
                               rocblas_int m,
@@ -887,36 +895,28 @@ void rocblasCall_gemv_mem_max(rocblas_operation transA,
                               rocblas_int batch_count,
                               size_t* w_temp)
 {
-    size_t worst = 0;
     if(m <= 0 || n <= 0 || batch_count <= 0)
     {
         *w_temp = 0;
         return;
     }
 
-    if(transA == rocblas_operation_none)
+    // The requirement grows with the size swept and is bounded in the other, so sweeping
+    // one edge at the full extent of the other covers every smaller call: m for a
+    // non-transposed gemv, n for a transposed one.
+    const bool sweep_m = (transA == rocblas_operation_none);
+    const rocblas_int extent = sweep_m ? m : n;
+
+    size_t worst = 0;
+    rocblas_int run = 0;
+    for(rocblas_int k = 1; k <= extent && run < rocblas_gemv_mem_max_run; ++k)
     {
-        // Skinny-m: scratch scales with m, and the gate only admits short outputs, so
-        // sweep m upward at the widest n and stop at the first run of empty requirements.
-        int misses = 0;
-        for(rocblas_int mm = 1; mm <= m && misses < 2048; ++mm)
-        {
-            size_t w = rocblas_internal_gemv_kernel_workspace_size<T>(transA, mm, n, batch_count);
-            worst = std::max(worst, w);
-            misses = w ? 0 : misses + 1;
-        }
-    }
-    else
-    {
-        // Skinny-n: scratch scales with n, and the gate only admits n below its
-        // crossover, so sweep n upward at the tallest m under the same stopping rule.
-        int misses = 0;
-        for(rocblas_int nn = 1; nn <= n && misses < 2048; ++nn)
-        {
-            size_t w = rocblas_internal_gemv_kernel_workspace_size<T>(transA, m, nn, batch_count);
-            worst = std::max(worst, w);
-            misses = w ? 0 : misses + 1;
-        }
+        size_t w = sweep_m
+            ? rocblas_internal_gemv_kernel_workspace_size<T>(transA, k, n, batch_count)
+            : rocblas_internal_gemv_kernel_workspace_size<T>(transA, m, k, batch_count);
+
+        worst = std::max(worst, w);
+        run = w ? 0 : run + 1;
     }
 
     *w_temp = worst;

@@ -27,51 +27,23 @@
 
 #include <algorithm>
 #include <gtest/gtest.h>
-#include <rocblas/rocblas.h>
 
-// Exported by rocBLAS for callers that must reserve the gemv scratch themselves.
-// Declared here rather than pulled in through the internal header, which the test
-// target does not compile with ROCBLAS_INTERNAL_API.
-template <typename To>
-size_t rocblas_internal_gemv_kernel_workspace_size(rocblas_operation transA,
-                                                   rocblas_int m,
-                                                   rocblas_int n,
-                                                   rocblas_int batch_count);
+// The helper under test. This file is compiled with the internal API enabled (see
+// clients/gtest/CMakeLists.txt) so that the tests exercise the routine rocSOLVER
+// actually ships, rather than a copy of it.
+#include "rocblas.hpp"
 
-// Mirrors rocblasCall_gemv_mem_max in library/src/include/rocblas.hpp. The helper
-// itself lives behind ROCBLAS_INTERNAL_API, so the bound it computes is reproduced
-// here and checked against an exhaustive search of the same box.
+// The bound produced by the shipped routine.
 template <typename T>
 static size_t
     gemv_mem_max(rocblas_operation transA, rocblas_int m, rocblas_int n, rocblas_int batch_count)
 {
-    if(m <= 0 || n <= 0 || batch_count <= 0)
-        return 0;
-
-    size_t worst = 0;
-    int misses = 0;
-    if(transA == rocblas_operation_none)
-    {
-        for(rocblas_int mm = 1; mm <= m && misses < 2048; ++mm)
-        {
-            size_t w = rocblas_internal_gemv_kernel_workspace_size<T>(transA, mm, n, batch_count);
-            worst = std::max(worst, w);
-            misses = w ? 0 : misses + 1;
-        }
-    }
-    else
-    {
-        for(rocblas_int nn = 1; nn <= n && misses < 2048; ++nn)
-        {
-            size_t w = rocblas_internal_gemv_kernel_workspace_size<T>(transA, m, nn, batch_count);
-            worst = std::max(worst, w);
-            misses = w ? 0 : misses + 1;
-        }
-    }
-    return worst;
+    size_t w = 0;
+    rocsolver::rocblasCall_gemv_mem_max<false, T>(transA, m, n, batch_count, &w);
+    return w;
 }
 
-// Exhaustive requirement over every subproblem (m' <= m, n' <= n).
+// Exhaustive requirement over every smaller call (m' <= m, n' <= n).
 template <typename T>
 static size_t
     gemv_mem_brute(rocblas_operation transA, rocblas_int m, rocblas_int n, rocblas_int batch_count)
@@ -84,11 +56,11 @@ static size_t
     return worst;
 }
 
-// The bound must cover every subproblem. A blocked factorization sizes this workspace
-// once from the full (m, n) and then calls larf on shrinking panels, so anything the
-// bound misses is a buffer overrun at run time.
+// The bound must cover every smaller call. A factorization sizes this workspace once
+// from the full (m, n) and then calls larf over a shrinking trailing submatrix, so
+// anything the bound misses is a buffer overrun at run time.
 template <typename T>
-static void expect_covers_box(rocblas_operation transA,
+static void expect_covers_all(rocblas_operation transA,
                               rocblas_int m,
                               rocblas_int n,
                               rocblas_int bc)
@@ -106,8 +78,8 @@ TEST(checkin_lapack, GEMV_MEM_covers_subproblems_transpose)
     for(rocblas_int m : {64, 600, 5000, 40000})
         for(rocblas_int n : {1, 7, 40, 130, 300})
         {
-            expect_covers_box<float>(trans_op, m, n, 1);
-            expect_covers_box<double>(trans_op, m, n, 1);
+            expect_covers_all<float>(trans_op, m, n, 1);
+            expect_covers_all<double>(trans_op, m, n, 1);
         }
 }
 
@@ -116,8 +88,8 @@ TEST(checkin_lapack, GEMV_MEM_covers_subproblems_no_transpose)
     for(rocblas_int m : {64, 600, 5000})
         for(rocblas_int n : {1, 40, 300, 4096})
         {
-            expect_covers_box<float>(none_op, m, n, 1);
-            expect_covers_box<double>(none_op, m, n, 1);
+            expect_covers_all<float>(none_op, m, n, 1);
+            expect_covers_all<double>(none_op, m, n, 1);
         }
 }
 
@@ -125,15 +97,15 @@ TEST(checkin_lapack, GEMV_MEM_covers_subproblems_batched)
 {
     for(rocblas_int bc : {1, 3})
     {
-        expect_covers_box<double>(trans_op, 5000, 130, bc);
-        expect_covers_box<double>(none_op, 600, 4096, bc);
+        expect_covers_all<double>(trans_op, 5000, 130, bc);
+        expect_covers_all<double>(none_op, 600, 4096, bc);
     }
 }
 
-// The requirement is not monotonic in n: the skinny-n kernel is only selected below a
-// crossover, so a tall problem whose n sits above it reports nothing while a narrower
-// panel of the same matrix needs scratch. Querying (m, n) alone therefore under-reserves.
-// This is the shape class that regressed; keep a direct guard on it.
+// The requirement is not monotone in n: rocBLAS selects its optimized kernel only below
+// a threshold on n, so a tall problem whose n sits above it reports nothing while a
+// narrower call on the same matrix needs scratch. Querying (m, n) alone therefore
+// under-reserves. This is the case that regressed; keep a direct guard on it.
 TEST(checkin_lapack, GEMV_MEM_non_monotonic_in_n)
 {
     const rocblas_int m = 40000;
@@ -142,7 +114,7 @@ TEST(checkin_lapack, GEMV_MEM_non_monotonic_in_n)
     size_t at_corner = rocblas_internal_gemv_kernel_workspace_size<double>(trans_op, m, n_wide, 1);
     size_t over_box = gemv_mem_max<double>(trans_op, m, n_wide, 1);
 
-    // Find the largest requirement among the narrower panels of the same matrix.
+    // Largest requirement among the narrower calls on the same matrix.
     size_t narrowest = 0;
     for(rocblas_int nn = 1; nn <= n_wide; ++nn)
         narrowest = std::max(
