@@ -601,6 +601,10 @@ namespace TensileLite
         size_t itersPerTile = 1;
         // Workgroups the dynamic grid policy may launch (CUs x occupancy).
         size_t maxGrid = 0;
+        // CUs the split is sized for: origami's cu_count for the static grid.
+        size_t splitCUs = 0;
+        // False keeps every tile whole unless the debug overrides ask otherwise.
+        bool allowSplit = true;
         // Flag-region entries left after the per-XCD queue counters.
         size_t flagSlots = 0;
         // Workspace the launch is given, and the bytes of one partial tile.
@@ -611,14 +615,28 @@ namespace TensileLite
         int overrideSplit = -1;
     };
 
+    // Fewest main-loop iterations a split part may get: origami's
+    // MinItersPerCU, which bounds the static grid's split the same way
+    // (shared/origami/src/origami/streamk.cpp, grid_k_split_aware).
+    constexpr size_t StreamKDynamicMinItersPerWI = 8;
+
+    // Splits the static grid tries, largest first, when there are fewer tiles
+    // than CUs and the reduction is tree (origami grid_k_split_aware).
+    inline constexpr size_t StreamKDynamicSplitFactors[] = {16, 12, 8, 6, 4, 3, 2};
+
     /**
      * Choose the dynamic StreamK work decomposition. Single source of truth for
      * the packed SKTiles/SKSplit/SKItersPerWI/TotalItems, the dynamic grid, the
      * partials workspace and the launch summary.
      *
-     * Every tile is whole (skTiles = 0) unless the debug overrides ask for a
-     * split; if the partials they ask for do not fit the workspace or the flag
-     * region the tiles stay whole.
+     * Problems with at least splitCUs tiles keep every tile whole (skTiles = 0,
+     * the historical packing). Fewer tiles are split the way the static grid
+     * splits them (origami grid_k_split_aware, tree reduction): skSplit is the
+     * largest of StreamKDynamicSplitFactors with tiles*skSplit <= splitCUs and
+     * at least StreamKDynamicMinItersPerWI iterations per part that also fits
+     * flagSlots and the workspace. If none does, the tiles stay whole. The
+     * debug overrides replace the policy; if the partials they ask for do not
+     * fit the workspace or the flag region the tiles stay whole.
      */
     TENSILELITEHOST_EXPORT StreamKDynamicSplit
         streamKDynamicSplit(StreamKDynamicSplitInputs const& in);
@@ -1365,6 +1383,11 @@ namespace TensileLite
             // newly generated StreamK 3 / SK5 set it true. Uniform-summation-order
             // grid steering consults the same bit.
             bool perTileExtraIters  = false;
+            // StreamK Hybrid kernel fixes the split tiles of its dynamic
+            // sub-path up by last arrival (one counter per split tile) instead
+            // of per-part ready flags; streamKDynamicDecomposition() splits
+            // tiles only for these. Older/custom kernels leave this false.
+            bool arrivalFixup       = false;
             bool useUniversalArgs   = true;
             bool useSFC             = false;
         };
