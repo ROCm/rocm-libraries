@@ -58,7 +58,8 @@ import tempfile
 from pathlib import Path
 
 from _flavor_gate import requires_newer_flavor as _requires_newer_flavor
-from _llvm_identity import clang_identity, flavor_of_clang
+from _hostcaps import available_cpus
+from _llvm_identity import flavor_of_clang, tool_identity
 
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parent  # tools -> rocke/platform
@@ -365,7 +366,7 @@ def main() -> int:
     # because the path alone does not say which vintage lives there -- and a
     # green recorded against the wrong compiler is not distinguishable after
     # the fact without this line.
-    identity = clang_identity(clang)
+    identity = tool_identity(clang)
     print(f"   version: {identity}")
 
     # The `flavor != native` test above compares two rocke-side values and so
@@ -410,7 +411,15 @@ def main() -> int:
     if not_lowerable:
         print(f"   {len(not_lowerable)} case(s) need a newer LLVM than {flavor}")
 
-    jobs = args.jobs or min(32, (os.cpu_count() or 1))
+    # `available_cpus()`, not `os.cpu_count()`: this gate is default-on in
+    # run_all.py, and the hosts it runs on are scheduler-pinned (384 CPUs
+    # reported, 2 allowed) or containerised. Sizing from the machine would
+    # launch ~32 concurrent clang+link jobs against a 2-CPU allocation, and the
+    # resulting contention and resource-limit failures surface here as
+    # L1-COMPILE defects -- i.e. the gate would report bad IR when what it
+    # actually hit was an oversubscribed host. The other two tools in this
+    # directory already size from the same helper.
+    jobs = args.jobs or min(32, available_cpus())
     out_dir = Path(tmp.name) / "out"
     out_dir.mkdir(exist_ok=True)
 

@@ -88,7 +88,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from _hostcaps import available_cpus
-from _llvm_identity import clang_identity, flavor_of_clang
+from _llvm_identity import flavor_of_clang, tool_identity
 
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parent  # tools -> rocke/platform
@@ -864,6 +864,46 @@ def main() -> int:
         print("rocKE intrinsic arch-domain generator -- prune")
         return _prune()
 
+    # Also before any probing, so a bad invocation costs milliseconds rather
+    # than the ten minutes a full sweep takes on clang 20.
+    #
+    # `--only` and `--arch` select a subset, and the document this writes is a
+    # whole column: every key crossed with every wired arch. Writing a filtered
+    # sweep to the committed path would therefore not corrupt cells, it would
+    # *delete* the unselected ones, and the loader cannot tell a key that was
+    # never measured from one this flavor does not have -- every other lookup
+    # would silently become no-data until someone regenerated in full. That is
+    # the exact inversion this artifact exists to prevent, reached by an
+    # invocation the --help text invites.
+    #
+    # `--check` is refused for the same reason rather than allowed as harmless:
+    # it would diff a subset against the full column and report drift that is
+    # only the filter, i.e. a red gate that says the artifact is stale when it
+    # is not. Neither mode has a sound answer here, so both ask for a
+    # destination and let the caller own the partial file.
+    if (args.only or args.arch) and args.out is None:
+        selectors = " ".join(
+            s
+            for s in (
+                f"--only {args.only}" if args.only else "",
+                " ".join(f"--arch {a}" for a in args.arch or ()),
+            )
+            if s
+        )
+        print(
+            f"\nERROR: {selectors} selects part of the sweep, and "
+            f"{'--check' if args.check else 'the default output path'} is the "
+            "committed full column.\n"
+            "      A partial sweep is not a column: unselected keys/arches "
+            "would be missing, not negative,\n"
+            "      and later lookups would read that as no-data.\n"
+            "      Pass --out PATH to write the partial result somewhere of "
+            "your own, or drop the filter to\n"
+            "      regenerate the column in full.",
+            file=sys.stderr,
+        )
+        return 2
+
     flavor = L._resolve_llvm_flavor()
     clang = _llvm_tool("clang")
     opt = _llvm_tool("opt")
@@ -908,7 +948,7 @@ def main() -> int:
         )
         return 1
 
-    identity = clang_identity(clang)
+    identity = tool_identity(clang)
     print(f"   version: {identity}")
 
     # A probe result is only meaningful against the flavor it was measured on.
@@ -921,6 +961,31 @@ def main() -> int:
             "The probe would be attributed to the wrong LLVM vintage. "
             "Set ROCKE_LLVM_BIN to the matching toolchain, or ROCKE_LLVM_FLAVOR "
             "if the override is intended."
+        )
+        return 2
+
+    # The two stages are measured by two different binaries -- `opt` resolves
+    # names and immarg operands, `clang` compiles and links -- and they are
+    # found by two independent searches. Under ROCKE_LLVM_BIN that is safe: the
+    # directory is authoritative, so a tool is found there or not at all. Under
+    # the discovered-prefix path it is not. A prefix that ships clang but not
+    # `opt` lets clang bind to that install while `opt` falls through to the
+    # next prefix or to PATH, and the provenance block below records only
+    # clang -- so a column could be stamped llvm22 while its flavor axis was
+    # measured by an llvm20 `opt`. That is the same mis-attribution the check
+    # above refuses, arrived at by a different route, so it gets the same
+    # answer. An unparseable banner stays silent, per flavor_of_clang.
+    opt_identity = tool_identity(opt)
+    opt_flavor = flavor_of_clang(opt_identity)
+    if opt_flavor and clang_flavor and opt_flavor != clang_flavor:
+        print(
+            f"\nERROR: opt reports {opt_flavor} but clang reports {clang_flavor}; "
+            "they are different LLVM installs. Stage A would measure the flavor "
+            "axis with one vintage and stage B the arch axis with another, and "
+            "the result would be committed under clang's name alone.\n"
+            f"      opt   : {opt} ({opt_identity})\n"
+            f"      clang : {clang} ({identity})\n"
+            "      Set ROCKE_LLVM_BIN to one complete LLVM install."
         )
         return 2
 

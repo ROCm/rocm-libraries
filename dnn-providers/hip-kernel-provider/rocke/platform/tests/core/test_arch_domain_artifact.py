@@ -41,6 +41,7 @@ step if this file is ever renamed.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -48,6 +49,7 @@ import tempfile
 import unittest
 from importlib.resources import files as resource_files
 from pathlib import Path
+from unittest import mock
 
 from rocke.core.isa.backend import wired_arches
 from rocke.core.lower_llvm import _resolve_llvm_flavor
@@ -281,6 +283,33 @@ class AvailableCpusTest(unittest.TestCase):
         for files in ({}, {"cpu.max": "garbage"}, {"cpu.max": "0 0"}):
             with self.subTest(files=sorted(files)):
                 self.assertGreaterEqual(available_cpus(self._root(files)), 1)
+
+    def test_no_tool_sizes_a_pool_from_the_machine(self):
+        """The helper only helps the callers that ask it.
+
+        Each of these tools fans out subprocesses -- clang+link probes, or a
+        `cmake --build -j` -- and each grew its own `os.cpu_count()` default
+        before the helper existed. One left behind is one gate that still
+        launches 32 compilers, or a 384-way build, against a 2-CPU allocation;
+        the failures land as compile defects and read as bad IR rather than as
+        an oversubscribed host. Asserted per file rather than per call site
+        because the next tool to need a worker count will be written by copying
+        one of these.
+
+        A mention inside a comment is how the rule explains itself, so only
+        code is searched.
+        """
+        for name in (
+            "gen_arch_domain.py",
+            "check_ir_validity.py",
+            "check_byte_identity.py",
+            "run_portable_ir_gates.py",
+        ):
+            with self.subTest(tool=name):
+                src = (_ROCKE / "tools" / name).read_text()
+                code = "\n".join(line.split("#", 1)[0] for line in src.splitlines())
+                self.assertNotIn("cpu_count", code, f"{name} sizes from the machine")
+                self.assertIn("available_cpus", code, f"{name} sizes from nothing")
 
 
 class DriftTest(unittest.TestCase):
@@ -574,6 +603,113 @@ for line in open(src):
         rc = self._run(tools, out)
         self.assertEqual(rc, 1)
         self.assertFalse(out.exists(), "committed our own defect as a measurement")
+
+    def test_a_disagreeing_opt_and_clang_write_nothing_and_fail(self):
+        """One sweep, one toolchain.
+
+        `opt` measures the flavor axis and `clang` the arch axis, and the two
+        are found by independent searches. A prefix that ships clang but not
+        `opt` lets clang bind there while `opt` falls through to another prefix
+        or to PATH -- and the provenance block records clang alone, so the
+        result would be filed under a vintage that measured only half of it.
+        """
+        out = Path(tempfile.mkdtemp()) / "column.json"
+        self.addCleanup(shutil.rmtree, out.parent, True)
+        tools = {
+            "clang": self._stub(
+                "clang", 'import sys\nprint("AMD clang version 22.0.0git")\n'
+            ),
+            "opt": self._stub(
+                "opt", 'import sys\nprint("AMD LLVM version 20.0.0git")\n'
+            ),
+        }
+        # Pin the flavor so the earlier clang-vs-rocke check passes on any host
+        # and the run reaches the pairing check this test is about.
+        with mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}):
+            rc = self._run(tools, out)
+        self.assertEqual(rc, 2, "two vintages measured one column")
+        self.assertFalse(out.exists(), "wrote a column measured by two LLVMs")
+
+    def test_an_unparseable_banner_is_not_a_disagreement(self):
+        """Unknown must never read as mismatch.
+
+        A vendor is free to reword its version banner. If that made the pairing
+        check fire, a cosmetic upstream change would red every generating host.
+        """
+        self.assertIsNone(G.flavor_of_clang("some vendor reworded this"))
+        for banner, flavor in (
+            ("AMD clang version 22.0.0git (...)", "llvm22"),
+            ("AMD LLVM version 22.0.0git", "llvm22"),
+        ):
+            with self.subTest(banner=banner):
+                self.assertEqual(G.flavor_of_clang(banner), flavor)
+
+
+class PartialSweepTest(unittest.TestCase):
+    """A filtered sweep must never land on the committed column.
+
+    `--only` and `--arch` measure a subset, but the document the generator
+    writes is a whole column -- every decl key crossed with every wired arch.
+    Writing a subset to the default path did not corrupt cells, it deleted the
+    unselected ones, and nothing downstream can tell a key that was never
+    measured from one this flavor does not have: every other lookup silently
+    became no-data until somebody regenerated in full. A single documented
+    `--only` invocation took a 166-key column down to one key.
+
+    The guard runs before any toolchain resolution, so these need no stubs --
+    which is also the point, since a bad invocation should cost milliseconds
+    rather than the ten minutes a full sweep takes on clang 20.
+    """
+
+    def _run(self, *args: str) -> int:
+        with mock.patch.object(sys, "argv", [str(_TOOL), *args]):
+            return G.main()
+
+    def _snapshot(self) -> dict[str, str]:
+        return {p.name: p.read_text() for _f, p in _columns()}
+
+    def test_a_filtered_sweep_without_an_out_refuses(self):
+        for args in (
+            ("--only", "fabs"),
+            ("--arch", "gfx942"),
+            ("--only", "fabs", "--arch", "gfx942"),
+        ):
+            with self.subTest(args=args):
+                before = self._snapshot()
+                self.assertEqual(self._run(*args), 2, f"{args} reached the writer")
+                self.assertEqual(before, self._snapshot(), "a committed column moved")
+
+    def test_a_filtered_check_refuses_rather_than_reporting_false_drift(self):
+        """`--check` with a filter would diff a subset against the full column.
+
+        Harmless to the file, but it reports the artifact stale when it is not
+        -- a red gate caused entirely by the filter. There is no sound answer
+        in either mode, so both ask for a destination.
+        """
+        before = self._snapshot()
+        self.assertEqual(self._run("--only", "fabs", "--check"), 2)
+        self.assertEqual(before, self._snapshot())
+
+    def test_a_filtered_sweep_with_an_out_is_let_through(self):
+        """The guard keys on the missing destination, not on the filter.
+
+        A guard that simply rejected `--only`/`--arch` would pass every test
+        above while deleting the documented way to probe one key -- which is
+        the whole reason the flag exists. Driven to the no-clang exit (rc 0,
+        UNVALIDATED) rather than a real sweep: reaching a decision that only
+        exists downstream of toolchain resolution is proof it cleared the
+        guard, and it costs no probing.
+        """
+        out = Path(tempfile.mkdtemp()) / "column.json"
+        self.addCleanup(shutil.rmtree, out.parent, True)
+        argv = [str(_TOOL), "--out", str(out), "--only", "fabs", "--arch", "gfx942"]
+        import check_ir_validity as V
+
+        with (
+            mock.patch.object(V, "_llvm_tool", lambda _n: None),
+            mock.patch.object(sys, "argv", argv),
+        ):
+            self.assertEqual(G.main(), 0, "the guard swallowed a well-formed probe")
 
 
 class ValidityGateTest(unittest.TestCase):
