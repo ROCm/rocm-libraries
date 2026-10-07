@@ -160,6 +160,47 @@ def _llvm_tool(name: str) -> str | None:
     return shutil.which(name)
 
 
+def _unpaired_opt(
+    opt: str, clang: str, clang_identity: str, clang_flavor: str
+) -> str | None:
+    """Why L0 must be skipped because `opt` is not clang's sibling, or None.
+
+    `_llvm_tool` resolves the two independently, and nothing else asks `opt`
+    what it is. Under the discovered-prefix path a prefix that ships clang but
+    not `opt` lets clang bind there while `opt` falls through to the next
+    prefix or to PATH, so the L0 verifier and the L1 compiler can be different
+    LLVM vintages. That is not cosmetic: an older `opt` rejecting a construct
+    its own parser predates reds the case as L0-VERIFY, which reads as "rocke
+    emitted invalid IR" when the IR is fine and the verifier is wrong -- a
+    failure attributed to the kernel, by the gate that exists to attribute
+    failures to kernels.
+
+    Skip the lane rather than fail the run, which is where this parts company
+    with the generator's hard refusal on the same mismatch. The generator needs
+    both tools -- it measures one axis with each -- so a mismatch there
+    invalidates the whole measurement and must stop it. Here `opt` only adds a
+    lane whose findings clang's own front end re-reaches at L1, so dropping it
+    costs an earlier, clearer diagnostic and nothing else. The caller already
+    handles `opt is None`, so the skip needs no new path.
+
+    Silent when either banner is unparseable, per `flavor_of_clang`: an
+    unreadable version string is not evidence of a mismatch, and guessing one
+    would disable L0 on every toolchain whose banner we have not seen.
+    """
+    opt_identity = tool_identity(opt)
+    opt_flavor = flavor_of_clang(opt_identity)
+    if not (opt_flavor and clang_flavor) or opt_flavor == clang_flavor:
+        return None
+    return (
+        f"   L0     : SKIPPED - opt reports {opt_flavor} but clang reports "
+        f"{clang_flavor}; they are different LLVM installs, so an L0 verdict "
+        f"from this opt would not be about the IR this clang compiles. Set "
+        f"ROCKE_LLVM_BIN to one complete LLVM install to restore the lane.\n"
+        f"            opt   : {opt} ({opt_identity})\n"
+        f"            clang : {clang} ({clang_identity})"
+    )
+
+
 def _dump_corpus(
     out_dir: Path, flavor: str, keep: list
 ) -> tuple[dict[str, tuple[Path, str]], dict[str, tuple[str, str]]]:
@@ -396,6 +437,12 @@ def main() -> int:
             f"meant, or pass --force to compile anyway (diagnostic only)."
         )
         return 1 if args.strict else 0
+
+    if opt is not None:
+        unpaired = _unpaired_opt(opt, clang, identity, clang_flavor)
+        if unpaired:
+            print(unpaired)
+            opt = None
 
     tmp = tempfile.TemporaryDirectory(prefix="rocke_ir_validity_")
     ir_dir = Path(args.keep_ir) if args.keep_ir else Path(tmp.name)

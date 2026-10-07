@@ -961,6 +961,45 @@ class ValidityGateTest(unittest.TestCase):
             with self.subTest(banner=banner):
                 self.assertIsNone(I.flavor_of_clang(banner))
 
+    def test_an_opt_from_another_install_loses_l0_rather_than_the_run(self):
+        """`opt` and clang are discovered independently, and only clang was
+        ever asked what it is.
+
+        A prefix shipping clang but not `opt` lets `opt` fall through to PATH,
+        and an older verifier rejecting a construct its parser predates reds
+        the case as L0-VERIFY -- the gate blaming the kernel for the toolchain.
+        The generator refuses outright on this mismatch because it needs both
+        tools to measure; this gate only loses a lane clang re-reaches at L1,
+        so it skips L0 and says so.
+        """
+        import check_ir_validity as V
+
+        v20 = "AMD clang version 20.0.0git (roc-7.1.1)"
+        v22 = "AMD clang version 22.0.0git (roc-7.2.0)"
+        with mock.patch.object(V, "tool_identity", return_value=v20):
+            reason = V._unpaired_opt("/a/opt", "/b/clang", v22, "llvm22")
+        self.assertIsNotNone(reason)
+        self.assertIn("SKIPPED", reason)
+        # Both paths named, or the reader cannot act on it.
+        self.assertIn("/a/opt", reason)
+        self.assertIn("/b/clang", reason)
+
+        # Matched pair: the lane stays.
+        with mock.patch.object(V, "tool_identity", return_value=v22):
+            self.assertIsNone(V._unpaired_opt("/a/opt", "/b/clang", v22, "llvm22"))
+
+        # An unreadable banner is not evidence of a mismatch. Guessing one
+        # would silently disable L0 on every toolchain whose version line we
+        # have not seen -- the same rule `flavor_of_clang` already follows.
+        for banner, clang_flavor in ((v20, None), ("who knows", "llvm22")):
+            with (
+                self.subTest(banner=banner),
+                mock.patch.object(V, "tool_identity", return_value=banner),
+            ):
+                self.assertIsNone(
+                    V._unpaired_opt("/a/opt", "/b/clang", v22, clang_flavor)
+                )
+
     def test_both_corpus_gates_skip_a_newer_flavor_the_same_way(self):
         """Both gates lower the shared corpus, so both meet an instance that
         declines the flavor they asked for -- check_ir_validity on a host whose
