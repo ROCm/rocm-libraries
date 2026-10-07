@@ -26,16 +26,23 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <functional>
 #include <iostream>
+#include <list>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <set>
+#include <string>
+#include <typeindex>
+#include <utility>
 #include <vector>
 
 #include <Tensile/Debug.hpp>
 #include <Tensile/PredicateDebugger.hpp>
+#include <Tensile/Predicates.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/UtilsOrigami.hpp>
 
@@ -76,6 +83,20 @@ namespace TensileLite
             tilewright_bank_sources;
 
         mutable std::atomic<bool> lastFindTopRetAll = false;
+
+        using Term = Predicates::Predicate<MyProblem>;
+
+        // The terms of the problem predicate of each solution_list solution
+        // that the row predicate `matched` does not hold, for the problems that
+        // reach this library through that row: a term equal to one of the row's
+        // in type and value holds for them already.
+        struct ResidualTerms
+        {
+            void const*                           matched = nullptr;
+            std::vector<std::vector<Term const*>> terms;
+            // 0: evaluate the whole problem predicate.
+            std::vector<char> reduced;
+        };
 
         static std::string Type()
         {
@@ -184,21 +205,33 @@ namespace TensileLite
             hip::HipAMDGPU const* pAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
             const bool debug = Debug::Instance().printPropertyEvaluation();
+            const bool uso   = problem.getParams().uniformSummationOrder();
 
-            auto considerSolution = [&](std::shared_ptr<MySolution> const& solution) {
+            ResidualTerms const* residual = debug || uso ? nullptr : residualTerms();
+            auto termsOf = [residual](size_t position) -> std::vector<Term const*> const* {
+                return residual && residual->reduced[position] ? &residual->terms[position]
+                                                               : nullptr;
+            };
+
+            auto considerSolution = [&](std::shared_ptr<MySolution> const& solution,
+                                        std::vector<Term const*> const*    terms) {
                 Task task(hardware, problem, *solution);
                 const bool hwMatch = (*(solution->hardwarePredicate))(hardware);
                 // With uniform summation order off, the filter stays
                 // hardwarePredicate && problemPredicate. The extra conjuncts in
                 // softwarePredicate() (taskPredicate, StreamK dynamic queue) are
                 // real filters, so they stay behind the check.
-                const bool swMatch = problem.getParams().uniformSummationOrder()
-                                         ? softwarePredicate(SolutionLibrarySearchType::DEFAULT,
-                                                             task,
-                                                             hardware,
-                                                             *solution,
-                                                             problem)
-                                         : (*(solution->problemPredicate))(problem);
+                const bool swMatch
+                    = uso ? softwarePredicate(SolutionLibrarySearchType::DEFAULT,
+                                              task,
+                                              hardware,
+                                              *solution,
+                                              problem)
+                      : terms
+                          ? std::all_of(terms->begin(),
+                                        terms->end(),
+                                        [&problem](Term const* term) { return (*term)(problem); })
+                          : (*(solution->problemPredicate))(problem);
                 const bool predicateMatch = hwMatch && swMatch;
 
                 if(debug)
@@ -248,13 +281,13 @@ namespace TensileLite
                         {
                             if(!bank
                                || !SelectedSolutionsScope::contains(solution_list[position].first))
-                                considerSolution(solution_list[position].second);
+                                considerSolution(solution_list[position].second, termsOf(position));
                         }
                         else if(bank && position - solution_list.size() < bank->size())
                         {
                             auto const& solution = (*bank)[position - solution_list.size()];
                             if(!SelectedSolutionsScope::contains(solution->index))
-                                considerSolution(solution);
+                                considerSolution(solution, nullptr);
                         }
                     }
                 }
@@ -334,7 +367,8 @@ namespace TensileLite
                             continue;
                         }
 #endif
-                        considerSolution(solution_list[r.config.index].second);
+                        considerSolution(solution_list[r.config.index].second,
+                                         termsOf(r.config.index));
                         if(rv.size() == numSolutions)
                         {
                             break;
@@ -361,8 +395,72 @@ namespace TensileLite
             return solutions;
         }
 
-#ifdef TENSILELITE_HAS_TILEWRIGHT
     private:
+        // The ResidualTerms of the innermost And row predicate the problem
+        // matched on the way to this library, or null.
+        ResidualTerms const* residualTerms() const
+        {
+            auto const* matched = MatchedPredicateScope::innermostOf<Predicates::And<MyProblem>>();
+            if(matched == nullptr)
+                return nullptr;
+            if(auto const* last = m_lastResidual.load(std::memory_order_acquire);
+               last && last->matched == matched)
+                return last;
+
+            std::lock_guard<std::mutex> lock(m_residualGuard);
+            for(auto const& entry : m_residuals)
+            {
+                if(entry.matched == matched)
+                {
+                    m_lastResidual.store(&entry, std::memory_order_release);
+                    return &entry;
+                }
+            }
+            if(m_residuals.size() >= MaxResidualSets)
+                return nullptr;
+            m_residuals.push_back(makeResidualTerms(*matched));
+            m_lastResidual.store(&m_residuals.back(), std::memory_order_release);
+            return &m_residuals.back();
+        }
+
+        ResidualTerms makeResidualTerms(Predicates::And<MyProblem> const& matched) const
+        {
+            std::set<std::type_index>                         heldTypes;
+            std::set<std::pair<std::type_index, std::string>> held;
+            for(auto const& term : matched.value)
+            {
+                heldTypes.emplace(typeid(*term));
+                held.emplace(typeid(*term), term->toString());
+            }
+
+            ResidualTerms residual;
+            residual.matched = &matched;
+            residual.terms.resize(solution_list.size());
+            residual.reduced.assign(solution_list.size(), 0);
+            for(size_t i = 0; i < solution_list.size(); i++)
+            {
+                auto const* all = dynamic_cast<Predicates::And<MyProblem> const*>(
+                    solution_list[i].second->problemPredicate.get());
+                if(all == nullptr)
+                    continue;
+                for(auto const& term : all->value)
+                {
+                    std::type_index const type(typeid(*term));
+                    if(heldTypes.count(type) == 0 || held.count({type, term->toString()}) == 0)
+                        residual.terms[i].push_back(term.get());
+                }
+                residual.reduced[i] = 1;
+            }
+            return residual;
+        }
+
+        static constexpr size_t MaxResidualSets = 4;
+
+        mutable std::mutex                        m_residualGuard;
+        mutable std::list<ResidualTerms>          m_residuals;
+        mutable std::atomic<ResidualTerms const*> m_lastResidual{nullptr};
+
+#ifdef TENSILELITE_HAS_TILEWRIGHT
         // The bank pool for the device of `hardware`. Failing to build one
         // leaves tilewright ranking solution_list alone on that device.
         typename TilewrightBank<MySolution>::Pool makeBankPool(MyProblem const& problem,

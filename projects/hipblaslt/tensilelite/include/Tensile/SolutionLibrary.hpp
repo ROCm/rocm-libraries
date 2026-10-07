@@ -29,6 +29,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <typeinfo>
 #include <vector>
 
 #include <Tensile/Tensile.hpp>
@@ -145,9 +146,10 @@ namespace TensileLite
         explicit SelectedSolutionsScope(SolutionVector<MySolution> const& selected)
             : m_selected(&selected)
             , m_contains(&containsIndex<MySolution>)
-            , m_outer(innermost())
         {
-            innermost() = this;
+            auto& head = innermost();
+            m_outer    = head;
+            head       = this;
         }
 
         ~SelectedSolutionsScope()
@@ -186,6 +188,51 @@ namespace TensileLite
         void const* m_selected;
         bool (*m_contains)(void const*, int);
         SelectedSolutionsScope const* m_outer;
+    };
+
+    /**
+ * Makes the predicate of a row that matched the problem visible to the
+ * libraries the row's library calls on the same thread, for as long as it
+ * lives. Scopes nest.
+ */
+    class TENSILELITEHOST_EXPORT MatchedPredicateScope
+    {
+    public:
+        template <typename Predicate>
+        explicit MatchedPredicateScope(Predicate const* predicate)
+            : m_predicate(predicate)
+            , m_type(&typeid(Predicate))
+        {
+            auto& head = innermost();
+            m_outer    = head;
+            head       = this;
+        }
+
+        ~MatchedPredicateScope()
+        {
+            innermost() = m_outer;
+        }
+
+        MatchedPredicateScope(MatchedPredicateScope const&)            = delete;
+        MatchedPredicateScope& operator=(MatchedPredicateScope const&) = delete;
+
+        /// The predicate of the innermost scope when that scope was made from
+        /// a Predicate, or null.
+        template <typename Predicate>
+        static Predicate const* innermostOf()
+        {
+            auto const* scope = innermost();
+            if(scope == nullptr || *scope->m_type != typeid(Predicate))
+                return nullptr;
+            return static_cast<Predicate const*>(scope->m_predicate);
+        }
+
+    private:
+        static MatchedPredicateScope const*& innermost();
+
+        void const*                  m_predicate;
+        std::type_info const*        m_type;
+        MatchedPredicateScope const* m_outer;
     };
 
     /**

@@ -235,6 +235,148 @@ TEST(PredictionLibraryTest, ClusterDimStaysIndexAlignedWithSolutionList)
     expectClusterDim(lib.origami_config_list[1], TensileLite::dim3(1, 1, 1));
 }
 
+namespace
+{
+    using ProblemTerm = Predicates::Predicate<ContractionProblemGemm>;
+
+    std::shared_ptr<ProblemTerm> allOf(std::vector<std::shared_ptr<ProblemTerm>> const& terms)
+    {
+        return std::make_shared<Predicates::And<ContractionProblemGemm>>(terms);
+    }
+
+    std::shared_ptr<ProblemTerm> floatTypes()
+    {
+        auto types   = std::make_shared<Predicates::Contraction::TypesEqual>();
+        types->value = {rocisa::DataType::Float,
+                        rocisa::DataType::Float,
+                        rocisa::DataType::Float,
+                        rocisa::DataType::Float,
+                        rocisa::DataType::Float,
+                        rocisa::DataType::Float};
+        return types;
+    }
+
+    std::shared_ptr<ProblemTerm> accumulate(bool high)
+    {
+        return std::make_shared<Predicates::Contraction::HighPrecisionAccumulateEqual>(high);
+    }
+
+    std::shared_ptr<ProblemTerm> leadingM(size_t atLeast)
+    {
+        return std::make_shared<Predicates::Contraction::LeadingFree0SizesGreaterOrEqual>(atLeast);
+    }
+
+    std::vector<int> solutionIndicesOf(SolutionVector<ContractionSolution> const& solutions)
+    {
+        std::vector<int> indices;
+        for(auto const& solution : solutions)
+            indices.push_back(solution->index);
+        return indices;
+    }
+
+    ContractionProblemGemm floatProblem(size_t m)
+    {
+        auto problem
+            = ContractionProblemGemm::GEMM(false, false, m, 64, 64, m, 64, m, 1.0, false, 1);
+        problem.setComputeInputTypeA(rocisa::DataType::Float);
+        problem.setComputeInputTypeB(rocisa::DataType::Float);
+        return problem;
+    }
+}
+
+TEST(PredictionLibraryTest, ARowPredicateLeavesTheSameSolutionsAsTheWholeProblemPredicate)
+{
+    auto large                  = makeMappedSolution(1);
+    auto otherHpa               = makeMappedSolution(2);
+    auto unchecked              = makeMappedSolution(3);
+    auto alsoLarge              = makeMappedSolution(4);
+    large->problemPredicate     = allOf({floatTypes(), accumulate(false), leadingM(128)});
+    otherHpa->problemPredicate  = allOf({floatTypes(), accumulate(true)});
+    alsoLarge->problemPredicate = allOf({leadingM(128), floatTypes()});
+
+    SolutionMap<ContractionSolution> solutions;
+    for(auto const& solution : {large, otherHpa, unchecked, alsoLarge})
+        solutions.emplace(solution->index, solution);
+    auto lib = std::make_shared<ContractionProblemPredictionLibrary>();
+    loadPredictionLibrary({1, 2, 3, 4}, solutions, *lib);
+
+    ContractionProblemSelectionLibrary rows;
+    rows.rows.emplace_back(ContractionProblemPredicate(allOf({floatTypes(), accumulate(false)})),
+                           lib);
+
+    auto const device = makeGfx950Device();
+    for(size_t m : {64, 256})
+    {
+        SCOPED_TRACE(m);
+        auto const problem = floatProblem(m);
+        ASSERT_FALSE(problem.highPrecisionAccumulate());
+        auto const direct     = solutionIndicesOf(lib->findTopSolutions(problem, device, 4));
+        auto const throughRow = solutionIndicesOf(rows.findTopSolutions(problem, device, 4));
+        EXPECT_EQ(throughRow, direct);
+        EXPECT_EQ(std::count(direct.begin(), direct.end(), 2), 0);
+        EXPECT_EQ(std::count(direct.begin(), direct.end(), 1), m >= 128 ? 1 : 0);
+        EXPECT_EQ(std::count(direct.begin(), direct.end(), 4), m >= 128 ? 1 : 0);
+    }
+}
+
+namespace
+{
+    // True, and counts its evaluations.
+    struct CountedTrue : public Predicates::Predicate_CRTP<CountedTrue, ContractionProblemGemm>
+    {
+        enum
+        {
+            HasIndex = false,
+            HasValue = true
+        };
+        int value = 0;
+
+        explicit CountedTrue(int value)
+            : value(value)
+        {
+        }
+        static std::string Type()
+        {
+            return "CountedTrue";
+        }
+        bool operator()(ContractionProblemGemm const&) const override
+        {
+            evaluations()++;
+            return true;
+        }
+        static int& evaluations()
+        {
+            static int count = 0;
+            return count;
+        }
+    };
+}
+
+TEST(PredictionLibraryTest, ARowPredicateTermIsNotEvaluatedAgainForTheSolution)
+{
+    auto solution              = makeMappedSolution(1);
+    solution->problemPredicate = allOf({std::make_shared<CountedTrue>(7), floatTypes()});
+    SolutionMap<ContractionSolution> solutions;
+    solutions.emplace(1, solution);
+    auto lib = std::make_shared<ContractionProblemPredictionLibrary>();
+    loadPredictionLibrary({1}, solutions, *lib);
+
+    ContractionProblemSelectionLibrary rows;
+    rows.rows.emplace_back(
+        ContractionProblemPredicate(allOf({floatTypes(), std::make_shared<CountedTrue>(7)})), lib);
+
+    auto const device  = makeGfx950Device();
+    auto const problem = floatProblem(256);
+
+    CountedTrue::evaluations() = 0;
+    ASSERT_EQ(solutionIndicesOf(lib->findTopSolutions(problem, device, 1)), std::vector<int>{1});
+    EXPECT_EQ(CountedTrue::evaluations(), 1);
+
+    CountedTrue::evaluations() = 0;
+    ASSERT_EQ(solutionIndicesOf(rows.findTopSolutions(problem, device, 1)), std::vector<int>{1});
+    EXPECT_EQ(CountedTrue::evaluations(), 1) << "only the row's term is evaluated";
+}
+
 TEST(PredictionLibraryTest, ZeroRequestedSolutionsReturnsNone)
 {
     SolutionMap<ContractionSolution> solutions;

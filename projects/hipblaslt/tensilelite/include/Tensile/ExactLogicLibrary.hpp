@@ -201,6 +201,15 @@ namespace TensileLite
             for(auto const& row : rows)
                 rowKinds.push_back(libraryRowKind(row.first));
 
+            rowConjunctions.clear();
+            if constexpr(!MyPredicate::SelectsHardware)
+            {
+                rowConjunctions.reserve(rows.size());
+                for(auto const& row : rows)
+                    rowConjunctions.push_back(
+                        dynamic_cast<Predicates::And<MyProblem> const*>(row.first.value.get()));
+            }
+
             rowsSelectDevices = !rows.empty() && rows.size() <= 64
                                 && std::all_of(rows.begin(), rows.end(), [](Row const& row) {
                                        return row.first.readsOnlyTheDevice();
@@ -224,6 +233,17 @@ namespace TensileLite
         LibraryRowKind rowKind(size_t row) const
         {
             return row < rowKinds.size() ? rowKinds[row] : libraryRowKind(rows[row].first);
+        }
+
+        /// Row `row`'s predicate when it is an And of problem predicates, else null.
+        Predicates::And<MyProblem> const* rowConjunction(size_t row) const
+        {
+            if constexpr(MyPredicate::SelectsHardware)
+                return nullptr;
+            else if(row < rowConjunctions.size())
+                return rowConjunctions[row];
+            else
+                return dynamic_cast<Predicates::And<MyProblem> const*>(rows[row].first.value.get());
         }
 
         virtual std::shared_ptr<MySolution> getSolutionByIndex(MyProblem const& problem,
@@ -270,6 +290,9 @@ namespace TensileLite
                     return false;
 
                 bool const equality = rowKind(i) == LibraryRowKind::EqualityMatching;
+                std::optional<MatchedPredicateScope> matched;
+                if(auto const* conjunction = rowConjunction(i))
+                    matched.emplace(conjunction);
                 if(!row.first.isFallbackMatch(hardware))
                 {
                     auto rv = row.second->findBestSolution(problem, hardware, fitness);
@@ -405,7 +428,7 @@ namespace TensileLite
             lastFindTopRetAll = false;
 
             // A tilewright bank pool can hold solutions an earlier row returned.
-            SelectedSolutionsScope selected(rv);
+            std::optional<SelectedSolutionsScope> selected;
 
             auto visit = [&](size_t i) {
                 auto const& row  = rows[i];
@@ -428,6 +451,11 @@ namespace TensileLite
                 if(!rowMatches(i, problem, hardware, rowDebug, deviceRows))
                     return false;
 
+                if(!rv.empty() && !selected)
+                    selected.emplace(rv);
+                std::optional<MatchedPredicateScope> matched;
+                if(auto const* conjunction = rowConjunction(i))
+                    matched.emplace(conjunction);
                 solutions
                     = row.second->findTopSolutions(problem, hardware, numSolutions - rv.size());
 
@@ -575,6 +603,7 @@ namespace TensileLite
         }
 
         std::vector<LibraryRowKind>                     rowKinds;
+        std::vector<Predicates::And<MyProblem> const*>  rowConjunctions;
         std::vector<std::pair<LibraryRowTypes, size_t>> rowsByTypes;
         bool                                            rowsSelectDevices = false;
         LibraryRowsByDevice                             devices;
