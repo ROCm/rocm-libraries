@@ -102,6 +102,9 @@ struct GemmPipelineAgBgCrCompTDMProducerConsumer
 
     static_assert(NumWaveGroups == 1, "the producer/consumer split replaces wave groups");
     static_assert(!Preshuffle, "preshuffled B is not supported");
+    static_assert(!kPadM && !kPadN && !kPadK,
+                  "padding is not supported: TDM handles ragged extents itself, and padded "
+                  "descriptor lengths would carry its transfers past the tensor");
     static_assert(!Policy::template isClusterLaunch<Problem>(),
                   "cluster multicast is not supported: a peer's transfer into this workgroup's "
                   "LDS is invisible to the tensor counter a producer publishes on");
@@ -209,7 +212,7 @@ struct GemmPipelineAgBgCrCompTDMProducerConsumer
                                num_loop,
                                barriers);
             }
-            else
+            else if(warp_id == NumConsumerWaves + 1)
             {
                 RunProducer<1>(b_dram_block_window_tmp[number<0>{}],
                                lds_views.at(number<1>{}),
@@ -272,10 +275,12 @@ struct GemmPipelineAgBgCrCompTDMProducerConsumer
             },
             number<NumSlots>{});
 
-        constexpr bool k_is_dim0  = IsA ? std::is_same_v<ALayout, tensor_layout::gemm::ColumnMajor>
+        // Col-major A and row-major B windows are (K, M|N): K is their outer, strided index.
+        constexpr bool k_is_outer = IsA ? std::is_same_v<ALayout, tensor_layout::gemm::ColumnMajor>
                                         : std::is_same_v<BLayout, tensor_layout::gemm::RowMajor>;
         using DramStep            = typename decltype(dram_window)::BottomTensorIndex;
-        constexpr DramStep k_step = k_is_dim0 ? make_array(KPerBlock, 0) : make_array(0, KPerBlock);
+        constexpr DramStep k_step =
+            k_is_outer ? make_array(KPerBlock, 0) : make_array(0, KPerBlock);
 
         const TDMConfig tdm_config = MakeTdmConfig<IsA>();
 
