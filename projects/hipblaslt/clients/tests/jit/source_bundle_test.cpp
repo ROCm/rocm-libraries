@@ -9,7 +9,6 @@
 namespace a  = hipblaslt_jit::source_bundle;
 namespace fs = std::filesystem;
 
-using hipblaslt_jit_test::require;
 using hipblaslt_jit_test::writeFile;
 
 void reject(const std::function<void()>& f)
@@ -34,7 +33,10 @@ TEST_CASE("the source bundle reader accepts only a contained directory", "[jit-c
     const std::string payload = std::string(200000, 'x') + "serialized solution bytes";
     writeFile(library, payload);
     const auto bytes = a::readArtifact(library);
-    require(std::string(bytes.begin(), bytes.end()) == payload, "Artifact bytes changed");
+    {
+        INFO(("Artifact bytes changed"));
+        REQUIRE((std::string(bytes.begin(), bytes.end()) == payload));
+    }
     writeFile(library, "");
     reject([&] { a::readArtifact(library); });
     const auto raw = root / "raw.dat";
@@ -44,7 +46,10 @@ TEST_CASE("the source bundle reader accepts only a contained directory", "[jit-c
     reject([&] { a::artifact(root, "../outside.co"); });
     reject([&] { a::artifact(root, fs::absolute(raw).u8string()); });
     reject([&] { a::artifact(root, "absent.co"); });
-    require(a::artifact(root, "raw.dat") == fs::canonical(raw), "Valid artifact path rejected");
+    {
+        INFO(("Valid artifact path rejected"));
+        REQUIRE((a::artifact(root, "raw.dat") == fs::canonical(raw)));
+    }
 #ifdef _WIN32
     reject([&] { a::artifact(root, "C:raw.dat", false); });
     reject([&] { a::artifact(root, "\\raw.dat", false); });
@@ -62,25 +67,41 @@ TEST_CASE("the source bundle reader accepts only a contained directory", "[jit-c
     for(const auto* name : {"b.s", "a.s", "scale.hip", "add.cpp", "kernel.h", "types.h"})
         writeFile(bundle / "sources" / name, std::string("// ") + name + "\n");
     const auto sources = a::readSourceBundle(bundle);
-    require(std::string(sources.library.begin(), sources.library.end()) == payload,
-            "Source bundle library changed");
-    require(names(sources.assembly) == std::vector<std::string>({"a.s", "b.s"}),
-            "Assembly is not every sources/*.s by name");
-    require(names(sources.hip) == std::vector<std::string>({"add.cpp", "scale.hip"}),
-            "HIP sources are not every sources/*.hip and *.cpp by name");
-    require(names(sources.headers) == std::vector<std::string>({"kernel.h", "types.h"}),
-            "Headers are not the other sources/ files by name");
-    require(std::string(sources.assembly[0].bytes.begin(), sources.assembly[0].bytes.end())
-                == "// a.s\n",
-            "Source bytes changed");
+    {
+        INFO(("Source bundle library changed"));
+        REQUIRE((std::string(sources.library.begin(), sources.library.end()) == payload));
+    }
+    {
+        INFO(("Assembly is not every sources/*.s by name"));
+        REQUIRE((names(sources.assembly) == std::vector<std::string>({"a.s", "b.s"})));
+    }
+    {
+        INFO(("HIP sources are not every sources/*.hip and *.cpp by name"));
+        REQUIRE((names(sources.hip) == std::vector<std::string>({"add.cpp", "scale.hip"})));
+    }
+    {
+        INFO(("Headers are not the other sources/ files by name"));
+        REQUIRE((names(sources.headers) == std::vector<std::string>({"kernel.h", "types.h"})));
+    }
+    {
+        INFO(("Source bytes changed"));
+        REQUIRE((std::string(sources.assembly[0].bytes.begin(), sources.assembly[0].bytes.end())
+            == "// a.s\n"));
+    }
     fs::rename(bundle / "sources/a.s", root / "a.s");
     fs::rename(bundle / "sources/b.s", root / "b.s");
-    require(a::readSourceBundle(bundle).assembly.empty(), "A bundle of HIP sources was rejected");
+    {
+        INFO(("A bundle of HIP sources was rejected"));
+        REQUIRE((a::readSourceBundle(bundle).assembly.empty()));
+    }
     fs::rename(root / "a.s", bundle / "sources/a.s");
     fs::rename(root / "b.s", bundle / "sources/b.s");
     fs::remove(bundle / "sources/scale.hip");
     fs::remove(bundle / "sources/add.cpp");
-    require(a::readSourceBundle(bundle).hip.empty(), "A bundle of assembly was rejected");
+    {
+        INFO(("A bundle of assembly was rejected"));
+        REQUIRE((a::readSourceBundle(bundle).hip.empty()));
+    }
     auto damage = [&](const std::function<void()>& change, const std::function<void()>& undo) {
         change();
         reject([&] { a::readSourceBundle(bundle); });

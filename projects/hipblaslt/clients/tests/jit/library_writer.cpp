@@ -14,16 +14,17 @@ namespace
 {
     namespace fs = std::filesystem;
     namespace hj = hipblaslt_jit;
-    using hipblaslt_jit_test::require;
 }
 
 TEST_CASE("pre-generated kernels publish into the JIT solution library", "[jit-gpu]")
 {
     int             device = 0;
     hipDeviceProp_t properties{};
-    require(hipGetDevice(&device) == hipSuccess
-                && hipGetDeviceProperties(&properties, device) == hipSuccess,
-            "Cannot query the current HIP device");
+    {
+        INFO(("Cannot query the current HIP device"));
+        REQUIRE((hipGetDevice(&device) == hipSuccess
+            && hipGetDeviceProperties(&properties, device) == hipSuccess));
+    }
     const std::string target(properties.gcnArchName);
     const auto        arch    = target.substr(0, target.find(':'));
     const auto        libraryRoot = fs::u8path(HIPBLASLT_JIT_LIBRARY);
@@ -43,7 +44,10 @@ TEST_CASE("pre-generated kernels publish into the JIT solution library", "[jit-g
         hj::BuiltSolution built;
         const auto        builtStatus = hj::makeComgrBuilder()->build(
             item.solution, {target, hj::jitCodeObjectVersion, scratch}, built);
-        require(builtStatus.ok(), "The build for " + target + " failed: " + builtStatus.message);
+        {
+            INFO(("The build for " + target + " failed: " + builtStatus.message));
+            REQUIRE((builtStatus.ok()));
+        }
         for(const auto& publication : item.publications)
         {
             std::vector<int32_t>  indices;
@@ -53,12 +57,19 @@ TEST_CASE("pre-generated kernels publish into the JIT solution library", "[jit-g
                                                 hipblaslt_jit_test::fp16Gemm(false, publication.k),
                                                 solutions,
                                                 indices);
-            require(status.ok(),
-                    item.name + " K=" + std::to_string(publication.k) + ": " + status.message);
-            require(indices.size() == 1 && hj::isJitIndex(indices[0]),
-                    item.name + " did not receive a JIT solution index");
+            {
+                INFO((item.name + " K=" + std::to_string(publication.k) + ": " + status.message));
+                REQUIRE((status.ok()));
+            }
+            {
+                INFO((item.name + " did not receive a JIT solution index"));
+                REQUIRE((indices.size() == 1 && hj::isJitIndex(indices[0])));
+            }
             ++published;
         }
     }
-    require(published == 3, "Expected the plain solution and both plain-pair solutions");
+    {
+        INFO(("Expected the plain solution and both plain-pair solutions"));
+        REQUIRE((published == 3));
+    }
 }

@@ -18,7 +18,6 @@ namespace
 {
     namespace fs = std::filesystem;
     namespace hj = hipblaslt_jit;
-    using hipblaslt_jit_test::require;
 
     const char* const kernelName = "hipblaslt_jit_builder_test_scale";
 
@@ -29,19 +28,29 @@ namespace
     {
         const hj::BuildRequest request{targetId, hj::jitCodeObjectVersion, scratch};
         const auto             status = hj::makeComgrBuilder()->build(solution, request, built);
-        require(status.ok(), "The build for " + targetId + " failed: " + status.message);
+        {
+            INFO(("The build for " + targetId + " failed: " + status.message));
+            REQUIRE((status.ok()));
+        }
 
         const auto metadata
             = hj::code_object::readMetadata(built.object.bytes.data(), built.object.bytes.size());
-        require(metadata.ok(), "Cannot read the built code object: " + metadata.log);
+        {
+            INFO(("Cannot read the built code object: " + metadata.log));
+            REQUIRE((metadata.ok()));
+        }
         const auto& kernels  = metadata.metadata.kernelNames;
         auto        expected = solution.kernelNames;
         expected.push_back(kernelName);
         for(const auto& name : expected)
-            require(std::find(kernels.begin(), kernels.end(), name) != kernels.end(),
-                    "The code object does not define " + name);
-        require(metadata.metadata.codeObjectVersion == hj::jitCodeObjectVersion,
-                "The code object is not version " + std::to_string(hj::jitCodeObjectVersion));
+        {
+            INFO(("The code object does not define " + name));
+            REQUIRE((std::find(kernels.begin(), kernels.end(), name) != kernels.end()));
+        }
+        {
+            INFO(("The code object is not version " + std::to_string(hj::jitCodeObjectVersion)));
+            REQUIRE((metadata.metadata.codeObjectVersion == hj::jitCodeObjectVersion));
+        }
     }
 
     void buildKernel(const std::string&   targetId,
@@ -78,10 +87,12 @@ namespace
         solution.kernelNames.push_back("hipblaslt_jit_builder_test_missing");
         const hj::BuildRequest request{targetId, hj::jitCodeObjectVersion, scratch};
         const auto             missing = hj::makeComgrBuilder()->build(solution, request, built);
-        require(!missing.ok() && missing.stage == hj::Stage::Build
-                    && missing.message.find("hipblaslt_jit_builder_test_missing")
-                           != std::string::npos,
-                "The build accepted a kernel name the code object does not define");
+        {
+            INFO(("The build accepted a kernel name the code object does not define"));
+            REQUIRE((!missing.ok() && missing.stage == hj::Stage::Build
+                && missing.message.find("hipblaslt_jit_builder_test_missing")
+                       != std::string::npos));
+        }
     }
 }
 
@@ -125,6 +136,9 @@ TEST_CASE("comgr builds the HIP kernel and every committed assembly file", "[jit
             ++built;
         }
     }
-    require(built > 0, "No committed assembly under the data directory");
+    {
+        INFO(("No committed assembly under the data directory"));
+        REQUIRE((built > 0));
+    }
     std::cout << "PASS the build of every assembly file fails when a kernel name is not defined\n";
 }

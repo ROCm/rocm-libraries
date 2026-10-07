@@ -18,7 +18,6 @@ namespace
 {
     namespace fs = std::filesystem;
     namespace hj = hipblaslt_jit;
-    using hipblaslt_jit_test::require;
 
     std::vector<uint8_t> skipIndexOne(std::vector<uint8_t> entry)
     {
@@ -34,9 +33,11 @@ TEST_CASE("the loader reads the JIT solution library", "[jit-gpu]")
 {
     int             device = 0;
     hipDeviceProp_t properties{};
-    require(hipGetDevice(&device) == hipSuccess
-                && hipGetDeviceProperties(&properties, device) == hipSuccess,
-            "Cannot query the current HIP device");
+    {
+        INFO(("Cannot query the current HIP device"));
+        REQUIRE((hipGetDevice(&device) == hipSuccess
+            && hipGetDeviceProperties(&properties, device) == hipSuccess));
+    }
     const std::string target(properties.gcnArchName);
     const auto        arch     = target.substr(0, target.find(':'));
     const auto        hardware = TensileLite::hip::GetDevice(properties, device);
@@ -61,39 +62,67 @@ TEST_CASE("the loader reads the JIT solution library", "[jit-gpu]")
             const auto           problem = hipblaslt_jit_test::fp16Gemm(false, publication.k);
             const auto           status
                 = library.lookup(key, device, problem, *hardware, 4, {}, indices);
-            require(status.ok(), "lookup K=" + std::to_string(publication.k) + ": " + status.message);
-            require(indices.size() == 1 && hj::isJitIndex(indices[0]),
-                    item.name + " K=" + std::to_string(publication.k)
-                        + " is not one JIT solution index");
+            {
+                INFO(("lookup K=" + std::to_string(publication.k) + ": " + status.message));
+                REQUIRE((status.ok()));
+            }
+            {
+                INFO((item.name + " K=" + std::to_string(publication.k)
+                    + " is not one JIT solution index"));
+                REQUIRE((indices.size() == 1 && hj::isJitIndex(indices[0])));
+            }
             hj::Status why;
             const auto solution = library.solutionByIndex(device, *hardware, indices[0], why);
-            require(solution != nullptr, "Cannot load solution: " + why.message);
-            require(solution->kernelName == publication.kernel,
-                    "Found kernel " + solution->kernelName + ", expected " + publication.kernel);
-            require(solution->solutionName == publication.solutionName,
-                    "Found solution " + solution->solutionName + ", expected "
-                        + publication.solutionName);
-            require(solution->index == indices[0], "The loaded solution has another index");
+            {
+                INFO(("Cannot load solution: " + why.message));
+                REQUIRE((solution != nullptr));
+            }
+            {
+                INFO(("Found kernel " + solution->kernelName + ", expected " + publication.kernel));
+                REQUIRE((solution->kernelName == publication.kernel));
+            }
+            {
+                INFO(("Found solution " + solution->solutionName + ", expected "
+                    + publication.solutionName));
+                REQUIRE((solution->solutionName == publication.solutionName));
+            }
+            {
+                INFO(("The loaded solution has another index"));
+                REQUIRE((solution->index == indices[0]));
+            }
             if(!loaded)
             {
                 const auto view = library.resolve(device, indices[0], why);
-                require(view.master && view.adapter, "resolve: " + why.message);
+                {
+                    INFO(("resolve: " + why.message));
+                    REQUIRE((view.master && view.adapter));
+                }
                 const auto object = library.directory(key)
                                     / fs::u8path(std::string(solution->codeObjectFilename.load()));
-                require(view.adapter->loadCodeObjectFile(object.string()) == hipSuccess,
-                        "Cannot load " + object.u8string());
-                require(view.adapter->initKernel(solution->kernelName) == hipSuccess,
-                        "Cannot resolve " + solution->kernelName);
+                {
+                    INFO(("Cannot load " + object.u8string()));
+                    REQUIRE((view.adapter->loadCodeObjectFile(object.string()) == hipSuccess));
+                }
+                {
+                    INFO(("Cannot resolve " + solution->kernelName));
+                    REQUIRE((view.adapter->initKernel(solution->kernelName) == hipSuccess));
+                }
                 loaded = true;
             }
         }
     }
-    require(plain && pair && loaded, "This device has no committed plain kernel");
+    {
+        INFO(("This device has no committed plain kernel"));
+        REQUIRE((plain && pair && loaded));
+    }
 
     std::vector<int32_t> transposed;
     const auto           status = library.lookup(
         key, device, hipblaslt_jit_test::fp16Gemm(true, 512), *hardware, 4, {}, transposed);
-    require(status.ok() && transposed.empty(), "A transposed A found a published solution");
+    {
+        INFO(("A transposed A found a published solution"));
+        REQUIRE((status.ok() && transposed.empty()));
+    }
 
     hj::BuiltSolution damaged;
     damaged.generated            = pair->solution;
