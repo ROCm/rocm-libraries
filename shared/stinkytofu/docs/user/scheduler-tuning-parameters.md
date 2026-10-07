@@ -9,7 +9,7 @@ For the placement mechanisms behind the prefetch and filler knobs, see
 
 | Entry point | How |
 |---|---|
-| TensileLite | `GlobalParameters: StinkyTofuModuleOptions: {WmmaQueueDepth: 8, WmmaQueueTarget: 2, DsReadPerCap: 12}` in the yaml (any module option, applied last), or add the key to `stinky_module_options` in `Tensile/KernelWriter.py` |
+| TensileLite | `GlobalParameters: StinkyTofuModuleOptions: {WmmaQueueDepth: 8, WmmaQueueCoverCycles: 32, DsReadPerCap: 8}` in the yaml (any module option, applied last), or add the key to `stinky_module_options` in `Tensile/KernelWriter.py` |
 | `stinkytofu-opt` | the `--flag=N` listed per parameter |
 | C++ pass pipeline | `PassFeatureConfig::dagFeatures.<field>` |
 
@@ -52,19 +52,25 @@ Each parameter resolves independently, first match wins:
 | Module option | Default | CLI | Meaning |
 |---|---|---|---|
 | `WmmaQueueDepth` | 1 | `--wmma-queue-depth=N` | Max WMMAs outstanding in the pipe. A WMMA is appended whenever fewer than N are outstanding; it waits only when the queue is full. 1 = one WMMA at a time (the original schedule). |
-| `WmmaQueueTarget` | 1 | `--wmma-queue-target=N` | Clamped to [1, depth]. Below N outstanding, the next WMMA goes before ds_loads and fillers, so the queue never runs dry. At or above N, ds_loads and fillers go first. 1 = never preempt. |
+| `WmmaQueueCoverCycles` | 0 (off) | `--wmma-queue-cover-cycles=N` | Cycles of queued WMMA work that must remain before a ds_load, filler or `tensor_load` may issue. Below N, and with room in the queue, the next ready WMMA goes first, so the pipe never runs dry. Forced picks (a promoted barrier) are not held. Useful range is up to about 64 (the pipe buffers ~8 WMMAs of 8 cycles). |
+
+The queue model runs only with **both** `WmmaQueueDepth > 1` and `WmmaQueueCoverCycles > 0`. With
+either one off, the schedule is the original single-window one, exactly.
 
 ```
-while outstanding >= depth: wait for the oldest WMMA to finish
-append the WMMA to the pipe window
-preempt = target > 1 && outstanding < target        // WMMA before ds/fillers
+cover = cycles until the pipe has run everything queued
+if cover >= N, or the queue is full:   issue the next ds_load / filler / tensor_load
+elif a WMMA is ready:                  issue the WMMA          // refill the queue first
+else:                                  issue the other pick    // never idle or deadlock
+while outstanding >= depth: wait for the oldest WMMA to finish // only when a WMMA is issued
 ```
 
-Depth 1 / target 1 reproduces the original schedule exactly. A higher target keeps the
-pipe busier but delays ds_loads; a lower one issues ds_loads sooner but lets the queue
-drain. With depth > 1 the wait pass also merges the waits of back-to-back WMMAs onto the
-first one, so the run stays back-to-back. The knob heuristic does **not** scale with the
-queue: when you raise the depth, set `DsReadPerCap` explicitly.
+A larger N keeps the pipe busier but delays ds_loads; a smaller one issues ds_loads sooner
+but lets the queue drain. N should cover the longest stall you want hidden: a ds_load stall is
+a few cycles, a stage barrier or `tensor_load` stall is 65 to 75 cycles. When the queue model
+is on, the wait pass also merges the waits of back-to-back WMMAs onto the first one, so the
+run stays back-to-back. The knob heuristic does **not** scale with the queue: when you raise
+the depth, set `DsReadPerCap` explicitly.
 
 ## ds_load issue
 
@@ -141,7 +147,7 @@ dependences allow.
 | Pattern | Options |
 |---|---|
 | Default interleave `W ds ds ds W …` | none |
-| Queue kept fed, ds first while the queue is healthy (equal to the default on henry fp8) | `WmmaQueueDepth=8, WmmaQueueTarget=2, DsIssueCapMode=1, DsIssueCapSpanCycles=32, DsReadPerCap=8` |
+| WMMA queue kept covered, ds_loads capped at 8 per 32-cycle period | `WmmaQueueDepth=8, WmmaQueueCoverCycles=32, DsIssueCapMode=1, DsIssueCapSpanCycles=32, DsReadPerCap=8` |
 | ds at a fixed rate with the LDS queue model off (measured 0.7 to 3.7% slower: bursts stall the WMMA stream) | add `DsReadThrottleLatency=1` |
 | Fillers packed early instead of spread | `EvenSpreadFillers=false` |
 | Free ds order | `LockDsReadOrder=false` |
