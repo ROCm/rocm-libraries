@@ -7661,6 +7661,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
         numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
         sizeMXSA = mxsaTileInfo.loadWidthGR * kernel["WavefrontSize"] * numWaves
         sizeMXSB = mxsbTileInfo.loadWidthGR * kernel["WavefrontSize"] * numWaves
+        # The region must also hold the whole scale tile, (DepthU / MXBlock) * MT * bpe bytes
+        # (4 KiB per tile at MT 256 and DepthU 512).
+        sizeMXSA = max(sizeMXSA, int((kernel["DepthU"] // kernel["ProblemType"]["MXBlockA"])
+                                     * kernel["MacroTile0"] * mxsaTileInfo.bpe))
+        sizeMXSB = max(sizeMXSB, int((kernel["DepthU"] // kernel["ProblemType"]["MXBlockB"])
+                                     * kernel["MacroTile1"] * mxsbTileInfo.bpe))
         self.ldsStartOffsetMXSA = sizeA + sizeB
         self.ldsStartOffsetMXSB = sizeA + sizeB + sizeMXSA
 

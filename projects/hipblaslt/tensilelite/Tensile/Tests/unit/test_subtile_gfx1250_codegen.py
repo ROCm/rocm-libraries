@@ -556,6 +556,9 @@ class TestGfx1250MxSubtileTdm:
         asmSecondM = str(emitSingleDsRead(tiA, 1, 0, 0, tile, swizzled=False))
         assert "offset:4352" in asmSecondM
         assert "offset:4608" not in asmSecondM
+        # Second K-subtile (DepthU 512): subtileShapeK * instK * 0.5 B = 128 B into the row.
+        asmSecondK = str(emitSingleDsRead(tiA, 0, 1, 0, tile, swizzled=False))
+        assert asmSecondK.count("offset:128") == 4
 
     def test_b_lr_dual_ds_load_b128(self):
         """32x16 B stays 8 VGPRs: two ds_load_b128 per MMA tile."""

@@ -62,6 +62,52 @@ workgroups (few tiles, long K).
 - The crash is one 256x256 tile with a long K, so StreamK 3 splits a single tile's K range
   across workgroups (root cause in the StreamK update above).
 
+## DepthU = 512 (enabled 2026-10-07)
+
+`configs/du512_timing.yaml` (MT256x256x512, `LDSSegmentInterleave: [0]`) passes the 10 default
+`validate.py` sizes plus 7 more (K tails, StreamK split, batch 2, partial tiles) with
+`mx-scale-jitter=4`. On GPU 0 at (4096, 4096, 1, 65536) it runs in 206.4 us vs 223.0 us for
+DepthU 256 (gen-v7), 8.0% faster, 5 of 5 paired rounds. LDS is 304 KiB of 320.
+
+Five gaps, all hidden at DepthU 256 because there is only one K-subtile and the scale tile
+happens to be 2 KiB:
+- Rejected by "Unable to load MXSA scales using one load per wave" (`Solution.py`). The check
+  is for buffer-load scales (16 B per thread, 2 KiB at 128 threads, against 4 KiB at DepthU 512). TDM
+  moves the whole tile, so it now applies only when the scales are not TDM-loaded. `MXLoadInst`
+  is still "Auto" at that point, so TDM is inferred from `TDMInst != 0`.
+- `LDSSegmentInterleave=2` cannot fit: A alone is 64 KiB plus padding, more than one segment.
+  It used to assert in `KernelWriter._initKernel`. The segment oracle now rejects it with a
+  reason. Two padded buffers (about 136 KiB each) fit only in the tight layout.
+- Assembly failed: the tail-loop "tighten Srd{MXSA,MXSB}+2" (`computeTailLoopSrdLimit`, only for
+  DepthU > 256) referenced `SrdMXSA`, which does not exist when scales are TDM-loaded. The TDM
+  filter now drops MXSA/MXSB as well as A/B.
+- Wrong values on every size: `emitSingleDsRead` computed the second K-subtile's LDS offset
+  as `sId1 * subtileShapeK * instK * int(bpe)`, and `int(0.5) = 0` for fp4. So K-subtile 0 was
+  read twice. The offset is now truncated after the multiply (+128 B).
+- Wrong values in M rows 128-255 (only with varying scales): the MXSA/MXSB LDS regions were
+  sized `loadWidthGR * 32 * numWaves = 2 KiB`, but the scale tile is (DepthU / 32) * MT = 4 KiB.
+  MXSB overwrote the upper half of MXSA. Each region now holds the whole tile.
+
+Profile vs earlier builds (GPU 0, (4096, 4096, 1, 65536); `pmc_compare.sh 2 ...` for the counters,
+medians over dispatches, logs `logs/*-pmcc-*`; `alt_timing.py 6 ...` for time):
+
+| Build | LDS bank | LDS addr | Segment stall (share of CU cycles) | Time (us) |
+| --- | --- | --- | --- | --- |
+| 10-05 final (`20261005-190611-final-gen`) | 0 | 0 | 0.123 M (0.085%) | 270.77 |
+| gen-v4 (TDM scale fixes) | 0 | 0 | 0.097 M (0.089%) | 224.20 |
+| gen-v5 (swap hoist) | 0 | 0 | 0.091 M (0.084%) | 222.82 |
+| gen-v5, `LDSSegmentInterleave: 0` | 0 | 0 | 24.55 M (22.9%) | 223.26 |
+| gen-v6 (NonEdge store fix) | 0 | 0 | 0.091 M (0.085%) | 222.65 |
+| gen-v7 (StreamK partials fix) | 0 | 0 | 0.094 M (0.087%) | 222.63 |
+| DepthU 512, `LDSSegmentInterleave: 0` | 0 | 19 | 15.45 M (15.9%) | 207.54 |
+
+- The DepthU 256 changes added no bank, address or segment conflicts.
+- DepthU 512 has no bank conflicts, but it brings segment conflicts back because mode 2 does not
+  fit (above). That is still fewer than DepthU 256 in the same layout.
+- At DepthU 256 the same 23% stall share costs 0.4 us (si0 vs si2), so these stalls are mostly
+  hidden. Whether that holds at DepthU 512 is not measured: no conflict-free DepthU 512 layout
+  fits in 320 KiB with two buffers.
+
 ## Scale addressing bugs hidden by validation (fixed 2026-10-06)
 
 With the client's MX data generation every block gets the same scale, so validation passes no

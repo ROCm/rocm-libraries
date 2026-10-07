@@ -5231,9 +5231,9 @@ class KernelWriterAssembly(KernelWriter):
       return module
     # TDM uses tensor_load_to_lds descriptors, not SRD buffer loads
     hasTDM = kernel.get("enableTDMA") and kernel.get("enableTDMB")
-    # Filter out A/B tensors when TDM is active (SrdA/SrdB not allocated)
+    # Filter out TDM-loaded tensors (no Srd allocated); scales ride the A/B TDM enable.
     if hasTDM:
-      tPs = [tP for tP in tPs if tP["tensorChar"] not in ("A", "B")]
+      tPs = [tP for tP in tPs if tP["tensorChar"] not in ("A", "B", "MXSA", "MXSB")]
       if not tPs:
         return module
 

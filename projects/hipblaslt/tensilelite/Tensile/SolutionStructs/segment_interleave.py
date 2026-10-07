@@ -257,6 +257,13 @@ def _evaluate_subtile(state, mode):
     if list(state["MIWaveGroup"]) != [2, 2]:                   return _no("subtile: MIWaveGroup must be [2,2]")
     if state.get("TDMSplit"):                                  return _no("subtile: TDMSplit")
     if mode == 2:
+        # Unpadded lower bound; KernelWriter asserts the padded fit.
+        pt = state["ProblemType"]
+        for tc in ("A", "B"):
+            mt = state["MacroTile0"] if tc == "A" else state["MacroTile1"]
+            scaleBytes = (state["DepthU"] // pt["MXBlock" + tc]) * mt if pt.get("MXBlock" + tc) else 0
+            if mt * state["DepthU"] * _bpe(state, tc) + scaleBytes > SEG:
+                return _no("subtile: %s and its scales exceed one %d-byte LDS segment" % (tc, SEG))
         return {"applicable": True, "aligned": False, "offsets": {"subtile": True},
                 "blockSpan": 0, "reason": "subtile-ab-split",
                 "segmentMap": "SUBTILE-AB-SPLIT seg0={A0,A1} seg1={B0,B1}"}

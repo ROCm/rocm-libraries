@@ -822,7 +822,7 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
     padInterval = int(getattr(tileInfo, "ldsBlockSizePerPadBytes", 0))
     tilePadBytes = (tileBytes // padInterval) * padAmount if padInterval else 0
     offsetStride = tileBytes + tilePadBytes
-    offset = sId0 * offsetStride + sId1 * subtileShapeK * instK * int(tileInfo.bpe)
+    offset = sId0 * offsetStride + int(sId1 * subtileShapeK * instK * tileInfo.bpe)
 
   dstVgpr = dstTile.regList.indices[0]
   numRegs = len(dstTile.regList.indices)

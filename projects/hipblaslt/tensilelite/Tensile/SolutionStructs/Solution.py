@@ -1192,7 +1192,11 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, f"No subtile geometry for dtype {dtype}")
           return
 
-      bytesLoaded = state["NumThreads"] * 16
+      # Buffer-load scales are one 16-byte load per thread; a TDM descriptor moves the whole tile.
+      # MXLoadInst is still unresolved here ("Auto" becomes TDM iff TDMInst != 0).
+      mxLoadInst = state.get("MXLoadInst", "Auto")
+      mxViaTDM = mxLoadInst == "TDM" or (mxLoadInst == "Auto" and state.get("TDMInst", 0) != 0)
+      bytesLoaded = float("inf") if mxViaTDM else state["NumThreads"] * 16
       if state["ProblemType"]["MXBlockA"]:
         numBytesMXSA = (state["DepthU"] // state["ProblemType"]["MXBlockA"]) * state["MacroTile0"]
         if bytesLoaded < numBytesMXSA:
