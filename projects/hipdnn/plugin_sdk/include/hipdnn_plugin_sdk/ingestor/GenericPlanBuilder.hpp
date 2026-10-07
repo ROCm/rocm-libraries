@@ -88,7 +88,7 @@ public:
             {
                 return false;
             }
-            return !_stateManager.unsortedCatalog(contextFor(handle, opGraph)).entries.empty();
+            return !_stateManager.unsortedDefinitions(contextFor(handle, opGraph)).empty();
         }
         catch(const std::exception& error)
         {
