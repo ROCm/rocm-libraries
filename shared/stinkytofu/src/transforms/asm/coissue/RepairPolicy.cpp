@@ -23,6 +23,10 @@ PolicyDecision decide(const PolicyInput& in) {
         d.reason = "off";
         return d;
     }
+    if (!worthSearching(in)) {
+        d.reason = "matrix ops not calibrated";
+        return d;
+    }
     if (in.moves == 0) {
         d.reason = "nothing to do";
         return d;
@@ -47,6 +51,10 @@ PolicyDecision decide(const PolicyInput& in) {
     d.writeBack = true;
     d.reason = "apply";
     return d;
+}
+
+bool worthSearching(const PolicyInput& in) {
+    return in.mode != RepairMode::Apply || in.calibrated || in.trustUncalibrated;
 }
 
 }  // namespace stinkytofu::coissue

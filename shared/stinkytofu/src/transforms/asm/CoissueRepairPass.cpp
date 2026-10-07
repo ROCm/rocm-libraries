@@ -526,6 +526,13 @@ class CoissueRepairPassImpl : public Pass {
             if (!seen) forms.push_back(form);
         }
 
+        PolicyInput in;
+        in.mode = mode;
+        in.marginPercent = f.marginPercent;
+        in.trustUncalibrated = f.trustUncalibrated;
+        in.calibrated = set.profiles[set.primary].covers(forms);
+        const bool search = worthSearching(in);
+
         size_t moves = 0;
         size_t tried = 0;
         size_t limited = 0;
@@ -536,7 +543,7 @@ class CoissueRepairPassImpl : public Pass {
         auto since = [](Clock::time_point t) {
             return std::chrono::duration<double>(Clock::now() - t).count();
         };
-        while (static_cast<int>(moves) < f.maxMoves) {
+        while (search && static_cast<int>(moves) < f.maxMoves) {
             ++nRounds;
             const auto tr = Clock::now();
             std::vector<const TimedInst*> timedOrder;
@@ -636,11 +643,6 @@ class CoissueRepairPassImpl : public Pass {
             if (!accepted) break;
         }
 
-        PolicyInput in;
-        in.mode = mode;
-        in.marginPercent = f.marginPercent;
-        in.trustUncalibrated = f.trustUncalibrated;
-        in.calibrated = set.profiles[set.primary].covers(forms);
         in.moves = moves;
         for (size_t p = 0; p < startCycles.size(); ++p) in.gains.push_back(startCycles[p] - current.cycles[p]);
         in.loopCycles = startCycles[set.primary];

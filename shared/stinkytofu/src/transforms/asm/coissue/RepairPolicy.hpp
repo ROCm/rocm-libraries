@@ -43,4 +43,9 @@ struct PolicyDecision {
 /// and only if the worst-case gain over the profiles reaches the margin.
 PolicyDecision decide(const PolicyInput& input);
 
+/// Whether the moves could be written back at all, so that searching for them pays off:
+/// not in apply mode for a loop outside the calibrated scope. Shadow mode always searches,
+/// to report what a loop would gain.
+bool worthSearching(const PolicyInput& input);
+
 }  // namespace stinkytofu::coissue
