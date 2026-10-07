@@ -196,7 +196,17 @@ typedef struct rocke_attr_map
 
 /* One enumerator per distinct op name string in rocke.core.ir. Every lowerer
  * dispatches on this enum instead of Python getattr(self, "_op_"+name). The
- * canonical dotted name string is recovered with rocke_opcode_name(). */
+ * canonical dotted name string is recovered with rocke_opcode_name().
+ *
+ * ADDING OR MOVING AN ENUMERATOR SHIFTS TWO POSITIONAL TABLES in
+ * core/ir/core_types.cpp: rocke_opcode_names[] and rocke_opcode_pure[]. Both
+ * are brace-initialized in enum order, so an enumerator added here without the
+ * matching entry in each silently re-indexes every opcode after it -- each one
+ * takes its predecessor's name and purity. A wrong purity bit changes what CSE
+ * and DCE may remove, so the damage surfaces as byte-identity MISMATCH in
+ * unrelated kernel families rather than anywhere near the new op. (The
+ * rocke_ll_dispatch / g_dispatch arrays are filled by set_handler(enum, fn) and
+ * are not positional.) */
 typedef enum rocke_opcode
 {
     ROCKE_OP_INVALID = 0,
@@ -321,6 +331,7 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_SMEM_LOAD_VN,
     ROCKE_OP_TILE_SMEM_LOAD_VN_F32,
     ROCKE_OP_TILE_SMEM_ADDR_OF,
+    ROCKE_OP_TILE_GLOBAL_ADDR_OF,
     ROCKE_OP_TILE_SMEM_PTR_ADD,
     ROCKE_OP_TILE_LDS_ATOMIC_ADD,
     ROCKE_OP_TILE_GLOBAL_PTR_ADD,
@@ -1204,6 +1215,12 @@ rocke_value_t*
 rocke_value_t* rocke_b_smem_addr_of(rocke_ir_builder_t* b, rocke_value_t* smem);
 rocke_value_t*
     rocke_b_smem_ptr_add(rocke_ir_builder_t* b, rocke_value_t* lds_addr, rocke_value_t* byte_off);
+
+/* The i64 address of ptr[index] in global memory. The TDM descriptor carries a
+ * raw 57-bit global address rather than a pointer, so the element GEP has to be
+ * materialised as an integer. Mirrors ir.py global_addr_of. */
+rocke_value_t*
+    rocke_b_global_addr_of(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* index);
 void rocke_b_async_buffer_load_lds_addr(rocke_ir_builder_t* b,
                                         rocke_value_t* rsrc,
                                         rocke_value_t* lds_addr,

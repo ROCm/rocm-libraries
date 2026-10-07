@@ -420,6 +420,28 @@ static rocke_status_t _op_tile_smem_addr_of(rocke_h_lowerer_t* lw, const rocke_o
     return lw->status;
 }
 
+/* Python _op_tile_global_addr_of */
+static rocke_status_t _op_tile_global_addr_of(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    rocke_value_t *ptr, *index;
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    if(op->num_operands < 2 || op->num_results < 1)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "tile.global_addr_of: bad operand/result count");
+    }
+    ptr = op->operands[0];
+    index = op->operands[1];
+    rocke_h_emitf(lw,
+                  "int64_t %s = (int64_t)(&%s[%s]);",
+                  rocke_h_name(lw, op->results[0]),
+                  rocke_h_name(lw, ptr),
+                  rocke_h_name(lw, index));
+    return lw->status;
+}
+
 /* Python _op_tile_smem_ptr_add */
 static rocke_status_t _op_tile_smem_ptr_add(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
@@ -1485,6 +1507,7 @@ const rocke_h_handler_entry_t* rocke_h_handlers_mem(void)
            {ROCKE_OP_TILE_SMEM_LOAD_VN_F32, _op_tile_smem_load_vN_f32},
            /* LDS pointer arithmetic */
            {ROCKE_OP_TILE_SMEM_ADDR_OF, _op_tile_smem_addr_of},
+           {ROCKE_OP_TILE_GLOBAL_ADDR_OF, _op_tile_global_addr_of},
            {ROCKE_OP_TILE_SMEM_PTR_ADD, _op_tile_smem_ptr_add},
            /* LDS atomics */
            {ROCKE_OP_TILE_LDS_ATOMIC_ADD, _op_tile_lds_atomic_add},

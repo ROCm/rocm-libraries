@@ -875,6 +875,12 @@ class _Lowerer:
             raise RuntimeError("smem_addr_of before smem_alloc was lowered")
         self._emit(f"int64_t {_name(op.result)} = (int64_t)(&{storage}[0]);")
 
+    def _op_tile_global_addr_of(self, op: Op) -> None:
+        ptr, index = op.operands
+        self._emit(
+            f"int64_t {_name(op.result)} = (int64_t)(&{_name(ptr)}[{_name(index)}]);"
+        )
+
     def _op_tile_smem_ptr_add(self, op: Op) -> None:
         base, off = op.operands
         self._emit(f"int64_t {_name(op.result)} = {_name(base)} + {_name(off)};")
