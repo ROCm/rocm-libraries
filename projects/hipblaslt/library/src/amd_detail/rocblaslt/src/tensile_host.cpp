@@ -7197,6 +7197,130 @@ inline bool isCustomKernelForPointerArray(TensileLite::ContractionProblemGemm co
            && !solution.customKernel.name.empty() && !solution.customKernel.generated;
 }
 
+// Write a pinned online winner into the tuning file, through the writer tune
+// uses and in the row format cache mode replays. There is no second format and
+// no second validation path: the row carries the same key, the same index and
+// the same kernel name, and is read back by the same parser.
+//
+// Written here, where the winner is pinned, and not deferred to a later visit
+// or to process exit. Three things decided that.
+//
+//   The cost is one small append, once per resolved shape, after the three-K-
+//   plus-one visits exploration takes. It is not the thing online exists to
+//   avoid: tune stalls a caller for a benchmark run of every candidate under a
+//   lock held for the whole search, which is seconds to minutes. This is a
+//   file open, a kilobyte and a flush.
+//
+//   Deferring to the measurement path would not even move that cost off the
+//   caller. runContractionProblem is the same call on the same thread -- for a
+//   matmul passing no algo it is the caller of this function -- so a write
+//   from there blocks exactly what a write from here does, while needing new
+//   state to remember what is owed and leaving a shape that is never
+//   dispatched again unrecorded.
+//
+//   Buffering to flush at exit is the only option that writes nothing on a
+//   call, and it is the only one that writes nothing at all when the process
+//   is killed rather than returned from, which is how the long-lived serving
+//   processes online is for usually end. A winner nobody can read is worth
+//   what no winner is worth.
+//
+// Writing at pin time also settles eviction: the resolution table is
+// direct-mapped and a colliding key displaces the entry, but by then the row
+// is already in the file and in the map, so eviction costs the lock-free
+// lookup and nothing else. The problem's own state is in m_problems, which
+// never evicts, so the tuner keeps answering with the measured winner through
+// the locked path.
+inline void recordOnlineTuningWinner(const RocblasltContractionProblem&          prob,
+                                     const rocblaslt::OnlineTuner::PinnedWinner& winner,
+                                     double                                      winnerTimeUs)
+{
+    const auto& tuning = TensileLite::TuningModeSingleton::getInstance();
+    if(!tuning.writes() || !winner.m_solution)
+        return;
+
+    const auto& tuner = rocblaslt::OnlineTuner::getInstance();
+
+    // Recording a winner is an optimisation for the next process and must
+    // never fail this one's matmul. The stream, the map and the logger can all
+    // throw, and the call that reaches here is a plain hipblasLtMatmul whose
+    // handler would turn that into an internal error.
+    try
+    {
+        TensileLite::TunedEntry entry;
+        entry.solutionIndex = winner.m_solution->index;
+
+        // From the measured object, like tune's, so the name written here is
+        // the name replay compares against via getKernelNameFromAlgoIndex.
+        entry.kernelName             = winner.m_solution->kernelName;
+        entry.schemaVersion          = TensileLite::kCurrentTuningSchemaVersion;
+        entry.buildStamp             = TensileLite::currentBuildStamp();
+        entry.requiredWorkspaceBytes = winner.m_requiredWorkspace;
+        entry.winnerTimeUs           = winnerTimeUs;
+
+        // Complete, under no ceiling. Online's search is the ranked prefix and
+        // it measured all of it; there is no budget that could have cut it
+        // short, because it never spends a caller's time waiting. That reads
+        // as final only against another online search, since the mode on the
+        // row is what tuningSearchCovers compares first.
+        entry.complete = true;
+        entry.budgetMs = 0;
+
+        TensileLite::TuningSearch search;
+        search.mode           = TensileLite::TuningMode::Online;
+        search.allKernels     = false;
+        search.maxCandidates  = tuner.topK();
+        search.workspaceBytes = winner.m_searchWorkspace;
+        search.coldIters      = tuner.coldCalls();
+        search.hotIters       = tuner.repeats();
+
+        // Neither has a counterpart here: online times the caller's own
+        // dispatch on the caller's own buffers, so there is nothing to rotate
+        // and nothing between two launches to flush.
+        search.flushICache = false;
+        search.rotatingMb  = 0;
+        entry.search       = search;
+
+        // The key off the record, never one rebuilt from whichever problem is
+        // in hand. One resolution covers several file keys, and only the key
+        // the record carries belongs to a problem that was measured; a merged
+        // sibling is served this winner at run time wherever its own ranking
+        // confirms it, but a row written under its key would record timings
+        // nobody took.
+        const bool persisted
+            = TensileLite::appendTunedEntry(tuning.cachePath(), prob, winner.m_tuningKey, entry);
+
+        // Beside whatever the file already held rather than instead of it. The
+        // file is shared with tune and is append-only, and online has no
+        // standing to drop another mode's winner; find() puts the newest
+        // complete row first, which is this one.
+        static_cast<void>(
+            TensileLite::OverrideMap::getMap().addIfAbsent(winner.m_tuningKey, entry));
+
+        // The shape is served by a measured kernel from here on, whether or not
+        // the append reached the file, so the summary counts it as matched
+        // rather than as the fallback its first lookups recorded. tuned counts
+        // the rows that will outlive the process.
+        auto& counters = TensileLite::TuningCounters::instance();
+        if(persisted)
+            counters.tuned++;
+        TensileLite::recordTuningLookup(winner.m_tuningKey, true);
+        TensileLite::recordTuningWinner(winner.m_tuningKey);
+
+        std::ostringstream msg;
+        msg << "online-winner=" << entry.solutionIndex << " us=" << std::fixed
+            << std::setprecision(2) << winnerTimeUs << " candidates=" << search.maxCandidates
+            << " repeats=" << search.hotIters << " persisted=" << (persisted ? "yes" : "no");
+        if(!persisted)
+            msg << " (could not write " << tuning.cachePath()
+                << "; the winner is used now but lost at exit)";
+
+        log_tuning_lifecycle(__func__, msg.str());
+    }
+    catch(...)
+    {
+    }
+}
+
 // Move the candidate online tuning wants to sample next to the front of the
 // ranking, leaving the order of the rest alone.
 //
@@ -7243,11 +7367,23 @@ inline void promoteOnlineTuningCandidate(
         resolved->setPosition(static_cast<int>(position));
 
         if(!resolved->pinned() && solutions[position]->index == resolved->winner())
-            tuner.pinWinner(*resolved,
-                            solutions[position],
-                            std::hash<TensileLite::ContractionProblemGemm>{}(tensile_prob),
-                            solutions[position]->requiredWorkspaceSize(tensile_prob, hardware),
-                            RocblasltContractionProblem2ProblemOverride(prob));
+        {
+            // Recorded by whoever installed the record and by nobody else. The
+            // test above is a hint taken without the lock, so two callers with
+            // different file keys can both reach here; pinWinner decides which
+            // of them the record belongs to, and only that one has a key worth
+            // writing a row under.
+            const auto* installed = tuner.pinWinner(
+                *resolved,
+                solutions[position],
+                std::hash<TensileLite::ContractionProblemGemm>{}(tensile_prob),
+                solutions[position]->requiredWorkspaceSize(tensile_prob, hardware),
+                tensile_prob.workspaceSize(),
+                RocblasltContractionProblem2ProblemOverride(prob));
+
+            if(installed)
+                recordOnlineTuningWinner(prob, *installed, resolved->winnerTimeUs());
+        }
     }
 
     const auto picked = solutions.begin() + position;

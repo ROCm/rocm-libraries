@@ -132,7 +132,15 @@ namespace rocblaslt
             std::shared_ptr<TensileLite::ContractionSolution> m_solution;
             size_t                                            m_problem           = 0;
             size_t                                            m_requiredWorkspace = 0;
-            TensileLite::ProblemOverride                      m_tuningKey;
+
+            // The workspace the candidate list was filtered by, which is the
+            // limit of the caller whose ranking the winner was recorded in.
+            // Recorded for the same reason a tune row records one: a winner
+            // chosen from candidates a small allocation could cover says
+            // nothing about the kernels it ruled out.
+            size_t m_searchWorkspace = 0;
+
+            TensileLite::ProblemOverride m_tuningKey;
         };
 
         /**
@@ -167,6 +175,20 @@ namespace rocblaslt
                 return m_winner;
             }
 
+            /**
+             * The winner's score, in microseconds, or zero when exploration
+             * measured nothing.
+             *
+             * Published with the winner and never changed afterwards, so it is
+             * read the same way: it is the number a recorded row reports, and
+             * the only evidence in the file that the kernel was measured here
+             * rather than predicted.
+             */
+            float winnerTimeUs() const
+            {
+                return m_winnerUs;
+            }
+
             /// The winner object, or nullptr until a caller has offered one.
             const PinnedWinner* pinned() const
             {
@@ -184,8 +206,9 @@ namespace rocblaslt
             }
 
         private:
-            size_t                                   m_key    = 0;
-            int                                      m_winner = -1;
+            size_t                                   m_key      = 0;
+            int                                      m_winner   = -1;
+            float                                    m_winnerUs = 0.0f;
             mutable std::atomic<int>                 m_position{-1};
             mutable std::atomic<const PinnedWinner*> m_pinned{nullptr};
         };
@@ -259,12 +282,22 @@ namespace rocblaslt
      *
      * tuningKey is that same problem in the tuning file's key, carried for
      * whoever records the winner; see PinnedWinner::m_tuningKey.
+     *
+     * Returns the record this call installed, or null when it installed
+     * nothing -- because another caller got there first, because there was
+     * nothing to offer, or because the pool is full. Whoever records the
+     * winner outside this process has to know which caller's key was taken,
+     * and this is the only answer that is not a race: the check above is a
+     * hint taken without the lock, so two callers can both reach here and only
+     * one of them leaves a record behind.
      */
-        void pinWinner(const Resolution&                                        resolved,
-                       const std::shared_ptr<TensileLite::ContractionSolution>& solution,
-                       size_t                                                   problem,
-                       size_t                                                   requiredWorkspace,
-                       const TensileLite::ProblemOverride&                      tuningKey);
+        const PinnedWinner*
+            pinWinner(const Resolution&                                        resolved,
+                      const std::shared_ptr<TensileLite::ContractionSolution>& solution,
+                      size_t                                                   problem,
+                      size_t                                                   requiredWorkspace,
+                      size_t                                                   searchWorkspace,
+                      const TensileLite::ProblemOverride&                      tuningKey);
 
         /**
      * @brief Pick which of the ranked candidates should run next.
@@ -369,6 +402,7 @@ namespace rocblaslt
             int                             m_calls     = 0;
             int                             m_declined  = 0;
             int                             m_winner    = -1;
+            float                           m_winnerUs  = 0.0f;
             bool                            m_gaveUp    = false;
             bool                            m_resolved  = false;
         };

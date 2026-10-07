@@ -376,6 +376,7 @@ namespace rocblaslt
         }
 
         state.m_winner   = winner;
+        state.m_winnerUs = winnerIndex < 0 ? 0.0f : winnerScore;
         state.m_resolved = true;
 
         publishResolution(problemKey, state);
@@ -412,9 +413,10 @@ namespace rocblaslt
         if(m_resolutionPool.size() >= c_resolutionSlots)
             return;
 
-        auto entry      = std::make_unique<Resolution>();
-        entry->m_key    = problemKey;
-        entry->m_winner = state.m_winner;
+        auto entry        = std::make_unique<Resolution>();
+        entry->m_key      = problemKey;
+        entry->m_winner   = state.m_winner;
+        entry->m_winnerUs = state.m_winnerUs;
 
         const Resolution* published = entry.get();
         m_resolutionPool.push_back(std::move(entry));
@@ -428,31 +430,36 @@ namespace rocblaslt
     // an empty record and both fill it. The load inside the lock is the
     // authoritative one; a caller is free to check pinned() first to stay off
     // the lock entirely, which is what the steady state does.
-    void OnlineTuner::pinWinner(const Resolution&                                        resolved,
-                                const std::shared_ptr<TensileLite::ContractionSolution>& solution,
-                                size_t                                                   problem,
-                                size_t                              requiredWorkspace,
-                                const TensileLite::ProblemOverride& tuningKey)
+    const OnlineTuner::PinnedWinner*
+        OnlineTuner::pinWinner(const Resolution&                                        resolved,
+                               const std::shared_ptr<TensileLite::ContractionSolution>& solution,
+                               size_t                                                   problem,
+                               size_t                              requiredWorkspace,
+                               size_t                              searchWorkspace,
+                               const TensileLite::ProblemOverride& tuningKey)
     {
         if(!solution)
-            return;
+            return nullptr;
 
         std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
 
         if(resolved.m_pinned.load(std::memory_order_relaxed)
            || m_winnerPool.size() >= c_resolutionSlots)
-            return;
+            return nullptr;
 
         auto entry                 = std::make_unique<PinnedWinner>();
         entry->m_solution          = solution;
         entry->m_problem           = problem;
         entry->m_requiredWorkspace = requiredWorkspace;
+        entry->m_searchWorkspace   = searchWorkspace;
         entry->m_tuningKey         = tuningKey;
 
         const PinnedWinner* published = entry.get();
         m_winnerPool.push_back(std::move(entry));
 
         resolved.m_pinned.store(published, std::memory_order_release);
+
+        return published;
     }
 
     bool OnlineTuner::acquireEvents(hipEvent_t& start, hipEvent_t& stop)

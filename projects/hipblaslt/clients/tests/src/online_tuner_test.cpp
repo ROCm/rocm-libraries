@@ -41,6 +41,22 @@ namespace
         return OnlineTuner::getInstance();
     }
 
+    /**
+     * A solution pointer the tuner can carry but nothing can dereference.
+     *
+     * ContractionSolution is forward-declared in the tuner's header and the
+     * solution library is not linked here, which is the whole point: the tuner
+     * only ever copies this pointer and hands it back. A non-owning alias over
+     * a byte of this translation unit is a solution as far as any of that is
+     * concerned, and owns nothing to destroy.
+     */
+    std::shared_ptr<TensileLite::ContractionSolution> placeholderSolution()
+    {
+        static char storage = 0;
+        return std::shared_ptr<TensileLite::ContractionSolution>(
+            std::shared_ptr<void>(), reinterpret_cast<TensileLite::ContractionSolution*>(&storage));
+    }
+
     // Offers the same ranking until the problem resolves, and reports how many
     // offers that took, or -1 if it never did.
     int exploreToResolution(size_t key, const std::vector<int>& ranked)
@@ -92,6 +108,10 @@ namespace
         const OnlineTuner::Resolution* resolved = tuner().resolution(key);
         ASSERT_NE(resolved, nullptr);
         EXPECT_EQ(resolved->winner(), -1);
+
+        // Nothing was measured, so there is no time to report and no row worth
+        // writing.
+        EXPECT_FLOAT_EQ(resolved->winnerTimeUs(), 0.0f);
     }
 
     // Exploration promotes the first candidate that still owes samples and,
@@ -157,11 +177,48 @@ namespace
         EXPECT_EQ(resolved->position(), -1);
 
         const std::shared_ptr<TensileLite::ContractionSolution> nothing;
-        tuner().pinWinner(*resolved, nothing, key, 0, TensileLite::ProblemOverride{});
+        EXPECT_EQ(tuner().pinWinner(*resolved, nothing, key, 0, 0, TensileLite::ProblemOverride{}),
+                  nullptr)
+            << "a caller with nothing to offer pinned something";
         EXPECT_EQ(resolved->pinned(), nullptr) << "a caller with nothing to offer pinned something";
 
         resolved->setPosition(2);
         EXPECT_EQ(resolved->position(), 2);
+    }
+
+    // A record is installed once, and pinWinner says which caller installed it.
+    // Whoever writes the row has to be that caller and no other: the key on the
+    // record is the one problem the winner was measured for, while the callers
+    // that lose the race carry keys nothing measured.
+    TEST(OnlineTuner, OnlyOneCallerInstallsTheRecord)
+    {
+        constexpr size_t key = 0x1008;
+
+        ASSERT_EQ(tuner().selectCandidate(key, {61}), -1);
+        const OnlineTuner::Resolution* resolved = tuner().resolution(key);
+        ASSERT_NE(resolved, nullptr);
+        ASSERT_EQ(resolved->pinned(), nullptr);
+
+        TensileLite::ProblemOverride measured;
+        measured.m = 4096;
+        TensileLite::ProblemOverride sibling;
+        sibling.m = 8192;
+
+        const auto solution = placeholderSolution();
+
+        const OnlineTuner::PinnedWinner* installed
+            = tuner().pinWinner(*resolved, solution, key, 256, 1024, measured);
+        ASSERT_NE(installed, nullptr);
+        EXPECT_EQ(installed, resolved->pinned());
+        EXPECT_EQ(installed->m_requiredWorkspace, 256u);
+        EXPECT_EQ(installed->m_searchWorkspace, 1024u);
+        EXPECT_EQ(installed->m_tuningKey.m, 4096u);
+
+        EXPECT_EQ(tuner().pinWinner(*resolved, solution, key, 0, 0, sibling), nullptr)
+            << "a second caller was told it had installed the record";
+        EXPECT_EQ(resolved->pinned(), installed);
+        EXPECT_EQ(resolved->pinned()->m_tuningKey.m, 4096u)
+            << "a later caller restated the key the row is written under";
     }
 
     // The selection hook registers a problem and the measurement hook only
