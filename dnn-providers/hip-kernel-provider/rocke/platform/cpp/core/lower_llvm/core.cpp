@@ -720,8 +720,16 @@ const char* rocke_ll_smem_storage_type(rocke_lower_t* L, const rocke_type_t* sme
 }
 
 /* ====================================================================== */
-/* FP hex constants (Python _fp32_hex / _fp64_hex / _fp16_hex)            */
+/* FP hex constants (Python _fp64_hex / _fp32_hex / _fp16_hex)            */
 /* ====================================================================== */
+
+const char* rocke_ll_fp64_hex(rocke_lower_t* L, double x)
+{
+    /* LLVM textual IR spells `double` hex constants as the raw IEEE-754 bits. */
+    uint64_t bits;
+    memcpy(&bits, &x, sizeof bits);
+    return rocke_arena_printf(&L->arena, "0x%016llX", (unsigned long long)bits);
+}
 
 const char* rocke_ll_fp32_hex(rocke_lower_t* L, double x)
 {
@@ -731,14 +739,6 @@ const char* rocke_ll_fp32_hex(rocke_lower_t* L, double x)
     double rounded = (double)f;
     uint64_t bits;
     memcpy(&bits, &rounded, sizeof bits);
-    return rocke_arena_printf(&L->arena, "0x%016llX", (unsigned long long)bits);
-}
-
-const char* rocke_ll_fp64_hex(rocke_lower_t* L, double x)
-{
-    /* LLVM textual IR spells `double` hex constants as the raw IEEE-754 bits. */
-    uint64_t bits;
-    memcpy(&bits, &x, sizeof bits);
     return rocke_arena_printf(&L->arena, "0x%016llX", (unsigned long long)bits);
 }
 
@@ -892,17 +892,17 @@ const char* rocke_ll_operand(rocke_lower_t* L, const rocke_value_t* v)
         {
             ity = "i32";
         }
-        if(strcmp(ity, "f32") == 0)
-        {
-            double fv = 0.0;
-            rocke_attr_get_float(&op->attrs, "value", &fv);
-            return rocke_ll_fp32_hex(L, fv);
-        }
         if(strcmp(ity, "f64") == 0)
         {
             double fv = 0.0;
             rocke_attr_get_float(&op->attrs, "value", &fv);
             return rocke_ll_fp64_hex(L, fv);
+        }
+        if(strcmp(ity, "f32") == 0)
+        {
+            double fv = 0.0;
+            rocke_attr_get_float(&op->attrs, "value", &fv);
+            return rocke_ll_fp32_hex(L, fv);
         }
         if(strcmp(ity, "f16") == 0)
         {

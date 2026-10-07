@@ -412,12 +412,12 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "sqrt.f32": "declare float @llvm.sqrt.f32(float)",
     "rsqrt.f32": "declare float @llvm.amdgcn.rsq.f32(float)",
     "rcp.f32": "declare float @llvm.amdgcn.rcp.f32(float)",
-    "maxnum.f32": "declare float @llvm.maxnum.f32(float, float)",
     "maxnum.f64": "declare double @llvm.maxnum.f64(double, double)",
+    "maxnum.f32": "declare float @llvm.maxnum.f32(float, float)",
     "maxnum.f16": "declare half @llvm.maxnum.f16(half, half)",
     "maxnum.bf16": "declare bfloat @llvm.maxnum.bf16(bfloat, bfloat)",
-    "minnum.f32": "declare float @llvm.minnum.f32(float, float)",
     "minnum.f64": "declare double @llvm.minnum.f64(double, double)",
+    "minnum.f32": "declare float @llvm.minnum.f32(float, float)",
     "minnum.f16": "declare half @llvm.minnum.f16(half, half)",
     "minnum.bf16": "declare bfloat @llvm.minnum.bf16(bfloat, bfloat)",
     "fabs.f32": "declare float @llvm.fabs.f32(float)",
@@ -1551,10 +1551,10 @@ class _Lowerer:
         if op.name == "arith.constant":
             ity = op.attrs.get("ity", "i32")
             val = op.attrs["value"]
-            if ity == "f32":
-                return _fp32_hex(val)
             if ity == "f64":
                 return _fp64_hex(val)
+            if ity == "f32":
+                return _fp32_hex(val)
             if ity == "f16":
                 return _fp16_hex(val)
             return str(int(val))
@@ -2234,14 +2234,14 @@ class _Lowerer:
         # have their own maxnum intrinsic. The previous f32-only path
         # silently mis-typed half operands as float and broke comgr.
         llvm_ty = {
-            "f32": "float",
             "f64": "double",
+            "f32": "float",
             "f16": "half",
             "bf16": "bfloat",
         }.get(ty_name)
         intrin_key = {
-            "f32": "maxnum.f32",
             "f64": "maxnum.f64",
+            "f32": "maxnum.f32",
             "f16": "maxnum.f16",
             "bf16": "maxnum.bf16",
         }.get(ty_name)
@@ -2257,14 +2257,14 @@ class _Lowerer:
         a, b = op.operands
         ty_name = a.type.name
         llvm_ty = {
-            "f32": "float",
             "f64": "double",
+            "f32": "float",
             "f16": "half",
             "bf16": "bfloat",
         }.get(ty_name)
         intrin_key = {
-            "f32": "minnum.f32",
             "f64": "minnum.f64",
+            "f32": "minnum.f32",
             "f16": "minnum.f16",
             "bf16": "minnum.bf16",
         }.get(ty_name)
@@ -6348,6 +6348,14 @@ def _encode_waitcnt_gfx11(vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
     return (ec_b & 0x7) | ((lk_b & 0x3F) << 4) | ((vm_b & 0x3F) << 10)
 
 
+def _fp64_hex(x: float) -> str:
+    # LLVM textual IR spells `double` hex constants as the raw IEEE-754 bits.
+    import struct
+
+    bits = struct.unpack("<Q", struct.pack("<d", float(x)))[0]
+    return f"0x{bits:016X}"
+
+
 def _fp32_hex(x: float) -> str:
     import struct
 
@@ -6357,14 +6365,6 @@ def _fp32_hex(x: float) -> str:
     # precision source literal).
     rounded = struct.unpack("<f", struct.pack("<f", float(x)))[0]
     bits = struct.unpack("<Q", struct.pack("<d", rounded))[0]
-    return f"0x{bits:016X}"
-
-
-def _fp64_hex(x: float) -> str:
-    # LLVM textual IR spells `double` hex constants as the raw IEEE-754 bits.
-    import struct
-
-    bits = struct.unpack("<Q", struct.pack("<d", float(x)))[0]
     return f"0x{bits:016X}"
 
 
