@@ -21,10 +21,24 @@ hardware predicates and size constraints. Compressed metadata uses the same
 strict framing as the native loader. No maintained inventory or previous
 manifest is an input. Indices are specific to the tested artifact.
 
-By default, seeded hash priorities select 100 distinct kernel names, then choose
-one solution alias for each. Selection is independent of traversal order and
-case generation. Both CI backends use `ROCJITSU_SWEEP_SEED`, falling back to
-`GITHUB_SHA`; the CLI requires `--seed`. To reproduce specific indices, repeat
+CI uses the fixed seed `0` for both backends. The sample contains 100 distinct
+eligible kernel names, with one solution index chosen for each. Several solution
+indices can refer to the same kernel name; those aliases do not increase that
+kernel's sampling weight.
+
+Each name receives the priority `SHA256(seed + "\0" + kernel_name)`. The 100 names
+with the smallest priorities are selected in priority order. Within each name,
+the representative solution has the smallest
+`SHA256(seed + "\0" + solution_name)`. The solution name identifies the kernel and
+its launch settings, so index renumbering preserves the chosen configuration.
+Identical names use metadata basename and index only to choose an executable handle.
+Selection is independent of traversal order, backend and case generation.
+For an unchanged eligible inventory, a fixed seed preserves the selection across
+PR revisions. Increasing the count extends the same ordered sample. Selecting
+every kernel name would still choose one representative index per name.
+
+The CLI requires `--seed`; use `--seed 0` to reproduce CI or an explicit alternate
+seed for local exploration. To reproduce specific indices, repeat
 `--solution-index N` instead of `--kernels N`. Explicit selection retains aliases,
 reports unsupported solutions and rejects missing indices.
 
@@ -61,11 +75,13 @@ cases still accounted for. It does not require another runner or scheduler.
 
 [`known_failures.yaml`](known_failures.yaml) is the executable skip list. After
 selection and shape generation, the runner matches each case by architecture,
-backend, native solution index, metadata SHA-256, main code-object SHA-256 and
-case ID. The two hashes come from `manifest.json`'s `input_sha256` map. This binds
-an index to its packaged kernel; a rebuilt or renumbered artifact cannot inherit
-a skip just because it uses the same index. The original selection and all four
-planned cases stay in the manifest.
+backend, solution name and case ID. The solution name identifies the kernel and
+its launch configuration. An entry covers only that named configuration, not
+every solution sharing its kernel. The current numeric index is resolved from
+the artifact, so renumbering or rebuilding a metadata/code-object file does not
+by itself remove the skip. File hashes remain in `manifest.json`'s `input_sha256`
+map for reproduction. The original selection and all four planned cases stay in
+the manifest.
 
 Each failure has a description, tracking links and a review date. Its `cases`
 list can name a subset of `tile`, `multi_tile`, `mn_edge` and `k_remainder`; listing
@@ -77,9 +93,10 @@ still stop new work.
 
 The list is reviewed against one rocJITsu revision and case policy. Supply the
 detector's full source revision with `--rocjitsu-revision`; CI obtains it from
-the checkout used to build the detector. A revision/policy mismatch or a matched
-entry past its `review_by` date requires rechecking. `--run-known-failures`
-disables skips and these guards while retaining every normal validation check.
+the checkout used to build the detector. A revision/policy mismatch requires
+rechecking. The `review_by` date is a maintenance reminder and does not change
+execution as time passes. `--run-known-failures` disables skips and the
+revision/policy guards while retaining every normal validation check.
 Use it with the same seed or explicit indices to reassess the list when bumping
 the detector pin. Remove passing entries and document/review remaining failures
 before updating the list's revision and date. `--known-failures PATH` selects a
@@ -152,7 +169,7 @@ export PYTHONPATH="$ROCM_PATH/share/hipblaslt/tensilelite${PYTHONPATH:+:$PYTHONP
 sweep="$ROCM_PATH/share/hipblaslt/tensilelite/rocjitsu"
 python3 -B "$sweep/test_rocjitsu_race_sweep.py"
 python3 -B "$sweep/rocjitsu_race_sweep.py" \
-  --backend tensile --seed "$PR_REVISION" \
+  --backend tensile --seed 0 \
   --rocjitsu "$ROCJITSU_BUILD_DIR/tools/rocjitsu/rocjitsu" \
   --rocjitsu-revision "$(git -C "$ROCJITSU_SOURCE_DIR" rev-parse HEAD)" \
   --client "$ROCM_PATH/libexec/hipblaslt/tensilelite/tensilelite-client" \

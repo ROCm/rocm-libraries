@@ -191,10 +191,11 @@ def derive_cases(solution):
 
 
 class KernelSample:
-    """Bounded, order-independent seeded random priorities over kernel names.
+    """Bounded, order-independent deterministic hash priorities over kernel names.
 
     Aliases do not get extra sampling weight. Choose their representative by a
-    separate priority. Selection does not depend on backend or generated cases.
+    separate priority over solution names, independent of index renumbering.
+    Selection does not depend on backend or generated cases.
     """
 
     def __init__(self, count, seed):
@@ -203,9 +204,12 @@ class KernelSample:
     def consider(self, library, solution):
         name = solution["kernelName"]
         rank = hashlib.sha256((self.seed + "\0" + name).encode()).hexdigest()
-        alias = hashlib.sha256(
-            (self.seed + "\0" + library.name + "\0" + str(solution["index"])).encode()
-        ).hexdigest()
+        alias = (
+            hashlib.sha256((self.seed + "\0" + solution["name"]).encode()).hexdigest(),
+            solution["name"],
+            library.name,
+            solution["index"],
+        )
         if rank in self.entries and alias >= self.entries[rank][0]:
             return
         if len(self.entries) == self.count and rank > max(self.entries):

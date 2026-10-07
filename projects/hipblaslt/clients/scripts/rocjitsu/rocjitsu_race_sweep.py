@@ -854,7 +854,7 @@ def main():
         "--known-failures",
         type=Path,
         default=Path(__file__).with_name("known_failures.yaml"),
-        help="Versioned list of artifact-specific cases to skip",
+        help="Versioned list of named solution configurations and cases to skip",
     )
     parser.add_argument(
         "--rocjitsu-revision",
@@ -864,12 +864,12 @@ def main():
     parser.add_argument(
         "--run-known-failures",
         action="store_true",
-        help="Execute every selected case, ignoring skips and their revision/review guards",
+        help="Execute every selected case, ignoring skips and revision/policy guards",
     )
     parser.add_argument(
         "--seed",
         required=True,
-        help="Recorded PR revision or explicit seed for reproducible sampling",
+        help="Seed for deterministic kernel ranking; CI always uses 0",
     )
     parser.add_argument("--timeout", type=float, default=120)
     parser.add_argument(

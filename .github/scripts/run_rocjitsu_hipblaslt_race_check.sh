@@ -265,13 +265,14 @@ check_status=0
 # Each backend reconstructs its inventory independently from the PR artifact.
 # Both run even after an earlier failure, with at most four workers at once.
 # Each gets 25 minutes; the remaining step budget covers setup and reporting.
-sweep_seed="${ROCJITSU_SWEEP_SEED:-${GITHUB_SHA:-local}}"
+# Fix the seed so unchanged artifacts keep the same sample across PR revisions.
+# Increase the kernel count to extend the sample; use the CLI to try other seeds.
 for backend in tensile bench; do
   client="${TENSILELITE_CLIENT}"
   [[ "${backend}" == bench ]] && client="${HIPBLASLT_BENCH}"
   if run_timed "${backend} sampled race sweep" \
     python3 "${SWEEP_DRIVER}" \
-      --backend "${backend}" --seed "${sweep_seed}" \
+      --backend "${backend}" --seed 0 \
       --rocjitsu "${ROCJITSU_BIN}" --client "${client}" \
       --rocjitsu-revision "${ROCJITSU_REVISION}" --known-failures "${KNOWN_FAILURES}" \
       --config "${ROCJITSU_CONFIG}" --target "${ROCJITSU_GPU_TARGET}" \
