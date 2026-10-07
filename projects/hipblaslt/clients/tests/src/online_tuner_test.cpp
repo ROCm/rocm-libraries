@@ -1,16 +1,23 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Host-only tests for the online tuner's bookkeeping: what registering a
-// problem does, how exploration ends, and what the lock-free resolution table
-// answers. The tuner carries no Tensile types and reaches no HIP call on any
-// path these take, so like the store tests they need neither a device nor the
-// hooks hipblaslt-test uses.
+// Tests for the online tuner's bookkeeping: what registering a problem does,
+// how exploration ends, and what the lock-free resolution table answers. The
+// tuner carries no Tensile types, so like the store tests these need neither
+// the solution library nor the hooks hipblaslt-test uses.
+//
+// Most need no device either, because they are decided before any HIP call.
+// The ones gathered at the end of the file do: advancing the rotation means
+// issuing a candidate, issuing one means acquiring an event pair, and the
+// event pool is itself under test. Those skip where there is no device rather
+// than passing for the wrong reason.
 
 #include "OnlineTuner.hpp"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <hip/hip_runtime_api.h>
 #include <memory>
 #include <vector>
 
@@ -395,6 +402,208 @@ namespace
         EXPECT_EQ(installed->m_tuningKey.colStrideA, 4096u)
             << "the row would be written under a merged sibling's key";
     }
+
+    // ----------------------------------------------------------------------
+    // HIP graph capture.
+    //
+    // A capture is not a dispatch. It writes a kernel choice down once and the
+    // caller replays it for the life of the graph, never coming back through
+    // selection -- so a probe promoted during capture is a knowingly
+    // non-optimal kernel with no path to correction. It also buys nothing: the
+    // measurement hook refuses a capturing stream, so the probe is never timed.
+    //
+    // Serving a RESOLVED problem is the opposite case and is kept: a measured
+    // winner is precisely what belongs in a graph. The two tests below are
+    // those two halves.
+    // ----------------------------------------------------------------------
+
+    // A capture is offered nothing while exploration is still running, and
+    // costs the exploration nothing by being refused -- the same shape of rule
+    // as the merged sibling above, and for the same two reasons.
+    TEST(OnlineTuner, CapturesAreOfferedNoCandidateAndSpendNoVisitBudget)
+    {
+        constexpr size_t key = 0x100d;
+
+        const size_t           problem = identityOf(key);
+        const std::vector<int> ranked{101, 102, 103};
+
+        EXPECT_EQ(tuner().selectCandidate(key, problem, ranked), 0);
+
+        // Comfortably past the visit budget, which is candidates * repeats * a
+        // slack factor and so cannot be more than a few dozen here.
+        for(int visit = 0; visit < 512; ++visit)
+            ASSERT_EQ(tuner().selectCandidate(key, problem, ranked, /*capturing=*/true), -1)
+                << "a probe candidate was promoted into a captured graph on visit " << visit;
+
+        EXPECT_EQ(tuner().resolution(key), nullptr)
+            << "captured visits ran the exploration out of its budget";
+
+        // Still owed its first candidate, which is what the captures having
+        // cost it nothing looks like from here.
+        EXPECT_EQ(tuner().selectCandidate(key, problem, ranked), 0)
+            << "a captured visit advanced the rotation";
+    }
+
+    // ----------------------------------------------------------------------
+    // Cases that need a device.
+    //
+    // Everything above is decided before any HIP call. These are not: a
+    // candidate's issue count only moves when a launch is offered an event
+    // pair, so the one case the self-limiting capture above is not -- a
+    // capture arriving part way through an exploration, where the candidate
+    // owed is no longer the caller's own rank 0 -- cannot be built without
+    // one. Nor can anything about the pool itself.
+    // ----------------------------------------------------------------------
+
+    int deviceCount()
+    {
+        int count = 0;
+        return hipGetDeviceCount(&count) == hipSuccess ? count : 0;
+    }
+
+    // A stream and a scrap buffer to put between a measurement's two events.
+    // Two back-to-back records can read exactly 0.0 ms, and the harvest's sign
+    // test rejects that, so a sample needs something real bracketed.
+    class Device
+    {
+    public:
+        explicit Device(int id)
+            : m_id(id)
+        {
+            EXPECT_EQ(hipSetDevice(id), hipSuccess);
+            EXPECT_EQ(hipStreamCreate(&m_stream), hipSuccess);
+            EXPECT_EQ(hipMalloc(&m_scratch, c_scratchBytes), hipSuccess);
+        }
+
+        ~Device()
+        {
+            static_cast<void>(hipSetDevice(m_id));
+            static_cast<void>(hipFree(m_scratch));
+            static_cast<void>(hipStreamDestroy(m_stream));
+        }
+
+        Device(const Device&)            = delete;
+        Device& operator=(const Device&) = delete;
+
+        int id() const
+        {
+            return m_id;
+        }
+        hipStream_t stream() const
+        {
+            return m_stream;
+        }
+
+        // What the kernel launch does for the library: record both ends around
+        // something, and leave the pair readable by the next harvest.
+        void bracket(hipEvent_t start, hipEvent_t stop) const
+        {
+            EXPECT_EQ(hipEventRecord(start, m_stream), hipSuccess);
+            EXPECT_EQ(hipMemsetAsync(m_scratch, 0, c_scratchBytes, m_stream), hipSuccess);
+            EXPECT_EQ(hipEventRecord(stop, m_stream), hipSuccess);
+            EXPECT_EQ(hipStreamSynchronize(m_stream), hipSuccess);
+        }
+
+    private:
+        static constexpr size_t c_scratchBytes = 4u << 20;
+
+        int         m_id      = 0;
+        hipStream_t m_stream  = nullptr;
+        void*       m_scratch = nullptr;
+    };
+
+    // One whole visit of a problem: take the offer, time the launch it asks
+    // for, read it back. Returns the position offered.
+    int sampleOneVisit(size_t                  key,
+                       size_t                  problem,
+                       const std::vector<int>& ranked,
+                       const Device&           device)
+    {
+        const int position = tuner().selectCandidate(key, problem, ranked);
+        if(position < 0)
+            return position;
+
+        hipEvent_t start = nullptr;
+        hipEvent_t stop  = nullptr;
+        EXPECT_TRUE(tuner().beginMeasurement(key, ranked[position], start, stop))
+            << "the tuner refused the launch it had just asked for";
+
+        if(start && stop)
+        {
+            device.bracket(start, stop);
+            tuner().harvestPending(key);
+        }
+
+        return position;
+    }
+
+    // The case the capture test above cannot reach, and the only damaging one:
+    // exploration has advanced past its first candidate, and a capture lands
+    // on one the caller's own ranking does not put first. Freezing that into a
+    // graph is a kernel the heuristic rejected and the tuner has not finished
+    // judging, kept for the graph's lifetime.
+    TEST(OnlineTuner, ACaptureMidExplorationIsRefusedTheProbeAndLeavesItOwed)
+    {
+        if(deviceCount() < 1)
+            GTEST_SKIP() << "no HIP device";
+
+        const Device device(0);
+
+        constexpr size_t key = 0x100e;
+
+        const size_t           problem = identityOf(key);
+        const std::vector<int> ranked{111, 112, 113};
+
+        // Run the rotation off candidate 0, so what is owed next is a probe
+        // sitting at a position the caller did not rank first. nextCandidate()
+        // takes the least-issued candidate, so the offers go 0, 1, 2, 0, 1, 2
+        // and one visit short of a full pass leaves the last one owed.
+        for(int candidate = 0; candidate < kTopK - 1; ++candidate)
+            ASSERT_EQ(sampleOneVisit(key, problem, ranked, device), candidate)
+                << "the rotation did not advance as expected";
+
+        ASSERT_EQ(tuner().resolution(key), nullptr) << "exploration ended early";
+
+        EXPECT_EQ(tuner().selectCandidate(key, problem, ranked, /*capturing=*/true), -1)
+            << "probe candidate " << (kTopK - 1) << " was promoted into a captured graph";
+
+        // Nothing was credited to the capture, so the probe it was refused is
+        // still the one the next real dispatch is asked for.
+        EXPECT_EQ(tuner().selectCandidate(key, problem, ranked), kTopK - 1)
+            << "a captured visit consumed the candidate it was refused";
+    }
+
+    // The other half of the rule. A resolved problem has a measured winner and
+    // a graph is where that answer belongs: it is the kernel cache mode would
+    // replay, picked the same way. Refusing a capture outright would hand it
+    // the heuristic's rank 1 instead and throw the measurement away.
+    TEST(OnlineTuner, ACaptureIsStillServedTheMeasuredWinner)
+    {
+        if(deviceCount() < 1)
+            GTEST_SKIP() << "no HIP device";
+
+        const Device device(0);
+
+        constexpr size_t key = 0x100f;
+
+        const size_t           problem = identityOf(key);
+        const std::vector<int> ranked{121, 122, 123};
+
+        for(int visit = 0; visit < kTopK * kRepeats; ++visit)
+            ASSERT_GE(sampleOneVisit(key, problem, ranked, device), 0) << "visit " << visit;
+
+        const OnlineTuner::Resolution* resolved = tuner().resolution(key);
+        ASSERT_NE(resolved, nullptr) << "exploration never ended";
+        ASSERT_GE(resolved->winner(), 0) << "nothing was measured, so there is no winner to serve";
+
+        const int expected = static_cast<int>(
+            std::find(ranked.begin(), ranked.end(), resolved->winner()) - ranked.begin());
+        ASSERT_LT(expected, static_cast<int>(ranked.size()));
+
+        EXPECT_EQ(tuner().selectCandidate(key, problem, ranked, /*capturing=*/true), expected)
+            << "a capture was denied the measured winner";
+    }
+
 } // namespace
 
 // The configuration the tuner is built with, which inside hipBLASLt comes from
