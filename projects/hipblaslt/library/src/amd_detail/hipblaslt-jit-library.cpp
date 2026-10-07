@@ -4,7 +4,6 @@
 #include "hipblaslt-jit-library.hpp"
 #include "hipblaslt-jit-code-object.hpp"
 #include "hipblaslt-jit-fs.hpp"
-#include "hipblaslt-jit-hash.hpp"
 #include "hipblaslt-jit-json.hpp"
 #include "hipblaslt-jit-msgpack.hpp"
 #include "hipblaslt-jit-problem-type.hpp"
@@ -14,8 +13,9 @@
 #include <Tensile/Tensile.hpp>
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <algorithm>
-#include <charconv>
+#include <cctype>
 #include <cstring>
+#include <fstream>
 #include <new>
 #include <stdexcept>
 #include <string_view>
@@ -90,48 +90,132 @@ namespace hipblaslt_jit
             return text.substr(0, prefix.size()) == prefix;
         }
 
-        // Reads a string that json::quote wrote at text[at] and moves past it.
-        bool unquote(std::string_view text, size_t& at, std::string& value)
+        // Escapes characters that are not safe in one path component. '=' introduces
+        // a two-digit hex byte, so the encoding does not collide with a literal.
+        std::string filesystemLiteral(std::string_view text)
         {
-            if(at >= text.size() || text[at] != '"')
-                return false;
-            value.clear();
-            for(++at; at < text.size(); ++at)
+            std::string out;
+            out.reserve(text.size());
+            for(unsigned char c : text)
             {
-                if(text[at] == '"')
+                if(std::isalnum(c) || c == '_' || c == '-' || c == '.' || c == '+')
+                    out += static_cast<char>(c);
+                else
                 {
-                    ++at;
-                    return true;
+                    constexpr char digits[] = "0123456789abcdef";
+                    out += '=';
+                    out += digits[c >> 4];
+                    out += digits[c & 0xf];
                 }
-                if(text[at] != '\\')
-                    value += text[at];
-                else if(++at < text.size() && text[at] == 'u')
-                {
-                    unsigned code = 0;
-                    const auto digits = text.substr(at + 1, 4);
-                    if(digits.size() != 4
-                       || std::from_chars(digits.data(), digits.data() + 4, code, 16).ptr
-                              != digits.data() + 4)
-                        return false;
-                    value += static_cast<char>(code);
-                    at += 4;
-                }
-                else if(at < text.size())
-                    value += text[at];
             }
-            return false;
+            return out.empty() ? std::string("x") : out;
         }
 
-        // The backend fields of a cache-key.json; the rest must match another key.
-        bool backendOf(std::string_view json, std::string& id, std::string& version)
+        std::string pathComponent(std::string part)
         {
-            constexpr std::string_view head = R"({"backend":{"id":)", middle = R"(,"version":)";
-            size_t                     at   = head.size();
-            if(!startsWith(json, head) || !unquote(json, at, id)
-               || json.substr(at, middle.size()) != middle)
+            if(part.empty() || part == "." || part == "..")
+                return "x" + part;
+            constexpr size_t width = 120;
+            if(part.size() <= width)
+                return part;
+            std::string nested;
+            for(size_t i = 0; i < part.size(); i += width)
+            {
+                if(!nested.empty())
+                    nested += '/';
+                auto piece = part.substr(i, width);
+                if(piece == "." || piece == "..")
+                    piece.insert(piece.begin(), 'x');
+                nested += piece;
+            }
+            return nested;
+        }
+
+        msgpack_io::CacheKeyDocument documentOf(const CacheKey& key)
+        {
+            msgpack_io::CacheKeyDocument document;
+            document.backendId         = key.backendId;
+            document.backendVersion    = key.backendVersion;
+            document.comgr             = key.comgr;
+            document.rocmPath          = key.rocmPath;
+            document.targetId          = key.targetId;
+            document.isa               = key.isa;
+            document.libraryArch       = key.libraryArch;
+            document.codeObjectVersion = key.codeObjectVersion;
+            document.schema            = jitLibrarySchema;
+            document.wavefrontSize     = key.wavefrontSize;
+            document.environment       = key.environment;
+            return document;
+        }
+
+        // A stored field that is absent keeps this build's value. comgr, the
+        // ROCm path, the schema and the code-object version never reject a
+        // directory: compatibility is decided per solution.
+        bool directoryAgrees(const msgpack_io::CacheKeyDocument& stored, const CacheKey& key)
+        {
+            if(stored.hasIsa && stored.isa != key.isa)
                 return false;
-            at += middle.size();
-            return unquote(json, at, version);
+            if(stored.hasTargetId && stored.targetId != key.targetId)
+                return false;
+            if(stored.hasLibraryArch && stored.libraryArch != key.libraryArch)
+                return false;
+            if(stored.hasWavefront && stored.wavefrontSize != key.wavefrontSize)
+                return false;
+            if(stored.hasBackendId && stored.backendId != key.backendId)
+                return false;
+            if(stored.hasBackendVersion && stored.backendVersion != key.backendVersion)
+                return false;
+            return true;
+        }
+
+        // ELF ABI version (e_ident[EI_ABIVERSION] is code object version - 2),
+        // or -1 when the file is not an AMDGPU ELF this build can inspect.
+        int codeObjectVersionOf(const fs::path& path)
+        {
+            std::ifstream input(path, std::ios::binary);
+            unsigned char elf[64] = {};
+            if(!input.read(reinterpret_cast<char*>(elf), sizeof(elf)))
+                return -1;
+            if(std::memcmp(elf, "\x7f" "ELF", 4) != 0 || elf[4] != 2 || elf[5] != 1)
+                return -1;
+            constexpr unsigned char amdhsaAbi = 64;
+            if(elf[7] != amdhsaAbi)
+                return -1;
+            const unsigned machine = elf[18] | (elf[19] << 8);
+            if(machine != 224)
+                return -1;
+            return static_cast<int>(elf[8]) + 2;
+        }
+
+        bool solutionRunnable(const TensileLite::ContractionSolution& solution,
+                              const fs::path&                         directory)
+        {
+            const int version = solution.internalArgsSupport.version;
+            const int loop    = solution.internalArgsSupport.persistentLoopArgsVersion;
+            if(version < 0 || version > 3 || loop < 0 || loop > 1)
+                return false;
+            if(loop == 1 && version != 3)
+                return false;
+            const int codeObject
+                = codeObjectVersionOf(directory / solution.codeObjectFilename.load());
+            return codeObject >= 4 && codeObject <= 6;
+        }
+
+        Status ensureEntryParents(const fs::path& root, const fs::path& file)
+        {
+            const auto relative = file.parent_path().lexically_relative(root);
+            if(relative.empty() || relative == ".")
+                return {};
+            fs::path current = root;
+            for(const auto& part : relative)
+            {
+                if(part == "." || part == "..")
+                    return failed(Stage::Publish, "An entry path escapes the library directory");
+                current /= part;
+                if(auto status = files::privateDirectory(current); !status.ok())
+                    return status;
+            }
+            return {};
         }
 
         template <class T>
@@ -213,32 +297,16 @@ namespace hipblaslt_jit
         return key;
     }
 
-    std::string CacheKey::canonicalJson() const
-    {
-        using json::literal;
-        using json::object;
-        using json::quote;
-        json::Members environmentMembers;
-        for(const auto& [name, value] : environment)
-            environmentMembers.emplace_back(name, quote(value));
-        return object({
-            {"backend", object({{"id", quote(backendId)}, {"version", quote(backendVersion)}})},
-            {"code_object_version", literal(codeObjectVersion)},
-            {"comgr", quote(comgr)},
-            {"compiler_environment", object(environmentMembers)},
-            {"rocm_path", quote(rocmPath)},
-            {"schema", literal(jitLibrarySchema)},
-            {"target",
-             object({{"isa", quote(isa)},
-                     {"library_arch", quote(libraryArch)},
-                     {"target_id", quote(targetId)},
-                     {"wavefront_size", literal(wavefrontSize)}})},
-        });
-    }
-
     std::string CacheKey::directoryName() const
     {
-        return isa + "-" + Fnv1a().add(canonicalJson()).hex();
+        // One path component. Toolchain identity (comgr, ROCm path, compiler
+        // environment) is recorded in the cache key and is not part of the name.
+        auto name = filesystemLiteral(isa) + "_" + filesystemLiteral(targetId) + "_"
+                    + filesystemLiteral(libraryArch) + "_wf" + std::to_string(wavefrontSize) + "_"
+                    + filesystemLiteral(backendId) + "_" + filesystemLiteral(backendVersion);
+        if(name == "." || name == "..")
+            name.insert(name.begin(), 'x');
+        return name;
     }
 
     std::string problemTypeKey(const TensileLite::ContractionProblemGemm& problem)
@@ -260,22 +328,26 @@ namespace hipblaslt_jit
 
     std::string entryPrefix(const std::string&         problemTypeKey,
                             const std::string&         kernelName,
-                            const std::vector<size_t>& sizes,
-                            unsigned                   collision)
+                            const std::vector<size_t>& sizes)
     {
-        Fnv1a content;
-        content.add(kernelName);
+        std::string sizesText;
         for(auto size : sizes)
-            content.add(std::to_string(size));
-        auto prefix = "TensileLibrary_JIT_" + Fnv1a().add(problemTypeKey).hex() + "_" + content.hex();
-        return collision ? prefix + "_" + std::to_string(collision) : prefix;
+        {
+            if(!sizesText.empty())
+                sizesText += 'x';
+            sizesText += std::to_string(size);
+        }
+        return "k/" + pathComponent(filesystemLiteral(kernelName)) + "/t/"
+               + pathComponent(filesystemLiteral(problemTypeKey)) + "/s/"
+               + pathComponent(filesystemLiteral(sizesText));
     }
 
     struct JitLibrary::Directory
     {
         fs::path    path;
-        std::string isa, key;
-        Status      failure; // a cache-key.json that does not match this key
+        std::string isa;
+        CacheKey    identity;
+        Status      failure; // a cache-key.msgpack this directory cannot use
 
         std::mutex                                        mutex;
         bool                                              loaded = false;
@@ -293,14 +365,17 @@ namespace hipblaslt_jit
         }
         fs::path keyPath() const
         {
-            return path / "cache-key.json";
+            return path / "cache-key.msgpack";
         }
         fs::path staging() const
         {
             return path / "staging";
         }
 
-        // Creates cache-key.json once; an existing one must hold this key.
+        // Creates cache-key.msgpack once. An existing file may differ in comgr,
+        // the ROCm path, the schema integer or the code-object version; those do
+        // not make the directory unusable. A present device or backend field
+        // that disagrees does.
         Status checkKey() const
         {
             const auto           file = keyPath();
@@ -308,16 +383,19 @@ namespace hipblaslt_jit
             std::error_code      error;
             if(!fs::exists(file, error))
             {
-                bytes.assign(key.begin(), key.end());
+                if(auto status = msgpack_io::writeCacheKey(documentOf(identity), bytes); !status.ok())
+                    return status;
                 if(auto status = files::writeAtomically(staging(), file, bytes); !status.ok())
                     return status;
             }
             if(auto status = files::readFile(file, fileLimit, bytes); !status.ok())
                 return status;
-            if(std::string(bytes.begin(), bytes.end()) != key)
+            msgpack_io::CacheKeyDocument stored;
+            if(auto status = msgpack_io::readCacheKey(bytes, stored); !status.ok())
+                return status;
+            if(!directoryAgrees(stored, identity))
                 return failed(Stage::Configure,
-                              "JIT solution library disabled: " + file.u8string()
-                                  + " does not hold this process's cache key");
+                              file.u8string() + " records a different device or backend");
             return {};
         }
 
@@ -432,17 +510,16 @@ namespace hipblaslt_jit
     }
 
     JitLibrary::Directory* JitLibrary::open(const std::string& name,
-                                            const std::string& isa,
-                                            const std::string& key,
+                                            const CacheKey&    key,
                                             Status&            why)
     {
         auto& slot = m_directories[name];
         if(!slot)
         {
-            auto opened  = std::make_unique<Directory>();
-            opened->path = schemaDirectory() / name;
-            opened->isa  = isa;
-            opened->key  = key;
+            auto opened      = std::make_unique<Directory>();
+            opened->path     = schemaDirectory() / name;
+            opened->isa      = key.isa;
+            opened->identity = key;
             for(const auto& path : {opened->path, opened->staging()})
                 if(auto status = files::privateDirectory(path); !status.ok())
                 {
@@ -465,7 +542,7 @@ namespace hipblaslt_jit
         if(auto status = checkRoot(); !status.ok())
             return status;
         Status why;
-        attached = open(key.directoryName(), key.isa, key.canonicalJson(), why);
+        attached = open(key.directoryName(), key, why);
         if(attached)
             addOnce(m_routes[device], attached);
         return why;
@@ -480,19 +557,24 @@ namespace hipblaslt_jit
         for(fs::directory_iterator next(schemaDirectory(), error), end; !error && next != end;
             next.increment(error))
         {
-            const auto name = next->path().filename().string();
-            if(!startsWith(name, key.isa + "-"))
+            if(!next->is_directory())
                 continue;
+            const auto           name = next->path().filename().string();
             std::vector<uint8_t> bytes;
-            if(!files::readFile(next->path() / "cache-key.json", fileLimit, bytes).ok())
+            if(!files::readFile(next->path() / "cache-key.msgpack", fileLimit, bytes).ok())
                 continue;
-            const std::string json(bytes.begin(), bytes.end());
-            auto              candidate = key;
-            if(!backendOf(json, candidate.backendId, candidate.backendVersion)
-               || candidate.canonicalJson() != json || candidate.directoryName() != name)
+            msgpack_io::CacheKeyDocument stored;
+            if(!msgpack_io::readCacheKey(bytes, stored).ok())
+                continue;
+            auto candidate = key;
+            if(stored.hasBackendId)
+                candidate.backendId = stored.backendId;
+            if(stored.hasBackendVersion)
+                candidate.backendVersion = stored.backendVersion;
+            if(candidate.directoryName() != name || !directoryAgrees(stored, candidate))
                 continue;
             Status why;
-            if(auto* directory = open(name, key.isa, json, why))
+            if(auto* directory = open(name, candidate, why))
                 addOnce(m_routes[device], directory);
         }
     }
@@ -528,12 +610,23 @@ namespace hipblaslt_jit
             {
                 if(!row.first(problem, hardware))
                     continue;
-                const auto solution = row.second->findBestSolution(problem, hardware);
+                std::shared_ptr<TensileLite::ContractionSolution> solution;
+                try
+                {
+                    solution = row.second->findBestSolution(problem, hardware);
+                }
+                catch(...)
+                {
+                    // An unknown field or a kernarg version this build cannot
+                    // run skips this solution. The rest of the library still loads.
+                    continue;
+                }
                 // Only a hand-edited file can hold an index the mapping cannot resolve.
                 if(!solution || !isJitIndex(solution->index)
                    || !master->libraryMapping.count(solution->index)
                    || std::find(excludeKernels.begin(), excludeKernels.end(), solution->kernelName)
-                          != excludeKernels.end())
+                          != excludeKernels.end()
+                   || !solutionRunnable(*solution, directory->path))
                     continue;
                 found.push_back(solution->index);
             }
@@ -653,42 +746,32 @@ namespace hipblaslt_jit
             for(size_t source = 0; source < candidates.size(); ++source)
             {
                 const auto& kernel = candidates[source].kernel;
-                for(unsigned collision = 0;; ++collision)
+                const auto  prefix = entryPrefix(type, kernel, sizes);
+                const auto  same   = std::find_if(placements.begin(),
+                                               placements.end(),
+                                               [&](const auto& p) { return p.prefix == prefix; });
+                if(same != placements.end())
                 {
-                    auto       prefix = entryPrefix(type, kernel, sizes, collision);
-                    const auto same   = std::find_if(placements.begin(),
-                                                   placements.end(),
-                                                   [&](const auto& p) { return p.prefix == prefix; });
-                    if(same != placements.end())
-                    {
-                        if(same->kernel != kernel)
-                            continue;
-                        placementOf.push_back(static_cast<size_t>(same - placements.begin()));
-                        break;
-                    }
-                    Placement placement{prefix, kernel, source};
-                    const auto existing = published.find(prefix);
-                    if(existing == published.end())
-                        placement.fresh = true;
-                    else
-                    {
-                        // A published name may only be reused for the same kernel;
-                        // anything else is a hash collision and takes the next name.
-                        msgpack_io::EntryFields fields;
-                        if(!files::readFile(directory->path / (prefix + ".dat"), fileLimit, bytes)
-                                .ok()
-                           || !msgpack_io::readEntry(bytes, fields).ok() || fields.kernelName != kernel
-                           || fields.index != existing->second)
-                            continue;
-                        placement.index     = existing->second;
-                        placement.predicate = std::move(fields.predicate);
-                        placement.row       = std::find(rowPrefixes.begin(), rowPrefixes.end(), prefix)
-                                        == rowPrefixes.end();
-                    }
-                    placementOf.push_back(placements.size());
-                    placements.push_back(std::move(placement));
-                    break;
+                    placementOf.push_back(static_cast<size_t>(same - placements.begin()));
+                    continue;
                 }
+                Placement placement{prefix, kernel, source};
+                const auto existing = published.find(prefix);
+                if(existing == published.end())
+                    placement.fresh = true;
+                else
+                {
+                    // The same kernel, problem type and sizes reuse the index.
+                    placement.index = existing->second;
+                    msgpack_io::EntryFields fields;
+                    if(files::readFile(directory->path / (prefix + ".dat"), fileLimit, bytes).ok()
+                       && msgpack_io::readEntry(bytes, fields).ok())
+                        placement.predicate = std::move(fields.predicate);
+                    placement.row = std::find(rowPrefixes.begin(), rowPrefixes.end(), prefix)
+                                    == rowPrefixes.end();
+                }
+                placementOf.push_back(placements.size());
+                placements.push_back(std::move(placement));
             }
 
             const auto fresh = std::count_if(
@@ -712,12 +795,15 @@ namespace hipblaslt_jit
             // file is complete before any file that refers to it.
             for(const auto& placement : placements)
                 if(placement.fresh)
+                {
+                    const auto object = directory->path / (placement.prefix + ".co");
+                    if(auto status = ensureEntryParents(directory->path, object); !status.ok())
+                        return status;
                     if(auto status = files::writeAtomically(
-                           staging,
-                           directory->path / (placement.prefix + ".co"),
-                           candidates[placement.source].object->bytes);
+                           staging, object, candidates[placement.source].object->bytes);
                        !status.ok())
                         return status;
+                }
             reached(PublishStep::CodeObjects);
 
             for(auto& placement : placements)
@@ -736,9 +822,11 @@ namespace hipblaslt_jit
                 if(auto status = msgpack_io::readEntry(placement.entry, fields); !status.ok())
                     return status;
                 placement.predicate = std::move(fields.predicate);
-                placement.row       = true;
-                if(auto status = files::writeAtomically(
-                       staging, directory->path / (placement.prefix + ".dat"), placement.entry);
+                placement.row = true;
+                const auto entry = directory->path / (placement.prefix + ".dat");
+                if(auto status = ensureEntryParents(directory->path, entry); !status.ok())
+                    return status;
+                if(auto status = files::writeAtomically(staging, entry, placement.entry);
                    !status.ok())
                     return status;
             }
