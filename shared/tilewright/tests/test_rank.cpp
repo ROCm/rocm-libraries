@@ -495,14 +495,17 @@ TEST_CASE("CandidateSet::rank is bitwise identical to rank_configs", "[rank]") {
         pool.push_back(c);
       }
       const tw::CandidateSet set(model, pool);
+      tw::Hardware other_hw = test_hardware();
+      other_hw.N_CU         = 80;
+      other_hw.lds_capacity /= 2;
       for (int i = 0; i < 60; ++i) {
-        const tw::Problem p          = random_problem();
-        const std::size_t min_scored = pick({0, 1, 3, 10, 1000});
-        const std::vector<tw::Result> expect =
-            tw::rank_configs(*model, p, test_hardware(), pool, min_scored);
+        const tw::Problem p                  = random_problem();
+        const std::size_t min_scored         = pick({0, 1, 3, 10, 1000});
+        const tw::Hardware hw                = rng() % 3 == 0 ? other_hw : test_hardware();
+        const std::vector<tw::Result> expect = tw::rank_configs(*model, p, hw, pool, min_scored);
         check_structure(expect, pool.size());
-        REQUIRE(same_results(set.rank(p, test_hardware(), min_scored), expect));
-        REQUIRE(same_results(set.rank(p, test_hardware(), min_scored), expect));
+        REQUIRE(same_results(set.rank(p, hw, min_scored), expect));
+        REQUIRE(same_results(set.rank(p, hw, min_scored), expect));
       }
     }
   }
@@ -599,6 +602,42 @@ TEST_CASE("every kernel variant returns identical bits", "[kernels]") {
     }
   }
   if (variants == 0) WARN("only the scalar kernels are available on this host");
+}
+
+TEST_CASE("the batched interaction kernel scores each column like one input", "[kernels]") {
+  using tw::detail::Isa;
+  using tw::detail::kBatch;
+  const tw::detail::Kernels* scalar = tw::detail::kernels_for(Isa::Scalar);
+  REQUIRE(scalar != nullptr);
+  std::mt19937 rng(11);
+  std::uniform_real_distribution<float> u(-1.0f, 1.0f);
+  for (Isa isa : {Isa::Scalar, Isa::Avx2, Isa::Avx512}) {
+    const tw::detail::Kernels* k = tw::detail::kernels_for(isa);
+    if (k == nullptr) continue;
+    for (std::size_t m : {1, 5, 16, 21, 96})
+      for (std::size_t kk : {0, 3, 16, 37, 50})
+        for (std::size_t nc : {1, 7, 8, 9, 16}) {
+          std::vector<float> W(m * kk), b(m), w2(m), X(kk * kBatch), hidden(m * kBatch);
+          for (float& v : W) v = u(rng);
+          for (float& v : b) v = u(rng);
+          for (float& v : w2) v = u(rng);
+          for (float& v : X) v = (rng() % 5 == 0) ? 0.0f : u(rng);
+          std::vector<float> out(kBatch, -7.0f);
+          k->interaction_batch(
+              W.data(), b.data(), w2.data(), X.data(), m, kk, nc, hidden.data(), out.data());
+          for (std::size_t c = 0; c < kBatch; ++c) {
+            if (c >= nc) {
+              CHECK(out[c] == -7.0f);
+              continue;
+            }
+            std::vector<float> x(kk), h(m);
+            for (std::size_t j = 0; j < kk; ++j) x[j] = X[j * kBatch + c];
+            scalar->linear_relu(W.data(), b.data(), x.data(), m, kk, h.data());
+            const float want = scalar->dot(w2.data(), h.data(), m);
+            REQUIRE(std::memcmp(&want, &out[c], sizeof want) == 0);
+          }
+        }
+  }
 }
 
 TEST_CASE("scores follow the two-tower formula", "[rank]") {

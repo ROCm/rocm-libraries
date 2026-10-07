@@ -49,6 +49,25 @@ struct FeatureCatalog {
   void (*query)(const Problem& p, const HwView& hw, float* out);
   void (*item)(const Config& c, float* out);
   void (*inter)(const Model& m, const Problem& p, const Config& c, const HwView& hw, float* out);
+  // `inter` in parts, for callers that reuse values across problems:
+  // inter_kernel writes inter_kernel_dim values that depend on the config, the
+  // problem's data types, the device and the model; inter_problem writes
+  // inter_problem_dim values that depend on the problem and the device;
+  // inter_pair then writes what `inter` writes.
+  std::size_t inter_kernel_dim;
+  std::size_t inter_problem_dim;
+  void (*inter_kernel)(const Model& m,
+                       const Problem& p,
+                       const Config& c,
+                       const HwView& hw,
+                       float* out);
+  void (*inter_problem)(const Problem& p, const HwView& hw, float* out);
+  void (*inter_pair)(const Problem& p,
+                     const Config& c,
+                     const HwView& hw,
+                     const float* kernel,
+                     const float* problem,
+                     float* out);
 };
 
 // The catalog whose hash is `hash`, or nullptr.
@@ -65,10 +84,54 @@ double mi_cycles(const Model& model,
                  std::size_t mi_k,
                  DataType dt);
 
+// The feasibility rules for one problem and device, with the values that
+// depend only on them computed once. `nt_a_available` / `nt_b_available`: the
+// candidate pool contains a kernel with cache_hints_a / cache_hints_b == 4.
+class Feasibility {
+ public:
+  Feasibility(const Problem& p, const Hardware& hardware, bool nt_a_available, bool nt_b_available);
+
+  // The tile's A and B slices fit in LDS.
+  bool lds_fits(const KernelShape& k) const {
+    return lds_valid_ &&
+           static_cast<double>(k.mk) * bytes_a_ + static_cast<double>(k.nk) * bytes_b_ <=
+               lds_capacity_;
+  }
+
+  bool rules_pass(const KernelShape& k) const {
+    // 1) A small batched problem must fit in one tile.
+    if (small_batched_ && (k.mt_m < M_ || k.mt_n < N_)) return false;
+    // 2) Dot2 is only correct for M < 3.
+    if (k.dot2 && M_ > 2) return false;
+    // 3) An operand whose free dimension is contiguous is read in global-read
+    //    vectors, so that dimension must hold one (TensileLite's
+    //    LeadingFree0/1SizesGreaterOrEqual; not emitted for Int8x4).
+    if (leading_free_a_ && M_ < k.grvw_a) return false;
+    if (leading_free_b_ && N_ < k.grvw_b) return false;
+    // 4) Non-temporal hints: on 128-byte-aligned K a skinny problem requires the
+    //    matching operand's non-temporal variant when the pool has one, and
+    //    every other aligned problem rejects hinted kernels.
+    const bool hinted = k.cache_hints_a != 0 || k.cache_hints_b != 0;
+    if (!k_aligned_ || (k.mt_k % 1024) * a_bits_ % 1024 != 0) return !hinted;
+    if (skinny_b_ && at_most_twice(M_, k.mt_m)) return !(nt_b_ && k.cache_hints_b != 4);
+    if (skinny_a_ && at_most_twice(N_, k.mt_n)) return !(nt_a_ && k.cache_hints_a != 4);
+    return !hinted;
+  }
+
+  bool operator()(const KernelShape& k) const { return lds_fits(k) && rules_pass(k); }
+
+ private:
+  // v <= 2 * t without overflow.
+  static bool at_most_twice(std::uint64_t v, std::uint64_t t) { return (v >> 1) + (v & 1) <= t; }
+
+  std::uint64_t M_ = 0, N_ = 0, a_bits_ = 0;
+  double bytes_a_ = 0.0, bytes_b_ = 0.0, lds_capacity_ = 0.0;
+  bool lds_valid_ = false, small_batched_ = false, leading_free_a_ = false, leading_free_b_ = false,
+       k_aligned_ = false, skinny_a_ = false, skinny_b_ = false, nt_a_ = false, nt_b_ = false;
+};
+
 bool check_lds_capacity(const Hardware& hardware, const Dim3& mt, DataType a, DataType b);
 
-// `nt_a_available` / `nt_b_available`: the candidate pool contains a kernel with
-// cache_hints_a / cache_hints_b == 4.
 bool is_kernel_feasible(const Problem& p,
                         const Config& c,
                         bool nt_a_available,

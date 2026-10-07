@@ -150,6 +150,17 @@ bool valid_hardware(const Hardware& hardware) noexcept;
 // Cell scoring `problem` (honoring TILEWRIGHT_FORCE_CELL), or -1.
 int route_cell(const Model& model, const Problem& problem) noexcept;
 
+// The Config fields the feasibility rules read.
+struct KernelShape {
+  std::uint64_t mt_m = 0, mt_n = 0, mt_k = 0;
+  std::uint64_t mk = 0, nk = 0;  // mt.mk(), mt.nk()
+  std::uint64_t grvw_a = 0, grvw_b = 0;
+  int cache_hints_a = 0, cache_hints_b = 0;
+  bool dot2 = false;  // MI 1x1x64
+};
+
+KernelShape kernel_shape(const Config& c);
+
 // A pool's configs grouped by view key (FeatureCatalog::view_key). Keys are
 // numbered in order of first appearance; the configs of key k are
 // members[member_begin[k] .. member_begin[k + 1]), in input order.
@@ -158,8 +169,9 @@ struct PoolKeys {
   std::vector<std::size_t> first;   // per key: its first config
   std::vector<std::size_t> member_begin;
   std::vector<std::size_t> members;
-  bool nt_a = false;  // some config has cache_hints_a == 4
-  bool nt_b = false;  // some config has cache_hints_b == 4
+  std::vector<KernelShape> shape;  // per key: kernel_shape of its first config
+  bool nt_a = false;               // some config has cache_hints_a == 4
+  bool nt_b = false;               // some config has cache_hints_b == 4
 };
 
 PoolKeys pool_keys(const FeatureCatalog& catalog, const std::vector<Config>& configs);
