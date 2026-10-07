@@ -73,6 +73,7 @@ namespace rocblaslt
     OnlineTuner::~OnlineTuner() {}
 
     int OnlineTuner::selectCandidateImpl(size_t                  problemKey,
+                                         size_t                  problem,
                                          const std::vector<int>& rankedSolutionIndices)
     {
         if(rankedSolutionIndices.empty())
@@ -89,6 +90,13 @@ namespace rocblaslt
         std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
 
         ProblemState& state = m_problems[problemKey];
+
+        // Dropped before anything else can hand out a new one. An offer is good
+        // for the single launch the visit it was made to is about to issue, and
+        // this is a different visit; one the caller never dispatched must not be
+        // left lying around for the next arrival to claim.
+        state.m_offered = -1;
+
         if(state.m_candidates.empty())
         {
             // No candidate list yet, so this problem is still inside its cold
@@ -101,8 +109,17 @@ namespace rocblaslt
                 return -1;
             }
 
-            registerProblem(problemKey, state, rankedSolutionIndices);
+            registerProblem(problemKey, problem, state, rankedSolutionIndices);
         }
+
+        // A problem the key merges with the one being explored. Its launches are
+        // not this exploration's to sample, so it is offered nothing -- and it
+        // spends none of the visit budget either, which a sibling dispatching
+        // often enough could otherwise exhaust, ending exploration early on
+        // whatever samples had been taken by then. It takes the branch below
+        // once there is a winner, like every other caller.
+        if(!state.m_resolved && state.m_problem != problem)
+            return -1;
 
         if(!state.m_resolved)
         {
@@ -129,7 +146,16 @@ namespace rocblaslt
         if(candidate < 0)
             return -1;
 
-        return positionOf(rankedSolutionIndices, state.m_candidates[candidate]);
+        const int position = positionOf(rankedSolutionIndices, state.m_candidates[candidate]);
+
+        // Recorded only where the caller is really being asked for it. A
+        // candidate absent from the list in hand is not promoted, so no launch
+        // of it is coming and an offer would only be there for something else
+        // to claim.
+        if(position >= 0)
+            state.m_offered = candidate;
+
+        return position;
     }
 
     void OnlineTuner::harvestPendingImpl(size_t problemKey)
@@ -262,6 +288,12 @@ namespace rocblaslt
         if(!acquireEvents(start, stop))
             return false;
 
+        // Spent. The offer buys one sample, so a second launch claiming the
+        // same one would issue a candidate twice on a single visit of it, and a
+        // launch arriving after the caller's own is by definition not the one
+        // selection asked for.
+        state.m_offered = -1;
+
         state.m_pending.push_back({start, stop, candidate});
         ++state.m_issued[candidate];
 
@@ -269,11 +301,19 @@ namespace rocblaslt
     }
 
     void OnlineTuner::registerProblem(size_t                  problemKey,
+                                      size_t                  problem,
                                       ProblemState&           state,
                                       const std::vector<int>& rankedSolutionIndices)
     {
         const size_t count
             = std::min(rankedSolutionIndices.size(), static_cast<size_t>(m_topK));
+
+        // Whoever registers owns the exploration, for the same reason the first
+        // caller to offer a winner object owns that record: a key covers
+        // problems that rank and run differently, and letting a later one take
+        // it over would only make the two take turns discarding each other's
+        // samples.
+        state.m_problem = problem;
 
         state.m_candidates.assign(rankedSolutionIndices.begin(),
                                   rankedSolutionIndices.begin() + count);
@@ -318,16 +358,23 @@ namespace rocblaslt
         return next;
     }
 
+    // The launch selectCandidate() asked for on this visit, and nothing else.
+    // Searching the candidate list for the index instead would accept a merged
+    // sibling's own pick, which is a different problem's launch wearing a
+    // candidate's number; see ProblemState::m_offered. The issued count is
+    // re-tested because nextCandidate() picked the offer, and under contention
+    // another visit's offer can have overwritten it in between -- a dropped
+    // sample, never a double-issued one.
     int OnlineTuner::measurableCandidate(const ProblemState& state, int solutionIndex) const
     {
-        if(state.m_resolved || state.m_gaveUp)
+        if(state.m_resolved || state.m_gaveUp || state.m_offered < 0)
             return -1;
 
-        for(size_t i = 0; i < state.m_candidates.size(); ++i)
-            if(state.m_candidates[i] == solutionIndex && state.m_issued[i] < m_repeats)
-                return static_cast<int>(i);
+        if(state.m_candidates[state.m_offered] != solutionIndex
+           || state.m_issued[state.m_offered] >= m_repeats)
+            return -1;
 
-        return -1;
+        return state.m_offered;
     }
 
     // The rotation issues at most repeats() launches per candidate, so a whole
@@ -445,6 +492,23 @@ namespace rocblaslt
 
         if(resolved.m_pinned.load(std::memory_order_relaxed)
            || m_winnerPool.size() >= c_resolutionSlots)
+            return nullptr;
+
+        // The record describes the problem that was measured, and that problem
+        // is the one that registered the exploration -- it is the only one
+        // beginMeasurement() took a sample for. Reaching here says the winner
+        // is in this caller's ranking, which is true of every merged sibling
+        // that can serve it and says nothing about who measured it, so the
+        // caller is matched against the registration instead. Refusing one
+        // costs it the shortcut and its own ranking still answers; what it
+        // buys is that the key a row is written under belongs to the problem
+        // the time was taken on. See PinnedWinner::m_tuningKey.
+        //
+        // The state is in m_problems, which never erases, and the resolution
+        // was published from it, so the lookup finds it whenever the key is
+        // one this tuner resolved.
+        const auto registered = m_problems.find(resolved.m_key);
+        if(registered == m_problems.end() || registered->second.m_problem != problem)
             return nullptr;
 
         auto entry                 = std::make_unique<PinnedWinner>();

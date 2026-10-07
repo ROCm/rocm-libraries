@@ -123,6 +123,12 @@ namespace rocblaslt
      * wherever its own ranking confirms it, but is never the key a row is
      * written under, because nothing measured it.
      *
+     * pinWinner() holds that last sentence up rather than leaving it to the
+     * order callers happen to arrive in. A record is installed only for the
+     * problem that registered the exploration, which is also the only problem
+     * whose launches were sampled, so m_problem here is ProblemState::m_problem
+     * and m_tuningKey is that problem's file key and no other's.
+     *
      * Built at pin time and nowhere else: it costs a pass over forty-odd fields
      * and a cached device query, which is affordable once per resolved problem
      * and would not be affordable per call.
@@ -276,20 +282,27 @@ namespace rocblaslt
      * only make the two take turns invalidating each other's record.
      *
      * problem is the caller's own identifier for the problem the winner was
-     * offered for, and is handed back unexamined through pinned(). Calling this
-     * cannot change which kernel is chosen for any problem: a caller that does
-     * not recognise what comes back has lost nothing but the shortcut.
+     * offered for, in the same terms selectCandidate() takes it, and is checked
+     * against the problem that registered the exploration rather than merely
+     * carried. A caller the resolution key merges with that problem measured
+     * none of it, so it has no key worth writing a row under; it is handed the
+     * winner through its own ranking and leaves no record behind. What comes
+     * back is handed on through pinned(), where a later caller compares its own
+     * identifier against it. Calling this cannot change which kernel is chosen
+     * for any problem: a caller that does not recognise what comes back has
+     * lost nothing but the shortcut.
      *
      * tuningKey is that same problem in the tuning file's key, carried for
      * whoever records the winner; see PinnedWinner::m_tuningKey.
      *
      * Returns the record this call installed, or null when it installed
-     * nothing -- because another caller got there first, because there was
-     * nothing to offer, or because the pool is full. Whoever records the
-     * winner outside this process has to know which caller's key was taken,
-     * and this is the only answer that is not a race: the check above is a
-     * hint taken without the lock, so two callers can both reach here and only
-     * one of them leaves a record behind.
+     * nothing -- because this caller is not the problem that was measured,
+     * because another caller got there first, because there was nothing to
+     * offer, or because the pool is full. Whoever records the winner outside
+     * this process has to know which caller's key was taken, and this is the
+     * only answer that is not a race: the check above is a hint taken without
+     * the lock, so two callers can both reach here and only one of them leaves
+     * a record behind.
      */
         const PinnedWinner*
             pinWinner(const Resolution&                                        resolved,
@@ -305,13 +318,22 @@ namespace rocblaslt
      * Registers the problem's candidate list on first sight. Returns the
      * position within rankedSolutionIndices to promote to the front, or -1 to
      * leave the caller's ordering alone.
+     *
+     * problem identifies the caller at the granularity the solution library
+     * caches its rankings at, and is what decides whose exploration this is.
+     * One resolution key covers several such problems by design; the first to
+     * register owns the exploration and every other is left its own ordering
+     * until there is a measured winner to serve it. See
+     * ProblemState::m_problem.
      */
-        int selectCandidate(size_t problemKey, const std::vector<int>& rankedSolutionIndices)
+        int selectCandidate(size_t                  problemKey,
+                            size_t                  problem,
+                            const std::vector<int>& rankedSolutionIndices)
         {
             if(!m_enabled)
                 return -1;
 
-            return selectCandidateImpl(problemKey, rankedSolutionIndices);
+            return selectCandidateImpl(problemKey, problem, rankedSolutionIndices);
         }
 
         /**
@@ -341,6 +363,13 @@ namespace rocblaslt
      * retired rather than pooled again. On false neither argument is touched
      * and nothing is owed. Problems that selectCandidate() has not registered
      * are never measured.
+     *
+     * Nor is any dispatch other than the one selectCandidate() last asked this
+     * caller for. The solution index alone does not identify it: a problem the
+     * resolution key merges with the one being explored is left its own
+     * ordering, and its own pick is very often a candidate of that exploration
+     * that still owes samples, so timing it would credit one problem with a
+     * launch of another. See ProblemState::m_offered.
      */
         bool beginMeasurement(size_t      problemKey,
                               int         solutionIndex,
@@ -392,12 +421,51 @@ namespace rocblaslt
         // coldCalls() carries. It is deliberately not m_calls: the visit budget
         // bounds how long exploration may run, and a problem that has not
         // started exploring must not be able to exhaust it.
+        //
+        // m_problem and m_offered are what make the samples below comparable
+        // with one another, which is the one thing resolve() assumes and the
+        // key alone does not give. The resolution key deliberately merges
+        // problems differing in epilogue, bias, strides or scaling -- all of
+        // which move a kernel's runtime -- so an unattributed sample set is a
+        // set of measurements of different things, and picking the smallest of
+        // them says which sibling dispatched rather than which kernel is
+        // faster. The two fields answer that in the two places it can go
+        // wrong, and each is needed:
+        //
+        // m_problem is the problem that registered the candidate list, at the
+        // granularity the solution library caches its rankings at -- the same
+        // quantity PinnedWinner::m_problem carries, and equal to it by
+        // construction. Exploration belongs to whoever registered: a merged
+        // sibling is offered no candidate, spends none of the visit budget and
+        // installs no record, and is served the measured winner through its own
+        // ranking once there is one.
+        //
+        // m_offered is the candidate selectCandidate() last asked this visit's
+        // caller to dispatch, and the only launch beginMeasurement() will time.
+        // Refusing the sibling a candidate is not enough on its own, because it
+        // still dispatches its own ranking's pick, and that is very often a
+        // candidate of this problem's that still owes samples -- matching on
+        // the solution index alone would take the sample anyway. The offer is
+        // dropped at the next visit and consumed by the first launch that
+        // claims it, so a sample is only taken for a dispatch selection asked
+        // for, on the visit it asked.
+        //
+        // Deliberately not a second identity check at the measurement hook:
+        // that hook holds the same Tensile problem with a different
+        // workspaceSize, the caller's own allocation rather than the ceiling
+        // the heuristic ranked under, which is the whole reason the resolution
+        // key exists (see onlineTuningProblemKey). A hash taken there would
+        // disagree with the registered one for every caller whose preference
+        // and allocation differ, and nothing of that caller's would ever be
+        // measured. The offer costs one compare and does not care.
         struct ProblemState
         {
             std::vector<int>                m_candidates;
             std::vector<std::vector<float>> m_samples;
             std::vector<int>                m_issued;
             std::vector<PendingMeasurement> m_pending;
+            size_t                          m_problem   = 0;
+            int                             m_offered   = -1;
             int                             m_coldCalls = 0;
             int                             m_calls     = 0;
             int                             m_declined  = 0;
@@ -410,7 +478,9 @@ namespace rocblaslt
         OnlineTuner();
         ~OnlineTuner();
 
-        int  selectCandidateImpl(size_t problemKey, const std::vector<int>& rankedSolutionIndices);
+        int  selectCandidateImpl(size_t                  problemKey,
+                                 size_t                  problem,
+                                 const std::vector<int>& rankedSolutionIndices);
         void harvestPendingImpl(size_t problemKey);
         bool beginMeasurementImpl(size_t      problemKey,
                                   int         solutionIndex,
@@ -420,6 +490,7 @@ namespace rocblaslt
         // The remainder require m_mutex, held shared where they only read and
         // exclusively where they mutate state or the event pool.
         void registerProblem(size_t                  problemKey,
+                             size_t                  problem,
                              ProblemState&           state,
                              const std::vector<int>& rankedSolutionIndices);
         int  nextCandidate(const ProblemState& state) const;
