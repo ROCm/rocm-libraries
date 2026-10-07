@@ -15,13 +15,32 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 
+# Enforce the same Torch-free execution for frozen and current workers, even
+# when the offline qualification interpreter has Torch installed.
+_NO_TORCH = """
+import sys
+from importlib.abc import MetaPathFinder
+
+class _NoTorch(MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "torch" or fullname.startswith("torch."):
+            raise ModuleNotFoundError("Torch is disabled in GPU reference workers")
+
+if any(name == "torch" or name.startswith("torch.") for name in sys.modules):
+    raise RuntimeError("Torch was imported before GPU reference worker startup")
+sys.meta_path.insert(0, _NoTorch())
+"""
+
 # Import through the child's selected PYTHONPATH, including the frozen baseline
 # runner. Only transport changes; validation and kernel execution stay in run().
-_SERVER = """
+_SERVER = (
+    _NO_TORCH
+    + """
 import json
 import sys
 from pathlib import Path
-from sdpa_reference.worker import run
+from importlib import import_module
+run = import_module(sys.argv[1]).run
 
 for line in sys.stdin:
     request_path = Path(json.loads(line))
@@ -29,17 +48,18 @@ for line in sys.stdin:
     run(json.loads(request_path.read_text()), work)
     (work / 'complete').touch()
 """
-_ACTIVE = ContextVar("sdpa_worker_session", default=None)
+)
+_ACTIVE = ContextVar("gpu_reference_worker_session", default=None)
 
 
 class _Worker:
-    def __init__(self, env: dict[str, str]) -> None:
-        self.directory = tempfile.TemporaryDirectory(prefix="rocke-sdpa-worker-")
+    def __init__(self, env: dict[str, str], module: str) -> None:
+        self.directory = tempfile.TemporaryDirectory(prefix="rocke-reference-worker-")
         self.log_path = Path(self.directory.name) / "worker.log"
         self.log = self.log_path.open("w")
         try:
             self.process = subprocess.Popen(
-                [sys.executable, "-s", "-u", "-c", _SERVER],
+                [sys.executable, "-s", "-u", "-c", _SERVER, module],
                 cwd=self.directory.name,
                 env=env,
                 stdin=subprocess.PIPE,
@@ -65,12 +85,13 @@ class _Worker:
             if time.monotonic() >= deadline:
                 self.process.kill()
                 self.process.wait()
-                raise TimeoutError("SDPA worker exceeded its request timeout")
+                raise TimeoutError("GPU reference worker exceeded its request timeout")
             time.sleep(0.01)
 
     def error(self) -> str:
         return (
-            "SDPA worker failed:\n" + self.log_path.read_text(errors="replace")[-16000:]
+            "GPU reference worker failed:\n"
+            + self.log_path.read_text(errors="replace")[-16000:]
         )
 
     def close(self) -> None:
@@ -92,15 +113,24 @@ class _Worker:
 class WorkerSession:
     """Keep baseline and candidate processes separate and close them on exit."""
 
-    def __init__(self, *, timeout: float = 300) -> None:
+    def __init__(self, *, module: str, timeout: float = 300) -> None:
         self.timeout = timeout
-        self.workers: dict[tuple[str, str], _Worker] = {}
+        self.module = module
+        self.workers: dict[tuple[str, str, str], _Worker] = {}
 
-    def execute(self, mode: str, request: Path, env: dict[str, str]) -> None:
+    def execute(
+        self,
+        mode: str,
+        request: Path,
+        env: dict[str, str],
+        *,
+        module: str | None = None,
+    ) -> None:
         """Reuse only workers with the same role and selected import roots."""
-        key = (mode, env["PYTHONPATH"])
+        module = module or self.module
+        key = (mode, env["PYTHONPATH"], module)
         if key not in self.workers:
-            self.workers[key] = _Worker(env)
+            self.workers[key] = _Worker(env, module)
         try:
             self.workers[key].execute(request, timeout=self.timeout)
         except BaseException:
@@ -115,9 +145,9 @@ class WorkerSession:
 
 
 @contextmanager
-def reuse_workers() -> Iterator[WorkerSession]:
+def reuse_workers(module: str) -> Iterator[WorkerSession]:
     """Reuse workers only within an explicit verification scope."""
-    session = WorkerSession()
+    session = WorkerSession(module=module)
     token = _ACTIVE.set(session)
     try:
         yield session

@@ -40,6 +40,10 @@ if str(_TESTROOT) not in sys.path:
 
 
 def pytest_addoption(parser):
+    parser.addoption("--rocke-reference-arch", default=None)
+    parser.addoption(
+        "--rocke-reference-operation", choices=("sdpa", "conv"), default=None
+    )
     parser.addoption(
         "--gdn-batch",
         action="store",
@@ -92,3 +96,15 @@ def _restore_attention_arch_state():
         if au is not None:
             au._RESOLVED_ATTENTION_ARCH = prev
             au._2D_LAUNCH_META.clear()
+
+
+def pytest_sessionstart(session):
+    from reference_common.pytest_support import start_reference_session
+
+    start_reference_session(session.config)
+
+
+def pytest_collection_modifyitems(config, items):
+    from reference_common.pytest_support import select_reference_items
+
+    select_reference_items(config, items)
