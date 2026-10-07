@@ -1620,6 +1620,16 @@ class _Lowerer:
         self._smem_offsets: Dict[str, int] = {}
         self._smem_pool_size: int = 0
         self._smem_pool_name: Optional[str] = None
+        # LDS alias scopes (kernel attr ``lds_alias_scopes``): one scope per
+        # smem allocation, noalias against allocations whose pooled byte
+        # ranges are disjoint. Without them SIInsertWaitcnts must assume any
+        # LDS read can alias an in-flight LDS DMA (buffer_load ... lds) and
+        # waits vmcnt(0) first; with them it waits only for DMA into the
+        # read's own allocation.
+        self._lds_aa = bool(kernel.attrs.get("lds_alias_scopes", False))
+        self._smem_sizes: Dict[str, int] = {}
+        self._lds_prov: Dict[str, str] = {}
+        self._lds_aa_used = False
         # Cache of per-allocation base pointers already emitted, keyed by
         # (block label, global name). Lets a non-zero-offset allocation that is
         # accessed several times in the same block reuse a single byte-level
@@ -2027,6 +2037,7 @@ class _Lowerer:
 
         for gname, stype in sorted_allocs:
             seg = _seg_size(stype)
+            self._smem_sizes[gname] = seg
             aln = _align(stype)
             first_seq, last_seq = live.get(gname, (0, 0))
             # Exclusive (cshuffle no-alias) allocations must not reuse another
@@ -2101,6 +2112,45 @@ class _Lowerer:
 
         pool_size = max(s_off + s_size for s_off, s_size, _ in slots)
         self._smem_pool_size = (pool_size + 15) & ~15
+
+    _LDS_AA_BASE = 900000
+
+    def _lds_aa_names(self) -> List[str]:
+        return sorted(self._smem_sizes)
+
+    def _lds_aa_suffix(self, gname: Optional[str]) -> str:
+        """``, !alias.scope !A, !noalias !N`` for an access to ``gname``."""
+        if not self._lds_aa or gname is None or gname not in self._smem_sizes:
+            return ""
+        self._lds_aa_used = True
+        names = self._lds_aa_names()
+        n = len(names)
+        i = names.index(gname)
+        b = self._LDS_AA_BASE
+        return f", !alias.scope !{b + 1 + n + i}, !noalias !{b + 1 + 2 * n + i}"
+
+    def _lds_aa_render(self) -> List[str]:
+        names = self._lds_aa_names()
+        n = len(names)
+        b = self._LDS_AA_BASE
+        out = [f'!{b} = distinct !{{!{b}, !"rocke.lds"}}']
+        for i, g in enumerate(names):
+            out.append(f'!{b + 1 + i} = distinct !{{!{b + 1 + i}, !{b}, !"{g}"}}')
+        for i, g in enumerate(names):
+            out.append(f"!{b + 1 + n + i} = !{{!{b + 1 + i}}}")
+        for i, g in enumerate(names):
+            lo, hi = self._smem_offsets[g], self._smem_offsets[g] + self._smem_sizes[g]
+            dis = [
+                f"!{b + 1 + j}"
+                for j, h in enumerate(names)
+                if h != g
+                and (
+                    self._smem_offsets[h] >= hi
+                    or self._smem_offsets[h] + self._smem_sizes[h] <= lo
+                )
+            ]
+            out.append(f"!{b + 1 + 2 * n + i} = !{{{', '.join(dis)}}}")
+        return out
 
     def _emit_smem_base_ptr(self, gname: str, stype: SmemType) -> str:
         """Return an addrspace(3) pointer to the start of the smem segment.
@@ -3365,7 +3415,7 @@ class _Lowerer:
         align = int(op.attrs.get("align", vec * elem_bytes))
         self._current().emit(
             f"  store <{vec} x {elem_ty}> {self._operand(value)}, ptr addrspace(3) {gep}, "
-            f"align {align}"
+            f"align {align}{self._lds_aa_suffix(gname)}"
         )
 
     def _op_tile_smem_load_v4(self, op: Op) -> None:
@@ -3466,6 +3516,7 @@ class _Lowerer:
             scalar = self._fresh("smem.s")
             self._current().emit(
                 f"  {scalar} = load {volatile}{elem_ty}, ptr addrspace(3) {base}, align {align}"
+                f"{self._lds_aa_suffix(gname)}"
             )
             self._current().emit(
                 f"  {op.result.name} = insertelement <1 x {elem_ty}> undef, {elem_ty} {scalar}, i32 0"
@@ -3473,7 +3524,7 @@ class _Lowerer:
         else:
             self._current().emit(
                 f"  {op.result.name} = load {volatile}<{vec} x {elem_ty}>, ptr addrspace(3) {base}, "
-                f"align {align}"
+                f"align {align}{self._lds_aa_suffix(gname)}"
             )
 
     def _op_tile_wmma_f32_16x16x16_f16(self, op: Op) -> None:
@@ -4940,6 +4991,7 @@ class _Lowerer:
         gname = self._smem_storage_name[smem.name]
         stype = smem.type
         base_ptr = self._emit_smem_base_ptr(gname, stype)
+        self._lds_prov[op.result.name] = gname
         # The global is ptr addrspace(3); cast to i64 for arithmetic.
         self._current().emit(
             f"  {op.result.name} = ptrtoint ptr addrspace(3) {base_ptr} to i64"
@@ -4947,6 +4999,8 @@ class _Lowerer:
 
     def _op_tile_smem_ptr_add(self, op: Op) -> None:
         base, off = op.operands
+        if base.name in self._lds_prov:
+            self._lds_prov[op.result.name] = self._lds_prov[base.name]
         self._current().emit(
             f"  {op.result.name} = add i64 {self._operand(base)}, {self._operand(off)}"
         )
@@ -4999,6 +5053,7 @@ class _Lowerer:
             f"i32 {self._operand(voff)}, "
             f"i32 {self._operand(soff)}, "
             f"i32 0, i32 {aux})"
+            f"{self._lds_aa_suffix(self._lds_prov.get(lds_addr.name))}"
         )
 
     def _op_tile_s_wait_asynccnt(self, op: Op) -> None:
@@ -6678,8 +6733,7 @@ class _Lowerer:
         then_blk = self._new_block("if.then")
         # Emit the conditional branch from the predecessor block.
         cur.emit(
-            f"  br i1 {self._operand(cond)}, "
-            f"label %{then_blk.label}, label %IF_ELSE"
+            f"  br i1 {self._operand(cond)}, label %{then_blk.label}, label %IF_ELSE"
         )
         cur.terminated = True
 
@@ -6830,6 +6884,9 @@ class _Lowerer:
             out.append("")
         if self._needs_nontemporal_md:
             out.append("!5 = !{i32 1}")
+            out.append("")
+        if self._lds_aa_used:
+            out.extend(self._lds_aa_render())
             out.append("")
         if self._debug is not None:
             out.extend(self._debug.render())
