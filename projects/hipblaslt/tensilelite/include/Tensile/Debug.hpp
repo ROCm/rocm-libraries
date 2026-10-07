@@ -80,6 +80,10 @@ namespace TensileLite
         // unset (the model decides). Re-read by reloadDebugBitsForTest().
         int tilewrightBank() const;
 
+        // TENSILE_TILEWRIGHT_PREPARE=0: a tilewright ranker builds its per-cell
+        // data on first use instead of when it is made.
+        bool tilewrightPrepare() const;
+
         bool printLibraryLogicIndex() const;
 
         // Reports the effective Stream-K (SK5 hybrid) scheduling mode selected at

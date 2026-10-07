@@ -185,9 +185,12 @@ namespace TensileLite
         // Looks up the stem of `logicFile` in the tilewright_index of its directory.
         void loadTilewright(std::string const& logicFile)
         {
-            auto model        = TilewrightRanker::loadModel(logicFile);
-            tilewright_ranker = TilewrightRanker::load(model, logicFile, solution_list);
-            if(tilewright_ranker && TilewrightRanker::ranksBank(*model))
+            auto       model = TilewrightRanker::loadModel(logicFile);
+            bool const bank  = model && TilewrightRanker::ranksBank(*model);
+            // A bank pool ranker, prepared when it is made, ranks in place of
+            // this one.
+            tilewright_ranker = TilewrightRanker::load(model, logicFile, solution_list, !bank);
+            if(tilewright_ranker && bank)
                 tilewright_bank = std::make_shared<const TilewrightBank<MySolution>>(model);
         }
 #endif
@@ -271,24 +274,36 @@ namespace TensileLite
                 size_t              offeredCount = 0;
                 if(ranker)
                 {
-                    ranked = ranker->rank(problem, *(pAMDGPU->analyticalHardware), numSolutions);
-                    for(; offeredCount < ranked.size() && rv.size() != numSolutions; offeredCount++)
+                    ranked = ranker->rank(problem, *pAMDGPU, numSolutions);
+                    for(bool everyScored = false;; everyScored = true)
                     {
-                        // In a bank pool, a kernel can be the exact match an
-                        // Equality row already returned.
-                        size_t const position = ranked[offeredCount];
-                        if(position < solution_list.size())
+                        for(; offeredCount < ranked.size() && rv.size() != numSolutions;
+                            offeredCount++)
                         {
-                            if(!bank
-                               || !SelectedSolutionsScope::contains(solution_list[position].first))
-                                considerSolution(solution_list[position].second, termsOf(position));
+                            // In a bank pool, a kernel can be the exact match an
+                            // Equality row already returned.
+                            size_t const position = ranked[offeredCount];
+                            if(position < solution_list.size())
+                            {
+                                if(!bank
+                                   || !SelectedSolutionsScope::contains(
+                                       solution_list[position].first))
+                                    considerSolution(solution_list[position].second,
+                                                     termsOf(position));
+                            }
+                            else if(bank && position - solution_list.size() < bank->size())
+                            {
+                                auto const& solution = (*bank)[position - solution_list.size()];
+                                if(!SelectedSolutionsScope::contains(solution->index))
+                                    considerSolution(solution, nullptr);
+                            }
                         }
-                        else if(bank && position - solution_list.size() < bank->size())
-                        {
-                            auto const& solution = (*bank)[position - solution_list.size()];
-                            if(!SelectedSolutionsScope::contains(solution->index))
-                                considerSolution(solution, nullptr);
-                        }
+                        // The first numSolutions ranked kernels did not all pass
+                        // the predicates: offer the others the ranking scored.
+                        if(everyScored || rv.size() == numSolutions || numSolutions < 0
+                           || ranked.size() < static_cast<size_t>(numSolutions))
+                            break;
+                        ranked = ranker->rank(problem, *pAMDGPU, numSolutions, true);
                     }
                 }
 #endif
@@ -492,14 +507,13 @@ namespace TensileLite
                 for(auto& entry : bank)
                     pool.bank.push_back(std::move(entry.second));
                 size_t const own = solution_list.size();
-                pool.ranker
-                    = TilewrightRanker::make(tilewright_bank->model(),
-                                             own + pool.bank.size(),
-                                             [&](size_t i) -> SizeMapping const& {
-                                                 return i < own
-                                                            ? solution_list[i].second->sizeMapping
-                                                            : pool.bank[i - own]->sizeMapping;
-                                             });
+                pool.ranker      = TilewrightRanker::make(
+                    tilewright_bank->model(),
+                    own + pool.bank.size(),
+                    [&](size_t i) -> std::shared_ptr<MySolution> const& {
+                        return i < own ? solution_list[i].second : pool.bank[i - own];
+                    },
+                    tilewright_ranker->arch());
             }
             catch(std::exception const& e)
             {
