@@ -55,7 +55,7 @@ namespace hipblaslt_jit
         for(auto& file : sources.assembly)
             result.solution.units.push_back(
                 {std::move(file.name), std::move(file.bytes), BuildUnit::Kind::Assembly, {}});
-        std::vector<IncludeFile> includes;
+        std::vector<BuildUnit> includes;
         for(auto& header : sources.headers)
             includes.push_back({std::move(header.name), std::move(header.bytes)});
         for(auto& file : sources.hip)

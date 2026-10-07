@@ -242,57 +242,60 @@ libraries disable the library for the process, and each use then fails with
 `JIT solution library disabled: <reason>`. A prebuilt library that already uses
 the reserved index range also disables it.
 
-**Layout.** Under a `v1` schema directory, each cache key has its own
-directory, named after the ISA and a 64-bit hash of the key. Each key directory
-is a standard lazy TensileLite library that the stock loader reads: a master
-file, the index mapping, and one entry (`.dat`) and code object (`.co`) per
-solution. For example:
+**Layout.** Under a `v1` schema directory, each device and backend has its own
+directory. The directory name is a filesystem-safe literal of the ISA, target
+ID, library architecture, wavefront size, backend id and backend version. It
+does not include the comgr path or the ROCm path. Each directory is a standard
+lazy TensileLite library that the stock loader reads: a master file, the index
+mapping, and one entry (`.dat`) and code object (`.co`) per solution. The
+files the library reads and writes are MessagePack. For example:
 
 ```text
 $HIPBLASLT_JIT_LIBRARY_PATH/
 └── v1/
     ├── allocator.dat                  next free solution index
     ├── lock                           publication lock for the whole root
-    └── gfx950-677afeae9fbc7f02/       one directory per cache key
-        ├── cache-key.json
+    └── gfx950_..._replay_1/           one directory per device and backend
+        ├── cache-key.msgpack
         ├── TensileLibrary_lazy_gfx950.dat
         ├── TensileLiteLibrary_lazy_gfx950_Mapping.dat
-        ├── TensileLibrary_JIT_ad7857c9cccf2981_555e7809bfd8786c.dat
-        ├── TensileLibrary_JIT_ad7857c9cccf2981_555e7809bfd8786c.co
+        ├── k/<kernel>/t/<problem>/s/<sizes>.dat
+        ├── k/<kernel>/t/<problem>/s/<sizes>.co
         └── staging/                   temporary files before rename
 ```
 
-An entry name is `TensileLibrary_JIT_<ProblemType hash>_<kernel and size hash>`,
-so publishers of the same solution for the same problem choose the same files.
-When a name already holds another kernel, the publisher appends `_1`, `_2` and
-so on. Each entry holds one supported solution of a generated entry, with its
-solution index rewritten to the allocated one and the generated entry's code
-object beside it. Each master row is
+An entry name is a filesystem-safe literal of the kernel, the problem type and
+the sizes. Publishers of that same identity choose the same files and reuse the
+existing index. Each entry holds one supported solution of a generated entry,
+with its solution index rewritten to the allocated one and the generated
+entry's code object beside it. Each master row is
 `And(SizeEqual(M), SizeEqual(N), SizeEqual(batch), SizeEqual(K), <the entry's
 problem predicate>)` pointing to a placeholder for the entry, so a lookup
 matches only the exact sizes within the full ProblemType. The solution's own
 hardware, problem and task predicates, including its workspace requirement,
-still run on every match.
+still run on every match. On load, a solution whose code-object version or
+kernarg version this build cannot run is skipped. The rest of the library
+still loads. A different schema integer, comgr path or ROCm path does not
+reject the directory.
 
-**Cache key.** `cache-key.json` records, in canonical JSON:
+**Cache key.** `cache-key.msgpack` records:
 
 | Field | Contents |
 | --- | --- |
-| `target` | Full target ID with features (for example `gfx950:sramecc+:xnack-`), ISA, TensileLite library architecture and wavefront size |
-| `backend` | Backend identifier and version. Each backend defines its version to change whenever its output can; the replay backend's is a hash of its replayed bundles. |
+| `target_id`, `isa`, `library_arch`, `wavefront_size` | Full target ID with features (for example `gfx950:sramecc+:xnack-`), ISA, TensileLite library architecture and wavefront size |
+| `backend_id`, `backend_version` | Backend identifier and version. The replay backend's version is a stable literal. |
 | `comgr` | comgr version, and on Linux the path, size and modification time of the loaded comgr library |
 | `code_object_version` | The code-object version that the generator and the builder use (4) |
 | `rocm_path` | The ROCm path that the builder passes to comgr |
 | `compiler_environment` | `HIP_PATH`, `LLVM_PATH`, and every set `AMD_COMGR_*` variable, such as `AMD_COMGR_DRIVER_OPTIONS_APPEND` and `AMD_COMGR_HOTSWAP_*`, except those that control only comgr's cache, logging, temporary files and statistics |
-| `schema` | The library schema version (1) |
+| `schema` | The library schema version (1). A different integer does not reject the directory. |
 
-A process uses only the directory whose name and `cache-key.json` both match
-its key exactly. It ignores other directories and never modifies or deletes
-them, and a directory whose `cache-key.json` holds a different key fails the
-lookup or publication with a message that says so. To resolve an index it has
-not looked up, a process searches the directories for its device whose key
-matches everything except the backend, so a later process can run the solution
-without configuring the backend that generated it.
+A process uses the directory named for its device and backend. A present device
+or backend field that disagrees with that directory fails the lookup or
+publication. The comgr identity, the ROCm path, the schema integer and the
+code-object version are recorded and do not. To resolve an index it has not
+looked up, a process searches the directories for its device, so a later
+process can run the solution without configuring the backend that generated it.
 
 **Indices.** JIT solutions use solution indices from 2^30 to `INT32_MAX`.
 Prebuilt libraries stay below that range; one that reaches it disables the JIT
@@ -331,7 +334,8 @@ code objects in process through AMD comgr (`hipblaslt-jit-builder.cpp` and
   features the device has; it is then rewritten to the device's full target
   ID. Assembly units that declare different wavefront sizes are rejected.
 - HIP source: `AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE` with
-  `--rocm-path` and a content-derived `-cuid`, so HIP objects link together.
+  `--rocm-path` and a `-cuid` taken from the source name, so HIP objects link
+  together.
   The ROCm path is `HIP_PATH` when set, otherwise the prefix of the loaded HIP
   runtime.
 - Link: `AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE` joins the assembly

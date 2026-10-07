@@ -57,14 +57,9 @@ namespace hipblaslt_jit
         }
     };
 
-    // A header a HIP unit includes by name.
-    struct IncludeFile
-    {
-        std::string          name;
-        std::vector<uint8_t> bytes;
-    };
-
-    // A source file the builder assembles or compiles.
+    // One source the builder assembles or compiles. An include uses the same
+    // shape — name and bytes — and is not a separate type. Kind is read only
+    // for a unit the builder must assemble or compile.
     struct BuildUnit
     {
         enum class Kind
@@ -72,10 +67,10 @@ namespace hipblaslt_jit
             Assembly,
             Hip,
         };
-        std::string              name;
-        std::vector<uint8_t>     bytes;
-        Kind                     kind = Kind::Assembly;
-        std::vector<IncludeFile> includes; // Hip only
+        std::string            name;
+        std::vector<uint8_t>   bytes;
+        Kind                   kind = Kind::Assembly;
+        std::vector<BuildUnit> includes; // Hip only; name and bytes
     };
 
     // One CustomKernel library entry plus the code that defines its kernels.

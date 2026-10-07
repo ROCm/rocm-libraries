@@ -54,23 +54,23 @@ namespace hipblaslt_jit
 
         // Captures the comgr identity, the ROCm path and the environment once per
         // process, because comgr latches some of them when it is first used.
+        // Those toolchain fields are recorded in cache-key.msgpack and are not
+        // part of the directory name: a later ROCm still reads the library.
         static CacheKey
                     make(const DeviceTarget& target, const BackendInfo& backend, int codeObjectVersion);
-        std::string canonicalJson() const; // the content of cache-key.json
-        std::string directoryName() const; // "<isa>-<FNV-1a of canonicalJson()>"
+        std::string directoryName() const; // filesystem-safe literal, not a hash
     };
 
     // The problem's ProblemType as canonical JSON. Throws like problemTypeFields.
     std::string problemTypeKey(const TensileLite::ContractionProblemGemm& problem);
     // problem.size(i) for every index; a published entry matches only these sizes.
     std::vector<size_t> problemSizes(const TensileLite::ContractionProblemGemm& problem);
-    // "TensileLibrary_JIT_<ProblemType hash>_<kernel and sizes hash>[_<collision>]".
-    // A function of the content, so concurrent publishers of one entry choose the
-    // same name.
+    // Filesystem-safe literal of the kernel, the problem type and the sizes.
+    // The same identity always names the same entry, so a second publish reuses
+    // that entry's index.
     std::string entryPrefix(const std::string&         problemTypeKey,
                             const std::string&         kernelName,
-                            const std::vector<size_t>& sizes,
-                            unsigned                   collision = 0);
+                            const std::vector<size_t>& sizes);
 
     enum class PublishStep
     {
@@ -88,10 +88,13 @@ namespace hipblaslt_jit
     extern void (*publishStepHook)(PublishStep);
 #endif
 
-    // A persistent library of generated solutions. Each cache key directory is a
+    // A persistent library of generated solutions. Each directory is a
     // TensileLite lazy-loading library that the stock loader reads: a master
     // with one row per entry, matching only the entry's ProblemType and exact
     // sizes, an index mapping, and one entry file and code object per solution.
+    // Library files are MessagePack, including cache-key.msgpack. A solution
+    // whose code-object version or kernarg version this build cannot run is
+    // skipped; the rest of the library still loads.
     // Publishing holds the root's file lock and replaces files atomically, in an
     // order that never lets a reader see a reference to a missing file, so
     // readers take no lock. Thread-safe.
@@ -163,7 +166,7 @@ namespace hipblaslt_jit
         std::filesystem::path schemaDirectory() const;
         // Callers hold m_mutex.
         Status     checkRoot();
-        Directory* open(const std::string& name, const std::string& isa, const std::string& key, Status& why);
+        Directory* open(const std::string& name, const CacheKey& key, Status& why);
         Status     attach(const CacheKey& key, int device, Directory*& attached);
         void       discover(int device);
 

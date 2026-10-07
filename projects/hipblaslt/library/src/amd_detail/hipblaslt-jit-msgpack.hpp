@@ -56,4 +56,22 @@ namespace hipblaslt_jit::msgpack_io
     // {"next": <first unallocated index>}.
     Status writeAllocator(int64_t next, std::vector<uint8_t>& bytes);
     Status readAllocator(const std::vector<uint8_t>& bytes, int64_t& next);
+
+    // cache-key.msgpack. Unknown fields are ignored. A missing field stays at
+    // the default; present records which names were read so a caller can tell
+    // a default from a stored value.
+    struct CacheKeyDocument
+    {
+        std::string                        backendId, backendVersion, comgr, rocmPath;
+        std::string                        targetId, isa, libraryArch;
+        int                                codeObjectVersion = 0;
+        int                                schema            = 1;
+        int                                wavefrontSize     = 0;
+        std::map<std::string, std::string> environment;
+        bool                               hasBackendId = false, hasBackendVersion = false;
+        bool                               hasTargetId = false, hasIsa = false, hasLibraryArch = false;
+        bool                               hasWavefront = false;
+    };
+    Status writeCacheKey(const CacheKeyDocument& document, std::vector<uint8_t>& bytes);
+    Status readCacheKey(const std::vector<uint8_t>& bytes, CacheKeyDocument& document);
 }
