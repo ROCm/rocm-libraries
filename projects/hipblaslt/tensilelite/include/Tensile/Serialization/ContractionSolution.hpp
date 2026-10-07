@@ -257,6 +257,9 @@ namespace TensileLite
                 // Optional: older logic files deserialize as false (no
                 // arrival fixup, so dynamic StreamK keeps every tile whole).
                 iot::mapOptional(io, "arrivalFixup", s.arrivalFixup);
+                // Optional: older logic files deserialize as false (no dynamic
+                // parallel reduction, so the host never sets its mode bit).
+                iot::mapOptional(io, "dynamicParallel", s.dynamicParallel);
                 iot::mapRequired(io, "useUniversalArgs", s.useUniversalArgs);
                 iot::mapRequired(io, "useSFC", s.useSFC);
             }
