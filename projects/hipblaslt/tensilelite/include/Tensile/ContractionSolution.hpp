@@ -1404,6 +1404,11 @@ namespace TensileLite
             // of per-part ready flags; streamKDynamicDecomposition() splits
             // tiles only for these. Older/custom kernels leave this false.
             bool arrivalFixup       = false;
+            // StreamK Hybrid kernel reduces split tiles of its dynamic
+            // sub-mode in parallel (PostGSU kernel) when bit 29 of SKTiles is
+            // set; streamKDynamicDecomposition() picks it only for these.
+            // Older/custom kernels leave this false and never receive the bit.
+            bool dynamicParallel    = false;
             bool useUniversalArgs   = true;
             bool useSFC             = false;
         };
