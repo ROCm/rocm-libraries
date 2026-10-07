@@ -18,6 +18,18 @@
 // ranking phase, its mean nanoseconds per call over all timed calls, its share
 // and its p50 / p99 over the shapes' means.
 //
+// --cycle P times each shape once per pass instead, P passes over the shapes
+// in input order after one untimed pass, as an integration that ranks every
+// problem once between other work sees the CPU caches. --thrash BYTES also
+// writes BYTES of another buffer between calls, continuing where the last
+// call's left off; with --thrash-problem only as many bytes as the problem's
+// A, B, C and D hold (at most BYTES), and --thrash-small-pages keeps that
+// buffer out of huge pages, so that writing it also evicts TLB entries. The
+// summary is over the shapes' medians across the passes, then a second row
+// over every call. --per-call FILE writes "<pass> <shape> <us>" per call,
+// with the phases' nanoseconds when --stages is on (without --cycle, one line
+// per shape with its median and pass 0).
+//
 // --hash prints instead an FNV-1a 64 hash of every shape's ranking (config
 // index, scored flag and score bits of every result, rank or rank_top as
 // selected) and of each shape's alone with --hash-each, for checking that
@@ -45,6 +57,10 @@
 #include <sstream>
 #include <string>
 #include <vector>
+
+#if defined(__linux__)
+#include <sys/mman.h>
+#endif
 
 namespace {
 
@@ -202,25 +218,91 @@ void usage(const char* argv0) {
   std::fprintf(stderr,
                "usage: %s --model FILE --inputs FILE [--iters 200] [--warmup 50] "
                "[--min-scored 1] [--top-k K] [--prepare] [--stages] [--hash [--hash-each]] "
+               "[--cycle PASSES [--thrash BYTES [--thrash-problem] [--thrash-small-pages]] "
+               "[--per-call FILE]] "
                "[--dump-plans N [--dump-context CU_BUDGET,SCHEDULE] [--dump-arch ARCH]]\n",
                argv0);
+}
+
+// Writes one byte per cache line of `bytes` of the `size` bytes at `buffer`
+// from `*at` on (wrapping), so that the next ranking call finds as much of its
+// data evicted as other work of that size would evict.
+void thrash(unsigned char* buffer, std::size_t size, std::size_t bytes, std::size_t* at) {
+  if (size == 0) return;
+  bytes = std::min(bytes, size);
+  for (std::size_t n = 0; n < bytes; n += 64) {
+    buffer[*at] = static_cast<unsigned char>(buffer[*at] + 1);
+    *at += 64;
+    if (*at >= size) *at = 0;
+  }
+  asm volatile("" : : "g"(buffer) : "memory");
+}
+
+// Asks for small pages over the `size` bytes at `buffer`, before they are
+// first written, where the platform lets a process choose.
+void small_pages(unsigned char* buffer, std::size_t size) {
+#if defined(__linux__) && defined(MADV_NOHUGEPAGE)
+  constexpr std::uintptr_t kPage = 4096;
+  const auto begin = (reinterpret_cast<std::uintptr_t>(buffer) + kPage - 1) & ~(kPage - 1);
+  const auto end   = (reinterpret_cast<std::uintptr_t>(buffer) + size) & ~(kPage - 1);
+  if (end > begin) madvise(reinterpret_cast<void*>(begin), end - begin, MADV_NOHUGEPAGE);
+#else
+  (void)buffer;
+  (void)size;
+#endif
+}
+
+std::size_t element_bytes(tilewright::DataType t) {
+  using D = tilewright::DataType;
+  switch (t) {
+    case D::Double:
+    case D::ComplexFloat:
+    case D::Int64: return 8;
+    case D::ComplexDouble: return 16;
+    case D::Float:
+    case D::Int32:
+    case D::XFloat32:
+    case D::Int8x4: return 4;
+    case D::Half:
+    case D::BFloat16: return 2;
+    default: return 1;
+  }
+}
+
+void print_summary(const char* name, std::vector<double> v) {
+  std::sort(v.begin(), v.end());
+  double sum = 0;
+  for (double x : v) sum += x;
+  std::printf("%-14s %6zu %10.2f %10.2f %10.2f %10.2f %10.2f %10.2f\n",
+              name,
+              v.size(),
+              v.front(),
+              percentile(v, 0.5),
+              sum / static_cast<double>(v.size()),
+              percentile(v, 0.9),
+              percentile(v, 0.99),
+              v.back());
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
-  std::string model_path, inputs_path;
+  std::string model_path, inputs_path, per_call_path;
   std::size_t iters = 200, warmup = 50, min_scored = 1, dump = 0, top_k = 0;
-  bool prepare = false, stages = false, hash = false, hash_each = false;
+  std::size_t cycle = 0, thrash_bytes = 0;
+  bool prepare = false, stages = false, hash = false, hash_each = false, thrash_problem = false,
+       thrash_small = false;
   tilewright::ExecutionContext dump_context{};
   std::string dump_arch;
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
-    bool* flag          = a == "--prepare"     ? &prepare
-                          : a == "--stages"    ? &stages
-                          : a == "--hash"      ? &hash
-                          : a == "--hash-each" ? &hash_each
-                                               : nullptr;
+    bool* flag          = a == "--prepare"              ? &prepare
+                          : a == "--stages"             ? &stages
+                          : a == "--hash"               ? &hash
+                          : a == "--hash-each"          ? &hash_each
+                          : a == "--thrash-problem"     ? &thrash_problem
+                          : a == "--thrash-small-pages" ? &thrash_small
+                                                        : nullptr;
     if (flag != nullptr) {
       *flag = true;
       continue;
@@ -244,6 +326,12 @@ int main(int argc, char** argv) {
       top_k = std::stoul(v);
     else if (a == "--dump-plans")
       dump = std::stoul(v);
+    else if (a == "--cycle")
+      cycle = std::stoul(v);
+    else if (a == "--thrash")
+      thrash_bytes = std::stoul(v);
+    else if (a == "--per-call")
+      per_call_path = v;
     else if (a == "--dump-arch")
       dump_arch = v;
     else if (a == "--dump-context") {
@@ -337,6 +425,94 @@ int main(int argc, char** argv) {
 
   const bool timed_stages = stages && tilewright::stage_timers_enabled();
   if (stages && !timed_stages) std::fprintf(stderr, "--stages: this build has no stage timers\n");
+  if (cycle > 0) {
+    const std::unique_ptr<unsigned char[]> buffer(new unsigned char[thrash_bytes]);
+    if (thrash_small) small_pages(buffer.get(), thrash_bytes);
+    std::fill(buffer.get(), buffer.get() + thrash_bytes, static_cast<unsigned char>(1));
+    std::size_t thrash_at  = 0;
+    const std::size_t elem = element_bytes(ix.problem.a_dtype);
+    const double tick      = timed_stages ? tilewright::stage_tick_ns() : 0.0;
+    std::FILE* per_call = per_call_path.empty() ? nullptr : std::fopen(per_call_path.c_str(), "w");
+    if (!per_call_path.empty() && per_call == nullptr) {
+      std::fprintf(stderr, "cannot write %s\n", per_call_path.c_str());
+      return 1;
+    }
+    if (per_call != nullptr) {
+      std::fprintf(per_call, "# pass shape us");
+      if (timed_stages)
+        for (std::size_t s = 0; s < tilewright::kStageCount; ++s)
+          std::fprintf(per_call, " %s", tilewright::stage_name(static_cast<tilewright::Stage>(s)));
+      std::fprintf(per_call, "\n");
+    }
+    std::vector<std::vector<double>> times(ix.shapes.size());
+    std::vector<double> calls;
+    std::vector<double> stage_sum(tilewright::kStageCount, 0.0);
+    for (std::size_t pass = 0; pass <= cycle; ++pass) {
+      for (std::size_t si = 0; si < ix.shapes.size(); ++si) {
+        const Shape& sh = ix.shapes[si];
+        tilewright::ExecutionContext ctx;
+        ctx.cu_budget = sh.cu_budget;
+        const auto p  = problem_of(ix, sh);
+        if (pass == 0 && prepare) set.prepare(p, ix.hardware);
+        const std::size_t mn            = sh.m * sh.n,
+                          problem_bytes = elem * sh.b * (sh.m * sh.k + sh.k * sh.n + 2 * mn);
+        thrash(
+            buffer.get(), thrash_bytes, thrash_problem ? problem_bytes : thrash_bytes, &thrash_at);
+        tilewright::reset_stage_times();
+        const auto t0      = std::chrono::steady_clock::now();
+        const auto* result = call(p, ctx);
+        const auto t1      = std::chrono::steady_clock::now();
+        asm volatile("" : : "g"(result) : "memory");
+        if (pass == 0) continue;
+        const double us = std::chrono::duration<double, std::micro>(t1 - t0).count();
+        times[si].push_back(us);
+        calls.push_back(us);
+        const tilewright::StageTimes st = tilewright::stage_times();
+        if (per_call != nullptr) std::fprintf(per_call, "%zu %zu %.3f", pass, si, us);
+        if (timed_stages) {
+          for (std::size_t s = 0; s < tilewright::kStageCount; ++s) {
+            const double ns = static_cast<double>(st.ticks[s]) * tick;
+            stage_sum[s] += ns;
+            if (per_call != nullptr) std::fprintf(per_call, " %.0f", ns);
+          }
+        }
+        if (per_call != nullptr) std::fprintf(per_call, "\n");
+      }
+    }
+    if (per_call != nullptr) std::fclose(per_call);
+    std::vector<double> medians;
+    for (auto& t : times) {
+      std::sort(t.begin(), t.end());
+      medians.push_back(t[t.size() / 2]);
+    }
+    std::printf(
+        "# %zu shapes, %zu kernels, %s %zu, launch '%s', %zu passes, thrash %zu bytes%s%s\n",
+        ix.shapes.size(),
+        ix.configs.size(),
+        what,
+        what_n,
+        recorded.c_str(),
+        cycle,
+        thrash_bytes,
+        thrash_problem ? " at most, the problem's" : "",
+        thrash_small ? ", small pages" : "");
+    print_summary("candidate_set", medians);
+    print_summary("calls", calls);
+    if (timed_stages) {
+      double total = 0;
+      for (double ns : stage_sum) total += ns;
+      for (std::size_t s = 0; s < tilewright::kStageCount; ++s)
+        std::printf("STAGE %-16s %9.1f %7.1f%%\n",
+                    tilewright::stage_name(static_cast<tilewright::Stage>(s)),
+                    stage_sum[s] / static_cast<double>(calls.size()),
+                    total > 0 ? 100.0 * stage_sum[s] / total : 0.0);
+      std::printf("STAGE %-16s %9.1f\n", "total", total / static_cast<double>(calls.size()));
+    }
+    return 0;
+  }
+  std::FILE* per_call = per_call_path.empty() ? nullptr : std::fopen(per_call_path.c_str(), "w");
+  if (per_call != nullptr)
+    std::fprintf(per_call, "# pass shape us (median of the shape's calls)\n");
   std::vector<double> per_shape;
   per_shape.reserve(ix.shapes.size());
   std::vector<std::vector<double>> stage_shape(tilewright::kStageCount);
@@ -361,6 +537,8 @@ int main(int argc, char** argv) {
     }
     std::sort(us.begin(), us.end());
     per_shape.push_back(us[us.size() / 2]);
+    if (per_call != nullptr)
+      std::fprintf(per_call, "0 %zu %.3f\n", per_shape.size() - 1, per_shape.back());
     if (timed_stages) {
       const tilewright::StageTimes t = tilewright::stage_times();
       if (t.calls > 0) {
@@ -373,6 +551,7 @@ int main(int argc, char** argv) {
       }
     }
   }
+  if (per_call != nullptr) std::fclose(per_call);
   std::sort(per_shape.begin(), per_shape.end());
   double sum = 0;
   for (double x : per_shape) sum += x;

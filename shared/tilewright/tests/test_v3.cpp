@@ -972,6 +972,38 @@ TEST_CASE("rank_configs with pool options ranks like a CandidateSet", "[v3][laun
                    tw::rank_configs(*m, p, hw, tw::ExecutionContext{}, pool, kAll)));
 }
 
+TEST_CASE("a cascade keeps the earliest of the keys its embedding term ties", "[v3][cascade]") {
+  // Values outside the one-hot's give equal item features to keys that the
+  // attribute keeps apart.
+  ModelSpec spec       = v3_grid({{"x", 0, 3, {1, 2}}});
+  spec.v3_cascade_keys = 4;
+  const tw::ModelPtr m = load_spec(spec);
+  std::vector<tw::Config> pool;
+  for (std::int64_t x = 10; x < 50; ++x) {
+    pool.push_back(make_config(128, 128, 64));
+    pool.back().attributes = {{"x", x}};
+  }
+  for (std::size_t mt : {32, 64, 256}) pool.push_back(make_config(mt, 128, 64));
+  for (std::size_t i = 0; i < pool.size(); ++i) pool[i].index = i;
+  REQUIRE(tw::detail::pool_keys(*m, pool).first.size() == pool.size());
+  const tw::Hardware hw = test_hardware();
+  const tw::CandidateSet set(m, pool);
+  for (const tw::Problem& p : {make_problem(1000, 2000, 512),
+                               make_problem(64, 64, 64, 4),
+                               make_problem(4096, 4096, 4096)}) {
+    for (std::size_t min_scored :
+         {std::size_t{0}, std::size_t{1}, std::size_t{4}, std::size_t{9}}) {
+      const std::vector<tw::Result> r = set.rank(p, hw, min_scored);
+      CHECK(same_results(r, tw::rank_configs(*m, p, hw, pool, min_scored)));
+      std::vector<std::size_t> tied;
+      for (const tw::Result& x : r)
+        if (x.scored && x.config_index < 40) tied.push_back(x.config_index);
+      std::sort(tied.begin(), tied.end());
+      for (std::size_t i = 0; i < tied.size(); ++i) CHECK(tied[i] == i);
+    }
+  }
+}
+
 TEST_CASE("launch plans reach rank_top, the tier-2 cascade, a bounded cache and prepare",
           "[v3][launch]") {
   const tw::Hardware hw              = test_hardware();

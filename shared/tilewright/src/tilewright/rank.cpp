@@ -10,8 +10,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <initializer_list>
 #include <limits>
 #include <memory>
@@ -138,6 +140,58 @@ bool walk_bounds(const Model& model,
     all       = walk_bounds(model, s.hi, hi, steps + 1, bounds) && all;
   }
   return all;
+}
+
+// A key of embedding term `v` (finite or -inf) of candidate `c` that is larger
+// exactly when the candidate is better: a larger term, or an equal one and a
+// smaller index. -0 and +0 are equal terms.
+inline std::uint64_t order_key(float v, std::size_t c) {
+  std::uint32_t bits;
+  std::memcpy(&bits, &v, sizeof bits);
+  const std::uint32_t ordered =
+      (bits ^ (static_cast<std::uint32_t>(static_cast<std::int32_t>(bits) >> 31) | 0x80000000u)) +
+      (bits == 0x80000000u ? 1u : 0u);
+  return (std::uint64_t{ordered} << 32) | (0xFFFFFFFFull - static_cast<std::uint32_t>(c));
+}
+
+inline std::size_t order_key_index(std::uint64_t key) {
+  return static_cast<std::size_t>(0xFFFFFFFFull - (key & 0xFFFFFFFFull));
+}
+
+// Moves the `k` largest of the `n` distinct values at `v` to its first `k`
+// (in no order), 0 < k <= n; `spare` holds n values. The partitions do not
+// branch on the values, whose order is new to every ranking.
+void select_largest(std::uint64_t* v, std::size_t n, std::size_t k, std::uint64_t* spare) {
+  std::size_t lo = 0, hi = n;
+  while (hi - lo > 32) {
+    const std::uint64_t a = v[lo], b = v[lo + (hi - lo) / 2], c = v[hi - 1];
+    const std::uint64_t pivot = std::max(std::min(a, b), std::min(std::max(a, b), c));
+    std::size_t front = 0, back = hi - lo;
+    for (std::size_t i = lo; i < hi; ++i) {
+      const std::uint64_t x = v[i];
+      const bool above      = x > pivot;
+      spare[front]          = x;
+      spare[back - 1]       = x;
+      front += above ? 1 : 0;
+      back -= above ? 0 : 1;
+    }
+    std::copy(spare, spare + (hi - lo), v + lo);
+    const std::size_t mid = lo + front;
+    if (mid == k) return;
+    if (mid > k)
+      hi = mid;
+    else
+      lo = mid;
+  }
+  std::nth_element(v + lo, v + (k - 1), v + hi, std::greater<std::uint64_t>());
+}
+
+inline void prefetch(const void* p) {
+#if defined(__GNUC__) || defined(__clang__)
+  __builtin_prefetch(p);
+#else
+  (void)p;
+#endif
 }
 
 bool finite(float v) {
@@ -451,6 +505,8 @@ struct Scratch {
   std::vector<std::size_t> tier1, tier2, order, ranked, run, views;
   std::vector<std::uint32_t> passing;
   std::vector<float> score, emb, q_feat, i_feat, x_feat, x_problem, norm, q_emb, i_emb, h0, h2;
+  std::vector<LaunchPlan> plans;
+  std::vector<std::uint64_t> ordered, spare;
   BatchBuffer x_batch, h_batch;
 
   // The epoch of a new call over `nk` keys.
@@ -672,6 +728,9 @@ void rank_in_cell(const Model& model,
       return tier_configs;
     scored = true;
     if (emb.size() < nk) emb.resize(nk);
+    const auto better = [&](std::size_t a, std::size_t b) {
+      return emb[a] > emb[b] || (!(emb[b] > emb[a]) && a < b);
+    };
     if (cache != nullptr) {
       // Candidates of a tier that is not a whitelist are outside the
       // whitelist, so other_emb holds their rows.
@@ -700,9 +759,23 @@ void rank_in_cell(const Model& model,
       }
     }
     TILEWRIGHT_STAGE_LAP(Stage1);
-    const auto better = [&](std::size_t a, std::size_t b) {
-      return emb[a] > emb[b] || (!(emb[b] > emb[a]) && a < b);
-    };
+    // Every candidate has a config, so the best `width` hold at least `width`
+    // configs.
+    if (before + width >= min_scored && nk <= 0xFFFFFFFFull) {
+      std::vector<std::uint64_t>& ordered = s.ordered;
+      ordered.resize(candidates.size());
+      for (std::size_t i = 0; i < candidates.size(); ++i)
+        ordered[i] = order_key(emb[candidates[i]], candidates[i]);
+      s.spare.resize(ordered.size());
+      select_largest(ordered.data(), ordered.size(), width, s.spare.data());
+      candidates.resize(width);
+      for (std::size_t i = 0; i < width; ++i) candidates[i] = order_key_index(ordered[i]);
+      std::sort(candidates.begin(), candidates.end());
+      std::size_t kept = 0;
+      for (const std::size_t c : candidates) kept += configs_of(c);
+      TILEWRIGHT_STAGE_LAP(TopW);
+      return kept;
+    }
     std::size_t keep = width;
     std::nth_element(candidates.begin(),
                      candidates.begin() + static_cast<std::ptrdiff_t>(keep - 1),
@@ -793,6 +866,19 @@ void rank_in_cell(const Model& model,
   // it.
   const auto rank_tier = [&](const std::vector<std::size_t>& tier, bool reuse) {
     ranked.clear();
+    // The keys' scattered data is requested at once rather than as each key
+    // is scored, and their plans asked for before any is scored.
+    for (const std::size_t key : tier) {
+      prefetch(&keys.first[key]);
+      if (x_kernel != nullptr) prefetch(x_kernel + key * cat.inter_kernel_dim);
+    }
+    for (const std::size_t key : tier) prefetch(&configs[keys.first[key]]);
+    std::vector<LaunchPlan>& plans = s.plans;
+    plans.assign(tier.size(), LaunchPlan{});
+    if (launch != nullptr)
+      for (std::size_t i = 0; i < tier.size(); ++i)
+        plans[i] = launch->plan(configs[keys.first[tier[i]]], problem, context);
+    TILEWRIGHT_STAGE_LAP(Launch);
     float emb_score[kBatch], inter[kBatch];
     for (std::size_t b0 = 0; b0 < tier.size(); b0 += kBatch) {
       const std::size_t nc = std::min(kBatch, tier.size() - b0);
@@ -815,9 +901,7 @@ void rank_in_cell(const Model& model,
           emb_score[c] = k.dot(q_emb.data(), ie, e) / w.temperature;
         }
         TILEWRIGHT_STAGE_LAP(FullScore);
-        const LaunchPlan plan =
-            launch != nullptr ? launch->plan(cfg, problem, context) : LaunchPlan{};
-        TILEWRIGHT_STAGE_LAP(Launch);
+        const LaunchPlan& plan = plans[b0 + c];
         if (x_kernel != nullptr)
           cat.inter_pair(problem,
                          cfg,
