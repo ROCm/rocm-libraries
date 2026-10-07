@@ -845,6 +845,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     //  ValuIssue - the same for a VALU, which can only issue in the window's co-issue slots.
     enum class TimeKind { Elapsed, Issue, ValuIssue };
     void advanceTime(int cycles, TimeKind kind);
+    void elapseDsPacingWait(int wait);
     int computeValuAdvanceCycles(int issueCycles) const;
     void updateWMMAStatus(DAGNode* node);
     void stampDataReady(const StinkyInstruction& inst, int extraDelay = 0);
@@ -1114,6 +1115,23 @@ int CDNA5ReadyQueue::freeCoIssueSpace() const {
     for (int pos = coIssueCyclePos_; pos < activeWmmaLatency_; ++pos)
         if (isBlockedCycle(pos)) return pos - coIssueCyclePos_;
     return activeWmmaLatency_ - coIssueCyclePos_;
+}
+
+// A ds_load's pacing wait. The Periodic cap (A ds_loads per X-cycle period) is a hardware rate
+// limit: the wave really stalls until the period ends, so that wait elapses and moves the cap's
+// clock. Left unelapsed the period never ends and the next ds_load is counted into the same,
+// full period, exceeding A. The rest of the wait (LDS return-queue throttle) stays pacing only,
+// as does every wait with the Sliding cap, so the default schedule is unchanged.
+void CDNA5ReadyQueue::elapseDsPacingWait(int wait) {
+    int capWait = 0;
+    if (dsIssueCap_.mode() == DsIssueCap::Mode::Periodic && dsIssueCap_.full())
+        capWait = std::max(1, dsIssueCap_.minResidual());
+    wait = std::max(wait, capWait);
+    if (capWait > 0) advanceTime(capWait, TimeKind::Elapsed);
+    if (wait > capWait) {
+        dsSchedulingBudgetUsed_ += wait - capWait;
+        dsReadInflight_.advanceThrottle(wait - capWait);
+    }
 }
 
 // Advance the co-issue timeline and the elapse-time clock, and decay the RAW
@@ -2518,8 +2536,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
                 // budget. RAW/hazard waits remain genuine elapsed stalls.
                 if (pickWait > 0) {
                     if (pickKind == kLocalRead) {
-                        dsSchedulingBudgetUsed_ += pickWait;
-                        dsReadInflight_.advanceThrottle(pickWait);
+                        elapseDsPacingWait(pickWait);
                     } else {
                         advanceTime(pickWait, TimeKind::Elapsed);
                     }
@@ -2543,8 +2560,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             // stall).
             if (pickWait > 0) {
                 if (pickKind == kLocalRead) {
-                    dsSchedulingBudgetUsed_ += pickWait;
-                    dsReadInflight_.advanceThrottle(pickWait);
+                    elapseDsPacingWait(pickWait);
                 } else {
                     advanceTime(pickWait, TimeKind::Elapsed);
                 }
@@ -2611,10 +2627,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         int throttleWait = 0;
         if (fallbackKind == kLocalRead) {
             throttleWait = dsReadThrottleWait();
-            if (throttleWait > 0) {
-                dsSchedulingBudgetUsed_ += throttleWait;
-                dsReadInflight_.advanceThrottle(throttleWait);
-            }
+            elapseDsPacingWait(throttleWait);
         }
         PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase G fallback pick dagId=" << fallback->id
                              << " kind=" << fallbackKind << " wait=" << realWait
