@@ -53,6 +53,12 @@ namespace TensileLite
         return scope;
     }
 
+    MatchedPredicateScope const*& MatchedPredicateScope::innermost()
+    {
+        thread_local MatchedPredicateScope const* scope = nullptr;
+        return scope;
+    }
+
 #ifdef TENSILE_MSGPACK
     std::map<int, std::string> LoadLibraryMapping(std::string const& filename)
     {
