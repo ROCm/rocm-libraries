@@ -89,7 +89,7 @@ def test_gpu_targets_from_configs_skips_invalid_yaml_and_missing_files(tmp_path:
 
 def test_run_passes_gpu_targets_from_configs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     hip = tmp_path / "hip"
-    (hip / "tensilelite/Tensile/bin").mkdir(parents=True)
+    (hip / "tensilelite/tensilelite/bin").mkdir(parents=True)
     tuning = tmp_path / "tuning"
     tuning.mkdir()
     cfg = tuning / "job_1.yaml"
