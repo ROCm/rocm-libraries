@@ -147,6 +147,22 @@ inline rocblaslt_status validateMatmulSwizzleArgs(const rocblaslt_matmul_desc   
 }
 
 /*******************************************************************************
+ * Validate Batch Strides
+ * Kernels receive batch strides as 32-bit values; a single batch never uses its stride.
+ ******************************************************************************/
+inline bool batchStridesFitKernels(int64_t num_batches,
+                                   int64_t batch_stride_a,
+                                   int64_t batch_stride_b,
+                                   int64_t batch_stride_c,
+                                   int64_t batch_stride_d)
+{
+    constexpr int64_t max_batch_stride = std::numeric_limits<uint32_t>::max();
+    return num_batches <= 1
+           || (batch_stride_a <= max_batch_stride && batch_stride_b <= max_batch_stride
+               && batch_stride_c <= max_batch_stride && batch_stride_d <= max_batch_stride);
+}
+
+/*******************************************************************************
  * Validate Matmul Arguments
  ******************************************************************************/
 inline rocblaslt_status validateMatmulArgs(int64_t                       m,
@@ -266,11 +282,8 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
         return rocblaslt_status_invalid_size;
     }
 
-    // Kernels receive batch strides as 32-bit values; a single batch never uses its stride.
-    constexpr int64_t max_batch_stride = std::numeric_limits<uint32_t>::max();
-    if(num_batches_a > 1
-       && (batch_stride_a > max_batch_stride || batch_stride_b > max_batch_stride
-           || batch_stride_c > max_batch_stride || batch_stride_d > max_batch_stride))
+    if(!batchStridesFitKernels(
+           num_batches_a, batch_stride_a, batch_stride_b, batch_stride_c, batch_stride_d))
     {
         log_error(__func__,
                   "batch strides of 2^32 elements or more are not supported",
