@@ -15,6 +15,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * `TENSILE_FIXED_WGMXCCSPLITK` environment variable to override the split-K work-group XCC mapping factor for StreamK GEMMs.
 * `HIPBLASLT_MATRIX_LAYOUT_OFFSET` matrix-layout attribute for 64-bit element offsets into sub-matrices in General Batched GEMM (`batch_mode=1`), along with `hipblaslt-bench` `batch_offset_a/b/c/d` arguments; nonzero offsets require `HIPBLASLT_BATCH_MODE_POINTER_ARRAY` and are rejected for sub-byte MX types (`HIP_R_6F_E2M3`, `HIP_R_6F_E3M2`, `HIP_R_4F_E2M1`) with `HIPBLAS_STATUS_NOT_SUPPORTED`.
 * `TENSILE_USE_TILEWRIGHT` environment variable to rank the kernels of Prediction libraries with the tilewright learned kernel recommender (`shared/tilewright`) when a model ships for the library, falling back to the Origami ranking otherwise. Calls with an SM count target below the device's CU count, or with dynamic or automatic Stream-K tile scheduling, are ranked by Origami. Models ship for gfx950 and gfx1250 libraries; hipBLASLt builds tilewright into TensileLite and installs the models next to the Tensile libraries unless `HIPBLASLT_ENABLE_TILEWRIGHT=OFF`.
+* `TENSILE_TILEWRIGHT_BANK` environment variable: with `TENSILE_USE_TILEWRIGHT=1`, a value of `1` also offers tilewright the tuned Equality kernels of the problem type for every problem size (the bank), `0` keeps tilewright to the Prediction kernels, and when it is unset a model that reads kernel attributes enables the bank. Equality rows still answer their exact sizes first.
 
 ### Changed
 
@@ -38,6 +39,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Improved gfx950 GEMM performance by updating Origami solution libraries with work-stealing support and additional tuned TF32 and MX kernels.
 * Improved split-K GEMM performance with a K-first work-group reordering (K-Coherent) approach that increases L2 cache reuse across K-slices.
 * Reduced the host time of kernel selection for new and repeated problems: the solution cache looks a problem up once, by a byte key of the fields that identify it, and keeps at most 16,384 problems per library instead of growing without bound; lazily loaded libraries no longer keep a second cache of their own.
+* Reduced the host time of kernel selection further: library rows are classified once at load instead of by their type names on every call, only the rows of the problem's data types are evaluated, the hardware rows a device matches are evaluated once per device, lazily loaded libraries name the code objects of their solutions once at load, the tilewright ranker reads only the kernels it scores, and a Prediction kernel's problem predicate skips the terms the library row that routed the problem already checked.
 
 ### Resolved issues
 
