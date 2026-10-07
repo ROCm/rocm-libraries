@@ -14422,6 +14422,44 @@ class KernelWriterAssembly(KernelWriter):
   # globalWriteWorkGroupInit:
   ##############################################################################
 
+  def _calculateBufferSize(self, kernel, dataType, strideName, tmpsgprSize, srdName, fallbackValue):
+    """
+    Calculate buffer size as stride * N * bpe and conditionally set SRD size.
+
+    Computes: size_bytes = stride * SizeJ * bpe
+    Sets SRD size to actual size if it fits in 32-bit, otherwise uses fallback.
+
+    Args:
+        kernel: Kernel configuration dictionary
+        dataType: DataType object (e.g., kernel["ProblemType"]["DestDataType"])
+        strideName: Name of stride sgpr (e.g., "StrideD1J", "StrideC1J")
+        tmpsgprSize: Temporary sgpr pair for size calculation
+        srdName: Name of SRD register to set size field (e.g., "SrdTD+2", "SrdD+2")
+        fallbackValue: Value to use if size doesn't fit in 32-bit (e.g., "BufferLimit", "BufferOOB")
+
+    Returns:
+        Module containing the buffer size calculation instructions
+    """
+    module = Module("_calculateBufferSize")
+
+    # Calculate bpe using numBytes() - bytes per element
+    bpe = dataType.numBytes()
+
+    # Extract channel name (C, D, TD) from strideName for comment
+    ch = strideName.replace("Stride", "").replace("1J", "")
+
+    module.addComment1("Calculate %s buffer size = %s * N * bpe (accounts for padding)" % (ch, strideName))
+    module.add(SMulI32(dst=sgpr(tmpsgprSize+0), src0=sgpr(strideName), src1=sgpr("SizeJ"),
+                       comment="size = %s * N" % strideName))
+    module.add(SMulHIU32(dst=sgpr(tmpsgprSize+1), src0=sgpr(strideName), src1=sgpr("SizeJ")))
+    module.add(SLShiftLeftB64(dst=sgpr(tmpsgprSize, 2), src=sgpr(tmpsgprSize, 2),
+                              shiftHex=log2(bpe), comment="size_bytes = %s * N * bpe" % strideName))
+    module.add(SCmpEQU32(src0=sgpr(tmpsgprSize+1), src1=0, comment="Does size fit in 32-bit?"))
+    module.add(SCSelectB32(dst=sgpr(srdName), src0=sgpr(tmpsgprSize+0), src1=fallbackValue,
+                          comment="%s size = (fits_32bit) ? actual_size : %s" % (srdName, fallbackValue)))
+
+    return module
+
   def SrdTDInit(self, kernel):
     module = Module("SrdTDInit")
     tmpsgpr0 = self.sgprPool.checkOut(1, tag="SrdTDInit_tmpsgpr0", preventOverflow=False)
@@ -14450,16 +14488,9 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SCBranchSCC0(labelName=UseBufferOOBLabel.getLabelName(), comment="If GSU > 1, use BufferOOB"))
 
       # GSU == 1: Regular GEMM, use stride-based sizing
-      bpe = int(self.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters())
-      module.addComment1("GSU=1: Calculate D buffer size = StrideD * N * bpe (accounts for padding)")
-      module.add(SMulI32(dst=sgpr(tmpsgpr2+0), src0=sgpr("StrideD1J"), src1=sgpr("SizeJ"),
-                         comment="size = StrideD * N"))
-      module.add(SMulHIU32(dst=sgpr(tmpsgpr2+1), src0=sgpr("StrideD1J"), src1=sgpr("SizeJ")))
-      module.add(SLShiftLeftB64(dst=sgpr(tmpsgpr2, 2), src=sgpr(tmpsgpr2, 2),
-                                shiftHex=log2(bpe), comment="size_bytes = StrideD * N * bpe"))
-      module.add(SCmpEQU32(src0=sgpr(tmpsgpr2+1), src1=0, comment="Does size fit in 32-bit?"))
-      module.add(SCSelectB32(dst=sgpr("SrdTD+2"), src0=sgpr(tmpsgpr2+0), src1="BufferLimit",
-                            comment="SrdTD size = (fits_32bit) ? actual_size : BufferLimit"))
+      module.addComment1("GSU=1:")
+      module.add(self._calculateBufferSize(kernel, kernel["ProblemType"]["DestDataType"],
+                                           "StrideD1J", tmpsgpr2, "SrdTD+2", "BufferLimit"))
       module.add(SBranch(labelName=SrdTDInitEndLabel.getLabelName()))
 
       # GSU > 1: Use BufferOOB for workspace
@@ -14471,16 +14502,9 @@ class KernelWriterAssembly(KernelWriter):
       self.sgprPool.checkIn(tmpSgprGSU)
     else:
       # No StreamK, No GSU: Regular GEMM, use stride-based sizing
-      bpe = int(self.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters())
-      module.addComment1("Regular GEMM: Calculate D buffer size = StrideD * N * bpe (accounts for padding)")
-      module.add(SMulI32(dst=sgpr(tmpsgpr2+0), src0=sgpr("StrideD1J"), src1=sgpr("SizeJ"),
-                         comment="size = StrideD * N"))
-      module.add(SMulHIU32(dst=sgpr(tmpsgpr2+1), src0=sgpr("StrideD1J"), src1=sgpr("SizeJ")))
-      module.add(SLShiftLeftB64(dst=sgpr(tmpsgpr2, 2), src=sgpr(tmpsgpr2, 2),
-                                shiftHex=log2(bpe), comment="size_bytes = StrideD * N * bpe"))
-      module.add(SCmpEQU32(src0=sgpr(tmpsgpr2+1), src1=0, comment="Does size fit in 32-bit?"))
-      module.add(SCSelectB32(dst=sgpr("SrdTD+2"), src0=sgpr(tmpsgpr2+0), src1="BufferLimit",
-                            comment="SrdTD size = (fits_32bit) ? actual_size : BufferLimit"))
+      module.addComment1("Regular GEMM:")
+      module.add(self._calculateBufferSize(kernel, kernel["ProblemType"]["DestDataType"],
+                                           "StrideD1J", tmpsgpr2, "SrdTD+2", "BufferLimit"))
 
     module.add(SMovB32(dst=sgpr("SrdTD+3"), src="Srd127_96", comment="Set bits 127_96 in post-loop SRD"))
 
@@ -14488,7 +14512,7 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SMulHIU32(dst=sgpr(tmpsgpr1+1), src0=sgpr(tmpsgpr0), src1=sgpr("StrideD1J"), comment=""))
     module.add(SMulI32(dst=sgpr(tmpsgpr1+0), src0=sgpr(tmpsgpr0), src1=sgpr("StrideD1J"), comment=""))
 
-    bpe = int(self.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters()) # self.states.bpeCinternal
+    bpe = kernel["ProblemType"]["DestDataType"].numBytes()
     module.add(SLShiftLeftB64(dst=sgpr(tmpsgpr1,2), src=sgpr(tmpsgpr1,2), shiftHex=log2(bpe), comment="scale by bpe"))
 
     SrdTDGeneralBatched = Label(label="SrdTDInit_GeneralBatched", comment="")
@@ -14819,21 +14843,15 @@ class KernelWriterAssembly(KernelWriter):
 
         # GSU == 1: Regular GEMM, use stride-based sizing
         if ch == "C":
-          bpe = int(self.states.bpr * kernel["ProblemType"]["ComputeDataType"].numRegisters())
+          dataType = kernel["ProblemType"]["ComputeDataType"]
           stride = "StrideC1J"
         else:
-          bpe = int(self.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters())
+          dataType = kernel["ProblemType"]["DestDataType"]
           stride = "StrideD1J"
 
-        module.addComment1("GSU=1: Calculate %s buffer size = Stride%s * N * bpe (accounts for padding)" % (ch, ch))
-        module.add(SMulI32(dst=sgpr(tmpsgprSize+0), src0=sgpr(stride), src1=sgpr("SizeJ"),
-                           comment="size = Stride%s * N" % ch))
-        module.add(SMulHIU32(dst=sgpr(tmpsgprSize+1), src0=sgpr(stride), src1=sgpr("SizeJ")))
-        module.add(SLShiftLeftB64(dst=sgpr(tmpsgprSize, 2), src=sgpr(tmpsgprSize, 2),
-                                  shiftHex=log2(bpe), comment="size_bytes = Stride%s * N * bpe" % ch))
-        module.add(SCmpEQU32(src0=sgpr(tmpsgprSize+1), src1=0, comment="Does size fit in 32-bit?"))
-        module.add(SCSelectB32(dst=sgpr("Srd%s+2"%ch), src0=sgpr(tmpsgprSize+0), src1="BufferOOB",
-                              comment="Srd%s size = (fits_32bit) ? actual_size : BufferOOB"%ch))
+        module.addComment1("GSU=1:")
+        module.add(self._calculateBufferSize(kernel, dataType, stride, tmpsgprSize,
+                                             "Srd%s+2"%ch, "BufferOOB"))
         module.add(SBranch(labelName=PostLoopSrdEndLabel.getLabelName()))
 
         # GSU > 1: Use BufferOOB for workspace
@@ -14848,21 +14866,15 @@ class KernelWriterAssembly(KernelWriter):
         # No StreamK, No GSU: Regular GEMM, use stride-based sizing
         tmpsgprSize = self.sgprPool.checkOutAligned(2, 2, tag="Srd%s_size"%ch, preventOverflow=False)
         if ch == "C":
-          bpe = int(self.states.bpr * kernel["ProblemType"]["ComputeDataType"].numRegisters())
+          dataType = kernel["ProblemType"]["ComputeDataType"]
           stride = "StrideC1J"
         else:
-          bpe = int(self.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters())
+          dataType = kernel["ProblemType"]["DestDataType"]
           stride = "StrideD1J"
 
-        module.addComment1("Regular GEMM: Calculate %s buffer size = Stride%s * N * bpe (accounts for padding)" % (ch, ch))
-        module.add(SMulI32(dst=sgpr(tmpsgprSize+0), src0=sgpr(stride), src1=sgpr("SizeJ"),
-                           comment="size = Stride%s * N" % ch))
-        module.add(SMulHIU32(dst=sgpr(tmpsgprSize+1), src0=sgpr(stride), src1=sgpr("SizeJ")))
-        module.add(SLShiftLeftB64(dst=sgpr(tmpsgprSize, 2), src=sgpr(tmpsgprSize, 2),
-                                  shiftHex=log2(bpe), comment="size_bytes = Stride%s * N * bpe" % ch))
-        module.add(SCmpEQU32(src0=sgpr(tmpsgprSize+1), src1=0, comment="Does size fit in 32-bit?"))
-        module.add(SCSelectB32(dst=sgpr("Srd%s+2"%ch), src0=sgpr(tmpsgprSize+0), src1="BufferOOB",
-                              comment="Srd%s size = (fits_32bit) ? actual_size : BufferOOB"%ch))
+        module.addComment1("Regular GEMM:")
+        module.add(self._calculateBufferSize(kernel, dataType, stride, tmpsgprSize,
+                                             "Srd%s+2"%ch, "BufferOOB"))
         self.sgprPool.checkIn(tmpsgprSize)
     else:
       # For other buffers (not C/D), use BufferOOB
