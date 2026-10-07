@@ -68,5 +68,7 @@ baseline. Otherwise `--cus` must be at least 1 and less than the device CU count
 (reported by `rocminfo`); occupying every CU would leave none for the benchmark,
 so that is rejected.
 
-Useful flags: `--device N` (sets `HIP_VISIBLE_DEVICES`), `--wait` (max seconds to
+Useful flags: `--device N` (a HIP device ordinal among the devices
+`ROCR_VISIBLE_DEVICES` exposes; sets `HIP_VISIBLE_DEVICES=N` for the cotenant and
+the command, replacing any inherited value), `--wait` (max seconds to
 wait for `READY`), `--grace` (extra settle time after residency, default 0).
