@@ -1021,19 +1021,7 @@ Solutions:
   _WorkspaceSizePerElemC: 0
   _staggerStrideShift: 3
 IndexOrder: [2, 3, 0, 1]
-ExactLogic:
-- - [1, 1, 1, 128]
-  - [0, 0.0508561]
-- - [128, 128, 1, 128]
-  - [1, 0.0]
-- - [512, 512, 1, 512]
-  - [2, 0.0]
-- - [1024, 1024, 1, 1024]
-  - [3, 0.0]
-- - [2048, 2048, 1, 2048]
-  - [4, 0.0]
-- - [4096, 4096, 1, 4096]
-  - [5, 0.0]
+ExactLogic: null
 RangeLogic: null
 TileSelectionIndices: null
 PerfMetric: DeviceEfficiency

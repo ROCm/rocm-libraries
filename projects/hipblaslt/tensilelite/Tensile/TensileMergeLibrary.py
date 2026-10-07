@@ -39,6 +39,7 @@ from .Common import ParallelMap2
 from .Common.GlobalParameters import defaultSolution
 from .Common import assignParameterWithDefault
 from .CustomYamlLoader import load_yaml_stream
+from .ExactLogicSidecar import attachSidecar
 from .ExecutionPolicy import normalize_execution_policy_with_defaults
 
 verbosity = 1
@@ -266,7 +267,7 @@ def loadData(filename: str) -> list[Any]:
         SystemExit: When ``parseLibraryLogicList`` rejects the file via
             ``printExit``.
     """
-    data = load_yaml_stream(filename, yaml.CSafeLoader)
+    data = attachSidecar(load_yaml_stream(filename, yaml.CSafeLoader), filename)
     normalized = False
     wasList = isinstance(data, list)
     data = convertToDict(data, filename)

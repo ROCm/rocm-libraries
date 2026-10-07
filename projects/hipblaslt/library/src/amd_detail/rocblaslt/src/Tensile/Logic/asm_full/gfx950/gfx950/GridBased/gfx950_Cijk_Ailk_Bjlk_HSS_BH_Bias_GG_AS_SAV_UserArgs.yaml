@@ -376,9 +376,7 @@ Solutions:
   _WorkspaceSizePerElemC: 0
   _staggerStrideShift: 0
 IndexOrder: [2, 3, 0, 1]
-ExactLogic:
-- - [8, 1, 1, 8]
-  - [0, 0.0]
+ExactLogic: null
 RangeLogic: null
 TileSelectionIndices: null
 PerfMetric: DeviceEfficiency
