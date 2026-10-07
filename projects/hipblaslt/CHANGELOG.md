@@ -50,7 +50,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 * Improved gfx950 GEMM performance by updating Origami solution libraries with work-stealing support and additional tuned TF32 and MX kernels.
 * Improved split-K GEMM performance with a K-first work-group reordering (K-Coherent) approach that increases L2 cache reuse across K-slices.
-* Reduced the host time of kernel selection for new and repeated problems: the solution cache looks a problem up once, by a byte key of the fields that identify it, and keeps at most 16,384 problems per library instead of growing without bound; lazily loaded libraries no longer keep a second cache of their own.
+* Reduced the host time of kernel selection for new and repeated problems: the solution cache looks a problem up once, by a byte key of the fields that identify it, and keeps at most 16,384 problems per library, replacing the least recently used one, instead of growing without bound; lazily loaded libraries no longer keep a second cache of their own.
 * Reduced the host time of kernel selection further: library rows are classified once at load instead of by their type names on every call, only the rows of the problem's data types are evaluated, the hardware rows a device matches are evaluated once per device, lazily loaded libraries name the code objects of their solutions once at load, the tilewright ranker reads only the kernels it scores, and a Prediction kernel's problem predicate skips the terms the library row that routed the problem already checked.
 
 ### Resolved issues
