@@ -28,8 +28,6 @@
 #pragma once
 
 #include "asan_helpers.hpp"
-#include <limits>
-#include <type_traits>
 
 /*! \file
     \brief ideal_sizes.hpp gathers all constants that can be tuned for performance.
