@@ -4509,7 +4509,14 @@ void testing_matmul_with_bias(const Arguments& arg,
         tuningVec.push_back(hipblaslt_ext::GemmTuning());
     }
 
-    if(arg.algo_method == 2)
+    std::vector<int> listedIndices;
+    for(int32_t i = 0; i < HIPBLASLT_MAX_SOLUTION_INDEX_LIST && arg.solution_index_list[i] != -1;
+        i++)
+    {
+        listedIndices.push_back(arg.solution_index_list[i]);
+    }
+
+    if(listedIndices.empty() && arg.algo_method == 2)
     {
         heuristicResult.clear();
         heuristicTuningIndex.clear();
@@ -4882,20 +4889,37 @@ void testing_matmul_with_bias(const Arguments& arg,
             verifyMixedValidityContract();
         }
     }
-    else if(arg.algo_method == 1)
+    else if(!listedIndices.empty() || arg.algo_method == 1)
     {
         std::vector<hipblasLtMatmulHeuristicResult_t> tmpAlgo;
-        EXPECT_HIPBLAS_STATUS(hipblaslt_ext::getAllAlgos(handle,
-                                                         gemmType,
-                                                         transA,
-                                                         transB,
-                                                         arg.a_type,
-                                                         arg.b_type,
-                                                         arg.c_type,
-                                                         arg.d_type,
-                                                         arg.compute_type,
-                                                         tmpAlgo),
-                              HIPBLAS_STATUS_SUCCESS);
+        if(!listedIndices.empty())
+        {
+            // Indices the library does not hold are dropped; the others keep
+            // their list order.
+            if(hipblaslt_ext::getAlgosFromIndex(handle, listedIndices, tmpAlgo)
+               != HIPBLAS_STATUS_SUCCESS)
+            {
+                hipblaslt_cerr << "solution_index_list: " << listedIndices.size() - tmpAlgo.size()
+                               << " of " << listedIndices.size() << " solution indices not found"
+                               << std::endl;
+            }
+        }
+        else
+        {
+            EXPECT_HIPBLAS_STATUS(hipblaslt_ext::getAllAlgos(handle,
+                                                             gemmType,
+                                                             transA,
+                                                             transB,
+                                                             arg.a_type,
+                                                             arg.b_type,
+                                                             arg.c_type,
+                                                             arg.d_type,
+                                                             arg.compute_type,
+                                                             tmpAlgo),
+                                  HIPBLAS_STATUS_SUCCESS);
+        }
+        const int32_t requestLimit
+            = listedIndices.empty() ? requestAlgoCount : std::numeric_limits<int32_t>::max();
         returnedAlgoCount = tmpAlgo.size();
         heuristicResult.clear();
         heuristicTuningIndex.clear();
@@ -4960,7 +4984,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     }
                     CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
                     requestCount += addRequest;
-                    if(requestCount >= requestAlgoCount)
+                    if(requestCount >= requestLimit)
                     {
                         break;
                     }
@@ -4998,7 +5022,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     }
                     CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
                     requestCount += addRequest;
-                    if(requestCount >= requestAlgoCount)
+                    if(requestCount >= requestLimit)
                     {
                         break;
                     }
@@ -5071,7 +5095,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
                 CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
                 requestCount += addRequest;
-                if(requestCount >= requestAlgoCount)
+                if(requestCount >= requestLimit)
                 {
                     break;
                 }
@@ -6405,8 +6429,58 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
         timingCfg.flush_us = flush_time_used;
 
-        for(size_t sol = 0; sol < heuristicResult.size(); sol++)
+        auto printSkip = [&](size_t sol, double warm_time) {
+            std::ostringstream skipMsg;
+            skipMsg << std::fixed << std::setprecision(2) << "Skip solution: " << sol
+                    << " (best warm-up = " << best_warm_time / number_cold_calls
+                    << " us , warm-up = " << warm_time / number_cold_calls
+                    << " us, skip ratio = " << std::defaultfloat << arg.skip_slow_solution_ratio
+                    << ", solution index = "
+                    << hipblaslt_ext::getIndexFromAlgo(heuristicResult[sol].algo) << ")";
+            hipblaslt_cout << skipMsg.str() << std::endl;
+        };
+
+        // Pass 0 only records warm-up times; pass 1 times the solutions.
+        const bool prepass    = arg.skip_screen_prepass && arg.skip_slow_solution_ratio != 0.0f;
+        int        screenPass = prepass ? 0 : 1;
+        std::vector<double> warmTimes(prepass ? heuristicResult.size() : 0);
+        auto                nextSolution = [&](size_t sol) -> size_t {
+            if(screenPass == 0 && sol + 1 >= heuristicResult.size())
+            {
+                screenPass = 1;
+                return 0;
+            }
+            return sol + 1;
+        };
+        // Returns true when the solution must not be timed in this pass.
+        auto screenSolution = [&](size_t sol, double warm_time) -> bool {
+            if(prepass && screenPass == 1)
+                return false;
+            best_warm_time = std::min(best_warm_time, warm_time);
+            if(prepass)
+            {
+                warmTimes[sol] = warm_time;
+                return true;
+            }
+            if(warm_time * arg.skip_slow_solution_ratio > best_warm_time)
+            {
+                printSkip(sol, warm_time);
+                return true;
+            }
+            return false;
+        };
+
+        for(size_t sol = 0; sol < heuristicResult.size(); sol = nextSolution(sol))
         {
+            if(prepass && screenPass == 1
+               && warmTimes[sol] * arg.skip_slow_solution_ratio > best_warm_time)
+            {
+                printSkip(sol, warmTimes[sol]);
+                continue;
+            }
+            // An untimed first launch keeps lazy code object loading out of the
+            // warm-up times the prepass compares.
+            const int loadCalls = (screenPass == 0 && number_cold_calls > 0) ? 1 : 0;
             // Reset per-solution so an aborted/empty measurement can't report the prior
             // solution's stats (run_measurement leaves `out` untouched on early return).
             timing = {};
@@ -6445,11 +6519,14 @@ void testing_matmul_with_bias(const Arguments& arg,
                         hipblaslt_bench_options::cotenant_cus(),
                         hipblaslt_bench_options::cotenant_max_occupancy(),
                         stream);
-                    if(arg.skip_slow_solution_ratio)
+                    if(arg.skip_slow_solution_ratio && loadCalls == 0)
                         pre_gpu_time(
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
-                    for(int i = 0; i < number_cold_calls; i++)
+                    for(int i = 0; i < number_cold_calls + loadCalls; i++)
                     {
+                        if(loadCalls > 0 && i == loadCalls)
+                            pre_gpu_time(
+                                arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
                         CHECK_HIPBLASLT_ERROR(gemmVec[i % block_count].run(stream));
                         if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
                             copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
@@ -6461,22 +6538,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       event_gpu_time_end,
                                       gpu_time_used,
                                       stream);
-                        best_warm_time
-                            = best_warm_time < gpu_time_used ? best_warm_time : gpu_time_used;
-                        if((gpu_time_used * arg.skip_slow_solution_ratio) > best_warm_time)
-                        {
-                            std::ostringstream skipMsg;
-                            skipMsg << std::fixed << std::setprecision(2)
-                                    << "Skip solution: " << sol
-                                    << " (best warm-up = " << best_warm_time / number_cold_calls
-                                    << " us , warm-up = " << gpu_time_used / number_cold_calls
-                                    << " us, skip ratio = " << std::defaultfloat
-                                    << arg.skip_slow_solution_ratio << ", solution index = "
-                                    << hipblaslt_ext::getIndexFromAlgo(heuristicResult[sol].algo)
-                                    << ")";
-                            hipblaslt_cout << skipMsg.str() << std::endl;
+                        if(screenSolution(sol, gpu_time_used))
                             continue;
-                        }
                     }
                     perf_monitor->start();
                     hipblaslt_bench::run_measurement(
@@ -6501,11 +6564,14 @@ void testing_matmul_with_bias(const Arguments& arg,
                         hipblaslt_bench_options::cotenant_cus(),
                         hipblaslt_bench_options::cotenant_max_occupancy(),
                         stream);
-                    if(arg.skip_slow_solution_ratio)
+                    if(arg.skip_slow_solution_ratio && loadCalls == 0)
                         pre_gpu_time(
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
-                    for(int i = 0; i < number_cold_calls; i++)
+                    for(int i = 0; i < number_cold_calls + loadCalls; i++)
                     {
+                        if(loadCalls > 0 && i == loadCalls)
+                            pre_gpu_time(
+                                arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
                         auto ptr_matmul = matmul[i % block_count][0];
                         auto ptr_alpha  = arg.scaleAlpha_vector
                                               ? (dScaleAlphaVec[0].as<char>())
@@ -6547,22 +6613,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       event_gpu_time_end,
                                       gpu_time_used,
                                       stream);
-                        best_warm_time
-                            = best_warm_time < gpu_time_used ? best_warm_time : gpu_time_used;
-                        if((gpu_time_used * arg.skip_slow_solution_ratio) > best_warm_time)
-                        {
-                            std::ostringstream skipMsg;
-                            skipMsg << std::fixed << std::setprecision(2)
-                                    << "Skip solution: " << sol
-                                    << " (best warm-up = " << best_warm_time / number_cold_calls
-                                    << " us , warm-up = " << gpu_time_used / number_cold_calls
-                                    << " us, skip ratio = " << std::defaultfloat
-                                    << arg.skip_slow_solution_ratio << ", solution index = "
-                                    << hipblaslt_ext::getIndexFromAlgo(heuristicResult[sol].algo)
-                                    << ")";
-                            hipblaslt_cout << skipMsg.str() << std::endl;
+                        if(screenSolution(sol, gpu_time_used))
                             continue;
-                        }
                     }
                     perf_monitor->start();
                     hipblaslt_bench::run_measurement(
@@ -6610,11 +6662,14 @@ void testing_matmul_with_bias(const Arguments& arg,
                         hipblaslt_bench_options::cotenant_cus(),
                         hipblaslt_bench_options::cotenant_max_occupancy(),
                         stream);
-                    if(arg.skip_slow_solution_ratio)
+                    if(arg.skip_slow_solution_ratio && loadCalls == 0)
                         pre_gpu_time(
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
-                    for(int i = 0; i < number_cold_calls; i++)
+                    for(int i = 0; i < number_cold_calls + loadCalls; i++)
                     {
+                        if(loadCalls > 0 && i == loadCalls)
+                            pre_gpu_time(
+                                arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
                         auto ptr_matmul = matmul[i % block_count][0];
                         auto ptr_alpha  = arg.scaleAlpha_vector
                                               ? (dScaleAlphaVec[0].as<char>())
@@ -6654,22 +6709,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       event_gpu_time_end,
                                       gpu_time_used,
                                       stream);
-                        best_warm_time
-                            = best_warm_time < gpu_time_used ? best_warm_time : gpu_time_used;
-                        if((gpu_time_used * arg.skip_slow_solution_ratio) > best_warm_time)
-                        {
-                            std::ostringstream skipMsg;
-                            skipMsg << std::fixed << std::setprecision(2)
-                                    << "Skip solution: " << sol
-                                    << " (best warm-up = " << best_warm_time / number_cold_calls
-                                    << " us , warm-up = " << gpu_time_used / number_cold_calls
-                                    << " us, skip ratio = " << std::defaultfloat
-                                    << arg.skip_slow_solution_ratio << ", solution index = "
-                                    << hipblaslt_ext::getIndexFromAlgo(heuristicResult[sol].algo)
-                                    << ")";
-                            hipblaslt_cout << skipMsg.str() << std::endl;
+                        if(screenSolution(sol, gpu_time_used))
                             continue;
-                        }
                     }
                     perf_monitor->start();
                     hipblaslt_bench::run_measurement(
@@ -6741,11 +6782,14 @@ void testing_matmul_with_bias(const Arguments& arg,
                         hipblaslt_bench_options::cotenant_cus(),
                         hipblaslt_bench_options::cotenant_max_occupancy(),
                         stream);
-                    if(arg.skip_slow_solution_ratio)
+                    if(arg.skip_slow_solution_ratio && loadCalls == 0)
                         pre_gpu_time(
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
-                    for(int i = 0; i < number_cold_calls; i++)
+                    for(int i = 0; i < number_cold_calls + loadCalls; i++)
                     {
+                        if(loadCalls > 0 && i == loadCalls)
+                            pre_gpu_time(
+                                arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
                         CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(
                             d_userArgsVec[i % block_count], stream));
                         if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
@@ -6758,22 +6802,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       event_gpu_time_end,
                                       gpu_time_used,
                                       stream);
-                        best_warm_time
-                            = best_warm_time < gpu_time_used ? best_warm_time : gpu_time_used;
-                        if((gpu_time_used * arg.skip_slow_solution_ratio) > best_warm_time)
-                        {
-                            std::ostringstream skipMsg;
-                            skipMsg << std::fixed << std::setprecision(2)
-                                    << "Skip solution: " << sol
-                                    << " (best warm-up = " << best_warm_time / number_cold_calls
-                                    << " us , warm-up = " << gpu_time_used / number_cold_calls
-                                    << " us, skip ratio = " << std::defaultfloat
-                                    << arg.skip_slow_solution_ratio << ", solution index = "
-                                    << hipblaslt_ext::getIndexFromAlgo(heuristicResult[sol].algo)
-                                    << ")";
-                            hipblaslt_cout << skipMsg.str() << std::endl;
+                        if(screenSolution(sol, gpu_time_used))
                             continue;
-                        }
                     }
                     perf_monitor->start();
                     hipblaslt_bench::run_measurement(
@@ -6810,11 +6840,14 @@ void testing_matmul_with_bias(const Arguments& arg,
                         hipblaslt_bench_options::cotenant_cus(),
                         hipblaslt_bench_options::cotenant_max_occupancy(),
                         stream);
-                    if(arg.skip_slow_solution_ratio)
+                    if(arg.skip_slow_solution_ratio && loadCalls == 0)
                         pre_gpu_time(
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
-                    for(int i = 0; i < number_cold_calls; i++)
+                    for(int i = 0; i < number_cold_calls + loadCalls; i++)
                     {
+                        if(loadCalls > 0 && i == loadCalls)
+                            pre_gpu_time(
+                                arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
                         CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(stream));
                         if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
                             copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
@@ -6826,22 +6859,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       event_gpu_time_end,
                                       gpu_time_used,
                                       stream);
-                        best_warm_time
-                            = best_warm_time < gpu_time_used ? best_warm_time : gpu_time_used;
-                        if((gpu_time_used * arg.skip_slow_solution_ratio) > best_warm_time)
-                        {
-                            std::ostringstream skipMsg;
-                            skipMsg << std::fixed << std::setprecision(2)
-                                    << "Skip solution: " << sol
-                                    << " (best warm-up = " << best_warm_time / number_cold_calls
-                                    << " us , warm-up = " << gpu_time_used / number_cold_calls
-                                    << " us, skip ratio = " << std::defaultfloat
-                                    << arg.skip_slow_solution_ratio << ", solution index = "
-                                    << hipblaslt_ext::getIndexFromAlgo(heuristicResult[sol].algo)
-                                    << ")";
-                            hipblaslt_cout << skipMsg.str() << std::endl;
+                        if(screenSolution(sol, gpu_time_used))
                             continue;
-                        }
                     }
                     perf_monitor->start();
                     hipblaslt_bench::run_measurement(
