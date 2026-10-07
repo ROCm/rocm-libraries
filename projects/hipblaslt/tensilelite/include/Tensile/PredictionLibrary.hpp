@@ -27,7 +27,10 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <iostream>
+#include <map>
+#include <memory>
 #include <set>
 #include <vector>
 
@@ -47,6 +50,8 @@ namespace TensileLite
     // Declared unconditionally so ProblemPredictionLibrary has the same layout in
     // translation units built with and without TENSILELITE_HAS_TILEWRIGHT.
     class TilewrightRanker;
+    template <typename MySolution>
+    class TilewrightBank;
 
     /**
      * \ingroup SolutionLibrary
@@ -63,6 +68,12 @@ namespace TensileLite
         std::vector<origami::config_t>                           origami_config_list;
         // Pool position i of the ranker is solution_list[i].
         std::shared_ptr<const TilewrightRanker> tilewright_ranker;
+        // Set when tilewright also ranks the problem type's Equality kernels; the
+        // bank pools follow solution_list with the solutions of these libraries
+        // (TilewrightBank). Without sources the bank is empty.
+        std::shared_ptr<const TilewrightBank<MySolution>> tilewright_bank;
+        std::function<std::vector<std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>>()>
+            tilewright_bank_sources;
 
         mutable std::atomic<bool> lastFindTopRetAll = false;
 
@@ -153,7 +164,10 @@ namespace TensileLite
         // Looks up the stem of `logicFile` in the tilewright_index of its directory.
         void loadTilewright(std::string const& logicFile)
         {
-            tilewright_ranker = TilewrightRanker::load(logicFile, solution_list);
+            auto model        = TilewrightRanker::loadModel(logicFile);
+            tilewright_ranker = TilewrightRanker::load(model, logicFile, solution_list);
+            if(tilewright_ranker && TilewrightRanker::ranksBank(*model))
+                tilewright_bank = std::make_shared<const TilewrightBank<MySolution>>(model);
         }
 #endif
 
@@ -206,18 +220,42 @@ namespace TensileLite
             if(pAMDGPU && pAMDGPU->analyticalHardware)
             {
 #ifdef TENSILELITE_HAS_TILEWRIGHT
+                TilewrightRanker const*                         ranker = tilewright_ranker.get();
+                std::vector<std::shared_ptr<MySolution>> const* bank   = nullptr;
+                if(ranker && tilewright_bank)
+                {
+                    auto const& pool = tilewright_bank->pool(
+                        *pAMDGPU, [&]() { return makeBankPool(problem, hardware); });
+                    if(pool.ranker)
+                    {
+                        ranker = pool.ranker.get();
+                        bank   = &pool.bank;
+                    }
+                }
+
                 // Pool positions tilewright offered, in order; origami ranks the rest.
                 std::vector<size_t> ranked;
                 size_t              offeredCount = 0;
-                if(tilewright_ranker)
+                if(ranker)
                 {
-                    ranked = tilewright_ranker->rank(
-                        problem, *(pAMDGPU->analyticalHardware), numSolutions);
+                    ranked = ranker->rank(problem, *(pAMDGPU->analyticalHardware), numSolutions);
                     for(; offeredCount < ranked.size() && rv.size() != numSolutions; offeredCount++)
                     {
+                        // In a bank pool, a kernel can be the exact match an
+                        // Equality row already returned.
                         size_t const position = ranked[offeredCount];
                         if(position < solution_list.size())
-                            considerSolution(solution_list[position].second);
+                        {
+                            if(!bank
+                               || !SelectedSolutionsScope::contains(solution_list[position].first))
+                                considerSolution(solution_list[position].second);
+                        }
+                        else if(bank && position - solution_list.size() < bank->size())
+                        {
+                            auto const& solution = (*bank)[position - solution_list.size()];
+                            if(!SelectedSolutionsScope::contains(solution->index))
+                                considerSolution(solution);
+                        }
                     }
                 }
 #endif
@@ -270,7 +308,7 @@ namespace TensileLite
 
 #ifdef TENSILELITE_HAS_TILEWRIGHT
                     std::vector<bool> offered;
-                    if(tilewright_ranker)
+                    if(ranker)
                     {
                         offered.assign(solution_list.size(), false);
                         for(size_t i = 0; i < offeredCount; i++)
@@ -322,5 +360,57 @@ namespace TensileLite
             SolutionVector<MySolution> solutions;
             return solutions;
         }
+
+#ifdef TENSILELITE_HAS_TILEWRIGHT
+    private:
+        // The bank pool for the device of `hardware`. Failing to build one
+        // leaves tilewright ranking solution_list alone on that device.
+        typename TilewrightBank<MySolution>::Pool makeBankPool(MyProblem const& problem,
+                                                               Hardware const&  hardware) const
+        {
+            typename TilewrightBank<MySolution>::Pool pool;
+            try
+            {
+                std::map<int, std::shared_ptr<MySolution>> bank;
+                if(tilewright_bank_sources)
+                {
+                    for(auto const& source : tilewright_bank_sources())
+                    {
+                        for(auto const& solution : source->findAllSolutions(
+                                problem, hardware, SolutionLibrarySearchType::HARDWARE_ONLY))
+                            bank.emplace(solution->index, solution);
+                    }
+                }
+                for(auto const& entry : solution_list)
+                    bank.erase(entry.first);
+
+                if(Debug::Instance().printDataInit())
+                    std::cout << "tilewright bank: " << bank.size() << " kernels after "
+                              << solution_list.size() << " Prediction kernels" << std::endl;
+                if(bank.empty())
+                    return pool;
+
+                pool.bank.reserve(bank.size());
+                for(auto& entry : bank)
+                    pool.bank.push_back(std::move(entry.second));
+                size_t const own = solution_list.size();
+                pool.ranker
+                    = TilewrightRanker::make(tilewright_bank->model(),
+                                             own + pool.bank.size(),
+                                             [&](size_t i) -> SizeMapping const& {
+                                                 return i < own
+                                                            ? solution_list[i].second->sizeMapping
+                                                            : pool.bank[i - own]->sizeMapping;
+                                             });
+            }
+            catch(std::exception const& e)
+            {
+                std::cerr << "hipBLASLt Warning: the tilewright bank could not be ranked ("
+                          << e.what() << "); ranking the Prediction kernels alone.\n";
+                pool = {};
+            }
+            return pool;
+        }
+#endif
     };
 } // namespace TensileLite

@@ -332,6 +332,9 @@ namespace TensileLite
             // false in case of early return;
             lastFindTopRetAll = false;
 
+            // A tilewright bank pool can hold solutions an earlier row returned.
+            SelectedSolutionsScope selected(rv);
+
             auto visit = [&](size_t i) {
                 auto const& row  = rows[i];
                 auto const  kind = rowKind(i);

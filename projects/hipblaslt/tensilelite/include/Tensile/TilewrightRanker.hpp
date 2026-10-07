@@ -4,17 +4,22 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <iostream>
 #include <limits>
+#include <list>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include <Tensile/AMDGPU.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/Debug.hpp>
 
@@ -94,6 +99,38 @@ namespace TensileLite
         }
 
         // Looks up the stem of `logicFile` in the tilewright_index of its
+        // directory. Returns nullptr when no model is listed for the stem, or,
+        // with a warning, when the listed model cannot be loaded.
+        static tilewright::ModelPtr loadModel(std::string const& logicFile)
+        {
+            if(logicFile.empty())
+                return nullptr;
+
+            std::string dir  = ".";
+            std::string stem = logicStem(logicFile, &dir);
+
+            std::string error;
+            auto        model = tilewright::load_model_by_index(stem, dir, &error);
+            if(!model && !error.empty())
+                warnUnusable(stem, error);
+            return model;
+        }
+
+        // A ranker over `poolSize` kernels whose config i is built from
+        // sizeMapping(i). Throws what the CandidateSet throws.
+        template <typename SizeMappingOf>
+        static std::shared_ptr<const TilewrightRanker>
+            make(tilewright::ModelPtr model, size_t poolSize, SizeMappingOf&& sizeMapping)
+        {
+            auto const                      names = tilewright::attribute_names(*model);
+            std::vector<tilewright::Config> configs;
+            configs.reserve(poolSize);
+            for(size_t i = 0; i < poolSize; i++)
+                configs.push_back(makeConfig(sizeMapping(i), i, &names));
+            return std::make_shared<const TilewrightRanker>(std::move(model), std::move(configs));
+        }
+
+        // Looks up the stem of `logicFile` in the tilewright_index of its
         // directory; config i is built from solutions[i]. Returns nullptr when
         // no model is listed for the stem, or, with a warning, when the listed
         // model cannot be used.
@@ -102,39 +139,26 @@ namespace TensileLite
             load(std::string const&                                              logicFile,
                  std::vector<std::pair<int, std::shared_ptr<MySolution>>> const& solutions)
         {
-            if(logicFile.empty())
+            return load(loadModel(logicFile), logicFile, solutions);
+        }
+
+        // As above, for the model loadModel(logicFile) returned.
+        template <typename MySolution>
+        static std::shared_ptr<const TilewrightRanker>
+            load(tilewright::ModelPtr                                            model,
+                 std::string const&                                              logicFile,
+                 std::vector<std::pair<int, std::shared_ptr<MySolution>>> const& solutions)
+        {
+            if(!model)
                 return nullptr;
 
-            std::string dir          = ".";
-            std::string stem         = logicFile;
-            size_t      directoryPos = stem.rfind('/');
-#ifdef _WIN32
-            if(directoryPos == std::string::npos)
-                directoryPos = stem.rfind('\\');
-#endif
-            if(directoryPos != std::string::npos)
-            {
-                dir  = stem.substr(0, directoryPos);
-                stem = stem.substr(directoryPos + 1);
-            }
-            // Logic stems contain no '.', and the file may carry two extensions.
-            stem = stem.substr(0, stem.find('.'));
-
-            std::shared_ptr<const TilewrightRanker> ranker;
-            std::string                             error;
+            std::string error;
             try
             {
-                auto model = tilewright::load_model_by_index(stem, dir, &error);
-                if(model)
-                {
-                    auto const                      names = tilewright::attribute_names(*model);
-                    std::vector<tilewright::Config> configs;
-                    configs.reserve(solutions.size());
-                    for(size_t i = 0; i < solutions.size(); i++)
-                        configs.push_back(makeConfig(solutions[i].second->sizeMapping, i, &names));
-                    ranker = std::make_shared<const TilewrightRanker>(std::move(model),
-                                                                      std::move(configs));
-                }
+                return make(
+                    std::move(model), solutions.size(), [&](size_t i) -> SizeMapping const& {
+                        return solutions[i].second->sizeMapping;
+                    });
             }
             catch(std::exception const& e)
             {
@@ -144,13 +168,20 @@ namespace TensileLite
             {
                 error = "unknown exception";
             }
+            warnUnusable(logicStem(logicFile), error);
+            return nullptr;
+        }
 
-            if(!ranker && !error.empty())
-                std::cerr << "hipBLASLt Warning: TENSILE_USE_TILEWRIGHT is set but the tilewright "
-                             "model for "
-                          << stem << " could not be used (" << error
-                          << "); ranking with origami instead.\n";
-            return ranker;
+        // Whether a library ranked with `model` also ranks its problem type's
+        // Equality kernels: as TENSILE_TILEWRIGHT_BANK says, or, when it is
+        // unset, when the model reads kernel attributes, which the Equality
+        // variants of one tile need to be told apart.
+        static bool ranksBank(tilewright::Model const& model)
+        {
+            int const setting = Debug::Instance().tilewrightBank();
+            if(setting >= 0)
+                return setting == 1;
+            return !tilewright::attribute_names(model).empty();
         }
 
         // Attaches the attributes listed in `attributeNames`, or all of them
@@ -265,6 +296,32 @@ namespace TensileLite
         }
 
     private:
+        // Logic stems contain no '.', and the file may carry two extensions.
+        static std::string logicStem(std::string const& logicFile, std::string* dir = nullptr)
+        {
+            std::string stem         = logicFile;
+            size_t      directoryPos = stem.rfind('/');
+#ifdef _WIN32
+            if(directoryPos == std::string::npos)
+                directoryPos = stem.rfind('\\');
+#endif
+            if(directoryPos != std::string::npos)
+            {
+                if(dir != nullptr)
+                    *dir = stem.substr(0, directoryPos);
+                stem = stem.substr(directoryPos + 1);
+            }
+            return stem.substr(0, stem.find('.'));
+        }
+
+        static void warnUnusable(std::string const& stem, std::string const& error)
+        {
+            std::cerr << "hipBLASLt Warning: TENSILE_USE_TILEWRIGHT is set but the tilewright "
+                         "model for "
+                      << stem << " could not be used (" << error
+                      << "); ranking with origami instead.\n";
+        }
+
         // Default exactly when ExactLogicLibrary::findTopSolutions computes
         // effectiveDynamic as false.
         template <typename MyProblem>
@@ -397,5 +454,90 @@ namespace TensileLite
         }
 
         tilewright::CandidateSet m_candidates;
+    };
+
+    /**
+     * The pools a library ranks when tilewright also ranks its problem type's
+     * Equality kernels (the bank): one per device, because a device runs only
+     * the bank kernels whose hardware predicate accepts it.
+     *
+     * Pool position i < P (P kernels in the library's own pool) is the library's
+     * kernel i; position P + j is bank[j]. The bank holds, in ascending solution
+     * index, the Equality-row solutions whose hardware predicate accepts the
+     * device, of every library file that holds the same problem type for the
+     * same architecture (libraryProblemTypeKey; the library's own file
+     * included), less the solutions of the library's own pool. The training
+     * pipeline builds the same pool for its benchmark device.
+     */
+    template <typename MySolution>
+    class TilewrightBank
+    {
+    public:
+        struct Pool
+        {
+            std::vector<std::shared_ptr<MySolution>> bank;
+            // Null when the bank is empty or could not be ranked: the library's
+            // own ranker ranks its own pool then.
+            std::shared_ptr<const TilewrightRanker> ranker;
+        };
+
+        explicit TilewrightBank(tilewright::ModelPtr model)
+            : m_model(std::move(model))
+        {
+        }
+
+        tilewright::ModelPtr const& model() const noexcept
+        {
+            return m_model;
+        }
+
+        // The pool of `device`, made by build() the first time the device asks.
+        template <typename Build>
+        Pool const& pool(AMDGPU const& device, Build&& build) const
+        {
+            Device const key{device.processor, device.computeUnitCount, device.pciChipId()};
+            if(Entry const* last = m_last.load(std::memory_order_acquire);
+               last && last->device == key)
+                return last->pool;
+
+            std::lock_guard<std::mutex> lock(m_mutex);
+            for(auto const& entry : m_entries)
+            {
+                if(entry.device == key)
+                {
+                    m_last.store(&entry, std::memory_order_release);
+                    return entry.pool;
+                }
+            }
+            m_entries.push_back(Entry{key, build()});
+            m_last.store(&m_entries.back(), std::memory_order_release);
+            return m_entries.back().pool;
+        }
+
+    private:
+        // The fields AMDGPU::operator== compares.
+        struct Device
+        {
+            AMDGPU::Processor  processor;
+            int                computeUnitCount;
+            std::optional<int> pciChipId;
+
+            bool operator==(Device const& other) const
+            {
+                return processor == other.processor && computeUnitCount == other.computeUnitCount
+                       && pciChipId == other.pciChipId;
+            }
+        };
+
+        struct Entry
+        {
+            Device device;
+            Pool   pool;
+        };
+
+        tilewright::ModelPtr              m_model;
+        mutable std::mutex                m_mutex;
+        mutable std::list<Entry>          m_entries;
+        mutable std::atomic<Entry const*> m_last{nullptr};
     };
 } // namespace TensileLite
