@@ -7,6 +7,7 @@
 // the scheduler's plan (WAITCNT_COISSUE.md 7.7). The repair's rules propose moves only for
 // the windows listed here, worst first.
 
+#include <algorithm>
 #include <cstddef>
 #include <vector>
 
@@ -26,8 +27,9 @@ struct WindowDamage {
     /// Loop-order positions of the VALUs planned in this window that lost their slot.
     std::vector<size_t> slipped;
 
+    /// A window that issues shorter than planned can still have lost a VALU slot.
     int severity(bool byIdle) const {
-        return (byIdle ? idleAfter : extraIssue) + static_cast<int>(slipped.size());
+        return std::max(0, byIdle ? idleAfter : extraIssue) + static_cast<int>(slipped.size());
     }
 };
 

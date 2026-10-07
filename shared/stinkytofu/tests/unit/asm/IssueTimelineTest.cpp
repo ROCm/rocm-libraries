@@ -346,6 +346,19 @@ TEST_F(IssueTimelineTest, DamageReportFindsLostSlot) {
     EXPECT_EQ(report.damaged.front()->window, 0);
 }
 
+TEST_F(IssueTimelineTest, DamageSeverityCountsSlipsOfShorterWindow) {
+    // A window that issues a cycle shorter than planned but lost a VALU slot is damaged.
+    WindowDamage w;
+    w.extraIssue = -1;
+    w.slipped = {4};
+    EXPECT_EQ(w.severity(false), 1);
+    w.slipped.clear();
+    EXPECT_EQ(w.severity(false), 0);
+    w.extraIssue = 2;
+    EXPECT_EQ(w.severity(false), 2);
+    EXPECT_EQ(w.severity(true), 0);
+}
+
 // --- profile resolution -------------------------------------------------------------------
 
 TEST_F(IssueTimelineTest, SpecsParseStrictly) {
