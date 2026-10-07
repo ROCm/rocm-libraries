@@ -107,10 +107,10 @@ target_link_libraries(hipcub_generate_resource_spec PRIVATE hip::host)
 # This test may still get the offload-compress flag passed. Since it does not include any kernel
 # code it will give an unused-command-line-argument warning.
 target_compile_options(hipcub_generate_resource_spec PRIVATE "-Wno-unused-command-line-argument")
-# This helper only enumerates devices through the HIP host API, so it does not need ASAN. It is run
-# at CTest setup time, where the ASAN runtime library might not be on the loader path.
-target_compile_options(hipcub_generate_resource_spec PRIVATE "-fno-sanitize=address")
-target_link_options(hipcub_generate_resource_spec PRIVATE "-fno-sanitize=address")
+# This helper only enumerates devices through the HIP host API, so it does not need sanitizers. It is run
+# at CTest setup time, where the sanitizer runtime libraries might not be on the loader path.
+target_compile_options(hipcub_generate_resource_spec PRIVATE "-fno-sanitize=all")
+target_link_options(hipcub_generate_resource_spec PRIVATE "-fno-sanitize=all")
 
 # hipCUB tests
 add_subdirectory(hipcub)
