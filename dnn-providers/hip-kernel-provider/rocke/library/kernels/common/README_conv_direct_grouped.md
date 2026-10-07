@@ -334,6 +334,14 @@ if ok:
 
 ## Launch Grid
 
+Every direct kernel is AOT: the batch, the spatial extents, the group count and
+the activation strides are kernargs (`conv_direct_arg_names(direction=...)`),
+so one binary serves any image. Take the grid from
+`direct_launch_geometry(spec)` and the kernarg values from
+`ConvArgs.from_problem(problem, direction=...).to_launch_values(...)` rather
+than re-deriving them at the call site; the formulas below document what those
+helpers compute.
+
 ### Grouped variants
 
 ```
@@ -379,6 +387,10 @@ The `y` extent is `spec.n_ho_blocks()`, which is sized on the **input** height
 — the row loop walks `hi`, and `Ho == H` only when `2 * PAD == KH - 1`.  A wave
 whose `wo_tile` lands past `n_wo_tiles` runs the loop but has its epilogue
 atomics suppressed, so an over-provisioned `z` extent is safe.
+
+`n_wo_tiles = ceil(Wo / mfma_k)` and `n_q_blocks = ceil(n_wo_tiles / waves_q)`
+are computed in-kernel from the `p_Wo` kernarg, with the same ceilings
+`spec.n_q_blocks()` uses for the host-side `z` extent.
 
 ---
 
