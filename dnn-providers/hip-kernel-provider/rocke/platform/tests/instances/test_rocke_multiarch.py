@@ -13,8 +13,10 @@ These tests need no GPU.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import unittest
+from unittest import mock
 
 from rocke.core.arch import ArchTarget, known_arches, normalize_dtype, validate_arch
 from rocke.core.isa import Gfx9MfmaBackend, Gfx950Backend, backend_for
@@ -244,7 +246,42 @@ class TestGfx950ByteIdentical(unittest.TestCase):
         )
         return build_universal_gemm(spec)
 
-    def test_legacy_equals_gfx950(self):
+    def test_omitting_the_target_raises(self):
+        """There is no implicit target any more, and that has to be asserted.
+
+        This replaces a test that compared the no-arg lowering against an
+        explicit ``gfx950`` one, back when omitting the target silently meant
+        gfx950. Removing the default turned both sides of that comparison into
+        the same call, so it passed unconditionally while checking nothing --
+        and it was the only test standing between the default coming back and
+        a green suite. The property worth keeping from it is the one the
+        removal established: a caller that does not name a target gets an
+        error, not a guess.
+
+        Both engines are covered, because the default was removed from both
+        and a fallback that returned on only one side is exactly the drift the
+        byte-identity invariant exists to catch.
+        """
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        k = self._kernel()
+        for backend in ("python", "cpp"):
+            with (
+                self.subTest(backend=backend),
+                mock.patch.dict(os.environ, {"ROCKE_BACKEND": backend}),
+            ):
+                with self.assertRaises((TypeError, ValueError)):
+                    lower_kernel_to_llvm(k)
+                with self.assertRaises((TypeError, ValueError)):
+                    lower_kernel_to_llvm(k, arch=None)
+
+    def test_the_same_target_lowers_deterministically(self):
+        """Two lowerings of one kernel at one target are byte-identical.
+
+        Weak on its own, but it is the control for the test above: it shows
+        the kernel lowers at all, so a raise there is the missing target and
+        not a broken fixture.
+        """
         from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         k = self._kernel()

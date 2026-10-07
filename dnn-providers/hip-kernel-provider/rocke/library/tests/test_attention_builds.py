@@ -863,6 +863,14 @@ class TestAttentionHelpers(unittest.TestCase):
                 self.assertTrue(spec64.use_k_single_buffer)
 
     def test_unified_attention_scalar_kernels_compile(self):
+        """The scalar fallbacks lower on every arch we ship, not just one.
+
+        These three kernels carry no MFMA and no arch-gated memory op, which is
+        exactly why pinning them to a single target was easy to do and worth
+        undoing: the claim being made is that the scalar path is the portable
+        one, and a single-arch run cannot make that claim. Both wired targets
+        are sub-tested so a regression names the arch it broke on.
+        """
         p = UnifiedAttentionProblem(
             total_q=3,
             num_seqs=1,
@@ -882,9 +890,11 @@ class TestAttentionHelpers(unittest.TestCase):
             ),
         ]
         for k in kernels:
-            ll = lower_kernel_to_llvm(k, arch="gfx950")
-            self.assertIn("define amdgpu_kernel void", ll)
-            self.assertIn("@llvm.exp2.f32", ll)
+            for arch in ("gfx942", "gfx950"):
+                with self.subTest(kernel=k.name, arch=arch):
+                    ll = lower_kernel_to_llvm(k, arch=arch)
+                    self.assertIn("define amdgpu_kernel void", ll)
+                    self.assertIn("@llvm.exp2.f32", ll)
 
     def test_unified_attention_2d_tiled_kernel_compiles(self):
         """The production tiled kernel emits async DMA + MFMA + ds_bpermute."""
@@ -2573,7 +2583,14 @@ class TestAttentionHelpers(unittest.TestCase):
                     num_seqs=4,
                 )
             )
-            seg_ll = lower_kernel_to_llvm(seg, arch="gfx950")
+            # gfx942, not gfx950: every assertion below is about what this
+            # target can and cannot lower, so selection and emission have to
+            # name the same arch. Lowering at gfx950 also blinded the warning
+            # lane to the exact regression this test exists to catch -- the
+            # 16x16x32 MFMA asserted absent here, and its ds.read.tr16 /
+            # permlane32.swap neighbours, are `ok` on gfx950 and `arch_absent`
+            # on gfx942 in all three committed arch-domain columns.
+            seg_ll = lower_kernel_to_llvm(seg, arch="gfx942")
             # The arch-dispatched reduce kernel must also build on gfx942.
             red = build_unified_attention_reduce_tiled(
                 UnifiedAttentionReduceTiledSpec(
@@ -2584,7 +2601,7 @@ class TestAttentionHelpers(unittest.TestCase):
                     num_segments=128,
                 )
             )
-            red_ll = lower_kernel_to_llvm(red, arch="gfx950")
+            red_ll = lower_kernel_to_llvm(red, arch="gfx942")
         # gfx942 narrow 3D path: 16x16x16 MFMA + 1-DWORD async DMA KV feed.
         self.assertIn("@llvm.amdgcn.mfma.f32.16x16x16f16", seg_ll)
         self.assertIn("@llvm.amdgcn.raw.ptr.buffer.load.lds", seg_ll)
