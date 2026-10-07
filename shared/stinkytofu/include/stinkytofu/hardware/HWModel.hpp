@@ -22,6 +22,7 @@
 // referenced by pointer; only HWModel.cpp includes the rule table itself.
 
 #include <array>
+#include <cstdint>
 #include <span>
 
 #include "stinkytofu/Export.hpp"
@@ -29,6 +30,56 @@
 namespace stinkytofu {
 
 struct HazardRule;  // stinkytofu/transforms/asm/dag/HazardRules.hpp
+
+/// Instruction classes the issue-timing rules match on. The co-issue timeline puts
+/// every instruction in exactly one of them (coissue::classify); Branch and Any are
+/// match-only.
+enum class IssueClass : uint8_t {
+    Any,       ///< every instruction
+    Matrix,    ///< v_wmma*, v_swmmac*
+    Valu,      ///< vector ALU, including transcendental
+    Salu,      ///< scalar ALU; as a consumer, branches are not included
+    Branch,    ///< s_branch, s_cbranch_*
+    LdsLoad,   ///< DS reads
+    LdsStore,  ///< DS writes and atomics
+    Memory,    ///< every other memory instruction
+    MemWait,   ///< s_wait_*cnt
+    Barrier,   ///< s_barrier_*
+    Inserted,  ///< added after the scheduler: s_set_vgpr_msb, s_wait_alu, s_nop, v_nop, s_delay_alu
+};
+
+/// An instruction, by class or by mnemonic. A non-null mnemonic wins over the class.
+struct IssueMatch {
+    IssueClass cls = IssueClass::Any;
+    const char* mnemonic = nullptr;
+};
+
+/// Issue cycles of an instruction by what comes right before it. For `after`, a
+/// mnemonic is compared with the instruction right before; a class with the last
+/// instruction that is not IssueClass::Inserted.
+struct IssueCostRule {
+    IssueMatch inst;
+    IssueMatch after;
+    int cycles;
+};
+
+/// Register class a latency rule applies to.
+enum class LatencyReg : uint8_t { Any, Scc, Vcc, Sgpr, Vgpr };
+
+/// Cycles from a scalar or vector producer's issue until a consumer may issue.
+struct LatencyRule {
+    IssueClass producer;
+    IssueClass consumer;
+    LatencyReg reg;
+    int cycles;
+};
+
+/// A matrix-op form whose issue timing has been checked on hardware.
+struct CalibratedMatrixForm {
+    const char* mnemonic;
+    /// Both A and B are FP4 (the form with the short window).
+    bool fp4Operands;
+};
 
 /// Physical hardware facts for one architecture.
 ///
@@ -137,6 +188,32 @@ struct HWModel {
         int vmVsrcBridge;
     };
 
+    /// Measured issue behavior of one wave's instruction stream. Read by the co-issue
+    /// timeline (coissue::TimingProfile), not by CDNA5ReadyQueue. The defaults are the
+    /// scheduler's own assumptions, for an arch nobody has measured.
+    struct Issue {
+        /// Cycles from a matrix op's issue until the next instruction may issue; 0 means
+        /// the op's own issue cycles.
+        int matrixIssueCycles = 0;
+        /// A blocked co-issue cycle (HwInstDesc::blockedScaleMask) also blocks the issue
+        /// of every other instruction.
+        bool blockedCycleAtIssue = true;
+        /// s_wait_*cnt: cycles to issue the wait itself.
+        int waitcntIssueCycles = 1;
+        /// s_wait_*cnt: extra cycles for the first wait of a group; a wait right behind
+        /// another s_wait_* does not pay them.
+        int waitcntSettleCycles = 0;
+        /// First match wins; an instruction no rule matches costs its issue cycles.
+        std::span<const IssueCostRule> costRules = {};
+    };
+
+    /// Matrix ops that can wait in front of the matrix pipe, so the wave issues past an
+    /// op that has not started. 0 means no queue: a matrix op issues only once the
+    /// previous op's window has ended.
+    struct MatrixQueue {
+        int depth = 0;
+    };
+
     Lds lds;
     Barrier barrier;
     Coexec coexec;
@@ -144,6 +221,13 @@ struct HWModel {
     DelayAlu delayAlu;
     Counters counters;
     WaitHide waitHide;
+    Issue issue = {};
+    MatrixQueue matrixQueue = {};
+    /// Scalar and vector result latency by producer and consumer. First match wins;
+    /// otherwise a result is ready after the producer's latencyCycles.
+    std::span<const LatencyRule> latencyRules = {};
+    /// The matrix-op forms the facts above were measured on.
+    std::span<const CalibratedMatrixForm> calibratedMatrixForms = {};
 };
 
 /// Collapse a {major, minor, stepping} arch triple to a switchable key.

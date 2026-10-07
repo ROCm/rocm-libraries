@@ -55,6 +55,8 @@ target_sources(stinkytofu_objs PRIVATE
     EpilogueStoreSinkPass.cpp
     StinkyWmmaVgprReorderPass.cpp
     FlattenCalleesPass.cpp
+    CoissueRepairPass.cpp
+    coissue/TimingProfile.cpp
 )
 
 add_subdirectory(ra)

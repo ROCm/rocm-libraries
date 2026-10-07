@@ -59,6 +59,7 @@
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
+#include "stinkytofu/transforms/asm/CoissueRepairPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/DefUseAnalysisCleanup.hpp"
 #include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
@@ -247,6 +248,80 @@ TEST(ApiExport, SignatureBaseConstruction) {
 TEST(ApiExport, GetGfxArchID) {
     GfxArchID arch = getGfxArchID(12, 5, 0);
     EXPECT_EQ(arch, GfxArchID::Gfx1250);
+}
+
+// =============================================================================
+// CoissueRepairPass knobs: module option -> pass feature -> resolved profile
+// =============================================================================
+
+TEST(ApiExport, CoissueKnobsRoundTrip) {
+    StinkyAsmModule::ModuleOptions options;
+    const PassFeatureConfig::CoissueFeatures defaults = coissueFeaturesFromModuleOptions(options);
+    EXPECT_EQ(defaults.repairMode, "off");
+    EXPECT_DOUBLE_EQ(defaults.marginPercent, 0.5);
+    EXPECT_EQ(defaults.profileSet, "robust");
+    EXPECT_EQ(defaults.maxMoves, 64);
+    EXPECT_EQ(defaults.searchRadius, 4);
+    EXPECT_FALSE(defaults.trustUncalibrated);
+    EXPECT_EQ(defaults.patterns, "");
+    EXPECT_EQ(defaults.waitcntIssueCycles, -1);
+    EXPECT_EQ(defaults.waitcntSettleCycles, -1);
+    EXPECT_EQ(defaults.issueCycles, "");
+    EXPECT_EQ(defaults.scalarLatency, "");
+    EXPECT_EQ(defaults.matrixQueueDepth, -1);
+    EXPECT_FALSE(validateCoissueFeatures(defaults, kArch).has_value());
+
+    options.CoissueRepairMode = "shadow";
+    options.CoissueMarginPercent = 1.25;
+    options.CoissueProfileSet = "compiler+measured";
+    options.CoissueMaxMoves = 7;
+    options.CoissueSearchRadius = 2;
+    options.CoissueTrustUncalibrated = true;
+    options.CoissuePatterns = "hoist-compare";
+    options.CoissueWaitcntIssueCycles = 2;
+    options.CoissueWaitcntSettleCycles = 1;
+    options.CoissueIssueCycles = "s_wait_tensorcnt=4; s_set_vgpr_msb@lds=5";
+    options.CoissueScalarLatency = "salu>valu:sgpr=4";
+    options.CoissueMatrixQueueDepth = 5;
+    const PassFeatureConfig::CoissueFeatures set = coissueFeaturesFromModuleOptions(options);
+    EXPECT_EQ(set.repairMode, "shadow");
+    EXPECT_DOUBLE_EQ(set.marginPercent, 1.25);
+    EXPECT_EQ(set.profileSet, "compiler+measured");
+    EXPECT_EQ(set.maxMoves, 7);
+    EXPECT_EQ(set.searchRadius, 2);
+    EXPECT_TRUE(set.trustUncalibrated);
+    EXPECT_EQ(set.patterns, "hoist-compare");
+    EXPECT_EQ(set.waitcntIssueCycles, 2);
+    EXPECT_EQ(set.waitcntSettleCycles, 1);
+    EXPECT_EQ(set.issueCycles, "s_wait_tensorcnt=4; s_set_vgpr_msb@lds=5");
+    EXPECT_EQ(set.scalarLatency, "salu>valu:sgpr=4");
+    EXPECT_EQ(set.matrixQueueDepth, 5);
+    EXPECT_FALSE(validateCoissueFeatures(set, kArch).has_value());
+
+    // The printed profiles carry the knob values: the compiler profile ignores them,
+    // the measured one takes them over its facts.
+    const std::vector<std::string> lines = describeCoissueProfiles(set, kArch);
+    ASSERT_EQ(lines.size(), 2u);
+    EXPECT_EQ(lines[0].rfind("compiler:", 0), 0u);
+    EXPECT_NE(lines[1].find("waitcnt 2 issue + 1 settle, queue 5"), std::string::npos) << lines[1];
+    EXPECT_NE(lines[1].find("s_wait_tensorcnt=4; s_set_vgpr_msb@lds=5; s_wait_alu=3"),
+              std::string::npos)
+        << lines[1];
+    EXPECT_NE(lines[1].find("latency [salu>valu:sgpr=4; salu>branch:scc=9"), std::string::npos)
+        << lines[1];
+
+    PassFeatureConfig::CoissueFeatures bad = set;
+    bad.issueCycles = "s_wait_bogus=1";
+    EXPECT_TRUE(validateCoissueFeatures(bad, kArch).has_value());
+    bad = set;
+    bad.scalarLatency = "salu>salu";
+    EXPECT_TRUE(validateCoissueFeatures(bad, kArch).has_value());
+    bad = set;
+    bad.repairMode = "aply";
+    EXPECT_TRUE(validateCoissueFeatures(bad, kArch).has_value());
+    bad = set;
+    bad.profileSet = "measured+nonsense";
+    EXPECT_TRUE(validateCoissueFeatures(bad, kArch).has_value());
 }
 
 // =============================================================================

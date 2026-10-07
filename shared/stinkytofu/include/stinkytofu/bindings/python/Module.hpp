@@ -141,7 +141,19 @@
     X(DsReadPerWmma, int, -1) /* deprecated alias for DsReadPerCap */                           \
     X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                             \
     X(TensorLoadDsLoadGapCycles, int, 64)                                                       \
-    X(BarrierHalfSlack, int, 0) /* WMMA windows inside a signal/wait pair; 0 = together */
+    X(BarrierHalfSlack, int, 0) /* WMMA windows inside a signal/wait pair; 0 = together */      \
+    X(CoissueRepairMode, std::string, "off") /* off | shadow | apply */                         \
+    X(CoissueMarginPercent, double, 0.5)     /* worst-case gain to write back, % of loop */     \
+    X(CoissueProfileSet, std::string, "robust")                                                 \
+    X(CoissueMaxMoves, int, 64)                                                                 \
+    X(CoissueSearchRadius, int, 4)                                                              \
+    X(CoissueTrustUncalibrated, bool, false)                                                    \
+    X(CoissuePatterns, std::string, "")   /* empty = all registered */                          \
+    X(CoissueWaitcntIssueCycles, int, -1) /* -1 = HWModel fact */                               \
+    X(CoissueWaitcntSettleCycles, int, -1)                                                      \
+    X(CoissueIssueCycles, std::string, "")   /* "s_wait_tensorcnt=4; s_set_vgpr_msb@lds=3" */   \
+    X(CoissueScalarLatency, std::string, "") /* "salu>salu=1; salu>branch:scc=9" */             \
+    X(CoissueMatrixQueueDepth, int, -1)      /* -1 = HWModel fact, 0 = no queue */
 
 namespace stinkytofu {
 /**

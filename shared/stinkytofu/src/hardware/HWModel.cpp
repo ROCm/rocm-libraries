@@ -27,6 +27,33 @@ constexpr HWModel::WaitHide::Form kGfx1250WaitHideForms[] = {
     {.costLatency = 16, .dstVgprs = 8, .xdlVaVdst = 12, .csmaccVaVdst = 12},
 };
 
+// Measured on one scale-FP8 loop (mxf8_tn_maf) with rocprofv3 counters and ATT traces.
+constexpr IssueCostRule kGfx1250IssueCostRules[] = {
+    // A ds_load behind a bank switch and an s_wait_alu moves from +2 to +5.
+    {{IssueClass::Inserted, "s_wait_alu"}, {}, 3},
+    // A second switch right behind the first: about 1 cycle more.
+    {{IssueClass::Inserted, "s_set_vgpr_msb"}, {IssueClass::Inserted, "s_set_vgpr_msb"}, 1},
+    // A switch hides in the cycle after a matrix op, and costs nothing after a scalar
+    // or vector op.
+    {{IssueClass::Inserted, "s_set_vgpr_msb"}, {IssueClass::Matrix}, 0},
+    {{IssueClass::Inserted, "s_set_vgpr_msb"}, {IssueClass::Salu}, 0},
+    {{IssueClass::Inserted, "s_set_vgpr_msb"}, {IssueClass::Valu}, 0},
+    // The gap between two ds_loads grows from 1 to 4 with a switch between them.
+    {{IssueClass::Inserted, "s_set_vgpr_msb"}, {IssueClass::LdsLoad}, 3},
+    {{IssueClass::Inserted, "s_set_vgpr_msb"}, {}, 1},
+};
+
+constexpr LatencyRule kGfx1250LatencyRules[] = {
+    // s_cmp then s_cbranch_scc*.
+    {IssueClass::Salu, IssueClass::Branch, LatencyReg::Scc, 9},
+    // A dependent scalar instruction issues on the next cycle.
+    {IssueClass::Salu, IssueClass::Salu, LatencyReg::Any, 1},
+};
+
+constexpr CalibratedMatrixForm kGfx1250CalibratedMatrixForms[] = {
+    {"v_wmma_scale_f32_16x16x128_f8f6f4", /*fp4Operands=*/false},
+};
+
 constexpr HWModel kGfx1250Model = {
     .lds =
         {
@@ -84,6 +111,22 @@ constexpr HWModel kGfx1250Model = {
             .vmVsrcTex = 11,
             .vmVsrcBridge = 11,
         },
+    .issue =
+        {
+            // The next instruction after a v_wmma issues at +2 at the earliest.
+            .matrixIssueCycles = 2,
+            // VALU, scalar, LDS and wait instructions all issue on the LD_SCALE cycle.
+            .blockedCycleAtIssue = false,
+            // A satisfied s_wait_dscnt takes 3 cycles: 1 issue + 2 settle. A second one
+            // right behind it takes 1-2.
+            .waitcntIssueCycles = 1,
+            .waitcntSettleCycles = 2,
+            .costRules = kGfx1250IssueCostRules,
+        },
+    // The wave's lead over the matrix pipe reaches 27 cycles: about 3 ops of 8.
+    .matrixQueue = {.depth = 3},
+    .latencyRules = kGfx1250LatencyRules,
+    .calibratedMatrixForms = kGfx1250CalibratedMatrixForms,
 };
 
 // gfx1250v0: starts from the gfx1250 values. Kept as its own object so those

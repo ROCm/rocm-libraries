@@ -195,8 +195,35 @@ struct PassFeatureConfig {
         int warGateWmmas = 0;
     };
 
+    /// CoissueRepairPass knobs; each mirrors the ModuleOptions::Coissue* option of the
+    /// same name. A timing knob at -1 or empty leaves the HWModel fact in place.
+    struct CoissueFeatures {
+        /// "off", "shadow" (search and report only) or "apply".
+        std::string repairMode = "off";
+        /// Worst-case predicted gain needed to write back, in percent of the loop.
+        double marginPercent = 0.5;
+        /// Profiles a move must not slow down: "robust", or names joined by '+'.
+        std::string profileSet = "robust";
+        int maxMoves = 64;
+        /// Windows a filler may travel.
+        int searchRadius = 4;
+        /// Also write back loops whose matrix-op form has no calibrated facts.
+        bool trustUncalibrated = false;
+        /// Pattern plug-ins, comma separated; empty = all registered, "none" = none.
+        std::string patterns;
+        int waitcntIssueCycles = -1;
+        int waitcntSettleCycles = -1;
+        /// Issue-cost overrides, e.g. "s_wait_tensorcnt=4; s_set_vgpr_msb@lds=3".
+        std::string issueCycles;
+        /// Latency-rule overrides, e.g. "salu>salu=1; salu>branch:scc=9".
+        std::string scalarLatency;
+        /// Matrix ops queued in front of the pipe; -1 = the fact, 0 = no queue.
+        int matrixQueueDepth = -1;
+    };
+
     LoopConfig loopConfig;
     DagFeatures dagFeatures;
+    CoissueFeatures coissue;
 };
 
 /// VGPR MSB encoding mode supported by the toolchain.

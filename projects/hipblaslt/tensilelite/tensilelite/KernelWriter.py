@@ -7200,6 +7200,31 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                    self.states.archCaps["RequiresXCntForVolatileVMEM"]),
                                "EnableXnackReplay": bool(
                                    self.states.archCaps["EnableXnackReplay"]),
+                               # CoissueRepairPass (see GlobalParameters.py).
+                               "CoissueRepairMode": str(
+                                   globalParameters.get("StinkyTofuCoissueRepairMode", "off")),
+                               "CoissueMarginPercent": float(
+                                   globalParameters.get("StinkyTofuCoissueMarginPercent", 0.5)),
+                               "CoissueProfileSet": str(
+                                   globalParameters.get("StinkyTofuCoissueProfileSet", "robust")),
+                               "CoissueMaxMoves": int(
+                                   globalParameters.get("StinkyTofuCoissueMaxMoves", 64)),
+                               "CoissueSearchRadius": int(
+                                   globalParameters.get("StinkyTofuCoissueSearchRadius", 4)),
+                               "CoissueTrustUncalibrated": bool(
+                                   globalParameters.get("StinkyTofuCoissueTrustUncalibrated", False)),
+                               "CoissuePatterns": str(
+                                   globalParameters.get("StinkyTofuCoissuePatterns", "")),
+                               "CoissueWaitcntIssueCycles": int(
+                                   globalParameters.get("StinkyTofuCoissueWaitcntIssueCycles", -1)),
+                               "CoissueWaitcntSettleCycles": int(
+                                   globalParameters.get("StinkyTofuCoissueWaitcntSettleCycles", -1)),
+                               "CoissueIssueCycles": str(
+                                   globalParameters.get("StinkyTofuCoissueIssueCycles", "")),
+                               "CoissueScalarLatency": str(
+                                   globalParameters.get("StinkyTofuCoissueScalarLatency", "")),
+                               "CoissueMatrixQueueDepth": int(
+                                   globalParameters.get("StinkyTofuCoissueMatrixQueueDepth", -1)),
                               }
 
       # Region-clone jobs for StinkyTofu RegionClonePass.

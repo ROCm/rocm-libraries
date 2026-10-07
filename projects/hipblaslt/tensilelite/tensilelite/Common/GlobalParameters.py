@@ -419,6 +419,26 @@ globalParameters["StinkyTofuDsIssueCapSpanCycles"] = 0
 # see stinkytofu docs/user/scheduler-tuning-parameters.md.
 globalParameters["StinkyTofuModuleOptions"] = {}
 
+# StinkyTofu CoissueRepairPass (gfx1250): reorders loop fillers so the instructions added
+# after scheduling (bank switches, s_wait_alu, nops) cost less matrix-pipe time. "off"
+# (default) does not run it; "shadow" searches and reports each loop's moves as remarks
+# (StinkyTofuEnableRemarks) without changing the code; "apply" writes them back for loops
+# whose matrix-op form is calibrated and whose worst-case gain reaches the margin. The
+# timing knobs override the gfx1250 HWModel facts; -1 or "" keeps the fact. See
+# shared/stinkytofu/docs/developer/coissue-repair-pass.md.
+globalParameters["StinkyTofuCoissueRepairMode"] = "off"
+globalParameters["StinkyTofuCoissueMarginPercent"] = 0.5
+globalParameters["StinkyTofuCoissueProfileSet"] = "robust"
+globalParameters["StinkyTofuCoissueMaxMoves"] = 64
+globalParameters["StinkyTofuCoissueSearchRadius"] = 4
+globalParameters["StinkyTofuCoissueTrustUncalibrated"] = False
+globalParameters["StinkyTofuCoissuePatterns"] = ""
+globalParameters["StinkyTofuCoissueWaitcntIssueCycles"] = -1
+globalParameters["StinkyTofuCoissueWaitcntSettleCycles"] = -1
+globalParameters["StinkyTofuCoissueIssueCycles"] = ""
+globalParameters["StinkyTofuCoissueScalarLatency"] = ""
+globalParameters["StinkyTofuCoissueMatrixQueueDepth"] = -1
+
 # Directory for StinkyTofu per-kernel instruction-cost output files (empty = disabled).
 # When set, each kernel's StinkyTofu module writes its cost file here via
 # StinkyTofuModule.setOutputDir (see KernelWriter._convertToStinkyTofu).
