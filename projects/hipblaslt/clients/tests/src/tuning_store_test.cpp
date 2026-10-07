@@ -10,6 +10,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <clocale>
 #include <cstdio>
 #include <cstdlib>
@@ -70,6 +71,7 @@ namespace
     TuningSearch rankedSearch(int32_t maxCandidates)
     {
         TuningSearch search;
+        search.mode           = TuningMode::Tune;
         search.allKernels     = false;
         search.maxCandidates  = maxCandidates;
         search.workspaceBytes = 32 << 20;
@@ -77,6 +79,23 @@ namespace
         search.hotIters       = 5;
         search.flushICache    = true;
         search.rotatingMb     = 160;
+        return search;
+    }
+
+    // What online records: a ranked prefix of the model's own candidates,
+    // measured a few times in place, with no rotation and no instruction-cache
+    // flush because there is no search of its own to put them in.
+    TuningSearch onlineSearch(int32_t maxCandidates, int32_t hotIters = 3)
+    {
+        TuningSearch search;
+        search.mode           = TuningMode::Online;
+        search.allKernels     = false;
+        search.maxCandidates  = maxCandidates;
+        search.workspaceBytes = 32 << 20;
+        search.coldIters      = 32;
+        search.hotIters       = hotIters;
+        search.flushICache    = false;
+        search.rotatingMb     = 0;
         return search;
     }
 
@@ -248,6 +267,33 @@ namespace
 
         std::vector<std::pair<std::string, std::optional<std::string>>> m_savedEnv;
     };
+
+    // The loader pairs cells by position before it pairs them by name, and
+    // skips a row whose two lines disagree in width. That makes a fixture that
+    // gained a column in one line and not the other vanish silently instead of
+    // failing, and a suite every row of which was skipped passes.
+    //
+    // So it is asserted once, outright: the writer emits one value per column,
+    // a row one cell short is skipped rather than read, and the row every case
+    // below is built from really does reach the map.
+    TEST_F(TuningStore, EveryWrittenColumnHasAValueAndAShortRowIsSkipped)
+    {
+        const auto row   = tunedRow(halfKey(), tunedEntry(7, "kernel"));
+        const auto cells = cellsOf(row);
+        ASSERT_EQ(cells.names.size(), cells.values.size());
+        EXPECT_NE(std::find(cells.names.begin(), cells.names.end(), "tuning_mode"),
+                  cells.names.end())
+            << "the writer emits no tuning_mode column";
+
+        OverrideMap parsed;
+        EXPECT_EQ(loadInto(parsed, fileOf({row})).accepted, 1u);
+        EXPECT_EQ(parsed.size(), 1u);
+
+        RowCells narrowed = cells;
+        narrowed.values.pop_back();
+        OverrideMap skipped;
+        EXPECT_EQ(loadInto(skipped, fileOf({rowOf(narrowed)})).accepted, 0u);
+    }
 
     // Every column the writer emits reads back into the key and entry it came
     // from, including the fields legacy rows cannot express.
@@ -483,8 +529,12 @@ namespace
     TEST_F(TuningStore, RowCutShortIsRejected)
     {
         const auto row = tunedRow(halfKey(), tunedEntry(7, "kernel", false, 1000));
-        for(const char* column :
-            {"kernel_name", "required_workspace", "complete", "budget_ms", "rotating_mb"})
+        for(const char* column : {"kernel_name",
+                                  "required_workspace",
+                                  "complete",
+                                  "budget_ms",
+                                  "tuning_mode",
+                                  "rotating_mb"})
         {
             SCOPED_TRACE(std::string("value row cut before ") + column);
             OverrideMap map;
@@ -721,6 +771,7 @@ namespace
         std::string row = withCell(tunedRow(key, tunedEntry(7, "kernel")), "schema_version", "1");
         for(const char* column : {"complete",
                                   "budget_ms",
+                                  "tuning_mode",
                                   "search_all_kernels",
                                   "search_max_candidates",
                                   "search_workspace",
@@ -864,6 +915,99 @@ namespace
         EXPECT_FALSE(tuningBudgetIsMoreGenerous(500, 1000));
         EXPECT_FALSE(tuningBudgetIsMoreGenerous(0, 0)) << "nothing beats an unlimited run";
         EXPECT_FALSE(tuningBudgetIsMoreGenerous(5000, 0));
+    }
+
+    // One format, both modes. A row says which mode measured it, and the
+    // spelling is the one HIPBLASLT_TUNING_MODE takes, so the file reads the
+    // way the knob is set.
+    TEST_F(TuningStore, RowRecordsTheModeThatProducedIt)
+    {
+        const ProblemOverride key = halfKey();
+
+        const std::pair<TuningSearch, const char*> cases[]
+            = {{rankedSearch(16), "tune"}, {onlineSearch(5), "online"}};
+
+        for(const auto& [search, spelling] : cases)
+        {
+            SCOPED_TRACE(spelling);
+
+            const auto row   = tunedRow(key, tunedEntry(7, "kernel", true, 0, search));
+            const auto cells = cellsOf(row);
+            EXPECT_EQ(cells.values[columnIndex(cells, "tuning_mode")], spelling);
+
+            OverrideMap map;
+            ASSERT_EQ(loadInto(map, fileOf({row})).accepted, 1u);
+
+            const auto found = map.find(key);
+            ASSERT_EQ(found.size(), 1u);
+            ASSERT_TRUE(found[0].search.has_value());
+            EXPECT_EQ(found[0].search->mode, search.mode);
+            EXPECT_TRUE(*found[0].search == search);
+        }
+    }
+
+    // A row whose mode is missing, unreadable, or names a mode that writes no
+    // rows at all is damaged. Defaulting it would file an online winner,
+    // measured in place on a live dispatch, as a tune winner measured on
+    // scratch, and from then on the two are compared against each other.
+    TEST_F(TuningStore, RowWithoutAModeThatWritesRowsIsRejected)
+    {
+        const auto row = tunedRow(halfKey(), tunedEntry(7, "kernel"));
+
+        OverrideMap missing;
+        EXPECT_EQ(loadInto(missing, fileOf({withoutColumn(row, "tuning_mode")})).accepted, 0u);
+
+        for(const char* value : {"", "TUNE", "2", "not-a-mode", "off", "cache"})
+        {
+            SCOPED_TRACE(std::string("tuning_mode=") + value);
+            OverrideMap map;
+            EXPECT_EQ(loadInto(map, fileOf({withCell(row, "tuning_mode", value)})).accepted, 0u);
+        }
+    }
+
+    // The two modes measure in regimes that do not compare, so neither ever
+    // covers the other however its counts read. Online's row is a short ranked
+    // prefix with no rotation and no flush, which against tune's settings
+    // reads as a weaker search of the same kind; it is not one.
+    TEST_F(TuningStore, SearchesFromDifferentModesNeverCoverEachOther)
+    {
+        EXPECT_FALSE(tuningSearchCovers(onlineSearch(16), rankedSearch(2)));
+        EXPECT_FALSE(tuningSearchCovers(rankedSearch(16), onlineSearch(2)));
+
+        // Identical in every other column, so only the mode can be refusing.
+        TuningSearch asTune = onlineSearch(5);
+        asTune.mode         = TuningMode::Tune;
+        EXPECT_FALSE(tuningSearchCovers(onlineSearch(5), asTune));
+        EXPECT_TRUE(tuningSearchCovers(onlineSearch(5), onlineSearch(5)));
+        EXPECT_TRUE(tuningSearchCovers(onlineSearch(16), onlineSearch(5)));
+
+        // The partial-row comparison reads the mode too, so a tune run under
+        // the same counts does not mistake an online row for its own.
+        EXPECT_FALSE(onlineSearch(5) == asTune);
+    }
+
+    // What the gate is for: a tune run meets a shape online already settled.
+    // The online row is complete and its counts look like a narrower search of
+    // the same kind, which without the mode on the row could read as covering
+    // a modest tune search and close the gate on it.
+    TEST_F(TuningStore, OnlineRowNeitherCoversNorIsCoveredByATuneSearch)
+    {
+        const ProblemOverride key = halfKey();
+
+        // Deliberately weaker than the online row on every count that
+        // tuningSearchCovers compares, so nothing but the mode can separate
+        // them.
+        TuningSearch modestTune = onlineSearch(2);
+        modestTune.mode         = TuningMode::Tune;
+
+        OverrideMap map;
+        loadInto(map, fileOf({tunedRow(key, tunedEntry(7, "kernel", true, 0, onlineSearch(5)))}));
+        ASSERT_EQ(map.find(key).size(), 1u) << "the online row was not read back";
+
+        EXPECT_TRUE(map.needsRetune(key, modestTune, 0))
+            << "an online row closed the gate on a tune search";
+        EXPECT_FALSE(map.needsRetune(key, onlineSearch(5), 0))
+            << "an online row did not close the gate on the online search that wrote it";
     }
 
     TEST_F(TuningStore, SearchCoverage)

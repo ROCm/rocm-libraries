@@ -296,12 +296,9 @@ namespace TensileLite
             break;
         }
 
-        const char* modeName = tuning.mode() == TuningMode::Tune     ? "tune"
-                               : tuning.mode() == TuningMode::Online ? "online"
-                                                                     : "cache";
-
         std::ostringstream msg;
-        msg << "mode=" << modeName << " path=" << tuning.cachePath() << " load=" << statusName
+        msg << "mode=" << tuningModeName(tuning.mode()) << " path=" << tuning.cachePath()
+            << " load=" << statusName
             << " loaded=" << TuningCounters::instance().entriesLoaded.load();
 
         if(status == TuningLoadStatus::NoPath)
@@ -490,6 +487,7 @@ namespace TensileLite
 
     bool appendTunedEntry(const std::string&                 path,
                           const RocblasltContractionProblem& problem,
+                          const ProblemOverride&             key,
                           const TunedEntry&                  entry)
     {
         if(path.empty() || entry.solutionIndex < 0)
@@ -501,12 +499,21 @@ namespace TensileLite
                                    tuningDataTypeToString(problem.d_type),
                                    computeTypeToBenchString(problem.compute_type)};
 
-        return appendTuningRow(path,
-                               formatTuningRow(RocblasltContractionProblem2ProblemOverride(problem),
-                                               types,
-                                               entry,
-                                               currentBuildStamp()),
-                               currentBuildStamp());
+        return appendTuningRow(
+            path, formatTuningRow(key, types, entry, currentBuildStamp()), currentBuildStamp());
+    }
+
+    bool appendTunedEntry(const std::string&                 path,
+                          const RocblasltContractionProblem& problem,
+                          const TunedEntry&                  entry)
+    {
+        // Checked before the key is built: building one queries the device,
+        // and a caller with nothing to write should not pay for that.
+        if(path.empty() || entry.solutionIndex < 0)
+            return false;
+
+        return appendTunedEntry(
+            path, problem, RocblasltContractionProblem2ProblemOverride(problem), entry);
     }
 
     void getContractionProblemsFromFile(const std::string& path)

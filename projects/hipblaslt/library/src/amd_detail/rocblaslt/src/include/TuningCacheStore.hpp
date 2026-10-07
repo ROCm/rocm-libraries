@@ -38,6 +38,17 @@ namespace TensileLite
     };
 
     /**
+     * The spelling HIPBLASLT_TUNING_MODE is set to, which is also the spelling
+     * a row records the mode that produced it under.
+     *
+     * One table for both, so the value a user writes into the environment, the
+     * value the startup line reports and the value that lands in the file can
+     * never drift apart.
+     */
+    const char*               tuningModeName(TuningMode mode);
+    std::optional<TuningMode> tuningModeFromName(const std::string& name);
+
+    /**
      * HIPBLASLT_TUNING_MODE and HIPBLASLT_TUNING_CACHE_PATH as the environment
      * sets them.
      */
@@ -77,10 +88,11 @@ namespace TensileLite
      * have no leading dimensions, strides or epilogue, so they can only be
      * matched on the historical fields; see ProblemOverride::legacyKey.
      *
-     * Version 1 rows carry the whole key. Version 2 rows add whether the
-     * search that produced them finished, under what budget, and what it
-     * covered. A version 1 row reads as a finished search with none recorded,
-     * which is what every row written before those columns existed was.
+     * Version 1 rows carry the whole key. Version 2 rows add which mode
+     * produced them, whether the search that produced them finished, under
+     * what budget, and what it covered. A version 1 row reads as a finished
+     * search with none recorded, which is what every row written before those
+     * columns existed was.
      *
      * Each later schema takes the next number, and kCurrentTuningSchemaVersion
      * names the one this build writes.
@@ -297,20 +309,28 @@ namespace TensileLite
      */
     struct TuningSearch
     {
-        bool    allKernels     = true;
-        int32_t maxCandidates  = 0; // ranked-prefix length, ignored with allKernels
-        size_t  workspaceBytes = 0; // the caller's limit candidates were filtered by
-        int32_t coldIters      = 0;
-        int32_t hotIters       = 0;
-        bool    flushICache    = false;
-        int32_t rotatingMb     = 0;
+        // Which mode measured this. Only tune and online write rows, and the
+        // two measure in regimes that do not compare: tune benchmarks on
+        // library-owned scratch over a rotating buffer with the instruction
+        // cache flushed between launches, while online times the caller's own
+        // dispatch on the caller's own buffers, in place, with none of that.
+        // Default Tune, because that is the only mode that recorded a search
+        // before online existed.
+        TuningMode mode           = TuningMode::Tune;
+        bool       allKernels     = true;
+        int32_t    maxCandidates  = 0; // ranked-prefix length, ignored with allKernels
+        size_t     workspaceBytes = 0; // the caller's limit candidates were filtered by
+        int32_t    coldIters      = 0;
+        int32_t    hotIters       = 0;
+        bool       flushICache    = false;
+        int32_t    rotatingMb     = 0;
 
         bool operator==(const TuningSearch& other) const
         {
-            return allKernels == other.allKernels && maxCandidates == other.maxCandidates
-                   && workspaceBytes == other.workspaceBytes && coldIters == other.coldIters
-                   && hotIters == other.hotIters && flushICache == other.flushICache
-                   && rotatingMb == other.rotatingMb;
+            return mode == other.mode && allKernels == other.allKernels
+                   && maxCandidates == other.maxCandidates && workspaceBytes == other.workspaceBytes
+                   && coldIters == other.coldIters && hotIters == other.hotIters
+                   && flushICache == other.flushICache && rotatingMb == other.rotatingMb;
         }
     };
 
@@ -320,6 +340,15 @@ namespace TensileLite
      */
     inline bool tuningSearchCovers(const TuningSearch& done, const TuningSearch& now)
     {
+        // Searches from different modes are not comparable at all, so one never
+        // covers the other however its counts read. An online row records a
+        // ranked prefix measured a handful of times in place, which against
+        // tune's settings reads as a weaker search of the same kind; it is not
+        // one. The numbers below count launches and candidates, and they only
+        // mean the same thing when both sides spent them the same way.
+        if(done.mode != now.mode)
+            return false;
+
         const bool candidates
             = done.allKernels || (!now.allKernels && done.maxCandidates >= now.maxCandidates);
         return candidates && done.workspaceBytes >= now.workspaceBytes

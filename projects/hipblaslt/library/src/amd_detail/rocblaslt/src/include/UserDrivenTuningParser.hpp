@@ -199,6 +199,26 @@ namespace TensileLite
                           const TunedEntry&                  entry);
 
     /**
+     * The same, under a key the caller hands over rather than one rebuilt from
+     * `problem`.
+     *
+     * Online tuning holds one pinned record per resolved problem and that
+     * record carries the key its row must be written under. Its resolution key
+     * is coarser than a file key, so several distinct keys share one record,
+     * and only the one on the record names a problem that was measured. Taking
+     * the key off the record rather than off whichever caller is in hand is
+     * what keeps a merged sibling from restating it.
+     *
+     * `problem` is still read, for the type columns: they keep a spelling the
+     * parser reads back, which the key cannot supply because it holds Tensile
+     * types and several compute types share one.
+     */
+    bool appendTunedEntry(const std::string&                 path,
+                          const RocblasltContractionProblem& problem,
+                          const ProblemOverride&             key,
+                          const TunedEntry&                  entry);
+
+    /**
      * What one tuning attempt did.
      *
      * Skips are policy: the tuner understood the problem and chose not to
