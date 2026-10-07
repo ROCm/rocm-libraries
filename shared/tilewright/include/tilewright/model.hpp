@@ -120,6 +120,14 @@ class CandidateSet {
                            std::size_t min_scored           = 0,
                            const std::vector<double>* prior = nullptr) const;
 
+  // The scored configs of rank(problem, hardware, context, min_scored, prior),
+  // in the same order: its result without the unscored configs.
+  std::vector<Result> rank_scored(const Problem& problem,
+                                  const Hardware& hardware,
+                                  const ExecutionContext& context,
+                                  std::size_t min_scored           = 0,
+                                  const std::vector<double>* prior = nullptr) const;
+
  private:
   struct Impl;
   std::unique_ptr<Impl> impl_;

@@ -242,6 +242,9 @@ if (!tilewright::supports(*model, context, hw)) { /* use another ranking */ }
   (every kernel unscored unless `supports(model, context, hardware)`) and, with
   `TieBreak::Prior`, orders equal scores by `prior` (a vector with one value per
   kernel, or null; another size throws `std::invalid_argument`).
+  `rank_scored(problem, hardware, context, min_scored, prior)` returns the
+  scored kernels of that ranking only, in the same order, without the work of
+  listing every other kernel of the pool.
 - `rank_configs(model, problem, hardware, configs, min_scored)` and
   `rank_configs(model, problem, hardware, context, configs, min_scored,
   tie_break, prior)` return the same results as a `CandidateSet` for an ad-hoc

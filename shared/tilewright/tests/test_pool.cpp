@@ -624,6 +624,7 @@ TEST_CASE("an unsupported context leaves every config unscored", "[context]") {
           tw::ExecutionContext{0, tw::Schedule::Auto}}) {
       CHECK(all_unscored_in_order(set.rank(p, hw, bad, kAll, &prior), pool.size()));
       CHECK(all_unscored_in_order(tw::rank_configs(*model, p, hw, bad, pool, kAll), pool.size()));
+      CHECK(set.rank_scored(p, hw, bad, kAll, &prior).empty());
     }
     CHECK(same_results(set.rank(p, hw, kAll), ex));
   }

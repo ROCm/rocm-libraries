@@ -279,7 +279,8 @@ std::vector<Result> rank_in_cell(const Model& model,
                                  const PoolKeys& keys,
                                  std::size_t min_scored,
                                  const std::vector<double>* prior,
-                                 const CellCacheSource* source) {
+                                 const CellCacheSource* source,
+                                 bool scored_only) {
   const std::size_t n       = configs.size();
   const std::size_t nk      = keys.first.size();
   const FeatureCatalog& cat = *model.catalog;
@@ -331,7 +332,7 @@ std::vector<Result> rank_in_cell(const Model& model,
         tier1_configs += size_of(key);
       }
   }
-  if (tier1.empty()) return all_unscored(n);
+  if (tier1.empty()) return scored_only ? std::vector<Result>() : all_unscored(n);
 
   std::vector<std::size_t>& tier2 = s.tier2;
   tier2.clear();
@@ -486,6 +487,13 @@ std::vector<Result> rank_in_cell(const Model& model,
     log_pick(
         problem, cell, configs[order.front()], score[keys.key_of[order.front()]], order.front(), n);
 
+  if (scored_only) {
+    std::vector<Result> result;
+    result.reserve(order.size());
+    for (std::size_t ci : order)
+      result.push_back(Result{ci, static_cast<double>(score[keys.key_of[ci]]), true});
+    return result;
+  }
   std::vector<Result> result(n);
   std::vector<unsigned char>& used = s.used;
   used.assign(n, 0);
@@ -509,23 +517,25 @@ std::vector<Result> rank_pool(const Model& model,
                               std::size_t min_scored,
                               TieBreak tie_break,
                               const std::vector<double>* prior,
-                              const CellCacheSource* source) {
+                              const CellCacheSource* source,
+                              bool scored_only = false) {
   const std::size_t n = configs.size();
   if (prior != nullptr && prior->size() != n)
     throw std::invalid_argument("tilewright: the prior holds " + std::to_string(prior->size()) +
                                 " values for " + std::to_string(n) + " configs");
   if (n == 0) return {};
-  if (!supports(model, context, hardware) || !valid_hardware(hardware)) return all_unscored(n);
+  const auto unscored = [&] { return scored_only ? std::vector<Result>() : all_unscored(n); };
+  if (!supports(model, context, hardware) || !valid_hardware(hardware)) return unscored();
   const int cell = route_cell(model, problem);
-  if (cell < 0) return all_unscored(n);
+  if (cell < 0) return unscored();
   const std::vector<double>* order_prior = tie_break == TieBreak::Prior ? prior : nullptr;
   const std::size_t ci                   = static_cast<std::size_t>(cell);
   if (keys != nullptr)
     return rank_in_cell(
-        model, ci, problem, hardware, configs, *keys, min_scored, order_prior, source);
+        model, ci, problem, hardware, configs, *keys, min_scored, order_prior, source, scored_only);
   const PoolKeys built = pool_keys(*model.catalog, configs);
   return rank_in_cell(
-      model, ci, problem, hardware, configs, built, min_scored, order_prior, source);
+      model, ci, problem, hardware, configs, built, min_scored, order_prior, source, scored_only);
 }
 
 }  // namespace
@@ -763,6 +773,24 @@ std::vector<Result> CandidateSet::rank(const Problem& problem,
                            impl_->options.tie_break,
                            prior,
                            impl_.get());
+}
+
+std::vector<Result> CandidateSet::rank_scored(const Problem& problem,
+                                              const Hardware& hardware,
+                                              const ExecutionContext& context,
+                                              std::size_t min_scored,
+                                              const std::vector<double>* prior) const {
+  return detail::rank_pool(*impl_->model,
+                           problem,
+                           hardware,
+                           context,
+                           impl_->configs,
+                           &impl_->keys,
+                           min_scored,
+                           impl_->options.tie_break,
+                           prior,
+                           impl_.get(),
+                           true);
 }
 
 std::vector<Result> rank_configs(const Model& model,
