@@ -168,7 +168,6 @@ check_status=0
 ROCJITSU_BIN=emulator
 TENSILELITE_CLIENT=client
 HIPBLASLT_BENCH=bench
-ROCJITSU_SWEEP_SEED=pr-revision
 ROCJITSU_CONFIG=config
 ROCJITSU_REVISION=detector-revision
 ROCJITSU_GPU_TARGET=gfx942
@@ -179,12 +178,14 @@ KNOWN_FAILURES=artifact/known_failures.yaml
 run_timed() { echo "STAGE: $1"; shift; "$@"; }
 python3() { printf 'ARG: %s\n' "$@"; if [[ "$3" == tensile ]]; then return "$TENSILE_SWEEP_STATUS"; else return "$BENCH_SWEEP_STATUS"; fi; }
 """
-        for statuses in [(0, 0), (1, 0), (0, 1), (1, 1)]:
+        for revision, statuses in enumerate([(0, 0), (1, 0), (0, 1), (1, 1)]):
             with self.subTest(statuses=statuses):
                 result = subprocess.run(
                     ["bash", "-c", setup + stages],
                     env={
                         **os.environ,
+                        "GITHUB_SHA": f"{revision:040x}",
+                        "ROCJITSU_SWEEP_SEED": "ignored-environment-override",
                         **dict(
                             zip(
                                 [
@@ -215,7 +216,7 @@ python3() { printf 'ARG: %s\n' "$@"; if [[ "$3" == tensile ]]; then return "$TEN
                     ("--workers", "4"),
                     ("--kernels", "100"),
                     ("--target", "gfx942"),
-                    ("--seed", "pr-revision"),
+                    ("--seed", "0"),
                     ("--suite-timeout", "1500"),
                     ("--rocjitsu-revision", "detector-revision"),
                     ("--known-failures", "artifact/known_failures.yaml"),

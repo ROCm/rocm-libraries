@@ -105,7 +105,7 @@ def bench_log(j=None):
 
 def failure_list():
     return {
-        "version": 1,
+        "version": 2,
         "rocjitsu_revision": "a" * 40,
         "case_policy": plan.POLICY,
         "failures": [
@@ -113,24 +113,19 @@ def failure_list():
                 "id": "test-hang",
                 "reason": "Unsupported instruction leaves the client waiting",
                 "tracking": ["https://github.com/ROCm/rocm-systems/pull/12963"],
-                "review_by": "2099-01-01",
+                # Review dates are reminders; an old date must still apply skips.
+                "review_by": "2000-01-01",
                 "target": "gfx942",
                 "backends": ["tensile", "bench"],
                 "cases": [c["id"] for c in job()["cases"]],
-                "solutions": [
-                    {
-                        "index": 7,
-                        "metadata_sha256": "1" * 64,
-                        "code_object_sha256": "2" * 64,
-                    }
-                ],
+                "solution_names": ["solution-7"],
             }
         ],
     }
 
 
 class SweepTests(unittest.TestCase):
-    def test_known_failures_require_the_exact_artifact_backend_and_case(self):
+    def test_known_failures_follow_solution_names_across_artifact_changes(self):
         j = job()
         j["code_objects"] = ["kernel.co"]
         original = {
@@ -148,6 +143,7 @@ class SweepTests(unittest.TestCase):
             "index",
             "metadata",
             "code",
+            "solution",
             "target",
             "backend",
             "planning",
@@ -160,6 +156,8 @@ class SweepTests(unittest.TestCase):
                     manifest["input_sha256"]["library.dat"] = "3" * 64
                 elif difference == "code":
                     manifest["input_sha256"]["kernel.co"] = "3" * 64
+                elif difference == "solution":
+                    manifest["jobs"][0]["solutions"][0]["name"] = "different-settings"
                 elif difference == "target":
                     manifest["target"] = "gfx950"
                 elif difference == "backend":
@@ -171,7 +169,11 @@ class SweepTests(unittest.TestCase):
                 cases = manifest["jobs"][0]["cases"]
                 self.assertEqual(
                     [c["id"] for c in cases if c.get("skip")],
-                    ["tile"] if difference is None else [],
+                    (
+                        ["tile"]
+                        if difference in (None, "index", "metadata", "code")
+                        else []
+                    ),
                 )
                 for case in cases:
                     case.pop("skip", None)
@@ -181,12 +183,11 @@ class SweepTests(unittest.TestCase):
                     "skips must not replace or reshape selections",
                 )
 
-    def test_known_failure_schema_revision_review_and_overlap_guards(self):
+    def test_known_failure_schema_revision_and_overlap_guards(self):
         for change in (
             "missing_tracking",
             "bad_case",
-            "bad_hash",
-            "bad_index",
+            "bad_name",
             "unknown_key",
         ):
             with self.subTest(change=change):
@@ -196,15 +197,13 @@ class SweepTests(unittest.TestCase):
                     entry["tracking"] = []
                 elif change == "bad_case":
                     entry["cases"] = ["typo"]
-                elif change == "bad_hash":
-                    entry["solutions"][0]["metadata_sha256"] = "*"
-                elif change == "bad_index":
-                    entry["solutions"][0]["index"] = True
+                elif change == "bad_name":
+                    entry["solution_names"] = [7]
                 else:
                     entry["case"] = ["tile"]
                 with self.assertRaises(ValueError):
                     known_failures(yaml.safe_dump(data))
-        for change in ("revision", "policy", "review", "overlap"):
+        for change in ("revision", "policy", "overlap"):
             with self.subTest(change=change):
                 data = failure_list()
                 manifest = {
@@ -219,8 +218,6 @@ class SweepTests(unittest.TestCase):
                     revision = "b" * 40
                 elif change == "policy":
                     manifest["policy"] = "new-policy"
-                elif change == "review":
-                    data["failures"][0]["review_by"] = "2000-01-01"
                 else:
                     duplicate = copy.deepcopy(data["failures"][0])
                     duplicate["id"] = "overlap"
@@ -245,12 +242,6 @@ class SweepTests(unittest.TestCase):
         data = failure_list()
         entry = data["failures"][0]
         entry["cases"] = cases
-        entry["solutions"][0].update(
-            metadata_sha256=plan.sha256(library),
-            code_object_sha256=plan.sha256(code_object),
-        )
-        if recheck:
-            entry["review_by"] = "2000-01-01"
         path = root / "failures.yaml"
         path.write_text(yaml.safe_dump(data))
         args = SimpleNamespace(
@@ -475,28 +466,48 @@ class SweepTests(unittest.TestCase):
         self.assertFalse(plan.matches_hardware(predicate, "gfx950", device))
         self.assertFalse(plan.matches_hardware({"type": "Unknown"}, "gfx942", device))
 
-    def test_random_sample_is_seeded_distinct_and_order_independent(self):
+    def test_sample_is_seeded_distinct_order_independent_and_extensible(self):
         solutions = [solution(i) for i in range(100)]
         alias = copy.deepcopy(solutions[0])
         alias["index"] = 1000
         solutions.append(alias)
 
-        def choose(seed, values):
-            sampler = plan.KernelSample(10, seed)
+        def choose(seed, values, count=10):
+            sampler = plan.KernelSample(count, seed)
             for s in values:
                 sampler.consider(Path("library.dat"), s)
-            return [s["index"] for _, s in sampler.selected()]
+            return [(s["kernelName"], s["index"]) for _, s in sampler.selected()]
 
+        self.assertEqual(choose("0", solutions), choose("0", list(reversed(solutions))))
+        self.assertNotEqual(choose("0", solutions), choose("1", solutions))
+        self.assertEqual(len({name for name, _ in choose("0", solutions)}), 10)
+        self.assertEqual(choose("0", solutions), choose("0", solutions, 20)[:10])
         self.assertEqual(
-            choose("pr-a", solutions), choose("pr-a", list(reversed(solutions)))
+            {name for name, _ in choose("0", solutions, 100)},
+            {s["kernelName"] for s in solutions},
         )
-        self.assertNotEqual(choose("pr-a", solutions), choose("pr-b", solutions))
-        self.assertEqual(len(set(choose("pr-a", solutions))), 10)
         sampler = plan.KernelSample(2, "seed")
         for s in [solution(0), alias]:
             sampler.consider(Path("library.dat"), s)
         with self.assertRaisesRegex(ValueError, "found only 1"):
             sampler.selected()
+
+    def test_solution_representative_survives_index_renumbering(self):
+        solutions = [solution(7), solution(8)]
+        solutions[1]["kernelName"] = solutions[0]["kernelName"]
+
+        def selected_name(values):
+            sampler = plan.KernelSample(1, "0")
+            for value in values:
+                sampler.consider(Path("library.dat"), value)
+            return sampler.selected()[0][1]["name"]
+
+        renamed = copy.deepcopy(solutions)
+        renamed[0]["index"], renamed[1]["index"] = 8, 7
+        self.assertEqual(selected_name(solutions), selected_name(renamed))
+        self.assertEqual(
+            selected_name(solutions), selected_name(list(reversed(renamed)))
+        )
 
     def test_shapes_follow_each_kernels_tile_and_depth(self):
         first, second = plan.derive_cases(solution(0)), plan.derive_cases(
