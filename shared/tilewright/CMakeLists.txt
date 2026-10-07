@@ -15,6 +15,7 @@ option(TILEWRIGHT_BUILD_TESTING "Build the tilewright tests." ${_tilewright_stan
 option(TILEWRIGHT_ENABLE_PYTHON "Build the tilewright Python bindings." OFF)
 option(TILEWRIGHT_ENABLE_INSTALL "Install the library, headers and CMake package." ${_tilewright_standalone})
 option(TILEWRIGHT_ENABLE_FETCH "Fetch missing test/binding dependencies with FetchContent." ON)
+option(TILEWRIGHT_STAGE_TIMERS "Time the phases of each ranking call (tilewright/stage_timers.hpp)." OFF)
 
 include(GNUInstallDirs)
 find_package(Threads REQUIRED)
@@ -37,12 +38,17 @@ target_link_libraries(tilewright PUBLIC Threads::Threads)
 
 target_sources(
     tilewright
-    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/tilewright/features.cpp"
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/tilewright/cache.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/tilewright/features.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/tilewright/format.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/tilewright/kernels.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/tilewright/rank.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/tilewright/registry.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/tilewright/stage_timers.cpp"
 )
+if(TILEWRIGHT_STAGE_TIMERS)
+    target_compile_definitions(tilewright PRIVATE TILEWRIGHT_STAGE_TIMERS=1)
+endif()
 
 # Scores are part of the model contract and must not depend on the compiler or
 # on flags a parent project sets: no fast-math and no floating-point contraction.

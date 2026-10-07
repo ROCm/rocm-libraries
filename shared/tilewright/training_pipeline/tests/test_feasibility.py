@@ -198,3 +198,81 @@ def test_matches_engine_on_random_pools():
         assert engine == python, (p, mode)
         partial += 0 < len(python) < len(pool)
     assert partial > 50
+
+
+def test_soft_rules_by_version():
+    assert fz.soft_rules({}, 2) == {
+        "small_batched_rule": True,
+        "dot2_rule": True,
+        "non_temporal_rule": True,
+    }
+    assert fz.soft_rules({"non_temporal_rule": False}, 2)["non_temporal_rule"] is False
+    assert not any(fz.soft_rules({}, 3).values())
+    assert fz.soft_rules({"dot2_rule": True}, 3)["dot2_rule"] is True
+    dot2, p = cfg(mi=(1, 1, 64)), prob(3, 4096, 100)
+    gates = dict(lds_bytes=1 << 20, nt_a_available=False, nt_b_available=False)
+    assert fz.passes_gates(p, dot2, **gates, **fz.soft_rules({}, 3))
+    small = prob(200, 200, 512, batch=4)
+    assert fz.passes_gates(small, cfg(mt=(128, 256, 64)), **gates, dot2_rule=False,
+                           small_batched_rule=False)  # fmt: skip
+    wide_a, narrow = cfg(grvw=(8, 1)), prob(7, 64, 256, ta="N", tb="N")
+    assert fz.passes_gates(narrow, wide_a, **gates, **fz.soft_rules({}, 3))
+    assert not fz.passes_gates(narrow, wide_a, **gates, **fz.soft_rules({}, 2))
+    assert not fz.passes_gates(narrow, wide_a, **gates)
+
+
+def test_v3_soft_rules_match_engine():
+    tw = pytest.importorskip("tilewright")
+    from lib import evaluate as ev
+    from test_v3 import v3_bundle
+
+    rng = random.Random(5)
+    dtypes = ["bfloat16", "half", "float", "float8", "int8x4"]
+    for flags in range(8):
+        serving = {
+            "small_batched_rule": bool(flags & 1),
+            "dot2_rule": bool(flags & 2),
+            "non_temporal_rule": bool(flags & 4),
+            "whitelist_tier": False,
+        }
+        bundle = v3_bundle(labels=["Large|Large|LargeK|Bnone"], serving=serving)
+        model = tw.load_model_from_memory(
+            mlrec.write_model(bundle, None, "gfx950", arch_constants("gfx950"), "fp32")
+        )
+        rules = fz.soft_rules(serving, 3)
+        for _ in range(150):
+            pool = [
+                cfg(
+                    mt=(rng.choice([16, 64, 128, 256]), rng.choice([16, 64, 256]), 64),
+                    mi=rng.choice([(16, 16, 32), (1, 1, 64)]),
+                    cha=rng.choice([0, 0, 4, 1]),
+                    chb=rng.choice([0, 0, 4]),
+                    grvw=(rng.choice([1, 8, 16]), rng.choice([1, 8])),
+                )
+                for _ in range(rng.randint(1, 20))
+            ]
+            p = prob(
+                rng.choice([1, 2, 3, 8, 200, 1000]),
+                rng.choice([1, 16, 200, 3000, 40000]),
+                rng.choice([64, 512, 1024, 4096]),
+                batch=rng.choice([1, 4]),
+                ta=rng.choice("TN"),
+                tb=rng.choice("TN"),
+                dt=rng.choice(dtypes),
+            )
+            hw = DeviceHardware(100, 65536, 4 << 20)
+            cs = tw.CandidateSet(
+                model, [ev.make_config(tw, k, i) for i, k in enumerate(pool)]
+            )
+            res = cs.rank(ev.make_problem(tw, p), ev.make_hardware(tw, hw), 0)
+            engine = {r.config_index for r in res if r.scored}
+            nt = fz.non_temporal_availability(pool)
+            python = {
+                i
+                for i, k in enumerate(pool)
+                if fz.passes_gates(
+                    p, k, lds_bytes=hw.lds_bytes, nt_a_available=nt[0],
+                    nt_b_available=nt[1], **rules,
+                )  # fmt: skip
+            }
+            assert engine == python, (p, flags)

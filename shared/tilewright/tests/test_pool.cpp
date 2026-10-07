@@ -378,7 +378,8 @@ TEST_CASE("view keys tell every numeric Config field apart and ignore index and 
   });
   vary([](tw::Config& c) { c.attributes = {{"wave_num", 2}}; });
 
-  const tw::detail::PoolKeys keys = tw::detail::pool_keys(tw::detail::v2_catalog(), pool);
+  const tw::ModelPtr model        = load_spec(grid_model());
+  const tw::detail::PoolKeys keys = tw::detail::pool_keys(*model, pool);
   REQUIRE(keys.first.size() == 13);
   for (std::size_t i = 0; i < 13; ++i) {
     CHECK(keys.key_of[i] == i);
@@ -418,7 +419,7 @@ TEST_CASE("duplicate configs rank exactly like configs scored one by one", "[poo
       }
     const tw::ModelPtr model = load_spec(spec);
     const tw::CandidateSet set(model, pool);
-    const tw::detail::PoolKeys keys = tw::detail::pool_keys(*model->catalog, pool);
+    const tw::detail::PoolKeys keys = tw::detail::pool_keys(*model, pool);
     for (int i = 0; i < 40; ++i) {
       const tw::Problem p          = rnd.problem();
       const std::size_t min_scored = rnd.pick<std::size_t>({0, 1, 3, 10, kAll});
@@ -493,12 +494,146 @@ TEST_CASE("a large pool of a few distinct kernels is scored per kernel", "[pool]
     pool.push_back(kinds[(i * 7) % 3]);
     pool.back().index = i;
   }
-  REQUIRE(tw::detail::pool_keys(*model->catalog, pool).first.size() == 3);
+  REQUIRE(tw::detail::pool_keys(*model, pool).first.size() == 3);
   const tw::CandidateSet set(model, pool);
   for (const tw::Problem& p : {make_problem(4096, 4096, 4096), make_problem(100, 3000, 700, 2)})
     for (std::size_t min_scored : {std::size_t{0}, kAll})
       CHECK(same_results(set.rank(p, test_hardware(), min_scored),
                          rank_singly(*model, p, pool, min_scored)));
+}
+
+TEST_CASE("rank_top returns the scored prefix of rank", "[pool][top]") {
+  Random rnd(9001);
+  ModelSpec listed = grid_model(tw::WeightType::Int4);
+  for (CellSpec& cell : listed.cells) {
+    cell.embed_dim    = 24;
+    cell.hidden_dim   = 40;
+    cell.inter_hidden = 21;
+  }
+  ModelSpec cascade     = grid_model(tw::WeightType::Bf16);
+  cascade.cascade_keys  = 3;
+  const std::size_t k[] = {0, 1, 2, 3, 7, 25, kAll};
+  std::vector<tw::Result> reused;
+  for (int round = 0; round < 8; ++round) {
+    ModelSpec spec                     = round % 2 == 0 ? listed : cascade;
+    const std::vector<tw::Config> pool = rnd.pool(2 + rnd.below(20), 1 + rnd.below(80));
+    if (round % 2 == 0)
+      for (CellSpec& cell : spec.cells) {
+        cell.signatures.clear();
+        for (const tw::Config& c : pool)
+          if (rnd.below(4) == 0) cell.signatures.push_back(sig(c));
+      }
+    const tw::ModelPtr model = load_spec(spec);
+    const tw::TieBreak tie   = round % 4 < 2 ? tw::TieBreak::PoolOrder : tw::TieBreak::Prior;
+    const tw::CandidateSet set(model, pool, tw::PoolOptions{tie});
+    for (int i = 0; i < 30; ++i) {
+      const tw::Problem p              = rnd.problem();
+      const std::vector<double> values = rnd.prior(pool.size());
+      const std::vector<double>* prior = rnd.below(2) == 0 ? &values : nullptr;
+      for (std::size_t depth : k) {
+        INFO("round " << round << " problem " << i << " k " << depth);
+        const std::vector<tw::Result> expect =
+            scored_prefix(set.rank(p, test_hardware(), {}, depth, prior), depth);
+        REQUIRE(same_results(set.rank_top(p, test_hardware(), {}, depth, prior), expect));
+        set.rank_top(p, test_hardware(), {}, depth, reused, prior);
+        REQUIRE(same_results(reused, expect));
+      }
+    }
+  }
+}
+
+TEST_CASE("rank_top keeps the configs tied at its last position in order", "[pool][top]") {
+  const tw::Problem p    = make_problem(4096, 4096, 4096);
+  const tw::Hardware& hw = test_hardware();
+  Random rnd(5150);
+  std::vector<tw::Config> pool;
+  for (std::size_t i = 0; i < 48; ++i) {
+    tw::Config c = make_config(rnd.pick<std::size_t>({64, 128, 256}),
+                               rnd.pick<std::size_t>({32, 64, 128}),
+                               rnd.pick<std::size_t>({32, 64}));
+    c.occupancy  = rnd.pick<int>({1, 2});
+    c.index      = i;
+    pool.push_back(c);
+  }
+  const std::vector<double> prior = rnd.prior(pool.size());
+  // Scores log2(mt_m): three scores shared by many keys; then one score for all.
+  for (const ModelSpec& spec : {probe_model(Tower::Item, 0, 0.0f, 1.0f), zero_model()})
+    for (tw::TieBreak tie : {tw::TieBreak::PoolOrder, tw::TieBreak::Prior}) {
+      const tw::ModelPtr model = load_spec(spec);
+      const tw::CandidateSet set(model, pool, tw::PoolOptions{tie});
+      for (std::size_t depth = 1; depth <= pool.size() + 1; ++depth) {
+        INFO("k " << depth << " tie-break " << static_cast<int>(tie));
+        const std::vector<tw::Result> full = set.rank(p, hw, {}, depth, &prior);
+        REQUIRE(same_results(set.rank_top(p, hw, {}, depth, &prior), scored_prefix(full, depth)));
+      }
+    }
+  const tw::CandidateSet flat(load_spec(zero_model()), pool);
+  CHECK(indices(flat.rank_top(p, hw, {}, 5)) == std::vector<std::size_t>{0, 1, 2, 3, 4});
+}
+
+TEST_CASE("rank_top of nothing to score is empty", "[pool][top]") {
+  const tw::ModelPtr model           = load_spec(zero_model());
+  const std::vector<tw::Config> pool = {make_config(128, 128, 64), make_config(64, 64, 64)};
+  const tw::CandidateSet set(model, pool, tw::PoolOptions{tw::TieBreak::Prior});
+  const tw::Problem p    = make_problem(4096, 4096, 4096);
+  const tw::Hardware& hw = test_hardware();
+  CHECK(set.rank_top(p, hw, {}, 1).size() == 1);
+  CHECK(set.rank_top(p, hw, {}, kAll).size() == 2);
+  CHECK(set.rank_top(p, hw, {}, 0).empty());
+  CHECK(set.rank_top(make_problem(8, 8, 8), hw, {}, kAll).empty());
+  CHECK(set.rank_top(p, tw::Hardware{64, 65536, 0}, {}, kAll).empty());
+  CHECK(set.rank_top(p, hw, {hw.N_CU - 1, tw::Schedule::Default}, kAll).empty());
+  CHECK(tw::CandidateSet(model, {}).rank_top(p, hw, {}, kAll).empty());
+  const std::vector<double> short_prior(1, 0.0);
+  CHECK_THROWS_AS(set.rank_top(p, hw, {}, 1, &short_prior), std::invalid_argument);
+  CHECK_THROWS_AS(set.rank_top(p, hw, {}, 0, &short_prior), std::invalid_argument);
+
+  std::vector<tw::Result> out(7, tw::Result{99, 1.0, true});
+  set.rank_top(p, hw, {}, kAll, out);
+  CHECK(indices(out) == std::vector<std::size_t>{0, 1});
+  const tw::Result* data = out.data();
+  set.rank_top(p, hw, {}, 1, out);
+  CHECK(indices(out) == std::vector<std::size_t>{0});
+  CHECK(out.data() == data);
+  set.rank_top(make_problem(8, 8, 8), hw, {}, 1, out);
+  CHECK(out.empty());
+}
+
+TEST_CASE("rankings do not depend on the ranking scratch's epoch or its wrap-around", "[pool]") {
+  Random rnd(424242);
+  ModelSpec spec                      = grid_model(tw::WeightType::Int8);
+  const std::vector<tw::Config> big   = rnd.pool(40, 90);
+  const std::vector<tw::Config> small = rnd.pool(5, 9);
+  for (CellSpec& cell : spec.cells)
+    for (const tw::Config& c : big)
+      if (rnd.below(4) == 0) cell.signatures.push_back(sig(c));
+  const tw::ModelPtr model = load_spec(spec);
+  const tw::CandidateSet big_set(model, big), small_set(model, small);
+  std::vector<tw::Problem> problems;
+  std::vector<std::size_t> depth;
+  for (int i = 0; i < 24; ++i) {
+    problems.push_back(rnd.problem());
+    depth.push_back(rnd.pick<std::size_t>({0, 1, 5, kAll}));
+  }
+  std::vector<std::vector<tw::Result>> expect_big, expect_small;
+  for (std::size_t i = 0; i < problems.size(); ++i) {
+    expect_big.push_back(rank_singly(*model, problems[i], big, depth[i]));
+    expect_small.push_back(rank_singly(*model, problems[i], small, depth[i]));
+  }
+  // Interleaved pools leave marks of other calls behind; the epoch passes its
+  // largest value within the first calls.
+  for (std::uint32_t start : {0u, 0x7FFFFFFFu - 5u, 0x7FFFFFFFu}) {
+    tw::detail::set_rank_epoch(start);
+    for (int round = 0; round < 3; ++round)
+      for (std::size_t i = 0; i < problems.size(); ++i) {
+        INFO("start " << start << " round " << round << " problem " << i);
+        CHECK(same_results(big_set.rank(problems[i], test_hardware(), depth[i]), expect_big[i]));
+        CHECK(
+            same_results(small_set.rank(problems[i], test_hardware(), depth[i]), expect_small[i]));
+        CHECK(same_results(tw::rank_configs(*model, problems[i], test_hardware(), big, depth[i]),
+                           expect_big[i]));
+      }
+  }
 }
 
 TEST_CASE("attributes never change scores, feasibility, whitelisting or order", "[attributes]") {
@@ -624,7 +759,6 @@ TEST_CASE("an unsupported context leaves every config unscored", "[context]") {
           tw::ExecutionContext{0, tw::Schedule::Auto}}) {
       CHECK(all_unscored_in_order(set.rank(p, hw, bad, kAll, &prior), pool.size()));
       CHECK(all_unscored_in_order(tw::rank_configs(*model, p, hw, bad, pool, kAll), pool.size()));
-      CHECK(set.rank_scored(p, hw, bad, kAll, &prior).empty());
     }
     CHECK(same_results(set.rank(p, hw, kAll), ex));
   }
@@ -781,10 +915,10 @@ TEST_CASE("the loader selects the feature catalog by the model's hash", "[catalo
   CHECK(v2.query_dim == kQ);
   CHECK(v2.item_dim == kI);
   CHECK(v2.inter_dim == kX);
-  CHECK(v2.view_key_size == 12);
   for (const char* other : {"", "e7fe4b524851e89", "e7fe4b524851e8950", "E7FE4B524851E895"})
     CHECK(tw::detail::find_catalog(other) == nullptr);
   const tw::ModelPtr model = load_spec(grid_model());
   CHECK(model->catalog == &v2);
+  CHECK(model->view_key_size == 12);
   CHECK(tw::describe(*model).feature_catalog_hash == v2.hash);
 }

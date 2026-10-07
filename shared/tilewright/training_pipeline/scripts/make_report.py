@@ -4,14 +4,29 @@
 
 """Write a self-contained HTML report of a pipeline run.
 
-Usage: make_report.py <run_dir> [out.html]     (default: <run_dir>/report.html)
+Usage: make_report.py <run_dir> [out.html] [--jobs N] [--no-engine] [--no-bench]
+                      [--target T] [--selection-budget-us US] [--diagnostics]
+                      [--origami-reference]
 
-Reads the run's artifacts (round_*/stage04b/decisions.json,
-round_*/stage05/{cells,metrics}.json, round_*/stage06/manifest.json,
-round_*/stage01/shapes.yaml, validate/stage07/summary.json,
-validate/stage08/summary.json, timing/*.json and the latest
-configs/*.source.yaml) and writes nothing but the output file. A section
-whose inputs are missing shows "n/a". The page has no external references.
+Reads the run's artifacts (round_*/stage04b/{decisions,splits}.json and its
+gate/ and train/ slices, round_*/stage04 and stage03c/holdout/stage04
+enriched chunks and kernels.json, round_*/stage01b/plan.json,
+round_*/stage05/{cells,metrics}.json and models.pt,
+round_*/stage06/{manifest,deploy_record,gate}.json, round_*/stage01/
+shapes.yaml, validate/stage07/summary.json with its parity and timing logs,
+validate/stage08/summary.json with each dataset's per_gemm.csv,
+timing/*.json and the latest configs/*.source.yaml) and writes nothing but
+the output file. A section whose inputs are missing shows "n/a". The page
+has no external references.
+
+The headline is the bundle the run shipped: the latest deploy record not
+marked `deployed: false`, measured on GEMMs it never trained on (its deploy
+gate, else stage04b; run_orchestrator.shipped_bundle_numbers). The report's
+own re-ranking charges picks with the config's validate.pick_measurement,
+as stages 4.5, 6, 7 and 8 do. Every efficiency, gap and ranking is against
+the fastest measured kernel and an absolute target; Origami appears only in
+the opt-in --origami-reference section, and only on the same GEMMs as the
+model.
 """
 import glob
 import html
@@ -20,6 +35,9 @@ import math
 import os
 import re
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import report_sections as rs  # noqa: E402
 
 
 def load_json(path):
@@ -176,8 +194,29 @@ def _wgeo(pairs):
     return math.exp(ls / ws) if ws > 0 else None
 
 
+def paired_cells(cells):
+    """(model, Origami, GEMMs) over the cells with both numbers on the same
+    GEMMs: per cell `paired_sel_eff_new` and `origami_sel_eff_new` over its
+    `origami_n_eval` GEMMs."""
+    both = [
+        c
+        for c in cells
+        if _num(c.get("paired_sel_eff_new")) and _num(c.get("origami_sel_eff_new"))
+    ]
+    n = sum(int(c.get("origami_n_eval") or 0) for c in both)
+    if not n:
+        return None, None, 0
+    return (
+        _wgeo((c["paired_sel_eff_new"], c.get("origami_n_eval") or 0) for c in both),
+        _wgeo((c["origami_sel_eff_new"], c.get("origami_n_eval") or 0) for c in both),
+        n,
+    )
+
+
 def held_out_rounds(run_dir):
-    """Per active round: the prior model on that round's new shapes."""
+    """Per active round: the prior model on that round's new shapes, its
+    misses, and (for the reference section) the model and Origami on the
+    same GEMMs."""
     rows = []
     for d in round_dirs(run_dir):
         dec = load_json(os.path.join(d, "stage04b", "decisions.json"))
@@ -186,28 +225,124 @@ def held_out_rounds(run_dir):
         cells = [c for c in dec.get("per_cell") or [] if isinstance(c, dict)]
         agg = dec.get("aggregate") if isinstance(dec.get("aggregate"), dict) else {}
         model = _num(agg.get("global_sel_eff_new"))
-        origami = _num(agg.get("global_origami_sel_eff_new"))
         if model is None:
             model = _wgeo((c.get("sel_eff_new"), c.get("n_eval") or 0) for c in cells)
-        if origami is None:
-            origami = _wgeo(
-                (c.get("origami_sel_eff_new"), c.get("origami_n_eval") or 0)
-                for c in cells
-            )
         n = agg.get("n_gemms_evaluated")
         if not isinstance(n, int):
             n = sum(int(c.get("n_eval") or 0) for c in cells)
         if model is None:
             continue
+        pm, po, pn = paired_cells(cells)
+        if _num(agg.get("global_paired_sel_eff_new")) is not None:
+            pm = agg["global_paired_sel_eff_new"]
+            po = _num(agg.get("global_origami_sel_eff_new"))
+            pn = agg.get("n_gemms_paired", pn)
         rows.append(
             {
                 "round": os.path.basename(d),
                 "model": _pct(model),
-                "origami": _pct(origami),
                 "n_gemms": n,
+                "n_miss": agg.get("n_miss_total"),
+                "pick_measurement": agg.get("pick_measurement"),
+                "paired_model": _pct(pm),
+                "paired_origami": _pct(po),
+                "paired_n": pn,
             }
         )
     return rows
+
+
+def shipped_bundle(run_dir):
+    """The bundle the run shipped and its held-out numbers
+    (run_orchestrator.shipped_bundle_numbers), with the deploy-gate record
+    of the round that shipped it (`gate`)."""
+    rs.pipeline_on_path()
+    try:
+        from pathlib import Path
+
+        from run_orchestrator import shipped_bundle_numbers
+
+        out = shipped_bundle_numbers(Path(run_dir))
+    except Exception:  # noqa: BLE001
+        out = load_json(os.path.join(run_dir, "held_out_sel_eff_breakdown.json"))
+        if not isinstance(out, dict) or "shipped" not in out:
+            return None
+    out = _finite(out)
+    shipped = out.get("shipped") or {}
+    rec_path = shipped.get("deploy_record")
+    gate = (
+        load_json(os.path.join(os.path.dirname(rec_path), "gate.json"))
+        if rec_path
+        else None
+    )
+    out["gate"] = _finite(gate) if isinstance(gate, dict) else None
+    return out
+
+
+def stage04b_contexts(run_dir):
+    """Per round: stage04b's held-out summaries per trained context
+    (aggregate.by_context) and per held-out context
+    (aggregate.context_holdout), keyed by run_analysis context labels."""
+    rs.pipeline_on_path()
+    from lib import features as fs
+    from lib.run_analysis import context_label
+
+    def label(key):
+        budget, _, sched = str(key).partition("/")
+        try:
+            return context_label(
+                fs.ExecutionContext(cu_budget=int(budget), schedule=sched or "default")
+            )
+        except (TypeError, ValueError):
+            return str(key)
+
+    rows = []
+    for d in round_dirs(run_dir):
+        dec = load_json(os.path.join(d, "stage04b", "decisions.json"))
+        agg = (dec or {}).get("aggregate") if isinstance(dec, dict) else None
+        if not isinstance(agg, dict):
+            continue
+        for kind, block in (
+            ("trained context", agg.get("by_context")),
+            ("held-out context", agg.get("context_holdout")),
+        ):
+            if not isinstance(block, dict):
+                continue
+            for key, s in sorted(block.items()):
+                if not isinstance(s, dict):
+                    continue
+                rows.append(
+                    {
+                        "round": os.path.basename(d),
+                        "kind": kind,
+                        "context": label(key),
+                        "n": s.get("n_evaluated"),
+                        "n_miss": s.get("n_miss"),
+                        "sel_eff": _num(s.get("sel_eff")),
+                    }
+                )
+    return rows
+
+
+def context_names(config_text):
+    """{run_analysis context label: the config's context names}."""
+    rs.pipeline_on_path()
+    try:
+        import yaml
+
+        from lib import features as fs
+        from lib.contexts import contexts_from_config
+        from lib.run_analysis import context_label
+
+        cfg = yaml.safe_load(config_text or "") or {}
+        ctxs = contexts_from_config(cfg if isinstance(cfg, dict) else {})
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    for c in ctxs:
+        key = context_label(fs.ExecutionContext(c.cu_budget, c.schedule))
+        out.setdefault(key, []).append(c.label + (" held out" if c.holdout else ""))
+    return {k: ", ".join(v) for k, v in out.items()}
 
 
 def training_rounds(run_dir):
@@ -222,7 +357,6 @@ def training_rounds(run_dir):
                 "round": os.path.basename(d),
                 "model": _pct(met.get("global_sel_eff")),
                 "deployed": _pct(met.get("global_deployed_sel_eff")),
-                "origami": _pct(met.get("global_origami_sel_eff")),
                 "n_cells": met.get("n_cells_trained"),
                 "n_gemms": met.get("n_gemms_trained"),
             }
@@ -241,12 +375,8 @@ def _split_parents(run_dir):
 
 
 def held_out_breakdown(run_dir):
-    """Latest held-out measurement per leaf cell (the orchestrator's
-    held_out_sel_eff_breakdown.json when present, else rebuilt in memory
-    from every decisions.json)."""
-    b = load_json(os.path.join(run_dir, "held_out_sel_eff_breakdown.json"))
-    if isinstance(b, dict) and isinstance(b.get("per_cell"), dict) and b["per_cell"]:
-        return b["per_cell"]
+    """Latest stage04b held-out measurement per leaf cell over every round
+    (each by the model of the round before it)."""
     per_cell = {}
     for d in round_dirs(run_dir):
         dec = load_json(os.path.join(d, "stage04b", "decisions.json"))
@@ -262,6 +392,8 @@ def held_out_breakdown(run_dir):
                 "round": os.path.basename(d),
                 "sel_eff_new": se,
                 "n_eval": n,
+                "n_miss": int(c.get("n_miss") or 0),
+                "paired_sel_eff_new": _num(c.get("paired_sel_eff_new")),
                 "origami_sel_eff_new": _num(c.get("origami_sel_eff_new")),
                 "origami_n_eval": int(c.get("origami_n_eval") or 0),
                 "winner_us_geomean": _num(c.get("winner_us_geomean")),
@@ -274,37 +406,41 @@ def held_out_breakdown(run_dir):
 
 
 def held_out_aggregate(per_cell):
+    """GEMM-weighted model selection efficiency over the leaves of
+    `per_cell`, and the model and Origami on the same GEMMs (paired: each
+    cell's `paired_sel_eff_new` / `origami_sel_eff_new`)."""
     leaves = _leaves(per_cell)
     mo = _wgeo(
         (per_cell[c].get("sel_eff_new"), per_cell[c].get("n_eval")) for c in leaves
     )
-    oo = _wgeo(
-        (per_cell[c].get("origami_sel_eff_new"), per_cell[c].get("origami_n_eval"))
-        for c in leaves
-    )
+    pm, po, pn = paired_cells([per_cell[c] for c in leaves])
     both = [
         c
         for c in leaves
-        if _num(per_cell[c].get("sel_eff_new"))
+        if _num(per_cell[c].get("paired_sel_eff_new"))
         and _num(per_cell[c].get("origami_sel_eff_new"))
     ]
     best = _wgeo(
         (
-            max(per_cell[c]["sel_eff_new"], per_cell[c]["origami_sel_eff_new"]),
-            per_cell[c].get("n_eval"),
+            max(per_cell[c]["paired_sel_eff_new"], per_cell[c]["origami_sel_eff_new"]),
+            per_cell[c].get("origami_n_eval"),
         )
         for c in both
     )
     wins = sum(
         1
         for c in both
-        if per_cell[c]["sel_eff_new"] >= per_cell[c]["origami_sel_eff_new"]
+        if per_cell[c]["paired_sel_eff_new"] >= per_cell[c]["origami_sel_eff_new"]
     )
     return {
         "model": _pct(mo),
-        "origami": _pct(oo),
+        "n_gemms": sum(int(per_cell[c].get("n_eval") or 0) for c in leaves),
+        "n_miss": sum(int(per_cell[c].get("n_miss") or 0) for c in leaves),
+        "paired_model": _pct(pm),
+        "paired_origami": _pct(po),
+        "paired_n": pn,
         "delta": (
-            round((mo - oo) * 100, 2) if mo is not None and oo is not None else None
+            round((pm - po) * 100, 2) if pm is not None and po is not None else None
         ),
         "router_bound": _pct(best),
         "model_win_frac": round(wins / len(both) * 100, 1) if both else None,
@@ -312,12 +448,15 @@ def held_out_aggregate(per_cell):
     }
 
 
-def final_cells(run_dir, held):
-    """Deployed leaf cells: the latest cells.json entry per label over all
-    rounds, with held-out values (inherited from the nearest measured
-    ancestor for leaves created by the last split)."""
+def final_cells(run_dir, held, upto=None):
+    """Leaf cells of the shipped bundle: the latest cells.json entry per
+    label over the rounds up to `upto` (a round name; default all), with
+    held-out values (inherited from the nearest measured ancestor for leaves
+    created by the last split)."""
     by_label = {}
-    for d in round_dirs(run_dir):
+    names = [os.path.basename(d) for d in round_dirs(run_dir)]
+    last = names.index(upto) if upto in names else len(names) - 1
+    for d in round_dirs(run_dir)[: last + 1]:
         cj = load_json(os.path.join(d, "stage05", "cells.json"))
         if not isinstance(cj, dict):
             continue
@@ -341,16 +480,14 @@ def final_cells(run_dir, held):
     for lab in sorted(leaves):
         c = by_label[lab]
         dep = c.get("deployed") if isinstance(c.get("deployed"), dict) else {}
-        ori = c.get("origami") if isinstance(c.get("origami"), dict) else {}
         model = _pct(c.get("best_sel_eff"))
         deployed = _pct(dep.get("sel_eff"))
-        origami = _pct(ori.get("sel_eff"))
         held_v, inherited = inherit(lab, "sel_eff_new")
+        held_pm, _ = inherit(lab, "paired_sel_eff_new")
         held_o, _ = inherit(lab, "origami_sel_eff_new")
         held_w, _ = inherit(lab, "winner_us_geomean")
         held_p, _ = inherit(lab, "pick_us_geomean")
-        held_op, _ = inherit(lab, "origami_pick_us_geomean")
-        hv, ho = _pct(held_v), _pct(held_o)
+        hv, hpm, ho = _pct(held_v), _pct(held_pm), _pct(held_o)
 
         def diff(a, b):
             return round(a - b, 2) if a is not None and b is not None else None
@@ -361,26 +498,38 @@ def final_cells(run_dir, held):
                 "n_gemms": int(c.get("n_gemms") or 0),
                 "model": model,
                 "deployed": deployed,
-                "origami": origami,
                 "k_delta": diff(deployed, model),
-                "dep_delta": diff(deployed, origami),
                 "held": hv,
                 "held_inherited": inherited,
+                "held_paired": hpm,
                 "held_ori": ho,
-                "held_delta": diff(hv, ho),
+                "held_delta": diff(hpm, ho),
                 "smartK": len(c.get("smart_k_signatures") or []) or None,
                 "cap": f"{c.get('embed_dim')}/{c.get('hidden_dim')}/{c.get('inter_hidden')}",
                 "held_w_us": held_w,
                 "held_pick_us": held_p,
-                "held_ori_pick_us": held_op,
             }
         )
     return cells
 
 
+def _ci(v):
+    return [float(v[0]), float(v[1])] if isinstance(v, list) and len(v) == 2 else None
+
+
+def _rsn_order(item):
+    try:
+        return int(str(item[0]).replace("rsn", ""))
+    except ValueError:
+        return 1 << 30
+
+
 def stage07(run_dir):
-    """Per bench yaml of the latest stage07 run: pick parity and the paired
-    selection-time deltas per request size."""
+    """Per bench yaml of the latest stage07 run: pick parity, the runtime's
+    selection efficiency (its top-1 picks against the bench timings of the
+    same problems, with the bootstrap interval), and per request size the
+    ML-on selection times overall, on the first call into a cell and warm
+    (medians with bootstrap intervals), plus the ML-off reference."""
     summ = load_json(os.path.join(run_dir, "validate", "stage07", "summary.json"))
     if not isinstance(summ, dict):
         return None
@@ -402,20 +551,56 @@ def stage07(run_dir):
                 "counts": par.get("counts") or {},
                 "ok": par.get("ok"),
             }
+            sel = par.get("runtime_selection")
+            if isinstance(sel, dict):
+                row["runtime_selection"] = {
+                    "pick_measurement": sel.get("pick_measurement"),
+                    "n_problems": sel.get("n_problems"),
+                    "n": sel.get("n_evaluated"),
+                    "n_miss": sel.get("n_miss"),
+                    "sel_eff": _num(sel.get("sel_eff")),
+                    "ci95": _ci(sel.get("sel_eff_ci95")),
+                    "p5": _num((sel.get("percentiles") or {}).get("p5")),
+                    "without": {
+                        k: sel.get(k)
+                        for k in (
+                            "n_without_runtime_pick",
+                            "n_without_timings",
+                            "n_top1_without_row",
+                            "n_outside_the_pool",
+                        )
+                        if sel.get(k)
+                    },
+                }
         timing = []
-        for rsn, t in sorted((y.get("timing") or {}).items(), key=lambda kv: kv[0]):
+        for rsn, t in sorted((y.get("timing") or {}).items(), key=_rsn_order):
             if not isinstance(t, dict):
                 continue
             d = t.get("delta_us") or {}
+            on = t.get("ml_on_us") or {}
+            first = (t.get("first_in_cell") or {}).get("ml_on_us") or {}
+            warm = (t.get("warm") or {}).get("ml_on_us") or {}
             timing.append(
                 {
-                    "rsn": rsn.replace("rsn", ""),
-                    "n": d.get("n"),
+                    "rsn": str(rsn).replace("rsn", ""),
+                    "n": on.get("n", d.get("n")),
                     "reps": t.get("repetitions"),
-                    "on_p50": (t.get("ml_on_us") or {}).get("p50"),
+                    "on_p50": on.get("p50"),
+                    "on_p50_ci": _ci(on.get("p50_ci95")),
+                    "on_p99": on.get("p99"),
+                    "on_max": on.get("max"),
+                    "first_n": first.get("n"),
+                    "first_p50": first.get("p50"),
+                    "first_p50_ci": _ci(first.get("p50_ci95")),
+                    "first_max": first.get("max"),
+                    "warm_n": warm.get("n"),
+                    "warm_p50": warm.get("p50"),
+                    "warm_p50_ci": _ci(warm.get("p50_ci95")),
+                    "warm_max": warm.get("max"),
                     "off_p50": (t.get("ml_off_us") or {}).get("p50"),
                     "d_p10": d.get("p10"),
                     "d_p50": d.get("p50"),
+                    "d_p50_ci": _ci(d.get("p50_ci95")),
                     "d_p90": d.get("p90"),
                     "d_p99": d.get("p99"),
                 }
@@ -426,9 +611,8 @@ def stage07(run_dir):
 
 
 def stage08(run_dir):
-    """Every dataset of the latest stage08 run: the GEMM-weighted model and
-    Origami selection efficiency and the paired statistics of its summary's
-    `overall` block."""
+    """Every dataset of the latest stage08 run: the model and Origami on the
+    same GEMMs (the paired statistics of its summary's `overall` block)."""
     summ = load_json(os.path.join(run_dir, "validate", "stage08", "summary.json"))
     if not isinstance(summ, dict):
         return []
@@ -439,56 +623,22 @@ def stage08(run_dir):
         s = x.get("summary") if isinstance(x.get("summary"), dict) else {}
         ov = s.get("overall") if isinstance(s.get("overall"), dict) else {}
         paired = ov.get("paired") if isinstance(ov.get("paired"), dict) else {}
+        ci = paired.get("speedup_ci95")
         rows.append(
             {
                 "name": x.get("name"),
                 "rc": x.get("rc"),
-                "n": ov.get("n_evaluated", ov.get("n_gemms")),
-                "model": _pct(
-                    _first_pos(
-                        ov.get("sel_eff"),
-                        s.get("model_geomean_gemm_weighted"),
-                        x.get("model_geomean_sel_eff"),
-                    )
-                ),
-                "origami": _pct(
-                    _first_pos(
-                        ov.get("origami_sel_eff"),
-                        s.get("origami_geomean_gemm_weighted"),
-                        x.get("origami_geomean_sel_eff"),
-                    )
-                ),
                 "paired_n": paired.get("n"),
+                "model": _pct(paired.get("model_sel_eff")),
+                "origami": _pct(paired.get("origami_sel_eff")),
                 "wins": paired.get("wins"),
                 "ties": paired.get("ties"),
                 "losses": paired.get("losses"),
                 "speedup": _num(paired.get("speedup_geomean")),
-                "per_cell": _stage08_cells(run_dir, x),
+                "speedup_ci95": ci if isinstance(ci, list) and len(ci) == 2 else None,
             }
         )
     return rows
-
-
-def _stage08_cells(run_dir, ds):
-    path = ds.get("per_cell_json")
-    if not path:
-        return []
-    if not os.path.isabs(path):
-        path = os.path.join(run_dir, "validate", "stage08", path)
-    data = load_json(path)
-    if isinstance(data, dict):
-        data = data.get("per_cell", data.get("cells"))
-    if isinstance(data, dict):
-        data = [dict(v, cell=k) for k, v in data.items() if isinstance(v, dict)]
-    out = []
-    for r in data or []:
-        if not isinstance(r, dict) or not r.get("cell"):
-            continue
-        mo = _pct(_first_pos(r.get("sel_eff"), r.get("model_sel_eff")))
-        og = _pct(_first_pos(r.get("origami_sel_eff")))
-        if mo is not None and og is not None:
-            out.append([str(r["cell"]), mo, og])
-    return out
 
 
 def deployed_size_mb(run_dir):
@@ -630,7 +780,6 @@ _CHART_MUT = "#57606a"
 _CHART_GRID = "#eaeef2"
 _C_MODEL = "#0969da"
 _C_DEPLOYED = "#1a7f37"
-_C_ORIGAMI = "#9a6700"
 
 
 def _short(s, n=14):
@@ -762,7 +911,6 @@ def chart_trend(train):
         [
             ("model", [r.get("model") for r in train], _C_MODEL),
             ("deployed", [r.get("deployed") for r in train], _C_DEPLOYED),
-            ("origami", [r.get("origami") for r in train], _C_ORIGAMI),
         ],
         y_suffix="%",
     )
@@ -1002,7 +1150,7 @@ def held_out_by_category(run_dir, held):
         tree = load_cumulative_split_tree([Path(d) for d in rds])
     except Exception:
         tree = {}
-    cat = {c: {"n": 0, "s": [], "o": []} for c in SHAPE_CATEGORIES}
+    cat = {c: {"n": 0, "s": [], "p": [], "o": []} for c in SHAPE_CATEGORIES}
     bases = {}
     total = 0
     for d in rds:
@@ -1028,10 +1176,12 @@ def held_out_by_category(run_dir, held):
             bc["n"] += 1
             bc["leaves"].add(leaf)
             se = inherit(leaf, "sel_eff_new")
+            pe = inherit(leaf, "paired_sel_eff_new")
             oe = inherit(leaf, "origami_sel_eff_new")
             if se:
                 rec["s"].append(se)
-            if oe:
+            if pe and oe:
+                rec["p"].append(pe)
                 rec["o"].append(oe)
     if not total:
         return None, None, 0
@@ -1044,15 +1194,16 @@ def held_out_by_category(run_dir, held):
         r = cat[c]
         if not r["n"]:
             continue
-        sm, om = geo(r["s"]), geo(r["o"])
+        sm, pm, om = geo(r["s"]), geo(r["p"]), geo(r["o"])
         cat_rows.append(
             {
                 "category": c,
                 "n": r["n"],
                 "held": round(sm, 2) if sm is not None else None,
+                "paired": round(pm, 2) if pm is not None else None,
                 "origami": round(om, 2) if om is not None else None,
                 "delta": (
-                    round(sm - om, 2) if sm is not None and om is not None else None
+                    round(pm - om, 2) if pm is not None and om is not None else None
                 ),
             }
         )
@@ -1077,7 +1228,13 @@ def _f(v, digits=2, signed=False):
     return f"{v:+.{digits}f}" if signed else f"{v:.{digits}f}"
 
 
-def stage07_html(s7):
+def _ci_txt(ci, scale=1.0, digits=2):
+    if not ci:
+        return ""
+    return f" [{ci[0] * scale:.{digits}f}, {ci[1] * scale:.{digits}f}]"
+
+
+def stage07_html(s7, origami_reference=False):
     if not s7:
         return '<p class="mut">no stage 7 results in this run.</p>'
     parts = []
@@ -1085,63 +1242,223 @@ def stage07_html(s7):
     parts.append(f'<p class="cap">stage 7 status: <b>{esc(status)}</b>.</p>')
     for y in s7["yamls"]:
         par = y.get("parity")
+        sel = y.get("runtime_selection")
         rows = []
         if par:
             counts = ", ".join(
                 f"{esc(k)}={esc(v)}" for k, v in sorted(par["counts"].items())
             )
             rows.append(
-                f'<tr><td class="c">pick parity</td><td colspan="8">{esc(par["agree"])} / '
-                f'{esc(par["n"])} problems agree ({_f(par["rate"])}%) &mdash; {counts}</td></tr>'
+                f'<tr><td class="c">pick parity</td><td colspan="6" style="text-align:left">'
+                f'{esc(par["agree"])} / {esc(par["n"])} problems agree ({_f(par["rate"])}%)'
+                f" &mdash; {counts}</td></tr>"
+            )
+        if sel:
+            se = sel.get("sel_eff")
+            without = ", ".join(f"{esc(k)}={esc(v)}" for k, v in sel["without"].items())
+            rows.append(
+                f'<tr><td class="c">runtime selection efficiency</td>'
+                f'<td colspan="6" style="text-align:left"><b>'
+                f"{_f(se * 100 if se is not None else None)}%</b>"
+                f'{esc(_ci_txt(sel.get("ci95"), 100))} of the fastest measured kernel over '
+                f'{esc(sel.get("n"))} of {esc(sel.get("n_problems"))} problems; '
+                f'{esc(sel.get("n_miss"))} misses (pick_measurement '
+                f'{esc(sel.get("pick_measurement"))}); p5 '
+                f'{_f(sel["p5"] * 100 if sel.get("p5") is not None else None)}%'
+                f"{('; not evaluated: ' + without) if without else ''}</td></tr>"
             )
         for t in y.get("timing") or []:
             rows.append(
                 f'<tr><td class="c">selection time, rsn={esc(t["rsn"])}</td>'
-                f'<td>{esc(t["n"])}</td><td>{esc(t["reps"])}</td>'
-                f'<td>{_f(t["on_p50"])}</td><td>{_f(t["off_p50"])}</td>'
-                f'<td>{_f(t["d_p10"], signed=True)}</td><td><b>{_f(t["d_p50"], signed=True)}</b></td>'
-                f'<td>{_f(t["d_p90"], signed=True)}</td><td>{_f(t["d_p99"], signed=True)}</td></tr>'
+                f'<td>{esc(t["n"])} problems, {esc(t["reps"])} reps</td>'
+                f'<td><b>{_f(t["on_p50"])}</b>{esc(_ci_txt(t.get("on_p50_ci")))}</td>'
+                f'<td>{_f(t["on_p99"])} / {_f(t["on_max"])}</td>'
+                f'<td>{_f(t["first_p50"])}{esc(_ci_txt(t.get("first_p50_ci")))}'
+                f' (n={esc(t.get("first_n"))}, max {_f(t.get("first_max"))})</td>'
+                f'<td>{_f(t["warm_p50"])}{esc(_ci_txt(t.get("warm_p50_ci")))}'
+                f' (n={esc(t.get("warm_n"))}, max {_f(t.get("warm_max"))})</td>'
+                + (
+                    f'<td>{_f(t["off_p50"])} / <b>{_f(t["d_p50"], signed=True)}</b>'
+                    f'{esc(_ci_txt(t.get("d_p50_ci")))} / {_f(t["d_p99"], signed=True)}</td>'
+                    if origami_reference
+                    else "<td></td>"
+                )
+                + "</tr>"
             )
         parts.append(
             f'<h3>{esc(y["yaml"])} <span class="mut">({esc(y.get("n_kept"))} of '
             f'{esc(y.get("n_entries"))} problems match the config)</span></h3>'
-            '<table style="max-width:1100px"><thead><tr><th class="c">check</th>'
-            "<th>problems</th><th>reps</th><th>ML-on p50 &micro;s</th>"
-            "<th>ML-off p50 &micro;s</th><th>&Delta; p10</th><th>&Delta; p50</th>"
-            "<th>&Delta; p90</th><th>&Delta; p99</th></tr></thead><tbody>"
+            '<table style="max-width:1400px"><thead><tr><th class="c">check</th>'
+            "<th>problems</th><th>ML-on p50 &micro;s [95% CI]</th><th>ML-on p99 / max</th>"
+            "<th>first call into a cell p50 [95% CI]</th><th>warm p50 [95% CI]</th>"
+            + (
+                "<th>[reference] ML-off p50 / &Delta; p50 [95% CI] / &Delta; p99</th>"
+                if origami_reference
+                else "<th></th>"
+            )
+            + "</tr></thead><tbody>"
             + "".join(rows)
             + "</tbody></table>"
         )
     return "".join(parts)
 
 
-def stage08_html(s8):
-    if not s8:
+def stage08_html(rows, target):
+    """Validation datasets against the fastest measured kernel: the stage's
+    own number (model picks and the runtime's fallback, as deployed) and the
+    model's own picks per leaf."""
+    if not rows:
         return '<p class="mut">no stage 8 results in this run.</p>'
-    rows = []
-    for r in s8:
-        d = (
-            r["model"] - r["origami"]
-            if r["model"] is not None and r["origami"] is not None
-            else None
-        )
-        wtl = (
-            f"{esc(r['wins'])} / {esc(r['ties'])} / {esc(r['losses'])}"
-            if r.get("paired_n")
-            else "&ndash;"
-        )
-        rows.append(
+    trs = []
+    for r in rows:
+        cells = [c for c in r["cells"].values() if c.get("sel_eff") is not None]
+        below = sum(1 for c in cells if c["sel_eff"] < target)
+        se, dep = r.get("sel_eff"), r.get("deployed")
+        trs.append(
             f'<tr><td class="c">{esc(r["name"])}</td><td>{esc(r["rc"])}</td>'
-            f'<td>{esc(r["n"]) if r["n"] is not None else "&ndash;"}</td>'
-            f'<td>{_f(r["model"])}</td><td>{_f(r["origami"])}</td>'
-            f'<td>{_f(d, signed=True)}</td><td>{wtl}</td><td>{_f(r["speedup"], 3)}</td></tr>'
+            f'<td>{esc(r.get("pick_measurement") or "")}</td>'
+            f'<td>{esc(r.get("n_evaluated")) if r.get("n_evaluated") is not None else "&ndash;"}</td>'
+            f'<td>{esc(r.get("n_miss_deployed")) if r.get("n_miss_deployed") is not None else "&ndash;"}</td>'
+            f"<td><b>{_f(dep * 100 if dep is not None else None)}</b></td>"
+            f"<td>{_f((dep - target) * 100 if dep is not None else None, signed=True)}</td>"
+            f'<td>{esc(r["n_served"]) if r["n_served"] is not None else "&ndash;"}</td>'
+            f"<td>{_f(se * 100 if se is not None else None)}</td>"
+            f"<td>{below} / {len(cells)}</td></tr>"
         )
     return (
-        '<table style="max-width:1100px"><thead><tr><th class="c">dataset</th><th>rc</th>'
-        "<th>GEMMs</th><th>model %</th><th>Origami %</th><th>&Delta; pp</th>"
-        "<th>wins / ties / losses</th><th>speedup vs Origami</th></tr></thead><tbody>"
-        + "".join(rows)
+        '<p class="cap">Report only: these datasets never steer sampling, training or the '
+        "cells chosen for training. <b>deployed %</b> = the stage's own number: geomean of "
+        "fastest measured / pick over every evaluated GEMM, the model's pick or, where the "
+        "model scores nothing that runs, the runtime's fallback; a miss is a pick without a "
+        "timing of its own under the pick measurement shown. <b>model picks %</b> = over the "
+        "GEMMs the model serves itself (the per-cell bars below).</p>"
+        '<table style="max-width:1200px"><thead><tr><th class="c">dataset</th><th>rc</th>'
+        "<th>pick measurement</th><th>GEMMs evaluated</th><th>misses</th><th>deployed %</th>"
+        "<th>vs target pp</th><th>served by the model</th><th>model picks %</th>"
+        "<th>cells below target</th></tr></thead><tbody>"
+        + "".join(trs)
         + "</tbody></table>"
+    )
+
+
+def stage07_tiles(s7):
+    """Per bench yaml: the runtime's selection efficiency with its interval,
+    and at the smallest request size the ML-on median on the first call into
+    a cell and warm, with their intervals."""
+    sel, first, warm = [], [], []
+    for y in (s7 or {}).get("yamls", []):
+        r = y.get("runtime_selection") or {}
+        if r.get("sel_eff") is not None:
+            ci = r.get("ci95")
+            sel.append(
+                [
+                    y["yaml"],
+                    round(r["sel_eff"] * 100, 2),
+                    [round(ci[0] * 100, 2), round(ci[1] * 100, 2)] if ci else None,
+                ]
+            )
+        t = (y.get("timing") or [None])[0]
+        if t and t.get("first_p50") is not None:
+            first.append([y["yaml"], t["rsn"], t["first_p50"], t.get("first_p50_ci")])
+        if t and t.get("warm_p50") is not None:
+            warm.append([y["yaml"], t["rsn"], t["warm_p50"], t.get("warm_p50_ci")])
+    return {"sel": sel, "first": first, "warm": warm}
+
+
+def shipped_html(sb, target):
+    """The shipped bundle: which bundle, its measurements on GEMMs it never
+    trained on, the deploy gate's comparison with the bundle it replaced on
+    the same GEMMs, and a later bundle the gate kept out."""
+    if not sb or not sb.get("shipped"):
+        final = (sb or {}).get("final_bundle")
+        msg = '<p class="mut">this run deployed no bundle.</p>'
+        if final:
+            msg += (
+                f'<p class="cap">{esc(final.get("round"))}: staged, not deployed '
+                f'({esc(final.get("reason"))}).</p>'
+            )
+        return msg
+    sh = sb["shipped"]
+    parts = [
+        f'<p class="cap">Shipped bundle: <b>{esc(sh.get("round"))}</b> '
+        f'(models {esc(os.path.basename(os.path.dirname(str(sh.get("train_dir") or ""))))}/'
+        f'{esc(os.path.basename(str(sh.get("train_dir") or "")))}, model file sha256 '
+        f'{esc(str(sh.get("model_file_sha256") or "")[:12])}). Headline source: '
+        f'<b>{esc(sb.get("source") or "none")}</b>'
+        + (
+            " (no measurement on GEMMs it did not train on)"
+            if not sb.get("source")
+            else ""
+        )
+        + ".</p>"
+    ]
+    ms = sb.get("measurements") or []
+    head = next(
+        (
+            i
+            for i, m in enumerate(ms)
+            if m["source"] == sb.get("source")
+            and m.get("sel_eff") == sb.get("held_out_sel_eff")
+        ),
+        None,
+    )
+    if ms:
+        trs = "".join(
+            f'<tr{" style=font-weight:600" if i == head else ""}>'
+            f'<td class="c">{esc(m["source"])}</td><td class="c">{esc(m["round"])}</td>'
+            f'<td>{intf_(m.get("n_eval"))}</td><td>{intf_(m.get("n_miss"))}</td>'
+            f'<td>{len(m.get("per_cell") or {})}</td>'
+            f'<td><b>{_f(m["sel_eff"] * 100 if m.get("sel_eff") is not None else None)}</b></td>'
+            f'<td>{_f((m["sel_eff"] - target) * 100 if m.get("sel_eff") is not None else None, signed=True)}</td></tr>'
+            for i, m in enumerate(ms)
+        )
+        parts.append(
+            '<p class="cap">Every measurement of this bundle on GEMMs it never trained on: '
+            "<b>deploy_gate</b> = stage06's gate slice of the round that shipped it, "
+            "<b>stage04b</b> = a later round's new GEMMs evaluated with the same models.pt. "
+            "Picks are charged under the pick measurement of the stage; the runtime's fallback "
+            "counts where the model scores nothing that runs.</p>"
+            '<table style="max-width:900px"><thead><tr><th class="c">source</th>'
+            '<th class="c">round</th><th>GEMMs</th><th>misses</th><th>cells</th>'
+            "<th>sel_eff %</th><th>vs target pp</th></tr></thead><tbody>"
+            f"{trs}</tbody></table>"
+        )
+    gate = sb.get("gate")
+    if gate:
+        base = gate.get("baseline") or {}
+        line = (
+            f"Deploy gate: {intf_(gate.get('n_evaluated'))} of {intf_(gate.get('n_gemms'))} "
+            f"gate GEMMs evaluated, pick_measurement {esc(gate.get('pick_measurement'))}, "
+            f"target {esc(gate.get('target'))}, "
+            f"{'passed' if gate.get('passed') else 'not passed'} ({esc(gate.get('reason'))})."
+        )
+        if base.get("n"):
+            line += (
+                f" On the same {intf_(base['n'])} GEMMs the bundle reaches "
+                f"<b>{_f((base.get('bundle_sel_eff') or 0) * 100)}%</b> and the bundle it "
+                f"replaced ({esc(os.path.basename(os.path.dirname(str(base.get('train_dir') or ''))))}) "
+                f"{_f((base.get('sel_eff') or 0) * 100)}% (paired)."
+            )
+        elif base.get("error"):
+            line += f" Baseline not measured: {esc(base['error'])}."
+        parts.append(f'<p class="cap">{line}</p>')
+    final = sb.get("final_bundle")
+    if final:
+        parts.append(
+            f'<p class="cap"><b>Not deployed:</b> {esc(final.get("round"))} staged a later '
+            f'bundle that its gate kept out ({esc(final.get("reason"))}; gate '
+            f'{_f((final.get("gate_sel_eff") or 0) * 100 if final.get("gate_sel_eff") is not None else None)}%). '
+            "The headline, the leaf-cell table and the bench analysis are of the shipped "
+            "bundle above.</p>"
+        )
+    return "".join(parts)
+
+
+def intf_(v):
+    return (
+        f"{int(v):,}"
+        if isinstance(v, (int, float)) and not isinstance(v, bool)
+        else "&ndash;"
     )
 
 
@@ -1187,13 +1504,14 @@ def timing_html(rounds, total):
     )
 
 
-def category_html(cat_rows, base_rows, n_total):
+def category_html(cat_rows, base_rows, n_total, target):
     if not cat_rows:
         return '<p class="mut">no held-out shapes in this run.</p>'
     rows = "".join(
-        f'<tr{" class=lose" if (r["delta"] is not None and r["delta"] < 0) else ""}>'
+        f'<tr{" class=lose" if (r["held"] is not None and r["held"] < target * 100) else ""}>'
         f'<td class="c">{esc(r["category"])}</td><td>{r["n"]:,}</td>'
-        f'<td>{_f(r["held"])}</td><td>{_f(r["origami"])}</td><td>{_f(r["delta"], signed=True)}</td></tr>'
+        f'<td>{_f(r["held"])}</td>'
+        f'<td>{_f(r["held"] - target * 100 if r["held"] is not None else None, signed=True)}</td></tr>'
         for r in cat_rows
     )
     out = (
@@ -1201,7 +1519,7 @@ def category_html(cat_rows, base_rows, n_total):
         "without re-used history shapes). Each GEMM counts with the held-out selection "
         "efficiency of the leaf cell it routes to.</p>"
         '<table style="max-width:820px"><thead><tr><th class="c">category</th><th>GEMMs</th>'
-        "<th>model %</th><th>Origami %</th><th>&Delta; pp</th></tr></thead>"
+        "<th>model %</th><th>vs target pp</th></tr></thead>"
         f"<tbody>{rows}</tbody></table>"
     )
     if base_rows:
@@ -1220,69 +1538,447 @@ def category_html(cat_rows, base_rows, n_total):
     return out
 
 
-def build(run_dir, out_path):
+def origami_reference_html(agg, traj, cells, cat_rows, s8):
+    """Opt-in external reference: the analytical Origami pick next to the
+    model, always on the same GEMMs. Nothing in the pipeline or in the rest
+    of this report uses it."""
+
+    def tab(head, rows):
+        ths = "".join(
+            f'<th class="c">{h}</th>' if i == 0 else f"<th>{h}</th>"
+            for i, h in enumerate(head)
+        )
+        return (
+            '<div class="scroll"><table style="margin-bottom:0;font-size:11px"><thead><tr>'
+            f"{ths}</tr></thead><tbody>{''.join(rows)}</tbody></table></div>"
+        )
+
+    def d(a, b):
+        return a - b if a is not None and b is not None else None
+
+    parts = [
+        '<p class="cap">External reference only: Origami is the analytical model hipBLASLt '
+        "ranks with when tilewright is off. No ranking, gap, action or cell selection of the "
+        "pipeline or of this report depends on these numbers. Every comparison is paired: "
+        "the model and Origami on the same GEMMs (those with a measured Origami pick), so "
+        "the model's numbers here can differ from the headline over every GEMM.</p>",
+        f'<p class="cap">Shipped bundle on {intf_(agg.get("paired_n"))} held-out GEMMs: model '
+        f'{_f(agg.get("paired_model"))}%, Origami {_f(agg.get("paired_origami"))}%, &Delta; '
+        f'{_f(agg.get("delta"), signed=True)} pp; per-cell best of both '
+        f'{_f(agg.get("router_bound"))}%, model ahead in '
+        f'{_f(agg.get("model_win_frac"), 1)}% of the cells.</p>',
+        "<h3>Held-out per round (stage04b)</h3>",
+        tab(
+            ["round", "same GEMMs", "model %", "Origami %", "&Delta; pp"],
+            [
+                f'<tr><td class="c">{esc(r["round"])}</td><td>{intf_(r.get("paired_n"))}</td>'
+                f'<td>{_f(r["paired_model"])}</td><td>{_f(r["paired_origami"])}</td>'
+                f'<td>{_f(d(r["paired_model"], r["paired_origami"]), signed=True)}</td></tr>'
+                for r in traj
+            ],
+        ),
+        "<h3>Leaf cells of the shipped bundle (held-out)</h3>",
+        tab(
+            ["cell", "model %", "Origami %", "&Delta; pp"],
+            [
+                f'<tr><td class="c">{esc(c["cell"])}</td><td>{_f(c["held_paired"])}</td>'
+                f'<td>{_f(c["held_ori"])}</td><td>{_f(c["held_delta"], signed=True)}</td></tr>'
+                for c in cells
+                if c.get("held_paired") is not None and c.get("held_ori") is not None
+            ],
+        ),
+        '<p class="mut">stage05\'s in-sample Origami numbers are over a different set of '
+        "GEMMs than the model's and are not shown.</p>",
+    ]
+    if cat_rows:
+        parts += [
+            "<h3>Held-out GEMMs by shape category</h3>",
+            tab(
+                ["category", "GEMMs", "model %", "Origami %", "&Delta; pp"],
+                [
+                    f'<tr><td class="c">{esc(r["category"])}</td><td>{r["n"]:,}</td><td>{_f(r["paired"])}</td>'
+                    f'<td>{_f(r["origami"])}</td><td>{_f(r["delta"], signed=True)}</td></tr>'
+                    for r in cat_rows
+                ],
+            ),
+        ]
+    if s8:
+        parts += [
+            "<h3>Stage 8 datasets</h3>",
+            tab(
+                [
+                    "dataset",
+                    "same GEMMs",
+                    "model %",
+                    "Origami %",
+                    "&Delta; pp",
+                    "wins / ties / losses",
+                    "speedup vs Origami [95% CI]",
+                ],
+                [
+                    f'<tr><td class="c">{esc(r["name"])}</td><td>{intf_(r["paired_n"])}</td><td>{_f(r["model"])}</td>'
+                    f'<td>{_f(r["origami"])}</td><td>{_f(d(r["model"], r["origami"]), signed=True)}</td>'
+                    f'<td>{esc(r["wins"])} / {esc(r["ties"])} / {esc(r["losses"])}</td>'
+                    f'<td>{_f(r["speedup"], 3)}{esc(_ci_txt(r.get("speedup_ci95"), 1, 3))}</td></tr>'
+                    for r in s8
+                ],
+            ),
+        ]
+    return (
+        '<h2 id="origami">External reference: Origami</h2>'
+        "<details><summary>show the Origami comparison (opt-in, not used by the pipeline)</summary>"
+        + "".join(parts)
+        + "</details>"
+    )
+
+
+_DEFAULT_CELL_KEYS = (
+    "cell",
+    "n_gemms",
+    "model",
+    "deployed",
+    "k_delta",
+    "held",
+    "held_inherited",
+    "smartK",
+    "cap",
+)
+
+
+def _analysis(run_dir, jobs, engine, notes, pick_measurement, diagnostics):
+    rs.pipeline_on_path()
+    try:
+        from lib import run_analysis
+
+        return run_analysis.analyze_run(
+            run_dir,
+            jobs=jobs,
+            use_engine=engine,
+            pick_measurement=pick_measurement,
+            diagnostics=diagnostics,
+        )
+    except Exception as e:  # noqa: BLE001
+        notes.append(f"bench analysis failed: {type(e).__name__}: {e}")
+        return None
+
+
+def _stage08_decomposition(run_dir, s8rows, jobs, engine, notes, pick_measurement):
+    """Decomposition of every stage08 dataset with enriched chunks (report
+    only), under the shipped bundle and its pool, with the dataset's own pick
+    measurement (else the config's)."""
+    rs.pipeline_on_path()
+    try:
+        from lib import run_analysis as ra
+        from lib.subcells import load_cumulative_split_tree
+
+        model = ra.final_model(run_dir, want_bytes=engine)
+        if model is None:
+            return {}
+        tw = ra.engine_module(model) if engine else None
+        lib_pool = ra.library_pool(model)
+        tree = load_cumulative_split_tree(ra.round_dirs(run_dir))
+        out = {}
+        s8dir = os.path.join(run_dir, "validate", "stage08")
+        for r in s8rows:
+            ds = r["dataset"]
+            enriched = ra.stage08_enriched_dir(ra.Path(s8dir), ds)
+            if enriched is None:
+                continue
+            summ = ds.get("summary") or {}
+            bench = ra.load_bench(
+                [enriched],
+                tree=tree,
+                jobs=jobs,
+                keep=ra.workload_keep(summ.get("workload_filter") or {}),
+            )
+            if not bench.gemms:
+                continue
+            e = ra.evaluate(
+                bench,
+                ra.pool_for(bench, lib_pool),
+                model,
+                tw=tw,
+                pick_measurement=summ.get("pick_measurement") or pick_measurement,
+                restrict_to_pool=True,
+            )
+            out[str(r["name"])] = {
+                "engine": e.engine,
+                "pick_measurement": e.pick_measurement,
+                "decomposition": ra.decomposition(e),
+            }
+        return out
+    except Exception as e:  # noqa: BLE001
+        notes.append(f"stage 8 decomposition failed: {type(e).__name__}: {e}")
+        return {}
+
+
+def subset_html(path):
+    doc = load_json(path)
+    if not isinstance(doc, dict) or not doc.get("sizes"):
+        return (
+            '<p class="mut">no shipped_subset.json (scripts/choose_shipped_subset.py) '
+            "for this run.</p>"
+        )
+    _pipeline_on_path()
+    from lib.shipped_subset import report_html
+
+    return report_html(doc, esc)
+
+
+def gate_check_html(analysis, sb):
+    """The report's re-ranking of the deploy-gate slice next to the gate's
+    own record (they agree when the report charges picks as stage06 does)."""
+    gate = (sb or {}).get("gate")
+    mine = ((analysis or {}).get("gate") or {}).get("decomposition", {}).get("*")
+    if not gate or not mine:
+        return ""
+    se = mine.get("deployed_sel_eff")
+    g = gate.get("sel_eff")
+    agree = (
+        se is not None
+        and g is not None
+        and abs(se - g) <= 1e-6
+        and mine.get("n_deployed") == gate.get("n_evaluated")
+    )
+    return (
+        f'<p class="cap">Deploy-gate slice re-ranked by this report: '
+        f"<b>{_f(se * 100 if se is not None else None, 4)}%</b> over "
+        f'{intf_(mine.get("n_deployed"))} GEMMs ({intf_(mine.get("n_miss"))} misses); '
+        f"stage06/gate.json: {_f(g * 100 if g is not None else None, 4)}% over "
+        f'{intf_(gate.get("n_evaluated"))} ({intf_(gate.get("n_miss"))} misses) &mdash; '
+        f'{"they agree" if agree else "<b>they differ</b>"}.</p>'
+    )
+
+
+def _evidence(run_dir, settings, notes, gemm_counts=None):
+    rs.pipeline_on_path()
+    try:
+        from lib import cell_evidence as ce
+
+        evidence = ce.collect(ce.Path(run_dir), gemm_counts)
+        as_enhance = ce.collect(ce.Path(run_dir))
+    except Exception as e:  # noqa: BLE001
+        notes.append(f"cell evidence failed: {type(e).__name__}: {e}")
+        return {}, []
+    t = settings["target"]
+    selections = []
+    for n in (5, 10):
+        for rank in ("gain", "sel_eff"):
+            picked = ce.select_weak_cells(
+                as_enhance, weakest=n, below=t, rank_by=rank, target=t
+            )
+            selections.append(
+                (f"--weakest {n} --rank-by {rank}", [e.cell for e in picked])
+            )
+    below = ce.select_weak_cells(as_enhance, below=t, target=t)
+    selections.append((f"--below {t:g}", [e.cell for e in below]))
+    return evidence, selections
+
+
+def _train_round(sb):
+    td = str(((sb or {}).get("shipped") or {}).get("train_dir") or "")
+    name = os.path.basename(os.path.dirname(td))
+    return name if round_num(name) >= 0 else None
+
+
+def _analysis_caption(analysis, what):
+    model = analysis.get("model") or {}
+    deployed = (
+        f"the shipped bundle (deploy record of {model.get('deploy_round')}, models of "
+        f"{model.get('train_round')})"
+        if model.get("deployed")
+        else f"the newest trained model ({model.get('round')})"
+    )
+    return (
+        f'<p class="cap">{what}: {analysis["n_gemms"]:,} GEMMs under {esc(deployed)}, '
+        f'model file from {esc(model.get("source"))}, {esc(model.get("n_cells"))} cells, '
+        f'non-temporal rule {"on" if model.get("non_temporal_rule") else "off"}, cascade keys '
+        f'{esc(model.get("cascade_keys"))}; pool: {esc(analysis["pool"]["size"])} solutions '
+        f'({esc(analysis["pool"].get("signatures"))} kernel signatures) from the '
+        f'{esc(analysis["pool"]["source"])}; pick measurement '
+        f'<code>{esc(analysis.get("pick_measurement"))}</code>'
+        + (
+            f'; {analysis["n_out_of_pool_rows"]:,} measured rows of kernels outside the pool '
+            "(oracle candidates only)"
+            if analysis.get("n_out_of_pool_rows")
+            else ""
+        )
+        + (
+            f'; {analysis["n_inconsistent"]} GEMMs where the engine scored a kernel outside '
+            "the Python tier 1"
+            if analysis.get("n_inconsistent")
+            else ""
+        )
+        + ".</p>"
+        + "".join(f'<p class="mut">{esc(n)}</p>' for n in model.get("notes") or [])
+    )
+
+
+def build(
+    run_dir,
+    out_path,
+    *,
+    jobs=1,
+    engine=True,
+    bench=True,
+    origami_reference=False,
+    selection_budget_us=10.0,
+    target=None,
+    diagnostics=False,
+    shipped_subset=None,
+):
     run_dir = run_dir.rstrip("/")
-    held = held_out_breakdown(run_dir)
+    notes = []
+    config_text = config_source(run_dir)
+    settings = rs.run_settings(config_text)
+    if target is not None:
+        settings["target"] = float(target)
+    tgt = settings["target"]
+    pick_measurement = settings["pick_measurement"]
+    sb = shipped_bundle(run_dir) or {}
+    shipped_cells = sb.get("per_cell") or {}
+    latest = held_out_breakdown(run_dir)
+    held = shipped_cells or latest
+    held_note = (
+        f"the shipped bundle on GEMMs it never trained on ({esc(sb.get('source'))})"
+        if shipped_cells
+        else "no measurement of the shipped bundle on GEMMs it never trained on: the "
+        "latest stage04b measurement per leaf (each by the model of the round before it)"
+    )
     agg = held_out_aggregate(held)
     traj = held_out_rounds(run_dir)
     train = training_rounds(run_dir)
-    cells = final_cells(run_dir, held)
+    cells_full = final_cells(run_dir, held, upto=_train_round(sb))
     s7 = stage07(run_dir)
     s8 = stage08(run_dir)
     t_rounds, t_total = timing_rows(run_dir)
     cat_rows, base_rows, n_cat = held_out_by_category(run_dir, held)
-    in_sample = [c["model"] for c in cells if c.get("model") is not None]
+    in_sample = [c["model"] for c in cells_full if c.get("model") is not None]
 
-    def rt_eff(key):
+    analysis = (
+        _analysis(run_dir, jobs, engine, notes, pick_measurement, diagnostics)
+        if bench
+        else None
+    )
+    decomp = (analysis or {}).get("decomposition") or {}
+    counts = {c: d["n_gemms"] for c, d in decomp.items() if c != "*"} or None
+    evidence, selections = _evidence(run_dir, settings, notes, counts)
+    improve = rs.improve_rows(evidence, decomp, settings)
+
+    s8_summary = load_json(os.path.join(run_dir, "validate", "stage08", "summary.json"))
+    s8rows = (
+        rs.stage08_model_rows(os.path.join(run_dir, "validate", "stage08"), s8_summary)
+        if isinstance(s8_summary, dict)
+        else []
+    )
+    s8_dec = (
+        _stage08_decomposition(run_dir, s8rows, jobs, engine, notes, pick_measurement)
+        if bench and s8rows
+        else {}
+    )
+    s7_summary = load_json(os.path.join(run_dir, "validate", "stage07", "summary.json"))
+    s7_cells = []
+    if isinstance(s7_summary, dict):
+        rs.pipeline_on_path()
+        try:
+            from lib.cell_evidence import model_labels, split_tree
+
+            s7_cells = rs.stage07_per_cell(
+                os.path.join(run_dir, "validate", "stage07"),
+                s7_summary,
+                labels=model_labels(rs.Path(run_dir)),
+                tree=split_tree(rs.Path(run_dir)),
+            )
+        except Exception as e:  # noqa: BLE001
+            notes.append(f"stage 7 per-cell timing failed: {type(e).__name__}: {e}")
+    try:
+        s4b_ctx = stage04b_contexts(run_dir)
+    except Exception as e:  # noqa: BLE001
+        notes.append(f"stage04b context results unreadable: {type(e).__name__}: {e}")
+        s4b_ctx = []
+
+    def rt_eff():
         num = den = 0.0
-        for c in cells:
-            n, w, p = c.get("n_gemms") or 0, c.get("held_w_us"), c.get(key)
+        for c in cells_full:
+            n, w, p = c.get("n_gemms") or 0, c.get("held_w_us"), c.get("held_pick_us")
             if n and w and p:
                 num += n * w
                 den += n * p
         return round(num / den * 100, 2) if den else None
 
-    worst = sorted(
-        (
-            dict(
-                c,
-                extra_us=(
-                    c["n_gemms"] * (c["held_pick_us"] - c["held_ori_pick_us"])
-                    if c.get("held_pick_us") and c.get("held_ori_pick_us")
-                    else None
-                ),
-            )
-            for c in cells
-        ),
-        key=lambda c: (
-            c["held_delta"] is None,
-            c["held_delta"] if c["held_delta"] is not None else 0,
-        ),
-    )[:25]
-    s7_tile = None
-    for y in (s7 or {}).get("yamls", []):
-        for t in y.get("timing") or []:
-            if t["rsn"] == "1" and t.get("d_p50") is not None:
-                s7_tile = t["d_p50"]
-                break
-        if s7_tile is not None:
-            break
+    cells = []
+    for c in cells_full:
+        row = {k: c.get(k) for k in _DEFAULT_CELL_KEYS}
+        row["gap"] = (
+            round(c["held"] - tgt * 100, 2) if c.get("held") is not None else None
+        )
+        cells.append(row)
+    all_dec = decomp.get("*") or {}
+    shipped = sb.get("shipped") or {}
+    gate = sb.get("gate") or {}
+    base = gate.get("baseline") or {}
+    final = sb.get("final_bundle") or {}
     summary = {
         "run": os.path.basename(run_dir),
         "rounds": len(round_dirs(run_dir)),
-        "held": agg,
+        "target": round(tgt * 100, 2),
+        "pick_measurement": pick_measurement,
+        "shipped": {
+            "round": shipped.get("round"),
+            "train_round": _train_round(sb),
+            "source": sb.get("source"),
+            "sel_eff": _pct(sb.get("held_out_sel_eff")),
+            "n": sb.get("n_gemms") if sb.get("source") else None,
+            "n_miss": sb.get("n_miss"),
+            "n_cells": sb.get("n_cells"),
+        },
+        "baseline": (
+            {
+                "n": base["n"],
+                "bundle": _pct(base.get("bundle_sel_eff")),
+                "base": _pct(base.get("sel_eff")),
+            }
+            if base.get("n")
+            else None
+        ),
+        "not_deployed": (
+            {"round": final.get("round"), "reason": final.get("reason")}
+            if final
+            else None
+        ),
+        "held": {
+            "model": agg.get("model"),
+            "n_cells": agg.get("n_cells"),
+            "n_miss": agg.get("n_miss"),
+            "shipped": bool(shipped_cells),
+        },
         "in_sample_mean": (
             round(sum(in_sample) / len(in_sample), 2) if in_sample else None
         ),
-        "rt_model": rt_eff("held_pick_us"),
-        "rt_origami": rt_eff("held_ori_pick_us"),
+        "rt_model": rt_eff(),
         "n_cells": len(cells),
         "bin_mb": deployed_size_mb(run_dir),
         "shapes": shapes_total(run_dir),
         "wall": fmt_dur(t_total) if t_total else None,
-        "sel_delta_us": s7_tile,
+        "s7": stage07_tiles(s7),
+        "n_action": sum(1 for r in improve if r["action"] != "none"),
+        "gain": round(sum(r["gain"] for r in improve) * 100, 2) if improve else None,
+        "bench_sel_eff": _pct(all_dec.get("sel_eff")),
+        "bench_miss": all_dec.get("n_miss"),
+        "bench_unserved": (
+            all_dec.get("n_gemms", 0) - all_dec.get("n_served", 0) if all_dec else None
+        ),
+        "bench_gemms": all_dec.get("n_gemms"),
     }
-    s8pc = {r["name"]: r["per_cell"] for r in s8 if r.get("name") and r.get("per_cell")}
+    s8pc = {
+        str(r["name"]): sorted(
+            [c, round(v["sel_eff"] * 100, 2), v["n_served"]]
+            for c, v in r["cells"].items()
+            if v.get("sel_eff") is not None
+        )
+        for r in s8rows
+        if r.get("name") and r["cells"]
+    }
     images = cell3d_images(list(held) or [c["cell"] for c in cells])
     cell3d = (
         "".join(
@@ -1295,47 +1991,149 @@ def build(run_dir, out_path):
     train_rows = (
         "".join(
             f'<tr><td class="c">{esc(r["round"])}</td><td>{_f(r["model"])}</td><td>{_f(r["deployed"])}</td>'
-            f'<td>{_f(r["origami"])}</td><td>{esc(r["n_cells"])}</td><td>{esc(r["n_gemms"])}</td></tr>'
+            f'<td>{esc(r["n_cells"])}</td><td>{esc(r["n_gemms"])}</td></tr>'
             for r in train
         )
-        or '<tr><td class="c" colspan="6">no stage05 metrics.json in this run</td></tr>'
+        or '<tr><td class="c" colspan="5">no stage05 metrics.json in this run</td></tr>'
     )
-    page = (
-        _HTML.replace("__TITLE__", esc(summary["run"]))
-        .replace("__S7__", stage07_html(s7))
-        .replace("__S8__", stage08_html(s8))
-        .replace("__TRAINROWS__", train_rows)
-        .replace("__CHART_TREND__", chart_trend(train))
-        .replace(
-            "__CHART_HELD__",
-            chart_hist(
-                cells,
-                "held",
-                "Held-out selection efficiency per leaf cell (new shapes of later rounds)",
+    traj_js = [
+        {
+            "round": r["round"],
+            "model": r["model"],
+            "n_gemms": r["n_gemms"],
+            "n_miss": r["n_miss"],
+        }
+        for r in traj
+    ]
+    na = '<p class="mut">no training benches (round_*/stage04 chunks) in this run.</p>'
+    params, param_cells, dparams, dparam_cells = {}, {}, {}, {}
+    if analysis:
+        held_out = analysis.get("held_out")
+        sections = {
+            "DECOMP": _analysis_caption(
+                analysis, "Training benches of the shipped bundle"
+            )
+            + rs.decomposition_html(analysis, order=base_order),
+            "DECOMP_HELD": (
+                f'<p class="cap">{held_out["n_gemms"]:,} GEMMs the shipped bundle never '
+                "trained on: the deploy-gate slice of its training round and the stage04 "
+                "rows of later rounds, under the same model, pool and pick measurement as "
+                "the training benches.</p>"
+                + gate_check_html(analysis, sb)
+                + rs.decomposition_html(
+                    dict(
+                        held_out,
+                        engine=analysis.get("engine"),
+                        pick_measurement=analysis.get("pick_measurement"),
+                    ),
+                    order=base_order,
+                )
+                if held_out
+                else '<p class="mut">no bench of GEMMs the shipped bundle never trained '
+                "on (no deploy-gate slice and no later round).</p>"
             ),
+            "KERNELS": rs.kernels_html(analysis) + rs.cell_usage_html(analysis),
+            "PARAMS": rs.parameters_html(),
+            "DIAG": rs.diagnostics_html(analysis),
+            "PRUNE": rs.pruning_html(analysis),
+        }
+        p = analysis.get("parameters") or {}
+        params, param_cells = p.get("params") or {}, p.get("by_cell") or {}
+        dg = p.get("diagnostics") or {}
+        dparams, dparam_cells = dg.get("params") or {}, dg.get("by_cell") or {}
+    else:
+        sections = {
+            "DECOMP": na,
+            "DECOMP_HELD": na,
+            "KERNELS": na,
+            "PARAMS": na,
+            "DIAG": "",
+            "PRUNE": na,
+        }
+    if diagnostics and not dparams:
+        sections["DIAG"] = (
+            '<h2 id="diagnostics">Diagnostics: framework-specific kernel parameters</h2>'
+            '<p class="mut">no bench analysis to break down.</p>'
         )
-        .replace(
-            "__CHART_INSAMPLE__",
-            chart_hist(
-                cells,
-                "deployed",
-                "In-sample selection efficiency per leaf cell (its own training GEMMs)",
-            ),
-        )
-        .replace("__CATEGORIES__", category_html(cat_rows, base_rows, n_cat))
-        .replace("__TREE__", esc(cell_tree_ascii(cells)))
-        .replace("__CELL3D__", cell3d)
-        .replace("__TIMING__", timing_html(t_rounds, t_total))
-        .replace("__CONFIG__", esc(config_source(run_dir)))
-        .replace("__TRAJ__", script_json(_finite(traj)))
-        .replace("__CELLS__", script_json(_finite(cells)))
-        .replace("__WORST__", script_json(_finite(worst)))
-        .replace("__SUMM__", script_json(_finite(summary)))
-        .replace("__S8PC__", script_json(_finite(s8pc)))
+    s8_dec_html = "".join(
+        f"<details><summary>{esc(name)}: loss decomposition (validation, report only)</summary>"
+        + rs.decomposition_html(d, order=base_order)
+        + "</details>"
+        for name, d in sorted(s8_dec.items())
     )
+    contexts = (
+        rs.contexts_html(analysis, s4b_ctx, settings, context_names(config_text))
+        if rs.has_contexts(analysis, s4b_ctx)
+        else '<p class="mut">every row of this run is of the exclusive context.</p>'
+    )
+    data = {
+        "TRAJ": traj_js,
+        "CELLS": cells,
+        "S": summary,
+        "S8PC": s8pc,
+        "PARAMS": params,
+        "PCELLS": param_cells,
+        "DPARAMS": dparams,
+        "DPCELLS": dparam_cells,
+    }
+    parts = {
+        "TITLE": esc(summary["run"]),
+        "NOTES": "".join(f'<p class="mut">{esc(n)}</p>' for n in notes),
+        "SHIPPED": shipped_html(sb, tgt),
+        "SUBSET": subset_html(
+            shipped_subset or os.path.join(run_dir, "shipped_subset.json")
+        ),
+        "IMPROVE": rs.improve_html(improve, settings, selections),
+        "CONTEXTS": contexts,
+        "SELTIME": rs.selection_time_html(
+            s7_cells, float(selection_budget_us), origami_reference
+        ),
+        "S7": stage07_html(s7, origami_reference),
+        "S8": stage08_html(s8rows, tgt) + s8_dec_html,
+        "TRAINROWS": train_rows,
+        "CHART_TREND": chart_trend(train),
+        "HELD_NOTE": held_note,
+        "CHART_HELD": chart_hist(
+            cells_full,
+            "held",
+            "Held-out selection efficiency per leaf cell (GEMMs the model did not train on)",
+        ),
+        "CHART_INSAMPLE": chart_hist(
+            cells_full,
+            "deployed",
+            "In-sample selection efficiency per leaf cell (its own training GEMMs)",
+        ),
+        "CATEGORIES": category_html(cat_rows, base_rows, n_cat, tgt),
+        "TREE": esc(cell_tree_ascii(cells_full)),
+        "CELL3D": cell3d,
+        "TIMING": timing_html(t_rounds, t_total),
+        "CONFIG": esc(config_text),
+        "ORIGAMI": (
+            origami_reference_html(agg, traj, cells_full, cat_rows, s8)
+            if origami_reference
+            else ""
+        ),
+        "DATA": script_json(_finite(data)),
+        **sections,
+    }
+    page = fill(_HTML, parts)
     with open(out_path, "w") as f:
         f.write(page)
     return out_path
+
+
+_SLOT = re.compile(r"__([A-Z][A-Z0-9_]*)__")
+
+
+def fill(template, parts):
+    """`template` with every __NAME__ slot of `parts` replaced in one pass,
+    so text inserted for one slot is never searched for another."""
+    return _SLOT.sub(lambda m: parts.get(m.group(1), m.group(0)), template)
+
+
+def base_order(label):
+    base, *segs = (label or "").split("#")
+    return (base_cell_key(base), [seg_key(s) for s in segs])
 
 
 _HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -1343,7 +2141,7 @@ _HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>Run report - __TITLE__</title><style>
 :root{--bd:#d8dee4;--mut:#57606a;--win:#e6ffec;--lose:#ffebe9;--weak:#fff8c5;}
 body{font:14px/1.45 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1f2328;margin:0;padding:24px;max-width:1760px;}
-p,h1,h2,.stats,details{max-width:1200px;}
+p,h1,h2,.stats,details>summary{max-width:1200px;}
 h1{font-size:20px;margin:0 0 2px;} h2{font-size:15px;margin:24px 0 8px;} h3{font-size:13px;margin:14px 0 6px;}
 .cap{color:var(--mut);font-size:12.5px;margin:0 0 12px;} .mut{color:var(--mut);font-size:11.5px;}
 .stats{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:8px;}
@@ -1362,38 +2160,66 @@ figure.chart svg{width:100%;height:auto;border:1px solid var(--bd);border-radius
 .s8r{display:flex;align-items:center;height:18px;white-space:nowrap;} .s8lab{overflow:hidden;text-overflow:ellipsis;color:#444;}
 .s8bar{flex:0 0 240px;position:relative;height:13px;} .s8mid{position:absolute;left:120px;top:-2px;bottom:-2px;width:1px;background:#ccc;}
 .s8fill{position:absolute;top:1px;height:11px;} .s8v{flex:0 0 200px;text-align:right;color:#57606a;padding-left:12px;}
+details{margin:6px 0;} summary{cursor:pointer;color:#0969da;}
 </style></head><body>
 <h1>Run report &mdash; __TITLE__</h1>
 <p class="cap" id="cap"></p>
 <div class="stats" id="stats"></div>
-<p class="cap"><b>Cells</b> are <code>M-tier|N-tier|K-tier|Batch</code>: M and N Tiny &le;32, Small &le;128, Mid &le;512, Large &gt;512; K TinyK &le;32, MidK &le;512, LargeK &gt;512; Bnone = unbatched, Bany = batched. Split suffixes such as <code>#K&gt;4096</code> subdivide a cell. Selection efficiency of a GEMM = time of the fastest measured solution / time of the picked solution (every solution of the library counts with its own time, also when several share kernel parameters); aggregates are geometric means.</p>
+__NOTES__
+<h2 id="shipped">Shipped bundle</h2>
+__SHIPPED__
+<p class="cap"><b>Cells</b> are <code>M-tier|N-tier|K-tier|Batch</code>: M and N Tiny &le;32, Small &le;128, Mid &le;512, Large &gt;512; K TinyK &le;32, MidK &le;512, LargeK &gt;512; Bnone = unbatched, Bany = batched. Split suffixes such as <code>#K&gt;4096</code> subdivide a cell. Selection efficiency of a GEMM = time of the fastest measured solution / time of the picked solution (every solution of the library counts with its own time, also when several share kernel parameters); aggregates are geometric means. Every target and gap in this report is absolute, against the fastest measured kernel. A <b>kernel</b> is its signature (macro tile M and N, depthU, matrix instruction M, N and K, cache hints A and B); the library solutions sharing one are its members.</p>
+
+<h2 id="subset">Shipped candidate set</h2>
+__SUBSET__
+
+<h2 id="improve">Where to improve</h2>
+__IMPROVE__
+
+<h2 id="decomp">Loss decomposition per cell (training benches)</h2>
+__DECOMP__
+
+<h2 id="decomp_held">Loss decomposition per cell (GEMMs the shipped bundle never trained on)</h2>
+__DECOMP_HELD__
+
+<h2 id="contexts">Execution contexts</h2>
+__CONTEXTS__
+
+<h2 id="kernels">Kernel usage</h2>
+__KERNELS__
+
+<h2 id="params">Kernel parameters</h2>
+__PARAMS__
+__DIAG__
+
+<h2 id="prune">Pool-drop candidates</h2>
+__PRUNE__
+
+<h2 id="seltime">Selection time per cell (stage 7)</h2>
+__SELTIME__
 
 <h2>Stage 7 &mdash; selection time and C++/Python pick parity</h2>
-<p class="cap">Selection time is hipBLASLt's per-call "Solution selection time" for the request size shown (rsn); &Delta; = ML-on minus ML-off for the same problem, median over repetitions, summarized over problems. The first call of each run (library load) is excluded. Pick parity compares the pool position of hipBLASLt's top-1 pick and its serving cell with the offline ranking of the same model and library.</p>
+<p class="cap">Selection time is hipBLASLt's per-call "Solution selection time" with tilewright (ML-on) for the request size shown (rsn), median over repetitions per problem, summarized over problems; the first call of each run (library load) is excluded, and the rest split into the first call of a run into a serving cell and the warm calls after it. Intervals are bootstrap 95% intervals of the median. Pick parity compares the pool position of hipBLASLt's top-1 pick and its serving cell with the offline ranking of the same model and library; the runtime selection efficiency charges those top-1 picks with the bench timings of the same problems.</p>
 __S7__
 
-<h2>Stage 8 &mdash; selection efficiency on external datasets</h2>
+<h2>Stage 8 &mdash; selection efficiency on validation datasets</h2>
 __S8__
 <div id="s8charts"></div>
 
 <h2>Held-out selection efficiency per round (stage04b)</h2>
-<p class="cap">The model of the previous round on this round's new shapes. The last row aggregates the latest measurement of every leaf cell.</p>
-<table id="traj" style="max-width:900px"><thead><tr><th class="c">round</th><th>model %</th><th>Origami %</th><th>&Delta; pp</th><th>GEMMs</th></tr></thead><tbody id="tbody_traj"></tbody></table>
+<p class="cap">The model of the previous round on this round's new shapes (history; each row is another model). The last row is the shipped bundle's headline.</p>
+<table id="traj" style="max-width:900px"><thead><tr><th class="c">round</th><th>model %</th><th>vs target pp</th><th>GEMMs</th><th>misses</th></tr></thead><tbody id="tbody_traj"></tbody></table>
 
 <h2>Training (stage05, in-sample)</h2>
-<p class="cap">Selection efficiency on the GEMMs of the cells trained in that round: model = full ranking, deployed = whitelist-restricted ranking as shipped, Origami = the analytical pick.</p>
-<table style="max-width:900px"><thead><tr><th class="c">round</th><th>model %</th><th>deployed %</th><th>Origami %</th><th>cells trained</th><th>GEMMs</th></tr></thead><tbody>__TRAINROWS__</tbody></table>
+<p class="cap">Selection efficiency on the GEMMs of the cells trained in that round: model = full ranking, deployed = whitelist-restricted ranking as shipped.</p>
+<table style="max-width:900px"><thead><tr><th class="c">round</th><th>model %</th><th>deployed %</th><th>cells trained</th><th>GEMMs</th></tr></thead><tbody>__TRAINROWS__</tbody></table>
 __CHART_TREND__
 
-<h2 id="cellh">Leaf cells of the final model</h2>
-<p class="cap"><b>held-out</b> values are on new shapes of later rounds (<b>*</b> = inherited from the parent cell); the other columns are in-sample. K = whitelist size; ed/hd/ih = embedding / hidden / interaction widths. Click a header to sort.</p>
+<h2 id="cellh">Leaf cells of the shipped bundle</h2>
+<p class="cap"><b>held-out</b> values: __HELD_NOTE__ (<b>*</b> = inherited from the parent cell); the other columns are in-sample. vs target = held-out minus the target. K = whitelist size; ed/hd/ih = embedding / hidden / interaction widths. Click a header to sort.</p>
 <div class="scroll"><table id="cells" style="margin-bottom:0;font-size:11px"><thead><tr id="chead"></tr></thead><tbody id="tbody_cells"></tbody></table></div>
 __CHART_HELD__
 __CHART_INSAMPLE__
-
-<h2>Worst held-out cells</h2>
-<p class="cap">Leaf cells sorted by held-out &Delta; vs Origami. extra &micro;s = GEMMs &times; (model pick &minus; Origami pick) held-out latency geomeans.</p>
-<div class="scroll"><table style="margin-bottom:0;font-size:11px"><thead><tr id="worsth"></tr></thead><tbody id="tbody_worst"></tbody></table></div>
 
 <h2>Held-out GEMMs by shape category</h2>
 __CATEGORIES__
@@ -1409,69 +2235,155 @@ __TIMING__
 
 <h2>Configuration</h2>
 <details><summary>config (as written, before environment expansion)</summary><pre class="cfg">__CONFIG__</pre></details>
+__ORIGAMI__
 
 <script>
-const TRAJ=__TRAJ__, CELLS=__CELLS__, WORST=__WORST__, S=__SUMM__, S8PC=__S8PC__;
+const D=__DATA__;
+const TRAJ=D.TRAJ, CELLS=D.CELLS, S=D.S, S8PC=D.S8PC, T=S.target;
 function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
 function num(v,d){return (v==null||!isFinite(v))?"\u2013":Number(v).toFixed(d==null?2:d);}
 function sgn(v,d){return (v==null||!isFinite(v))?"\u2013":(v>=0?"+":"")+Number(v).toFixed(d==null?2:d);}
-const H=S.held||{};
-document.getElementById("cap").textContent="Run "+S.run+" \u2013 "+S.rounds+" rounds"+(S.wall?(" \u2013 wall-clock "+S.wall):"");
+document.getElementById("cap").textContent="Run "+S.run+" \u2013 "+S.rounds+" rounds"+(S.wall?(" \u2013 wall-clock "+S.wall):"")+" \u2013 target "+num(T,1)+"% of the fastest measured kernel";
+const SH=S.shipped||{},S7=S.s7||{};
+const fmtn=v=>v!=null?Number(v).toLocaleString():"n/a";
+const ci=c=>c?" ["+num(c[0])+", "+num(c[1])+"]":"";
 const stats=[
-  ["held-out sel_eff, model (latest per leaf)",H.model!=null?num(H.model)+"%":"n/a"],
-  ["held-out sel_eff, Origami (same cells)",H.origami!=null?num(H.origami)+"%":"n/a"],
-  ["model \u2212 Origami",H.delta!=null?sgn(H.delta)+" pp":"n/a"],
-  ["per-cell best of model / Origami (upper bound)",H.router_bound!=null?num(H.router_bound)+"%":"n/a"],
-  ["leaf cells with a held-out value",H.n_cells!=null?H.n_cells:"n/a"],
-  ["runtime-weighted held-out, model / Origami",(S.rt_model!=null?num(S.rt_model)+"%":"n/a")+" / "+(S.rt_origami!=null?num(S.rt_origami)+"%":"n/a")],
+  ["shipped bundle",SH.round?SH.round+(SH.train_round&&SH.train_round!==SH.round?" (models of "+SH.train_round+")":""):"none"],
+  ["held-out sel_eff, shipped bundle"+(SH.source?" ("+SH.source+")":""),SH.sel_eff!=null?num(SH.sel_eff)+"%":"n/a"],
+  ["held-out GEMMs / misses (pick measurement "+S.pick_measurement+")",SH.n!=null?fmtn(SH.n)+" / "+fmtn(SH.n_miss):"n/a"],
+];
+if(S.baseline)stats.push(["deploy gate: this bundle vs the one it replaced, same "+fmtn(S.baseline.n)+" GEMMs",num(S.baseline.bundle)+"% vs "+num(S.baseline.base)+"%"]);
+if(S.not_deployed)stats.push(["latest bundle not deployed",S.not_deployed.round+(S.not_deployed.reason?": "+S.not_deployed.reason:"")]);
+for(const [y,v,c] of S7.sel||[])stats.push(["runtime selection efficiency, stage 7 "+y+" [95% CI]",num(v)+"%"+ci(c)]);
+for(const [y,r,v,c] of S7.first||[]){const w=(S7.warm||[]).find(x=>x[0]===y);stats.push(["selection time p50, first call into a cell / warm (stage 7 "+y+", rsn="+r+")",num(v)+ci(c)+" / "+(w?num(w[2])+ci(w[3]):"\u2013")+" \u00b5s"]);}
+stats.push(
+  ["runtime-weighted held-out, shipped bundle",S.rt_model!=null?num(S.rt_model)+"%":"n/a"],
+  ["training benches, deployed picks / misses",S.bench_sel_eff!=null?num(S.bench_sel_eff)+"% / "+fmtn(S.bench_miss):"n/a"],
+  ["training GEMMs without a model pick",S.bench_unserved!=null?fmtn(S.bench_unserved)+" of "+fmtn(S.bench_gemms):"n/a"],
+  ["leaf cells needing an action",S.n_action!=null?S.n_action:"n/a"],
+  ["expected gain if all reach the target",S.gain!=null?"+"+num(S.gain)+" pp":"n/a"],
   ["in-sample mean over leaf cells",S.in_sample_mean!=null?num(S.in_sample_mean)+"%":"n/a"],
   ["deployed model file",S.bin_mb!=null?S.bin_mb+" MB":"n/a"],
-  ["shapes generated",S.shapes!=null?Number(S.shapes).toLocaleString():"n/a"],
-  ["selection time ML-on \u2212 ML-off (median per problem, rsn=1)",S.sel_delta_us!=null?sgn(S.sel_delta_us)+" \u00b5s":"n/a"],
-];
+  ["shapes generated",S.shapes!=null?fmtn(S.shapes):"n/a"],
+);
 document.getElementById("stats").innerHTML=stats.map(([l,v])=>`<div class="stat"><div class="v">${esc(v)}</div><div class="l">${esc(l)}</div></div>`).join("");
-document.getElementById("tbody_traj").innerHTML=TRAJ.map(r=>`<tr><td class="c">${esc(r.round)}</td><td>${num(r.model)}</td><td>${num(r.origami)}</td><td>${(r.model!=null&&r.origami!=null)?sgn(r.model-r.origami):"\u2013"}</td><td>${r.n_gemms!=null?Number(r.n_gemms).toLocaleString():""}</td></tr>`).join("")
- +(H.model!=null?`<tr style="font-weight:600"><td class="c">latest per leaf cell</td><td>${num(H.model)}</td><td>${num(H.origami)}</td><td>${sgn(H.delta)}</td><td>${esc(H.n_cells)} cells</td></tr>`:"");
-const COLS=[["cell","cell"],["n_gemms","GEMMs"],["held","held-out %"],["held_ori","Origami held-out %"],["held_delta","\u0394 held-out"],["model","model %"],["deployed","deployed %"],["k_delta","K\u0394"],["origami","Origami %"],["dep_delta","\u0394 deployed"],["smartK","K"],["cap","ed/hd/ih"]];
+document.getElementById("tbody_traj").innerHTML=TRAJ.map(r=>`<tr><td class="c">${esc(r.round)}</td><td>${num(r.model)}</td><td>${r.model!=null?sgn(r.model-T):"\u2013"}</td><td>${r.n_gemms!=null?Number(r.n_gemms).toLocaleString():""}</td><td>${r.n_miss!=null?Number(r.n_miss).toLocaleString():""}</td></tr>`).join("")
+ +(SH.sel_eff!=null?`<tr style="font-weight:600"><td class="c">shipped bundle (${esc(SH.source)})</td><td>${num(SH.sel_eff)}</td><td>${sgn(SH.sel_eff-T)}</td><td>${fmtn(SH.n)}</td><td>${fmtn(SH.n_miss)}</td></tr>`:"");
+const COLS=[["cell","cell"],["n_gemms","GEMMs"],["held","held-out %"],["gap","vs target"],["model","model %"],["deployed","deployed %"],["k_delta","K\u0394"],["smartK","K"],["cap","ed/hd/ih"]];
 const STR=k=>(k==="cell"||k==="cap");
 let sk="held",asc=true;
-function rowClass(c){if(c.held==null)return"";if(c.held>=95)return"win";if(c.held_ori!=null&&c.held<c.held_ori-2)return"lose";if(c.held<88)return"weak";return"";}
-function cellText(c,k){const v=c[k];if(STR(k))return esc(v);if(k==="n_gemms")return Number(v||0).toLocaleString();if(k==="smartK")return v!=null?esc(v):"";if(k==="held")return v!=null?num(v)+(c.held_inherited?"*":""):"";if(k.endsWith("delta"))return v!=null?sgn(v):"";return v!=null?num(v):"";}
+function rowClass(c){if(c.held==null)return"";if(c.held>=T)return"win";if(c.held<T-5)return"lose";return"weak";}
+function cellText(c,k){const v=c[k];if(STR(k))return esc(v);if(k==="n_gemms")return Number(v||0).toLocaleString();if(k==="smartK")return v!=null?esc(v):"";if(k==="held")return v!=null?num(v)+(c.held_inherited?"*":""):"";if(k==="gap"||k.endsWith("delta"))return v!=null?sgn(v):"";return v!=null?num(v):"";}
 function render(){CELLS.sort((a,b)=>{const d=STR(sk)?String(a[sk]||"").localeCompare(String(b[sk]||"")):((a[sk]??-1e9)-(b[sk]??-1e9));return asc?d:-d;});
  const head=document.getElementById("chead");head.innerHTML="<th>#</th>"+COLS.map(([k,t])=>`<th class="sort ${STR(k)?"c":""}" data-k="${esc(k)}">${esc(t)}${k===sk?(asc?" \u25b2":" \u25bc"):""}</th>`).join("");
  document.getElementById("tbody_cells").innerHTML=CELLS.map((c,i)=>`<tr class="${rowClass(c)}"><td class="c">${i+1}</td>`+COLS.map(([k])=>`<td class="${STR(k)?"c":""}">${cellText(c,k)}</td>`).join("")+"</tr>").join("");}
 document.getElementById("chead").addEventListener("click",e=>{const th=e.target.closest("th[data-k]");if(!th)return;const k=th.dataset.k;if(k===sk)asc=!asc;else{sk=k;asc=STR(k);}render();});
 render();
-const WCOLS=[["cell","cell"],["n_gemms","GEMMs"],["held_w_us","fastest \u00b5s"],["held_pick_us","model pick \u00b5s"],["held_ori_pick_us","Origami pick \u00b5s"],["extra_us","extra \u00b5s"],["held","held-out %"],["held_ori","Origami %"],["held_delta","\u0394"],["cap","ed/hd/ih"]];
-document.getElementById("worsth").innerHTML="<th>#</th>"+WCOLS.map(([k,t])=>`<th class="${STR(k)?"c":""}">${esc(t)}</th>`).join("");
-document.getElementById("tbody_worst").innerHTML=WORST.map((c,i)=>`<tr class="${(c.held_delta!=null&&c.held_delta<0)?"lose":""}"><td class="c">${i+1}</td>`+WCOLS.map(([k])=>`<td class="${STR(k)?"c":""}">${STR(k)?esc(c[k]):(k==="n_gemms"?Number(c[k]||0).toLocaleString():(k==="held_delta"?sgn(c[k],1):num(c[k],1)))}</td>`).join("")+"</tr>").join("");
 (function(){
  const host=document.getElementById("s8charts");const names=Object.keys(S8PC).sort();
  for(const ds of names){
   const rows=(S8PC[ds]||[]).slice();if(!rows.length)continue;
   const fig=document.createElement("figure");fig.className="chart";fig.style.maxWidth="1700px";
-  const cap=document.createElement("figcaption");const wins=rows.filter(r=>r[1]>=r[2]).length;
-  cap.innerHTML=`<b>${esc(ds)}</b> \u2013 ${rows.length} cells, model ahead in ${wins}. sort `;
+  const cap=document.createElement("figcaption");const ok=rows.filter(r=>r[1]>=T).length;
+  cap.innerHTML=`<b>${esc(ds)}</b> \u2013 ${rows.length} cells, ${ok} at or above the ${num(T,1)}% target (bar = model \u2212 target). sort `;
   const sel=document.createElement("select");
-  for(const [v,t] of [["dw","\u0394 worst first"],["db","\u0394 best first"],["la","label"]]){const o=document.createElement("option");o.value=v;o.textContent=t;sel.appendChild(o);}
+  for(const [v,t] of [["dw","worst first"],["db","best first"],["la","label"]]){const o=document.createElement("option");o.value=v;o.textContent=t;sel.appendChild(o);}
   cap.appendChild(sel);fig.appendChild(cap);
   const box=document.createElement("div");box.className="s8bars";fig.appendChild(box);host.appendChild(fig);
   const draw=mode=>{const r2=rows.slice();
-   if(mode==="db")r2.sort((a,b)=>(b[1]-b[2])-(a[1]-a[2]));else if(mode==="la")r2.sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0);else r2.sort((a,b)=>(a[1]-a[2])-(b[1]-b[2]));
-   const maxd=Math.max(1,...r2.map(r=>Math.abs(r[1]-r[2])));
+   if(mode==="db")r2.sort((a,b)=>b[1]-a[1]);else if(mode==="la")r2.sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0);else r2.sort((a,b)=>a[1]-b[1]);
+   const maxd=Math.max(1,...r2.map(r=>Math.abs(r[1]-T)));
    const labw=Math.min(900,Math.max(220,Math.round(7.7*Math.max(0,...r2.map(r=>String(r[0]).length)))));
-   box.innerHTML=r2.map(r=>{const d=r[1]-r[2],w=Math.abs(d)/maxd*116;const left=d>=0?120:120-w;
-    return `<div class="s8r"><div class="s8lab" style="flex:0 0 ${labw}px" title="${esc(r[0])}">${esc(r[0])}</div><div class="s8bar"><div class="s8mid"></div><div class="s8fill" style="left:${left.toFixed(1)}px;width:${w.toFixed(1)}px;background:${d>=0?"#2da44e":"#cf222e"}"></div></div><div class="s8v">${num(r[1],1)} / ${num(r[2],1)} <b>${sgn(d,1)}</b></div></div>`;}).join("");};
+   box.innerHTML=r2.map(r=>{const d=r[1]-T,w=Math.abs(d)/maxd*116;const left=d>=0?120:120-w;
+    return `<div class="s8r"><div class="s8lab" style="flex:0 0 ${labw}px" title="${esc(r[0])}">${esc(r[0])}</div><div class="s8bar"><div class="s8mid"></div><div class="s8fill" style="left:${left.toFixed(1)}px;width:${w.toFixed(1)}px;background:${d>=0?"#2da44e":"#cf222e"}"></div></div><div class="s8v">${num(r[1],1)}% n=${esc(r[2])} <b>${sgn(d,1)}</b></div></div>`;}).join("");};
   sel.addEventListener("change",()=>draw(sel.value));draw("dw");
  }
 })();
+function paramView(prefix,PARAMS,PCELLS){
+ const s=document.getElementById(prefix+"_sel");if(!s)return;const names=Object.keys(PARAMS||{});if(!names.length)return;
+ for(const n of names){const o=document.createElement("option");o.value=n;o.textContent=n;s.appendChild(o);}
+ const pct=(a,b)=>b?(a/b*100).toFixed(1)+"%":"\u2013";
+ const draw=()=>{const name=s.value,rows=PARAMS[name]||[];
+  const W=rows.reduce((a,r)=>a+r.wins,0),P=rows.reduce((a,r)=>a+(r.picks||0),0);
+  document.getElementById(prefix+"_tab").innerHTML=`<div class="scroll"><table style="margin-bottom:0;font-size:11px"><thead><tr><th class="c">${esc(name)}</th><th>kernels</th><th>wins</th><th>win share</th><th>picks</th><th>pick share</th><th>drop loss %</th><th>stranded GEMMs</th></tr></thead><tbody>`
+   +rows.map(r=>`<tr><td class="c">${esc(r.value)}</td><td>${r.kernels}</td><td>${r.wins}</td><td>${pct(r.wins,W)}</td><td>${r.picks==null?"\u2013":r.picks}</td><td>${r.picks==null?"\u2013":pct(r.picks,P)}</td><td>${num(r.drop_loss*100,3)}</td><td>${r.stranded}</td></tr>`).join("")+"</tbody></table></div>";
+  const top=rows.slice(0,10).map(r=>r.value),pc=(PCELLS||{})[name]||{},cs=Object.keys(pc).sort();
+  document.getElementById(prefix+"_cells").innerHTML=`<div class="scroll"><table style="margin-bottom:0;font-size:11px"><thead><tr><th class="c">cell</th>`+top.map(v=>`<th>${esc(v)}</th>`).join("")+`<th>other</th></tr></thead><tbody>`
+   +cs.map(c=>{const m=pc[c];let ow=0,op=0;for(const [v,[w,p]] of Object.entries(m)){if(!top.includes(v)){ow+=w;op+=p;}}
+    return `<tr><td class="c">${esc(c)}</td>`+top.map(v=>{const x=m[v];return `<td>${x?x[0]+" / "+x[1]:""}</td>`;}).join("")+`<td>${ow||op?ow+" / "+op:""}</td></tr>`;}).join("")+"</tbody></table></div>";};
+ s.addEventListener("change",draw);draw();
+}
+paramView("param",D.PARAMS,D.PCELLS);
+paramView("diag",D.DPARAMS,D.DPCELLS);
 </script></body></html>"""
 
 
+def main(argv=None):
+    import argparse
+
+    ap = argparse.ArgumentParser(description="HTML report of a pipeline run")
+    ap.add_argument("run_dir")
+    ap.add_argument(
+        "out", nargs="?", default=None, help="default: <run_dir>/report.html"
+    )
+    ap.add_argument("--jobs", type=int, default=8, help="processes reading benches")
+    ap.add_argument(
+        "--no-engine",
+        action="store_true",
+        help="skip the tilewright ranking (no cascade / ranking / pick decomposition)",
+    )
+    ap.add_argument(
+        "--no-bench", action="store_true", help="skip every bench-level section"
+    )
+    ap.add_argument(
+        "--selection-budget-us",
+        type=float,
+        default=10.0,
+        help="ML-on selection time above which a stage 7 problem counts as over budget",
+    )
+    ap.add_argument(
+        "--target",
+        type=float,
+        default=None,
+        help="absolute selection-efficiency target (default: validate.sel_eff_threshold "
+        "of the run's config, else 0.95)",
+    )
+    ap.add_argument(
+        "--diagnostics",
+        action="store_true",
+        help="add a collapsed section breaking wins and picks down by framework-specific "
+        "kernel parameters (occupancy, vector widths, kernel attributes)",
+    )
+    ap.add_argument(
+        "--shipped-subset",
+        default=None,
+        help="choose_shipped_subset.py output (default: <run_dir>/shipped_subset.json)",
+    )
+    ap.add_argument(
+        "--origami-reference",
+        action="store_true",
+        help="add a collapsed external-reference section comparing with Origami on the "
+        "same GEMMs",
+    )
+    a = ap.parse_args(argv)
+    out = a.out or os.path.join(a.run_dir, "report.html")
+    print(
+        "wrote",
+        build(
+            a.run_dir,
+            out,
+            jobs=max(1, a.jobs),
+            engine=not a.no_engine,
+            bench=not a.no_bench,
+            origami_reference=a.origami_reference,
+            selection_budget_us=a.selection_budget_us,
+            target=a.target,
+            diagnostics=a.diagnostics,
+            shipped_subset=a.shipped_subset,
+        ),
+    )
+    return 0
+
+
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("usage: make_report.py <run_dir> [out.html]", file=sys.stderr)
-        sys.exit(2)
-    rd = sys.argv[1]
-    outp = sys.argv[2] if len(sys.argv) > 2 else os.path.join(rd, "report.html")
-    print("wrote", build(rd, outp))
+    sys.exit(main())

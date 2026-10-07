@@ -10,6 +10,7 @@ import sys
 import types
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from bench_fakes import LIBRARY_STEM, solution, write_logic
@@ -112,40 +113,305 @@ def model_bytes(labels, dtype="fp32", signatures=None, seed=0):
     )
 
 
-def expected_pick(tw, model, g, min_scored=1):
+def ranked_sids(tw, model, g, min_scored=1):
     cs = tw.CandidateSet(model, [ev.make_config(tw, k, i) for i, k in enumerate(POOL)])
-    measured = {c["sol_idx_global"]: c["us"] for c in g["candidates"]}
     prob = ev.make_problem(tw, fs.problem_kwargs_from_row(g))
+    out = []
     for r in cs.rank(prob, ev.make_hardware(tw, HW), min_scored):
         if not r.scored:
             break
-        sid = POOL[r.config_index]["sol_idx_global"]
-        if sid in measured:
-            return sid, "model"
+        out.append(POOL[r.config_index]["sol_idx_global"])
+    return out
+
+
+def expected_pick(tw, model, g, min_scored=1, measurement="timed"):
+    """(solution, served_by, cost, miss) the module docstring describes."""
+    timed = {c["sol_idx_global"]: c["us"] for c in g["candidates"] if not c["is_skip"]}
+    screened = {
+        c["sol_idx_global"]: c["us"]
+        for c in g["candidates"]
+        if c["is_skip"] and c["sol_idx_global"] not in timed
+    }
+    worst = max(c["us"] for c in g["candidates"])
+    listed = g.get("listed")
+    for sid in ranked_sids(tw, model, g, min_scored):
+        if sid in timed:
+            return sid, "model", timed[sid], None
+        if sid in screened:
+            if measurement == "any":
+                return sid, "model", screened[sid], None
+            return sid, "model", worst, "screened"
+        if measurement == "timed" and listed is not None and sid not in listed:
+            return sid, "model", worst, "not_benched"
     oc = [c for c in g["candidates"] if c["is_origami_pick"]]
-    return (oc[0]["sol_idx_global"], "origami_fallback") if oc else (None, None)
+    if oc:
+        return oc[0]["sol_idx_global"], "origami_fallback", oc[0]["us"], None
+    return None, None, None, None
 
 
-def test_picks_follow_candidate_set_rank():
+@pytest.mark.parametrize("measurement", ["timed", "any"])
+def test_picks_follow_candidate_set_rank(measurement):
     tw = pytest.importorskip("tilewright")
     rng = random.Random(7)
     gemms = random_gemms(rng, 80, [(600, 900, 2000), (700, 4000), (600, 1024, 3000)])
     gemms += random_gemms(rng, 40, [(200, 300), (700, 2000), (64, 256)])
     _bundle, data = model_bytes(CELLS[:2])
     out = ev.evaluate_model(
-        data, gemms, hardware=HW, pools={ev.pool_key(gemms[0]): POOL}
+        data,
+        gemms,
+        hardware=HW,
+        pools={ev.pool_key(gemms[0]): POOL},
+        pick_measurement=measurement,
     )
     model = tw.load_model_from_memory(data)
-    served = set()
+    served, misses = set(), 0
     for g, r in zip(gemms, out.results):
-        sid, by = expected_pick(tw, model, g)
-        assert (r.pick_sol_idx, r.served_by) == (sid, by)
+        sid, by, us, miss = expected_pick(tw, model, g, measurement=measurement)
+        assert (r.pick_sol_idx, r.served_by, r.miss) == (sid, by, miss)
         if sid is not None:
-            us = {c["sol_idx_global"]: c["us"] for c in g["candidates"]}[sid]
             assert r.pick_us == us and r.sel_eff == pytest.approx(g["winner_us"] / us)
         served.add(by)
+        misses += miss is not None
     assert "model" in served
+    assert (misses > 0) == (measurement == "timed")
+    summary = out.summary()
+    assert summary["n_miss"] == summary["n_miss_by_reason"]["screened"] == misses
+    assert summary["pick_measurement"] == measurement
     assert out.n_routing_mismatch == 0 and out.weight_dtype == "fp32"
+
+
+def test_a_pick_off_the_plan_is_a_miss():
+    tw = pytest.importorskip("tilewright")
+    _bundle, data = model_bytes(CELLS[:1])
+    model = tw.load_model_from_memory(data)
+    probe = gemm(2048, 2048, 2048, [dict(POOL[0], us=1.0, rank=0)])
+    ranked = ranked_sids(tw, model, probe)
+    assert len(ranked) >= 3
+    first, second, third = ranked[:3]
+    cands = [
+        dict(k, us=10.0 + i, rank=i, is_skip=False, is_origami_pick=(i == 0))
+        for i, k in enumerate(POOL)
+        if k["sol_idx_global"] not in (first, second)
+    ]
+    planned = gemm(2048, 2048, 2048, cands)
+    planned["listed"] = frozenset(c["sol_idx_global"] for c in cands) | {second}
+    exhaustive = gemm(2048, 2048, 2048, [dict(c) for c in cands])
+    pools = {ev.pool_key(planned): POOL}
+    worst = max(c["us"] for c in cands)
+    third_us = next(c["us"] for c in cands if c["sol_idx_global"] == third)
+
+    timed = ev.evaluate_model(
+        data, [planned, exhaustive], hardware=HW, pools=pools, pick_measurement="timed"
+    )
+    a, b = timed.results
+    assert (a.pick_sol_idx, a.miss, a.pick_us, a.pick_rank) == (
+        first,
+        "not_benched",
+        worst,
+        0,
+    )
+    assert (b.pick_sol_idx, b.miss, b.pick_us, b.pick_rank) == (
+        third,
+        None,
+        third_us,
+        2,
+    )
+    assert timed.summary()["n_miss_by_reason"] == {"screened": 0, "not_benched": 1}
+
+    walked = ev.evaluate_model(
+        data, [planned], hardware=HW, pools=pools, pick_measurement="any"
+    )
+    (c,) = walked.results
+    assert (c.pick_sol_idx, c.miss, c.pick_rank) == (third, None, 2)
+    with pytest.raises(ValueError):
+        ev.evaluate_model(data, [planned], hardware=HW, pick_measurement="first")
+
+
+def test_measurements_prefer_timed_rows():
+    cands = [
+        dict(POOL[0], us=5.0, is_skip=False),
+        dict(POOL[0], us=3.0, is_skip=True),
+        dict(POOL[1], us=7.0, is_skip=True),
+        dict(POOL[1], us=6.0, is_skip=True),
+        dict(POOL[2], us=0.0, is_skip=False),
+        dict(POOL[3], us=float("nan"), is_skip=False),
+        dict(POOL[4], us=2.0, is_skip=False, sol_idx_global=-1),
+    ]
+    timed, screened = ev.measurements(gemm(1, 1, 1, cands))
+    assert timed == {10: 5.0} and screened == {11: 6.0}
+    assert ev.pick_cost(10, timed, screened, None, "timed") == (True, 5.0, None)
+    assert ev.pick_cost(11, timed, screened, None, "timed") == (True, 6.0, "screened")
+    assert ev.pick_cost(11, timed, screened, None) == (True, 6.0, None)
+    assert ev.pick_cost(12, timed, screened, None, "timed") == (False, None, None)
+    assert ev.pick_cost(12, timed, screened, {10}, "timed") == (
+        True,
+        6.0,
+        "not_benched",
+    )
+    assert ev.pick_cost(12, timed, screened, {12}, "timed") == (False, None, None)
+    assert ev.pick_cost(12, timed, screened, {10}) == (False, None, None)
+    with pytest.raises(ValueError):
+        ev.pick_cost(10, timed, screened, None, "fastest")
+
+
+def test_warmup_counts_screened_picks_and_misses_off_list_ones():
+    timed, screened = {10: 5.0, 13: 9.0}, {11: 6.0}
+    assert ev.pick_cost(11, timed, screened, None, "warmup") == (True, 6.0, None)
+    assert ev.pick_cost(11, timed, screened, None, "timed") == (True, 9.0, "screened")
+    assert ev.pick_cost(12, timed, screened, {10, 11, 13}, "warmup") == (
+        True,
+        9.0,
+        "not_benched",
+    )
+    assert ev.pick_cost(12, timed, screened, {10, 11, 13}, "any") == (False, None, None)
+    assert ev.pick_cost(12, timed, screened, None, "warmup") == (False, None, None)
+
+
+def test_off_list_sel_eff_charges_an_unmeasured_off_list_pick():
+    timed, screened = {10: 4.0, 13: 9.0}, {11: 6.0}
+    listed = {10, 11, 13}
+
+    def cost(sid, rule="warmup", rb=None):
+        return ev.pick_cost(sid, timed, screened, listed, rule, rb, 0.5)
+
+    assert cost(12) == (True, 8.0, "not_benched")
+    assert cost(12, "timed") == (True, 8.0, "not_benched")
+    assert cost(12, "any") == (False, None, None)
+    assert cost(12, "rebench", {12: 0.8}) == (True, 5.0, "not_benched")
+    assert cost(11, "timed") == (True, 9.0, "screened")
+    assert ev.pick_cost(12, {}, screened, listed, "warmup", None, 0.5) == (
+        True,
+        6.0,
+        "not_benched",
+    )
+
+
+def test_rebench_charges_a_miss_by_its_measured_ratio():
+    timed = {10: 4.0, 13: 5.0}
+    screened = {11: 9.0}
+    ratios = {11: 0.8, 12: 0.5, 10: 0.1}
+    cost = lambda sid, listed=None, rule="rebench", rb=ratios: ev.pick_cost(  # noqa
+        sid, timed, screened, listed, rule, rb
+    )
+    assert cost(11) == (True, 5.0, "screened")
+    assert cost(12, {10, 13}) == (True, 8.0, "not_benched")
+    assert cost(10) == (True, 4.0, None)
+    assert cost(11, rb={11: 1.3}) == (True, 4.0, "screened")
+    assert cost(11, rb={}) == (True, 9.0, "screened")
+    assert ev.pick_cost(11, {10: 4.0, 13: 20.0}, screened, None, "rebench", {}) == (
+        True,
+        9.0,
+        "screened",
+    )
+    assert cost(12) == (False, None, None)
+    assert cost(11, rule="timed") == (True, 9.0, "screened")
+    assert cost(11, rule="any") == (True, 9.0, None)
+    assert ev.REBENCH_PICK_MEASUREMENT not in ev.PICK_MEASUREMENTS
+
+
+def test_rebench_rule_reads_the_ratios_attached_to_the_gemms():
+    tw = pytest.importorskip("tilewright")
+    from lib import rebench as rb
+
+    _bundle, data = model_bytes(CELLS[:1])
+    model = tw.load_model_from_memory(data)
+    first = ranked_sids(tw, model, gemm(2048, 2048, 2048, [dict(POOL[0], us=1.0)]))[0]
+    cands = [
+        dict(k, us=10.0 + i, rank=i, is_skip=k["sol_idx_global"] == first)
+        for i, k in enumerate(POOL)
+    ]
+    for c in cands:
+        c["is_origami_pick"] = c["rank"] == 0
+    measured, plain = gemm(2048, 2048, 2048, cands), gemm(2048, 2048, 2048, cands)
+    shape = (2048, 2048, 2048, 1)
+    ratio = rb.PickRatio(shape, first, -1, 8.0, 6.0, 3)
+    assert rb.attach_rebench([measured], {shape: ratio}) == 1
+    assert measured["rebench"] == {first: 0.75} and "rebench" not in plain
+    pools = {ev.pool_key(measured): POOL}
+    out = ev.evaluate_model(
+        data, [measured, plain], hardware=HW, pools=pools, pick_measurement="rebench"
+    )
+    a, b = out.results
+    assert (a.pick_sol_idx, a.miss) == (b.pick_sol_idx, b.miss) == (first, "screened")
+    assert a.sel_eff == pytest.approx(0.75)
+    assert b.pick_us == next(c["us"] for c in cands if c["sol_idx_global"] == first)
+    assert out.pick_measurement == "rebench"
+
+
+def test_attach_plan_lists_the_planned_kernels():
+    cands = [dict(POOL[0], us=1.0)]
+    gemms = [gemm(64, 64, 64, cands), gemm(128, 64, 64, cands), gemm(9, 9, 9, cands)]
+    plan = {
+        "shapes": [
+            {"m": 64, "n": 64, "k": 64, "batch": 1, "kernels": [3, 1]},
+            {"m": 128, "n": 64, "k": 64, "batch": 1, "kernels": None},
+        ]
+    }
+    assert ev.attach_plan(gemms, plan) == 1
+    assert gemms[0]["listed"] == {1, 3}
+    assert "listed" not in gemms[1] and "listed" not in gemms[2]
+
+
+def test_attach_plans_unions_the_lists_and_takes_context_replans():
+    cands = [dict(POOL[0], us=1.0)]
+    gemms = [
+        gemm(64, 64, 64, cands),
+        gemm(64, 64, 64, cands),
+        gemm(128, 64, 64, cands),
+        gemm(9, 9, 9, cands),
+    ]
+    gemms[1].update(cu_budget=32, schedule="default")
+    gemms[3]["listed"] = frozenset({1})
+
+    def plan(*shapes):
+        return {
+            "shapes": [
+                {"m": m, "n": 64, "k": 64, "batch": 1, "kernels": ks}
+                for m, ks in shapes
+            ]
+        }
+
+    rounds = [plan((64, [1, 3]), (128, [2])), plan((64, [5]), (128, None))]
+    replan = {(32, "default"): [plan((64, [7]))]}
+    assert ev.attach_plans(gemms, rounds, replan) == 2
+    assert gemms[0]["listed"] == {1, 3, 5}
+    assert gemms[1]["listed"] == {7}
+    assert "listed" not in gemms[2] and "listed" not in gemms[3]
+
+
+def test_load_timings_merges_files_and_keeps_exclusive_rows(tmp_path):
+    header = "m,n,k,batch_count,transA,transB,sol_idx_global,us,is_skip,cu_budget\n"
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    (tmp_path / "a" / "chunk_0000.csv").write_text(
+        header
+        + "64,64,64,1,T,N,1,5.0,False,\n"
+        + "64,64,64,1,T,N,2,9.0,True,\n"
+        + "64,64,64,1,T,N,3,1.0,False,32\n"
+        + "8,8,8,1,T,N,1,1.0,False,\n"
+        + "x,8,8,1,T,N,1,1.0,False,\n"
+    )
+    (tmp_path / "b" / "chunk_0000.csv").write_text(
+        header + "64,64,64,1,T,N,1,4.0,False,0\n"
+    )
+    key = (64, 64, 64, 1, "T", "N")
+    got = ev.load_timings([tmp_path / "a", tmp_path / "b"], wanted=[key])
+    assert list(got) == [key] and got[key]["winner_us"] == 4.0
+    assert ev.measurements(got[key]) == ({1: 4.0}, {2: 9.0})
+    assert set(ev.load_timings([tmp_path / "a"])) == {key, (8, 8, 8, 1, "T", "N")}
+
+
+def test_bootstrap_ci():
+    assert (
+        ev.bootstrap_ci([1.0]) is None
+        and ev.bootstrap_ci([1.0, 2.0], resamples=0) is None
+    )
+    values = [float(v) for v in range(50)]
+    lo, hi = ev.bootstrap_ci(values, resamples=200, seed=3)
+    assert lo <= sum(values) / len(values) <= hi
+    assert ev.bootstrap_ci(values, resamples=200, seed=3) == [lo, hi]
+    med_lo, med_hi = ev.bootstrap_ci(values, statistic=np.median, resamples=200)
+    assert med_lo <= 24.5 <= med_hi
 
 
 def test_fallback_and_not_evaluable():
@@ -207,7 +473,7 @@ def test_weight_dtype_is_what_ranks():
         mlrec.write_model(bundle, None, "gfx950", arch_constants("gfx950"), "int4")
     )
     for g, r in zip(gemms, out.results):
-        assert (r.pick_sol_idx, r.served_by) == expected_pick(tw, model, g)
+        assert (r.pick_sol_idx, r.served_by) == expected_pick(tw, model, g)[:2]
 
 
 def test_pools():
@@ -368,6 +634,18 @@ def test_top1_picks():
             p["sol_idx_global"] == top["sol_idx_global"] and p["top1_score"] == r.score
         )
         assert p["n_configs"] == len(POOL) and p["cell"] in CELLS
+    ranked = ev.top1_picks(
+        data, problems, POOL, hardware=HW, min_scored=8, with_ranking=True
+    )
+    for p, prob in zip(ranked[:2], problems):
+        want = cs.rank(
+            ev.make_problem(tw, fs.problem_kwargs_from_row(prob)),
+            ev.make_hardware(tw, HW),
+            8,
+        )
+        assert p["ranked"] == [r.config_index for r in want if r.scored]
+        assert len(p["ranked"]) == p["n_scored"] >= 8
+    assert "ranked" not in picks[0]
     twin_picks = ev.top1_picks(data, problems, TWINS, hardware=HW)
     for p, q in zip(twin_picks[:2], picks):
         assert (p["top1_index"], p["top1_sig"]) == (q["top1_index"], q["top1_sig"])

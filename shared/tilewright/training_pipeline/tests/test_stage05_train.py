@@ -5,6 +5,7 @@
 tests): a kernel pool, a deterministic latency model, and chunk_*.csv files
 with the stage04 column schema."""
 
+import argparse
 import csv
 import hashlib
 import importlib.util
@@ -15,13 +16,14 @@ import random
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 import bench_fakes as bf
 import stage05_train as s5
-from lib import dat, feasibility
+from lib import dat, feasibility, grid, hipblaslt_launch
 from lib import features as fs
 from lib import hardware as hwlib
 
@@ -146,7 +148,7 @@ def write_round(out_dir, shapes, pool=None, rows_per_chunk=300):
 
 def write_config(path):
     path.write_text(
-        "arch: gfx950\nhardware:\n"
+        "config_id: unit_bbs_tn\narch: gfx950\nhardware:\n"
         + "".join(f"  {k}: {v}\n" for k, v in HARDWARE.items())
     )
     return path
@@ -225,6 +227,8 @@ def test_end_to_end(tmp_path):
     for entry in bundle["models"].values():
         assert entry["smart_k_signatures"] and len(entry["smart_k_signatures"][0]) == 8
         assert "q_proj.0.weight" in entry["state_dict"]
+        assert entry["state_dict"]["temperature"].shape == (1,)
+        assert "log_temperature" not in entry["state_dict"]
         assert entry["feature_norms"]["i_std"][nta] == 0.0
 
     cells = {
@@ -235,6 +239,13 @@ def test_end_to_end(tmp_path):
         assert c["n_val_gemms"] > 0 and c["selection_set"] == "validation"
         assert c["n_train_gemms"] + c["n_val_gemms"] == c["n_gemms"] == 24
         assert c["origami"]["n_eval"] == c["n_train_gemms"]
+        assert 1 <= c["best_step"] <= c["steps"] and c["best_phase"] == "main"
+        assert c["selection_metric"] == (
+            "deployed_validation" if have_engine() else "validation"
+        )
+        if have_engine():
+            # The kept checkpoint was measured exactly as it is deployed.
+            assert c["selection_deployed_val_sel_eff"] == c["deployed_val"]["sel_eff"]
     metrics = json.loads((out / "metrics.json").read_text())
     assert set(metrics["environment"]["artifact_knobs"]) == set(s5.ARTIFACT_ENV_KNOBS)
     assert metrics["hardware"] == HARDWARE and metrics["weight_dtype"] == "int4"
@@ -322,7 +333,9 @@ def test_label_seeds_make_cells_independent_of_the_run(tmp_path):
             for name, t in entry["state_dict"].items():
                 assert t.equal(a[label]["state_dict"][name]), (label, name)
     serial_log = (full / "training_log.csv").read_text()
-    assert len(serial_log.splitlines()) == 1 + 6 * len(CELLS3)
+    cells = json.loads((full / "cells.json").read_text())["cells"]
+    # Short schedules measure every step.
+    assert len(serial_log.splitlines()) == 1 + sum(c["steps"] for c in cells)
     assert (par / "training_log.csv").read_text() == serial_log
 
 
@@ -863,3 +876,693 @@ def test_training_whitening_matches_the_engine():
                 torch.from_numpy(qa), torch.from_numpy(ia), torch.from_numpy(xa)
             )
         assert float(py[0]) == pytest.approx(engine[j], rel=1e-4, abs=1e-4)
+
+
+def write_attributes(data, pool):
+    base = dat.kernel_dat_info(bf.solution(0, 0))["attributes"]
+    listed = {
+        k["sol_idx_global"]: {
+            "attributes": dict(
+                base,
+                workgroup_mapping=k["sol_idx_global"] % 5,
+                tile_processing_strategy=k["sol_idx_global"] % 3,
+                work_assignment=(
+                    0
+                    if k["sol_idx_global"] % 3 == 1
+                    else (k["sol_idx_global"] // 3) % 3
+                ),
+            )
+        }
+        for k in pool
+    }
+    dat.write_kernel_attributes(data / dat.KERNELS_FILE, listed, bf.LIBRARY_STEM)
+
+
+def write_context_round(out_dir, shapes, cu_budget, schedule, pool=None):
+    out_dir = write_round(out_dir, shapes, pool)
+    for path in sorted(out_dir.glob("chunk_*.csv")):
+        with path.open() as f:
+            rows = list(csv.DictReader(f))
+        with path.open("w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=list(COLUMNS) + ["cu_budget", "schedule"])
+            w.writeheader()
+            w.writerows(dict(r, cu_budget=cu_budget, schedule=schedule) for r in rows)
+    return out_dir
+
+
+def test_v3_training_smoke(tmp_path):
+    pool = kernel_pool()
+    data = write_round(tmp_path / "r0" / "stage04", shapes_for(0, 20, CELLS3[:2]))
+    write_attributes(data, pool)
+    shapes = shapes_for(1, 16, CELLS3[:2])
+    ctx = write_context_round(tmp_path / "ctx" / "stage04", shapes, 50, "dynamic")
+    write_attributes(ctx, pool)
+    out = tmp_path / "v3" / "stage05"
+    train(tmp_path, [data, ctx], out, "--catalog", "v3", "--whitelist", "view-key")
+    bundle = load_bundle(out / "models.pt")
+    assert bundle["catalog"] == "v3"
+    spec = fs.parse_attribute_spec(bundle["attribute_spec"])
+    assert spec == fs.DEFAULT_ATTRIBUTE_SPEC
+    assert bundle["q_names"] == fs.v3_query_feature_names()
+    assert bundle["i_names"] == fs.v3_item_feature_names(spec)
+    assert bundle["contexts"] == {
+        "min_cu_fraction": 0.5,
+        "max_cu_fraction": 1.0,
+        "schedules": ["default", "dynamic"],
+    }
+    assert bundle["clip"] is True
+    assert bundle["serving"] == {
+        "small_batched_rule": False,
+        "dot2_rule": False,
+        "non_temporal_rule": False,
+        "whitelist_tier": True,
+        "launch_keys": False,
+        "cascade_keys": 32,
+    }
+    assert sorted(bundle["models"]) == sorted(CELLS3[:2])
+    for entry in bundle["models"].values():
+        assert entry["smart_k_signatures"] == [] and entry["view_key_hashes"]
+        b = entry["feature_bounds"]
+        assert len(b["i_lo"]) == len(bundle["i_names"])
+        assert all(lo <= hi for lo, hi in zip(b["x_lo"], b["x_hi"]))
+    cells = json.loads((out / "cells.json").read_text())
+    assert cells["catalog"] == "v3" and len(cells["uncovered_base_cells"]) == 94
+    metrics = json.loads((out / "metrics.json").read_text())
+    assert metrics["feature_names_hash"] == fs.v3_catalog_hash()
+    assert metrics["load_stats"]["gemms_non_exclusive"] == len(set(shapes))
+
+    # Provenance: the same in models.pt and metrics.json, over the chunks of
+    # both folders in training order.
+    from lib import hipblaslt_launch
+    from lib import provenance as prov
+
+    recorded = bundle["provenance"]
+    assert metrics["provenance"] == recorded
+    assert list(recorded) == [
+        "config_id",
+        "training_data_hash",
+        "source_revision",
+        "date",
+        "launch_model",
+    ]
+    assert recorded["config_id"] == "unit_bbs_tn"
+    chunks = [p for d in (data, ctx) for p in sorted(Path(d).glob("chunk_*.csv"))]
+    assert recorded["training_data_hash"] == prov.training_data_hash(chunks)
+    assert recorded["source_revision"] == prov.source_revision()
+    assert recorded["launch_model"] == hipblaslt_launch.HipblasltLaunch("gfx950").id
+
+    if not have_engine():
+        return
+    import tilewright as tw
+
+    from lib import evaluate as ev
+    from lib import hardware as hwlib
+    from lib import mlrec
+
+    for c in cells["cells"]:
+        assert c["deployed"]["n_model_served"] == c["deployed"]["n_eval"] > 0
+    data_v3 = mlrec.write_model(
+        bundle, None, "gfx950", hwlib.arch_constants("gfx950"), "bf16"
+    )
+    info = tw.describe(tw.load_model_from_memory(data_v3))
+    assert info.format_version == 3 and info.uncovered_base_labels == 94
+    assert info.provenance.launch_model == recorded["launch_model"]
+    assert info.provenance.training_data_hash == recorded["training_data_hash"]
+    gemms = [
+        g
+        for gs in s5.load_enriched_chunks([str(data), str(ctx)], True)[0].values()
+        for g in gs
+    ]
+    hw = hwlib.DeviceHardware(**HARDWARE)
+    result = ev.evaluate_model(data_v3, gemms, hardware=hw)
+    assert result.n_routing_mismatch == 0
+    assert result.summary()["n_model_served"] == len(gemms)
+    other = [dict(g, m=8, n=200, batch_count=4) for g in gemms[:3]]
+    assert ev.evaluate_model(data_v3, other, hardware=hw).n_routing_mismatch == 0
+
+
+def _planned_rounds(tmp_path, n_per_cell=16):
+    """Two v3 rounds of one cell benched from two halves of the pool, and a
+    plan listing each shape's half: every GEMM has pool kernels off its
+    list that the other round measured."""
+    pool = kernel_pool()
+    halves = (pool[: len(pool) // 2], pool[len(pool) // 2 :])
+    plan = {"shapes": []}
+    dirs = []
+    for r, half in enumerate(halves):
+        shapes = shapes_for(10 + r, n_per_cell, CELLS3[:1])
+        d = write_round(tmp_path / f"r{r}" / "stage04", shapes, half)
+        write_attributes(d, pool)
+        dirs.append(d)
+        listed = [k["sol_idx_global"] for k in half]
+        plan["shapes"] += [
+            {"m": m, "n": n, "k": k, "batch": b, "kernels": listed}
+            for m, n, k, b in shapes
+        ]
+    path = tmp_path / "plan.json"
+    path.write_text(json.dumps(plan))
+    return dirs, path
+
+
+PLANNED_V3 = ("--catalog", "v3", "--min-cell-gemms", 8, "--min-base-cell-gemms", 8)
+
+
+def test_planned_training_counts_off_list_picks(tmp_path):
+    dirs, plan = _planned_rounds(tmp_path)
+    runs = {}
+    for name, extra in (
+        ("skip", ()),
+        ("plan", ("--plan", plan)),
+        ("charged", ("--plan", plan, "--off-list-sel-eff", 1)),
+    ):
+        out = tmp_path / name / "stage05"
+        train(tmp_path, dirs, out, *PLANNED_V3, *extra)
+        runs[name] = json.loads((out / "metrics.json").read_text())
+    assert runs["skip"]["load_stats"]["gemms_listed"] == 0
+    assert runs["plan"]["load_stats"]["gemms_listed"] == 32
+    if have_engine():
+        val = {k: m["validation"] for k, m in runs.items()}
+        off = {k: v["n_miss_by_reason"]["not_benched"] for k, v in val.items()}
+        assert off["skip"] == 0 and off["plan"] > 0
+        assert val["charged"]["sel_eff"] > val["plan"]["sel_eff"]
+
+
+def test_pseudo_negatives_join_the_loss_of_planned_gemms(tmp_path):
+    dirs, plan = _planned_rounds(tmp_path)
+    v3 = PLANNED_V3
+    out = tmp_path / "plain" / "stage05"
+    train(tmp_path, dirs, out, *v3, "--plan", plan)
+    cells = json.loads((out / "cells.json").read_text())["cells"]
+    assert [c["n_unmeasured_pairs"] for c in cells] == [0]
+
+    out = tmp_path / "pseudo" / "stage05"
+    train(tmp_path, dirs, out, *v3, "--plan", plan, "--unmeasured-samples", 3)
+    (cell,) = json.loads((out / "cells.json").read_text())["cells"]
+    assert 0 < cell["n_unmeasured_pairs"] <= 3 * cell["n_train_gemms"]
+    if have_engine():
+        assert cell["deployed_val"]["n_eval"] == cell["n_val_gemms"]
+
+
+def test_global_deployed_numbers_weight_cells_by_their_evaluated_gemms():
+    cells = [
+        {"n_val_gemms": 100, "deployed_val": {"sel_eff": 0.5, "n_eval": 10}},
+        {"n_val_gemms": 10, "deployed_val": {"sel_eff": 1.0, "n_eval": 10}},
+        {"n_val_gemms": 5, "deployed_val": None},
+        {"n_val_gemms": 5, "deployed_val": {"sel_eff": float("nan"), "n_eval": 0}},
+    ]
+    assert s5.pooled_mean(cells, "deployed_val", "sel_eff") == pytest.approx(
+        math.sqrt(0.5)
+    )
+
+
+def test_unmeasured_kernels_are_feasible_and_off_the_list():
+    pool = kernel_pool()
+    g = {
+        "m": 64,
+        "n": 4096,
+        "k": 1024,
+        "batch_count": 1,
+        "transA": "T",
+        "transB": "N",
+        "a_type": "bf16_r",
+        "b_type": "bf16_r",
+        "c_type": "bf16_r",
+        "d_type": "bf16_r",
+        "compute_type": "f32_r",
+        "candidates": [dict(pool[0], us=1.0)],
+        "listed": frozenset({pool[0]["sol_idx_global"], pool[1]["sol_idx_global"]}),
+    }
+    kw = dict(
+        lds_bytes=65536, nt_flags=(False, True), rules={"non_temporal_rule": True}
+    )
+    got = s5.unmeasured_kernels(g, pool, 100, random.Random(0), **kw)
+    ids = {k["sol_idx_global"] for k in got}
+    assert ids and not ids & g["listed"]
+    prob = fs.problem_kwargs_from_row(g)
+    for k in pool:
+        ok = feasibility.passes_gates(
+            prob,
+            fs.config_kwargs_from_row(k),
+            lds_bytes=65536,
+            nt_a_available=False,
+            nt_b_available=True,
+            non_temporal_rule=True,
+        )
+        assert (k["sol_idx_global"] in ids) == (
+            ok and k["sol_idx_global"] not in g["listed"]
+        )
+    assert len(s5.unmeasured_kernels(g, pool, 2, random.Random(0), **kw)) == 2
+    assert (
+        s5.unmeasured_kernels(dict(g, listed=None), pool, 5, random.Random(0), **kw)
+        == []
+    )
+
+
+def test_unmeasured_pairs_join_each_gemm_after_its_measured_pairs():
+    q = np.zeros((2, 1), np.float32)
+    i = np.arange(3, dtype=np.float32).reshape(3, 1)
+    x = np.zeros((3, 1), np.float32)
+    gidx = np.array([0, 0, 1])
+    us = np.array([1.0, 2.0, 4.0])
+    win = np.array([1.0, 1.0, 4.0])
+    gemms = [{"winner_us": 1.0}, {"winner_us": 4.0}]
+    kernels = [[{"k": 0}], [{"k": 1}, {"k": 2}]]
+
+    class Catalog:
+        def vectors(self, *a, **kw):
+            return [0.0], [9.0], [0.0]
+
+    import unittest.mock as um
+
+    with um.patch.object(
+        s5.fs, "problem_kwargs_from_row", lambda g: {}
+    ), um.patch.object(s5.fs, "config_kwargs_from_row", lambda k: {}), um.patch.object(
+        s5.ev, "context_of", lambda g: None
+    ):
+        arrays, measured, pseudo = s5.with_unmeasured_pairs(
+            (q, i, x, gidx, us, win),
+            gemms,
+            kernels,
+            0.1,
+            q_names=[],
+            i_names=[],
+            x_names=[],
+            hardware=None,
+            constants=None,
+            catalog=Catalog(),
+        )
+    assert arrays[3].tolist() == [0, 0, 0, 1, 1, 1]
+    assert pseudo.tolist() == [False, False, True, False, True, True]
+    assert measured.tolist() == [0, 1, 3]
+    assert arrays[1][:, 0].tolist() == [0.0, 1.0, 9.0, 2.0, 9.0, 9.0]
+    assert arrays[4].tolist() == pytest.approx([1.0, 2.0, 1.1, 4.0, 4.4, 4.4])
+    assert arrays[5].tolist() == [1.0, 1.0, 1.0, 4.0, 4.0, 4.0]
+
+
+def test_v2_training_drops_non_exclusive_gemms(tmp_path):
+    data = write_round(tmp_path / "r0" / "stage04", shapes_for(0, 14, CELLS3[:1]))
+    shapes = shapes_for(1, 6, CELLS3[:1])
+    ctx = write_context_round(tmp_path / "ctx" / "stage04", shapes, 50, "default")
+    out = tmp_path / "round_0" / "stage05"
+    train(tmp_path, [data, ctx], out, "--skip-deployed-eval")
+    metrics = json.loads((out / "metrics.json").read_text())
+    assert metrics["load_stats"]["gemms_dropped_non_exclusive"] == len(set(shapes))
+    assert metrics["contexts"] is None
+    bundle = load_bundle(out / "models.pt")
+    assert "catalog" not in bundle and bundle["serving"]["cascade_keys"] == 0
+
+    v3 = tmp_path / "round_1" / "stage05"
+    proc = train(
+        tmp_path, [data], v3, "--catalog", "v3", "--skip-deployed-eval",
+        "--prior-round-dir", tmp_path / "round_0", expect_rc=1,
+    )  # fmt: skip
+    assert "cannot be carried forward" in proc.stdout + proc.stderr
+    train(tmp_path, [data], v3, "--whitelist", "view-key", expect_rc=1)
+    train(tmp_path, [data], v3, "--dot2-rule", expect_rc=1)
+    train(tmp_path, [data], v3, "--launch-keys", expect_rc=1)
+
+
+def test_launch_keys_reach_the_model_file():
+    from lib import mlrec
+
+    plain = s5.serving_options(argparse.Namespace(catalog="v3"))
+    keyed = s5.serving_options(argparse.Namespace(catalog="v3", launch_keys=True))
+    assert plain["launch_keys"] is False and keyed["launch_keys"] is True
+    assert dict(plain, launch_keys=True) == keyed
+    assert mlrec.v3_serving_flags(plain) & mlrec.V3_LAUNCH_KEYS == 0
+    assert mlrec.v3_serving_flags(keyed) & mlrec.V3_LAUNCH_KEYS
+    assert "launch_keys" not in s5.serving_options(argparse.Namespace(catalog="v2"))
+
+
+def test_declared_contexts_and_catalog_selection(tmp_path):
+    gemms = [{}, {"cu_budget": 25}, {"cu_budget": 300, "schedule": "auto"}]
+    assert s5.declared_contexts(gemms, 100) == {
+        "min_cu_fraction": 0.25,
+        "max_cu_fraction": 1.0,
+        "schedules": ["default", "auto"],
+    }
+    assert s5.declared_contexts([{}], 100, 0.5, "dynamic")["schedules"] == ["dynamic"]
+    with pytest.raises(ValueError):
+        s5.declared_contexts([{}], 100, 0.0)
+    with pytest.raises(ValueError):
+        s5.declared_contexts([{}], 100, None, "fast")
+
+    import argparse
+
+    def ns(**kw):
+        return argparse.Namespace(
+            **{"catalog": None, "attribute_spec": None, "arch": "gfx950", **kw}
+        )
+
+    assert s5.training_catalog(ns(), {}) == fs.V2_CATALOG
+    cfg = {"train": {"catalog": "v3", "attribute_spec": [{"name": "param_a"}]}}
+    assert s5.training_catalog(ns(), cfg).spec == (fs.AttributeFeature("param_a"),)
+    spec_file = tmp_path / "spec.yaml"
+    spec_file.write_text("- {name: wave_group_0, transform: log2p1}\n")
+    cat = s5.training_catalog(ns(catalog="v3", attribute_spec=spec_file), {})
+    assert cat.spec[0].transform == "log2p1"
+    assert s5.training_catalog(ns(catalog="v3"), {}).spec == fs.DEFAULT_ATTRIBUTE_SPEC
+    launch = s5.training_catalog(ns(catalog="v3"), {}).launch
+    assert isinstance(launch, hipblaslt_launch.HipblasltLaunch)
+    assert launch.arch == "gfx950"
+    stem = "TensileLibrary_F8F8_BF8_HA_Contraction_l_Alik_Bljk_Cijk_Dijk"
+    strict = ns(catalog="v3", arch="gfx1250v0", library_stem=stem + "_gfx1250-strict")
+    assert s5.training_catalog(strict, {}).launch.arch == "gfx1250"
+    from_cfg = {"hipblaslt": {"library_stem": stem + "_gfx942"}}
+    assert s5.training_catalog(ns(catalog="v3"), from_cfg).launch.arch == "gfx942"
+    with pytest.raises(ValueError):
+        s5.training_catalog(ns(catalog="v2", attribute_spec=spec_file), {})
+    assert s5.uncovered_base_cells({"Large|Large|LargeK|Bnone#M<=1000": {}}) == [
+        c for c in grid.all_cell_labels() if c != "Large|Large|LargeK|Bnone"
+    ]
+
+
+# ── training schedule, targets and checkpoints ───────────────────────────────
+
+
+def test_learning_rate_schedules():
+    lr = [s5.learning_rate(s, 100, 1.0, warmup_frac=0.1) for s in range(100)]
+    assert lr[0] == pytest.approx(1 / 11) and lr[9] == pytest.approx(10 / 11)
+    assert lr[10] == pytest.approx(1.0) and lr[-1] == pytest.approx(0.02)
+    assert all(a >= b for a, b in zip(lr[10:], lr[11:]))
+    step = [
+        s5.learning_rate(s, 101, 1.0, schedule="step", warmup_frac=0)
+        for s in range(101)
+    ]
+    assert step[59] == 1.0 and step[60] == pytest.approx(0.1)
+    assert step[85] == pytest.approx(0.01) and step[-1] == pytest.approx(0.01)
+    assert s5.learning_rate(50, 100, 3.0, schedule="constant") == 3.0
+    assert s5.learning_rate(0, 1, 2.0) == 2.0
+    with pytest.raises(ValueError):
+        s5.learning_rate(50, 100, 1.0, schedule="linear")
+
+
+def test_near_ties_share_the_top_target_and_relevance():
+    us = np.asarray([10.0, 10.05, 10.2, 11.0, 30.0, 5.0, 5.2])
+    win = np.asarray([10.0] * 5 + [5.0] * 2)
+    gidx = np.asarray([0] * 5 + [1] * 2)
+    tol = math.log1p(0.01)
+    t = s5.per_gemm_softmax_targets_np(us, win, gidx, alpha=12.0, target_tolerance=tol)
+    assert t[0] == t[1] > t[2] > t[3] > t[4] and t[5] > t[6]
+    assert t[:5].sum() == pytest.approx(1.0) and t[5:].sum() == pytest.approx(1.0)
+    ref = np.exp(-12.0 * np.maximum(np.log(us / win) - tol, 0.0))
+    for g in (0, 1):
+        np.testing.assert_allclose(t[gidx == g], ref[gidx == g] / ref[gidx == g].sum())
+    rel = s5.relevance_labels(us, win, 0.01)
+    assert list(rel) == [6, 6, 5, 4, 0, 6, 5]
+    old_bins = 5 - np.searchsorted(
+        [0.05, 0.10, 0.20, 0.40, 0.80], np.log(us / win), "right"
+    )
+    assert list(s5.relevance_labels(us, win, math.expm1(0.05))) == list(old_bins)
+    assert s5.config_tie_tolerance({"stage08": {"tie_tolerance": 0.016}}) == 0.016
+    assert s5.config_tie_tolerance({}) == s5.DEFAULT_TIE_TOLERANCE
+
+
+def test_fake_quantization_rounds_like_the_model_file():
+    import torch
+
+    from lib import mlrec
+
+    w = torch.randn(7, 5, generator=torch.Generator().manual_seed(3)) * 0.3
+    for dtype in ("int8", "int4", "bf16"):
+        code = mlrec.WEIGHT_DTYPES[dtype]
+        stored = mlrec.decode_weight(
+            mlrec.encode_weight(w.numpy(), code), w.numel(), code
+        )
+        q = s5.fake_quant_weight(w, dtype)
+        np.testing.assert_allclose(q.numpy().reshape(-1), stored, rtol=1e-6, atol=1e-7)
+    w.requires_grad_(True)
+    s5.fake_quant_weight(w, "int4").sum().backward()
+    assert torch.equal(w.grad, torch.ones_like(w))
+    assert s5.fake_quant_weight(w, "fp32") is w
+
+
+def test_temperature_is_log_parameterized_and_exported_as_the_engine_reads_it():
+    import torch
+
+    torch.manual_seed(0)
+    s = s5.GenericTwoTower(4, 3, 2, 8, 16, 8)
+    with torch.no_grad():
+        s.log_temperature.fill_(math.log(0.5))
+    q, i, x = torch.randn(6, 4), torch.randn(6, 3), torch.randn(6, 2)
+    state = s.export_state()
+    assert "log_temperature" not in state
+    assert float(state["temperature"][0]) == pytest.approx(0.5)
+    other = s5.GenericTwoTower(4, 3, 2, 8, 16, 8)
+    other.load_exported(state)
+    assert torch.equal(other.score_pairs(q, i, x), s.score_pairs(q, i, x))
+    for stored, used in ((-0.5, 0.5), (0.01, s5.MIN_TEMPERATURE)):
+        other.load_exported(dict(state, temperature=torch.tensor([stored])))
+        assert float(other.temperature().detach()) == pytest.approx(used)
+    old = dict(state)
+    del old["temperature"]
+    other.load_exported(old)
+    assert float(other.temperature().detach()) == pytest.approx(1.0)
+    grouped = s.score_grouped(
+        q[:2], torch.tensor([0, 0, 1, 1, 0, 1]), i, torch.arange(6), x
+    )
+    rows = s.score_pairs(q[[0, 0, 1, 1, 0, 1]], i, x)
+    torch.testing.assert_close(grouped, rows)
+    fixed = s5.GenericTwoTower(4, 3, 2, 8, 16, 8, learn_temperature=False)
+    assert not fixed.log_temperature.requires_grad
+
+
+def _reference_greedy(sig_to_data, winner_us, k):
+    """The pure-Python whitelist greedy `_greedy_table` replaces."""
+    log_win = {gi: math.log(w) for gi, w in winner_us.items()}
+    chosen, best, pick = [], {gi: -math.inf for gi in winner_us}, {}
+    pick = {gi: math.inf for gi in winner_us}
+
+    def take(sig):
+        chosen.append(sig)
+        for gi, (us, score) in sig_to_data[sig].items():
+            if score > best[gi]:
+                best[gi], pick[gi] = score, us
+
+    while len(chosen) < k and any(p == math.inf for p in pick.values()):
+        top, top_cover, top_gain = None, 0, -math.inf
+        for sig, data in sig_to_data.items():
+            if sig in chosen:
+                continue
+            cover, gain = 0, 0.0
+            for gi in winner_us:
+                c = data.get(gi)
+                if c is None:
+                    continue
+                if pick[gi] == math.inf:
+                    cover += 1
+                    gain += log_win[gi] - math.log(c[0])
+                elif c[1] > best[gi]:
+                    gain += math.log(pick[gi]) - math.log(c[0])
+            if cover and (
+                cover > top_cover or (cover == top_cover and gain > top_gain)
+            ):
+                top, top_cover, top_gain = sig, cover, gain
+        if top is None:
+            break
+        take(top)
+    while len(chosen) < k:
+        top, top_obj = None, -math.inf
+        for sig, data in sig_to_data.items():
+            if sig in chosen:
+                continue
+            total, count = 0.0, 0
+            for gi in winner_us:
+                c = data.get(gi)
+                new = c[0] if c is not None and c[1] > best[gi] else pick[gi]
+                if new == math.inf:
+                    continue
+                total += log_win[gi] - math.log(new)
+                count += 1
+            if count and total / count > top_obj:
+                top, top_obj = sig, total / count
+        if top is None:
+            break
+        take(top)
+    return chosen
+
+
+def test_vectorized_whitelist_greedy_matches_the_reference():
+    rng = random.Random(4)
+    for trial in range(30):
+        n_sig, n_g = rng.randint(1, 12), rng.randint(1, 15)
+        winner = {gi: rng.uniform(1, 10) for gi in range(n_g) if rng.random() < 0.9}
+        cache = {}
+        for s in range(n_sig):
+            data = {
+                gi: (w * rng.uniform(1.0, 1.6), rng.gauss(0, 1))
+                for gi, w in winner.items()
+                if rng.random() < 0.5
+            }
+            if data:
+                cache[(trial, s)] = data
+        table = s5.ScoreTable.from_cache(cache, winner)
+        for k in (1, 3, 8, 20):
+            got = [table.keys[j] for j in s5._greedy_table(table, k)]
+            assert got == _reference_greedy(cache, winner, k), (trial, k)
+
+
+def test_the_key_index_matches_the_student_score_cache(tmp_path):
+    import torch
+
+    pool = twin_pool()
+    data = write_round(tmp_path / "stage04", shapes_for(12, 8, CELLS3[:2]), pool)
+    gemms = [
+        g for gs in s5.load_enriched_chunks(str(data), True)[0].values() for g in gs
+    ]
+    names = (fs.query_feature_names(), fs.item_feature_names())
+    names += (fs.interaction_feature_names(),)
+    hw, consts = hwlib.DeviceHardware(**HARDWARE), hwlib.arch_constants("gfx950")
+    q, i, x, gidx, us, win, _rank = s5.build_cell_tensors(gemms, *names, hw, consts)
+    qw, iw, xw, norms = s5.whiten(q, i, x)
+    torch.manual_seed(2)
+    student = s5.GenericTwoTower(len(names[0]), len(names[1]), len(names[2]), 8, 16, 8)
+    nt = {k: (False, True) for k in {s5.ev.pool_key(g) for g in gemms}}
+    rules = {"non_temporal_rule": True}
+    ref = s5.ScoreTable.from_cache(
+        *s5._student_score_cache(
+            gemms, student, *names, hw, consts, norms, "cpu", nt, rules=rules
+        )
+    )
+    pairs = s5._PairSet((qw, iw, xw, gidx, us, win), "cpu")
+    student.eval()
+    with torch.no_grad():
+        scores = pairs.scores(student).numpy()
+    index = s5.KeyIndex(gemms, lds_bytes=hw.lds_bytes, nt_flags=nt, rules=rules)
+    table = index.table(scores)
+    assert table.keys == ref.keys and table.gemms == ref.gemms
+    np.testing.assert_array_equal(table.us, ref.us)
+    np.testing.assert_allclose(table.score, ref.score, rtol=1e-5, atol=1e-6)
+    sk = s5.select_smart_k_signatures(gemms, 4, table=table, k_max=6, k_min=2)
+    assert (
+        sk["sigs"]
+        == s5.select_smart_k_signatures(gemms, 4, table=ref, k_max=6, k_min=2)["sigs"]
+    )
+    assert sk["metrics"]["mode"] == "student_aware" and 2 <= len(sk["sigs"]) <= 6
+
+
+def _cell_kwargs(**over):
+    names = (fs.query_feature_names(), fs.item_feature_names())
+    names += (fs.interaction_feature_names(),)
+    kw = dict(
+        cell=CELLS3[0],
+        q_names=names[0],
+        i_names=names[1],
+        x_names=names[2],
+        hardware=hwlib.DeviceHardware(**HARDWARE),
+        constants=hwlib.arch_constants("gfx950"),
+        epochs=4,
+        lr=2e-3,
+        weight_decay=1e-4,
+        grad_clip_norm=1.0,
+        lam=0.5,
+        T=2.0,
+        alpha=12.0,
+        tie_tolerance=0.01,
+        n_estimators=8,
+        num_leaves=7,
+        lgb_lr=0.1,
+        seed=3,
+        device="cpu",
+        eval_sample_frac=1.0,
+        use_teacher=False,
+        quiet=True,
+        training_log_writer=None,
+        validation_frac=0.25,
+        split_seed=5,
+        batch_gemms=4,
+        eval_points=8,
+    )
+    kw.update(over)
+    return kw
+
+
+def test_the_best_deployed_validation_checkpoint_is_kept(tmp_path, monkeypatch):
+    data = write_round(tmp_path / "stage04", shapes_for(13, 24, CELLS3[:1]))
+    (gemms,) = s5.load_enriched_chunks(str(data), True)[0].values()
+    measured = iter([0.90, 0.95, 0.93, 0.95, 0.91] + [0.5] * 100)
+    monkeypatch.setattr(
+        s5.ShippedSelector, "measures_validation", property(lambda s: True)
+    )
+    monkeypatch.setattr(
+        s5.ShippedSelector, "validation_sel_eff", lambda self, entry: next(measured)
+    )
+    selector = {"engine": False, "whitelist": {"mode": "signature", "k": 3}}
+    r = s5.train_cell(gemms=gemms, selector=selector, **_cell_kwargs())
+    steps = [m["step"] for m in r["epoch_metrics"]]
+    seen = [m["val_deployed_sel_eff"] for m in r["epoch_metrics"]]
+    assert seen[:5] == [0.90, 0.95, 0.93, 0.95, 0.91]
+    tied = [m for m in r["epoch_metrics"] if m["val_deployed_sel_eff"] == 0.95]
+    kept = min(tied, key=lambda m: m["val_loss"])
+    assert (
+        r["best_step"] == kept["step"] and r["selection_deployed_val_sel_eff"] == 0.95
+    )
+    assert r["selection_metric"] == "deployed_validation"
+    assert r["steps"] == steps[-1] and len(steps) == 8 and not r["stopped_early"]
+    assert r["smart_k_signatures"] and r["smart_k_metrics"]["mode"] == "student_aware"
+
+    measured = iter([0.9, 0.8, 0.8, 0.8] + [0.99] * 100)
+    r = s5.train_cell(gemms=gemms, selector=selector, **_cell_kwargs(patience=3))
+    assert r["stopped_early"] and len(r["epoch_metrics"]) == 4
+    assert r["best_step"] == r["epoch_metrics"][0]["step"]
+
+
+def test_deployed_numbers_charge_picks_by_the_configured_rule(monkeypatch):
+    from lib import evaluate as ev
+
+    class Stop(Exception):
+        pass
+
+    seen = []
+
+    def evaluate_bundle(bundle, gemms, **kw):
+        seen.append(kw.get("pick_measurement"))
+        raise Stop
+
+    monkeypatch.setattr(s5.ev, "evaluate_bundle", evaluate_bundle)
+    monkeypatch.setattr(s5, "cell_bundle", lambda *a, **k: {})
+    monkeypatch.setattr(s5, "model_entry", lambda r: r)
+    selector = SimpleNamespace(
+        label="c",
+        names=([], [], []),
+        spec={"arch": "gfx950", "weight_dtype": "int4", "pick_measurement": "timed"},
+        val_g=[],
+        constants=None,
+        hardware=None,
+        tw=None,
+    )
+    with pytest.raises(Stop):
+        s5.ShippedSelector.validation_sel_eff(selector, {})
+    for rule in ev.PICK_MEASUREMENTS:
+        with pytest.raises(Stop):
+            s5.deployed_eval_cell(
+                "c",
+                {},
+                [],
+                [],
+                names=([], [], []),
+                arch="gfx950",
+                constants=None,
+                hardware=None,
+                weight_dtype="int4",
+                pools={},
+                tw=None,
+                pick_measurement=rule,
+            )
+    assert seen == ["timed", *ev.PICK_MEASUREMENTS]
+
+
+def test_quantization_aware_phase_continues_from_the_kept_checkpoint(tmp_path):
+    data = write_round(tmp_path / "stage04", shapes_for(14, 20, CELLS3[:1]))
+    (gemms,) = s5.load_enriched_chunks(str(data), True)[0].values()
+    kw = _cell_kwargs(weight_dtype="int4", qat_frac=0.5, eval_points=4)
+    r = s5.train_cell(gemms=gemms, selector=None, **kw)
+    phases = [m["phase"] for m in r["epoch_metrics"]]
+    assert phases.count("main") == 4 and phases.count("qat") >= 1
+    assert r["steps"] > max(
+        m["step"] for m in r["epoch_metrics"] if m["phase"] == "main"
+    )
+    assert r["selection_metric"] == "validation"
+    assert "smart_k_signatures" not in r
+    full = s5.train_cell(gemms=gemms, selector=None, **_cell_kwargs(batch_gemms=0))
+    assert full["steps"] == 4 and len(full["epoch_metrics"]) == 4

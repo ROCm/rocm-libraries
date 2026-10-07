@@ -15,7 +15,8 @@ Modes:
                    `--shapes-per-cell`; base cells without a model get none.
                    The prior per-cell sel_eff is carried as information only
                    (stage04b decides from the sel_eff measured on the new
-                   shapes).
+                   shapes). `--only-cells` limits the round to the leaves
+                   under the labels given, with or without a model.
 
 Both modes:
 
@@ -132,6 +133,31 @@ def _build_active_plan(
             "parent_cell": serving if serving != leaf else None,
         }
     return plan
+
+
+def restrict_plan(
+    plan: Dict[str, Dict[str, Any]],
+    only_cells: List[str],
+    shapes_per_cell: int,
+    split_tree: Dict[str, "sc.SplitRule"],
+) -> Tuple[Dict[str, Dict[str, Any]], List[str]]:
+    """(`plan` limited to the leaves under `only_cells`, the labels that are
+    not cells of the grid or the split tree). Those leaves get
+    `shapes_per_cell`, also without a prior model, and are marked
+    `requested`; every other entry gets 0."""
+    from lib.cell_evidence import requested_leaves
+
+    leaves, unknown = requested_leaves(only_cells, split_tree)
+    out: Dict[str, Dict[str, Any]] = {}
+    for cell, info in plan.items():
+        out[cell] = dict(info, n_target=0, requested=False)
+    for leaf in leaves:
+        info = out.get(leaf) or {
+            "sel_eff_prev_round": None,
+            "has_prior_model": False,
+        }
+        out[leaf] = dict(info, n_target=shapes_per_cell, requested=True)
+    return out, unknown
 
 
 # ── history ──────────────────────────────────────────────────────────────────
@@ -354,6 +380,13 @@ def main() -> int:
         help="(active mode) shapes per leaf with a prior model.",
     )
     ap.add_argument(
+        "--only-cells",
+        default=None,
+        help="(active mode) comma list of cell labels: only the leaves under "
+        "them get --shapes-per-cell (also leaves without a prior model); every "
+        "other leaf gets none.",
+    )
+    ap.add_argument(
         "--min-cell-gemms",
         type=int,
         default=0,
@@ -451,6 +484,15 @@ def main() -> int:
             return 1
         split_tree = sc.load_cumulative_split_tree(prior_round_dirs)
         plan = _build_active_plan(cells_json_path, args.shapes_per_cell, split_tree)
+        if args.only_cells is not None:
+            only = [c.strip() for c in args.only_cells.split(",") if c.strip()]
+            plan, unknown = restrict_plan(plan, only, args.shapes_per_cell, split_tree)
+            if not only:
+                ui.err("err", "--only-cells names no cell")
+                return 1
+            if unknown:
+                ui.err("err", f"--only-cells: unknown cell label(s) {unknown}")
+                return 1
         per_cell = {cell: int(info["n_target"]) for cell, info in plan.items()}
         args.prior_shapes_yaml = list(args.prior_shapes_yaml or []) + auto_shapes
         args.prior_enriched_csv_dir = (
@@ -580,6 +622,7 @@ def main() -> int:
             args.out_dir / "per_cell_plan.json",
             {
                 "shapes_per_cell": args.shapes_per_cell,
+                "only_cells": args.only_cells,
                 "prior_cells_json": str(cells_json_path),
                 "prior_round_dirs": [str(p) for p in (args.prior_round_dir or [])],
                 "prior_shapes_yaml": [str(p) for p in (args.prior_shapes_yaml or [])],

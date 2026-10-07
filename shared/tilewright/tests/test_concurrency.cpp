@@ -124,3 +124,59 @@ TEST_CASE("concurrent loads and ranks agree with a serial run", "[concurrency]")
   CHECK(work.load() == static_cast<int>(n_threads) * 120);
   CHECK(failures.load() == 0);
 }
+
+TEST_CASE("concurrent rankings that release and rebuild cached cells agree with a serial run",
+          "[concurrency][cache]") {
+  const std::size_t saved = tw::cache_limit();
+  ModelSpec spec          = grid_model(tw::WeightType::Int4);
+  for (CellSpec& c : spec.cells) c.signatures = {{128, 128, 64, 16, 16, 32, 0, 0}};
+  const tw::ModelPtr model = load_spec(spec);
+  std::vector<tw::Config> pool;
+  for (std::size_t mt : {16, 32, 64, 128, 256})
+    for (std::size_t nt : {32, 64, 128}) pool.push_back(make_config(mt, nt, 64));
+  std::mt19937_64 rng(9);
+  std::vector<tw::Problem> problems;
+  std::vector<std::size_t> depth;
+  for (int i = 0; i < 64; ++i) {
+    problems.push_back(make_problem(1 + rng() % 5000, 1 + rng() % 5000, 1 + rng() % 5000));
+    depth.push_back(rng() % 2 ? 1 : 30);
+  }
+  std::vector<std::vector<tw::Result>> expect;
+  for (std::size_t i = 0; i < problems.size(); ++i)
+    expect.push_back(tw::rank_configs(*model, problems[i], test_hardware(), pool, depth[i]));
+
+  // Room for about two cells: rankings of other cells release the ones in use.
+  tw::set_cache_limit(2 * tw::detail::cell_weight_bytes(*model, 0));
+  const tw::ModelPtr fresh = load_spec(spec);
+  const tw::CandidateSet set(fresh, pool);
+  std::atomic<int> failures{0};
+  const unsigned n_threads = std::max(4u, std::min(16u, std::thread::hardware_concurrency()));
+  std::vector<std::thread> threads;
+  for (unsigned t = 0; t < n_threads; ++t)
+    threads.emplace_back([&, t] {
+      std::vector<tw::Result> top;
+      for (int iter = 0; iter < 200; ++iter) {
+        const std::size_t i  = (t * 13 + static_cast<std::size_t>(iter) * 7) % problems.size();
+        const tw::Problem& p = problems[i];
+        bool ok              = false;
+        switch ((t + static_cast<unsigned>(iter)) % 4) {
+          case 0: ok = same_results(set.rank(p, test_hardware(), depth[i]), expect[i]); break;
+          case 1:
+            set.rank_top(p, test_hardware(), {}, depth[i], top);
+            ok = same_results(top, scored_prefix(expect[i], depth[i]));
+            break;
+          case 2:
+            set.prepare(p, test_hardware());
+            ok = true;
+            break;
+          default:
+            ok = same_results(tw::rank_configs(*fresh, p, test_hardware(), pool, depth[i]),
+                              expect[i]);
+        }
+        if (!ok) ++failures;
+      }
+    });
+  for (std::thread& th : threads) th.join();
+  tw::set_cache_limit(saved);
+  CHECK(failures.load() == 0);
+}

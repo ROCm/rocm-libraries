@@ -6,32 +6,52 @@
 The bundle is written as MLREC_v2 at the deploy weight dtype, loaded with
 `tilewright.load_model_from_memory`, and every GEMM is ranked by a
 `tilewright.CandidateSet` holding the library's kernel pool, the way
-TensileLite ranks at runtime: pool-order tie-break and the exclusive
-execution context (the engine's defaults, the only context v2 models serve).
-The tilewright Python module is required
+TensileLite ranks at runtime: pool-order tie-break and the GEMM's execution
+context (`cu_budget`, `schedule`; absent means exclusive use of the device,
+the only context v2 models serve). MLREC_v3 bundles are written as MLREC_v3
+and ranked with hipBLASLt's launch plans (`lib.hipblaslt_launch`) as the
+engine's launch model, the plans stage05 trains with and the deployed
+TensileLite adapter must give. The tilewright Python module is required
 (`pip install shared/tilewright/python`).
 
 A kernel is identified by its position in the pool; solutions with identical
 `tilewright::Config` fields are separate kernels that score alike, and the
 engine ranks the first of them in pool order first.
 
-Deployed pick of one GEMM (top-1 request, `min_scored` = 1):
-  * walk the scored configs in rank order and take the first pool position
-    this GEMM has a measurement for; the pick costs that solution's own
-    latency. The bench measured every solution that passes the library's
-    predicates for the problem, so this is the runtime's "first ranked
-    solution whose predicates pass". A predicate-passing kernel the bench
-    failed to measure is skipped here, where the runtime could pick it;
-  * when no scored config is measured (no trained cell, nothing feasible, or
-    only unmeasured configs scored) the runtime falls back to the Origami
-    ranking; the fallback pick is the row with `is_origami_pick == 1` (the
-    first tested row of a bench run without tilewright; CSVs without that
-    column use the tested row with the lowest bench rank);
+Deployed pick of one GEMM (top-1 request, `min_scored` = 1). The runtime runs
+the first kernel of the engine's ranking whose library predicates pass. A
+bench without a kernel list times or skip-screens every kernel whose
+predicates pass, so a kernel without a row is one the runtime skips too. A
+GEMM benched from a plan has no rows for the kernels off its list (`listed`,
+see `attach_plan`), which the runtime may run.
+  * `pick_measurement="timed"`: walk the
+    scored configs in rank order to the first one the runtime would run. When it has a timed row the
+    pick costs that latency. When it has only a skip row (one cold warm-up
+    call) or is off the plan's list, the GEMM is a miss (`miss` says which):
+    it counts at the slowest latency measured for it;
+  * `pick_measurement="warmup"` (what the validating stages use by default):
+    as "timed", but a pick with only a skip row costs its warm-up latency, a
+    close and slightly pessimistic stand-in for its timed latency; a pick
+    off the plan's list stays a miss, since nothing measured it;
+  * `pick_measurement="rebench"`: as "timed", but a miss whose GEMM carries
+    a re-bench of that kernel (`rebench`: {solution: winner / pick latency
+    measured together, lib/rebench.py `rebench_picks`}) costs the GEMM's
+    winner latency over that ratio, capped at the winner's; a miss without
+    one counts as under "warmup" (keeping its `miss` reason);
+  * `pick_measurement="any"` (the default here): the first scored config
+    with any row, at that row's latency (a skip row's warm-up); kernels off
+    a plan's list are passed over like kernels without a row;
+  * when the runtime would run no scored config (no trained cell, nothing
+    feasible, or only configs without rows scored) it falls back to the
+    Origami ranking; the fallback pick is the row with `is_origami_pick == 1`
+    (the first tested row of a bench run without tilewright; CSVs without
+    that column use the tested row with the lowest bench rank);
   * a GEMM with neither is not evaluable and is only counted.
 
 Per-GEMM selection efficiency is winner_us / pick_us with winner_us the
 fastest tested solution; aggregates are geometric means. Paired statistics
-compare the deployed pick with the Origami pick on the GEMMs that have both.
+compare the deployed pick with the Origami pick on the GEMMs that have both;
+those are the only numbers that compare the two.
 
 Library pool: one CandidateSet per (layout, dtypes) key holding each kernel
 (`sol_idx_global`) once, with its attributes when the kernel list carries
@@ -49,18 +69,34 @@ engine served from another cell than `lib.subcells` routes them to, and
 """
 from __future__ import annotations
 
+import csv
 import math
 import os
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from pathlib import Path
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 import numpy as np
 
 from . import features as fs
-from . import mlrec, ui
+from . import hipblaslt_launch, mlrec, ui
 from .grid import cell_key
-from .hardware import DATATYPE_VALUE, ArchConstants, DeviceHardware
-from .subcells import assign_subcell, resolve_model_cell, split_tree_from_labels
+from .hardware import DATATYPE_NAME, DATATYPE_VALUE, ArchConstants, DeviceHardware
+from .subcells import (
+    assign_subcell,
+    resolve_model_cell,
+    split_tree_from_labels,
+    v3_serving_cell,
+)
 
 CONFIG_FIELDS: Tuple[str, ...] = (
     "mt_m",
@@ -92,6 +128,19 @@ ENGINE_DEBUG_ENV: Tuple[str, ...] = (
     "TILEWRIGHT_PICK_LOG",
     "TILEWRIGHT_DIAG",
 )
+PICK_MEASUREMENTS: Tuple[str, ...] = ("warmup", "timed", "any")
+# Rules that charge a pick with only a skip-screen row its warm-up latency.
+WARMUP_COUNTS: Tuple[str, ...] = ("warmup", "any")
+# "rebench" needs re-bench results attached to the GEMMs (lib/miss_rebench.py,
+# validate.rebench_misses); PICK_MEASUREMENTS are the rules a stage can apply
+# from its data alone.
+REBENCH_PICK_MEASUREMENT = "rebench"
+EVALUATION_PICK_MEASUREMENTS: Tuple[str, ...] = (
+    *PICK_MEASUREMENTS,
+    REBENCH_PICK_MEASUREMENT,
+)
+DEFAULT_PICK_MEASUREMENT = "any"
+MISS_REASONS: Tuple[str, ...] = ("screened", "not_benched")
 
 
 class RoutingMismatchError(Exception):
@@ -209,11 +258,107 @@ def make_config(tw: Any, config: Mapping[str, Any], index: int) -> Any:
     return tw.Config(**kwargs)
 
 
-def candidate_set(tw: Any, model: Any, pool: Sequence[Mapping[str, Any]]) -> Any:
+_PARTIAL_REDUCTION_MEMBERS = {
+    "none": "None_",
+    "tree": "Tree",
+    "parallel": "Parallel",
+    "atomic": "Atomic",
+}
+
+
+def make_plan(tw: Any, plan: fs.LaunchPlan) -> Any:
+    """tilewright.LaunchPlan of a `features.LaunchPlan`."""
+    return tw.LaunchPlan(
+        dynamic_queue=plan.dynamic_queue,
+        grid_wgs=plan.grid_wgs,
+        partial_reduction=getattr(
+            tw.PartialReduction, _PARTIAL_REDUCTION_MEMBERS[plan.partial_reduction]
+        ),
+    )
+
+
+class EngineLaunch:
+    """A tilewright launch model giving the engine `launch`'s plan of pool
+    kernel `config.index` on a device with `n_cu` CUs, its launch key
+    (`launch.launch_key(kernel, attributes)`; 0 when `launch` has none) and
+    `launch`'s `id` (empty when it has none)."""
+
+    def __init__(
+        self,
+        tw: Any,
+        pool: Sequence[Mapping[str, Any]],
+        launch: fs.LaunchSource,
+        n_cu: int,
+    ) -> None:
+        self.tw = tw
+        self.pool = pool
+        self.launch = launch
+        self.n_cu = int(n_cu)
+        self._schedules = {
+            int(tw.Schedule.Default): "default",
+            int(tw.Schedule.Dynamic): "dynamic",
+            int(tw.Schedule.Auto): "auto",
+        }
+        self._key_of = getattr(launch, "launch_key", None)
+        self.id = str(getattr(launch, "id", "") or "")
+
+    def plan(self, config: Any, problem: Any, context: Any) -> Any:
+        kernel = self.pool[int(config.index)]
+        prob = {
+            "m": int(problem.size.m),
+            "n": int(problem.size.n),
+            "k": int(problem.size.k),
+            "batch": int(problem.batch),
+            "mi_dtype": DATATYPE_NAME.get(int(problem.mi_dtype), ""),
+        }
+        ctx = fs.ExecutionContext(
+            cu_budget=int(context.cu_budget),
+            schedule=self._schedules[int(context.schedule)],
+        )
+        return make_plan(
+            self.tw,
+            self.launch(prob, kernel, kernel.get("attributes"), ctx, self.n_cu),
+        )
+
+    def launch_key(self, config: Any) -> int:
+        if self._key_of is None:
+            return 0
+        kernel = self.pool[int(config.index)]
+        return int(self._key_of(kernel, kernel.get("attributes"))) & 0xFFFFFFFFFFFFFFFF
+
+
+def engine_launch(
+    tw: Any,
+    pool: Sequence[Mapping[str, Any]],
+    launch: fs.LaunchSource,
+    n_cu: int,
+) -> EngineLaunch:
+    """The launch model `candidate_set` hands the engine."""
+    return EngineLaunch(tw, pool, launch, n_cu)
+
+
+def candidate_set(
+    tw: Any,
+    model: Any,
+    pool: Sequence[Mapping[str, Any]],
+    hardware: Optional[DeviceHardware] = None,
+) -> Any:
     """tilewright.CandidateSet of a kernel pool (`make_config` entries in pool
     order, `index` = pool position) with the engine's default pool-order
-    tie-break, the one TensileLite uses."""
-    return tw.CandidateSet(model, [make_config(tw, k, i) for i, k in enumerate(pool)])
+    tie-break, the one TensileLite uses. An MLREC_v3 model ranks with
+    hipBLASLt's launch plans (`lib.hipblaslt_launch`) for its arch on
+    `hardware`, the plans stage05 trains with; ValueError without
+    `hardware`."""
+    configs = [make_config(tw, k, i) for i, k in enumerate(pool)]
+    info = tw.describe(model)
+    if int(info.format_version) < 3:
+        return tw.CandidateSet(model, configs)
+    if hardware is None:
+        raise ValueError("an MLREC_v3 candidate set needs the device hardware")
+    launch = hipblaslt_launch.HipblasltLaunch(str(info.arch))
+    return tw.CandidateSet(
+        model, configs, launch=engine_launch(tw, pool, launch, int(hardware.n_cu))
+    )
 
 
 def make_hardware(tw: Any, hardware: DeviceHardware) -> Any:
@@ -222,6 +367,26 @@ def make_hardware(tw: Any, hardware: DeviceHardware) -> Any:
     h.lds_capacity = int(hardware.lds_bytes)
     h.L2_capacity = int(hardware.l2_bytes)
     return h
+
+
+def context_of(gemm: Mapping[str, Any]) -> fs.ExecutionContext:
+    """Execution context of a GEMM dict or enriched row (`cu_budget`,
+    `schedule`; empty or absent means exclusive)."""
+    budget = gemm.get("cu_budget")
+    schedule = gemm.get("schedule")
+    return fs.ExecutionContext(
+        cu_budget=int(float(budget)) if budget not in (None, "") else 0,
+        schedule=str(schedule).lower() if schedule not in (None, "") else "default",
+    )
+
+
+def make_context(tw: Any, context: fs.ExecutionContext) -> Any:
+    schedule = {
+        "default": tw.Schedule.Default,
+        "dynamic": tw.Schedule.Dynamic,
+        "auto": tw.Schedule.Auto,
+    }[context.schedule]
+    return tw.ExecutionContext(cu_budget=int(context.cu_budget), schedule=schedule)
 
 
 def load_model_bytes(data: bytes, tw: Any = None) -> Any:
@@ -249,13 +414,18 @@ def pool_key(gemm: Mapping[str, Any]) -> Tuple[str, ...]:
 
 
 def gemm_key(gemm: Mapping[str, Any]) -> Tuple[Any, ...]:
-    """Identity of a GEMM problem (sizes, layout, dtypes)."""
-    return (
+    """Identity of a GEMM problem (sizes, layout, dtypes), plus its execution
+    context when that is not exclusive."""
+    key = (
         int(gemm["m"]),
         int(gemm["n"]),
         int(gemm["k"]),
         int(gemm["batch_count"]),
     ) + pool_key(gemm)
+    ctx = context_of(gemm)
+    if not ctx.is_exclusive():
+        key += (ctx.cu_budget, ctx.schedule)
+    return key
 
 
 def _kernel(c: Mapping[str, Any]) -> Dict[str, Any]:
@@ -318,11 +488,20 @@ def order_candidates_by_pool(
         )
 
 
-def library_pool(library_dir: Any, library_stem: str) -> List[Dict[str, Any]]:
-    """Pool of the library `<library_dir>/<library_stem>.dat[.zlib]`."""
-    from .dat import load_library_kernels
+def library_pool(
+    library_dir: Any,
+    library_stem: str,
+    cfg: Optional[Mapping[str, Any]] = None,
+    device_index: int = 0,
+) -> List[Dict[str, Any]]:
+    """Pool of the library `<library_dir>/<library_stem>.dat[.zlib]`, with
+    the bank the pipeline config `cfg` asks for on device `device_index`
+    (`lib.bank_pool.config_pool`)."""
+    from .bank_pool import config_pool
 
-    return pool_from_kernels(load_library_kernels(library_dir, library_stem))
+    return pool_from_kernels(
+        config_pool(cfg, library_dir, library_stem, device_index).kernels
+    )
 
 
 def pools_for(
@@ -364,9 +543,13 @@ class PoolSet:
     """CandidateSets of one loaded model, one per pool key."""
 
     def __init__(
-        self, tw: Any, model: Any, pools: Mapping[Tuple[str, ...], Sequence[Mapping]]
+        self,
+        tw: Any,
+        model: Any,
+        pools: Mapping[Tuple[str, ...], Sequence[Mapping]],
+        hardware: Optional[DeviceHardware] = None,
     ) -> None:
-        self.tw, self.model = tw, model
+        self.tw, self.model, self.hardware = tw, model, hardware
         self.pools = {k: list(v) for k, v in pools.items()}
         self._sets: Dict[Tuple[str, ...], Any] = {}
 
@@ -376,18 +559,194 @@ class PoolSet:
             return None
         cs = self._sets.get(key)
         if cs is None:
-            cs = self._sets[key] = candidate_set(self.tw, self.model, pool)
+            cs = self._sets[key] = candidate_set(
+                self.tw, self.model, pool, self.hardware
+            )
         return cs
 
 
 # ── per-GEMM evaluation ──────────────────────────────────────────────────────
 
 
+def attach_plan(gemms: Iterable[Dict[str, Any]], plan: Mapping[str, Any]) -> int:
+    """Set `listed` (the solution indices of the shape's kernel list) on every
+    GEMM that `plan` (stage01b's plan.json) benched from a list; returns how
+    many. Shapes benched exhaustively keep no `listed`."""
+    return attach_plans(gemms, [plan])
+
+
+def attach_plans(
+    gemms: Iterable[Dict[str, Any]],
+    plans: Sequence[Mapping[str, Any]],
+    context_plans: Optional[
+        Mapping[Tuple[int, str], Sequence[Mapping[str, Any]]]
+    ] = None,
+) -> int:
+    """`attach_plan` over several plans (a training set's rounds and seed
+    benches): a GEMM's `listed` is the union of its shape's lists, so a
+    kernel any of its benches listed is not off-list. A GEMM of a context in
+    `context_plans` ({(cu_budget, schedule): plans}, stage01b's context
+    re-plans) takes its lists from those instead. A shape some plan benched
+    exhaustively keeps no `listed`. Returns the number of GEMMs listed."""
+    from .planner import plan_lookup
+
+    general = [plan_lookup(p) for p in plans]
+    by_context = {
+        key: [plan_lookup(p) for p in ps] for key, ps in (context_plans or {}).items()
+    }
+    n = 0
+    for g in gemms:
+        shape = (int(g["m"]), int(g["n"]), int(g["k"]), int(g.get("batch_count", 1)))
+        c = context_of(g)
+        lookups = by_context.get((c.cu_budget, c.schedule), general)
+        entries = [lk[shape] for lk in lookups if shape in lk]
+        if not entries or any(e.get("kernels") is None for e in entries):
+            g.pop("listed", None)
+            continue
+        g["listed"] = frozenset(int(s) for e in entries for s in e["kernels"])
+        n += 1
+    return n
+
+
+def measurements(
+    gemm: Mapping[str, Any],
+) -> Tuple[Dict[int, float], Dict[int, float]]:
+    """({solution: fastest timed latency}, {solution: fastest warm-up latency})
+    of one GEMM's candidates; a solution with a timed row has no warm-up
+    entry."""
+    timed: Dict[int, float] = {}
+    screened: Dict[int, float] = {}
+    for c in gemm.get("candidates", ()):
+        sid = int(c.get("sol_idx_global", -1))
+        us = float(c.get("us", 0) or 0)
+        if sid < 0 or not us > 0 or not math.isfinite(us):
+            continue
+        table = screened if c.get("is_skip") else timed
+        if sid not in table or us < table[sid]:
+            table[sid] = us
+    for sid in timed:
+        screened.pop(sid, None)
+    return timed, screened
+
+
+ProblemKey = Tuple[int, int, int, int, str, str]
+
+
+_TIMING_COLUMNS = (
+    "m",
+    "n",
+    "k",
+    "batch_count",
+    "transA",
+    "transB",
+    "sol_idx_global",
+    "us",
+    "is_skip",
+    "cu_budget",
+    "schedule",
+)
+
+
+def load_timings(
+    csv_dirs: Iterable[Any], wanted: Optional[Iterable[ProblemKey]] = None
+) -> Dict[ProblemKey, Dict[str, Any]]:
+    """{(m, n, k, batch, transA, transB): GEMM dict with `candidates` and
+    `winner_us` (the fastest timed row)} of the exclusive-context rows of the
+    chunk_*.csv files in `csv_dirs`; rows of one problem in several files
+    merge. `wanted` limits the problems read."""
+    keep = None
+    if wanted is not None:
+        keep = {tuple(str(v) for v in key) for key in wanted}
+    out: Dict[ProblemKey, Dict[str, Any]] = {}
+    for d in csv_dirs:
+        for path in sorted(Path(d).glob("chunk_*.csv")):
+            with path.open(newline="") as f:
+                reader = csv.reader(f)
+                header = next(reader, None) or []
+                col = {c: header.index(c) for c in _TIMING_COLUMNS if c in header}
+                if not all(c in col for c in _TIMING_COLUMNS[:8]):
+                    continue
+                at = [col[c] for c in _TIMING_COLUMNS[:6]]
+                i_sid, i_us = col["sol_idx_global"], col["us"]
+                i_skip = col.get("is_skip")
+                i_cu, i_sched = col.get("cu_budget"), col.get("schedule")
+                for row in reader:
+                    try:
+                        raw = tuple(row[i] for i in at)
+                        if keep is not None and raw not in keep:
+                            continue
+                        context = context_of(
+                            {
+                                "cu_budget": row[i_cu] if i_cu is not None else "",
+                                "schedule": row[i_sched] if i_sched is not None else "",
+                            }
+                        )
+                        if not context.is_exclusive():
+                            continue
+                        key = (int(raw[0]), int(raw[1]), int(raw[2]), int(raw[3] or 1))
+                        cand = {
+                            "sol_idx_global": int(row[i_sid]),
+                            "us": float(row[i_us]),
+                            "is_skip": i_skip is not None and row[i_skip] == "True",
+                        }
+                    except (IndexError, TypeError, ValueError):
+                        continue
+                    full = key + (raw[4], raw[5])
+                    out.setdefault(full, {"candidates": []})["candidates"].append(cand)
+    for g in out.values():
+        timed, _ = measurements(g)
+        g["winner_us"] = min(timed.values()) if timed else 0.0
+    return out
+
+
+def pick_cost(
+    sid: int,
+    timed: Mapping[int, float],
+    screened: Mapping[int, float],
+    listed: Optional[Iterable[int]],
+    pick_measurement: str = DEFAULT_PICK_MEASUREMENT,
+    rebench: Optional[Mapping[int, float]] = None,
+    off_list_sel_eff: Optional[float] = None,
+) -> Tuple[bool, Optional[float], Optional[str]]:
+    """(the runtime runs `sid`, its cost, miss reason) for a ranked kernel of
+    one GEMM (see the module docstring); the cost of a miss is the slowest
+    latency the GEMM measured, or with "rebench" its re-bench ratio (else a
+    screened pick's warm-up latency)
+    (`rebench`) applied to the winner. `off_list_sel_eff` charges an
+    off-list pick without a re-bench the winner's latency over it instead
+    of the slowest."""
+    if pick_measurement not in EVALUATION_PICK_MEASUREMENTS:
+        raise ValueError(
+            f"pick_measurement {pick_measurement!r} is not one of "
+            f"{EVALUATION_PICK_MEASUREMENTS}"
+        )
+    if sid in timed:
+        return True, timed[sid], None
+    if sid in screened:
+        if pick_measurement in WARMUP_COUNTS:
+            return True, screened[sid], None
+        reason: Optional[str] = "screened"
+    elif pick_measurement != "any" and listed is not None and sid not in listed:
+        reason = "not_benched"
+    else:
+        return False, None, None
+    ratio = (rebench or {}).get(sid)
+    if pick_measurement == REBENCH_PICK_MEASUREMENT:
+        if ratio and timed:
+            return True, min(timed.values()) / min(1.0, float(ratio)), reason
+        if reason == "screened":
+            return True, screened[sid], reason
+    if reason == "not_benched" and off_list_sel_eff and timed:
+        return True, min(timed.values()) / float(off_list_sel_eff), reason
+    worst = max([*timed.values(), *screened.values()], default=None)
+    return True, worst, reason
+
+
 @dataclass
 class GemmResult:
     """Deployed result of one GEMM. `pick_index` / `origami_index` are pool
     positions (None outside the pool), `pick_rank` the pick's place in the
-    engine's ranking."""
+    engine's ranking, `miss` why the pick has no timing of its own."""
 
     index: int
     m: int
@@ -406,6 +765,7 @@ class GemmResult:
     pick_rank: Optional[int] = None
     pick_index: Optional[int] = None
     origami_index: Optional[int] = None
+    miss: Optional[str] = None
 
     @property
     def sel_eff(self) -> Optional[float]:
@@ -472,6 +832,7 @@ class Evaluation:
     min_scored: int
     n_pool_configs: Dict[str, int] = field(default_factory=dict)
     n_routing_mismatch: int = 0
+    pick_measurement: str = DEFAULT_PICK_MEASUREMENT
 
     def summary(
         self,
@@ -479,11 +840,13 @@ class Evaluation:
         tie_tolerance: float = 0.01,
         bootstrap: int = 0,
     ) -> Dict[str, Any]:
-        return summarize(
+        out = summarize(
             self.results if results is None else results,
             tie_tolerance=tie_tolerance,
             bootstrap=bootstrap,
         )
+        out["pick_measurement"] = self.pick_measurement
+        return out
 
 
 def require_consistent_routing(evaluation: Evaluation, what: str) -> Evaluation:
@@ -508,10 +871,19 @@ def evaluate_model(
     min_scored: int = 1,
     labels: Optional[Iterable[str]] = None,
     tw: Any = None,
+    pick_measurement: str = DEFAULT_PICK_MEASUREMENT,
+    off_list_sel_eff: Optional[float] = None,
 ) -> Evaluation:
     """Deployed picks of `gemms` (stage05 GEMM dicts with `candidates` and
-    `winner_us`) under the model file `data`. A GEMM's measurement of a
-    solution is its fastest row of that solution index."""
+    `winner_us`, optionally `listed`) under the model file `data`. A GEMM's
+    measurement of a solution is its fastest timed row of that solution
+    index, else its fastest skip row; `off_list_sel_eff` as in
+    `pick_cost`."""
+    if pick_measurement not in EVALUATION_PICK_MEASUREMENTS:
+        raise ValueError(
+            f"pick_measurement {pick_measurement!r} is not one of "
+            f"{EVALUATION_PICK_MEASUREMENTS}"
+        )
     tw = tw or tilewright_module()
     header = mlrec.read_header(data)
     model = load_model_bytes(data, tw)
@@ -521,7 +893,7 @@ def evaluate_model(
     tree = split_tree_from_labels(labels)
     label_set = set(labels)
     pools = build_pools(gemms) if pools is None else pools
-    poolset = PoolSet(tw, model, pools)
+    poolset = PoolSet(tw, model, pools, hardware)
     positions = {
         key: {int(k["sol_idx_global"]): i for i, k in enumerate(pool)}
         for key, pool in poolset.pools.items()
@@ -535,14 +907,15 @@ def evaluate_model(
         leaf = assign_subcell(cell_key(m, n, k, b), m, n, k, b, tree)
         problem_obj = make_problem(tw, prob)
         cell = model_cell_label(tw, model, problem_obj)
-        if cell != resolve_model_cell(leaf, label_set):
+        expected = (
+            v3_serving_cell(m, n, k, b, tree, label_set)
+            if header["version"] == 3
+            else resolve_model_cell(leaf, label_set)
+        )
+        if cell != expected:
             n_mismatch += 1
-        measured: Dict[int, float] = {}
-        for c in g.get("candidates", ()):
-            sid = int(c.get("sol_idx_global", -1))
-            us = float(c.get("us", 0) or 0)
-            if sid >= 0 and us > 0 and (sid not in measured or us < measured[sid]):
-                measured[sid] = us
+        timed, screened = measurements(g)
+        listed = g.get("listed")
         res = GemmResult(
             index=gi,
             m=m,
@@ -564,17 +937,31 @@ def evaluate_model(
         cs = poolset.candidate_set(key)
         if cs is not None:
             pool = poolset.pools[key]
-            for rank, r in enumerate(cs.rank(problem_obj, hw, int(min_scored))):
+            ranked = cs.rank(
+                problem_obj, hw, int(min_scored), make_context(tw, context_of(g))
+            )
+            for rank, r in enumerate(ranked):
                 if not r.scored:
                     break
                 res.n_scored += 1
-                sid = pool[int(r.config_index)]["sol_idx_global"]
-                if res.pick_us is None and sid in measured:
-                    res.pick_sol_idx, res.pick_us = sid, measured[sid]
+                if res.served_by is not None:
+                    continue
+                sid = int(pool[int(r.config_index)]["sol_idx_global"])
+                runs, cost, miss = pick_cost(
+                    sid,
+                    timed,
+                    screened,
+                    listed,
+                    pick_measurement,
+                    g.get("rebench"),
+                    off_list_sel_eff,
+                )
+                if runs:
+                    res.pick_sol_idx, res.pick_us, res.miss = sid, cost, miss
                     res.pick_index = int(r.config_index)
                     res.pick_rank = rank
                     res.served_by = "model"
-        if res.pick_us is None and res.origami_us is not None:
+        if res.served_by is None and res.origami_us is not None:
             res.pick_sol_idx, res.pick_us = res.origami_sol_idx, res.origami_us
             res.pick_index = res.origami_index
             res.served_by = "origami_fallback"
@@ -585,6 +972,7 @@ def evaluate_model(
         min_scored=int(min_scored),
         n_pool_configs={"|".join(k): len(v) for k, v in poolset.pools.items()},
         n_routing_mismatch=n_mismatch,
+        pick_measurement=pick_measurement,
     )
 
 
@@ -599,6 +987,8 @@ def evaluate_bundle(
     pools: Optional[Mapping[Tuple[str, ...], Sequence[Mapping]]] = None,
     min_scored: int = 1,
     tw: Any = None,
+    pick_measurement: str = DEFAULT_PICK_MEASUREMENT,
+    off_list_sel_eff: Optional[float] = None,
 ) -> Evaluation:
     """`evaluate_model` of the bundle written at `weight_dtype`."""
     data = mlrec.write_model(bundle, None, arch, constants, weight_dtype)
@@ -610,6 +1000,8 @@ def evaluate_bundle(
         min_scored=min_scored,
         labels=list(bundle["models"].keys()),
         tw=tw,
+        pick_measurement=pick_measurement,
+        off_list_sel_eff=off_list_sel_eff,
     )
 
 
@@ -619,6 +1011,25 @@ def evaluate_bundle(
 def geomean(values: Iterable[float]) -> float:
     logs = [math.log(v) for v in values if v is not None and v > 0 and math.isfinite(v)]
     return math.exp(sum(logs) / len(logs)) if logs else float("nan")
+
+
+def bootstrap_ci(
+    values: Sequence[float],
+    statistic: Any = np.mean,
+    resamples: int = 1000,
+    seed: int = 0,
+) -> Optional[List[float]]:
+    """Percentile-bootstrap 95% interval of `statistic` over `values`; None
+    for fewer than two values or no resamples."""
+    arr = np.asarray([v for v in values if math.isfinite(v)], dtype=np.float64)
+    if arr.size < 2 or resamples <= 0:
+        return None
+    rng = np.random.default_rng(seed)
+    stats = np.empty(int(resamples), dtype=np.float64)
+    for i in range(int(resamples)):
+        stats[i] = statistic(arr[rng.integers(0, arr.size, arr.size)])
+    lo, hi = np.percentile(stats, [2.5, 97.5])
+    return [float(lo), float(hi)]
 
 
 PERCENTILES: Tuple[float, ...] = (1.0, 5.0, 10.0, 25.0, 50.0)
@@ -640,9 +1051,12 @@ def summarize(
 ) -> Dict[str, Any]:
     """Aggregate selection efficiency and model-vs-Origami paired statistics.
 
-    `tie_tolerance` is the relative latency difference treated as a tie;
-    `bootstrap` > 0 adds a percentile-bootstrap 95% interval of the paired
-    geomean speedup (Origami pick latency / deployed pick latency)."""
+    `sel_eff` is the deployed pick against the fastest measured kernel over
+    every evaluated GEMM; `paired` compares the deployed and the Origami pick
+    on the GEMMs that have both. `tie_tolerance` is the relative latency
+    difference treated as a tie; `bootstrap` > 0 adds a percentile-bootstrap
+    95% interval of the paired geomean speedup (Origami pick latency /
+    deployed pick latency)."""
     evaluated = [r for r in results if r.sel_eff is not None]
     paired = [r for r in evaluated if r.origami_sel_eff is not None]
     model_se = [r.sel_eff for r in evaluated]
@@ -658,6 +1072,10 @@ def summarize(
         "n_origami_fallback": sum(
             1 for r in evaluated if r.served_by == "origami_fallback"
         ),
+        "n_miss": sum(1 for r in evaluated if r.miss is not None),
+        "n_miss_by_reason": {
+            why: sum(1 for r in evaluated if r.miss == why) for why in MISS_REASONS
+        },
         "sel_eff": geomean(model_se),
         "pick_us_geomean": geomean(r.pick_us for r in evaluated),
         "winner_us_geomean": geomean(r.winner_us for r in evaluated),
@@ -681,20 +1099,16 @@ def summarize(
             "same_kernel": sum(
                 1 for r in paired if r.pick_sol_idx == r.origami_sol_idx
             ),
+            "n_miss": sum(1 for r in paired if r.miss is not None),
             "model_sel_eff_percentiles": _percentiles([r.sel_eff for r in paired]),
             "origami_sel_eff_percentiles": _percentiles(
                 [r.origami_sel_eff for r in paired]
             ),
         },
     }
-    if bootstrap > 0 and len(d) > 1:
-        rng = np.random.default_rng(seed)
-        arr = np.asarray(d, dtype=np.float64)
-        means = np.empty(int(bootstrap), dtype=np.float64)
-        for i in range(int(bootstrap)):
-            means[i] = arr[rng.integers(0, arr.size, arr.size)].mean()
-        lo, hi = np.percentile(means, [2.5, 97.5])
-        out["paired"]["speedup_ci95"] = [float(math.exp(lo)), float(math.exp(hi))]
+    ci = bootstrap_ci(d, resamples=int(bootstrap), seed=seed)
+    if ci is not None:
+        out["paired"]["speedup_ci95"] = [math.exp(ci[0]), math.exp(ci[1])]
         out["paired"]["bootstrap_resamples"] = int(bootstrap)
     return out
 
@@ -710,15 +1124,18 @@ def top1_picks(
     hardware: DeviceHardware,
     min_scored: int = 1,
     tw: Any = None,
+    with_ranking: bool = False,
 ) -> List[Dict[str, Any]]:
     """Top-1 config of each problem (dicts with m, n, k, batch_count, the
     hipBLASLt type strings and transA/transB) over one library pool, as the
     engine ranks it. `top1_index` is its pool position (`top1_index=` of the
     engine's pick log), `cell` the serving cell label (`leaf=`), `n_configs`
-    the pool size; `top1_sig` and `sol_idx_global` describe the kernel."""
+    the pool size; `top1_sig` and `sol_idx_global` describe the kernel. With
+    `with_ranking`, `ranked` lists the pool positions of every scored config
+    in rank order."""
     tw = tw or tilewright_module()
     model = load_model_bytes(data, tw)
-    cs = candidate_set(tw, model, pool)
+    cs = candidate_set(tw, model, pool, hardware)
     hw = make_hardware(tw, hardware)
     out: List[Dict[str, Any]] = []
     for p in problems:
@@ -740,6 +1157,8 @@ def top1_picks(
         ranked = cs.rank(pobj, hw, int(min_scored))
         scored = [r for r in ranked if r.scored]
         rec["n_scored"] = len(scored)
+        if with_ranking:
+            rec["ranked"] = [int(r.config_index) for r in scored]
         if rec["cell"] is None:
             rec["reason"] = "no_model"
         elif not scored:

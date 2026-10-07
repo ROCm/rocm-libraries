@@ -18,10 +18,18 @@ All knobs live in the config's `probe:` section. The orchestrator skips this
 stage when `bench.adaptive.enabled` is set, since the bench then times every
 kernel adaptively.
 
+With --plan (stage01b's plan.json) the probe does not use the library
+heuristic: each shape times the plan's probe kernels (its ranker's top kernel
+and random kernels of its list, or random feasible kernels for exhaustive
+shapes) through `solution_index_list`, with the skip screen off, and
+calibrates from the fastest of them. A shape the plan has no probe kernels
+for takes the first kernels in library order (`algo_method: 1`).
+
 Workflow:
   1. Distribute stage01's shapes.yaml round-robin over `--devices`; every probe
      line gets `requested_solution_num: 1` (one kernel is enough to measure the
-     shape) and the probe iteration counts from the config.
+     shape), or the plan's probe kernels with --plan, and the probe iteration
+     counts from the config.
   2. Run one hipblaslt-bench per device in parallel. A bench whose log stops
      growing for --stall-timeout-s (after --startup-grace-s until its first
      shape finishes) is killed.
@@ -29,7 +37,8 @@ Workflow:
      batch_count) the bench prints with it. A shape the bench printed nothing
      for (no solution, crash, killed) keeps the default knobs.
   4. Write shapes_probed.yaml: the original lines in their original order with
-     the calibrated knobs and `requested_solution_num: -1`.
+     the calibrated knobs and `requested_solution_num: -1` (planned lines keep
+     their kernel list or `algo_method`).
 
 Every bench process leads its own process group. SIGINT, SIGTERM or SIGHUP
 stops all of them (`lib.procs`) and the stage exits with 128 + the signal
@@ -45,6 +54,7 @@ Outputs in `--out-dir`:
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import re
 import shutil
@@ -66,7 +76,13 @@ from lib import procs  # noqa: E402
 from lib import ui  # noqa: E402
 from lib.bench_env import bench_env_with  # noqa: E402
 from lib.bench_log import LogProbe, parse_log_file  # noqa: E402
-from lib.bench_yaml import read_bench_lines, shape_of_line  # noqa: E402
+from lib.bench_yaml import (  # noqa: E402
+    drop_line_knob,
+    format_solution_list,
+    read_bench_lines,
+    set_line_knob,
+    shape_of_line,
+)
 from lib.fs import atomic_write_text  # noqa: E402
 
 ShapeTuple = Tuple[int, int, int, int]
@@ -109,6 +125,34 @@ def _stamp_iters_in_line(
     return line if line.endswith("\n") else line + "\n"
 
 
+# Library-order kernels a probe line takes when the plan names none.
+FALLBACK_PROBE_KERNELS = 3
+
+
+def _planned_probe_line(line: str, probe: Optional[List[int]]) -> str:
+    """Probe form of a stamped line under a plan: time `probe` (or the first
+    kernels in library order) with the skip screen off."""
+    line = drop_line_knob(line, "skip_screen_prepass")
+    line = set_line_knob(line, "skip_slow_solution_ratio", "0")
+    if probe:
+        return set_line_knob(line, "solution_index_list", format_solution_list(probe))
+    line = drop_line_knob(line, "solution_index_list")
+    line = set_line_knob(line, "algo_method", "1")
+    return set_line_knob(line, "requested_solution_num", str(FALLBACK_PROBE_KERNELS))
+
+
+def load_plan_probes(path: Path) -> Dict[ShapeTuple, List[int]]:
+    """{(m, n, k, batch): probe kernels} of a stage01b plan.json."""
+    with Path(path).open() as f:
+        doc = json.load(f)
+    return {
+        (int(e["m"]), int(e["n"]), int(e["k"]), int(e.get("batch", 1))): [
+            int(s) for s in e.get("probe") or []
+        ]
+        for e in doc.get("shapes") or []
+    }
+
+
 # ── probe-pass split (multi-device) ──────────────────────────────────────────
 
 
@@ -119,11 +163,13 @@ def _build_probe_yamls(
     first_cold: int,
     other_iters: int,
     other_cold: int,
+    probes: Optional[Dict[ShapeTuple, List[int]]] = None,
 ) -> Tuple[List[List[str]], List[List[int]]]:
     """Round-robin `lines` over `devices`: (per-device stamped lines,
     per-device indices into `lines`). The first line of each device gets
     (first_iters, first_cold), the rest (other_iters, other_cold); every line
-    gets `requested_solution_num: 1`."""
+    gets `requested_solution_num: 1`, or with `probes` (a plan) its probe
+    kernels (`_planned_probe_line`)."""
     n_dev = len(devices)
     buckets: List[List[int]] = [list(range(d, len(lines), n_dev)) for d in range(n_dev)]
     per_dev_lines: List[List[str]] = []
@@ -133,7 +179,13 @@ def _build_probe_yamls(
             it, cold = (
                 (first_iters, first_cold) if j == 0 else (other_iters, other_cold)
             )
-            stamped.append(_stamp_iters_in_line(lines[i], it, cold, rsn=1))
+            line = _stamp_iters_in_line(lines[i], it, cold, rsn=1)
+            if probes is not None:
+                shape = shape_of_line(line)
+                line = _planned_probe_line(
+                    line, probes.get(shape) if shape is not None else None
+                )
+            stamped.append(line)
         per_dev_lines.append(stamped)
     return per_dev_lines, buckets
 
@@ -343,6 +395,13 @@ def _parse_args() -> argparse.Namespace:
         "seconds; its unmeasured shapes keep the default knobs. 0 disables "
         "the watchdog.",
     )
+    ap.add_argument(
+        "--plan",
+        type=Path,
+        default=None,
+        help="stage01b plan.json: probe each shape with its planned probe "
+        "kernels instead of the library heuristic's pick.",
+    )
     ap.add_argument("--quiet", action="store_true")
     return ap.parse_args()
 
@@ -404,6 +463,16 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups, work_dir: Path) 
                 f"light={pcfg['ratio_light']}  heavy={pcfg['ratio_heavy']}",
             )
 
+    probes: Optional[Dict[ShapeTuple, List[int]]] = None
+    if args.plan is not None:
+        try:
+            probes = load_plan_probes(args.plan)
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            ui.err("err", f"cannot read --plan {args.plan}: {e}")
+            return 1
+        if not args.quiet:
+            ui.info("cfg", f"plan         : {args.plan} ({len(probes):,} shapes)")
+
     if not args.quiet:
         ui.banner("Step 1/4  Build per-device probe yamls", ui.C.BLUE)
     lines = read_bench_lines(in_yaml)
@@ -419,6 +488,7 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups, work_dir: Path) 
         int(pcfg["first_line_cold_iters"]),
         int(pcfg["other_lines_iters"]),
         int(pcfg["other_lines_cold_iters"]),
+        probes,
     )
     if not args.quiet:
         for dev, idx in zip(devices, per_dev_indices):

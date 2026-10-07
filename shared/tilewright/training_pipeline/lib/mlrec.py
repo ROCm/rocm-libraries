@@ -11,7 +11,9 @@ MLREC_v2 (what the engine loads; all little-endian):
     u64      payload_size
     u32      payload_crc32        CRC-32/ISO-HDLC of the payload
     u8       weight_dtype         0 fp32, 1 bf16, 2 int8, 3 int4
-    u8[3]    0
+    u8       serving_flags        bit 0: served without the non-temporal rule
+    u16      cascade_keys         0, or the view keys of a tier without a whitelist
+                                  that get the full score after the embedding term
     u32      q_dim, i_dim, x_dim
     u32      n_cells, n_splits
     u16+str  feature_catalog_hash
@@ -21,6 +23,37 @@ MLREC_v2 (what the engine loads; all little-endian):
              sorted by (mi_m, mi_n, mi_k, dtype)
     payload  n_splits split records, then n_cells cell records
     char[8]  "MLRECEND"
+
+MLREC_v3 keeps the fixed header (magic "MLREC_v3", bytes 29-31 zero) and
+replaces the header tail with:
+
+    u16+str  feature_catalog_hash  features.v3_catalog_hash()
+    u64      feature_spec_hash     feature_spec_hash(spec)
+    u16+str  arch
+    f64      parallel_mi_cu, mi_default_cycles
+    u32      n_mi, then the MI table as in v2
+    u32      serving_flags         bit 0 small-batched one-tile rule, bit 1 Dot2
+                                   M<3 rule, bit 2 non-temporal rule (soft rules,
+                                   applied when set), bit 3 no whitelist tier,
+                                   bit 4 launch keys (the pool is grouped by
+                                   the launch model's launch_key)
+    u32      cascade_keys
+    f64      min_cu_fraction, max_cu_fraction
+                                   usable CUs / device CUs the model supports,
+                                   0 < min <= max <= 1
+    u8       schedules             bit per Schedule (default, dynamic, auto)
+    u8       clip                  1: cells carry raw feature bounds
+    u16      n_attributes, then per entry u16+str name | i64 default |
+             u8 transform (ATTRIBUTE_TRANSFORMS index) | onehot only:
+             u16 n_values, i64 values[n_values]
+    optional provenance, present when header bytes remain:
+    u16      n_provenance (1..5), then per entry u16+str key | u16+str value,
+             each key of PROVENANCE_KEYS at most once
+
+and its cell records add, after x_std, the bounds when clip is set (f32
+q_lo[q], q_hi[q], i_lo[i], i_hi[i], x_lo[x], x_hi[x]; +-inf allowed) and,
+after the signatures, `u32 n_view_keys | u64 view_key_hash[n_view_keys]`.
+i_dim is the base item dim plus the spec's features.
 
 MLREC_v1 had `u32 version | u32 endian | u8 weight_dtype | u32+str hash |
 u32+str arch | u32 dims[3] | u32 n_cells, n_splits` before the same payload
@@ -58,11 +91,12 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 import numpy as np
 
 from . import features as fs
-from .hardware import DATATYPE_NAME, DATATYPE_VALUE, ArchConstants
+from .hardware import DATATYPE_NAME, DATATYPE_VALUE, ArchConstants, DeviceHardware
 from .subcells import ROUTING_AXES, SplitRule, split_tree_from_labels
 
 MAGIC_V1 = b"MLREC_v1"
 MAGIC_V2 = b"MLREC_v2"
+MAGIC_V3 = b"MLREC_v3"
 TRAILER = b"MLRECEND"
 ENDIAN_MARKER = 0x01020304
 
@@ -99,8 +133,31 @@ WEIGHT_ORDER: Tuple[str, ...] = (
 
 NORM_KEYS: Tuple[str, ...] = ("q_mean", "q_std", "i_mean", "i_std", "x_mean", "x_std")
 
-_V2_FIXED = struct.Struct("<8sIIQIB3xIIIII")
-_V2_RESERVED = slice(29, 32)
+_V2_FIXED = struct.Struct("<8sIIQIBBHIIIII")
+NO_NON_TEMPORAL_RULE = 0x01
+_SERVING_FLAGS_KNOWN = NO_NON_TEMPORAL_RULE
+V3_SMALL_BATCHED_RULE = 0x01
+V3_DOT2_RULE = 0x02
+V3_NON_TEMPORAL_RULE = 0x04
+V3_NO_WHITELIST_TIER = 0x08
+V3_LAUNCH_KEYS = 0x10
+_V3_SERVING_FLAGS_KNOWN = 0x1F
+SCHEDULE_BITS: Dict[str, int] = {"default": 1, "dynamic": 2, "auto": 4}
+BOUND_KEYS: Tuple[str, ...] = ("q_lo", "q_hi", "i_lo", "i_hi", "x_lo", "x_hi")
+# Where an MLREC_v3 model came from: the training config's id, a hash of the
+# training data, the revision of the pipeline's sources, the training date
+# (ISO 8601) and the id of the launch model whose plans it trained with (the
+# engine refuses to rank with another). Written in this order.
+PROVENANCE_KEYS: Tuple[str, ...] = (
+    "config_id",
+    "training_data_hash",
+    "source_revision",
+    "date",
+    "launch_model",
+)
+_ISO_DATE_RE = re.compile(
+    r"\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?"
+)
 _V1_FIXED = struct.Struct("<8sIIB")
 _MI_ENTRY = struct.Struct("<IIIid")
 
@@ -318,11 +375,36 @@ def _split_bytes(rule: SplitRule) -> bytes:
     )
 
 
+def _bound_bytes(
+    label: str, entry: Mapping[str, Any], dims: Tuple[int, int, int]
+) -> bytes:
+    bounds = entry.get("feature_bounds") or {}
+    sizes = {"q": dims[0], "i": dims[1], "x": dims[2]}
+    out = []
+    for key in BOUND_KEYS:
+        n = sizes[key[0]]
+        fill = -math.inf if key.endswith("_lo") else math.inf
+        vals = np.asarray(bounds.get(key, [fill] * n), dtype=np.float32).reshape(-1)
+        if vals.size != n:
+            raise ValueError(f"{label}: {key} has {vals.size} values, expected {n}")
+        if np.any(np.isnan(vals)):
+            raise ValueError(f"{label}: NaN in {key}")
+        out.append(vals.astype("<f4").tobytes())
+    for side in "qix":
+        lo = np.frombuffer(out[BOUND_KEYS.index(f"{side}_lo")], "<f4")
+        hi = np.frombuffer(out[BOUND_KEYS.index(f"{side}_hi")], "<f4")
+        if np.any(lo > hi):
+            raise ValueError(f"{label}: a {side} lower bound exceeds its upper bound")
+    return b"".join(out)
+
+
 def _cell_bytes(
     label: str,
     entry: Mapping[str, Any],
     dims: Tuple[int, int, int],
     weight_dtype: int,
+    version: int = 2,
+    clip: bool = False,
 ) -> bytes:
     q_dim, i_dim, x_dim = dims
     embed = int(entry["embed_dim"])
@@ -347,12 +429,20 @@ def _cell_bytes(
             raise ValueError(f"{label}: {key} has {vals.size} values, expected {n}")
         _require_finite(vals, f"{label}: {key}")
         out.append(vals.astype("<f4").tobytes())
+    if version == 3 and clip:
+        out.append(_bound_bytes(label, entry, dims))
     sigs = [tuple(int(v) for v in s) for s in (entry.get("smart_k_signatures") or [])]
     out.append(struct.pack("<I", len(sigs)))
     for sig in sigs:
         if len(sig) != 8:
             raise ValueError(f"{label}: signature must have 8 ints: {sig!r}")
         out.append(struct.pack("<8i", *sig))
+    if version == 3:
+        keys = sorted(
+            {int(h) & 0xFFFFFFFFFFFFFFFF for h in entry.get("view_key_hashes") or []}
+        )
+        out.append(struct.pack("<I", len(keys)))
+        out.extend(struct.pack("<Q", h) for h in keys)
     shapes = tensor_shapes(q_dim, i_dim, x_dim, embed, hidden, inter)
     for name in WEIGHT_ORDER:
         if name not in sd:
@@ -374,15 +464,7 @@ def _cell_bytes(
     return b"".join(out)
 
 
-def _constants_tail(fhash: str, arch: str, constants: ArchConstants) -> bytes:
-    scalars = [float(constants.parallel_mi_cu), *map(float, constants.bw)]
-    scalars.append(float(constants.mi_default))
-    if len(scalars) != 5 or not all(math.isfinite(v) for v in scalars):
-        raise ValueError("arch constants must be 5 finite numbers")
-    if scalars[0] <= 0:
-        raise ValueError("parallel_mi_cu must be > 0")
-    if scalars[4] <= 0:
-        raise ValueError("mi_default cycles must be > 0")
+def _mi_table_bytes(constants: ArchConstants) -> bytes:
     if len(constants.mi_table) > MAX_MI_ENTRIES:
         raise ValueError(f"MI table has more than {MAX_MI_ENTRIES} entries")
     entries = []
@@ -403,15 +485,30 @@ def _constants_tail(fhash: str, arch: str, constants: ArchConstants) -> bytes:
     if len({e[:4] for e in entries}) != len(entries):
         raise ValueError("MI table has duplicate entries")
     entries.sort(key=lambda e: e[:4])
+    return struct.pack("<I", len(entries)) + b"".join(
+        _MI_ENTRY.pack(*e) for e in entries
+    )
+
+
+def _constants_tail(fhash: str, arch: str, constants: ArchConstants) -> bytes:
+    scalars = [float(constants.parallel_mi_cu), *map(float, constants.bw)]
+    scalars.append(float(constants.mi_default))
+    if len(scalars) != 5 or not all(math.isfinite(v) for v in scalars):
+        raise ValueError("arch constants must be 5 finite numbers")
+    if scalars[0] <= 0:
+        raise ValueError("parallel_mi_cu must be > 0")
+    if scalars[4] <= 0:
+        raise ValueError("mi_default cycles must be > 0")
     tail = [_lenstr(fhash), _label(arch, "arch"), struct.pack("<ddddd", *scalars)]
-    tail.append(struct.pack("<I", len(entries)))
-    tail.extend(_MI_ENTRY.pack(*e) for e in entries)
+    tail.append(_mi_table_bytes(constants))
     return b"".join(tail)
 
 
 def _assemble_v2(
     *,
     weight_dtype: int,
+    serving_flags: int = 0,
+    cascade_keys: int = 0,
     fhash: str,
     arch: str,
     dims: Tuple[int, int, int],
@@ -429,9 +526,305 @@ def _assemble_v2(
         len(payload),
         zlib.crc32(payload) & 0xFFFFFFFF,
         weight_dtype,
+        serving_flags,
+        cascade_keys,
         *dims,
         n_cells,
         n_splits,
+    )
+    return head + tail + payload + TRAILER
+
+
+def _split_rules(
+    models: Mapping[str, Any],
+    splits: Optional[Union[Mapping[str, SplitRule], Iterable[SplitRule]]],
+) -> List[SplitRule]:
+    if not models:
+        raise ValueError("bundle has no cells")
+    if splits is None:
+        rules = list(split_tree_from_labels(models.keys()).values())
+    elif isinstance(splits, Mapping):
+        rules = list(splits.values())
+    else:
+        rules = list(splits)
+    rules.sort(key=lambda r: r.cell)
+    parents = [r.cell for r in rules]
+    if len(set(parents)) != len(parents):
+        raise ValueError("duplicate split parents")
+    _check_acyclic(rules)
+    return rules
+
+
+def v3_serving_flags(serving: Mapping[str, Any]) -> int:
+    """MLREC_v3 serving flags of a bundle's `serving` (soft rules and
+    launch keys off and the whitelist tier on unless set)."""
+    flags = 0
+    if serving.get("small_batched_rule", False):
+        flags |= V3_SMALL_BATCHED_RULE
+    if serving.get("dot2_rule", False):
+        flags |= V3_DOT2_RULE
+    if serving.get("non_temporal_rule", False):
+        flags |= V3_NON_TEMPORAL_RULE
+    if not serving.get("whitelist_tier", True):
+        flags |= V3_NO_WHITELIST_TIER
+    if serving.get("launch_keys", False):
+        flags |= V3_LAUNCH_KEYS
+    return flags
+
+
+def schedule_mask(schedules: Iterable[str]) -> int:
+    mask = 0
+    for name in schedules:
+        if name not in SCHEDULE_BITS:
+            raise ValueError(f"unknown schedule {name!r}")
+        mask |= SCHEDULE_BITS[name]
+    if mask == 0:
+        raise ValueError("a model must support at least one schedule")
+    return mask
+
+
+# Fixed inputs whose v3 features `feature_spec_hash` covers, with fixed arch
+# constants, launch plans and execution contexts: (problem, config,
+# (n_cu, lds_bytes, l2_bytes), (cu_budget, schedule), launch plan). The engine
+# holds the same cases (features.cpp).
+_GOLDEN_CONSTANTS = ArchConstants(
+    parallel_mi_cu=4.0,
+    bw=(0.0, 0.0, 0.0),
+    mi_table={
+        (16, 16, 32, "bfloat16"): 16.0,
+        (16, 16, 128, "float8"): 16.0,
+        (16, 16, 4, "xfloat32"): 32.0,
+    },
+    mi_default=64.0,
+)
+
+
+def _golden_problem(m, n, k, batch, ta, tb, ab, cd, mi):
+    return dict(
+        m=m, n=n, k=k, batch=batch, a_transpose=ta, b_transpose=tb,
+        a_dtype=ab, b_dtype=ab, c_dtype=cd, d_dtype=cd, mi_dtype=mi,
+    )  # fmt: skip
+
+
+def _golden_config(mt, mi, hints):
+    return dict(
+        mt_m=mt[0], mt_n=mt[1], mt_k=mt[2], mi_m=mi[0], mi_n=mi[1], mi_k=mi[2],
+        cache_hints_a=hints[0], cache_hints_b=hints[1],
+    )  # fmt: skip
+
+
+_GOLDEN_CASES = (
+    (
+        _golden_problem(4096, 4096, 4096, 1, "T", "N", "bfloat16", "bfloat16", "bfloat16"),
+        _golden_config((256, 256, 64), (16, 16, 32), (0, 0)),
+        (256, 163840, 4194304), (0, "default"), fs.LaunchPlan(),
+    ),
+    (
+        _golden_problem(777, 12345, 1000, 3, "N", "T", "float8", "bfloat16", "float8"),
+        _golden_config((128, 64, 128), (16, 16, 128), (4, 0)),
+        (256, 163840, 4194304), (64, "dynamic"), fs.LaunchPlan(True, 192, "parallel"),
+    ),
+    (
+        _golden_problem(1, 9000, 16, 1, "N", "N", "half", "half", "half"),
+        _golden_config((16, 64, 32), (1, 1, 64), (0, 4)),
+        (80, 65536, 8388608), (0, "auto"), fs.LaunchPlan(True, 0, "none"),
+    ),
+    (
+        _golden_problem(300, 200, 70000, 8, "T", "T", "float", "float", "xfloat32"),
+        _golden_config((64, 256, 16), (16, 16, 4), (1, 1)),
+        (304, 65536, 4194304), (100, "default"), fs.LaunchPlan(False, 304, "atomic"),
+    ),
+)  # fmt: skip
+
+
+def feature_spec_hash(spec: fs.AttributeSpec) -> int:
+    """The feature_spec_hash of an MLREC_v3 file with attribute spec `spec`:
+    FNV-1a 64 of a text with the v3 catalog hash and version, the names of the
+    query, item (with the spec's) and interaction features, the spec, and the
+    float32 bits of the features of `_GOLDEN_CASES`. A change to any feature's
+    name or computation changes it, so the engine rejects a model whose
+    features differ from its own. The text is the engine's
+    (feature_spec_hash in features.cpp)."""
+    text = fs.v3_catalog_hash() + "\nversion\t3\n"
+    for tag, names in (
+        ("query", fs.v3_query_feature_names()),
+        ("item", fs.v3_item_feature_names(spec)),
+        ("interaction", fs.v3_interaction_feature_names()),
+    ):
+        text += tag + "\t" + ",".join(names) + "\n"
+    for a in spec:
+        text += f"{a.name}\t{a.default}\t{a.transform}"
+        if a.transform == "onehot":
+            text += "\t" + ",".join(str(v) for v in a.values)
+        text += "\n"
+    for c, (problem, config, hw, ctx, plan) in enumerate(_GOLDEN_CASES):
+        attrs = {
+            a.name: (
+                a.values[(j + c) % len(a.values)]
+                if a.transform == "onehot"
+                else (7 * j + 3 * c) % 17 - 4
+            )
+            for j, a in enumerate(spec)
+        }
+        q, i, x = fs.v3_feature_vectors(
+            problem,
+            config,
+            attrs,
+            hardware=DeviceHardware(*hw),
+            constants=_GOLDEN_CONSTANTS,
+            context=fs.ExecutionContext(*ctx),
+            spec=spec,
+            plan=plan,
+        )
+        bits = np.asarray(q + i + x, dtype=np.float32).view(np.uint32)
+        text += f"golden\t{c}\t" + ",".join(f"{int(b):08x}" for b in bits) + "\n"
+    return fs._fnv1a(text.encode("ascii"))
+
+
+def check_provenance(provenance: Optional[Mapping[str, Any]]) -> Dict[str, str]:
+    """The provenance entries an MLREC_v3 file records, in PROVENANCE_KEYS
+    order: keys of PROVENANCE_KEYS with values that are 1 to 65535 printable
+    ASCII characters without spaces (`date` an ISO 8601 date or date and
+    time); None or "" values are left out. ValueError otherwise."""
+    if not provenance:
+        return {}
+    unknown = sorted(set(provenance) - set(PROVENANCE_KEYS))
+    if unknown:
+        raise ValueError(
+            f"unknown provenance keys {unknown}; allowed: {list(PROVENANCE_KEYS)}"
+        )
+    out: Dict[str, str] = {}
+    for key in PROVENANCE_KEYS:
+        value = provenance.get(key)
+        if value is None or value == "":
+            continue
+        text = check_label(value, f"provenance {key}")
+        if key == "date" and not _ISO_DATE_RE.fullmatch(text):
+            raise ValueError(f"provenance date {text!r} is not an ISO 8601 date")
+        out[key] = text
+    return out
+
+
+def _provenance_bytes(provenance: Mapping[str, str]) -> bytes:
+    if not provenance:
+        return b""
+    return struct.pack("<H", len(provenance)) + b"".join(
+        _lenstr(k) + _lenstr(v) for k, v in provenance.items()
+    )
+
+
+def _v3_tail(
+    spec: fs.AttributeSpec,
+    arch: str,
+    constants: ArchConstants,
+    serving: Mapping[str, Any],
+    contexts: Mapping[str, Any],
+    clip: bool,
+    provenance: Optional[Mapping[str, Any]] = None,
+) -> bytes:
+    pmc, mi_default = float(constants.parallel_mi_cu), float(constants.mi_default)
+    if not (math.isfinite(pmc) and pmc > 0):
+        raise ValueError("parallel_mi_cu must be finite and > 0")
+    if not (math.isfinite(mi_default) and mi_default > 0):
+        raise ValueError("mi_default cycles must be finite and > 0")
+    lo = float(contexts.get("min_cu_fraction", 1.0))
+    hi = float(contexts.get("max_cu_fraction", 1.0))
+    if not (0.0 < lo <= hi <= 1.0):
+        raise ValueError("CU fraction range must satisfy 0 < min <= max <= 1")
+    cascade = int(serving.get("cascade_keys", 32) or 0)
+    if not 0 <= cascade < 2**32:
+        raise ValueError(f"cascade_keys {cascade} out of range")
+    fhash = fs.v3_catalog_hash()
+    tail = [
+        _lenstr(fhash),
+        struct.pack("<Q", feature_spec_hash(spec)),
+        _label(arch, "arch"),
+        struct.pack("<dd", pmc, mi_default),
+        _mi_table_bytes(constants),
+        struct.pack("<II", v3_serving_flags(serving), cascade),
+        struct.pack("<dd", lo, hi),
+        struct.pack(
+            "<BB",
+            schedule_mask(contexts.get("schedules", ("default",))),
+            1 if clip else 0,
+        ),
+        struct.pack("<H", len(spec)),
+    ]
+    for a in spec:
+        tail.append(_label(a.name, "attribute name"))
+        tail.append(
+            struct.pack("<qB", a.default, fs.ATTRIBUTE_TRANSFORMS.index(a.transform))
+        )
+        if a.transform == "onehot":
+            tail.append(struct.pack(f"<H{len(a.values)}q", len(a.values), *a.values))
+    tail.append(_provenance_bytes(check_provenance(provenance)))
+    return b"".join(tail)
+
+
+def write_model_v3(
+    bundle: Mapping[str, Any],
+    splits: Optional[Union[Mapping[str, SplitRule], Iterable[SplitRule]]],
+    arch: str,
+    constants: ArchConstants,
+    weight_dtype: Union[str, int],
+    provenance: Optional[Mapping[str, Any]] = None,
+) -> bytes:
+    """MLREC_v3 bytes of a trained v3 bundle: as `write_model`, plus
+    `attribute_spec` (list of AttributeFeature dicts), `contexts`
+    {min_cu_fraction, max_cu_fraction, schedules}, `clip` and per cell
+    `feature_bounds` {q_lo, ..., x_hi} and `view_key_hashes`; `serving`
+    holds small_batched_rule / dot2_rule / non_temporal_rule and
+    launch_keys (default off), whitelist_tier (default on) and cascade_keys
+    (default 32). The arch's
+    bandwidth coefficients are not written. `provenance` (else the bundle's
+    `provenance`) is recorded as `check_provenance` describes."""
+    wdt = weight_dtype_code(weight_dtype)
+    spec = fs.parse_attribute_spec(bundle.get("attribute_spec") or [])
+    expected = (
+        fs.v3_query_feature_names(),
+        fs.v3_item_feature_names(spec),
+        fs.v3_interaction_feature_names(),
+    )
+    names = (
+        list(bundle.get("q_names", expected[0])),
+        list(bundle.get("i_names", expected[1])),
+        list(bundle.get("x_names", expected[2])),
+    )
+    if [list(n) for n in names] != [list(e) for e in expected]:
+        raise ValueError(
+            "bundle feature names differ from the v3 catalog "
+            f"(hash {fs.v3_catalog_hash()}) with its attribute spec"
+        )
+    dims = (len(expected[0]), len(expected[1]), len(expected[2]))
+    models: Mapping[str, Any] = bundle["models"]
+    rules = _split_rules(models, splits)
+    clip = bool(bundle.get("clip", False))
+    payload = b"".join(_split_bytes(r) for r in rules) + b"".join(
+        _cell_bytes(label, models[label], dims, wdt, version=3, clip=clip)
+        for label in sorted(models)
+    )
+    tail = _v3_tail(
+        spec,
+        str(arch),
+        constants,
+        bundle.get("serving") or {},
+        bundle.get("contexts") or {},
+        clip,
+        provenance if provenance is not None else bundle.get("provenance"),
+    )
+    header_size = _V2_FIXED.size + len(tail)
+    head = _V2_FIXED.pack(
+        MAGIC_V3,
+        ENDIAN_MARKER,
+        header_size,
+        len(payload),
+        zlib.crc32(payload) & 0xFFFFFFFF,
+        wdt,
+        0,
+        0,
+        *dims,
+        len(models),
+        len(rules),
     )
     return head + tail + payload + TRAILER
 
@@ -442,6 +835,7 @@ def write_model(
     arch: str,
     constants: ArchConstants,
     weight_dtype: Union[str, int],
+    provenance: Optional[Mapping[str, Any]] = None,
 ) -> bytes:
     """MLREC_v2 bytes of a trained bundle (the `models.pt` dict: `models`
     label -> entry with state_dict / feature_norms / dims /
@@ -450,7 +844,14 @@ def write_model(
     `splits` None rebuilds the tree from the cell labels, which is what a
     deployed model must carry. Cells and splits are written sorted by label.
     Raises ValueError when the bundle does not match the current feature
-    catalog or holds values the engine would reject."""
+    catalog or holds values the engine would reject.
+
+    A bundle with `catalog` "v3" is written as MLREC_v3 (`write_model_v3`)
+    with `provenance`; MLREC_v2 files record none."""
+    if bundle.get("catalog", "v2") == "v3":
+        return write_model_v3(bundle, splits, arch, constants, weight_dtype, provenance)
+    if bundle.get("catalog", "v2") != "v2":
+        raise ValueError(f"unknown bundle catalog {bundle.get('catalog')!r}")
     wdt = weight_dtype_code(weight_dtype)
     names = (
         list(bundle.get("q_names", fs.query_feature_names())),
@@ -469,24 +870,20 @@ def write_model(
         )
     dims = (len(names[0]), len(names[1]), len(names[2]))
     models: Mapping[str, Any] = bundle["models"]
-    if not models:
-        raise ValueError("bundle has no cells")
-    if splits is None:
-        rules = list(split_tree_from_labels(models.keys()).values())
-    elif isinstance(splits, Mapping):
-        rules = list(splits.values())
-    else:
-        rules = list(splits)
-    rules.sort(key=lambda r: r.cell)
-    parents = [r.cell for r in rules]
-    if len(set(parents)) != len(parents):
-        raise ValueError("duplicate split parents")
-    _check_acyclic(rules)
+    rules = _split_rules(models, splits)
     payload = b"".join(_split_bytes(r) for r in rules) + b"".join(
         _cell_bytes(label, models[label], dims, wdt) for label in sorted(models)
     )
+    serving = bundle.get("serving") or {}
+    cascade = int(serving.get("cascade_keys", 0) or 0)
+    if not 0 <= cascade <= 0xFFFF:
+        raise ValueError(f"cascade_keys {cascade} out of range")
     return _assemble_v2(
         weight_dtype=wdt,
+        serving_flags=(
+            0 if serving.get("non_temporal_rule", True) else NO_NON_TEMPORAL_RULE
+        ),
+        cascade_keys=cascade,
         fhash=fs.feature_names_hash(),
         arch=str(arch),
         dims=dims,
@@ -532,6 +929,8 @@ def _parse_payload(
     n_cells: int,
     dims: Tuple[int, int, int],
     weight_dtype: int,
+    version: int = 2,
+    clip: bool = False,
 ) -> Tuple[List[SplitRule], List[Dict[str, Any]]]:
     q_dim, i_dim, x_dim = dims
     splits: List[SplitRule] = []
@@ -563,6 +962,10 @@ def _parse_payload(
         cell["feature_norms"] = {
             key: cur.floats(sizes[key[0]], f"{label} {key}") for key in NORM_KEYS
         }
+        if version == 3 and clip:
+            cell["feature_bounds"] = {
+                key: cur.floats(sizes[key[0]], f"{label} {key}") for key in BOUND_KEYS
+            }
         (n_sig,) = cur.unpack("<I", f"{label} n_sig")
         if 32 * n_sig > cur.end - cur.pos:
             raise FormatError(f"{label}: signature count exceeds the file")
@@ -570,6 +973,12 @@ def _parse_payload(
         cell["smart_k_signatures"] = [
             tuple(int(v) for v in row) for row in sig_arr.reshape(n_sig, 8)
         ]
+        if version == 3:
+            (n_vk,) = cur.unpack("<I", f"{label} n_view_keys")
+            if 8 * n_vk > cur.end - cur.pos:
+                raise FormatError(f"{label}: view key count exceeds the file")
+            vk = np.frombuffer(cur.take(8 * n_vk, f"{label} view keys"), "<u8")
+            cell["view_key_hashes"] = [int(h) for h in vk]
         state: Dict[str, np.ndarray] = {}
         for name, shape in tensor_shapes(
             q_dim, i_dim, x_dim, embed, hidden, inter
@@ -598,6 +1007,8 @@ def _read_v2(data: bytes) -> Dict[str, Any]:
         payload_size,
         crc,
         wdt,
+        flags,
+        cascade,
         q_dim,
         i_dim,
         x_dim,
@@ -606,8 +1017,8 @@ def _read_v2(data: bytes) -> Dict[str, Any]:
     ) = _V2_FIXED.unpack_from(data, 0)
     if endian != ENDIAN_MARKER:
         raise FormatError("bad endian marker")
-    if data[_V2_RESERVED] != b"\x00\x00\x00":
-        raise FormatError("reserved header bytes are not zero")
+    if flags & ~_SERVING_FLAGS_KNOWN:
+        raise FormatError(f"unknown serving flags {flags}")
     if wdt not in WEIGHT_DTYPE_NAMES:
         raise FormatError(f"bad weight dtype {wdt}")
     if header_size + payload_size + len(TRAILER) != len(data):
@@ -651,8 +1062,180 @@ def _read_v2(data: bytes) -> Dict[str, Any]:
         ),
         "splits": splits,
         "cells": cells,
+        "serving": {
+            "non_temporal_rule": not flags & NO_NON_TEMPORAL_RULE,
+            "cascade_keys": cascade,
+        },
         "header_size": header_size,
         "payload_crc32": crc,
+        "has_trailer": True,
+    }
+
+
+def _v3_header(data: bytes, end: int) -> Dict[str, Any]:
+    if len(data) < _V2_FIXED.size:
+        raise FormatError("file too short")
+    fields = _V2_FIXED.unpack_from(data, 0)
+    (_m, endian, header_size, payload_size, crc, wdt, f29, f30) = fields[:8]
+    if endian != ENDIAN_MARKER:
+        raise FormatError("bad endian marker")
+    if f29 or f30:
+        raise FormatError("reserved header bytes 29-31 must be zero")
+    if wdt not in WEIGHT_DTYPE_NAMES:
+        raise FormatError(f"bad weight dtype {wdt}")
+    cur = _Cursor(data, _V2_FIXED.size, min(header_size, end))
+    fhash = cur.lenstr("<H", "feature hash")
+    (spec_hash,) = cur.unpack("<Q", "feature spec hash")
+    arch = cur.lenstr("<H", "arch")
+    pmc, mi_default = cur.unpack("<dd", "arch constants")
+    (n_mi,) = cur.unpack("<I", "n_mi")
+    table: Dict[Tuple[int, int, int, str], float] = {}
+    for e in range(n_mi):
+        m, n, k, dt, cycles = cur.unpack(_MI_ENTRY.format, f"mi entry {e}")
+        if dt not in DATATYPE_NAME:
+            raise FormatError(f"mi entry {e}: unknown dtype {dt}")
+        table[(m, n, k, DATATYPE_NAME[dt])] = cycles
+    flags, cascade = cur.unpack("<II", "serving")
+    lo, hi = cur.unpack("<dd", "CU fraction range")
+    schedules, clip = cur.unpack("<BB", "schedules")
+    if flags & ~_V3_SERVING_FLAGS_KNOWN:
+        raise FormatError(f"unknown serving flags {flags}")
+    if not 0.0 < lo <= hi <= 1.0:
+        raise FormatError("CU fraction range must satisfy 0 < min <= max <= 1")
+    if schedules == 0 or schedules & ~0x07:
+        raise FormatError(f"invalid schedule mask {schedules}")
+    if clip > 1:
+        raise FormatError(f"invalid clip flag {clip}")
+    (n_attr,) = cur.unpack("<H", "n_attributes")
+    raw = []
+    for a in range(n_attr):
+        name = cur.lenstr("<H", f"attribute {a} name")
+        default, transform = cur.unpack("<qB", f"attribute {a}")
+        if transform >= len(fs.ATTRIBUTE_TRANSFORMS):
+            raise FormatError(f"attribute {name}: unknown transform {transform}")
+        entry: Dict[str, Any] = {
+            "name": name,
+            "default": default,
+            "transform": fs.ATTRIBUTE_TRANSFORMS[transform],
+        }
+        if entry["transform"] == "onehot":
+            (nv,) = cur.unpack("<H", f"attribute {name} values")
+            entry["values"] = list(cur.unpack(f"<{nv}q", f"attribute {name} values"))
+        raw.append(entry)
+    provenance: Dict[str, str] = {}
+    if cur.pos < cur.end:
+        (n_prov,) = cur.unpack("<H", "n_provenance")
+        if not 1 <= n_prov <= len(PROVENANCE_KEYS):
+            raise FormatError(f"provenance count {n_prov} out of range")
+        for p in range(n_prov):
+            key = cur.lenstr("<H", f"provenance {p} key")
+            value = cur.lenstr("<H", f"provenance {p} value")
+            if key not in PROVENANCE_KEYS:
+                raise FormatError(f"unknown provenance key {key!r}")
+            if key in provenance:
+                raise FormatError(f"duplicate provenance key {key!r}")
+            if not _LABEL_RE.fullmatch(value):
+                raise FormatError(f"invalid provenance {key} value {value[:60]!r}")
+            provenance[key] = value
+    try:
+        spec = fs.parse_attribute_spec(raw)
+    except ValueError as e:
+        raise FormatError(str(e)) from e
+    if fhash != fs.v3_catalog_hash():
+        raise FormatError(f"feature catalog hash {fhash!r} is not the v3 catalog's")
+    if feature_spec_hash(spec) != spec_hash:
+        raise FormatError(
+            "feature_spec_hash does not match the attribute spec and the v3 features"
+        )
+    names = (
+        fs.v3_query_feature_names(),
+        fs.v3_item_feature_names(spec),
+        fs.v3_interaction_feature_names(),
+    )
+    dims = tuple(fields[8:11])
+    if dims != tuple(len(n) for n in names):
+        raise FormatError(f"feature dims {dims} do not match the v3 catalog and spec")
+    return {
+        "header_end": cur.pos,
+        "header_size": header_size,
+        "payload_size": payload_size,
+        "crc": crc,
+        "weight_dtype": wdt,
+        "feature_catalog_hash": fhash,
+        "feature_spec_hash": spec_hash,
+        "attribute_spec": spec,
+        "names": names,
+        "arch": arch,
+        "dims": dims,
+        "n_cells": fields[11],
+        "n_splits": fields[12],
+        "constants": ArchConstants(
+            parallel_mi_cu=pmc,
+            bw=(0.0, 0.0, 0.0),
+            mi_table=table,
+            mi_default=mi_default,
+        ),
+        "serving": {
+            "small_batched_rule": bool(flags & V3_SMALL_BATCHED_RULE),
+            "dot2_rule": bool(flags & V3_DOT2_RULE),
+            "non_temporal_rule": bool(flags & V3_NON_TEMPORAL_RULE),
+            "whitelist_tier": not flags & V3_NO_WHITELIST_TIER,
+            "launch_keys": bool(flags & V3_LAUNCH_KEYS),
+            "cascade_keys": cascade,
+        },
+        "contexts": {
+            "min_cu_fraction": lo,
+            "max_cu_fraction": hi,
+            "schedules": [n for n, b in SCHEDULE_BITS.items() if schedules & b],
+        },
+        "clip": bool(clip),
+        "provenance": {k: provenance[k] for k in PROVENANCE_KEYS if k in provenance},
+    }
+
+
+def _read_v3(data: bytes) -> Dict[str, Any]:
+    if len(data) < _V2_FIXED.size + len(TRAILER):
+        raise FormatError("file too short")
+    h = _v3_header(data, len(data))
+    header_size, payload_size = h["header_size"], h["payload_size"]
+    if header_size + payload_size + len(TRAILER) != len(data):
+        raise FormatError("header/payload sizes do not match the file size")
+    if data[-len(TRAILER) :] != TRAILER:
+        raise FormatError("missing MLRECEND trailer")
+    if h["header_end"] != header_size:
+        raise FormatError("header_size does not match the header contents")
+    payload = data[header_size : header_size + payload_size]
+    if zlib.crc32(payload) & 0xFFFFFFFF != h["crc"]:
+        raise FormatError("payload CRC mismatch")
+    splits, cells = _parse_payload(
+        _Cursor(data, header_size, header_size + payload_size),
+        h["n_splits"],
+        h["n_cells"],
+        h["dims"],
+        h["weight_dtype"],
+        version=3,
+        clip=h["clip"],
+    )
+    return {
+        "format": MAGIC_V3.decode(),
+        "version": 3,
+        "weight_dtype": h["weight_dtype"],
+        "weight_dtype_name": WEIGHT_DTYPE_NAMES[h["weight_dtype"]],
+        "feature_catalog_hash": h["feature_catalog_hash"],
+        "feature_spec_hash": h["feature_spec_hash"],
+        "attribute_spec": h["attribute_spec"],
+        "names": h["names"],
+        "arch": h["arch"],
+        "dims": h["dims"],
+        "constants": h["constants"],
+        "splits": splits,
+        "cells": cells,
+        "serving": h["serving"],
+        "contexts": h["contexts"],
+        "clip": h["clip"],
+        "provenance": h["provenance"],
+        "header_size": header_size,
+        "payload_crc32": h["crc"],
         "has_trailer": True,
     }
 
@@ -713,8 +1296,28 @@ def _read_v1(data: bytes) -> Dict[str, Any]:
 def read_header(data: bytes) -> Dict[str, Any]:
     """Format version, weight dtype, hash, arch and counts of a model file
     without parsing the payload."""
+    magic = bytes(data[:8])
+    if magic == MAGIC_V3:
+        data = bytes(data)
+        h = _v3_header(data, len(data))
+        return {"version": 3} | {
+            k: h[k]
+            for k in (
+                "weight_dtype",
+                "feature_catalog_hash",
+                "feature_spec_hash",
+                "attribute_spec",
+                "arch",
+                "dims",
+                "n_cells",
+                "n_splits",
+                "serving",
+                "contexts",
+                "clip",
+                "provenance",
+            )
+        }
     data = bytes(data[:4096]) if len(data) > 4096 else bytes(data)
-    magic = data[:8]
     if magic == MAGIC_V2:
         if len(data) < _V2_FIXED.size:
             raise FormatError("file too short")
@@ -725,9 +1328,13 @@ def read_header(data: bytes) -> Dict[str, Any]:
             "weight_dtype": fields[5],
             "feature_catalog_hash": cur.lenstr("<H", "feature hash"),
             "arch": cur.lenstr("<H", "arch"),
-            "dims": tuple(fields[6:9]),
-            "n_cells": fields[9],
-            "n_splits": fields[10],
+            "dims": tuple(fields[8:11]),
+            "n_cells": fields[11],
+            "n_splits": fields[12],
+            "serving": {
+                "non_temporal_rule": not fields[6] & NO_NON_TEMPORAL_RULE,
+                "cascade_keys": fields[7],
+            },
         }
     if magic == MAGIC_V1:
         h = _v1_header(data)
@@ -746,10 +1353,12 @@ def read_header(data: bytes) -> Dict[str, Any]:
 
 
 def read_model(data: bytes) -> Dict[str, Any]:
-    """Parse an MLREC_v1 or MLREC_v2 file. Weight matrices come back as the
+    """Parse an MLREC_v1, v2 or v3 file. Weight matrices come back as the
     fp32 values the engine computes from them. Raises FormatError."""
     data = bytes(data)
     magic = data[:8]
+    if magic == MAGIC_V3:
+        return _read_v3(data)
     if magic == MAGIC_V2:
         return _read_v2(data)
     if magic == MAGIC_V1:
@@ -769,12 +1378,36 @@ def bundle_from_model(parsed: Mapping[str, Any]) -> Dict[str, Any]:
             "inter_hidden": c["inter_hidden"],
             "smart_k_signatures": [list(s) for s in c["smart_k_signatures"]],
         }
-    return {
-        "q_names": fs.query_feature_names(),
-        "i_names": fs.item_feature_names(),
-        "x_names": fs.interaction_feature_names(),
-        "models": models,
-    }
+        if "view_key_hashes" in c:
+            models[c["label"]]["view_key_hashes"] = list(c["view_key_hashes"])
+        if "feature_bounds" in c:
+            models[c["label"]]["feature_bounds"] = {
+                k: list(v) for k, v in c["feature_bounds"].items()
+            }
+    if parsed.get("version") == 3:
+        q, i, x = parsed["names"]
+        out: Dict[str, Any] = {
+            "catalog": "v3",
+            "attribute_spec": [a.to_dict() for a in parsed["attribute_spec"]],
+            "contexts": dict(parsed["contexts"]),
+            "clip": parsed["clip"],
+            "q_names": list(q),
+            "i_names": list(i),
+            "x_names": list(x),
+            "models": models,
+        }
+        if parsed.get("provenance"):
+            out["provenance"] = dict(parsed["provenance"])
+    else:
+        out = {
+            "q_names": fs.query_feature_names(),
+            "i_names": fs.item_feature_names(),
+            "x_names": fs.interaction_feature_names(),
+            "models": models,
+        }
+    if "serving" in parsed:
+        out["serving"] = dict(parsed["serving"])
+    return out
 
 
 def _check_parsed_payload(
@@ -837,14 +1470,18 @@ def convert_v1_to_v2(data: bytes, constants: ArchConstants) -> bytes:
 
 __all__: Sequence[str] = (
     "FormatError",
+    "PROVENANCE_KEYS",
     "WEIGHT_DTYPES",
     "WEIGHT_ORDER",
     "bundle_from_model",
     "check_label",
+    "check_provenance",
     "convert_v1_to_v2",
     "decode_weight",
     "encode_weight",
+    "feature_spec_hash",
     "read_model",
     "weight_dtype_code",
     "write_model",
+    "write_model_v3",
 )

@@ -4,6 +4,7 @@
 import argparse
 import csv
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -28,6 +29,17 @@ pytest.importorskip("tilewright")
 import stage08_optional_validate_selection_efficiency as s08  # noqa: E402
 
 STEM = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_gfx950"
+HIPBLASLT = {
+    "a_type": "bf16_r",
+    "b_type": "bf16_r",
+    "c_type": "bf16_r",
+    "d_type": "bf16_r",
+    "scale_type": "f32_r",
+    "compute_type": "c_f32_r",
+    "transA": "T",
+    "transB": "N",
+    "library_stem": STEM,
+}
 
 
 @pytest.fixture(scope="module")
@@ -72,6 +84,13 @@ def test_every_gemm_is_scored_as_deployed(trained):
     overall = s["overall"]
     assert overall["n_gemms"] == overall["n_evaluated"] == 45
     assert overall["paired"]["n"] == 45
+    assert ds["model_sel_eff"] == pytest.approx(overall["sel_eff"])
+    assert ds["n_evaluated"] == 45 and ds["n_miss"] == overall["n_miss"]
+    assert ds["paired_n"] == 45 and s["pick_measurement"] == "warmup"
+    assert ds["paired_model_sel_eff"] == pytest.approx(
+        overall["paired"]["model_sel_eff"]
+    )
+    assert "model_geomean_sel_eff" not in ds
     per_cell = json.loads((out / "heldout" / "per_cell_sel_eff.json").read_text())
     rows = {r["cell"]: r for r in per_cell["per_cell"]}
     unmodeled = rows[CELLS3[2]]
@@ -82,6 +101,10 @@ def test_every_gemm_is_scored_as_deployed(trained):
         per_gemm = list(csv.DictReader(f))
     assert len(per_gemm) == 45
     assert {r["served_by"] for r in per_gemm} >= {"model", "origami_fallback"}
+    assert sum(1 for r in per_gemm if r["miss"]) == ds["n_miss"]
+    for r in rows.values():
+        assert r["n_miss"] <= r["n_evaluated"]
+        assert r["paired_model_sel_eff"] == pytest.approx(r["paired"]["model_sel_eff"])
 
 
 def test_library_stem_restricts_the_pool(trained, tmp_path):
@@ -204,6 +227,7 @@ def test_yaml_dataset_probes_only_without_adaptive_timing(
     config.write_text(
         yaml.safe_dump(
             {
+                "hipblaslt": HIPBLASLT,
                 "probe": {"skip_ratio_mode": "sigmoid"},
                 "bench": {"adaptive": {"enabled": adaptive}},
             }
@@ -229,3 +253,97 @@ def test_yaml_dataset_probes_only_without_adaptive_timing(
     scripts = [Path(cmd[2]).name for cmd in calls]
     assert ("stage02_probe.py" in scripts) == probed
     assert scripts[-1] == "stage03_load_balance_offline_tuning.py"
+
+
+def test_yaml_entries_become_training_bench_lines(tmp_path, monkeypatch):
+    from lib import bench_yaml
+    from lib.shapes import Shape
+
+    entries = [
+        {"M": 64, "N": 128, "K": 256, "batch_count": 1, "a_type": "bf16_r"},
+        {"M": 64, "N": 128, "K": 256, "transA": "T", "iters": 2},
+        {"M": 64, "N": 128, "K": 256, "transA": "N"},
+        {"M": 8, "N": 8, "K": 8, "batch_count": 4, "compute_type": "f32_r"},
+        {"M": 8, "N": 8, "K": 8, "batch_count": 4, "compute_type": "f16_r"},
+        {"N": 8, "K": 8},
+        "not a mapping",
+    ]
+    shapes, counts = s08.dataset_shapes(entries, HIPBLASLT)
+    assert shapes == [Shape(64, 128, 256, 1), Shape(8, 8, 8, 4)]
+    assert counts == {
+        "n_entries": 6,
+        "n_other_type": 2,
+        "n_repeated": 1,
+        "n_unreadable": 1,
+    }
+    cfg = {
+        "hipblaslt": HIPBLASLT,
+        "bench": {
+            "skip_slow_solution_ratio": 0.5,
+            "rotating_mb": 512,
+            "rotating_target_blocks": 16,
+            "adaptive": {"enabled": True, "measure_time": 1.5},
+        },
+    }
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.safe_dump(cfg))
+    dataset = tmp_path / "ds.yaml"
+    dataset.write_text(yaml.safe_dump(entries))
+    bench = tmp_path / "hipblaslt-bench"
+    bench.write_text("")
+    monkeypatch.setattr(s08, "_run_subprocess", lambda cmd, log, quiet=False: 0)
+    args = argparse.Namespace(
+        bench_binary=bench,
+        config_yaml=config,
+        devices="0",
+        blocks_per_gpu=1,
+        quiet=True,
+    )
+    logs, error = s08._bench_yaml("ds", dataset, tmp_path / "out", args)
+    assert error is None and logs == tmp_path / "out" / "bench" / "logs"
+    lines = (tmp_path / "out" / "bench_input" / "shapes.yaml").read_text().splitlines()
+    assert lines == [bench_yaml.render_bench_line(s, cfg) for s in shapes]
+    for line in lines:
+        assert "flush: true" in line and "adaptive: true" in line
+        assert "skip_slow_solution_ratio: 0.5" in line and "iters" not in line
+        assert int(re.search(r"rotating: (\d+)", line).group(1)) >= 1
+    counts_file = json.loads((tmp_path / "out" / "bench_input.json").read_text())
+    assert counts_file["n_benched"] == 2
+    config.write_text(yaml.safe_dump({"bench": cfg["bench"]}))
+    _, error = s08._bench_yaml("ds", dataset, tmp_path / "o2", args)
+    assert "hipblaslt section" in error
+    config.write_text(yaml.safe_dump(cfg))
+    dataset.write_text(yaml.safe_dump([entries[2]]))
+    _, error = s08._bench_yaml("ds", dataset, tmp_path / "o3", args)
+    assert error.startswith("no problem of the config's data types and layout")
+
+
+def test_the_external_reference_prints_only_on_request(trained):
+    out = trained / "printed"
+    common = [
+        "--train-dir",
+        trained / "round_0" / "stage05",
+        "--arch",
+        "gfx950",
+        "--config-yaml",
+        trained / "config.yaml",
+        "--dataset",
+        f"heldout={trained / 'heldout'}",
+        "--bootstrap",
+        0,
+    ]
+    plain = run_stage(
+        "stage08_optional_validate_selection_efficiency.py",
+        *common,
+        "--out-dir",
+        out / "plain",
+    )
+    assert "origami" not in plain.stdout.lower() and "misses" in plain.stdout
+    ref = run_stage(
+        "stage08_optional_validate_selection_efficiency.py",
+        *common,
+        "--out-dir",
+        out / "ref",
+        "--origami-reference",
+    )
+    assert "[reference] Origami on the same 45 GEMMs" in ref.stdout

@@ -188,3 +188,50 @@ def test_bad_inputs_are_rejected(tmp_path, monkeypatch, config_path):
     assert _run(monkeypatch, *args, "--round-index", 2) == 0
     cat = json.loads((tmp_path / "a" / "categorization.json").read_text())
     assert cat["round_index"] == 2
+
+
+def test_only_cells_restricts_the_plan_to_the_requested_leaves():
+    from lib import subcells as sc
+
+    parent, other = "Large|Large|LargeK|Bnone", "Mid|Mid|MidK|Bnone"
+    rule = sc.build_split_rule(parent, "M", 4096)
+    tree = {rule.cell: rule}
+    plan = {
+        rule.lo_label: {"n_target": 7, "has_prior_model": True},
+        rule.hi_label: {"n_target": 7, "has_prior_model": True},
+        other: {"n_target": 7, "has_prior_model": True},
+    }
+    fresh = "Small|Small|MidK|Bnone"
+    out, unknown = s01.restrict_plan(plan, [parent, fresh], 11, tree)
+    assert unknown == []
+    assert out[other]["n_target"] == 0 and not out[other]["requested"]
+    for leaf in (rule.lo_label, rule.hi_label, fresh):
+        assert out[leaf]["n_target"] == 11 and out[leaf]["requested"]
+    assert out[fresh]["has_prior_model"] is False
+    assert parent not in out
+    _, unknown = s01.restrict_plan(plan, ["Nope|Mid|MidK|Bnone"], 11, tree)
+    assert unknown == ["Nope|Mid|MidK|Bnone"]
+
+
+def test_only_cells_end_to_end(tmp_path, monkeypatch, config_path):
+    prior = tmp_path / "round_0"
+    args = ["--mode", "initial", "--out-dir", prior / "stage01"]
+    args += ["--config-yaml", config_path, "--target-per-cell", 4, "--quiet"]
+    assert _run(monkeypatch, *args) == 0
+    (prior / "stage05").mkdir()
+    planned = ["Mid|Mid|MidK|Bnone", "Large|Small|LargeK|Bnone"]
+    (prior / "stage05" / "cells.json").write_text(
+        json.dumps({"cells": [{"label": c, "best_sel_eff": 0.9} for c in planned]})
+    )
+    out = tmp_path / "round_1" / "stage01"
+    args = ["--mode", "active", "--out-dir", out, "--config-yaml", config_path]
+    args += ["--prior-round-dir", prior, "--shapes-per-cell", 6, "--quiet"]
+    wanted = "Mid|Mid|MidK|Bnone,Small|Mid|MidK|Bnone"
+    assert _run(monkeypatch, *args, "--only-cells", wanted) == 0
+    new = parse_shapes_yaml(out / "shapes.yaml")
+    assert {grid.cell_key(*s) for s in new} == set(wanted.split(","))
+    plan = json.loads((out / "per_cell_plan.json").read_text())
+    assert plan["only_cells"] == wanted
+    assert plan["cells"]["Large|Small|LargeK|Bnone"]["n_target"] == 0
+    assert _run(monkeypatch, *args, "--only-cells", "Nope|Mid|MidK|Bnone") == 1
+    assert _run(monkeypatch, *args, "--only-cells", ",") == 1

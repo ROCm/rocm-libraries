@@ -25,7 +25,9 @@ runtime:
   rocm_libraries_root: ${TILEWRIGHT_BENCH_ROOT}
 
 seed:
-  target_per_cell: 30
+  # Above train.min_cell_gemms, so a cell still trains in round_0 when some
+  # of its shapes fail to bench.
+  target_per_cell: 40
   shapes_per_cell: 30
   seed: 42
   n_strata: 2
@@ -100,8 +102,9 @@ deploy:
   stop_when_target_reached: false
   weight_dtype: int8
   rocm_libraries_to_deploy: ${TILEWRIGHT_DEPLOY_ROOT}
-  # One model serves the library of every directory listed here.
-  targets: [gfx1250v0, gfx1250]
+  # One model serves the library of every directory listed here; the
+  # gfx1250-strict tree holds the library gfx1250v0 is built from.
+  targets: [gfx1250v0, gfx1250, gfx1250-strict]
   apply_patch: true
   build_after_apply: true
   build_jobs: null

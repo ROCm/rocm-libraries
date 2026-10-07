@@ -8,10 +8,12 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -107,6 +109,126 @@ const char* schedule_name(tw::Schedule s) {
     case tw::Schedule::Auto: return "Auto";
   }
   return "?";
+}
+
+const char* reduction_name(tw::PartialReduction r) {
+  switch (r) {
+    case tw::PartialReduction::None: return "None_";
+    case tw::PartialReduction::Tree: return "Tree";
+    case tw::PartialReduction::Parallel: return "Parallel";
+    case tw::PartialReduction::Atomic: return "Atomic";
+  }
+  return "?";
+}
+
+// A Python callable(config, problem, context) -> LaunchPlan as a LaunchModel,
+// with an optional callable(config) -> int as its launch key. Ranking runs
+// without the GIL, so each call takes it.
+class PyLaunchModel final : public tw::LaunchModel {
+ public:
+  PyLaunchModel(nb::object fn, nb::object key, std::string id)
+      : fn_(std::move(fn)), key_(std::move(key)), id_(std::move(id)) {}
+  ~PyLaunchModel() override {
+    nb::gil_scoped_acquire gil;
+    fn_.reset();
+    key_.reset();
+  }
+
+  tw::LaunchPlan plan(const tw::Config& config,
+                      const tw::Problem& problem,
+                      const tw::ExecutionContext& context) const override {
+    nb::gil_scoped_acquire gil;
+    nb::object out = fn_(nb::cast(config, nb::rv_policy::copy),
+                         nb::cast(problem, nb::rv_policy::copy),
+                         nb::cast(context, nb::rv_policy::copy));
+    tw::LaunchPlan plan;
+    if (!nb::try_cast(out, plan))
+      throw nb::type_error("a launch model must return a tilewright.LaunchPlan");
+    return plan;
+  }
+
+  std::uint64_t launch_key(const tw::Config& config) const override {
+    if (!key_.is_valid()) return 0;
+    nb::gil_scoped_acquire gil;
+    nb::object out          = key_(nb::cast(config, nb::rv_policy::copy));
+    std::uint64_t key       = 0;
+    std::int64_t signed_key = 0;
+    if (nb::try_cast(out, key)) return key;
+    if (nb::try_cast(out, signed_key)) return static_cast<std::uint64_t>(signed_key);
+    throw nb::type_error("a launch key must be an int in [-2**63, 2**64)");
+  }
+
+  std::string id() const override { return id_; }
+
+ private:
+  nb::object fn_, key_;
+  std::string id_;
+};
+
+// Plans fixed in advance, by Config::index. Configs with identical plans share
+// a launch key (the first index holding that plan), so the table groups
+// exactly for the one problem and context it was computed for.
+class PlanTable final : public tw::LaunchModel {
+ public:
+  explicit PlanTable(std::vector<tw::LaunchPlan> plans) : plans_(std::move(plans)) {
+    std::map<std::tuple<bool, std::size_t, int>, std::uint64_t> first;
+    keys_.reserve(plans_.size());
+    for (std::size_t i = 0; i < plans_.size(); ++i) {
+      const tw::LaunchPlan& p = plans_[i];
+      keys_.push_back(
+          first.try_emplace({p.dynamic_queue, p.grid_wgs, static_cast<int>(p.partial_reduction)}, i)
+              .first->second);
+    }
+  }
+
+  tw::LaunchPlan plan(const tw::Config& config,
+                      const tw::Problem&,
+                      const tw::ExecutionContext&) const override {
+    return plans_[checked(config)];
+  }
+
+  std::uint64_t launch_key(const tw::Config& config) const override {
+    return keys_[checked(config)];
+  }
+
+ private:
+  std::size_t checked(const tw::Config& config) const {
+    if (config.index >= plans_.size())
+      throw std::out_of_range("no launch plan for config index " + std::to_string(config.index));
+    return config.index;
+  }
+
+  std::vector<tw::LaunchPlan> plans_;
+  std::vector<std::uint64_t> keys_;
+};
+
+std::shared_ptr<const tw::LaunchModel> launch_model_from(nb::handle launch) {
+  if (launch.is_none()) return nullptr;
+  if (nb::isinstance<nb::list>(launch) || nb::isinstance<nb::tuple>(launch)) {
+    std::vector<tw::LaunchPlan> plans;
+    if (!nb::try_cast(launch, plans))
+      throw nb::type_error("a launch plan list must hold tilewright.LaunchPlan values");
+    return std::make_shared<PlanTable>(std::move(plans));
+  }
+  std::string id;
+  if (nb::hasattr(launch, "id")) {
+    nb::object value = launch.attr("id");
+    if (!value.is_none() && !nb::try_cast(value, id))
+      throw nb::type_error("a launch model's id must be a str");
+  }
+  if (nb::hasattr(launch, "plan")) {
+    nb::object key;
+    if (nb::hasattr(launch, "launch_key")) key = launch.attr("launch_key");
+    return std::make_shared<PyLaunchModel>(
+        nb::borrow<nb::object>(launch.attr("plan")), std::move(key), std::move(id));
+  }
+  if (PyCallable_Check(launch.ptr()))
+    return std::make_shared<PyLaunchModel>(
+        nb::borrow<nb::object>(launch), nb::object(), std::move(id));
+  throw nb::type_error(
+      "launch must be None, a callable(config, problem, context) -> LaunchPlan, an object with "
+      "such a plan method (and optionally launch_key(config) -> int), or a list of LaunchPlan by "
+      "Config.index");
 }
 
 }  // namespace
@@ -336,6 +458,43 @@ NB_MODULE(_tilewright, m) {
                ", schedule=" + schedule_name(c.schedule) + ")";
       });
 
+  nb::enum_<tw::PartialReduction>(m, "PartialReduction", nb::is_arithmetic())
+      .value("None_", tw::PartialReduction::None, "No split tile (PartialReduction::None in C++).")
+      .value("Tree", tw::PartialReduction::Tree)
+      .value("Parallel", tw::PartialReduction::Parallel)
+      .value("Atomic", tw::PartialReduction::Atomic);
+
+  nb::class_<tw::LaunchPlan>(
+      m,
+      "LaunchPlan",
+      "How a kernel is launched for one problem; the default is a static launch of one "
+      "workgroup per output tile.")
+      .def(
+          "__init__",
+          [](tw::LaunchPlan* self,
+             bool dynamic_queue,
+             std::size_t grid_wgs,
+             tw::PartialReduction partial_reduction) {
+            new (self) tw::LaunchPlan{dynamic_queue, grid_wgs, partial_reduction};
+          },
+          "dynamic_queue"_a     = false,
+          "grid_wgs"_a          = std::size_t{0},
+          "partial_reduction"_a = tw::PartialReduction::None,
+          "grid_wgs: workgroups launched (0 means one per output tile).")
+      .def_rw("dynamic_queue", &tw::LaunchPlan::dynamic_queue)
+      .def_rw("grid_wgs", &tw::LaunchPlan::grid_wgs)
+      .def_rw("partial_reduction", &tw::LaunchPlan::partial_reduction)
+      .def("__eq__",
+           [](const tw::LaunchPlan& a, const tw::LaunchPlan& b) {
+             return a.dynamic_queue == b.dynamic_queue && a.grid_wgs == b.grid_wgs &&
+                    a.partial_reduction == b.partial_reduction;
+           })
+      .def("__repr__", [](const tw::LaunchPlan& p) {
+        return std::string("LaunchPlan(dynamic_queue=") + (p.dynamic_queue ? "True" : "False") +
+               ", grid_wgs=" + std::to_string(p.grid_wgs) +
+               ", partial_reduction=PartialReduction." + reduction_name(p.partial_reduction) + ")";
+      });
+
   nb::class_<tw::Result>(m, "Result")
       .def(nb::init<>())
       .def_rw("config_index", &tw::Result::config_index)
@@ -351,15 +510,54 @@ NB_MODULE(_tilewright, m) {
                ")";
       });
 
+  nb::class_<tw::Provenance>(m,
+                             "Provenance",
+                             "Where an MLREC_v3 model came from; a field its file does not "
+                             "record is empty.")
+      .def_ro("config_id", &tw::Provenance::config_id)
+      .def_ro("training_data_hash", &tw::Provenance::training_data_hash)
+      .def_ro("source_revision", &tw::Provenance::source_revision)
+      .def_ro("date", &tw::Provenance::date)
+      .def_ro("launch_model", &tw::Provenance::launch_model)
+      .def("__repr__", [](const tw::Provenance& p) {
+        return "Provenance(config_id='" + p.config_id + "', training_data_hash='" +
+               p.training_data_hash + "', source_revision='" + p.source_revision + "', date='" +
+               p.date + "', launch_model='" + p.launch_model + "')";
+      });
+
   nb::class_<tw::ModelInfo>(m, "ModelInfo")
       .def_ro("arch", &tw::ModelInfo::arch)
       .def_ro("feature_catalog_hash", &tw::ModelInfo::feature_catalog_hash)
       .def_ro("weight_type", &tw::ModelInfo::weight_type)
       .def_ro("n_cells", &tw::ModelInfo::n_cells)
       .def_ro("n_splits", &tw::ModelInfo::n_splits)
+      .def_ro("format_version", &tw::ModelInfo::format_version)
+      .def_ro("feature_spec_hash", &tw::ModelInfo::feature_spec_hash)
+      .def_ro("query_dim", &tw::ModelInfo::query_dim)
+      .def_ro("item_dim", &tw::ModelInfo::item_dim)
+      .def_ro("inter_dim", &tw::ModelInfo::inter_dim)
+      .def_ro("min_cu_fraction", &tw::ModelInfo::min_cu_fraction)
+      .def_ro("max_cu_fraction", &tw::ModelInfo::max_cu_fraction)
+      .def_ro("schedules", &tw::ModelInfo::schedules, "A bit per Schedule value.")
+      .def_ro("cascade_keys", &tw::ModelInfo::cascade_keys)
+      .def_ro("whitelist_tier", &tw::ModelInfo::whitelist_tier)
+      .def_ro("launch_keys",
+              &tw::ModelInfo::launch_keys,
+              "Whether the pool is grouped by the launch model's launch_key.")
+      .def_ro("small_batched_rule", &tw::ModelInfo::small_batched_rule)
+      .def_ro("dot2_rule", &tw::ModelInfo::dot2_rule)
+      .def_ro("non_temporal_rule", &tw::ModelInfo::non_temporal_rule)
+      .def_ro("clip", &tw::ModelInfo::clip)
+      .def_ro("uncovered_base_labels", &tw::ModelInfo::uncovered_base_labels)
+      .def_ro("packed_bytes", &tw::ModelInfo::packed_bytes, "Bytes of the packed weights.")
+      .def_ro("expanded_bytes",
+              &tw::ModelInfo::expanded_bytes,
+              "Bytes of the fp32 weights of every cell (the cache holds those in use).")
+      .def_ro("provenance", &tw::ModelInfo::provenance)
       .def("__repr__", [](const tw::ModelInfo& i) {
         return "ModelInfo(arch='" + i.arch + "', feature_catalog_hash='" + i.feature_catalog_hash +
-               "', weight_type=" + std::to_string(static_cast<int>(i.weight_type)) +
+               "', format_version=" + std::to_string(i.format_version) +
+               ", weight_type=" + std::to_string(static_cast<int>(i.weight_type)) +
                ", n_cells=" + std::to_string(i.n_cells) +
                ", n_splits=" + std::to_string(i.n_splits) + ")";
       });
@@ -391,14 +589,26 @@ NB_MODULE(_tilewright, m) {
           [](tw::CandidateSet* self,
              const PyModel& model,
              std::vector<tw::Config> configs,
-             tw::TieBreak tie_break) {
+             tw::TieBreak tie_break,
+             nb::handle launch) {
             model_of(model);
-            new (self) tw::CandidateSet(model.ptr, std::move(configs), tw::PoolOptions{tie_break});
+            tw::PoolOptions options{tie_break, launch_model_from(launch)};
+            new (self) tw::CandidateSet(model.ptr, std::move(configs), std::move(options));
           },
           "model"_a,
           "configs"_a,
           "tie_break"_a = tw::TieBreak::PoolOrder,
-          "Raises ValueError for a config with an empty or duplicate attribute name.")
+          "launch"_a    = nb::none(),
+          "launch: the integration's launch model (PoolOptions::launch): a callable(config, "
+          "problem, context) -> LaunchPlan (launch key 0), an object with such a plan method and "
+          "optionally launch_key(config) -> int, or a list of LaunchPlan by Config.index (for one "
+          "problem and context; configs with identical plans share a launch key); None gives "
+          "every config LaunchPlan() and launch key 0. Configs with equal signature, spec "
+          "attributes and launch key must get equal plans. Its errors propagate out of the call "
+          "that asked. A callable or object may define a str `id` (LaunchModel::id; absent or "
+          "None means empty). Raises ValueError for a config with an empty or duplicate attribute "
+          "name, or when the model's provenance names a launch model and `launch` is None or has "
+          "another id.")
       .def(
           "rank",
           [](const tw::CandidateSet& self,
@@ -425,10 +635,56 @@ NB_MODULE(_tilewright, m) {
           "config is unscored when the model does not support the context. With "
           "TieBreak.Prior, prior (one float per config) orders equal scores; ValueError "
           "when it has the wrong length.")
+      .def(
+          "rank_top",
+          [](const tw::CandidateSet& self,
+             tw::Problem p,
+             tw::Hardware h,
+             std::size_t k,
+             std::optional<tw::ExecutionContext> context,
+             std::optional<std::vector<double>> prior) {
+            nb::gil_scoped_release release;
+            return self.rank_top(
+                p, h, context.value_or(tw::ExecutionContext{}), k, prior ? &*prior : nullptr);
+          },
+          "problem"_a,
+          "hardware"_a,
+          "k"_a,
+          "context"_a = nb::none(),
+          "prior"_a   = nb::none(),
+          "The best k configs: the scored results among the first k of rank(problem, "
+          "hardware, k, context, prior), fewer when fewer are scored.")
+      .def(
+          "prepare",
+          [](const tw::CandidateSet& self,
+             std::optional<std::vector<int>> cells,
+             std::optional<tw::Problem> problem,
+             std::optional<tw::Hardware> hardware) {
+            if (problem.has_value() != hardware.has_value())
+              throw std::invalid_argument("prepare takes a problem and a hardware together");
+            nb::gil_scoped_release release;
+            if (problem) self.prepare(*problem, *hardware);
+            if (cells) self.prepare(*cells);
+            if (!problem && !cells) self.prepare();
+          },
+          "cells"_a    = nb::none(),
+          "problem"_a  = nb::none(),
+          "hardware"_a = nb::none(),
+          "Build now what rankings would build on first use: for the given cells (every cell "
+          "when neither cells nor a problem is given; the cell the problem routes to), their "
+          "fp32 weights, whitelist membership and item embeddings of every config; with a "
+          "problem and hardware, also the kernel-only interaction features for its data types.")
       .def_prop_ro("configs", [](const tw::CandidateSet& s) { return s.configs(); })
       .def("__len__", [](const tw::CandidateSet& s) { return s.configs().size(); });
 
-  m.def("feature_catalog_hash", []() { return std::string(tw::feature_catalog_hash()); });
+  m.def(
+      "feature_catalog_hash",
+      []() { return std::string(tw::feature_catalog_hash()); },
+      "Hash of the MLREC_v2 feature catalog.");
+
+  m.def("feature_catalog_hashes",
+        &tw::feature_catalog_hashes,
+        "Hashes of every feature catalog the engine computes (MLREC_v2, then MLREC_v3).");
 
   m.def(
       "load_model",
@@ -495,20 +751,45 @@ NB_MODULE(_tilewright, m) {
 
   m.def(
       "compute_features",
-      [](const PyModel& model, const tw::Problem& p, const tw::Config& c, const tw::Hardware& h) {
-        return tw::compute_features(model_of(model), p, c, h);
+      [](const PyModel& model,
+         const tw::Problem& p,
+         const tw::Config& c,
+         const tw::Hardware& h,
+         std::optional<tw::ExecutionContext> context,
+         std::optional<tw::LaunchPlan> plan) {
+        return tw::compute_features(model_of(model),
+                                    p,
+                                    c,
+                                    h,
+                                    context.value_or(tw::ExecutionContext{}),
+                                    plan.value_or(tw::LaunchPlan{}));
       },
       "model"_a,
       "problem"_a,
       "config"_a,
       "hardware"_a,
-      "Raw (unwhitened) query, item and interaction features; empty for invalid hardware.");
+      "context"_a = nb::none(),
+      "plan"_a    = nb::none(),
+      "Raw (unwhitened) query, item and interaction features for the context (None: exclusive "
+      "use of the device) and the config's launch plan (None: LaunchPlan()); empty for invalid "
+      "hardware.");
 
   m.def(
       "attribute_names",
       [](const PyModel& model) { return tw::attribute_names(model_of(model)); },
       "model"_a,
-      "Names of the Config attributes the model's feature catalog reads (v2 models: none).");
+      "Names of the Config attributes the model reads (v2 models: none); a config without one "
+      "is ranked with the model's default value.");
+
+  m.def(
+      "set_cache_limit",
+      [](std::size_t bytes) { tw::set_cache_limit(bytes); },
+      "bytes"_a,
+      "Limit the bytes of fp32 cell weights and candidate-set caches the process keeps; the "
+      "least recently used are released past it and rebuilt when needed, with the same "
+      "results.");
+  m.def("cache_limit", []() { return tw::cache_limit(); }, "The cache limit in bytes.");
+  m.def("cache_usage", []() { return tw::cache_usage(); }, "Bytes the cache holds now.");
 
   m.def(
       "supports",
@@ -519,7 +800,7 @@ NB_MODULE(_tilewright, m) {
       "context"_a,
       "hardware"_a,
       "True when the model was trained for the context on this hardware (v2 models: every CU "
-      "and Schedule.Default).");
+      "and Schedule.Default; v3 models: the schedules and CU fractions they declare).");
 
   m.def(
       "rank_configs",
@@ -530,16 +811,18 @@ NB_MODULE(_tilewright, m) {
          std::size_t min_scored,
          std::optional<tw::ExecutionContext> context,
          tw::TieBreak tie_break,
-         std::optional<std::vector<double>> prior) {
+         std::optional<std::vector<double>> prior,
+         nb::handle launch) {
         const tw::Model& mdl = model_of(model);
+        const tw::PoolOptions options{tie_break, launch_model_from(launch)};
         nb::gil_scoped_release release;
         return tw::rank_configs(mdl,
                                 p,
                                 h,
                                 context.value_or(tw::ExecutionContext{}),
                                 configs,
+                                options,
                                 min_scored,
-                                tie_break,
                                 prior ? &*prior : nullptr);
       },
       "model"_a,
@@ -550,6 +833,7 @@ NB_MODULE(_tilewright, m) {
       "context"_a    = nb::none(),
       "tie_break"_a  = tw::TieBreak::PoolOrder,
       "prior"_a      = nb::none(),
-      "Same result as CandidateSet(model, configs, tie_break).rank(problem, hardware, "
-      "min_scored, context, prior).");
+      "launch"_a     = nb::none(),
+      "Same result as CandidateSet(model, configs, tie_break, launch).rank(problem, hardware, "
+      "min_scored, context, prior), with the same ValueErrors.");
 }

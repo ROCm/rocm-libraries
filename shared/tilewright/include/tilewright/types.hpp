@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -120,9 +121,57 @@ struct ExecutionContext {
 // a caller-supplied prior, then input order (Prior); see CandidateSet::rank.
 enum class TieBreak : std::uint8_t { PoolOrder = 0, Prior = 1 };
 
-// Fixed per CandidateSet.
+// How the workgroups that split one output tile's K loop combine their partial
+// results: by the workgroups themselves (Tree), by a separate reduction pass
+// over a workspace (Parallel), or by atomic adds into the output (Atomic).
+enum class PartialReduction : std::uint8_t { None = 0, Tree = 1, Parallel = 2, Atomic = 3 };
+
+// How a kernel is launched for one problem, in terms common to GEMM
+// frameworks. The default is a static launch of one workgroup per output tile.
+struct LaunchPlan {
+  bool dynamic_queue                 = false;  // workgroups take output tiles from a shared queue
+  std::size_t grid_wgs               = 0;      // workgroups launched; 0 means one per output tile
+  PartialReduction partial_reduction = PartialReduction::None;  // None: no split tile
+};
+
+// The integration's launch of its kernels on the device it ranks for.
+//
+// launch_key() names a config's launch class. Contract: configs with equal
+// signature (mt, mi, cache hints), equal attribute-spec values and equal
+// launch key get the same plan() for every problem and context. The engine
+// never interprets the key; it only compares keys, and configs that differ in
+// it are separate candidates of an MLREC_v3 model whose serving options ask
+// for launch keys (ModelInfo::launch_keys); other models ignore it. The
+// default, 0 for every config, declares that every config of a signature
+// launches alike.
+//
+// Ranking asks plan() only for configs that receive the full score, once per
+// group of configs that share a candidate (see CandidateSet), and
+// launch_key() once per config when a pool of such a model is grouped. Both
+// must be thread-safe when the CandidateSet is shared between threads;
+// exceptions they throw propagate out of the call that asked. plan() is on
+// the ranking's path: what it needs of a config should be held per config
+// (for instance by Config::index, prepared when the pool is built) rather
+// than searched for in `attributes` by name on each call.
+class LaunchModel {
+ public:
+  virtual ~LaunchModel()                                         = default;
+  virtual LaunchPlan plan(const Config& config,
+                          const Problem& problem,
+                          const ExecutionContext& context) const = 0;
+  virtual std::uint64_t launch_key(const Config&) const { return 0; }
+  // Names the launch rule and its version, as the training pipeline records
+  // it in an MLREC_v3 model's provenance (launch_model); a CandidateSet
+  // refuses a launch model whose id differs from the one its model records.
+  // Empty for none.
+  virtual std::string id() const { return {}; }
+};
+
+// Fixed per CandidateSet. Without `launch`, every config gets LaunchPlan{}
+// and launch key 0.
 struct PoolOptions {
   TieBreak tie_break = TieBreak::PoolOrder;
+  std::shared_ptr<const LaunchModel> launch;
 };
 
 // Ranking result for one input config, which is configs[config_index] of the

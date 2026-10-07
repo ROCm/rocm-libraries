@@ -2,12 +2,18 @@
 # SPDX-License-Identifier: MIT
 
 """stage08_optional_validate_selection_efficiency -- selection efficiency of
-a trained bundle on external datasets, deployed model vs Origami.
+a trained bundle on external datasets. Report-only: nothing here feeds a
+training or deploy decision.
 
 A dataset is one of
-  (1) a hipblaslt-bench YAML of problems: benched here (stage02 probe when the
-      config has a `probe:` section and bench.adaptive is off, then stage03
-      over every candidate) with --bench-binary, then enriched;
+  (1) a hipblaslt-bench YAML of problems: benched here like training benches
+      (stage02 probe when the config has a `probe:` section and
+      bench.adaptive is off, then stage03 over every candidate) with
+      --bench-binary, then enriched. Each entry's M, N, K and batch_count
+      become a bench line of lib.bench_yaml.render_bench_line with the
+      config's data types, layout and bench knobs (rotating buffer, flush,
+      skip screen, adaptive timing); entries that name another data type or
+      layout than the config are dropped, repeated problems benched once;
   (2) a directory of stage03 block_*.log files: enriched with stage04;
   (3) a directory of stage04 chunk_*.csv files: evaluated as is.
 
@@ -15,15 +21,22 @@ The bundle is evaluated exactly as deployed (lib/evaluate.py): MLREC_v2 at
 --weight-dtype, the engine's routing over the split tree rebuilt from the
 bundle's cell labels, the whitelists, and the library pool (--library-dir /
 --library-stem; candidates outside the library are dropped). The pick is a
-pool position and costs that solution's own latency. A GEMM the model
-scores nothing for gets the runtime's fallback, the Origami pick, so every
-GEMM with a measured Origami pick counts. Model and Origami are compared on
-the same GEMMs (paired: geomeans, wins / ties / losses within
---tie-tolerance, low percentiles, bootstrap interval of the speedup).
+pool position and costs that solution's own latency; under
+--pick-measurement timed a pick without a timed row of its own is a miss.
+With --rebench-misses every miss is re-benched on --devices with
+--bench-binary and charged by its measured ratio to the winner
+(lib/miss_rebench.py); the configured rule's numbers stay as `pre_rebench`.
+A GEMM the model scores nothing for gets the runtime's fallback, the Origami
+pick. The headline is the model against the fastest measured kernel over
+every evaluated GEMM. Origami is an external reference, compared only on the
+same GEMMs (paired: geomeans, wins / ties / losses within --tie-tolerance,
+low percentiles, bootstrap interval of the speedup), and printed only with
+--origami-reference.
 
 Output per dataset in <out-dir>/<name>/: bench/ and stage04_enriched/ when
 produced here, per_cell_sel_eff.json, per_gemm.csv (pick and Origami pick
-as pool position and solution index); plus <out-dir>/summary.json over all
+as pool position and solution index, and misses), with --rebench-misses
+rebench/ and rebench_misses.json; plus <out-dir>/summary.json over all
 datasets.
 
 A dataset fails (rc 1 in summary.json, the stage exits 1) when it cannot be
@@ -39,7 +52,7 @@ import subprocess
 import sys
 import time
 from collections import Counter
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -54,8 +67,11 @@ import yaml  # noqa: E402
 
 from lib import evaluate as ev  # noqa: E402
 from lib import hardware as hwlib  # noqa: E402
+from lib import miss_rebench as mr  # noqa: E402
 from lib import mlrec  # noqa: E402
 from lib import ui  # noqa: E402
+from lib.bench_yaml import write_bench_yaml  # noqa: E402
+from lib.shapes import Shape  # noqa: E402
 from run_orchestrator import arch_base  # noqa: E402
 
 
@@ -105,40 +121,93 @@ def _fail(name: str, path: Path, reason: str, rc: int = 1) -> Dict[str, Any]:
     return {"name": name, "path": str(path), "rc": rc, "reason": reason}
 
 
+TYPE_FIELDS = (
+    "a_type",
+    "b_type",
+    "c_type",
+    "d_type",
+    "compute_type",
+    "transA",
+    "transB",
+    "scaleA",
+    "scaleB",
+)
+
+
+def dataset_shapes(
+    entries: List[Any], hipblaslt: Dict[str, Any]
+) -> Tuple[List[Shape], Dict[str, int]]:
+    """(problems to bench, counts) of a bench yaml's entries: the M, N, K and
+    batch_count of every entry whose data types and layout (the fields it
+    names) are the config's, each problem once."""
+    want = {
+        f: _norm_field(f, hipblaslt[f])
+        for f in TYPE_FIELDS
+        if hipblaslt.get(f) is not None
+    }
+    seen: Dict[Tuple[int, int, int, int], Shape] = {}
+    counts = {"n_entries": 0, "n_other_type": 0, "n_repeated": 0, "n_unreadable": 0}
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        counts["n_entries"] += 1
+        if any(f in e and _norm_field(f, e[f]) != v for f, v in want.items()):
+            counts["n_other_type"] += 1
+            continue
+        try:
+            key = (
+                int(e["M"]),
+                int(e["N"]),
+                int(e["K"]),
+                int(e.get("batch_count", 1) or 1),
+            )
+        except (KeyError, TypeError, ValueError):
+            counts["n_unreadable"] += 1
+            continue
+        if key in seen:
+            counts["n_repeated"] += 1
+            continue
+        seen[key] = Shape(m=key[0], n=key[1], k=key[2], batch=key[3])
+    return list(seen.values()), counts
+
+
 def _bench_yaml(
     name: str, path: Path, out: Path, args: argparse.Namespace
 ) -> Tuple[Optional[Path], Optional[str]]:
-    """Bench every candidate of the problems in `path`; (logs dir, error)."""
+    """Bench every candidate of the problems in `path` like a training bench;
+    (logs dir, error)."""
     if args.bench_binary is None or not Path(args.bench_binary).exists():
         return None, "a yaml dataset needs an existing --bench-binary"
-    bench_in = out / "bench_input"
-    bench_in.mkdir(parents=True, exist_ok=True)
+    cfg = (
+        yaml.safe_load(args.config_yaml.read_text()) or {}
+        if args.config_yaml is not None
+        else {}
+    )
+    if not isinstance(cfg.get("hipblaslt"), dict):
+        return None, (
+            "a yaml dataset is benched like the training data: it needs "
+            "--config-yaml with the hipblaslt section"
+        )
     entries = yaml.safe_load(path.read_text()) or []
     if isinstance(entries, dict):
         entries = [entries]
-    n = 0
-    with (bench_in / "shapes.yaml").open("w") as f:
-        for e in entries:
-            if not isinstance(e, dict):
-                continue
-            e = dict(e)
-            e["requested_solution_num"] = -1
-            e["print_kernel_info"] = 1
-            e.setdefault("iters", 2)
-            e.setdefault("cold_iters", 2)
-            f.write(
-                "- "
-                + yaml.safe_dump(
-                    e, default_flow_style=True, sort_keys=False, width=10**9
-                ).strip()
-                + "\n"
-            )
-            n += 1
+    shapes, counts = dataset_shapes(list(entries), cfg["hipblaslt"])
+    if not shapes:
+        return None, f"no problem of the config's data types and layout ({counts})"
+    bench_in = out / "bench_input"
+    bench_in.mkdir(parents=True, exist_ok=True)
+    write_bench_yaml(shapes, cfg, bench_in / "shapes.yaml")
+    (out / "bench_input.json").write_text(
+        json.dumps(dict(counts, n_benched=len(shapes)), indent=2) + "\n"
+    )
     if not args.quiet:
-        ui.info("bench", f"{name}: {n} problems, every candidate benched")
-    cfg = {}
-    if args.config_yaml is not None:
-        cfg = yaml.safe_load(args.config_yaml.read_text()) or {}
+        ui.info(
+            "bench",
+            f"{name}: {len(shapes)} problems benched like training "
+            f"({counts['n_other_type']} of other data types or layout, "
+            f"{counts['n_repeated']} repeated, {counts['n_unreadable']} unreadable "
+            f"of {counts['n_entries']} entries)",
+        )
     probe = cfg.get("probe") or {}
     adaptive = bool(((cfg.get("bench") or {}).get("adaptive") or {}).get("enabled"))
     common = ["--bench-binary", str(args.bench_binary), "--devices", args.devices]
@@ -213,6 +282,12 @@ def _norm_field(field: str, val: Any) -> str:
     return s
 
 
+def _bench_input_yamls(out: Path) -> List[Path]:
+    """The bench lines of a yaml dataset benched here, calibrated first."""
+    bench_in = out / "bench_input"
+    return [bench_in / "shapes_probed.yaml", bench_in / "shapes.yaml"]
+
+
 def _per_cell_rows(
     results: List[ev.GemmResult], min_cell_gemms: int, tie_tolerance: float
 ) -> List[Dict[str, Any]]:
@@ -234,9 +309,11 @@ def _per_cell_rows(
                 "n_evaluated": s["n_evaluated"],
                 "n_model_served": s["n_model_served"],
                 "n_origami_fallback": s["n_origami_fallback"],
+                "n_miss": s["n_miss"],
                 "model_sel_eff": s["sel_eff"],
                 "model_pick_us_geomean": s["pick_us_geomean"],
                 "winner_us_geomean": s["winner_us_geomean"],
+                "paired_model_sel_eff": s["paired"]["model_sel_eff"],
                 "origami_sel_eff": s["origami_sel_eff"],
                 "origami_n_eval": s["n_origami"],
                 "origami_pick_us_geomean": s["origami_pick_us_geomean"],
@@ -266,16 +343,13 @@ def _write_per_gemm(path: Path, results: List[ev.GemmResult]) -> None:
         "origami_sel_eff",
         "n_scored",
         "pick_rank",
+        "miss",
     ]
     with path.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
         w.writeheader()
         for r in results:
             w.writerow(r.to_json())
-
-
-def _geo(rows: List[Dict[str, Any]], key: str) -> float:
-    return ev.geomean(r[key] for r in rows if r.get(key) is not None)
 
 
 def _evaluate_dataset(
@@ -318,14 +392,30 @@ def _evaluate_dataset(
     if not gemms:
         return _fail(name, path, "no GEMM left to evaluate")
 
-    evaluation = ev.evaluate_model(
-        ctx["model_bytes"],
-        gemms,
-        hardware=ctx["hardware"],
-        pools=ev.pools_for(gemms, ctx["library"]),
-        labels=ctx["labels"],
-        tw=ctx["tw"],
+    pools = ev.pools_for(gemms, ctx["library"])
+
+    def evaluate(rule: str) -> ev.Evaluation:
+        return ev.evaluate_model(
+            ctx["model_bytes"],
+            gemms,
+            hardware=ctx["hardware"],
+            pools=pools,
+            labels=ctx["labels"],
+            tw=ctx["tw"],
+            pick_measurement=rule,
+        )
+
+    bench = ctx["rebench"]
+    if bench is not None:
+        bench = replace(
+            bench,
+            work_dir=out / "rebench",
+            lines={**mr.read_lines(_bench_input_yamls(out)), **bench.lines},
+        )
+    measured = mr.measured_evaluation(
+        evaluate, gemms, bench, args.pick_measurement, name
     )
+    evaluation = measured.evaluation
     results = evaluation.results
     per_cell = _per_cell_rows(results, args.min_cell_gemms, args.tie_tolerance)
     overall = ev.summarize(
@@ -341,12 +431,34 @@ def _evaluate_dataset(
         "weight_dtype": args.weight_dtype,
         "n_cells_evaluated": len(per_cell),
         "n_routing_mismatch": evaluation.n_routing_mismatch,
-        "model_geomean_sel_eff": _geo(per_cell, "model_sel_eff"),
-        "origami_geomean_sel_eff": _geo(per_cell, "origami_sel_eff"),
-        "model_geomean_gemm_weighted": overall["sel_eff"],
-        "origami_geomean_gemm_weighted": overall["origami_sel_eff"],
+        "pick_measurement": evaluation.pick_measurement,
+        "model_sel_eff": overall["sel_eff"],
+        "n_evaluated": overall["n_evaluated"],
+        "n_miss": overall["n_miss"],
+        "paired": {
+            k: overall["paired"].get(k)
+            for k in (
+                "n",
+                "model_sel_eff",
+                "origami_sel_eff",
+                "wins",
+                "ties",
+                "losses",
+                "speedup_ci95",
+            )
+        },
         "overall": overall,
     }
+    if measured.record is not None:
+        rec = measured.record
+        pre = ev.summarize(measured.pre.results, tie_tolerance=args.tie_tolerance)
+        summary["pre_rebench"] = mr.pre_rebench(pre, args.pick_measurement)
+        summary["rebench"] = mr.record_counts(rec)
+        for key in ("n_rebenched", "n_rebench_failed", "n_context_skipped"):
+            summary[key] = rec[key]
+        (out / mr.RECORD_FILE).write_text(
+            json.dumps(_train.jsonable(rec), indent=2) + "\n"
+        )
     per_cell_path = out / "per_cell_sel_eff.json"
     per_cell_path.write_text(
         json.dumps(
@@ -356,36 +468,58 @@ def _evaluate_dataset(
     _write_per_gemm(out / "per_gemm.csv", results)
 
     if not args.quiet:
+        ref = args.origami_reference
         w = min(max(max((len(r["cell"]) for r in per_cell), default=24), 24), 80)
         ui.info(
             "eval",
-            f"{'cell':<{w}} {'n':>6} {'model':>8} {'origami':>8} "
-            f"{'fallback':>8}  W/T/L",
+            f"{'cell':<{w}} {'n':>6} {'model':>8} {'misses':>6} {'fallback':>8}"
+            + (f"  [reference] {'paired':>8} {'origami':>8}  W/T/L" if ref else ""),
         )
         for r in per_cell:
             p = r["paired"]
             ui.info(
                 "eval",
                 f"{r['cell']:<{w}} {r['n_gemms']:>6d} "
-                f"{_train.fmt_pct(r['model_sel_eff'])} "
-                f"{_train.fmt_pct(r['origami_sel_eff'])} "
-                f"{r['n_origami_fallback']:>8d}  "
-                f"{p['wins']}/{p['ties']}/{p['losses']}",
+                f"{_train.fmt_pct(r['model_sel_eff'])} {r['n_miss']:>6d} "
+                f"{r['n_origami_fallback']:>8d}"
+                + (
+                    f"  [reference] {_train.fmt_pct(p['model_sel_eff'])} "
+                    f"{_train.fmt_pct(p['origami_sel_eff'])}  "
+                    f"{p['wins']}/{p['ties']}/{p['losses']}"
+                    if ref
+                    else ""
+                ),
+            )
+        ui.ok(
+            "eval",
+            f"{name}: model={_train.fmt_pct(overall['sel_eff'])} over "
+            f"{overall['n_evaluated']} GEMMs, {overall['n_miss']} misses",
+        )
+        if "pre_rebench" in summary:
+            pre = summary["pre_rebench"]
+            ui.info(
+                "eval",
+                f"{name}: misses re-benched: {summary['n_rebenched']} measured, "
+                f"{summary['n_rebench_failed']} failed, "
+                f"{summary['n_context_skipped']} context GEMMs skipped; under "
+                f"{pre['pick_measurement']} {_train.fmt_pct(pre['sel_eff'])}",
             )
         p = overall["paired"]
         ci = p.get("speedup_ci95")
-        ui.ok(
-            "eval",
-            f"{name}: paired n={p['n']}  model={_train.fmt_pct(p['model_sel_eff'])}  "
-            f"origami={_train.fmt_pct(p['origami_sel_eff'])}  "
-            f"wins/ties/losses={p['wins']}/{p['ties']}/{p['losses']}"
-            + (f"  speedup 95% CI=[{ci[0]:.4f}, {ci[1]:.4f}]" if ci else ""),
-        )
+        if ref and p["n"]:
+            ui.info(
+                "eval",
+                f"{name}: [reference] Origami on the same {p['n']} GEMMs: "
+                f"model={_train.fmt_pct(p['model_sel_eff'])}  "
+                f"origami={_train.fmt_pct(p['origami_sel_eff'])}  "
+                f"wins/ties/losses={p['wins']}/{p['ties']}/{p['losses']}"
+                + (f"  speedup 95% CI=[{ci[0]:.4f}, {ci[1]:.4f}]" if ci else ""),
+            )
         if overall["n_not_evaluable"]:
             ui.warn(
                 "eval",
-                f"{overall['n_not_evaluable']} GEMMs had neither a measured "
-                f"model pick nor a measured Origami pick",
+                f"{overall['n_not_evaluable']} GEMMs not evaluated: neither the "
+                f"model's pick nor the runtime's fallback pick was measured",
             )
     result = {
         "name": name,
@@ -393,10 +527,18 @@ def _evaluate_dataset(
         "rc": 0,
         "per_cell_json": str(per_cell_path),
         "n_evaluated_cells": len(per_cell),
-        "model_geomean_sel_eff": summary["model_geomean_sel_eff"],
-        "origami_geomean_sel_eff": summary["origami_geomean_sel_eff"],
+        "model_sel_eff": summary["model_sel_eff"],
+        "n_evaluated": summary["n_evaluated"],
+        "n_miss": summary["n_miss"],
+        "paired_n": summary["paired"]["n"],
+        "paired_model_sel_eff": summary["paired"]["model_sel_eff"],
+        "paired_origami_sel_eff": summary["paired"]["origami_sel_eff"],
         "summary": summary,
     }
+    if "pre_rebench" in summary:
+        result["pre_rebench"] = summary["pre_rebench"]
+        for key in ("n_rebenched", "n_rebench_failed", "n_context_skipped"):
+            result[key] = summary[key]
     try:
         ev.require_consistent_routing(evaluation, name)
     except ev.RoutingMismatchError as e:
@@ -564,7 +706,21 @@ def main() -> int:
         ap.add_argument(f"--filter-{fld}", default=None)
     ap.add_argument("--filter-transA", default=None)
     ap.add_argument("--filter-transB", default=None)
+    ap.add_argument(
+        "--pick-measurement",
+        choices=ev.PICK_MEASUREMENTS,
+        default="warmup",
+        help="warmup: a skip row counts with its warm-up latency and a kernel off the plan's list is a miss; timed: both are misses; any: a skip row counts "
+        "and an off-list kernel is passed over (lib/evaluate.py)",
+    )
+    ap.add_argument(
+        "--origami-reference",
+        action="store_true",
+        help="also print Origami's numbers on the same GEMMs (an external "
+        "reference)",
+    )
     ap.add_argument("--quiet", action="store_true")
+    mr.add_arguments(ap, bench=False)
     args = ap.parse_args()
 
     datasets = _parse_specs(args.dataset, args.datasets_yaml)
@@ -604,12 +760,18 @@ def main() -> int:
         bundle, None, args.arch, constants, args.weight_dtype
     )
     library = (
-        ev.library_pool(args.library_dir, args.library_stem)
+        ev.library_pool(args.library_dir, args.library_stem, cfg, args.hardware_device)
         if args.library_stem
         else None
     )
+    try:
+        rebench = mr.from_args(args, cfg, args.out_dir / "rebench", hardware.n_cu)
+    except ValueError as e:
+        ui.err("err", str(e))
+        return 1
     ctx = {
         "tw": tw,
+        "rebench": rebench,
         "hardware": hardware,
         "model_bytes": model_bytes,
         "labels": list(bundle["models"].keys()),
@@ -653,13 +815,18 @@ def main() -> int:
             if s.get("rc") != 0:
                 ui.warn("dataset", f"{s['name']:20s}  rc={s['rc']}  {s.get('reason')}")
                 continue
-            p = s["summary"]["overall"]["paired"]
-            ui.ok(
-                "dataset",
-                f"{s['name']:20s}  n_cells={s['n_evaluated_cells']}  paired n={p['n']}  "
-                f"model={_train.fmt_pct(p['model_sel_eff'])}  "
-                f"origami={_train.fmt_pct(p['origami_sel_eff'])}",
+            line = (
+                f"{s['name']:20s}  n_cells={s['n_evaluated_cells']}  "
+                f"model={_train.fmt_pct(s['model_sel_eff'])} over "
+                f"{s['n_evaluated']} GEMMs, {s['n_miss']} misses"
             )
+            if args.origami_reference and s["paired_n"]:
+                line += (
+                    f"  [reference] same {s['paired_n']} GEMMs: model="
+                    f"{_train.fmt_pct(s['paired_model_sel_eff'])} origami="
+                    f"{_train.fmt_pct(s['paired_origami_sel_eff'])}"
+                )
+            ui.ok("dataset", line)
         ui.ok("done", f"summary.json -> {out_json}")
     return 0 if n_failed == 0 else 1
 

@@ -5,7 +5,8 @@
 
 Runs the hipblaslt-bench of the deploy checkout's build on every bench yaml
 (filtered to the config's data types and layout) and checks the runtime
-against stage06's deploy record.
+against stage06's deploy record. Report-only: no training or deploy decision
+reads its numbers.
 
 Pick parity (one run per yaml, `requested_solution_num: 1`, with
 `TILEWRIGHT_DIAG` and `TILEWRIGHT_PICK_LOG` on):
@@ -20,21 +21,40 @@ Pick parity (one run per yaml, `requested_solution_num: 1`, with
     kernel's signature is reported but does not decide. Both sides run the
     same engine, so a mismatch points at how hipBLASLt maps its problem,
     kernels, pool order or hardware to tilewright. A pick-log line without
-    `top1_index` fails the check.
+    `top1_index` fails the check;
+  * the runtime's selection efficiency: each runtime pick joined to the bench
+    timings of its problem (--timings-csv-dir, enriched chunk_*.csv such as
+    the run's stage04 data), against the fastest timed kernel; a pick with
+    only a skip row is a miss under --pick-measurement timed (lib/evaluate.py),
+    a pick without any row is counted apart (the runtime then ran a later
+    kernel whose predicates pass).
+
+Order parity (one more run per yaml with `requested_solution_num:
+stage07.parity_top_k`, 8 by default): the runtime's top-1 at that request
+size against the engine's, and the solutions the runtime returned, in order,
+against the engine's ranking of the same request size. The kernels the
+engine scored must come first and in the engine's order; the engine's kernels
+the runtime left out must be ones it may reject by their predicates (a
+kernel the timings show measured for the problem may not be left out), and
+the rest of the list (filled by the analytical ranking) must be unscored.
 
 Selection time (separate runs, pick log off): for every request size in
 `stage07.timing_request_sizes`, `stage07.timing_repetitions` repetitions of
 an ML-on and an ML-off run over the identical problem list, the order
 alternating between repetitions. Each problem's `Solution selection time`
-is paired across the two runs; the report gives the per-problem ML-on minus
-ML-off deltas (median over repetitions) as median and percentiles. The first
+is paired across the two runs (median over repetitions per problem). The
+report gives the ML-on times and the ML-on minus ML-off deltas as median,
+percentiles and maximum, with percentile-bootstrap 95% intervals of the
+medians, overall and split into the first call into each serving cell
+(which builds that cell's caches) and the warm calls after it. The first
 problem of every run, which carries the library load, is reported
 separately. ML-on runs must show the deployed model loading; ML-off runs get
-no tilewright variables at all.
+no tilewright variables at all. The ML-off times are the analytical
+ranking's and are printed only with --origami-reference.
 
 Everything is written below --out-dir. The exit status is non-zero when a
 bench fails, the deployed model is not the one the runtime loaded, or pick
-parity is below `stage07.parity_min_match_rate`.
+or order parity is below `stage07.parity_min_match_rate`.
 """
 from __future__ import annotations
 
@@ -52,16 +72,19 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 THIS_DIR = Path(__file__).resolve().parent
 PIPELINE_ROOT = THIS_DIR.parent
 if str(PIPELINE_ROOT) not in sys.path:
     sys.path.insert(0, str(PIPELINE_ROOT))
 
+import numpy as np  # noqa: E402
 import yaml  # noqa: E402
 
+from lib import evaluate as ev  # noqa: E402
 from lib import ui  # noqa: E402
+from lib.bench_log import iter_problems  # noqa: E402
 from run_orchestrator import arch_base, cfg_get  # noqa: E402
 
 _RE_SEL_TIME = re.compile(r"Solution selection time:\s*(\S+)\s*us")
@@ -146,16 +169,21 @@ def load_bench_entries(path: Path) -> List[Dict[str, Any]]:
 
 
 def normalized_entries(
-    entries: Sequence[Mapping[str, Any]], requested_solutions: int
+    entries: Sequence[Mapping[str, Any]],
+    requested_solutions: int,
+    kernel_info: bool = False,
 ) -> List[Dict[str, Any]]:
     """Copies set to run one timed iteration of `requested_solutions`
-    solutions, without the training-bench timing and pruning knobs."""
+    solutions, without the training-bench timing and pruning knobs; with
+    `kernel_info` every result names its solution index."""
     out = []
     for e in entries:
         d = {k: v for k, v in e.items() if k not in DROP_KEYS}
         d["iters"] = 1
         d["cold_iters"] = 0
         d["requested_solution_num"] = int(requested_solutions)
+        if kernel_info:
+            d["print_kernel_info"] = 1
         out.append(d)
     return out
 
@@ -489,6 +517,190 @@ def compare_picks(
     }
 
 
+def runtime_lists(path: Path) -> Dict[Key, List[int]]:
+    """{problem: the solution indices the runtime returned, in its order} of
+    a bench log run with `print_kernel_info`; a repeated problem keeps its
+    first list."""
+    out: Dict[Key, List[int]] = {}
+    if not path.is_file():
+        return out
+    with path.open(errors="replace") as f:
+        for prob in iter_problems(f):
+            rows = sorted(prob.tested, key=lambda r: r.rank)
+            if not rows:
+                continue
+            first = rows[0].fields
+            try:
+                key = (
+                    int(first["m"]),
+                    int(first["n"]),
+                    int(first["k"]),
+                    int(first.get("batch_count", "1")),
+                    first["transA"],
+                    first["transB"],
+                )
+            except (KeyError, ValueError):
+                continue
+            out.setdefault(key, [r.sol_index for r in rows if r.sol_index is not None])
+    return out
+
+
+def _subsequence(part: Sequence[int], whole: Sequence[int]) -> bool:
+    it = iter(whole)
+    return all(x in it for x in part)
+
+
+def compare_orders(
+    problems: Sequence[Mapping[str, Any]],
+    runtime: Mapping[Key, Sequence[int]],
+    py: Sequence[Mapping[str, Any]],
+    position_of: Mapping[int, int],
+    measured: Optional[Mapping[Key, Iterable[int]]] = None,
+) -> Dict[str, Any]:
+    """Join the runtime's returned lists (solution indices) with the engine's
+    rankings (`top1_picks(..., with_ranking=True)`, pool positions) by
+    problem. `match`: the scored kernels the runtime returned are the
+    engine's first ones in its order, followed only by unscored kernels;
+    `predicate_skips`: the same, but the runtime left some of the engine's
+    kernels out, none of which `measured` (solutions with bench rows per
+    problem) shows to pass the predicates; `order_mismatch` otherwise.
+    `agree_unscored`: no ranking on either side."""
+    py_by: Dict[Key, Mapping[str, Any]] = {}
+    for p in py:
+        k = (
+            int(p["m"]),
+            int(p["n"]),
+            int(p["k"]),
+            int(p["batch"]),
+            str(p["transA"]),
+            str(p["transB"]),
+        )
+        py_by.setdefault(k, p)
+    sol_at = {pos: sid for sid, pos in position_of.items()}
+    rows: List[Dict[str, Any]] = []
+    counts: Dict[str, int] = defaultdict(int)
+    seen = set()
+    for e in problems:
+        key = entry_key(e)
+        if key in seen:
+            continue
+        seen.add(key)
+        p = py_by.get(key) or {}
+        ranked = list(p.get("ranked") or []) if p.get("reason") == "ok" else []
+        sids = runtime.get(key)
+        row: Dict[str, Any] = {"m": key[0], "n": key[1], "k": key[2], "batch": key[3]}
+        row["transA"], row["transB"] = key[4], key[5]
+        if sids is None:
+            row["result"] = "no_runtime_list"
+        else:
+            got = [position_of.get(int(s), -1) for s in sids]
+            row["runtime"], row["engine"] = got, ranked[: max(len(got), 1)]
+            scored = set(ranked)
+            ours = [x for x in got if x in scored]
+            fill_at = next((i for i, x in enumerate(got) if x not in scored), len(got))
+            if not ranked:
+                row["result"] = "agree_unscored" if not ours else "order_mismatch"
+            elif any(x in scored for x in got[fill_at:]):
+                row["result"] = "order_mismatch"
+            elif ours == ranked[: len(ours)]:
+                row["result"] = "match"
+            elif ours and _subsequence(ours, ranked):
+                left_out = [
+                    x for x in ranked[: ranked.index(ours[-1]) + 1] if x not in ours
+                ]
+                row["left_out"] = left_out
+                passes = set((measured or {}).get(key, ()))
+                row["result"] = (
+                    "order_mismatch"
+                    if any(sol_at.get(x) in passes for x in left_out)
+                    else "predicate_skips"
+                )
+            else:
+                row["result"] = "order_mismatch"
+            row["n_filled"] = len(got) - fill_at
+        counts[row["result"]] += 1
+        rows.append(row)
+    n = len(rows)
+    agree = sum(
+        counts.get(r, 0) for r in ("match", "predicate_skips", "agree_unscored")
+    )
+    return {
+        "n_problems": n,
+        "n_agree": agree,
+        "match_rate": agree / n if n else None,
+        "counts": dict(counts),
+        "per_problem": rows,
+    }
+
+
+def runtime_selection(
+    problems: Sequence[Mapping[str, Any]],
+    cpp: Sequence[Mapping[str, Any]],
+    pool: Sequence[Mapping[str, Any]],
+    timings: Mapping[Key, Mapping[str, Any]],
+    pick_measurement: str,
+    bootstrap: int = 0,
+) -> Dict[str, Any]:
+    """Selection efficiency of the runtime's top-1 picks (pick-log
+    `top1_index`, a pool position) against the bench timings of the same
+    problems (`lib.evaluate.load_timings`)."""
+    by_key: Dict[Key, Mapping[str, Any]] = {}
+    for p in cpp:
+        by_key.setdefault(tuple(p["key"]), p)
+    ratios: List[float] = []
+    counts: Dict[str, int] = defaultdict(int)
+    seen = set()
+    for e in problems:
+        key = entry_key(e)
+        if key in seen:
+            continue
+        seen.add(key)
+        pick = by_key.get(key)
+        if pick is None:
+            counts["n_without_runtime_pick"] += 1
+            continue
+        g = timings.get(key)
+        idx = int(pick["top1_index"])
+        if g is None:
+            counts["n_without_timings"] += 1
+            continue
+        if not 0 <= idx < len(pool):
+            counts["n_outside_the_pool"] += 1
+            continue
+        timed, screened = ev.measurements(g)
+        runs, cost, miss = ev.pick_cost(
+            int(pool[idx]["sol_idx_global"]), timed, screened, None, pick_measurement
+        )
+        winner = float(g.get("winner_us") or 0)
+        if not runs:
+            counts["n_top1_without_row"] += 1
+            continue
+        if cost is None or cost <= 0 or winner <= 0:
+            counts["n_without_timings"] += 1
+            continue
+        ratios.append(winner / cost)
+        if miss is not None:
+            counts["n_miss"] += 1
+    logs = [math.log(r) for r in ratios]
+    ci = ev.bootstrap_ci(logs, resamples=bootstrap)
+    return {
+        "pick_measurement": pick_measurement,
+        "n_problems": len(seen),
+        "n_evaluated": len(ratios),
+        "n_miss": counts.get("n_miss", 0),
+        "n_without_runtime_pick": counts.get("n_without_runtime_pick", 0),
+        "n_without_timings": counts.get("n_without_timings", 0),
+        "n_top1_without_row": counts.get("n_top1_without_row", 0),
+        "n_outside_the_pool": counts.get("n_outside_the_pool", 0),
+        "sel_eff": ev.geomean(ratios),
+        "sel_eff_ci95": None if ci is None else [math.exp(ci[0]), math.exp(ci[1])],
+        "percentiles": {
+            f"p{q}": percentile(ratios, q) if ratios else None
+            for q in (1, 5, 10, 25, 50)
+        },
+    }
+
+
 def json_clean(obj: Any) -> Any:
     if isinstance(obj, float) and not math.isfinite(obj):
         return None
@@ -533,12 +745,40 @@ def _occurrence_keys(calls: Sequence[Call]) -> List[Tuple[Any, ...]]:
     return out
 
 
-def paired_timing(reps: Sequence[Tuple[BenchLog, BenchLog]]) -> Dict[str, Any]:
+def _with_ci(xs: Sequence[float], bootstrap: int) -> Dict[str, Any]:
+    out = describe(xs)
+    finite = [x for x in xs if isinstance(x, (int, float)) and math.isfinite(x)]
+    out["p50_ci95"] = ev.bootstrap_ci(finite, statistic=np.median, resamples=bootstrap)
+    return out
+
+
+def first_calls_into_cells(calls: Sequence[Call], cell_of: Mapping[Key, str]) -> set:
+    """Occurrence keys of the calls that are the first of their run into
+    their serving cell."""
+    seen: set = set()
+    out = set()
+    for okey, c in zip(_occurrence_keys(calls), calls):
+        cell = cell_of.get(c.key) if c.key is not None else None
+        if cell is not None and cell not in seen:
+            seen.add(cell)
+            out.add(okey)
+    return out
+
+
+def paired_timing(
+    reps: Sequence[Tuple[BenchLog, BenchLog]],
+    cell_of: Optional[Mapping[Key, str]] = None,
+    bootstrap: int = 0,
+) -> Dict[str, Any]:
     """Per-problem ML-on vs ML-off selection times over repetitions. The
-    first call of every run (library load) is kept out of the pairing."""
+    first call of every run (library load) is kept out of the pairing. With
+    `cell_of` (problem -> serving cell) the problems are also split into the
+    first call into each cell of an ML-on run and the warm calls after it;
+    `*_ci95` are bootstrap intervals of the medians."""
     on_t: Dict[Any, List[float]] = defaultdict(list)
     off_t: Dict[Any, List[float]] = defaultdict(list)
     delta_t: Dict[Any, List[float]] = defaultdict(list)
+    first_in_cell: set = set()
     cold_on: List[float] = []
     cold_off: List[float] = []
     unpaired = 0
@@ -554,6 +794,8 @@ def paired_timing(reps: Sequence[Tuple[BenchLog, BenchLog]]) -> Dict[str, Any]:
             cold.add(_occurrence_keys(on.calls)[0])
         if off.calls:
             cold.add(_occurrence_keys(off.calls)[0])
+        if cell_of:
+            first_in_cell |= first_calls_into_cells(on.calls, cell_of)
         keys = (set(on_map) | set(off_map)) - cold
         for k in keys:
             a, b = on_map.get(k), off_map.get(k)
@@ -567,24 +809,34 @@ def paired_timing(reps: Sequence[Tuple[BenchLog, BenchLog]]) -> Dict[str, Any]:
             on_t[k].append(a.sel_us)
             off_t[k].append(b.sel_us)
             delta_t[k].append(a.sel_us - b.sel_us)
-    per_on = [statistics.median(v) for v in on_t.values()]
-    per_off = [statistics.median(v) for v in off_t.values()]
-    per_delta = [statistics.median(v) for v in delta_t.values()]
-    ratios = [
-        statistics.median(on_t[k]) / statistics.median(off_t[k])
-        for k in on_t
-        if statistics.median(off_t[k]) > 0
-    ]
-    return {
+    med = {k: statistics.median(v) for k, v in on_t.items()}
+    med_off = {k: statistics.median(v) for k, v in off_t.items()}
+    med_delta = {k: statistics.median(v) for k, v in delta_t.items()}
+    ratios = [med[k] / med_off[k] for k in med if med_off[k] > 0]
+    out = {
         "repetitions": len(reps),
-        "n_problems_paired": len(per_delta),
+        "n_problems_paired": len(med_delta),
         "n_unpaired": unpaired,
-        "ml_on_us": describe(per_on),
-        "ml_off_us": describe(per_off),
-        "delta_us": describe(per_delta),
-        "ratio_on_over_off": describe(ratios),
+        "ml_on_us": _with_ci(list(med.values()), bootstrap),
+        "ml_off_us": _with_ci(list(med_off.values()), bootstrap),
+        "delta_us": _with_ci(list(med_delta.values()), bootstrap),
+        "ratio_on_over_off": _with_ci(ratios, bootstrap),
         "first_call_us": {"ml_on": cold_on, "ml_off": cold_off},
     }
+    if cell_of:
+        first = [k for k in med if k in first_in_cell]
+        warm = [k for k in med if k not in first_in_cell]
+        out["first_in_cell"] = {
+            "n_problems": len(first),
+            "ml_on_us": _with_ci([med[k] for k in first], bootstrap),
+            "delta_us": _with_ci([med_delta[k] for k in first], bootstrap),
+        }
+        out["warm"] = {
+            "n_problems": len(warm),
+            "ml_on_us": _with_ci([med[k] for k in warm], bootstrap),
+            "delta_us": _with_ci([med_delta[k] for k in warm], bootstrap),
+        }
+    return out
 
 
 # ── stage ───────────────────────────────────────────────────────────────────
@@ -604,10 +856,36 @@ class Context:
     stall_timeout_s: float
     quiet: bool
     failures: List[str] = field(default_factory=list)
+    timing_dirs: List[Path] = field(default_factory=list)
+    pick_measurement: str = "warmup"
+    bootstrap: int = 0
+    top_k: int = 0
+    origami_reference: bool = False
+    cells: Dict[str, Dict[Key, str]] = field(default_factory=dict)
+    _pool: Optional[List[Dict[str, Any]]] = None
+    _timings: Optional[Dict[Key, Dict[str, Any]]] = None
 
     def fail(self, msg: str) -> None:
         self.failures.append(msg)
         ui.err("check", msg)
+
+    def pool(self) -> List[Dict[str, Any]]:
+        """The library's kernel pool, in the order the runtime ranks it."""
+        if self._pool is None:
+            self._pool = ev.library_pool(
+                self.library_dir, self.stem, self.cfg, self.device
+            )
+        return self._pool
+
+    def timings(self, keys: Iterable[Key]) -> Dict[Key, Dict[str, Any]]:
+        """Bench timings of `keys` from --timings-csv-dir (read once)."""
+        if self._timings is None:
+            self._timings = {}
+        want = [k for k in keys if k not in self._timings]
+        if want and self.timing_dirs:
+            got = ev.load_timings(self.timing_dirs, wanted=want)
+            self._timings.update(got)
+        return {k: self._timings[k] for k in keys if k in self._timings}
 
 
 def _env(
@@ -641,9 +919,11 @@ def _bench(
 
 
 def _offline_picks(
-    ctx: Context, problems: Sequence[Mapping[str, Any]]
+    ctx: Context,
+    problems: Sequence[Mapping[str, Any]],
+    min_scored: int = 1,
+    with_ranking: bool = False,
 ) -> List[Dict[str, Any]]:
-    from lib import dat, evaluate
     from lib.hardware import device_hardware
 
     data = Path(ctx.record["staged_model"]).read_bytes()
@@ -651,9 +931,6 @@ def _offline_picks(
         raise RuntimeError(
             f"{ctx.record['staged_model']} differs from the deploy record"
         )
-    pool = evaluate.pool_from_kernels(
-        dat.load_library_kernels(ctx.library_dir, ctx.stem)
-    )
     hw = device_hardware(ctx.cfg, ctx.device)
     rows = []
     for e in problems:
@@ -663,16 +940,41 @@ def _offline_picks(
             {f: e[f] for f in ("a_type", "b_type", "c_type", "d_type", "compute_type")}
         )
         rows.append(row)
-    return evaluate.top1_picks(data, rows, pool, hardware=hw, min_scored=1)
+    return ev.top1_picks(
+        data,
+        rows,
+        ctx.pool(),
+        hardware=hw,
+        min_scored=int(min_scored),
+        with_ranking=with_ranking,
+    )
 
 
-def run_parity(
-    ctx: Context, tag: str, entries: List[Dict[str, Any]], min_rate: float
-) -> Dict[str, Any]:
-    out = ctx.out_dir / tag / "parity"
-    yaml_path = out / "bench.yaml"
-    write_bench_yaml(normalized_entries(entries, 1), yaml_path)
-    env = _env(
+def serving_cells(
+    picks: Sequence[Mapping[str, Any]], key: str = "cell"
+) -> Dict[Key, str]:
+    """{problem: serving cell} of pick-log lines (`key` "cell") or offline
+    picks."""
+    out: Dict[Key, str] = {}
+    for p in picks:
+        if "key" in p:
+            k = tuple(p["key"])
+        else:
+            k = (
+                int(p["m"]),
+                int(p["n"]),
+                int(p["k"]),
+                int(p["batch"]),
+                str(p["transA"]),
+                str(p["transB"]),
+            )
+        if p.get(key):
+            out.setdefault(k, str(p[key]))
+    return out
+
+
+def _parity_env(ctx: Context) -> Dict[str, str]:
+    return _env(
         ctx,
         {
             "TENSILE_USE_TILEWRIGHT": "1",
@@ -681,7 +983,23 @@ def run_parity(
         },
         timing=False,
     )
-    log = _bench(ctx, yaml_path, out / "bench.log", env)
+
+
+def _ci_text(
+    ci: Optional[Sequence[float]], scale: float = 1.0, fmt: str = ".2f"
+) -> str:
+    if not ci:
+        return ""
+    return f" (95% CI {ci[0] * scale:{fmt}} .. {ci[1] * scale:{fmt}})"
+
+
+def run_parity(
+    ctx: Context, tag: str, entries: List[Dict[str, Any]], min_rate: float
+) -> Dict[str, Any]:
+    out = ctx.out_dir / tag / "parity"
+    yaml_path = out / "bench.yaml"
+    write_bench_yaml(normalized_entries(entries, 1), yaml_path)
+    log = _bench(ctx, yaml_path, out / "bench.log", _parity_env(ctx))
     if log is None:
         return {"ok": False, "error": "bench failed"}
     diag_ok, diag_problems = check_diag(log, ctx.weights_path, ctx.record)
@@ -696,6 +1014,17 @@ def run_parity(
     result["diag_ok"] = diag_ok
     result["min_match_rate"] = min_rate
     result["n_unparsed_pick_lines"] = len(log.unparsed_picks)
+    ctx.cells[tag] = {**serving_cells(py), **serving_cells(log.picks)}
+    keys = list(dict.fromkeys(entry_key(e) for e in entries))
+    sel = runtime_selection(
+        entries,
+        log.picks,
+        ctx.pool(),
+        ctx.timings(keys),
+        ctx.pick_measurement,
+        ctx.bootstrap,
+    )
+    result["runtime_selection"] = sel
     rate = result["match_rate"]
     result["ok"] = (
         diag_ok and not log.unparsed_picks and rate is not None and rate >= min_rate
@@ -748,7 +1077,110 @@ def run_parity(
             "parity",
             f"{tag}: {result['n_agree']}/{result['n_problems']} problems agree",
         )
+    if sel["n_evaluated"]:
+        ui.ok(
+            "parity",
+            f"{tag}: the runtime's picks on {sel['n_evaluated']} problems with bench "
+            f"timings: {sel['sel_eff'] * 100:.2f}% of the fastest"
+            f"{_ci_text(sel['sel_eff_ci95'], 100)}, {sel['n_miss']} misses, "
+            f"{sel['n_top1_without_row']} top-1 kernels without a row",
+        )
     return {k: v for k, v in result.items() if k != "per_problem"}
+
+
+def run_order_parity(
+    ctx: Context, tag: str, entries: List[Dict[str, Any]], k: int, min_rate: float
+) -> Dict[str, Any]:
+    """The runtime at `requested_solution_num: k`: its top-1 and the order
+    of the solutions it returns, against the engine."""
+    out = ctx.out_dir / tag / f"parity_rsn{k}"
+    yaml_path = out / "bench.yaml"
+    write_bench_yaml(normalized_entries(entries, k, kernel_info=True), yaml_path)
+    log_path = out / "bench.log"
+    log = _bench(ctx, yaml_path, log_path, _parity_env(ctx))
+    if log is None:
+        return {"ok": False, "error": "bench failed"}
+    diag_ok, diag_problems = check_diag(log, ctx.weights_path, ctx.record)
+    for p in diag_problems:
+        ctx.fail(f"{tag} rsn={k}: {p}")
+    try:
+        py = _offline_picks(ctx, entries, min_scored=k, with_ranking=True)
+    except Exception as e:
+        ctx.fail(f"{tag} rsn={k}: offline ranking failed: {e!r}")
+        return {"ok": False, "diag_ok": diag_ok, "error": repr(e)}
+    keys = list(dict.fromkeys(entry_key(e) for e in entries))
+    measured = {
+        key: {int(c["sol_idx_global"]) for c in g["candidates"] if c["us"] > 0}
+        for key, g in ctx.timings(keys).items()
+    }
+    position_of = {int(kk["sol_idx_global"]): i for i, kk in enumerate(ctx.pool())}
+    top1 = compare_picks(entries, log.picks, py)
+    order = compare_orders(entries, runtime_lists(log_path), py, position_of, measured)
+    result = {
+        "requested_solution_num": k,
+        "diag_ok": diag_ok,
+        "min_match_rate": min_rate,
+        "top1": top1,
+        "order": order,
+    }
+    rates = {"top-1": top1["match_rate"], "order": order["match_rate"]}
+    result["ok"] = diag_ok and all(
+        r is not None and r >= min_rate for r in rates.values()
+    )
+    with (out / "parity.json").open("w") as f:
+        json.dump(json_clean(result), f, indent=2)
+    for what, rate in rates.items():
+        counts = (top1 if what == "top-1" else order)["counts"]
+        if rate is None:
+            ctx.fail(f"{tag} rsn={k}: no problem to compare ({what})")
+        elif rate < min_rate:
+            ctx.fail(
+                f"{tag} rsn={k}: {what} parity {rate * 100:.2f}% < "
+                f"{min_rate * 100:.2f}% ({counts}); see {out / 'parity.json'}"
+            )
+    if result["ok"]:
+        ui.ok(
+            "parity",
+            f"{tag} rsn={k}: top-1 {top1['n_agree']}/{top1['n_problems']}, order "
+            f"{order['n_agree']}/{order['n_problems']} problems agree "
+            f"({order['counts'].get('predicate_skips', 0)} with kernels the "
+            f"runtime may have rejected)",
+        )
+    return {
+        "requested_solution_num": k,
+        "ok": result["ok"],
+        "diag_ok": diag_ok,
+        "top1": {kk: v for kk, v in top1.items() if kk != "per_problem"},
+        "order": {kk: v for kk, v in order.items() if kk != "per_problem"},
+    }
+
+
+def _print_timing(ctx: Context, tag: str, rsn: int, stats: Mapping[str, Any]) -> None:
+    on = stats["ml_on_us"]
+    ui.ok(
+        "timing",
+        f"{tag} rsn={rsn}: ML-on selection time per problem: median {on['p50']:.2f} us"
+        f"{_ci_text(on.get('p50_ci95'))}, p99 {on['p99']:.2f}, max {on['max']:.2f} "
+        f"over {on['n']} problems",
+    )
+    for part, what in (("first_in_cell", "first call into a cell"), ("warm", "warm")):
+        st = (stats.get(part) or {}).get("ml_on_us") or {}
+        if st.get("n"):
+            ui.ok(
+                "timing",
+                f"{tag} rsn={rsn}:   {what}: median {st['p50']:.2f} us"
+                f"{_ci_text(st.get('p50_ci95'))}, max {st['max']:.2f} over "
+                f"{st['n']} problems",
+            )
+    d = stats["delta_us"]
+    if ctx.origami_reference and d.get("n"):
+        ui.info(
+            "timing",
+            f"{tag} rsn={rsn}: [reference] ML-on minus ML-off (the analytical "
+            f"ranking) per problem: median {d['p50']:+.2f} us"
+            f"{_ci_text(d.get('p50_ci95'))}, p10 {d['p10']:+.2f}, "
+            f"p90 {d['p90']:+.2f}, p99 {d['p99']:+.2f}",
+        )
 
 
 def run_timing(
@@ -757,6 +1189,7 @@ def run_timing(
     entries: List[Dict[str, Any]],
     sizes: Sequence[int],
     reps: int,
+    cell_of: Optional[Mapping[Key, str]] = None,
 ) -> Dict[str, Any]:
     results: Dict[str, Any] = {}
     on_env = _env(
@@ -797,19 +1230,29 @@ def run_timing(
                         f"selections for {len(entries)} problems",
                     )
             pairs.append((on, off))
-        stats = paired_timing(pairs)
+        stats = paired_timing(pairs, cell_of=cell_of, bootstrap=ctx.bootstrap)
         results[f"rsn{rsn}"] = stats
-        d = stats["delta_us"]
-        if d.get("n"):
-            ui.ok(
-                "timing",
-                f"{tag} rsn={rsn}: ML-on minus ML-off per problem: median "
-                f"{d['p50']:+.2f} us, p10 {d['p10']:+.2f}, p90 {d['p90']:+.2f}, "
-                f"p99 {d['p99']:+.2f} over {d['n']} problems",
-            )
+        if stats["delta_us"].get("n"):
+            _print_timing(ctx, tag, rsn, stats)
         else:
             ctx.fail(f"{tag} rsn={rsn}: no paired selection times")
     return results
+
+
+def yaml_tags(paths: Sequence[Path]) -> List[str]:
+    """Output-directory names of the bench yamls: the file stem, with `_2`,
+    `_3`, ... appended to repeats so that yamls of the same name keep
+    separate results."""
+    tags: List[str] = []
+    used = set()
+    for p in paths:
+        tag, i = p.stem, 1
+        while tag in used:
+            i += 1
+            tag = f"{p.stem}_{i}"
+        used.add(tag)
+        tags.append(tag)
+    return tags
 
 
 def _parse_sizes(text: Optional[str], default: Sequence[int]) -> List[int]:
@@ -859,6 +1302,38 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     ap.add_argument("--repetitions", type=int, default=None)
     ap.add_argument("--parity-min-match-rate", type=float, default=None)
+    ap.add_argument(
+        "--parity-top-k",
+        type=int,
+        default=None,
+        help="request size of the order-parity run (<= 1: none); default "
+        "stage07.parity_top_k",
+    )
+    ap.add_argument(
+        "--timings-csv-dir",
+        type=Path,
+        action="append",
+        default=None,
+        help="enriched chunk_*.csv dirs with bench timings of the problems "
+        "(repeatable): the runtime's selection efficiency",
+    )
+    ap.add_argument(
+        "--pick-measurement",
+        choices=ev.PICK_MEASUREMENTS,
+        default=None,
+        help="default validate.pick_measurement",
+    )
+    ap.add_argument(
+        "--bootstrap",
+        type=int,
+        default=None,
+        help="bootstrap resamples of the intervals; default stage07.bootstrap",
+    )
+    ap.add_argument(
+        "--origami-reference",
+        action="store_true",
+        help="also print the ML-off (analytical ranking) selection times",
+    )
     ap.add_argument("--no-timing", action="store_true")
     ap.add_argument("--no-parity", action="store_true")
     ap.add_argument("--quiet", action="store_true")
@@ -904,6 +1379,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         startup_grace_s=float(cfg_get(cfg, "bench.startup_grace_s")),
         stall_timeout_s=float(cfg_get(cfg, "bench.stall_timeout_s")),
         quiet=args.quiet,
+        timing_dirs=list(args.timings_csv_dir or []),
+        pick_measurement=str(
+            args.pick_measurement or cfg_get(cfg, "validate.pick_measurement")
+        ),
+        bootstrap=int(
+            args.bootstrap
+            if args.bootstrap is not None
+            else cfg_get(cfg, "stage07.bootstrap")
+        ),
+        top_k=int(
+            args.parity_top_k
+            if args.parity_top_k is not None
+            else cfg_get(cfg, "stage07.parity_top_k")
+        ),
+        origami_reference=args.origami_reference,
     )
     ui.banner("stage07  selection time + pick parity")
     ui.info("cfg", f"bench        : {bench}")
@@ -919,7 +1409,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     ui.info(
         "cfg",
-        f"parity       : {'off' if args.no_parity else f'min match rate {min_rate}'}",
+        "parity       : "
+        + (
+            "off"
+            if args.no_parity
+            else f"min match rate {min_rate}, order at rsn {ctx.top_k}"
+        ),
     )
 
     summary: Dict[str, Any] = {
@@ -942,8 +1437,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
     else:
         wf = workload_filter(cfg)
-        for yp in args.bench_yaml:
-            tag = yp.stem
+        for yp, tag in zip(args.bench_yaml, yaml_tags(args.bench_yaml)):
             try:
                 entries = load_bench_entries(yp)
             except (OSError, ValueError, yaml.YAMLError) as e:
@@ -965,8 +1459,22 @@ def main(argv: Optional[List[str]] = None) -> int:
             else:
                 if not args.no_parity:
                     res["parity"] = run_parity(ctx, tag, kept, min_rate)
+                    if ctx.top_k > 1:
+                        res["parity_top_k"] = run_order_parity(
+                            ctx, tag, kept, ctx.top_k, min_rate
+                        )
                 if not args.no_timing:
-                    res["timing"] = run_timing(ctx, tag, kept, sizes, reps)
+                    cell_of = ctx.cells.get(tag)
+                    if cell_of is None:
+                        try:
+                            cell_of = serving_cells(_offline_picks(ctx, kept))
+                        except Exception as e:
+                            ui.warn(
+                                "timing",
+                                f"{tag}: no serving cells ({e!r}); first calls "
+                                f"into a cell are not told apart",
+                            )
+                    res["timing"] = run_timing(ctx, tag, kept, sizes, reps, cell_of)
             summary["per_yaml"][tag] = res
     summary["failures"] = ctx.failures
     summary["ok"] = not ctx.failures

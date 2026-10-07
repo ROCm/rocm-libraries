@@ -39,9 +39,14 @@ for d in weights.iterdir():
 """
 
 
-@pytest.mark.parametrize("twins", [False, True], ids=["unique", "duplicate_kernels"])
-def test_two_rounds_on_cpu(tmp_path, monkeypatch, twins):
+@pytest.mark.parametrize(
+    "twins, contexts",
+    [(False, False), (True, False), (False, True)],
+    ids=["unique", "duplicate_kernels", "contexts"],
+)
+def test_two_rounds_on_cpu(tmp_path, monkeypatch, twins, contexts):
     pytest.importorskip("tilewright")
+    fh.unhide_devices(monkeypatch)
     kernels = fh.kernels_grid(twins=twins)
     bench_root = tmp_path / "bench"
     build = bench_root / "projects" / "hipblaslt" / "build" / "release"
@@ -119,6 +124,13 @@ def test_two_rounds_on_cpu(tmp_path, monkeypatch, twins):
             "timing_repetitions": 2,
         },
     }
+    if contexts:
+        cfg["train"]["catalog"] = "v3"
+        cfg["bench"]["pool_only_library"] = True
+        cfg["contexts"] = {
+            "list": [{"cu_budget": 0}, {"cu_budget": 16, "cotenant": True}],
+            "holdout": [{"cu_budget": 32, "cotenant": True, "fraction": 0.5}],
+        }
     errors, warnings = ro.validate_config(cfg)
     assert errors == [] and warnings == []
     cfg_path = tmp_path / "e2e.yaml"
@@ -135,7 +147,13 @@ def test_two_rounds_on_cpu(tmp_path, monkeypatch, twins):
     rec = json.loads(
         (run_dir / "round_1" / "stage06" / "deploy_record.json").read_text()
     )
-    assert rec["applied"] and rec["built"]
+    assert rec["applied"] and rec["built"] and rec["deployed"]
+    gate = rec["gate"]
+    assert gate["n_evaluated"] == gate["n_gemms"] > 0 and gate["passed"]
+    assert gate["csv_dirs"] == [str(run_dir / "round_1" / "stage04b" / "gate")]
+    breakdown = json.loads((run_dir / "held_out_sel_eff_breakdown.json").read_text())
+    assert breakdown["source"] == "deploy_gate"
+    assert breakdown["held_out_sel_eff"] == pytest.approx(gate["sel_eff"])
     t = rec["targets"][0]
     index = (weights / ARCH / ARCH / "tilewright_index").read_text()
     assert f"{bf.LIBRARY_STEM}\t{t['weights_file']}" in index
@@ -152,6 +170,10 @@ def test_two_rounds_on_cpu(tmp_path, monkeypatch, twins):
     assert parity["library_pool_size"] == len(kernels)
     assert (run_dir / "report.html").is_file()
     assert (run_dir / "held_out_sel_eff_breakdown.json").is_file()
+
+    if contexts:
+        _check_contexts(run_dir)
+        return
 
     enriched = run_dir / "round_0" / "stage04"
     listed = dat.read_kernel_attributes(enriched / dat.KERNELS_FILE)
@@ -176,3 +198,28 @@ def test_two_rounds_on_cpu(tmp_path, monkeypatch, twins):
                     twin[f] for f in s04.CONFIG_FIELDS
                 ]
                 assert float(twin["us"]) > float(base["us"])
+
+
+def _check_contexts(run_dir):
+    """Every shape is enriched exclusively and under 16 CUs, the model
+    declares the trained budget, stage04b reports the held-out one."""
+    from test_stage05_train import load_bundle
+
+    rd0 = run_dir / "round_0"
+    gemms = defaultdict(set)
+    for path in sorted((rd0 / "stage04").glob("chunk_*.csv")):
+        with path.open() as f:
+            for r in csv.DictReader(f):
+                gemms[r.get("cu_budget") or "0"].add((r["m"], r["n"], r["k"]))
+    assert set(gemms) == {"0", "16"} and gemms["0"] == gemms["16"]
+    summary = json.loads((rd0 / "stage03c" / "contexts.json").read_text())
+    assert [c["name"] for c in summary["contexts"]] == ["cu16_cot", "cu32_cot"]
+    assert summary["library_path"].endswith("libdir_pool")
+    bundle = load_bundle(rd0 / "stage05" / "models.pt")
+    assert bundle["catalog"] == "v3"
+    assert bundle["contexts"]["min_cu_fraction"] == 16 / 64
+    metrics = json.loads((rd0 / "stage05" / "metrics.json").read_text())
+    assert metrics["load_stats"]["gemms_non_exclusive"] == len(gemms["16"])
+    held = json.loads((run_dir / "round_1" / "stage04b" / "decisions.json").read_text())
+    report = held["aggregate"]["context_holdout"]["32/default"]
+    assert 0 < report["n_gemms"] < len(gemms["0"]) + len(gemms["16"])

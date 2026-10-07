@@ -176,6 +176,20 @@ def test_enriched_rows(dataset, monkeypatch):
     assert "rows_collapsed" not in counters
 
 
+def test_execution_context_columns(dataset, monkeypatch):
+    assert _run(monkeypatch, dataset) == 0
+    rows = [r for g in _rows(dataset / "out").values() for r in g]
+    assert {(r["cu_budget"], r["schedule"]) for r in rows} == {("0", "default")}
+    args = ("--cu-budget", "64", "--schedule", "dynamic")
+    assert _run(monkeypatch, dataset, *args) == 0
+    rows = [r for g in _rows(dataset / "out").values() for r in g]
+    assert {(r["cu_budget"], r["schedule"]) for r in rows} == {("64", "dynamic")}
+    summary = json.loads((dataset / "out" / "enrich_summary.json").read_text())
+    assert summary["context"] == {"cu_budget": 64, "schedule": "dynamic"}
+    with pytest.raises(SystemExit):
+        _run(monkeypatch, dataset, "--cu-budget", "-1")
+
+
 def test_kernels_with_identical_parameters_keep_their_own_rows(dataset, monkeypatch):
     assert _run(monkeypatch, dataset, "--library-stem", LIBRARY_STEM) == 0
     f = {int(r["rank"]): r for r in _rows(dataset / "out")[_gemm(GF)]}
@@ -266,3 +280,100 @@ def test_kernel_name_mismatches_become_fatal():
         enricher.config_for(10, "Cijk_X_MT256x128x64_MI16_Y")
     with pytest.raises(RuntimeError, match="disagree"):
         enricher.config_for(10, "Cijk_X_MT256x128x64_MI16_Y")
+
+
+# ── planned runs ─────────────────────────────────────────────────────────────
+
+
+def _plan(path, entries):
+    shapes = [
+        {"m": g.m, "n": g.n, "k": g.k, "batch": g.batch, "kernels": kernels}
+        for g, kernels in entries
+    ]
+    path.write_text(json.dumps({"version": 1, "shapes": shapes}))
+    return path
+
+
+def test_rows_without_plan_count_as_planned(dataset, monkeypatch):
+    assert _run(monkeypatch, dataset, "--library-stem", LIBRARY_STEM) == 0
+    for rows in _rows(dataset / "out").values():
+        assert {(r["is_planned"], r["n_planned"]) for r in rows} == {("1", "")}
+    assert s04.OUT_FIELDS[-2:] == ["is_planned", "n_planned"]
+
+
+def test_planned_runs_record_list_membership(dataset, monkeypatch):
+    plan = _plan(
+        dataset / "plan.json",
+        [(GA, [11, 12, 10]), (GF, None), (GE, [15, 16, 90, 77])],
+    )
+    assert (
+        _run(monkeypatch, dataset, "--library-stem", LIBRARY_STEM, "--plan", plan) == 0
+    )
+    by_gemm = _rows(dataset / "out")
+    a = {int(r["rank"]): r for r in by_gemm[_gemm(GA)]}
+    assert [a[r]["is_planned"] for r in range(4)] == ["1", "1", "1", "0"]
+    assert {a[r]["n_planned"] for r in range(4)} == {"3"}
+    assert {r["is_origami_pick"] for r in a.values()} == {"0"}
+    assert [a[r]["is_winner"] for r in range(4)] == ["False", "True", "False", "False"]
+    f = by_gemm[_gemm(GF)]
+    assert {(r["is_planned"], r["n_planned"], r["is_origami_pick"]) for r in f} == {
+        ("1", "", "0")
+    }
+    e = {int(r["rank"]): r for r in by_gemm[_gemm(GE)]}
+    assert (e[0]["is_planned"], e[3]["is_planned"], e[0]["n_planned"]) == (
+        "1",
+        "1",
+        "4",
+    )
+    (b,) = by_gemm[_gemm(GB)]
+    assert (b["is_planned"], b["n_planned"], b["is_origami_pick"]) == ("1", "", "1")
+    summary = json.loads((dataset / "out" / "enrich_summary.json").read_text())
+    assert summary["counters"]["rows_unplanned"] == 1
+    assert summary["counters"]["gemms_in_plan"] == 3
+    assert summary["plan"] == str(plan)
+
+
+def test_several_log_dirs_and_extra_library(dataset, monkeypatch):
+    seed_logs = dataset / "seed_logs"
+    seed_logs.mkdir()
+    g = Gemm(96, 96, 96)
+    lines = BANNER + preamble(2) + measured_lines(0, g, 90, 2.0, (512, 512, 64))
+    lines += measured_lines(1, g, 12, 3.0, MT[12]) + winner(0, g, 90, 2.0)
+    (seed_logs / "block_0000_lines1-1_gpu0.log").write_text("\n".join(lines) + "\n")
+    rc = _run(
+        monkeypatch,
+        dataset,
+        "--library-stem",
+        LIBRARY_STEM,
+        "--log-dir",
+        seed_logs,
+        "--extra-library-stem",
+        OTHER_STEM,
+    )
+    assert rc == 0
+    by_gemm = _rows(dataset / "out")
+    assert _gemm(g) in by_gemm and _gemm(GA) in by_gemm
+    rows = {r["sol_idx_global"]: r for r in by_gemm[_gemm(g)]}
+    assert set(rows) == {"90", "12"} and rows["90"]["is_winner"] == "True"
+    e = {int(r["rank"]): r for r in by_gemm[_gemm(GE)]}
+    assert sorted(e) == [0, 1, 3]
+    summary = json.loads((dataset / "out" / "enrich_summary.json").read_text())
+    assert summary["log_files"] == 3
+    assert summary["extra_library_stems"] == [OTHER_STEM]
+
+
+def test_extra_library_needs_a_stem(dataset, monkeypatch):
+    assert _run(monkeypatch, dataset, "--extra-library-stem", OTHER_STEM) == 1
+
+
+def test_unreadable_plan_is_an_error(dataset, monkeypatch):
+    (dataset / "plan.json").write_text("{not json")
+    rc = _run(
+        monkeypatch,
+        dataset,
+        "--library-stem",
+        LIBRARY_STEM,
+        "--plan",
+        dataset / "plan.json",
+    )
+    assert rc == 1

@@ -303,6 +303,9 @@ def test_describe_route_and_labels(model):
     )
     assert info.weight_type == tw.WeightType.Fp32
     assert model.describe().n_cells == 2
+    recorded = info.provenance
+    assert isinstance(recorded, tw.Provenance) and "config_id=''" in repr(recorded)
+    assert (recorded.training_data_hash, recorded.source_revision) == ("", "")
     assert tw.cell_label(model, tw.route(model, _problem(m=2048))) == LARGE + "#M<=2048"
     assert tw.cell_label(model, tw.route(model, _problem(m=2049))) == LARGE
     assert tw.route(model, _problem(m=8, n=8, k=8)) == -1
@@ -369,6 +372,95 @@ def test_rank_contract_tiers_and_candidate_set(model):
     for bad in (tw.Hardware(), tw.Hardware(N_CU=64, lds_capacity=65536, L2_capacity=0)):
         assert not any(r.scored for r in cs.rank(_problem(), bad))
     assert tw.rank_configs(model, _problem(), HW, []) == []
+
+
+def _scored_prefix(results, k):
+    out = []
+    for r in results:
+        if not r.scored or len(out) == k:
+            break
+        out.append(r)
+    return out
+
+
+def test_rank_top_is_the_scored_prefix_of_rank(model, flat_model):
+    prior = [0.5, NAN, -1.0, 2.0, 0.5]
+    exclusive = tw.ExecutionContext()
+    problems = (_problem(), _problem(m=100, n=3000, k=700), _problem(m=8, n=8, k=8))
+    for m in (model, flat_model):
+        for tie_break in (tw.TieBreak.PoolOrder, tw.TieBreak.Prior):
+            cs = tw.CandidateSet(m, POOL, tie_break=tie_break)
+            for p in problems:
+                for k in (0, 1, 2, 3, 1000):
+                    top = cs.rank_top(p, HW, k, prior=prior)
+                    assert top == _scored_prefix(cs.rank(p, HW, k, prior=prior), k)
+                    assert (
+                        cs.rank_top(p, HW, k=k, context=exclusive, prior=prior) == top
+                    )
+    cs = tw.CandidateSet(model, POOL)
+    budget = tw.ExecutionContext(cu_budget=1)
+    assert cs.rank_top(_problem(), HW, 1000, context=budget) == []
+    with pytest.raises(ValueError, match="prior"):
+        cs.rank_top(_problem(), HW, 1, prior=[0.0])
+
+
+def test_cache_limit_never_changes_rankings(model):
+    saved = tw.cache_limit()
+    problems = [
+        _problem(m=100 + 211 * i, n=4096 - 97 * i, k=64 + 333 * i) for i in range(12)
+    ]
+    try:
+        tw.set_cache_limit(2**63)
+        fresh = tw.load_model_from_memory(
+            write_model(
+                [
+                    _cell(LARGE, seed=1, signatures=[_sig(POOL[1])]),
+                    _cell(LARGE + "#M<=2048", embed=5, hidden=7, inter=3, seed=2),
+                ],
+                [(LARGE, "M", 2048, LARGE + "#M<=2048", LARGE + "#M>2048")],
+            )
+        )
+        info = tw.describe(fresh)
+        assert info.packed_bytes > 0 and info.expanded_bytes > info.packed_bytes
+        before = tw.cache_usage()
+        expect = [tw.CandidateSet(fresh, POOL).rank(p, HW, 3) for p in problems]
+        assert tw.cache_usage() > before
+        for limit in (0, 1, 2**63):
+            tw.set_cache_limit(limit)
+            assert tw.cache_limit() == limit
+            cs = tw.CandidateSet(fresh, POOL)
+            assert [cs.rank(p, HW, 3) for p in problems] == expect
+            if limit == 0:
+                assert tw.cache_usage() <= info.expanded_bytes
+        del cs
+        tw.set_cache_limit(0)
+        assert tw.cache_usage() == 0
+    finally:
+        tw.set_cache_limit(saved)
+
+
+def test_prepare_builds_what_rankings_use(model):
+    saved = tw.cache_limit()
+    problems = [_problem(), _problem(m=100, n=3000, k=700), _problem(m=1500, batch=3)]
+    try:
+        tw.set_cache_limit(2**63)
+        expect = [tw.CandidateSet(model, POOL).rank(p, HW, 3) for p in problems]
+        for how in ("all", "cells", "problem"):
+            cs = tw.CandidateSet(model, POOL)
+            if how == "all":
+                cs.prepare()
+            elif how == "cells":
+                cs.prepare(cells=[tw.route(model, p) for p in problems] + [-1, 99])
+            else:
+                for p in problems:
+                    cs.prepare(problem=p, hardware=HW)
+            usage = tw.cache_usage()
+            assert [cs.rank(p, HW, 3) for p in problems] == expect
+            assert tw.cache_usage() == usage
+        with pytest.raises(ValueError, match="together"):
+            cs.prepare(problem=problems[0])
+    finally:
+        tw.set_cache_limit(saved)
 
 
 def test_compute_features(model):
@@ -490,6 +582,74 @@ def test_execution_context_and_supports(model):
             ):
                 assert _order(r) == list(range(len(POOL)))
                 assert not any(x.scored for x in r)
+
+
+def test_launch_plan():
+    p = tw.LaunchPlan()
+    assert (p.dynamic_queue, p.grid_wgs, p.partial_reduction) == (
+        False,
+        0,
+        tw.PartialReduction.None_,
+    )
+    assert [
+        int(r)
+        for r in (
+            tw.PartialReduction.None_,
+            tw.PartialReduction.Tree,
+            tw.PartialReduction.Parallel,
+            tw.PartialReduction.Atomic,
+        )
+    ] == [0, 1, 2, 3]
+    q = tw.LaunchPlan(True, 2**40, tw.PartialReduction.Atomic)
+    assert repr(q) == (
+        "LaunchPlan(dynamic_queue=True, grid_wgs=1099511627776, "
+        "partial_reduction=PartialReduction.Atomic)"
+    )
+    assert q != p and tw.LaunchPlan(partial_reduction=tw.PartialReduction.Atomic) != q
+    q.dynamic_queue, q.grid_wgs, q.partial_reduction = (
+        False,
+        0,
+        tw.PartialReduction.None_,
+    )
+    assert q == p
+    with pytest.raises(TypeError):
+        tw.LaunchPlan(grid_wgs=-1)
+
+
+def test_v2_models_never_ask_a_launch_model(model):
+    asked = []
+
+    def launch(config, problem, context):
+        asked.append(config.index)
+        return tw.LaunchPlan(True, 1, tw.PartialReduction.Tree)
+
+    class Planner:
+        def plan(self, config, problem, context):
+            return launch(config, problem, context)
+
+        def launch_key(self, config):
+            asked.append(config.index)
+            return config.index
+
+    plain = tw.CandidateSet(model, POOL)
+    plans = [tw.LaunchPlan(True, 3)] * 20
+    for source in (launch, Planner(), plans, tuple(plans), None):
+        cs = tw.CandidateSet(model, POOL, launch=source)
+        for p in (_problem(), _problem(m=100, n=3000, k=700)):
+            for depth in (0, 1000):
+                assert cs.rank(p, HW, depth) == plain.rank(p, HW, depth)
+                assert tw.rank_configs(model, p, HW, POOL, depth, launch=source) == (
+                    plain.rank(p, HW, depth)
+                )
+    assert asked == []
+    f = tw.compute_features(model, _problem(), POOL[1], HW)
+    g = tw.compute_features(model, _problem(), POOL[1], HW, plan=tw.LaunchPlan(True, 7))
+    assert (f.query, f.item, f.interaction) == (g.query, g.item, g.interaction)
+    for bad in (3, "plans", [tw.LaunchPlan(), 1]):
+        with pytest.raises(TypeError):
+            tw.CandidateSet(model, POOL, launch=bad)
+        with pytest.raises(TypeError):
+            tw.rank_configs(model, _problem(), HW, POOL, launch=bad)
 
 
 def test_prior_tie_break(flat_model):

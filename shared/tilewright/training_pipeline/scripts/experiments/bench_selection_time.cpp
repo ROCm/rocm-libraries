@@ -4,8 +4,14 @@
 // CPU wall-clock of tilewright's ranking call over one library's kernel pool.
 // The inputs file comes from bench_selection_time.py. For every shape the
 // program reports the median of --iters calls (after --warmup calls) of
-// CandidateSet::rank and of the uncached rank_configs, then a summary over the
-// shapes.
+// CandidateSet::rank (with --top-k K: rank_top into a reused buffer) and of
+// the uncached rank_configs, then a summary over the shapes. A shape line may
+// carry a fifth field, the context's cu_budget.
+//
+// --launch-id ID gives the CandidateSet a launch model with that id, as an
+// MLREC_v3 model that records one requires. Its plans follow a fixed cheap
+// rule, not the integration's: the timings include asking for a plan per
+// fully scored key but not the integration's cost of computing one.
 
 #include "tilewright/model.hpp"
 #include "tilewright/types.hpp"
@@ -17,14 +23,36 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <memory>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
 
 struct Shape {
-  std::size_t m, n, k, b;
+  std::size_t m, n, k, b, cu_budget;
+};
+
+class FixedRuleLaunch final : public tilewright::LaunchModel {
+ public:
+  explicit FixedRuleLaunch(std::string id) : id_(std::move(id)) {}
+  tilewright::LaunchPlan plan(const tilewright::Config& c,
+                              const tilewright::Problem& p,
+                              const tilewright::ExecutionContext&) const override {
+    tilewright::LaunchPlan plan;
+    const std::size_t tiles = ((p.size.m + c.mt.m - 1) / c.mt.m) *
+                              ((p.size.n + c.mt.n - 1) / c.mt.n) *
+                              std::max<std::size_t>(p.batch, 1);
+    plan.dynamic_queue = tiles > 480;
+    plan.grid_wgs      = plan.dynamic_queue ? 0 : tiles;
+    return plan;
+  }
+  std::string id() const override { return id_; }
+
+ private:
+  std::string id_;
 };
 
 struct Inputs {
@@ -92,6 +120,7 @@ bool load_inputs(const std::string& path, Inputs* ix) {
   for (std::size_t i = 0; i < n; ++i) {
     Shape sh{};
     if (!next_line(in, s) || !(s >> sh.m >> sh.n >> sh.k >> sh.b)) return false;
+    if (!(s >> sh.cu_budget)) sh.cu_budget = 0;
     ix->shapes.push_back(sh);
   }
   if (!next_line(in, s) || !expect(s, "CONFIGS") || !(s >> n)) return false;
@@ -121,10 +150,10 @@ double median_us(std::size_t warmup, std::size_t iters, F&& call) {
   std::vector<double> us;
   us.reserve(iters);
   for (std::size_t i = 0; i < iters; ++i) {
-    const auto t0     = std::chrono::steady_clock::now();
-    const auto result = call();
-    const auto t1     = std::chrono::steady_clock::now();
-    asm volatile("" : : "g"(result.data()) : "memory");
+    const auto t0      = std::chrono::steady_clock::now();
+    const auto* result = call();
+    const auto t1      = std::chrono::steady_clock::now();
+    asm volatile("" : : "g"(result) : "memory");
     us.push_back(std::chrono::duration<double, std::micro>(t1 - t0).count());
   }
   std::sort(us.begin(), us.end());
@@ -159,7 +188,7 @@ void print_row(const char* name, std::vector<double> v) {
 void usage(const char* argv0) {
   std::fprintf(stderr,
                "usage: %s --model FILE --inputs FILE [--iters 200] [--warmup 50] "
-               "[--min-scored 1]\n",
+               "[--min-scored 1] [--top-k K] [--launch-id ID] [--prepare] [--no-uncached]\n",
                argv0);
 }
 
@@ -167,9 +196,19 @@ void usage(const char* argv0) {
 
 int main(int argc, char** argv) {
   std::string model_path, inputs_path;
-  std::size_t iters = 200, warmup = 50, min_scored = 1;
+  std::size_t iters = 200, warmup = 50, min_scored = 1, top_k = 0;
+  std::string launch_id;
+  bool prepare = false, uncached_too = true;
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
+    if (a == "--prepare") {
+      prepare = true;
+      continue;
+    }
+    if (a == "--no-uncached") {
+      uncached_too = false;
+      continue;
+    }
     if (i + 1 >= argc) {
       usage(argv[0]);
       return 2;
@@ -185,6 +224,10 @@ int main(int argc, char** argv) {
       warmup = std::stoul(v);
     else if (a == "--min-scored")
       min_scored = std::stoul(v);
+    else if (a == "--top-k")
+      top_k = std::stoul(v);
+    else if (a == "--launch-id")
+      launch_id = v;
     else {
       usage(argv[0]);
       return 2;
@@ -203,25 +246,43 @@ int main(int argc, char** argv) {
   Inputs ix;
   if (!load_inputs(inputs_path, &ix)) return 1;
 
-  const tilewright::CandidateSet set(model, ix.configs);
+  tilewright::PoolOptions options;
+  if (!launch_id.empty()) options.launch = std::make_shared<FixedRuleLaunch>(launch_id);
+  const tilewright::CandidateSet set(model, ix.configs, options);
+  if (prepare) set.prepare();
   std::vector<double> cached, uncached;
+  std::vector<tilewright::Result> out, held;
   std::size_t unscored = 0;
   for (const Shape& sh : ix.shapes) {
     tilewright::Problem p = ix.problem;
     p.size                = tilewright::Dim3{sh.m, sh.n, sh.k};
     p.batch               = sh.b;
-    const auto first      = set.rank(p, ix.hardware, min_scored);
+    tilewright::ExecutionContext context;
+    context.cu_budget = sh.cu_budget;
+    if (prepare) set.prepare(p, ix.hardware);
+    const auto first = set.rank(p, ix.hardware, context, min_scored);
     if (first.empty() || !first.front().scored) ++unscored;
-    cached.push_back(
-        median_us(warmup, iters, [&] { return set.rank(p, ix.hardware, min_scored); }));
-    uncached.push_back(median_us(warmup, iters, [&] {
-      return tilewright::rank_configs(*model, p, ix.hardware, ix.configs, min_scored);
-    }));
+    if (top_k > 0)
+      cached.push_back(median_us(warmup, iters, [&] {
+        set.rank_top(p, ix.hardware, context, top_k, out);
+        return out.data();
+      }));
+    else
+      cached.push_back(median_us(warmup, iters, [&] {
+        held = set.rank(p, ix.hardware, context, min_scored);
+        return held.data();
+      }));
+    if (uncached_too && sh.cu_budget == 0 && launch_id.empty())
+      uncached.push_back(median_us(warmup, iters, [&] {
+        held = tilewright::rank_configs(*model, p, ix.hardware, ix.configs, min_scored);
+        return held.data();
+      }));
   }
-  std::printf("# %zu shapes, %zu kernels, min_scored %zu, median of %zu calls after %zu\n",
+  std::printf("# %zu shapes, %zu kernels, %s %zu, median of %zu calls after %zu\n",
               ix.shapes.size(),
               ix.configs.size(),
-              min_scored,
+              top_k > 0 ? "rank_top k" : "min_scored",
+              top_k > 0 ? top_k : min_scored,
               iters,
               warmup);
   std::printf("# microseconds per call; %zu shapes had no scored kernel\n", unscored);
@@ -234,7 +295,7 @@ int main(int argc, char** argv) {
               "p90",
               "p99",
               "max");
-  print_row("candidate_set", cached);
+  print_row(top_k > 0 ? "rank_top" : "candidate_set", cached);
   print_row("rank_configs", uncached);
   return 0;
 }

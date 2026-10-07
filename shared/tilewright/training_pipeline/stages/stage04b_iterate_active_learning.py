@@ -13,14 +13,25 @@ round_(R-1)/stage05/models.pt and round_R/stage04, and writes
                        without a model of their own that stage05 can train
                        now, and the children of this round's splits
     splits.json        this round's split rules (read by stage01 and stage05)
+    gate/, train/      with --gate-frac: the rows of this round's gate GEMMs
+                       and every other row of --enriched-csv-dir (chunk_*.csv
+                       and kernels.json)
+
+Deploy gate (--gate-frac F > 0): of each leaf's held-out GEMMs, round(F * n)
+(the lowest values of a hash of --seed, --round-idx and the GEMM) are kept
+out of this round's training: stage05 trains on train/ instead of
+--enriched-csv-dir, and stage06 measures the bundle this round ships on
+gate/, GEMMs no bundle has trained on. Later rounds train on them like on
+any earlier round's data.
 
 Only cells stage05 can train are listed: a leaf with at least
 --train-min-cell-gemms GEMMs over every round's stage04 data (the data stage05
-trains on). A leaf without its own model gets decision `train` when it has
-that many and `no_model` otherwise; it stays served by its nearest trained
-ancestor until it is trained. A retrain cell below the bound is reported in
-`cells_not_trainable`. Split parents whose model the bundle keeps for such
-leaves are listed in `cells_fallback_parents` and get no decision.
+trains on, without this round's gate GEMMs). A leaf without its own model gets
+decision `train` when it has that many and `no_model` otherwise; it stays
+served by its nearest trained ancestor until it is trained. A retrain cell
+below the bound is reported in `cells_not_trainable`. Split parents whose
+model the bundle keeps for such leaves are listed in `cells_fallback_parents`
+and get no decision.
 
 Held-out data: this round's GEMMs minus any shape the evaluated models could
 have trained on, i.e. shapes stage01 re-used from history
@@ -30,8 +41,18 @@ in a prior round's stage04 data.
 Measurement: the bundle is evaluated exactly as deployed (lib/evaluate.py):
 MLREC_v2 at --weight-dtype, the engine's routing with ancestor fallback, the
 per-cell whitelist, the library pool, and the Origami fallback for GEMMs the
-model scores nothing for. Cells are the leaves of the cumulative split tree
-of the prior rounds; a leaf without its own model is served like at runtime.
+model scores nothing for. A pick without a timed row of its own is a miss
+under --pick-measurement timed (GEMMs benched from --plan know which kernels
+were never benched). Cells are the leaves of the cumulative split tree of the
+prior rounds; a leaf without its own model is served like at runtime.
+With --rebench-misses every miss of the bundle (and of --prior-models) is
+re-benched on --devices with --bench-binary and charged by its measured
+ratio to the winner (lib/miss_rebench.py); the decisions use those numbers,
+decisions.json keeps the configured rule's as `sel_eff_new_pre_rebench` per
+cell and `aggregate.pre_rebench`, and rebench_misses.json lists the misses.
+Thresholds are absolute selection efficiencies. Origami's numbers are
+recorded on the GEMMs that have an Origami pick, next to the model's on the
+same GEMMs, and printed only with --origami-reference.
 
 Decision per cell with a model and >= --min-cell-gemms held-out GEMMs:
   * sel_eff_new >= --sel-eff-threshold                         -> pass
@@ -59,14 +80,16 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import re
+import shutil
 import sys
 import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Set, Tuple
 
 THIS_DIR = Path(__file__).resolve().parent
 PIPELINE_ROOT = THIS_DIR.parent
@@ -88,6 +111,7 @@ except ImportError:
 import stage05_train as _train  # noqa: E402
 from lib import evaluate as ev  # noqa: E402
 from lib import hardware as hwlib  # noqa: E402
+from lib import miss_rebench as mr  # noqa: E402
 from lib import mlrec  # noqa: E402
 from lib import subcells as sc  # noqa: E402
 from lib import ui  # noqa: E402
@@ -96,20 +120,11 @@ from lib.shapes import read_reused_shapes  # noqa: E402
 LOW_SEL_EFF = 0.70
 
 
-def _resolve_threshold(
-    spec: str, origami_sel_eff: Optional[float], fallback: float
-) -> float:
-    """A numeric threshold, or "origami" for this cell's Origami sel_eff on
-    the same GEMMs (`fallback` when the cell has none)."""
-    s = str(spec).strip().lower()
-    if s == "origami":
-        if origami_sel_eff is None or math.isnan(origami_sel_eff):
-            return fallback
-        return float(origami_sel_eff)
-    try:
-        return float(s)
-    except (TypeError, ValueError):
-        return fallback
+def _finite(text: str) -> float:
+    v = float(text)
+    if not math.isfinite(v):
+        raise argparse.ArgumentTypeError(f"expected a finite number, got {text!r}")
+    return v
 
 
 _ROUND_RE = re.compile(r"^round_(\d+)$")
@@ -148,6 +163,97 @@ def history_gemm_keys(round_dirs: Iterable[Path]) -> Set[Tuple[Any, ...]]:
     return keys
 
 
+GATE_DIR = "gate"
+TRAIN_DIR = "train"
+_ROW_KEY_FIELDS = (
+    "m",
+    "n",
+    "k",
+    "batch_count",
+    "transA",
+    "transB",
+    "a_type",
+    "b_type",
+    "c_type",
+    "d_type",
+    "compute_type",
+    "cu_budget",
+    "schedule",
+)
+
+
+def _gate_unit(seed: int, round_idx: int, gemm: Dict[str, Any]) -> float:
+    key = "|".join(str(v) for v in ev.gemm_key(gemm))
+    h = hashlib.sha256(f"gate|{int(seed)}|{int(round_idx)}|{key}".encode()).digest()
+    return int.from_bytes(h[:8], "little") / float(1 << 64)
+
+
+def select_gate(
+    held_out: Dict[str, List[dict]], frac: float, seed: int, round_idx: int
+) -> Dict[str, List[dict]]:
+    """{leaf: gate GEMMs}: round(frac * n) of each leaf's n held-out GEMMs,
+    lowest `_gate_unit` first."""
+    out: Dict[str, List[dict]] = {}
+    if frac <= 0:
+        return out
+    for label, gs in held_out.items():
+        n = int(math.floor(frac * len(gs) + 0.5))
+        if n > 0:
+            out[label] = sorted(gs, key=lambda g: _gate_unit(seed, round_idx, g))[:n]
+    return out
+
+
+def split_rows(
+    src: Path, gate_keys: Set[Tuple[Any, ...]], out_dir: Path
+) -> Dict[str, int]:
+    """Copy the chunk_*.csv rows of `src` to `out_dir`/gate (rows of GEMMs in
+    `gate_keys`) and `out_dir`/train (all other rows), chunk by chunk with
+    each file's header; the kernel attribute file goes to both. Returns the
+    row counts."""
+    from lib.dat import KERNELS_FILE
+
+    counts = {GATE_DIR: 0, TRAIN_DIR: 0}
+    dirs = {name: out_dir / name for name in counts}
+    for d in dirs.values():
+        d.mkdir(parents=True)
+        if (src / KERNELS_FILE).is_file():
+            shutil.copy2(src / KERNELS_FILE, d / KERNELS_FILE)
+    for path in sorted(src.glob("chunk_*.csv")):
+        with path.open(newline="") as f:
+            reader = csv.reader(f)
+            header = next(reader, None)
+            if header is None:
+                continue
+            idx = [header.index(c) if c in header else -1 for c in _ROW_KEY_FIELDS]
+            writers: Dict[str, Any] = {}
+            files = []
+            last: Optional[Tuple[str, ...]] = None
+            to_gate = False
+            try:
+                for row in reader:
+                    raw = tuple(row[i] if 0 <= i < len(row) else "" for i in idx)
+                    if raw != last:
+                        last = raw
+                        try:
+                            key = ev.gemm_key(dict(zip(_ROW_KEY_FIELDS, raw)))
+                        except (KeyError, TypeError, ValueError):
+                            key = None
+                        to_gate = key in gate_keys
+                    name = GATE_DIR if to_gate else TRAIN_DIR
+                    w = writers.get(name)
+                    if w is None:
+                        fh = (dirs[name] / path.name).open("w", newline="")
+                        files.append(fh)
+                        w = writers[name] = csv.writer(fh, lineterminator="\n")
+                        w.writerow(header)
+                    w.writerow(row)
+                    counts[name] += 1
+            finally:
+                for fh in files:
+                    fh.close()
+    return counts
+
+
 def _per_leaf_budget(arg: Optional[int], round_dir: Path) -> Optional[int]:
     if arg is not None:
         return int(arg)
@@ -170,21 +276,83 @@ def _evaluate(
     hardware: hwlib.DeviceHardware,
     tw: Any,
     what: str,
-) -> Dict[int, ev.GemmResult]:
-    """{id(gemm): deployed result} of `bundle` on `gemms`; RoutingMismatchError
-    when the engine routes any GEMM elsewhere than lib/subcells."""
-    out = ev.evaluate_bundle(
-        bundle,
-        gemms,
-        arch=args.arch,
-        constants=constants,
-        hardware=hardware,
-        weight_dtype=args.weight_dtype,
-        pools=pools,
-        tw=tw,
+    bench: Optional[mr.MissBench] = None,
+) -> Tuple[Dict[int, ev.GemmResult], Optional[mr.Measured]]:
+    """({id(gemm): deployed result} of `bundle` on `gemms`, with `bench` the
+    evaluation whose misses were re-benched); RoutingMismatchError when the
+    engine routes any GEMM elsewhere than lib/subcells."""
+
+    def evaluate(rule: str) -> ev.Evaluation:
+        out = ev.evaluate_bundle(
+            bundle,
+            gemms,
+            arch=args.arch,
+            constants=constants,
+            hardware=hardware,
+            weight_dtype=args.weight_dtype,
+            pools=pools,
+            tw=tw,
+            pick_measurement=rule,
+        )
+        return ev.require_consistent_routing(out, what)
+
+    measured = mr.measured_evaluation(
+        evaluate, gemms, bench, args.pick_measurement, what.replace(" ", "_")
     )
-    ev.require_consistent_routing(out, what)
-    return {id(g): r for g, r in zip(gemms, out.results)}
+    by_id = {id(g): r for g, r in zip(gemms, measured.evaluation.results)}
+    return by_id, (measured if bench is not None else None)
+
+
+def _context_label(g: Mapping[str, Any]) -> str:
+    c = ev.context_of(g)
+    return f"{c.cu_budget}/{c.schedule}"
+
+
+def _summaries_by_context(
+    gemms: List[dict], results: Dict[int, ev.GemmResult]
+) -> Dict[str, Any]:
+    """{"cu_budget/schedule": summary} of the evaluated GEMMs."""
+    groups: Dict[str, List[ev.GemmResult]] = {}
+    for g in gemms:
+        r = results.get(id(g))
+        if r is not None:
+            groups.setdefault(_context_label(g), []).append(r)
+    return {k: ev.summarize(v) for k, v in sorted(groups.items())}
+
+
+def _context_holdout(args, bundle, library, split_tree, constants, hardware, tw):
+    """Per-context summary of `bundle` on --context-holdout-dir (None when the
+    directory has no rows)."""
+    if not any(args.context_holdout_dir.glob("chunk_*.csv")):
+        ui.warn("holdout", f"no held-out context rows in {args.context_holdout_dir}")
+        return None
+    cells, _ = _train.load_enriched_chunks(
+        str(args.context_holdout_dir), args.quiet, split_tree=(split_tree or None)
+    )
+    gemms = [g for gs in cells.values() for g in gs]
+    try:
+        results, _ = _evaluate(
+            bundle,
+            gemms,
+            ev.pools_for(gemms, library),
+            args,
+            constants,
+            hardware,
+            tw,
+            "held-out contexts",
+        )
+    except (ev.RoutingMismatchError, RuntimeError, ValueError) as e:
+        ui.warn("holdout", f"held-out context evaluation failed: {e}")
+        return {"error": str(e)}
+    out = _summaries_by_context(gemms, results)
+    if not args.quiet:
+        for label, summ in out.items():
+            ui.info(
+                "holdout",
+                f"context {label}: sel_eff {summ['sel_eff']:.4f} over "
+                f"{summ['n_evaluated']} GEMM(s)",
+            )
+    return out
 
 
 def main() -> int:
@@ -230,15 +398,46 @@ def main() -> int:
     ap.add_argument("--library-stem", default=None)
     ap.add_argument(
         "--sel-eff-threshold",
-        default="0.95",
-        help='pass threshold: a float, or "origami" for the cell\'s Origami '
-        "sel_eff on the same GEMMs",
+        type=_finite,
+        default=0.95,
+        help="pass threshold: the held-out selection efficiency a cell needs",
     )
     ap.add_argument(
         "--split-floor",
-        default="0.85",
-        help='below this (float or "origami") a cell whose attempts are used '
-        "up splits without the improvement check; 0 disables",
+        type=_finite,
+        default=0.85,
+        help="below this a cell whose attempts are used up splits without the "
+        "improvement check; 0 disables",
+    )
+    ap.add_argument(
+        "--pick-measurement",
+        choices=ev.PICK_MEASUREMENTS,
+        default="warmup",
+        help="warmup: a skip row counts with its warm-up latency and a kernel off the plan's list is a miss; timed: both are misses; any: a skip row counts "
+        "and an off-list kernel is passed over (lib/evaluate.py)",
+    )
+    ap.add_argument(
+        "--plan",
+        type=Path,
+        default=None,
+        help="stage01b plan.json of this round: GEMMs benched from a kernel "
+        "list miss when the model picks a kernel off it",
+    )
+    ap.add_argument(
+        "--origami-reference",
+        action="store_true",
+        help="also print Origami's numbers (an external reference; they never "
+        "enter a decision)",
+    )
+    ap.add_argument(
+        "--gate-frac",
+        type=_finite,
+        default=0.0,
+        help="fraction of each leaf's held-out GEMMs kept out of this round's "
+        "training for the deploy gate (writes gate/ and train/); 0 disables",
+    )
+    ap.add_argument(
+        "--seed", type=int, default=42, help="run seed; picks the gate GEMMs"
     )
     ap.add_argument(
         "--split-min-improvement",
@@ -309,6 +508,14 @@ def main() -> int:
         help="keep GEMMs that also occur in a prior round's stage04 data",
     )
     ap.add_argument(
+        "--context-holdout-dir",
+        type=Path,
+        default=None,
+        help="enriched CSVs of held-out execution contexts (stage03c): "
+        "reported per context in aggregate.context_holdout, never part of the "
+        "decisions",
+    )
+    ap.add_argument(
         "--per-leaf-budget",
         type=int,
         default=None,
@@ -336,6 +543,7 @@ def main() -> int:
         help="demote splits to retrains (no later round trains the children)",
     )
     ap.add_argument("--quiet", action="store_true")
+    mr.add_arguments(ap)
     args = ap.parse_args()
 
     if not _TORCH_OK:
@@ -355,6 +563,11 @@ def main() -> int:
         constants = hwlib.arch_constants(args.arch)
     except (ValueError, RuntimeError, OSError) as e:
         ui.err("hardware", str(e))
+        return 1
+    try:
+        bench = mr.from_args(args, cfg, args.out_dir / "rebench", hardware.n_cu)
+    except ValueError as e:
+        ui.err("rebench", str(e))
         return 1
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -434,29 +647,47 @@ def main() -> int:
             f"[{len(reused)} re-used shapes from {len(reused_files)} file(s), "
             f"{len(history)} history GEMMs]",
         )
+    n_listed = 0
+    if args.plan is not None:
+        try:
+            n_listed = ev.attach_plan(all_new, json.loads(args.plan.read_text()))
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            ui.err("plan", f"cannot read --plan {args.plan}: {e!r}")
+            return 1
+        if not args.quiet:
+            ui.ok("plan", f"{n_listed} new GEMMs were benched from a kernel list")
 
     if (args.library_dir is None) != (args.library_stem is None):
         ui.err("pool", "--library-dir and --library-stem go together")
         return 1
     library = (
-        ev.library_pool(args.library_dir, args.library_stem)
+        ev.library_pool(args.library_dir, args.library_stem, cfg, args.hardware_device)
         if args.library_stem
         else None
     )
     pools = ev.pools_for(all_new, library)
     held_list = [g for gs in held_out.values() for g in gs]
     prior_results: Dict[int, ev.GemmResult] = {}
+    measured: Dict[str, mr.Measured] = {}
     try:
-        results = (
-            _evaluate(
-                bundle, held_list, pools, args, constants, hardware, tw, "held out"
+        results: Dict[int, ev.GemmResult] = {}
+        if held_list:
+            results, m_held = _evaluate(
+                bundle,
+                held_list,
+                pools,
+                args,
+                constants,
+                hardware,
+                tw,
+                "held out",
+                bench,
             )
-            if held_list
-            else {}
-        )
+            if m_held is not None:
+                measured["held_out"] = m_held
         if prior_bundle is not None and held_list:
             try:
-                prior_results = _evaluate(
+                prior_results, m_prior = _evaluate(
                     prior_bundle,
                     held_list,
                     pools,
@@ -465,16 +696,52 @@ def main() -> int:
                     hardware,
                     tw,
                     "--prior-models",
+                    bench,
                 )
+                if m_prior is not None:
+                    measured["prior_models"] = m_prior
             except (RuntimeError, ValueError) as e:
                 ui.warn("prior", f"--prior-models evaluation failed ({e}); not used")
     except ev.RoutingMismatchError as e:
         ui.err("eval", str(e))
         return 1
     prior_labels = set((prior_bundle or {}).get("models", {}))
+    pre_results: Dict[int, ev.GemmResult] = {}
+    if "held_out" in measured:
+        pre_results = {
+            id(g): r for g, r in zip(held_list, measured["held_out"].pre.results)
+        }
+
+    gate = select_gate(held_out, args.gate_frac, args.seed, args.round_idx)
+    gate_record: Optional[Dict[str, Any]] = None
+    training_dir = args.enriched_csv_dir
+    for name in (GATE_DIR, TRAIN_DIR):
+        if (args.out_dir / name).exists():
+            shutil.rmtree(args.out_dir / name)
+    if gate:
+        gate_keys = {ev.gemm_key(g) for gs in gate.values() for g in gs}
+        rows = split_rows(args.enriched_csv_dir, gate_keys, args.out_dir)
+        training_dir = args.out_dir / TRAIN_DIR
+        gate_record = {
+            "frac": args.gate_frac,
+            "seed": args.seed,
+            "n_gemms": len(gate_keys),
+            "n_cells": len(gate),
+            "n_rows": rows[GATE_DIR],
+            "n_training_rows": rows[TRAIN_DIR],
+            "dir": str(args.out_dir / GATE_DIR),
+            "training_dir": str(training_dir),
+            "per_cell": {label: len(gs) for label, gs in sorted(gate.items())},
+        }
+        if not args.quiet:
+            ui.ok(
+                "gate",
+                f"{len(gate_keys)} held-out GEMMs of {len(gate)} cells kept out of "
+                f"this round's training for the deploy gate -> {args.out_dir / GATE_DIR}",
+            )
 
     union = _train.gemm_shapes_by_leaf(
-        [Path(rd) / "stage04" for rd in prior_round_dirs] + [args.enriched_csv_dir],
+        [Path(rd) / "stage04" for rd in prior_round_dirs] + [training_dir],
         split_tree or None,
     )
     train_min = max(1, int(args.train_min_cell_gemms))
@@ -497,7 +764,6 @@ def main() -> int:
         )
 
     prior_sel_eff_by_cell: Dict[str, Optional[float]] = {}
-    prior_origami_by_cell: Dict[str, Optional[float]] = {}
     prior_low_by_cell: Dict[str, Optional[int]] = {}
     prior_low_n_by_cell: Dict[str, Optional[int]] = {}
     last_decision_by_cell: Dict[str, str] = {}
@@ -515,8 +781,6 @@ def main() -> int:
             cell = r["cell"]
             if r.get("sel_eff_new") is not None:
                 prior_sel_eff_by_cell[cell] = r.get("sel_eff_new")
-            if r.get("origami_sel_eff_new") is not None:
-                prior_origami_by_cell[cell] = r.get("origami_sel_eff_new")
             if int(r.get("n_eval") or 0) > 0:
                 prior_low_by_cell[cell] = r.get("n_low_seleff_lt_0p70")
                 prior_low_n_by_cell[cell] = int(r["n_eval"])
@@ -570,13 +834,24 @@ def main() -> int:
             "n_new_gemms": n_new,
             "n_excluded_not_held_out": excluded_by_cell.get(label, 0),
             "n_training_gemms": n_train,
+            "n_gate_gemms": len(gate.get(label, [])),
         }
+        if summ is not None and pre_results:
+            pre = ev.summarize([pre_results[id(g)] for g in gemms])
+            base_row["sel_eff_new_pre_rebench"] = pre["sel_eff"]
+            base_row["n_miss_pre_rebench"] = pre["n_miss"]
         if summ is not None:
             base_row.update(
                 {
                     "n_model_served": summ["n_model_served"],
                     "n_origami_fallback": summ["n_origami_fallback"],
+                    "n_miss": summ["n_miss"],
                     "model_cells": sorted({r.model_cell or "" for r in cres} - {""}),
+                    "paired_sel_eff_new": (
+                        summ["paired"]["model_sel_eff"]
+                        if summ["paired"]["n"] > 0
+                        else None
+                    ),
                 }
             )
         if label not in models:
@@ -661,8 +936,8 @@ def main() -> int:
 
         prior_se = prior_sel_eff_by_cell.get(label)
         attempts = retrain_attempts_by_cell.get(label, 0)
-        threshold = _resolve_threshold(args.sel_eff_threshold, ori_sel, 0.95)
-        floor = _resolve_threshold(args.split_floor, ori_sel, 0.85)
+        threshold = float(args.sel_eff_threshold)
+        floor = float(args.split_floor)
 
         structural_octaves, structural_axis = 0.0, None
         if args.structural_split_min_octaves > 0:
@@ -823,15 +1098,23 @@ def main() -> int:
         lists[decision].append(label)
 
         if not args.quiet:
-            pse = _ancestor_value(prior_sel_eff_by_cell, label)
+            if same_data is not None:
+                pse, where = same_data, "same GEMMs"
+            else:
+                pse, where = _ancestor_value(prior_sel_eff_by_cell, label), "other"
             prior_str = (
-                f"  prior={_train.fmt_pct(pse)}(d={(sel_eff_new - pse) * 100:+7.2f})"
+                f"  prior={_train.fmt_pct(pse)}"
+                f"(d={(sel_eff_new - pse) * 100:+7.2f}, {where})"
                 if pse is not None and not math.isnan(sel_eff_new)
                 else "  prior=" + "--".rjust(18)
             )
-            ori_str = (
-                f"  origami={_train.fmt_pct(ori_sel)}" if ori_sel is not None else ""
-            )
+            ori_str = ""
+            if args.origami_reference and ori_sel is not None:
+                ori_str = (
+                    f"  [reference] origami={_train.fmt_pct(ori_sel)} vs "
+                    f"{_train.fmt_pct(row['paired_sel_eff_new'])} on "
+                    f"{summ['n_origami']} GEMMs"
+                )
             split_str = (
                 f"  SPLIT[{split_axis}={split_threshold}]  reason={reason}"
                 if decision == "split"
@@ -842,8 +1125,8 @@ def main() -> int:
             print(
                 f"  {color}[{tag}]{ui.C.ENDC} {label:{lbl_w}s}  "
                 f"sel_eff={_train.fmt_pct(sel_eff_new)}{prior_str}  "
-                f"n_eval={n_eval:>3d}/{n_new:>3d}{ori_str}  "
-                f"low<70%={n_low:>3d}{split_str}",
+                f"n_eval={n_eval:>3d}/{n_new:>3d}  miss={summ['n_miss']:>3d}  "
+                f"low<70%={n_low:>3d}{ori_str}{split_str}",
                 flush=True,
             )
 
@@ -861,22 +1144,59 @@ def main() -> int:
         return None if math.isnan(v) else v
 
     overall = ev.summarize(list(results.values()), bootstrap=1000) if results else None
+    by_context = _summaries_by_context(held_list, results)
+    context_holdout = None
+    if args.context_holdout_dir is not None:
+        context_holdout = _context_holdout(
+            args, bundle, library, split_tree, constants, hardware, tw
+        )
     aggregate = {
         "n_cells_evaluated": len(evaluated),
         "n_gemms_evaluated": sum(int(r["n_eval"]) for r in evaluated),
         "n_gemms_excluded_not_held_out": n_excluded,
+        "n_gemms_listed": n_listed,
         "n_low_seleff_lt_0p70_total": sum(
             int(r.get("n_low_seleff_lt_0p70") or 0) for r in evaluated
+        ),
+        "n_miss_total": sum(int(r.get("n_miss") or 0) for r in evaluated),
+        "pick_measurement": (
+            ev.REBENCH_PICK_MEASUREMENT if bench is not None else args.pick_measurement
         ),
         "winner_us_geomean": _wlog("winner_us_geomean"),
         "global_sel_eff_new": _wlog("sel_eff_new"),
         "global_model_pick_us_geomean": _wlog("pick_us_geomean"),
+        "n_gemms_paired": sum(int(r.get("origami_n_eval") or 0) for r in evaluated),
+        "global_paired_sel_eff_new": _wlog("paired_sel_eff_new", "origami_n_eval"),
         "global_origami_sel_eff_new": _wlog("origami_sel_eff_new", "origami_n_eval"),
         "global_origami_pick_us_geomean": _wlog(
             "origami_pick_us_geomean", "origami_n_eval"
         ),
         "all_held_out": overall,
     }
+    if "held_out" in measured:
+        rec = measured["held_out"].record or {}
+        aggregate["pre_rebench"] = dict(
+            mr.pre_rebench(
+                ev.summarize(list(pre_results.values())), args.pick_measurement
+            ),
+            global_sel_eff_new=_wlog("sel_eff_new_pre_rebench"),
+        )
+        for key in ("n_rebenched", "n_rebench_failed", "n_context_skipped"):
+            aggregate[key] = rec.get(key)
+        aggregate["rebench"] = {
+            tag: mr.record_counts(m.record) for tag, m in measured.items()
+        }
+        (args.out_dir / mr.RECORD_FILE).write_text(
+            json.dumps(
+                _train.jsonable({tag: m.record for tag, m in measured.items()}),
+                indent=2,
+            )
+            + "\n"
+        )
+    if len(by_context) > 1:
+        aggregate["by_context"] = by_context
+    if context_holdout is not None:
+        aggregate["context_holdout"] = context_holdout
 
     decisions_json = {
         "schema_version": "pipeline-v3-2026-10-03",
@@ -892,6 +1212,7 @@ def main() -> int:
         "split_after_attempts": args.split_after_attempts,
         "train_min_cell_gemms": train_min,
         "split_budget_check": budget_check,
+        "gate": gate_record,
         "elapsed_s": time.time() - t0,
         "summary": {
             "pass": len(lists["pass"]),
@@ -934,19 +1255,31 @@ def main() -> int:
 
     if not args.quiet:
         ui.banner("Done", ui.C.GREEN)
-        for name, key in (
-            ("global_sel_eff_new (deployed)", "global_sel_eff_new"),
-            ("global_origami_sel_eff_new", "global_origami_sel_eff_new"),
-        ):
+        print(
+            f"  {ui.C.BOLD}{'global_sel_eff_new (deployed)':32s}:{ui.C.ENDC} "
+            f"{_train.fmt_pct(aggregate['global_sel_eff_new'])} over "
+            f"{aggregate['n_gemms_evaluated']} GEMMs, "
+            f"{aggregate['n_miss_total']} misses",
+            flush=True,
+        )
+        if "pre_rebench" in aggregate:
+            pre = aggregate["pre_rebench"]
             print(
-                f"  {ui.C.BOLD}{name:32s}:{ui.C.ENDC} {_train.fmt_pct(aggregate[key])}",
+                f"  {ui.C.BOLD}{'misses re-benched':32s}:{ui.C.ENDC} "
+                f"{aggregate['n_rebenched']} measured, "
+                f"{aggregate['n_rebench_failed']} failed, "
+                f"{aggregate['n_context_skipped']} context GEMMs skipped; "
+                f"under {pre['pick_measurement']} "
+                f"{_train.fmt_pct(pre['global_sel_eff_new'])}",
                 flush=True,
             )
-        if overall:
+        if args.origami_reference and overall and overall["paired"]["n"]:
             p = overall["paired"]
             print(
-                f"  {ui.C.BOLD}{'deployed vs origami (paired)':32s}:{ui.C.ENDC} "
-                f"n={p['n']}  wins/ties/losses={p['wins']}/{p['ties']}/{p['losses']}",
+                f"  {ui.C.BOLD}{'[reference] Origami, same GEMMs':32s}:{ui.C.ENDC} "
+                f"n={p['n']}  deployed={_train.fmt_pct(p['model_sel_eff'])}  "
+                f"origami={_train.fmt_pct(p['origami_sel_eff'])}  "
+                f"wins/ties/losses={p['wins']}/{p['ties']}/{p['losses']}",
                 flush=True,
             )
         for k, what in (
