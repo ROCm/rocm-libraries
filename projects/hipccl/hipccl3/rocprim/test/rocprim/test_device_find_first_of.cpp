@@ -307,7 +307,16 @@ TEST(RocprimDeviceFindFirstOfTests, LargeIndices)
 
     constexpr bool debug_synchronous = false;
 
-    for(size_t size : test_utils::get_large_sizes(seeds[0]))
+    std::vector<size_t> sizes = test_utils::get_large_sizes(seeds[0]);
+#ifdef _WIN32
+    // Skip the two largest sizes on Windows to avoid TDR timeouts on slower APUs
+    if(sizes.size() > 2)
+    {
+        sizes.resize(sizes.size() - 2);
+    }
+#endif
+
+    for(size_t size : sizes)
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
