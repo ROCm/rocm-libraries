@@ -548,8 +548,8 @@ const char* rocke_h_f64_literal(rocke_h_lowerer_t* lw, double val)
         out = rocke_arena_strdup(&lw->b->arena, "-0.0");
         return out ? out : "";
     }
-    /* %.17g round-trips every finite double. The text may differ from CPython
-     * repr (same port hazard as rocke_h_f32_literal). */
+    /* NOTE(port): Python emits repr(float); %.17g is a close approximation but
+     * NOT guaranteed byte-identical to CPython repr. Known port hazard. */
     out = rocke_arena_printf(&lw->b->arena, "%.17g", val);
     return out ? out : "";
 }
