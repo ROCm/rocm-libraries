@@ -6891,8 +6891,17 @@ inline void promoteOnlineTuningCandidate(
         rankedPositions.push_back(i);
     }
 
-    auto&     tuner   = rocblaslt::OnlineTuner::getInstance();
-    const int promote = tuner.selectCandidate(problemKey, rankedSolutionIndices);
+    // Which problem is asking, as against which resolution it falls under. The
+    // key merges problems that rank and run differently, so this is what says
+    // whose exploration this is and who may leave a record behind; see
+    // OnlineTuner::ProblemState::m_problem. Taken here rather than in the pin
+    // branch below because selection needs it too, and this whole function is
+    // off the resolved path -- a problem with a record of its own is answered
+    // before the ranking it would reorder is even fetched.
+    const size_t problemIdentity = std::hash<TensileLite::ContractionProblemGemm>{}(tensile_prob);
+
+    auto&     tuner = rocblaslt::OnlineTuner::getInstance();
+    const int promote = tuner.selectCandidate(problemKey, problemIdentity, rankedSolutionIndices);
     if(promote < 0)
         return;
 
@@ -6914,12 +6923,13 @@ inline void promoteOnlineTuningCandidate(
             // Recorded by whoever installed the record and by nobody else. The
             // test above is a hint taken without the lock, so two callers with
             // different file keys can both reach here; pinWinner decides which
-            // of them the record belongs to, and only that one has a key worth
-            // writing a row under.
+            // of them the record belongs to -- the problem its samples were
+            // taken on -- and only that one has a key worth writing a row
+            // under.
             const auto* installed = tuner.pinWinner(
                 *resolved,
                 solutions[position],
-                std::hash<TensileLite::ContractionProblemGemm>{}(tensile_prob),
+                problemIdentity,
                 solutions[position]->requiredWorkspaceSize(tensile_prob, hardware),
                 tensile_prob.workspaceSize(),
                 RocblasltContractionProblem2ProblemOverride(prob));
@@ -7000,6 +7010,18 @@ inline bool promoteResolvedOnlineTuningWinner(
     // candidate to compare. The caller's own ranking is the answer.
     if(winner < 0)
         return true;
+
+    // No record yet, and only the full path can install one. Answering from the
+    // position hint here would be correct for this caller and would also be the
+    // end of it: the hint is written by whichever caller a merged key brings
+    // along next, so a sibling can set it to a position that happens to hold
+    // the winner in the measured problem's list too, and the measured problem
+    // would then never take the branch that pins. Nothing would be written to
+    // the file and no caller would ever reach the resolved fast path. Costs an
+    // acquire load until some caller pins, which is at most one visit when the
+    // key covers one problem.
+    if(!resolved.pinned())
+        return false;
 
     const int position = resolved.position();
 
