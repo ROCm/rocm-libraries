@@ -38,10 +38,9 @@ namespace
 // initialize() and backendLoggingCallback() to short-circuit before touching the state object.
 std::atomic<bool> sLoggingShutdown{false};
 
-// Logger-initialized flag. Stored with release as the last write under loggerStateMutex once
-// all logger/sink state is built (and cleared with release by loggerShutdown()); the acquire
-// load at the top of initialize() pairs with it so the initialized fast path needs neither the
-// BackendLogState nor its mutex. Reads under loggerStateMutex use relaxed ordering.
+// Set (release) as the last write under loggerStateMutex once logger state is built, and
+// cleared (release) as the first write in loggerShutdown() so concurrent initialize() calls
+// wait for teardown. The acquire load at the top of initialize() pairs with both stores.
 std::atomic<bool> sLoggerInitialized{false};
 
 constexpr const char* S_BACKEND_ASYNC_LOGGER_NAME = "hipdnn_backend_async";
@@ -276,6 +275,7 @@ void loggerShutdown()
 {
     auto& state = getBackendLogState();
     const std::unique_lock<std::shared_mutex> lock(state.loggerStateMutex);
+    sLoggerInitialized.store(false, std::memory_order_release);
 
     // Clear all user callbacks first (atomically disable)
     for(auto& [key, info] : state.userCallbacks)
@@ -314,8 +314,6 @@ void loggerShutdown()
     // environment, following the original start-up behavior.
     hipdnn_data_sdk::logging::resetLogLevelCache();
     GraphLogger::resetCache();
-
-    sLoggerInitialized.store(false, std::memory_order_release);
 }
 
 namespace
