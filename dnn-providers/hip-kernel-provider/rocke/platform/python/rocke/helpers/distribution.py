@@ -979,10 +979,10 @@ def store_tile(
     if traits is None:
         traits = make_load_store_traits(distribution)
     quant_dtypes = ("i8", "fp8e4m3", "bf8e5m2")
-    if window.dtype.name not in ("f16", "bf16", "f32", "f64", "i32") + quant_dtypes:
+    if window.dtype.name not in ("f16", "bf16", "f32", "i32", "f64") + quant_dtypes:
         raise NotImplementedError(
             f"store_tile dtype {window.dtype.name} not wired "
-            "(f16/bf16/f32/f64/i32/i8/fp8e4m3/bf8e5m2)"
+            "(f16/bf16/f32/i32/f64/i8/fp8e4m3/bf8e5m2)"
         )
     for y_base in traits.iterate_accesses():
         x_coords = distribution.calculate_x(
