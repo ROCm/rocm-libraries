@@ -6466,7 +6466,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                         if((gpu_time_used * arg.skip_slow_solution_ratio) > best_warm_time)
                         {
                             std::ostringstream skipMsg;
-                            skipMsg << std::fixed << std::setprecision(2) << "Skip solution: " << sol
+                            skipMsg << std::fixed << std::setprecision(2)
+                                    << "Skip solution: " << sol
                                     << " (best warm-up = " << best_warm_time / number_cold_calls
                                     << " us , warm-up = " << gpu_time_used / number_cold_calls
                                     << " us, skip ratio = " << std::defaultfloat
@@ -6551,7 +6552,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                         if((gpu_time_used * arg.skip_slow_solution_ratio) > best_warm_time)
                         {
                             std::ostringstream skipMsg;
-                            skipMsg << std::fixed << std::setprecision(2) << "Skip solution: " << sol
+                            skipMsg << std::fixed << std::setprecision(2)
+                                    << "Skip solution: " << sol
                                     << " (best warm-up = " << best_warm_time / number_cold_calls
                                     << " us , warm-up = " << gpu_time_used / number_cold_calls
                                     << " us, skip ratio = " << std::defaultfloat
@@ -6657,7 +6659,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                         if((gpu_time_used * arg.skip_slow_solution_ratio) > best_warm_time)
                         {
                             std::ostringstream skipMsg;
-                            skipMsg << std::fixed << std::setprecision(2) << "Skip solution: " << sol
+                            skipMsg << std::fixed << std::setprecision(2)
+                                    << "Skip solution: " << sol
                                     << " (best warm-up = " << best_warm_time / number_cold_calls
                                     << " us , warm-up = " << gpu_time_used / number_cold_calls
                                     << " us, skip ratio = " << std::defaultfloat
@@ -6760,7 +6763,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                         if((gpu_time_used * arg.skip_slow_solution_ratio) > best_warm_time)
                         {
                             std::ostringstream skipMsg;
-                            skipMsg << std::fixed << std::setprecision(2) << "Skip solution: " << sol
+                            skipMsg << std::fixed << std::setprecision(2)
+                                    << "Skip solution: " << sol
                                     << " (best warm-up = " << best_warm_time / number_cold_calls
                                     << " us , warm-up = " << gpu_time_used / number_cold_calls
                                     << " us, skip ratio = " << std::defaultfloat
@@ -6827,7 +6831,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                         if((gpu_time_used * arg.skip_slow_solution_ratio) > best_warm_time)
                         {
                             std::ostringstream skipMsg;
-                            skipMsg << std::fixed << std::setprecision(2) << "Skip solution: " << sol
+                            skipMsg << std::fixed << std::setprecision(2)
+                                    << "Skip solution: " << sol
                                     << " (best warm-up = " << best_warm_time / number_cold_calls
                                     << " us , warm-up = " << gpu_time_used / number_cold_calls
                                     << " us, skip ratio = " << std::defaultfloat

@@ -325,9 +325,9 @@ TEST(ExactLogicLibraryTest, FindTopSolutionsKeepsGridBasedAndFreeSizeWhenStreamK
 {
     ScopedStreamK5ForceMode forceDynamic("1");
 
-    auto        lib     = buildAllMatchingKindsLibrary();
-    auto        problem = dummyProblem();
-    const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    auto         lib     = buildAllMatchingKindsLibrary();
+    auto         problem = dummyProblem();
+    const AMDGPU device  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
 
     EXPECT_EQ(solutionNames(lib->findTopSolutions(problem, device, 5)),
               (std::vector<std::string>{"prediction", "gridbased", "freesize"}));
@@ -534,10 +534,10 @@ TEST(ExactLogicLibraryTest, FindTopSolutionsReturnsOnlyPredictionWithPredictionL
     setenv("TENSILE_PREDICTION_LIB", "1", 1);
     Debug::Instance().reloadDebugBitsForTest();
 
-    auto        lib     = buildAllMatchingKindsLibrary();
-    auto        problem = dummyProblem();
-    const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
-    const auto  names   = solutionNames(lib->findTopSolutions(problem, device, 5));
+    auto         lib     = buildAllMatchingKindsLibrary();
+    auto         problem = dummyProblem();
+    const AMDGPU device  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    const auto   names   = solutionNames(lib->findTopSolutions(problem, device, 5));
 
     if(previous)
         setenv("TENSILE_PREDICTION_LIB", saved.c_str(), 1);
