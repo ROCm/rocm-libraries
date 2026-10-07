@@ -27,9 +27,9 @@ from copy import deepcopy
 
 from .KernelWriterBase import KernelWriterBase
 
-from Tensile.Common.Architectures import isaToGfx
-from Tensile.Common import INDEX_CHARS, IsaInfo
-from Tensile.Common.DataType import DataType
+from .Common.Architectures import archMacroNames
+from .Common import INDEX_CHARS, IsaInfo
+from .Common.DataType import DataType
 
 class KernelWriterConversion(KernelWriterBase):
 
@@ -629,11 +629,9 @@ class KernelWriterConversion(KernelWriterBase):
       for isa in self.isaInfoMap.keys():
         if self.isaInfoMap[isa].asmCaps['v_pk_add_f32']:
           canPKF32Arch.append(isa)
-      defineStr = []
-      if len(canPKF32Arch) > 0:
-        defineStr = "#if defined(__%s__)"%isaToGfx(canPKF32Arch[0])
-        for arch in canPKF32Arch[1:]:
-          defineStr += "|| defined(__%s__)"%isaToGfx(arch)
+      macros = [m for arch in canPKF32Arch for m in archMacroNames(arch)]
+      if macros:
+        defineStr = "#if " + "|| ".join("defined(%s)"%m for m in macros)
       else:
         defineStr = "#if 0"
       # PGR=2

@@ -802,7 +802,7 @@ namespace TensileLite
         numWG.y *= gsu;
 
         size_t problemTiles = numWG.x * numWG.y;
-        if(sizeMapping.persistentKernelAlongBatch || sizeMapping.streamK != 0)
+        if(sizeMapping.persistentKernelAlongBatch || sizeMapping.isPersistent())
             problemTiles *= numWG.z;
 
         return problemTiles;
@@ -958,6 +958,7 @@ namespace TensileLite
             m_beta); // Set enum using beta to potentially allow for faster solutions
         consistencyCheck();
         normalize();
+        calcArithmeticIntensity();
     }
 
     void ContractionProblemGemm::normalize()

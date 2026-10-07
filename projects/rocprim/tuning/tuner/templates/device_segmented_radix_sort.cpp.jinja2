@@ -1,7 +1,7 @@
 {% extends "common/base.cpp.jinja2" %}
 
 {% block benchmarking_include %}
-    {% if value_type %}
+    {% if value_type != "rocprim::empty_type" %}
         #include "benchmark_device_segmented_radix_sort_pairs.hpp"
     {% else %}
         #include "benchmark_device_segmented_radix_sort_keys.hpp"
@@ -23,7 +23,7 @@
     >
 {%- endblock %}
 {% block benchmark_type %}
-    {% if value_type %}
+    {% if value_type != "rocprim::empty_type" %}
         using benchmark_type = device_segmented_radix_sort_pairs_benchmark<key_type, value_type, config>;
     {% else %}
         using benchmark_type = device_segmented_radix_sort_keys_benchmark<key_type, config>;
@@ -32,11 +32,7 @@
 
 {% block type_definitions %}
     using key_type = {{ key_type }};
-    {% if value_type %}
-        using value_type = {{ value_type }};
-    {% else %}
-        using value_type = rocprim::empty_type;
-    {% endif %}
+    using value_type = {{ value_type }};
 {% endblock %}
 
 {% block primbench_executor %}

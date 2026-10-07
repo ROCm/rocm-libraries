@@ -9,8 +9,8 @@ if(MIOPEN_ENABLE_SQLITE)
 endif()
 
 if(MIOPEN_USE_HIPCONV)
-    # MIOpen provides its own 1x1/pointwise path, so drop hipconv's hipBLASLt-backed one.
-    set(HIPCONV_ENABLE_POINTWISE OFF CACHE BOOL "" FORCE)
+    # MIOpen provides its own 1x1/pointwise path, so drop hipconv's hipBLASLt-backed ones.
+    set(HIPCONV_ENABLE_EXPLICIT_GEMM OFF CACHE BOOL "" FORCE)
     add_subdirectory(hipconv)
 endif()
 
@@ -110,6 +110,7 @@ set( MIOpen_Source
     fusion/problem_description.cpp
     generic_search.cpp
     getitem_api.cpp
+    gpu_conv_reference.cpp
     glu/problem_description.cpp
     glu_api.cpp
     groupnorm_api.cpp
@@ -398,6 +399,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/reduction_functions.hpp
         kernels/configuration.hpp
         kernels/default_configurations.hpp
+        kernels/gpu_reference_kernel/naive_conv.hpp
         kernels/gpu_reference_kernel/fp8_kern_types.h
         kernels/Conv_Winograd_v13_3_12_fp16dot_stride1.inc
         kernels/Conv_Winograd_v13_3_12_fp16dot_stride2_dec.inc

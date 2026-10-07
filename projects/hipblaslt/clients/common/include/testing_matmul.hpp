@@ -6155,15 +6155,19 @@ void testing_matmul_with_bias(const Arguments& arg,
             std::string archName      = "";
             std::string cuNum         = "";
 
-            if(tuningEnv && heuristicResult.size() == 1)
+            // The tuning file has no grouped GEMM key, so a grouped winner would
+            // be read back as a single GEMM of the same shape.
+            if(tuningEnv && !do_grouped_gemm && heuristicResult.size() == 1)
             {
                 archName = deviceProps.gcnArchName;
                 cuNum    = std::to_string(deviceProps.multiProcessorCount);
             }
 
-            if(arg.print_solution_found)
+            if(arg.print_solution_found || tuningEnv)
             {
-                if(arg.print_kernel_info)
+                // A tuning run records the winner's kernel name, which comes
+                // from best_k_name below.
+                if(arg.print_kernel_info || tuningEnv)
                 {
                     if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
                     {
@@ -6177,6 +6181,13 @@ void testing_matmul_with_bias(const Arguments& arg,
                             solutionName = groupedGemmVec[0].getSolutionName();
                             kernelName   = groupedGemmVec[0].getKernelName();
                         }
+
+                        // The ext accessor joins every kernel the solution
+                        // launches with "; ". Replay compares against the main
+                        // kernel's name alone, which the algo accessor returns.
+                        if(tuningEnv)
+                            kernelName = hipblaslt_ext::getKernelNameFromAlgo(
+                                handle, heuristicResult[sol].algo);
                     }
                     else
                     {
@@ -6236,13 +6247,14 @@ void testing_matmul_with_bias(const Arguments& arg,
             std::string kernelName   = "";
             std::string archName     = "";
             std::string cuNum        = "";
-            if(tuningEnv)
+            if(tuningEnv && !do_grouped_gemm)
             {
                 archName = deviceProps.gcnArchName;
                 cuNum    = std::to_string(deviceProps.multiProcessorCount);
             }
 
-            if(arg.print_kernel_info)
+            // Same reason as the per-candidate loop above.
+            if(arg.print_kernel_info || tuningEnv)
             {
                 solutionName = best_s_name;
                 kernelName   = best_k_name;

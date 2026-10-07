@@ -15,6 +15,7 @@ find_package(Threads REQUIRED)
 add_executable(
     hipdnn_test_sdk_tests
     main.cpp
+    utilities/TestAsanDefaultSuppressions.cpp
     utilities/TestCpuFpReferenceBatchnorm.cpp
     utilities/TestComparisonReport.cpp
     utilities/TestCpuFpReferenceBatchnormWithVariance.cpp

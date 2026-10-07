@@ -759,7 +759,7 @@ def test_streamk_divergent_pair_never_derives_valid_without_emitting(
                        PrefetchGlobalRead=max(pgrA, pgrB),
                        PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
     if sol.get("Valid") is not True:
-        assert "StreamK tail cannot normalize LDS to buffer 0" in out, out
+        assert "persistent tail cannot normalize LDS to buffer 0" in out, out
         return
     errs, asm = _emitDerived(sol, assembler)
     assert errs == [0] and asm, (

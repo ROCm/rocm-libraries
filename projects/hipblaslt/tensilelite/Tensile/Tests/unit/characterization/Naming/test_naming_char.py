@@ -142,6 +142,26 @@ def test_name_custom_kernel_early_return(make_state, snapshot):
     } == snapshot
 
 
+def test_generated_solution_name_keeps_runtime_tokens(make_state):
+    # A generated CustomKernel stamp is the assembly identity. Kernel names
+    # stay that stamp. Solution names fall through and pick up the same
+    # runtime dispatch tokens as an unstamped solution.
+    plain = make_state()
+    generated = make_state(CustomKernel={"name": "stamped_kernel", "generated": True})
+    handwritten = make_state(CustomKernel={"name": "hand_ck"})
+
+    assert N.getKernelNameMin(generated, splitGSU=False) == "stamped_kernel"
+    assert N.getSolutionNameMin(generated, splitGSU=False) == N.getSolutionNameMin(plain, splitGSU=False)
+    assert N.getSolutionNameFull(generated, splitGSU=False) == N.getSolutionNameFull(plain, splitGSU=False)
+
+    tokens = set(N.getSolutionNameMin(generated, splitGSU=False).split("_"))
+    for token in ("WGM1", "WGMXCCG0", "SU0", "SUM0", "SUS0", "GSUC0", "GSUWGMRR0"):
+        assert token in tokens
+
+    assert N.getSolutionNameMin(handwritten, splitGSU=False) == "hand_ck"
+    assert N.getKernelNameMin(handwritten, splitGSU=False) == "hand_ck"
+
+
 def test_name_with_thread_tile_no_matrix_inst(make_state, snapshot):
     # No MatrixInstM -> the ThreadTile branch instead of MatrixInstruction.
     s = make_state()

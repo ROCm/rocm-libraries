@@ -54,7 +54,7 @@ from .gfx950.attention_dense import (  # noqa: F401
 # gfx942 dense flash-attention prefill. Exposed under its own arch module
 # alias to avoid shadowing the gfx950 exports above (same symbol names). Reach it via
 # ``kernels.attention_dense_gfx942`` or ``from kernels.gfx942 import attention_dense``;
-# dispatch selects it opt-in via spec_id="gfx942_attention_dense".
+# dispatch selects it opt-in via spec_id="gfx942_dense".
 from .gfx942 import attention_dense as attention_dense_gfx942  # noqa: F401
 
 

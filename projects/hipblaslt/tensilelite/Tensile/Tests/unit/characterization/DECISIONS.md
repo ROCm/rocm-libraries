@@ -651,3 +651,19 @@ reordering another group cannot silently redirect a set-cover test.
 newer baseline through every conflict. The rebased run passed at 84.14%; use its
 report to raise 38 per-file floors without lowering any, and raise the exact
 whole-project floor from 75% to 82%.
+
+## D44 — Canonical persistent execution policy in generated names and schemas
+
+[ADR 0014](adr/0014-canonical-persistent-policy-names.md) records the intended
+policy-field migration in generated names, derived solution state, parameter
+registries, and serialized defaults. The scoped codegen updates preserve
+fixture membership, kernel counts, and emission return codes. Explicit names
+for prebuilt kernels remain part of the compatibility contract.
+
+## D30 — DataParallel scheduling arguments
+
+[ADR 0015](adr/0015-data-parallel-scheduling-arguments.md) supersedes ADR 0014's
+retained six-word payload for generated DataParallel kernels. Generated DP uses
+two scheduling words and a tile cursor; prebuilt version-zero layouts retain
+their recorded argument contract. ABI, emitted-control-flow, and numerical
+tests carry the evidence for this change.

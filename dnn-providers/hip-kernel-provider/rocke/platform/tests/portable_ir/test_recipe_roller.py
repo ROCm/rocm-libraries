@@ -212,12 +212,35 @@ _CONV_GRID = (
 )
 _CONV_HOLDOUTS = ({"N": 32, "K": 256}, {"N": 8, "K": 256}, {"N": 64, "K": 512})
 
-# conv C drives a strength-reduced `n // C`, so its constants are a log2 shift and
-# a magic multiplier keyed on C's odd part. The holdouts deliberately cover odd
-# parts 3, 5 and 7 (192, 160, 224) -- values whose multipliers differ from every
-# sampled one, so a recipe that merely froze the sampled constants cannot pass.
-_CONV_C_SAMPLES = [64, 96, 128]
-_CONV_C_HOLDOUTS = [192, 160, 224, 384]
+# A build-time divisor D drives a strength-reduced `n // D`, so its constants are a
+# log2 shift and a magic multiplier keyed on D's odd part. The holdouts
+# deliberately cover odd parts 3, 5 and 7 (192, 160, 224) -- values whose
+# multipliers differ from every sampled one, so a recipe that merely froze the
+# sampled constants cannot pass.
+_MAGIC_D_SAMPLES = [64, 96, 128]
+_MAGIC_D_HOLDOUTS = [192, 160, 224, 384]
+
+# The kernel the magic-division lane rolls: one `n // D`, `n % D` with D baked in
+# at build time. Kept minimal on purpose -- the AOT conv kernels this lane used to
+# roll take their magic pairs as kernel arguments, so no shipped family bakes one
+# on a swept axis any more, and the lane is about the C VM's arithmetic, not a
+# particular kernel.
+_MAGIC_BUILDER = """
+def _magic(D):
+    from rocke.core.ir import I32, IRBuilder, PtrType
+    from rocke.helpers.transforms import calculate_magic_numbers, do_magic_division
+
+    b = IRBuilder("magic_div")
+    out = b.param("out", PtrType(I32, "global"))
+    n = b.param("n", I32)
+    tid = b.thread_id_x()
+    v = b.add(n, tid)
+    mult, shift = calculate_magic_numbers(D)
+    q = do_magic_division(b, v, mult, shift)
+    r = b.sub(v, b.mul(q, b.const_i32(D)))
+    b.global_store(out, tid, b.add(q, r))
+    return b.kernel
+"""
 
 
 def test_roll_nd_cross_product():
@@ -319,9 +342,9 @@ json.dump(shas, open(out + "/shas.json", "w"))
 def test_standalone_cli_regenerates_magic_division_constants(tmp_path):
     """The C VM regenerates magic-division constants it never recorded.
 
-    conv `C` is the axis that no curve fits: the kernel strength-reduces `n // C`
-    into `(umul_hi(n, M) + n) >> s`, where `s` is `ceil(log2 C)` and `M` depends on
-    `C`'s odd part. The recipe carries the generating formula instead
+    A build-time divisor `D` is the axis that no curve fits: the kernel
+    strength-reduces `n // D` into `(umul_hi(n, M) + n) >> s`, where `s` is
+    `ceil(log2 D)` and `M` depends on `D`'s odd part. The recipe carries the generating formula instead
     (`magic_multiplier` / `magic_shift`), so this test is really asking whether the
     C VM's arithmetic matches Python's bit for bit at divisors it never saw --
     including odd parts 3, 5 and 7, whose multipliers share no value with any
@@ -334,27 +357,26 @@ def test_standalone_cli_regenerates_magic_division_constants(tmp_path):
             "`cmake --build <build> --target rocke_portable_ir_replay_cli` "
             "or point ROCKE_REPLAY_CLI at it"
         )
-    points = _CONV_C_SAMPLES + _CONV_C_HOLDOUTS
+    points = _MAGIC_D_SAMPLES + _MAGIC_D_HOLDOUTS
     author = f"""
 import json, sys
 from rocke.core.lower_llvm import lower_kernel_to_llvm
-from rocke.portable_ir.drivers.roll_hsaco_parity import _conv
 from rocke.portable_ir.src import recipe_bundle
 from rocke.portable_ir.src.roll_nd import roll_nd
-
+{_MAGIC_BUILDER}
 out, flavor = sys.argv[1], sys.argv[2]
-r = roll_nd(_conv, axes={{"C": {_CONV_C_SAMPLES}}},
-            holdout_points=[{{"C": c}} for c in {_CONV_C_HOLDOUTS}])
+r = roll_nd(_magic, axes={{"D": {_MAGIC_D_SAMPLES}}},
+            holdout_points=[{{"D": c}} for c in {_MAGIC_D_HOLDOUTS}])
 if not r.ok:
     raise SystemExit("roll_nd failed: " + str(r.reason))
 prog = json.dumps(r.recipe["program"])
 for fn in ("magic_multiplier", "magic_shift"):
     if fn not in prog:
         raise SystemExit("expected " + fn + " in the rolled recipe")
-open(out + "/convc.recipe.cbor", "wb").write(recipe_bundle.cbor_encode(r.recipe))
+open(out + "/magic.recipe.cbor", "wb").write(recipe_bundle.cbor_encode(r.recipe))
 shas = {{}}
 for c in {points}:
-    ll = lower_kernel_to_llvm(_conv(C=c), llvm_flavor=flavor, arch="{_ARCH}")
+    ll = lower_kernel_to_llvm(_magic(D=c), llvm_flavor=flavor, arch="{_ARCH}")
     shas[str(c)] = __import__("hashlib").sha256(ll.encode()).hexdigest()
 json.dump(shas, open(out + "/shas.json", "w"))
 """
@@ -365,7 +387,7 @@ json.dump(shas, open(out + "/shas.json", "w"))
     import json
 
     want = json.loads((tmp_path / "shas.json").read_text())
-    recipe = tmp_path / "convc.recipe.cbor"
+    recipe = tmp_path / "magic.recipe.cbor"
     seen = set()
     for c in points:
         got = subprocess.run(
@@ -379,22 +401,22 @@ json.dump(shas, open(out + "/shas.json", "w"))
                 "--flavor",
                 flavor,
                 "--int",
-                f"C={c}",
+                f"D={c}",
             ],
             capture_output=True,
             text=True,
         )
-        assert got.returncode == 0, f"C={c}: {got.stderr[-2000:]}"
+        assert got.returncode == 0, f"D={c}: {got.stderr[-2000:]}"
         sha = hashlib.sha256(got.stdout.encode()).hexdigest()
-        held = "held-out" if c in _CONV_C_HOLDOUTS else "sampled"
+        held = "held-out" if c in _MAGIC_D_HOLDOUTS else "sampled"
         assert sha == want[str(c)], (
-            f"C={c} ({held}): the C VM's magic-division constants diverged from "
+            f"D={c} ({held}): the C VM's magic-division constants diverged from "
             f"Python's -- the two mirrors of calculate_magic_numbers disagree"
         )
         seen.add(sha)
-    # Negative control: if every C produced the same .ll, the comparison above
+    # Negative control: if every D produced the same .ll, the comparison above
     # would be vacuous.
-    assert len(seen) == len(points), "expected a distinct .ll per C value"
+    assert len(seen) == len(points), "expected a distinct .ll per D value"
 
 
 def test_regimes_do_not_oversplit_a_uniform_real_axis():
