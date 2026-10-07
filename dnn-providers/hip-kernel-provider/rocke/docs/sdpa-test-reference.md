@@ -82,7 +82,8 @@ Use a Python environment outside the source tree with `numpy`, `pytest`, and
 `pytest-timeout`. A working HIP runtime and COMGR are required for current kernel
 compilation. Set `ROCM_PATH` or the runtime's library overrides when needed, and
 select `ROCKE_LLVM_FLAVOR` to match COMGR as described in
-[`platform/AGENTS.md`](../platform/AGENTS.md). Torch is not required.
+[`platform/AGENTS.md`](../platform/AGENTS.md). Use an environment without Torch for reference verification. The shared worker
+launcher blocks Torch imports in both baseline and current interpreters.
 
 From the rocm-libraries root, fetch the existing archive with DVC installed:
 
@@ -93,7 +94,7 @@ dvc pull dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles
 Then, from the rocKE root, extract and validate it for source testing:
 
 ```bash
-python library/tests/sdpa_reference/artifact.py unpack \
+python library/tests/reference_common/artifact.py unpack --operation sdpa \
   --archive library/tests/reference_bundles/sdpa/gfx942.tar.gz \
   --bundle library/tests/reference_bundles/sdpa/gfx942 \
   --lock library/tests/sdpa_reference/architectures/gfx942/baseline_lock.json
@@ -130,7 +131,7 @@ Run the CPU contract checks with:
 
 ```bash
 python -m pytest library/tests/test_sdpa_reference_contract.py \
-  library/tests/test_sdpa_reference_artifact.py -v
+  library/tests/test_reference_artifact.py -v
 ```
 
 These check analytic SDPA results, bf16 interpretation, preservation of the
@@ -184,7 +185,7 @@ GPU correctness results.
 5. Pack the reviewed bundle from the rocKE root:
 
    ```bash
-   python library/tests/sdpa_reference/artifact.py pack \
+   python library/tests/reference_common/artifact.py pack --operation sdpa \
      --bundle <new-bundle-directory> \
      --lock library/tests/sdpa_reference/architectures/gfx942/baseline_lock.json \
      --archive library/tests/reference_bundles/sdpa/gfx942.tar.gz
@@ -219,7 +220,7 @@ The existing TheRock CI flow builds and tests the installed provider artifact:
    `library/tests/reference_bundles/sdpa/gfx942.tar.gz` before provider configuration.
 2. Provider CMake validates and extracts the archive against the committed
    architecture-specific baseline lock, then installs the test harness and bundle.
-   `ROCKE_INSTALL_TEST_SDPA_REFERENCE` defaults on for provider artifact builds
+   `ROCKE_INSTALL_TEST_GPU_REFERENCES` defaults on for provider artifact builds
    and off in the rocm-libraries superbuild (`ROCM_LIBS_SUPERBUILD`). Setting it
    to OFF disables reference installation and GPU-test registration even when
    a bundle-directory override is cached; host checks remain installed.
@@ -231,10 +232,11 @@ The existing TheRock CI flow builds and tests the installed provider artifact:
    release library payload.
 4. The test job assembles the generic and matching architecture artifacts and
    prepares the Python/runtime dependencies. The existing provider runner selects
-   CTest entries using the provider's category YAML. `rocke_sdpa_gpu_pytest` runs
+   CTest entries using the provider's category YAML. `rocke_sdpa_gpu_gfx942_pytest` runs
    the same pytest file used locally: eight numerical cases and three negative
-   checks. `rocke_sdpa_reference_unit_pytest` runs the host contract/artifact checks
-   independently of the GPU bundle.
+   checks. `rocke_sdpa_reference_unit_pytest` runs the SDPA host contract checks;
+   `rocke_reference_common_pytest` runs shared archive and worker-isolation checks.
+   Both host entries run independently of GPU bundles.
 
 This uses the existing workflows; no additional workflow is required. CI verifies
 an already qualified baseline and cannot generate or approve its own replacement.
@@ -245,11 +247,15 @@ With reference installation enabled, an extracted bundle can override DVC archiv
 -DROCKE_TEST_SDPA_REFERENCE_INSTALL_SOURCE_gfx942=<qualified-bundle-directory>
 ```
 
+For a candidate with a different reviewed lock, also pass
+`-DROCKE_TEST_SDPA_REFERENCE_INSTALL_LOCK_gfx942=<reviewed-lock>`. A lock override
+requires the extracted-source override. These controls do not publish the candidate.
+
 Run the installed GPU entry with:
 
 ```bash
 ctest --test-dir <install-prefix>/bin/hip_kernel_provider \
-  -R '^rocke_sdpa_gpu_pytest$' --output-on-failure
+  -R '^rocke_sdpa_gpu_gfx942_pytest$' --output-on-failure
 ```
 
 The GPU entry is installed when a qualified bundle is configured. In that required
@@ -263,19 +269,20 @@ does not replace those tests or establish coverage for them.
 
 ## Configuration controls
 
-Normal provider CI uses the defaults. These are the four setting types:
+Normal provider CI uses the defaults. The settings are:
 
 | Setting | Type | Purpose |
 |---|---|---|
-| `ROCKE_INSTALL_TEST_SDPA_REFERENCE` | CMake Boolean | Install reference bundles and register their GPU tests; OFF ignores install-source overrides |
+| `ROCKE_INSTALL_TEST_GPU_REFERENCES` | CMake Boolean | Install all published GPU reference bundles; OFF ignores source and lock overrides |
 | `ROCKE_TEST_SDPA_REFERENCE_INSTALL_SOURCE_<arch>` | CMake path | Install an extracted local bundle instead of staging its standard DVC archive |
+| `ROCKE_TEST_SDPA_REFERENCE_INSTALL_LOCK_<arch>` | CMake path | Explicit reviewed lock for an extracted local install-source override |
 | `ROCKE_TEST_SDPA_REFERENCE_BUNDLE_<ARCH>` | Environment variable | Select the bundle pytest reads for one runtime environment |
 | `ROCKE_TEST_REQUIRE_SDPA_GPU` | Environment variable | Set to `1` by installed CTest to fail on missing required prerequisites |
 
 CMake uses lowercase architecture suffixes such as `gfx942`; runtime overrides
 use uppercase suffixes such as `GFX942`. A CMake variable does not set the runtime
 environment variable. With no overrides, CMake packages the standard archives for
-all registry-enrolled architectures, and pytest finds the installed target bundle.
+all operation/architecture pairs in `reference_common/published_bundles.json`, and pytest finds the installed target bundle.
 There is no separate architecture-selection option or unqualified bundle alias.
 Other detected, unenrolled GPU architectures remain outside the required cohort.
 
@@ -352,3 +359,5 @@ these measurements are environment-dependent, not a performance guarantee.
 Legacy Torch-dependent tests still skip in the supplied CI environment, as does
 an optional jsonschema check. Passing the selected CTests does not establish
 execution of those skipped numerical cohorts.
+
+Archive packaging uses the [shared artifact command](../TESTING.md#shared-gpu-reference-artifact-command).
