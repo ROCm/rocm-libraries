@@ -4,11 +4,16 @@
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <gtest/gtest.h>
 
+#include <cstdlib>
 #include <deque>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
+#include <vector>
+
+extern "C" void hipblaslt_debug_reload();
 
 namespace
 {
@@ -228,5 +233,119 @@ namespace
     INSTANTIATE_TEST_SUITE_P(RecoverableErrors,
                              HipSolutionAdapterRecoveryTest,
                              ::testing::Values(hipErrorLaunchFailure, hipErrorNoBinaryForGpu));
+
+    // ----------------------------------------------------------------------
+    // Whose failure an unrecordable launch event is.
+    //
+    // The events launchKernel takes are instrumentation, but they are recorded
+    // around a production dispatch, and HIP_CHECK_RETURN made hipEventRecord's
+    // error the launch's error. Online tuning times the caller's own
+    // hipblasLtMatmul with them, so that turned a measurement problem into a
+    // failed GEMM -- and a start record that fails returns before the kernel
+    // is enqueued, so the GEMM does not run either.
+    //
+    // bestEffortEvents is the caller saying it would rather lose the
+    // measurement. The two cases below are the same launch with that answer
+    // given both ways.
+    // ----------------------------------------------------------------------
+
+    class HipSolutionAdapterEventTest : public ::testing::Test
+    {
+    protected:
+        void SetUp() override
+        {
+            if(hipGetDeviceCount(&m_devices) != hipSuccess || m_devices < 2)
+                GTEST_SKIP() << "needs two HIP devices to build an unrecordable event";
+
+            // The launch has to reach the event records without a module or a
+            // kernel, so the records are what is under test rather than
+            // whatever fails first. TENSILE_DB2 bit 0 is skip-kernel-launch,
+            // and the adapter caches it at construction, hence the local one.
+            // If the reload below ever stops reaching the adapter these tests
+            // fail with hipErrorNotFound from getKernel, not a wrong answer.
+            //
+            // Reloaded through the library hook, not Debug::Instance() here.
+            // Debug is a LazySingleton, a function-local static in a header,
+            // so this binary's copy is not the one the adapter reads -- the
+            // adapter lives in libtensilelite-host and has a third.
+            const char* const existing = getenv("TENSILE_DB2");
+            m_savedDb2 = existing ? std::optional<std::string>(existing) : std::nullopt;
+            setenv("TENSILE_DB2", "0x1", 1);
+            hipblaslt_debug_reload();
+
+            ASSERT_EQ(hipSetDevice(0), hipSuccess);
+            ASSERT_EQ(hipEventCreateWithFlags(&m_onDeviceZero, hipEventDefault), hipSuccess);
+
+            // Recording an event on another device's stream is rejected with
+            // hipErrorInvalidResourceHandle -- measured on gfx950, and the
+            // failure a process driving several GPUs actually hits. A
+            // destroyed handle would be the other way to get a failing record
+            // and it faults instead of returning.
+            ASSERT_EQ(hipSetDevice(1), hipSuccess);
+            ASSERT_EQ(hipStreamCreate(&m_streamOnDeviceOne), hipSuccess);
+            ASSERT_NE(hipEventRecord(m_onDeviceZero, m_streamOnDeviceOne), hipSuccess)
+                << "this device pair records across devices, so nothing here can fail";
+            static_cast<void>(hipGetLastError());
+        }
+
+        void TearDown() override
+        {
+            if(m_streamOnDeviceOne)
+                static_cast<void>(hipStreamDestroy(m_streamOnDeviceOne));
+            if(m_onDeviceZero)
+            {
+                static_cast<void>(hipSetDevice(0));
+                static_cast<void>(hipEventDestroy(m_onDeviceZero));
+            }
+
+            if(m_savedDb2)
+                setenv("TENSILE_DB2", m_savedDb2->c_str(), 1);
+            else
+                unsetenv("TENSILE_DB2");
+            hipblaslt_debug_reload();
+
+            static_cast<void>(hipSetDevice(0));
+        }
+
+        // One kernel with no code object, so the launch is all event handling.
+        std::vector<TensileLite::KernelInvocation> kernels() const
+        {
+            return std::vector<TensileLite::KernelInvocation>(1);
+        }
+
+        int                        m_devices           = 0;
+        hipEvent_t                 m_onDeviceZero      = nullptr;
+        hipStream_t                m_streamOnDeviceOne = nullptr;
+        std::optional<std::string> m_savedDb2;
+    };
+
+    TEST_F(HipSolutionAdapterEventTest, smoke_AnUnrecordableEventFailsTheLaunchByDefault)
+    {
+        TensileLite::hip::SolutionAdapter adapter;
+
+        EXPECT_EQ(adapter.launchKernels(kernels(), m_streamOnDeviceOne, m_onDeviceZero, nullptr),
+                  hipErrorInvalidResourceHandle);
+        EXPECT_EQ(adapter.launchKernels(kernels(), m_streamOnDeviceOne, nullptr, m_onDeviceZero),
+                  hipErrorInvalidResourceHandle);
+        static_cast<void>(hipGetLastError());
+    }
+
+    TEST_F(HipSolutionAdapterEventTest, smoke_BestEffortEventsCostTheMeasurementNotTheLaunch)
+    {
+        TensileLite::hip::SolutionAdapter adapter;
+
+        EXPECT_EQ(adapter.launchKernels(kernels(),
+                                        m_streamOnDeviceOne,
+                                        m_onDeviceZero,
+                                        m_onDeviceZero,
+                                        /*isKernelLoaded=*/false,
+                                        /*bestEffortEvents=*/true),
+                  hipSuccess)
+            << "a measurement event failure was returned as the launch's status";
+
+        // And it is not left behind for the caller to trip over later.
+        EXPECT_EQ(hipGetLastError(), hipSuccess)
+            << "the swallowed event error was left in HIP's last-error state";
+    }
 
 } // namespace

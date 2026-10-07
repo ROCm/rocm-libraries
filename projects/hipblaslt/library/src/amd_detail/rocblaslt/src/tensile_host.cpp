@@ -6262,9 +6262,26 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 static_cast<void>(onlineTuner.beginMeasurement(
                     onlineKey, solution->index, measureStart, measureStop));
 
+            // The pair is passed best effort, which is the difference between
+            // a tuner that stops measuring and one that breaks the call it was
+            // measuring. launchKernel returns hipEventRecord's error, and this
+            // is a production dispatch, so without it an unrecordable event is
+            // the status of the caller's hipblasLtMatmul: a correct GEMM
+            // reported as a failure, or no GEMM at all when it is the start
+            // record that fails. Both arguments here were a hardcoded nullptr
+            // before online tuning, so the exposure is this feature's to carry.
+            //
+            // The lost sample needs no handling of its own. A pair no launch
+            // recorded reads back non-positive -- see harvestPendingImpl's sign
+            // test -- so the next harvest drops it and retires the pair instead
+            // of pooling it, which is exactly "no measurement this visit".
             t_lastLaunchedIndex = solution->index;
-            status              = hip2RocStatus(adapter->launchKernels(
-                kernels, prob.stream, measureStart, measureStop, isPreloaded));
+            status              = hip2RocStatus(adapter->launchKernels(kernels,
+                                                          prob.stream,
+                                                          measureStart,
+                                                          measureStop,
+                                                          isPreloaded,
+                                                          /*bestEffortEvents=*/true));
             if(prob.adaptive_launch)
                 prob.adaptive_launch->probed
                     = status == rocblaslt_status_success

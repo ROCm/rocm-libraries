@@ -567,11 +567,45 @@ namespace TensileLite
             return launchKernel(kernel, nullptr, nullptr, nullptr);
         }
 
+        namespace
+        {
+            // Record an optional instrumentation event. See
+            // SolutionAdapter::launchKernel for why a caller may choose to
+            // carry the failure itself.
+            hipError_t
+                recordLaunchEvent(hipEvent_t event, hipStream_t stream, bool bestEffortEvents)
+            {
+                if(event == nullptr)
+                    return hipSuccess;
+
+                const hipError_t status = hipEventRecord(event, stream);
+                if(status == hipSuccess || !bestEffortEvents)
+                    return status;
+
+                // Swallowed here, so it must not be left behind for the
+                // caller's own next hipGetLastError() to find and attribute to
+                // their work instead of ours.
+                static_cast<void>(hipGetLastError());
+                return hipSuccess;
+            }
+        }
+
         hipError_t SolutionAdapter::launchKernel(KernelInvocation const& kernel,
                                                  hipStream_t             stream,
                                                  hipEvent_t              startEvent,
                                                  hipEvent_t              stopEvent,
                                                  bool                    isKernelLoaded)
+        {
+            return launchKernel(
+                kernel, stream, startEvent, stopEvent, isKernelLoaded, /*bestEffortEvents=*/false);
+        }
+
+        hipError_t SolutionAdapter::launchKernel(KernelInvocation const& kernel,
+                                                 hipStream_t             stream,
+                                                 hipEvent_t              startEvent,
+                                                 hipEvent_t              stopEvent,
+                                                 bool                    isKernelLoaded,
+                                                 bool                    bestEffortEvents)
         {
 #ifdef HIP_HAS_CLUSTER_LAUNCH
             const bool enableCluster = (kernel.clusterDim.x > 1 || kernel.clusterDim.y > 1);
@@ -648,10 +682,8 @@ namespace TensileLite
             if(m_debugSkipLaunch)
             {
                 std::cout << "DEBUG: Skip kernel execution" << std::endl;
-                if(startEvent != nullptr)
-                    HIP_CHECK_RETURN(hipEventRecord(startEvent, stream));
-                if(stopEvent != nullptr)
-                    HIP_CHECK_RETURN(hipEventRecord(stopEvent, stream));
+                HIP_CHECK_RETURN(recordLaunchEvent(startEvent, stream, bestEffortEvents));
+                HIP_CHECK_RETURN(recordLaunchEvent(stopEvent, stream, bestEffortEvents));
                 return hipSuccess;
             }
 
@@ -675,8 +707,7 @@ namespace TensileLite
                                        &argsSize,
                                        HIP_LAUNCH_PARAM_END};
 
-            if(startEvent != nullptr)
-                HIP_CHECK_RETURN(hipEventRecord(startEvent, stream));
+            HIP_CHECK_RETURN(recordLaunchEvent(startEvent, stream, bestEffortEvents));
 
 #ifdef HIP_HAS_CLUSTER_LAUNCH
             if(enableCluster)
@@ -743,8 +774,7 @@ namespace TensileLite
                 );
             }
 
-            if(stopEvent != nullptr)
-                HIP_CHECK_RETURN(hipEventRecord(stopEvent, stream));
+            HIP_CHECK_RETURN(recordLaunchEvent(stopEvent, stream, bestEffortEvents));
             return hipSuccess;
         }
 
@@ -771,6 +801,17 @@ namespace TensileLite
                                                   hipEvent_t                           stopEvent,
                                                   bool                                 isKernelLoaded)
         {
+            return launchKernels(
+                kernels, stream, startEvent, stopEvent, isKernelLoaded, /*bestEffortEvents=*/false);
+        }
+
+        hipError_t SolutionAdapter::launchKernels(std::vector<KernelInvocation> const& kernels,
+                                                  hipStream_t                          stream,
+                                                  hipEvent_t                           startEvent,
+                                                  hipEvent_t                           stopEvent,
+                                                  bool isKernelLoaded,
+                                                  bool bestEffortEvents)
+        {
             auto first = kernels.begin();
             auto last  = kernels.end() - 1;
 
@@ -784,7 +825,8 @@ namespace TensileLite
                 if(iter == last)
                     kStop = stopEvent;
 
-                HIP_CHECK_RETURN_WITH_LOG(launchKernel(*iter, stream, kStart, kStop, isKernelLoaded),
+                HIP_CHECK_RETURN_WITH_LOG(
+                    launchKernel(*iter, stream, kStart, kStop, isKernelLoaded, bestEffortEvents),
                     [&](hipError_t error) {
                         std::cerr << "launchKernel failed: " << iter->kernelName << std::endl
                                 << " with workgroup size: " << iter->workGroupSize << std::endl
