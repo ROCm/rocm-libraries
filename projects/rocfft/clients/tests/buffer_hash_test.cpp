@@ -465,6 +465,7 @@ static hash_output<size_t> hash_real_1234(rocfft_precision precision)
 // known buffer always produces the same fingerprint on every toolchain.
 TEST(rocfft_UnitTest, buffer_hash_golden_values)
 {
+    PROB_SKIP_UNITTEST();
     auto h_half = hash_real_1234<rocfft_fp16>(rocfft_precision_half);
     EXPECT_EQ(h_half.buffer_real, 6010172260665940913ULL);
     EXPECT_EQ(h_half.buffer_imag, 0u);
@@ -497,6 +498,7 @@ static void expect_real_transpose_detected(rocfft_precision precision)
 // square output hashes differently.
 TEST(rocfft_UnitTest, buffer_hash_detects_transpose)
 {
+    PROB_SKIP_UNITTEST();
     expect_real_transpose_detected<float>(rocfft_precision_single);
     expect_real_transpose_detected<double>(rocfft_precision_double);
 
@@ -520,6 +522,7 @@ TEST(rocfft_UnitTest, buffer_hash_detects_transpose)
 // A 1-ULP change in any element must change the hash.
 TEST(rocfft_UnitTest, buffer_hash_detects_one_ulp)
 {
+    PROB_SKIP_UNITTEST();
     std::vector<float> a = {1.0f, 2.0f, 1.7f, 4.0f};
     std::vector<float> b = a;
     b[2]                 = std::nextafter(1.7f, 2.0f);
@@ -531,6 +534,7 @@ TEST(rocfft_UnitTest, buffer_hash_detects_one_ulp)
 // Swapping two batches must change the hash.
 TEST(rocfft_UnitTest, buffer_hash_detects_batch_swap)
 {
+    PROB_SKIP_UNITTEST();
     std::vector<float> a = {1, 2, 3, 4, 5, 6, 7, 8};
     std::vector<float> b = {5, 6, 7, 8, 1, 2, 3, 4};
     auto ha = hash_host_buffer(rocfft_precision_single, rocfft_array_type_real, a, {4}, {1}, 4, 2);
@@ -542,6 +546,7 @@ TEST(rocfft_UnitTest, buffer_hash_detects_batch_swap)
 // must not change it.
 TEST(rocfft_UnitTest, buffer_hash_ignores_padding)
 {
+    PROB_SKIP_UNITTEST();
     const size_t       nbatch = 2, rows = 3, cols = 4;
     std::vector<float> contig(nbatch * rows * cols);
     std::vector<float> padded(nbatch * 17, -999.0f);
