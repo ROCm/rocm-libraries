@@ -32,6 +32,7 @@
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
+#include "stinkytofu/analysis/asm/ClusterBarrierHandoffVerifier.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
 #include "stinkytofu/pipeline/ModuleAdaptors.hpp"
@@ -401,6 +402,10 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                                                     module.getFunctions())) {
             pm.addPass(std::move(pass));
         }
+        // Read-only check of final control flow, including cloned iterations,
+        // flattened helpers, SW-prefetch branches and requested removals.
+        // Cluster synchronization is required at O0 as well as scheduled levels.
+        if (moduleOptions.ClusterBarrier) pm.addPass(createClusterBarrierHandoffVerifierPass());
         mpm.addPass(createMainOnlyAdaptor(std::move(pm)));
     }
     return true;

@@ -384,16 +384,44 @@ exit has drain wait + skip path.
 
 ---
 
-## Entry handoff regression tests
+## Final handoff verification
+
+`ClusterBarrierHandoffVerifier` runs at the end of the gfx1250 main-function
+pipeline whenever cluster barriers are enabled, including O0. It runs after
+region cloning, hazard handling, callee flattening, instruction prefetch and
+requested instruction removal. It is read-only and adds no GPU instructions.
+
+The verifier tracks whether a cluster wait still needs a local signal/wait pair
+before another cluster signal can execute. It checks loop backedges and cloned
+paths using final branch targets and inline labels rather than potentially stale
+basic-block edges. A local signal before the latest cluster wait cannot satisfy
+the handoff. A path may exit without another signal; it needs no extra rendezvous.
+
+The verifier uses the same scalar equality/inequality facts as barrier reuse.
+Zero and nonzero loop-counter facts survive unrelated SCC writes, so repeated
+guards can exclude infeasible exits or bypasses of an existing local barrier.
+Register writes invalidate the affected facts, calls invalidate all scalar facts,
+and control-flow merges keep only common facts. Unsupported predicates retain
+both edges; unresolved branches or calls with unproven barrier behavior report
+an error. The analysis converges over loops without dropping pending handoffs.
+
+Insertion and verification have separate responsibilities. Rule 2 supplies the
+handoff and reuses existing barriers when its conservative proof succeeds. The
+final verifier detects later transformations that break that ordering. Neither
+proves cluster arrival counts or workgroup-uniform participation; those remain
+writer contracts.
 
 `Tensile/Tests/unit/test_cluster_entry_handoff_codegen.py` loads the executable
 `common/gemm/gfx1250/cluster_entry_handoff.yaml` through the real Python and
 backend pipeline. It checks SIA0 barrier reuse and the required SIA4 entry pair
-for three layouts, with iteration cloning enabled and disabled, and assembles all
-12 generated kernels. The common GPU runner executes the YAML with full output
-validation, 288 warmups, and 288 timed enqueues per problem and solution. The
-YAML is selected on gfx1250 and gfx1250-strict and skipped on other supported
-architectures. Independent process reruns are part of manual hang validation.
+for three wave-tile layouts, with iteration cloning enabled and disabled. It also
+checks nonpersistent DU128 insertion and DU256 prefetch-barrier reuse under both
+schedulers, and assembles the generated kernels. The common GPU runner executes
+the YAML with full output validation and repeated warmup launches. The YAML is
+selected on gfx1250 and gfx1250-strict and skipped on other supported
+architectures. Independent process reruns are part of
+manual hang validation. `ClusterBarrierHandoffVerifierTest` covers missing joins,
+clone bypasses, loop backedges, guarded exits and invalidated scalar facts.
 
 ---
 
@@ -401,3 +429,5 @@ architectures. Independent process reruns are part of manual hang validation.
 
 - `src/transforms/asm/InsertClusterBarrierPass.cpp` -- implementation
 - `include/stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp` -- public API
+- `src/analysis/asm/ClusterBarrierHandoffVerifier.cpp` -- final ordering check
+- `src/pipeline/backend/Gfx1250Backend.cpp` -- pipeline registration
