@@ -77,16 +77,16 @@ def _cases():
             MlaPrefillSpec(num_heads=num_heads, block_q=16), arch=_ARCH
         )
 
-    def dispatched(num_heads):
+    def dispatched(num_heads, total_q=64, max_k=96):
         def build():
             from dispatch.mla import MLARequest, dispatch_mla
 
             result = dispatch_mla(
                 MLARequest(
                     num_heads=num_heads,
-                    total_q=64,
+                    total_q=total_q,
                     num_seqs=2,
-                    max_seqlen_k=96,
+                    max_seqlen_k=max_k,
                     arch=_ARCH,
                     # MI300A, pinned: the XCD count would otherwise come from
                     # the host's device and make the fixture host-dependent.
@@ -105,6 +105,9 @@ def _cases():
         "mla_prefill_gfx942/probe_h64": probe(64),
         "mla_prefill_gfx942/dispatch_fwd_h128": dispatched(128),
         "mla_prefill_gfx942/dispatch_fwd_h64": dispatched(64),
+        # Long keys filling the device: the agpr_acc layout at llvm22 (llvm20
+        # refuses it and dispatch falls back to 16 rows per wave).
+        "mla_prefill_gfx942/dispatch_fwd_h128_long": dispatched(128, 8192, 8192),
     }
 
 
@@ -115,9 +118,23 @@ def _current_flavor():
 
 
 def _sha_for(build, flavor):
+    import os
+
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
-    llvm = _lower_kernel_to_llvm_python(build(), arch=_ARCH, llvm_flavor=flavor)
+    # Build under the flavor being lowered: dispatch admission is
+    # flavor-dependent (agpr_acc refuses llvm20), so a dispatch-built case must
+    # select its spec for the same flavor its IR is recorded for.
+    old = os.environ.get("ROCKE_LLVM_FLAVOR")
+    os.environ["ROCKE_LLVM_FLAVOR"] = flavor
+    try:
+        kernel = build()
+    finally:
+        if old is None:
+            os.environ.pop("ROCKE_LLVM_FLAVOR", None)
+        else:
+            os.environ["ROCKE_LLVM_FLAVOR"] = old
+    llvm = _lower_kernel_to_llvm_python(kernel, arch=_ARCH, llvm_flavor=flavor)
     data = llvm.encode("utf-8")
     return hashlib.sha256(data).hexdigest(), len(data)
 

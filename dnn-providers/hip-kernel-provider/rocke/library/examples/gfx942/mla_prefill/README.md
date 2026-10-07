@@ -50,6 +50,12 @@
   - [Kept — two heads x two query tiles per workgroup](#kept--two-heads-x-two-query-tiles-per-workgroup)
   - [Kept — XCD-aware workgroup order](#kept--xcd-aware-workgroup-order)
   - [Measured and not kept in the sixth pass](#measured-and-not-kept-in-the-sixth-pass)
+- [Seventh pass — one workgroup per CU](#seventh-pass--one-workgroup-per-cu)
+  - [Accumulator in AGPRs](#accumulator-in-agprs)
+  - [DMA'd key tiles and LDS alias scopes](#dmad-key-tiles-and-lds-alias-scopes)
+  - [Lazy-rescale threshold](#lazy-rescale-threshold)
+  - [When dispatch picks it](#when-dispatch-picks-it)
+  - [Measured and not kept in the seventh pass](#measured-and-not-kept-in-the-seventh-pass)
 - [Method](#method)
 - [What remains unproven](#what-remains-unproven)
 
@@ -199,6 +205,11 @@ One lever per step. Full 8-case parity after each. Keep or revert, never stack.
 | 42 | Query tiles per head (`q_tiles_per_wg`), shipped as two heads x two tiles | **Kept** | each head's W_UK / W_UV fetch and epilogue staging serve two waves; half the epilogue rounds; registers and LDS unchanged; L2 misses fell sharply; large gain on short full-prompt shapes, neutral to small on chunked |
 | 43 | XCD-aware workgroup order (`num_xcds`, from the device CU count) | **Kept** | each XCD walks short runs of a head-major order, so its L2 holds a few heads' weights; gain on short shapes |
 | 44 | One head x four query tiles per workgroup | Not selected | lowest weight traffic, but a large regression on some chunked shapes that is not explained |
+| 45 | `agpr_acc`: 32 rows per wave, accumulator in AGPRs, one workgroup per CU | **Kept, by rule** | in-place asm MFMAs into fixed AGPRs; llvm22 / llvm23 only; three dwords spill outside the loop; gain on long key ranges that fill the device |
+| 46 | Double-buffered key tile with the loop unrolled by two (agpr_acc) | **Kept** | one barrier per tile; static slot offsets |
+| 47 | Direct-to-LDS key tiles (`buffer_load ... lds`), DMA spread over the score fences | **Kept** | needs lever 48; without it the backend waits on each DMA before the next LDS read and the spread is much slower than one burst |
+| 48 | `lds_alias_scopes` (platform, both engines) | **Kept** | per-allocation LDS alias scopes; a read waits only for DMA into its own allocation |
+| 49 | Lazy-rescale threshold 8 -> 64 (log2) | **Kept** | the rescale kept firing on long key ranges; gain on both layouts |
 
 ### Kept — wt_lds bank-conflict pad
 
@@ -850,6 +861,70 @@ golden fixture pins a 228-CU device so it does not depend on the host.
   and a rescale exists; only an inline-asm MFMA into fixed AGPRs passes, and
   only on llvm22. Not attempted on the kernel.
 
+## Seventh pass — one workgroup per CU
+
+Levers 45–49: the aiter-style layout, one workgroup of four waves per CU with
+32 query rows per wave, on the two-heads-by-two-tiles mapping. It is a second
+variant of the one-wave-per-head builder, selected by dispatch for long key
+ranges; the 16-row layout stays the default elsewhere.
+
+### Accumulator in AGPRs
+
+At 32 rows a wave owns a 256-register latent accumulator, which only fits in
+AGPRs. A compile-only probe showed that no LLVM register-class hint keeps it
+there once the conditional lazy rescale exists: carried as loop values, the
+accumulator's AGPR-to-VGPR copies are hoisted to the top of the loop and the
+absorbed query spills. So the accumulator never becomes an IR value
+(`_AgprAcc`): the PV MFMA is inline asm accumulating in place in fixed
+`a[4t:4t+3]`, the rescale scales in place under a wave-uniform `scf_if`, and
+the epilogue reads it out once. `agpr_alloc = (0, 0)` keeps the backend out of
+the AGPR file. llvm20 ignores that and lets its own MFMAs write the hidden
+tiles, so admission refuses llvm20; the guard test checks that only the
+in-place asm MFMAs touch AGPRs. The asm pads its own hazards (`s_nop 1` before
+each MFMA, a fence before the first read).
+
+### DMA'd key tiles and LDS alias scopes
+
+The workgroup owns the CU's LDS, so the key tile is double-buffered and loaded
+straight into LDS: latent rows keep their pad, RoPE rows go to their own
+buffer with an XOR swizzle applied through the per-lane source address, 18
+one-dword DMA instructions per wave per tile. The loop is unrolled by two so
+each copy's slot is static, with one barrier per tile; the masked tail runs in
+pairs and its padding tile masks to nothing.
+
+Spreading the DMA between MFMAs, as aiter does, was first much slower than one
+burst: the backend must assume an LDS read can alias any in-flight LDS DMA and
+waited for each one. rocke pools LDS into one global, so the backend cannot
+tell slots apart. The platform kernel attribute `lds_alias_scopes` (both
+engines) gives each allocation its own alias scope, `noalias` against
+allocations with disjoint pooled bytes; with it the waits go and the spread
+DMA wins.
+
+### Lazy-rescale threshold
+
+On long key ranges the running max keeps creeping up, and at a threshold of 8
+(log2 units) the rescale fired on a sizeable share of tiles -- copying the
+whole AGPR accumulator out and back each time. The threshold is now 64: the
+f32 row sum and accumulator stay far below their limit, and the rescale
+becomes rare. It also helps the 16-row layout.
+
+### When dispatch picks it
+
+Only when (a) the flavor is llvm22 or llvm23, (b) the key range is at least
+4096, and (c) the workgroups at least fill every CU. Shorter ranges are
+dominated by the per-workgroup absorb and `W_UV`, which a second workgroup
+per CU hides; fewer workgroups than CUs leave CUs idle that the 16-row layout,
+with twice the workgroups, uses; and a grid just over one round pays a whole
+second round.
+
+### Measured and not kept in the seventh pass
+
+- **Register-staged double buffer**: superseded by the DMA'd tile.
+- **One DMA burst after the barrier**: slower than the spread once alias
+  scopes are on.
+- **Deeper score read-ahead (12, 16 k-steps)**: slower.
+- **Padding only the first asm MFMA per operand**: no measurable change.
+
 ## Method
 
 Per lever, in order, with no deviation:
@@ -895,3 +970,7 @@ They are not deliverables and their output does not belong in this repository.
 - **Fifth- and sixth-pass timing ran on a 228-CU MI300A only.** The 8-XCD
   order for a 304-CU MI300X is derived, not measured.
 - **The one-head x four-tile regression on chunked shapes is unexplained.**
+- **The agpr_acc asm hazard padding is validated by parity, not by a hazard
+  model.** The asm is opaque to the backend's hazard recognizer.
+- **llvm23's async DMA (`buffer_load_lds_async` + `asyncmark`) also removes
+  the conservative waits** in a compile-only check; it was not timed.

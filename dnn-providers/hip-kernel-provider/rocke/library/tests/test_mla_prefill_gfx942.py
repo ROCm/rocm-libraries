@@ -455,3 +455,122 @@ class TestDefaultLayoutOccupancy(_OccupancyGuard, unittest.TestCase):
     @staticmethod
     def make_spec():
         return _spec(num_heads=128)
+
+
+def _aa_spec(**kw) -> MlaPrefillSpec:
+    kw.setdefault("heads_per_wg", 2)
+    kw.setdefault("q_tiles_per_wg", 2)
+    kw.setdefault("block_q", 64)
+    kw.setdefault("num_warps", 4)
+    return MlaPrefillSpec(num_heads=kw.pop("num_heads", 128), agpr_acc=True, **kw)
+
+
+class TestAgprAccAdmission(unittest.TestCase):
+    """``agpr_acc``: 32 rows per wave, accumulator in AGPRs, llvm22+ only."""
+
+    def _with_flavor(self, flavor):
+        import os
+
+        old = os.environ.get("ROCKE_LLVM_FLAVOR")
+        os.environ["ROCKE_LLVM_FLAVOR"] = flavor
+        self.addCleanup(
+            lambda: (
+                os.environ.__setitem__("ROCKE_LLVM_FLAVOR", old)
+                if old is not None
+                else os.environ.pop("ROCKE_LLVM_FLAVOR", None)
+            )
+        )
+
+    def test_llvm20_refused(self):
+        # llvm20 ignores agpr_alloc=(0,0) and lets backend MFMAs write the
+        # hidden accumulator's AGPRs.
+        self._with_flavor("llvm20")
+        ok, reason = supports_mla_prefill(_aa_spec(), arch="gfx942")
+        self.assertFalse(ok)
+        self.assertIn("llvm22 or llvm23", reason)
+
+    def test_llvm22_and_llvm23_admitted(self):
+        for flavor in ("llvm22", "llvm23"):
+            with self.subTest(flavor=flavor):
+                self._with_flavor(flavor)
+                self.assertEqual(
+                    supports_mla_prefill(_aa_spec(), arch="gfx942"), (True, "")
+                )
+
+    def test_32_rows_per_wave(self):
+        self._with_flavor("llvm22")
+        ok, reason = supports_mla_prefill(_aa_spec(block_q=32), arch="gfx942")
+        self.assertFalse(ok)
+        self.assertIn("block_q=64", reason)
+        self.assertTrue(_aa_spec().fwd_kernel_name().endswith("_aa_bf16"))
+
+    def test_lowering_scopes_lds_and_hides_the_accumulator(self):
+        self._with_flavor("llvm22")
+        kernel = build_mla_prefill_fwd(_aa_spec(), arch="gfx942")
+        self.assertTrue(kernel.attrs.get("lds_alias_scopes"))
+        ir = lower_kernel_to_llvm(kernel, arch="gfx942")
+        self.assertIn("!alias.scope", ir)
+        self.assertIn("buffer.load.lds(", ir)
+        # The PV MFMAs accumulate in place in fixed AGPRs.
+        self.assertIn("v_mfma_f32_16x16x16_bf16 a[0:3], $0, $1, a[0:3]", ir)
+
+
+class TestAgprAccResources(unittest.TestCase):
+    """Compiled ``agpr_acc`` kernel: one workgroup per CU, AGPRs only in asm."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import torch  # noqa: F401
+        except ImportError:
+            pass
+        try:
+            from rocke.analysis.isa import analyze_hsaco
+            from rocke.core.lower_llvm import _resolve_llvm_flavor
+            from rocke.helpers.compile import compile_kernel
+        except ImportError as exc:  # pragma: no cover - environment-dependent
+            raise unittest.SkipTest(f"comgr/resource tools unavailable: {exc}")
+        if _resolve_llvm_flavor() not in ("llvm22", "llvm23"):
+            raise unittest.SkipTest("agpr_acc needs an llvm22 / llvm23 comgr")
+        try:
+            art = compile_kernel(
+                build_mla_prefill_fwd(_aa_spec(), arch="gfx942"),
+                arch="gfx942",
+                capture_ir_text=False,
+            )
+        except (ImportError, RuntimeError) as exc:  # pragma: no cover
+            raise unittest.SkipTest(f"comgr toolchain unavailable: {exc}")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "mla_prefill_fwd_aa.hsaco"
+            path.write_bytes(bytes(art.hsaco))
+            try:
+                an = analyze_hsaco(path, keep_text=True)
+            except (FileNotFoundError, RuntimeError) as exc:  # pragma: no cover
+                raise unittest.SkipTest(f"HSACO introspection unavailable: {exc}")
+        cls.res = an.resources
+        cls.mfma = [
+            ln.split("//")[0].strip()
+            for ln in an.objdump_text.splitlines()
+            if "v_mfma" in ln
+        ]
+
+    def test_fits_one_workgroup_per_cu(self):
+        self.assertLessEqual(self.res.lds_bytes, 65536)
+        self.assertLessEqual(self.res.vgpr_count, 512)
+
+    def test_scratch_is_bounded(self):
+        # Three dwords live across the loop spill and reload once per
+        # workgroup; anything more would be a spill inside the loop.
+        self.assertLessEqual(self.res.scratch_bytes, 16)
+
+    def test_only_the_asm_mfmas_touch_agprs(self):
+        import re
+
+        agpr_dst = [m for m in self.mfma if re.match(r"v_mfma\S+ a\[", m)]
+        self.assertTrue(agpr_dst)
+        for m in agpr_dst:
+            # In place: destination and accumulator are the same AGPR tile.
+            self.assertRegex(m, r"(a\[\d+:\d+\]),.*\1$")
+        for m in self.mfma:
+            if not re.match(r"v_mfma\S+ a\[", m):
+                self.assertNotIn("a[", m)
