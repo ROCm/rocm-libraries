@@ -1,14 +1,17 @@
 {
   "version": "1.0",
   "id": "8b61d0c9-24af-4d17-9e52-3a7c06b8f145",
-  "name": "ASM_SDPA_ENGINE estimate (gfx950, 3024 graphs)",
+  "name": "ASM_SDPA_ENGINE (gfx950, 200 contribution(s))",
   "adapter": "tree_data",
   "features_signature": [
+    "$device.memory_clock_rate",
+    "$device.peak_memory_bandwidth",
     "$graph.arithmetic_intensity",
     "$graph.flops",
     "$graph.flops_by_type.SdpaAttributes",
     "$graph.logical_bytes",
     "$graph.nodes[0].flops",
+    "$graph.nodes[0].generate_stats",
     "$graph.nodes[0].k.dims[0]",
     "$graph.nodes[0].k.dims[1]",
     "$graph.nodes[0].k.dims[2]",
@@ -33,6 +36,7 @@
     "$graph.nodes[0].v.numel",
     "$graph.nodes[0].v.strides[0]",
     "$graph.nodes[0].v.strides[2]",
+    "$graph.tensor_count",
     "$graph.tensors[0].dims[0]",
     "$graph.tensors[0].dims[1]",
     "$graph.tensors[0].dims[2]",
@@ -54,19 +58,19 @@
     "$graph.tensors[3].strides[0]",
     "$graph.tensors[3].strides[2]"
   ],
-  "features_hash": "sha256:48f0c1e557050f6a",
+  "features_hash": "sha256:90ba1cf9873d9e66",
   "trained_against": {
-    "selector_revision": "hip-kernel-provider/asm-sdpa-fwd/e0fd843161b6c577",
+    "selector_revision": "hip-kernel-provider/asm-sdpa-fwd/bb4f9d59d2c03d52",
     "feature_semantics_revision": 1
   },
   "objective": "max",
   "score": {
     "metric": "tflops",
     "calibrated": true,
-    "transform": "log1p"
+    "transform": "log"
   },
   "tree_data": {
     "artifact": "asm_sdpa_engine_tflops.bin",
-    "hash": "37fc582b6202478053123a18ba3134ade061bf859b3ad6223448abd8d69437ac"
+    "hash": "6c9ea4e2eb1ff314accdd7021474b44cd039e728e6a415ac680275691725b8c4"
   }
 }
