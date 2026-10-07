@@ -1385,6 +1385,24 @@ struct UniversalGemmKernel
         return MakeCBlockWindows<DstInMemOp>(e_ptr, i_m, i_n, e_tensor_desc);
     }
 
+    /// Stands in for the barrier token when the pipeline uses no named barriers.
+    struct NoBarriers
+    {
+    };
+
+    /// @brief Collective, once per launch: each tile must leave the barriers at rest for the next.
+    CK_TILE_DEVICE static auto InitBarriers()
+    {
+        if constexpr(std::is_void_v<barrier_pipeline>)
+        {
+            return NoBarriers{};
+        }
+        else
+        {
+            return barrier_pipeline::template init<SelfType>();
+        }
+    }
+
     /**
      * @brief Runs single GEMM problem cooperatively by whole workgroup.
      *
@@ -1397,8 +1415,10 @@ struct UniversalGemmKernel
      * @param splitk_batch_offset splitk_batch_offset Utility structure used to calculate k batch.
      * @param block_idx_m The GEMM's output M dimension tile index processed by this workgroup.
      * @param block_idx_n The GEMM's output N dimension tile index processed by this workgroup.
+     * @param barriers The token from InitBarriers(); may be omitted without named barriers.
      *
      */
+    template <typename BarrierToken = NoBarriers>
     CK_TILE_DEVICE static void RunGemm(const std::array<const ADataType*, NumATensor>& as_ptr,
                                        const std::array<const BDataType*, NumBTensor>& bs_ptr,
                                        const std::array<const void*, NumDTensor>& ds_ptr,
@@ -1407,8 +1427,12 @@ struct UniversalGemmKernel
                                        const KernelArgs& kargs,
                                        const SplitKBatchOffset& splitk_batch_offset,
                                        const index_t block_idx_m,
-                                       const index_t block_idx_n)
+                                       const index_t block_idx_n,
+                                       const BarrierToken barriers = {})
     {
+        static_assert(std::is_same_v<BarrierToken, decltype(InitBarriers())>,
+                      "pass RunGemm the token from InitBarriers(); only pipelines without named "
+                      "barriers may omit it");
 
         // cluster launch GridDim is aligned to clusterDim, need to skip out-of-bound blocks
         if constexpr(ClusterLaunch)
@@ -1439,15 +1463,13 @@ struct UniversalGemmKernel
             }
             else
             {
-                // init() is collective, so every wave arms before any touches a barrier.
-                return GemmPipeline{}.template operator()(
-                    as_block_window,
-                    AElementWise{},
-                    bs_block_window,
-                    BElementWise{},
-                    num_loop,
-                    smem_ptr,
-                    barrier_pipeline::template init<SelfType>());
+                return GemmPipeline{}.template operator()(as_block_window,
+                                                          AElementWise{},
+                                                          bs_block_window,
+                                                          BElementWise{},
+                                                          num_loop,
+                                                          smem_ptr,
+                                                          barriers);
             }
         }();
 
@@ -1602,8 +1624,32 @@ struct UniversalGemmKernel
         // allocate LDS
         __shared__ char smem_ptr[GetSmemSize()];
 
-        SelfType::RunGemm(
-            as_ptr, bs_ptr, kargs.ds_ptr, e_ptr, smem_ptr, kargs, splitk_batch_offset, i_m, i_n);
+        // SelfType may hide RunGemm with 9 parameters, so only barrier pipelines add a token.
+        if constexpr(std::is_void_v<barrier_pipeline>)
+        {
+            SelfType::RunGemm(as_ptr,
+                              bs_ptr,
+                              kargs.ds_ptr,
+                              e_ptr,
+                              smem_ptr,
+                              kargs,
+                              splitk_batch_offset,
+                              i_m,
+                              i_n);
+        }
+        else
+        {
+            SelfType::RunGemm(as_ptr,
+                              bs_ptr,
+                              kargs.ds_ptr,
+                              e_ptr,
+                              smem_ptr,
+                              kargs,
+                              splitk_batch_offset,
+                              i_m,
+                              i_n,
+                              InitBarriers());
+        }
     }
 
     // Persistent kernel entry point
@@ -1617,9 +1663,11 @@ struct UniversalGemmKernel
         const auto num_tiles = GetNumTiles(kargs.M, kargs.N);
         const auto num_work  = amd_wave_read_first_lane(num_tiles * kargs.k_batch);
         auto block_id        = GetBlockId();
+        const auto barriers  = InitBarriers();
 
         while(block_id < num_work)
         {
+            // Orders the last tile's LDS reads before this tile's writes; epilogues retire them.
             s_waitcnt_barrier();
             const auto tile_idx = amd_wave_read_first_lane(block_id % num_tiles);
             const auto [iM, iN] = TilePartitioner{kargs.M, kargs.N}.GetOutputTileIndex(tile_idx);
@@ -1685,16 +1733,32 @@ struct UniversalGemmKernel
 
             // allocate LDS
             __shared__ char smem_ptr[GetSmemSize()];
-            // Run the GEMM
-            SelfType::RunGemm(as_ptr,
-                              bs_ptr,
-                              kargs.ds_ptr,
-                              e_ptr,
-                              smem_ptr,
-                              kargs,
-                              splitk_batch_offset,
-                              i_m,
-                              i_n);
+            // Run the GEMM; SelfType may hide RunGemm with 9 parameters.
+            if constexpr(std::is_void_v<barrier_pipeline>)
+            {
+                SelfType::RunGemm(as_ptr,
+                                  bs_ptr,
+                                  kargs.ds_ptr,
+                                  e_ptr,
+                                  smem_ptr,
+                                  kargs,
+                                  splitk_batch_offset,
+                                  i_m,
+                                  i_n);
+            }
+            else
+            {
+                SelfType::RunGemm(as_ptr,
+                                  bs_ptr,
+                                  kargs.ds_ptr,
+                                  e_ptr,
+                                  smem_ptr,
+                                  kargs,
+                                  splitk_batch_offset,
+                                  i_m,
+                                  i_n,
+                                  barriers);
+            }
 
             // Advance to the next work item
             block_id += grid_size;
