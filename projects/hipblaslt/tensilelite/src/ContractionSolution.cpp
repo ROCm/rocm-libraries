@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <Tensile/ContractionSolution.hpp>
+#include <Tensile/DefaultPersistentLaunch.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
 
 #include <Tensile/hip/HipUtils.hpp>
@@ -252,59 +253,19 @@ namespace TensileLite
 
     namespace
     {
-        // The dynamic-queue StreamK kernels (SK4 and the SK4 sub-path of SK5)
-        // bake a fixed power-of-two per-XCD queue count for fast index masking.
-        // Codegen derives it from the arch's XCD count (StreamK.py
-        // _wsQueueConstants / archCaps["NumXCD"], mirroring origami
-        // get_default_num_xcds); the host reads the SAME origami value here so
-        // codegen and the runtime guard stay in lockstep. Returns 0 when the
-        // architecture cannot be determined (guard treats that as unsupported).
+        inline origami::hardware_t const* analyticalHardwareOf(Hardware const& hardware)
+        {
+            auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+            return hipAMDGPU ? hipAMDGPU->analyticalHardware.get() : nullptr;
+        }
+
+        using PersistentLaunch::streamKBakedQueueCount;
+        using PersistentLaunch::streamKQueueRegionBytes;
+        using PersistentLaunch::streamKReconcileReduction;
+
         inline size_t streamKBakedQueueCount(Hardware const& hardware)
         {
-            auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
-            if(hipAMDGPU == nullptr || hipAMDGPU->analyticalHardware == nullptr)
-                return 0;
-            try
-            {
-                return origami::hardware_t::get_default_num_xcds(
-                    hipAMDGPU->analyticalHardware->arch);
-            }
-            catch(std::exception const&)
-            {
-                // origami throws for architectures without a hardcoded default
-                // XCD count; treat that as "cannot determine" (0 == unsupported)
-                // rather than propagating the exception through solution
-                // selection.
-                return 0;
-            }
-        }
-
-        // Per-XCD counter stride (bytes) for the dynamic-queue work-queue
-        // region. Set equal to the hardware L2 cache-line size so each per-XCD
-        // atomic counter occupies its own line (no false sharing). Sourced from
-        // origami (hardware_t::get_default_cache_line_bytes) -- the SAME value
-        // the codegen mirrors via rocisa archCaps["CacheLineBytes"]
-        // (StreamK.py _wsQueueConstants). Host (origami) and codegen (archCaps)
-        // strides are two mirrors of the one origami cache-line size, so the
-        // flag region the host sizes matches the layout the kernel addresses.
-        // Returns 0 when the architecture cannot be determined.
-        inline size_t streamKPerQueueStrideBytes(Hardware const& hardware)
-        {
-            auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
-            if(hipAMDGPU == nullptr || hipAMDGPU->analyticalHardware == nullptr)
-                return 0;
-            return origami::hardware_t::get_default_cache_line_bytes(
-                hipAMDGPU->analyticalHardware->arch);
-        }
-
-        // Bytes the per-XCD work-queue counters occupy: one cache line each, so
-        // no two share a line. The kernel places them at the base of the
-        // AddressFlags buffer and starts the ready flags after them (StreamK.py
-        // _wsFlagsBaseOffset is this same product). 0 when the architecture
-        // cannot be determined.
-        inline size_t streamKQueueRegionBytes(Hardware const& hardware)
-        {
-            return streamKPerQueueStrideBytes(hardware) * streamKBakedQueueCount(hardware);
+            return streamKBakedQueueCount(analyticalHardwareOf(hardware));
         }
 
         // True when the launch takes the dynamic work-queue path and so carries
@@ -4843,48 +4804,6 @@ namespace TensileLite
                              bool*                         outTreeBoundsFallback = nullptr,
                              bool*                         outClusterDPGridClamp = nullptr,
                              size_t*                       outSelectedGrid       = nullptr);
-
-        // Reconcile the reduction strategy with the grid that was finally
-        // chosen. The strategy is picked BEFORE the grid -- getSKReduction()
-        // feeds getPersistentGridImpl() as an input -- so the grid can still land on a
-        // splitting factor F = grid / tiles of 1, which parallel reduction
-        // cannot express: it splits each output tile across F workgroups and
-        // sums the partials in a second kernel, so F < 2 leaves it nothing to
-        // reduce (solve() rejects it outright). Ways the grid gets there:
-        //
-        //   * the uniform-summation-order F-star snap in getPersistentGridImpl() finds
-        //     no admissible F >= 2 (workspace too small for 2 * tiles partial
-        //     tiles, or ItersPerTile / F below MinItersPerCU) and falls back to
-        //     the all-full grid == tiles;
-        //   * the same snap sees g0 < tiles and snaps up to tiles;
-        //   * persistentFixedGrid / persistentMaxCUs / persistentGridMultiplier / the analytical grid
-        //     land anywhere in [1, 2 * tiles).
-        //
-        // Tree reduction is always expressible at those grids, so fall back to
-        // it rather than failing the launch. Applied AFTER the grid is final
-        // and never fed back into grid selection, so it cannot perturb the
-        // grid.
-        //
-        // Both requiredWorkspaceSize() -- the workspace query the caller sizes
-        // its allocation from -- and resolveStreamKSettings() -- what solve()
-        // launches -- call this on the same (reduction, grid, tiles) triple
-        // immediately after getPersistentGridImpl(). For SK3 and SK5-static, where the
-        // two start from the same getSKReduction() answer, that keeps query and
-        // launch agreed on the reduction and so on the workspace. SK4 and
-        // SK5-dynamic are pinned to tree at the launch sites only; see
-        // requiredWorkspaceSize() for why the resulting divergence is bounded.
-        //
-        // Unconditional, not uniform-summation-order enforcement: F < 2 is
-        // unlaunchable for parallel whatever the mode, and solve() still throws
-        // on the triple. Demoting here keeps that throw unreachable.
-        inline origami::reduction_t streamKReconcileReduction(
-            origami::reduction_t reductionStrat, size_t skGrid, size_t tiles)
-        {
-            if(reductionStrat == origami::reduction_t::parallel
-               && (tiles == 0 || (skGrid / tiles) < 2))
-                return origami::reduction_t::tree;
-            return reductionStrat;
-        }
     }
 
     void ContractionSolution::validatePersistentLoopArgsVersion() const
@@ -4966,7 +4885,15 @@ namespace TensileLite
         if(!sizeMapping.isPersistent())
             return launch;
         launch.totalTiles = problem.getNumTiles(sizeMapping, 1);
-        if(sizeMapping.isPersistentDataParallel())
+        if(sizeMapping.isPersistentDataParallel()
+           && decidesDefaultPersistentLaunch(problem, hardware))
+        {
+            DefaultPersistentLaunch const decided
+                = resolveDefaultLaunch(problem, hardware, launch.totalTiles, nullptr);
+            launch.grid         = decided.grid;
+            launch.selectedGrid = decided.selectedGrid;
+        }
+        else if(sizeMapping.isPersistentDataParallel())
             launch.grid = getPersistentGridImpl(*this, problem, hardware, launch.totalTiles,
                                                 origami::reduction_t::none, nullptr,
                                                 nullptr, nullptr, &launch.clusterGridClamp,
@@ -5868,6 +5795,23 @@ namespace TensileLite
             ContractionSolution::ProblemType const& problemType,
             ContractionSolution::Problem const&     problem,
             char const**                            obstacleToken = nullptr);
+
+        // The M, N, K and batch origami's Stream-K selection reads of `problem`,
+        // with `numCus` as its CU budget.
+        origami::problem_t origamiShape(ContractionProblemGemm const& problem, size_t numCus)
+        {
+            size_t x = 1, y = 1, z = 1, batch = 1;
+            for(size_t i = 0; i < problem.freeIndicesA().size(); ++i)
+                x *= problem.freeSizeA(i);
+            for(size_t i = 0; i < problem.freeIndicesB().size(); ++i)
+                y *= problem.freeSizeB(i);
+            for(size_t i = 0; i < problem.boundIndices().size(); ++i)
+                z *= problem.boundSize(i);
+            for(size_t i = 0; i < problem.batchIndices().size(); ++i)
+                batch *= problem.batchSize(i);
+            return {.size = {x, y, z}, .batch = batch, .num_cus = numCus};
+        }
+
     } // namespace
 
     origami::reduction_t ContractionSolution::getSKReduction(Problem const&  problem,
@@ -5895,36 +5839,13 @@ namespace TensileLite
                 return reductionStrat;
             }
 
-            size_t x     = 1;
-            size_t y     = 1;
-            size_t z     = 1;
-            size_t batch = 1;
-            for(size_t i = 0; i < problem.freeIndicesA().size(); i++)
-            {
-                x *= problem.freeSizeA(i);
-            }
-            for(size_t i = 0; i < problem.freeIndicesB().size(); i++)
-            {
-                y *= problem.freeSizeB(i);
-            }
-            for(size_t i = 0; i < problem.boundIndices().size(); ++i)
-            {
-                z *= problem.boundSize(i);
-            }
-            for(size_t i = 0; i < problem.batchIndices().size(); ++i)
-            {
-                batch *= problem.batchSize(i);
-            }
             hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
             TENSILE_ASSERT_EXC(hipAMDGPU != nullptr);
             TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
 
-            origami::problem_t origami_problem = {
-                .size  = {x, y, z},
-                .batch = batch,
-                // CU budget hint; 0 = use all CUs.
-                .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
-            };
+            // CU budget hint; 0 = use all CUs.
+            origami::problem_t const origami_problem
+                = origamiShape(problem, static_cast<size_t>(problem.getParams().smCountTarget()));
             origami::config_t origami_config = {
                 .mt = {static_cast<size_t>(sizeMapping.macroTile.x),
                        static_cast<size_t>(sizeMapping.macroTile.y),
@@ -5972,106 +5893,23 @@ namespace TensileLite
     bool ContractionSolution::streamK5EffectiveDynamic(Problem const&  problem,
                                                        Hardware const& hardware) const
     {
-        bool        effectiveDynamic = false;
-        const char* reasonStr        = "default";
-
-        const int sk5DebugMode = Debug::Instance().streamK5ForceMode();
-        if(sk5DebugMode == 0)
-        {
-            effectiveDynamic = false;
-            reasonStr        = "force-env";
-        }
-        else if(sk5DebugMode == 1)
-        {
-            effectiveDynamic = true;
-            reasonStr        = "force-env";
-        }
-        else
-        {
-            // -1 (or any non 0/1) -> respect the API attribute and run the
-            // original requested-mode logic.
-            bool      runHeuristic  = false;
-            const int requestedMode = problem.getParams().streamKTileSchedulingMode();
-            switch(requestedMode)
-            {
-            case 1: // ON -> dynamic (SK4) path
-                effectiveDynamic = true;
-                reasonStr        = "api-on";
-                break;
-            case 0: // OFF -> static (SK3) unless sm_count_target engages heuristic
-                if(problem.getParams().smCountTarget() <= 0)
-                {
-                    effectiveDynamic = false;
-                    reasonStr        = "api-off-static";
-                }
-                else
-                {
-                    runHeuristic = true;
-                    reasonStr    = "api-off-heuristic";
-                }
-                break;
-            case 2: // AUTO -> origami hybrid-mode heuristic
-                runHeuristic = true;
-                reasonStr    = "api-auto-heuristic";
-                break;
-            default:
-                effectiveDynamic = false;
-                reasonStr        = "default";
-                break;
-            }
-
-            if(runHeuristic)
-            {
-                size_t x = 1, y = 1, z = 1, batchSz = 1;
-                for(size_t i = 0; i < problem.freeIndicesA().size(); ++i)
-                    x *= problem.freeSizeA(i);
-                for(size_t i = 0; i < problem.freeIndicesB().size(); ++i)
-                    y *= problem.freeSizeB(i);
-                for(size_t i = 0; i < problem.boundIndices().size(); ++i)
-                    z *= problem.boundSize(i);
-                for(size_t i = 0; i < problem.batchIndices().size(); ++i)
-                    batchSz *= problem.batchSize(i);
-
-                origami::problem_t origami_problem = {
-                    .size  = {x, y, z},
-                    .batch = batchSz,
-                    // CU budget hint; 0 = use all CUs.
-                    .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
-                };
-                origami::config_t origami_config = {
-                    .mt = {static_cast<size_t>(sizeMapping.macroTile.x),
-                           static_cast<size_t>(sizeMapping.macroTile.y),
-                           static_cast<size_t>(sizeMapping.depthU)},
-                    .occupancy = std::max(sizeMapping.CUOccupancy, static_cast<int>(1)),
-                };
-
-                hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
-                TENSILE_ASSERT_EXC(hipAMDGPU != nullptr);
-                TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
-                const auto autoMode = origami::streamk::select_hybrid_mode(
-                    origami_problem,
-                    *(hipAMDGPU->analyticalHardware),
-                    origami_config,
-                    static_cast<size_t>(problem.getParams().smCountTarget()));
-                effectiveDynamic = autoMode == origami::hybrid_mode_t::dynamic;
-            }
-        }
-
-        if(Debug::Instance().printStreamKModeSelection())
-        {
-            const int   forceMode = Debug::Instance().streamK5ForceMode();
-            const int   requested = problem.getParams().streamKTileSchedulingMode();
-            const int   smCount   = problem.getParams().smCountTarget();
-            const char* reqStr
-                = (requested == 0 ? "OFF" : requested == 1 ? "ON" : requested == 2 ? "AUTO" : "?");
-            std::cerr << "TensileLite::DEBUG: SK5 hybrid mode for kernel '" << this->kernelName
-                      << "': requested=" << reqStr << " forceEnv=" << forceMode
-                      << " smCountTarget=" << smCount << " reason=" << reasonStr << " -> effective="
-                      << (effectiveDynamic ? "dynamic(SK4/work-queue)" : "static(SK3/static-tile)")
-                      << "\n";
-        }
-
-        return effectiveDynamic;
+        int const               smCountTarget = problem.getParams().smCountTarget();
+        origami::config_t const kernel        = {
+                   .mt        = {static_cast<size_t>(sizeMapping.macroTile.x),
+                                 static_cast<size_t>(sizeMapping.macroTile.y),
+                                 static_cast<size_t>(sizeMapping.depthU)},
+                   .occupancy = std::max(sizeMapping.CUOccupancy, static_cast<int>(1)),
+        };
+        // CU budget hint; 0 = use all CUs.
+        return PersistentLaunch::streamKHybridDynamic(
+            origamiShape(problem, static_cast<size_t>(smCountTarget)),
+            kernel,
+            analyticalHardwareOf(hardware),
+            problem.getParams().streamKTileSchedulingMode(),
+            smCountTarget,
+            kernelName.c_str(),
+            Debug::Instance().streamK5ForceMode(),
+            Debug::Instance().printStreamKModeSelection());
     }
 
     bool ContractionSolution::streamKDynamicQueueSupported(Problem const&  problem,
@@ -6141,45 +5979,67 @@ namespace TensileLite
         else
             tiles = problem.getNumTiles(sizeMapping, 1);
 
-        // Take the caller's already-resolved sub-mode when offered: resolving it
-        // is not free (see the note in getPersistentGridImpl), and solve() has it.
-        const bool effectiveDynamic
-            = (sizeMapping.hasHybridAssignment())
-                  ? (effectiveDynamicHint != nullptr ? *effectiveDynamicHint
-                                                     : streamK5EffectiveDynamic(problem, hardware))
-                  : false;
-
-        sk.tileProcessingStrategy = TileProcessingStrategy::StreamK;
-        sk.workAssignment = sizeMapping.workAssignment;
-        sk.effectiveWorkAssignment = sizeMapping.hasDynamicAssignment() || effectiveDynamic
-                                        ? WorkAssignment::DynamicWorkQueue : WorkAssignment::StaticGrid;
-        sk.totalTiles = tiles;
-        sk.argsVersion = internalArgsSupport.persistentLoopArgsVersion;
-
-        // Pinning SK4 and SK5-resolved-dynamic to tree is a launch-site rule:
-        // requiredWorkspaceSize() always asks getSKReduction() and has no such
-        // special case, so a dynamic-queue launch can be sized for parallel and
-        // then run tree -- see the note there on why that is not a memory-safety
-        // problem.
-        if(sizeMapping.hasDynamicAssignment())
-            sk.reduction = origami::reduction_t::tree;
-        else if(sizeMapping.hasHybridAssignment())
-            sk.reduction = effectiveDynamic ? origami::reduction_t::tree
-                                            : getSKReduction(problem, hardware);
+        if(sizeMapping.isStreamK() && decidesDefaultPersistentLaunch(problem, hardware))
+        {
+            DefaultPersistentLaunch const decided
+                = resolveDefaultLaunch(problem, hardware, tiles, effectiveDynamicHint);
+            sk.tileProcessingStrategy  = TileProcessingStrategy::StreamK;
+            sk.workAssignment          = sizeMapping.workAssignment;
+            sk.effectiveWorkAssignment = decided.effectiveWorkAssignment;
+            sk.totalTiles              = tiles;
+            sk.argsVersion             = internalArgsSupport.persistentLoopArgsVersion;
+            sk.reduction               = decided.reduction;
+            sk.smCountTarget           = problem.getParams().smCountTarget();
+            sk.grid                    = decided.grid;
+            sk.selectedGrid            = decided.selectedGrid;
+        }
         else
-            sk.reduction = getSKReduction(problem, hardware);
-        sk.smCountTarget             = problem.getParams().smCountTarget();
-        sk.grid = getPersistentGridImpl(*this,
-                                problem,
-                                hardware,
-                                tiles,
-                                sk.reduction,
-                                sizeMapping.hasHybridAssignment() ? &effectiveDynamic : nullptr,
-                                nullptr, nullptr, &sk.clusterGridClamp, &sk.selectedGrid);
-        // Same reconciliation, same helper, same triple as
-        // requiredWorkspaceSize(). Must run before the workspace-fit fallback
-        // below so that fallback sees the reduction the launch will use.
-        sk.reduction = streamKReconcileReduction(sk.reduction, sk.grid, tiles);
+        {
+            // Take the caller's already-resolved sub-mode when offered: resolving it
+            // is not free (see the note in getPersistentGridImpl), and solve() has it.
+            const bool effectiveDynamic = (sizeMapping.hasHybridAssignment())
+                                              ? (effectiveDynamicHint != nullptr
+                                                     ? *effectiveDynamicHint
+                                                     : streamK5EffectiveDynamic(problem, hardware))
+                                              : false;
+
+            sk.tileProcessingStrategy  = TileProcessingStrategy::StreamK;
+            sk.workAssignment          = sizeMapping.workAssignment;
+            sk.effectiveWorkAssignment = sizeMapping.hasDynamicAssignment() || effectiveDynamic
+                                             ? WorkAssignment::DynamicWorkQueue
+                                             : WorkAssignment::StaticGrid;
+            sk.totalTiles              = tiles;
+            sk.argsVersion             = internalArgsSupport.persistentLoopArgsVersion;
+
+            // Pinning SK4 and SK5-resolved-dynamic to tree is a launch-site rule:
+            // requiredWorkspaceSize() always asks getSKReduction() and has no such
+            // special case, so a dynamic-queue launch can be sized for parallel and
+            // then run tree -- see the note there on why that is not a memory-safety
+            // problem.
+            if(sizeMapping.hasDynamicAssignment())
+                sk.reduction = origami::reduction_t::tree;
+            else if(sizeMapping.hasHybridAssignment())
+                sk.reduction = effectiveDynamic ? origami::reduction_t::tree
+                                                : getSKReduction(problem, hardware);
+            else
+                sk.reduction = getSKReduction(problem, hardware);
+            sk.smCountTarget = problem.getParams().smCountTarget();
+            sk.grid          = getPersistentGridImpl(*this,
+                                            problem,
+                                            hardware,
+                                            tiles,
+                                            sk.reduction,
+                                            sizeMapping.hasHybridAssignment() ? &effectiveDynamic
+                                                                                       : nullptr,
+                                            nullptr,
+                                            nullptr,
+                                            &sk.clusterGridClamp,
+                                            &sk.selectedGrid);
+            // Same reconciliation, same helper, same triple as
+            // requiredWorkspaceSize(). Must run before the workspace-fit fallback
+            // below so that fallback sees the reduction the launch will use.
+            sk.reduction = streamKReconcileReduction(sk.reduction, sk.grid, tiles);
+        }
 
         const bool streamKDP   = Debug::Instance().useStreamKDataParrallel();
         const bool forceDPOnly = sizeMapping.isPersistentDataParallel();
@@ -6733,6 +6593,14 @@ namespace TensileLite
 
     namespace
     {
+        using PersistentLaunch::dataParallelLaunchGrid;
+        using PersistentLaunch::dynamicQueueGrid;
+        using PersistentLaunch::notePersistentOccupancy;
+        using PersistentLaunch::origamiCuBudget;
+        using PersistentLaunch::origamiGridProblem;
+        using PersistentLaunch::streamKFlagRegionGrid;
+        using PersistentLaunch::streamKTreeFixupGrid;
+
         size_t getPersistentGridImpl(ContractionSolution const& self,
                              ContractionProblemGemm const& problem,
                              Hardware const&               hardware,
@@ -6801,94 +6669,36 @@ namespace TensileLite
             {
                 if(self.sizeMapping.hasDynamicAssignment() || sk5DynamicSubMode())
                 {
-                    // Limit workgroups per CU to 3
-                    // TODO Verify this limit is best
-                    const size_t occupancy
-                        = std::max(self.sizeMapping.CUOccupancy, static_cast<int>(1));
-                    auto kernelOccupancy = std::min(occupancy, size_t{3});
-                    auto maxGrid         = cuCount * kernelOccupancy;
-                    if(pAMDGPU->persistentMaxCUs > 0)
-                    {
-                        maxGrid = std::min(maxGrid, static_cast<size_t>(pAMDGPU->persistentMaxCUs));
-                    }
-                    // TODO Calculate total work items when dynamic queue works with stream-k
-                    // For now, all work items are full tiles
-                    auto workItems = tiles;
-                    // Select grid to use all CUs, unless number of work items is less
-                    grid = std::min(workItems, maxGrid);
+                    grid = dynamicQueueGrid(
+                        tiles, cuCount, self.sizeMapping.CUOccupancy, pAMDGPU->persistentMaxCUs);
                 }
                 else
                 {
-                    size_t x     = 1;
-                    size_t y     = 1;
-                    size_t batch = 1;
-                    for(size_t i = 0; i < problem.freeIndicesA().size(); i++)
-                    {
-                        x *= problem.freeSizeA(i);
-                    }
-                    for(size_t i = 0; i < problem.freeIndicesB().size(); i++)
-                    {
-                        y *= problem.freeSizeB(i);
-                    }
-                    for(size_t i = 0; i < problem.batchIndices().size(); ++i)
-                    {
-                        batch *= problem.batchSize(i);
-                    }
                     hip::HipAMDGPU const* hipAMDGPU
                         = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
-                    // Fold both CU budgets into origami_problem.num_cus (the single
-                    // source of truth select_grid_size derives its budget from).
-                    // smCountTarget and persistentMaxCUs each use 0 to mean "no cap"; take the
-                    // tighter (minimum) positive cap so the analytical path honors both.
-                    auto   smt       = problem.getParams().smCountTarget(); // int, 0 = no cap
-                    auto   maxCUs       = pAMDGPU->persistentMaxCUs;                   // int, 0 = no cap
-                    size_t budget    = 0;                                  // 0 = use all CUs
-                    if(smt > 0)
-                        budget = static_cast<size_t>(smt);
-                    if(maxCUs > 0)
-                        budget = (budget == 0) ? static_cast<size_t>(maxCUs)
-                                               : std::min(budget, static_cast<size_t>(maxCUs));
+                    size_t const budget = origamiCuBudget(problem.getParams().smCountTarget(),
+                                                          pAMDGPU->persistentMaxCUs);
 
-                    origami::problem_t origami_problem = {
-                        .size        = {x, y, z},
-                        .batch       = batch,
-                        // CU budget hint; 0 = use all CUs.
-                        .num_cus     = budget,
-                        .a_transpose = problem.transA() ? origami::transpose_t::T
-                                                        : origami::transpose_t::N,
-                        .b_transpose = problem.transB() ? origami::transpose_t::T
-                                                        : origami::transpose_t::N,
-                        .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
-                        .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
-                        .mi_dtype    = datatypeToAnalyticalDatatype(problem.computeInputTypeA()),
-                    };
-                    if(Debug::Instance().printPropertyEvaluation() && self.sizeMapping.CUOccupancy <= 0)
-                    {
-                        std::cerr << "TensileLite::DEBUG: sizeMapping.CUOccupancy="
-                                  << self.sizeMapping.CUOccupancy
-                                  << " (<=0) for kernel '" << self.kernelName
-                                  << "'; clamping to 1 for origami grid selection.\n";
-                    }
-                    origami::config_t origami_config = {
-                        .mt = {static_cast<size_t>(self.sizeMapping.macroTile.x),
-                               static_cast<size_t>(self.sizeMapping.macroTile.y),
-                               static_cast<size_t>(self.sizeMapping.depthU)},
-                        .mi = {static_cast<size_t>(self.sizeMapping.matrixInstruction[0]),
-                               static_cast<size_t>(self.sizeMapping.matrixInstruction[1]),
-                               static_cast<size_t>(self.sizeMapping.matrixInstruction[2])},
-                        .occupancy = std::max(self.sizeMapping.CUOccupancy, static_cast<int>(1)),
-                        .workgroup_mapping         = self.sizeMapping.workGroupMapping,
-                        .workspace_size            = problem.workspaceSize(),
-                        .workspace_size_per_elem_c = self.sizeMapping.isPersistentDataParallel()
-                                                         ? static_cast<size_t>(DataTypeInfo::Get(self.problemType.computeType).elementSize)
-                                                         : self.sizeMapping.workspaceSizePerElemC,
-                        // The existing grid predictor was calibrated with this model
-                        // for whole-tile launches. This adapter preserves its grid policy;
-                        // the DataParallel launch itself has no reduction strategy.
-                        .reduction_strategy = self.sizeMapping.isPersistentDataParallel()
-                                                  ? origami::reduction_t::tree : reductionStrat,
-                    };
+                    // CU budget hint; 0 = use all CUs.
+                    origami::problem_t const origami_problem
+                        = origamiGridProblem(origamiShape(problem, budget),
+                                             problem.transA(),
+                                             problem.transB(),
+                                             problem.a().dataType(),
+                                             problem.b().dataType(),
+                                             problem.computeInputTypeA());
+                    notePersistentOccupancy(self.kernelName.c_str(),
+                                            self.sizeMapping.CUOccupancy,
+                                            Debug::Instance().printPropertyEvaluation());
+                    origami::config_t origami_config = self.persistentLaunchConfig();
+                    origami_config.workspace_size    = problem.workspaceSize();
+                    // The existing grid predictor was calibrated with this model
+                    // for whole-tile launches. This adapter preserves its grid policy;
+                    // the DataParallel launch itself has no reduction strategy.
+                    origami_config.reduction_strategy = self.sizeMapping.isPersistentDataParallel()
+                                                            ? origami::reduction_t::tree
+                                                            : reductionStrat;
 
                     TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
 
@@ -6951,19 +6761,12 @@ namespace TensileLite
                 }
                 else
                 {
-                    // hipExtModuleLaunchKernel takes uint32 work-item counts.
-                    // Whole-tile scheduling still needs this launch bound even
-                    // though it does not use StreamK's tree-fixup arithmetic.
-                    const size_t threadsPerWorkGroup = self.sizeMapping.workGroupSize.x
+                    grid = dataParallelLaunchGrid(grid,
+                                                  self.sizeMapping.workGroupSize.x
                                                       * self.sizeMapping.workGroupSize.y
-                                                      * self.sizeMapping.workGroupSize.z;
-                    const size_t maxGrid = std::numeric_limits<uint32_t>::max()
-                                           / std::max(threadsPerWorkGroup, size_t{1});
-                    if(grid > maxGrid)
-                    {
-                        const size_t occupancy = std::max(self.sizeMapping.CUOccupancy, 1);
-                        grid = std::min(cuCount * occupancy, maxGrid);
-                    }
+                                                      * self.sizeMapping.workGroupSize.z,
+                                                  cuCount,
+                                                  self.sizeMapping.CUOccupancy);
                 }
                 return grid;
             }
@@ -7084,107 +6887,119 @@ namespace TensileLite
             if(outSelectedGrid)
                 *outSelectedGrid = grid;
 
-            // Tree-fixup uses scalarUInt24DivideAndRemainder (dividend < 2^24, divisor < 2^16).
-            // If we exceed those bounds, fall back to DP.
             if(reductionStrat == origami::reduction_t::tree)
-            {
-                size_t itersPerTile = problem.getItersPerTile(self.sizeMapping);
-                size_t itersPerWG   = tiles * itersPerTile / grid;
-                // numWorkItems = grid * threadsPerWorkGroup
-                // the largest grid this fallback can express is
-                // UINT32_MAX / threadsPerWorkGroup -- 2^24 tiles at 256 threads
-                // but 2^25 at 128 and 2^22 at 1024.
-                const size_t threadsPerWorkGroup = self.sizeMapping.workGroupSize.x
-                                                    * self.sizeMapping.workGroupSize.y
-                                                    * self.sizeMapping.workGroupSize.z;
-                const size_t maxTiles = (size_t{std::numeric_limits<uint32_t>::max()} + 1)
-                                        / std::max(threadsPerWorkGroup, size_t{1});
+                grid = streamKTreeFixupGrid(grid,
+                                            tiles,
+                                            problem.getItersPerTile(self.sizeMapping),
+                                            self.sizeMapping.workGroupSize.x
+                                                * self.sizeMapping.workGroupSize.y
+                                                * self.sizeMapping.workGroupSize.z,
+                                            cuCount,
+                                            self.sizeMapping.CUOccupancy,
+                                            outTreeBoundsFallback);
 
-                if(itersPerTile >= 65536 || itersPerWG >= 65536
-                   || (tiles * itersPerTile) >= maxTiles)
-                {
-                    const size_t occupancy
-                    = std::max(self.sizeMapping.CUOccupancy, static_cast<int>(1));
-                    grid = (tiles >= maxTiles) ? cuCount * occupancy : tiles;
-                    if(outTreeBoundsFallback)
-                        *outTreeBoundsFallback = true;
-                }
-            }
-
-            // The flag region holds one int per Stream-K workgroup. The static
-            // paths index it by CTA id ("flag offset based on CTA index" in
-            // StreamK.py); SK4 and the SK4 sub-path of SK5 index it by partial
-            // index instead ("flag offset based on partial index", StreamK.py
-            // ~1742 and ~4033) off a base that already skips the work-queue
-            // counters. Either way a grid wider than what that indexing reaches
-            // would have workgroups writing past the end of their own block.
-            // Every caller reaches grid through here and this is the last
-            // write, so it is the one place the bound has to hold.
-            //
-            // Only the launches that actually reach the flags are bounded:
-            //
-            //   - atomic and ForceDPOnly kernels never take the pointer at all
-            //     (see the Flags kernarg in singleCallArgs)
-            //   - parallel reduction is passed Flags == nullptr, and the kernel
-            //     branches on that to skip the flag protocol
-            //   - tiles % grid == 0 spreads the tiles evenly over the
-            //     workgroups, so no partial tiles exist to fix up. This is the
-            //     same test the workspace sizing uses to decide whether partials
-            //     exist, and it is what excludes every data-parallel path: they
-            //     all arrive at grid == tiles, whether from K == 0, from the
-            //     tree-fixup bound above, or from the data-parallel debug knob.
-            //
-            // Clamping outside those cases would shrink a grid that has no flag
-            // region to overrun, and against the data-parallel fallbacks it
-            // would do real harm: the tree-fixup bound sets grid = tiles
-            // precisely to leave Stream-K behind, and cutting that back would
-            // return the launch to the K-split it was escaping. grid defaults
-            // to the CU count, well inside the bound on a 256-CU gfx950, but
-            // TENSILE_STREAMK_GRID_MULTIPLIER scales it with no cap of its own.
-            const bool usesFlagRegion = self.sizeMapping.streamKAtomic == 0
-                                        && !self.sizeMapping.isPersistentDataParallel()
-                                        && reductionStrat != origami::reduction_t::parallel
-                                        && grid > 0 && (tiles % grid) != 0;
-
-            // SK4 and the SK4 sub-path of SK5 start their flags after the
-            // per-XCD work-queue counters, so they index fewer entries than the
-            // region holds. The rest index from 0 and keep all of them;
-            // tightening every path would cost them grid they are entitled to.
-            size_t flagEntries = StreamKFlagElements;
-            // The && short-circuits, so a launch that never reaches the flags
-            // does not pay for resolving the SK5 sub-mode.
-            if(usesFlagRegion && streamKUsesDynamicQueue(self.sizeMapping, sk5DynamicSubMode()))
-            {
-                const size_t prefixEntries = streamKQueueRegionBytes(hardware) / sizeof(int);
-                // Subtracting is only safe while the prefix leaves entries
-                // behind. Neither way in is reachable today: an unknown arch
-                // reports a 0-byte prefix and is rejected before this by
-                // streamKDynamicQueueUnsupported, and no shipping part has a
-                // cache line * XCD product anywhere near StreamKFlagElements
-                // ints. Should one ever get here the full bound is kept, which
-                // is the unsafe direction -- it would hand back grid past the
-                // flags the kernel indexes -- so this guard is a placeholder
-                // for a real decision, not a safe fallback.
-                if(prefixEntries < flagEntries)
-                    flagEntries -= prefixEntries;
-            }
-
-            if(usesFlagRegion && grid > flagEntries)
-            {
-                if(Debug::Instance().printPropertyEvaluation())
-                {
-                    std::cerr << "TensileLite::DEBUG: kernel '" << self.kernelName
-                              << "' StreamK grid " << grid << " exceeds the " << flagEntries
-                              << " usable entries of the " << StreamKFlagElements
-                              << "-entry flag region (tiles=" << tiles
-                              << "); clamping the grid to " << flagEntries << ".\n";
-                }
-                grid = flagEntries;
-            }
-
-            return grid;
+            return streamKFlagRegionGrid(
+                grid,
+                tiles,
+                self.sizeMapping.streamKAtomic != 0,
+                self.sizeMapping.isPersistentDataParallel(),
+                reductionStrat,
+                [&] { return streamKUsesDynamicQueue(self.sizeMapping, sk5DynamicSubMode()); },
+                analyticalHardwareOf(hardware),
+                self.kernelName.c_str(),
+                Debug::Instance().printPropertyEvaluation());
         }
     } // namespace
+
+    bool hasDefaultPersistentSettings(Hardware const& hardware)
+    {
+        auto const* device = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+        return device != nullptr && device->analyticalHardware != nullptr
+               && device->persistentFixedGrid <= 0
+               && device->persistentDynamicGrid
+                      == static_cast<int>(origami::grid_selection_t::k_split_aware)
+               && device->persistentMaxCUs <= 0;
+    }
+
+    DefaultPersistentLaunchDebug defaultPersistentLaunchDebug()
+    {
+        Debug const& debug = Debug::Instance();
+        return {.streamK5ForceMode         = debug.streamK5ForceMode(),
+                .printStreamKModeSelection = debug.printStreamKModeSelection(),
+                .printPropertyEvaluation   = debug.printPropertyEvaluation()};
+    }
+
+    bool ContractionSolution::followsDefaultPersistentLaunch() const
+    {
+        return (sizeMapping.isStreamK() || sizeMapping.isPersistentDataParallel())
+               && !handwrittenCustomKernel()
+               && !(sizeMapping.isPersistentDataParallel()
+                    && sizeMapping.clusterDim.x * sizeMapping.clusterDim.y > 1);
+    }
+
+    origami::config_t ContractionSolution::persistentLaunchConfig() const
+    {
+        return {
+            .mt                = {static_cast<size_t>(sizeMapping.macroTile.x),
+                                  static_cast<size_t>(sizeMapping.macroTile.y),
+                                  static_cast<size_t>(sizeMapping.depthU)},
+            .mi                = {static_cast<size_t>(sizeMapping.matrixInstruction[0]),
+                                  static_cast<size_t>(sizeMapping.matrixInstruction[1]),
+                                  static_cast<size_t>(sizeMapping.matrixInstruction[2])},
+            .occupancy         = std::max(sizeMapping.CUOccupancy, static_cast<int>(1)),
+            .workgroup_mapping = sizeMapping.workGroupMapping,
+            .workspace_size_per_elem_c
+            = sizeMapping.isPersistentDataParallel()
+                  ? static_cast<size_t>(DataTypeInfo::Get(problemType.computeType).elementSize)
+                  : sizeMapping.workspaceSizePerElemC,
+        };
+    }
+
+    bool ContractionSolution::decidesDefaultPersistentLaunch(Problem const&  problem,
+                                                             Hardware const& hardware) const
+    {
+        return !problem.getParams().uniformSummationOrder() && followsDefaultPersistentLaunch()
+               && hasDefaultPersistentSettings(hardware);
+    }
+
+    DefaultPersistentLaunch
+        ContractionSolution::resolveDefaultLaunch(Problem const&  problem,
+                                                  Hardware const& hardware,
+                                                  size_t          tiles,
+                                                  bool const*     effectiveDynamicHint) const
+    {
+        origami::config_t const  config = persistentLaunchConfig();
+        origami::problem_t const shape  = origamiShape(problem, 0);
+
+        DefaultPersistentLaunchInputs in;
+        in.m                = shape.size.m;
+        in.n                = shape.size.n;
+        in.k                = shape.size.k;
+        in.batch            = shape.batch;
+        in.transA           = problem.transA();
+        in.transB           = problem.transB();
+        in.aType            = problem.a().dataType();
+        in.bType            = problem.b().dataType();
+        in.computeInputType = problem.computeInputTypeA();
+        in.tiles            = tiles;
+        in.itersPerTile     = problem.getItersPerTile(sizeMapping);
+        in.workspaceSize    = problem.workspaceSize();
+        in.smCountTarget    = problem.getParams().smCountTarget();
+        in.schedulingMode   = problem.getParams().streamKTileSchedulingMode();
+        in.kernel           = &config;
+        in.threads          = sizeMapping.workGroupSize.x * sizeMapping.workGroupSize.y
+                     * sizeMapping.workGroupSize.z;
+        in.occupancy        = sizeMapping.CUOccupancy;
+        in.workAssignment   = sizeMapping.workAssignment;
+        in.streamK          = sizeMapping.isStreamK();
+        in.atomic           = sizeMapping.streamKAtomic != 0;
+        in.kernelName       = kernelName.c_str();
+        in.hardware         = analyticalHardwareOf(hardware);
+        in.computeUnits     = dynamic_cast<AMDGPU const&>(hardware).computeUnitCount;
+        in.effectiveDynamic = effectiveDynamicHint;
+        in.debug            = defaultPersistentLaunchDebug();
+        return TensileLite::resolveDefaultPersistentLaunch(in);
+    }
 
     size_t ContractionSolution::getSKGrid(Problem const&       problem,
                                           Hardware const&      hardware,
