@@ -2730,4 +2730,62 @@ namespace
             << "parallel never reaches the flags; the bound must not shrink its grid";
     }
 
+    // Dynamic work-queue StreamK decomposition (streamKDynamicSplit). Pure
+    // function: the arg packers, grid, workspace query and launch summary all
+    // read it, so it is pinned down here case by case.
+    TensileLite::StreamKDynamicSplitInputs dynamicSplitInputs(size_t tiles, size_t itersPerTile)
+    {
+        TensileLite::StreamKDynamicSplitInputs in;
+        in.tiles            = tiles;
+        in.itersPerTile     = itersPerTile;
+        in.maxGrid          = 256;
+        in.flagSlots        = 1792;
+        in.workspaceBytes   = size_t{1} << 30;
+        in.partialTileBytes = 192 * 224 * 4;
+        return in;
+    }
+
+    TEST(StreamKDynamicSplit_pre_checkin, TilesStayWholeByDefault)
+    {
+        const auto d = TensileLite::streamKDynamicSplit(dynamicSplitInputs(300, 128));
+        EXPECT_EQ(d.skTiles, 0u);
+        // The historical packing for whole tiles: split 2 round-tripped.
+        EXPECT_EQ(d.skSplit, 2u);
+        EXPECT_EQ(d.skItersPerWI, 64u);
+        EXPECT_EQ(d.totalItems, 300u);
+        EXPECT_EQ(d.grid, 256u);
+        EXPECT_EQ(d.partialSlots(), 0u);
+
+        const auto e = TensileLite::streamKDynamicSplit(dynamicSplitInputs(1, 262144));
+        EXPECT_EQ(e.skTiles, 0u);
+        EXPECT_EQ(e.totalItems, 1u);
+        EXPECT_EQ(e.grid, 1u);
+    }
+
+    TEST(StreamKDynamicSplit_pre_checkin, DebugOverridesReplaceThePolicy)
+    {
+        auto in          = dynamicSplitInputs(1, 262144);
+        in.overrideTiles = 1;
+        in.overrideSplit = 64;
+        auto d           = TensileLite::streamKDynamicSplit(in);
+        EXPECT_EQ(d.skTiles, 1u);
+        EXPECT_EQ(d.skSplit, 64u);
+        EXPECT_EQ(d.totalItems, 64u);
+        EXPECT_EQ(d.grid, 64u);
+
+        // Split alone keeps the default of no stream-k tiles.
+        auto s          = dynamicSplitInputs(1, 262144);
+        s.overrideSplit = 64;
+        d               = TensileLite::streamKDynamicSplit(s);
+        EXPECT_EQ(d.skTiles, 0u);
+        EXPECT_EQ(d.skSplit, 64u);
+        EXPECT_EQ(d.totalItems, 1u);
+
+        // Partials that do not fit the workspace are not written past it.
+        in.workspaceBytes = 10 * in.partialTileBytes;
+        d                 = TensileLite::streamKDynamicSplit(in);
+        EXPECT_EQ(d.skTiles, 0u);
+        EXPECT_EQ(d.partialSlots(), 0u);
+    }
+
 } // namespace
