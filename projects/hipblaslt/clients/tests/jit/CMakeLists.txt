@@ -49,6 +49,9 @@ target_compile_definitions(hipblaslt-jit-source-bundle-test PRIVATE
 hipblaslt_jit_test(jit-source-bundle jit-cpu hipblaslt-jit-source-bundle-test)
 
 if(NOT HIPBLASLT_ENABLE_JIT)
+    add_executable(hipblaslt-jit-disabled-test disabled_api_test.cpp)
+    target_link_libraries(hipblaslt-jit-disabled-test PRIVATE roc::hipblaslt hip::host)
+    hipblaslt_jit_test(jit-disabled jit-cpu hipblaslt-jit-disabled-test)
     return()
 endif()
 

@@ -30,7 +30,7 @@ under `clients/tests/jit/scratch` in the build directory before it runs, except
 The CTest tests are:
 
 - `jit-cpu`: `jit-source-bundle` and `jit-builder`. A build with
-  `HIPBLASLT_ENABLE_JIT=OFF` has `jit-source-bundle`.
+  `HIPBLASLT_ENABLE_JIT=OFF` has `jit-source-bundle` and `jit-disabled`.
 - `jit-gpu`: `jit-publish` and `jit-loader`, when `GPU_TARGETS` include an
   architecture with committed assembly. CTest runs `jit-publish` before
   `jit-loader`. A build with `HIPBLASLT_ENABLE_YAML=ON` does not have them,
@@ -41,6 +41,7 @@ The CTest tests are:
 | CTest test | Behavior under test |
 | --- | --- |
 | `jit-source-bundle` | The source bundle reader: assembly, HIP sources and headers sorted by name, relative paths, symbolic links that escape the bundle, size limits, and a library entry that is missing, empty or not named `library/TensileLibrary.dat` |
+| `jit-disabled` | Built only with `HIPBLASLT_ENABLE_JIT=OFF`. The JIT headers are absent from the public include tree, `hipblaslt-ext.hpp` compiles without them, and the extension API links against the disabled library |
 | `jit-builder` | The comgr builder, without a GPU, building the hand-written HIP kernel `builder_test_kernel.hip` for each committed assembly target, then each assembly file linked with that kernel into one code object; each code object defines its kernels and has the builder's code-object version, and a kernel name it does not define fails the build |
 | `jit-publish` | Builds the device's committed assembly and publishes it into the JIT solution library: `plain` for K=512, and `plain-pair`'s two solutions for K=1024 and K=256. Indices are at least `2^30` |
 | `jit-loader` | Loads that library, finds each published solution and the pre-generated kernel, resolves the kernel from its code object, and finds nothing for a transposed A. An entry whose solutions are not 0 to N-1 is rejected. Launches no kernel |
