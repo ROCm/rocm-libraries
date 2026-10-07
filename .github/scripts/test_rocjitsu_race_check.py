@@ -24,6 +24,24 @@ def workflow_steps():
 
 
 class RaceCheckTests(unittest.TestCase):
+    def test_workflow_revision_matches_the_packaged_failure_list(self):
+        if "ROCM_PATH" in os.environ:
+            directory = (
+                Path(os.environ["ROCM_PATH"]) / "share/hipblaslt/tensilelite/rocjitsu"
+            )
+        else:
+            directory = (
+                Path(__file__).parents[2]
+                / "projects/hipblaslt/clients/scripts/rocjitsu"
+            )
+        failures = yaml.safe_load((directory / "known_failures.yaml").read_text())
+        checkout = next(
+            s
+            for s in workflow_steps()
+            if s["name"] == "Checkout rocm-systems for rocjitsu"
+        )
+        self.assertEqual(checkout["with"]["ref"], failures["rocjitsu_revision"])
+
     def test_bench_yaml_helper_uses_active_python(self):
         # CI exercises the installed helper; local source checks need no GPU build.
         if "ROCM_PATH" in os.environ:
@@ -152,10 +170,12 @@ TENSILELITE_CLIENT=client
 HIPBLASLT_BENCH=bench
 ROCJITSU_SWEEP_SEED=pr-revision
 ROCJITSU_CONFIG=config
+ROCJITSU_REVISION=detector-revision
 ROCJITSU_GPU_TARGET=gfx942
 ROCM_PATH=artifact
 RACE_REPORT_DIR=reports
 SWEEP_DRIVER=artifact/sweep.py
+KNOWN_FAILURES=artifact/known_failures.yaml
 run_timed() { echo "STAGE: $1"; shift; "$@"; }
 python3() { printf 'ARG: %s\n' "$@"; if [[ "$3" == tensile ]]; then return "$TENSILE_SWEEP_STATUS"; else return "$BENCH_SWEEP_STATUS"; fi; }
 """
@@ -197,6 +217,8 @@ python3() { printf 'ARG: %s\n' "$@"; if [[ "$3" == tensile ]]; then return "$TEN
                     ("--target", "gfx942"),
                     ("--seed", "pr-revision"),
                     ("--suite-timeout", "1500"),
+                    ("--rocjitsu-revision", "detector-revision"),
+                    ("--known-failures", "artifact/known_failures.yaml"),
                 ]:
                     self.assertEqual(
                         result.stdout.count(f"ARG: {flag}\nARG: {value}\n"), 2

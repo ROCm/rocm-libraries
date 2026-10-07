@@ -1,0 +1,51 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Native indices apply only to the metadata and main code-object hashes below.
+# #12963 adds the instruction; #12964 makes unsupported instructions fail promptly.
+# Recheck with --run-known-failures and remove passing entries after a pin update.
+version: 1
+rocjitsu_revision: c5cc42b6c18f359bf1ee9c262212c2616a016a8c
+case_policy: tile-depth-v1
+failures:
+- id: gfx942-s-atomic-dec
+  reason: rocJITsu cannot execute s_atomic_dec. It emits an unimplemented-instruction warning,
+    then leaves the native client waiting until the process timeout.
+  tracking:
+  - https://github.com/ROCm/rocm-systems/pull/12963
+  - https://github.com/ROCm/rocm-systems/pull/12964
+  review_by: '2026-11-06'
+  target: gfx942
+  backends:
+  - tensile
+  - bench
+  cases:
+  - tile
+  - multi_tile
+  - mn_edge
+  - k_remainder
+  solutions:
+  - index: 269865
+    metadata_sha256: 96d12e1c959dc2860fac002549aa188c0d181e395e74c6a569463ca474d4de8e
+    code_object_sha256: 11c2da1fcca1b0f00aaf21aa1502ebcbdab7cf65103e3c350248d113133943f5
+  - index: 272220
+    metadata_sha256: 86e85d651ddb5f67b8c6b8df06cdcc2071ecbd9ae550b64892b934f4dfa24d74
+    code_object_sha256: 58c0b0f5e9e5859b7bf4a7b794dc2b88a3b67933bf33c906e974b9fed57e43ae
+  - index: 312365
+    metadata_sha256: 4b47f7c7801be125ef3964fc8aa76b415b4815dececeddec486319e3c16a4446
+    code_object_sha256: 5dc50133ceeec10f6749ab40ef99a05e0a5d95f8f7b7ae5f7c5036acc2e9bb73
+  - index: 313496
+    metadata_sha256: 4b47f7c7801be125ef3964fc8aa76b415b4815dececeddec486319e3c16a4446
+    code_object_sha256: 5dc50133ceeec10f6749ab40ef99a05e0a5d95f8f7b7ae5f7c5036acc2e9bb73
+  - index: 315833
+    metadata_sha256: 4b47f7c7801be125ef3964fc8aa76b415b4815dececeddec486319e3c16a4446
+    code_object_sha256: 5dc50133ceeec10f6749ab40ef99a05e0a5d95f8f7b7ae5f7c5036acc2e9bb73
+  - index: 332717
+    metadata_sha256: 259884489612b2d66ef4abfb86e9772adf6e9d9126b32b9a8e15771bc2d16563
+    code_object_sha256: 935301d16cd3aa35f58f9c734bc896ea946da7f0adcc833de1d175f383e2d767
+  - index: 336905
+    metadata_sha256: 259884489612b2d66ef4abfb86e9772adf6e9d9126b32b9a8e15771bc2d16563
+    code_object_sha256: 935301d16cd3aa35f58f9c734bc896ea946da7f0adcc833de1d175f383e2d767
+  - index: 337843
+    metadata_sha256: 259884489612b2d66ef4abfb86e9772adf6e9d9126b32b9a8e15771bc2d16563
+    code_object_sha256: 935301d16cd3aa35f58f9c734bc896ea946da7f0adcc833de1d175f383e2d767
