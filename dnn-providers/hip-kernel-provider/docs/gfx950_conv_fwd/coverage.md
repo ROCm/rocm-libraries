@@ -41,11 +41,11 @@ The shipped catalog is checked on gfx950 by:
 
 | Check | What it establishes |
 |---|---|
-| Adapter and miner tests | The rocKE adapter accepts every catalog spec, refuses grouped pointwise, non-divisible group counts and grid-z overflow, and emits the same IR as the original builder for both families; implicit-GEMM symbols are unchanged by the family fields; the direct guard refuses the row-coverage cases, unequal stride or padding, dilation and channel multipliers; the miner admits grouped records and excludes grouped pointwise. |
-| Provider unit tests (`*Gfx950ConvFwd*`) | Graph refusal, every baked constraint of both families, grouped geometry (filter bytes over C/G, grid z over groups), the per-group epilogue rule, the direct row-coverage table and launch geometry, family consistency and placeholder checks, ranking, output validation and buffer nonaliasing. |
+| Adapter and miner tests | The rocKE adapter accepts every catalog spec, refuses grouped pointwise, non-divisible group counts and grid-z overflow, and emits the same IR as the original builder for both families; implicit-GEMM symbols are unchanged by the family fields; the direct guard refuses the row-coverage cases, unequal stride or padding, dilation and channel multipliers; the miner admits grouped records and excludes grouped pointwise. Each shipped binary is the IR rocKE emits for other problems with its capabilities, and the implicit-GEMM serving rule agrees with rocKE's `KernelCache.supports_problem`. |
+| Provider unit tests (`*Gfx950ConvFwd*`) | Graph refusal, every capability of both families (kernels built for other shapes serve, mismatched widths, code paths and filters refuse), grouped geometry (filter bytes over C/G, grid z over groups), the per-group epilogue rule, the direct row-coverage table and launch geometry, family consistency and placeholder checks, ranking, output validation and buffer nonaliasing. |
 | Census (`TestGfx950ConvFwdPacks`) | The packed gfx950 shard registers exactly the generated kernel inventory. |
 | Descriptor checks | `hkp_desk_check` and `verify_variant_sets` in full mode: every packaged binary agrees with its descriptor's compiled specialization, with one distinct TOC entry per variant. |
-| Provider GPU integration test | Every implicit-GEMM catalog variant, grouped and depthwise included, is forced for both `tile_k` values and compared with the CPU reference. Every direct variant is served from a winner record that ranks it first and compared with the CPU reference; an unforced plan serves the direct default; benchmarking measures both families and reuses its winner; the guarded depthwise graphs offer only `kernel_family=0` and stay correct. |
+| Provider GPU integration test | Every implicit-GEMM catalog variant, grouped and depthwise included, is forced for both `tile_k` values and compared with the CPU reference. On graphs no kernel was compiled for (dense, strided 5x5, pointwise, grouped pointwise, grouped, depthwise), every serving kernel is served in turn and compared with the CPU reference. Every direct kernel serving a catalog depthwise graph is served from a winner record that ranks it first and compared with the CPU reference; every graph's candidate count equals the adapter's; an unforced plan serves the direct default; benchmarking measures both families and reuses its winner; the guarded depthwise graphs offer only `kernel_family=0` and stay correct. |
 | Shared integration bundles | `quick/Gfx950ConvFwd/Smoke`, `standard/Gfx950ConvFwd/Spatial` and `standard/Gfx950ConvFwd/Depthwise` run through the exact engine name with `--fail-on-unsupported`. |
 
 Engine attribution is explicit: `hipkernel:Gfx950ConvFwd`
@@ -55,8 +55,9 @@ The installed descriptor loader emits its existing warnings for the optional
 
 ## Known gaps
 
-- Grouped pointwise convolution is declined: rocKE's pointwise shortcut
-  indexes the input and output without the group offset.
+- No kernel is built for grouped pointwise convolution: rocKE's pointwise
+  shortcut indexes the input and output without the group offset. Grouped
+  kernels built against a non-pointwise problem serve such graphs.
 - The direct depthwise family covers pure depthwise convolution only. Channel
   multipliers, unequal strides, unequal or asymmetric padding, dilation, and
   padding that leaves an output row or column outside the input stream all fall

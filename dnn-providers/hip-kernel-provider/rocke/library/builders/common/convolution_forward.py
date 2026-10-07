@@ -20,9 +20,13 @@ workspace; pointers must be 16-byte aligned and non-aliasing.
 The kernels are rocKE's AOT builds: the ABI is ``(A, B, D, A_bytes:i32,
 B_bytes:i32, D_bytes:i32)`` followed by the problem block of
 ``kernels.common.conv_abi`` (extents, strides, magic divisors and tile counts as
-i32 kernel arguments). Each packaged kernel is still built for, and matched to,
-one exact problem: the builder keys code shape decisions (pointwise, grouping,
-load widths) on it. :meth:`Gfx950ConvFwdSpec.launch_signature` and
+i32 kernel arguments). A packaged kernel is built for one problem, but it
+computes every problem its build-time capabilities admit, and the native pack
+matches it to all of them. :func:`gfx950_conv_fwd_capabilities` reports what a
+binary keeps from its build problem (grouped and pointwise code paths, load and
+store widths; for the direct kernels the filter, stride and padding) and
+:func:`gfx950_conv_fwd_serves` decides a
+runtime problem against it. :meth:`Gfx950ConvFwdSpec.launch_signature` and
 :meth:`Gfx950ConvFwdSpec.launch_values` give the launch through rocKE's own
 ``ConvArgs``; the native pack mirrors them.
 
@@ -44,7 +48,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, fields, replace
 
 from dispatch.grouped_convolution import ConvGroupedRequest, dispatch_conv_grouped
 from rocke.core.ir import KernelDef
@@ -109,8 +113,8 @@ class Gfx950ConvFwdSpec:
     current defaults, or :func:`gfx950_conv_fwd_direct_spec_for_request` for a
     direct depthwise kernel. Direct construction is useful for descriptor
     hydration; :func:`supports_gfx950_conv_fwd` and the builder validate it
-    before emission. All geometry is compiled into the kernel and must match the
-    runtime graph.
+    before emission. The geometry is the build problem; the kernel takes the
+    runtime problem as AOT arguments (see :func:`gfx950_conv_fwd_serves`).
 
     The trailing family fields default to the implicit-GEMM family, so a spec
     serialized before they existed hydrates and hashes unchanged.
@@ -318,7 +322,16 @@ class Gfx950ConvFwdSpec:
         )
 
 
-def _problem_error(spec: Gfx950ConvFwdSpec) -> str:
+def _problem_error(
+    spec: Gfx950ConvFwdSpec, *, decline_grouped_pointwise: bool = True
+) -> str:
+    """The packaged contract's problem checks; "" when accepted.
+
+    A kernel is never built for a grouped pointwise problem (rocKE's pointwise
+    shortcut ignores groups), so that is declined by default. A runtime problem
+    passes ``decline_grouped_pointwise=False``: grouped binaries built against
+    a non-pointwise problem compute it through their descriptors.
+    """
     for name in ("N", "Hi", "Wi", "C", "K", "Y", "X", "sH", "sW", "dH", "dW"):
         value = getattr(spec, name)
         if type(value) is not int or not 0 < value <= _INT32_MAX:
@@ -345,7 +358,7 @@ def _problem_error(spec: Gfx950ConvFwdSpec) -> str:
     pointwise = (
         spec.Y == spec.X == 1 and spec.sH == spec.sW == 1 and spec.pH == spec.pW == 0
     )
-    if spec.groups > 1 and pointwise:
+    if decline_grouped_pointwise and spec.groups > 1 and pointwise:
         return (
             "grouped pointwise convolution (1x1 filter, stride 1, no padding) "
             "is not supported: the kernel's pointwise shortcut ignores groups"
@@ -658,3 +671,140 @@ def build_gfx950_conv_fwd(spec: Gfx950ConvFwdSpec, *, arch: str = _ARCH) -> Kern
             return _direct.build_direct_depthwise_spatial(instance, arch=arch)
         return _direct.build_direct_depthwise(instance, arch=arch)
     return _conv.build_implicit_gemm_conv(spec.to_instance_spec(), arch=arch)
+
+
+# ---------------------------------------------------------------------------
+# What a packaged binary computes at runtime
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Gfx950ConvFwdCapabilities:
+    """What a packaged binary keeps from the problem it was built for.
+
+    Implicit GEMM: ``load_width`` (A and B, along C/groups), ``store_width``
+    (the cshuffle store along K/groups; 1 for the scalar default epilogue),
+    and the ``pointwise`` and ``grouped`` code paths. Direct depthwise: the
+    compiled filter, stride and padding; batch, image and group count are
+    kernel arguments for both variants.
+    """
+
+    load_width: int = 0
+    store_width: int = 0
+    pointwise: bool = False
+    grouped: bool = False
+    filter_hw: tuple[int, int] = (0, 0)
+    stride_hw: tuple[int, int] = (0, 0)
+    pad_hw: tuple[int, int] = (0, 0)
+
+
+def _is_pointwise(spec: Gfx950ConvFwdSpec) -> bool:
+    return spec.Y == spec.X == 1 and spec.sH == spec.sW == 1 and spec.pH == spec.pW == 0
+
+
+def gfx950_conv_fwd_capabilities(spec: Gfx950ConvFwdSpec) -> Gfx950ConvFwdCapabilities:
+    """The build-time capabilities of the binary ``spec`` describes.
+
+    The widths are the ones rocKE's builder resolves for the build problem
+    (``_sync_load_vecs`` and ``default_vector_sizes``), so they are exactly what
+    the binary bakes in. The native pack's ``conv::implicitGemmCapabilities``
+    recomputes them from the same metadata.
+    """
+    if spec.is_direct:
+        return Gfx950ConvFwdCapabilities(
+            filter_hw=(spec.Y, spec.X),
+            stride_hw=(spec.sH, spec.sW),
+            pad_hw=(spec.pH, spec.pW),
+        )
+    instance = spec.to_instance_spec()
+    load_width, _ = _conv._sync_load_vecs(instance)
+    store_width = 1
+    if spec.epilogue == "cshuffle":
+        _, _, store_width = _conv.ImplicitGemmConvSpec.default_vector_sizes(
+            spec.C // spec.groups, spec.K // spec.groups, spec.dtype
+        )
+    return Gfx950ConvFwdCapabilities(
+        load_width=load_width,
+        store_width=store_width,
+        pointwise=_is_pointwise(spec),
+        grouped=spec.groups > 1,
+    )
+
+
+def gfx950_conv_fwd_serves(
+    spec: Gfx950ConvFwdSpec, problem: Gfx950ConvFwdSpec
+) -> tuple[bool, str]:
+    """Whether the binary ``spec`` describes computes ``problem``.
+
+    ``problem`` is read for its problem fields only. Implicit GEMM mirrors the
+    forward subset of rocKE's ``KernelCache.supports_problem``: the load width
+    divides C/groups, the store width K/groups, a grouped problem needs the
+    grouped code path (which computes groups == 1 too), and the pointwise GEMM
+    serves only pointwise problems. Direct depthwise needs the build's filter,
+    stride and padding, and the runtime problem must pass the direct guard. Both families then need a grid
+    and kernel arguments that fit.
+    """
+    error = _problem_error(problem, decline_grouped_pointwise=False)
+    if error:
+        return False, error
+    if problem.dtype != spec.dtype:
+        return False, f"dtype {problem.dtype} != kernel dtype {spec.dtype}"
+    caps = gfx950_conv_fwd_capabilities(spec)
+    if spec.is_direct:
+        runtime = replace(
+            spec, **{f.name: getattr(problem, f.name) for f in fields(_ProblemFields)}
+        )
+        error = _direct_error(runtime)
+        if error:
+            return False, error
+        for label, baked, actual in (
+            ("filter", caps.filter_hw, (problem.Y, problem.X)),
+            ("stride", caps.stride_hw, (problem.sH, problem.sW)),
+            ("padding", caps.pad_hw, (problem.pH, problem.pW)),
+        ):
+            if baked != actual:
+                return (
+                    False,
+                    f"direct kernel compiled for {label} {baked}, problem has {actual}",
+                )
+        return True, "ok"
+    cpg = problem.C // problem.groups
+    kpg = problem.K // problem.groups
+    if problem.groups > 1 and not caps.grouped:
+        return False, "kernel is ungrouped, problem is grouped"
+    if caps.pointwise and not _is_pointwise(problem):
+        return False, "kernel is the pointwise GEMM, problem is not pointwise"
+    if cpg % caps.load_width:
+        return False, f"cpg={cpg} not divisible by the load width {caps.load_width}"
+    if kpg % caps.store_width:
+        return False, f"kpg={kpg} not divisible by the store width {caps.store_width}"
+    if problem.Y * problem.X * cpg >= MUL24_REDUCTION_LIMIT:
+        return False, "the reduction extent Y*X*C/groups must stay below 2**23"
+    args = ConvArgs.from_problem(
+        problem.to_problem(), tile_m=spec.tile_m, tile_n=spec.tile_n
+    )
+    for axis, extent in zip("xyz", args.grid()):
+        if extent > _MAX_GRID_DIM:
+            return False, f"grid {axis} = {extent} exceeds {_MAX_GRID_DIM}"
+    return True, "ok"
+
+
+@dataclass(frozen=True)
+class _ProblemFields:
+    """The problem half of Gfx950ConvFwdSpec, for moving a runtime problem onto a
+    kernel's tuning."""
+
+    N: int
+    Hi: int
+    Wi: int
+    C: int
+    K: int
+    Y: int
+    X: int
+    sH: int
+    sW: int
+    pH: int
+    pW: int
+    dH: int
+    dW: int
+    groups: int
