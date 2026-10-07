@@ -1376,13 +1376,13 @@ function(hkp_product_offers_engine out_var engine)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_gfx950_conv_fwd_available(<out>)
-#   TRUE when this configuration actually ships the gfx950 forward-convolution bundle:
-#   the `product` pack target is wired, gfx950 is among the architectures it was wired
-#   for, and what that pack ships for gfx950 includes hipkernel:Gfx950ConvFwd. Same
-#   conjuncts, probe and fallback as hkp_gfx950_attention_dense_available() above.
+# _hkp_product_ships_for_gfx950(<out> <engine>)
+#   TRUE when this configuration actually ships <engine> for gfx950: the `product` pack
+#   target is wired, gfx950 is among the architectures it was wired for, and what that
+#   pack ships for gfx950 includes <engine>. Same conjuncts, probe and fallback as
+#   hkp_gfx950_attention_dense_available() above.
 # ---------------------------------------------------------------------------
-function(hkp_gfx950_conv_fwd_available out_var)
+function(_hkp_product_ships_for_gfx950 out_var engine)
     set(${out_var} FALSE PARENT_SCOPE)
 
     get_property(_labels GLOBAL PROPERTY HKP_PACK_LABELS)
@@ -1403,9 +1403,29 @@ function(hkp_gfx950_conv_fwd_available out_var)
 
     get_property(_shipped GLOBAL PROPERTY HKP_PACK_SHIPPED_ENGINES_product)
     _hkp_shipped_engines_for_arch(_engines "${_shipped}" gfx950)
-    if("hipkernel:Gfx950ConvFwd" IN_LIST _engines)
+    if("${engine}" IN_LIST _engines)
         set(${out_var} TRUE PARENT_SCOPE)
     endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_gfx950_conv_fwd_available(<out>)
+#   TRUE when this configuration actually ships the gfx950 forward-convolution bundle,
+#   hipkernel:Gfx950ConvFwd; see _hkp_product_ships_for_gfx950().
+# ---------------------------------------------------------------------------
+function(hkp_gfx950_conv_fwd_available out_var)
+    _hkp_product_ships_for_gfx950(_ships "hipkernel:Gfx950ConvFwd")
+    set(${out_var} "${_ships}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_gfx950_conv_fwd_aot_available(<out>)
+#   The same predicate for the shape-generic AOT-instance engine,
+#   hipkernel:Gfx950ConvFwdAot, which ships its own bundle.
+# ---------------------------------------------------------------------------
+function(hkp_gfx950_conv_fwd_aot_available out_var)
+    _hkp_product_ships_for_gfx950(_ships "hipkernel:Gfx950ConvFwdAot")
+    set(${out_var} "${_ships}" PARENT_SCOPE)
 endfunction()
 
 # ---------------------------------------------------------------------------

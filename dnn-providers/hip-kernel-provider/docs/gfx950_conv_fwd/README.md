@@ -54,6 +54,11 @@ served when at least one packaged kernel's capabilities admit it, whatever
 its batch, image size, channel counts, filter, stride, padding or dilation.
 3D, fused, channels-first, and other dtypes are integration gaps; they are not
 claims about rocKE's broader capabilities.
+
+Shape-generic AOT instances, each one rocKE `KernelIdentity` built once against
+the AOT sweep's probe problem rather than a catalog shape, ship as a separate
+engine, `hipkernel:Gfx950ConvFwdAot`; see [AOT instances](aot_instances.md).
+
 [Verification and coverage](coverage.md) records what the shipped catalog is
 verified against.
 

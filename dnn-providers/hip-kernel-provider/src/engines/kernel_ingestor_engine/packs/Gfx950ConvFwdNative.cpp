@@ -294,18 +294,24 @@ std::optional<conv::Problem> buildProblem(const KernelDefinition& kernel)
     return problem;
 }
 
+/// Whether @p kernel's implicit-GEMM pipeline has the launch this pack computes. These
+/// pipelines all launch warp_m * warp_n * 64 threads over an (N-tiles, M-tiles, groups)
+/// grid with static LDS; "wavelet" appends load waves and is not accepted.
+bool hasReviewedPipeline(const KernelDefinition& kernel)
+{
+    const auto* pipelineName = stringMetadata(kernel, "pipeline");
+    return pipelineName != nullptr
+           && (*pipelineName == "mem" || *pipelineName == "compv3" || *pipelineName == "compv4"
+               || *pipelineName == "basic");
+}
+
 std::optional<ConvLaunch> implicitGemmLaunch(const MatchedProblem& matched,
                                              const KernelDefinition& kernel,
                                              const conv::Problem& build)
 {
-    // What stays reviewed here is the launch contract and the binary's capabilities. These
-    // pipelines all launch warp_m * warp_n * 64 threads over an (N-tiles, M-tiles, groups)
-    // grid with static LDS; "wavelet" appends load waves and is not accepted.
+    // What stays reviewed here is the launch contract and the binary's capabilities.
     const auto& p = matched.problem;
-    const auto* pipelineName = stringMetadata(kernel, "pipeline");
-    if(pipelineName == nullptr
-       || (*pipelineName != "mem" && *pipelineName != "compv3" && *pipelineName != "compv4"
-           && *pipelineName != "basic"))
+    if(!hasReviewedPipeline(kernel))
     {
         return std::nullopt;
     }
@@ -534,6 +540,133 @@ double
     return (metadataEquals(kernel, "tile_k", int64_t{64}) ? 2.0 : 1.0) + bonus;
 }
 
+// ---- hipkernel:Gfx950ConvFwdAot: shape-generic AOT instances ----
+//
+// Each kernel is one rocKE forward KernelIdentity: its metadata holds tuning and
+// capability fields only, and the problem reaches the kernel as AOT arguments computed
+// from the graph. Matching is therefore a capability check (conv::aotInstanceLaunch),
+// not an equality on the geometry.
+
+constexpr std::string_view AOT_GRAPH_MATCHER_SYMBOL = "hipkernel.gfx950_conv_fwd_aot.graph_match";
+constexpr std::string_view AOT_KERNEL_MATCHER_SYMBOL = "hipkernel.gfx950_conv_fwd_aot.kernel_match";
+constexpr std::string_view AOT_SCORE_SYMBOL = "hipkernel.gfx950_conv_fwd_aot.score";
+constexpr std::string_view AOT_DISPATCH_SYMBOL = "hipkernel.gfx950_conv_fwd_aot.dispatch";
+
+/// Integer instance fields; supports_gfx950_conv_fwd_aot validated every one at build.
+constexpr std::array<const char*, 13> AOT_INT_FIELDS{"tile_m",
+                                                     "tile_n",
+                                                     "tile_k",
+                                                     "warp_m",
+                                                     "warp_n",
+                                                     "warp_tile_m",
+                                                     "warp_tile_n",
+                                                     "warp_tile_k",
+                                                     "vector_size_a",
+                                                     "vector_size_b",
+                                                     "vector_size_c",
+                                                     "async_chunk_a",
+                                                     "async_chunk_b"};
+
+/// The instance @p kernel describes, when its metadata is a complete instance with a
+/// launch contract this pack reviewed: wave64, a reviewed pipeline (unroll_k and
+/// async_dma change only the K loop), and a default or cshuffle epilogue. Unlike the
+/// exact-shape engine, the store width is the identity's vector_size_c, not derived.
+std::optional<conv::AotInstance> aotInstance(const KernelDefinition& kernel)
+{
+    if(kernel.source.kind != KernelSourceKind::KPACK
+       || !metadataEquals(kernel, "layout", std::string("NHWC"))
+       || !metadataEquals(kernel, "wave_size", int64_t{64}) || !hasReviewedPipeline(kernel)
+       || (!metadataEquals(kernel, "epilogue", std::string("default"))
+           && !metadataEquals(kernel, "epilogue", std::string("cshuffle"))))
+    {
+        return std::nullopt;
+    }
+    std::array<int64_t, AOT_INT_FIELDS.size()> values{};
+    for(size_t i = 0; i < AOT_INT_FIELDS.size(); ++i)
+    {
+        const auto value = intMetadata(kernel, AOT_INT_FIELDS[i]);
+        // Every field but the async chunk widths is positive; those are 0 without async.
+        if(!value || *value < (i >= 11 ? 0 : 1))
+        {
+            return std::nullopt;
+        }
+        values[i] = *value;
+    }
+    std::array<bool, 3> flags{};
+    const std::array<const char*, 3> flagFields{"unroll_k", "async_dma", "grouped"};
+    for(size_t i = 0; i < flagFields.size(); ++i)
+    {
+        const auto value = intMetadata(kernel, flagFields[i]);
+        if(!value || (*value != 0 && *value != 1))
+        {
+            return std::nullopt;
+        }
+        flags[i] = *value == 1;
+    }
+    return conv::AotInstance{values[0],
+                             values[1],
+                             values[3],
+                             values[4],
+                             values[8],
+                             values[9],
+                             values[10],
+                             flags[1],
+                             values[11],
+                             values[12],
+                             flags[2]};
+}
+
+std::optional<ConvLaunch> aotKernelFits(const MatchedProblem& matched,
+                                        const KernelDefinition& kernel)
+{
+    const std::string dtype = matched.dtype == data_objects::DataType::HALF ? "fp16" : "bf16";
+    const auto instance = aotInstance(kernel);
+    if(!instance || !metadataEquals(kernel, "dtype", dtype))
+    {
+        return std::nullopt;
+    }
+    const auto launch = conv::aotInstanceLaunch(matched.problem, matched.geometry, *instance);
+    const auto kernargs
+        = launch ? conv::implicitGemmKernargs(matched.problem, matched.geometry, *launch)
+                 : std::nullopt;
+    if(!kernargs)
+    {
+        return std::nullopt;
+    }
+    return ConvLaunch{*launch, *kernargs};
+}
+
+bool aotKernelMatches(const MatchContext& context,
+                      const BoundTokens& /*bound*/,
+                      const KernelDefinition& kernel)
+{
+    const auto matched = matchProblem(context);
+    return matched && aotKernelFits(*matched, kernel).has_value();
+}
+
+double aotScore(const MatchContext& context,
+                const BoundTokens& /*bound*/,
+                const KernelDefinition& kernel)
+{
+    // Deterministic fallback only; see conv::aotInstanceScore. Only kernels the kernel
+    // matcher admitted are scored, so a refusal here is a contract violation, ranked last.
+    const auto matched = matchProblem(context);
+    const auto instance = aotInstance(kernel);
+    const auto launch
+        = matched && instance
+              ? conv::aotInstanceLaunch(matched->problem, matched->geometry, *instance)
+              : std::nullopt;
+    if(!launch)
+    {
+        return -1.0;
+    }
+    return conv::aotInstanceScore(matched->problem, matched->geometry, *instance, *launch);
+}
+
+/// How one engine of this pack admits a kernel for a matched graph and launches it:
+/// kernelFits for hipkernel:Gfx950ConvFwd, aotKernelFits for hipkernel:Gfx950ConvFwdAot.
+using KernelFits = std::optional<ConvLaunch> (*)(const MatchedProblem&, const KernelDefinition&);
+
 void requireBindings(const BoundTokens& bound, const Binding& binding)
 {
     if(tryGetBoundInt(bound, X_TOKEN) != std::optional<int64_t>(binding.x)
@@ -644,8 +777,9 @@ private:
 class ConvFwdDispatchHandler : public IKernelDispatchHandler<Handle>
 {
 public:
-    explicit ConvFwdDispatchHandler(const compilation::KpackKernelLoader& loader)
+    ConvFwdDispatchHandler(const compilation::KpackKernelLoader& loader, KernelFits fits)
         : _loader(loader)
+        , _fits(fits)
     {
     }
 
@@ -663,7 +797,7 @@ public:
                                               const KernelDefinition& kernel) const override
     {
         const auto matched = matchProblem(context);
-        const auto launch = matched ? kernelFits(*matched, kernel) : std::nullopt;
+        const auto launch = matched ? _fits(*matched, kernel) : std::nullopt;
         if(!launch)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -674,12 +808,12 @@ public:
         requireBindings(bound, matched->binding);
         requireOutput(context, *matched);
 
-        // This pack ships prebuilt code objects only; kernelFits already refused every
+        // This pack ships prebuilt code objects only; _fits already refused every
         // other source kind. Each family has its own ABI, so the signature follows it.
         auto code
             = buildIngestorKernelCode(_loader, context, kernel, kernelSignature(launch->kernargs));
-        // kernelFits computed this family's launch for this exact geometry before loading
-        // the archive. Neither family uses dynamic LDS.
+        // _fits computed this kernel's launch for this graph's geometry before
+        // loading the archive. No kernel of this pack uses dynamic LDS.
         code.setBlockSize(launch->geometry.blockX, 1, 1);
         code.setGridSize(launch->geometry.gridX, launch->geometry.gridY, launch->geometry.gridZ);
         code.setSharedMemBytes(0);
@@ -749,6 +883,7 @@ public:
 
 private:
     const compilation::KpackKernelLoader& _loader;
+    KernelFits _fits;
 };
 
 const ConvFwdDispatchHandler& dispatchHandler()
@@ -756,7 +891,14 @@ const ConvFwdDispatchHandler& dispatchHandler()
     // The registries retain non-owning pointers; both dependencies live for the
     // process, including across provider handle destruction and recreation.
     static const compilation::KpackKernelLoader s_loader(gfx950ConvFwdKpackModuleCache());
-    static const ConvFwdDispatchHandler s_handler(s_loader);
+    static const ConvFwdDispatchHandler s_handler(s_loader, &kernelFits);
+    return s_handler;
+}
+
+const ConvFwdDispatchHandler& aotDispatchHandler()
+{
+    static const compilation::KpackKernelLoader s_loader(gfx950ConvFwdAotKpackModuleCache());
+    static const ConvFwdDispatchHandler s_handler(s_loader, &aotKernelFits);
     return s_handler;
 }
 
@@ -779,6 +921,26 @@ void registerGfx950ConvFwdSymbols(SymbolScope<Handle>& scope)
 void resetGfx950ConvFwdModuleCache()
 {
     gfx950ConvFwdKpackModuleCache().clear();
+}
+
+compilation::KpackModuleCache& gfx950ConvFwdAotKpackModuleCache()
+{
+    static compilation::KpackModuleCache s_moduleCache;
+    return s_moduleCache;
+}
+
+void registerGfx950ConvFwdAotSymbols(SymbolScope<Handle>& scope)
+{
+    // Both engines read the graph the same way; only the kernels they admit differ.
+    scope.add(std::string(AOT_GRAPH_MATCHER_SYMBOL), &graphMatches);
+    scope.add(std::string(AOT_KERNEL_MATCHER_SYMBOL), &aotKernelMatches);
+    scope.add(std::string(AOT_SCORE_SYMBOL), &aotScore);
+    scope.add(std::string(AOT_DISPATCH_SYMBOL), &aotDispatchHandler());
+}
+
+void resetGfx950ConvFwdAotModuleCache()
+{
+    gfx950ConvFwdAotKpackModuleCache().clear();
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine
