@@ -82,11 +82,52 @@ class ArchDomain:
     """One committed column -- a single LLVM flavor, every key, every target."""
 
     def __init__(self, flavor: str, doc: dict) -> None:
+        # This is the trust boundary, so the shape is checked rather than
+        # defaulted. Accepting a document that merely parses -- `{}`, a v2
+        # column, something else entirely -- would hand back an ArchDomain
+        # whose every lookup returns None, and None is this module's word for
+        # "not measured". A corrupt or mismatched artifact would therefore
+        # present as a complete absence of data and switch the whole warning
+        # lane off in silence, which is the one failure the lane exists to
+        # prevent. `load` already refuses to swallow a parse error for the same
+        # reason; a wrong schema is the same defect one layer up.
+        #
+        # Only the envelope is checked. Per-cell vocabulary is not: `lookup`
+        # hands back the status string and `is_negative` compares it for
+        # equality, so an unrecognised status is already inert, and
+        # `tests/core/test_arch_domain_artifact.py` gates the committed columns
+        # cell by cell. Re-validating 1000+ cells on every import would buy
+        # nothing and would reject a future column that adds a status this
+        # vintage has not heard of -- a forward-compatible change the schema
+        # string is there to version.
+        # ValueError, not TypeError, throughout: the caller did not pass the
+        # wrong kind of thing, the committed artifact says the wrong thing.
+        # One exception type for all three checks also means a caller that
+        # wants to report a bad column has one thing to catch.
+        if not isinstance(doc, dict):
+            raise ValueError(  # noqa: TRY004
+                f"arch-domain column for {flavor} is a {type(doc).__name__}, "
+                "not a JSON object"
+            )
+        schema = doc.get("schema", "")
+        if schema != SCHEMA:
+            raise ValueError(
+                f"arch-domain column for {flavor} declares schema "
+                f"{schema!r}, expected {SCHEMA!r}. The artifact is corrupt or "
+                "was written by a different rocke; regenerate it with "
+                "tools/gen_arch_domain.py."
+            )
+        keys = doc.get("keys")
+        if not isinstance(keys, dict):
+            raise ValueError(  # noqa: TRY004 -- see above
+                f"arch-domain column for {flavor} has no `keys` mapping "
+                f"(found {type(keys).__name__}); nothing was measured."
+            )
         self.flavor = flavor
-        self.schema: str = doc.get("schema", "")
+        self.schema: str = schema
         self.toolchain: dict[str, object] = doc.get("toolchain", {})
         self.canonical: dict[str, str] = doc.get("canonical", {})
-        self._keys: dict[str, dict[str, dict]] = doc.get("keys", {})
+        self._keys: dict[str, dict[str, dict]] = keys
 
     def lookup(self, key: str, arch: str) -> Cell | None:
         """The cell for ``(key, arch)``, or ``None`` when it was not measured.

@@ -109,6 +109,37 @@ def test_unknown_key_and_unknown_arch_are_no_data() -> None:
     assert table.lookup(known_key, "gfx-not-a-target") is None
 
 
+def test_a_malformed_column_is_rejected_not_emptied() -> None:
+    """A wrong document must not become an empty table.
+
+    ``None`` from :func:`lookup` is this module's word for "not measured", so
+    a column that parses as JSON but is not *this* schema -- ``{}``, a future
+    v2, a different artifact entirely -- would hand back an ``ArchDomain``
+    whose every lookup says no-data. The lane would switch itself off for
+    everyone and report nothing, which is precisely the silent failure it
+    exists to prevent. ``load`` already lets a JSON parse error propagate for
+    the same reason; a wrong schema is that defect one layer up.
+    """
+    for doc in (
+        {},
+        [],
+        {"keys": {}},  # no schema at all
+        {"schema": "rocke.intrinsic_arch_domain/v2", "keys": {}},
+        {"schema": arch_domain.SCHEMA},  # schema but nothing measured
+        {"schema": arch_domain.SCHEMA, "keys": []},
+    ):
+        with pytest.raises(ValueError):
+            arch_domain.ArchDomain("llvm22", doc)
+
+
+def test_every_committed_column_declares_the_schema_it_is() -> None:
+    """The check above is only worth having if the real columns pass it."""
+    for flavor in _committed_flavors():
+        table = arch_domain.load(flavor)
+        assert table is not None
+        assert table.schema == arch_domain.SCHEMA
+
+
 def test_load_is_cached() -> None:
     """The lookup sits on the hot path of every intrinsic demand; re-reading and
     re-parsing a ~1000-cell column per demand would be felt."""
@@ -252,6 +283,44 @@ def test_lane_can_be_switched_off(monkeypatch: pytest.MonkeyPatch) -> None:
         warnings.simplefilter("always")
         lower_kernel_to_llvm(_a_kernel(), arch="gfx950")
     assert not [w for w in caught if isinstance(w.message, ArchDomainWarning)]
+
+
+def test_the_off_switch_is_case_insensitive(monkeypatch: pytest.MonkeyPatch) -> None:
+    from rocke.core.lower_llvm import _ARCH_DOMAIN_ENV, _arch_domain_mode
+
+    for raw in ("off", "OFF", " Off "):
+        monkeypatch.setenv(_ARCH_DOMAIN_ENV, raw)
+        assert _arch_domain_mode() == "off", raw
+
+
+def test_an_unset_or_empty_lane_setting_warns(monkeypatch: pytest.MonkeyPatch) -> None:
+    from rocke.core.lower_llvm import _ARCH_DOMAIN_ENV, _arch_domain_mode
+
+    monkeypatch.delenv(_ARCH_DOMAIN_ENV, raising=False)
+    assert _arch_domain_mode() == "warn"
+    monkeypatch.setenv(_ARCH_DOMAIN_ENV, "")
+    assert _arch_domain_mode() == "warn"
+
+
+def test_a_misspelled_lane_setting_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Falling back to the default here does the opposite of what was asked.
+
+    Every plausible way to get this wrong -- ``0``, ``false``, ``no``, a
+    typo -- is somebody trying to turn the lane *off*. Matching only the exact
+    string ``off`` and silently warning for everything else leaves the lane on
+    while the developer believes it is off, and this variable exists precisely
+    to be the escape hatch when the lane is wrong. An escape hatch that
+    quietly does not open is worse than none.
+    """
+    from rocke.core.lower_llvm import _ARCH_DOMAIN_ENV, _arch_domain_mode
+
+    # `error` is a planned third mode, not a current one. It belongs here
+    # until it exists: the day it is added, this line is the reminder that
+    # `_ARCH_DOMAIN_MODES` has to learn about it too.
+    for raw in ("0", "1", "false", "no", "offf", "on", "warning", "error"):
+        monkeypatch.setenv(_ARCH_DOMAIN_ENV, raw)
+        with pytest.raises(ValueError, match=_ARCH_DOMAIN_ENV):
+            _arch_domain_mode()
 
 
 # --------------------------------------------------------------------------
