@@ -163,6 +163,17 @@ function(_hkp_disabled_kinds out_var enable_rocke)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# _hkp_disabled_kind_names(<out_var> <enable_rocke>)
+#   The bare kind names of _hkp_disabled_kinds(), the form the packer's --disable-kind
+#   and load_flat_input(disabled_kinds=) take. Every consumer of the list reads it here.
+# ---------------------------------------------------------------------------
+function(_hkp_disabled_kind_names out_var enable_rocke)
+    _hkp_disabled_kinds(_pairs "${enable_rocke}")
+    list(TRANSFORM _pairs REPLACE "=.*$" "")
+    set(${out_var} "${_pairs}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
 # _hkp_pack_producer()
 #   Resolve the producer half of one pack step into the caller's scope:
 #
@@ -205,10 +216,9 @@ function(_hkp_pack_producer)
             "${Python3_EXECUTABLE}" "${HKP_TOOL}" PARENT_SCOPE)
         # A kind whose producer this build never made prunes like an arch-pruned UKD
         # rather than reaching a producer that does not exist.
-        _hkp_disabled_kinds(_disabled_pairs "${ARG_ENABLE_ROCKE}")
+        _hkp_disabled_kind_names(_kinds "${ARG_ENABLE_ROCKE}")
         set(_disable_args "")
-        foreach(_pair IN LISTS _disabled_pairs)
-            string(REGEX REPLACE "=.*$" "" _kind "${_pair}")
+        foreach(_kind IN LISTS _kinds)
             list(APPEND _disable_args --disable-kind "${_kind}")
         endforeach()
         set(_producer_arg ${_disable_args} PARENT_SCOPE)
@@ -1569,11 +1579,7 @@ function(_hkp_wire_root)
     if(NOT W_SOURCE_ROOT)
         set(_reason "empty-root")
     else()
-        set(_kinds "")
-        foreach(_pair IN LISTS _disabled_pairs)
-            string(REGEX REPLACE "=.*$" "" _kind "${_pair}")
-            list(APPEND _kinds "${_kind}")
-        endforeach()
+        _hkp_disabled_kind_names(_kinds "${W_ENABLE_ROCKE}")
         _hkp_root_probe(_shipped _offered _probe_ok "${W_SOURCE_ROOT}" "${W_ARCHES}"
                         "${W_EXCLUDE_FOLDERS}" "${_kinds}")
         set_property(GLOBAL PROPERTY HKP_PACK_PROBE_OK_${W_NAME} "${_probe_ok}")

@@ -342,16 +342,16 @@ function(hkp_load_packaging_probes rocm_kpack_dir hipcc rocke_comgr_lib)
     set_property(GLOBAL PROPERTY HKP_PROBE_HIPCC "${hipcc}")
     set_property(GLOBAL PROPERTY HKP_PROBE_COMGR_LIB "${rocke_comgr_lib}")
     set_property(GLOBAL PROPERTY HKP_PROBE_ROOT_ARGS "${ARGN}")
-    # The filters the production pack runs under: derive and the arch listing read the
-    # root under them, so what a probe expects is what its pack ships.
-    _hkp_disabled_families(_exclude_folders)
-    _hkp_disabled_kinds(_disabled_pairs "${HIPKERNELPROVIDER_ENABLE_ROCKE}")
+    # The filters the production roots were wired with, read from those very arguments:
+    # derive and the arch listing see the root as the pack step does, so what a probe
+    # expects is what its pack ships.
+    cmake_parse_arguments(_F "" "ENABLE_ROCKE" "EXCLUDE_FOLDERS" ${ARGN})
+    _hkp_disabled_kind_names(_kinds "${_F_ENABLE_ROCKE}")
     set(_filter_args "")
-    foreach(_folder IN LISTS _exclude_folders)
+    foreach(_folder IN LISTS _F_EXCLUDE_FOLDERS)
         list(APPEND _filter_args --exclude-folder "${_folder}")
     endforeach()
-    foreach(_pair IN LISTS _disabled_pairs)
-        string(REGEX REPLACE "=.*$" "" _kind "${_pair}")
+    foreach(_kind IN LISTS _kinds)
         list(APPEND _filter_args --disable-kind "${_kind}")
     endforeach()
     set_property(GLOBAL PROPERTY HKP_PROBE_FILTER_ARGS "${_filter_args}")
