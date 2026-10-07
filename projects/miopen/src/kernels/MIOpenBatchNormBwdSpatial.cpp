@@ -411,6 +411,11 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
         unsigned int lid   = threadIdx.x;
         unsigned int grpid = blockIdx.x;
         unsigned int chwid = grpid * mio_bn_config::hw;
+        FpPrecType curN    = cast<FpPrecType>(0.);
+
+        unsigned int index = 0;
+        unsigned int nidx  = 0;
+        unsigned int hwidx = 0;
 
         pscale = bnScale[grpid];
 #if(MIOPEN_NRN_OP_ID > 0)
@@ -420,69 +425,130 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
 #if(MIO_BN_USESAVED == 0)
         //==== CALC MEAN and VARIANCE ONCE AGAIN =======================
         FpPrecType variance = 0;
-        if constexpr(!mio_config::layout_nhwc && mio_bn_config::hw >= 4096)
+        if constexpr(!mio_config::layout_nhwc && mio_bn_config::hw >= 4096 &&
+                     mio_bn_config::hw % 4 == 0)
         {
-            fp_prec_read_vec_type read4;
-            for(unsigned int k = lid << 2; k < less4; k += grprd)
-            {
-                read4 = cast<fp_prec_read_vec_type>(
-                    *(reinterpret_cast<const fp_read_vec_type*>(x_in + getTensorIndex(k))));
-                miopen::batchnorm::_accumulate(mean, read4);
-                miopen::batchnorm::_accumulate_mad(variance, read4, read4);
-            }
+            using fp_type4 = typename mapped_vector_type<FpType, 4>::type;
+            fp_type4 read4;
 
-            if constexpr(rem4 > 0)
-            {
-                if(lid < rem4)
+            static_unroll_count<unsigned int, 0, less4, grprd, 2>{[&](unsigned int k) {
+                if((k + (lid << 2)) < less4)
                 {
-                    unsigned int index = getTensorIndex((lid << 2) + less4);
-                    if(index + read_size - 1 < mio_bn_config::nchw)
-                    {
-                        read4 = cast<fp_prec_read_vec_type>(
-                            *(reinterpret_cast<const fp_read_vec_type*>(x_in + index)));
-                        miopen::batchnorm::_accumulate(mean, read4);
-                        miopen::batchnorm::_accumulate_mad(variance, read4, read4);
-                    }
+                    nidx  = (k + (lid << 2)) / mio_bn_config::hw;
+                    hwidx = (k + (lid << 2)) - (nidx * mio_bn_config::hw);
+                    index = nidx * mio_bn_config::chw + chwid + hwidx;
+                    read4 = *(reinterpret_cast<const fp_type4*>(x_in + index));
+                    typename mapped_vector_type<FpPrecType, 4>::type read4Prec =
+                        cast<typename mapped_vector_type<FpPrecType, 4>::type>(read4);
+
+                    miopen::reduction::welford_step_unroll4(read4Prec, mean, variance, curN);
+                }
+            }};
+
+            if constexpr(rem4 > 0u)
+            {
+                const unsigned int remkey = (lid << 2) + less4;
+                nidx                      = remkey / mio_bn_config::hw;
+                hwidx                     = remkey - (nidx * mio_bn_config::hw);
+                index                     = nidx * mio_bn_config::chw + chwid + hwidx;
+
+                // index is unsigned int, so if the result would normally end up negative,
+                // the value wraps around and the check fails. Improves on the
+                // previous way of handling which was: if(index < (mio_bn_config::nchw - 3))
+                if(index + 3 < (mio_bn_config::nchw))
+                {
+                    read4 = *(reinterpret_cast<const fp_type4*>(x_in + index));
+                    typename mapped_vector_type<FpPrecType, 4>::type read4Prec =
+                        cast<typename mapped_vector_type<FpPrecType, 4>::type>(read4);
+
+                    miopen::reduction::welford_step_unroll4(read4Prec, mean, variance, curN);
                 }
             }
         }
         else
         {
-            for(unsigned int k = lid; k < less; k += mio_bn_config::launch_dim.grp0)
+            static_unroll_count<unsigned int, 0, less, mio_bn_config::launch_dim.grp0, 4>{
+                [&](unsigned int k) {
+                    if(k + lid < less)
+                    {
+                        nidx  = (k + lid) / mio_bn_config::hw;
+                        hwidx = (k + lid) - (nidx * mio_bn_config::hw);
+                        if constexpr(mio_config::layout_nhwc)
+                        {
+                            index = nidx * mio_bn_config::chw + hwidx * mio_bn_config::c + grpid;
+                        }
+                        else
+                        {
+                            index = nidx * mio_bn_config::chw + chwid + hwidx;
+                        }
+                        const auto xin     = cast<FpPrecType>(x_in[index]);
+                        FpPrecType oldMean = mean;
+                        mean               = (mean * curN + xin) / (curN + 1.f);
+                        curN += 1.f;
+                        variance = fma(xin - mean, xin - oldMean, variance);
+                    }
+                }};
+
+            if constexpr(rem > 0u)
             {
-                FpPrecType in = cast<FpPrecType>(x_in[getTensorIndex(k)]);
-                mean += in;
-                variance = fma(in, in, variance);
-            }
-            if constexpr(rem > 0)
-            {
+                // Note: The HIP compiler has a bug, it throws compiler warning for comparing
+                // unsigned int with 0 value, when rem is 0. but when rem is 0, this code block
+                // should not be compiled due to the if constexpr used above.
                 if(lid < rem)
                 {
-                    unsigned int index = getTensorIndex(lid + less);
-                    FpPrecType in =
-                        (index < mio_bn_config::nchw) ? cast<FpPrecType>(x_in[index]) : 0;
-                    mean += in;
-                    variance = fma(in, in, variance);
+                    unsigned int remkey = lid + less;
+                    nidx                = remkey / mio_bn_config::hw;
+                    hwidx               = remkey - (nidx * mio_bn_config::hw);
+                    if constexpr(mio_config::layout_nhwc)
+                    {
+                        index = nidx * mio_bn_config::chw + hwidx * mio_bn_config::c + grpid;
+                    }
+                    else
+                    {
+                        index = nidx * mio_bn_config::chw + chwid + hwidx;
+                    }
+
+                    bool contributeToVariance = (index < mio_bn_config::nchw);
+                    FpPrecType xin =
+                        contributeToVariance ? cast<FpPrecType>(x_in[index]) : cast<FpPrecType>(0.);
+                    FpPrecType oldMean = mean;
+                    mean = contributeToVariance ? ((mean * curN + xin) / (curN + 1.f)) : mean;
+                    curN += contributeToVariance ? 1.f : 0.f;
+                    variance += contributeToVariance ? ((xin - mean) * (xin - oldMean)) : 0;
                 }
             }
         }
 
         __syncthreads();
 
-        // REDUCE MEAN AND VARIANCE -----------------------
-        miopen::reduction::reduce2<FpAccumType, mio_bn_config::lds_size>(
-            reinterpret_cast<FpAccumType&>(mean),
-            reinterpret_cast<FpAccumType&>(variance),
+        constexpr auto lcl_data_size = mio_bn_config::lds_gcn_size;
+        __shared__ FpAccumType lcl_data_x[lcl_data_size];
+        __shared__ FpAccumType lcl_data_y[lcl_data_size];
+        __shared__ FpAccumType lcl_data_c[lcl_data_size];
+
+        __builtin_amdgcn_sched_barrier(0);
+
+        miopen::reduction::reduce2_welford<FpAccumType, lcl_data_size>(
+            mean,
+            variance,
+            curN,
             static_cast<FpAccumType>(INHW),
+            lcl_data_x,
+            lcl_data_y,
+            lcl_data_c,
             lid);
 
+        __builtin_amdgcn_sched_barrier(0);
+
         // REDUCTION COMPLETE ---------------------------
-        variance = fma(-mean, mean, variance);
-        if(variance < 0)
+
+        if(variance < FpPrecType{0})
         {
-            variance = 0;
+            variance = FpPrecType{0};
         }
-        invVariance = rsqrt(variance + epsilon);
+
+        // unsafe: casting double to FpPrecType
+        invVariance = miopen::rsqrt(variance + static_cast<FpPrecType>(epsilon));
 
 #else // MIO_BN_USESAVED == 1
         mean        = savedMean[grpid];
