@@ -431,6 +431,67 @@ TEST(TestGfx950ConvFwdGeometry, DirectKernargsMatchRockesConvArgs)
     EXPECT_EQ(directKernargs(problem, *geometry), expected);
 }
 
+TEST(TestGfx950ConvFwdGeometry, AotInstanceLaunchTilesTheRuntimeProblemWithItsOwnTile)
+{
+    // One instance, two problems: the grid and the AOT tile counts follow the graph.
+    const AotInstance instance{64, 32, 2, 1, 8, 8, 8, false, 0, 0, true};
+    for(const auto& problem : {Problem{2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1},
+                               Problem{4, 64, 128, 28, 28, 3, 3, 2, 2, 1, 1, 1, 1, 2}})
+    {
+        const auto geometry = deriveGeometry(problem);
+        ASSERT_TRUE(geometry);
+        const auto launch = aotInstanceLaunch(problem, *geometry, instance);
+        ASSERT_TRUE(launch);
+        const auto kpg = problem.k / problem.groups;
+        EXPECT_EQ(launch->gridX, static_cast<unsigned int>((kpg + 31) / 32));
+        EXPECT_EQ(launch->gridY, static_cast<unsigned int>((geometry->gemmM + 63) / 64));
+        EXPECT_EQ(launch->gridZ, static_cast<unsigned int>(problem.groups));
+        EXPECT_EQ(launch->blockX, 128U);
+        const auto kernargs = implicitGemmKernargs(problem, *geometry, *launch);
+        ASSERT_TRUE(kernargs);
+        EXPECT_EQ(kernargs->at(37), static_cast<int32_t>(launch->gridY)); // p_num_pid_m
+        EXPECT_EQ(kernargs->at(38), static_cast<int32_t>(launch->gridX)); // p_num_pid_n
+    }
+}
+
+TEST(TestGfx950ConvFwdGeometry, AotInstanceLaunchRefusesWhatTheBinaryCannotCompute)
+{
+    const Problem grouped{2, 24, 40, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1, 2}; // cpg 12, kpg 20
+    const auto geometry = deriveGeometry(grouped);
+    ASSERT_TRUE(geometry);
+    const auto launches = [&](AotInstance instance) {
+        return aotInstanceLaunch(grouped, *geometry, instance).has_value();
+    };
+    const AotInstance base{64, 64, 2, 2, 4, 4, 4, false, 0, 0, true};
+    EXPECT_TRUE(launches(base));
+    auto changed = base;
+    changed.grouped = false;
+    EXPECT_FALSE(launches(changed)); // Ungrouped code path on a grouped problem.
+    changed = base;
+    changed.vectorA = 8;
+    EXPECT_FALSE(launches(changed)); // 8 does not divide C / groups = 12.
+    changed = base;
+    changed.vectorC = 8;
+    EXPECT_FALSE(launches(changed)); // 8 does not divide K / groups = 20.
+    changed = base;
+    changed.asyncDma = true;
+    changed.asyncChunkA = changed.asyncChunkB = 4;
+    EXPECT_TRUE(launches(changed));
+    changed.asyncChunkB = 8;
+    EXPECT_FALSE(launches(changed)); // A chunk would straddle a filter position.
+    changed.asyncChunkA = changed.asyncChunkB = 0;
+    EXPECT_FALSE(launches(changed)); // An async binary must record its chunks.
+
+    // gridDim.y: 16-row tiles over N * Ho * Wo = 2^21 outputs need 131072 workgroups.
+    const Problem tall{2048, 8, 8, 32, 32, 1, 1, 1, 1, 0, 0, 1, 1};
+    const auto tallGeometry = deriveGeometry(tall);
+    ASSERT_TRUE(tallGeometry);
+    EXPECT_FALSE(
+        aotInstanceLaunch(tall, *tallGeometry, {16, 16, 1, 1, 8, 8, 8, false, 0, 0, true}));
+    EXPECT_TRUE(
+        aotInstanceLaunch(tall, *tallGeometry, {256, 16, 4, 1, 8, 8, 8, false, 0, 0, true}));
+}
+
 TEST(TestGfx950ConvFwdGeometry, DirectStdGridTilesOutputColumnsChannelsAndImages)
 {
     // ceil(Wo / block_w) x ceil(G / (64 * block_waves)) x N, 64 * block_waves threads.

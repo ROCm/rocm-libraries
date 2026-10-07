@@ -1359,6 +1359,213 @@ TEST(TestGfx950ConvFwdDispatch, OutputValidationWaitsForPreparationAndPrecedesCo
     }
 }
 
+// ---- hipkernel:Gfx950ConvFwdAot: shape-generic AOT instances ----
+
+constexpr PackSymbols GFX950_CONV_FWD_AOT{"hipkernel:Gfx950ConvFwdAot",
+                                          "hipkernel.gfx950_conv_fwd_aot.graph_match",
+                                          "",
+                                          "hipkernel.gfx950_conv_fwd_aot.kernel_match",
+                                          "hipkernel.gfx950_conv_fwd_aot.score",
+                                          "hipkernel.gfx950_conv_fwd_aot.dispatch",
+                                          "gfx950_conv_fwd.x.uid",
+                                          "gfx950_conv_fwd.w.uid",
+                                          "gfx950_conv_fwd.y.uid"};
+
+struct AotWidths
+{
+    int64_t a = 8;
+    int64_t b = 8;
+    int64_t c = 8;
+};
+
+/// An instance as make_conv_aot_config.py emits it: tuning and capability fields only,
+/// no problem extents.
+KernelDefinition aotKernel(AotWidths widths = {},
+                           int64_t grouped = 1,
+                           const std::string& dtype = "fp16",
+                           int64_t tileM = 64,
+                           int64_t tileN = 64)
+{
+    KernelDefinition kernel;
+    kernel.name = "aot_instance";
+    kernel.source.kind = KernelSourceKind::KPACK;
+    kernel.metadata = {{"dtype", dtype},
+                       {"layout", std::string("NHWC")},
+                       {"tile_m", tileM},
+                       {"tile_n", tileN},
+                       {"tile_k", int64_t{64}},
+                       {"warp_m", int64_t{2}},
+                       {"warp_n", int64_t{2}},
+                       {"warp_tile_m", int64_t{32}},
+                       {"warp_tile_n", int64_t{32}},
+                       {"warp_tile_k", int64_t{16}},
+                       {"wave_size", int64_t{64}},
+                       {"pipeline", std::string("mem")},
+                       {"epilogue", std::string("cshuffle")},
+                       {"vector_size_a", widths.a},
+                       {"vector_size_b", widths.b},
+                       {"vector_size_c", widths.c},
+                       {"unroll_k", int64_t{0}},
+                       {"async_dma", int64_t{0}},
+                       {"async_chunk_a", int64_t{0}},
+                       {"async_chunk_b", int64_t{0}},
+                       {"grouped", grouped},
+                       {"instance_id", std::string(40, 'a')}};
+    return kernel;
+}
+
+TEST(TestGfx950ConvFwdAotKernelMatcher, OneInstanceServesEveryShapeItsCapabilitiesAdmit)
+{
+    // No geometry field exists to compare: the same descriptor claims every shape.
+    const auto instance = aotKernel();
+    // ConvShape fields: n, c, k, groups, h, w, y, x, sH, sW, pH, pW, dH, dW.
+    const std::vector<ConvShape> shapes{{2, 32, 32, 1, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1},
+                                        {1, 32, 64, 1, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1},
+                                        {2, 32, 64, 1, 17, 19, 3, 3, 2, 2, 1, 1, 1, 1},
+                                        {1, 32, 32, 1, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2},
+                                        {2, 32, 64, 1, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1},
+                                        {4, 64, 128, 1, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1},
+                                        {2, 64, 64, 2, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}};
+    for(size_t i = 0; i < shapes.size(); ++i)
+    {
+        SCOPED_TRACE(i);
+        const GraphFixture fixture(buildGraph(convSpec(shapes[i])), gfx950Properties());
+        ASSERT_TRUE(matchesGraph(GFX950_CONV_FWD_AOT, fixture.context()));
+        EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), instance));
+        // The exact-shape engine's kernel matcher has nothing to compare it with.
+        EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), instance));
+    }
+}
+
+TEST(TestGfx950ConvFwdAotKernelMatcher, BakedWidthsMustDivideThePerGroupChannelRuns)
+{
+    // A and B run along C / groups, D along K / groups.
+    ConvShape shape;
+    shape.groups = 1;
+    shape.c = 12;
+    shape.k = 18;
+    const GraphFixture fixture(buildGraph(convSpec(shape)), gfx950Properties());
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), aotKernel({8, 8, 2})));
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), aotKernel({4, 4, 4})));
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), aotKernel({4, 2, 2})));
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), aotKernel({4, 4, 2})));
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), aotKernel({1, 1, 1})));
+
+    // Depthwise: one channel per group admits only scalar accesses.
+    const GraphFixture depthwise(buildGraph(convSpec(depthwiseShape(32, 14, 14, 3, 1, 1))),
+                                 gfx950Properties());
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, depthwise.context(), aotKernel({2, 2, 1})));
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, depthwise.context(), aotKernel({1, 1, 1})));
+}
+
+TEST(TestGfx950ConvFwdAotKernelMatcher, AGroupedGraphNeedsAGroupedBinary)
+{
+    ConvShape grouped;
+    grouped.c = grouped.k = 64;
+    grouped.groups = 2;
+    const GraphFixture fixture(buildGraph(convSpec(grouped)), gfx950Properties());
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), aotKernel({}, 1)));
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), aotKernel({}, 0)));
+
+    ConvShape dense;
+    dense.groups = 1;
+    const GraphFixture denseFixture(buildGraph(convSpec(dense)), gfx950Properties());
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, denseFixture.context(), aotKernel({}, 0)));
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, denseFixture.context(), aotKernel({}, 1)));
+}
+
+TEST(TestGfx950ConvFwdAotGraphMatcher, GroupedPointwiseIsServedByGroupedInstances)
+{
+    ConvShape shape;
+    shape.groups = 4;
+    shape.y = shape.x = 1;
+    shape.pH = shape.pW = 0;
+    const GraphFixture fixture(buildGraph(convSpec(shape)), gfx950Properties());
+    // Both engines read the graph the same way.
+    EXPECT_TRUE(matchesGraph(GFX950_CONV_FWD, fixture.context()));
+    ASSERT_TRUE(matchesGraph(GFX950_CONV_FWD_AOT, fixture.context()));
+    // An instance is built against a 3x3 probe, so it is never the pointwise GEMM.
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), aotKernel()));
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), aotKernel({}, 0)));
+}
+
+TEST(TestGfx950ConvFwdAotKernelMatcher, AsyncChunksMustDivideThePerGroupInputRun)
+{
+    ConvShape shape;
+    shape.groups = 1;
+    shape.c = 24;
+    const GraphFixture fixture(buildGraph(convSpec(shape)), gfx950Properties());
+    auto kernel = aotKernel();
+    kernel.metadata["async_dma"] = int64_t{1};
+    kernel.metadata["async_chunk_a"] = int64_t{8};
+    kernel.metadata["async_chunk_b"] = int64_t{8};
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), kernel));
+    kernel.metadata["async_chunk_b"] = int64_t{16};
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), kernel));
+    // An async binary without recorded chunks cannot be checked, so it is refused.
+    kernel.metadata["async_chunk_a"] = kernel.metadata["async_chunk_b"] = int64_t{0};
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), kernel));
+}
+
+TEST(TestGfx950ConvFwdAotKernelMatcher, RefusesOutOfContractOrIncompleteMetadata)
+{
+    const GraphFixture fixture(buildGraph(), gfx950Properties());
+    ASSERT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), aotKernel()));
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), aotKernel({}, 1, "bf16")));
+
+    const std::vector<std::pair<const char*, MetadataValue>> outOfContract{
+        {"pipeline", std::string("wavelet")},
+        {"epilogue", std::string("none")},
+        {"layout", std::string("NCHW")},
+        {"wave_size", int64_t{32}},
+        {"unroll_k", int64_t{2}},
+        {"grouped", int64_t{-1}},
+        {"vector_size_c", int64_t{0}},
+        {"tile_m", int64_t{0}},
+        {"async_chunk_a", int64_t{-1}}};
+    for(const auto& [field, value] : outOfContract)
+    {
+        SCOPED_TRACE(field);
+        auto kernel = aotKernel();
+        kernel.metadata[field] = value;
+        EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), kernel));
+    }
+    for(const auto& field : aotKernel().metadata)
+    {
+        if(field.first == "instance_id")
+        {
+            continue; // Tracking only; the launch never reads it.
+        }
+        SCOPED_TRACE(field.first);
+        auto kernel = aotKernel();
+        kernel.metadata.erase(field.first);
+        EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), kernel));
+    }
+    auto embedded = aotKernel();
+    embedded.source.kind = KernelSourceKind::EMBEDDED_SOURCE;
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), embedded));
+}
+
+TEST(TestGfx950ConvFwdAotScore, PrefersLessTilePaddingAndRanksRefusalsLast)
+{
+    // K = 32: a 32-wide N tile launches no padding columns, a 128-wide one 96 of them.
+    const GraphFixture fixture(buildGraph(), gfx950Properties());
+    const auto snug
+        = scoreKernel(GFX950_CONV_FWD_AOT, fixture.context(), aotKernel({}, 1, "fp16", 64, 32));
+    const auto padded
+        = scoreKernel(GFX950_CONV_FWD_AOT, fixture.context(), aotKernel({}, 1, "fp16", 64, 128));
+    EXPECT_GT(snug, padded);
+    EXPECT_GT(padded, 0.0);
+    EXPECT_EQ(scoreKernel(GFX950_CONV_FWD_AOT, fixture.context(), aotKernel({}, 1, "fp16", 64, 32)),
+              snug);
+
+    ConvShape shape;
+    shape.groups = 1;
+    shape.c = 12;
+    const GraphFixture refused(buildGraph(convSpec(shape)), gfx950Properties());
+    EXPECT_LT(scoreKernel(GFX950_CONV_FWD_AOT, refused.context(), aotKernel()), 0.0);
+}
+
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

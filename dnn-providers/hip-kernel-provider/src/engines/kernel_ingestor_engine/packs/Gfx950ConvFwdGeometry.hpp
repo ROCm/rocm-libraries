@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <numeric>
 #include <optional>
 #include <string_view>
 
@@ -473,6 +474,78 @@ inline bool implicitGemmServes(const ImplicitGemmCapabilities& capabilities, con
            && (!capabilities.pointwise || isPointwise(problem))
            && (problem.c / problem.groups) % capabilities.loadWidth == 0
            && (problem.k / problem.groups) % capabilities.storeWidth == 0;
+}
+
+/// One shape-generic AOT instance of hipkernel:Gfx950ConvFwdAot: the build-time fields
+/// of a rocKE forward KernelIdentity that bound which problems its binary computes.
+/// Mirrors Gfx950ConvFwdAotSpec in rocke/library/builders/common/convolution_forward.py.
+struct AotInstance
+{
+    int64_t tileM;
+    int64_t tileN;
+    int64_t warpM;
+    int64_t warpN;
+    int64_t vectorA; ///< A load width; A runs along C / groups.
+    int64_t vectorB; ///< B load width; B runs along C / groups.
+    int64_t vectorC; ///< D store width; D runs along K / groups.
+    bool asyncDma;
+    int64_t asyncChunkA; ///< Elements per async A chunk; 0 without asyncDma.
+    int64_t asyncChunkB;
+    bool grouped; ///< Built with the grouped code path, which also serves groups == 1.
+};
+
+/// The launch of @p instance on @p problem, or std::nullopt when the binary cannot
+/// compute it. Mirrors gfx950_conv_fwd_aot_serves in convolution_forward.py, the forward
+/// subset of rocKE's KernelCache.supports_problem: implicitGemmServes with the widths the
+/// identity records (A and B both run along C / groups, so both divide it exactly when
+/// their lcm does; the 3x3 probe is never the pointwise GEMM), an async chunk divides
+/// C / groups (it would otherwise read across filter positions), and launchGeometry's
+/// 65535 grid bound. implicitGemmKernargs adds the 24-bit reduction bound.
+inline std::optional<LaunchGeometry>
+    aotInstanceLaunch(const Problem& problem, const Geometry& geometry, const AotInstance& instance)
+{
+    if(instance.vectorA <= 0 || instance.vectorB <= 0 || instance.vectorC <= 0)
+    {
+        return std::nullopt;
+    }
+    const ImplicitGemmCapabilities capabilities{
+        std::lcm(instance.vectorA, instance.vectorB), instance.vectorC, false, instance.grouped};
+    if(!implicitGemmServes(capabilities, problem))
+    {
+        return std::nullopt;
+    }
+    const auto cpg = problem.c / problem.groups;
+    if(instance.asyncDma
+       && (instance.asyncChunkA <= 0 || instance.asyncChunkB <= 0 || cpg % instance.asyncChunkA != 0
+           || cpg % instance.asyncChunkB != 0))
+    {
+        return std::nullopt;
+    }
+    return launchGeometry(
+        problem, geometry, instance.tileM, instance.tileN, instance.warpM, instance.warpN, 64);
+}
+
+/// Deterministic order among the AOT instances that serve one problem, used only when
+/// nothing is benchmarked or recorded. Higher is better: the fraction of the launched
+/// tile area that is real output (padding waste costs work), times how well the grid
+/// fills a device of CU_COUNT compute units, with wider vectors breaking ties. A
+/// placeholder until rocKE's dispatcher ranks instances; BenchmarkPlan replaces it.
+inline double aotInstanceScore(const Problem& problem,
+                               const Geometry& geometry,
+                               const AotInstance& instance,
+                               const LaunchGeometry& launch)
+{
+    constexpr double CU_COUNT = 256.0;
+    const auto kpg = static_cast<double>(problem.k / problem.groups);
+    const auto useful = static_cast<double>(geometry.gemmM) * kpg;
+    const auto launched = static_cast<double>(launch.gridY) * static_cast<double>(instance.tileM)
+                          * static_cast<double>(launch.gridX) * static_cast<double>(instance.tileN);
+    const auto tiles = static_cast<double>(launch.gridX) * static_cast<double>(launch.gridY)
+                       * static_cast<double>(launch.gridZ);
+    const auto fill = tiles >= CU_COUNT ? 1.0 : tiles / CU_COUNT;
+    const auto widths
+        = static_cast<double>(instance.vectorA + instance.vectorB + instance.vectorC) / 24.0;
+    return (useful / launched) * fill + 1e-3 * widths;
 }
 
 /// The kernel_family metadata value, also the engine knob that forces a family.
