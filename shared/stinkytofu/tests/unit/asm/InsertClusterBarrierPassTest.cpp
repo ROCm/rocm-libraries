@@ -779,7 +779,8 @@ TEST_F(InsertClusterBarrierPassTest, Rule1SignalBelowGsu1IsDrunkByRule2Wait) {
     ASSERT_NE(rule2Wait, nullptr);
     EXPECT_TRUE(isClusterBarrierWithLiteral(*rule2Wait, /*wantSignal=*/false))
         << "all local waves must finish the run-up cluster wait before a later "
-           "iteration can post its next arrival:" << blockListing(*bb);
+           "iteration can post its next arrival:"
+        << blockListing(*bb);
     EXPECT_EQ(inFlightAt(indexOf(rule2Wait)), 1)
         << "the wait has to have Rule 1's token to drink:" << blockListing(*bb);
 }
@@ -947,14 +948,13 @@ TEST_F(InsertClusterBarrierPassTest, Rule2DoesNotReuseJoinBeyondCall) {
 // A repeated scalar guard can bypass the prefetch join only if the counter
 // changed. At a merge, a write on either predecessor must invalidate the fact.
 class InsertClusterBarrierGuardTest : public InsertClusterBarrierPassTest,
-                                     public testing::WithParamInterface<int> {};
+                                      public testing::WithParamInterface<int> {};
 
 TEST_P(InsertClusterBarrierGuardTest, ReusesJoinOnlyWhileGuardRemainsValid) {
     appendGsu1Preheader();
     StinkyInstruction* firstLoad = findFirstTensorLoad();
     createGuardedBranch(GFX::s_cbranch_scc1, 90, "zero_join");
-    if (GetParam() == 2)
-        createGuardedBranch(GFX::s_cbranch_scc1, 93, "counter_unchanged");
+    if (GetParam() == 2) createGuardedBranch(GFX::s_cbranch_scc1, 93, "counter_unchanged");
     if (GetParam() != 0) createSSubWritingSgprAndScc(90);
     if (GetParam() == 2) createLabel("counter_unchanged");
     createGuardedBranch(GFX::s_cbranch_scc1, 90, "bypass_join");
@@ -974,10 +974,12 @@ TEST_P(InsertClusterBarrierGuardTest, ReusesJoinOnlyWhileGuardRemainsValid) {
     ASSERT_NE(realInstBefore(firstLoad), nullptr);
     if (GetParam() == 0)
         EXPECT_TRUE(isClusterBarrierWithLiteral(*realInstBefore(firstLoad), false))
-            << "the unchanged nonzero counter cannot bypass the existing join:" << blockListing(*bb);
+            << "the unchanged nonzero counter cannot bypass the existing join:"
+            << blockListing(*bb);
     else
         EXPECT_TRUE(isWorkgroupBarrierWaitInst(*realInstBefore(firstLoad)))
-            << "an overwritten counter must not justify removing the entry join:" << blockListing(*bb);
+            << "an overwritten counter must not justify removing the entry join:"
+            << blockListing(*bb);
 }
 
 INSTANTIATE_TEST_SUITE_P(CounterWrites, InsertClusterBarrierGuardTest, testing::Values(0, 1, 2));

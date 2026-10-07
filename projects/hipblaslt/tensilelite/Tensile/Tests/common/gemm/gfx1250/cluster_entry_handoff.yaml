@@ -19,6 +19,7 @@ GlobalParameters:
   DataInitTypeMXSA: 3
   DataInitTypeMXSB: 3
   NumWarmups: 288
+  SyncsPerBenchmark: 0
   EnqueuesPerSync: 288
   KernelTime: true
   SkipSlowSolutionRatio: 0.0

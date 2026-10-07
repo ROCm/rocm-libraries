@@ -67,8 +67,10 @@ struct ScalarBranchFacts {
                 return reg >= dst.reg.idx && reg - dst.reg.idx < dst.reg.num;
             };
             for (auto it = comparisons.begin(); it != comparisons.end();) {
-                if (overlaps(it->first.first)) it = comparisons.erase(it);
-                else ++it;
+                if (overlaps(it->first.first))
+                    it = comparisons.erase(it);
+                else
+                    ++it;
             }
             if (predicate && overlaps(predicate->reg)) predicate.reset();
         }
@@ -87,7 +89,8 @@ struct ScalarBranchFacts {
         if (reg->dataType == StinkyRegister::Type::LiteralInt) std::swap(reg, value);
         if (!reg->isRegister() || reg->isVirtualReg() || reg->reg.type != RegType::S ||
             reg->reg.num != 1 || reg->reg.offset != 0 || reg->reg.isMinus || reg->reg.isAbs ||
-            value->dataType != StinkyRegister::Type::LiteralInt) return;
+            value->dataType != StinkyRegister::Type::LiteralInt)
+            return;
         predicate = Predicate{reg->reg.idx, static_cast<uint32_t>(value->getLiteralInt()),
                               opcode == GFX::s_cmp_eq_u32};
         for (const auto& [key, equal] : comparisons) {
@@ -105,8 +108,7 @@ struct ScalarBranchFacts {
 
     bool assumeScc(bool value) {
         if (scc && *scc != value) return false;
-        if (predicate)
-            comparisons[{predicate->reg, predicate->value}] = value == predicate->equal;
+        if (predicate) comparisons[{predicate->reg, predicate->value}] = value == predicate->equal;
         scc = value;
         return true;
     }
