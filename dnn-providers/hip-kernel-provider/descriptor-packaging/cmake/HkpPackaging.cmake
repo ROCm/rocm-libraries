@@ -183,8 +183,9 @@ endfunction()
 #   PACK_JOBS caps the worker processes one pack may spawn; 1 selects the packer's
 #   serial path. Omitted, the packer sizes its pool against the machine. Roots have
 #   no ordering edge between them, so the generator runs them at once: the test
-#   roots name a small cap so their pools do not multiply, and the product root
-#   omits it because it is the root expected to be large enough to repay a full pool.
+#   roots name a small cap so their pools do not multiply, while the production root
+#   and the packaging probes omit it and use the packer's default. A probe pack is
+#   bounded by the descriptors it keeps, so a full pool costs it little.
 #
 #   NAME is the source label written into every descriptor's provenance. NAME, the
 #   absolute SOURCE_ROOT, OUT_ROOT and ARCHES go into a global registry read by
