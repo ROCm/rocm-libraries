@@ -234,7 +234,7 @@ namespace rocblaslt
             // recorded, so only that pair is safe to hand out again.
             if(timed)
             {
-                recycleEvents(pending.m_start, pending.m_stop);
+                recycleEvents(pending.m_start, pending.m_stop, pending.m_device);
                 state.m_samples[pending.m_candidate].push_back(milliseconds * 1000.0f);
             }
             else
@@ -308,7 +308,8 @@ namespace rocblaslt
             return false;
         }
 
-        if(!acquireEvents(start, stop))
+        int device = 0;
+        if(!acquireEvents(start, stop, device))
             return false;
 
         // Spent. The offer buys one sample, so a second launch claiming the
@@ -317,7 +318,7 @@ namespace rocblaslt
         // selection asked for.
         state.m_offered = -1;
 
-        state.m_pending.push_back({start, stop, candidate});
+        state.m_pending.push_back({start, stop, candidate, device});
         ++state.m_issued[candidate];
 
         return true;
@@ -549,12 +550,31 @@ namespace rocblaslt
         return published;
     }
 
-    bool OnlineTuner::acquireEvents(hipEvent_t& start, hipEvent_t& stop)
+    // A pair is only ever handed back to the device that created it. An event
+    // is owned by the device current when hipEventCreateWithFlags() ran, and
+    // recording it onto a stream belonging to another one is refused with
+    // hipErrorInvalidResourceHandle -- measured on gfx950, and not something
+    // hipSetDevice around the record can repair.
+    //
+    // Nothing downstream would report that cleanly either. A refused record
+    // leaves the pair holding its previous timestamps, and hipEventQuery still
+    // says complete, so hipEventElapsedTime returns a stale duration. The
+    // inversion recycleEvents() applies is what saves the measurement: the
+    // stale value comes back negative and the sign test drops it. The sample
+    // is wrong only in sign, by luck of the ordering, and a pair pooled in its
+    // natural orientation would have returned a plausible positive number from
+    // a different device's kernel.
+    bool OnlineTuner::acquireEvents(hipEvent_t& start, hipEvent_t& stop, int& device)
     {
-        if(!m_pairs.empty())
+        if(hipGetDevice(&device) != hipSuccess)
+            return false;
+
+        std::vector<EventPair>& pool = m_pairs[device];
+
+        if(!pool.empty())
         {
-            const EventPair pair = m_pairs.back();
-            m_pairs.pop_back();
+            const EventPair pair = pool.back();
+            pool.pop_back();
 
             start = pair.m_start;
             stop  = pair.m_stop;
@@ -583,10 +603,14 @@ namespace rocblaslt
     // Inverted on purpose, and only ever reached for a pair a launch really did
     // record: reusing it without recording it then reads the negative of the
     // duration it last measured, which harvestPendingImpl()'s sign test drops.
-    void OnlineTuner::recycleEvents(hipEvent_t start, hipEvent_t stop)
+    //
+    // device is the one the pair was created on, carried through
+    // PendingMeasurement rather than read from hipGetDevice() here, since the
+    // thread harvesting is not necessarily the thread that measured.
+    void OnlineTuner::recycleEvents(hipEvent_t start, hipEvent_t stop, int device)
     {
         if(start && stop)
-            m_pairs.push_back({stop, start});
+            m_pairs[device].push_back({stop, start});
     }
 
     // Retiring instead of pooling is what closes the window a rejected sample

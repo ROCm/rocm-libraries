@@ -604,6 +604,57 @@ namespace
             << "a capture was denied the measured winner";
     }
 
+    // The event pool is on a process-wide singleton and the device is per
+    // caller. Keyed on nothing, one vector hands device 1 the pairs device 0
+    // recycled -- and hipEventRecord rejects a pair belonging to another
+    // device with hipErrorInvalidResourceHandle, measured on gfx950, which the
+    // production launch then has to carry.
+    TEST(OnlineTuner, APooledEventPairIsNotHandedToAnotherDevice)
+    {
+        if(deviceCount() < 2)
+            GTEST_SKIP() << "needs two HIP devices";
+
+        const Device zero(0);
+        const Device one(1);
+
+        constexpr size_t keyZero = 0x1010;
+        constexpr size_t keyOne  = 0x1011;
+
+        const std::vector<int> ranked{131, 132, 133};
+
+        // Device 0 takes one sample, and the harvest puts its pair in the
+        // pool. recycleEvents() stores it inverted, so an unkeyed pool would
+        // hand this pair's stop back as the next caller's start.
+        ASSERT_EQ(hipSetDevice(zero.id()), hipSuccess);
+        hipEvent_t startZero = nullptr;
+        hipEvent_t stopZero  = nullptr;
+        ASSERT_EQ(tuner().selectCandidate(keyZero, identityOf(keyZero), ranked), 0);
+        ASSERT_TRUE(tuner().beginMeasurement(keyZero, ranked[0], startZero, stopZero));
+        zero.bracket(startZero, stopZero);
+        tuner().harvestPending(keyZero);
+
+        // Device 1 now explores a shape of its own.
+        ASSERT_EQ(hipSetDevice(one.id()), hipSuccess);
+        hipEvent_t startOne = nullptr;
+        hipEvent_t stopOne  = nullptr;
+        ASSERT_EQ(tuner().selectCandidate(keyOne, identityOf(keyOne), ranked), 0);
+        ASSERT_TRUE(tuner().beginMeasurement(keyOne, ranked[0], startOne, stopOne));
+
+        EXPECT_NE(startOne, startZero) << "device 1 was handed device 0's pair";
+        EXPECT_NE(startOne, stopZero) << "device 1 was handed device 0's pair";
+        EXPECT_NE(stopOne, startZero) << "device 1 was handed device 0's pair";
+        EXPECT_NE(stopOne, stopZero) << "device 1 was handed device 0's pair";
+
+        // The assertion that does not depend on how the pool is organised:
+        // whatever device 1 was given has to be recordable on device 1.
+        EXPECT_EQ(hipEventRecord(startOne, one.stream()), hipSuccess)
+            << "the pair handed to device 1 cannot be recorded there";
+        EXPECT_EQ(hipEventRecord(stopOne, one.stream()), hipSuccess);
+        EXPECT_EQ(hipStreamSynchronize(one.stream()), hipSuccess);
+
+        ASSERT_EQ(hipSetDevice(zero.id()), hipSuccess);
+    }
+
 } // namespace
 
 // The configuration the tuner is built with, which inside hipBLASLt comes from
