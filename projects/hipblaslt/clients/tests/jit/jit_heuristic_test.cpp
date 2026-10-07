@@ -320,6 +320,12 @@ namespace
         requireUniqueKernels(handle, cpp);
     }
 
+    int publishedIndex(const hipblasLtMatmulHeuristicResult_t& result)
+    {
+        auto algo = result.algo;
+        return hipblaslt_ext::getIndexFromAlgo(algo);
+    }
+
     void requireMissThenHit(uint64_t before, uint64_t afterFirst, uint64_t afterSecond, int first,
                              int second)
     {
@@ -435,13 +441,13 @@ namespace
             requireMissThenHit(before,
                                afterWideC,
                                afterWide,
-                               hipblaslt_ext::getIndexFromAlgo(cWide.results.front().algo),
-                               hipblaslt_ext::getIndexFromAlgo(cppWide.results.front().algo));
+                               publishedIndex(cWide.results.front()),
+                               publishedIndex(cppWide.results.front()));
             requireMissThenHit(afterWide,
                                afterNarrowC,
                                afterNarrow,
-                               hipblaslt_ext::getIndexFromAlgo(cNarrow.results.front().algo),
-                               hipblaslt_ext::getIndexFromAlgo(cppNarrow.results.front().algo));
+                               publishedIndex(cNarrow.results.front()),
+                               publishedIndex(cppNarrow.results.front()));
 #endif
 #ifndef HIPBLASLT_JIT_HIPKITTENS
             runFirst(handle, desc, stream, kWide, cWide.results.front());
@@ -463,8 +469,8 @@ namespace
             requireMissThenHit(before,
                                afterWideC,
                                afterWide,
-                               hipblaslt_ext::getIndexFromAlgo(cWide.results.front().algo),
-                               hipblaslt_ext::getIndexFromAlgo(cppWide.results.front().algo));
+                               publishedIndex(cWide.results.front()),
+                               publishedIndex(cppWide.results.front()));
 #endif
             requireUniqueKernels(handle, cWide);
             requireUniqueKernels(handle, cppWide);

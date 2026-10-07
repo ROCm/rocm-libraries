@@ -341,7 +341,7 @@ namespace
 
 TEST_CASE("replayed JIT GEMM solutions run end to end", "[jit-gpu]")
 {
-    hipblaslt_jit_test::LibraryScratch library("end-to-end");
+    [[maybe_unused]] hipblaslt_jit_test::LibraryScratch root("end-to-end");
     hipblaslt_jit_test::ScratchDir     stage("end-to-end-sources");
     hipblaslt_jit_test::stageDescribedSources(std::filesystem::u8path(HIPBLASLT_JIT_DATA),
                                               stage.path);
@@ -350,7 +350,7 @@ TEST_CASE("replayed JIT GEMM solutions run end to end", "[jit-gpu]")
 
 TEST_CASE("getLibraryAlgos publishes plain-pair solutions", "[jit-gpu]")
 {
-    hipblaslt_jit_test::LibraryScratch library("end-to-end-library");
+    [[maybe_unused]] hipblaslt_jit_test::LibraryScratch root("end-to-end-library");
     hipblaslt_jit_test::ScratchDir     stage("end-to-end-library-sources");
     hipblaslt_jit_test::stageDescribedSources(std::filesystem::u8path(HIPBLASLT_JIT_DATA),
                                               stage.path);
