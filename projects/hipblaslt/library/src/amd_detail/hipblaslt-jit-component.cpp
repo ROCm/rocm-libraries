@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "hipblaslt-jit-component.hpp"
+#include <atomic>
 #include "hipblaslt-jit-library.hpp"
 #include <algorithm>
 #include <cerrno>
@@ -17,6 +18,16 @@
 
 namespace hipblaslt_jit
 {
+    namespace
+    {
+        std::atomic<uint64_t> generations{0};
+    }
+
+    uint64_t generationCount() noexcept
+    {
+        return generations.load(std::memory_order_relaxed);
+    }
+
     std::shared_ptr<const SolutionLoader> makeTensileLoader();
 
     std::shared_ptr<const Jit> makeJit(std::shared_ptr<const Backend> backend)
@@ -167,6 +178,7 @@ namespace hipblaslt_jit
         const GenerationRequest generation{
             request, target, count, workspaceLimit, excludeKernels, scratch->path()};
         std::vector<GeneratedSolution> generated;
+        generations.fetch_add(1, std::memory_order_relaxed);
         status = guarded([&] { return c.backend->generate(generation, generated); });
         if(!status.ok())
         {

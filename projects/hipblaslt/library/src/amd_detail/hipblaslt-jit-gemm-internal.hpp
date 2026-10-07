@@ -9,12 +9,14 @@
 
 namespace hipblaslt_ext::experimental::jit::detail
 {
-    // Reuse hipBLASLt's validated GEMM representation. Scalar values are owned;
-    // device buffers and execution resources retain their normal caller lifetime.
+    // Reuse hipBLASLt's validated GEMM representation. Device buffers and
+    // execution resources retain their normal caller lifetime.
     struct HIPBLASLT_EXPORT GemmRequest final : OperationRequest
     {
         static constexpr std::string_view operation = "hipblaslt.gemm.v1";
         RocblasltContractionProblem       problem;
+        // RocblasltContractionProblem stores alpha and beta as pointers and does not own the bytes.
+        // GemmRequest outlives the caller's scalars, so it copies them and points problem.alpha/beta at that copy.
         alignas(16) std::array<unsigned char, 16> alpha{}, beta{};
 
         explicit GemmRequest(const RocblasltContractionProblem& source)

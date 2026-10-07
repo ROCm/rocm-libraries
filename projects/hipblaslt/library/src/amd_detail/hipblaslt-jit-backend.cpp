@@ -10,6 +10,7 @@
 #include "hipblaslt-jit-mode.hpp"
 #include "hipblaslt_internal.hpp"
 #include "rocblaslt_secure_env.hpp"
+#include "hipblaslt-jit-replay-catalog.hpp"
 #include "hipblaslt-jit-replay.hpp"
 #include "rocblaslt.h"
 #include "rocblaslt_arch_revision.hpp"
@@ -18,7 +19,6 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
-#include <sstream>
 #include <stdexcept>
 #ifdef _WIN32
 #include <process.h>
@@ -526,45 +526,67 @@ namespace hipblaslt_ext::experimental
 
 namespace hipblaslt_jit
 {
+#ifdef HIPBLASLT_JIT_HIPKITTENS
+    std::shared_ptr<const Jit> makeHipKittensJit();
+#endif
+
     namespace
     {
-        // The process-wide Jit: replay backend, comgr builder, TensileLite loader.
-        // Null when HIPBLASLT_JIT_TEST_REPLAY names no bundle. The store on that
-        // Jit publishes every solution the replay backend builds.
+        // Replay of the kernels compiled in from clients/tests/jit/data. Null when
+        // this build has none, or those bundles cannot be read. The store on
+        // that Jit publishes every solution the replay backend builds.
         std::shared_ptr<const Jit> replayProcess()
         {
-            static std::once_flag                 once;
-            static std::shared_ptr<const Jit>     jit;
+            static std::once_flag             once;
+            static std::shared_ptr<const Jit> jit;
             std::call_once(once, [] {
-                const char* value = rocblaslt_secure_getenv("HIPBLASLT_JIT_TEST_REPLAY");
-                if(!value || !*value)
-                    return;
-                hipblaslt_ext::experimental::jit::replay::Options options;
-                std::istringstream                                paths(value);
-                std::string                                       path;
-                while(paths >> path)
-                    options.replay.push_back(std::move(path));
-                if(options.replay.empty())
-                    return;
-                hipblaslt_ext::experimental::jit::Backend     backend;
-                hipblaslt_ext::experimental::jit::Diagnostics diagnostics;
-                const auto status = hipblaslt_ext::experimental::jit::replay::createBackend(
-                    options, backend, diagnostics);
-                if(status != HIPBLAS_STATUS_SUCCESS)
+#ifdef HIPBLASLT_JIT_REPLAY_DATA
+                try
                 {
-                    std::cerr << "hipblaslt warning: HIPBLASLT_JIT_TEST_REPLAY could not be read: "
-                              << diagnostics.message << std::endl;
-                    return;
+                    hipblaslt_ext::experimental::jit::replay::Options options;
+                    for(const auto& bundle : committed::stagePlainPair(HIPBLASLT_JIT_REPLAY_DATA))
+                        options.replay.push_back(bundle.u8string());
+                    hipblaslt_ext::experimental::jit::Backend     backend;
+                    hipblaslt_ext::experimental::jit::Diagnostics diagnostics;
+                    const auto status = hipblaslt_ext::experimental::jit::replay::createBackend(
+                        options, backend, diagnostics);
+                    if(status != HIPBLAS_STATUS_SUCCESS)
+                    {
+                        std::cerr
+                            << "hipblaslt warning: the committed JIT kernels could not be read: "
+                            << diagnostics.message << std::endl;
+                        return;
+                    }
+                    jit = hipblaslt_ext::experimental::jit::detail::BackendAccess::get(backend);
                 }
-                jit = hipblaslt_ext::experimental::jit::detail::BackendAccess::get(backend);
+                catch(const std::exception& error)
+                {
+                    std::cerr << "hipblaslt warning: the committed JIT kernels could not be read: "
+                              << error.what() << std::endl;
+                }
+#endif
             });
             return jit;
+        }
+
+        // Heuristic queries publish through this backend. A HipKittens build uses
+        // that backend. Otherwise this is replay of the committed kernels.
+        std::shared_ptr<const Jit> processJit()
+        {
+#ifdef HIPBLASLT_JIT_HIPKITTENS
+            static std::once_flag             once;
+            static std::shared_ptr<const Jit> hipkittens;
+            std::call_once(once, [] { hipkittens = makeHipKittensJit(); });
+            return hipkittens;
+#else
+            return replayProcess();
+#endif
         }
     }
 
     bool jitHeuristicLibrary()
     {
-        return static_cast<bool>(replayProcess());
+        return static_cast<bool>(processJit());
     }
 
     void warnJitHeuristicUnavailable()
@@ -590,7 +612,7 @@ namespace hipblaslt_jit
     {
         if(room <= 0 || results == nullptr || handle == nullptr)
             return 0;
-        const auto jit = replayProcess();
+        const auto jit = processJit();
         if(!jit)
         {
             warnJitHeuristicUnavailable();

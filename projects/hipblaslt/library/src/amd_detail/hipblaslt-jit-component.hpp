@@ -262,6 +262,13 @@ namespace hipblaslt_jit
 
     // The comgr builder and the TensileLite loader around one backend.
     std::shared_ptr<const Jit> makeJit(std::shared_ptr<const Backend> backend);
+
+    // How many times this process has entered Backend::generate. A JIT solution
+    // library hit does not. Tests read this; it is not a user-facing control.
+#if defined(__GNUC__)
+    __attribute__((visibility("default")))
+#endif
+    uint64_t generationCount() noexcept;
 }
 
 namespace hipblaslt_ext::experimental::jit::detail

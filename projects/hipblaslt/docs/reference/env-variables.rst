@@ -205,7 +205,7 @@ GEMM support. A build without that support does not consult them.
         | 2: the JIT library only
         | Any other value warns once and leaves JIT off
 
-    * - | ``HIPBLASLT_JIT_TEST_REPLAY``
-        | Testing builds only. Whitespace-separated source-bundle directories the process backend replays. Read once per process. The backend publishes into the JIT solution library, and a later query reuses the index.
-      - | Unset or empty: a JIT build has no backend to consult. Mode 1 leaves heuristic queries unchanged, and mode 2 returns no algorithms
-        | One or more bundle directories: those bundles are replayed for a matching GEMM, published, and reused on a later query
+    * - | ``HIPBLASLT_JIT_LIBRARY_PATH``
+        | Directory where generated solutions are stored. Read once per process.
+      - | Unset or empty: ``/tmp/hipblaslt-jit-<uid>`` on Linux and ``%TEMP%\\hipblaslt-jit-<user>`` on Windows
+        | A directory path: that directory is the library root. hipBLASLt creates it when missing and refuses a symbolic link, a path owned by another user, or a directory writable by group or others

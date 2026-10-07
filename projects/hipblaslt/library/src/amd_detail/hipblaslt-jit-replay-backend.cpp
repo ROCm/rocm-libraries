@@ -57,7 +57,10 @@ namespace hipblaslt_ext::experimental::jit::replay
                     }
                     m_replayed.push_back(std::move(replayed));
                 }
-                m_info.version = "replay:" + version.hex();
+                // KernArgsVersion and the solution's internalArgsSupport version name the
+                // argument layout. Neither changes when the committed assembly changes, so
+                // the library cache key is a content hash of these bundles.
+                m_info.version = version.hex();
             }
 
             const hipblaslt_jit::BackendInfo& info() const noexcept override

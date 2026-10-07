@@ -90,12 +90,12 @@ once and leaves the mode off.
 | `1` | The override file, then the Equality provider rows, then the JIT library, then the other provider rows, then the `getAllSolutions` fill. Each source fills only the remaining request, and a kernel already returned is skipped. |
 | `2` | The JIT library only. The override file is not read. A problem the library does not solve returns success with no algorithms. |
 
-`HIPBLASLT_JIT_TEST_REPLAY` is a whitespace-separated list of source-bundle
-directories, read once per process. When it names bundles, heuristic queries
-use the replay backend. A JIT build with no such source warns once: mode `1`
-leaves the query unchanged, and mode `2` returns no algorithms. The replay
-backend implements generation only. Every query publishes through the JIT
-solution library.
+A JIT build with no HipKittens backend replays the committed kernels under
+`clients/tests/jit/data` when that tree is compiled in. Those queries publish
+into the JIT solution library, and a later query in the process reuses the
+index. A build with no such kernels warns once: mode `1` leaves the query
+unchanged, and mode `2` returns no algorithms. The replay backend implements
+generation only.
 
 The algorithms those queries return are JIT solution library indices, from
 2^30, and they run through the same path as a prebuilt index.
