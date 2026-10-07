@@ -6362,12 +6362,19 @@ namespace TensileLite
             // problem-type level in the logic files.
             if(problemType.mxBlockA != 0 || problemType.mxBlockB != 0)
             {
-                // The granule size below is derived for one specific geometry.
-                // Change the swizzle format, the block size or MatrixInstK and
-                // 256 silently becomes the wrong number rather than a violated
-                // one, so pin the envelope the derivation covers. All shipped
-                // MX solutions satisfy all three.
-                if(problemType.mxScaleFormat != 1)
+                // MX StreamK USO admits NoSwizzle (0) and HostPreSwizzle (1)
+                // under the envelope below (mxBlock 32, MatrixInstK 128,
+                // DepthU % 256 == 0). StreamK._depthUForTc is format-gated:
+                // HostPreSwizzle/InMemorySwizzle use *32 DepthU-sized K-steps;
+                // NoSwizzle keeps the canonical _DepthUMXS* step that matches
+                // SubtileScaleEmit.emitScaleGRPtrUpdate.
+                //
+                // InMemorySwizzle (2) remains refused until audited (gfx1250
+                // TDM path). Unexpected format values are refused the same
+                // way. Change the block size or MatrixInstK and 256 silently
+                // becomes the wrong number rather than a violated one, so pin
+                // the envelope the derivation covers.
+                if(problemType.mxScaleFormat != 0 && problemType.mxScaleFormat != 1)
                     return refuse("MXScaleFormat",
                                   "MX scale format " + std::to_string(problemType.mxScaleFormat)
                                       + " under StreamK is not audited for uniform summation "

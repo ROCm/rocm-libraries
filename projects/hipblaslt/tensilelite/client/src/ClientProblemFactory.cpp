@@ -94,7 +94,8 @@ namespace TensileLite
             , m_useUserArgs(false)
             , m_mxBlockA(args["mx-a-block"].as<int>())
             , m_mxBlockB(args["mx-b-block"].as<int>())
-            , m_padMXScaleTensorFreeDim(false)
+            , m_mxScaleFormat(args.count("mx-scale-format") ? args["mx-scale-format"].as<int>() : 0)
+            , m_mxScaleTensorPad(ContractionProblemGemm::MXScaleTensorPad::Gfx1250)
             , m_swizzleTensorA(false)
             , m_swizzleTensorB(false)
             , m_fusedGemmA2A(args["fused-gemm-a2a"].as<bool>())
@@ -127,8 +128,8 @@ namespace TensileLite
                 hipDeviceProp_t prop;
                 int deviceIdx = args.count("device-idx") ? args["device-idx"].as<int>() : 0;
                 HIP_CHECK_EXC(hipGetDeviceProperties(&prop, deviceIdx));
-                std::string archName(prop.gcnArchName);
-                m_padMXScaleTensorFreeDim = (archName.find("gfx950") != std::string::npos);
+                m_mxScaleTensorPad
+                    = selectMXScaleTensorPad(std::string(prop.gcnArchName), m_mxScaleFormat);
             }
 
             std::vector<bool> isComplex;
@@ -555,11 +556,15 @@ namespace TensileLite
                             rv.back().setUseDeviceUserArguments(m_useUserArgs);
                             if(m_mxBlockA)
                             {
-                                rv.back().setMXScaleA(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSA], m_mxBlockA, {}, m_padMXScaleTensorFreeDim);
+                                rv.back().setMXScaleA(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSA], m_mxBlockA, {}, m_mxScaleTensorPad);
                             }
                             if(m_mxBlockB)
                             {
-                                rv.back().setMXScaleB(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSB], m_mxBlockB, {}, m_padMXScaleTensorFreeDim);
+                                rv.back().setMXScaleB(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSB], m_mxBlockB, {}, m_mxScaleTensorPad);
+                            }
+                            if(m_mxBlockA || m_mxBlockB)
+                            {
+                                rv.back().setMXScaleFormat(m_mxScaleFormat);
                             }
                             // StreamK=5 hybrid-mode toggle. Accepts the full
                             // tri-state {0=OFF (static), 1=ON (dynamic per-XCD

@@ -3249,6 +3249,40 @@ namespace TensileLite
                         problem, stream, "prob", problem.mxTypeB(), "==", "sol", value);
                 }
             };
+
+            struct MXScaleFormat
+                : public Predicate_CRTP<MXScaleFormat, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value;
+
+                MXScaleFormat() = default;
+                MXScaleFormat(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "MXScaleFormat";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.mxScaleFormat() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.mxScaleFormat(), "==", "sol", value);
+                }
+            };
         } // namespace Contraction
 
         /**

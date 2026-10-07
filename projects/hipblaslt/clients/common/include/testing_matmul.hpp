@@ -1629,6 +1629,13 @@ std::tuple<hipDataType, hipDataType> derive_unset_compute_input_type(const Argum
     return {real_compute_input_typeA, real_compute_input_typeB};
 }
 
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+inline bool mxNeedsHostPreSwizzleScaleBuf(hipblaslt_scaling_format fmt)
+{
+    return fmt == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
+}
+#endif
+
 // Swizzle MX scale tensor for the new MX layout expected by the kernel.
 // The kernel expects scale data in a permuted layout where the K-block dimension
 // is split into outer tiles of size dimk (=128/MXBlock) and interleaved with the
@@ -2154,9 +2161,21 @@ void testing_matmul_with_bias(const Arguments& arg,
                     bool   kAlongRowsA = (transA == HIPBLAS_OP_T);
                     size_t kDim        = kAlongRowsA ? scaleA_r : scaleA_c;
                     size_t mnDim       = kAlongRowsA ? scaleA_c : scaleA_r;
-                    size_t padDim      = kAlongRowsA ? kDim : mnDim;
-                    size_t paddedDim   = (padDim + dimk - 1) / dimk * dimk;
-                    size_scaleAVec[i]  = kAlongRowsA ? (mnDim * paddedDim) : (kDim * paddedDim);
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+                    if(mxNeedsHostPreSwizzleScaleBuf(arg.scaleA))
+                    {
+                        // Headroom for preSwizzleScalesGFX950 output (MN→×32, K→×8).
+                        size_t paddedK    = (kDim + 7) / 8 * 8;
+                        size_t paddedMN   = (mnDim + 31) / 32 * 32;
+                        size_scaleAVec[i] = paddedK * paddedMN;
+                    }
+                    else
+#endif
+                    {
+                        size_t padDim     = kAlongRowsA ? kDim : mnDim;
+                        size_t paddedDim  = (padDim + dimk - 1) / dimk * dimk;
+                        size_scaleAVec[i] = kAlongRowsA ? (mnDim * paddedDim) : (kDim * paddedDim);
+                    }
                 }
                 else
                 {
@@ -2181,9 +2200,21 @@ void testing_matmul_with_bias(const Arguments& arg,
                     bool   kAlongRowsB = (transB == HIPBLAS_OP_N);
                     size_t kDim        = kAlongRowsB ? scaleB_r : scaleB_c;
                     size_t mnDim       = kAlongRowsB ? scaleB_c : scaleB_r;
-                    size_t padDim      = kAlongRowsB ? kDim : mnDim;
-                    size_t paddedDim   = (padDim + dimk - 1) / dimk * dimk;
-                    size_scaleBVec[i]  = kAlongRowsB ? (mnDim * paddedDim) : (kDim * paddedDim);
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+                    if(mxNeedsHostPreSwizzleScaleBuf(arg.scaleB))
+                    {
+                        // Headroom for preSwizzleScalesGFX950 output (MN→×32, K→×8).
+                        size_t paddedK    = (kDim + 7) / 8 * 8;
+                        size_t paddedMN   = (mnDim + 31) / 32 * 32;
+                        size_scaleBVec[i] = paddedK * paddedMN;
+                    }
+                    else
+#endif
+                    {
+                        size_t padDim     = kAlongRowsB ? kDim : mnDim;
+                        size_t paddedDim  = (padDim + dimk - 1) / dimk * dimk;
+                        size_scaleBVec[i] = kAlongRowsB ? (mnDim * paddedDim) : (kDim * paddedDim);
+                    }
                 }
                 else
                 {

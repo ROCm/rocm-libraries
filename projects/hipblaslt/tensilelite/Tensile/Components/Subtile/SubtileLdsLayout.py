@@ -121,8 +121,9 @@ def subtileRegionSize(tileInfo, macroTile: int, ldsRowBankSize: int) -> int:
 def _mxScaleRegionSize(tileInfo, kernel: dict) -> int:
   """Bytes reserved for one MX scale operand.
 
-  Swizzled scale takes more LDS than the scales strictly need, so that the DTL
-  loads feeding it can stay wide.
+  HostPreSwizzle / InMemorySwizzle take more LDS than the scales strictly need
+  so DTL loads can stay wide. NoSwizzle remaps into the same HostPreSwizzle-
+  shaped LDS slots, so it keeps this wide allocation (not canonical MT*Ks).
   """
   numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
   return tileInfo.loadWidthGR * kernel["WavefrontSize"] * numWaves
