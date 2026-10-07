@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -31,6 +32,7 @@
 #include "core/Utils.hpp"
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
+#include "engines/kernel_ingestor_engine/IngestorLaunchRestore.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseLaunchValues.hpp"
@@ -357,6 +359,17 @@ private:
     int64_t _blockSize;
 };
 
+// Applies the launch geometry to `code` and builds the prepared dispatch. A plan built
+// from a graph and a plan restored from a saved payload both come through here.
+std::unique_ptr<PreparedDispatch> makePreparedPointwise(IngestorKernelCode code,
+                                                        const PointwiseLaunchInputs& launch)
+{
+    const auto blockSize = static_cast<unsigned int>(launch.blockSize);
+    code.setBlockSize(blockSize, 1, 1);
+    code.setGridSize(1, 1, 1);
+    return std::make_unique<PreparedPointwise>(std::move(code), launch.binding, launch.blockSize);
+}
+
 std::string elementTypeFor(const KernelDefinition& kernel)
 {
     const auto& dtype = kernel.getStringMetadata(std::string(DTYPE_FIELD));
@@ -452,10 +465,20 @@ public:
         auto code = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, kernel, options, pointwiseKernelSignature());
 
-        code.setBlockSize(blockSize, 1, 1);
-        code.setGridSize(1, 1, 1);
+        return makePreparedPointwise(std::move(code),
+                                     PointwiseLaunchInputs{binding, blockSizeValue});
+    }
 
-        return std::make_unique<PreparedPointwise>(std::move(code), binding, blockSizeValue);
+    std::unique_ptr<PreparedDispatch> restoreLaunch(const SavedLaunchInputs& inputs,
+                                                    SavedKernelCode code,
+                                                    int deviceOrdinal) const override
+    {
+        auto restored = restoreIngestorLaunch<PointwiseLaunchInputs>(inputs,
+                                                                     std::move(code),
+                                                                     pointwiseKernelSignature(),
+                                                                     &readPointwiseLaunchInputs,
+                                                                     deviceOrdinal);
+        return makePreparedPointwise(std::move(restored.code), restored.launch);
     }
 
     std::optional<SavedLaunchInputs>
@@ -501,6 +524,24 @@ MetadataValues pointwiseLaunchValues(const PointwiseBinding& binding, int64_t bl
             {std::string(POINTWISE_INPUT_B_UID_VALUE), binding.inputB},
             {std::string(POINTWISE_OUTPUT_UID_VALUE), binding.output},
             {std::string(POINTWISE_BLOCK_SIZE_VALUE), blockSize}};
+}
+
+PointwiseLaunchInputs readPointwiseLaunchInputs(const SavedLaunchInputs& inputs)
+{
+    requireLaunchContract(inputs, POINTWISE_DISPATCH_SYMBOL_V1);
+    requireOnlyLaunchValues(inputs,
+                            {POINTWISE_INPUT_A_UID_VALUE,
+                             POINTWISE_INPUT_B_UID_VALUE,
+                             POINTWISE_OUTPUT_UID_VALUE,
+                             POINTWISE_BLOCK_SIZE_VALUE});
+
+    PointwiseLaunchInputs launch;
+    launch.binding.inputA = requireLaunchInt(inputs, POINTWISE_INPUT_A_UID_VALUE);
+    launch.binding.inputB = requireLaunchInt(inputs, POINTWISE_INPUT_B_UID_VALUE);
+    launch.binding.output = requireLaunchInt(inputs, POINTWISE_OUTPUT_UID_VALUE);
+    launch.blockSize = requireLaunchInt(
+        inputs, POINTWISE_BLOCK_SIZE_VALUE, 1, std::numeric_limits<uint32_t>::max());
+    return launch;
 }
 
 compilation::KpackModuleCache& pointwiseKpackModuleCache()

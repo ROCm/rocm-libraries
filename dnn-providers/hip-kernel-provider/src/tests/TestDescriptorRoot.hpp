@@ -91,11 +91,8 @@ inline const std::filesystem::path& unitKpackRoot()
 #endif
 
 #ifdef HIPKERNELPROVIDER_ARCHIVE_FIXTURE_RELDIR
-/// The packed `archive_fixture` set, staged for the integration binary and read here too.
-/// It holds one subdirectory per packed arch, each with a real Pointwise archive.
-///
-/// The integration suite corrupts this staged archive in place while it runs. Read it only
-/// through a copy: see copyPackedArchTree().
+/// This binary's own packed copy of the `archive_fixture` set, staged outside its discovery
+/// root. It holds one subdirectory per packed arch, each with a real Pointwise archive.
 inline const std::filesystem::path& archiveFixtureRoot()
 {
     static const std::filesystem::path s_root

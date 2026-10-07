@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -63,6 +64,11 @@ void rediscoverStateManagersForTesting();
 /// The device resolver every descriptor-backed engine in this provider shares.
 /// Process-lifetime: a device-property cache with no engine-specific state.
 const HandleDeviceResolver& deviceResolver();
+
+/// The name of the engine with @p engineId when @p handle's provider has loaded it, and a
+/// descriptor set this provider discovered defines it. Reads only the engine names of the
+/// discovered sets. No value for a handle without a container.
+std::optional<std::string> loadedIngestorEngineName(const Handle& handle, int64_t engineId);
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 

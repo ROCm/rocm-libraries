@@ -29,6 +29,7 @@
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanRefusal.hpp"
+#include "engines/kernel_ingestor_engine/serialization/IngestorPlanTestUtilities.hpp"
 
 /**
  * @file TestIngestorKernelCode.cpp
@@ -544,6 +545,20 @@ private:
     int _ordinal;
 };
 
+// The architecture of each ordinal of a fake machine. An absent ordinal names no device.
+hipError_t reportArchitecture(const std::map<int, std::string>& architectures,
+                              int deviceOrdinal,
+                              std::string& reportedArch)
+{
+    const auto found = architectures.find(deviceOrdinal);
+    if(found == architectures.end())
+    {
+        return hipErrorInvalidDevice;
+    }
+    reportedArch = found->second;
+    return hipSuccess;
+}
+
 /// Stands in for a machine: every ordinal's architecture is dictated, and loading a
 /// module is recorded rather than performed.
 class FakeDeviceCode : public IngestorKernelCode
@@ -566,13 +581,7 @@ protected:
     hipError_t queryDeviceArch(int deviceOrdinal, std::string& reportedArch) const override
     {
         archQueries.push_back(deviceOrdinal);
-        const auto found = _architectures.find(deviceOrdinal);
-        if(found == _architectures.end())
-        {
-            return hipErrorInvalidDevice;
-        }
-        reportedArch = found->second;
-        return hipSuccess;
+        return reportArchitecture(_architectures, deviceOrdinal, reportedArch);
     }
 
     Resolved resolveForDevice(int deviceOrdinal, const std::string& /*reportedArch*/) const override
@@ -704,6 +713,166 @@ TEST(TestIngestorKernelCodeDevice, ReportsADeviceItCannotQuery)
 }
 
 // ---------------------------------------------------------------------------
+// Code restored from a saved plan on a new device
+// ---------------------------------------------------------------------------
+
+constexpr const char* STORED_LABEL = "stored pointwise kernel";
+
+// What one load of the stored bytes received.
+struct StoredLoad
+{
+    std::vector<uint8_t> bytes;
+    std::string symbol;
+    std::string label;
+    int deviceOrdinal = 0;
+};
+
+// Holds stored bytes as a restored plan does. Every ordinal's architecture is dictated,
+// and the load of the stored bytes is recorded rather than performed. The real
+// resolution step runs, so the test covers its target check and its call to the load step.
+class FakeStoredCode : public IngestorKernelCode
+{
+public:
+    FakeStoredCode(SavedKernelCode code, std::map<int, std::string> architectures, int firstOrdinal)
+        : IngestorKernelCode(std::make_shared<const SavedKernelCode>(std::move(code)),
+                             STORED_LABEL,
+                             firstOrdinal,
+                             Resolved{std::make_unique<CountingProgram>(firstOrdinal),
+                                      std::make_unique<CountingKernel>(firstOrdinal)})
+        , _architectures(std::move(architectures))
+    {
+    }
+
+    mutable std::vector<StoredLoad> loads;
+
+    // When true, the load step returns no program and no kernel.
+    bool loadsNothing = false;
+
+protected:
+    hipError_t queryDeviceArch(int deviceOrdinal, std::string& reportedArch) const override
+    {
+        return reportArchitecture(_architectures, deviceOrdinal, reportedArch);
+    }
+
+    Resolved loadStoredOnDevice(const SavedKernelCode& code,
+                                const std::string& label,
+                                int deviceOrdinal) const override
+    {
+        loads.push_back(StoredLoad{code.codeObject, code.symbol, label, deviceOrdinal});
+        if(loadsNothing)
+        {
+            return Resolved{};
+        }
+        return Resolved{std::make_unique<CountingProgram>(deviceOrdinal),
+                        std::make_unique<CountingKernel>(deviceOrdinal)};
+    }
+
+private:
+    std::map<int, std::string> _architectures;
+};
+
+SavedKernelCode storedKpackCode(const std::string& target)
+{
+    SavedKernelCode code;
+    code.codeObject = {0x10, 0x20, 0x30, 0x40};
+    code.sourceKind = KernelSourceKind::KPACK;
+    code.target = target;
+    code.symbol = "PointwiseAdd";
+    return code;
+}
+
+TEST(TestIngestorKernelCodeReload, LoadsTheStoredBytesOnANewDevice)
+{
+    const std::string target = "gfx942:sramecc+:xnack-";
+    FakeStoredCode code(storedKpackCode(target), {{0, target}, {1, target}}, 0);
+    code.setBlockSize(64, 1, 1);
+    code.setGridSize(7, 1, 1);
+
+    const auto& second = dynamic_cast<const CountingKernel&>(code.kernelFor(1));
+
+    EXPECT_EQ(second.ordinal(), 1);
+    ASSERT_EQ(code.loads.size(), 1U);
+    EXPECT_EQ(code.loads[0].bytes, (std::vector<uint8_t>{0x10, 0x20, 0x30, 0x40}));
+    EXPECT_EQ(code.loads[0].symbol, "PointwiseAdd");
+    EXPECT_EQ(code.loads[0].label, "stored pointwise kernel");
+    EXPECT_EQ(code.loads[0].deviceOrdinal, 1);
+
+    // The new device launches with the recorded geometry, not with 1x1x1.
+    EXPECT_EQ(second.blockX, 64U);
+    EXPECT_EQ(second.gridX, 7U);
+}
+
+TEST(TestIngestorKernelCodeReload, ReusesTheEntryOfAKnownDevice)
+{
+    const std::string target = "gfx942:sramecc+:xnack-";
+    const FakeStoredCode code(storedKpackCode(target), {{0, target}, {1, target}}, 0);
+
+    const auto& first = code.kernelFor(1);
+    const auto& repeat = code.kernelFor(1);
+    const auto& restored = dynamic_cast<const CountingKernel&>(code.kernelFor(0));
+
+    EXPECT_EQ(&first, &repeat);
+    EXPECT_EQ(restored.ordinal(), 0);
+
+    // Only the new device loads the stored bytes, and only once.
+    ASSERT_EQ(code.loads.size(), 1U);
+    EXPECT_EQ(code.loads[0].deviceOrdinal, 1);
+}
+
+TEST(TestIngestorKernelCodeReload, RefusesADeviceThatCannotRunTheExactTarget)
+{
+    // Both devices report gfx942, so the architecture check admits device 1. A kpack
+    // target needs a device whose name starts with that target. Device 1 does not.
+    const FakeStoredCode code(
+        storedKpackCode("gfx942:xnack-"), {{0, "gfx942:xnack-"}, {1, "gfx942:sramecc+:xnack-"}}, 0);
+
+    const std::string what
+        = serialization::expectPluginException([&]() { static_cast<void>(code.kernelFor(1)); },
+                                               HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                                               "",
+                                               "'gfx942:xnack-'");
+    EXPECT_NE(what.find("'gfx942:sramecc+:xnack-'"), std::string::npos) << what;
+
+    EXPECT_TRUE(code.loads.empty());
+}
+
+// Gives the stored-bytes constructor a first entry with no program and no kernel.
+class EmptyStoredCode : public IngestorKernelCode
+{
+public:
+    explicit EmptyStoredCode(SavedKernelCode code)
+        : IngestorKernelCode(
+              std::make_shared<const SavedKernelCode>(std::move(code)), STORED_LABEL, 0, Resolved{})
+    {
+    }
+};
+
+TEST(TestIngestorKernelCodeReload, RefusesARestoredEntryWithoutAKernel)
+{
+    const std::string what = serialization::expectPluginInternalError(
+        []() { const EmptyStoredCode code(storedKpackCode("gfx942:sramecc+:xnack-")); },
+        "stored pointwise kernel");
+    EXPECT_NE(what.find("'PointwiseAdd'"), std::string::npos) << what;
+    EXPECT_NE(what.find("device 0"), std::string::npos) << what;
+}
+
+TEST(TestIngestorKernelCodeReload, RefusesALoadThatGivesNoKernel)
+{
+    const std::string target = "gfx942:sramecc+:xnack-";
+    FakeStoredCode code(storedKpackCode(target), {{0, target}, {1, target}}, 0);
+    code.loadsNothing = true;
+
+    serialization::expectPluginInternalError([&]() { static_cast<void>(code.kernelFor(1)); },
+                                             "device 1");
+
+    // The memo does not keep the refused load, so the next call loads the stored bytes again.
+    code.loadsNothing = false;
+    const auto& second = dynamic_cast<const CountingKernel&>(code.kernelFor(1));
+    EXPECT_EQ(second.ordinal(), 1);
+    EXPECT_EQ(code.loads.size(), 2U);
+}
+
+// ---------------------------------------------------------------------------
 // Source-compiled kernels
 // ---------------------------------------------------------------------------
 
@@ -782,33 +951,16 @@ TEST(TestIngestorKernelCode, DoesNotExposeTheBytesOfANonKpackProgram)
     const IngestorKernelCode code(std::make_unique<CountingProgram>(99),
                                   std::make_unique<CountingKernel>(99));
 
-    try
-    {
-        static_cast<void>(code.readCodeObject());
-        FAIL() << "expected a program that runs anywhere to expose no bytes";
-    }
-    catch(const HipdnnPluginException& error)
-    {
-        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
-        EXPECT_NE(std::string(error.what()).find("not exposed"), std::string::npos) << error.what();
-    }
+    serialization::expectPluginInternalError([&]() { static_cast<void>(code.readCodeObject()); },
+                                             "not exposed");
 }
 
 TEST(TestIngestorKernelCode, RefusesWithoutArchiveCoordinates)
 {
     const FakeDeviceCode code({{0, "gfx942:sramecc+:xnack-"}}, 0);
 
-    try
-    {
-        static_cast<void>(code.readCodeObject());
-        FAIL() << "expected code without archive coordinates to be refused";
-    }
-    catch(const HipdnnPluginException& error)
-    {
-        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
-        EXPECT_NE(std::string(error.what()).find("no archive coordinates"), std::string::npos)
-            << error.what();
-    }
+    serialization::expectPluginInternalError([&]() { static_cast<void>(code.readCodeObject()); },
+                                             "no archive coordinates");
 }
 
 TEST(TestIngestorKernelCode, MapsReadFailuresToSaveRefusals)
@@ -851,20 +1003,12 @@ TEST(TestIngestorKernelCode, RefusesToSaveWhenTheArchiveIsAbsent)
                                   std::make_unique<CountingProgram>(0),
                                   std::make_unique<CountingKernel>(0));
 
-    try
-    {
-        static_cast<void>(code.readCodeObject());
-        FAIL() << "expected an absent archive to refuse the save";
-    }
-    catch(const HipdnnPluginException& error)
-    {
-        const std::string what = error.what();
-        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE) << what;
-        EXPECT_EQ(what.rfind(serialization::INGESTOR_PLAN_SAVE_INCOMPATIBLE_PREFIX, 0), 0U) << what;
-        EXPECT_NE(what.find("OPEN_ARCHIVE"), std::string::npos) << what;
-        EXPECT_NE(what.find(absent.string()), std::string::npos) << what;
-        EXPECT_NE(what.find("PointwiseAdd"), std::string::npos) << what;
-    }
+    const std::string what = serialization::expectIngestorPlanSaveRefusal(
+        [&]() { static_cast<void>(code.readCodeObject()); },
+        HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+        "OPEN_ARCHIVE");
+    EXPECT_NE(what.find(absent.string()), std::string::npos) << what;
+    EXPECT_NE(what.find("PointwiseAdd"), std::string::npos) << what;
 }
 
 } // namespace

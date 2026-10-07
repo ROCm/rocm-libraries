@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstring>
 #include <initializer_list>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <ostream>
@@ -37,6 +38,7 @@
 #include "compilation/KpackModuleCache.hpp"
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
+#include "engines/kernel_ingestor_engine/IngestorLaunchRestore.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseGeometry.hpp"
@@ -1030,6 +1032,29 @@ private:
     int64_t _blockM;
 };
 
+// Applies the launch geometry to `code` and builds the prepared dispatch. A plan built
+// from a graph and a plan restored from a saved payload both come through here.
+// `kernelName` is only for the diagnostic.
+//
+// Grid from the SELECTED CANDIDATE'S block_m and the GRAPH PROBLEM, not from descriptor
+// shape metadata: that carries canonical build inputs (B=1, Sq=Skv=512), not runtime
+// constraints. block_n does not enter the launch.
+std::unique_ptr<PreparedDispatch>
+    makePreparedGfx950AttentionDense(IngestorKernelCode code,
+                                     const Gfx950AttentionDenseLaunchInputs& launch,
+                                     const std::string& kernelName)
+{
+    const auto& problem = launch.problem;
+    const auto geometry = gfx950AttentionDenseGeometry(
+        launch.blockM, problem.seqLenQ, problem.numQueryHeads, problem.batch, kernelName);
+
+    code.setBlockSize(geometry.blockX, 1, 1);
+    code.setGridSize(geometry.gridX, geometry.gridY, geometry.gridZ);
+
+    return std::make_unique<PreparedGfx950AttentionDense>(
+        std::move(code), launch.binding, problem, launch.blockM);
+}
+
 /**
  * @brief The native dispatch behind this engine's UDD.
  */
@@ -1088,20 +1113,25 @@ public:
         const auto* k = findTensor(context, binding.k);
         const auto problem = problemFor(*q, *k);
 
-        // Grid from the SELECTED CANDIDATE'S block_m and the GRAPH PROBLEM, not from
-        // descriptor shape metadata: that carries canonical build inputs (B=1,
-        // Sq=Skv=512), not runtime constraints. block_n does not enter the launch.
-        const auto geometry = gfx950AttentionDenseGeometry(tile->blockM,
-                                                           problem.seqLenQ,
-                                                           problem.numQueryHeads,
-                                                           problem.batch,
-                                                           toString(kernel.kernelId));
+        return makePreparedGfx950AttentionDense(
+            std::move(code),
+            Gfx950AttentionDenseLaunchInputs{binding, problem, tile->blockM},
+            toString(kernel.kernelId));
+    }
 
-        code.setBlockSize(geometry.blockX, 1, 1);
-        code.setGridSize(geometry.gridX, geometry.gridY, geometry.gridZ);
-
-        return std::make_unique<PreparedGfx950AttentionDense>(
-            std::move(code), binding, problem, tile->blockM);
+    std::unique_ptr<PreparedDispatch> restoreLaunch(const SavedLaunchInputs& inputs,
+                                                    SavedKernelCode code,
+                                                    int deviceOrdinal) const override
+    {
+        const std::string kernelName = toString(code.kernelId);
+        auto restored = restoreIngestorLaunch<Gfx950AttentionDenseLaunchInputs>(
+            inputs,
+            std::move(code),
+            attentionDenseKernelSignature(),
+            &readGfx950AttentionDenseLaunchInputs,
+            deviceOrdinal);
+        return makePreparedGfx950AttentionDense(
+            std::move(restored.code), restored.launch, kernelName);
     }
 
     std::optional<SavedLaunchInputs>
@@ -1173,6 +1203,136 @@ MetadataValues gfx950AttentionDenseLaunchValues(const AttentionDenseBinding& bin
              std::string(data_objects::EnumNameDataType(problem.dataType))},
             {std::string(GFX950_ATTENTION_DENSE_STRIDE_LAYOUT_VALUE),
              std::string(GFX950_ATTENTION_DENSE_BSHD_LAYOUT)}};
+}
+
+namespace
+{
+
+// Refuses a saved launch value of the dense-attention contract.
+[[noreturn]] void refuseAttentionDenseLaunchValue(const SavedLaunchInputs& inputs,
+                                                  std::string_view name,
+                                                  const std::string& reason)
+{
+    serialization::refuseIngestorPlan(serialization::IngestorPlanRefusal::INCOMPATIBLE,
+                                      "launch value '" + std::string(name) + "' of dispatch '"
+                                          + inputs.dispatchSymbol + "' " + reason);
+}
+
+} // namespace
+
+Gfx950AttentionDenseLaunchInputs
+    readGfx950AttentionDenseLaunchInputs(const SavedLaunchInputs& inputs)
+{
+    requireLaunchContract(inputs, GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1);
+    requireOnlyLaunchValues(inputs,
+                            {GFX950_ATTENTION_DENSE_Q_UID_VALUE,
+                             GFX950_ATTENTION_DENSE_K_UID_VALUE,
+                             GFX950_ATTENTION_DENSE_V_UID_VALUE,
+                             GFX950_ATTENTION_DENSE_O_UID_VALUE,
+                             GFX950_ATTENTION_DENSE_CAUSAL_VALUE,
+                             GFX950_ATTENTION_DENSE_SLIDING_WINDOW_VALUE,
+                             GFX950_ATTENTION_DENSE_BATCH_VALUE,
+                             GFX950_ATTENTION_DENSE_SEQLEN_Q_VALUE,
+                             GFX950_ATTENTION_DENSE_SEQLEN_KV_VALUE,
+                             GFX950_ATTENTION_DENSE_NUM_QUERY_HEADS_VALUE,
+                             GFX950_ATTENTION_DENSE_NUM_KV_HEADS_VALUE,
+                             GFX950_ATTENTION_DENSE_HEAD_SIZE_VALUE,
+                             GFX950_ATTENTION_DENSE_BLOCK_M_VALUE,
+                             GFX950_ATTENTION_DENSE_SCALE_VALUE,
+                             GFX950_ATTENTION_DENSE_DATA_TYPE_VALUE,
+                             GFX950_ATTENTION_DENSE_STRIDE_LAYOUT_VALUE});
+
+    constexpr int64_t INT32_LIMIT = std::numeric_limits<int32_t>::max();
+
+    Gfx950AttentionDenseLaunchInputs launch;
+    auto& binding = launch.binding;
+    auto& problem = launch.problem;
+    binding.q = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_Q_UID_VALUE);
+    binding.k = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_K_UID_VALUE);
+    binding.v = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_V_UID_VALUE);
+    binding.o = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_O_UID_VALUE);
+    binding.causal = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_CAUSAL_VALUE);
+    binding.slidingWindow = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_SLIDING_WINDOW_VALUE);
+
+    // The kernel takes these three as int32_t arguments.
+    problem.batch = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_BATCH_VALUE, 1, INT32_LIMIT);
+    problem.seqLenQ
+        = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_SEQLEN_Q_VALUE, 1, INT32_LIMIT);
+    problem.seqLenKv
+        = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_SEQLEN_KV_VALUE, 1, INT32_LIMIT);
+    // num_query_heads is a grid dimension.
+    problem.numQueryHeads
+        = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_NUM_QUERY_HEADS_VALUE, 1, INT32_LIMIT);
+    problem.numKvHeads
+        = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_NUM_KV_HEADS_VALUE, 1, INT32_LIMIT);
+    problem.headSize
+        = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_HEAD_SIZE_VALUE, 1, INT32_LIMIT);
+    launch.blockM = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_BLOCK_M_VALUE);
+
+    // The kernel takes the scale as a float. A double that a float cannot hold exactly was
+    // not written from one.
+    const double scale = requireLaunchDouble(inputs, GFX950_ATTENTION_DENSE_SCALE_VALUE);
+    if(!std::isfinite(scale)
+       || std::fabs(scale) > static_cast<double>(std::numeric_limits<float>::max())
+       || static_cast<double>(static_cast<float>(scale)) != scale)
+    {
+        refuseAttentionDenseLaunchValue(inputs,
+                                        GFX950_ATTENTION_DENSE_SCALE_VALUE,
+                                        "must be a finite double that a float holds exactly");
+    }
+    binding.scale = static_cast<float>(scale);
+
+    const std::string dataTypeName
+        = requireLaunchString(inputs, GFX950_ATTENTION_DENSE_DATA_TYPE_VALUE);
+    bool dataTypeFound = false;
+    for(const auto dataType : data_objects::EnumValuesDataType())
+    {
+        if(dataTypeName == data_objects::EnumNameDataType(dataType))
+        {
+            problem.dataType = dataType;
+            dataTypeFound = true;
+            break;
+        }
+    }
+    if(!dataTypeFound || !supportedDataTypeName(problem.dataType).has_value())
+    {
+        refuseAttentionDenseLaunchValue(
+            inputs,
+            GFX950_ATTENTION_DENSE_DATA_TYPE_VALUE,
+            "must name a data type the kernel is built for (BFLOAT16 or HALF); the plan "
+            "holds '"
+                + dataTypeName + "'");
+    }
+
+    // The kernel takes no stride arguments and reads every operand as dense BSHD.
+    const std::string strideLayout
+        = requireLaunchString(inputs, GFX950_ATTENTION_DENSE_STRIDE_LAYOUT_VALUE);
+    if(strideLayout != GFX950_ATTENTION_DENSE_BSHD_LAYOUT)
+    {
+        refuseAttentionDenseLaunchValue(inputs,
+                                        GFX950_ATTENTION_DENSE_STRIDE_LAYOUT_VALUE,
+                                        "must be '"
+                                            + std::string(GFX950_ATTENTION_DENSE_BSHD_LAYOUT)
+                                            + "'; the plan holds '" + strideLayout + "'");
+    }
+
+    try
+    {
+        static_cast<void>(gfx950AttentionDenseGeometry(
+            launch.blockM, problem.seqLenQ, problem.numQueryHeads, problem.batch, "saved plan"));
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        if(error.getStatus() != HIPDNN_PLUGIN_STATUS_BAD_PARAM)
+        {
+            throw;
+        }
+        refuseAttentionDenseLaunchValue(inputs,
+                                        GFX950_ATTENTION_DENSE_BLOCK_M_VALUE,
+                                        "is not a tile the kernel is built with: "
+                                            + error.getMessage());
+    }
+    return launch;
 }
 
 compilation::KpackModuleCache& gfx950AttentionDenseKpackModuleCache()

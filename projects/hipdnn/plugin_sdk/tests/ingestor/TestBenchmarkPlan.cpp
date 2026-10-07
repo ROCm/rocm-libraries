@@ -1314,6 +1314,35 @@ TEST(TestIngestorBenchmarkPlan, SaveablePlanIsTheChosenCandidates)
     EXPECT_EQ(plan.saveablePlan(), winnersSaveable.get());
 }
 
+TEST(TestIngestorBenchmarkPlan, PlanInterfaceHasNoSaveablePlanByDefault)
+{
+    const FakePlan plan;
+    const hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>& asPlan = plan;
+
+    EXPECT_EQ(asPlan.saveablePlan(), nullptr);
+}
+
+TEST(TestIngestorBenchmarkPlan, HasNoSaveablePlanWhenTheChosenCandidateHasNone)
+{
+    auto loser = std::make_unique<FakePlan>(64);
+    auto winner = std::make_unique<FakePlan>(64);
+    const auto* loserRaw = loser.get();
+    const auto* winnerRaw = winner.get();
+
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back({testId(0x01), std::move(loser)});
+    candidates.push_back({testId(0x02), std::move(winner)});
+
+    const BenchmarkTestHandle handle;
+    const TestBenchmarkPlan plan(
+        std::move(candidates), handle, fixedTimer({{loserRaw, 5.0}, {winnerRaw, 1.0}}));
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    EXPECT_EQ(plan.chosenPlan(), winnerRaw);
+    EXPECT_EQ(plan.saveablePlan(), nullptr);
+}
+
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

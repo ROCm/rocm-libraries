@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -30,6 +31,7 @@
 #include "core/Handle.hpp"
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
+#include "engines/kernel_ingestor_engine/IngestorLaunchRestore.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvFwdLaunchValues.hpp"
@@ -382,6 +384,29 @@ private:
     int64_t _blockSize;
 };
 
+// Applies the launch geometry to `code` and builds the prepared dispatch. A plan built
+// from a graph and a plan restored from a saved payload both come through here.
+std::unique_ptr<PreparedDispatch> makePreparedConvFwd(IngestorKernelCode code,
+                                                      const ConvFwdLaunchInputs& launch)
+{
+    const auto& extents = launch.extents;
+    const auto blockSize = static_cast<unsigned int>(launch.blockSize);
+    const auto p = extents.h - extents.r + 1;
+    const auto q = extents.width - extents.s + 1;
+    // int64_t: n*k*p*q can exceed 2^31 for shapes this matcher admits. A 32-bit
+    // product would wrap, corrupting both the grid size and the kernel's own bounds
+    // guard (ConvFwd.cpp).
+    const int64_t total = static_cast<int64_t>(extents.n) * extents.k * p * q;
+    const auto gridSize = static_cast<unsigned int>((total + static_cast<int64_t>(blockSize) - 1)
+                                                    / static_cast<int64_t>(blockSize));
+
+    code.setBlockSize(blockSize, 1, 1);
+    code.setGridSize(gridSize, 1, 1);
+
+    return std::make_unique<PreparedConvFwd>(
+        std::move(code), launch.binding, extents, launch.blockSize);
+}
+
 /// The C++ type the kernel is compiled for, from the kernel's dtype metadata.
 std::string elementTypeFor(const KernelDefinition& kernel)
 {
@@ -499,20 +524,21 @@ public:
         auto code = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, kernel, options, convFwdKernelSignature());
 
-        const auto p = h - r + 1;
-        const auto q = width - s + 1;
-        // int64_t: n*k*p*q can exceed 2^31 for shapes this matcher admits. A 32-bit
-        // product would wrap, corrupting both the grid size and the kernel's own bounds
-        // guard (ConvFwd.cpp).
-        const int64_t total = static_cast<int64_t>(n) * k * p * q;
-        const auto gridSize = static_cast<unsigned int>(
-            (total + static_cast<int64_t>(blockSize) - 1) / static_cast<int64_t>(blockSize));
+        return makePreparedConvFwd(
+            std::move(code),
+            ConvFwdLaunchInputs{binding, ConvFwdExtents{n, c, h, width, k, r, s}, blockSizeValue});
+    }
 
-        code.setBlockSize(blockSize, 1, 1);
-        code.setGridSize(gridSize, 1, 1);
-
-        return std::make_unique<PreparedConvFwd>(
-            std::move(code), binding, ConvFwdExtents{n, c, h, width, k, r, s}, blockSizeValue);
+    std::unique_ptr<PreparedDispatch> restoreLaunch(const SavedLaunchInputs& inputs,
+                                                    SavedKernelCode code,
+                                                    int deviceOrdinal) const override
+    {
+        auto restored = restoreIngestorLaunch<ConvFwdLaunchInputs>(inputs,
+                                                                   std::move(code),
+                                                                   convFwdKernelSignature(),
+                                                                   &readConvFwdLaunchInputs,
+                                                                   deviceOrdinal);
+        return makePreparedConvFwd(std::move(restored.code), restored.launch);
     }
 
     std::optional<SavedLaunchInputs>
@@ -578,6 +604,82 @@ MetadataValues convFwdLaunchValues(const ConvFwdBinding& binding,
             {std::string(CONV_FWD_R_VALUE), int64_t{extents.r}},
             {std::string(CONV_FWD_S_VALUE), int64_t{extents.s}},
             {std::string(CONV_FWD_BLOCK_SIZE_VALUE), blockSize}};
+}
+
+ConvFwdLaunchInputs readConvFwdLaunchInputs(const SavedLaunchInputs& inputs)
+{
+    requireLaunchContract(inputs, CONV_FWD_DISPATCH_SYMBOL_V1);
+    requireOnlyLaunchValues(inputs,
+                            {CONV_FWD_X_UID_VALUE,
+                             CONV_FWD_W_UID_VALUE,
+                             CONV_FWD_Y_UID_VALUE,
+                             CONV_FWD_N_VALUE,
+                             CONV_FWD_C_VALUE,
+                             CONV_FWD_H_VALUE,
+                             CONV_FWD_WIDTH_VALUE,
+                             CONV_FWD_K_VALUE,
+                             CONV_FWD_R_VALUE,
+                             CONV_FWD_S_VALUE,
+                             CONV_FWD_BLOCK_SIZE_VALUE});
+
+    // The kernel takes each extent as an int.
+    const auto extent = [&inputs](std::string_view name) {
+        return static_cast<int>(requireLaunchInt(inputs, name, 1, std::numeric_limits<int>::max()));
+    };
+
+    ConvFwdLaunchInputs launch;
+    launch.binding.x = requireLaunchInt(inputs, CONV_FWD_X_UID_VALUE);
+    launch.binding.w = requireLaunchInt(inputs, CONV_FWD_W_UID_VALUE);
+    launch.binding.y = requireLaunchInt(inputs, CONV_FWD_Y_UID_VALUE);
+    launch.extents.n = extent(CONV_FWD_N_VALUE);
+    launch.extents.c = extent(CONV_FWD_C_VALUE);
+    launch.extents.h = extent(CONV_FWD_H_VALUE);
+    launch.extents.width = extent(CONV_FWD_WIDTH_VALUE);
+    launch.extents.k = extent(CONV_FWD_K_VALUE);
+    launch.extents.r = extent(CONV_FWD_R_VALUE);
+    launch.extents.s = extent(CONV_FWD_S_VALUE);
+    launch.blockSize = requireLaunchInt(
+        inputs, CONV_FWD_BLOCK_SIZE_VALUE, 1, std::numeric_limits<uint32_t>::max());
+
+    if(launch.extents.r > launch.extents.h || launch.extents.s > launch.extents.width)
+    {
+        serialization::refuseIngestorPlan(
+            serialization::IngestorPlanRefusal::INCOMPATIBLE,
+            "launch values 'r' and 's' of dispatch '" + inputs.dispatchSymbol
+                + "' must not exceed 'h' and 'width'; the plan holds r "
+                + std::to_string(launch.extents.r) + ", h " + std::to_string(launch.extents.h)
+                + ", s " + std::to_string(launch.extents.s) + " and width "
+                + std::to_string(launch.extents.width));
+    }
+
+    // Each factor is in [1, INT_MAX], so a product overflows int64_t only past the second
+    // factor. The grid computation adds block_size to the product, so that sum must fit
+    // too. The block count must fit the unsigned int grid dimension.
+    const int64_t outputHeight = int64_t{launch.extents.h} - launch.extents.r + 1;
+    const int64_t outputWidth = int64_t{launch.extents.width} - launch.extents.s + 1;
+    int64_t total = int64_t{launch.extents.n} * launch.extents.k;
+    bool fits = total <= std::numeric_limits<int64_t>::max() / outputHeight;
+    if(fits)
+    {
+        total *= outputHeight;
+        fits = total <= std::numeric_limits<int64_t>::max() / outputWidth;
+    }
+    if(fits)
+    {
+        total *= outputWidth;
+        const int64_t blocks = total / launch.blockSize + (total % launch.blockSize != 0 ? 1 : 0);
+        fits = total <= std::numeric_limits<int64_t>::max() - launch.blockSize
+               && blocks <= int64_t{std::numeric_limits<unsigned int>::max()};
+    }
+    if(!fits)
+    {
+        serialization::refuseIngestorPlan(
+            serialization::IngestorPlanRefusal::INCOMPATIBLE,
+            "launch values 'n', 'k', 'h', 'width', 'r', 's' and 'block_size' of dispatch '"
+                + inputs.dispatchSymbol + "' give a grid larger than "
+                + std::to_string(std::numeric_limits<unsigned int>::max()) + " blocks");
+    }
+    return launch;
 }
 
 compilation::KpackModuleCache& convFwdKpackModuleCache()

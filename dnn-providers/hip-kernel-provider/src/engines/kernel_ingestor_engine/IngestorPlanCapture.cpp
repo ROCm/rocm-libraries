@@ -15,6 +15,7 @@
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
 #include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
+#include "engines/kernel_ingestor_engine/RestoredIngestorPlan.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanRefusal.hpp"
 #include "engines/kernel_ingestor_engine/serialization/SerializableSourceKind.hpp"
 #include "version.h"
@@ -36,6 +37,14 @@ serialization::IngestorPlanPayload captureIngestorPlan(const hipdnn_plugin_sdk::
             "engine name '" + engineName + "' does not give the id "
                 + hipdnn_data_sdk::utilities::formatEngineIdHex(engineId)
                 + " of the engine that built the plan");
+    }
+
+    if(dynamic_cast<const RestoredIngestorPlan<Handle>*>(&plan) != nullptr)
+    {
+        serialization::refuseIngestorPlanSave(
+            IngestorPlanRefusal::INCOMPATIBLE,
+            "this plan was loaded from a saved payload; re-saving is not supported; keep the "
+            "original bytes");
     }
 
     const auto* saveable = plan.saveablePlan();

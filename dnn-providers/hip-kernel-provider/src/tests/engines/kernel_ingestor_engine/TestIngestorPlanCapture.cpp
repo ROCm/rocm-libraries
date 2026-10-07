@@ -3,7 +3,6 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -17,10 +16,9 @@
 #include <hip/hip_runtime_api.h>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
-#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
-#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/BenchmarkPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
@@ -33,15 +31,19 @@
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 
 #include "PackedKernelSource.hpp"
-#include "TestDescriptorRoot.hpp"
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPlanCapture.hpp"
+#include "engines/kernel_ingestor_engine/PackedPlanTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/RestoredIngestorPlan.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvFwdPackedCase.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvFwdTestGraphs.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwisePackedCase.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanCodec.hpp"
-#include "engines/kernel_ingestor_engine/serialization/IngestorPlanRefusal.hpp"
+#include "engines/kernel_ingestor_engine/serialization/IngestorPlanTestUtilities.hpp"
 #include "utilities/Digest.hpp"
 #include "version.h"
 
@@ -58,7 +60,7 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 namespace
 {
 
-using hipdnn_plugin_sdk::HipdnnPluginException;
+using hipdnn_data_sdk::utilities::Workspace;
 using hipdnn_plugin_sdk::ingestor::BenchmarkPlan;
 using hipdnn_plugin_sdk::ingestor::BoundTokens;
 using hipdnn_plugin_sdk::ingestor::DeviceProperties;
@@ -67,16 +69,19 @@ using hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler;
 using hipdnn_plugin_sdk::ingestor::KernelDefinition;
 using hipdnn_plugin_sdk::ingestor::KernelDispatcher;
 using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
-using hipdnn_plugin_sdk::ingestor::MatchContext;
 using hipdnn_plugin_sdk::ingestor::MetadataValues;
 using hipdnn_plugin_sdk::ingestor::PreparedDispatch;
 using hipdnn_plugin_sdk::ingestor::SavedLaunchInputs;
 using hipdnn_test_sdk::utilities::claimScratchDirectory;
+using hipdnn_test_sdk::utilities::GraphTensorBundle;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
 using serialization::IngestorPlanPayload;
 
 namespace fixtures = hip_kernel_provider::testing;
 namespace packs = hip_kernel_provider::kernel_ingestor_engine::testing;
+
+using packs::PackedPlan;
+using packs::PackedPlanCase;
 
 constexpr const char* SCRATCH_LABEL = "ingestorplancapture";
 constexpr const char* ENGINE_NAME = "hipkernel:capture_test_engine";
@@ -89,77 +94,28 @@ int64_t testEngineId()
 // The text of the refusal for a benchmarking plan without a chosen kernel.
 constexpr const char* NO_WINNER_PHRASE = "has not chosen a kernel yet";
 
-void expectSaveRefusal(const hipdnn_plugin_sdk::IPlan<Handle>& plan,
-                       hipdnnPluginStatus_t status,
-                       const std::string& phrase)
+// Saves `plan` under the test engine id and the engine name `name`.
+auto captureOf(const hipdnn_plugin_sdk::IPlan<Handle>& plan, std::string name = ENGINE_NAME)
 {
-    const Handle handle;
-    try
-    {
-        static_cast<void>(captureIngestorPlan(plan, handle, testEngineId(), ENGINE_NAME));
-        ADD_FAILURE() << "expected a save refusal that contains '" << phrase << "'";
-    }
-    catch(const HipdnnPluginException& error)
-    {
-        const std::string message = error.getMessage();
-        EXPECT_EQ(error.getStatus(), status) << message;
-        const std::string prefix(status == HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE
-                                     ? serialization::INGESTOR_PLAN_SAVE_INCOMPATIBLE_PREFIX
-                                     : serialization::INGESTOR_PLAN_SAVE_DAMAGED_PREFIX);
-        EXPECT_EQ(message.rfind(prefix, 0), 0U) << message;
-        EXPECT_NE(message.find(phrase), std::string::npos) << message;
-    }
+    return [&plan, engineName = std::move(name)]() {
+        const Handle handle;
+        static_cast<void>(captureIngestorPlan(plan, handle, testEngineId(), engineName));
+    };
 }
 
-void expectInternalError(const hipdnn_plugin_sdk::IPlan<Handle>& plan, const std::string& phrase)
+std::string expectSaveRefusal(const hipdnn_plugin_sdk::IPlan<Handle>& plan,
+                              hipdnnPluginStatus_t status,
+                              const std::string& phrase)
 {
-    const Handle handle;
-    try
-    {
-        static_cast<void>(captureIngestorPlan(plan, handle, testEngineId(), ENGINE_NAME));
-        ADD_FAILURE() << "expected an internal error that contains '" << phrase << "'";
-    }
-    catch(const HipdnnPluginException& error)
-    {
-        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR) << error.getMessage();
-        EXPECT_NE(error.getMessage().find(phrase), std::string::npos) << error.getMessage();
-    }
+    return serialization::expectIngestorPlanSaveRefusal(captureOf(plan), status, phrase);
 }
 
 // ---------------------------------------------------------------------------
 // Refusals that need no device
 // ---------------------------------------------------------------------------
 
-// A handler with none of the save overrides. It prepares an empty launch and launches
-// nothing.
-class SavesNothingHandler : public IKernelDispatchHandler<Handle>
-{
-public:
-    size_t workspaceBytes(const MatchContext& /*context*/,
-                          const BoundTokens& /*bound*/,
-                          const KernelDefinition& /*kernel*/) const override
-    {
-        return 0;
-    }
-
-    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& /*context*/,
-                                              const BoundTokens& /*bound*/,
-                                              const KernelDefinition& /*kernel*/) const override
-    {
-        return std::make_unique<PreparedDispatch>();
-    }
-
-    void launch(const Handle& /*handle*/,
-                const PreparedDispatch& /*prepared*/,
-                const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
-                uint32_t /*numDeviceBuffers*/,
-                void* /*workspace*/) const override
-    {
-    }
-};
-
 // Saves its launch inputs under a name no handler is registered under.
-class UnregisteredAliasHandler : public SavesNothingHandler
+class UnregisteredAliasHandler : public packs::StubDispatchHandler
 {
 public:
     std::optional<SavedLaunchInputs>
@@ -192,7 +148,7 @@ TEST(TestIngestorPlanCapture, RefusesABenchmarkPlanWithoutAWinner)
 {
     // Real GenericPlans: a benchmarking plan that answered before a winner exists would
     // hand capture a plan to save, and the refusal would come from a later step.
-    const SavesNothingHandler handler;
+    const packs::StubDispatchHandler handler;
     std::vector<BenchmarkPlan<Handle>::Candidate> candidates;
     candidates.push_back({{}, makeStubPlan(handler, 0x01)});
     candidates.push_back({{}, makeStubPlan(handler, 0x02)});
@@ -207,7 +163,7 @@ TEST(TestIngestorPlanCapture, RefusesABenchmarkPlanWithoutAWinner)
 
 TEST(TestIngestorPlanCapture, RefusesAHandlerThatSavesNothing)
 {
-    const SavesNothingHandler handler;
+    const packs::StubDispatchHandler handler;
     const auto plan = makeStubPlan(handler, 0x03);
 
     expectSaveRefusal(*plan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "does not support saving");
@@ -218,181 +174,43 @@ TEST(TestIngestorPlanCapture, RefusesAnAliasThatIsNotRegisteredToTheHandler)
     const UnregisteredAliasHandler handler;
     const auto plan = makeStubPlan(handler, 0x04);
 
-    expectInternalError(*plan, "is not registered to this handler");
+    serialization::expectPluginInternalError(captureOf(*plan), "is not registered to this handler");
 }
 
 TEST(TestIngestorPlanCapture, RefusesAnEngineNameWithoutTheEngineId)
 {
-    const SavesNothingHandler handler;
+    const packs::StubDispatchHandler handler;
     const auto plan = makeStubPlan(handler, 0x05);
-    const Handle handle;
 
-    try
-    {
-        static_cast<void>(
-            captureIngestorPlan(*plan, handle, testEngineId(), "hipkernel:another_engine"));
-        ADD_FAILURE() << "expected an engine name that does not give the engine id to be refused";
-    }
-    catch(const HipdnnPluginException& error)
-    {
-        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR) << error.getMessage();
-        EXPECT_NE(error.getMessage().find("does not give the id"), std::string::npos)
-            << error.getMessage();
-        EXPECT_NE(error.getMessage().find("hipkernel:another_engine"), std::string::npos)
-            << error.getMessage();
-        EXPECT_NE(
-            error.getMessage().find(hipdnn_data_sdk::utilities::formatEngineIdHex(testEngineId())),
-            std::string::npos)
-            << error.getMessage();
-    }
+    const std::string message = serialization::expectPluginInternalError(
+        captureOf(*plan, "hipkernel:another_engine"), "does not give the id");
+    EXPECT_NE(message.find("hipkernel:another_engine"), std::string::npos) << message;
+    EXPECT_NE(message.find(hipdnn_data_sdk::utilities::formatEngineIdHex(testEngineId())),
+              std::string::npos)
+        << message;
+}
+
+TEST(TestIngestorPlanCapture, RefusesARestoredPlan)
+{
+    const packs::StubDispatchHandler handler;
+    const RestoredIngestorPlan<Handle> plan(
+        handler, std::make_unique<PreparedDispatch>(), 0, "restored test plan");
+
+    expectSaveRefusal(plan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "loaded from a saved payload");
+    const std::string message
+        = expectSaveRefusal(plan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "keep the original bytes");
+
+    // The benchmarking advice does not apply to a restored plan.
+    EXPECT_EQ(message.find(NO_WINNER_PHRASE), std::string::npos) << message;
 }
 
 // ---------------------------------------------------------------------------
 // Real kpack plans
 // ---------------------------------------------------------------------------
 
-// A device buffer of `bytes`, zero-filled.
-class DeviceBuffer
-{
-public:
-    explicit DeviceBuffer(size_t bytes)
-    {
-        if(hipMalloc(&_ptr, bytes) != hipSuccess)
-        {
-            _ptr = nullptr;
-            return;
-        }
-        if(hipMemset(_ptr, 0, bytes) != hipSuccess)
-        {
-            static_cast<void>(hipFree(_ptr));
-            _ptr = nullptr;
-        }
-    }
-
-    ~DeviceBuffer()
-    {
-        if(_ptr != nullptr)
-        {
-            static_cast<void>(hipFree(_ptr));
-        }
-    }
-
-    DeviceBuffer(const DeviceBuffer&) = delete;
-    DeviceBuffer& operator=(const DeviceBuffer&) = delete;
-    DeviceBuffer(DeviceBuffer&&) = delete;
-    DeviceBuffer& operator=(DeviceBuffer&&) = delete;
-
-    void* get() const
-    {
-        return _ptr;
-    }
-
-private:
-    void* _ptr = nullptr;
-};
-
-// Enough bytes for every tensor of the default pointwise and conv test graphs.
-constexpr size_t TENSOR_BYTES = 256;
-
-// One buffer per operand uid 1, 2 and 3: the uids both test graphs use.
-class OperandBuffers
-{
-public:
-    OperandBuffers()
-        : _descriptors{{1, _first.get()}, {2, _second.get()}, {3, _third.get()}}
-    {
-    }
-
-    bool allocated() const
-    {
-        return _first.get() != nullptr && _second.get() != nullptr && _third.get() != nullptr;
-    }
-
-    const hipdnnPluginDeviceBuffer_t* data() const
-    {
-        return _descriptors.data();
-    }
-
-    uint32_t count() const
-    {
-        return static_cast<uint32_t>(_descriptors.size());
-    }
-
-private:
-    DeviceBuffer _first{TENSOR_BYTES};
-    DeviceBuffer _second{TENSOR_BYTES};
-    DeviceBuffer _third{TENSOR_BYTES};
-    std::vector<hipdnnPluginDeviceBuffer_t> _descriptors;
-};
-
-enum class PackedSet
-{
-    POINTWISE,
-    CONV_FWD,
-};
-
-// Copies the packed set of `set` for the local device into `scratch`. `copy` stays
-// empty when the build packed nothing for the device. `deviceProperties` receives the
-// properties of device 0, with the decorated arch name the device reports.
-//
-// Uses fatal assertions: call through ASSERT_NO_FATAL_FAILURE.
-void copyPackedSet(PackedSet set,
-                   const ScopedDirectory& scratch,
-                   DeviceProperties& deviceProperties,
-                   std::filesystem::path& copy)
-{
-    const std::filesystem::path& root
-        = set == PackedSet::POINTWISE ? fixtures::archiveFixtureRoot() : fixtures::unitKpackRoot();
-
-    hipDeviceProp_t properties{};
-    std::string arch;
-    std::filesystem::path packed;
-    ASSERT_NO_FATAL_FAILURE(fixtures::findPackedArchDirectoryUnder(root, properties, arch, packed));
-
-    deviceProperties.gcnArchName = properties.gcnArchName;
-    deviceProperties.warpSize = properties.warpSize;
-    deviceProperties.multiProcessorCount = properties.multiProcessorCount;
-
-    if(!packed.empty())
-    {
-        copy = fixtures::copyPackedArchTree(packed, scratch.path());
-    }
-}
-
-// A GenericPlan over the registered handler of `set`, for `kernel`.
-std::unique_ptr<GenericPlan<Handle>> makePackedPlan(PackedSet set,
-                                                    const DeviceProperties& deviceProperties,
-                                                    const KernelDefinition& kernel)
-{
-    const auto& pack = set == PackedSet::POINTWISE ? packs::POINTWISE_ADD : packs::CONV_FWD;
-    const packs::GraphFixture fixture(
-        set == PackedSet::POINTWISE
-            ? packs::buildPointwiseGraph()
-            : packs::buildConvFwdGraph(hipdnn_flatbuffers_sdk::data_objects::DataType::HALF),
-        deviceProperties);
-
-    const auto bound = packs::matchesGraph(pack, fixture.context());
-    if(!bound.has_value())
-    {
-        ADD_FAILURE() << "the test graph does not match its pack";
-        return nullptr;
-    }
-    return std::make_unique<GenericPlan<Handle>>(
-        KernelDispatcher<Handle>{kernel, &packs::dispatchHandler(pack)}, fixture.context(), *bound);
-}
-
-// The packed Pointwise descriptor with block size 256 (workspace 1024).
-constexpr const char* POINTWISE_B256_DESCRIPTOR = "packed_pointwise_add_b256.ukd.json";
-// The packed Pointwise pack, whose inline kernel has block size 64 (workspace 0).
-constexpr const char* POINTWISE_B64_DESCRIPTOR = "packed_pointwise_add.kdp.json";
-// The packed ConvFwd descriptor with block size 64.
-constexpr const char* CONV_FWD_DESCRIPTOR = "conv_fwd_f16_block64.ukd.json";
-
 struct CaptureCase
 {
-    std::string name;
-    PackedSet set;
-    const char* descriptor;
+    const PackedPlanCase* packedCase;
     std::string alias;
     MetadataValues launchValues;
     uint64_t workspaceBytes;
@@ -408,19 +226,16 @@ TEST_P(TestIngestorPlanCaptureKpack, CapturesAKpackPlan)
     const auto& param = GetParam();
 
     const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
-    DeviceProperties deviceProperties;
-    std::filesystem::path packed;
-    ASSERT_NO_FATAL_FAILURE(copyPackedSet(param.set, scratch, deviceProperties, packed));
-    if(packed.empty())
+    PackedPlan built;
+    ASSERT_NO_FATAL_FAILURE(packs::buildPackedPlan(
+        *param.packedCase, param.packedCase->captureGraph(), scratch.path(), built));
+    if(built.plan == nullptr)
     {
-        GTEST_SKIP() << "nothing was packed for this device (" << deviceProperties.gcnArchName
+        GTEST_SKIP() << "nothing was packed for this device (" << built.deviceProperties.gcnArchName
                      << ")";
     }
-
-    KernelDefinition kernel;
-    ASSERT_NO_FATAL_FAILURE(fixtures::readPackedKernelDefinition(packed, param.descriptor, kernel));
-    const auto plan = makePackedPlan(param.set, deviceProperties, kernel);
-    ASSERT_NE(plan, nullptr);
+    const KernelDefinition& kernel = built.kernel;
+    const auto& plan = built.plan;
 
     const Handle handle;
     const IngestorPlanPayload payload
@@ -438,9 +253,10 @@ TEST_P(TestIngestorPlanCaptureKpack, CapturesAKpackPlan)
     EXPECT_EQ(payload.sha256, kernel.source.sha256);
     EXPECT_EQ(utilities::sha256Hex(payload.codeObject.data(), payload.codeObject.size()),
               kernel.source.sha256);
-    EXPECT_TRUE(hipdnn_plugin_sdk::archMatches(
-        deviceProperties.gcnArchName, payload.target, hipdnn_plugin_sdk::ArchMatchMode::PREFIX))
-        << payload.target << " does not serve " << deviceProperties.gcnArchName;
+    EXPECT_TRUE(hipdnn_plugin_sdk::archMatches(built.deviceProperties.gcnArchName,
+                                               payload.target,
+                                               hipdnn_plugin_sdk::ArchMatchMode::PREFIX))
+        << payload.target << " does not serve " << built.deviceProperties.gcnArchName;
     EXPECT_TRUE(serialization::detail::sameKernelSignature(payload.recordedSignature,
                                                            kernel.source.signature));
     EXPECT_EQ(payload.providerVersion, HIP_KERNEL_PROVIDER_VERSION_STRING);
@@ -452,18 +268,14 @@ TEST_P(TestIngestorPlanCaptureKpack, CapturesAKpackPlan)
 INSTANTIATE_TEST_SUITE_P(
     ,
     TestIngestorPlanCaptureKpack,
-    ::testing::Values(CaptureCase{"Pointwise",
-                                  PackedSet::POINTWISE,
-                                  POINTWISE_B256_DESCRIPTOR,
+    ::testing::Values(CaptureCase{&packs::POINTWISE_PACKED_PLAN_CASE,
                                   "hipkernel.pointwise.dispatch.v1",
                                   {{"input_a.uid", int64_t{packs::INPUT_A_UID}},
                                    {"input_b.uid", int64_t{packs::INPUT_B_UID}},
                                    {"output.uid", int64_t{packs::OUTPUT_UID}},
                                    {"block_size", int64_t{256}}},
                                   1024},
-                      CaptureCase{"ConvFwd",
-                                  PackedSet::CONV_FWD,
-                                  CONV_FWD_DESCRIPTOR,
+                      CaptureCase{&packs::CONV_FWD_PACKED_PLAN_CASE,
                                   "hipkernel.conv_fwd.dispatch.v1",
                                   {{"x.uid", int64_t{packs::CONV_X_UID}},
                                    {"w.uid", int64_t{packs::CONV_W_UID}},
@@ -477,7 +289,9 @@ INSTANTIATE_TEST_SUITE_P(
                                    {"s", int64_t{2}},
                                    {"block_size", int64_t{64}}},
                                   0}),
-    [](const ::testing::TestParamInfo<CaptureCase>& info) { return info.param.name; });
+    [](const ::testing::TestParamInfo<CaptureCase>& info) {
+        return std::string(info.param.packedCase->name);
+    });
 
 // Saving accepts only kpack kernels: embedded_source kernels have no recorded argument
 // signature, and their code bytes are not exposed. When either fact changes, change this
@@ -494,23 +308,19 @@ TEST_P(TestIngestorPlanCaptureGate, AppliesTheSourceKindGate)
     if(GetParam() == KernelSourceKind::KPACK)
     {
         const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
-        DeviceProperties deviceProperties;
-        std::filesystem::path packed;
+        PackedPlan built;
         ASSERT_NO_FATAL_FAILURE(
-            copyPackedSet(PackedSet::CONV_FWD, scratch, deviceProperties, packed));
-        if(packed.empty())
+            packs::buildPackedPlan(packs::CONV_FWD_PACKED_PLAN_CASE,
+                                   packs::CONV_FWD_PACKED_PLAN_CASE.captureGraph(),
+                                   scratch.path(),
+                                   built));
+        if(built.plan == nullptr)
         {
-            GTEST_SKIP() << "nothing was packed for this device (" << deviceProperties.gcnArchName
-                         << ")";
+            GTEST_SKIP() << "nothing was packed for this device ("
+                         << built.deviceProperties.gcnArchName << ")";
         }
 
-        KernelDefinition kernel;
-        ASSERT_NO_FATAL_FAILURE(
-            fixtures::readPackedKernelDefinition(packed, CONV_FWD_DESCRIPTOR, kernel));
-        const auto plan = makePackedPlan(PackedSet::CONV_FWD, deviceProperties, kernel);
-        ASSERT_NE(plan, nullptr);
-
-        const auto payload = captureIngestorPlan(*plan, handle, testEngineId(), ENGINE_NAME);
+        const auto payload = captureIngestorPlan(*built.plan, handle, testEngineId(), ENGINE_NAME);
         EXPECT_EQ(payload.sourceKind, KernelSourceKind::KPACK);
         return;
     }
@@ -544,36 +354,30 @@ TEST(TestIngestorPlanCapture, RefusesWhenTheArchiveIsGone)
     SKIP_IF_NO_DEVICES();
 
     const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
-    DeviceProperties deviceProperties;
-    std::filesystem::path packed;
-    ASSERT_NO_FATAL_FAILURE(copyPackedSet(PackedSet::CONV_FWD, scratch, deviceProperties, packed));
-    if(packed.empty())
+    PackedPlan built;
+    ASSERT_NO_FATAL_FAILURE(packs::buildPackedPlan(packs::CONV_FWD_PACKED_PLAN_CASE,
+                                                   packs::CONV_FWD_PACKED_PLAN_CASE.captureGraph(),
+                                                   scratch.path(),
+                                                   built));
+    if(built.plan == nullptr)
     {
-        GTEST_SKIP() << "nothing was packed for this device (" << deviceProperties.gcnArchName
+        GTEST_SKIP() << "nothing was packed for this device (" << built.deviceProperties.gcnArchName
                      << ")";
     }
 
-    KernelDefinition kernel;
-    ASSERT_NO_FATAL_FAILURE(
-        fixtures::readPackedKernelDefinition(packed, CONV_FWD_DESCRIPTOR, kernel));
-    const auto plan = makePackedPlan(PackedSet::CONV_FWD, deviceProperties, kernel);
-    ASSERT_NE(plan, nullptr);
-
     const Handle handle;
-    const OperandBuffers buffers;
-    ASSERT_TRUE(buffers.allocated());
-    plan->execute(handle, buffers.data(), buffers.count());
+    const auto buffers = packs::deviceBuffersOf(built.tensors);
+    built.plan->execute(handle, buffers.data(), static_cast<uint32_t>(buffers.size()));
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-    const std::filesystem::path archive
-        = std::filesystem::weakly_canonical(kernel.originDirectory / kernel.source.library);
+    const std::filesystem::path archive = built.archive();
     ASSERT_TRUE(std::filesystem::remove(archive)) << archive;
 
-    expectSaveRefusal(*plan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "OPEN_ARCHIVE");
-    expectSaveRefusal(*plan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, archive.string());
+    expectSaveRefusal(*built.plan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "OPEN_ARCHIVE");
+    expectSaveRefusal(*built.plan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, archive.string());
 
     // The plan keeps its loaded module, so it still executes.
-    plan->execute(handle, buffers.data(), buffers.count());
+    built.plan->execute(handle, buffers.data(), static_cast<uint32_t>(buffers.size()));
     EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
 }
 
@@ -584,7 +388,8 @@ TEST(TestIngestorPlanCapture, CapturesTheBenchmarkWinnersOwnWorkspace)
     const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
     DeviceProperties deviceProperties;
     std::filesystem::path packed;
-    ASSERT_NO_FATAL_FAILURE(copyPackedSet(PackedSet::POINTWISE, scratch, deviceProperties, packed));
+    ASSERT_NO_FATAL_FAILURE(packs::copyPackedArchForDevice(
+        packs::POINTWISE_PACKED_PLAN_CASE.root(), scratch.path(), deviceProperties, packed));
     if(packed.empty())
     {
         GTEST_SKIP() << "nothing was packed for this device (" << deviceProperties.gcnArchName
@@ -594,15 +399,26 @@ TEST(TestIngestorPlanCapture, CapturesTheBenchmarkWinnersOwnWorkspace)
     KernelDefinition smallKernel;
     KernelDefinition largeKernel;
     ASSERT_NO_FATAL_FAILURE(
-        fixtures::readPackedKernelDefinition(packed, POINTWISE_B64_DESCRIPTOR, smallKernel));
-    ASSERT_NO_FATAL_FAILURE(
-        fixtures::readPackedKernelDefinition(packed, POINTWISE_B256_DESCRIPTOR, largeKernel));
+        fixtures::readPackedKernelDefinition(packed, packs::POINTWISE_B64_DESCRIPTOR, smallKernel));
+    ASSERT_NO_FATAL_FAILURE(fixtures::readPackedKernelDefinition(
+        packed, packs::POINTWISE_B256_DESCRIPTOR, largeKernel));
     ASSERT_NE(smallKernel.kernelId, largeKernel.kernelId);
 
-    auto smallPlan = makePackedPlan(PackedSet::POINTWISE, deviceProperties, smallKernel);
-    auto largePlan = makePackedPlan(PackedSet::POINTWISE, deviceProperties, largeKernel);
-    ASSERT_NE(smallPlan, nullptr);
-    ASSERT_NE(largePlan, nullptr);
+    std::unique_ptr<GenericPlan<Handle>> smallPlan;
+    std::unique_ptr<GenericPlan<Handle>> largePlan;
+    GraphTensorBundle tensors;
+    ASSERT_NO_FATAL_FAILURE(packs::makePackedPlan(packs::POINTWISE_PACKED_PLAN_CASE,
+                                                  packs::POINTWISE_PACKED_PLAN_CASE.captureGraph(),
+                                                  deviceProperties,
+                                                  smallKernel,
+                                                  smallPlan,
+                                                  tensors));
+    ASSERT_NO_FATAL_FAILURE(packs::makePackedPlan(packs::POINTWISE_PACKED_PLAN_CASE,
+                                                  packs::POINTWISE_PACKED_PLAN_CASE.captureGraph(),
+                                                  deviceProperties,
+                                                  largeKernel,
+                                                  largePlan,
+                                                  tensors));
     const Handle handle;
     ASSERT_EQ(smallPlan->getWorkspaceSize(handle), 0U);
     ASSERT_EQ(largePlan->getWorkspaceSize(handle), 1024U);
@@ -624,11 +440,10 @@ TEST(TestIngestorPlanCapture, CapturesTheBenchmarkWinnersOwnWorkspace)
                                      });
     ASSERT_EQ(plan.getWorkspaceSize(handle), 1024U);
 
-    const OperandBuffers buffers;
-    const DeviceBuffer workspace(plan.getWorkspaceSize(handle));
-    ASSERT_TRUE(buffers.allocated());
+    const auto buffers = packs::deviceBuffersOf(tensors);
+    const Workspace<> workspace(plan.getWorkspaceSize(handle));
     ASSERT_NE(workspace.get(), nullptr);
-    plan.execute(handle, buffers.data(), buffers.count(), workspace.get());
+    plan.execute(handle, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace.get());
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
     const auto payload = captureIngestorPlan(plan, handle, testEngineId(), ENGINE_NAME);

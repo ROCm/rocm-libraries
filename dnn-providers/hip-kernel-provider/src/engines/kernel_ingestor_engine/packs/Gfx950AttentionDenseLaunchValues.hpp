@@ -10,11 +10,13 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/SavedDispatch.hpp>
 
 /**
  * @file Gfx950AttentionDenseLaunchValues.hpp
  * @brief The launch state of the gfx950 dense-attention ingestor pack, and its saved form:
  *        a versioned dispatch name and the named, typed values the launch is computed from.
+ *        The pack also reads its saved form back into its launch inputs.
  *
  * The version in a dispatch name identifies the contract of its values. A change to the
  * names, types or meanings of the values needs a new version.
@@ -76,6 +78,26 @@ inline constexpr std::string_view GFX950_ATTENTION_DENSE_BSHD_LAYOUT = "bshd";
 /// enumerator name.
 hipdnn_plugin_sdk::ingestor::MetadataValues gfx950AttentionDenseLaunchValues(
     const AttentionDenseBinding& binding, const AttentionDenseProblem& problem, int64_t blockM);
+
+/// Everything a dense-attention launch is computed from.
+struct Gfx950AttentionDenseLaunchInputs
+{
+    AttentionDenseBinding binding;
+    AttentionDenseProblem problem;
+    int64_t blockM = 0;
+};
+
+/// Reads the values of the `hipkernel.gfx950_attention_dense.dispatch.v1` contract.
+/// `batch`, `seqlen_q` and `seqlen_kv` must be in [1, INT32_MAX], because the kernel takes
+/// them as 32-bit integers. The head counts and `head_size` must be in [1, INT32_MAX].
+/// `block_m` must be a tile the kernel is built with. `scale` must convert to a float
+/// and back without change. `data_type` must be a type the kernel is built for, and
+/// `stride_layout` must be `bshd`.
+///
+/// @throws HipdnnPluginException with a load refusal when the dispatch name is not that
+///         contract, or when a value is missing, extra, of another type or out of range.
+Gfx950AttentionDenseLaunchInputs readGfx950AttentionDenseLaunchInputs(
+    const hipdnn_plugin_sdk::ingestor::SavedLaunchInputs& inputs);
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 

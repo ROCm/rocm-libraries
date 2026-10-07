@@ -20,8 +20,9 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 /// code object, its dispatch handler's launch inputs, and the plan's own workspace size.
 ///
 /// For a benchmarking plan, the plan saved is the candidate that the first execute()
-/// chose. Reads the plan only through const accessors and an acquire load, so it is safe
-/// while other threads execute the plan.
+/// chose. A plan restored from a saved payload is refused. Reads the plan only through
+/// const accessors and an acquire load, so it is safe while other threads execute the
+/// plan.
 ///
 /// @param engineId The id of the engine that built @p plan.
 /// @param engineName The name of that engine. Its hash must equal @p engineId.

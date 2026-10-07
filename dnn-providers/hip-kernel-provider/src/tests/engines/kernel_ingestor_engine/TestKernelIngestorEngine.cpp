@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <memory>
 #include <stdexcept>
 #include <string>
 
@@ -24,19 +25,22 @@
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
+#include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 #include "core/Container.hpp"
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
+#include "core/Settings.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
 
 /**
  * @file TestKernelIngestorEngine.cpp
- * @brief Tests registerNativeIngestorSymbols() and makePointwiseAddEngine(); GenericEngine
- *        itself is covered by the SDK's suite. Reached through Container and
- *        EngineManager since makePointwiseAddEngine() takes no injectable seams.
+ * @brief Tests registerNativeIngestorSymbols(), makePointwiseAddEngine() and
+ *        loadedIngestorEngineName(); GenericEngine itself is covered by the SDK's suite.
+ *        Reached through Container and EngineManager since makePointwiseAddEngine() takes
+ *        no injectable seams.
  */
 namespace
 {
@@ -79,6 +83,52 @@ void stubAsThisEnginesConfig(MockEngineConfig& config)
     EXPECT_CALL(config, engineId())
         .WillRepeatedly(::testing::Return(
             hipdnn_data_sdk::utilities::engineNameToId(POINTWISE_ADD.engineName)));
+}
+
+// A loaded engine that no descriptor set defines.
+class UndescribedEngine : public hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>
+{
+public:
+    int64_t id() const override
+    {
+        return hipdnn_data_sdk::utilities::engineNameToId("hipkernel:TestOnlyUndescribedEngine");
+    }
+
+    bool isApplicable(
+        Handle& /*handle*/,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/) const override
+    {
+        return false;
+    }
+
+    void getDetails(Handle& /*handle*/,
+                    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
+                    hipdnnPluginConstData_t& /*detailsOut*/) const override
+    {
+    }
+
+    size_t getMaxWorkspaceSize(
+        const Handle& /*handle*/,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/)
+        const override
+    {
+        return 0;
+    }
+
+    void initializeExecutionContext(
+        const Handle& /*handle*/,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/,
+        Context& /*executionContext*/) const override
+    {
+    }
+};
+
+bool isLoaded(const Handle& handle, int64_t engineId)
+{
+    const auto engineIds = handle.container->getEngineManager().getAllEngineIds();
+    return std::find(engineIds.begin(), engineIds.end(), engineId) != engineIds.end();
 }
 
 // registerNativeIngestorSymbols(): idempotent across repeated calls
@@ -401,6 +451,34 @@ TEST(TestKernelIngestorEngine, IgnoresAHipdnnDescriptorRuntimeDirThatDoesNotExis
 
     ASSERT_EQ(roots.size(), 1U);
     EXPECT_EQ(roots.front(), descriptorSearchDirectory());
+}
+
+// loadedIngestorEngineName(): the engine lookup a restore makes
+
+TEST(TestKernelIngestorEngine, LoadedIngestorEngineNameFindsOnlyLoadedIngestorEngines)
+{
+    Handle handle;
+    handle.container = std::make_shared<Container>();
+
+    const int64_t pointwiseEngineId
+        = hipdnn_data_sdk::utilities::engineNameToId(POINTWISE_ADD.engineName);
+    const auto pointwiseName = loadedIngestorEngineName(handle, pointwiseEngineId);
+    ASSERT_TRUE(pointwiseName.has_value());
+    EXPECT_EQ(*pointwiseName, std::string(POINTWISE_ADD.engineName));
+
+    auto undescribed = std::make_unique<UndescribedEngine>();
+    const int64_t undescribedEngineId = undescribed->id();
+    handle.container->getEngineManager().addEngine(std::move(undescribed));
+    ASSERT_TRUE(isLoaded(handle, undescribedEngineId));
+    EXPECT_FALSE(loadedIngestorEngineName(handle, undescribedEngineId).has_value());
+
+    const int64_t missingEngineId
+        = hipdnn_data_sdk::utilities::engineNameToId("hipkernel:NoSuchEngine");
+    ASSERT_FALSE(isLoaded(handle, missingEngineId));
+    EXPECT_FALSE(loadedIngestorEngineName(handle, missingEngineId).has_value());
+
+    const Handle withoutContainer;
+    EXPECT_FALSE(loadedIngestorEngineName(withoutContainer, pointwiseEngineId).has_value());
 }
 
 } // namespace

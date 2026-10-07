@@ -73,6 +73,28 @@ enum class MetadataType
     INT_LIST,
 };
 
+/// The descriptor spelling of @p type, which `metadataTypeFromString` parses. A value
+/// outside the enum gives "unknown (<value>)".
+inline std::string toString(MetadataType type)
+{
+    switch(type)
+    {
+    case MetadataType::BOOL:
+        return "bool";
+    case MetadataType::INT:
+        return "int";
+    case MetadataType::FLOAT:
+        return "float";
+    case MetadataType::STRING:
+        return "string";
+    case MetadataType::INT_LIST:
+        return "int_list";
+    default:
+        break;
+    }
+    return "unknown (" + std::to_string(static_cast<int>(type)) + ")";
+}
+
 inline MetadataType metadataTypeOf(const MetadataValue& value)
 {
     return static_cast<MetadataType>(value.index());

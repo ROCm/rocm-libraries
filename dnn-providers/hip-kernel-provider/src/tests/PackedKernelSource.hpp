@@ -5,7 +5,6 @@ SPDX-License-Identifier: MIT
 
 #pragma once
 
-#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -16,9 +15,9 @@ SPDX-License-Identifier: MIT
 
 #include <hip/hip_runtime_api.h>
 
-#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
+#include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 
 #include "TestDescriptorRoot.hpp"
@@ -73,21 +72,17 @@ inline void findPackedArchDirectory(hipDeviceProp_t& properties,
     findPackedArchDirectoryUnder(unitKpackRoot(), properties, arch, directory);
 }
 
-/// Reads `kernel_source` out of a built descriptor. A .kdp.json nests it under its first
-/// inline kernel descriptor; a .ukd.json carries it at the top level. Parsed directly
-/// rather than through DescriptorLoader, whose contract the integration tier covers.
-///
-/// Found by RECURSIVE search rather than a join on the arch root: the packer preserves
-/// each descriptor's authored subpath, so a descriptor sits wherever its source root put
-/// it. Searching by filename keeps callers indifferent to that depth.
-///
-/// Asserts rather than skips -- the per-arch directory exists by the time this is called,
-/// so anything missing inside it is a broken build. Call through ASSERT_NO_FATAL_FAILURE.
-inline void readPackedKernelSource(const std::filesystem::path& directory,
-                                   const std::string& descriptorFile,
-                                   PackedKernelSource& out)
+namespace detail
 {
-    std::filesystem::path descriptor;
+
+// Finds `descriptorFile` at any depth under `directory` and parses its kernel (the first
+// inline kernel of a .kdp.json) with the descriptor loader's parser. A missing or rejected
+// descriptor is a broken build: call through ASSERT_NO_FATAL_FAILURE.
+inline void readPackedKernelDescriptor(const std::filesystem::path& directory,
+                                       const std::string& descriptorFile,
+                                       std::filesystem::path& descriptor,
+                                       hipdnn_plugin_sdk::ingestor::KernelDescriptor& out)
+{
     std::error_code walkError;
     for(const auto& entry : std::filesystem::recursive_directory_iterator(directory, walkError))
     {
@@ -106,21 +101,47 @@ inline void readPackedKernelSource(const std::filesystem::path& directory,
     nlohmann::json document;
     ASSERT_NO_THROW(document = nlohmann::json::parse(in)) << descriptor;
 
-    const nlohmann::json& kernel
-        = document.contains("kernelDescriptors") ? document["kernelDescriptors"][0] : document;
-    ASSERT_TRUE(kernel.contains("kernel_source")) << descriptor;
+    const bool isPack = document.contains("kernelDescriptors");
+    if(isPack)
+    {
+        const nlohmann::json& kernels = document["kernelDescriptors"];
+        ASSERT_TRUE(kernels.is_array() && !kernels.empty()) << descriptor;
+    }
+    const nlohmann::json& kernel = isPack ? document["kernelDescriptors"][0] : document;
+    ASSERT_TRUE(kernel.is_object()) << descriptor;
 
-    const nlohmann::json& source = kernel["kernel_source"];
-    ASSERT_TRUE(source.contains("toc_key")) << descriptor;
-    ASSERT_TRUE(source.contains("library")) << descriptor;
-    ASSERT_TRUE(source.contains("sha256")) << descriptor;
+    namespace loader = hipdnn_plugin_sdk::ingestor::detail;
+    const std::string where = descriptor.string();
+    bool supported = false;
+    ASSERT_NO_THROW(supported = loader::versionIsSupported(
+                        kernel, loader::UKD_VERSION_MAJOR, loader::UKD_VERSION_MINOR, where))
+        << descriptor;
+    ASSERT_TRUE(supported) << descriptor << " declares a version that this build does not read";
+    ASSERT_NO_THROW(out = loader::parseKernelDescriptor(kernel, where)) << descriptor;
+}
 
-    out.tocKey = source["toc_key"].get<std::string>();
-    out.library = source["library"].get<std::string>();
+} // namespace detail
+
+/// Reads the kpack coordinates of the first kernel in a built descriptor. The descriptor
+/// loader parses the kernel. A .kdp.json nests the kernel under its first inline kernel
+/// descriptor; a .ukd.json carries it at the top level.
+///
+/// Asserts rather than skips. Call through ASSERT_NO_FATAL_FAILURE.
+inline void readPackedKernelSource(const std::filesystem::path& directory,
+                                   const std::string& descriptorFile,
+                                   PackedKernelSource& out)
+{
+    std::filesystem::path descriptor;
+    hipdnn_plugin_sdk::ingestor::KernelDescriptor kernel;
+    ASSERT_NO_FATAL_FAILURE(
+        detail::readPackedKernelDescriptor(directory, descriptorFile, descriptor, kernel));
+
+    out.tocKey = kernel.source.tocKey;
+    out.library = kernel.source.library;
     // Read rather than recomputed: recomputing would compare the loader's hash against
     // this test's hash of the same bytes, which passes however wrong both are. The shipped
     // field is the claim the loader actually checks.
-    out.sha256 = source["sha256"].get<std::string>();
+    out.sha256 = kernel.source.sha256;
     out.originDirectory = descriptor.parent_path();
     // `library` is relative to the directory holding the descriptor that declared it --
     // the same anchoring KernelDefinition::originDirectory describes. That directory is
@@ -131,10 +152,9 @@ inline void readPackedKernelSource(const std::filesystem::path& directory,
         << descriptor << " names an archive that is not on disk: " << out.archive;
 }
 
-/// The kernel a built descriptor declares, as a definition a pack can prepare: its id, its
-/// name, its integer and string metadata, and its `kernel_source` as the descriptor loader
-/// parses it, with the recorded signature. `treeRoot` is @p directory, which the loader
-/// stamps as the containment boundary.
+/// The kernel a built descriptor declares, as a definition a pack can prepare: its id,
+/// name, metadata, priority, arch and `kernel_source`, as the descriptor loader parses
+/// them. `treeRoot` is @p directory, which the loader stamps as the containment boundary.
 ///
 /// Asserts rather than skips. Call through ASSERT_NO_FATAL_FAILURE.
 inline void readPackedKernelDefinition(const std::filesystem::path& directory,
@@ -142,51 +162,16 @@ inline void readPackedKernelDefinition(const std::filesystem::path& directory,
                                        hipdnn_plugin_sdk::ingestor::KernelDefinition& out)
 {
     std::filesystem::path descriptor;
-    std::error_code walkError;
-    for(const auto& entry : std::filesystem::recursive_directory_iterator(directory, walkError))
-    {
-        if(entry.is_regular_file() && entry.path().filename() == descriptorFile)
-        {
-            descriptor = entry.path();
-            break;
-        }
-    }
-    ASSERT_FALSE(descriptor.empty()) << "the packed descriptor is missing anywhere under "
-                                     << directory << ": " << descriptorFile;
+    hipdnn_plugin_sdk::ingestor::KernelDescriptor kernel;
+    ASSERT_NO_FATAL_FAILURE(
+        detail::readPackedKernelDescriptor(directory, descriptorFile, descriptor, kernel));
 
-    std::ifstream in(descriptor);
-    ASSERT_TRUE(in.good()) << "could not open " << descriptor;
-
-    nlohmann::json document;
-    ASSERT_NO_THROW(document = nlohmann::json::parse(in)) << descriptor;
-
-    const nlohmann::json& kernel
-        = document.contains("kernelDescriptors") ? document["kernelDescriptors"][0] : document;
-    ASSERT_TRUE(kernel.is_object()) << descriptor;
-    ASSERT_TRUE(kernel.contains("id") && kernel.contains("name")
-                && kernel.contains("kernel_source"))
-        << descriptor;
-
-    ASSERT_NO_THROW(out.source = hipdnn_plugin_sdk::ingestor::detail::parseKernelSource(
-                        kernel["kernel_source"], descriptor.string()))
-        << descriptor;
-    out.kernelId = hipdnn_flatbuffers_sdk::utilities::parseUuid(kernel["id"].get<std::string>());
-    out.name = kernel["name"].get<std::string>();
-    out.metadata.clear();
-    if(kernel.contains("metadata"))
-    {
-        for(const auto& item : kernel["metadata"].items())
-        {
-            if(item.value().is_number_integer())
-            {
-                out.metadata[item.key()] = item.value().get<int64_t>();
-            }
-            else if(item.value().is_string())
-            {
-                out.metadata[item.key()] = item.value().get<std::string>();
-            }
-        }
-    }
+    out.kernelId = kernel.id;
+    out.name = kernel.name;
+    out.source = kernel.source;
+    out.metadata = kernel.metadata;
+    out.priority = kernel.priority;
+    out.arch = kernel.arch;
     out.originDirectory = descriptor.parent_path();
     out.treeRoot = directory;
 }

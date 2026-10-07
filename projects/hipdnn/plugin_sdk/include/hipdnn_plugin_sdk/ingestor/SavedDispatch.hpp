@@ -29,6 +29,9 @@ struct SavedLaunchInputs
 /// restored plan can load them again for another device.
 struct SavedKernelCode
 {
+    /// The id of the kernel descriptor the code object was selected from. Diagnostics
+    /// name the kernel with it.
+    DescriptorId kernelId{};
     KernelSourceKind sourceKind = KernelSourceKind::EMBEDDED_SOURCE;
     std::string symbol;
     /// The GPU target the code object was built for.

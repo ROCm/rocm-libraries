@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -245,6 +246,30 @@ void rediscoverStateManagersForTesting()
     }
     const std::lock_guard<std::mutex> guard(found.slotsMutex);
     found.slots = std::move(rescan.slots);
+}
+
+std::optional<std::string> loadedIngestorEngineName(const Handle& handle, int64_t engineId)
+{
+    if(handle.container == nullptr)
+    {
+        return std::nullopt;
+    }
+
+    const auto engineIds = handle.getEngineManager().getAllEngineIds();
+    if(std::find(engineIds.begin(), engineIds.end(), engineId) == engineIds.end())
+    {
+        return std::nullopt;
+    }
+
+    const auto& sets = discoverDescriptorSets();
+    const auto found = std::find_if(sets.begin(), sets.end(), [engineId](const auto& set) {
+        return hipdnn_data_sdk::utilities::engineNameToId(set.engine.name) == engineId;
+    });
+    if(found == sets.end())
+    {
+        return std::nullopt;
+    }
+    return found->engine.name;
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

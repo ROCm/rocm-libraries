@@ -26,6 +26,7 @@
 #include "compilation/KpackKernelLoader.hpp"
 #include "compilation/KpackModuleCache.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
+#include "engines/kernel_ingestor_engine/PackedPlanTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvFwdTestGraphs.hpp"
 #include "utilities/Digest.hpp"
 
@@ -34,8 +35,6 @@ namespace hip_kernel_provider::compilation
 namespace
 {
 
-using hip_kernel_provider::testing::copyPackedArchTree;
-using hip_kernel_provider::testing::findPackedArchDirectory;
 using hip_kernel_provider::testing::PackedKernelSource;
 using hip_kernel_provider::testing::readPackedKernelDefinition;
 using hip_kernel_provider::testing::readPackedKernelSource;
@@ -43,6 +42,8 @@ using hip_kernel_provider::testing::testKpackArchive;
 using hip_kernel_provider::testing::unitKpackRoot;
 using hipdnn_test_sdk::utilities::claimScratchDirectory;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
+
+namespace packs = hip_kernel_provider::kernel_ingestor_engine::testing;
 
 constexpr const char* SCRATCH_LABEL = "kpackcodeobjectread";
 
@@ -52,9 +53,6 @@ constexpr const char* TEST_ARCHIVE_ARCH = "gfx1100";
 constexpr const char* TEST_ARCHIVE_TOC_KEY = "lib/libhip.so#0";
 
 constexpr const char* DIGEST = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-
-// The standalone descriptor of the packed conv set.
-constexpr const char* PACKED_UKD_DESCRIPTOR = "conv_fwd_f16_block64.ukd.json";
 
 TEST(TestKpackCodeObjectRead, ReportsAnAbsentArchive)
 {
@@ -104,33 +102,16 @@ TEST(TestKpackCodeObjectRead, RejectsAPayloadThatIsNotACodeObject)
     }
 }
 
-// The local device's decorated arch, and a copy of the conv set this build packed for it.
-// `copy` stays empty when nothing was packed for the device.
-//
-// Uses fatal assertions: call through ASSERT_NO_FATAL_FAILURE.
-void copyPackedConvSet(const ScopedDirectory& scratch,
-                       std::string& deviceArch,
-                       std::filesystem::path& copy)
-{
-    hipDeviceProp_t properties{};
-    std::string arch;
-    std::filesystem::path packed;
-    ASSERT_NO_FATAL_FAILURE(findPackedArchDirectory(properties, arch, packed));
-    deviceArch = properties.gcnArchName;
-    if(!packed.empty())
-    {
-        copy = copyPackedArchTree(packed, scratch.path());
-    }
-}
-
 TEST(TestKpackCodeObjectRead, ReturnsVerifiedBytesWithoutLoadingAModule)
 {
     SKIP_IF_NO_DEVICES();
 
     const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
-    std::string deviceArch;
+    hipdnn_plugin_sdk::ingestor::DeviceProperties packedDevice;
     std::filesystem::path packed;
-    ASSERT_NO_FATAL_FAILURE(copyPackedConvSet(scratch, deviceArch, packed));
+    ASSERT_NO_FATAL_FAILURE(
+        packs::copyPackedArchForDevice(unitKpackRoot(), scratch.path(), packedDevice, packed));
+    const std::string& deviceArch = packedDevice.gcnArchName;
     if(packed.empty())
     {
         GTEST_SKIP() << "nothing was packed for this device (" << deviceArch
@@ -138,7 +119,7 @@ TEST(TestKpackCodeObjectRead, ReturnsVerifiedBytesWithoutLoadingAModule)
     }
 
     hipdnn_plugin_sdk::ingestor::KernelDefinition kernel;
-    ASSERT_NO_FATAL_FAILURE(readPackedKernelDefinition(packed, PACKED_UKD_DESCRIPTOR, kernel));
+    ASSERT_NO_FATAL_FAILURE(readPackedKernelDefinition(packed, packs::CONV_FWD_DESCRIPTOR, kernel));
 
     hipdnn_plugin_sdk::ingestor::DeviceProperties deviceProperties;
     deviceProperties.gcnArchName = deviceArch;
@@ -183,9 +164,11 @@ TEST(TestKpackCodeObjectRead, RefusesBytesWhoseDigestDisagrees)
     SKIP_IF_NO_DEVICES();
 
     const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
-    std::string deviceArch;
+    hipdnn_plugin_sdk::ingestor::DeviceProperties packedDevice;
     std::filesystem::path packed;
-    ASSERT_NO_FATAL_FAILURE(copyPackedConvSet(scratch, deviceArch, packed));
+    ASSERT_NO_FATAL_FAILURE(
+        packs::copyPackedArchForDevice(unitKpackRoot(), scratch.path(), packedDevice, packed));
+    const std::string& deviceArch = packedDevice.gcnArchName;
     if(packed.empty())
     {
         GTEST_SKIP() << "nothing was packed for this device (" << deviceArch
@@ -193,7 +176,7 @@ TEST(TestKpackCodeObjectRead, RefusesBytesWhoseDigestDisagrees)
     }
 
     PackedKernelSource source;
-    ASSERT_NO_FATAL_FAILURE(readPackedKernelSource(packed, PACKED_UKD_DESCRIPTOR, source));
+    ASSERT_NO_FATAL_FAILURE(readPackedKernelSource(packed, packs::CONV_FWD_DESCRIPTOR, source));
 
     // A well-formed digest that differs from the descriptor's in one character.
     std::string wrongDigest = source.sha256;

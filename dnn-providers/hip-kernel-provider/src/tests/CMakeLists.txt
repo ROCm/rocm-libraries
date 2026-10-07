@@ -159,24 +159,26 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE_RELPATH below, which the parse-level cases open
     # because they need a real container rather than a matching device.
     target_sources(hip_kernel_provider_tests PRIVATE
+        compilation/TestCodeObjectLoad.cpp
         compilation/TestKpackArchSelection.cpp
         compilation/TestKpackArchive.cpp
         compilation/TestKpackCodeObjectRead.cpp
         compilation/TestKpackKernelLoader.cpp
         compilation/TestKpackModuleCache.cpp
         engines/kernel_ingestor_engine/TestIngestorPlanCapture.cpp
+        engines/kernel_ingestor_engine/TestIngestorPlanRoundTrip.cpp
         engines/kernel_ingestor_engine/packs/TestPointwiseKpackDispatch.cpp
         ingestor/TestPackedDescriptorLoad.cpp
     )
 
-    # The packed Pointwise set the integration binary reads. The save cases need a
-    # packed Pointwise kernel, and the unit root packs none: its Pointwise set is
-    # embedded_source. Binary-relative, like the defines above. The integration
-    # suite corrupts this staged archive in place, so these cases read only a copy.
+    # This binary's own packed copy of the archive_fixture Pointwise set. The save cases
+    # need a packed Pointwise kernel, and the unit root packs none: its Pointwise set is
+    # embedded_source. The copy stages outside the unit root, so the engine does not
+    # discover it. Binary-relative, like the defines above.
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
-        HIPKERNELPROVIDER_ARCHIVE_FIXTURE_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}/${HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE}")
-    if(TARGET hkp_packaging_archive_fixture)
-        add_dependencies(hip_kernel_provider_tests hkp_packaging_archive_fixture)
+        HIPKERNELPROVIDER_ARCHIVE_FIXTURE_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_UNIT_ARCHIVE_FIXTURE_SUBDIR}")
+    if(TARGET hkp_packaging_unit_archive_fixture)
+        add_dependencies(hip_kernel_provider_tests hkp_packaging_unit_archive_fixture)
     endif()
 
     # A real archive to open, so the arch-mismatch and missing-toc_key cases meet the

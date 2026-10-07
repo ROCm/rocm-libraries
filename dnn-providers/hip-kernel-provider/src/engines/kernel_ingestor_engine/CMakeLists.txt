@@ -9,6 +9,7 @@
 target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/IngestorPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/IngestorPlanCapture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/IngestorPlanRestore.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/KernelIngestorEngine.cpp
     # Pointwise and Conv descriptors are test fixtures under test_descriptors/; a Pointwise
     # bundle also sits in descriptor-packaging/examples/descriptors, where the superbuild CI
