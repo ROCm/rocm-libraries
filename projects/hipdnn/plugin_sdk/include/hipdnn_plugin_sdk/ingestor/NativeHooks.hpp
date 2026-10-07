@@ -14,6 +14,12 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
+/// The registry template under its ingestor spelling. It is one template, shared with the
+/// UHD scorer registry, so `ingestor::NativeRegistry<T>` and
+/// `hipdnn_plugin_sdk::NativeRegistry<T>` name the same type.
+template <typename T>
+using NativeRegistry = hipdnn_plugin_sdk::NativeRegistry<T>;
+
 /// @brief Descriptor-native hooks retain their typed graph and kernel operands.
 using GraphMatchFn = std::optional<BoundTokens> (*)(const MatchContext&);
 using GraphCriterionFn = bool (*)(const MatchContext&, const BoundTokens&);

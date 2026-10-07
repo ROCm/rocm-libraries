@@ -4,12 +4,13 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <stdexcept>
+#include <type_traits>
 
 #include <gtest/gtest.h>
 
 #include "KernelIngestorTestFixtures.hpp"
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
 /**
  * @file TestNativeRegistry.cpp
@@ -29,6 +30,22 @@ TEST(TestIngestorNativeRegistry, ResolvesARegisteredSymbol)
     EXPECT_EQ(GraphMatchRegistry::resolve("registry.resolves"), acceptGraph);
 
     GraphMatchRegistry::unregisterSymbol("registry.resolves");
+}
+
+// Code written against `ingestor::NativeRegistry` shares one registry with code using the
+// SDK-level template: a symbol registered through either spelling resolves through both.
+TEST(TestIngestorNativeRegistry, BothSpellingsNameOneRegistry)
+{
+    static_assert(std::is_same_v<NativeRegistry<GraphMatchFn>, GraphMatchRegistry>);
+    static_assert(
+        std::is_same_v<NativeRegistry<ScoreFn>, hipdnn_plugin_sdk::NativeRegistry<ScoreFn>>);
+
+    NativeRegistry<GraphMatchFn>::registerSymbol("registry.spellings", acceptGraph);
+
+    EXPECT_EQ(hipdnn_plugin_sdk::NativeRegistry<GraphMatchFn>::resolve("registry.spellings"),
+              acceptGraph);
+
+    GraphMatchRegistry::unregisterSymbol("registry.spellings");
 }
 
 TEST(TestIngestorNativeRegistry, RejectsDuplicateRegistration)

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -107,3 +109,5 @@ private:
 };
 
 } // namespace hipdnn_plugin_sdk
+
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR
