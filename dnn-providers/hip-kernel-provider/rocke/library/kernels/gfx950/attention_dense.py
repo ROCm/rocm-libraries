@@ -275,6 +275,11 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                 raise ValueError("fp8 KV is not yet supported with ragged=True")
             if self.varlen:
                 raise ValueError("fp8 KV is not yet supported with varlen=True")
+        if self.fp8_two_phase and self.kv_storage_dtype != "fp8e4m3":
+            raise ValueError(
+                "fp8_two_phase selects the fp8 KV two-phase loader and requires "
+                "kv_storage_dtype='fp8e4m3'"
+            )
         if self.causal_bottom_right:
             # The non-persistent contiguous builder is the only gfx950 path
             # that implements the compile-time shifted diagonal.
