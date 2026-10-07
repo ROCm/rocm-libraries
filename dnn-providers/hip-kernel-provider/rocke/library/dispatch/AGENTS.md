@@ -260,12 +260,13 @@ Follow the `_make_d256_decode_candidate()` pattern in `generic.py`:
 4. **Register** it from that module's `register(route, execution)`. A new arch module
    also needs one line in `__init__.py` to join the assembly loop.
 
-   There are two registries, not one. Routing labels go on
-   `ATTENTION_ROUTE_REGISTRY`; anything with `build` and `bind_torch` also goes
-   on `ATTENTION_EXECUTION_REGISTRY`, which is what the sweeps walk. Route-only
-   registration leaves the candidate invisible to every bench. Set
-   `opt_in=True` on a sweep-only candidate so `algorithm="auto"` cannot select
-   it, and give it a `sweep_space` so the sweep expands its variants.
+   Attention has two registries; see
+   [Two registries](attention/README.md#two-registries) for which one a
+   candidate goes on. Route-only registration hides a candidate from the
+   sweeps (`registered_attention_combos` / `attention_sweep_space` /
+   `dispatch_attention_all`); `dispatch_attention` and the live benches still
+   see it. Give a sweep-only candidate `opt_in=True` and a `sweep_space` that
+   returns every variant.
 
    A new operator family (not a new attention candidate) also exposes the three
    sweep entry points over its registry: `registered_<family>_combos`,

@@ -132,8 +132,8 @@ also follow the matching [library process](#appendix--attention-sdpamha-library-
       unreachable.
 - [ ] **Sweep coverage:** route-only registration is not enough. Every
       sweep-only variant is registered with `opt_in=True` (so `algorithm="auto"`
-      never picks it) and carries a `sweep_space`, and the family exposes all
-      three sweep entry points over its registry —
+      never picks it) and its `sweep_space` returns every variant, and the
+      family exposes all three sweep entry points over its registry —
       `registered_<family>_combos`, `<family>_sweep_space`,
       `dispatch_<family>_all` (pattern:
       [families/norm.py](platform/python/rocke/dispatch/families/norm.py)).
@@ -141,6 +141,9 @@ also follow the matching [library process](#appendix--attention-sdpamha-library-
       `ATTENTION_EXECUTION_REGISTRY` too. A CPU-only test asserts the sweep
       returns the opt-in variants that production dispatch hides. Full recipe:
       [dispatch/AGENTS.md](library/dispatch/AGENTS.md#how-to-add-a-new-specialized-candidate).
+      `<family>` means one set per registry (GEMM exposes `gemm_fp16_*` and
+      `gemm_bf16_*`). Known gap, tracked as a backlog item: GDN decode lacks
+      `registered_gdn_combos`, and GDN prefill exposes none of the three.
 - [ ] Golden created for the new family; gate GREEN at every flavor in `LLVM_FLAVORS`.
 - [ ] **End-user visibility:** family added to the support matrix
       (`SUPPORT_MATRIX.md` / operation-support doc) so users can see it is
