@@ -5,6 +5,7 @@
 
 #include "ck_tile/core/arch/arch.hpp"
 #include "ck_tile/core/config.hpp"
+#include "ck_tile/core/container/sequence.hpp"
 #include "ck_tile/core/numeric/integer.hpp"
 #include "ck_tile/core/numeric/integral_constant.hpp"
 #include "ck_tile/core/utility/functional.hpp"
@@ -282,9 +283,10 @@ struct ring_schedule
     CK_TILE_HOST_DEVICE static void for_each_step(index_t num_steps, Body&& body)
     {
         index_t first_step = 0;
-        for(; first_step + NumSlots <= num_steps; first_step += NumSlots)
+        while(first_step + NumSlots <= num_steps)
         {
             static_for<0, NumSlots, 1>{}([&](auto slot) { body(slot, first_step + slot.value); });
+            first_step += NumSlots;
         }
         static_for<0, NumSlots, 1>{}([&](auto slot) {
             if(first_step + slot.value < num_steps)
@@ -311,19 +313,20 @@ CK_TILE_HOST_DEVICE void publish_slot(Token token, index_t slot)
 // can replay it against a model of the barrier semantics; kernels reach it through run().
 //
 // fill(slot, step) starts step's transfer into slot; retire(number<N>{}) returns once at most N
-// transfers are still in flight, oldest retiring first. Step k publishes step k - Lag, which
-// keeps Lag + 1 asynchronous transfers overlapping the consumers' math. Lag must stay below
-// NumSlots: otherwise a producer waits for the drain of a step it has not published.
+// transfers are still in flight, oldest retiring first. Step k publishes step k - PublishLag,
+// which keeps PublishLag + 1 asynchronous transfers overlapping the consumers' math. PublishLag
+// must stay below NumSlots: otherwise a producer waits for the drain of a step it has not
+// published.
 template <typename Ops,
           index_t NumSlots,
-          index_t Lag,
+          index_t PublishLag,
           typename Token,
           typename Fill,
           typename Retire>
 CK_TILE_HOST_DEVICE void
 drive_producer(Token token, index_t num_steps, Fill&& fill, Retire&& retire)
 {
-    static_assert(0 <= Lag && Lag < NumSlots,
+    static_assert(0 <= PublishLag && PublishLag < NumSlots,
                   "a producer can leave at most NumSlots - 1 filled slots unpublished");
 
     ring_schedule<NumSlots>::for_each_step(num_steps, [&](auto slot, index_t step) {
@@ -334,19 +337,19 @@ drive_producer(Token token, index_t num_steps, Fill&& fill, Retire&& retire)
             Ops::template wait<kSlot>(token);
         }
         fill(slot, step);
-        if(Lag == 0 || step >= Lag)
+        if(PublishLag == 0 || step >= PublishLag)
         {
-            retire(number<Lag>{});
-            Ops::template publish<(kSlot + NumSlots - Lag) % NumSlots>(token);
+            retire(number<PublishLag>{});
+            Ops::template publish<(kSlot + NumSlots - PublishLag) % NumSlots>(token);
         }
     });
 
-    // The last Lag fills are still unpublished; publish them oldest first.
-    if constexpr(Lag > 0)
+    // The last PublishLag fills are still unpublished; publish them oldest first.
+    if constexpr(PublishLag > 0)
     {
         retire(number<0>{});
-        static_for<0, Lag, 1>{}([&](auto i) {
-            const index_t step = num_steps - Lag + i.value;
+        static_for<0, PublishLag, 1>{}([&](auto i) {
+            const index_t step = num_steps - PublishLag + i.value;
             if(step >= 0)
             {
                 publish_slot<Ops, NumSlots>(token, step % NumSlots);
@@ -499,15 +502,15 @@ struct named_barrier_slot_ring
         /** Drive this producer through a whole K loop: first fills, steady state, ragged tail,
          * the publishes the lag defers, and the waits that leave the ring at rest.
          *
-         * @tparam Lag   Fills left in flight when one is published; below kNumSlots.
-         * @param fill   fill(number<Slot>{}, step) starts step's transfer into Slot.
-         * @param retire retire(number<N>{}) returns once at most N transfers are in flight.
+         * @tparam PublishLag Fills left in flight when one is published; below kNumSlots.
+         * @param fill        fill(number<Slot>{}, step) starts step's transfer into Slot.
+         * @param retire      retire(number<N>{}) returns once at most N transfers are in flight.
          */
-        template <index_t Lag = 0, typename Fill, typename Retire>
+        template <index_t PublishLag = 0, typename Fill, typename Retire>
         CK_TILE_DEVICE static void
         run(token barriers, index_t num_steps, Fill&& fill, Retire&& retire)
         {
-            drive_producer<producer, kNumSlots, Lag>(barriers, num_steps, fill, retire);
+            drive_producer<producer, kNumSlots, PublishLag>(barriers, num_steps, fill, retire);
         }
     };
 
@@ -552,13 +555,19 @@ struct named_barrier_slot_ring
     // collective init() may reach this.
     CK_TILE_DEVICE static void arm()
     {
-        static_for<0, kNumSlots, 1>{}([](auto s) {
-            named_barrier_init<data_id<s.value>()>(named_barrier_pool<Pipeline>(),
-                                                   kDataMemberCount);
-            static_for<0, kNumProducerWaves, 1>{}([s](auto p) {
-                named_barrier_init<free_id<p.value, s.value>()>(named_barrier_pool<Pipeline>(),
+        static_ford<sequence<1 + kNumProducerWaves, kNumSlots>>{}([](auto rs) {
+            constexpr index_t kRole = rs[number<0>{}];
+            constexpr index_t kSlot = rs[number<1>{}];
+            if constexpr(kRole == 0)
+            {
+                named_barrier_init<data_id<kSlot>()>(named_barrier_pool<Pipeline>(),
+                                                     kDataMemberCount);
+            }
+            else
+            {
+                named_barrier_init<free_id<kRole - 1, kSlot>()>(named_barrier_pool<Pipeline>(),
                                                                 kFreeMemberCount);
-            });
+            }
         });
     }
 };
@@ -587,6 +596,7 @@ struct named_barrier_pipeline
     static_assert(kNumBarriers <= kMaxNamedBarrierId,
                   "the pipeline needs more named barriers than the hardware has: reduce slots "
                   "or producer waves");
+    // Implied by the cap above as it stands; it guards against raising kNumNamedBarriers.
     static_assert((kNumBarriers + 3) / 4 <= kMaxNamedBarrierGroups,
                   "the pool would overflow amdhsa_named_barrier_count, which wraps silently");
 
