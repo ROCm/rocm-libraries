@@ -2393,21 +2393,21 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         const bool nonWmmaOwed = !quotaClosedWindow && nonWmmaIssuedThisRegion_ < hideBudget;
         const bool blockWmmaForHideBudget = !preemptForQueue && hasPickableNonWmma &&
                                             (nonWmmaOwed || dsLoadIssuedThisRegion_ < dsLoadBudget);
-        PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase B candidate wmmaId=" << bestWMMA->id
-                             << " bestLatency=" << bestLatency
-                             << " blockLoopHead=" << blockWmmaForLoopHeadBalance
-                             << " blockActiveWindow=" << blockWmmaForActiveWindow
-                             << " blockAtLeastOneNonWmmaInterleaving="
-                             << blockWmmaForAtLeastOneNonWmmaInterleaving
-                             << " blockCoexecSpacing=" << blockWmmaForCoexecSpacing
-                             << " blockHideBudget=" << blockWmmaForHideBudget << " hideBudget="
-                             << hideBudget << " nonWmmaIssued=" << nonWmmaIssuedThisRegion_
-                             << " dsLoadBudget=" << dsLoadBudget << " dsLoadIssued="
-                             << dsLoadIssuedThisRegion_ << " fills=" << nonWmmaFillsSinceActiveWmma_
-                             << " localReadQ=" << localReadQueue.size() << " nonWmmaMinId="
-                             << (smallestPickable ? std::to_string(smallestPickable->id)
-                                                  : std::string("none"))
-                             << "\n");
+        PASS_DEBUG(
+            std::cerr
+            << "[CDNA5 pickOne] Phase B candidate wmmaId=" << bestWMMA->id
+            << " bestLatency=" << bestLatency << " blockLoopHead=" << blockWmmaForLoopHeadBalance
+            << " blockActiveWindow=" << blockWmmaForActiveWindow
+            << " blockAtLeastOneNonWmmaInterleaving=" << blockWmmaForAtLeastOneNonWmmaInterleaving
+            << " blockCoexecSpacing=" << blockWmmaForCoexecSpacing
+            << " blockHideBudget=" << blockWmmaForHideBudget << " preempt=" << preemptForQueue
+            << " outstanding=" << outstandingWmmas() << " cover=" << queuedCoverCycles()
+            << " hideBudget=" << hideBudget << " nonWmmaIssued=" << nonWmmaIssuedThisRegion_
+            << " dsLoadBudget=" << dsLoadBudget << " dsLoadIssued=" << dsLoadIssuedThisRegion_
+            << " fills=" << nonWmmaFillsSinceActiveWmma_ << " localReadQ=" << localReadQueue.size()
+            << " nonWmmaMinId="
+            << (smallestPickable ? std::to_string(smallestPickable->id) : std::string("none"))
+            << "\n");
         if (bestLatency <= 0 && !blockWmmaForLoopHeadBalance && !blockWmmaForActiveWindow &&
             !blockWmmaForAtLeastOneNonWmmaInterleaving && !blockWmmaForCoexecSpacing &&
             !blockWmmaForHideBudget) {
