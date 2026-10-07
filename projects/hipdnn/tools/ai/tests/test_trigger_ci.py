@@ -3,11 +3,14 @@
 """Unit tests for the hipdnn-trigger-ci skill's trigger_ci.py.
 
 Every subprocess call goes to FakeGh, so no test reaches GitHub or dispatches
-a real workflow.
+a real workflow. FakeGh serves the workflow files from this checkout, so the
+tests also catch a workflow change that breaks the script or SKILL.md.
 """
 
 import importlib.util
 import json
+import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -16,7 +19,9 @@ from types import ModuleType
 import pytest
 
 TOOLS_AI_DIR = Path(__file__).resolve().parent.parent
-TRIGGER_CI = TOOLS_AI_DIR / "skills" / "hipdnn-trigger-ci" / "scripts" / "trigger_ci.py"
+SKILL_DIR = TOOLS_AI_DIR / "skills" / "hipdnn-trigger-ci"
+TRIGGER_CI = SKILL_DIR / "scripts" / "trigger_ci.py"
+WORKFLOWS_DIR = TOOLS_AI_DIR.parents[3] / ".github" / "workflows"
 
 REPO = "ROCm/rocm-libraries"
 HEAD_SHA = "a" * 40
@@ -51,11 +56,26 @@ class FakeGh:
             "isCrossRepository": False,
         }
         self.last_dispatch_id = 100
+        # Workflow file name -> text served instead of the checkout's copy.
+        self.workflows = {}
 
     def __call__(self, cmd, capture_output=False, text=False, check=False, **_):
         self.calls.append(cmd)
+        if cmd[:2] == ["gh", "api"] and "/contents/.github/workflows/" in cmd[-1]:
+            return self._workflow_file(cmd)
         stdout = self._answer(cmd)
         return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+    def _workflow_file(self, cmd):
+        name = cmd[-1].split("/contents/.github/workflows/")[1].split("?")[0]
+        text = self.workflows.get(name)
+        if text is None and (WORKFLOWS_DIR / name).is_file():
+            text = (WORKFLOWS_DIR / name).read_text()
+        if text is None:
+            return subprocess.CompletedProcess(
+                cmd, 1, stdout="", stderr="gh: Not Found (HTTP 404)"
+            )
+        return subprocess.CompletedProcess(cmd, 0, stdout=text, stderr="")
 
     def _answer(self, cmd):
         if cmd[:3] == ["gh", "auth", "status"]:
@@ -70,12 +90,19 @@ class FakeGh:
             return json.dumps(self.active_runs)
         if cmd[:3] == ["gh", "run", "list"] and "--event" in cmd:
             return json.dumps([{"databaseId": self.last_dispatch_id}])
+        if cmd[:3] == ["gh", "run", "list"] and "--status" in cmd:
+            return json.dumps([{"databaseId": 7, "workflowName": "CI"}])
+        if cmd[:3] in (["gh", "run", "list"], ["gh", "pr", "checks"]):
+            return ""
+        if cmd[:3] == ["gh", "run", "watch"]:
+            return ""
         if cmd[:3] == ["gh", "workflow", "run"]:
             self.dispatched.append(cmd)
             self.last_dispatch_id += 1
             return ""
+        if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+            return "users/someone/feature"
         if cmd[0] == "git":
-            # No checkout root: skips the TheRock pin-drift check.
             return ""
         raise AssertionError(f"unexpected command: {cmd}")
 
@@ -107,7 +134,22 @@ def _inputs(dispatch_cmd):
     )
 
 
-MULTI_ARCH = ["--branch", "users/someone/feature", "dispatch", "-w", "multi-arch"]
+BRANCH = ["--branch", "users/someone/feature"]
+MULTI_ARCH = [*BRANCH, "dispatch", "-w", "multi-arch"]
+
+# A workflow named like therock-ci.yml, so the tests below do not depend on
+# which inputs the real one has a default for.
+FAKE_WORKFLOW = """\
+name: Fake
+on:
+  workflow_dispatch:
+    inputs:
+      projects:
+        type: string
+      families:
+        type: string
+        default: "gfx94X"  # comment
+"""
 
 
 # --------------------------------------------------------------------------- #
@@ -123,47 +165,133 @@ def test_dispatch_needs_exactly_one_of_dry_run_and_yes(
     assert gh.dispatched == []
 
 
-def test_therock_ci_requires_projects(trigger_mod, gh, monkeypatch, capsys):
+def test_input_without_default_is_required(trigger_mod, gh, monkeypatch, capsys):
+    gh.workflows["therock-ci.yml"] = FAKE_WORKFLOW
     code = _exit_code(
         trigger_mod,
         monkeypatch,
-        "--branch",
-        "users/someone/feature",
+        *BRANCH,
         "dispatch",
         "-w",
         "therock-ci",
-        "--gfx",
-        "gfx94X",
+        "-f",
+        "families=gfx950",
+        "-f",
+        "projects=",
         "--yes",
     )
     assert code == 1
-    assert "needs --projects" in capsys.readouterr().err
+    assert "input projects has no default" in capsys.readouterr().err
+    assert gh.dispatched == []
+
+
+def test_unknown_input_is_rejected_with_the_current_list(
+    trigger_mod, gh, monkeypatch, capsys
+):
+    gh.workflows["therock-ci.yml"] = FAKE_WORKFLOW
+    code = _exit_code(
+        trigger_mod,
+        monkeypatch,
+        *BRANCH,
+        "dispatch",
+        "-w",
+        "therock-ci",
+        "-f",
+        "projects=all",
+        "-f",
+        "linux_test_labels=test:hipdnn",
+        "--dry-run",
+    )
+    assert code == 1
+    err = capsys.readouterr().err
+    assert (
+        "therock-ci.yml at 'users/someone/feature' has no input linux_test_labels"
+        in err
+    )
+    assert "its inputs are: projects, families (default 'gfx94X')" in err
     assert gh.dispatched == []
 
 
 @pytest.mark.parametrize(
-    "workflow_args",
-    [["therock-ci", "--projects", "all"], ["hipdnn-superbuild"]],
-    ids=["therock-ci", "hipdnn-superbuild"],
+    "fields, message",
+    [
+        (["-f", "projects"], "-f 'projects' is not name=value"),
+        (["-f", "=all"], "-f '=all' is not name=value"),
+        (["-f", "projects=a", "-f", "projects=b"], "-f projects given twice"),
+    ],
+    ids=["no-equals", "no-name", "twice"],
 )
-def test_reuse_build_is_multi_arch_only(
-    trigger_mod, gh, monkeypatch, capsys, workflow_args
+def test_malformed_field_is_rejected(
+    trigger_mod, gh, monkeypatch, capsys, fields, message
 ):
     code = _exit_code(
         trigger_mod,
         monkeypatch,
-        "--branch",
-        "users/someone/feature",
+        *BRANCH,
         "dispatch",
         "-w",
-        *workflow_args,
+        "therock-ci",
+        *fields,
+        "--dry-run",
+    )
+    assert code == 1
+    assert message in capsys.readouterr().err
+    assert gh.dispatched == []
+
+
+def test_missing_workflow_at_ref_stops_dispatch(trigger_mod, gh, monkeypatch, capsys):
+    monkeypatch.setitem(trigger_mod.WORKFLOWS, "multi-arch", "no-such-workflow.yml")
+    assert _exit_code(trigger_mod, monkeypatch, *MULTI_ARCH, "--dry-run") == 1
+    assert "Not Found (HTTP 404)" in capsys.readouterr().err
+    assert gh.dispatched == []
+
+
+def test_workflow_without_dispatch_trigger_is_rejected(
+    trigger_mod, gh, monkeypatch, capsys
+):
+    gh.workflows["therock-multi-arch-ci.yml"] = (
+        "on:\n  push:\n    branches: [develop]\n"
+    )
+    assert _exit_code(trigger_mod, monkeypatch, *MULTI_ARCH, "--dry-run") == 1
+    assert "has no workflow_dispatch trigger" in capsys.readouterr().err
+
+
+def test_reuse_build_needs_the_baseline_inputs(trigger_mod, gh, monkeypatch, capsys):
+    gh.workflows["therock-ci.yml"] = FAKE_WORKFLOW
+    code = _exit_code(
+        trigger_mod,
+        monkeypatch,
+        *BRANCH,
+        "dispatch",
+        "-w",
+        "therock-ci",
+        "-f",
+        "projects=all",
         "--reuse-build",
         str(BASELINE_ID),
         "--dry-run",
     )
     assert code == 1
-    assert "--reuse-build is only valid for -w multi-arch" in capsys.readouterr().err
+    assert (
+        "--reuse-build needs baseline_run_id, prebuilt_stages, which therock-ci.yml"
+        in capsys.readouterr().err
+    )
     assert gh.dispatched == []
+
+
+def test_reuse_build_refuses_its_inputs_via_field(trigger_mod, gh, monkeypatch, capsys):
+    code = _exit_code(
+        trigger_mod,
+        monkeypatch,
+        *MULTI_ARCH,
+        "-f",
+        "prebuilt_stages=all",
+        "--reuse-build",
+        str(BASELINE_ID),
+        "--dry-run",
+    )
+    assert code == 1
+    assert "--reuse-build sets prebuilt_stages" in capsys.readouterr().err
 
 
 def test_fork_pr_is_refused(trigger_mod, gh, monkeypatch, capsys):
@@ -275,10 +403,10 @@ def test_yes_dispatches_when_nothing_is_active(trigger_mod, gh, monkeypatch, cap
         trigger_mod,
         monkeypatch,
         *MULTI_ARCH,
-        "--gfx",
-        "gfx94X",
-        "--test-labels",
-        "test:hipdnn",
+        "-f",
+        "linux_amdgpu_families=gfx94X",
+        "-f",
+        "linux_test_labels=test:hipdnn",
         "--yes",
     )
     assert len(gh.dispatched) == 1
@@ -303,8 +431,8 @@ def test_reuse_build_sets_baseline_and_prebuilt_stages(
         trigger_mod,
         monkeypatch,
         *MULTI_ARCH,
-        "--gfx",
-        "gfx94X",
+        "-f",
+        "linux_amdgpu_families=gfx94X",
         "--reuse-build",
         str(BASELINE_ID),
         "--yes",
@@ -360,4 +488,90 @@ def test_reuse_build_rejection_blocks_dispatch(trigger_mod, gh, monkeypatch):
         "--yes",
     )
     assert code == 1
+    assert gh.dispatched == []
+
+
+# --------------------------------------------------------------------------- #
+# Workflow parsing, and the script against this checkout's workflows and SKILL.md
+# --------------------------------------------------------------------------- #
+
+
+def test_dispatch_inputs_reads_defaults_and_flow_style(trigger_mod):
+    assert trigger_mod.dispatch_inputs(FAKE_WORKFLOW) == {
+        "projects": None,
+        "families": "gfx94X",
+    }
+    assert trigger_mod.dispatch_inputs("on: [push, workflow_dispatch]\n") == {}
+    assert trigger_mod.dispatch_inputs("on: [push]\n") is None
+
+
+@pytest.mark.parametrize("alias", ["therock-ci", "multi-arch", "hipdnn-superbuild"])
+def test_checkout_workflows_are_dispatchable(trigger_mod, alias):
+    path = WORKFLOWS_DIR / trigger_mod.WORKFLOWS[alias]
+    assert path.is_file(), f"{alias} points to missing {path}"
+    declared = trigger_mod.dispatch_inputs(path.read_text())
+    assert declared is not None, f"{path.name} has no workflow_dispatch trigger"
+    if alias == "multi-arch":
+        assert set(trigger_mod.REUSE_INPUTS) <= set(declared)
+
+
+def _yaml_dispatch_inputs(data):
+    on = data.get("on", data.get(True))  # YAML 1.1 loads a bare on: as True
+    if isinstance(on, (str, list)):
+        return {} if "workflow_dispatch" in on else None
+    if not isinstance(on, dict) or "workflow_dispatch" not in on:
+        return None
+    inputs = (on["workflow_dispatch"] or {}).get("inputs") or {}
+    result = {}
+    for name, spec in inputs.items():
+        default = (spec or {}).get("default")
+        if isinstance(default, bool):
+            default = str(default).lower()
+        result[name] = None if default is None else str(default)
+    return result
+
+
+@pytest.mark.parametrize(
+    "path", sorted(WORKFLOWS_DIR.glob("*.y*ml")), ids=lambda path: path.name
+)
+def test_dispatch_inputs_matches_pyyaml(trigger_mod, path):
+    yaml = pytest.importorskip("yaml")
+    expected = _yaml_dispatch_inputs(yaml.safe_load(path.read_text()) or {})
+    assert trigger_mod.dispatch_inputs(path.read_text()) == expected
+
+
+SKILL_PLACEHOLDERS = {
+    "<pr-number>": "1",
+    "<run-id>": str(BASELINE_ID),
+    "<branch>": "users/someone/feature",
+}
+
+
+def _skill_commands():
+    """The runnable trigger_ci.py lines in SKILL.md (templates with [...] skipped)."""
+    text = (SKILL_DIR / "SKILL.md").read_text()
+    commands = []
+    for block in re.findall(r"```bash\n(.*?)```", text, re.S):
+        for line in block.splitlines():
+            if "scripts/trigger_ci.py" not in line or "[" in line:
+                continue
+            for placeholder, value in SKILL_PLACEHOLDERS.items():
+                line = line.replace(placeholder, value)
+            argv = shlex.split(line.split("scripts/trigger_ci.py", 1)[1])
+            commands.append(argv)
+    return commands
+
+
+def test_skill_md_has_dispatch_examples_for_every_workflow(trigger_mod):
+    used = {argv[argv.index("-w") + 1] for argv in _skill_commands() if "-w" in argv}
+    assert used == set(trigger_mod.WORKFLOWS)
+
+
+@pytest.mark.parametrize("argv", _skill_commands(), ids=shlex.join)
+def test_skill_md_command_runs(trigger_mod, gh, monkeypatch, capsys, argv):
+    """Each SKILL.md example parses, and its -f inputs exist in the workflow."""
+    try:
+        _run(trigger_mod, monkeypatch, *argv)
+    except SystemExit as exc:
+        assert exc.code in (0, None), capsys.readouterr().err
     assert gh.dispatched == []

@@ -9,26 +9,34 @@ Override with --branch.
 dispatch needs --dry-run (print the gh command only) or --yes (dispatch for
 real, after the --dry-run command was approved).
 
+Workflow inputs are passed as -f name=value, as with gh workflow run. They are
+checked against the workflow_dispatch inputs of the workflow file on the
+target branch, so a renamed or removed input fails before dispatching.
+
 Examples:
     # Dry-run TheRock CI for integration-tests on gfx94X (current branch)
-    python3 <skill>/scripts/trigger_ci.py dispatch -w therock-ci --gfx gfx94X \\
-        --projects "dnn-providers/integration-tests" --dry-run
+    python3 <skill>/scripts/trigger_ci.py dispatch -w therock-ci \\
+        -f linux_amdgpu_families=gfx94X \\
+        -f projects=dnn-providers/integration-tests --dry-run
 
     # Same, dispatched for real after approval
-    python3 <skill>/scripts/trigger_ci.py dispatch -w therock-ci --gfx gfx94X \\
-        --projects "dnn-providers/integration-tests" --yes
+    python3 <skill>/scripts/trigger_ci.py dispatch -w therock-ci \\
+        -f linux_amdgpu_families=gfx94X \\
+        -f projects=dnn-providers/integration-tests --yes
 
     # Dry-run on a specific branch
     python3 <skill>/scripts/trigger_ci.py --branch users/someone/feature dispatch \\
         -w hipdnn-superbuild --dry-run
 
     # Dry-run multi-arch CI with test labels
-    python3 <skill>/scripts/trigger_ci.py dispatch -w multi-arch --gfx gfx94X,gfx950 \\
-        --test-labels test:hipdnn,test:miopenprovider --dry-run
+    python3 <skill>/scripts/trigger_ci.py dispatch -w multi-arch \\
+        -f linux_amdgpu_families=gfx94X,gfx950 \\
+        -f linux_test_labels=test:hipdnn,test:miopenprovider --dry-run
 
     # Re-run multi-arch tests at another tier, reusing run 36880722738's build
     python3 <skill>/scripts/trigger_ci.py --pr 12751 dispatch -w multi-arch \\
-        --gfx gfx94X --test-labels test:hipdnn,test_filter:comprehensive \\
+        -f linux_amdgpu_families=gfx94X \\
+        -f linux_test_labels=test:hipdnn,test_filter:comprehensive \\
         --reuse-build 36880722738 --dry-run
 
     # Check CI status for a PR
@@ -51,56 +59,23 @@ import shlex
 import subprocess
 import sys
 import time
-from pathlib import Path
+from urllib.parse import quote
 
 REPO = "ROCm/rocm-libraries"
 CANONICAL_REMOTE_URL = re.compile(
     r"github\.com[:/]ROCm/rocm-libraries(\.git)?/?$", re.IGNORECASE
 )
 
-# TheRock commit the --help family and label lists were taken from. The Sources
-# links in SKILL.md use the same SHA; update both together.
-THEROCK_SNAPSHOT_REF = "7440cb8578f4daae0d85a428fadd6645dc5464a0"
-CI_ENV_ACTION = ".github/actions/ci-env/action.yml"
-
 WORKFLOWS = {
-    "therock-ci": {
-        "file": "therock-ci.yml",
-        "fields": ["projects", "gfx", "windows_gfx"],
-    },
-    "multi-arch": {
-        "file": "therock-multi-arch-ci.yml",
-        "fields": [
-            "gfx",
-            "windows_gfx",
-            "test_labels",
-            "windows_test_labels",
-            "reuse_build",
-        ],
-    },
-    "hipdnn-superbuild": {
-        "file": "hipdnn-superbuild-ci.yml",
-        "fields": [],
-    },
+    "therock-ci": "therock-ci.yml",
+    "multi-arch": "therock-multi-arch-ci.yml",
+    "hipdnn-superbuild": "hipdnn-superbuild-ci.yml",
 }
 
-INPUT_MAP = {
-    "gfx": "linux_amdgpu_families",
-    "windows_gfx": "windows_amdgpu_families",
-    "projects": "projects",
-    "test_labels": "linux_test_labels",
-    "windows_test_labels": "windows_test_labels",
-    "reuse_build": "baseline_run_id",
-}
+# Inputs --reuse-build sets; the workflow must declare both.
+REUSE_INPUTS = ("baseline_run_id", "prebuilt_stages")
 
-OPTION_NAMES = {
-    "gfx": "--gfx",
-    "windows_gfx": "--windows-gfx",
-    "projects": "--projects",
-    "test_labels": "--test-labels",
-    "windows_test_labels": "--windows-test-labels",
-    "reuse_build": "--reuse-build",
-}
+YAML_KEY = re.compile(r"""^(\s*)["']?([\w-]+)["']?:(?:\s+(.*))?$""")
 
 INSTALL_HINTS = {
     "gh": "install the GitHub CLI (https://cli.github.com)",
@@ -174,16 +149,66 @@ def current_git_branch():
     return merge_ref[len("refs/heads/") :]
 
 
-def checkout_therock_ref():
-    root = run_cmd(["git", "rev-parse", "--show-toplevel"], check=False)
-    if not root:
-        return ""
+def workflow_text(workflow_file, ref):
+    path = f".github/workflows/{workflow_file}"
+    cmd = [
+        "gh",
+        "api",
+        "-H",
+        "Accept: application/vnd.github.raw",
+        f"repos/{REPO}/contents/{path}?ref={quote(ref, safe='')}",
+    ]
     try:
-        text = Path(root, CI_ENV_ACTION).read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return ""
-    match = re.search(r'therock-ref:\n(?:.*\n)*?\s*value:\s*"([0-9a-f]+)"', text)
-    return match.group(1) if match else ""
+        result = subprocess.run(cmd, capture_output=True, text=True)
+    except FileNotFoundError:
+        exit_not_found(cmd)
+    if result.returncode != 0:
+        print(
+            f"error: could not read {path} at '{ref}': {result.stderr.strip()}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return result.stdout
+
+
+def _yaml_scalar(value):
+    """Plain or quoted one-line scalar; None for an empty (null) value."""
+    value = (value or "").strip()
+    if value[:1] in ("'", '"'):
+        return value[1 : value.index(value[0], 1)]
+    value = "" if value.startswith("#") else value.split(" #")[0].strip()
+    return value or None
+
+
+def dispatch_inputs(text):
+    """Return {name: default, or None when unset} for the workflow_dispatch
+    inputs in a workflow file, or None when it has no workflow_dispatch trigger.
+
+    Reads only the block-style mappings GitHub workflows use for on: and its
+    inputs, which keeps the script stdlib-only.
+    """
+    stack = []  # (indent, key) of the mappings enclosing the current line
+    found = False
+    inputs = {}
+    for line in text.splitlines():
+        match = YAML_KEY.match(line)
+        if not match:
+            continue
+        indent, key, value = len(match.group(1)), match.group(2), match.group(3)
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        path = [k for _, k in stack]
+        stack.append((indent, key))
+        if path == ["on"] and key == "workflow_dispatch":
+            found = True
+        elif path == [] and key == "on" and "workflow_dispatch" in (value or ""):
+            found = True  # flow style, e.g. on: [push, workflow_dispatch]
+        elif path == ["on", "workflow_dispatch", "inputs"]:
+            inputs[key] = None
+        elif path[:3] == ["on", "workflow_dispatch", "inputs"] and len(path) == 4:
+            if key == "default":
+                inputs[path[3]] = _yaml_scalar(value)
+    return inputs if found else None
 
 
 def pr_branch(pr_number):
@@ -270,8 +295,7 @@ def dispatch_workflow(workflow_file, ref, inputs, dry_run=False):
         ref,
     ]
     for key, value in inputs.items():
-        if value:
-            cmd.extend(["-f", f"{key}={value}"])
+        cmd.extend(["-f", f"{key}={value}"])
 
     print(f"  {shlex.join(cmd)}")
 
@@ -390,24 +414,34 @@ def find_active_run(ref):
     return max(active, key=lambda run: run["databaseId"], default=None)
 
 
+def fail(message):
+    print(f"error: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def parse_fields(fields):
+    inputs = {}
+    for field in fields:
+        name, sep, value = field.partition("=")
+        if not sep or not name:
+            fail(f"-f '{field}' is not name=value")
+        if name in inputs:
+            fail(f"-f {name} given twice")
+        inputs[name] = value
+    return inputs
+
+
+def describe_inputs(declared):
+    if not declared:
+        return "it declares no inputs"
+    return "its inputs are: " + ", ".join(
+        name if default is None else f"{name} (default '{default}')"
+        for name, default in declared.items()
+    )
+
+
 def cmd_dispatch(args):
-    wf = WORKFLOWS[args.workflow]
-    for field, option in OPTION_NAMES.items():
-        if getattr(args, field, "") and field not in wf["fields"]:
-            valid_for = [name for name, w in WORKFLOWS.items() if field in w["fields"]]
-            print(
-                f"error: {option} is only valid for -w {' or -w '.join(valid_for)}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-    # therock-ci has no default for projects; an empty value selects no subtrees,
-    # so the run skips every build job and still completes.
-    if args.workflow == "therock-ci" and not args.projects:
-        print(
-            "error: -w therock-ci needs --projects (subtree paths or 'all')",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    workflow_file = WORKFLOWS[args.workflow]
     ref = resolve_branch(args)
     # A dispatch on a postsubmit branch shares the concurrency group of that
     # commit's push run and cancels it on shared CI.
@@ -420,29 +454,52 @@ def cmd_dispatch(args):
             file=sys.stderr,
         )
         sys.exit(1)
-    head_sha = ref_head_sha(ref)
-    inputs = {}
-    for field in wf["fields"]:
-        value = getattr(args, field, "") or ""
-        if value:
-            inputs[INPUT_MAP[field]] = value
+    inputs = parse_fields(args.field)
+    # Check the inputs against the workflow as it is on the target branch, so a
+    # renamed or removed input fails here instead of being ignored by GitHub.
+    declared = dispatch_inputs(workflow_text(workflow_file, ref))
+    if declared is None:
+        fail(f"{workflow_file} at '{ref}' has no workflow_dispatch trigger")
+    unknown = [name for name in inputs if name not in declared]
+    if unknown:
+        fail(
+            f"{workflow_file} at '{ref}' has no input {', '.join(unknown)}; "
+            f"{describe_inputs(declared)}"
+        )
     if args.reuse_build:
-        check_reuse_baseline(args.reuse_build, wf["file"], ref, head_sha)
+        missing = [name for name in REUSE_INPUTS if name not in declared]
+        if missing:
+            fail(
+                f"--reuse-build needs {', '.join(missing)}, which {workflow_file} "
+                f"at '{ref}' does not declare"
+            )
+        given = [name for name in REUSE_INPUTS if name in inputs]
+        if given:
+            fail(f"--reuse-build sets {', '.join(given)}; do not pass it with -f")
+    # An input without a default is one the caller must choose. An empty
+    # therock-ci projects, for example, selects no subtrees, so the run skips
+    # every build job and still passes.
+    unset = [
+        name
+        for name, default in declared.items()
+        if default is None and not inputs.get(name)
+    ]
+    if unset:
+        fail(
+            f"{workflow_file} input {', '.join(unset)} has no default; "
+            "pass -f name=value"
+        )
+    head_sha = ref_head_sha(ref)
+    if args.reuse_build:
+        check_reuse_baseline(args.reuse_build, workflow_file, ref, head_sha)
+        inputs["baseline_run_id"] = str(args.reuse_build)
         # Copy every build stage from the baseline run; only tests run.
         inputs["prebuilt_stages"] = "all"
-    pinned = checkout_therock_ref()
-    if pinned and pinned != THEROCK_SNAPSHOT_REF:
-        print(
-            f"warning: {CI_ENV_ACTION} pins TheRock {pinned}, but the --help family "
-            f"and label lists are from {THEROCK_SNAPSHOT_REF}; re-read the TheRock "
-            f"files at {pinned} before relying on them",
-            file=sys.stderr,
-        )
-    doomed = runs_cancelled_by_dispatch(wf["file"], head_sha)
+    doomed = runs_cancelled_by_dispatch(workflow_file, head_sha)
     if doomed:
         print(
             f"warning: this dispatch cancels {len(doomed)} active run(s) of "
-            f"{wf['file']} at {head_sha[:11]} (shared concurrency group):",
+            f"{workflow_file} at {head_sha[:11]} (shared concurrency group):",
             file=sys.stderr,
         )
         for run in doomed:
@@ -464,7 +521,7 @@ def cmd_dispatch(args):
                 file=sys.stderr,
             )
     print(f"Dispatching '{args.workflow}' on '{ref}':")
-    dispatch_workflow(wf["file"], ref, inputs, dry_run=args.dry_run)
+    dispatch_workflow(workflow_file, ref, inputs, dry_run=args.dry_run)
 
 
 def cmd_status(args):
@@ -544,23 +601,14 @@ def main():
     parser = argparse.ArgumentParser(
         description="Trigger CI on a rocm-libraries branch",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=f"""
-The lists below are a snapshot of TheRock at {THEROCK_SNAPSHOT_REF}.
-If therock-ref in {CI_ENV_ACTION} differs, re-read the TheRock files
-named below at that ref (dispatch warns when it does).
-
-GPU families (case-insensitive; from TheRock build_tools/github_actions/amdgpu_family_matrix.py):
-  presubmit:   gfx94X, gfx110X, gfx1151, gfx120X, gfx125X
-  postsubmit:  gfx90a, gfx950
-  nightly:     gfx900, gfx90c, gfx906, gfx908, gfx101X, gfx103X, gfx1150, gfx1152, gfx1153
-  multi-arch only: gfx1250-strict, all, none
-  Families without an entry for the target platform are dropped.
-
-hipDNN test labels (multi-arch; from TheRock fetch_test_configurations.py test_matrix):
-  test:hipdnn, test:hipdnn_install, test:hipdnn-integration-tests, test:hipdnn-samples,
-  test:miopenprovider, test:hipblasltprovider, test:hipkernelprovider
-  The test: prefix is optional. Any test label selects the full test tier; add
-  test_filter:<quick|standard|comprehensive|full> to the same list to pick the tier.
+        epilog="""
+Workflow aliases: """
+        + ", ".join(f"{alias} = {file}" for alias, file in WORKFLOWS.items())
+        + """
+Valid -f inputs are the workflow_dispatch inputs of that file on the target
+branch; an unknown name is rejected with the current list. Valid values
+(GPU families, test labels, projects) are defined by the files SKILL.md
+points to.
         """,
     )
     parser.add_argument(
@@ -587,28 +635,12 @@ hipDNN test labels (multi-arch; from TheRock fetch_test_configurations.py test_m
         help="Which workflow to trigger",
     )
     dispatch.add_argument(
-        "--gfx", default="", help="Linux GPU families (comma-separated)"
-    )
-    dispatch.add_argument(
-        "--windows-gfx", dest="windows_gfx", default="", help="Windows GPU families"
-    )
-    dispatch.add_argument(
-        "--projects",
-        default="",
-        help="Space-separated subtree paths from .github/scripts/therock_matrix.py, "
-        "or 'all' (therock-ci only, required there)",
-    )
-    dispatch.add_argument(
-        "--test-labels",
-        dest="test_labels",
-        default="",
-        help="Linux test labels, comma-separated (multi-arch only)",
-    )
-    dispatch.add_argument(
-        "--windows-test-labels",
-        dest="windows_test_labels",
-        default="",
-        help="Windows test labels, comma-separated (multi-arch only)",
+        "--field",
+        "-f",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help="Workflow input, as with gh workflow run; repeat for each input",
     )
     dispatch.add_argument(
         "--reuse-build",
@@ -616,8 +648,8 @@ hipDNN test labels (multi-arch; from TheRock fetch_test_configurations.py test_m
         type=int,
         default=None,
         metavar="RUN_ID",
-        help="Skip the build and copy its artifacts from this completed multi-arch "
-        "run of the same commit (multi-arch only)",
+        help="Skip the build and copy its artifacts from this completed run of "
+        "the same workflow and commit (sets baseline_run_id and prebuilt_stages)",
     )
     dispatch.add_argument(
         "--cancel-active",

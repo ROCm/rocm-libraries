@@ -1,7 +1,7 @@
 ---
 name: hipdnn-trigger-ci
 description: Dispatch TheRock CI, TheRock Multi-Arch CI or the hipDNN superbuild CI on a rocm-libraries branch with chosen GPU families, projects and test labels, then check status or watch the run. Always dry-runs first; a real dispatch needs explicit user approval.
-argument-hint: "[--branch <branch>|--pr <pr-number>] [dispatch -w <workflow>|status|watch] [--gfx <families>] [--windows-gfx <families>] [--projects <paths>] [--test-labels <labels>] [--reuse-build <run-id>] [--dry-run|--yes [--cancel-active]] [--run-id <run-id>]"
+argument-hint: "[--branch <branch>|--pr <pr-number>] [dispatch -w <workflow>|status|watch] [-f <input>=<value> ...] [--reuse-build <run-id>] [--dry-run|--yes [--cancel-active]] [--run-id <run-id>]"
 allowed-tools: Bash, Read, Grep, Glob
 ---
 
@@ -18,22 +18,19 @@ Infer options from the user request:
 - **Workflow** (`dispatch -w`):
   - `multi-arch` → `.github/workflows/therock-multi-arch-ci.yml`. Builds ROCm with TheRock and runs component tests on the chosen GPU families. This is the one to use for hipDNN/provider test labels.
   - `therock-ci` → `.github/workflows/therock-ci.yml`. Single-arch TheRock CI for a set of rocm-libraries subtrees.
-  - `hipdnn-superbuild` → `.github/workflows/hipdnn-superbuild-ci.yml`. Takes no inputs.
+  - `hipdnn-superbuild` → `.github/workflows/hipdnn-superbuild-ci.yml`.
 - **Branch**: `--branch <branch>` (a global option, placed before the subcommand). If omitted, `--pr <pr-number>` resolves the PR head branch; otherwise the current git branch is used, under its upstream name when it tracks one. If that upstream is on a remote other than `ROCm/rocm-libraries` (a fork), or the `--pr` is from a fork, the script stops and asks for `--branch`; `--pr <pr-number> status` still works on fork PRs. The branch must already be pushed to `ROCm/rocm-libraries` for a dispatch to find it.
 
   **A dispatch can cancel other runs.** All three workflows use the concurrency group `<workflow>-<PR number or commit SHA>` with `cancel-in-progress: true`. A dispatch has no PR number, so it shares the group of every queued or in-progress run of the same workflow at the branch's head commit that was not started by a pull request: an earlier dispatch on the same commit (for example the same branch with other families or labels), and the push postsubmit or scheduled run of that commit. Pull-request runs are keyed by PR number and are not affected. `dispatch` lists those runs as a warning, in the dry-run too; `--yes` then refuses unless `--cancel-active` is also passed. Show the list to the user and add `--cancel-active` only after they approve cancelling those runs. `dispatch` also refuses `develop` and `release/*`, whose postsubmit runs share the group, unless `--allow-shared-branch` is passed; pass it only when the user explicitly asks to dispatch on such a branch.
-- **GPU families**: `--gfx` (Linux) and `--windows-gfx`, comma-separated. When omitted the workflow defaults apply:
-  - `multi-arch`: Linux `gfx94X,gfx950,gfx125X`, Windows `gfx110X` (`.github/workflows/therock-multi-arch-ci.yml`, `setup` job inputs). Pass `none` to skip a platform, for example `--windows-gfx none` for a Linux-only run.
-  - `therock-ci`: Linux `gfx94X, gfx950, gfx125X`, Windows `gfx1151` (`.github/workflows/therock-ci.yml`, "Fetch Linux/Windows targets for build and test" steps).
-- **Projects** (`therock-ci` only, required there): `--projects`, space-separated subtree paths that are keys of `subtree_to_project_map` in `.github/scripts/therock_matrix.py` (for example `dnn-providers/integration-tests`, `projects/hipdnn`), or `all`. The workflow has no default: without it a run builds and tests nothing yet completes, so `dispatch` refuses `-w therock-ci` without `--projects`.
-- **Test labels** (`multi-arch` only): `--test-labels` (Linux) and `--windows-test-labels`, comma-separated. See the test reference below.
-- **Reuse a build** (`multi-arch` only): `--reuse-build <run-id>` skips every build stage and copies the artifacts from that earlier multi-arch run (`prebuilt_stages=all`, `baseline_run_id=<run-id>`), so only the tests run. Use it to re-run tests with other labels or another tier without rebuilding. The script refuses a run of another workflow or repo, a run of a different commit than the branch head, and a run that has not completed. It does not check the baseline's jobs: every family requested now must have built successfully in that run, or its test jobs fail on missing artifacts. A cancelled run whose build stages all passed is a valid baseline. The workflow's own reuse policy never copies `compiler-runtime`; `all` does, which is untested here, so confirm the first such run gets past the copy step.
+- **Inputs** (`-f <input>=<value>`, repeat per input): the `workflow_dispatch.inputs` of the workflow file on the target branch. Read them there; do not rely on remembered names. `dispatch` reads the same file at the same branch and rejects an unknown name (listing the current inputs), an input given twice, and a missing input that has no default (for example `projects` for `therock-ci`, which otherwise builds and tests nothing yet passes). Omitted inputs keep the workflow default.
+- **Values**: the workflow passes GPU families and test labels to TheRock, so the valid values are defined there, at the TheRock ref the target branch uses. Today that ref is `therock-ref` in `.github/actions/ci-env/action.yml`; if that moves, follow the workflow's checkout of TheRock. Read the files at that ref (`gh api -H "Accept: application/vnd.github.raw" "repos/ROCm/TheRock/contents/<path>?ref=<therock-ref>"`):
+  - GPU families: `build_tools/github_actions/amdgpu_family_matrix.py`.
+  - Test labels and components: `build_tools/github_actions/fetch_test_configurations.py` (`test_matrix`).
+  - Test tier: `build_tools/github_actions/configure_multi_arch_ci.py` (`_determine_test_type`).
+  - `therock-ci` projects: keys of `subtree_to_project_map` in `.github/scripts/therock_matrix.py` in this repo, or `all`.
 
-`dispatch` rejects an option the chosen workflow does not take (for example `--test-labels` with `-w therock-ci`, or any option with `-w hipdnn-superbuild`) instead of dropping it.
-
-The accepted GPU family names come from TheRock's `build_tools/github_actions/amdgpu_family_matrix.py` at the TheRock ref pinned in `.github/actions/ci-env/action.yml` (`therock-ref`). `trigger_ci.py --help` prints a hardcoded snapshot of the list and names the TheRock commit it was taken from, and `dispatch` warns when the checkout's `therock-ref` differs from it; in that case, or when a name is rejected, re-read `amdgpu_family_matrix.py` at the current `therock-ref`. Names are case-insensitive. A family that has no entry for the target platform is dropped for that platform (for example `gfx94X` and `gfx950` are Linux-only). `multi-arch` rejects an unknown name with an error listing the known families; `therock-ci` skips unknown names silently, so check the spelling. `multi-arch` also accepts `gfx1250-strict` (dispatch-only) and `all`.
-
-Multi-arch has further dispatch inputs (`baseline_repository`, `build_python_packages`, `build_pytorch`, `build_jax`, `build_native_linux`, and `prebuilt_stages` values other than `all`) that this script does not expose. Read `.github/workflows/therock-multi-arch-ci.yml` if the user needs one; pass it through `gh workflow run` directly only after showing the user the command.
+  Never invent a family or label; an unknown label matches no component, so only sanity runs.
+- **Reuse a build**: `--reuse-build <run-id>` skips every build stage and copies the artifacts from that earlier run (it sets `baseline_run_id=<run-id>` and `prebuilt_stages=all`), so only the tests run. Use it to re-run tests with other labels or another tier without rebuilding. Only a workflow that declares both inputs accepts it (today `multi-arch`); do not pass either with `-f`. The script refuses a run of another workflow or repo, a run of a different commit than the branch head, and a run that has not completed. It does not check the baseline's jobs: every family requested now must have built successfully in that run, or its test jobs fail on missing artifacts. A cancelled run whose build stages all passed is a valid baseline. The workflow's own reuse policy never copies `compiler-runtime`; `all` does, which is untested here, so confirm the first such run gets past the copy step.
 
 ## Workflow
 
@@ -43,9 +40,9 @@ Multi-arch has further dispatch inputs (`baseline_repository`, `build_python_pac
 
 3. Dry-run the dispatch and show the user the printed command:
    ```bash
-   python3 <skill-directory>/scripts/trigger_ci.py [--branch <branch> | --pr <pr-number>] dispatch -w <workflow> [--gfx <families>] [--windows-gfx <families>] [--projects "<paths>"] [--test-labels <labels>] [--windows-test-labels <labels>] [--reuse-build <run-id>] --dry-run
+   python3 <skill-directory>/scripts/trigger_ci.py [--branch <branch> | --pr <pr-number>] dispatch -w <workflow> [-f <input>=<value> ...] [--reuse-build <run-id>] --dry-run
    ```
-   Here `<workflow>` is `multi-arch`, `therock-ci` or `hipdnn-superbuild`; `<families>`, `<paths>` and `<labels>` are the values described under Inputs.
+   Here `<workflow>` is `multi-arch`, `therock-ci` or `hipdnn-superbuild`; inputs and values are described under Inputs.
 
 4. After explicit approval, run the same command with `--yes` in place of `--dry-run`. If the dry-run listed active runs that the dispatch cancels, ask for approval to cancel them too, and add `--cancel-active`. The script dispatches, waits up to about 15 seconds for the new run to appear and prints its run ID with `gh run watch` / `gh run view --log` commands.
 
@@ -59,81 +56,41 @@ Multi-arch has further dispatch inputs (`baseline_repository`, `build_python_pac
 
 ## Test reference
 
-Sources, all at the pinned TheRock ref: [fetch_test_configurations.py](https://github.com/ROCm/TheRock/blob/7440cb8578f4daae0d85a428fadd6645dc5464a0/build_tools/github_actions/fetch_test_configurations.py) (component matrix and label matching), [configure_multi_arch_ci.py](https://github.com/ROCm/TheRock/blob/7440cb8578f4daae0d85a428fadd6645dc5464a0/build_tools/github_actions/configure_multi_arch_ci.py) (`_determine_test_type`), [test_runner.py](https://github.com/ROCm/TheRock/blob/7440cb8578f4daae0d85a428fadd6645dc5464a0/build_tools/github_actions/test_executable_scripts/test_runner.py) (ctest invocation), [amdgpu_family_matrix.py](https://github.com/ROCm/TheRock/blob/7440cb8578f4daae0d85a428fadd6645dc5464a0/build_tools/github_actions/amdgpu_family_matrix.py) and [test_artifacts.yml](https://github.com/ROCm/TheRock/blob/7440cb8578f4daae0d85a428fadd6645dc5464a0/.github/workflows/test_artifacts.yml) (sanity gate and component test jobs). The links use the same SHA as `THEROCK_SNAPSHOT_REF` in `scripts/trigger_ci.py`, so the `dispatch` drift warning applies to this section too. Re-read them if the pin in `.github/actions/ci-env/action.yml` has moved.
+Test labels are workflow input values (`linux_test_labels`, `windows_test_labels`), not GitHub PR labels; the string is passed through as is. Never create or add `test:hipdnn` or any other hipDNN test label to a PR.
 
-### Component labels
+For which components, tiers and ctest labels a run selects, read the TheRock files listed under Inputs, then the test category YAMLs in this repo:
 
-`--test-labels` values are the `linux_test_labels` / `windows_test_labels` workflow_dispatch inputs, not GitHub PR labels. The string is passed through as is, so no matching label has to exist in the repo. The only `test:` GitHub PR labels in `ROCm/rocm-libraries` are `test:rocblas`, `test:rocprim`, `test:hipblaslt`, `test:hipsparselt` and `test:rpp` (`gh label list --repo ROCm/rocm-libraries --search test:`); never create or add `test:hipdnn` or any other hipDNN test label to a PR. Each label is a key of `test_matrix` in `fetch_test_configurations.py` and selects one TheRock test component. The `test:` prefix is optional (it is stripped, so `test:hipdnn` and `hipdnn` select the same component) and matching is exact. The `sanity` component always runs and gates the rest: component test jobs start only after it passes (`test_components` needs `test_sanity_check` in `test_artifacts.yml`). With no labels, every component that applies to the family and platform runs.
+- `projects/hipdnn/test_categories.yaml`
+- `dnn-providers/integration-tests/test_categories*.yaml`
+- `dnn-providers/miopen-provider/test_categories*.yaml`, `dnn-providers/hipblaslt-provider/test_categories*.yaml`
+- `dnn-providers/hip-kernel-provider/*_test_categories*.yaml`
 
-hipDNN components (all run on Linux and Windows, one shard, 30-minute timeout):
+## Examples
 
-| Label | `fetch_artifact_args` | CTest directory in the test job |
-|---|---|---|
-| `test:hipdnn` | `--hipdnn --tests` | `hipdnn` |
-| `test:hipdnn_install` | none | none (runs `test_hipdnn_install.py`) |
-| `test:hipdnn-integration-tests` | `--hipdnn --hipdnn-integration-tests --tests` | `hipdnn_integration_tests_ctest` |
-| `test:hipdnn-samples` | `--blas --miopen --hipdnn --miopenprovider --hipdnn-samples --tests` | `hipdnn_samples` |
-| `test:miopenprovider` | `--blas --miopen --hipdnn --miopenprovider --hipdnn-integration-tests --tests` | `miopen_plugin` |
-| `test:hipblasltprovider` | `--blas --hipdnn --hipblasltprovider --hipdnn-integration-tests --tests` | `hipblaslt_plugin` |
-| `test:hipkernelprovider` | `--hipdnn --hipkernelprovider --hipdnn-integration-tests --tests` | `hip_kernel_provider` (installs the rocKE wheels first) |
+Always dry-run first and show the printed command. The values below are examples; check them against the sources under Inputs.
 
-`test:hipdnn_install` uses an underscore; `test:hipdnn-install` matches nothing. The three provider labels also fetch `--hipdnn-integration-tests` and exercise the integration-test harness, so for a change under `dnn-providers/integration-tests` select `test:hipdnn-integration-tests,test:miopenprovider,test:hipblasltprovider,test:hipkernelprovider`.
-
-Other components use their own names (for example `test:rocblas`, `test:hipblaslt`); read the component matrix for the full list. Do not invent labels: an unknown label matches no component, so only sanity runs.
-
-### Test tier
-
-This applies to `multi-arch`. A `therock-ci` dispatch always runs `standard` (`.github/scripts/therock_configure_ci.py`, which reads labels only on push and pull request events).
-
-One tier (`test_type`) is chosen for the whole run:
-
-1. A `test_filter:<tier>` entry in the test labels wins. `<tier>` is `quick`, `standard`, `comprehensive` or `full`; any other value fails the setup job.
-2. Otherwise any component label selects `full`.
-3. Otherwise a dispatch runs `quick`.
-
-`gfx125X` is forced to `quick` for its own test jobs (`test_type_for_family` in the family matrix).
-
-`test_filter:` entries are passed through to component matching unchanged and match no component, so **always pair `test_filter:<tier>` with at least one component label**; on its own it leaves only sanity. Because component labels imply `full`, add `test_filter:quick` for a fast signal on a provider.
-
-Each test job runs `ctest -L ^<tier>$` in its CTest directory, plus the `ex_gpu_<arch>` label when the build defines it, and excludes the `<tier>_exclude` and `<tier>_therock_ci_exclude` labels.
-
-### What each tier runs
-
-CTest labels come from the test category YAMLs. A test in a lower tier also carries every higher tier's label (quick ⊂ standard ⊂ comprehensive ⊂ full).
-
-- `hipdnn`: `projects/hipdnn/test_categories.yaml`. Quick covers all GTests; the `unit` and `integration` categories name the test executables (for example `hipdnn_backend_tests`, `hipdnn_frontend_tests`, `hipdnn_public_backend_tests`).
-- Integration-test bundle sweeps are driven by each provider, not by `hipdnn-integration-tests` (see `dnn-providers/integration-tests/CMakeLists.txt`). Bundle GTest suites are named `<tier>_<Op>_<Variant>` after the bundle folder (for example `quick_SdpaFwd_bhsd_bf16_hd128_nomask_batch_Small`). `dnn-providers/miopen-provider/test_categories_integration.yaml` and `dnn-providers/hipblaslt-provider/test_categories_integration.yaml` select `quick_*` for quick, add `standard_*` for standard, add `full_*` for comprehensive, and `*` for full.
-- `hipdnn-integration-tests`: `dnn-providers/integration-tests/test_categories.yaml` (quick is everything not prefixed `Standard`, `Comprehensive` or `Full`) and `dnn-providers/integration-tests/test_categories_external.yaml` (the pre-registered `hipdnn-integration-tests_test_name_validation`, `hipdnn_bundle_verifier_python_tests` and `hipdnn_support_claim_verifier_python_tests`).
-- `hipkernelprovider`: the `*_test_categories*.yaml` files in `dnn-providers/hip-kernel-provider`, for example `dnn-providers/hip-kernel-provider/ROCKE_ENGINE_test_categories_external.yaml` (the rocKE quick checks).
-
-To choose ctest names or reproduce a tier locally, prefer the `hipdnn-integration-testing` skill once it lands (ALMIOPEN-2578; not on develop yet). Until then, read the YAMLs above.
-
-### Examples
-
-Always dry-run first and show the printed command.
-
-TheRock CI for the integration-tests subtree on one family (no TheRock branch needed):
+TheRock CI for the integration-tests subtree on one family:
 
 ```bash
-python3 <skill-directory>/scripts/trigger_ci.py dispatch -w therock-ci --gfx gfx94X --projects "dnn-providers/integration-tests" --dry-run
+python3 <skill-directory>/scripts/trigger_ci.py dispatch -w therock-ci -f linux_amdgpu_families=gfx94X -f projects=dnn-providers/integration-tests --dry-run
 ```
 
-Multi-arch, Linux-only, MIOpen provider and hipDNN tests at the full tier (implied by the labels):
+Multi-arch, Linux only, MIOpen provider and hipDNN tests:
 
 ```bash
-python3 <skill-directory>/scripts/trigger_ci.py dispatch -w multi-arch --gfx gfx94X,gfx950 --windows-gfx none --test-labels test:hipdnn,test:miopenprovider --dry-run
+python3 <skill-directory>/scripts/trigger_ci.py dispatch -w multi-arch -f linux_amdgpu_families=gfx94X,gfx950 -f windows_amdgpu_families=none -f linux_test_labels=test:hipdnn,test:miopenprovider --dry-run
 ```
 
-Same, but at the quick tier:
+Re-run the tests of a finished multi-arch run without rebuilding (the run must be of the branch's current head commit):
 
 ```bash
-python3 <skill-directory>/scripts/trigger_ci.py dispatch -w multi-arch --gfx gfx94X --windows-gfx none --test-labels test:miopenprovider,test_filter:quick --dry-run
+python3 <skill-directory>/scripts/trigger_ci.py --pr <pr-number> dispatch -w multi-arch -f linux_amdgpu_families=gfx94X -f windows_amdgpu_families=none -f linux_test_labels=test:miopenprovider,test_filter:quick --reuse-build <run-id> --dry-run
 ```
 
-Re-run the tests of a finished multi-arch run at the comprehensive tier, without rebuilding (the run must be of the branch's current head commit):
+The hipDNN superbuild CI (no inputs):
 
 ```bash
-python3 <skill-directory>/scripts/trigger_ci.py --pr <pr-number> dispatch -w multi-arch --gfx gfx94X --windows-gfx none --test-labels test:miopenprovider,test_filter:comprehensive --reuse-build <run-id> --dry-run
+python3 <skill-directory>/scripts/trigger_ci.py dispatch -w hipdnn-superbuild --dry-run
 ```
 
 Check or follow the run on a PR's branch:
@@ -148,7 +105,7 @@ python3 <skill-directory>/scripts/trigger_ci.py --pr <pr-number> watch
 Summarize:
 
 - The exact `gh workflow run` command (dry-run output) and whether it was dispatched
-- Workflow, branch, GPU families per platform and test labels
+- Workflow, branch and the `-f` inputs (GPU families, test labels)
 - Run ID and URL when dispatched, or the status/watch result
 
 ## Notes
