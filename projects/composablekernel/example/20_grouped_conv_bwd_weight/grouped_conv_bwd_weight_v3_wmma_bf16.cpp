@@ -3,11 +3,11 @@
 
 #include "common.hpp"
 
-#include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_bwd_weight_two_stage_wmma_cshuffle_v3.hpp"
+#include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_bwd_weight_wmma_cshuffle_v3.hpp"
 
 using InDataType = BF16;
 // bf16 kernel use fp32 atomic add to accumulate Weight tensor into global memory
-using WeiDataType = BF16;
+using WeiDataType = F32;
 using OutDataType = BF16;
 using AccDataType = F32;
 
@@ -17,10 +17,10 @@ using OutElementOp = PassThrough;
 
 template <ck::index_t NDimSpatial>
 using DeviceConvBwdWeightInstance =
-    ck::tensor_operation::device::DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3<
+    ck::tensor_operation::device::DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<
         NDimSpatial,
         ck::tuple_element_t<NDimSpatial - 1,
-                            ck::Tuple<ck::tensor_layout::convolution::NWGC,
+                            ck::Tuple<ck::tensor_layout::convolution::GNWC,
                                       ck::tensor_layout::convolution::NHWGC,
                                       ck::tensor_layout::convolution::NDHWGC>>,
         ck::tuple_element_t<NDimSpatial - 1,
@@ -28,7 +28,7 @@ using DeviceConvBwdWeightInstance =
                                       ck::tensor_layout::convolution::GKYXC,
                                       ck::tensor_layout::convolution::GKZYXC>>,
         ck::tuple_element_t<NDimSpatial - 1,
-                            ck::Tuple<ck::tensor_layout::convolution::NWGK,
+                            ck::Tuple<ck::tensor_layout::convolution::GNWK,
                                       ck::tensor_layout::convolution::NHWGK,
                                       ck::tensor_layout::convolution::NDHWGK>>,
         InDataType,           // InDataType
@@ -40,40 +40,32 @@ using DeviceConvBwdWeightInstance =
         OutElementOp,         // OutElementwiseOperation
         ConvBwdWeightDefault, // ConvolutionBackwardWeightSpecialization
         256,                  // BlockSize
-        32,                   // MPerBlock
-        512,                  // NPerBlock
-        128,                  // KPerBlock
+        128,                  // MPerBlock
+        128,                  // NPerBlock
+        32,                   // KPerBlock
         8,                    // K1
         16,                   // MPerWmma
         16,                   // NPerWmma
-        2,                    // MRepeat
-        4,                    // NRepeat
-        S<16, 4, 4>,          // ABlockTransferThreadClusterLengths_K0_M_K1
+        4,                    // MRepeat
+        2,                    // NRepeat
+        S<4, 16, 1>,          // ABlockTransferThreadClusterLengths_K0_M_K1
         S<2, 0, 1>,           // ABlockTransferThreadClusterArrangeOrder
         S<1, 0, 2>,           // ABlockTransferSrcAccessOrder
         1,                    // ABlockTransferSrcVectorDim
-        8,                    // ABlockTransferSrcScalarPerVector
+        1,                    // ABlockTransferSrcScalarPerVector
         2,                    // ABlockTransferDstScalarPerVector_K1
-        false,                // ABlockLdsAddExtraM
-        S<16, 16, 1>,         // BBlockTransferThreadClusterLengths_K0_N_K1
+        true,                 // ABlockLdsAddExtraM
+        S<4, 16, 1>,          // BBlockTransferThreadClusterLengths_K0_N_K1
         S<2, 0, 1>,           // BBlockTransferThreadClusterArrangeOrder
         S<1, 0, 2>,           // BBlockTransferSrcAccessOrder
         1,                    // BBlockTransferSrcVectorDim
-        8,                    // BBlockTransferSrcScalarPerVector
-        8,                    // BBlockTransferDstScalarPerVector_K1
-        false,                // BBlockLdsAddExtraN
+        1,                    // BBlockTransferSrcScalarPerVector
+        2,                    // BBlockTransferDstScalarPerVector_K1
+        true,                 // BBlockLdsAddExtraN
         1,                    // CShuffleMRepeatPerShuffle
         1,                    // CShuffleNRepeatPerShuffle
-        S<1, 16, 1, 16>, // CShuffleBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock
-        1,               // CShuffleBlockTransferScalarPerVector_NPerBlock
-        ck::BlockGemmPipelineScheduler::Intrawave,
-        ck::BlockGemmPipelineVersion::v1,
-        32,
-        BF16,
-        BF16,
-        1,
-        1,
-        false>;
+        S<1, 32, 1, 4>, // CShuffleBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock
+        4>;             // CShuffleBlockTransferScalarPerVector_NPerBlock
 
 template <ck::index_t NDimSpatial>
 using HostConvBwdWeightInstance = ck::tensor_operation::host::ReferenceConvBwdWeight<NDimSpatial,
@@ -98,9 +90,9 @@ int main(int argc, char* argv[])
 
     switch(conv_param.num_dim_spatial_)
     {
-    // case 1: return !run_grouped_conv_bwd_weight<1>(config, conv_param);
+    case 1: return !run_grouped_conv_bwd_weight<1>(config, conv_param);
     case 2: return !run_grouped_conv_bwd_weight<2>(config, conv_param);
-    // case 3: return !run_grouped_conv_bwd_weight<3>(config, conv_param);
+    case 3: return !run_grouped_conv_bwd_weight<3>(config, conv_param);
     default: break;
     }
 

@@ -6,7 +6,7 @@ bool run_grouped_conv_bwd_weight(const ExecutionConfig& config,
                                  const ck::utils::conv::ConvParam& conv_param)
 {
     // Dl ops don't support split_k > 1
-    constexpr ck::index_t split_k = -1;
+    constexpr ck::index_t split_k = 1;
 
     const auto in_g_n_c_wis_desc =
         ck::utils::conv::make_input_host_tensor_descriptor_g_n_c_wis_packed<
@@ -95,14 +95,6 @@ bool run_grouped_conv_bwd_weight(const ExecutionConfig& config,
                                       WeiElementOp{},
                                       OutElementOp{},
                                       split_k);
-
-    const std::size_t workspace_sz = conv.GetWorkSpaceSize(&argument);
-    DeviceMem workspace_dev(0);
-    if(workspace_sz)
-    {
-        workspace_dev.Realloc(workspace_sz);
-        conv.SetWorkSpacePointer(&argument, workspace_dev.GetDeviceBuffer());
-    }
 
     if(!conv.IsSupportedArgument(argument))
     {
@@ -213,8 +205,7 @@ bool run_grouped_conv_bwd_weight(const ExecutionConfig& config,
         return pass;
     }
 
-    float avg_time = invoker.Run(
-        argument, StreamConfig{nullptr, config.time_kernel, 0, 5, 50, config.time_kernel});
+    float avg_time = invoker.Run(argument, StreamConfig{nullptr, config.time_kernel});
 
     std::size_t flop      = conv_param.GetFlops();
     std::size_t num_btype = conv_param.GetByte<InDataType, WeiDataType, OutDataType>();
