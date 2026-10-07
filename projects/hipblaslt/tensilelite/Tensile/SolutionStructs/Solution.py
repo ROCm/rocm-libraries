@@ -1882,7 +1882,9 @@ class Solution(collections.abc.Mapping):
 
     Raises:
       RuntimeError: If a macrotile component is supplied by neither the
-        CustomKernel block nor the consuming logic file.
+        CustomKernel block nor the consuming logic file, or if the solution
+        can split K (GlobalSplitU other than 0 or 1) but its grid launches one
+        GSU slice per tile.
     """
     ck = state["CustomKernel"]
 
@@ -1909,6 +1911,24 @@ class Solution(collections.abc.Mapping):
     # ContractionSolution reads customKernel.macrotile directly for custom-kernel
     # tile and workspace sizing.
     ck["macrotile"] = macrotile
+
+    # A split-K kernel reduces into D only once every GSU slice of a tile has
+    # arrived, so a grid sized from tile counts alone would return success with D
+    # unwritten. GSU and persistent grids account for the split themselves.
+    # GlobalSplitU -1 lets the runtime pick a split above 1.
+    gsu = state.get("GlobalSplitU", 1)
+    grid = ck.get("grid", [])
+    oneSlicePerTile = all(
+      g in ("One", "TilesX", "TilesY", "Batch", "TilesXY", "TilesXYBatch") for g in grid)
+    if gsu not in (0, 1) and oneSlicePerTile:
+      raise RuntimeError(
+        f"Custom kernel '{ck.get('name', '?')}' runs with GlobalSplitU {gsu}, but its "
+        f"CustomKernel grid {grid} launches one GSU slice per tile; use TilesYGSU "
+        f"or TilesXYBatchGSU.")
+    # The same grid cannot honor a runtime GSU override either; clearing the flag
+    # rejects one during solution selection instead of failing at launch.
+    if oneSlicePerTile:
+      state.setdefault("InternalSupportParams", {})["SupportUserGSU"] = False
 
     # Derive _GlobalAccumulation from GlobalSplitUAlgorithm so the C++
     # runtime sees a non-zero sizeMapping.globalAccumulation for GSU>1
@@ -6752,6 +6772,21 @@ class Solution(collections.abc.Mapping):
       epilogueSize += int(state["NumThreads"] * state["ProblemType"]["ComputeDataType"].numBytes() * vecDT.scaleAlpha(0).turn)
     if state["ProblemType"]["UseScaleAB"] == "Vector":
       epilogueSize += int(state["NumThreads"] * state["ProblemType"]["ComputeDataType"].numBytes() * (vecDT.scaleA.turn + vecDT.scaleB.turn))
+    # Classic persistent TDM epilogues reuse LDS for vectors. Without PAP,
+    # a tile-end rendezvous lets compute reuse that storage. With PAP, the
+    # successor's compute data is already live during the epilogue, so the
+    # vectors need storage outside every compute bank.
+    state["_PersistentVectorEpilogueLds"] = bool(
+      epilogueSize and isPersistent(state) and state["enableTDMA"] and state["enableTDMB"]
+      and not state["UseSubtileImpl"] and not state["StoreRemapVectorWidth"]
+      and not state["ProblemType"]["Gradient"])
+    state["_SeparateEpilogueLds"] = bool(
+      state["_PersistentVectorEpilogueLds"] and state["PrefetchAcrossPersistent"])
+    if state["_SeparateEpilogueLds"]:
+      epilogueOffset = int(math.ceil(ldsNumBytes / 16) * 16)
+      state["LdsOffsetBias"] = epilogueOffset
+      state["LdsOffsetBiasNonGSU"] = epilogueOffset
+      state["LdsOffsetBiasGSU"] = epilogueOffset
     ldsNumBytes = max(ldsNumBytes, state["LdsOffsetBias"] + epilogueSize)
 
     state["LdsBytesNoAmax"] = ldsNumBytes
@@ -6901,8 +6936,10 @@ class Solution(collections.abc.Mapping):
       if isPersistent(state) and not hasStaticAssignment(state):
         reject(state, printRejectionReason, "PrefetchGL2 with persistent execution requires WorkAssignment=StaticGrid")
         return
+      # General batch is supported on StridedBatched SupportUserArgs kernels,
+      # where ArgType == 3 selects it at runtime. StridedBatched=False is not.
       if state["ProblemType"]["Batched"] and not state["ProblemType"]["StridedBatched"]:
-        reject(state, printRejectionReason, "PrefetchGL2 does not support general batch")
+        reject(state, printRejectionReason, "PrefetchGL2 does not support StridedBatched=False")
         return
       if state["ProblemType"]["Sparse"]:
         if state["DirectToVgprSparseMetadata"]:

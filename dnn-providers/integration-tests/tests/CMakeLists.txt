@@ -58,6 +58,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuBatchnormFwdInfVariancePlan.cpp
     TestReferenceGraphExecutorFactory.cpp
     TestBundleDiscovery.cpp
+    TestGTestFilter.cpp
     TestVerificationPaths.cpp
     TestBundleVerificationHarness.cpp
     TestInputFillRecipes.cpp
@@ -99,6 +100,7 @@ target_link_libraries(hipdnn_integration_tests_unit_tests
         GTest::gmock
         GTest::gtest
         Threads::Threads
+        $<$<BOOL:${USE_ROCRAND}>:roc::rocrand>
         $<$<PLATFORM_ID:Windows>:shlwapi>
 )
 
@@ -106,6 +108,14 @@ target_compile_options(hipdnn_integration_tests_unit_tests
     PRIVATE ${INTEGRATION_TESTS_WARNING_COMPILE_OPTIONS})
 
 clang_tidy_check(hipdnn_integration_tests_unit_tests)
+
+# FillInputs.cpp generates large inputs with rocRAND (DeviceInputFiller). Only that
+# file is built with USE_ROCRAND: rocrand.h declares a global `half`, which is
+# ambiguous in any file that also pulls in hipdnn_data_sdk::types::half unqualified.
+if(USE_ROCRAND)
+    set_source_files_properties(../src/harness/input-init/FillInputs.cpp
+        PROPERTIES COMPILE_DEFINITIONS USE_ROCRAND)
+endif()
 
 add_unit_test_target(hipdnn_integration_tests_unit_tests ${CMAKE_CURRENT_BINARY_DIR})
 

@@ -422,5 +422,57 @@ class TestGroupedSpecKernelNameDistinguishesBody(unittest.TestCase):
         )
 
 
+class TestLaunchContractMatchesKernel(unittest.TestCase):
+    """The dispatcher's signature and launch values must describe the kernel
+    ``to_wgrad_spec`` builds and the grid ``_wgrad_grid`` launches.
+
+    Both go through the split-K resolver, so the raw ``spec.split_k`` (-1 on
+    the auto path) and the spec's (absent) two-stage flag must not leak into
+    the kernargs: kernargs pack positionally, and a mismatch launches.
+    """
+
+    def _check(self, req):
+        from dispatch.grouped_convolution import launch_values_for
+        from kernels.common.conv_args import ConvArgs
+
+        r = dispatch_conv_grouped(req)
+        p = _problem(r.request)
+        ws = r.spec.to_wgrad_spec(p)
+        abi = ConvArgs.from_problem(
+            p,
+            direction="wgrad",
+            tile_m=ws.tile_m,
+            tile_n=ws.tile_n,
+            tile_k=ws.tile_k,
+        ).arg_names(two_stage=ws.two_stage)
+        self.assertEqual([a["name"] for a in r.signature], [n for n, _ in abi])
+
+        ws_kw = dict(ws_ptr=0x9000, ws_bytes=64) if ws.two_stage else {}
+        values = launch_values_for(
+            r.request,
+            r.spec,
+            A_ptr=0x1000,
+            B_ptr=0x2000,
+            D_ptr=0x3000,
+            A_bytes=1,
+            B_bytes=1,
+            D_bytes=1,
+            **ws_kw,
+        )
+        self.assertEqual(values["ks_count"], ws.split_k)
+        self.assertEqual(r.grid[2], p.groups * ws.split_k)
+        return ws
+
+    def test_auto_split_k(self):
+        self._check(_wgrad("gfx942", G=4))
+
+    def test_odd_wg_N_two_stage(self):
+        # Odd wg_N with a 16-bit dW cannot use the packed atomic, so split-K
+        # resolves to the two-stage path and its scratch pair joins the ABI.
+        ws = self._check(_wgrad("gfx950", C=3, K=24, Y=3, X=3, dtype="bf16"))
+        if ws.split_k > 1:
+            self.assertTrue(ws.two_stage)
+
+
 if __name__ == "__main__":
     unittest.main()
