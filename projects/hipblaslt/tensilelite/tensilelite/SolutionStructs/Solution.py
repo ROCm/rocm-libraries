@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from ..ExecutionPolicy import isPersistent, isStreamK, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment, requiresPartialReduction, normalize_execution_policy
+from ..ExecutionPolicy import isPersistent, isStreamK, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment, requiresPartialReduction, normalize_execution_policy, usesStreamKArrivalFixup
 
 import collections
 import copy
@@ -287,6 +287,19 @@ def _supportStreamKPerTileExtraIters(state):
   key from defaultSolution; indexing it here KeyErrors on ordinary GFA states.
   """
   return isStreamK(state) and not hasDynamicAssignment(state) and not isCustomKernelConfig(state)
+
+
+def _supportStreamKArrivalFixup(state, hasSAtomic):
+  """Whether this solution's asm fixes split dynamic tiles up by last arrival.
+
+  Only generated StreamK Hybrid kernels whose dynamic sub-mode uses the arrival
+  counter (scalar atomics, DebugStreamK 0, no PrefetchAcrossPersistent) claim
+  it; the host splits dynamic tiles only for these.
+  """
+  return bool(isStreamK(state) and hasHybridAssignment(state)
+              and not isCustomKernelConfig(state)
+              and usesStreamKArrivalFixup(state.get("DebugStreamK", 0), hasSAtomic,
+                                          bool(state.get("PrefetchAcrossPersistent", 0))))
 
 
 def _validateStreamKForceDPOnly(state, printRejectionReason):
@@ -7223,6 +7236,10 @@ class Solution(collections.abc.Mapping):
               reject(state, printRejectionReason, "packedC0 Assembly requires AF0EM>=VectorWidth or not VectorStore (for stores)")
 
     state["_PrefetchAcrossPersistentEnabled"] = bool(state["PrefetchAcrossPersistent"])
+    # Capability, fully derived like SupportStreamKPerTileExtraIters: only the
+    # generator knows which fixup protocol it emits (StreamKHybrid.usesArrivalFixup).
+    state["InternalSupportParams"]["SupportStreamKArrivalFixup"] = \
+        _supportStreamKArrivalFixup(state, isaInfoMap[isa].asmCaps["HasSAtomic"])
     state["AssignedDerivedParameters"] = True
 
     # Set E

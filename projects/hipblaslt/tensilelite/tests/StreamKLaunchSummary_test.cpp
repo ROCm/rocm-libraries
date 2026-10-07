@@ -2273,6 +2273,7 @@ namespace
         in.tiles            = tiles;
         in.itersPerTile     = itersPerTile;
         in.maxGrid          = 256;
+        in.splitCUs         = 256;
         in.flagSlots        = 1792;
         in.workspaceBytes   = size_t{1} << 30;
         in.partialTileBytes = 192 * 224 * 4;
@@ -2280,7 +2281,7 @@ namespace
     }
 } // namespace
 
-TEST(StreamKDynamicSplitTest, TilesStayWholeByDefault)
+TEST(StreamKDynamicSplitTest, ManyTilesStayWhole)
 {
     const auto d = streamKDynamicSplit(dynamicSplitInputs(300, 128));
     EXPECT_EQ(d.skTiles, 0u);
@@ -2291,10 +2292,97 @@ TEST(StreamKDynamicSplitTest, TilesStayWholeByDefault)
     EXPECT_EQ(d.grid, 256u);
     EXPECT_EQ(d.partialSlots(), 0u);
 
-    const auto e = streamKDynamicSplit(dynamicSplitInputs(1, 262144));
+    const auto e = streamKDynamicSplit(dynamicSplitInputs(256, 128));
+    EXPECT_EQ(e.skTiles, 0u) << "tiles == CUs already fills the grid";
+    EXPECT_EQ(e.grid, 256u);
+}
+
+// The static grid's split for fewer tiles than CUs (origami
+// grid_k_split_aware, tree reduction): the largest of 16, 12, 8, 6, 4, 3,
+// 2 parts with one part per CU and at least 8 iterations per part.
+TEST(StreamKDynamicSplitTest, SplitFollowsTheStaticFactors)
+{
+    const auto d = streamKDynamicSplit(dynamicSplitInputs(1, 20480));
+    EXPECT_EQ(d.skTiles, 1u);
+    EXPECT_EQ(d.skSplit, 16u) << "at most 16 parts, however long K is";
+    EXPECT_EQ(d.skItersPerWI, 1280u);
+    EXPECT_EQ(d.totalItems, 16u);
+    EXPECT_EQ(d.grid, 16u);
+
+    // 20 tiles: 16 parts would need 320 CUs, 12 fit in 240.
+    const auto e = streamKDynamicSplit(dynamicSplitInputs(20, 128));
+    EXPECT_EQ(e.skTiles, 20u);
+    EXPECT_EQ(e.skSplit, 12u);
+    EXPECT_EQ(e.skItersPerWI, 11u);
+    EXPECT_EQ(e.totalItems, 240u);
+    EXPECT_EQ(e.grid, 240u);
+    EXPECT_GE(size_t{e.skItersPerWI} * e.skSplit, 128u) << "parts cover the tile";
+    EXPECT_LT(size_t{e.skItersPerWI} * (e.skSplit - 1), 128u) << "no empty part";
+
+    // The split is sized for the CUs, not for the grid.
+    auto in      = dynamicSplitInputs(50, 128);
+    in.maxGrid   = 768;
+    const auto f = streamKDynamicSplit(in);
+    EXPECT_EQ(f.skSplit, 4u) << "50 x 4 <= 256 CUs, 50 x 6 is not";
+    EXPECT_EQ(f.grid, 200u);
+}
+
+TEST(StreamKDynamicSplitTest, FewTilesSplitWithinOneWave)
+{
+    // 100 tiles: two parts each still fit one wave of 256 workgroups.
+    const auto d = streamKDynamicSplit(dynamicSplitInputs(100, 128));
+    EXPECT_EQ(d.skTiles, 100u);
+    EXPECT_EQ(d.skSplit, 2u);
+    EXPECT_EQ(d.skItersPerWI, 64u);
+    EXPECT_EQ(d.totalItems, 200u);
+    EXPECT_EQ(d.grid, 200u);
+
+    // 200 tiles: a second part would not fit, so they stay whole.
+    const auto e = streamKDynamicSplit(dynamicSplitInputs(200, 128));
     EXPECT_EQ(e.skTiles, 0u);
-    EXPECT_EQ(e.totalItems, 1u);
-    EXPECT_EQ(e.grid, 1u);
+    EXPECT_EQ(e.totalItems, 200u);
+    EXPECT_EQ(e.grid, 200u);
+}
+
+TEST(StreamKDynamicSplitTest, MinimumItersPerPart)
+{
+    // I = 40: at most 5 parts of 8 iterations, so the largest allowed factor is 4.
+    const auto d = streamKDynamicSplit(dynamicSplitInputs(1, 40));
+    EXPECT_EQ(d.skSplit, 4u);
+    EXPECT_EQ(d.skItersPerWI, 10u);
+    EXPECT_GE(d.skItersPerWI, StreamKDynamicMinItersPerWI);
+
+    const auto e = streamKDynamicSplit(dynamicSplitInputs(1, 15));
+    EXPECT_EQ(e.skTiles, 0u) << "too short to split";
+}
+
+TEST(StreamKDynamicSplitTest, ShrinksToFitWorkspaceAndFlags)
+{
+    auto in           = dynamicSplitInputs(1, 262144);
+    in.workspaceBytes = 10 * in.partialTileBytes + 7;
+    const auto d      = streamKDynamicSplit(in);
+    EXPECT_EQ(d.skSplit, 8u) << "the largest factor whose partials fit";
+    EXPECT_LE(d.partialSlots() * in.partialTileBytes, in.workspaceBytes);
+
+    in.workspaceBytes = in.partialTileBytes;
+    EXPECT_EQ(streamKDynamicSplit(in).skTiles, 0u) << "room for one partial is no split at all";
+
+    auto fl      = dynamicSplitInputs(7, 262144);
+    fl.flagSlots = 20;
+    const auto f = streamKDynamicSplit(fl);
+    EXPECT_EQ(f.skSplit, 2u);
+    EXPECT_LE(f.partialSlots(), fl.flagSlots);
+}
+
+TEST(StreamKDynamicSplitTest, SplitNotAllowedKeepsTilesWhole)
+{
+    auto in       = dynamicSplitInputs(1, 262144);
+    in.allowSplit = false;
+    const auto d  = streamKDynamicSplit(in);
+    EXPECT_EQ(d.skTiles, 0u);
+    EXPECT_EQ(d.skSplit, 2u);
+    EXPECT_EQ(d.totalItems, 1u);
+    EXPECT_EQ(d.grid, 1u);
 }
 
 TEST(StreamKDynamicSplitTest, DebugOverridesReplaceThePolicy)
@@ -2307,6 +2395,10 @@ TEST(StreamKDynamicSplitTest, DebugOverridesReplaceThePolicy)
     EXPECT_EQ(d.skSplit, 64u);
     EXPECT_EQ(d.totalItems, 64u);
     EXPECT_EQ(d.grid, 64u);
+
+    // Even when the split is not allowed by default.
+    in.allowSplit = false;
+    EXPECT_EQ(streamKDynamicSplit(in).skSplit, 64u);
 
     // Split alone keeps the default of no stream-k tiles.
     auto s          = dynamicSplitInputs(1, 262144);
@@ -2321,4 +2413,126 @@ TEST(StreamKDynamicSplitTest, DebugOverridesReplaceThePolicy)
     d                 = streamKDynamicSplit(in);
     EXPECT_EQ(d.skTiles, 0u);
     EXPECT_EQ(d.partialSlots(), 0u);
+}
+
+// The same decomposition seen through a synthesised StreamK Hybrid solution in
+// its dynamic sub-mode (tile scheduling ON), so the workspace query, the launch
+// settings, the launch-summary snapshot and the packed launch are all compared
+// with each other rather than with the pure helper alone.
+namespace
+{
+    std::shared_ptr<ContractionSolution> dynamicSplitSolution()
+    {
+        auto solution = std::make_shared<ContractionSolution>();
+        initStreamKSolution(*solution, 5);
+        solution->kernelName                            = "streamk_dynamic_split_probe";
+        solution->sizeMapping.LocalSplitU               = 1;
+        solution->sizeMapping.packBatchDims             = 0;
+        solution->sizeMapping.workGroupMapping          = 1;
+        solution->sizeMapping.workGroupMappingXCC       = 0;
+        solution->sizeMapping.staggerU                  = 0;
+        solution->sizeMapping.globalSplitU              = 1;
+        solution->sizeMapping.globalAccumulation        = 4;
+        solution->internalArgsSupport.staggerU          = true;
+        solution->internalArgsSupport.perTileExtraIters = false;
+        solution->internalArgsSupport.arrivalFixup      = true;
+        solution->problemType.mxScaleFormat             = 1;
+        return solution;
+    }
+
+    hip::HipAMDGPU dynamicSplitDevice()
+    {
+        auto device = makeHipDeviceWithAnalytical(makeGfx950AnalyticalHardware());
+        device.persistentDynamicGrid
+            = static_cast<int>(origami::grid_selection_t::k_split_aware);
+        return device;
+    }
+
+    ContractionProblemGemm dynamicSplitGemm(size_t m, size_t n, size_t k, size_t batch)
+    {
+        auto problem = makeBatchedGemmProblem(m, n, k, batch);
+        problem.setWorkspaceSize(size_t{1} << 30);
+        problem.setParams().setStreamKTileSchedulingMode(1);
+        return problem;
+    }
+
+    void expectSameSplit(StreamKDynamicSplit const& a, StreamKDynamicSplit const& b)
+    {
+        EXPECT_EQ(a.skTiles, b.skTiles);
+        EXPECT_EQ(a.skSplit, b.skSplit);
+        EXPECT_EQ(a.skItersPerWI, b.skItersPerWI);
+        EXPECT_EQ(a.totalItems, b.totalItems);
+        EXPECT_EQ(a.grid, b.grid);
+    }
+} // namespace
+
+// Only kernels that advertise the arrival fixup are split: the spin-flag
+// kernels (no scalar atomics, DebugStreamK, PAP, DynamicWorkQueue) keep tiles
+// whole.
+TEST(StreamKDynamicSplitTest, SplitNeedsTheArrivalFixup)
+{
+    auto         device  = dynamicSplitDevice();
+    auto         problem = dynamicSplitGemm(128, 128, 262144, 1);
+    auto         capable = dynamicSplitSolution();
+    const size_t tiles   = problem.getNumTiles(capable->sizeMapping, 1);
+    ASSERT_GT(capable->streamKDynamicDecomposition(problem, device, tiles).skTiles, 0u);
+
+    auto spinFlag                              = dynamicSplitSolution();
+    spinFlag->internalArgsSupport.arrivalFixup = false;
+    EXPECT_EQ(spinFlag->streamKDynamicDecomposition(problem, device, tiles).skTiles, 0u);
+}
+
+// With the dynamic grid policy off and no fixed grid the launch falls back
+// to one workgroup per CU (or TENSILE_STREAMK_MAX_CUS), which the split is
+// already sized within: the same split, and every part has a workgroup.
+TEST(StreamKDynamicSplitTest, NoDynamicGridKeepsTheSplitWithinTheGrid)
+{
+    auto         solution = dynamicSplitSolution();
+    auto         device   = dynamicSplitDevice();
+    auto         problem  = dynamicSplitGemm(128, 128, 262144, 1);
+    const size_t tiles    = problem.getNumTiles(solution->sizeMapping, 1);
+    const auto   policy   = solution->streamKDynamicDecomposition(problem, device, tiles);
+    ASSERT_GT(policy.skTiles, 0u);
+
+    device.persistentDynamicGrid = 0;
+    ASSERT_TRUE(solution->streamK5EffectiveDynamic(problem, device));
+    for(int maxCUs : {0, 8})
+    {
+        SCOPED_TRACE("max CUs " + std::to_string(maxCUs));
+        device.persistentMaxCUs = maxCUs;
+        const auto d = solution->streamKDynamicDecomposition(problem, device, tiles);
+        if(maxCUs == 0)
+            expectSameSplit(d, policy);
+        EXPECT_GT(d.skTiles, 0u);
+        EXPECT_GE(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree),
+                  size_t{d.totalItems});
+    }
+}
+
+// A fixed grid is what launches, so the split is sized for it: every part
+// keeps a workgroup of its own and the grid is not raised for the queues.
+TEST(StreamKDynamicSplitTest, FixedGridBoundsTheSplit)
+{
+    auto         solution  = dynamicSplitSolution();
+    auto         device    = dynamicSplitDevice();
+    auto         problem   = dynamicSplitGemm(128, 128, 262144, 1);
+    const size_t tiles     = problem.getNumTiles(solution->sizeMapping, 1);
+    const auto   unbounded = solution->streamKDynamicDecomposition(problem, device, tiles);
+    ASSERT_GT(unbounded.totalItems, 8u);
+    for(int fixed : {4, 8})
+    {
+        SCOPED_TRACE("fixed grid " + std::to_string(fixed));
+        device.persistentFixedGrid = fixed;
+        const auto d = solution->streamKDynamicDecomposition(problem, device, tiles);
+        EXPECT_EQ(d.skTiles, tiles);
+        EXPECT_EQ(d.totalItems, size_t(fixed));
+        // 4 is below the 8 per-XCD queues: the items stay within the fixed
+        // grid, so the queues do not raise it.
+        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree),
+                  size_t(fixed))
+            << "no raise: the items fit the fixed grid";
+    }
+    // Only an upper bound: a larger fixed grid does not split further.
+    device.persistentFixedGrid = 100000;
+    expectSameSplit(solution->streamKDynamicDecomposition(problem, device, tiles), unbounded);
 }

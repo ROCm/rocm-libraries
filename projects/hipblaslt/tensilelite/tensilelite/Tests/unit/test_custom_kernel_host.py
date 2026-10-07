@@ -15,7 +15,11 @@ from tensilelite.BenchmarkProblems import _hashableProblemTypeKV
 from tensilelite.Common.DataType import DataType
 from tensilelite.Common.Utilities import deriveWaveParams
 from tensilelite.SolutionStructs.Naming import _getName, getKernelFileBase
-from tensilelite.SolutionStructs.Solution import Solution, _supportStreamKPerTileExtraIters
+from tensilelite.SolutionStructs.Solution import (
+    Solution,
+    _supportStreamKArrivalFixup,
+    _supportStreamKPerTileExtraIters,
+)
 from tensilelite.Toolchain.Component import Assembler
 
 pytestmark = pytest.mark.unit
@@ -318,6 +322,24 @@ def test_uso_capability_assignment_survives_missing_custom_kernel_name():
         _supportStreamKPerTileExtraIters(state)
     )
     assert state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] is True
+
+
+@pytest.mark.parametrize(
+    "state, hasSAtomic, expected",
+    [
+        ({"StreamK": 5}, True, True),
+        ({"StreamK": 5}, False, False),
+        ({"StreamK": 5, "DebugStreamK": 1}, True, False),
+        ({"StreamK": 5, "PrefetchAcrossPersistent": 1}, True, False),
+        ({"StreamK": 5, "CustomKernel": {"name": "handwritten"}}, True, False),
+        ({"StreamK": 5, "CustomKernel": {"name": "gen", "generated": True}}, True, True),
+        ({"StreamK": 4}, True, False),
+        ({"StreamK": 3}, True, False),
+        ({"StreamK": 0}, True, False),
+    ],
+)
+def test_arrival_fixup_capability(state, hasSAtomic, expected):
+    assert _supportStreamKArrivalFixup(state, hasSAtomic) is expected
 
 
 # --------------------------------------------------------------------------- #
