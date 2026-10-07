@@ -46,11 +46,15 @@ def _mailboxLds0Token(writer):
 
 
 def _emitMailboxAddressAndWave0Skip(writer, module, vLocalAddress, skipLabel,
-                                    preventOverflow=True):
+                                    preventOverflow=True, scratchSgprs=None):
     # Per-wave mailbox slot in LDS[0..124]: (Serial<<2) - (tid0<<2).
     # tid0 is firstlane(Serial). Serial is written at kernel start.
-    sTid0 = writer.sgprPool.checkOut(1, "MailboxFirstTid", preventOverflow=preventOverflow)
-    sBase = writer.sgprPool.checkOut(1, "MailboxWaveBase", preventOverflow=preventOverflow)
+    # scratchSgprs: optional two dead sgprs to use instead of checking out.
+    if scratchSgprs is None:
+        sTid0 = writer.sgprPool.checkOut(1, "MailboxFirstTid", preventOverflow=preventOverflow)
+        sBase = writer.sgprPool.checkOut(1, "MailboxWaveBase", preventOverflow=preventOverflow)
+    else:
+        sTid0, sBase = scratchSgprs
     module.add(VReadfirstlaneB32(dst=sgpr(sTid0), src=vgpr("Serial"),
                                  comment="wave first thread id from Serial"))
     module.add(VLShiftLeftB32(dst=vgpr(vLocalAddress), src=vgpr("Serial"), shiftHex=log2(4),
@@ -61,9 +65,11 @@ def _emitMailboxAddressAndWave0Skip(writer, module, vLocalAddress, skipLabel,
     module.add(SLShiftLeftB32(dst=sgpr(sBase), src=sgpr(sTid0), shiftHex=log2(4),
                               comment="wave base in bytes"))
     module.add(VSubU32(dst=vgpr(vLocalAddress), src0=vgpr(vLocalAddress), src1=sgpr(sBase)))
-    writer.sgprPool.checkIn(sBase)
+    if scratchSgprs is None:
+        writer.sgprPool.checkIn(sBase)
     module.add(SCmpEQU32(src0=sgpr(sTid0), src1=0, comment="Check for wave 0"))
-    writer.sgprPool.checkIn(sTid0)
+    if scratchSgprs is None:
+        writer.sgprPool.checkIn(sTid0)
     module.add(SCBranchSCC0(labelName=skipLabel.getLabelName(), comment="Skip work item"))
 
 
