@@ -266,6 +266,11 @@ TEST_F(TestVerificationModePathsFixture, AutoNoGoldenBothRefsMissFails)
     useMatchingEngine();
     useCapabilityMissReference();
 
+    std::vector<std::string> refErrors;
+    testing_support::captureReferenceErrors(_mocks.reporter, refErrors);
+    std::vector<std::string> unverifiable;
+    testing_support::captureUnverifiable(_mocks.reporter, unverifiable);
+
     ::testing::TestPartResultArray results;
     runCapturing(loadBundle("auto_both_miss", /*includeGoldenOutput=*/false),
                  VerificationMode::AUTO,
@@ -273,6 +278,12 @@ TEST_F(TestVerificationModePathsFixture, AutoNoGoldenBothRefsMissFails)
 
     EXPECT_TRUE(testing_support::anyFailed(results));
     EXPECT_FALSE(testing_support::anySkipped(results));
+    const std::string messages = testing_support::allMessages(results);
+    EXPECT_THAT(messages, ::testing::HasSubstr("Unverifiable: no oracle can verify"));
+    EXPECT_THAT(messages, ::testing::HasSubstr("GPU reference (cannot run this op"));
+    EXPECT_THAT(messages, ::testing::HasSubstr("CPU reference (cannot run this op"));
+    EXPECT_TRUE(refErrors.empty());
+    EXPECT_EQ(unverifiable.size(), 1U);
     // Nothing was compared, so no oracle may be credited with the verdict.
     EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::NONE));
 }
@@ -469,12 +480,23 @@ TEST_F(TestVerificationModePathsFixture, DeviceModeCapabilityMissFails)
     useMatchingEngine();
     useCapabilityMissReference();
 
+    std::vector<std::string> refErrors;
+    testing_support::captureReferenceErrors(_mocks.reporter, refErrors);
+    std::vector<std::string> unverifiable;
+    testing_support::captureUnverifiable(_mocks.reporter, unverifiable);
+
     ::testing::TestPartResultArray results;
     runCapturing(
         loadBundle("gpu_miss", /*includeGoldenOutput=*/true), VerificationMode::GPU, &results);
 
     EXPECT_TRUE(testing_support::anyFailed(results));
     EXPECT_FALSE(testing_support::anySkipped(results));
+    // An unverifiable bundle, not a broken oracle: a miss is not a reference error.
+    const std::string messages = testing_support::allMessages(results);
+    EXPECT_THAT(messages, ::testing::HasSubstr("Unverifiable: the requested oracle"));
+    EXPECT_THAT(messages, ::testing::HasSubstr("GPU reference (cannot run this op"));
+    EXPECT_TRUE(refErrors.empty());
+    EXPECT_EQ(unverifiable.size(), 1U);
 }
 
 // The one oracle an explicit mode allows broke. That is a bug in the oracle, not a
@@ -542,12 +564,22 @@ TEST_F(TestVerificationModePathsFixture, CpuModeCapabilityMissFails)
     useMatchingEngine();
     useCapabilityMissReference();
 
+    std::vector<std::string> refErrors;
+    testing_support::captureReferenceErrors(_mocks.reporter, refErrors);
+    std::vector<std::string> unverifiable;
+    testing_support::captureUnverifiable(_mocks.reporter, unverifiable);
+
     ::testing::TestPartResultArray results;
     runCapturing(
         loadBundle("cpu_miss", /*includeGoldenOutput=*/true), VerificationMode::CPU, &results);
 
     EXPECT_TRUE(testing_support::anyFailed(results));
     EXPECT_FALSE(testing_support::anySkipped(results));
+    const std::string messages = testing_support::allMessages(results);
+    EXPECT_THAT(messages, ::testing::HasSubstr("Unverifiable: the requested oracle"));
+    EXPECT_THAT(messages, ::testing::HasSubstr("CPU reference (cannot run this op"));
+    EXPECT_TRUE(refErrors.empty());
+    EXPECT_EQ(unverifiable.size(), 1U);
 }
 
 // ── No oracle ────────────────────────────────────────────────────────────────
@@ -653,6 +685,11 @@ TEST_F(TestVerificationModePathsFixture, AutoLateCapabilityMissFails)
     useCapabilityMissReference();
     EXPECT_CALL(_mocks.engineRunner, execute(_, _, _)).Times(1);
 
+    std::vector<std::string> refErrors;
+    testing_support::captureReferenceErrors(_mocks.reporter, refErrors);
+    std::vector<std::string> unverifiable;
+    testing_support::captureUnverifiable(_mocks.reporter, unverifiable);
+
     ::testing::TestPartResultArray results;
     runCapturing(loadBundle("auto_late_miss", /*includeGoldenOutput=*/false),
                  VerificationMode::AUTO,
@@ -661,8 +698,11 @@ TEST_F(TestVerificationModePathsFixture, AutoLateCapabilityMissFails)
     EXPECT_TRUE(testing_support::anyFailed(results));
     EXPECT_FALSE(testing_support::anySkipped(results));
     const std::string messages = testing_support::allMessages(results);
+    EXPECT_THAT(messages, ::testing::HasSubstr("Unverifiable: no oracle can verify"));
     EXPECT_THAT(messages, ::testing::HasSubstr("GPU reference (cannot run this op"));
     EXPECT_THAT(messages, ::testing::HasSubstr("CPU reference (cannot run this op"));
+    EXPECT_TRUE(refErrors.empty());
+    EXPECT_EQ(unverifiable.size(), 1U);
 }
 
 // An applicability check that throws is a broken reference, not a decline, and is

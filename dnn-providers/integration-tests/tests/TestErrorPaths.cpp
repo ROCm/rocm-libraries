@@ -148,6 +148,11 @@ TEST_F(TestErrorPaths, RefCapabilityMissFails)
             throw ReferenceCapabilityError("stub: no plan for this op");
         });
 
+    std::vector<std::string> refErrors;
+    testing_support::captureReferenceErrors(mocks.reporter, refErrors);
+    std::vector<std::string> unverifiable;
+    testing_support::captureUnverifiable(mocks.reporter, unverifiable);
+
     ::testing::TestPartResultArray results;
     runCapturing(mocks,
                  loadBundle("ref_cap_miss", /*includeGoldenOutput=*/false),
@@ -157,6 +162,11 @@ TEST_F(TestErrorPaths, RefCapabilityMissFails)
     EXPECT_TRUE(testing_support::anyFailed(results))
         << "ReferenceCapabilityError leaves no oracle, which should FAIL";
     EXPECT_FALSE(testing_support::anySkipped(results));
+    const std::string messages = testing_support::allMessages(results);
+    EXPECT_THAT(messages, ::testing::HasSubstr("Unverifiable: the requested oracle"));
+    EXPECT_THAT(messages, ::testing::HasSubstr("CPU reference (cannot run this op"));
+    EXPECT_TRUE(refErrors.empty());
+    EXPECT_EQ(unverifiable.size(), 1U);
 }
 
 // The other capability-miss form: the reference says up front, via isApplicable(),
@@ -170,6 +180,11 @@ TEST_F(TestErrorPaths, RefNotApplicableFails)
         .WillByDefault(::testing::Return(false));
     EXPECT_CALL(mocks.cpuReference, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
 
+    std::vector<std::string> refErrors;
+    testing_support::captureReferenceErrors(mocks.reporter, refErrors);
+    std::vector<std::string> unverifiable;
+    testing_support::captureUnverifiable(mocks.reporter, unverifiable);
+
     ::testing::TestPartResultArray results;
     runCapturing(mocks,
                  loadBundle("ref_not_applicable", /*includeGoldenOutput=*/false),
@@ -179,6 +194,11 @@ TEST_F(TestErrorPaths, RefNotApplicableFails)
     EXPECT_TRUE(testing_support::anyFailed(results))
         << "isApplicable()==false leaves no oracle, which should FAIL";
     EXPECT_FALSE(testing_support::anySkipped(results));
+    const std::string messages = testing_support::allMessages(results);
+    EXPECT_THAT(messages, ::testing::HasSubstr("Unverifiable: the requested oracle"));
+    EXPECT_THAT(messages, ::testing::HasSubstr("CPU reference (not applicable)"));
+    EXPECT_TRUE(refErrors.empty());
+    EXPECT_EQ(unverifiable.size(), 1U);
 }
 
 // A reference that breaks on an op it accepted is a real defect in the reference,
