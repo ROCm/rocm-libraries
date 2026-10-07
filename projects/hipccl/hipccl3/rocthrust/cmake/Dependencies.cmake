@@ -51,7 +51,7 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
 
   # SQlite (for run-to-run bitwise-reproducibility tests)
   # Note: SQLite 3.51.3 to address CVE https://github.com/advisories/GHSA-p36r-6g67-869c
-  set(SQLITE_MIN_VERSION "3.51.3")
+  set(SQLITE_MIN_VERSION "3.45.1")
   string(REPLACE "." "_" SQLITE_VER_UNDERSCORE ${SQLITE_MIN_VERSION})
 
   if(SQLITE_USE_SYSTEM_PACKAGE)
