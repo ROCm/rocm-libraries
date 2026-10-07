@@ -997,7 +997,7 @@ TEST(TestFillInputs, BlockScaleDequantizeScaleNormalized)
 }
 
 // A test override of the operand range renormalizes the scale default.
-TEST(TestFillInputs, TestOverrideOfOperandRenormalizesScale)
+TEST(TestFillInputs, OverrideOfOperandRenormalizesScale)
 {
     InputFillRecipes overrides;
     overrides.set(1, FillRecipe::free(-2.0f, 2.0f));
