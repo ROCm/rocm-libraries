@@ -2406,13 +2406,14 @@ TEST(StreamKDynamicSplitTest, DebugOverridesReplaceThePolicy)
 }
 
 // The same decomposition through a StreamK Hybrid solution in its dynamic
-// sub-mode, comparing the workspace query, launch settings, summary and launch.
+// sub-mode (or a DynamicWorkQueue one), comparing the workspace query, launch
+// settings, summary and launch.
 namespace
 {
-    std::shared_ptr<ContractionSolution> dynamicSplitSolution()
+    std::shared_ptr<ContractionSolution> dynamicSplitSolution(int streamK = 5)
     {
         auto solution = std::make_shared<ContractionSolution>();
-        initStreamKSolution(*solution, 5);
+        initStreamKSolution(*solution, streamK);
         solution->kernelName                            = "streamk_dynamic_split_probe";
         solution->sizeMapping.LocalSplitU               = 1;
         solution->sizeMapping.packBatchDims             = 0;
@@ -2453,6 +2454,26 @@ namespace
         EXPECT_EQ(a.skItersPerWI, b.skItersPerWI);
         EXPECT_EQ(a.totalItems, b.totalItems);
         EXPECT_EQ(a.grid, b.grid);
+    }
+
+    std::vector<KernelInvocation> solveWithWorkspace(ContractionSolution const&    solution,
+                                                     ContractionProblemGemm const& problem,
+                                                     Hardware const&               device)
+    {
+        // Dummy addresses: solve() only stores pointers into the kernel
+        // argument block, it never dereferences them.
+        void* const       fake = reinterpret_cast<void*>(0x1000);
+        ContractionInputs inputs;
+        inputs.a             = fake;
+        inputs.b             = fake;
+        inputs.c             = fake;
+        inputs.d             = fake;
+        inputs.ws            = fake;
+        inputs.Synchronizer  = fake;
+        inputs.alpha         = static_cast<float>(1);
+        inputs.beta          = static_cast<float>(1);
+        inputs.workspaceSize = problem.workspaceSize();
+        return solution.solve(problem, inputs, device);
     }
 } // namespace
 
@@ -2522,6 +2543,180 @@ TEST(StreamKDynamicSplitTest, FixedGridBoundsTheSplit)
     // Only an upper bound: a larger fixed grid does not split further.
     device.persistentFixedGrid = 100000;
     expectSameSplit(solution->streamKDynamicDecomposition(problem, device, tiles), unbounded);
+}
+
+// A caller that allocates exactly the reported workspace gets the split the
+// report was sized for, and the launch carries that same split.
+TEST(StreamKDynamicSplitTest, QueriedWorkspaceReproducesTheSplit)
+{
+    auto solution = dynamicSplitSolution();
+    auto device   = dynamicSplitDevice();
+    for(size_t batch : {size_t{1}, size_t{4}})
+    {
+        SCOPED_TRACE("batch " + std::to_string(batch));
+        auto problem = dynamicSplitGemm(128, 128, 262144, batch);
+        ASSERT_TRUE(solution->streamK5EffectiveDynamic(problem, device));
+        const size_t tiles = problem.getNumTiles(solution->sizeMapping, 1);
+        ASSERT_EQ(tiles, batch);
+
+        const auto wanted = solution->streamKDynamicDecomposition(problem, device, tiles);
+        ASSERT_EQ(wanted.skTiles, tiles);
+        ASSERT_GT(wanted.skSplit, 1u);
+
+        const size_t required = solution->requiredWorkspaceSize(problem, device);
+        EXPECT_EQ(required, solution->partialTileSize(wanted.partialSlots()));
+
+        problem.setWorkspaceSize(required);
+        expectSameSplit(solution->streamKDynamicDecomposition(problem, device, tiles), wanted);
+        EXPECT_EQ(solution->requiredWorkspaceSize(problem, device), required);
+
+        const auto launch = solution->resolvePersistentSettings(problem, device);
+        EXPECT_EQ(launch.workspaceBytes, required);
+        EXPECT_EQ(launch.grid, wanted.grid);
+
+        const auto invocations = solveWithWorkspace(*solution, problem, device);
+        ASSERT_FALSE(invocations.empty());
+        EXPECT_EQ(invocations.front().numWorkGroups.x, wanted.grid);
+
+        // One byte short: the split shrinks to what fits, never past it.
+        problem.setWorkspaceSize(required - 1);
+        const auto shorter = solution->streamKDynamicDecomposition(problem, device, tiles);
+        EXPECT_LT(shorter.partialSlots(), wanted.partialSlots());
+        EXPECT_LE(solution->partialTileSize(shorter.partialSlots()), required - 1);
+    }
+}
+
+// A DynamicWorkQueue solution with the arrival fixup splits few-tile problems
+// as Hybrid's dynamic sub-mode does, and the workspace query and the launch
+// carry the split. Without the arrival fixup the tiles stay whole.
+TEST(StreamKDynamicSplitTest, DynamicWorkQueueSplitsFewTiles)
+{
+    auto solution = dynamicSplitSolution(4);
+    auto hybrid   = dynamicSplitSolution(5);
+    auto device   = dynamicSplitDevice();
+    ASSERT_TRUE(solution->sizeMapping.hasDynamicAssignment());
+    auto spinFlag                              = dynamicSplitSolution(4);
+    spinFlag->internalArgsSupport.arrivalFixup = false;
+    for(size_t batch : {size_t{1}, size_t{4}})
+    {
+        SCOPED_TRACE("batch " + std::to_string(batch));
+        auto         problem = dynamicSplitGemm(128, 128, 262144, batch);
+        const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
+        ASSERT_EQ(tiles, batch);
+
+        const auto d = solution->streamKDynamicDecomposition(problem, device, tiles);
+        EXPECT_EQ(d.skTiles, tiles);
+        EXPECT_GT(d.skSplit, 1u);
+        expectSameSplit(d, hybrid->streamKDynamicDecomposition(problem, device, tiles));
+
+        const size_t required = solution->requiredWorkspaceSize(problem, device);
+        EXPECT_EQ(required, solution->partialTileSize(d.partialSlots()));
+        problem.setWorkspaceSize(required);
+        expectSameSplit(solution->streamKDynamicDecomposition(problem, device, tiles), d);
+
+        const auto launch = solution->resolvePersistentSettings(problem, device);
+        EXPECT_EQ(launch.workspaceBytes, required);
+        EXPECT_EQ(launch.grid, d.grid);
+        const auto invocations = solveWithWorkspace(*solution, problem, device);
+        ASSERT_FALSE(invocations.empty());
+        EXPECT_EQ(invocations.front().numWorkGroups.x, d.grid);
+
+        EXPECT_EQ(spinFlag->streamKDynamicDecomposition(problem, device, tiles).skTiles, 0u);
+    }
+}
+
+// requiredWorkspaceSize(), the launch settings and the launch-summary snapshot
+// implement the reserve-or-not rule separately; they must agree, split or not.
+TEST(StreamKDynamicSplitTest, WorkspaceQueriesAgree)
+{
+    auto solution = dynamicSplitSolution();
+    auto device   = dynamicSplitDevice();
+    struct Shape
+    {
+        size_t m, n, k, batch;
+        bool   split;
+    };
+    // 1 tile, 4 batched tiles, 64 tiles (split 4), 300 tiles (whole, and
+    // 300 % 256 != 0 so the tiles % grid partials reservation applies).
+    for(Shape sh : {Shape{128, 128, 262144, 1, true},
+                    Shape{128, 128, 262144, 4, true},
+                    Shape{1024, 1024, 4096, 1, true},
+                    Shape{1280, 3840, 1024, 1, false}})
+    {
+        SCOPED_TRACE(std::to_string(sh.m) + "x" + std::to_string(sh.n) + "x"
+                     + std::to_string(sh.k) + " batch " + std::to_string(sh.batch));
+        auto         problem = dynamicSplitGemm(sh.m, sh.n, sh.k, sh.batch);
+        const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
+        EXPECT_EQ(solution->streamKDynamicDecomposition(problem, device, tiles).skTiles > 0,
+                  sh.split);
+        for(int pass = 0; pass < 2; ++pass)
+        {
+            const size_t required = solution->requiredWorkspaceSize(problem, device);
+            const auto   launch   = solution->resolvePersistentSettings(problem, device);
+            const auto   decided  = solution->computeStreamKDecisions(problem, device);
+            EXPECT_EQ(launch.workspaceBytes, required) << "pass " << pass;
+            EXPECT_EQ(decided.requiredWorkspaceBytes, required) << "pass " << pass;
+            EXPECT_GT(required, 0u);
+            // Second pass: exactly the reported size.
+            problem.setWorkspaceSize(required);
+        }
+    }
+}
+
+// The split is fitted with slots * partialTileSize(1) and reserved as
+// partialTileSize(slots): the two must be the same bytes.
+TEST(StreamKDynamicSplitTest, FitMatchesTheReservation)
+{
+    auto solution = dynamicSplitSolution();
+    for(size_t slots : {size_t{1}, size_t{2}, size_t{45}, size_t{256}, size_t{1792}})
+        EXPECT_EQ(solution->partialTileSize(slots), slots * solution->partialTileSize(1));
+}
+
+// Uniform summation order: the dynamic split gives every tile the same parts
+// (skTiles == tiles), so it splits as with the mode off, except where partials
+// are summed in arrival order or widened by the fixup.
+TEST(StreamKDynamicSplitTest, UniformSummationOrderSplitsEveryTile)
+{
+    auto device = dynamicSplitDevice();
+    for(int streamK : {4, 5})
+    {
+        auto solution = dynamicSplitSolution(streamK);
+        for(auto sh : {std::array<size_t, 4>{128, 128, 262144, 1},
+                       std::array<size_t, 4>{128, 128, 262144, 4},
+                       std::array<size_t, 4>{1024, 1024, 4096, 1}})
+        {
+            SCOPED_TRACE("StreamK " + std::to_string(streamK) + " " + std::to_string(sh[0])
+                         + "x" + std::to_string(sh[1]) + "x" + std::to_string(sh[2])
+                         + " batch " + std::to_string(sh[3]));
+            auto         off   = dynamicSplitGemm(sh[0], sh[1], sh[2], sh[3]);
+            const size_t tiles = off.getNumTiles(solution->sizeMapping, 1);
+            auto         uso   = off;
+            uso.setParams().setUniformSummationOrder(1);
+            const auto d = solution->streamKDynamicDecomposition(uso, device, tiles);
+            EXPECT_EQ(d.skTiles, tiles);
+            EXPECT_GE(d.skSplit, 2u);
+            expectSameSplit(d, solution->streamKDynamicDecomposition(off, device, tiles));
+            EXPECT_TRUE(solution->uniformSummationOrderSupported(uso, device));
+            EXPECT_NO_THROW(solveWithWorkspace(*solution, uso, device));
+        }
+    }
+
+    auto         uso   = dynamicSplitGemm(128, 128, 262144, 1);
+    const size_t tiles = uso.getNumTiles(dynamicSplitSolution()->sizeMapping, 1);
+    uso.setParams().setUniformSummationOrder(1);
+    auto off = uso;
+    off.setParams().setUniformSummationOrder(0);
+
+    auto atomic                       = dynamicSplitSolution();
+    atomic->sizeMapping.streamKAtomic = 1;
+    EXPECT_GT(atomic->streamKDynamicDecomposition(off, device, tiles).skTiles, 0u);
+    EXPECT_EQ(atomic->streamKDynamicDecomposition(uso, device, tiles).skTiles, 0u);
+
+    auto widened                                 = dynamicSplitSolution();
+    widened->problemType.highPrecisionAccumulate = true;
+    widened->problemType.computeType             = rocisa::DataType::Half;
+    EXPECT_GT(widened->streamKDynamicDecomposition(off, device, tiles).skTiles, 0u);
+    EXPECT_EQ(widened->streamKDynamicDecomposition(uso, device, tiles).skTiles, 0u);
 }
 
 // Uniform summation order ignores debug overrides that split only some tiles.
