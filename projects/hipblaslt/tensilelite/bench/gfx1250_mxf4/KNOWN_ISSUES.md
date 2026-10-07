@@ -23,6 +23,18 @@ Sizes are (M, N, batch, K).
 | | (300, 200, 2, 1152) | wrong values, 13786 of 120000 |
 | | (256, 256, 1, 8192) | illegal memory access (GPU hang, aborts the client) |
 
+**Update 2026-10-07 (`logs/*-gen-v6`, GPU 0):** every wrong-value size above passes except
+(128, 64, 3, 4096), with `mx-scale-jitter=4`. The crash at (256, 256, 1, 8192) is still open.
+The cause was the NonEdge store of the last partial M tile. With MI 32x16 in wave32 and fp32
+output, each lane stores 16 consecutive rows of one column (four `b128`) under one exec mask:
+lanes 0-15 hold rows 0-15 of the 32-row block and lanes 16-31 rows 16-31.
+`_emitAlign8ExecMask` built the mask as `-1 >> (32 - validRows)`, one lane per row, and
+`checkIsEdgeSubtile` sent any remainder that is a multiple of 4 to that path. At M = 300 the last
+block has 12 valid rows: columns 0-11 stored all 16 rows (4 rows spill into the next column) and
+columns 12-15 stored none. The check now requires a multiple of 16 for this layout, so other
+remainders take the per-element edge path. A per-store mask (one per `b128`) would keep 4-row
+remainders on the fast path. `validate.py LOGDIR [SIZE ...]` reruns a build at given sizes.
+
 - Not caused by the 32x16 accumulator row fix-up (`emitWmma32x16AccRowFixup`). Tensile built
   from `e91596bfb48`, before that fix, has the same pass/fail result on every size. The count of
   wrong values differs slightly between the two builds.
@@ -173,9 +185,30 @@ The window from the first barrier to the last TDM load went from about 120 SALU 
 62 SALU. Time went from 232.3 us to 230.2 us (9.47 to 9.56 PF, 10 alternating rounds, faster in
 10/10), with the same validation results, jitter included.
 
+**LDS read-offset swaps moved off the critical path (2026-10-07, `logs/*-gen-v5`, GPU 0).**
+The 14 `v_xor_b32` that switch the read offsets to the other buffer sat after the second
+barrier, followed by an `s_wait_alu`, ahead of the first read. They are per-wave and need
+neither the TDM data nor the barrier, so `hoistLRSwapAboveWaitTDM` (`WaitAluInsertion.py`)
+moves them before the `s_wait_tensorcnt`. It does this only when an `s_wait_dscnt 0` already
+drained every read of those offsets, and only in TDM kernels. Both main-loop copies and one exit
+path qualify. Time went from 235.1 us to 233.6 us on GPU 0 (faster in 10/10; GPU 0 runs about
+5 us slower than GPU 3 for the same kernel), with the same validation results, jitter included.
+
 The A/B tile1 clamp is Size - wId * MT / numWaves, without the workgroup's tile offset, so it
-is only right for workgroup 0 along that dimension. Edge workgroups read past Size. This is unchanged from before and is a candidate for the
-edge-tile failures above.
+is only right for workgroup 0 along that dimension. Edge workgroups read past Size, but only
+into LDS rows whose outputs are never stored, so it did not cause the edge failures (those were
+the store mask, see the top section). It is still an out-of-bounds global read.
+
+**Deeper prefetch is worth about 16.5 us (2026-10-07, `logs/*-inj-v5_tc*`, GPU 0).**
+`inject_delay.py SRC NAME tcnt 8` changes the main-loop `s_wait_tensorcnt 4` to 8, so each
+iteration waits for the loads of two iterations back, which times a 3-deep pipeline (results
+are wrong). 233.7 us became 217.1 us (8/8), and `tcnt 12` (4-deep) gives the same 216.7 us. The
+same test on a build without segment interleave (`configs/segil0_timing.yaml`) gives 217.4 us
+against 217.0 us with it, so a third buffer does not need the mode-2 layout. Three contiguous
+buffers of A, B, SA and SB (about 68 KiB each) fit in the 320 KiB. The generator side: the
+subtile `PrefetchGlobalRead` 2 is one tile ahead plus a one-partition offset, so this needs a
+two-tiles-ahead mode, buffer rotation by an SGPR delta in place of the XOR swaps (which also
+frees the 14 swap-mask VGPRs), and the prologue and exit paths for the extra tile.
 
 ## TDM supply: 256-byte scale rows cost 17% (fixed in the generator 2026-10-06)
 

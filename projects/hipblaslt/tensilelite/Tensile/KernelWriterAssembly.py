@@ -15575,6 +15575,12 @@ class KernelWriterAssembly(KernelWriter):
       divisor   = kernel["MacroTile0"]
       destBpe   = int(kernel["ProblemType"]["DestDataType"].numBytes()) if self.states.storeAlign8 else 1
       alignSize = 16 // destBpe  # storeAlign8: dwordx4 store width (16B) / destBpe; else: 16
+      if (self.states.storeAlign8 and kernel["WavefrontSize"] == 32
+          and kernel["MatrixInstM"] == 32 and kernel["MatrixInstN"] == 16
+          and kernel["ProblemType"]["DestDataType"].isSingle()):
+        # Each lane stores 16 consecutive rows under one exec mask, so the NonEdge mask
+        # can only drop whole 16-row lane groups.
+        alignSize = 16
       wgSgpr    = "WorkGroup0"
       nwgSgpr   = "NumWorkGroups0"
       # tmpS0 = SizeI % MT0  (the trailing-row count for the last WG)
