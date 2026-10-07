@@ -59,23 +59,12 @@
 
 /******************************* larfg ****************************************
 *******************************************************************************/
-#ifndef LARFG_SSKER_THREADS
-#define LARFG_SSKER_THREADS 256 // must be 64, 128, 256, 512, or 1024
-#endif
-
-#ifndef LARFG_SSKER_MAX_N
-#if !defined(ROCSOLVER_LARFG_USE_KERNEL) || !ROCSOLVER_LARFG_USE_KERNEL
-#define LARFG_SSKER_MAX_N                                   \
-    (std::is_same_v<T, float>                       ? 27136 \
-         : std::is_same_v<T, double>                ? 20992 \
-         : std::is_same_v<T, rocblas_float_complex> ? 18944 \
-                                                    : 12800)
-// #define LARFG_SSKER_MAX_N (std::is_same_v<T, float> ? 11264 : \
-//                         std::is_same_v<T, double> ? 7424 : \
-//                         std::is_same_v<T, rocblas_float_complex> ? 10240 : 6144)
-#else
-#define LARFG_SSKER_MAX_N (std::numeric_limits<int64_t>::max())
-#endif // ROCSOLVER_LARFG_USE_KERNEL
+/*! \brief Determines the default size at which rocSOLVER switches from
+    the kernel to the BLAS implementation when executing LARFG. This is used
+    when a configuration has no set switch size (see larfg_use_kernel).
+    Overriden by LARFG_SSKER_MAX_N. */
+#ifndef LARFG_SSKER_DEFAULT_MAX_N
+#define LARFG_SSKER_DEFAULT_MAX_N 98304
 #endif
 
 /******************************* larft ****************************************
