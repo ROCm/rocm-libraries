@@ -349,8 +349,6 @@ rocblas_status rocsolver_larfg_template(rocblas_handle handle,
                                incx, stridex, tau, strideP, batch_count);
     }
 
-    // std::cout << "running larfg w blas..." << std::endl;
-
     // everything must be executed with scalars on the device
     rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_device);
 

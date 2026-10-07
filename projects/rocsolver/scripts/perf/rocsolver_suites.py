@@ -399,8 +399,7 @@ def geqrf_suite(*, suite, precision, sizenormal, sizebatch):
     """
     fn = 'geqrf'
     size=sizenormal
-    # for nc in [0, 160]:
-    for nc in [128]:
+    for nc in [0, 160]:
         if nc == 0: nn = 'sq'
         else: nn = nc
         for s in size:
@@ -929,16 +928,6 @@ def gesvdjBatch_suite(*, suite, precision, sizenormal, sizebatch):
             row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'evect': vv, 'n': s}
             yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --left_svect {v} --right_svect {v} -m {s} --lda {ld} --ldu {ld} --ldv {ld}')
 
-def larfg_suite(*, suite, precision, sizenormal, sizebatch):
-    """
-    LARFG tests are run with the given precision and sizes
-    """
-    fn = 'larfg'
-    size = sizenormal
-    for s in size:
-        row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'n': s}
-        yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -n {s}')
-
 
 # Registry of all available benchmark suites
 SUITES = {
@@ -974,7 +963,6 @@ SUITES = {
     'xxgqr': xxgqr_suite,
     'xxmqr': xxmqr_suite,
     'larft': larft_suite,
-    'larfg': larfg_suite,
 
     # Matrix reductions (tridiagonalization, bidiagonalization)
     'xxtrd': xxtrd_suite,
