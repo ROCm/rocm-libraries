@@ -457,44 +457,60 @@ def processKernelSourceNativeInit(
     return _emitKernel(kernelWriterAssembly, splitGSU, kernel, compress)
 
 
-def _restart_worker_pool_for_native_batch(threadCount):
-    """Shut down the current loky pool and pre-create a fresh one that uses
-    the "spawn" multiprocessing context, so the workers used for the
-    upcoming native-rocisa batch are real fresh interpreters.
-
-    This matters because loky's default "loky" start method forks new
-    workers from *this* (calling) process. If this process already ran the
-    stinkytofu-adapter batch, ``sys.modules["rocisa"]`` is already rebound to
-    the adapter here -- a forked worker would inherit that binding regardless
-    of the ``ROCISA_BACKEND`` env var, since fork doesn't re-run imports.
-    Forcing "spawn" avoids that: each new worker re-imports ``rocisa`` from
-    scratch and sees the updated env var.
-    """
-    import multiprocessing
-    from joblib.externals.loky import get_reusable_executor
-
-    try:
-        get_reusable_executor().shutdown(wait=True)
-    except Exception:
-        pass
-
-    # Pre-create the singleton loky executor with a spawn context before
-    # joblib's Parallel(...) call implicitly requests one; joblib's own API
-    # has no way to pass `context` through, but it will reuse this
-    # already-configured executor since the worker count matches.
-    get_reusable_executor(
-        max_workers=threadCount,
-        context=multiprocessing.get_context("spawn"),
-        reuse=False,
-    )
-
-
 def _shutdown_worker_pool():
     try:
         from joblib.externals.loky import get_reusable_executor
         get_reusable_executor().shutdown(wait=True)
     except Exception:
         pass
+
+
+@contextmanager
+def _native_rocisa_workers():
+    """Run the enclosed ParallelMap2 calls on fresh native-rocisa workers."""
+    orig_backend = os.environ.get("ROCISA_BACKEND")
+    orig_threads = globalParameters["CpuThreads"]
+    os.environ["ROCISA_BACKEND"] = "rocisa"
+    # Keep at least 2 threads so ParallelMap2 runs in worker processes, not in-process.
+    if 0 <= orig_threads < 2:
+        globalParameters["CpuThreads"] = 2
+    try:
+        # Drop idle adapter workers so joblib starts fresh ones that inherit ROCISA_BACKEND.
+        _shutdown_worker_pool()
+        yield
+    finally:
+        # Drop the native workers so later ParallelMap2 calls start adapter workers again.
+        _shutdown_worker_pool()
+        globalParameters["CpuThreads"] = orig_threads
+        if orig_backend is None:
+            os.environ.pop("ROCISA_BACKEND", None)
+        else:
+            os.environ["ROCISA_BACKEND"] = orig_backend
+
+
+def _mapKernelsByBackend(fn, nativeFn, kernels):
+    """Map ``fn`` over ``kernels`` in order, using ``nativeFn`` on native-rocisa workers
+    for non-gfx1250 kernels while the stinkytofu adapter is active."""
+    nativeIdx = []
+    if getattr(rocisa, "_BACKEND", "") == "stinkytofu":
+        nativeIdx = [i for i, k in enumerate(kernels) if tuple(k["ISA"])[:2] != _GFX1250]
+    if not nativeIdx:
+        # Common path: single-backend (all stinkytofu or all native).
+        return ParallelMap2(fn, kernels, "Generating assembly kernels", multiArg=False, return_as="list")
+
+    results = [None] * len(kernels)
+
+    def runBatch(f, idx, message):
+        batch = ParallelMap2(f, [kernels[i] for i in idx], message, multiArg=False, return_as="list")
+        for i, r in zip(idx, batch):
+            results[i] = r
+
+    adapterIdx = [i for i, k in enumerate(kernels) if tuple(k["ISA"])[:2] == _GFX1250]
+    if adapterIdx:
+        runBatch(fn, adapterIdx, "Generating assembly kernels (gfx1250, stinkytofu)")
+    with _native_rocisa_workers():
+        runBatch(nativeFn, nativeIdx, "Generating assembly kernels (native rocisa)")
+    return results
 
 
 def _checkInvalidSolutionsAndKernels(errorTolerant, result, kernel):
@@ -754,16 +770,25 @@ def writeSolutionsAndKernels(
         numAsmKernels = len(asmKernels)
         numKernels = len(asmKernels)
         assert numKernels == numAsmKernels, "Only assembly kernels are supported in TensileLite"
-        asmIter = zip(
-            itertools.repeat(kernelWriterAssembly),
-            itertools.repeat(rocisa.rocIsa.getInstance().getData()),
-            itertools.repeat(outOptions),
-            itertools.repeat(splitGSU),
-            asmKernels
-        )
         memcompress = numAsmKernels > 10000
+        unaryProcessKernelSource = functools.partial(
+            processKernelSource,
+            kernelWriterAssembly,
+            rocisa.rocIsa.getInstance().getData(),
+            outOptions,
+            splitGSU,
+            compress=memcompress,
+        )
+        unaryProcessNative = functools.partial(
+            processKernelSourceNativeInit,
+            kernelWriterAssembly,
+            str(asmToolchain.assembler.path),
+            disableAsmComments,
+            splitGSU,
+            compress=memcompress,
+        )
     with timing_context("python_kernel_codegen"):
-        asmResults = ParallelMap2(functools.partial(processKernelSource, compress=memcompress), asmIter, "Generating assembly kernels", return_as="list")
+        asmResults = _mapKernelsByBackend(unaryProcessKernelSource, unaryProcessNative, asmKernels)
     with timing_context("python_kernel_validate"):
         removeInvalidSolutionsAndKernels(
             asmResults, asmKernels, solutions, errorTolerant, getVerbosity(), splitGSU
@@ -935,82 +960,19 @@ def writeSolutionsAndKernelsTCL(
             return processed_kernel
         return composed_function
 
-    # --- Backend-aware kernel batching ---
-    # When the stinkytofu adapter is active (gfx1250 auto-detected), split
-    # kernels so gfx1250 uses the adapter and non-gfx1250 uses native rocisa
-    # in a fresh worker pool.
-    _stinkytofu_active = getattr(rocisa, "_BACKEND", "") == "stinkytofu"
-
-    if _stinkytofu_active:
-        gfx1250_kernels = [k for k in uniqueAsmKernels if tuple(k["ISA"])[:2] == _GFX1250]
-        native_kernels  = [k for k in uniqueAsmKernels if tuple(k["ISA"])[:2] != _GFX1250]
-    else:
-        gfx1250_kernels = []
-        native_kernels  = []
-
-    if not native_kernels:
-        # Common path: single-backend (all stinkytofu or all native).
-        results = ParallelMap2(
-            compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
-            uniqueAsmKernels,
-            "Generating assembly kernels",
-            multiArg=False,
-            return_as="list"
-        )
-    else:
-        results = []
-        # Batch 1: gfx1250 kernels with stinkytofu adapter workers.
-        if gfx1250_kernels:
-            results.extend(ParallelMap2(
-                compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
-                gfx1250_kernels,
-                "Generating assembly kernels (gfx1250, stinkytofu)",
-                multiArg=False,
-                return_as="list"
-            ))
-
-        # Batch 2: non-gfx1250 kernels with fresh native-rocisa workers.
-        from Tensile.Common.Parallel import CPUThreadCount
-
-        _orig_backend = os.environ.get("ROCISA_BACKEND")
-        _orig_threads = globalParameters["CpuThreads"]
-        os.environ["ROCISA_BACKEND"] = "rocisa"
-        # Force at least 2 threads so joblib spawns a subprocess.
-        # Running in-process would reuse the already-imported stinkytofu
-        # adapter from sys.modules instead of loading native rocisa.
-        if _orig_threads >= 0 and _orig_threads < 2:
-            globalParameters["CpuThreads"] = 2
-        # Shut down the existing (stinkytofu-adapter) worker pool and pre-create
-        # a fresh spawn-context pool so native-rocisa workers are real fresh
-        # interpreters that re-import rocisa and honour ROCISA_BACKEND=rocisa,
-        # rather than forked children inheriting this process's adapter binding.
-        _restart_worker_pool_for_native_batch(CPUThreadCount())
-        try:
-            assemblerPath = str(asmToolchain.assembler._component_path)
-            unaryProcessNative = functools.partial(
-                processKernelSourceNativeInit,
-                kernelWriterAssembly,
-                assemblerPath,
-                not disableAsmComments,
-                splitGSU,
-                compress=memcompress,
-            )
-            results.extend(ParallelMap2(
-                compose(unaryAssemble, unaryWriteAssembly, unaryProcessNative),
-                native_kernels,
-                "Generating assembly kernels (native rocisa)",
-                multiArg=False,
-                return_as="list"
-            ))
-        finally:
-            # Shut down native workers before restoring env so joblib won't
-            # reuse them for subsequent stinkytofu codegen.
-            _shutdown_worker_pool()
-            globalParameters["CpuThreads"] = _orig_threads
-            if _orig_backend is None:
-                os.environ.pop("ROCISA_BACKEND", None)
-            else:
-                os.environ["ROCISA_BACKEND"] = _orig_backend
+    unaryProcessNative = functools.partial(
+        processKernelSourceNativeInit,
+        kernelWriterAssembly,
+        str(asmToolchain.assembler.path),
+        not disableAsmComments,
+        splitGSU,
+        compress=memcompress,
+    )
+    results = _mapKernelsByBackend(
+        compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
+        compose(unaryAssemble, unaryWriteAssembly, unaryProcessNative),
+        uniqueAsmKernels,
+    )
 
     buildAssemblyCodeObjectFiles(
         asmToolchain.linker,
