@@ -64,6 +64,8 @@ target_sources(stinkytofu_objs PRIVATE
     coissue/TimingProfile.cpp
     coissue/IssueTimeline.cpp
     coissue/InsertionModels.cpp
+    coissue/QueueModel.cpp
+    coissue/DamageReport.cpp
 )
 
 add_subdirectory(ra)

@@ -17,6 +17,7 @@
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
+#include "transforms/asm/coissue/DamageReport.hpp"
 #include "transforms/asm/coissue/IssueTimeline.hpp"
 #include "transforms/asm/coissue/TimingProfile.hpp"
 
@@ -245,6 +246,104 @@ TEST_F(IssueTimelineTest, MatrixQueueLetsIssueRunAhead) {
     EXPECT_EQ(issue, (std::vector<int>{0, 2, 4, 6, 8}));
     ASSERT_EQ(tl.pipe().size(), 5u);
     EXPECT_EQ(tl.pipe()[4].start, 32);
+}
+
+// --- QueueModel, SyncModel and the cost -----------------------------------------------------
+
+// Short windows (two matrix ops issued 2 cycles apart) build a lead over the pipe; a delay is
+// free while the lead covers it, and costs in full once the lead is gone.
+TEST_F(IssueTimelineTest, QueueLeadHidesDelay) {
+    const std::string four = wmma("v[0:7]") + wmma("v[8:15]") + wmma("v[16:23]") + wmma("v[24:31]");
+    build(four + "\n\"st.s_nop\"(8)\n" + wmma("v[32:39]"));
+    IssueTimeline tl(measured());
+    for (const TimedInst& t : timed) tl.place(t);
+    const auto& pipe = tl.pipe();
+    ASSERT_EQ(pipe.size(), 5u);
+    // Leads 0, 6, 12, 18: the issue runs ahead of the 8-cycle ops.
+    EXPECT_EQ(pipe[1].start - pipe[1].issue, 6);
+    EXPECT_EQ(pipe[3].start - pipe[3].issue, 18);
+    // The 9-cycle s_nop is hidden: the fifth op still starts right behind the fourth.
+    EXPECT_EQ(pipe[4].start, pipe[3].end);
+
+    // No queue, so no lead: the s_nop starts 2 cycles into the fourth window and runs 3
+    // cycles past its end, and the pipe idles for those 3.
+    TimingProfile noQueue = measured();
+    noQueue.matrixQueueDepth = 0;
+    IssueTimeline flat(noQueue);
+    for (const TimedInst& t : timed) flat.place(t);
+    EXPECT_EQ(flat.pipe()[4].start - flat.pipe()[3].end, 2 + 9 - 8);
+}
+
+TEST_F(IssueTimelineTest, BarrierWaitDrainsQueue) {
+    build(wmma("v[0:7]") + wmma("v[8:15]") + wmma("v[16:23]") + R"(
+        "st.s_barrier_wait"(-1)
+    )" + wmma("v[24:31]"));
+    // Conservative sync: the op after the barrier wait issues once the queued work is done.
+    IssueTimeline tl(measured());
+    for (const TimedInst& t : timed) tl.place(t);
+    EXPECT_EQ(tl.pipe()[3].issue, tl.pipe()[2].end);
+    EXPECT_EQ(tl.pipe()[3].start - tl.pipe()[3].issue, 0);
+    // Without the sync model the queue keeps its lead across the barrier.
+    TimingProfile free = measured();
+    free.sync = SyncModel::None;
+    IssueTimeline tf(free);
+    for (const TimedInst& t : timed) tf.place(t);
+    EXPECT_LT(tf.pipe()[3].issue, tf.pipe()[2].end);
+}
+
+TEST_F(IssueTimelineTest, SteadyTripCostIsIdleThenLength) {
+    build(wmma("v[0:7]") + R"(
+        s1 = "st.s_mov_b32"(1)
+        s2 = "st.s_mov_b32"(2)
+    )" + wmma("v[8:15]"));
+    std::vector<const TimedInst*> body;
+    for (const TimedInst& t : timed) body.push_back(&t);
+    const TripTiming trip = steadyTrip(body, compiler());
+    // No queue: two windows of 8, back to back across the back edge. The trip's issue ends
+    // when its second op issues, 8 + 1 cycles after its first.
+    EXPECT_EQ(trip.cycles, 9);
+    EXPECT_EQ(trip.pipeIdle, 0);
+    EXPECT_EQ(trip.pipeIdleWithHandover, 0);
+    EXPECT_EQ(trip.cost(), (TripCost{0, 9}));
+    // Idle first, issue length as tie-break.
+    EXPECT_LT((TripCost{0, 17}), (TripCost{1, 10}));
+}
+
+TEST_F(IssueTimelineTest, DamageReportFindsLostSlot) {
+    // Plan: the VALU takes slot 3 of the first window. Final: a bank switch in front of it
+    // takes cycle 3, so the VALU slips to slot 6.
+    const std::string head = wmma("v[0:7]") + R"(
+        s1 = "st.s_mov_b32"(1)
+        s2 = "st.s_mov_b32"(2)
+    )";
+    const std::string tail = R"(
+        v430 = "st.v_add_nc_u32"(v431, v432)
+    )" + wmma("v[8:15]");
+    build(head + tail);
+    std::vector<const TimedInst*> order;
+    for (const TimedInst& t : timed) order.push_back(&t);
+    const TripTiming plan = steadyTrip(order, compiler());
+    std::vector<TimedInst> planInsts = timed;
+
+    build(head + "\n\"st.s_set_vgpr_msb\"(10)\n" + tail);
+    std::vector<const TimedInst*> finalBody;
+    for (const TimedInst& t : timed) finalBody.push_back(&t);
+    const TripTiming final = steadyTrip(finalBody, compiler());
+    // Order position k of the final trip: skip the inserted switch (index 3).
+    std::vector<Placement> finalByOrder;
+    for (size_t i = 0; i < finalBody.size(); ++i)
+        if (i != 3) finalByOrder.push_back(final.placements[i]);
+    std::vector<const TimedInst*> planOrder;
+    for (const TimedInst& t : planInsts) planOrder.push_back(&t);
+    const DamageReport report = buildDamageReport(planOrder, plan.placements, finalByOrder, plan,
+                                                  final, DamageTrigger::IssueGrowth);
+    ASSERT_EQ(report.all.size(), 2u);
+    EXPECT_EQ(plan.placements[3].pos, 3);
+    EXPECT_EQ(finalByOrder[3].pos, 6);
+    ASSERT_EQ(report.all[0].slipped.size(), 1u);
+    EXPECT_EQ(report.all[0].slipped[0], 3u);
+    ASSERT_FALSE(report.damaged.empty());
+    EXPECT_EQ(report.damaged.front()->window, 0);
 }
 
 // --- profile resolution -------------------------------------------------------------------

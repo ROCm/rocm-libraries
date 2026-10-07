@@ -169,6 +169,7 @@ const TimedInst& TimedInstCache::get(const StinkyInstruction& inst) {
 
 IssueTimeline::IssueTimeline(const TimingProfile& profile)
     : profile_(profile),
+      queue_(profile.matrixQueueDepth),
       producers_(kNumRegSlots),
       hazardReady_(profile.hazardGaps.size(), std::vector<int>(kNumRegSlots, 0)) {}
 
@@ -246,12 +247,8 @@ Placement IssueTimeline::place(const TimedInst& in, int notBefore) {
         case IssueClass::Matrix: {
             if (profile_.matrixQueueDepth == 0 && hasWindow_)
                 t_ = std::max(t_, winStart_ + winLatency_);
-            at = std::max({t_, dataReady(in), notBefore});
-            const int depth = profile_.matrixQueueDepth;
-            if (depth > 0 && static_cast<int>(pipe_.size()) >= depth)
-                at = std::max(at, pipe_[pipe_.size() - depth].start);
-            const int start = pipe_.empty() ? at : std::max(at, pipe_.back().end);
-            pipe_.push_back({at, start, start + in.winLatency});
+            at = queue_.issueAt(std::max({t_, dataReady(in), notBefore}));
+            queue_.push(at, in.winLatency);
             hasWindow_ = true;
             winStart_ = at;
             winLatency_ = in.winLatency;
@@ -285,8 +282,7 @@ Placement IssueTimeline::place(const TimedInst& in, int notBefore) {
         case IssueClass::Barrier: {
             at = std::max(t_, notBefore);
             t_ = roll(at + std::max(in.issue, in.latency));
-            if (profile_.sync == SyncModel::Conservative && in.isBarrierWait && !pipe_.empty())
-                t_ = std::max(t_, pipe_.back().end);
+            if (in.isBarrierWait) t_ = afterBarrierWait(profile_.sync, t_, queue_);
             break;
         }
         default: {
@@ -358,9 +354,10 @@ TripTiming steadyTrip(const std::vector<const TimedInst*>& body, const TimingPro
         for (size_t i = 1; i < out.pipe.size(); ++i)
             out.pipeIdle += std::max(0, out.pipe[i].start - out.pipe[i - 1].end);
         out.pipeIdleWithHandover = out.pipeIdle;
-        if (pipe.size() > n)
-            out.pipeIdleWithHandover +=
-                std::max(0, out.pipe.front().start - pipe[pipe.size() - n - 1].end);
+        if (pipe.size() > n) {
+            out.handover = pipe[pipe.size() - n - 1];
+            out.pipeIdleWithHandover += std::max(0, out.pipe.front().start - out.handover->end);
+        }
     }
     return out;
 }

@@ -17,9 +17,11 @@
 // costs, latency rules, and the matrix queue in front of the pipe.
 
 #include <cstdint>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
+#include "QueueModel.hpp"
 #include "TimingProfile.hpp"
 
 namespace stinkytofu {
@@ -78,13 +80,6 @@ class TimedInstCache {
     std::unordered_map<const StinkyInstruction*, TimedInst> cache_;
 };
 
-/// One matrix op in the pipe: when it left the issue stream, and when the pipe ran it.
-struct PipeOp {
-    int issue = 0;
-    int start = 0;
-    int end = 0;
-};
-
 struct Placement {
     int cycle = 0;   ///< issue cycle
     int window = -1; ///< index of the matrix op whose window the instruction sits in
@@ -105,7 +100,7 @@ class IssueTimeline {
         return t_;
     }
     const std::vector<PipeOp>& pipe() const {
-        return pipe_;
+        return queue_.ops();
     }
     const TimingProfile& profile() const {
         return profile_;
@@ -136,7 +131,7 @@ class IssueTimeline {
     uint16_t winBlocked_ = 0;
     int window_ = -1;
     std::vector<int> dsDone_;
-    std::vector<PipeOp> pipe_;
+    QueueModel queue_;
     std::vector<Producer> producers_;
     /// [gap][slot]: the cycle a consumer of that hazard gap may read the slot.
     std::vector<std::vector<int>> hazardReady_;
@@ -160,6 +155,12 @@ struct TripTiming {
     std::vector<Placement> placements;
     /// The trip's matrix ops, in order.
     std::vector<PipeOp> pipe;
+    /// The previous trip's last matrix op, if any.
+    std::optional<PipeOp> handover;
+
+    TripCost cost() const {
+        return {pipeIdleWithHandover, cycles};
+    }
 };
 
 constexpr int kSteadyTrips = 3;
