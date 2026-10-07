@@ -408,12 +408,15 @@ namespace rocblaslt
             hipEvent_t m_stop  = nullptr;
         };
 
-        // One launch the GPU has not been observed to finish yet.
+        // One launch the GPU has not been observed to finish yet. m_device is
+        // the device the pair was created on, carried so recycleEvents() can
+        // put it back where it came from.
         struct PendingMeasurement
         {
             hipEvent_t m_start     = nullptr;
             hipEvent_t m_stop      = nullptr;
             int        m_candidate = -1;
+            int        m_device    = 0;
         };
 
         // m_pending holds the outstanding measurements in launch order, capped
@@ -507,8 +510,8 @@ namespace rocblaslt
         float score(const std::vector<float>& samples) const;
         void  resolve(size_t problemKey, ProblemState& state);
         void  publishResolution(size_t problemKey, const ProblemState& state);
-        bool  acquireEvents(hipEvent_t& start, hipEvent_t& stop);
-        void  recycleEvents(hipEvent_t start, hipEvent_t stop);
+        bool  acquireEvents(hipEvent_t& start, hipEvent_t& stop, int& device);
+        void  recycleEvents(hipEvent_t start, hipEvent_t stop, int device);
         void  retireEvents(hipEvent_t start, hipEvent_t stop);
 
         bool m_enabled   = false;
@@ -517,9 +520,17 @@ namespace rocblaslt
         int  m_coldCalls = 0;
         bool m_verbose   = false;
 
-        std::unordered_map<size_t, ProblemState> m_problems;
-        std::vector<EventPair>                   m_pairs;
-        std::shared_timed_mutex                  m_mutex;
+        // Keyed by device, because a HIP event belongs to the device that
+        // created it: hipEventRecord onto another device's stream is refused
+        // with hipErrorInvalidResourceHandle. One flat pool would hand device
+        // B a pair device A created as soon as both explore in the same
+        // process, which is the ordinary shape of a multi-GPU application.
+        //
+        // The map is only ever read and written under m_mutex held
+        // exclusively, so the vectors it owns cannot move under a reader.
+        std::unordered_map<size_t, ProblemState>        m_problems;
+        std::unordered_map<int, std::vector<EventPair>> m_pairs;
+        std::shared_timed_mutex                         m_mutex;
 
         // The resolved table is deliberately not the problem map: it is fixed
         // in size and never rehashes, which is what lets resolution() follow a
