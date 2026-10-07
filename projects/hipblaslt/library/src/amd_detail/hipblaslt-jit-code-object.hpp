@@ -2,14 +2,17 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include "hipblaslt-jit-component.hpp"
+
 #include <cstddef>
 #include <string>
 #include <vector>
 
-// In-process code-object construction through AMD comgr. The build, link and
-// metadata functions are noexcept: failures, including allocation failure, are
-// reported through Status and a log carrying the comgr diagnostics of every stage
-// that ran. Only the Target string helpers may throw (std::bad_alloc).
+// In-process code-object construction through AMD comgr. build and inspect are
+// noexcept: failures, including allocation failure, are reported through Status
+// and a log carrying the comgr diagnostics of every stage that ran. Assembly,
+// HIP compilation and linking stay inside the implementation. Only the Target
+// string helpers may throw (std::bad_alloc).
 namespace hipblaslt_jit::code_object
 {
     enum class Status
@@ -39,31 +42,6 @@ namespace hipblaslt_jit::code_object
         std::string   targetId() const; // gfx950:sramecc+:xnack-
         std::string   isaName() const; // amdgcn-amd-amdhsa--gfx950:sramecc+:xnack-
         int           resolvedWavefrontSize() const;
-    };
-
-    struct AssemblySource
-    {
-        std::string name;
-        std::string text;
-    };
-
-    struct HipSource
-    {
-        std::string name;
-        std::string text;
-    };
-
-    // Header made available to #include "name" without touching the file system.
-    struct IncludeFile
-    {
-        std::string name;
-        std::string text;
-    };
-
-    struct Relocatable
-    {
-        std::string       name;
-        std::vector<char> bytes;
     };
 
     enum class HipPipeline
@@ -99,7 +77,9 @@ namespace hipblaslt_jit::code_object
         // (not ROCM_PATH) for the TheRock layout. See rocmPath().
         std::string              rocmPath;
         std::vector<std::string> includeDirectories;
-        std::vector<IncludeFile> includes;
+        // Extra headers, name and bytes only, offered to every HIP unit as
+        // #include "name". A unit's own includes are added as well.
+        std::vector<hipblaslt_jit::BuildUnit> includes;
         // Prepends "-include __clang_hip_runtime_wrapper.h"; comgr omits the HIP
         // runtime wrapper that the clang driver normally injects.
         bool includeHipRuntimeWrapper = true;
@@ -116,64 +96,31 @@ namespace hipblaslt_jit::code_object
         }
     };
 
-    struct RelocatableResult
+    // Kernel names, ISA and ELF code-object version. The builder uses this to
+    // reject an object that does not match the request. hipBLASLt loads the
+    // bytes from Result.
+    struct ObjectCheck
     {
         Status                   status = Status::InternalError;
         std::string              log;
-        std::vector<Relocatable> objects;
+        std::string              isaName;
+        int                      codeObjectVersion = 0;
+        std::vector<std::string> kernelNames;
         bool                     ok() const noexcept
         {
             return status == Status::Success;
         }
     };
 
-    struct CodeObjectMetadata
-    {
-        std::string              isaName; // from comgr
-        int                      codeObjectVersion = 0; // from the ELF ABI version
-        std::vector<std::string> kernelNames; // amdhsa.kernels[].name
-    };
+    // Assembles every assembly unit and compiles every HIP unit, then links
+    // them into one executable code object. Target::wavefrontSize applies to
+    // assembly; HIP keeps the processor default. Includes are name and bytes.
+    Result build(const std::vector<hipblaslt_jit::BuildUnit>& units,
+                 const Target&                                 target,
+                 const Options&                                options) noexcept;
 
-    struct MetadataResult
-    {
-        Status             status = Status::InternalError;
-        std::string        log;
-        CodeObjectMetadata metadata;
-        bool               ok() const noexcept
-        {
-            return status == Status::Success;
-        }
-    };
-
-    // Assembles each source to a relocatable object.
-    RelocatableResult assembleRelocatables(const std::vector<AssemblySource>& sources,
-                                           const Target&                      target,
-                                           const Options&                     options) noexcept;
-
-    // Compiles each HIP source as its own translation unit (Options::hipPipeline) with
-    // a content-derived -cuid, so the resulting objects can be linked together.
-    RelocatableResult compileHipRelocatables(const std::vector<HipSource>& sources,
-                                             const Target&                 target,
-                                             const Options&                options) noexcept;
-
-    // Links relocatables from either producer, including assembled and compiled
-    // objects together, into one executable code object.
-    Result link(const std::vector<Relocatable>& objects,
-                const Target&                   target,
-                const Options&                  options) noexcept;
-
-    // assembleRelocatables + link: all sources share one executable.
-    Result assemble(const std::vector<AssemblySource>& sources,
-                    const Target&                      target,
-                    const Options&                     options) noexcept;
-
-    // compileHipRelocatables + link: all sources share one executable.
-    Result compileHip(const std::vector<HipSource>& sources,
-                      const Target&                 target,
-                      const Options&                options) noexcept;
-
-    MetadataResult readMetadata(const void* elf, std::size_t size) noexcept;
-    MetadataResult readMetadata(const std::vector<char>& elf) noexcept;
+    ObjectCheck inspect(const void* elf, std::size_t size) noexcept;
+    ObjectCheck inspect(const std::vector<char>& elf) noexcept;
 
     // "major.minor" of the loaded comgr library, for diagnostics.
     std::string comgrVersion() noexcept;

@@ -26,6 +26,29 @@ namespace hipblaslt_jit::code_object
 {
     namespace
     {
+        struct NamedText
+        {
+            std::string name;
+            std::string text;
+        };
+
+        struct Relocatable
+        {
+            std::string       name;
+            std::vector<char> bytes;
+        };
+
+        struct RelocatableResult
+        {
+            Status                   status = Status::InternalError;
+            std::string              log;
+            std::vector<Relocatable> objects;
+            bool                     ok() const noexcept
+            {
+                return status == Status::Success;
+            }
+        };
+
         struct Failure
         {
             Status      status;
@@ -304,20 +327,13 @@ namespace hipblaslt_jit::code_object
             }
         }
 
-        // Deterministic per-source compilation unit id (FNV-1a over name and text).
-        std::string contentId(const HipSource& source)
+        // A -cuid unique within one link. Source names are already unique.
+        std::string contentId(const std::string& name)
         {
-            std::uint64_t hash = 14695981039346656037ull;
-            auto          mix  = [&](const std::string& bytes) {
-                for(unsigned char c : bytes)
-                    hash = (hash ^ c) * 1099511628211ull;
-                hash = (hash ^ 0xff) * 1099511628211ull;
-            };
-            mix(source.name);
-            mix(source.text);
-            char text[17];
-            std::snprintf(text, sizeof(text), "%016llx", static_cast<unsigned long long>(hash));
-            return text;
+            std::string id;
+            for(unsigned char c : name)
+                id += (std::isalnum(c) || c == '_') ? static_cast<char>(c) : '_';
+            return id.empty() ? std::string("unit") : id;
         }
 
         std::string waveOption(const Target& target)
@@ -332,8 +348,8 @@ namespace hipblaslt_jit::code_object
                 add(set,
                     AMD_COMGR_DATA_KIND_INCLUDE,
                     include.name,
-                    include.text.data(),
-                    include.text.size());
+                    reinterpret_cast<const char*>(include.bytes.data()),
+                    include.bytes.size());
         }
 
         std::vector<Relocatable> relocatablesFrom(const DataSet&                  output,
@@ -379,7 +395,7 @@ namespace hipblaslt_jit::code_object
             return text;
         }
 
-        RelocatableResult assembleImpl(const std::vector<AssemblySource>& sources,
+        RelocatableResult assembleImpl(const std::vector<NamedText>& sources,
                                        const Target&                      target,
                                        const Options&                     options,
                                        std::string&                       log)
@@ -422,7 +438,7 @@ namespace hipblaslt_jit::code_object
             return {Status::Success, {}, relocatablesFrom(output, names)};
         }
 
-        RelocatableResult compileHipImpl(const std::vector<HipSource>& sources,
+        RelocatableResult compileHipImpl(const std::vector<NamedText>& sources,
                                          const Target&                 target,
                                          const Options&                options,
                                          std::string&                  log)
@@ -456,7 +472,7 @@ namespace hipblaslt_jit::code_object
             for(size_t i = 0; i < sources.size(); ++i)
             {
                 auto options_i = compile;
-                options_i.push_back("-cuid=" + contentId(sources[i]));
+                options_i.push_back("-cuid=" + contentId(sources[i].name));
                 options_i.insert(
                     options_i.end(), options.compilerFlags.begin(), options.compilerFlags.end());
                 const auto info  = makeAction(target.isaName(), options_i, true);
@@ -663,13 +679,12 @@ namespace hipblaslt_jit::code_object
             return elf[8] + 2;
         }
 
-        MetadataResult readMetadataImpl(const void* bytes, size_t size, std::string&)
+        ObjectCheck readMetadataImpl(const void* bytes, size_t size, std::string&)
         {
             if(!bytes)
                 fail(Status::InvalidArgument, "null code object");
-            MetadataResult result;
-            auto&          md = result.metadata;
-            md.codeObjectVersion
+            ObjectCheck result;
+            result.codeObjectVersion
                 = elfCodeObjectVersion(static_cast<const unsigned char*>(bytes), size);
             const bool relocatable = le16(static_cast<const unsigned char*>(bytes) + 16) == 1;
 
@@ -685,11 +700,11 @@ namespace hipblaslt_jit::code_object
             size_t isaSize = 0;
             check(amd_comgr_get_data_isa_name(data.get(), &isaSize, nullptr),
                   "amd_comgr_get_data_isa_name", Status::MetadataError);
-            md.isaName.assign(isaSize, '\0');
-            check(amd_comgr_get_data_isa_name(data.get(), &isaSize, md.isaName.data()),
+            result.isaName.assign(isaSize, '\0');
+            check(amd_comgr_get_data_isa_name(data.get(), &isaSize, result.isaName.data()),
                   "amd_comgr_get_data_isa_name", Status::MetadataError);
-            while(!md.isaName.empty() && md.isaName.back() == '\0')
-                md.isaName.pop_back();
+            while(!result.isaName.empty() && result.isaName.back() == '\0')
+                result.isaName.pop_back();
 
             Metadata root;
             check(amd_comgr_get_data_metadata(data.get(), root.out()),
@@ -699,7 +714,7 @@ namespace hipblaslt_jit::code_object
             if(!lookup(root.get(), "amdhsa.kernels", kernels))
                 fail(Status::MetadataError, "missing metadata key 'amdhsa.kernels'");
             forEach(kernels.get(), "amdhsa.kernels", [&](amd_comgr_metadata_node_t node) {
-                md.kernelNames.push_back(stringField(node, ".name", true));
+                result.kernelNames.push_back(stringField(node, ".name", true));
             });
             result.status = Status::Success;
             return result;
@@ -771,59 +786,67 @@ namespace hipblaslt_jit::code_object
         return (gfx.size() == 6 && gfx.rfind("gfx9", 0) == 0) ? 64 : 32;
     }
 
-    RelocatableResult assembleRelocatables(const std::vector<AssemblySource>& sources,
-                                           const Target&                      target,
-                                           const Options&                     options) noexcept
-    {
-        return guarded<RelocatableResult>(
-            [&](std::string& log) { return assembleImpl(sources, target, options, log); });
-    }
-
-    RelocatableResult compileHipRelocatables(const std::vector<HipSource>& sources,
-                                             const Target&                 target,
-                                             const Options&                options) noexcept
-    {
-        return guarded<RelocatableResult>(
-            [&](std::string& log) { return compileHipImpl(sources, target, options, log); });
-    }
-
-    Result link(const std::vector<Relocatable>& objects,
-                const Target&                   target,
-                const Options&                  options) noexcept
-    {
-        return guarded<Result>(
-            [&](std::string& log) { return linkImpl(objects, target, options, log); });
-    }
-
-    Result assemble(const std::vector<AssemblySource>& sources,
-                    const Target&                      target,
-                    const Options&                     options) noexcept
+    Result build(const std::vector<hipblaslt_jit::BuildUnit>& units,
+                 const Target&                                 target,
+                 const Options&                                options) noexcept
     {
         return guarded<Result>([&](std::string& log) {
-            auto objects = assembleImpl(sources, target, options, log);
-            return linkImpl(objects.objects, target, options, log);
+            if(units.empty())
+                fail(Status::InvalidArgument, "no sources supplied");
+            Options               merged = options;
+            std::set<std::string> includeNames;
+            for(const auto& include : merged.includes)
+                includeNames.insert(include.name);
+            std::vector<NamedText> assembly, hip;
+            for(const auto& unit : units)
+            {
+                if(unit.name.empty())
+                    fail(Status::InvalidArgument, "source name must not be empty");
+                const std::string text(unit.bytes.begin(), unit.bytes.end());
+                if(unit.kind == hipblaslt_jit::BuildUnit::Kind::Hip)
+                {
+                    for(const auto& include : unit.includes)
+                    {
+                        if(include.name.empty())
+                            fail(Status::InvalidArgument, "include name must not be empty");
+                        if(includeNames.insert(include.name).second)
+                            merged.includes.push_back(include);
+                    }
+                    hip.push_back({unit.name, text});
+                }
+                else
+                    assembly.push_back({unit.name, text});
+            }
+            std::vector<Relocatable> objects;
+            if(!assembly.empty())
+            {
+                auto assembled = assembleImpl(assembly, target, merged, log);
+                for(auto& object : assembled.objects)
+                    objects.push_back(std::move(object));
+            }
+            if(!hip.empty())
+            {
+                auto hipTarget          = target;
+                hipTarget.wavefrontSize = 0;
+                auto compiled           = compileHipImpl(hip, hipTarget, merged, log);
+                for(auto& object : compiled.objects)
+                    objects.push_back(std::move(object));
+            }
+            auto linkTarget          = target;
+            linkTarget.wavefrontSize = 0;
+            return linkImpl(objects, linkTarget, merged, log);
         });
     }
 
-    Result compileHip(const std::vector<HipSource>& sources,
-                      const Target&                 target,
-                      const Options&                options) noexcept
+    ObjectCheck inspect(const void* elf, std::size_t size) noexcept
     {
-        return guarded<Result>([&](std::string& log) {
-            auto objects = compileHipImpl(sources, target, options, log);
-            return linkImpl(objects.objects, target, options, log);
-        });
-    }
-
-    MetadataResult readMetadata(const void* elf, std::size_t size) noexcept
-    {
-        return guarded<MetadataResult>(
+        return guarded<ObjectCheck>(
             [&](std::string& log) { return readMetadataImpl(elf, size, log); });
     }
 
-    MetadataResult readMetadata(const std::vector<char>& elf) noexcept
+    ObjectCheck inspect(const std::vector<char>& elf) noexcept
     {
-        return readMetadata(elf.data(), elf.size());
+        return inspect(elf.data(), elf.size());
     }
 
     std::string comgrVersion() noexcept

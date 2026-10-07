@@ -4,7 +4,6 @@
 #include "solution_entry.hpp"
 #include <catch2/catch_test_macros.hpp>
 
-#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <map>
@@ -32,25 +31,6 @@ namespace
             INFO(("The build for " + targetId + " failed: " + status.message));
             REQUIRE((status.ok()));
         }
-
-        const auto metadata
-            = hj::code_object::readMetadata(built.object.bytes.data(), built.object.bytes.size());
-        {
-            INFO(("Cannot read the built code object: " + metadata.log));
-            REQUIRE((metadata.ok()));
-        }
-        const auto& kernels  = metadata.metadata.kernelNames;
-        auto        expected = solution.kernelNames;
-        expected.push_back(kernelName);
-        for(const auto& name : expected)
-        {
-            INFO(("The code object does not define " + name));
-            REQUIRE((std::find(kernels.begin(), kernels.end(), name) != kernels.end()));
-        }
-        {
-            INFO(("The code object is not version " + std::to_string(hj::jitCodeObjectVersion)));
-            REQUIRE((metadata.metadata.codeObjectVersion == hj::jitCodeObjectVersion));
-        }
     }
 
     void buildKernel(const std::string&   targetId,
@@ -73,7 +53,7 @@ namespace
     {
         const auto text = hipblaslt_jit_test::readFile(file);
         hj::GeneratedSolution solution;
-        solution.kernelNames = {kernelNameFromSource};
+        solution.kernelNames = {kernelNameFromSource, kernelName};
         solution.units.push_back({file.filename().u8string(),
                                   std::vector<uint8_t>(text.begin(), text.end()),
                                   hj::BuildUnit::Kind::Assembly,
