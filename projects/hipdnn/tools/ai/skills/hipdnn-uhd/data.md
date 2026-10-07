@@ -1,0 +1,188 @@
+# Data
+
+Everything here runs on the local machine, against the local build and GPU. Measurements are
+**converted** once into a stored dataset, and every step that trains or scores **reads** the
+dataset. The tools are hipDNN's own: `hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_gen`
+(`projects/hipdnn/tools/uhd_gen`) and `python -m uhd_gen.dataset`.
+
+## The tools
+
+- **A build for this GPU and this checkout.** An existing build directory serves only if all
+  of these hold; otherwise make a new one (never reconfigure someone else's):
+  - `GPU_TARGETS` in its `CMakeCache.txt` includes the device's arch;
+  - `CMAKE_HOME_DIRECTORY` there is the checkout's path as you see it (a build configured at
+    another mount point loads its libraries from that path and fails to start);
+  - `<build>/lib/hipdnn_plugins/engines/` holds the provider plugin and a non-empty
+    `arch_content/`;
+  - its tools are as new as the checkout's sources: no commit touching `projects/hipdnn` or
+    `dnn-providers` is newer than the tools
+    (`git log -1 --format=%ci -- projects/hipdnn dnn-providers` against the binaries' times).
+    A `hipdnn_corpus_gen` older than the checkout reads the current `corpus_gen/operations/`
+    with `no declaration for operation` or `metadata error` lines.
+- **Building.** From the checkout root (relative paths in this skill are from there), with the `hip-kernel-provider` preset (hipDNN plus the
+  provider in one build):
+  ```bash
+  cmake --preset hip-kernel-provider -B <build> -G Ninja -DGPU_TARGETS=<arch> \
+    -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
+    -DENABLE_CLANG_TIDY=OFF -DENABLE_CLANG_FORMAT=OFF
+  cmake --build <build> -- -k 0
+  ```
+  The ingestor packs rocKE kernels, so it needs `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`. If
+  configure stops with `comgr loaded '<library>' instead of the requested '<stub>'`, add
+  `-DHIPKERNELPROVIDER_ROCKE_COMGR_LIB=<library>`. Build everything (`ALL` stages the
+  descriptors); `-k 0` lets the tools finish when a test binary fails to link. The build
+  provides `hipdnn_corpus_gen`, `hipdnn_bench`, `hipdnn_uhd_features`, `hipdnn_list_engines`,
+  `hipdnn_validate_descriptors` and the engine plugins under
+  `<build>/lib/hipdnn_plugins/engines/`.
+- **uhd_gen** needs LightGBM, pandas and pyarrow. Run it from the checkout with
+  `PYTHONPATH=<checkout>/projects/hipdnn/tools`, or install it into your own environment with
+  `pip install -e projects/hipdnn/tools/uhd_gen`. Pass
+  `--feature-evaluator <build>/bin/hipdnn_uhd_features` wherever `uhd_gen` takes it.
+- **Containers.** When the tools run in a container, run it as yourself, so the store stays
+  yours to reorganise, with the GPU's devices and both groups that own them:
+  ```bash
+  docker run --rm --user $(id -u):$(id -g) --device=/dev/kfd --device=/dev/dri \
+    --group-add video --group-add render -v <checkout>:<checkout> -w <checkout> <image> ...
+  ```
+  (`--group-add` takes the GID when the image has no `render` group: `getent group render`.)
+  Check `rocminfo` inside the container lists the gfx agent before running any tool: without
+  the render group the GPU is invisible, and every engine appears to serve nothing.
+- After any CMake reconfigure of the hip-kernel-provider build, rebuild its descriptor
+  staging targets before trusting an engine result: a reconfigure empties
+  `lib/hipdnn_plugins/engines/arch_content/`, and every engine then declines every graph.
+- Plugin directories are passed as absolute paths; `hipdnn_list_engines --plugin-dir <abs>`
+  prints each registered engine as `NAME (0xHEX)`.
+- `uhd_gen` takes `--engine-id` as a signed decimal:
+  `python3 -c "v=int('0xAD075A5EA86DD563',16); print(v-(1<<64) if v>=1<<63 else v)"`.
+  `hipdnn_bench` and `hipdnn_corpus_gen` take either form.
+
+## The device
+
+A dataset holds one GPU product of one architecture. Read both off the device:
+
+```bash
+rocminfo | grep -m1 -E '^\s+Name:\s+gfx'          # the arch, e.g. gfx950
+amd-smi static --asic | grep -m1 MARKET_NAME       # the product, e.g. AMD Instinct MI355X
+```
+
+Without `amd-smi`, the product is the `Marketing Name` of the agent whose `Name` is the gfx
+arch; `rocminfo` lists CPU agents first, so the first `Marketing Name` is usually the CPU's.
+
+The device key is `<arch>-<product>`: the marketing name with `AMD`, `Instinct` and `Radeon`
+dropped, lowercased, spaces as `-` (`gfx950-mi355x`, `gfx1100-rx-7900-xtx`). Two products of
+one arch never train together. A model installs per gfx arch, so it serves every product of
+that arch; say so when the arch has other products. On a machine with several GPUs, measure
+on one product at a time (`HIP_VISIBLE_DEVICES`, or `uhd_gen generate --device`).
+
+## The local store
+
+One directory the user names (default `~/uhd-work`), laid out so a key is its path:
+
+| What | Where |
+|---|---|
+| shape sets (corpora) | `corpora/<engine>/<device>/<set>/<operation>/{graphs/, manifest.json, manifest.csv}` and `<set>/eval_slice.json` |
+| raw collections | `collections/<engine>/<device>/<revision>/<date>/<collection>/` (one `uhd_gen generate --collect-only` output each) |
+| datasets | `datasets/<engine>/<device>/<revision>/<role>[/under-<L2 id>]/` (`dataset.parquet`, `dataset_manifest.json`) |
+| models | `models/<model>/` (one `uhd_gen generate` output each) |
+| archived sets | `archive/` (a set moved here counts for nothing) |
+
+Engine names carry `:` (`hipkernel:Gfx950ConvFwd`); write it as `-` in paths. The revision
+segment is the selector revision with `/` as `-`.
+
+- **Shape sets accumulate.** Sets are numbered in order (`set-0001`, `set-0002`, ...). A new
+  set of an engine on a device passes `--exclude-corpus <set>/<operation>/manifest.json` for
+  every active set of that engine and device, and a `--seed` none of them used (each
+  `manifest.json` records its `seed`). corpus_gen walks through the excluded configurations
+  and returns new ones; together the sets are one growing set. To start a key afresh, move
+  its sets to `archive/`.
+- **Only a set that succeeded is active.** corpus_gen writes its output directory even when
+  it exits 2 (an empty set) or 1; move such a directory to `archive/` at once, so no later
+  set excludes it or trains from it.
+- **Evaluation slice.** Every set reserves a tenth of each regime once, when it is made, with
+  the skill's `scripts/eval_slice.py`: `eval_slice.py choose <set>/*/manifest.json` (every
+  operation of the set) writes `<set>/eval_slice.json`.
+  Every model trained from the set holds those graphs out (`uhd_gen generate
+  --eval-benchmarks`; several sets: `eval_slice.py holdout <slices> --out
+  eval_benchmarks.json`), and is scored and validated on them.
+- **Closed shape set.** An engine `projects/hipdnn/tools/corpus_gen/operations/engines.json`
+  lists with `coverage: pack` serves exactly its pack: corpus_gen takes the pack
+  (`--kdp-root`), there is no slice, and the model trains on every shape and is scored by
+  recall (`uhd_gen generate --recall`).
+- **Selector revision.** Every collection records the engine's `selector_revision` in its
+  `collection_manifest.json`. Rows of different revisions never train together; a revision
+  change (the engine's code changed) needs new measurements.
+- A **contribution** is one source's rows (a collection, an old generate folder, a CSV set).
+  Each row records its contribution, when it was measured, its `purpose` (`training`,
+  `holdout` or `eval`) and its corpus. Training reads `training` rows only. Rows are only
+  appended; when a shape was measured more than once, training takes the newest.
+
+## Workflow
+
+1. **What is stored**: list `datasets/`; each `dataset_manifest.json` lists every
+   contribution with its date, devices, purpose and origin. A model's
+   `models/<model>/generation/generation_manifest.json` names the dataset and contributions it
+   trained on, and its `training_problem_keys` / `eval_problem_keys`.
+2. **Measure more**: [generate.md](generate.md) makes a set, collects it and adds each collection.
+3. **Add a collection**:
+   `python -m uhd_gen.dataset add --into <dataset dir> --collection <collection dir>...
+   --corpus-id <set>`. The binding (engine, role, revision) comes from the collection; one
+   that contradicts the dataset is refused whole. Adding the same contribution again adds
+   nothing.
+4. **Convert measurements made elsewhere** with `python -m uhd_gen.dataset add --into ...`:
+
+   | Source | Flags | Notes |
+   |---|---|---|
+   | hipdnn_bench / §8.3 CSVs | `--csv <files>` with `--engine`, `--engine-id`, `--role`, `--arch`, `--selector-revision` | CSV rows carry no binding, so all of it is stated; the dataset directory names the device. `--expand-descriptor kernel.descriptor --scope-by kernel.solver_id` splits a configuration string into per-solver positional columns so a catalog ranker can tell configurations apart; `--resolve-duplicates` / `--best-column` decide repeated rows |
+   | an old generate folder | `--generation <dir>` | its measurements, converted rather than re-measured |
+   | raw collections | `--collection <dirs>` | as step 3 |
+
+   `--purpose` (default `training`) and `--corpus-id` apply to every source. Measurements made
+   for evaluation are `--purpose eval`, or they are trained on and every later evaluation on
+   them is recall.
+5. **Train from stored data**: `uhd_gen generate --dataset <dataset dir>` (every training
+   contribution) or with `--contribution <ids>`; the rest of the command is as in
+   [generate.md](generate.md). A descriptor engine's L1 trains from the dataset measured under its
+   L2 (`under-<L2 id>`).
+6. **Size from stored data**: `uhd_gen size --dataset <dataset dir> --test-set
+   <dataset>/sizing/test_set.json --create-test-set --target 0.7 --tolerance 0.10
+   --corpus-manifest <set>/<operation>/manifest.csv ... --descriptor-tree <tree> --engine ...
+   --engine-id ... --arch ... --feature-evaluator ... --output-dir <dir>` fits a learning
+   curve on a pinned test set (created once, reused every round) and writes
+   `regime_quotas.json`; `--previous <last sizing_report.json>` checks the last round's
+   prediction. Grow the set with those quotas: `hipdnn_corpus_gen ... --regime-quotas
+   <regime_quotas.json> --count 0` (the quotas alone), excluding every active set.
+
+## Published engines
+
+An engine whose measurements come from another source only converts and trains: no shape
+set, collection or validation. Its rows name no label or features, so they are stated at
+generate: `--target`, `--objective`, `--features` and, for a two-layer ranker,
+`--group-by-feature` (e.g. `kernel.solver_id`). Use numeric problem columns, the solver id
+and the expanded `kernel.descriptor.s<solver>_f<i>` slots as features.
+
+## Decision rules
+
+- Re-measure only what is not stored. A training change (features, boosting, a new
+  `uhd_gen`) retrains from the dataset; a revision change needs new measurements.
+- A refused conversion was measured under another binding; it belongs in another dataset.
+  Do not force it.
+- A CSV with no FLOP count cannot derive `tflops`: train with `--target minTimeMs
+  --objective min` (it ranks identically within a problem).
+- Never choose a device or merge two devices' rows for the user.
+
+## Report
+
+The dataset path, device, revision and role; training rows/graphs and contributions (dates,
+devices, purposes, origins); for a conversion, the contribution added (or that it was there
+already) and its counts; for training, the contributions read and the model directory.
+
+## Common failures
+
+| Symptom | Fix |
+|---|---|
+| `dataset disagrees on selector_revision` / binding differs | the source was measured under another binding: another dataset |
+| `knob addressing contradicts the dataset` | the source encodes a knob differently from the rows stored; find which is stale |
+| CSV: carries no binding | pass `--engine`, `--engine-id`, `--role`, `--arch`, `--selector-revision` |
+| generate: no training data | nothing collected or converted for that engine/device/role at that revision |
+| generate: contribution not in the dataset | it is in another revision's or role's dataset, or is holdout/eval |
+| every engine declines every graph | the descriptor staging was emptied by a reconfigure: rebuild the staging targets |
