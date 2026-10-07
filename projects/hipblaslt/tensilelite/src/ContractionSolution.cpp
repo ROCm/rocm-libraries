@@ -7184,8 +7184,12 @@ namespace TensileLite
                 *outSelectedGrid = grid;
 
             // Tree-fixup uses scalarUInt24DivideAndRemainder (dividend < 2^24, divisor < 2^16).
-            // If we exceed those bounds, fall back to DP.
-            if(reductionStrat == origami::reduction_t::tree)
+            // If we exceed those bounds, fall back to DP. Only the static fixup
+            // (storeBranchesCommon) has those divides: the dynamic work-queue
+            // path decodes work items and fixes up partial tiles with 32-bit
+            // arithmetic only, so it is exempt.
+            if(reductionStrat == origami::reduction_t::tree
+               && !streamKUsesDynamicQueue(self.sizeMapping, sk5DynamicSubMode()))
             {
                 size_t itersPerTile = problem.getItersPerTile(self.sizeMapping);
                 size_t itersPerWG   = tiles * itersPerTile / grid;
