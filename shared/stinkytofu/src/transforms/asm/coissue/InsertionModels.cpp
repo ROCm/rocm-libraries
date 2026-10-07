@@ -13,6 +13,7 @@
 #include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
+#include "stinkytofu/support/CFGTraversal.hpp"
 #include "stinkytofu/transforms/asm/PrefetchBridgePlanner.hpp"
 #include "stinkytofu/transforms/asm/VgprMsbPlanner.hpp"
 
@@ -207,8 +208,13 @@ bool waitAluRelevant(const StinkyInstruction& inst) {
 
 class WaitAluModel : public InsertionModel {
    public:
-    WaitAluModel(const PassContext& passCtx, InsertWaitAluOptions opts, InstructionPool& pool)
-        : empty_(passCtx, opts), pool_(pool) {}
+    /// `bridged` are the prefetches outside `scope` the bridge pass rewrites.
+    WaitAluModel(Function& func, const std::vector<const BasicBlock*>& scope,
+                 const PassContext& passCtx, InsertWaitAluOptions opts, InstructionPool& pool,
+                 const std::unordered_set<const StinkyInstruction*>& bridged)
+        : empty_(passCtx, opts), pool_(pool), seeds_(scope.size(), empty_) {
+        seedFromOutside(func, scope, bridged);
+    }
     const char* name() const override {
         return "WaitAlu";
     }
@@ -268,7 +274,8 @@ class WaitAluModel : public InsertionModel {
 
     std::string stats() const override {
         return "waits reused " + std::to_string(hits_) + ", screened " + std::to_string(screened_) +
-               ", computed " + std::to_string(misses_) + " in " + std::to_string(rounds_) + " rounds";
+               ", computed " + std::to_string(misses_) + " in " + std::to_string(rounds_) +
+               " rounds";
     }
 
    private:
@@ -296,12 +303,73 @@ class WaitAluModel : public InsertionModel {
     };
     static constexpr size_t kCacheEntries = 4;
 
+    // What the blocks outside the scope hand the scope's blocks: the pass's phase 1 over the
+    // whole function (a worklist in reverse post-order; a block goes back on it when its
+    // entry widens), every block in its IR order. The scope's own order only reaches its
+    // entries through an outer loop, so its IR order stands in for the candidates there.
+    void seedFromOutside(Function& func, const std::vector<const BasicBlock*>& scope,
+                         const std::unordered_set<const StinkyInstruction*>& bridged) {
+        std::unordered_map<const BasicBlock*, size_t> inScope;
+        for (size_t s = 0; s < scope.size(); ++s) inScope[scope[s]] = s;
+        bool outside = false;
+        for (const BasicBlock* bb : scope)
+            for (const BasicBlock* pred : bb->getPredecessors())
+                outside |= inScope.count(pred) == 0;
+        if (!outside) return;
+
+        // The pass's block order (BBIndexAnalysis).
+        std::vector<const BasicBlock*> rpo;
+        std::unordered_map<const BasicBlock*, size_t> index;
+        traverseCFGInRPO(func, [&](BasicBlock* bb) {
+            index[bb] = rpo.size();
+            rpo.push_back(bb);
+        });
+
+        std::vector<Sequence> seqs;
+        seqs.reserve(rpo.size());
+        for (const BasicBlock* bb : rpo) {
+            Sequence seq;
+            for (const StinkyInstruction* inst : irOrder(*bb)) {
+                if (bridged.count(inst) != 0) inst = pool_.flatBridge(*inst);
+                if (waitAluRelevant(*inst)) seq.push_back(inst);
+            }
+            seqs.push_back(std::move(seq));
+        }
+        std::vector<WaitAluTracker> entry(rpo.size(), empty_);
+        std::vector<WaitAluTracker> exit(rpo.size(), empty_);
+        std::vector<size_t> work(rpo.size());
+        for (size_t b = 0; b < rpo.size(); ++b) work[b] = rpo.size() - 1 - b;
+        std::vector<bool> queued(rpo.size(), true);
+        while (!work.empty()) {
+            const size_t b = work.back();
+            work.pop_back();
+            queued[b] = false;
+            exit[b] = entry[b];
+            for (const StinkyInstruction* inst : seqs[b]) (void)exit[b].step(*inst);
+            for (const BasicBlock* succ : rpo[b]->getSuccessors()) {
+                auto it = index.find(succ);
+                if (it == index.end() || !entry[it->second].merge(exit[b])) continue;
+                if (!queued[it->second]) {
+                    queued[it->second] = true;
+                    work.push_back(it->second);
+                }
+            }
+        }
+        for (size_t b = 0; b < rpo.size(); ++b) {
+            if (inScope.count(rpo[b]) != 0) continue;
+            for (const BasicBlock* succ : rpo[b]->getSuccessors()) {
+                auto it = inScope.find(succ);
+                if (it != inScope.end()) (void)seeds_[it->second].merge(exit[b]);
+            }
+        }
+    }
+
     Waits computeWaits(const PredictedBlock& block) {
         Waits waits_;
         const size_t n = block.blocks.size();
         std::unordered_map<const BasicBlock*, size_t> index;
         for (size_t b = 0; b < n; ++b) index[block.blocks[b]] = b;
-        std::vector<WaitAluTracker> entry(n, empty_);
+        std::vector<WaitAluTracker> entry = seeds_;
         constexpr int kMaxRounds = 32;
         for (int round = 0; round < kMaxRounds; ++round) {
             // A round that widens no entry walked every block from its final entry state, so
@@ -336,6 +404,8 @@ class WaitAluModel : public InsertionModel {
 
     WaitAluTracker empty_;
     InstructionPool& pool_;
+    /// Per scope block, the entry state its predecessors outside the scope give it.
+    std::vector<WaitAluTracker> seeds_;
     std::list<Entry> cache_;
     size_t hits_ = 0;
     size_t misses_ = 0;
@@ -416,9 +486,12 @@ std::unique_ptr<InsertionModel> makeBridgeModel(Function& func,
     return std::make_unique<BridgeModel>(func, scope, required, pool);
 }
 
-std::unique_ptr<InsertionModel> makeWaitAluModel(const PassContext& passCtx,
+std::unique_ptr<InsertionModel> makeWaitAluModel(Function& func,
+                                                 const std::vector<const BasicBlock*>& scope,
+                                                 const PassContext& passCtx,
                                                  InsertWaitAluOptions opts, InstructionPool& pool) {
-    return std::make_unique<WaitAluModel>(passCtx, opts, pool);
+    return std::make_unique<WaitAluModel>(func, scope, passCtx, opts, pool,
+                                          std::unordered_set<const StinkyInstruction*>{});
 }
 
 std::unique_ptr<InsertionModel> makeCoexecNopModel(Function& func, const HWModel& hw,
@@ -511,10 +584,29 @@ InsertionPipeline::InsertionPipeline(Function& func, std::vector<const BasicBloc
     const HWModel& hw = passCtx.getHWModel();
     models_.push_back(std::make_unique<VgprMsbModel>(config.msbMode, *pool_));
     if (config.esm2) {
-        if (getMCIDByUOp(GFX::flat_prefetch_b8, arch) != nullptr)
+        // The prefetches the bridge pass rewrites outside the scope, for the scope's order
+        // as it is; what sits before the loop reaches InsertWaitAlu that way.
+        std::unordered_set<const StinkyInstruction*> bridged;
+        if (getMCIDByUOp(GFX::flat_prefetch_b8, arch) != nullptr) {
             models_.push_back(
                 std::make_unique<BridgeModel>(func, scope_, hw.waitHide.vmVsrcBridge, *pool_));
-        models_.push_back(std::make_unique<WaitAluModel>(passCtx, config.waitAlu, *pool_));
+            if (hw.waitHide.vmVsrcBridge > 0) {
+                std::vector<Sequence> orders;
+                for (const BasicBlock& bb : func) orders.push_back(irOrder(bb));
+                std::vector<BlockOrder> layout;
+                size_t b = 0;
+                for (const BasicBlock& bb : func) layout.push_back({&bb, &orders[b++]});
+                bridged = planPrefetchBridge(layout, hw.waitHide.vmVsrcBridge);
+                std::unordered_set<const BasicBlock*> inScope(scope_.begin(), scope_.end());
+                for (const BasicBlock& bb : func)
+                    if (inScope.count(&bb) != 0)
+                        for (const IRBase& node : bb)
+                            if (const auto* inst = dyn_cast<StinkyInstruction>(&node))
+                                bridged.erase(inst);
+            }
+        }
+        models_.push_back(
+            std::make_unique<WaitAluModel>(func, scope_, passCtx, config.waitAlu, *pool_, bridged));
     }
     models_.push_back(std::make_unique<CoexecNopModel>(func, hw, *pool_));
 }

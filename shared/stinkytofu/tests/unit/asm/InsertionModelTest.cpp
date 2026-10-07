@@ -80,6 +80,10 @@ struct Case {
     std::function<std::unique_ptr<Pass>()> pass;
     ModelFactory model;
     VgprMsbMode msbMode = VgprMsbMode::None;
+    /// The input itself instead of a filecheck file.
+    const char* text = nullptr;
+    /// Only the block with this label is the model's scope; every block is otherwise.
+    const char* scopeLabel = nullptr;
 };
 
 // Instructions the pass adds that the model leaves out on purpose: the mode2 enable at the
@@ -89,8 +93,11 @@ bool ignored(const StinkyInstruction& inst) {
 }
 
 void checkCase(const Case& c) {
-    const std::string text = readFilecheck(c.file);
+    const std::string text = c.text != nullptr ? c.text : readFilecheck(c.file);
     ASSERT_FALSE(text.empty()) << c.file;
+    auto inScope = [&](const BasicBlock& bb) {
+        return c.scopeLabel == nullptr || bb.getLabel() == c.scopeLabel;
+    };
     MultiParseResult forPass = parseAllSourceStringsWithDiagnostics(text);
     MultiParseResult forModel = parseAllSourceStringsWithDiagnostics(text);
     ASSERT_FALSE(forPass.hasErrors()) << c.file;
@@ -126,6 +133,7 @@ void checkCase(const Case& c) {
         std::vector<const BasicBlock*> scope;
         std::vector<std::vector<const StinkyInstruction*>> orders;
         for (BasicBlock& bb : modelFunc) {
+            if (!inScope(bb)) continue;
             scope.push_back(&bb);
             auto& order = orders.emplace_back();
             for (IRBase& node : bb)
@@ -141,6 +149,7 @@ void checkCase(const Case& c) {
 
         size_t b = 0;
         for (BasicBlock& bb : passFunc) {
+            if (!inScope(bb)) continue;
             ASSERT_LT(b, predicted.seqs.size()) << c.file << " @" << name;
             std::vector<std::string> real, model;
             for (IRBase& node : bb)
@@ -165,8 +174,9 @@ ModelFactory vgprMsb(VgprMsbMode mode) {
 }
 
 ModelFactory waitAlu(InsertWaitAluOptions opts) {
-    return [opts](Function&, const std::vector<const BasicBlock*>&, const PassContext& ctx,
-                  InstructionPool& pool) { return makeWaitAluModel(ctx, opts, pool); };
+    return
+        [opts](Function& func, const std::vector<const BasicBlock*>& scope, const PassContext& ctx,
+               InstructionPool& pool) { return makeWaitAluModel(func, scope, ctx, opts, pool); };
 }
 
 std::function<std::unique_ptr<Pass>()> waitAluPass(InsertWaitAluOptions opts) {
@@ -207,6 +217,30 @@ TEST(InsertionModelTest, WaitAluMatchesPass) {
     checkCase({"InsertWaitAluPass_xdl_hide_test.stir", false, waitAluPass(vsrc), waitAlu(vsrc)});
     checkCase({"InsertWaitAluPass_xdl_next_wmma_test.stir", false, waitAluPass(nextWmma),
                waitAlu(nextWmma)});
+}
+
+// The scope is the loop alone, yet what runs before it still decides its waits: the load
+// in front of the loop reads v3, which the loop's first VALU overwrites.
+TEST(InsertionModelTest, WaitAluSeesWhatRunsBeforeTheLoop) {
+    const InsertWaitAluOptions vsrc{true, false, false};
+    Case c{"inline", false, waitAluPass(vsrc), waitAlu(vsrc)};
+    c.text = R"(
+st.func @before_loop() {
+^entry:
+  v10 = "st.buffer_load_b32"(v3)
+  Successors: ^label_loop
+^label_loop:
+  v3 = "st.v_mov_b32"(v4)
+  s10, SCC0 = "st.s_add_i32"(s10, -1)
+  SCC0 = "st.s_cmp_eq_u32"(s10, 0)
+  "st.s_cbranch_scc0"(label_loop, SCC0)
+  Successors: ^label_loop, ^label_end
+^label_end:
+  "st.s_endpgm"()
+}
+)";
+    c.scopeLabel = "label_loop";
+    checkCase(c);
 }
 
 TEST(InsertionModelTest, CoexecNopMatchesPass) {

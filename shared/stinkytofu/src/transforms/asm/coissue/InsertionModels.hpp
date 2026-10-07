@@ -125,7 +125,9 @@ std::unique_ptr<InsertionModel> makeVgprMsbModel(VgprMsbMode mode, InstructionPo
 std::unique_ptr<InsertionModel> makeBridgeModel(Function& func,
                                                 const std::vector<const BasicBlock*>& scope,
                                                 int required, InstructionPool& pool);
-std::unique_ptr<InsertionModel> makeWaitAluModel(const PassContext& passCtx,
+std::unique_ptr<InsertionModel> makeWaitAluModel(Function& func,
+                                                 const std::vector<const BasicBlock*>& scope,
+                                                 const PassContext& passCtx,
                                                  InsertWaitAluOptions opts, InstructionPool& pool);
 std::unique_ptr<InsertionModel> makeCoexecNopModel(Function& func, const HWModel& hw,
                                                    InstructionPool& pool);
