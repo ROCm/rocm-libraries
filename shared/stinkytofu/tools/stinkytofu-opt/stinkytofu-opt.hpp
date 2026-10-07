@@ -415,7 +415,8 @@ const std::vector<PassInfo> availablePasses = {
      }},
     {"CoissueAuditPass",
      [](const std::vector<std::string>& args) {
-         return createCoissueAuditPass(hasPassArg(args, "timeline"), passArgValue(args, "trace"));
+         return createCoissueAuditPass(hasPassArg(args, "timeline"), passArgValue(args, "trace"),
+                                       hasPassArg(args, "compare"));
      }},
     {"RaiseVgprMsbPass",
      [](const std::vector<std::string>& args) {

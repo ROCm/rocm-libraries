@@ -45,9 +45,13 @@ STINKYTOFU_EXPORT std::unique_ptr<Pass> createCoissueRepairPass(CoissueRepairOpt
 /// Debug pass that reports the co-issue timing of the code as it stands. With
 /// `printTimeline`, it prints the steady trip of every innermost loop that has matrix ops,
 /// under each profile of PassFeatureConfig::CoissueFeatures::profileSet; with
-/// `traceProfile`, also the issue cycle of every instruction under that profile.
+/// `traceProfile`, also the issue cycle of every instruction under that profile. With
+/// `compare`, run after the inserting passes, it compares each loop with what
+/// CoissueRepairPass (audit option) predicted they would leave, and reports the counts and
+/// the first mismatch as a remark.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createCoissueAuditPass(bool printTimeline = false,
-                                                               std::string traceProfile = "");
+                                                               std::string traceProfile = "",
+                                                               bool compare = false);
 
 /// The Coissue* module options, as the pass reads them.
 STINKYTOFU_EXPORT PassFeatureConfig::CoissueFeatures coissueFeaturesFromModuleOptions(

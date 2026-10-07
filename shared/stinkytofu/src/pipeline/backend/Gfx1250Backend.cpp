@@ -41,6 +41,7 @@
 #include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
 #include "stinkytofu/transforms/asm/AsmMovePropagationPass.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
+#include "stinkytofu/transforms/asm/CoissueRepairPass.hpp"
 #include "stinkytofu/transforms/asm/EpilogueStoreSinkPass.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 #include "stinkytofu/transforms/asm/FlattenCalleesPass.hpp"
@@ -138,6 +139,16 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
     auto debugStreams = createDebugOutputStreams(moduleOptions);
 
     configureModuleInstrumentations(mpm, moduleOptions, "module", debugStreams, &module);
+
+    // Insertion-aware co-issue repair (CoissueRepairMode, off by default). A bad knob is an
+    // error even when the mode is off.
+    const PassFeatureConfig::CoissueFeatures coissue = coissueFeaturesFromModuleOptions(moduleOptions);
+    if (auto err = validateCoissueFeatures(coissue, module.getArch())) report_fatal_error(*err);
+    const bool coissueRepair = runScheduler && coissue.repairMode != "off";
+    // StinkyTofuDebugPass='CoissueAuditPass' compares the repair's predictions with what the
+    // passes after it really insert.
+    const bool coissueAudit =
+        coissueRepair && moduleOptions.DebugPass.find("CoissueAuditPass") != std::string::npos;
 
     if (runScheduler || moduleOptions.EnableESM2) {
         // strip delay_alu before scheduling (whole-kernel: entry + callable
@@ -241,8 +252,9 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
             // WMMA that consumes its loads, so that WMMA has nothing to issue behind
             // it. Repair moves this many non-WMMA instructions past each anchor to
             // refill those slots, without changing any wait immediate.
+            // CoissueRepairPass, when on, takes over that job after the clone split.
             const int waitRepairSlotsAfterAnchor = 1;
-            if (runScheduler && waitRepairSlotsAfterAnchor > 0) {
+            if (runScheduler && waitRepairSlotsAfterAnchor > 0 && !coissueRepair) {
                 innerPM.addPass(createWaitAwareScheduleRepairPass(waitRepairSlotsAfterAnchor));
             }
 
@@ -309,6 +321,19 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
 
     mpm.addPass(createFunctionToModuleAdaptor(createAsmMovePropagationPass()));
 
+    // Co-issue repair (entry only): by now every pass that changes the loops' shape has run
+    // and the memory waits are final; what follows are exactly the passes it predicts.
+    if (coissueRepair) {
+        PassManager pm = makeEntryPM(module, debugStreams);
+        PassFeatureConfig config;
+        config.coissue = coissue;
+        pm.setPassFeatureConfig(config);
+        CoissueRepairOptions options;
+        options.audit = coissueAudit;
+        pm.addPass(createCoissueRepairPass(options));
+        mpm.addPass(createMainOnlyAdaptor(std::move(pm)));
+    }
+
     // MSB is materialized for the entry function and every callable function
     // (each function owns its VGPR MSB hardware state).
     mpm.addPass(createFunctionToModuleAdaptor(createInsertVgprMsbPass()));
@@ -327,6 +352,13 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
 
     if (runScheduler) {
         mpm.addPass(createFunctionToModuleAdaptor(createInsertDelayAluPass(/*minWavesPerSimd=*/2)));
+    }
+
+    if (coissueAudit) {
+        PassManager pm = makeEntryPM(module, debugStreams);
+        pm.addPass(createCoissueAuditPass(/*printTimeline=*/false, /*traceProfile=*/"",
+                                          /*compare=*/true));
+        mpm.addPass(createMainOnlyAdaptor(std::move(pm)));
     }
 
     {
