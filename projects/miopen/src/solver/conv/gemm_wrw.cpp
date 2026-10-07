@@ -152,8 +152,9 @@ bool GemmWrw1x1_stride1::IsSlow(const ExecutionContext& context,
     const std::string& arch        = context.GetStream().GetDeviceName();
     const std::set<std::string> mi = {"gfx942", "gfx955"};
     const bool is_mi               = mi.find(arch) != mi.end();
-    const bool is_gfx11            = StartsWith(arch, "gfx11");
-    const bool is_gfx12            = StartsWith(arch, "gfx12");
+    const bool is_gfx117           = StartsWith(arch, "gfx117");
+    const bool is_gfx11            = StartsWith(arch, "gfx11") && !is_gfx117;
+    const bool is_gfx12            = StartsWith(arch, "gfx12") || is_gfx117;
 
     auto b                  = problem.GetBatchSize();
     auto s                  = problem.GetOutHeight() * problem.GetOutWidth();
@@ -496,8 +497,9 @@ bool GemmWrwUniversal::IsSlow(const ExecutionContext& context,
     const std::string& arch        = context.GetStream().GetDeviceName();
     const std::set<std::string> mi = {"gfx942", "gfx955"};
     const bool is_mi               = mi.find(arch) != mi.end();
-    const bool is_gfx11            = StartsWith(arch, "gfx11");
-    const bool is_gfx12            = StartsWith(arch, "gfx12");
+    const bool is_gfx117           = StartsWith(arch, "gfx117");
+    const bool is_gfx11            = StartsWith(arch, "gfx11") && !is_gfx117;
+    const bool is_gfx12            = StartsWith(arch, "gfx12") || is_gfx117;
 
     auto b                 = problem.GetBatchSize();
     auto s                 = problem.GetOutHeight() * problem.GetOutWidth();

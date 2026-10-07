@@ -74,7 +74,7 @@ const auto& GetTestParams()
 {
     static const auto params = [] {
         auto p =
-            miopen::unit_tests::UnitTestConvSolverParams(Gpu::gfx94X | Gpu::gfx950 | Gpu::gfx120X);
+            miopen::unit_tests::UnitTestConvSolverParams(Gpu::gfx94X | Gpu::gfx950 | Gpu::gfx120X | Gpu::gfx117X);
         return p;
     }();
     return params;

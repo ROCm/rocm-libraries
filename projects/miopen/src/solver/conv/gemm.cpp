@@ -222,8 +222,9 @@ bool GemmFwd1x1_0_2::IsSlow(const ExecutionContext& context,
     const std::string& arch        = context.GetStream().GetDeviceName();
     const std::set<std::string> mi = {"gfx942", "gfx955"};
     const bool is_mi               = mi.find(arch) != mi.end();
-    const bool is_gfx11            = StartsWith(arch, "gfx11");
-    const bool is_gfx12            = StartsWith(arch, "gfx12");
+    const bool is_gfx117           = StartsWith(arch, "gfx117");
+    const bool is_gfx11            = StartsWith(arch, "gfx11") && !is_gfx117;
+    const bool is_gfx12            = StartsWith(arch, "gfx12") || is_gfx117;
 
     auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
     auto c                      = problem.GetInChannels() + problem.GetOutChannels();
@@ -680,8 +681,9 @@ bool GemmFwd1x1_0_1::IsSlow(const ExecutionContext& context,
     const std::string& arch        = context.GetStream().GetDeviceName();
     const std::set<std::string> mi = {"gfx942", "gfx955"};
     const bool is_mi               = mi.find(arch) != mi.end();
-    const bool is_gfx11            = StartsWith(arch, "gfx11");
-    const bool is_gfx12            = StartsWith(arch, "gfx12");
+    const bool is_gfx117           = StartsWith(arch, "gfx117");
+    const bool is_gfx11            = StartsWith(arch, "gfx11") && !is_gfx117;
+    const bool is_gfx12            = StartsWith(arch, "gfx12") || is_gfx117;
 
     auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
     auto c                      = problem.GetInChannels() + problem.GetOutChannels();
@@ -998,8 +1000,9 @@ bool GemmFwdRest::IsSlow(const ExecutionContext& context, const ProblemDescripti
     const std::string& arch        = context.GetStream().GetDeviceName();
     const std::set<std::string> mi = {"gfx942", "gfx955"};
     const bool is_mi               = mi.find(arch) != mi.end();
-    const bool is_gfx11            = StartsWith(arch, "gfx11");
-    const bool is_gfx12            = StartsWith(arch, "gfx12");
+    const bool is_gfx117           = StartsWith(arch, "gfx117");
+    const bool is_gfx11            = StartsWith(arch, "gfx11") && !is_gfx117;
+    const bool is_gfx12            = StartsWith(arch, "gfx12") || is_gfx117;
 
     auto b                      = problem.GetBatchSize();
     auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
