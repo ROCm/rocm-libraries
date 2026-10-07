@@ -391,9 +391,9 @@ exit has drain wait + skip path.
 backend pipeline. It checks SIA0 barrier reuse and the required SIA4 entry pair
 for three layouts, with iteration cloning enabled and disabled, and assembles all
 12 generated kernels. The common GPU runner executes the YAML with full output
-validation, 288 warmups, and 288 timed enqueues per problem and solution. The
-YAML is selected on gfx1250 and gfx1250-strict and skipped on other supported
-architectures. Independent process reruns are part of manual hang validation.
+validation. The YAML is selected on gfx1250 and gfx1250-strict and skipped on
+other supported architectures. Independent process reruns are part of manual
+hang validation.
 
 ---
 
