@@ -1,7 +1,8 @@
 # fast_check SDC hunt
 
-An on-demand recipe for chasing intermittent silent data corruption (SDC), such as
-ROCM-31901 and ROCM-31905, with fast_check. fast_check checks every element of D
+`fast_check` provides an on-demand recipe for chasing intermittent silent data corruption (SDC), such as
+[ROCM-31901](https://amd-hub.atlassian.net/browse/ROCM-31901) and
+[ROCM-31905](https://amd-hub.atlassian.net/browse/ROCM-31905). `fast_check` checks every element of D
 on every launch and names the bad elements, solution and iteration, which makes it
 the cheapest way to tell whether an environment change makes a failure appear.
 
