@@ -28,7 +28,7 @@ instance list is untouched.
 | aiter_kernels_commit | `8253efc4059516f492df597b80ce5311e9fda8bd` |
 | rocm_version | `7.13.0` |
 | generic_target_shim | `chipset=gfx1200 flydsl_gpu_arch=gfx1200` |
-| inputs_sha256 | `7e9e7ba0d22e0996571ad2fc425664b93c135c43870a4d0d2c8e134be9f7316e` |
+| inputs_sha256 | `881a584cba10d799e6c2271544b768ac5a934888f7b45bbe8d003d3794cc02f1` |
 
 ## Instances
 
@@ -53,8 +53,8 @@ changes when the object does. The full record is `gfx12-generic/manifest.json`.
 | `sdpa_bf16_d256_causal0_bm64_bn32_bias1_pair1` | 100 | 193 | 49664 | `3d595c6dfe2e7350` |
 | `sdpa_bf16_d256_causal1_bm64_bn32_pair1` | 100 | 192 | 49664 | `ec17661e32af925f` |
 | `sdpa_bf16_d256_causal1_bm64_bn32_bias1_pair1` | 100 | 194 | 49664 | `a09db6d2cff8d958` |
-| `sdpa_bf16_dgeneric_causal0_bm128_bn32_dmax64` | 40 | 121 | 8704 | `bb1f9cecfbb81d8a` |
-| `sdpa_bf16_dgeneric_causal1_bm128_bn32_dmax64` | 40 | 122 | 8704 | `b21d6d8f5f33430f` |
+| `sdpa_bf16_dgeneric_causal0_bm64_bn32_dmax64` | 40 | 121 | 8704 | `606cbe5f79a8a99e` |
+| `sdpa_bf16_dgeneric_causal1_bm64_bn32_dmax64` | 40 | 122 | 8704 | `832ac32eb4170f3f` |
 | `sdpa_bf16_dgeneric_causal0_bm128_bn32_dmax96` | 30 | 160 | 12800 | `a6fa30a13371b5d5` |
 | `sdpa_bf16_dgeneric_causal1_bm128_bn32_dmax96` | 30 | 161 | 12800 | `ea98c0e8e47040c9` |
 | `sdpa_bf16_dgeneric_causal0_bm128_bn32_dmax128` | 20 | 187 | 16896 | `7107b388be3d1c17` |
@@ -101,8 +101,8 @@ changes when the object does. The full record is `gfx12-generic/manifest.json`.
 | `sdpa_f16_d256_causal0_bm64_bn32_bias1_pair1` | 100 | 189 | 49664 | `e2368416de555340` |
 | `sdpa_f16_d256_causal1_bm64_bn32_pair1` | 100 | 188 | 49664 | `15ea1d53186cae76` |
 | `sdpa_f16_d256_causal1_bm64_bn32_bias1_pair1` | 100 | 190 | 49664 | `6b24e72e4a0d994e` |
-| `sdpa_f16_dgeneric_causal0_bm128_bn32_dmax64` | 40 | 116 | 8704 | `d0104bfa21004b57` |
-| `sdpa_f16_dgeneric_causal1_bm128_bn32_dmax64` | 40 | 117 | 8704 | `9622bc4b61412d15` |
+| `sdpa_f16_dgeneric_causal0_bm64_bn32_dmax64` | 40 | 115 | 8704 | `6da0815ded7f7c1a` |
+| `sdpa_f16_dgeneric_causal1_bm64_bn32_dmax64` | 40 | 116 | 8704 | `da69d3fe06a83e13` |
 | `sdpa_f16_dgeneric_causal0_bm128_bn32_dmax96` | 30 | 156 | 12800 | `19fe81cfab8a9d13` |
 | `sdpa_f16_dgeneric_causal1_bm128_bn32_dmax96` | 30 | 157 | 12800 | `5f1104fc29fe50c9` |
 | `sdpa_f16_dgeneric_causal0_bm128_bn32_dmax128` | 20 | 191 | 16896 | `d525cb312a30f930` |

@@ -215,13 +215,14 @@ def sdpa_prefill_schedule(head_dim: int, causal: int, has_bias: int) -> tuple:
 # runs at its largest head's cost, so the tiers are cut where the odd head dims
 # models use fall: up to 64 (40, 48, 56), 96 (72, 80, 88), 128, 160 (136-160),
 # 224 (168-224) and 256. Each maps to its schedule (block_m, dv_split, hd_pair):
-# above 128 the waves work in head-dim pairs, and the 256 one also splits its
+# up to 64 a 64-row tile, as for the specialized head_dim 64 (at 96 and 128 it
+# measured slower or mixed); above 128 the waves work in head-dim pairs, and the 256 one also splits its
 # columns across two workgroups, because its masked loads on top of the d256
 # schedule do not fit the register file in one, which is why 224 is a tier of its
 # own. Below the specialized tier in priority, and each narrower one above the
 # wider, so the narrowest object that serves a head is the one chosen.
 SDPA_GENERIC_HEAD_DIM_MAX = {
-    64: (128, 1, 0),
+    64: (64, 1, 0),
     96: (128, 1, 0),
     128: (128, 1, 0),
     160: (64, 1, 1),

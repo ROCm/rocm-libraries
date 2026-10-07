@@ -9,7 +9,7 @@
     "aiter_kernels_commit": "8253efc4059516f492df597b80ce5311e9fda8bd",
     "rocm_version": "7.13.0",
     "generic_target_shim": "chipset=gfx1100",
-    "inputs_sha256": "c992263a196c80f6f1ae640e3c8a7c62e9c37bc255dcbf7ba8f72b69368cb6d8"
+    "inputs_sha256": "bfe023e503df8b89bfcc5b8d6ef2d7954eb19b50e03958a80be3427c789640ed"
   },
   "instances": [
     {
@@ -1229,7 +1229,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_bf16_dgeneric_causal0_bm128_bn32_dmax64",
+      "name": "sdpa_bf16_dgeneric_causal0_bm64_bn32_dmax64",
       "op": "sdpa",
       "dtype": "bf16",
       "priority": 40,
@@ -1237,7 +1237,7 @@
       "knobs": {
         "head_dim": null,
         "causal": 0,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
         "dv_split": 1,
         "has_bias": 0,
@@ -1247,7 +1247,7 @@
         "hd_pair": 0
       },
       "block": [
-        256,
+        128,
         1,
         1
       ],
@@ -1290,10 +1290,10 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_bf16_dgeneric_causal0_bm128_bn32_dmax64.hsaco",
+      "file": "sdpa_bf16_dgeneric_causal0_bm64_bn32_dmax64.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
-      "bytes": 17472,
-      "sha256": "5feae5f7e0871fa8f5a8c79f6090276d55ca07f45b0aa9c74c96d372a569fc4f",
+      "bytes": 17216,
+      "sha256": "f95b94fc6fedda628bc45e73fafcd777c2a3dbff5c0a8db9437b2a81d344f0f9",
       "kernarg_segment_size": 248,
       "lds_bytes": 8704,
       "vgprs": 148,
@@ -1305,7 +1305,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_bf16_dgeneric_causal1_bm128_bn32_dmax64",
+      "name": "sdpa_bf16_dgeneric_causal1_bm64_bn32_dmax64",
       "op": "sdpa",
       "dtype": "bf16",
       "priority": 40,
@@ -1313,7 +1313,7 @@
       "knobs": {
         "head_dim": null,
         "causal": 1,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
         "dv_split": 1,
         "has_bias": 0,
@@ -1323,7 +1323,7 @@
         "hd_pair": 0
       },
       "block": [
-        256,
+        128,
         1,
         1
       ],
@@ -1366,10 +1366,10 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_bf16_dgeneric_causal1_bm128_bn32_dmax64.hsaco",
+      "file": "sdpa_bf16_dgeneric_causal1_bm64_bn32_dmax64.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
-      "bytes": 17472,
-      "sha256": "f7aec5284ceb23327b4e44fce3966d6315eb4b6740eff47ec121ccc6c0f662fc",
+      "bytes": 17344,
+      "sha256": "19e6e7ac5dd6c516e4b83fc89dd10d3c95a64cd4910436b7e3084bc9a73c9aae",
       "kernarg_segment_size": 248,
       "lds_bytes": 8704,
       "vgprs": 168,
@@ -5277,7 +5277,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_f16_dgeneric_causal0_bm128_bn32_dmax64",
+      "name": "sdpa_f16_dgeneric_causal0_bm64_bn32_dmax64",
       "op": "sdpa",
       "dtype": "f16",
       "priority": 40,
@@ -5285,7 +5285,7 @@
       "knobs": {
         "head_dim": null,
         "causal": 0,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
         "dv_split": 1,
         "has_bias": 0,
@@ -5295,7 +5295,7 @@
         "hd_pair": 0
       },
       "block": [
-        256,
+        128,
         1,
         1
       ],
@@ -5338,10 +5338,10 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_f16_dgeneric_causal0_bm128_bn32_dmax64.hsaco",
+      "file": "sdpa_f16_dgeneric_causal0_bm64_bn32_dmax64.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
-      "bytes": 14912,
-      "sha256": "d2e5d5ba10c759d7dbb09ef16b482d6c43830d5f0780b2a2176d56827da15b5d",
+      "bytes": 14784,
+      "sha256": "eb78a665f459cb7d82de6666cfac88e75b7b3efc90934030e1b2a32f3812a026",
       "kernarg_segment_size": 248,
       "lds_bytes": 8704,
       "vgprs": 156,
@@ -5353,7 +5353,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_f16_dgeneric_causal1_bm128_bn32_dmax64",
+      "name": "sdpa_f16_dgeneric_causal1_bm64_bn32_dmax64",
       "op": "sdpa",
       "dtype": "f16",
       "priority": 40,
@@ -5361,7 +5361,7 @@
       "knobs": {
         "head_dim": null,
         "causal": 1,
-        "block_m": 128,
+        "block_m": 64,
         "block_n": 32,
         "dv_split": 1,
         "has_bias": 0,
@@ -5371,7 +5371,7 @@
         "hd_pair": 0
       },
       "block": [
-        256,
+        128,
         1,
         1
       ],
@@ -5414,10 +5414,10 @@
         {"name": "head_dim_rt", "kind": "by_value", "size": 4, "offset": 240},
         {"name": "v_group", "kind": "by_value", "size": 4, "offset": 244}
       ],
-      "file": "sdpa_f16_dgeneric_causal1_bm128_bn32_dmax64.hsaco",
+      "file": "sdpa_f16_dgeneric_causal1_bm64_bn32_dmax64.hsaco",
       "symbol": "flash_attn_func_gfx1151_kernel_0",
-      "bytes": 15040,
-      "sha256": "ef0c64edcb2275ef39bdf629db6883733869240610dcf502db6e119c16aec9fe",
+      "bytes": 14912,
+      "sha256": "45be7f2771528f15cdcba4bc76a4ce34e4953e1bbd8352d906f83ad2b93acbbf",
       "kernarg_segment_size": 248,
       "lds_bytes": 8704,
       "vgprs": 165,

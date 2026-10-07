@@ -28,7 +28,7 @@ instance list is untouched.
 | aiter_kernels_commit | `8253efc4059516f492df597b80ce5311e9fda8bd` |
 | rocm_version | `7.13.0` |
 | generic_target_shim | `chipset=gfx1100` |
-| inputs_sha256 | `c992263a196c80f6f1ae640e3c8a7c62e9c37bc255dcbf7ba8f72b69368cb6d8` |
+| inputs_sha256 | `bfe023e503df8b89bfcc5b8d6ef2d7954eb19b50e03958a80be3427c789640ed` |
 
 ## Instances
 
@@ -53,8 +53,8 @@ changes when the object does. The full record is `gfx11-generic/manifest.json`.
 | `sdpa_bf16_d256_causal0_bm64_bn32_bias1_pair1` | 100 | 256 | 49664 | `e6f5a2063a65d7ec` |
 | `sdpa_bf16_d256_causal1_bm64_bn32_pair1` | 100 | 256 | 49664 | `b8b8f1546601b7bb` |
 | `sdpa_bf16_d256_causal1_bm64_bn32_bias1_pair1` | 100 | 256 | 49664 | `3b7310180c45fcc9` |
-| `sdpa_bf16_dgeneric_causal0_bm128_bn32_dmax64` | 40 | 148 | 8704 | `5feae5f7e0871fa8` |
-| `sdpa_bf16_dgeneric_causal1_bm128_bn32_dmax64` | 40 | 168 | 8704 | `f7aec5284ceb2332` |
+| `sdpa_bf16_dgeneric_causal0_bm64_bn32_dmax64` | 40 | 148 | 8704 | `f95b94fc6fedda62` |
+| `sdpa_bf16_dgeneric_causal1_bm64_bn32_dmax64` | 40 | 168 | 8704 | `19e6e7ac5dd6c516` |
 | `sdpa_bf16_dgeneric_causal0_bm128_bn32_dmax96` | 30 | 222 | 12800 | `ddeb886990ba4f0f` |
 | `sdpa_bf16_dgeneric_causal1_bm128_bn32_dmax96` | 30 | 223 | 12800 | `e506438ebb9028ac` |
 | `sdpa_bf16_dgeneric_causal0_bm128_bn32_dmax128` | 20 | 249 | 16896 | `9ab4aa362fbdb7b3` |
@@ -101,8 +101,8 @@ changes when the object does. The full record is `gfx11-generic/manifest.json`.
 | `sdpa_f16_d256_causal0_bm64_bn32_bias1_pair1` | 100 | 256 | 49664 | `eeff5273237fc99e` |
 | `sdpa_f16_d256_causal1_bm64_bn32_pair1` | 100 | 256 | 49664 | `fa2ceb46a457694b` |
 | `sdpa_f16_d256_causal1_bm64_bn32_bias1_pair1` | 100 | 256 | 49664 | `5d4023a6c67c306e` |
-| `sdpa_f16_dgeneric_causal0_bm128_bn32_dmax64` | 40 | 156 | 8704 | `d2e5d5ba10c759d7` |
-| `sdpa_f16_dgeneric_causal1_bm128_bn32_dmax64` | 40 | 165 | 8704 | `ef0c64edcb2275ef` |
+| `sdpa_f16_dgeneric_causal0_bm64_bn32_dmax64` | 40 | 156 | 8704 | `eb78a665f459cb7d` |
+| `sdpa_f16_dgeneric_causal1_bm64_bn32_dmax64` | 40 | 165 | 8704 | `45be7f2771528f15` |
 | `sdpa_f16_dgeneric_causal0_bm128_bn32_dmax96` | 30 | 222 | 12800 | `4bf1f6c11a3fc8b4` |
 | `sdpa_f16_dgeneric_causal1_bm128_bn32_dmax96` | 30 | 223 | 12800 | `8f951fdb4c4a3324` |
 | `sdpa_f16_dgeneric_causal0_bm128_bn32_dmax128` | 20 | 242 | 16896 | `168d5740fca81e81` |

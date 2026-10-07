@@ -253,8 +253,10 @@ head_dim is a runtime argument; Q and K columns past it are zeroed as they load
 and O columns past it are not stored, so the tensors are read exactly as wide as
 they are. A generic object computes at its largest width, so the tiers are cut
 where the odd head dims models use fall: 40, 48 and 56 run at 64; 72, 80 and 88
-at 96; 136 to 160 at 160 and 168 to 224 at 224. The tiers above 128 use head-dim
-pairs, as the 256 object does; the 256 tier also splits its columns across two
+at 96; 136 to 160 at 160 and 168 to 224 at 224. The tier up to 64 uses a 64-row
+tile, as the specialized `head_dim` 64 does (at 96 and 128 a 64-row tile measured
+slower or mixed, so those keep 128); the tiers above 128 use head-dim pairs, as
+the 256 object does; the 256 tier also splits its columns across two
 workgroups (`dv_split` 2), because its masked loads on top of the pair schedule do
 not fit the register file in one. They rank below the specialized objects, each
 narrower tier above the wider (`priority` 40, 30, 20, 15, 12, 10), so 64/96/128/256
@@ -446,7 +448,7 @@ shard, so the shipped count per arch is the same as the authored count.
 | SDPA decode, additive f32 bias | one bias object beside each of the 16 above (`has_bias`) | 16 | shipped, `gfx11-generic`; the 16 plain decode objects compile to identical code with the bias arguments appended, the 40 prefill objects are unchanged |
 | SDPA decode, generic head_dim | dtype (2) × causal (2) × largest head {96, 256}; head_dim a runtime argument (appended to both kernels), K/V columns past it never fetched; no bias | 8 | shipped, `gfx11-generic`; the 32 decode objects above compile to identical code with the head_dim argument appended, the prefill objects are unchanged |
 | **Total, gfx11-generic** | | **108** | |
-| SDPA prefill schedules (§5.1) | not an axis: `block_m` 64 for `head_dim` 64 and non-causal 128 without a bias, and head-dim pairs (`hd_pair`) for 256 and the generic tiers above 128, replace the schedules of the same classes | ±0 | shipped; the 70 objects whose schedule did not change rebuilt byte-identical with kernel modification 18 in the source |
+| SDPA prefill schedules (§5.1) | not an axis: `block_m` 64 for `head_dim` 64, non-causal 128 without a bias and the generic tier up to 64, and head-dim pairs (`hd_pair`) for 256 and the generic tiers above 128, replace the schedules of the same classes | ±0 | shipped; the 66 objects whose schedule did not change rebuilt byte-identical with kernel modification 18 in the source |
 | **gfx12-generic** | the same table, built from the same sources for RDNA4 | **108** | shipped; GPU suites pass on gfx1201 |
 | **Total, both families** | | **216** | |
 

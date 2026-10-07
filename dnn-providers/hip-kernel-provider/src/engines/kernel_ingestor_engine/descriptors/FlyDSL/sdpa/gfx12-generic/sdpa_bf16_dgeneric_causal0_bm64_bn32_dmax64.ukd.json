@@ -1,21 +1,21 @@
 {
   "version": "1.0",
-  "id": "e9860f1b-0f35-5f30-ab19-b5796dea30c8",
-  "name": "sdpa_bf16_dgeneric_causal1_bm128_bn32_dmax64",
+  "id": "27c1ae87-4508-5d2a-949c-e7f4140cf3f7",
+  "name": "sdpa_bf16_dgeneric_causal0_bm64_bn32_dmax64",
   "arch": [
     "gfx1200",
     "gfx1201"
   ],
   "kernel_source": {
     "kind": "hsaco",
-    "file": "sdpa_bf16_dgeneric_causal1_bm128_bn32_dmax64.hsaco",
+    "file": "sdpa_bf16_dgeneric_causal0_bm64_bn32_dmax64.hsaco",
     "symbol": "flash_attn_func_gfx1151_kernel_0"
   },
   "metadata": {
     "dtype": "bf16",
     "head_dim": 0,
-    "causal": 1,
-    "block_m": 128,
+    "causal": 0,
+    "block_m": 64,
     "block_n": 32,
     "dv_split": 1,
     "has_bias": 0,
