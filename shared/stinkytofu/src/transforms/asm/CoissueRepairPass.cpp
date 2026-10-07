@@ -435,7 +435,8 @@ class CoissueRepairPassImpl : public Pass {
 
         ProfileSet set;
         (void)resolveProfileSet(hw, arch, f, set);
-        std::vector<std::unique_ptr<RepairRule>> rules = coreRules();
+        std::vector<std::unique_ptr<RepairRule>> rules;
+        if (!options_.patternsOnly) rules = coreRules();
         std::vector<std::unique_ptr<RepairRule>> patterns;
         (void)enabledPatterns(arch, f.patterns, patterns);
         const TimingProfile& primary = set.profiles[set.primary];
@@ -526,6 +527,7 @@ class CoissueRepairPassImpl : public Pass {
 
         size_t moves = 0;
         size_t tried = 0;
+        size_t limited = 0;
         std::vector<Move> candidates;
         while (static_cast<int>(moves) < f.maxMoves) {
             std::vector<const TimedInst*> timedOrder;
@@ -552,7 +554,11 @@ class CoissueRepairPassImpl : public Pass {
                     candidates.clear();
                     rule->propose(*damage, view, candidates);
                     for (const Move& m : candidates) {
-                        if (!checker.legal(order, m.from, m.to)) continue;
+                        if (!checker.legal(order, m.from, m.to)) {
+                            PASS_DEBUG(std::cerr << "[CoissueRepair]   " << m.rule << " " << m.from
+                                                 << " -> " << m.to << " illegal\n");
+                            continue;
+                        }
                         Order next = moved(order, m.from, m.to);
                         if (options_.prototypeWaitAluRule &&
                             !prototypeWaitAluSafe(next, m.to < m.from ? m.to : m.to - 1, cache))
@@ -561,10 +567,25 @@ class CoissueRepairPassImpl : public Pass {
                         const StinkyInstruction* movedInst = order[m.from];
                         Evaluation e =
                             ev.evaluate(next, &best, &limit, false, Fidelity::Screen, movedInst);
-                        if (e.limited) continue;
                         ++tried;
+                        if (e.limited) {
+                            ++limited;
+                            PASS_DEBUG(std::cerr << "[CoissueRepair]   " << m.rule << " " << m.from
+                                                 << " -> " << m.to << " adds insertions\n");
+                            continue;
+                        }
+                        PASS_DEBUG({
+                            std::cerr << "[CoissueRepair]   " << m.rule << " " << m.from << " -> "
+                                      << m.to << (e.rejected ? " refused" : "") << ":";
+                            for (size_t p = 0; p < e.costs.size(); ++p)
+                                std::cerr << " " << e.costs[p].pipeIdle << "/" << e.costs[p].cycles
+                                          << " (best " << best[p].pipeIdle << "/" << best[p].cycles
+                                          << ")";
+                            std::cerr << "\n";
+                        });
                         if (e.rejected || !(sum(e.costs) < sum(best))) continue;
                         e = ev.evaluate(next, &best, &limit, false, Fidelity::Exact, movedInst);
+                        limited += e.limited;
                         if (e.limited || e.rejected || !(sum(e.costs) < sum(best))) continue;
                         std::vector<int> gains;
                         for (size_t p = 0; p < e.cycles.size(); ++p)
@@ -610,7 +631,9 @@ class CoissueRepairPassImpl : public Pass {
            << decision.worstGain << " (" << std::fixed << std::setprecision(2)
            << decision.worstPercent << "%)  -> " << decision.reason << "; before "
            << list(startCycles) << " after " << list(current.cycles) << ", " << tried
-           << " candidates, " << std::setprecision(1) << ms << " ms";
+           << " candidates";
+        if (limited > 0) os << " (" << limited << " would add insertions)";
+        os << ", " << std::setprecision(1) << ms << " ms";
         emitRemark(passCtx, {OptimizationRemark::Kind::Analysis, kPassName, "Loop", os.str()});
         PASS_DEBUG({
             std::cerr << "[CoissueRepair] " << label << ": timeline " << ev.timelineSeconds << " s ("

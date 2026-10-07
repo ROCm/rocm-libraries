@@ -35,6 +35,9 @@ struct CoissueRepairOptions {
     /// op reading what it writes. That is the Python prototype's stand-in for the s_wait_alu
     /// model; only for comparing the engine with it.
     bool prototypeWaitAluRule = false;
+
+    /// Run only the patterns, without the core rules; for testing a pattern on its own.
+    bool patternsOnly = false;
 };
 
 /// Reorders the SALU/VALU fillers of each innermost loop that has matrix ops, so that what

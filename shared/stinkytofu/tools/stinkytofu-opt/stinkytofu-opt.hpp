@@ -411,6 +411,7 @@ const std::vector<PassInfo> availablePasses = {
          if (hasPassArg(args, "trackValuVsrc")) o.trackValuVsrc = true;
          o.audit = hasPassArg(args, "audit");
          o.prototypeWaitAluRule = hasPassArg(args, "prototypeWaitAlu");
+         o.patternsOnly = hasPassArg(args, "patternsOnly");
          return createCoissueRepairPass(o);
      }},
     {"CoissueAuditPass",
