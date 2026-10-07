@@ -622,7 +622,9 @@ def run_single_gemm(
                 -1: "GPU/HIP error (check permissions, memory, or kernel validity)",
                 -2: "No suitable kernel found for this problem size",
             }
-            error_msg = status_messages.get(exec_result.status, f"Unknown error (status={exec_result.status})")
+            error_msg = status_messages.get(
+                exec_result.status, f"Unknown error (status={exec_result.status})"
+            )
             result["status"] = "RUN_FAIL"
             result["error"] = f"{error_msg} (status_code={exec_result.status})"
 
