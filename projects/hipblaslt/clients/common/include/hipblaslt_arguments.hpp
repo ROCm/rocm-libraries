@@ -38,6 +38,8 @@
 #include <tuple>
 
 #define HIPBLASLT_MAX_REQUESTED_SOLUTION_NUM 65536
+// Must match the c_int32 array length of solution_index_list in hipblaslt_common.yaml.
+#define HIPBLASLT_MAX_SOLUTION_INDEX_LIST 4096
 
 // Predeclare enumerator
 enum hipblaslt_argument : int;
@@ -140,6 +142,9 @@ struct Arguments
     uint32_t algo;
     int32_t  solution_index;
     int32_t  requested_solution_num;
+    // Solution indices benchmarked in this order, ended by the first -1. A
+    // non-empty list replaces algo_method and requested_solution_num.
+    int32_t solution_index_list[HIPBLASLT_MAX_SOLUTION_INDEX_LIST];
 
     hipDataType          a_type;
     hipDataType          b_type;
@@ -214,6 +219,9 @@ struct Arguments
     int32_t rotating;
     bool    use_gpu_timer;
     float   skip_slow_solution_ratio;
+    // Warm up every solution before timing any, so the skip screen compares each
+    // solution against the best warm-up of all of them instead of those before it.
+    bool skip_screen_prepass;
     // tuning
     int32_t gsu_vector[MAX_SUPPORTED_NUM_PROBLEMS]; // This is for client
     int32_t wgm_vector[MAX_SUPPORTED_NUM_PROBLEMS]; // This is for client
@@ -282,6 +290,7 @@ struct Arguments
     OPER(algo) SEP                   \
     OPER(solution_index) SEP         \
     OPER(requested_solution_num) SEP \
+    OPER(solution_index_list) SEP    \
     OPER(a_type) SEP                 \
     OPER(b_type) SEP                 \
     OPER(c_type) SEP                 \
@@ -339,6 +348,7 @@ struct Arguments
     OPER(rotating) SEP               \
     OPER(use_gpu_timer) SEP          \
     OPER(skip_slow_solution_ratio) SEP\
+    OPER(skip_screen_prepass) SEP    \
     OPER(gsu_vector) SEP             \
     OPER(wgm_vector) SEP             \
     OPER(print_solution_found) SEP   \
