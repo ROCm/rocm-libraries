@@ -304,6 +304,7 @@ void batchNormSpatialHostBwdTrain(const tensor<XDataType>& x_input,
                                   const tensor<ScaleDataType>& bnBias,
                                   tensor<RefDataType>& dscale,
                                   tensor<RefDataType>& dbias,
+                                  double epsilon,
                                   const tensor<AccDataType>& savedMean,
                                   const tensor<AccDataType>& savedInvVar,
                                   miopenActivationMode_t activ_mode,
@@ -359,7 +360,7 @@ void batchNormSpatialHostBwdTrain(const tensor<XDataType>& x_input,
                 // The mean is always normalized by the number of values, necessary for the proper
                 // calculation of variance
                 variance_accum /= nhw;
-                invVar = 1.0 / sqrt(variance_accum + 1.0e-03);
+                invVar = 1.0 / sqrt(variance_accum + epsilon);
             }
             for(int row = 0; row < height; row++)
             { // via rows
