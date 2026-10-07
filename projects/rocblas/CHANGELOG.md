@@ -5,6 +5,10 @@ rocBLAS documentation is available at
 
 ## rocBLAS 5.8.0
 
+### Changed
+
+* `trsm`, `trsm_batched`, and `trsm_strided_batched` now print the required and available workspace sizes when they return `rocblas_status_memory_error` because a fixed-size handle workspace is too small. Previously this failure looked identical to running out of device memory.
+
 ### Removed
 
 * The `ROCBLAS_USE_HIPBLASLT_BATCHED` environment variable, deprecated in `rocBLAS 5.6.0`, is removed and is now ignored. Batched GEMM is controlled by the same environment variable as all other GEMM, so a batched-only override is no longer required. Use `ROCBLAS_USE_HIPBLASLT=0` to select the Tensile backend for all GEMM, including batched.
