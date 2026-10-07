@@ -2201,7 +2201,7 @@ TEST(GPU_BN_Spatial_FP16, BufferedStableVarianceAndInPlace)
 {
     // ±4 remains exactly representable around ±2048 in FP16, while naive
     // E[x²] - E[x]² loses precision. N=3 also retains odd pairs of half values.
-    RunBufferedStableVarianceAndInPlace<half_float::half>({42, 3}, {4}, 4.0f, 0.002, true);
+    RunBufferedStableVarianceAndInPlace<half_float::half>({42, 3}, {4, 6}, 4.0f, 0.002, true);
 }
 
 TEST(GPU_BN_Spatial_BF16, BufferedConfigurationBounds)

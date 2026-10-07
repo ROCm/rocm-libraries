@@ -711,11 +711,12 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<6, FpType, FpPrecType, FpAccumType>
     static constexpr unsigned int vector_count  = mio_bn_config::nhw / vector_size;
     static constexpr unsigned int lcl_data_size = mio_bn_config::lds_gcn_size;
 
-    static_assert(mio_config::input_type_strategy == type_strategy::bfpmix &&
+    static_assert((mio_config::input_type_strategy == type_strategy::bfpmix ||
+                   mio_config::input_type_strategy == type_strategy::fpmix) &&
                       std::is_same<mio_bn_config::fp_param_type, float>::value &&
                       !mio_config::layout_nhwc &&
                       mio_bn_config::target_arch == architecture::gfx125x,
-                  "Streaming batchnorm requires gfx1250 BF16 NCHW with FP32 parameters");
+                  "Streaming batchnorm requires gfx1250 FP16/BF16 NCHW with FP32 parameters");
     static_assert(vector_size == 4 || vector_size == 8,
                   "Streaming batchnorm supports vector4 and vector8");
     static_assert(block_size == 256 || block_size == 512 || block_size == 1024,
@@ -733,6 +734,8 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<6, FpType, FpPrecType, FpAccumType>
     using input_vector  = typename mapped_vector_type<FpType, vector_size>::type;
     using packed_vector = typename mapped_vector_type<unsigned int, vector_size / 2>::type;
     using accum_vector  = typename mapped_vector_type<FpAccumType, vector_size>::type;
+    static_assert(sizeof(FpType) == 2 && sizeof(input_vector) == sizeof(packed_vector),
+                  "Streaming batchnorm requires packed 16-bit input storage");
 
     constexpr __forceinline__ __device__ void
     operator()(const FpType* in,
@@ -1023,7 +1026,7 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
             } // end for(n)
 
         } // end if(inImgIndex)
-    } // end spatial norm
+    }
 
     static constexpr __forceinline__ __device__ void
     FinalMeanVariance(FpType* __restrict__ meanvarbuff,

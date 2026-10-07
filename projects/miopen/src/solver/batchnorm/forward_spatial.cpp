@@ -254,7 +254,8 @@ PerformanceConfigBnFwdTraining BnFwdTrainingSpatial::GetDefaultPerformanceConfig
     }
     const auto streaming =
         PerformanceConfigBnFwdTraining{0, GetKernelIdFromVariant(6, 8, 1024, 1, 1, 1)};
-    if(streaming.IsValid(context, problem_desc))
+    // FP16 streaming is a tuning candidate; retain the previously selected BF16 default.
+    if(problem_desc.IsBFp16() && streaming.IsValid(context, problem_desc))
     {
         size_t n, c, h, w;
         std::tie(n, c, h, w) = tien<4>(problem_desc.GetXDesc().GetLengths());
@@ -350,7 +351,8 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
         MIOPEN_THROW(miopenStatusBadParm,
                      "Unsupported specialized forward batchnorm configuration");
     if(variant == 6 && !config.IsValid(context, problem))
-        MIOPEN_THROW(miopenStatusBadParm, "Unsupported streaming BF16 batchnorm configuration");
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "Unsupported streaming FP16/BF16 batchnorm configuration");
 
     size_t xlocalsize_final = xlocalsize, ylocalsize_final = ylocalsize,
            zlocalsize_final = zlocalsize;

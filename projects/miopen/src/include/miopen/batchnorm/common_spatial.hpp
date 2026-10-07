@@ -360,13 +360,13 @@ inline bool IsSpatialStreamingApplicable(const miopen::batchnorm::ProblemDescrip
                                          size_t vectorsize,
                                          size_t blocksize)
 {
+    const auto input_type = problem.GetXDesc().GetType();
     if(problem.GetDirection() != miopen::batchnorm::Direction::ForwardTraining ||
        problem.GetMode() != miopenBNSpatial || !problem.Is2D() || !problem.IsLayoutNCHW() ||
-       !problem.IsBFp16() || !problem.IsScaleFp32() ||
-       problem.GetBnBias().GetType() != miopenFloat ||
-       problem.GetYDesc().GetType() != miopenBFloat16 || !problem.GetXDesc().IsPacked() ||
-       !problem.GetYDesc().IsPacked() || !problem.GetBnScale().IsPacked() ||
-       !problem.GetBnBias().IsPacked() ||
+       (input_type != miopenHalf && input_type != miopenBFloat16) || !problem.IsScaleFp32() ||
+       problem.GetBnBias().GetType() != miopenFloat || problem.GetYDesc().GetType() != input_type ||
+       !problem.GetXDesc().IsPacked() || !problem.GetYDesc().IsPacked() ||
+       !problem.GetBnScale().IsPacked() || !problem.GetBnBias().IsPacked() ||
        problem.GetXDesc().GetLengths() != problem.GetYDesc().GetLengths() ||
        (vectorsize != 4 && vectorsize != 8) ||
        (blocksize != 256 && blocksize != 512 && blocksize != 1024))
@@ -382,8 +382,6 @@ inline bool IsSpatialStreamingApplicable(const miopen::batchnorm::ProblemDescrip
 inline void AddSpatialStreamingConfigs(const miopen::batchnorm::ProblemDescription& problem,
                                        std::vector<std::string>& valid_kernels)
 {
-    if(problem.GetXDesc().GetLengths()[1] < 128)
-        return;
     for(const size_t blocksize : {1024, 512, 256})
         for(const size_t vectorsize : {4, 8})
             if(IsSpatialStreamingApplicable(problem, vectorsize, blocksize))
@@ -893,6 +891,36 @@ inline void DefaultConfigSpatialMultiple(const miopen::batchnorm::ProblemDescrip
                     {
                         valid_kernels.push_back(GetKernelIdFromVariant(
                             2, vectorsize, xlocalsize, ylocalsize, zlocalsize, nelements));
+                    }
+                }
+            }
+        }
+        // Explore channel-contiguous tiles across all NHWC shapes rather than pinning
+        // vector width and channel lanes to a single shape heuristic. Keep the
+        // established default first; tuning selects only applicable resource layouts.
+        if(problem.GetWavefrontSize() == 32)
+        {
+            for(const size_t vector : {size_t{1}, size_t{2}, size_t{4}, size_t{8}})
+            {
+                if(c % vector != 0)
+                    continue;
+                const size_t channel_vectors = c / vector;
+                for(const size_t xlocal : {size_t{8}, size_t{16}, size_t{32}})
+                {
+                    for(const size_t block : {size_t{128}, size_t{256}})
+                    {
+                        const size_t ylocal = block / xlocal;
+                        if(!IsSpatialMultipleApplicable(
+                               problem, vector, stash_values, ylocal, 1, n))
+                            continue;
+                        // Packed FP32 partials span pairs of input vectors.
+                        if(problem.GetXDesc().GetType() != miopenFloat && channel_vectors != 1 &&
+                           channel_vectors % 2 != 0)
+                            continue;
+                        const auto id = GetKernelIdFromVariant(2, vector, xlocal, ylocal, 1, n);
+                        if(std::find(valid_kernels.begin(), valid_kernels.end(), id) ==
+                           valid_kernels.end())
+                            valid_kernels.push_back(id);
                     }
                 }
             }
