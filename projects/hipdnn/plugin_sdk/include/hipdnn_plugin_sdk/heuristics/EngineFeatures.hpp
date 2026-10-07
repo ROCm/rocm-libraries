@@ -52,6 +52,7 @@ namespace detail
 using Graph = hipdnn_flatbuffers_sdk::data_objects::Graph;
 using Tensor = hipdnn_flatbuffers_sdk::data_objects::TensorAttributes;
 using Node = hipdnn_flatbuffers_sdk::data_objects::Node;
+using NodeAttributes = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
 
 inline const Tensor* tensor(const Graph& graph, int64_t uid)
 {
@@ -235,9 +236,10 @@ std::optional<double> attentionFlops(const Graph& graph, const TAttention& op)
            * (static_cast<double>(dq) + static_cast<double>(dv));
 }
 
-// One overload per node type. Convention: a multiply-add is 2, an elementwise operation or
-// transcendental 1 per element. Changing a constant changes a published feature's meaning
-// and must bump FEATURE_SEMANTICS_REVISION.
+// One overload per node type not in NO_COUNTING_CONVENTION, each with a logicalFlops case.
+// Convention (RFC 0019 §6.8): logical work, not executed work; a multiply-add is 2, an
+// elementwise operation or transcendental 1 per element. Changing a constant changes a
+// published feature's meaning and must bump FEATURE_SEMANTICS_REVISION.
 
 /// `2 * c.numel * k`: the batch broadcast is inside `c.numel`.
 inline std::optional<double>
@@ -437,18 +439,44 @@ std::optional<double> flopsOf(const Graph& graph, const TAttributes* op)
     return op == nullptr ? std::nullopt : nodeFlops(graph, *op);
 }
 
+/// Node types whose work has no counting convention. logicalFlops leaves their work unknown,
+/// so a graph holding one publishes no `graph.flops`: no `tflops` label or score and no
+/// feature derived from FLOPs; time models are unaffected. Every other NodeAttributes member
+/// has a nodeFlops overload and a logicalFlops case; TestEngineFeatures fails for a member
+/// that has neither (docs/AddingNewOperations.md, "Work Model (FLOPs)").
+inline constexpr std::array NO_COUNTING_CONVENTION{
+    // Not an operation: the node has no attributes.
+    NodeAttributes::NONE,
+    // Opaque: the graph does not say what the op computes.
+    NodeAttributes::CustomOpAttributes,
+    // Rows per expert follow the routing offsets' contents, not the shapes.
+    NodeAttributes::MoeGroupedMatmulAttributes,
+    NodeAttributes::MoeGroupedMatmulBwdAttributes,
+};
+
+constexpr bool hasCountingConvention(NodeAttributes type)
+{
+    for(const auto listed : NO_COUNTING_CONVENTION)
+    {
+        if(listed == type)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 /// Logical work of @p node, the same for every engine. Unknown, never 0, when a dimension
-/// is, when the type has no convention, or when @p dataDependent (operand contents such as
-/// routing offsets, ragged lengths, page tables or block masks decide the work): a count
-/// from the padded shapes would overstate it by an amount the graph cannot say.
+/// is, when the type is in NO_COUNTING_CONVENTION, or when @p dataDependent (operand contents
+/// such as routing offsets, ragged lengths, page tables or block masks decide the work): a
+/// count from the padded shapes would overstate it by an amount the graph cannot say.
 inline std::optional<double> logicalFlops(const Graph& graph, const Node& node, bool dataDependent)
 {
-    using hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
-    if(dataDependent)
+    const auto type = node.attributes_type();
+    if(dataDependent || !hasCountingConvention(type))
     {
         return std::nullopt;
     }
-    const auto type = node.attributes_type();
     switch(type)
     {
     case NodeAttributes::MatmulAttributes:
@@ -491,10 +519,8 @@ inline std::optional<double> logicalFlops(const Graph& graph, const Node& node, 
         return flopsOf(graph, node.attributes_as_BlockScaleQuantizeAttributes());
     case NodeAttributes::BlockScaleDequantizeAttributes:
         return flopsOf(graph, node.attributes_as_BlockScaleDequantizeAttributes());
-    // MoE rows follow the routing offsets' contents; custom ops are opaque.
-    case NodeAttributes::MoeGroupedMatmulAttributes:
-    case NodeAttributes::MoeGroupedMatmulBwdAttributes:
-    case NodeAttributes::CustomOpAttributes:
+    // A type this build predates. A member of this build's NodeAttributes reaching here has
+    // neither a case nor a NO_COUNTING_CONVENTION entry, which TestEngineFeatures rejects.
     default:
         return std::nullopt;
     }

@@ -1607,12 +1607,10 @@ the trainer, and the runtime compute the same number.
    node still publishes its `$graph.nodes[i].flops`. A graph with override shapes publishes no
    graph-level work features, because the shapes it declares are not the ones it executes.
 4. **Content-dependent work is unknown.** A node whose `data_dependent` is true
-   ([Section 6.7](#67-per-node-operand-features)) has no count: its shapes bound its work without
-   determining it. A bound, where one is worth publishing, takes its own name (`…flops_upper_bound`) and
-   never `flops`. Matmul, ConvolutionFwd, and SDPA, which published counts before this rule, keep their
-   own refusal lists at revision 1 — SDPA's already refuses its content-dependent operands — so a ragged
-   operand does not yet suppress their count. Bringing them under the generic rule changes published
-   values, which is a revision bump ([Section 6.9](#69-feature-semantics-revision)).
+   ([Section 6.7](#67-per-node-operand-features)) has no count, whatever its type: its shapes bound its
+   work without determining it. Any present `work_data_dependent` operand or ragged operand tensor
+   makes it so, for Matmul, ConvolutionFwd, and SDPA as for every other type. A bound, where one is
+   worth publishing, takes its own name (`…flops_upper_bound`) and never `flops`.
 5. **One formula per node type**, over the operand roles of
    [Section 6.7](#67-per-node-operand-features):
 
@@ -1677,6 +1675,13 @@ trainer calls are built against it, and `uhd_gen` reads the `$graph.flops` the b
 than recomputing it ([Open Question 4](#schema-and-training), resolved). A golden value per node type,
 and parity with the three counts that predate this section, are held by test beside the
 feature-semantics revision they were computed under ([Section 6.9](#69-feature-semantics-revision)).
+
+**A new node type declares its work.** Each `NodeAttributes` member either has a formula (a
+`nodeFlops` overload and a `logicalFlops` case) or is listed in `NO_COUNTING_CONVENTION` with its
+reason, as `NONE`, `CustomOpAttributes`, and the MoE grouped matmuls are. A test over every member
+fails for one with neither, so a new op cannot silently leave its graphs without `$graph.flops`.
+[Adding a New Operation: Work Model (FLOPs)](../AddingNewOperations.md#work-model-flops) gives the
+contributor steps.
 
 **Catalog rankers read the same problem at collection and at runtime.** A `sort_kernel_catalog`
 ranker binds the problem half of its row through one function (`catalogProblemFeatures`,

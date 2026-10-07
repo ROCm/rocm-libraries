@@ -4,6 +4,7 @@
 #include <array>
 #include <gtest/gtest.h>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -1258,7 +1259,10 @@ TEST(TestEngineFeatures, WorkModelMatchesEveryGoldenCount)
     }
 }
 
-TEST(TestEngineFeatures, EveryCountableNodeTypeHasItsDeclaredWork)
+// Every NodeAttributes member is either counted, with an entry here whose representative
+// graph publishes its declared work, or listed in NO_COUNTING_CONVENTION. A new member with
+// neither fails, so a new op cannot silently leave every graph holding it without FLOPs.
+TEST(TestEngineFeatures, EveryNodeTypeHasDeclaredWorkOrNoCountingConvention)
 {
     struct Case
     {
@@ -1266,6 +1270,9 @@ TEST(TestEngineFeatures, EveryCountableNodeTypeHasItsDeclaredWork)
         double flops;
     };
     const std::vector<Case> cases = {
+        {matmulBroadcastGraph, 840.0},
+        {convFwdGraph, 86400.0},
+        {[] { return attentionGraph(attention()); }, 32256.0},
         // 2 * dy.numel (384) * w.numel (864) / K (12).
         {[] {
              ConvolutionBwdAttributesT conv;
@@ -1487,15 +1494,25 @@ TEST(TestEngineFeatures, EveryCountableNodeTypeHasItsDeclaredWork)
          },
          256.0},
     };
+    std::set<NodeAttributes> counted;
     for(const auto& [make, flops] : cases)
     {
         const auto graph = make();
+        counted.insert(graph.nodes[0]->attributes.type);
         const std::string type = EnumNameNodeAttributes(graph.nodes[0]->attributes.type);
         SCOPED_TRACE(type);
         const auto published = features(graph);
         EXPECT_DOUBLE_EQ(published.at("graph.nodes[0].flops").get<double>(), flops);
         EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(), flops);
         EXPECT_DOUBLE_EQ(published.at("graph.flops_by_type." + type).get<double>(), flops);
+    }
+    for(const auto type : EnumValuesNodeAttributes())
+    {
+        SCOPED_TRACE(EnumNameNodeAttributes(type));
+        const bool listed = !hipdnn_plugin_sdk::heuristics::detail::hasCountingConvention(type);
+        EXPECT_NE(counted.count(type) == 1, listed)
+            << "needs a nodeFlops overload, a logicalFlops case and an entry above, or an "
+               "entry in NO_COUNTING_CONVENTION, but not both";
     }
 }
 

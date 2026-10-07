@@ -13,6 +13,8 @@ A contributor walkthrough for landing a new op across the hipDNN stack. The code
 **Supplementary Reference** *(read when you need it, not by default)*
 - [cuDNN Parity Rules](#cudnn-parity-rules)
 - [Cache-Key Annotations](#cache-key-annotations)
+- [Operand Features](#operand-features)
+- [Work Model (FLOPs)](#work-model-flops)
 - [File Map (PR Diff Template)](#file-map-pr-diff-template)
 - [Layer-by-Layer Reference](#layer-by-layer-reference)
 - [Testing Requirements](#testing-requirements)
@@ -99,6 +101,7 @@ Copy-paste this into your PR description.
 - [ ] `graph.fbs` `NodeAttributes` union updated and include added
 - [ ] `hipdnn_flatbuffers_sdk` target rebuilt; generated headers committed
 - [ ] New/changed tensor-uid fields annotated `(cache_uid)` (or a documented reason they're not), plus `work_data_dependent` where the tensor's contents decide the work; `cachekey_generated.h` and `node_operands_generated.h` regenerated and committed — see [Cache-Key Annotations](#cache-key-annotations) and [Operand Features](#operand-features)
+- [ ] Work model: `nodeFlops` overload and `logicalFlops` case added in `EngineFeatures.hpp` with an entry in `EveryNodeTypeHasDeclaredWorkOrNoCountingConvention`, or the op listed in `NO_COUNTING_CONVENTION` with a reason — see [Work Model (FLOPs)](#work-model-flops)
 - [ ] Backend descriptor type enum value assigned
 - [ ] Backend attribute name range assigned
 - [ ] (If new mode enum) `HipdnnBackendAttributeType.h` type tag added; `Hipdnn<Op>Mode.h` written; `hipdnn_backend.h` updated; `DataTypeConversion.{hpp,cpp}` and `DescriptorAttributeUtils.{hpp,cpp}` updated
@@ -237,6 +240,49 @@ pre-commit hook on any schema change. Its `visit()` asserts at compile time that
 is `NodeAttributes::MAX`, so a header left stale by a new node type fails to compile; rerun
 `scripts/gen_node_operands.py`.
 
+## Work Model (FLOPs)
+
+UHD heuristics also publish each node's logical work, `graph.nodes[i].flops`, and the graph
+aggregates built from it: `graph.flops`, `graph.flops_by_type.<Type>` and
+`graph.arithmetic_intensity`. `graph.flops` is the numerator of the `tflops` label, the default
+ranking metric. Unlike operands, the count is not generated: every `NodeAttributes` member needs
+one of two decisions in `plugin_sdk/include/hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp`.
+
+- **A formula.** Add a `nodeFlops(const Graph&, const <Op>Attributes&)` overload beside the
+  others, and to the `logicalFlops` switch the case
+  `case NodeAttributes::<Op>Attributes: return flopsOf(graph, node.attributes_as_<Op>Attributes());`.
+  Count the problem's **logical** work, not the work an implementation executes
+  ([RFC 0019 §6.8](./rfcs/0019_UniversalHeuristicDescriptor.md#68-the-work-model)): a
+  multiply-add is 2, elementwise work 1 per output element, a transcendental 1; padding,
+  recomputation and skipped blocks do not count, so every engine reports the same number.
+  Return `std::nullopt` (unknown, never 0) when the operands do not determine the count: a
+  missing tensor, a non-positive dim, shapes that do not compose. The `perElement`, `windowed`,
+  `convolutionFlops` and `attentionFlops` helpers cover the common shapes. Add the formula to the
+  table in RFC 0019 §6.8.
+- **No counting convention.** Add the member to `NO_COUNTING_CONVENTION`, with a one-line
+  reason above it, as for `CustomOpAttributes` (opaque) and the MoE grouped matmuls (the routing
+  offsets decide the rows); it then needs no overload and no case. Every node of that type has
+  unknown work, so a graph containing one publishes no `graph.flops` and no
+  `graph.arithmetic_intensity`: its benchmark rows carry no `tflops` label, no `tflops` model
+  can score it, and no feature derived from FLOPs can be extracted for it. Its
+  `graph.flops_by_type.<Type>` is absent; other types' entries are not. Models of `time` are
+  unaffected, since measured time needs no work count.
+
+An operand marked `work_data_dependent` already makes its node's count unknown whatever the
+formula ([Operand Features](#operand-features)); `nodeFlops` need not repeat that check.
+
+`EveryNodeTypeHasDeclaredWorkOrNoCountingConvention` in
+`plugin_sdk/tests/heuristics/TestEngineFeatures.cpp` holds one representative one-node graph per
+counted type, built with `single(...)`, and its expected count. It iterates every
+`NodeAttributes` member and fails for one that has neither an entry there nor a place in
+`NO_COUNTING_CONVENTION`, or has both. A new op with a formula therefore adds an entry; a new op
+with neither decision fails the test.
+
+`/hipdnn-codegen` emits all three pieces as stubs under `fragments/`:
+`node_flops_overload.txt`, `logical_flops_case.txt` (which also carries the
+`NO_COUNTING_CONVENTION` alternative) and `work_model_test_case.txt`. Fill in their TODOs: the
+stub overload returns unknown, and the stub test entry's expected count of 0 fails until replaced.
+
 ---
 
 ## File Map (PR Diff Template)
@@ -269,11 +315,13 @@ The complete surface area for a single op, using **Matmul** as the canonical exa
 | Frontend node class | `frontend/include/hipdnn_frontend/node/MatmulNode.hpp` |
 | Frontend Graph API | `frontend/include/hipdnn_frontend/Graph.hpp` (`Graph::matmul(...)`) |
 | JSON utility | `flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/utilities/json/MatmulAttributes.hpp` |
+| Work model (FLOPs) | `plugin_sdk/include/hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp` (`nodeFlops` overload + `logicalFlops` case, or a `NO_COUNTING_CONVENTION` entry — see [Work Model (FLOPs)](#work-model-flops)) |
 | Python bindings (optional) | `python/frontend_bindings/src/graph_bindings.cpp`, `python/frontend_bindings/src/attributes_bindings.cpp` |
 | Backend descriptor unit test | `backend/tests/descriptors/TestMatmulOperationDescriptor.cpp` |
 | Backend fromNode test | `backend/tests/descriptors/TestMatmulOperationFromNode.cpp` |
 | Backend graph descriptor test | `backend/tests/descriptors/TestGraphDescriptorMatmul.cpp` |
 | Backend enum string test | `backend/tests/TestBackendEnumStringUtils.cpp` |
+| Work model test | `plugin_sdk/tests/heuristics/TestEngineFeatures.cpp` (entry in `EveryNodeTypeHasDeclaredWorkOrNoCountingConvention`) |
 | Frontend attributes test | `frontend/tests/TestMatmulAttributes.cpp` |
 | Frontend node test | `frontend/tests/TestMatmulNode.cpp` |
 | Integration lowering test | `tests/frontend/IntegrationMatmulDescriptorLowering.cpp` |
@@ -340,6 +388,8 @@ Each layer has a required test. Every checkbox in the [PR Checklist](#pr-checkli
 | Lifting integration | backend descriptor → frontend node round-trip; tensor sharing; auto-assigned UIDs; per-scalar preservation | generator | `tests/frontend/IntegrationMatmulDescriptorLifting.cpp` |
 | Constants header | shared per-op test constants | generator | `test_sdk/include/hipdnn_test_sdk/constants/MatmulConstants.hpp` |
 | Backend enum string | one `EXPECT_STREQ` per new attribute and descriptor type | hand-add | `backend/tests/TestBackendEnumStringUtils.cpp` |
+| Work model | the op's declared FLOPs on a representative one-node graph, or its `NO_COUNTING_CONVENTION` entry instead; `EveryNodeTypeHasDeclaredWorkOrNoCountingConvention` fails for a member with neither | generator stub (`fragments/work_model_test_case.txt`), hand-complete | `plugin_sdk/tests/heuristics/TestEngineFeatures.cpp` (`matmulBroadcastGraph`, 840 FLOPs) |
+| Operand features (if any operand is `work_data_dependent`) | the operand, present, sets `graph.nodes[i].data_dependent` and leaves the node's FLOPs absent; every type's operand publication is covered by `EveryNodeTypePublishesItsOperands` | hand-add | `plugin_sdk/tests/heuristics/TestEngineFeatures.cpp` (`MoeRoutingMakesWorkDataDependent`) |
 | Sample (optional but expected) | end-user-style usage | hand-author | `samples/<op>/` |
 
 > [!IMPORTANT]
