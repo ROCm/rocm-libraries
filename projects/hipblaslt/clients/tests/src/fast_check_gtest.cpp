@@ -478,17 +478,17 @@ namespace
     // bias-gradient reduction. 2^24 + 1 - 2^24 is order-dependent in f32.
     TEST(FastCheck_pre_checkin, bias_gradient_refuses_inexact_partial_sums)
     {
-        const float values[] = {0x1p24f, 1.f, -0x1p24f};
-        const float zeros[] = {0.f, 0.f, 0.f};
+        const float values[]  = {0x1p24f, 1.f, -0x1p24f};
+        const float zeros[]   = {0.f, 0.f, 0.f};
         const float exact_sum = 1.f;
         for(char source : {'a', 'b'})
         {
             FastCheckProblem p;
             p.M = p.N = 1;
-            p.K = 3;
-            p.A = {source == 'a' ? values : zeros, HIP_R_32F, 1, 3, 1, 3};
-            p.B = {source == 'b' ? values : zeros, HIP_R_32F, 3, 1, 3, 3};
-            p.beta = 0;
+            p.K       = 3;
+            p.A       = {source == 'a' ? values : zeros, HIP_R_32F, 1, 3, 1, 3};
+            p.B       = {source == 'b' ? values : zeros, HIP_R_32F, 3, 1, 3, 3};
+            p.beta    = 0;
             ASSERT_TRUE(fast_check_expected(p).status.passed);
             auto res = fast_check_bias_gradient(p, source, &exact_sum, HIP_R_32F);
             EXPECT_FALSE(res.passed);
@@ -1010,14 +1010,21 @@ namespace
     // value, rather than independently converting a double literal such as 0.1.
     TEST(FastCheckDevice_pre_checkin, activation_uses_the_float_clamp_argument)
     {
-        const float bound = 0.1f, scale = 9.f;
+        const float  bound = 0.1f, scale = 9.f;
         DeviceMatrix d, e;
         d.write(std::vector<float>(DeviceMatrix::total, bound * scale));
         e.write(std::vector<float>(DeviceMatrix::total, 1.f));
         double amax = 0;
-        auto res = fast_check_activation_device(d.matrix(), e.matrix(), DeviceMatrix::batch,
-                                                scale, 1, FastCheckActivation::clamp,
-                                                0, bound, 0, &amax);
+        auto   res  = fast_check_activation_device(d.matrix(),
+                                                e.matrix(),
+                                                DeviceMatrix::batch,
+                                                scale,
+                                                1,
+                                                FastCheckActivation::clamp,
+                                                0,
+                                                bound,
+                                                0,
+                                                &amax);
         EXPECT_TRUE(res.passed) << res.message;
         EXPECT_EQ(amax, double(bound));
     }
@@ -1028,10 +1035,17 @@ namespace
         d.write(std::vector<float>(DeviceMatrix::total, 1.f));
         auto unsupported = e.matrix();
         unsupported.type = HIP_C_32F;
-        double amax = 0;
-        auto res = fast_check_activation_device(d.matrix(), unsupported, DeviceMatrix::batch,
-                                                1, 1, FastCheckActivation::relu,
-                                                0, 0, 0, &amax);
+        double amax      = 0;
+        auto   res       = fast_check_activation_device(d.matrix(),
+                                                unsupported,
+                                                DeviceMatrix::batch,
+                                                1,
+                                                1,
+                                                FastCheckActivation::relu,
+                                                0,
+                                                0,
+                                                0,
+                                                &amax);
         EXPECT_FALSE(res.passed);
         EXPECT_NE(res.message.find("could not copy"), std::string::npos) << res.message;
         EXPECT_TRUE(std::isnan(amax));

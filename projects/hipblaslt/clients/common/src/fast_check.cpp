@@ -1961,8 +1961,9 @@ FastCheckResult fast_check_bias_gradient(const FastCheckProblem& p,
             // The GEMM bound includes the other operand, which may be zero.
             // Bound this reduction separately before accumulating into int64_t.
             if(!is_exact_integer(value) || !(bound < exact_limit(p.compute_type)))
-                return {false, "the bias gradient cannot be checked exactly: its inputs must be "
-                               "integers and every partial sum must fit the compute type\n"};
+                return {false,
+                        "the bias gradient cannot be checked exactly: its inputs must be "
+                        "integers and every partial sum must fit the compute type\n"};
             expected[x] += int64_t(value);
         }
     }
