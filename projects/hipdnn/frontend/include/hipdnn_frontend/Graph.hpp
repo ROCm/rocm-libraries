@@ -2402,6 +2402,47 @@ public:
     }
 
     /**
+     * @brief Get the knob catalog of a specific engine for this graph
+     *
+     * The catalog lists the engine-specific knob configurations the engine
+     * supports for this graph, in the engine's order. Each inner vector is one
+     * entry and can be passed unchanged to create_execution_plan_ext(). An engine
+     * without engine-specific knobs reports one empty entry (its default
+     * configuration). Only engine-specific knobs appear; global knobs are never
+     * part of a catalog. Engines that have knobs but no catalog report an error.
+     *
+     * @param engineId The engine ID to query
+     * @param catalog Output catalog, one vector of KnobSetting per entry; cleared
+     *                on failure
+     * @return ErrorCode::OK on success, ErrorCode::INVALID_VALUE if the graph has
+     *         not been built, or ErrorCode::HIPDNN_BACKEND_ERROR if the backend
+     *         could not provide the catalog. Call get_message() for the specific
+     *         failure reason.
+     *
+     * @see hipdnn_frontend::KnobSetting, create_execution_plan_ext(), get_knobs_for_engine()
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error get_knob_catalog_for_engine(int64_t engineId,
+                                      std::vector<std::vector<KnobSetting>>& catalog) const
+    {
+        catalog.clear();
+
+        if(!hasValidGraphDesc())
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Graph has not been built, build the operation graph first. Cannot get knob "
+                    "catalog for engine."};
+        }
+
+        detail::ScopedHipdnnBackendDescriptor engineDesc;
+
+        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineDescriptorForGraph(
+            engineDesc, _graphDesc->get(), engineId));
+
+        return detail::unpackKnobCatalogFromDescriptors(engineDesc.get(), catalog);
+    }
+
+    /**
      * @brief Get knobs for a specific engine, indexed by knob type
      *
      * Convenience wrapper around get_knobs_for_engine() that populates

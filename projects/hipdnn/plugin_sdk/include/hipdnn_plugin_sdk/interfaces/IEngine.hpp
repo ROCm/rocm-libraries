@@ -10,6 +10,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 namespace hipdnn_plugin_sdk
@@ -84,6 +85,32 @@ public:
                             const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                             hipdnnPluginConstData_t& detailsOut) const
         = 0;
+
+    /**
+     * @brief Gets the catalog of valid engine-specific knob configurations for a graph.
+     *
+     * Serializes an `EngineKnobCatalog` (see `engine_knob_catalog.fbs`) into a buffer the
+     * handle owns, the way getDetails() does; it is released through the same handle
+     * store when the plugin's destroy entry point runs.
+     *
+     * The default declines: an engine that offers no catalog throws a HipdnnPluginException
+     * with HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, which reaches the host as "this engine
+     * offers no catalog for this graph" and gets the host's fallback.
+     *
+     * @param handle The engine plugin handle.
+     * @param opGraph The operation graph.
+     * @param catalogOut Output parameter for the serialized `EngineKnobCatalog`.
+     * @throws HipdnnPluginException with HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE by default.
+     */
+    // NOLINTNEXTLINE(portability-template-virtual-member-function)
+    virtual void getKnobCatalog(
+        [[maybe_unused]] THandle& handle,
+        [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+        [[maybe_unused]] hipdnnPluginConstData_t& catalogOut) const
+    {
+        throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                                    "this engine does not provide a knob catalog");
+    }
 
     /**
      * @brief Returns the maximum workspace size required for the given graph.

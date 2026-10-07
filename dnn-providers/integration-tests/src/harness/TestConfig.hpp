@@ -18,6 +18,7 @@
 #include "common/PlatformUtils.hpp"
 #include "harness/TestSettings.hpp"
 #include "harness/ValidationSite.hpp"
+#include "harness/catalog-sweep/CatalogSweepOptions.hpp"
 
 namespace hipdnn_integration_tests
 {
@@ -164,6 +165,9 @@ struct TestConfigOptions
     // failed by one.
     bool enforceSupportClaims = false;
     bool writeSupportClaims = false;
+    // --sweep-knob-catalog, already validated by main.cpp: set exactly when this run is a
+    // catalog sweep.
+    std::optional<catalog_sweep::CatalogSweepOptions> catalogSweep;
 };
 
 // Singleton class for storing CLI-based test configuration.
@@ -251,6 +255,14 @@ public:
         // env override so that neither an omitted --allow-bundles nor a stray
         // HIPDNN_TEST_ALLOW_BUNDLES=0 in the environment can reintroduce it.
         if(instance._writeSupportClaims)
+        {
+            instance._allowBundles = true;
+        }
+
+        // A sweep walks the bundle graphs and nothing else, so with bundle registration
+        // off it would sweep zero graphs: same trap, same answer.
+        instance._catalogSweep = std::move(opts.catalogSweep);
+        if(instance._catalogSweep.has_value())
         {
             instance._allowBundles = true;
         }
@@ -476,6 +488,13 @@ public:
         return _writeSupportClaims;
     }
 
+    // The sweep's options, or nullopt when this run is not a catalog sweep.
+    const std::optional<catalog_sweep::CatalogSweepOptions>& catalogSweep() const
+    {
+        throwIfNotInitialized();
+        return _catalogSweep;
+    }
+
     bool hasCaptureDir() const
     {
         throwIfNotInitialized();
@@ -512,6 +531,7 @@ private:
     std::optional<VerificationMode> _verificationMode;
     std::optional<ValidatorDevice> _validatorDevice;
     std::optional<std::filesystem::path> _captureDir;
+    std::optional<catalog_sweep::CatalogSweepOptions> _catalogSweep;
     std::string _currentArch;
     std::size_t _currentDeviceVramMb = 0;
     std::string _currentPlatform;

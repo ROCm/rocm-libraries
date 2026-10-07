@@ -26,6 +26,7 @@
  *    - Must have: void setStream(hipStream_t)
  *    - Must have: EngineManager<...>& getEngineManager()
  *    - Must have: void removeEngineDetailsDetachedBuffer(const void*)
+ *      (also releases the buffers behind hipdnnEnginePluginGetEngineKnobCatalog)
  *
  * 2. Context type (HIPDNN_PLUGIN_CONTEXT_TYPE):
  *    - Must inherit from: HipdnnEnginePluginExecutionContext
@@ -439,6 +440,81 @@ hipdnnPluginStatus_t hipdnnEnginePluginDestroyEngineDetails(hipdnnEnginePluginHa
         typedHandle->removeEngineDetailsDetachedBuffer(engineDetails->ptr);
 
         LOG_API_SUCCESS(apiName, "engineDetails->ptr=" << engineDetails->ptr);
+    });
+}
+
+hipdnnPluginStatus_t hipdnnEnginePluginGetEngineKnobCatalog(hipdnnEnginePluginHandle_t handle,
+                                                            int64_t engineId,
+                                                            const hipdnnPluginConstData_t* opGraph,
+                                                            hipdnnPluginConstData_t* knobCatalog)
+{
+    LOG_API_ENTRY("handle=" << static_cast<void*>(handle) << ", engineId=" << engineId
+                            << ", opGraph=" << static_cast<const void*>(opGraph)
+                            << ", knobCatalog=" << static_cast<void*>(knobCatalog));
+
+    // "No catalog for this engine/graph" is the ordinary decline, not a failure: it is answered by
+    // status alone, like hipdnnEnginePluginGetEngineName, so it neither logs an error nor
+    // overwrites the last-error string.
+    bool declined = false;
+
+    const auto status = hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+        hipdnn_plugin_sdk::throwIfNull(handle);
+        hipdnn_plugin_sdk::throwIfNull(opGraph);
+        hipdnn_plugin_sdk::throwIfNull(knobCatalog);
+
+        auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
+        auto& engineManager = typedHandle->getEngineManager();
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(
+            opGraph->ptr, opGraph->size);
+
+        try
+        {
+            engineManager.getEngineKnobCatalog(
+                *typedHandle, opGraphWrapper, engineId, *knobCatalog);
+        }
+        catch(const hipdnn_plugin_sdk::HipdnnPluginException& ex)
+        {
+            if(ex.getStatus() != HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE)
+            {
+                throw;
+            }
+            declined = true;
+            HIPDNN_PLUGIN_LOG_INFO("API not applicable: [" << apiName << "] engineId=" << engineId
+                                                           << ": " << ex.what());
+            return;
+        }
+
+        LOG_API_SUCCESS(apiName, "knobCatalog->ptr=" << knobCatalog->ptr);
+    });
+
+    if(status != HIPDNN_PLUGIN_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
+    return declined ? HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE : HIPDNN_PLUGIN_STATUS_SUCCESS;
+}
+
+hipdnnPluginStatus_t
+    hipdnnEnginePluginDestroyEngineKnobCatalog(hipdnnEnginePluginHandle_t handle,
+                                               hipdnnPluginConstData_t* knobCatalog)
+{
+    LOG_API_ENTRY("handle=" << static_cast<void*>(handle)
+                            << ", knobCatalog=" << static_cast<void*>(knobCatalog));
+
+    return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+        hipdnn_plugin_sdk::throwIfNull(handle);
+        hipdnn_plugin_sdk::throwIfNull(knobCatalog);
+        hipdnn_plugin_sdk::throwIfNull(knobCatalog->ptr);
+
+        // Catalog buffers live in the handle's detached-buffer store beside engine details,
+        // keyed by pointer, so the one removal hook releases either.
+        auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
+        typedHandle->removeEngineDetailsDetachedBuffer(knobCatalog->ptr);
+
+        LOG_API_SUCCESS(apiName, "knobCatalog->ptr=" << knobCatalog->ptr);
+        knobCatalog->ptr = nullptr;
+        knobCatalog->size = 0;
     });
 }
 

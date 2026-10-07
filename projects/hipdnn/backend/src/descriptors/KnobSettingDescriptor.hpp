@@ -29,6 +29,12 @@ public:
 
     /// Maximum length of a knob string value (characters, excluding null terminator).
     static constexpr int64_t MAX_KNOB_STRING_VALUE_LENGTH = 65536;
+
+    /// Construct a finalized KnobSettingDescriptor from a deserialized KnobSettingT.
+    /// Throws HIPDNN_STATUS_BAD_PARAM if the setting has no knob ID or no value.
+    static std::shared_ptr<KnobSettingDescriptor>
+        fromKnobSettingT(const hipdnn_flatbuffers_sdk::data_objects::KnobSettingT& knobSetting);
+
     void finalize() override;
 
     void getAttribute(hipdnnBackendAttributeName_t attributeName,

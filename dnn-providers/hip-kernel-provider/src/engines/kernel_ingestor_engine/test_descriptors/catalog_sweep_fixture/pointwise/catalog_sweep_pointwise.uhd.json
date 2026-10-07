@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "786d4ec0-b7dc-4647-8fea-12cbffac69bb",
+  "name": "catalog sweep pointwise selector",
+  "kind": "native",
+  "payload": "hipkernel.pointwise.score"
+}

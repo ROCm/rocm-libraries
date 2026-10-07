@@ -7,10 +7,12 @@
 #include <memory>
 #include <vector>
 
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 namespace hipdnn_plugin_sdk
@@ -126,6 +128,35 @@ public:
         getCustomKnobs(const THandle& handle,
                        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
         = 0;
+
+    /**
+     * @brief Gets the catalog of valid engine-specific knob configurations for a graph.
+     *
+     * Each returned `EngineConfigT` is one complete set of engine-specific knob settings
+     * that, applied unchanged to an engine configuration for this graph, selects a working
+     * configuration. Entries are ordered by engine preference, best first. A range or an
+     * independent value list in the knob metadata cannot express this: independent values
+     * combine into configurations the engine may not support. Only knobs returned by
+     * getCustomKnobs() belong in an entry, never `global.*` knobs.
+     *
+     * The default declines: a plan builder that advertises no catalog throws a
+     * HipdnnPluginException with HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, which reaches the host
+     * as "this engine offers no catalog for this graph" and gets the host's fallback.
+     *
+     * @param handle The engine plugin handle.
+     * @param opGraph The operation graph.
+     * @return The catalog entries. `engine_id` is filled in by the engine layer.
+     * @throws HipdnnPluginException with HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE by default.
+     */
+    virtual std::vector<hipdnn_flatbuffers_sdk::data_objects::EngineConfigT>
+        // NOLINTNEXTLINE(portability-template-virtual-member-function)
+        getKnobCatalog([[maybe_unused]] const THandle& handle,
+                       [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph&
+                           opGraph) const
+    {
+        throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                                    "this plan builder does not provide an engine knob catalog");
+    }
 };
 
 } // namespace hipdnn_plugin_sdk

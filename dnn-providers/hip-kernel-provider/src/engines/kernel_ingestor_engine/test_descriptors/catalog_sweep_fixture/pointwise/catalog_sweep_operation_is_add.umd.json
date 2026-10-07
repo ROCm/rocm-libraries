@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "6c74ef08-6abb-4bcc-98e8-3b6b5b8c2183",
+  "name": "catalog sweep: graph operation is add",
+  "scope": "graph",
+  "match_symbol": "hipkernel.pointwise.add_match"
+}

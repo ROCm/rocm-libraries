@@ -993,6 +993,8 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE";
     case HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE:
         return "HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE";
+    case HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT:
+        return "HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT";
 
     // Profiling control attributes
     case HIPDNN_ATTR_PROFILING_HANDLE_EXT:

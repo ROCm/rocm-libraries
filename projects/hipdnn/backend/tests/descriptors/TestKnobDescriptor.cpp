@@ -1633,3 +1633,82 @@ TEST(TestKnobDescriptorFactory, CreateKnobInfoDescriptorViaFactory)
 
     ASSERT_NO_THROW(hipdnn_backend::DescriptorFactory::destroy(descriptor));
 }
+
+// ============================================================================
+// validateValue
+// ============================================================================
+
+namespace
+{
+
+hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion intKnobValue(int64_t value)
+{
+    hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion result;
+    hipdnn_flatbuffers_sdk::data_objects::IntValueT intValue;
+    intValue.value = value;
+    result.Set(intValue);
+    return result;
+}
+
+hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion stringKnobValue(const std::string& value)
+{
+    hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion result;
+    hipdnn_flatbuffers_sdk::data_objects::StringValueT stringValue;
+    stringValue.value = value;
+    result.Set(std::move(stringValue));
+    return result;
+}
+
+} // namespace
+
+TEST_F(TestKnobDescriptor, ValidateValueAppliesRangeStrideAndTypeOfAnIntKnob)
+{
+    int64_t minValue = 0;
+    int64_t maxValue = 100;
+    int64_t stride = 10;
+    setKnobId("ranged");
+    setInt64Default(50);
+    ASSERT_NO_THROW(getDescriptor()->setAttribute(
+        HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE, HIPDNN_TYPE_INT64, 1, &minValue));
+    ASSERT_NO_THROW(getDescriptor()->setAttribute(
+        HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE, HIPDNN_TYPE_INT64, 1, &maxValue));
+    ASSERT_NO_THROW(
+        getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_INFO_STRIDE, HIPDNN_TYPE_INT64, 1, &stride));
+    ASSERT_NO_THROW(getDescriptor()->finalize());
+
+    auto desc = getDescriptor();
+    EXPECT_FALSE(desc->validateValue(intKnobValue(0)).has_value());
+    EXPECT_FALSE(desc->validateValue(intKnobValue(100)).has_value());
+    EXPECT_TRUE(desc->validateValue(intKnobValue(-10)).has_value()) << "below the minimum";
+    EXPECT_TRUE(desc->validateValue(intKnobValue(110)).has_value()) << "above the maximum";
+    EXPECT_TRUE(desc->validateValue(intKnobValue(55)).has_value()) << "not on the stride";
+    EXPECT_TRUE(desc->validateValue(stringKnobValue("50")).has_value()) << "wrong value type";
+}
+
+TEST_F(TestKnobDescriptor, ValidateValueAppliesValidValuesAndLengthOfAStringKnob)
+{
+    const std::vector<char> validValues = {'f', 'a', 's', 't', '\0', 's', 'l', 'o', 'w'};
+    int32_t maxLength = 8;
+    setKnobId("mode");
+    setStringDefault("fast");
+    ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING,
+                                                  HIPDNN_TYPE_CHAR,
+                                                  static_cast<int64_t>(validValues.size()),
+                                                  validValues.data()));
+    ASSERT_NO_THROW(getDescriptor()->setAttribute(
+        HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH, HIPDNN_TYPE_INT32, 1, &maxLength));
+    ASSERT_NO_THROW(getDescriptor()->finalize());
+
+    auto desc = getDescriptor();
+    EXPECT_FALSE(desc->validateValue(stringKnobValue("slow")).has_value());
+    EXPECT_TRUE(desc->validateValue(stringKnobValue("medium")).has_value())
+        << "not in the valid values";
+    EXPECT_TRUE(desc->validateValue(stringKnobValue("fastfastfast")).has_value())
+        << "longer than the maximum length";
+}
+
+TEST_F(TestKnobDescriptor, ValidateValueRequiresAFinalizedDescriptor)
+{
+    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->validateValue(intKnobValue(1)),
+                               HIPDNN_STATUS_NOT_INITIALIZED);
+}

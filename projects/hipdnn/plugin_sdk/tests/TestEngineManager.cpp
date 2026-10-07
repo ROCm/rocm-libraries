@@ -82,6 +82,28 @@ private:
     size_t _workspaceSize;
 };
 
+/// An engine that offers a catalog, marked by the size it reports so a test can tell which
+/// engine answered.
+class CatalogEngine : public TestEngine
+{
+public:
+    CatalogEngine(int64_t engineId, size_t catalogSize)
+        : TestEngine(engineId, true)
+        , _catalogSize(catalogSize)
+    {
+    }
+
+    void getKnobCatalog(TestHandle& /*handle*/,
+                        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
+                        hipdnnPluginConstData_t& catalogOut) const override
+    {
+        catalogOut.size = _catalogSize;
+    }
+
+private:
+    size_t _catalogSize;
+};
+
 using TestEngineManager = EngineManager<TestHandle, TestSettings, TestContext>;
 
 std::unique_ptr<TestEngine>
@@ -219,4 +241,60 @@ TEST(TestEngineManager, GetWorkspaceSizeThrowsForUnknownEngine)
     ON_CALL(mockConfig, engineId()).WillByDefault(Return(999));
 
     EXPECT_THROW(manager.getMaxWorkspaceSize(handle, mockGraph, mockConfig), HipdnnPluginException);
+}
+
+TEST(TestEngineManager, GetEngineKnobCatalogDispatchesToTheEngineWithThatId)
+{
+    TestEngineManager manager;
+    manager.addEngine(std::make_unique<CatalogEngine>(1, 11));
+    manager.addEngine(std::make_unique<CatalogEngine>(2, 22));
+
+    TestHandle handle;
+    const NiceMock<MockGraph> mockGraph;
+    hipdnnPluginConstData_t catalog{};
+
+    manager.getEngineKnobCatalog(handle, mockGraph, 2, catalog);
+
+    EXPECT_EQ(catalog.size, 22U);
+}
+
+TEST(TestEngineManager, GetEngineKnobCatalogDeclinesWithNotApplicableForAnEngineWithoutOne)
+{
+    TestEngineManager manager;
+    manager.addEngine(createTestEngine(1, true));
+
+    TestHandle handle;
+    const NiceMock<MockGraph> mockGraph;
+    hipdnnPluginConstData_t catalog{};
+
+    try
+    {
+        manager.getEngineKnobCatalog(handle, mockGraph, 1, catalog);
+        FAIL() << "expected HipdnnPluginException";
+    }
+    catch(const HipdnnPluginException& ex)
+    {
+        EXPECT_EQ(ex.getStatus(), HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE);
+    }
+    EXPECT_EQ(catalog.ptr, nullptr);
+}
+
+TEST(TestEngineManager, GetEngineKnobCatalogRejectsAnUnknownEngineWithInvalidValue)
+{
+    TestEngineManager manager;
+    manager.addEngine(std::make_unique<CatalogEngine>(1, 11));
+
+    TestHandle handle;
+    const NiceMock<MockGraph> mockGraph;
+    hipdnnPluginConstData_t catalog{};
+
+    try
+    {
+        manager.getEngineKnobCatalog(handle, mockGraph, 999, catalog);
+        FAIL() << "expected HipdnnPluginException";
+    }
+    catch(const HipdnnPluginException& ex)
+    {
+        EXPECT_EQ(ex.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+    }
 }

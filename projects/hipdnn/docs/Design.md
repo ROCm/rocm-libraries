@@ -200,6 +200,7 @@ The Backend uses descriptors as opaque handles to manage different aspects of gr
 - Contains engine ID, and a set of behavioral notes + configurable settings
 - Retrieved from engine config Descriptor
 - Exposes the engine name through the read-only `HIPDNN_ATTR_ENGINE_NAME_EXT` attribute
+- Exposes the valid engine-specific knob configurations for its graph through the read-only `HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT` attribute (an array of finalized engine config descriptors), fetched from the plugin on first read
 
 ##### 5. Execution Plan Descriptor (`HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR`)
 - Combines an engine configuration with a graph

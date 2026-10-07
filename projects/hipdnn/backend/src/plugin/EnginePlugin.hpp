@@ -63,6 +63,34 @@ public:
                                   int64_t engineId,
                                   const hipdnnPluginConstData_t* opGraph,
                                   hipdnnPluginConstData_t* engineDetails) const;
+
+    /**
+     * @brief Reports whether this plugin exports the optional engine knob catalog
+     *        entry points (`hipdnnEnginePluginGetEngineKnobCatalog` and
+     *        `hipdnnEnginePluginDestroyEngineKnobCatalog`).
+     *
+     * Symbol presence is the sole predicate. The pair is all or nothing: a plugin
+     * that exports only one of the two is treated as exporting neither.
+     */
+    virtual bool hasEngineKnobCatalog() const;
+
+    /**
+     * @brief Fetches the serialized knob catalog an engine offers for a graph.
+     *
+     * Callers must guard with `hasEngineKnobCatalog()`; calling this on a plugin
+     * without the entry points throws `HIPDNN_STATUS_NOT_SUPPORTED`.
+     *
+     * @return true when the plugin supplied a catalog in @p knobCatalog (to be
+     *         released with `destroyEngineKnobCatalog()`); false when the plugin
+     *         answered `HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`, i.e. it offers no
+     *         catalog for this engine and graph. Throws `HipdnnException` on any
+     *         other status.
+     */
+    [[nodiscard]] virtual bool getEngineKnobCatalog(hipdnnEnginePluginHandle_t handle,
+                                                    int64_t engineId,
+                                                    const hipdnnPluginConstData_t* opGraph,
+                                                    hipdnnPluginConstData_t* knobCatalog) const;
+
     virtual size_t getWorkspaceSize(hipdnnEnginePluginHandle_t handle,
                                     const hipdnnPluginConstData_t* engineConfig,
                                     const hipdnnPluginConstData_t* opGraph) const;
@@ -132,6 +160,8 @@ public:
                                 hipdnnEnginePluginExecutionContext_t executionContext) const;
     virtual void destroyEngineDetails(hipdnnEnginePluginHandle_t handle,
                                       hipdnnPluginConstData_t* engineDetails) const;
+    virtual void destroyEngineKnobCatalog(hipdnnEnginePluginHandle_t handle,
+                                          hipdnnPluginConstData_t* knobCatalog) const;
     virtual void destroyHandle(hipdnnEnginePluginHandle_t handle) const;
 
     static hipdnnPluginType_t getPluginType()
@@ -203,6 +233,17 @@ private:
 
     // Optional engine-name symbol, engine plugin API 1.4.0 and newer.
     hipdnnPluginStatus_t (*_funcGetEngineName)(int64_t, const char**)
+        = nullptr; ///< Default nullptr is load-bearing: tryAssignSymbol leaves this untouched when the symbol is absent.
+
+    // Optional engine knob catalog pair, engine plugin API 1.5.0 and newer. Both or neither:
+    // resolveSymbols() clears a lone survivor.
+    hipdnnPluginStatus_t (*_funcGetEngineKnobCatalog)(hipdnnEnginePluginHandle_t,
+                                                      int64_t,
+                                                      const hipdnnPluginConstData_t*,
+                                                      hipdnnPluginConstData_t*)
+        = nullptr; ///< Default nullptr is load-bearing: tryAssignSymbol leaves this untouched when the symbol is absent.
+    hipdnnPluginStatus_t (*_funcDestroyEngineKnobCatalog)(hipdnnEnginePluginHandle_t,
+                                                          hipdnnPluginConstData_t*)
         = nullptr; ///< Default nullptr is load-bearing: tryAssignSymbol leaves this untouched when the symbol is absent.
 
     friend class PluginManagerBase<EnginePlugin>;

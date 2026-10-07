@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "1c32ef31-454e-4989-a6e0-ffcd5d88470e",
+  "name": "catalog sweep pointwise dispatch",
+  "dispatch_symbol": "hipkernel.pointwise.dispatch"
+}

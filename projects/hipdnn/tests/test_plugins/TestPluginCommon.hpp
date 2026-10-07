@@ -393,6 +393,14 @@ public:
     }
 
     virtual uint32_t getNumApplicableEngines() const = 0;
+
+    /// Knobs this plugin advertises in `EngineDetails` for its engine. Defaults to none.
+    virtual std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>>
+        createKnobs(flatbuffers::FlatBufferBuilder& /*builder*/) const
+    {
+        return {};
+    }
+
     virtual bool supportsEngineOperations() const
     {
         return getNumApplicableEngines() > 0;
@@ -747,10 +755,11 @@ public:
             // the frontend checks before serializing a plan alongside the graph.
             const std::vector<int32_t> behaviorNotes{
                 static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION)};
+            const auto knobs = getInstance()->createKnobs(builder);
             auto newEngineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(
                 builder,
                 getInstance()->getEngineId(),
-                nullptr,
+                knobs.empty() ? nullptr : &knobs,
                 &behaviorNotes,
                 getInstance()->getEngineName());
             builder.Finish(newEngineDetails);

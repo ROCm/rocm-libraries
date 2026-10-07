@@ -15,6 +15,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -347,6 +348,161 @@ namespace hipdnn_frontend::detail
     }
 
     return {ErrorCode::OK, ""};
+}
+
+/// Reads the value type each knob of an engine advertises, keyed by knob ID.
+///
+/// A knob choice descriptor reports its value only in the type it was stored with and carries
+/// no type of its own, while a read in any other type fails inside the backend (and is logged
+/// there as an error). The advertised type is therefore taken from the engine's knob info
+/// (HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE) so every choice is read once, in its own type.
+///
+/// @param engineDesc A finalized engine backend descriptor
+/// @param outTypes Output map from knob ID to the backend attribute type of its value
+/// @return Error on failure, empty Error on success
+[[nodiscard]] inline Error
+    unpackKnobValueTypes(hipdnnBackendDescriptor_t engineDesc,
+                         std::unordered_map<std::string, hipdnnBackendAttributeType_t>& outTypes)
+{
+    outTypes.clear();
+
+    auto [knobDescs, infoErr] = getDescriptorAttrDescArray(
+        engineDesc, HIPDNN_ATTR_ENGINE_KNOB_INFO, "knob info descriptors");
+    HIPDNN_CHECK_ERROR(infoErr);
+
+    for(const auto& knobDesc : knobDescs)
+    {
+        std::string knobId;
+        HIPDNN_CHECK_ERROR(getDescriptorAttrString(
+            knobDesc.get(), HIPDNN_ATTR_KNOB_INFO_TYPE, knobId, "knob info ID"));
+
+        int64_t valueType = 0;
+        HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(knobDesc.get(),
+                                                   HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE,
+                                                   HIPDNN_TYPE_INT64,
+                                                   valueType,
+                                                   "knob info default value type"));
+
+        outTypes.emplace(std::move(knobId), static_cast<hipdnnBackendAttributeType_t>(valueType));
+    }
+
+    return {};
+}
+
+/// Unpacks a finalized HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR into a KnobSetting.
+///
+/// @param choiceDesc A finalized knob choice backend descriptor
+/// @param valueTypes The value type of every knob the engine advertises, from
+///        unpackKnobValueTypes()
+/// @param outSetting Output setting, valid only when the returned Error is good
+/// @return Error on failure, empty Error on success
+[[nodiscard]] inline Error unpackKnobSettingDescriptor(
+    hipdnnBackendDescriptor_t choiceDesc,
+    const std::unordered_map<std::string, hipdnnBackendAttributeType_t>& valueTypes,
+    std::optional<KnobSetting>& outSetting)
+{
+    outSetting.reset();
+
+    std::string knobId;
+    HIPDNN_CHECK_ERROR(getDescriptorAttrString(
+        choiceDesc, HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE, knobId, "knob choice ID"));
+    if(knobId.empty())
+    {
+        return {ErrorCode::INVALID_VALUE, "Knob choice descriptor has empty knob ID"};
+    }
+
+    const auto typeIt = valueTypes.find(knobId);
+    if(typeIt == valueTypes.end())
+    {
+        return {ErrorCode::INVALID_VALUE,
+                "Knob choice '" + knobId + "' names a knob the engine does not advertise"};
+    }
+
+    switch(typeIt->second)
+    {
+    case HIPDNN_TYPE_INT64:
+    {
+        int64_t value = 0;
+        HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(choiceDesc,
+                                                   HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE,
+                                                   HIPDNN_TYPE_INT64,
+                                                   value,
+                                                   "knob choice value"));
+        outSetting.emplace(std::move(knobId), value);
+        return {};
+    }
+    case HIPDNN_TYPE_DOUBLE:
+    {
+        double value = 0.0;
+        HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(choiceDesc,
+                                                   HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE,
+                                                   HIPDNN_TYPE_DOUBLE,
+                                                   value,
+                                                   "knob choice value"));
+        outSetting.emplace(std::move(knobId), value);
+        return {};
+    }
+    case HIPDNN_TYPE_CHAR:
+    {
+        std::string value;
+        HIPDNN_CHECK_ERROR(getDescriptorAttrString(
+            choiceDesc, HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, value, "knob choice value"));
+        outSetting.emplace(std::move(knobId), std::move(value));
+        return {};
+    }
+    default:
+        return {ErrorCode::INVALID_VALUE,
+                "Knob '" + knobId + "' has unknown value type: "
+                    + std::to_string(static_cast<int>(typeIt->second))};
+    }
+}
+
+/// Unpacks the knob catalog of a finalized backend engine descriptor
+/// (HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT) into one KnobSetting vector per entry.
+///
+/// Entries keep the backend order. Unlike knob info, nothing is skipped: an
+/// entry that cannot be unpacked fails the whole call, because a silently
+/// dropped entry would hide a configuration from the caller.
+///
+/// @param engineDesc A finalized engine backend descriptor
+/// @param outCatalog Output catalog, cleared on failure
+/// @return Error on failure, empty Error on success
+[[nodiscard]] inline Error
+    unpackKnobCatalogFromDescriptors(hipdnnBackendDescriptor_t engineDesc,
+                                     std::vector<std::vector<KnobSetting>>& outCatalog)
+{
+    outCatalog.clear();
+
+    std::unordered_map<std::string, hipdnnBackendAttributeType_t> valueTypes;
+    HIPDNN_CHECK_ERROR(unpackKnobValueTypes(engineDesc, valueTypes));
+
+    auto [entryDescs, catalogErr] = getDescriptorAttrDescArray(
+        engineDesc, HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT, "engine knob catalog");
+    HIPDNN_CHECK_ERROR(catalogErr);
+
+    std::vector<std::vector<KnobSetting>> catalog;
+    catalog.reserve(entryDescs.size());
+
+    for(size_t entryIndex = 0; entryIndex < entryDescs.size(); ++entryIndex)
+    {
+        const auto context = "knob catalog entry " + std::to_string(entryIndex);
+        auto [choiceDescs, choiceErr] = getDescriptorAttrDescArray(
+            entryDescs[entryIndex].get(), HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES, context);
+        HIPDNN_CHECK_ERROR(choiceErr);
+
+        std::vector<KnobSetting> entry;
+        entry.reserve(choiceDescs.size());
+        for(const auto& choiceDesc : choiceDescs)
+        {
+            std::optional<KnobSetting> setting;
+            HIPDNN_CHECK_ERROR(unpackKnobSettingDescriptor(choiceDesc.get(), valueTypes, setting));
+            entry.push_back(std::move(*setting));
+        }
+        catalog.push_back(std::move(entry));
+    }
+
+    outCatalog = std::move(catalog);
+    return {};
 }
 
 } // namespace hipdnn_frontend::detail

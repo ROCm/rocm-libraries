@@ -84,6 +84,10 @@ HIPDNN_MAP_TO_ID(LyingEngineNamePluginErrorStatus, -28);
 // this id. See TestMismatchedNamePlugin.cpp.
 HIPDNN_MAP_TO_ID(MismatchedNamePlugin, -29);
 
+// Knob-catalog fixture: advertises two engine-specific knobs and serves a catalog over them.
+// See TestKnobCatalogPlugin.cpp.
+HIPDNN_MAP_TO_ID(KnobCatalogPlugin, -31);
+
 namespace hipdnn_tests::plugin_constants
 {
 // Engine names reported by the named test plugins. All are deliberately absent from
@@ -99,4 +103,17 @@ inline constexpr const char* K_MISMATCHED_NAME_PLUGIN_ENGINE_NAME = "TEST_MISMAT
 // never reach an engine info.
 inline constexpr const char* K_LYING_ENGINE_NAME_UNUSABLE_NAME
     = "TEST_LYING_ENGINE_NAME_MUST_BE_IGNORED";
+
+// Knob-catalog fixture: the engine-specific knobs it advertises and catalogs over.
+inline constexpr const char* K_KNOB_CATALOG_TILE_KNOB = "catalog.tile_size";
+inline constexpr const char* K_KNOB_CATALOG_MODE_KNOB = "catalog.mode";
+
+// Knob-catalog fixture: the environment variable selecting the catalog it serves, read on
+// every call, and the values it understands. "valid" is the default.
+inline constexpr const char* K_KNOB_CATALOG_PLUGIN_MODE_ENV = "HIPDNN_TEST_KNOB_CATALOG_MODE";
+inline constexpr const char* K_KNOB_CATALOG_MODE_VALID = "valid";
+// Declines with NOT_APPLICABLE, as a plugin whose engine offers no catalog does.
+inline constexpr const char* K_KNOB_CATALOG_MODE_NOT_APPLICABLE = "not_applicable";
+// Serves a catalog whose second entry carries a tile size the knob does not allow.
+inline constexpr const char* K_KNOB_CATALOG_MODE_BAD_VALUE = "bad_value";
 } // namespace hipdnn_tests::plugin_constants

@@ -56,6 +56,18 @@ public:
                       int64_t elementCount,
                       const void* arrayOfElements) override;
 
+    /// The knob identifier (empty until set).
+    const std::string& knobId() const
+    {
+        return _knobId;
+    }
+
+    /// Checks a candidate value against the knob's advertised type and constraints.
+    /// Returns a description of the violation, or std::nullopt when the value is acceptable.
+    /// Throws HIPDNN_STATUS_NOT_INITIALIZED if the descriptor is not finalized.
+    std::optional<std::string>
+        validateValue(const hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion& value) const;
+
     /// Convert to a KnobT for consumption by other components
     std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobT> toKnobT() const;
 
@@ -64,6 +76,12 @@ public:
     std::string toString() const override;
 
 private:
+    /// Returns a description of the way @p value violates the declared constraints
+    /// (range, stride, valid values, string length), or std::nullopt when it satisfies them.
+    /// Does not compare the value type against the default value type.
+    std::optional<std::string> findConstraintViolation(
+        const hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion& value) const;
+
     // Core knob ID and metadata
     std::string _knobId;
     std::string _description;

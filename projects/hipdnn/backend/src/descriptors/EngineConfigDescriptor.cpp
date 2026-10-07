@@ -3,6 +3,7 @@
 
 #include "EngineConfigDescriptor.hpp"
 #include "BackendEnumStringUtils.hpp"
+#include "DescriptorAttributeUtils.hpp"
 #include "EngineDescriptor.hpp"
 #include "GraphDescriptor.hpp"
 #include "HipdnnBackendDescriptorType.h"
@@ -70,8 +71,11 @@ void EngineConfigDescriptor::getAttribute(hipdnnBackendAttributeName_t attribute
     case HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE:
         getMaxWorkspaceSize(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
-    case HIPDNN_ATTR_ENGINECFG_INTERMEDIATE_INFO:
     case HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES:
+        getKnobSettingDescriptors(
+            attributeType, requestedElementCount, elementCount, arrayOfElements);
+        break;
+    case HIPDNN_ATTR_ENGINECFG_INTERMEDIATE_INFO:
     default:
         throw HipdnnException(
             HIPDNN_STATUS_NOT_SUPPORTED,
@@ -208,6 +212,23 @@ std::shared_ptr<const EngineDescriptor> EngineConfigDescriptor::getEngine() cons
     return _engine;
 }
 
+std::shared_ptr<EngineConfigDescriptor> EngineConfigDescriptor::fromEngineConfigT(
+    const std::shared_ptr<const EngineDescriptor>& engine,
+    const hipdnn_flatbuffers_sdk::data_objects::EngineConfigT& entry)
+{
+    THROW_IF_NULL(engine,
+                  HIPDNN_STATUS_INTERNAL_ERROR,
+                  "EngineConfigDescriptor::fromEngineConfigT() failed: Engine is null.");
+
+    auto config = std::make_shared<EngineConfigDescriptor>();
+    config->_engine = engine;
+    config->_engineConfigData
+        = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::EngineConfigT>(entry);
+    config->_engineConfigData->engine_id = engine->getEngineId();
+    config->finalize();
+    return config;
+}
+
 hipdnnBackendDescriptorType_t EngineConfigDescriptor::getStaticType()
 {
     return HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR;
@@ -322,6 +343,48 @@ void EngineConfigDescriptor::setKnobSettingDescriptor(hipdnnBackendAttributeType
 
         _engineConfigData->knobs.push_back(knobDesc->toKnobSettingT());
     }
+}
+
+void EngineConfigDescriptor::getKnobSettingDescriptors(hipdnnBackendAttributeType_t attributeType,
+                                                       int64_t requestedElementCount,
+                                                       int64_t* elementCount,
+                                                       void* arrayOfElements) const
+{
+    checkGetArgs(HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                 attributeType,
+                 "EngineConfigDescriptor::getAttribute(HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES)");
+
+    const auto count = static_cast<int64_t>(_engineConfigData->knobs.size());
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      "EngineConfigDescriptor::getAttribute(HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES): "
+                      "elementCount is null");
+        *elementCount = count;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= count,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   "EngineConfigDescriptor::getAttribute(HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES): "
+                   "requestedElementCount < knob choice count");
+
+    std::vector<std::shared_ptr<KnobSettingDescriptor>> knobDescriptors;
+    knobDescriptors.reserve(_engineConfigData->knobs.size());
+    for(const auto& knob : _engineConfigData->knobs)
+    {
+        knobDescriptors.push_back(KnobSettingDescriptor::fromKnobSettingT(*knob));
+    }
+
+    if(elementCount != nullptr)
+    {
+        *elementCount = count;
+    }
+
+    HipdnnBackendDescriptor::packDescriptorArray(
+        knobDescriptors, static_cast<HipdnnBackendDescriptor**>(arrayOfElements));
 }
 
 std::string EngineConfigDescriptor::toString() const

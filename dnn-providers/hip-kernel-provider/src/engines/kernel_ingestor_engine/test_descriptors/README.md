@@ -12,8 +12,9 @@ Every set is a top-level folder here, and every one is packed whole.
 | `unit/` | `pointwise/` | `embedded_source` | `unit/unit/` | the unit binary |
 | `integration/` | `pointwise/` | `hip` | `integration/integration/` | the integration binary |
 | `archive_fixture/` | `pointwise/` | `hip` | `integration/archive_fixture/` | the integration binary |
+| `catalog_sweep_fixture/` | `pointwise/` | `hip` | `integration/catalog_sweep_fixture/` | the integration binary, and `hipdnn_integration_tests --sweep-knob-catalog` |
 
-The packer runs five times over these four sets. `shared/` feeds both binaries, and each other
+The packer runs six times over these five sets. `shared/` feeds both binaries, and each other
 folder feeds one binary. Every descriptor in these sets applies to each packed architecture.
 Each set therefore stages one architecture folder for each packed architecture.
 
@@ -103,3 +104,28 @@ Two rules follow for a test author:
 
 - Name the engine id when you assert which engine served a graph.
 - Do not assert the size of the applicable-engine list for a pointwise ADD/f32 graph.
+
+## `catalog_sweep_fixture/`
+
+Descriptors in the `hip` dialect, packed into an archive of their own, for the knob-catalog
+sweep (`hipdnn_integration_tests --sweep-knob-catalog`). The fixture declares its own engine,
+`hipkernel:pointwise_catalog_sweep`, which exposes `block_size` as its one knob. Keep the
+descriptors in the `pointwise/` child folder, for the reason `archive_fixture/` gives.
+
+It holds three ADD/f32 kernels with block sizes 64, 128 and 256, so the engine's catalog has
+three entries, one per block size. The kernels at 64 and 256 add correctly. The 128 kernel
+(`PointwiseAddNoOutput.cpp`) has the same signature but writes nothing to its output. It
+builds, loads and launches cleanly and leaves the output buffer untouched, so a sweep must
+report that entry as a numeric failure, not a pass. The heuristic ranks by block size, so the
+broken kernel sits in the middle of the ranking: it is neither the kernel a plain run serves
+nor the last catalog entry.
+
+This set is **test-only**. It stages only under the test descriptor root, and never reaches the
+production descriptors. Do not copy its broken kernel into one.
+
+Like `archive_fixture/`, it names the matcher, score and dispatch symbols of
+`hipkernel:Pointwise`, so it shares that engine's claim space and both engines rank for a
+pointwise ADD/f32 graph. The same two rules apply: name the engine id when you assert which
+engine served a graph, and do not assert the size of the applicable-engine list for a
+pointwise ADD/f32 graph. It is a pack of its own so that corrupting the archive of one fixture
+cannot touch the other.

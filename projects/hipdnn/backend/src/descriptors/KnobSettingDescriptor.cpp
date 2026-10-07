@@ -126,6 +126,17 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobSettingT>
     return knobSetting;
 }
 
+std::shared_ptr<KnobSettingDescriptor> KnobSettingDescriptor::fromKnobSettingT(
+    const hipdnn_flatbuffers_sdk::data_objects::KnobSettingT& knobSetting)
+{
+    auto descriptor = std::make_shared<KnobSettingDescriptor>();
+    descriptor->_knobId = knobSetting.knob_id;
+    copyKnobValueUnion(
+        knobSetting.value, descriptor->_value, "KnobSettingDescriptor::fromKnobSettingT()");
+    descriptor->finalize();
+    return descriptor;
+}
+
 hipdnnBackendDescriptorType_t KnobSettingDescriptor::getStaticType()
 {
     return HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR;

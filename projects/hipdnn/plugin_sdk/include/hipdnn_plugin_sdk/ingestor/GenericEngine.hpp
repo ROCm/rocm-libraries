@@ -17,6 +17,7 @@
 #include <flatbuffers/flatbuffers.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_knob_catalog_generated.h>
 #include <hipdnn_plugin_sdk/EnginePluginTypeTraits.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
@@ -126,6 +127,34 @@ public:
         detailsOut.ptr = detachedBuffer->data();
         detailsOut.size = detachedBuffer->size();
         handle.storeEngineDetailsDetachedBuffer(detailsOut.ptr, std::move(detachedBuffer));
+    }
+
+    /// Serializes the plan builder's catalog as an `EngineKnobCatalog` into a detached
+    /// buffer the handle owns, the way getDetails() does. Every entry carries this
+    /// engine's id, whatever the plan builder left there.
+    void getKnobCatalog(THandle& handle,
+                        const IGraph& opGraph,
+                        hipdnnPluginConstData_t& catalogOut) const override
+    {
+        hipdnn_flatbuffers_sdk::data_objects::EngineKnobCatalogT catalog;
+        catalog.engine_id = _id;
+        for(auto& config : _planBuilder.getKnobCatalog(handle, opGraph))
+        {
+            config.engine_id = _id;
+            catalog.configs.push_back(
+                std::make_unique<hipdnn_flatbuffers_sdk::data_objects::EngineConfigT>(
+                    std::move(config)));
+        }
+
+        flatbuffers::FlatBufferBuilder builder;
+        builder.Finish(
+            hipdnn_flatbuffers_sdk::data_objects::EngineKnobCatalog::Pack(builder, &catalog));
+
+        // Detached buffer outlives this call; the handle takes ownership.
+        auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
+        catalogOut.ptr = detachedBuffer->data();
+        catalogOut.size = detachedBuffer->size();
+        handle.storeEngineDetailsDetachedBuffer(catalogOut.ptr, std::move(detachedBuffer));
     }
 
     size_t getMaxWorkspaceSize(const THandle& handle,

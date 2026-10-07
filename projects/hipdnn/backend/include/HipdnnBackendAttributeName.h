@@ -66,6 +66,7 @@
  * - 60200-60299: Operation type extension attributes
  * - 60300-60399: Operation name extension attributes
  * - 60400-60499: Profiling control extension attributes
+ * - 60500-60599: Engine knob catalog extension attributes
  */
 typedef enum
 {
@@ -1505,6 +1506,31 @@ typedef enum
      *  rebinding to a different handle/stream requires a new descriptor
      *  (HIPDNN_TYPE_BOOLEAN, write-only) */
     HIPDNN_ATTR_PROFILING_RESET_EXT = 60409,
+
+    /** @} */
+
+    /**
+     * @name Engine Knob Catalog Attributes (60500-60599)
+     * Attributes for HIPDNN_BACKEND_ENGINE_DESCRIPTOR
+     * @{
+     */
+
+    /**
+     * @brief Engine knob catalog (read-only extension, engine descriptor)
+     *
+     * Array of finalized HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR descriptors, one per
+     * valid engine-specific knob configuration of this engine for the engine's
+     * operation graph, in the order supplied by the plugin. Each entry's
+     * HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES can be applied unchanged to a new
+     * engine config before creating an execution plan. Same get protocol as
+     * HIPDNN_ATTR_ENGINE_KNOB_INFO: query the count with requestedElementCount = 0,
+     * then fetch the descriptors. Engines without a catalog entry point report one
+     * empty entry when they expose no engine-specific knobs, and
+     * HIPDNN_STATUS_NOT_SUPPORTED otherwise. The catalog is fetched from the plugin
+     * on first read, not in finalize().
+     * Type: HIPDNN_TYPE_BACKEND_DESCRIPTOR
+     */
+    HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT = 60500,
 
     /** @} */
 

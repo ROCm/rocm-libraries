@@ -387,6 +387,226 @@ Bundle suites register under gtest as `{tier}_{Op}_{Topology}` (e.g.
 > leading dash. In GTest, only the first `-` starts the negative section.
 > Using `:-` between patterns does **not** negate — the dash becomes literal.
 
+## Knob catalog sweep
+
+`--sweep-knob-catalog` is an offline mode of `hipdnn_integration_tests` that validates
+**every configuration an engine can serve a graph with**, not just its default.
+A normal bundle run builds one plan per graph (`HEURISTICS_CHOICE`) and executes
+only the top-ranked configuration, and `--test-engine` pins the engine, not its
+configuration. A kernel-ingestor engine can match tens or hundreds of kernels to one
+graph; only the first is ever checked. The sweep asks each engine for its knob
+*catalog* (`Graph::get_knob_catalog_for_engine`), creates a plan for every entry with
+`create_execution_plan_ext`, runs it, and compares it to the reference.
+
+It is a separate mode, not a flavour of the verification run, and it is **not part of
+CI**. Runtime-compilation engines compile every entry, so a full sweep can take hours.
+
+### Running it
+
+```bash
+export HIPDNN_CACHE_DIR=$(mktemp -d)        # must be absent or empty
+unset HIPDNN_FORCE_BENCHMARKING             # must be unset (any value, even 0, refuses)
+
+./bin/hipdnn_integration_tests \
+  --sweep-knob-catalog \
+  --catalog-report sweep.jsonl \
+  --test-engine hipkernel:Pointwise \
+  --verification-mode gpu \
+  --gtest_filter='quick_Pointwise*'
+```
+
+The graphs are the bundle graphs, discovered and loaded exactly as in a verification
+run, and `--gtest_filter`, `--test-engine`, `--golden-data-dir`, `--test-article`,
+`--test-config` and `--verification-mode` mean what they mean there. In sweep mode
+`--gtest_filter` selects graphs by their bundle name (`Suite.Test`); the sweep's own
+tests are the only ones that run (the C++ graph tests are not).
+`--test-engine X` sweeps only engine `X`; without it every engine the graph lists
+is swept. Tolerances are the graph's own (the same atol/rtol, and the same
+`[[tolerance_overrides]]` / `[[validator_overrides]]` from `--test-config`, a normal run
+of that bundle uses).
+
+| Flag | Meaning |
+|---|---|
+| `--sweep-knob-catalog` | Enable the mode. |
+| `--catalog-report <path>` | **Required.** JSON Lines report. Opened for append (never truncated) and flushed after every record, so an interrupted run keeps what it finished. |
+| `--catalog-filter <expr>` | Run only the matching (graph, engine) pairs; everything else is still enumerated and recorded `FILTERED`. |
+| `--catalog-shard <i>/<n>` | Sweep only the graphs shard `i` of `n` owns (0-based, `i < n`). |
+
+`--catalog-*` flags without `--sweep-knob-catalog` are refused, not ignored. A sweep
+also cannot be combined with `--write-support-claims` or `--capture-bundles`, and needs a
+HIP device (the no-GPU "skip with exit 0" shortcut of the other modes does not apply:
+a sweep that sweeps nothing must not look green).
+
+### Refusals at startup
+
+The sweep exits with status 1, before loading any plugin, when:
+
+- `--catalog-report` is missing, or its file cannot be opened for append;
+- `HIPDNN_FORCE_BENCHMARKING` is set **to anything**. It overrides `global.benchmarking`
+  for every plan, so the sweep would not be building the configurations the catalog
+  lists. An empty value counts as set; `0` counts as set;
+- `HIPDNN_CACHE_DIR` is unset or empty, or does not name a **fresh** directory. Fresh
+  means: it does not exist yet, or it exists, is a directory, and is empty. hipDNN
+  persists engine rankings under it, and a ranking cached by an earlier run would change
+  which kernels a later run is offered. (An empty `HIPDNN_CACHE_DIR` is treated by hipDNN
+  itself as unset, so it is refused rather than allowed to fall back to the per-user cache.)
+
+### Filter expressions
+
+```
+expr   := clause (',' clause)*      all clauses must hold
+clause := field op values
+field  := graph | engine            the bundle's Suite.Test name / the engine name
+op     := =  !=  ~  !~              glob / not-glob / substring / not-substring
+values := pattern ('|' pattern)*    any alternative may match
+```
+
+Globs match the whole name, case-sensitively; `*` is any run of characters, `?` exactly
+one. Whitespace around tokens is ignored; a pattern cannot contain `,` or `|`.
+
+```
+--catalog-filter 'engine=hipkernel:*'
+--catalog-filter 'graph~Pointwise,engine!=MIOPEN_ENGINE'
+--catalog-filter 'engine=MIOPEN_ENGINE|HIP_MLOPS_ENGINE,graph!~Bf16'
+```
+
+The filter narrows the work, never the accounting: a filtered-out pair still has its
+catalog fetched, and each of its entries is written with status `FILTERED` (a graph the
+filter excludes outright is not executed at all, and needs no reference).
+
+### Sharding
+
+`--catalog-shard i/n` splits a sweep across processes or hosts. The shard unit is the
+**graph**, not the entry: partitioning by entry would make every shard build the graph,
+fetch the catalog and run the reference, whereas a graph-level shard does that work once
+for the graphs it owns. A graph belongs to shard `fnv1a64(Suite.Test) mod n` --
+a function of the name alone, so shards agree across hosts and do not depend on discovery
+order or on `--gtest_filter`. Every graph belongs to exactly one shard; run all `n` and
+concatenate the reports. Give each shard its own `HIPDNN_CACHE_DIR` and its own report
+file, so concurrent shards never share a cache or interleave writes.
+
+Shard by graph is coarse when a few graphs dominate (one graph with hundreds of
+runtime-compiled entries is one shard's whole job). Use `--catalog-filter` with `graph`
+clauses to give such a graph a process of its own.
+
+### What happens per graph
+
+1. The graph is built **once** (`from_binary`) and that same `Graph` object is used for
+   everything below.
+2. `get_engine_configs` lists the engines (only `--test-engine`'s if given). A graph no
+   engine supports, or the pinned engine does not list, is skipped here, before any
+   reference work.
+3. Only if at least one listed engine will actually be swept (with `--catalog-filter`:
+   has a (graph, engine) pair the filter lets through): the inputs are filled once from
+   the bundle's seeded recipes and the reference (golden data, GPU or CPU reference, per
+   `--verification-mode`) runs **once**; its outputs are copied to the host once and are
+   never handed to a plan. A reference problem therefore only ever fails a graph that an
+   engine serves.
+4. Per engine, `get_knob_catalog_for_engine` returns the entries. If it fails, or
+   returns nothing, the engine gets one `NO_CATALOG` record and the graph fails.
+5. Per entry: `create_execution_plan_ext(engineId, entry)`, `check_support`,
+   `build_plans`, workspace allocation, a **refill of the inputs**, **fresh outputs
+   prefilled with NaN**, execute, and a comparison of the graph's registered outputs
+   against the reference. The comparison builds its validators afresh each time.
+
+Because outputs are reset to NaN before every entry, a kernel that writes nothing is
+reported `FAIL_NUMERIC` (it left the sentinel) instead of passing on the previous
+entry's answer.
+
+A graph is **skipped** (not failed) where a normal run would skip it: a device/VRAM/arch
+guard or `[[test_skips]]` entry applies, no engine supports the graph (the frontend's
+`GRAPH_NOT_SUPPORTED` from `get_engine_configs`; message `no engine supports this graph`),
+the pinned engine does not list it, or no reference can run it (including bundles whose `enforcement_level` is below `FULL`, whose
+outputs are not compared). A skip is still written to the report as a reconcile record.
+`--fail-on-unsupported` turns the two "no engine / pinned engine does not list the graph"
+skips into failures, as in the verification run. A graph whose reference *breaks*, that
+cannot be built, or whose engine listing fails with any other error, fails.
+
+### Statuses
+
+| Status | Meaning |
+|---|---|
+| `PASS` | built, executed, every output matches the reference |
+| `FAIL_NUMERIC` | executed; an output is out of tolerance, or holds a NaN (even one the validator's tolerance would let through) |
+| `FAIL_BUILD` | `create_execution_plan_ext`, `check_support` or `build_plans` failed. This includes the plugin refusing the entry with `INVALID_VALUE` (an unsatisfiable knob filter) and an engine that cannot run the graph on this device: **never skipped** |
+| `FAIL_EXECUTE` | the plan built but workspace, input preparation or execution failed (or the entry threw) |
+| `FILTERED` | excluded by `--catalog-filter`; enumerated and recorded, not run |
+| `NO_CATALOG` | the engine returned no catalog for this graph |
+
+No entry an engine returns is ever skipped: each is run and classified, or `FILTERED`.
+The process exits non-zero if any graph failed (any `FAIL_*`, any `NO_CATALOG`, a graph
+error), or if the sweep enumerated no entries at all.
+
+### Report (JSON Lines)
+
+One **entry record** per catalog entry:
+
+```json
+{"graph":"quick_Pointwise_nchw_fp32_Small.Small","engine_id":123,"engine_name":"hipkernel:Pointwise",
+ "entry_index":3,"knobs":[{"knob_id":"block_size","value":64}],
+ "status":"FAIL_NUMERIC","max_abs_err":4.5,"mismatch_pct":100.0,
+ "message":"output y mismatches the reference (max_abs_err=4.5, mismatched=64/64, nan=64)",
+ "compile_time_ms":812.4,"device_arch":"gfx1151","hipdnn_version":"1.2.3.4"}
+```
+
+| Field | Notes |
+|---|---|
+| `graph` | the bundle's `Suite.Test` name |
+| `engine_id`, `engine_name` | |
+| `entry_index` | position in the engine's catalog; **informational** -- catalogs depend on graph, device and shipped kernel packs, so the knob set identifies an entry. `-1` on the record of an engine with no catalog |
+| `knobs` | array of `{knob_id, value}`; values keep their type (the integer `2` is not the string `"2"`) |
+| `status` | see above |
+| `max_abs_err`, `mismatch_pct` | worst absolute error over all outputs, and the percentage of elements out of tolerance or NaN. `null` when not measured (not run, or no element-wise measure for the output type; `mismatch_pct` is also `null` for RMS-graded outputs) |
+| `message` | failure detail; empty on `PASS` |
+| `compile_time_ms` | time in `create_execution_plan_ext` + `check_support` + `build_plans`: where runtime-compilation engines spend their time. `null` when the entry was not built |
+| `device_arch`, `hipdnn_version` | |
+
+And one **reconcile record** per graph, told apart by `"kind":"reconcile"`, written
+after that graph's entries (a skipped or failed graph gets one too, with `entries` 0):
+
+```json
+{"kind":"reconcile","graph":"quick_Pointwise_nchw_fp32_Small.Small","entries":12,"passed":10,
+ "failed":2,"filtered":0,"fail_numeric":1,"fail_build":0,"fail_execute":0,"no_catalog":1,
+ "reconciled":true,"graph_outcome":"SWEPT","message":"","line":"reconcile graph=... ",
+ "device_arch":"gfx1151","hipdnn_version":"1.2.3.4"}
+```
+
+`graph_outcome` is `SWEPT`, `SKIPPED` or `FAILED`. The same figures are printed per graph as
+
+```
+reconcile graph=quick_Pointwise_nchw_fp32_Small.Small entries=12 = passed=10 + failed=2 + filtered=0 [fail_numeric=1 fail_build=0 fail_execute=0 no_catalog=1]
+```
+
+**The identity `entries = passed + failed + filtered` is the proof that nothing was
+dropped.** `entries` is counted when a catalog is read, the right-hand side as records are
+written, so they are independent; `MISMATCH` is appended (and the graph fails) if they
+differ. An engine with no catalog counts as one entry and as one `failed` (its
+`NO_CATALOG`), so the identity covers it; so does a filtered engine with no catalog,
+which is one `filtered` entry. The run ends with a summary of the same identity over all
+graphs.
+
+### Risks and limits
+
+- **Time.** Engines that compile at plan-build time (the kernel ingestor with runtime
+  compilation) compile every entry: hundreds of entries per graph is hours.
+  Use `--catalog-shard`, `--catalog-filter` and `--gtest_filter`; `compile_time_ms` shows
+  where the time goes. Every entry also refills the inputs, which for large graphs costs
+  host time of its own.
+- **Catalogs are not stable identifiers.** They depend on the graph, the device and the
+  kernel packs shipped; compare reports by knob set, not by `entry_index`.
+- **Reports are appended.** Re-running into an existing report adds lines; use a fresh
+  path per run if you want one run per file.
+- **Validated so far.** On gfx1151 the sweep has been run against `MIOPEN_ENGINE` and
+  `HIP_MLOPS_ENGINE` (one-entry fallback catalogs over the quick tier) and against the
+  in-tree test pointwise pack `hipkernel:Pointwise` (two-entry catalogs), plus a test-only
+  engine with a kernel that writes no output (reported `FAIL_NUMERIC`). The rocKE engines
+  have **not** been exercised: their shipped packs target gfx942/gfx950, so no rocKE
+  catalog was fetched, no catalog sizes or collapsed entries were measured, and no rocKE
+  graph was reconciled. Run a sweep on that hardware before relying on it for rocKE.
+- **Not a CI test.** The sweep is slow, needs a fresh cache directory and a free device,
+  and an engine that merely does not run a graph on this device is reported, not hidden.
+- Support-claim sidecars are neither read nor enforced in sweep mode.
+
 ## Provider Integration
 
 Each provider consumes `hipdnn_integration_tests` as a CMake package and runs it

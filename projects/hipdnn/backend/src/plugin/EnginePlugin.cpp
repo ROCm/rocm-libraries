@@ -107,6 +107,30 @@ void EnginePlugin::resolveSymbols()
                                 "(hipdnnEnginePluginGetEngineName not exported)");
     }
 
+    // Optional pair, both or neither: a lone survivor is cleared below. The check reads the
+    // resolved pointers instead of keeping tryAssignSymbol's results in locals.
+    tryAssignSymbol(_funcGetEngineKnobCatalog, "hipdnnEnginePluginGetEngineKnobCatalog");
+    tryAssignSymbol(_funcDestroyEngineKnobCatalog, "hipdnnEnginePluginDestroyEngineKnobCatalog");
+    if(_funcGetEngineKnobCatalog == nullptr || _funcDestroyEngineKnobCatalog == nullptr)
+    {
+        if(_funcGetEngineKnobCatalog != nullptr || _funcDestroyEngineKnobCatalog != nullptr)
+        {
+            // A catalog that cannot be released is unusable, and a destroy with nothing to
+            // destroy is pointless: treat a lone symbol as no catalog at all.
+            HIPDNN_BACKEND_LOG_WARN(
+                "Plugin exports only one of hipdnnEnginePluginGetEngineKnobCatalog and "
+                "hipdnnEnginePluginDestroyEngineKnobCatalog; both are required, so the plugin "
+                "offers no engine knob catalog.");
+            _funcGetEngineKnobCatalog = nullptr;
+            _funcDestroyEngineKnobCatalog = nullptr;
+        }
+        else
+        {
+            HIPDNN_BACKEND_LOG_INFO("Plugin does not supply engine knob catalogs "
+                                    "(hipdnnEnginePluginGetEngineKnobCatalog not exported)");
+        }
+    }
+
 #ifndef NDEBUG
     _initialized = true;
 #endif
@@ -276,6 +300,55 @@ void EnginePlugin::getEngineDetails(hipdnnEnginePluginHandle_t handle,
     assert(_initialized);
     invokePluginFunction(
         "get engine details", _funcGetEngineDetails, handle, engineId, opGraph, engineDetails);
+}
+
+bool EnginePlugin::hasEngineKnobCatalog() const
+{
+    assert(_initialized);
+    return _funcGetEngineKnobCatalog != nullptr && _funcDestroyEngineKnobCatalog != nullptr;
+}
+
+bool EnginePlugin::getEngineKnobCatalog(hipdnnEnginePluginHandle_t handle,
+                                        int64_t engineId,
+                                        const hipdnnPluginConstData_t* opGraph,
+                                        hipdnnPluginConstData_t* knobCatalog) const
+{
+    assert(_initialized);
+    THROW_IF_FALSE(hasEngineKnobCatalog(),
+                   HIPDNN_STATUS_NOT_SUPPORTED,
+                   "Plugin does not export hipdnnEnginePluginGetEngineKnobCatalog; callers must "
+                   "guard with EnginePlugin::hasEngineKnobCatalog().");
+
+    const auto status = _funcGetEngineKnobCatalog(handle, engineId, opGraph, knobCatalog);
+
+    // The SDK emits this entry point even when the container defines no catalog, so
+    // NOT_APPLICABLE is how a plugin declines.
+    if(status == HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE)
+    {
+        return false;
+    }
+
+    if(status != HIPDNN_PLUGIN_STATUS_SUCCESS)
+    {
+        throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,
+                              std::string("Failed to get engine knob catalog. Status: ")
+                                  + toString(status) + "(" + std::to_string(status)
+                                  + "), Error: " + std::string(getLastErrorString()));
+    }
+
+    return true;
+}
+
+void EnginePlugin::destroyEngineKnobCatalog(hipdnnEnginePluginHandle_t handle,
+                                            hipdnnPluginConstData_t* knobCatalog) const
+{
+    assert(_initialized);
+    THROW_IF_FALSE(hasEngineKnobCatalog(),
+                   HIPDNN_STATUS_NOT_SUPPORTED,
+                   "Plugin does not export hipdnnEnginePluginDestroyEngineKnobCatalog; callers "
+                   "must guard with EnginePlugin::hasEngineKnobCatalog().");
+    invokePluginFunction(
+        "destroy engine knob catalog", _funcDestroyEngineKnobCatalog, handle, knobCatalog);
 }
 
 void EnginePlugin::destroyEngineDetails(hipdnnEnginePluginHandle_t handle,

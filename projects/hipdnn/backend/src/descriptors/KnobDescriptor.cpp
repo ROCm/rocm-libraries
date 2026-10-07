@@ -121,91 +121,105 @@ void KnobDescriptor::finalize()
     }
 
     // Validate that the default value satisfies declared constraints.
-    switch(_defaultValue.type)
+    if(auto violation = findConstraintViolation(_defaultValue))
     {
-    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue:
-    {
-        auto defaultVal = _defaultValue.AsIntValue()->value;
-        if(_minValueInt.has_value())
-        {
-            THROW_IF_TRUE(defaultVal < *_minValueInt,
-                          HIPDNN_STATUS_BAD_PARAM,
-                          "KnobDescriptor::finalize() failed: "
-                          "default value ("
-                              + std::to_string(defaultVal) + ") < MINIMUM_VALUE ("
-                              + std::to_string(*_minValueInt) + ").");
-            THROW_IF_TRUE(defaultVal > *_maxValueInt,
-                          HIPDNN_STATUS_BAD_PARAM,
-                          "KnobDescriptor::finalize() failed: "
-                          "default value ("
-                              + std::to_string(defaultVal) + ") > MAXIMUM_VALUE ("
-                              + std::to_string(*_maxValueInt) + ").");
-            if(_stride.has_value())
-            {
-                THROW_IF_TRUE((defaultVal - *_minValueInt) % *_stride != 0,
-                              HIPDNN_STATUS_BAD_PARAM,
-                              "KnobDescriptor::finalize() failed: "
-                              "default value ("
-                                  + std::to_string(defaultVal) + ") is not aligned to STRIDE ("
-                                  + std::to_string(*_stride) + ") from MINIMUM_VALUE ("
-                                  + std::to_string(*_minValueInt) + ").");
-            }
-        }
-        if(!_validValuesInt.empty())
-        {
-            THROW_IF_TRUE(std::find(_validValuesInt.begin(), _validValuesInt.end(), defaultVal)
-                              == _validValuesInt.end(),
-                          HIPDNN_STATUS_BAD_PARAM,
-                          "KnobDescriptor::finalize() failed: "
-                          "default value ("
-                              + std::to_string(defaultVal) + ") is not in VALID_VALUES_INT.");
-        }
-        break;
-    }
-    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue:
-    {
-        auto defaultVal = _defaultValue.AsFloatValue()->value;
-        if(_minValueDouble.has_value())
-        {
-            THROW_IF_TRUE(defaultVal < *_minValueDouble,
-                          HIPDNN_STATUS_BAD_PARAM,
-                          "KnobDescriptor::finalize() failed: "
-                          "default value is less than MINIMUM_VALUE (DOUBLE).");
-            THROW_IF_TRUE(defaultVal > *_maxValueDouble,
-                          HIPDNN_STATUS_BAD_PARAM,
-                          "KnobDescriptor::finalize() failed: "
-                          "default value is greater than MAXIMUM_VALUE (DOUBLE).");
-        }
-        break;
-    }
-    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue:
-    {
-        const auto& defaultVal = _defaultValue.AsStringValue()->value;
-        if(_stringMaxLength.has_value())
-        {
-            THROW_IF_TRUE(static_cast<int64_t>(defaultVal.size()) > *_stringMaxLength,
-                          HIPDNN_STATUS_BAD_PARAM,
-                          "KnobDescriptor::finalize() failed: "
-                          "default value length ("
-                              + std::to_string(defaultVal.size()) + ") exceeds STRING_MAX_LENGTH ("
-                              + std::to_string(*_stringMaxLength) + ").");
-        }
-        if(!_validValuesString.empty())
-        {
-            THROW_IF_TRUE(
-                std::find(_validValuesString.begin(), _validValuesString.end(), defaultVal)
-                    == _validValuesString.end(),
-                HIPDNN_STATUS_BAD_PARAM,
-                "KnobDescriptor::finalize() failed: "
-                "default value is not in VALID_VALUES_STRING.");
-        }
-        break;
-    }
-    default:
-        break;
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                              "KnobDescriptor::finalize() failed: default " + *violation);
     }
 
     HipdnnBackendDescriptorImpl<KnobDescriptor>::finalize();
+}
+
+// ============================================================================
+// Value validation
+// ============================================================================
+
+std::optional<std::string> KnobDescriptor::findConstraintViolation(
+    const hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion& value) const
+{
+    switch(value.type)
+    {
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue:
+    {
+        const auto val = value.AsIntValue()->value;
+        if(_minValueInt.has_value())
+        {
+            if(val < *_minValueInt)
+            {
+                return "value (" + std::to_string(val) + ") < MINIMUM_VALUE ("
+                       + std::to_string(*_minValueInt) + ").";
+            }
+            if(val > *_maxValueInt)
+            {
+                return "value (" + std::to_string(val) + ") > MAXIMUM_VALUE ("
+                       + std::to_string(*_maxValueInt) + ").";
+            }
+            if(_stride.has_value() && (val - *_minValueInt) % *_stride != 0)
+            {
+                return "value (" + std::to_string(val) + ") is not aligned to STRIDE ("
+                       + std::to_string(*_stride) + ") from MINIMUM_VALUE ("
+                       + std::to_string(*_minValueInt) + ").";
+            }
+        }
+        if(!_validValuesInt.empty()
+           && std::find(_validValuesInt.begin(), _validValuesInt.end(), val)
+                  == _validValuesInt.end())
+        {
+            return "value (" + std::to_string(val) + ") is not in VALID_VALUES_INT.";
+        }
+        return std::nullopt;
+    }
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue:
+    {
+        const auto val = value.AsFloatValue()->value;
+        if(_minValueDouble.has_value())
+        {
+            if(val < *_minValueDouble)
+            {
+                return "value (" + std::to_string(val) + ") is less than MINIMUM_VALUE (DOUBLE).";
+            }
+            if(val > *_maxValueDouble)
+            {
+                return "value (" + std::to_string(val)
+                       + ") is greater than MAXIMUM_VALUE (DOUBLE).";
+            }
+        }
+        return std::nullopt;
+    }
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue:
+    {
+        const auto& val = value.AsStringValue()->value;
+        if(_stringMaxLength.has_value() && static_cast<int64_t>(val.size()) > *_stringMaxLength)
+        {
+            return "value length (" + std::to_string(val.size()) + ") exceeds STRING_MAX_LENGTH ("
+                   + std::to_string(*_stringMaxLength) + ").";
+        }
+        if(!_validValuesString.empty()
+           && std::find(_validValuesString.begin(), _validValuesString.end(), val)
+                  == _validValuesString.end())
+        {
+            return "value '" + val + "' is not in VALID_VALUES_STRING.";
+        }
+        return std::nullopt;
+    }
+    default:
+        return std::nullopt;
+    }
+}
+
+std::optional<std::string> KnobDescriptor::validateValue(
+    const hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion& value) const
+{
+    THROW_IF_FALSE(isFinalized(),
+                   HIPDNN_STATUS_NOT_INITIALIZED,
+                   "KnobDescriptor::validateValue() failed: Not finalized.");
+
+    if(value.type != _defaultValue.type)
+    {
+        return "value type does not match the advertised knob type.";
+    }
+
+    return findConstraintViolation(value);
 }
 
 // ============================================================================

@@ -43,6 +43,19 @@ public:
                 destroyEngineDetails,
                 (hipdnnEnginePluginHandle_t handle, hipdnnPluginConstData_t* engineDetails),
                 (const));
+    // Left unstubbed, gmock returns false: the "plugin exports no knob catalog" case.
+    MOCK_METHOD(bool, hasEngineKnobCatalog, (), (const));
+    MOCK_METHOD(bool,
+                getEngineKnobCatalog,
+                (hipdnnEnginePluginHandle_t handle,
+                 int64_t engineId,
+                 const hipdnnPluginConstData_t* opGraph,
+                 hipdnnPluginConstData_t* knobCatalog),
+                (const));
+    MOCK_METHOD(void,
+                destroyEngineKnobCatalog,
+                (hipdnnEnginePluginHandle_t handle, hipdnnPluginConstData_t* knobCatalog),
+                (const));
     MOCK_METHOD(size_t,
                 getWorkspaceSize,
                 (hipdnnEnginePluginHandle_t handle,

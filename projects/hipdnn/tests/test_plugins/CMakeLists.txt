@@ -86,6 +86,24 @@ add_test_plugin(${TEST_INCOMPLETE_API_PLUGIN_NAME} TestIncompleteApiPlugin.cpp)
 # test_knobs_plugin is a plugin that exposes engine configuration knobs
 add_test_plugin(${TEST_KNOBS_PLUGIN_NAME} TestKnobsPlugin.cpp)
 
+# test_knob_catalog_plugin exports the optional knob catalog entry points and serves a catalog
+# selected through an environment variable
+add_test_plugin(${TEST_KNOB_CATALOG_PLUGIN_NAME} TestKnobCatalogPlugin.cpp)
+
+# test_knob_catalog_get_only_plugin is the same plugin but exports only the catalog getter, without
+# the matching destroy entry point. The host must treat it as offering no catalog.
+add_test_plugin(${TEST_KNOB_CATALOG_GET_ONLY_PLUGIN_NAME} TestKnobCatalogPlugin.cpp)
+target_compile_definitions(
+    ${TEST_KNOB_CATALOG_GET_ONLY_PLUGIN_NAME} PRIVATE HIPDNN_TEST_KNOB_CATALOG_GET_ONLY
+)
+
+# test_knob_catalog_destroy_only_plugin is the same plugin but exports only the catalog destroy
+# entry point, without the getter. The host must treat it as offering no catalog.
+add_test_plugin(${TEST_KNOB_CATALOG_DESTROY_ONLY_PLUGIN_NAME} TestKnobCatalogPlugin.cpp)
+target_compile_definitions(
+    ${TEST_KNOB_CATALOG_DESTROY_ONLY_PLUGIN_NAME} PRIVATE HIPDNN_TEST_KNOB_CATALOG_DESTROY_ONLY
+)
+
 # test_knob_constraint_validation_plugin is a plugin that validates knob constraint types
 add_test_plugin(${TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME} TestKnobConstraintValidationPlugin.cpp)
 

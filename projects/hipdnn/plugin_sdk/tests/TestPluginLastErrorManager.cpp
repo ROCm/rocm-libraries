@@ -10,8 +10,8 @@
 
 using namespace hipdnn_plugin_sdk;
 
-// NOLINTNEXTLINE
-thread_local char PluginLastErrorManager::s_lastError[HIPDNN_PLUGIN_ERROR_STRING_MAX_LENGTH] = "";
+// The thread-local storage behind PluginLastErrorManager is defined once per binary, by the
+// EnginePluginImpl.inl include in TestEnginePluginKnobCatalogApi.cpp.
 
 TEST(TestPluginLastErrorManager, SetAndGetLastErrorString)
 {

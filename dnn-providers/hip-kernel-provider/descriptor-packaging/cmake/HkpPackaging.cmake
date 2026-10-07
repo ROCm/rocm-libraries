@@ -1456,6 +1456,16 @@ function(hkp_add_packaging)
         ${_rocke_args}
         PACK_JOBS 1)
 
+    hkp_wire_pack_target(
+        NAME catalog_sweep_fixture
+        SOURCE_ROOT "${_authored}/${HIPKERNELPROVIDER_TEST_SET_CATALOG_SWEEP_FIXTURE}"
+        ARCHES "${_arches}"
+        HIPCC "${HKP_HIPCC}"
+        ROCM_KPACK_DIR "${_rocm_kpack_dir}"
+        OUT_ROOT "${_integration}/${HIPKERNELPROVIDER_TEST_SET_CATALOG_SWEEP_FIXTURE}"
+        ${_rocke_args}
+        PACK_JOBS 1)
+
     hkp_register_tests("${_rocm_kpack_dir}" "${HKP_HIPCC}" "${_rocke_comgr_lib}")
 endfunction()
 

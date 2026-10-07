@@ -121,22 +121,22 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hip_kernel_provider_integration_tests
         PRIVATE HIPKERNELPROVIDER_PACKAGED_FIXTURE_SUBDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}/${HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE}"
     )
-    # The integration root is packed by three roots, and each stages under its own
+    # The integration root is packed by four roots, and each stages under its own
     # packaging target. Name each one individually.
     foreach(_hkp_set hkp_packaging_integration hkp_packaging_integration_shared
-                     hkp_packaging_archive_fixture)
+                     hkp_packaging_archive_fixture hkp_packaging_catalog_sweep_fixture)
         if(TARGET ${_hkp_set})
             add_dependencies(hip_kernel_provider_integration_tests ${_hkp_set})
         endif()
     endforeach()
 
-    # The parent of the integration descriptor sets, which holds all three. A
+    # The parent of the integration descriptor sets, which holds all four. A
     # walk of a parent reaches every subtree staged under it, so a further pack
     # there comes under the check with no edit here.
     hkp_verify_embedded_sources(
         TARGET hip_kernel_provider_integration_tests
         STAGED_DESCRIPTOR_ROOTS ${HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR}
-        PACK_NAMES integration integration_shared archive_fixture
+        PACK_NAMES integration integration_shared archive_fixture catalog_sweep_fixture
     )
 endif()
 

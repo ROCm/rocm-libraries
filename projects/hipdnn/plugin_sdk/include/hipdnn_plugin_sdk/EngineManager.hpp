@@ -105,6 +105,18 @@ public:
         engine.getDetails(handle, opGraph, engineDetailsOut);
     }
 
+    /// Serializes @p engineId's knob catalog for @p opGraph into @p catalogOut.
+    /// @throws HipdnnPluginException with HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE if the engine
+    /// offers no catalog, HIPDNN_PLUGIN_STATUS_INVALID_VALUE if @p engineId is not registered.
+    void getEngineKnobCatalog(THandle& handle,
+                              const IGraph& opGraph,
+                              int64_t engineId,
+                              hipdnnPluginConstData_t& catalogOut)
+    {
+        auto& engine = getEngine(engineId);
+        engine.getKnobCatalog(handle, opGraph, catalogOut);
+    }
+
     size_t getMaxWorkspaceSize(const THandle& handle,
                                const IGraph& opGraph,
                                const IEngineConfig& engineConfig) const

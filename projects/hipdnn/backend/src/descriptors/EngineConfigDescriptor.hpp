@@ -43,12 +43,24 @@ private:
                                   int64_t elementCount,
                                   const void* arrayOfElements);
 
+    void getKnobSettingDescriptors(hipdnnBackendAttributeType_t attributeType,
+                                   int64_t requestedElementCount,
+                                   int64_t* elementCount,
+                                   void* arrayOfElements) const;
+
 public:
     EngineConfigDescriptor();
     static constexpr int64_t INVALID_WORKSPACE_SIZE = -1;
 
     /// Maximum number of knob choices that can be set on a single engine config.
     static constexpr int64_t MAX_KNOB_CHOICES = 1024;
+
+    /// Builds a finalized config for @p engine carrying the knob settings of @p entry.
+    /// The entry's own engine ID is ignored: the config always targets @p engine.
+    /// Finalizing queries the plugin for the config's workspace size.
+    static std::shared_ptr<EngineConfigDescriptor>
+        fromEngineConfigT(const std::shared_ptr<const EngineDescriptor>& engine,
+                          const hipdnn_flatbuffers_sdk::data_objects::EngineConfigT& entry);
 
     void finalize() override;
 

@@ -3,6 +3,7 @@
 
 #include "DescriptorTestUtils.hpp"
 #include "HipdnnBackendFlatbufferData.h"
+#include "HipdnnException.hpp"
 #include "TestMacros.hpp"
 #include "descriptors/EngineConfigDescriptor.hpp"
 #include "descriptors/EngineDescriptor.hpp"
@@ -18,6 +19,10 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 
 #include <memory>
+#include <string>
+#include <utility>
+#include <variant>
+#include <vector>
 
 using namespace hipdnn_backend;
 using namespace plugin;
@@ -542,4 +547,157 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceViaDescriptorRejectExceedsMaxCou
                                    EngineConfigDescriptor::MAX_KNOB_CHOICES + 1,
                                    &knobPtr),
         HIPDNN_STATUS_BAD_PARAM);
+}
+
+// Helper to create a finalized KnobSettingDescriptor holding a string value
+static std::unique_ptr<HipdnnBackendDescriptor>
+    createFinalizedStringKnobSettingDescriptor(const std::string& knobId, const std::string& value)
+{
+    auto wrapper = test_utilities::createDescriptor<KnobSettingDescriptor>();
+    auto desc = wrapper->asDescriptor<KnobSettingDescriptor>();
+    desc->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE,
+                       HIPDNN_TYPE_CHAR,
+                       static_cast<int64_t>(knobId.size()),
+                       knobId.c_str());
+    desc->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE,
+                       HIPDNN_TYPE_CHAR,
+                       static_cast<int64_t>(value.size()),
+                       value.c_str());
+    desc->finalize();
+    return wrapper;
+}
+
+// Reads the HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES of a finalized config back as
+// (knob ID, int value or string value) pairs, with the count-then-data protocol.
+static std::vector<std::pair<std::string, std::variant<int64_t, std::string>>>
+    readKnobChoices(const EngineConfigDescriptor& engineConfig)
+{
+    int64_t count = -1;
+    engineConfig.getAttribute(
+        HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &count, nullptr);
+
+    std::vector<HipdnnBackendDescriptor*> raw(static_cast<size_t>(count));
+    int64_t returned = -1;
+    engineConfig.getAttribute(HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES,
+                              HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                              count,
+                              &returned,
+                              static_cast<void*>(raw.data()));
+    EXPECT_EQ(returned, count);
+
+    std::vector<std::unique_ptr<HipdnnBackendDescriptor>> owned;
+    owned.reserve(raw.size());
+    for(auto* descriptor : raw)
+    {
+        owned.emplace_back(descriptor);
+    }
+
+    const auto readString
+        = [](const KnobSettingDescriptor& choice, hipdnnBackendAttributeName_t attribute) {
+              int64_t length = 0;
+              choice.getAttribute(attribute, HIPDNN_TYPE_CHAR, 0, &length, nullptr);
+              std::vector<char> buffer(static_cast<size_t>(length));
+              choice.getAttribute(attribute, HIPDNN_TYPE_CHAR, length, &length, buffer.data());
+              return std::string(buffer.data());
+          };
+
+    std::vector<std::pair<std::string, std::variant<int64_t, std::string>>> choices;
+    for(const auto& descriptor : owned)
+    {
+        auto choice = descriptor->asDescriptor<KnobSettingDescriptor>();
+        const auto knobId = readString(*choice, HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE);
+
+        // The value is only retrievable in the type it was stored with.
+        int64_t intValue = 0;
+        int64_t valueCount = 0;
+        try
+        {
+            choice->getAttribute(
+                HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_INT64, 1, &valueCount, &intValue);
+            choices.emplace_back(knobId, intValue);
+        }
+        catch(const HipdnnException&)
+        {
+            choices.emplace_back(knobId, readString(*choice, HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE));
+        }
+    }
+    return choices;
+}
+
+TEST_F(TestEngineConfigDescriptor, GetKnobChoicesRoundTripsIntAndStringChoicesInOrder)
+{
+    auto engineConfig = getEngineConfigDescriptor();
+
+    auto intChoice = createFinalizedKnobSettingDescriptor("tile_size", 32);
+    auto stringChoice = createFinalizedStringKnobSettingDescriptor("mode", "accurate");
+    std::array<HipdnnBackendDescriptor*, 2> choices = {intChoice.get(), stringChoice.get()};
+    ASSERT_NO_THROW(engineConfig->setAttribute(HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES,
+                                               HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                               2,
+                                               static_cast<const void*>(choices.data())));
+    makeEngineConfigFinalized();
+
+    const auto read = readKnobChoices(*engineConfig);
+    ASSERT_EQ(read.size(), 2U);
+    EXPECT_EQ(read[0].first, "tile_size");
+    EXPECT_EQ(read[0].second, (std::variant<int64_t, std::string>(int64_t{32})));
+    EXPECT_EQ(read[1].first, "mode");
+    EXPECT_EQ(read[1].second, (std::variant<int64_t, std::string>(std::string("accurate"))));
+}
+
+TEST_F(TestEngineConfigDescriptor, GetKnobChoicesOfConfigWithoutChoicesIsEmpty)
+{
+    auto engineConfig = getEngineConfigDescriptor();
+    makeEngineConfigFinalized();
+
+    int64_t count = -1;
+    ASSERT_NO_THROW(engineConfig->getAttribute(
+        HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &count, nullptr));
+    EXPECT_EQ(count, 0);
+}
+
+TEST_F(TestEngineConfigDescriptor, GetKnobChoicesOnUnfinalizedConfigIsRejected)
+{
+    auto engineConfig = getEngineConfigDescriptor();
+
+    int64_t count = -1;
+    ASSERT_THROW_HIPDNN_STATUS(
+        engineConfig->getAttribute(
+            HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &count, nullptr),
+        HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+TEST_F(TestEngineConfigDescriptor, GetKnobChoicesRejectsWrongAttributeType)
+{
+    auto engineConfig = getEngineConfigDescriptor();
+    makeEngineConfigFinalized();
+
+    int64_t count = -1;
+    ASSERT_THROW_HIPDNN_STATUS(
+        engineConfig->getAttribute(
+            HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES, HIPDNN_TYPE_INT64, 0, &count, nullptr),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestEngineConfigDescriptor, GetKnobChoicesRejectsTooSmallBuffer)
+{
+    auto engineConfig = getEngineConfigDescriptor();
+
+    auto first = createFinalizedKnobSettingDescriptor("knob_1", 10);
+    auto second = createFinalizedKnobSettingDescriptor("knob_2", 20);
+    std::array<HipdnnBackendDescriptor*, 2> choices = {first.get(), second.get()};
+    ASSERT_NO_THROW(engineConfig->setAttribute(HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES,
+                                               HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                               2,
+                                               static_cast<const void*>(choices.data())));
+    makeEngineConfigFinalized();
+
+    std::array<HipdnnBackendDescriptor*, 1> out{};
+    int64_t count = -1;
+    ASSERT_THROW_HIPDNN_STATUS(engineConfig->getAttribute(HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES,
+                                                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                          1,
+                                                          &count,
+                                                          static_cast<void*>(out.data())),
+                               HIPDNN_STATUS_BAD_PARAM);
 }

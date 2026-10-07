@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_knob_catalog_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
@@ -215,6 +216,39 @@ TEST(TestIngestorGenericEngine, ConstructingAnEngineWithNoDeclaredKnobsNeverThro
     const StubDeviceResolver resolver;
 
     EXPECT_NO_THROW((StubEngine(makeEngineWithKnobs({}), makeStubStateManager(), resolver)));
+}
+
+/// The plan builder leaves engine_id unset; the engine is what knows its own id, and the
+/// backend rejects an entry carrying any other.
+TEST(TestIngestorGenericEngine, GetKnobCatalogSerializesEveryEntryUnderTheEnginesId)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    const ScopedTestSymbols symbols;
+    const StubDeviceResolver resolver;
+    const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}), makeStubStateManager(), resolver);
+
+    StubHandle handle;
+    const TestGraph graph(makeGraphId(0x67));
+    hipdnnPluginConstData_t serialized{};
+
+    engine.getKnobCatalog(handle, graph, serialized);
+
+    ASSERT_NE(serialized.ptr, nullptr);
+    ASSERT_GT(serialized.size, 0U);
+    flatbuffers::Verifier verifier(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
+    ASSERT_TRUE(VerifyEngineKnobCatalogBuffer(verifier));
+    const std::unique_ptr<EngineKnobCatalogT> catalog(
+        GetEngineKnobCatalog(serialized.ptr)->UnPack());
+
+    EXPECT_EQ(catalog->engine_id, engine.id());
+    // The stub manager ships the single 64-block kernel.
+    ASSERT_EQ(catalog->configs.size(), 1U);
+    EXPECT_EQ(catalog->configs.front()->engine_id, engine.id());
+    ASSERT_EQ(catalog->configs.front()->knobs.size(), 1U);
+    EXPECT_EQ(catalog->configs.front()->knobs.front()->knob_id, BLOCK_SIZE);
+    ASSERT_NE(catalog->configs.front()->knobs.front()->value.AsIntValue(), nullptr);
+    EXPECT_EQ(catalog->configs.front()->knobs.front()->value.AsIntValue()->value, 64);
 }
 
 TEST(TestIngestorGenericEngine, GetMaxWorkspaceSizeDelegatesToThePlanBuilder)

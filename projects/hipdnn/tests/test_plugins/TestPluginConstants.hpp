@@ -124,6 +124,35 @@ inline const std::string& testKnobsPluginPath()
     return s_testKnobsPluginPath;
 }
 
+// The knob-catalog plugin is consumed only by the knob-catalog integration tests, so only
+// targets that define TEST_KNOB_CATALOG_PLUGIN_NAME get this accessor.
+#ifdef TEST_KNOB_CATALOG_PLUGIN_NAME
+inline const std::string& testKnobCatalogPluginPath()
+{
+    static const std::string s_testKnobCatalogPluginPath
+        = getTestCustomFilepathForPlugin(TEST_KNOB_CATALOG_PLUGIN_NAME);
+    return s_testKnobCatalogPluginPath;
+}
+#endif
+
+#ifdef TEST_KNOB_CATALOG_GET_ONLY_PLUGIN_NAME
+inline const std::string& testKnobCatalogGetOnlyPluginPath()
+{
+    static const std::string s_testKnobCatalogGetOnlyPluginPath
+        = getTestCustomFilepathForPlugin(TEST_KNOB_CATALOG_GET_ONLY_PLUGIN_NAME);
+    return s_testKnobCatalogGetOnlyPluginPath;
+}
+#endif
+
+#ifdef TEST_KNOB_CATALOG_DESTROY_ONLY_PLUGIN_NAME
+inline const std::string& testKnobCatalogDestroyOnlyPluginPath()
+{
+    static const std::string s_testKnobCatalogDestroyOnlyPluginPath
+        = getTestCustomFilepathForPlugin(TEST_KNOB_CATALOG_DESTROY_ONLY_PLUGIN_NAME);
+    return s_testKnobCatalogDestroyOnlyPluginPath;
+}
+#endif
+
 inline const std::string& testKnobConstraintValidationPluginPath()
 {
     static const std::string s_testKnobConstraintValidationPluginPath

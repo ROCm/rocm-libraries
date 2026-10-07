@@ -179,6 +179,7 @@ set(INTEGRATION_TESTS_EXE hipdnn_integration_tests)
 add_executable(${INTEGRATION_TESTS_EXE}
     src/main.cpp
     src/harness/ReferenceExecutorPool.cpp
+    src/harness/bundle/BundleInputs.cpp
     src/harness/bundle/FrontendGraphEngineRunner.cpp
     src/harness/bundle/GraphSession.cpp
     src/harness/bundle/HarnessDependencies.cpp
@@ -191,6 +192,13 @@ add_executable(${INTEGRATION_TESTS_EXE}
     src/harness/bundle/SupportVerdict.cpp
     src/harness/bundle/SweepManifestCache.cpp
     src/harness/bundle/VariantPackBuilder.cpp
+    src/harness/catalog-sweep/CatalogReportWriter.cpp
+    src/harness/catalog-sweep/CatalogSweep.cpp
+    src/harness/catalog-sweep/CatalogSweepOptions.cpp
+    src/harness/catalog-sweep/CatalogSweepRegistration.cpp
+    src/harness/catalog-sweep/CatalogSweepTypes.cpp
+    src/harness/catalog-sweep/FrontendCatalogGraphRunner.cpp
+    src/harness/catalog-sweep/OutputDiffStats.cpp
     src/harness/input-init/FillInputs.cpp
 )
 

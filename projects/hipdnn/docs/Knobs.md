@@ -12,6 +12,7 @@ This document provides comprehensive information about hipDNN's engine configura
   - [Querying Available Knobs](#querying-available-knobs)
   - [Setting Knob Values](#setting-knob-values)
   - [Using Default Values](#using-default-values)
+  - [Enumerating Valid Configurations (Knob Catalog)](#enumerating-valid-configurations-knob-catalog)
 - [Standard Global Knobs](#standard-global-knobs)
 - [Provider-Specific Knobs](#provider-specific-knobs)
 - [API Reference](#api-reference)
@@ -239,6 +240,38 @@ auto error = graph.create_execution_plan_ext(engineId, settings);
 > [!NOTE]
 > **Deprecated Knobs**: If a knob is marked as deprecated, hipDNN will log a warning when you use it, but the knob will still function normally.
 
+### Enumerating Valid Configurations (Knob Catalog)
+
+Knob metadata describes each knob's legal values *independently*. A range is not an enumeration, and independent value lists combine into configurations an engine may not support, so metadata cannot be used to derive the configurations an engine really offers. For that, ask the engine for its **knob catalog**: the list of valid engine-specific knob configurations for a graph. Each entry can be passed unchanged to `create_execution_plan_ext`.
+
+```cpp
+std::vector<std::vector<hipdnn_frontend::KnobSetting>> catalog;
+auto err = graph.get_knob_catalog_for_engine(engineId, catalog);
+if(err.is_bad())
+{
+    // HIPDNN_STATUS_NOT_SUPPORTED: the engine has engine-specific knobs
+    // but does not implement a catalog.
+    return;
+}
+
+for(const auto& entry : catalog)
+{
+    auto planErr = graph.create_execution_plan_ext(engineId, entry);
+    // ...
+}
+```
+
+- Entries are ordered by engine preference, best first.
+- Entries contain engine-specific knobs only; `global.*` knobs are never part of a catalog, so you can still combine an entry with global knob settings of your own.
+- An engine with no engine-specific knobs returns one empty entry (its default configuration).
+- An engine that advertises engine-specific knobs but implements no catalog returns `HIPDNN_STATUS_NOT_SUPPORTED`.
+- A catalog depends on the graph, the device and the kernels installed for the engine. Treat an entry's position as informational and identify an entry by its knob settings.
+- The backend validates what a plugin supplies (knobs advertised for the graph, no `global.` knobs, values matching the advertised type and constraint, no duplicates, matching engine ID) and reports a violation as `HIPDNN_STATUS_INTERNAL_ERROR`.
+
+The C API equivalent is the read-only `HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT` attribute of the engine descriptor, an array of finalized engine-config descriptors. The catalog is fetched on first read, not at `finalize()`.
+
+To run every entry of every engine against the reference implementation, use the offline `--sweep-knob-catalog` mode of `hipdnn_integration_tests` (see `dnn-providers/integration-tests/README.md`).
+
 ---
 
 ## Standard Global Knobs
@@ -301,6 +334,7 @@ template <typename T> KnobSetting(std::string knobId, const T& value);
 ```cpp
 Error get_knobs_for_engine(int64_t engineId, std::vector<Knob>& knobs) const;
 Error get_knob_lookup_for_engine(int64_t engineId, std::unordered_map<std::string, Knob>& knobs) const;
+Error get_knob_catalog_for_engine(int64_t engineId, std::vector<std::vector<KnobSetting>>& catalog) const;
 ```
 
 **Setting Knobs**:

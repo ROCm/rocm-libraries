@@ -1014,7 +1014,50 @@ For users migrating from earlier versions without knobs:
 2. **Opt-in configuration**: Knobs are optional; existing code continues to work
 3. **Progressive enhancement**: Users can gradually adopt knobs for specific tuning needs
 
-### 11.8 Related Documentation
+### 11.8 Engine Knob Catalog (ALMIOPEN-2827)
+
+Knob metadata (`Knob`, `KnobConstraint`) describes the *legal values of each knob independently*. It cannot be used to enumerate the configurations an engine actually supports: a range is not an enumeration, and independent value lists combine into configurations the engine may not be able to run. An engine backed by a kernel catalog (for example the generic kernel ingestor, [RFC 0020](0020_UniversalEngineDescriptor.md) §8) can match tens to hundreds of kernels to one graph, so only the top-ranked one was ever exercised by `HEURISTICS_CHOICE`. The **knob catalog** closes that gap: it is the list of valid engine-specific knob configurations for a given graph and engine. This is an additive extension of the knob system and is documented here instead of in a standalone RFC.
+
+**Not changed:** how the heuristic and autotuning choose configurations; `global.*` knobs (catalogs carry engine-specific knobs only); kernel identities (UUIDs, kernel names) are never exposed through the public API.
+
+#### Components
+
+| Layer | Addition |
+|-------|----------|
+| FlatBuffers | `flatbuffers_sdk/schemas/engine_knob_catalog.fbs`: `EngineKnobCatalog { engine_id: int64; configs: [EngineConfig]; }` |
+| Engine plugin C ABI (1.5.0, additive) | Optional pair `hipdnnEnginePluginGetEngineKnobCatalog` / `hipdnnEnginePluginDestroyEngineKnobCatalog`, resolved with `tryAssignSymbol`. Keyed on symbol presence only, like `hipdnnEnginePluginGetEngineName`; `HIPDNN_ENGINE_API_VERSION_MINOR` is bumped 4 to 5. A plugin exports both or neither. `HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE` from the getter means "no catalog for this graph". |
+| Plugin SDK | `IPlanBuilder::getKnobCatalog(handle, graph)` (default: not supported), bridged through `IEngine::getKnobCatalog` and `EngineManager`, which dispatches by engine ID. `GenericPlanBuilder` implements it for the kernel ingestor. |
+| Backend C API | `HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT = 60500`: read-only attribute of the engine descriptor, an array of finalized `HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR`s ordered by engine preference, with the same count-then-data get protocol as `HIPDNN_ATTR_ENGINE_KNOB_INFO`. Fetched on the first read (`std::call_once`) and cached; never fetched by `finalize()`. `HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES` is now also readable on a finalized engine config (previously `HIPDNN_STATUS_NOT_SUPPORTED`). |
+| Frontend | `Graph::get_knob_catalog_for_engine(int64_t engineId, std::vector<std::vector<KnobSetting>>& catalog) const`. Each inner vector is one entry and can be passed unchanged to `create_execution_plan_ext`. |
+
+#### Backend validation of plugin-supplied catalogs
+
+A plugin is not trusted. After fetching a catalog the backend rejects it with `HIPDNN_STATUS_INTERNAL_ERROR`, naming the engine and the entry, when:
+
+1. an entry carries a knob the engine does not advertise for this graph;
+2. an entry carries a `global.` knob;
+3. a value does not match the advertised knob's type or constraint;
+4. an entry names the same knob twice, or two entries are equal;
+5. an entry's engine ID differs from the queried engine.
+
+#### Fallback for engines without the entry point
+
+| Engine advertises | Result |
+|-------------------|--------|
+| no engine-specific knobs (hipBLASLt, MIOpen) | one empty entry: the default configuration |
+| one or more engine-specific knobs and no catalog (ASM SDPA backward: `sdpa.bwd.accumulator_type`) | `HIPDNN_STATUS_NOT_SUPPORTED` until the engine implements a catalog |
+
+`global.*` knobs never count as engine-specific for this rule.
+
+#### Kernel-ingestor implementation and collapsed entries
+
+`GenericPlanBuilder::getKnobCatalog` projects every kernel of the ranked catalog onto the engine's exposed knob fields and de-duplicates, keeping the first occurrence so rank order is preserved. Two kernels that differ only in fields the engine does not expose therefore share one entry (a *collapsed* entry). The plan builder logs, at INFO, the entry count, the matched kernel count and each entry covering more than one kernel. Collapsing is not a harness failure; pack authors enforce it with the pack-author check in `tools/IngestorGenerator/tools/variant_reachability.py`, which asserts that no two matched kernels share a knob projection for each representative graph.
+
+#### Catalog-sweep validation mode
+
+`hipdnn_integration_tests --sweep-knob-catalog` runs every entry of every applicable engine for every graph and compares each against the reference with the graph's own tolerances, writing one JSON Lines record per entry (`PASS`, `FAIL_NUMERIC`, `FAIL_BUILD`, `FAIL_EXECUTE`, `FILTERED`, `NO_CATALOG`) and a per-graph reconciliation `entries = passed + failed + filtered`. It is an offline mode, not run in CI; see the integration-tests README. Catalogs depend on the graph, the device and the shipped kernel packs, so `entry_index` in a report is informational and the knob set identifies an entry.
+
+### 11.9 Related Documentation
 
 For implementation details and usage examples, refer to:
 

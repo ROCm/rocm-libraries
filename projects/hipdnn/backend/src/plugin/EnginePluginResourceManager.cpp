@@ -8,6 +8,7 @@
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_knob_catalog_generated.h>
 #include <limits>
 #include <mutex>
 #include <numeric>
@@ -555,6 +556,72 @@ std::shared_ptr<const EngineDetailsWrapper> EnginePluginResourceManager::getEngi
     const GraphDescriptor* graphDesc)
 {
     return std::make_shared<EngineDetailsWrapper>(rm, engineId, graphDesc);
+}
+
+std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineKnobCatalogT>
+    EnginePluginResourceManager::getEngineKnobCatalog(int64_t engineId,
+                                                      const GraphDescriptor* graphDesc) const
+{
+    THROW_IF_NULL(graphDesc, HIPDNN_STATUS_INTERNAL_ERROR, "Graph descriptor cannot be null");
+
+    auto it = _engineIdToHandle.find(engineId);
+    if(it == _engineIdToHandle.end())
+    {
+        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
+                              "Invalid engine ID: " + std::to_string(engineId));
+    }
+
+    auto handle = it->second;
+    auto plugin = _handleToPlugin.at(handle);
+
+    if(!plugin->hasEngineKnobCatalog())
+    {
+        return nullptr;
+    }
+
+    auto serializedGraphData = graphDesc->getSerializedGraph();
+
+    hipdnnPluginConstData_t catalogData{nullptr, 0};
+    if(!plugin->getEngineKnobCatalog(handle, engineId, &serializedGraphData, &catalogData))
+    {
+        return nullptr;
+    }
+
+    // The plugin owns the buffer until it is destroyed: release it on every path, after the
+    // catalog has been copied out of it.
+    const auto release = [&plugin, handle](hipdnnPluginConstData_t* data) {
+        if(data->ptr == nullptr)
+        {
+            return;
+        }
+
+        try
+        {
+            plugin->destroyEngineKnobCatalog(handle, data);
+        }
+        catch(const HipdnnException& e)
+        {
+            HIPDNN_BACKEND_LOG_ERROR(e.getMessage());
+        }
+    };
+    const std::unique_ptr<hipdnnPluginConstData_t, decltype(release)> owner(&catalogData, release);
+
+    if(catalogData.ptr == nullptr || catalogData.size == 0)
+    {
+        throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,
+                              "Knob catalog for engine ID " + std::to_string(engineId)
+                                  + " is empty or null");
+    }
+
+    flatbuffers::Verifier verifier(static_cast<const uint8_t*>(catalogData.ptr), catalogData.size);
+    if(!verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::EngineKnobCatalog>())
+    {
+        throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,
+                              "Knob catalog for engine ID " + std::to_string(engineId)
+                                  + " is not a valid EngineKnobCatalog flatbuffer");
+    }
+
+    return hipdnn_flatbuffers_sdk::data_objects::UnPackEngineKnobCatalog(catalogData.ptr);
 }
 
 size_t EnginePluginResourceManager::getWorkspaceSize(int64_t engineId,

@@ -430,7 +430,108 @@ public:
         return knobs;
     }
 
+    /// One entry per distinct knob projection of the ranked catalog, in rank order.
+    ///
+    /// A kernel's projection is its integer value for each of the engine's knob fields --
+    /// the same fields getCustomKnobs() advertises and readKnobFilter() applies, never a
+    /// `global.*` knob. Applying an entry therefore filters the catalog down to the kernels
+    /// sharing that projection, and buildPlan() serves the first of them in rank order:
+    /// exactly the kernel the entry was taken from. Two kernels sharing a projection are
+    /// indistinguishable through knobs, so only the better-ranked one is reachable; that
+    /// collapse is logged for the pack author rather than failed, and
+    /// tools/IngestorGenerator/tools/variant_reachability.py rejects it ahead of time.
+    std::vector<hipdnn_flatbuffers_sdk::data_objects::EngineConfigT>
+        getKnobCatalog(const THandle& handle, const IGraph& opGraph) const override
+    {
+        using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+        const auto ranked = _stateManager.sortedDefinitions(contextFor(handle, opGraph));
+
+        std::vector<KnobProjection> projections;
+        std::vector<std::vector<std::string>> kernelsOfEntry;
+        std::map<KnobProjection, size_t> entryOfProjection;
+        for(const auto& kernel : ranked)
+        {
+            auto projection = knobProjectionOf(kernel);
+            const auto [position, isNew]
+                = entryOfProjection.try_emplace(projection, projections.size());
+            if(isNew)
+            {
+                projections.push_back(std::move(projection));
+                kernelsOfEntry.emplace_back();
+            }
+            kernelsOfEntry[position->second].push_back(toString(kernel.kernelId));
+        }
+
+        HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '" << _engine.name << "' knob catalog has "
+                                                    << projections.size() << " entry(s) for "
+                                                    << ranked.size() << " matched kernel(s)");
+
+        std::vector<EngineConfigT> catalog;
+        catalog.reserve(projections.size());
+        for(size_t entry = 0; entry < projections.size(); ++entry)
+        {
+            if(kernelsOfEntry[entry].size() > 1)
+            {
+                std::string kernels;
+                for(const auto& kernelId : kernelsOfEntry[entry])
+                {
+                    kernels += (kernels.empty() ? "" : ", ") + kernelId;
+                }
+                HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
+                                       << _engine.name << "' knob catalog entry " << entry << " ("
+                                       << describeProjection(projections[entry]) << ") covers "
+                                       << kernelsOfEntry[entry].size()
+                                       << " kernels, which no knob setting tells apart; only the "
+                                       << "first ranked is reachable: " << kernels);
+            }
+
+            EngineConfigT config;
+            for(const auto& [knobName, value] : projections[entry])
+            {
+                auto setting = std::make_unique<KnobSettingT>();
+                setting->knob_id = knobName;
+                IntValueT intValue;
+                intValue.value = value;
+                setting->value.Set(intValue);
+                config.knobs.push_back(std::move(setting));
+            }
+            catalog.push_back(std::move(config));
+        }
+        return catalog;
+    }
+
 private:
+    /// A kernel's integer value for each of the engine's knob fields it has one for, in the
+    /// engine's knob order.
+    using KnobProjection = std::vector<std::pair<std::string, int64_t>>;
+
+    /// Mirrors applyKnobFilter(): a knob counts only through an integer value.
+    KnobProjection knobProjectionOf(const KernelDefinition& kernel) const
+    {
+        KnobProjection projection;
+        projection.reserve(_engine.knobs.size());
+        for(const auto& knobName : _engine.knobs)
+        {
+            const auto value = kernel.tryGetMetadata(knobName);
+            if(const auto* intValue = value.has_value() ? std::get_if<int64_t>(&*value) : nullptr)
+            {
+                projection.emplace_back(knobName, *intValue);
+            }
+        }
+        return projection;
+    }
+
+    static std::string describeProjection(const KnobProjection& projection)
+    {
+        std::string text;
+        for(const auto& [knobName, value] : projection)
+        {
+            text += (text.empty() ? "" : ", ") + knobName + "=" + std::to_string(value);
+        }
+        return text.empty() ? "no knobs" : text;
+    }
+
     /// The seam for a deterministic test timer is the constructor's `timer` parameter,
     /// not this factory: tests exercise this exact code path rather than overriding it.
     std::unique_ptr<IPlan<THandle>>

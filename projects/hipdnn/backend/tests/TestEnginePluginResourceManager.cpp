@@ -713,6 +713,186 @@ TEST(TestEnginePluginResourceManager, GetEngineDetails)
     }
 }
 
+namespace
+{
+
+/// An EngineKnobCatalog for @p engineId holding one entry per tile size.
+flatbuffers::FlatBufferBuilder createCatalog(int64_t engineId, const std::vector<int64_t>& tiles)
+{
+    hipdnn_flatbuffers_sdk::data_objects::EngineKnobCatalogT catalog;
+    catalog.engine_id = engineId;
+    for(const auto tile : tiles)
+    {
+        auto config = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::EngineConfigT>();
+        config->engine_id = engineId;
+        auto setting = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::KnobSettingT>();
+        setting->knob_id = "tile";
+        hipdnn_flatbuffers_sdk::data_objects::IntValueT value;
+        value.value = tile;
+        setting->value.Set(value);
+        config->knobs.push_back(std::move(setting));
+        catalog.configs.push_back(std::move(config));
+    }
+
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(
+        hipdnn_flatbuffers_sdk::data_objects::EngineKnobCatalog::Pack(builder, &catalog));
+    return builder;
+}
+
+} // namespace
+
+TEST(TestEnginePluginResourceManager, GetEngineKnobCatalogUnpacksAndReleasesThePluginBuffer)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    MockGraphDescriptor mockGraphDesc;
+    const hipdnnPluginConstData_t fakeSerializedData
+        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
+    auto catalogBuffer = createCatalog(100, {16, 32});
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100, 101, 102}));
+    EXPECT_CALL(mockGraphDesc, getSerializedGraph())
+        .WillOnce(::testing::Return(fakeSerializedData));
+    EXPECT_CALL(*mockPlugin, hasEngineKnobCatalog()).WillRepeatedly(::testing::Return(true));
+
+    EXPECT_CALL(*mockPlugin,
+                getEngineKnobCatalog(
+                    hipdnnEnginePluginHandle_t(0xdeadbeef),
+                    int64_t(100),
+                    testing::Pointee(testing::AllOf(
+                        testing::Field(&hipdnnPluginConstData_t::ptr, fakeSerializedData.ptr),
+                        testing::Field(&hipdnnPluginConstData_t::size, fakeSerializedData.size))),
+                    testing::_))
+        .WillOnce(testing::Invoke([&catalogBuffer](hipdnnEnginePluginHandle_t,
+                                                   int64_t,
+                                                   const hipdnnPluginConstData_t*,
+                                                   hipdnnPluginConstData_t* output) {
+            output->ptr = catalogBuffer.GetBufferPointer();
+            output->size = catalogBuffer.GetSize();
+            return true;
+        }));
+    EXPECT_CALL(*mockPlugin,
+                destroyEngineKnobCatalog(hipdnnEnginePluginHandle_t(0xdeadbeef), testing::_))
+        .Times(1);
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+
+    auto catalog = resourceManager.getEngineKnobCatalog(100, &mockGraphDesc);
+
+    ASSERT_NE(catalog, nullptr);
+    EXPECT_EQ(catalog->engine_id, 100);
+    ASSERT_EQ(catalog->configs.size(), 2U);
+    EXPECT_EQ(catalog->configs[0]->knobs[0]->value.AsIntValue()->value, 16);
+    EXPECT_EQ(catalog->configs[1]->knobs[0]->value.AsIntValue()->value, 32);
+}
+
+TEST(TestEnginePluginResourceManager, GetEngineKnobCatalogIsNullWhenPluginExportsNoCatalog)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    MockGraphDescriptor mockGraphDesc;
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin, hasEngineKnobCatalog()).WillRepeatedly(::testing::Return(false));
+    EXPECT_CALL(*mockPlugin, getEngineKnobCatalog(_, _, _, _)).Times(0);
+    EXPECT_CALL(*mockPlugin, destroyHandle(_));
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+
+    EXPECT_EQ(resourceManager.getEngineKnobCatalog(100, &mockGraphDesc), nullptr);
+}
+
+TEST(TestEnginePluginResourceManager, GetEngineKnobCatalogIsNullWhenPluginAnswersNotApplicable)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    MockGraphDescriptor mockGraphDesc;
+    const hipdnnPluginConstData_t fakeSerializedData
+        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(mockGraphDesc, getSerializedGraph())
+        .WillOnce(::testing::Return(fakeSerializedData));
+    EXPECT_CALL(*mockPlugin, hasEngineKnobCatalog()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*mockPlugin, getEngineKnobCatalog(_, _, _, _)).WillOnce(::testing::Return(false));
+    // Nothing was handed out, so nothing is released.
+    EXPECT_CALL(*mockPlugin, destroyEngineKnobCatalog(_, _)).Times(0);
+    EXPECT_CALL(*mockPlugin, destroyHandle(_));
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+
+    EXPECT_EQ(resourceManager.getEngineKnobCatalog(100, &mockGraphDesc), nullptr);
+}
+
+TEST(TestEnginePluginResourceManager, GetEngineKnobCatalogReleasesABufferThatIsNotACatalog)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    MockGraphDescriptor mockGraphDesc;
+    const hipdnnPluginConstData_t fakeSerializedData
+        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
+    static const std::array<uint8_t, 8> s_garbage = {1, 2, 3, 4, 5, 6, 7, 8};
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(mockGraphDesc, getSerializedGraph())
+        .WillOnce(::testing::Return(fakeSerializedData));
+    EXPECT_CALL(*mockPlugin, hasEngineKnobCatalog()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*mockPlugin, getEngineKnobCatalog(_, _, _, _))
+        .WillOnce(testing::Invoke([](hipdnnEnginePluginHandle_t,
+                                     int64_t,
+                                     const hipdnnPluginConstData_t*,
+                                     hipdnnPluginConstData_t* output) {
+            output->ptr = s_garbage.data();
+            output->size = s_garbage.size();
+            return true;
+        }));
+    // The plugin owns the buffer, so it is released even though the host rejects it.
+    EXPECT_CALL(*mockPlugin, destroyEngineKnobCatalog(_, _)).Times(1);
+    EXPECT_CALL(*mockPlugin, destroyHandle(_));
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+
+    try
+    {
+        auto catalog = resourceManager.getEngineKnobCatalog(100, &mockGraphDesc);
+        ADD_FAILURE() << "A buffer that is not a catalog was accepted";
+    }
+    catch(const HipdnnException& e)
+    {
+        EXPECT_EQ(e.getStatus(), HIPDNN_STATUS_PLUGIN_ERROR);
+    }
+}
+
 TEST(TestEnginePluginResourceManager, CreateExecutionContext)
 {
     const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();

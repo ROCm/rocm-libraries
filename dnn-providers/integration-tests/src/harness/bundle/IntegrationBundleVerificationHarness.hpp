@@ -391,7 +391,6 @@ private:
 
     // nullopt when the inputs are ready; otherwise the outcome to return.
     std::optional<VerificationOutcome> prepareInputs();
-    std::optional<VerificationOutcome> fillBundleInputs();
 
     OutputTensors allocateSentinelOutputs(bool onDevice) const;
     std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs, bool useDevice);

@@ -420,6 +420,23 @@ A handle used with the ingestor **must** expose `hipStream_t getStream() const`:
 
 A provider implementing `global.benchmarking` by hand rather than through the ingestor must apply `hipdnn_plugin_sdk::benchmarkingOverrideFromEnv()` as the ingestor and MIOpen do: consulted *outside* any config-validity branch and composed as `override.value_or(knobValue)` -- **never** an OR. An OR cannot express force-off, because a `false` override term never clears a `true` knob term, so `HIPDNN_FORCE_BENCHMARKING=0` could not override a knob-enabled run.
 
+#### Providing a Knob Catalog
+
+Knob metadata describes each knob's legal values independently, so it cannot express which *combinations* of engine-specific knob values the engine can really run: a range is not an enumeration, and independent value lists combine into configurations the engine may not support. An engine whose valid configurations are a finite, graph-dependent set (for example one backed by a kernel catalog) can publish that set as a **knob catalog**. Clients read it through `Graph::get_knob_catalog_for_engine()` (see [Knobs](./Knobs.md#enumerating-valid-configurations-knob-catalog)) and the integration test suite uses it to validate every configuration (`hipdnn_integration_tests --sweep-knob-catalog`).
+
+The catalog is optional and introduced in engine plugin API 1.5.0:
+
+- **Plugins built on the Plugin SDK** override `IPlanBuilder::getKnobCatalog(handle, opGraph)`, returning one `EngineConfigT` per entry, best first, each holding engine-specific knob settings only (never `global.*`). The default implementation throws a `HipdnnPluginException` with `HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`, meaning "no catalog". Engines built on `GenericEngine` (the kernel ingestor) forward to the plan builder, stamp the engine ID on every entry and serialize an `EngineKnobCatalog` for you. A hand-written `IEngine` overrides `IEngine::getKnobCatalog(handle, opGraph, catalogOut)` instead; `EngineManager::getEngineKnobCatalog()` dispatches by engine ID.
+- **Plugins that implement the C ABI directly** export both `hipdnnEnginePluginGetEngineKnobCatalog` and `hipdnnEnginePluginDestroyEngineKnobCatalog` (an `EngineKnobCatalog` from `engine_knob_catalog.fbs`). Export both or neither: the host treats a lone symbol as no catalog and logs a warning. The host keys off symbol export alone, as for `hipdnnEnginePluginGetEngineName`; the API version your plugin reports is not consulted. `HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE` from the getter means "no catalog for this graph".
+
+What the host does with your catalog:
+
+- It validates it (every knob advertised by the engine for the graph, no `global.` knobs, values matching the advertised type and constraint, no duplicate knob in an entry, no two equal entries, every entry carrying the queried engine ID) and fails the read with `HIPDNN_STATUS_INTERNAL_ERROR` naming the engine and entry if any rule is violated. Fix the plugin, not the client.
+- When you offer none: an engine advertising no engine-specific knobs gets one empty entry (its default configuration); an engine advertising one or more engine-specific knobs gets `HIPDNN_STATUS_NOT_SUPPORTED` from `get_knob_catalog_for_engine()` until it implements a catalog.
+- It calls the getter lazily on the first read of `HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT`, never from `finalize()`, so a catalog costs nothing for clients that do not ask.
+
+For the kernel ingestor, `GenericPlanBuilder::getKnobCatalog` projects each kernel of the ranked catalog onto the engine's exposed knob fields and de-duplicates keeping the first occurrence. Kernels that differ only in a field the engine does not expose collapse into one entry, which the plan builder logs at INFO with its kernel count. Pack authors should expose every field that distinguishes kernels the engine should be able to select; `tools/IngestorGenerator/tools/variant_reachability.py` reports pack variants that share a knob projection.
+
 #### Deprecating Knobs
 
 When a knob is no longer needed, mark it as deprecated rather than removing it. All knobs have a deprecated flag on them that can be set.
@@ -769,6 +786,8 @@ nm -gD your_plugin.so | grep " T "
 # hipdnnEnginePluginDestroy
 # hipdnnEnginePluginGetAllEngineIds
 # hipdnnEnginePluginGetEngineName
+# hipdnnEnginePluginGetEngineKnobCatalog
+# hipdnnEnginePluginDestroyEngineKnobCatalog
 # ... (other plugin API functions)
 ```
 

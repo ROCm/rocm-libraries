@@ -5,8 +5,10 @@
 #include "HipdnnBackendFlatbufferData.h"
 #include "HipdnnException.hpp"
 #include "TestMacros.hpp"
+#include "descriptors/EngineConfigDescriptor.hpp"
 #include "descriptors/EngineDescriptor.hpp"
 #include "descriptors/GraphDescriptor.hpp"
+#include "descriptors/KnobSettingDescriptor.hpp"
 #include "descriptors/ScopedDescriptor.hpp"
 #include "hipdnn_backend.h"
 #include "mocks/MockDescriptor.hpp"
@@ -15,14 +17,20 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_knob_catalog_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_plugin_sdk/KnobFactory.hpp>
 
+#include <array>
 #include <cstring>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <variant>
 #include <vector>
 
 using namespace hipdnn_backend;
@@ -938,4 +946,434 @@ TEST_F(TestEngineDescriptorWithKnobs, GetKnobInfoNullPointerWhenCountNonZero)
                                                     &returnedCount,
                                                     nullptr),
                                HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+// =============================================================================
+// HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT
+// =============================================================================
+
+namespace
+{
+
+using hipdnn_flatbuffers_sdk::data_objects::EngineConfigT;
+using hipdnn_flatbuffers_sdk::data_objects::EngineKnobCatalogT;
+using hipdnn_flatbuffers_sdk::data_objects::KnobSettingT;
+
+using CatalogValue = std::variant<int64_t, std::string>;
+using CatalogEntry = std::vector<std::pair<std::string, CatalogValue>>;
+
+constexpr const char* TILE_KNOB = "cat.tile";
+constexpr const char* MODE_KNOB = "cat.mode";
+constexpr const char* GLOBAL_KNOB = "global.benchmarking";
+
+std::unique_ptr<KnobSettingT> intSetting(const std::string& knobId, int64_t value)
+{
+    auto setting = std::make_unique<KnobSettingT>();
+    setting->knob_id = knobId;
+    hipdnn_flatbuffers_sdk::data_objects::IntValueT intValue;
+    intValue.value = value;
+    setting->value.Set(intValue);
+    return setting;
+}
+
+std::unique_ptr<KnobSettingT> stringSetting(const std::string& knobId, const std::string& value)
+{
+    auto setting = std::make_unique<KnobSettingT>();
+    setting->knob_id = knobId;
+    hipdnn_flatbuffers_sdk::data_objects::StringValueT stringValue;
+    stringValue.value = value;
+    setting->value.Set(std::move(stringValue));
+    return setting;
+}
+
+/// One catalog entry over the (tile, mode) knobs the fixture's engine advertises.
+std::unique_ptr<EngineConfigT>
+    makeEntry(int64_t tile, const std::string& mode, int64_t engineId = 0)
+{
+    auto entry = std::make_unique<EngineConfigT>();
+    entry->engine_id = engineId;
+    entry->knobs.push_back(intSetting(TILE_KNOB, tile));
+    entry->knobs.push_back(stringSetting(MODE_KNOB, mode));
+    return entry;
+}
+
+std::vector<std::unique_ptr<EngineConfigT>> entries(std::unique_ptr<EngineConfigT> a)
+{
+    std::vector<std::unique_ptr<EngineConfigT>> result;
+    result.push_back(std::move(a));
+    return result;
+}
+
+std::vector<std::unique_ptr<EngineConfigT>> entries(std::unique_ptr<EngineConfigT> a,
+                                                    std::unique_ptr<EngineConfigT> b)
+{
+    auto result = entries(std::move(a));
+    result.push_back(std::move(b));
+    return result;
+}
+
+std::vector<std::unique_ptr<EngineConfigT>> entries(std::unique_ptr<EngineConfigT> a,
+                                                    std::unique_ptr<EngineConfigT> b,
+                                                    std::unique_ptr<EngineConfigT> c)
+{
+    auto result = entries(std::move(a), std::move(b));
+    result.push_back(std::move(c));
+    return result;
+}
+
+} // namespace
+
+class TestEngineDescriptorKnobCatalog : public TestEngineDescriptor
+{
+protected:
+    /// Finalizes the engine with details advertising (tile, mode) knobs, when
+    /// @p engineSpecificKnobs, plus one global knob.
+    void finalizeEngine(bool engineSpecificKnobs)
+    {
+        flatbuffers::FlatBufferBuilder builder;
+        std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>> knobs;
+        if(engineSpecificKnobs)
+        {
+            knobs.push_back(hipdnn_plugin_sdk::KnobFactory::createIntKnob(
+                builder, TILE_KNOB, "Tile size", 16, 0, 0, 1, {16, 32, 64}));
+            knobs.push_back(hipdnn_plugin_sdk::KnobFactory::createStringKnob(
+                builder, MODE_KNOB, "Mode", "fast", {"fast", "accurate"}));
+        }
+        knobs.push_back(hipdnn_plugin_sdk::KnobFactory::createIntKnob(
+            builder, GLOBAL_KNOB, "Benchmarking", 0, 0, 1, 1, {}));
+        auto details = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+            builder, ENGINE_ID, builder.CreateVector(knobs));
+        builder.Finish(details);
+        _engineDetailsBuffer = builder.Release();
+        _serializedEngineDetails = {_engineDetailsBuffer.data(), _engineDetailsBuffer.size()};
+
+        makeEngineFinalized();
+
+        // Everything past finalize(): reading the catalog goes back to the plugin, and each
+        // entry is handed out as a finalized engine config, which asks for its workspace size.
+        EXPECT_CALL(*getMockGraph(), getHandle()).WillRepeatedly(Return(_mockHandle.get()));
+        EXPECT_CALL(*_mockHandle, getPluginResourceManager())
+            .WillRepeatedly(Return(_mockEnginePluginResourceManager));
+        EXPECT_CALL(*_mockEnginePluginResourceManager, getWorkspaceSize(_, _, _))
+            .WillRepeatedly(Return(size_t{0}));
+    }
+
+    /// The plugin serves @p configs once.
+    void serveCatalog(std::vector<std::unique_ptr<EngineConfigT>> configs) const
+    {
+        EngineKnobCatalogT catalog;
+        catalog.engine_id = ENGINE_ID;
+        catalog.configs = std::move(configs);
+        EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineKnobCatalog(ENGINE_ID, _))
+            .WillOnce(Invoke([catalog](int64_t, const GraphDescriptor*) {
+                return std::make_unique<EngineKnobCatalogT>(catalog);
+            }));
+    }
+
+    /// The plugin offers no catalog for the engine.
+    void serveNoCatalog() const
+    {
+        EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineKnobCatalog(ENGINE_ID, _))
+            .WillOnce(Invoke([](int64_t, const GraphDescriptor*) {
+                return std::unique_ptr<EngineKnobCatalogT>();
+            }));
+    }
+
+    /// Reads the whole catalog through the public attribute protocol: count, then entries,
+    /// then each entry's knob choices.
+    std::vector<CatalogEntry> readCatalog() const
+    {
+        auto engine = getEngineDescriptor();
+
+        int64_t count = -1;
+        engine->getAttribute(HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT,
+                             HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                             0,
+                             &count,
+                             nullptr);
+
+        std::vector<HipdnnBackendDescriptor*> raw(static_cast<size_t>(count));
+        int64_t returned = -1;
+        engine->getAttribute(HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT,
+                             HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                             count,
+                             &returned,
+                             static_cast<void*>(raw.data()));
+        EXPECT_EQ(returned, count);
+
+        std::vector<std::unique_ptr<HipdnnBackendDescriptor>> owned;
+        owned.reserve(raw.size());
+        for(auto* descriptor : raw)
+        {
+            owned.emplace_back(descriptor);
+        }
+
+        std::vector<CatalogEntry> catalog;
+        catalog.reserve(owned.size());
+        for(const auto& entryDescriptor : owned)
+        {
+            catalog.push_back(readEntry(*entryDescriptor->asDescriptor<EngineConfigDescriptor>()));
+        }
+        return catalog;
+    }
+
+    static std::string readString(const KnobSettingDescriptor& choice,
+                                  hipdnnBackendAttributeName_t attribute)
+    {
+        int64_t length = 0;
+        choice.getAttribute(attribute, HIPDNN_TYPE_CHAR, 0, &length, nullptr);
+        std::vector<char> buffer(static_cast<size_t>(length));
+        choice.getAttribute(attribute, HIPDNN_TYPE_CHAR, length, &length, buffer.data());
+        return {buffer.data()};
+    }
+
+    static CatalogEntry readEntry(const EngineConfigDescriptor& config)
+    {
+        int64_t count = -1;
+        config.getAttribute(
+            HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &count, nullptr);
+
+        std::vector<HipdnnBackendDescriptor*> raw(static_cast<size_t>(count));
+        int64_t returned = -1;
+        config.getAttribute(HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES,
+                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                            count,
+                            &returned,
+                            static_cast<void*>(raw.data()));
+
+        CatalogEntry entry;
+        for(auto* descriptor : raw)
+        {
+            const std::unique_ptr<HipdnnBackendDescriptor> owned(descriptor);
+            auto choice = owned->asDescriptor<KnobSettingDescriptor>();
+            const auto knobId = readString(*choice, HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE);
+
+            // The value is only retrievable in the type it was stored with.
+            int64_t intValue = 0;
+            int64_t valueCount = 0;
+            try
+            {
+                choice->getAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE,
+                                     HIPDNN_TYPE_INT64,
+                                     1,
+                                     &valueCount,
+                                     &intValue);
+                entry.emplace_back(knobId, intValue);
+            }
+            catch(const HipdnnException&)
+            {
+                entry.emplace_back(knobId, readString(*choice, HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE));
+            }
+        }
+        return entry;
+    }
+
+    /// Reads the catalog count and requires the read to fail with @p status and a message
+    /// containing every one of @p fragments.
+    void expectCatalogRejected(hipdnnStatus_t status,
+                               const std::vector<std::string>& fragments) const
+    {
+        int64_t count = -1;
+        try
+        {
+            getEngineDescriptor()->getAttribute(HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT,
+                                                HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                0,
+                                                &count,
+                                                nullptr);
+            ADD_FAILURE() << "Reading the catalog was expected to fail";
+        }
+        catch(const HipdnnException& e)
+        {
+            EXPECT_EQ(e.getStatus(), status) << e.getMessage();
+            for(const auto& fragment : fragments)
+            {
+                EXPECT_NE(e.getMessage().find(fragment), std::string::npos)
+                    << "'" << fragment << "' missing from: " << e.getMessage();
+            }
+        }
+    }
+};
+
+TEST_F(TestEngineDescriptorKnobCatalog, CatalogRoundTripsIntAndStringKnobsInPluginOrder)
+{
+    finalizeEngine(true);
+    serveCatalog(entries(makeEntry(16, "fast"), makeEntry(64, "accurate"), makeEntry(32, "fast")));
+
+    const auto catalog = readCatalog();
+
+    const std::vector<CatalogEntry> expected = {
+        {{TILE_KNOB, int64_t{16}}, {MODE_KNOB, std::string("fast")}},
+        {{TILE_KNOB, int64_t{64}}, {MODE_KNOB, std::string("accurate")}},
+        {{TILE_KNOB, int64_t{32}}, {MODE_KNOB, std::string("fast")}},
+    };
+    EXPECT_EQ(catalog, expected);
+}
+
+TEST_F(TestEngineDescriptorKnobCatalog, CatalogIsFetchedFromThePluginOnceAcrossReads)
+{
+    finalizeEngine(true);
+    // serveCatalog() expects exactly one plugin call.
+    serveCatalog(entries(makeEntry(16, "fast"), makeEntry(32, "fast")));
+
+    const auto first = readCatalog();
+    const auto second = readCatalog();
+
+    EXPECT_EQ(first.size(), 2U);
+    EXPECT_EQ(first, second);
+}
+
+TEST_F(TestEngineDescriptorKnobCatalog, FinalizeDoesNotFetchTheCatalog)
+{
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineKnobCatalog(_, _)).Times(0);
+
+    finalizeEngine(true);
+}
+
+TEST_F(TestEngineDescriptorKnobCatalog, EntryNamingAnotherEngineIsRejected)
+{
+    finalizeEngine(true);
+    serveCatalog(entries(makeEntry(16, "fast"), makeEntry(32, "fast", 7)));
+
+    expectCatalogRejected(HIPDNN_STATUS_INTERNAL_ERROR,
+                          {"(ID 0)", "entry 1", "engine ID 7 instead of the queried engine ID 0"});
+}
+
+TEST_F(TestEngineDescriptorKnobCatalog, EntryWithKnobTheEngineDoesNotAdvertiseIsRejected)
+{
+    finalizeEngine(true);
+    auto bad = makeEntry(16, "fast");
+    bad->knobs.push_back(intSetting("cat.unknown", 1));
+    serveCatalog(entries(std::move(bad)));
+
+    expectCatalogRejected(HIPDNN_STATUS_INTERNAL_ERROR,
+                          {"(ID 0)", "entry 0", "'cat.unknown' is not advertised"});
+}
+
+TEST_F(TestEngineDescriptorKnobCatalog, EntryWithGlobalKnobIsRejectedEvenWhenAdvertised)
+{
+    finalizeEngine(true);
+    auto bad = makeEntry(16, "fast");
+    bad->knobs.push_back(intSetting(GLOBAL_KNOB, 1));
+    serveCatalog(entries(makeEntry(32, "fast"), std::move(bad)));
+
+    expectCatalogRejected(HIPDNN_STATUS_INTERNAL_ERROR,
+                          {"(ID 0)", "entry 1", "'global.benchmarking' is a global knob"});
+}
+
+TEST_F(TestEngineDescriptorKnobCatalog, EntryWithValueOutsideTheKnobConstraintIsRejected)
+{
+    finalizeEngine(true);
+    // 48 is not one of the tile knob's valid values {16, 32, 64}.
+    serveCatalog(entries(makeEntry(16, "fast"), makeEntry(48, "fast")));
+
+    expectCatalogRejected(
+        HIPDNN_STATUS_INTERNAL_ERROR,
+        {"(ID 0)", "entry 1", "'cat.tile' has an invalid value", "VALID_VALUES_INT"});
+}
+
+TEST_F(TestEngineDescriptorKnobCatalog, EntryWithValueOfTheWrongTypeIsRejected)
+{
+    finalizeEngine(true);
+    auto bad = std::make_unique<EngineConfigT>();
+    bad->engine_id = ENGINE_ID;
+    bad->knobs.push_back(stringSetting(TILE_KNOB, "16"));
+    serveCatalog(entries(std::move(bad)));
+
+    expectCatalogRejected(HIPDNN_STATUS_INTERNAL_ERROR,
+                          {"entry 0", "'cat.tile' has an invalid value", "type does not match"});
+}
+
+TEST_F(TestEngineDescriptorKnobCatalog, EntrySettingAKnobTwiceIsRejected)
+{
+    finalizeEngine(true);
+    auto bad = makeEntry(16, "fast");
+    bad->knobs.push_back(intSetting(TILE_KNOB, 32));
+    serveCatalog(entries(std::move(bad)));
+
+    expectCatalogRejected(HIPDNN_STATUS_INTERNAL_ERROR,
+                          {"(ID 0)", "entry 0", "'cat.tile' appears more than once"});
+}
+
+TEST_F(TestEngineDescriptorKnobCatalog, EntriesWithEqualKnobValuesAreRejectedRegardlessOfKnobOrder)
+{
+    finalizeEngine(true);
+    auto reordered = std::make_unique<EngineConfigT>();
+    reordered->engine_id = ENGINE_ID;
+    reordered->knobs.push_back(stringSetting(MODE_KNOB, "fast"));
+    reordered->knobs.push_back(intSetting(TILE_KNOB, 16));
+    serveCatalog(entries(makeEntry(16, "fast"), makeEntry(32, "fast"), std::move(reordered)));
+
+    expectCatalogRejected(HIPDNN_STATUS_INTERNAL_ERROR,
+                          {"(ID 0)", "entry 2", "same knob values as entry 0"});
+}
+
+TEST_F(TestEngineDescriptorKnobCatalog,
+       PluginWithoutCatalogReportsOneEmptyEntryForEngineWithoutKnobs)
+{
+    // Only the global knob is advertised, and global knobs do not count as engine-specific.
+    finalizeEngine(false);
+    serveNoCatalog();
+
+    const auto catalog = readCatalog();
+
+    ASSERT_EQ(catalog.size(), 1U);
+    EXPECT_TRUE(catalog.front().empty());
+}
+
+TEST_F(TestEngineDescriptorKnobCatalog, PluginWithoutCatalogIsNotSupportedForEngineWithKnobs)
+{
+    finalizeEngine(true);
+    serveNoCatalog();
+
+    expectCatalogRejected(HIPDNN_STATUS_NOT_SUPPORTED,
+                          {"(ID 0)", "2 engine-specific knob(s)", "supplies no knob catalog"});
+}
+
+TEST_F(TestEngineDescriptorKnobCatalog, CatalogReadRequiresFinalizedEngine)
+{
+    int64_t count = -1;
+    ASSERT_THROW_HIPDNN_STATUS(
+        getEngineDescriptor()->getAttribute(HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT,
+                                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                            0,
+                                            &count,
+                                            nullptr),
+        HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+TEST_F(TestEngineDescriptorKnobCatalog, CatalogReadRejectsWrongAttributeType)
+{
+    finalizeEngine(true);
+
+    int64_t count = -1;
+    ASSERT_THROW_HIPDNN_STATUS(
+        getEngineDescriptor()->getAttribute(
+            HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT, HIPDNN_TYPE_INT64, 0, &count, nullptr),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestEngineDescriptorKnobCatalog, CatalogReadRejectsTooSmallBuffer)
+{
+    finalizeEngine(true);
+    serveCatalog(entries(makeEntry(16, "fast"), makeEntry(32, "fast")));
+
+    std::array<HipdnnBackendDescriptor*, 1> out{};
+    int64_t count = -1;
+    ASSERT_THROW_HIPDNN_STATUS(
+        getEngineDescriptor()->getAttribute(HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT,
+                                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                            1,
+                                            &count,
+                                            static_cast<void*>(out.data())),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestEngineDescriptorKnobCatalog, CatalogAttributeCannotBeSet)
+{
+    int64_t value = 0;
+    ASSERT_THROW_HIPDNN_STATUS(
+        getEngineDescriptor()->setAttribute(
+            HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT, HIPDNN_TYPE_INT64, 1, &value),
+        HIPDNN_STATUS_NOT_SUPPORTED);
 }

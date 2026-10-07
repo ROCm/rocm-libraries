@@ -5907,6 +5907,317 @@ TEST_F(TestGraph, GetKnobsForEngineHandlesCountMismatch)
     EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
 }
 
+// ============================================================================
+// get_knob_catalog_for_engine Tests
+// ============================================================================
+
+namespace
+{
+
+using CatalogChoice = std::pair<std::string, KnobValueVariant>;
+
+// Mocks a count-then-data read of a descriptor array attribute on parent.
+void mockDescriptorArray(std::shared_ptr<::testing::NiceMock<Mock_hipdnn_backend>>& mockBackend,
+                         hipdnnBackendDescriptor_t parent,
+                         hipdnnBackendAttributeName_t attribute,
+                         const std::vector<hipdnnBackendDescriptor_t>& children)
+{
+    const auto count = static_cast<int64_t>(children.size());
+
+    EXPECT_CALL(
+        *mockBackend,
+        backendGetAttribute(parent, attribute, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, _, nullptr))
+        .WillOnce(DoAll(SetArgPointee<4>(count), Return(HIPDNN_STATUS_SUCCESS)));
+
+    if(count > 0)
+    {
+        EXPECT_CALL(*mockBackend,
+                    backendGetAttribute(
+                        parent, attribute, HIPDNN_TYPE_BACKEND_DESCRIPTOR, count, _, NotNull()))
+            .WillOnce([children](hipdnnBackendDescriptor_t,
+                                 hipdnnBackendAttributeName_t,
+                                 hipdnnBackendAttributeType_t,
+                                 int64_t,
+                                 int64_t* elementCount,
+                                 void* out) {
+                *elementCount = static_cast<int64_t>(children.size());
+                std::copy(
+                    children.begin(), children.end(), static_cast<hipdnnBackendDescriptor_t*>(out));
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    }
+}
+
+// Mocks a string attribute: size query, then data read.
+void mockCharAttribute(std::shared_ptr<::testing::NiceMock<Mock_hipdnn_backend>>& mockBackend,
+                       hipdnnBackendDescriptor_t desc,
+                       hipdnnBackendAttributeName_t attribute,
+                       const std::string& value)
+{
+    const auto size = static_cast<int64_t>(value.size() + 1);
+
+    EXPECT_CALL(*mockBackend, backendGetAttribute(desc, attribute, HIPDNN_TYPE_CHAR, 0, _, nullptr))
+        .WillOnce(DoAll(SetArgPointee<4>(size), Return(HIPDNN_STATUS_SUCCESS)));
+    EXPECT_CALL(*mockBackend,
+                backendGetAttribute(desc, attribute, HIPDNN_TYPE_CHAR, size, _, NotNull()))
+        .WillOnce(
+            DoAll(SetArgPointee<4>(size),
+                  Invoke([value](hipdnnBackendDescriptor_t,
+                                 hipdnnBackendAttributeName_t,
+                                 hipdnnBackendAttributeType_t,
+                                 int64_t,
+                                 int64_t*,
+                                 void* out) { std::memcpy(out, value.c_str(), value.size() + 1); }),
+                  Return(HIPDNN_STATUS_SUCCESS)));
+}
+
+// Mocks the int64 default value type attribute of a knob info descriptor.
+void mockValueTypeAttribute(std::shared_ptr<::testing::NiceMock<Mock_hipdnn_backend>>& mockBackend,
+                            hipdnnBackendDescriptor_t knobInfo,
+                            hipdnnBackendAttributeType_t valueType)
+{
+    EXPECT_CALL(
+        *mockBackend,
+        backendGetAttribute(
+            knobInfo, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE, HIPDNN_TYPE_INT64, 1, _, NotNull()))
+        .WillOnce(DoAll(Invoke([valueType](hipdnnBackendDescriptor_t,
+                                           hipdnnBackendAttributeName_t,
+                                           hipdnnBackendAttributeType_t,
+                                           int64_t,
+                                           int64_t*,
+                                           void* out) {
+                            *static_cast<int64_t*>(out) = static_cast<int64_t>(valueType);
+                        }),
+                        Return(HIPDNN_STATUS_SUCCESS)));
+}
+
+// A choice's value must be read once, in the type its knob advertises: the backend rejects (and
+// logs as an error) a read in any other type, so no other-typed read may be attempted.
+void mockValueNeverReadAs(std::shared_ptr<::testing::NiceMock<Mock_hipdnn_backend>>& mockBackend,
+                          hipdnnBackendDescriptor_t choice,
+                          hipdnnBackendAttributeType_t type)
+{
+    EXPECT_CALL(*mockBackend,
+                backendGetAttribute(choice, HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, type, _, _, _))
+        .Times(0);
+}
+
+template <typename T>
+void mockValueReadAs(std::shared_ptr<::testing::NiceMock<Mock_hipdnn_backend>>& mockBackend,
+                     hipdnnBackendDescriptor_t choice,
+                     hipdnnBackendAttributeType_t type,
+                     T value)
+{
+    EXPECT_CALL(
+        *mockBackend,
+        backendGetAttribute(choice, HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, type, 1, _, NotNull()))
+        .WillOnce(DoAll(Invoke([value](hipdnnBackendDescriptor_t,
+                                       hipdnnBackendAttributeName_t,
+                                       hipdnnBackendAttributeType_t,
+                                       int64_t,
+                                       int64_t*,
+                                       void* out) { *static_cast<T*>(out) = value; }),
+                        Return(HIPDNN_STATUS_SUCCESS)));
+}
+
+// An engine knob as advertised by its knob info descriptor.
+struct AdvertisedKnob
+{
+    hipdnnBackendDescriptor_t info;
+    std::string knobId;
+    hipdnnBackendAttributeType_t valueType;
+};
+
+// Mocks the engine's knob info array, from which the catalog read takes each knob's value type.
+void mockAdvertisedKnobs(std::shared_ptr<::testing::NiceMock<Mock_hipdnn_backend>>& mockBackend,
+                         hipdnnBackendDescriptor_t engineDesc,
+                         const std::vector<AdvertisedKnob>& knobs)
+{
+    std::vector<hipdnnBackendDescriptor_t> infos;
+    infos.reserve(knobs.size());
+    for(const auto& knob : knobs)
+    {
+        infos.push_back(knob.info);
+    }
+    mockDescriptorArray(mockBackend, engineDesc, HIPDNN_ATTR_ENGINE_KNOB_INFO, infos);
+
+    for(const auto& knob : knobs)
+    {
+        mockCharAttribute(mockBackend, knob.info, HIPDNN_ATTR_KNOB_INFO_TYPE, knob.knobId);
+        mockValueTypeAttribute(mockBackend, knob.info, knob.valueType);
+    }
+}
+
+// Mocks a knob choice descriptor holding @p setting. Its value is read once, in the type of the
+// setting, and in no other.
+void mockKnobChoice(std::shared_ptr<::testing::NiceMock<Mock_hipdnn_backend>>& mockBackend,
+                    hipdnnBackendDescriptor_t choice,
+                    const CatalogChoice& setting)
+{
+    mockCharAttribute(mockBackend, choice, HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE, setting.first);
+
+    if(const auto* intValue = std::get_if<int64_t>(&setting.second))
+    {
+        mockValueNeverReadAs(mockBackend, choice, HIPDNN_TYPE_DOUBLE);
+        mockValueNeverReadAs(mockBackend, choice, HIPDNN_TYPE_CHAR);
+        mockValueReadAs(mockBackend, choice, HIPDNN_TYPE_INT64, *intValue);
+    }
+    else if(const auto* doubleValue = std::get_if<double>(&setting.second))
+    {
+        mockValueNeverReadAs(mockBackend, choice, HIPDNN_TYPE_INT64);
+        mockValueNeverReadAs(mockBackend, choice, HIPDNN_TYPE_CHAR);
+        mockValueReadAs(mockBackend, choice, HIPDNN_TYPE_DOUBLE, *doubleValue);
+    }
+    else
+    {
+        mockValueNeverReadAs(mockBackend, choice, HIPDNN_TYPE_INT64);
+        mockValueNeverReadAs(mockBackend, choice, HIPDNN_TYPE_DOUBLE);
+        mockCharAttribute(mockBackend,
+                          choice,
+                          HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE,
+                          std::get<std::string>(setting.second));
+    }
+}
+
+} // namespace
+
+TEST_F(TestGraph, GetKnobCatalogForEngineFailsWhenGraphNotBuilt)
+{
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    std::vector<std::vector<KnobSetting>> catalog = {{KnobSetting("stale", int64_t{1})}};
+    auto result = graph.get_knob_catalog_for_engine(42, catalog);
+
+    EXPECT_FALSE(result.is_good());
+    EXPECT_NE(result.get_message().find("Graph has not been built"), std::string::npos);
+    EXPECT_TRUE(catalog.empty());
+}
+
+TEST_F(TestGraph, GetKnobCatalogForEngineRoundTripsIntFloatAndStringSettings)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    auto engineDesc = buildGraphAndMockEngine(_mockBackend, graph, _handle);
+
+    const auto entry0 = reinterpret_cast<hipdnnBackendDescriptor_t>(0xC001);
+    const auto entry1 = reinterpret_cast<hipdnnBackendDescriptor_t>(0xC002);
+    const auto tile = reinterpret_cast<hipdnnBackendDescriptor_t>(0xD001);
+    const auto rate = reinterpret_cast<hipdnnBackendDescriptor_t>(0xD002);
+    const auto mode = reinterpret_cast<hipdnnBackendDescriptor_t>(0xD003);
+
+    const auto tileInfo = reinterpret_cast<hipdnnBackendDescriptor_t>(0xE001);
+    const auto rateInfo = reinterpret_cast<hipdnnBackendDescriptor_t>(0xE002);
+    const auto modeInfo = reinterpret_cast<hipdnnBackendDescriptor_t>(0xE003);
+
+    mockAdvertisedKnobs(_mockBackend,
+                        engineDesc,
+                        {{tileInfo, "tile_size", HIPDNN_TYPE_INT64},
+                         {rateInfo, "rate", HIPDNN_TYPE_DOUBLE},
+                         {modeInfo, "mode", HIPDNN_TYPE_CHAR}});
+    mockDescriptorArray(
+        _mockBackend, engineDesc, HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT, {entry0, entry1});
+    mockDescriptorArray(
+        _mockBackend, entry0, HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES, {tile, rate, mode});
+    // The second entry is the default configuration: no knob choices.
+    mockDescriptorArray(_mockBackend, entry1, HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES, {});
+    mockKnobChoice(_mockBackend, tile, {"tile_size", KnobValueVariant{int64_t{64}}});
+    mockKnobChoice(_mockBackend, rate, {"rate", KnobValueVariant{0.25}});
+    mockKnobChoice(_mockBackend, mode, {"mode", KnobValueVariant{std::string("accurate")}});
+
+    std::vector<std::vector<KnobSetting>> catalog;
+    auto result = graph.get_knob_catalog_for_engine(42, catalog);
+
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    const std::vector<std::vector<KnobSetting>> expected
+        = {{KnobSetting("tile_size", int64_t{64}),
+            KnobSetting("rate", 0.25),
+            KnobSetting("mode", std::string("accurate"))},
+           {}};
+    EXPECT_EQ(catalog, expected);
+}
+
+TEST_F(TestGraph, GetKnobCatalogForEngineReportsBackendRefusalAndClearsTheCatalog)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    auto engineDesc = buildGraphAndMockEngine(_mockBackend, graph, _handle);
+
+    mockAdvertisedKnobs(_mockBackend, engineDesc, {});
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineDesc,
+                                    HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    0,
+                                    _,
+                                    nullptr))
+        .WillOnce(Return(HIPDNN_STATUS_NOT_SUPPORTED));
+
+    std::vector<std::vector<KnobSetting>> catalog = {{KnobSetting("stale", int64_t{1})}};
+    auto result = graph.get_knob_catalog_for_engine(42, catalog);
+
+    EXPECT_FALSE(result.is_good());
+    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_TRUE(catalog.empty());
+}
+
+TEST_F(TestGraph, GetKnobCatalogForEngineFailsAsAWholeWhenOneChoiceCannotBeRead)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    auto engineDesc = buildGraphAndMockEngine(_mockBackend, graph, _handle);
+
+    const auto entry = reinterpret_cast<hipdnnBackendDescriptor_t>(0xC003);
+    const auto choice = reinterpret_cast<hipdnnBackendDescriptor_t>(0xD004);
+
+    const auto tileInfo = reinterpret_cast<hipdnnBackendDescriptor_t>(0xE004);
+
+    mockAdvertisedKnobs(_mockBackend, engineDesc, {{tileInfo, "tile_size", HIPDNN_TYPE_INT64}});
+    mockDescriptorArray(_mockBackend, engineDesc, HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT, {entry});
+    mockDescriptorArray(_mockBackend, entry, HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES, {choice});
+    mockCharAttribute(_mockBackend, choice, HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE, "tile_size");
+    // The advertised int64 read itself fails, and nothing else is tried in its place.
+    mockValueNeverReadAs(_mockBackend, choice, HIPDNN_TYPE_DOUBLE);
+    mockValueNeverReadAs(_mockBackend, choice, HIPDNN_TYPE_CHAR);
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    choice, HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_INT64, 1, _, NotNull()))
+        .WillOnce(Return(HIPDNN_STATUS_BAD_PARAM));
+
+    std::vector<std::vector<KnobSetting>> catalog;
+    auto result = graph.get_knob_catalog_for_engine(42, catalog);
+
+    EXPECT_FALSE(result.is_good());
+    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_TRUE(catalog.empty());
+}
+
+TEST_F(TestGraph, GetKnobCatalogForEngineRejectsAChoiceForAKnobTheEngineDoesNotAdvertise)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    auto engineDesc = buildGraphAndMockEngine(_mockBackend, graph, _handle);
+
+    const auto entry = reinterpret_cast<hipdnnBackendDescriptor_t>(0xC004);
+    const auto choice = reinterpret_cast<hipdnnBackendDescriptor_t>(0xD005);
+    const auto tileInfo = reinterpret_cast<hipdnnBackendDescriptor_t>(0xE005);
+
+    mockAdvertisedKnobs(_mockBackend, engineDesc, {{tileInfo, "tile_size", HIPDNN_TYPE_INT64}});
+    mockDescriptorArray(_mockBackend, engineDesc, HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT, {entry});
+    mockDescriptorArray(_mockBackend, entry, HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES, {choice});
+    mockCharAttribute(_mockBackend, choice, HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE, "undeclared");
+    mockValueNeverReadAs(_mockBackend, choice, HIPDNN_TYPE_INT64);
+    mockValueNeverReadAs(_mockBackend, choice, HIPDNN_TYPE_DOUBLE);
+    mockValueNeverReadAs(_mockBackend, choice, HIPDNN_TYPE_CHAR);
+
+    std::vector<std::vector<KnobSetting>> catalog;
+    auto result = graph.get_knob_catalog_for_engine(42, catalog);
+
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(result.get_message().find("undeclared"), std::string::npos);
+    EXPECT_TRUE(catalog.empty());
+}
+
 TEST_F(TestGraph, EngineOverrideDoesNotReplaceExplicitlySetEngineId)
 {
     ::testing::FLAGS_gmock_verbose = "error";

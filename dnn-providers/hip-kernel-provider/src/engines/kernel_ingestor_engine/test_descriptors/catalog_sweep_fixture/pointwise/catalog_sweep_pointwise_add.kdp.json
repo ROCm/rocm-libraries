@@ -1,0 +1,57 @@
+{
+  "version": "1.0",
+  "id": "0db80fdf-abbe-4c3d-a562-eac025bb9947",
+  "name": "hipkernel:catalog_sweep_pointwise_add",
+  "arch": [],
+  "matchers": [
+    "6c74ef08-6abb-4bcc-98e8-3b6b5b8c2183",
+    "c58a9267-5f67-435b-b129-eabc39e80b03"
+  ],
+  "engine": "c3ae9da6-6d5e-457d-b05b-fee983e184e9",
+  "dispatch": "1c32ef31-454e-4989-a6e0-ffcd5d88470e",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "b6bdf71f-1817-4e60-a9d4-fc7c172517dd",
+      "name": "catalog_sweep_pointwise_add.f32_block64",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "PointwiseAdd.cpp",
+        "entry": "PointwiseAdd",
+        "build": {
+          "defines": {
+            "HIP_PLUGIN_POINTWISE_TYPE": "float",
+            "HIP_PLUGIN_POINTWISE_BLOCK_SIZE": 64
+          }
+        }
+      },
+      "metadata": {
+        "block_size": 64,
+        "dtype": "FLOAT",
+        "operation": "ADD"
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "c3ae9da6-6d5e-457d-b05b-fee983e184e9",
+              "kmd_id": "3dbccb3c-889b-44cb-995c-ae753f9fe10a",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "block_size",
+                "dtype",
+                "operation"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
+    },
+    "c4b066a8-bb1e-44a6-8a69-11ac846c121c",
+    "d046e301-9b01-4c70-a918-99fc92895819"
+  ]
+}

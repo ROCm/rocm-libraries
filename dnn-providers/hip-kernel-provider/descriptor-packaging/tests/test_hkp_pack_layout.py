@@ -1222,6 +1222,7 @@ def test_example_tree_ids_do_not_collide_with_other_shipped_trees():
         descriptors / "unit/pointwise",
         descriptors / "integration/pointwise",
         descriptors / "archive_fixture",
+        descriptors / "catalog_sweep_fixture",
     ]
     assert any(
         ids(other) for other in others

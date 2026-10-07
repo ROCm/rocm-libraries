@@ -35,6 +35,8 @@ namespace hipdnn_flatbuffers_sdk::data_objects
 {
 // NOLINTNEXTLINE(readability-identifier-naming)
 struct EngineDetails;
+// NOLINTNEXTLINE(readability-identifier-naming)
+struct EngineKnobCatalogT;
 } // namespace hipdnn_flatbuffers_sdk::data_objects
 
 namespace hipdnn_backend
@@ -121,6 +123,20 @@ public:
         getEngineDetails(const std::shared_ptr<EnginePluginResourceManager>& rm,
                          int64_t engineId,
                          const GraphDescriptor* graphDesc);
+
+    /// @brief Fetches the knob catalog an engine offers for a graph from its plugin.
+    ///
+    /// The serialized catalog is verified, unpacked and released back to the plugin
+    /// before this returns, so the result owns its data.
+    ///
+    /// @return The catalog, or nullptr when the owning plugin offers none: it does
+    ///         not export the catalog entry points, or it answered
+    ///         HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE for this engine and graph.
+    ///         Throws HipdnnException for an unknown engine, a failing plugin or a
+    ///         buffer that is not a valid EngineKnobCatalog.
+    [[nodiscard]] virtual std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineKnobCatalogT>
+        getEngineKnobCatalog(int64_t engineId, const GraphDescriptor* graphDesc) const;
+
     static std::shared_ptr<const EngineExecutionContextWrapper>
         createExecutionContext(const std::shared_ptr<EnginePluginResourceManager>& rm,
                                int64_t engineId,

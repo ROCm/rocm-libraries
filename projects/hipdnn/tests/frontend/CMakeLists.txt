@@ -38,6 +38,7 @@ add_executable(
     IntegrationCustomOpDescriptorLowering.cpp
     IntegrationFrontendUserLogging.cpp
     IntegrationGraphEngineFiltering.cpp
+    IntegrationGraphKnobCatalog.cpp
     IntegrationGraphKnobsApi.cpp
     IntegrationGraphKnobSettingsDescriptorLowering.cpp
     IntegrationGraphKnobsDescriptorLifting.cpp
@@ -125,6 +126,7 @@ function(configure_hipdnn_public_frontend_test_target TARGET_NAME)
                 TEST_INCOMPLETE_API_PLUGIN_NAME="${TEST_INCOMPLETE_API_PLUGIN_NAME}"
                 TEST_GOOD_DEFAULT_PLUGIN_NAME="${TEST_GOOD_DEFAULT_PLUGIN_NAME}"
                 TEST_KNOBS_PLUGIN_NAME="${TEST_KNOBS_PLUGIN_NAME}"
+                TEST_KNOB_CATALOG_PLUGIN_NAME="${TEST_KNOB_CATALOG_PLUGIN_NAME}"
                 TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME="${TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME}"
                 TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME="${TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME}"
                 TEST_HASHED_NAME_PLUGIN_NAME="${TEST_HASHED_NAME_PLUGIN_NAME}"
@@ -153,6 +155,7 @@ function(configure_hipdnn_public_frontend_test_target TARGET_NAME)
         ${TEST_INCOMPLETE_API_PLUGIN_NAME}
         ${TEST_HASHED_NAME_PLUGIN_NAME}
         ${TEST_KNOBS_PLUGIN_NAME}
+        ${TEST_KNOB_CATALOG_PLUGIN_NAME}
         ${TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME}
         # Override-execute fake plugins.
         ${HIPDNN_TEST_OVERRIDE_IMPLEMENTING_PLUGIN_TARGET}

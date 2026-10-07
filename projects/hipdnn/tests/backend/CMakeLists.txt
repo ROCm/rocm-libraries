@@ -16,6 +16,7 @@ add_executable(
     IntegrationEngineApi.cpp
     IntegrationEngineConfigApi.cpp
     IntegrationEngineHeuristicApi.cpp
+    IntegrationEngineKnobCatalog.cpp
     IntegrationExecutionPlanApi.cpp
     IntegrationGetLastErrorString.cpp
     IntegrationHandleApi.cpp
@@ -61,6 +62,9 @@ target_compile_definitions(
             TEST_GOOD_DEFAULT_PLUGIN_NAME="${TEST_GOOD_DEFAULT_PLUGIN_NAME}"
             TEST_MISMATCHED_NAME_PLUGIN_NAME="${TEST_MISMATCHED_NAME_PLUGIN_NAME}"
             TEST_KNOBS_PLUGIN_NAME="${TEST_KNOBS_PLUGIN_NAME}"
+            TEST_KNOB_CATALOG_PLUGIN_NAME="${TEST_KNOB_CATALOG_PLUGIN_NAME}"
+            TEST_KNOB_CATALOG_GET_ONLY_PLUGIN_NAME="${TEST_KNOB_CATALOG_GET_ONLY_PLUGIN_NAME}"
+            TEST_KNOB_CATALOG_DESTROY_ONLY_PLUGIN_NAME="${TEST_KNOB_CATALOG_DESTROY_ONLY_PLUGIN_NAME}"
             TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME="${TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME}"
             TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME="${TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME}"
             TEST_OVERRIDE_IMPLEMENTING_PLUGIN_NAME="${HIPDNN_TEST_OVERRIDE_IMPLEMENTING_PLUGIN_TARGET}"
@@ -86,6 +90,9 @@ add_dependencies(
     test_duplicate_id_b_plugin
     test_incomplete_api_plugin
     test_knobs_plugin
+    ${TEST_KNOB_CATALOG_PLUGIN_NAME}
+    ${TEST_KNOB_CATALOG_GET_ONLY_PLUGIN_NAME}
+    ${TEST_KNOB_CATALOG_DESTROY_ONLY_PLUGIN_NAME}
     test_knob_constraint_validation_plugin
     test_incompatible_version_plugin
     ${HIPDNN_TEST_OVERRIDE_IMPLEMENTING_PLUGIN_TARGET}

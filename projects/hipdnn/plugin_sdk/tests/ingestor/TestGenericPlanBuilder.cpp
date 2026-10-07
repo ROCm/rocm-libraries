@@ -2402,5 +2402,236 @@ TEST(TestIngestorGenericPlanBuilder,
         << "the superset write-back must carry all three benchmarked candidates";
 }
 
+/// Accepts every kernel regardless of dtype, so two kernels that differ only in a field
+/// the engine does not expose both survive into the catalog.
+bool acceptEveryKernel(const MatchContext& /*context*/,
+                       const BoundTokens& /*bound*/,
+                       const KernelDefinition& /*kernel*/)
+{
+    return true;
+}
+
+using CatalogProjection = std::vector<std::pair<std::string, int64_t>>;
+
+CatalogProjection projectionOf(const hipdnn_flatbuffers_sdk::data_objects::EngineConfigT& entry)
+{
+    CatalogProjection projection;
+    for(const auto& setting : entry.knobs)
+    {
+        const auto* intValue = setting->value.AsIntValue();
+        EXPECT_NE(intValue, nullptr) << "knob '" << setting->knob_id << "' is not an integer";
+        if(intValue != nullptr)
+        {
+            projection.emplace_back(setting->knob_id, intValue->value);
+        }
+    }
+    return projection;
+}
+
+/// What a caller of create_execution_plan_ext does with a catalog entry: hand it to the engine
+/// as the configuration, in the order GenericEngine::initializeExecutionContext runs.
+KernelDefinition serveEntry(const TestPlanBuilder& builder,
+                            const TestGraph& graph,
+                            const hipdnn_flatbuffers_sdk::data_objects::EngineConfigT& entry)
+{
+    flatbuffers::FlatBufferBuilder fbb;
+    fbb.Finish(hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(fbb, &entry));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfig(
+        fbb.GetBufferPointer(), fbb.GetSize());
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+    KnobFilterContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(0, graph, engineConfig, context);
+    return context.plan().kernel();
+}
+
+TEST(TestIngestorGenericPlanBuilder, GetKnobCatalogHasOneEntryPerDistinctProjectionInRankOrder)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0xA1));
+    const auto catalog = builder.getKnobCatalog(0, graph);
+
+    // The float kernels are block sizes 64 and 256; the heuristic ranks the larger first.
+    ASSERT_EQ(catalog.size(), 2U);
+    EXPECT_EQ(projectionOf(catalog[0]), (CatalogProjection{{BLOCK_SIZE, 256}}));
+    EXPECT_EQ(projectionOf(catalog[1]), (CatalogProjection{{BLOCK_SIZE, 64}}));
+}
+
+TEST(TestIngestorGenericPlanBuilder, GetKnobCatalogMergesKernelsSharingAProjectionIntoOneEntry)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", acceptEveryKernel);
+    const auto manager = makeStateManager();
+    // dtype distinguishes kernel_64_float from kernel_64_half, but it is not an engine knob.
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0xA2));
+    const auto catalog = builder.getKnobCatalog(0, graph);
+
+    ASSERT_EQ(catalog.size(), 2U);
+    EXPECT_EQ(projectionOf(catalog[0]), (CatalogProjection{{BLOCK_SIZE, 256}}));
+    EXPECT_EQ(projectionOf(catalog[1]), (CatalogProjection{{BLOCK_SIZE, 64}}));
+}
+
+TEST(TestIngestorGenericPlanBuilder, GetKnobCatalogFollowsTheMeasuredOrderOfABenchmarkedRecord)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0xA3));
+    const auto properties = testDeviceProperties();
+    const auto heuristicOrder = catalogFor(*manager, graph, properties);
+    ASSERT_EQ(heuristicOrder.size(), 2U);
+    ASSERT_EQ(heuristicOrder.front().getIntMetadata(BLOCK_SIZE), 256)
+        << "this test needs the heuristic front to differ from the record's";
+
+    // A record covering the whole catalog measures the 64-block kernel fastest.
+    WinnerRecord measured;
+    for(const auto& kernel : heuristicOrder)
+    {
+        measured.push_back(
+            rankedEntryFor(kernel, kernel.getIntMetadata(BLOCK_SIZE) == 64 ? 0.1 : 9.0));
+    }
+    std::stable_sort(measured.begin(), measured.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.timeMs < rhs.timeMs;
+    });
+    manager->recordWinner(winnerKeyFor(graph, properties), measured, WinnerWriteCause::FRESH_MISS);
+
+    const auto catalog = builder.getKnobCatalog(0, graph);
+
+    ASSERT_EQ(catalog.size(), 2U);
+    EXPECT_EQ(projectionOf(catalog[0]), (CatalogProjection{{BLOCK_SIZE, 64}}));
+    EXPECT_EQ(projectionOf(catalog[1]), (CatalogProjection{{BLOCK_SIZE, 256}}));
+}
+
+TEST(TestIngestorGenericPlanBuilder, GetKnobCatalogCarriesOnlyIntegerKnobsOfTheEngine)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    // dtype is a string field: getCustomKnobs() never advertises it, so no entry may set it.
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE, DTYPE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0xA4));
+    const auto catalog = builder.getKnobCatalog(0, graph);
+
+    ASSERT_EQ(catalog.size(), 2U);
+    for(const auto& entry : catalog)
+    {
+        ASSERT_EQ(entry.knobs.size(), 1U);
+        EXPECT_EQ(entry.knobs.front()->knob_id, BLOCK_SIZE);
+    }
+}
+
+TEST(TestIngestorGenericPlanBuilder, GetKnobCatalogOfAnEngineWithoutKnobsIsOneEmptyEntry)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0xA5));
+    const auto catalog = builder.getKnobCatalog(0, graph);
+
+    ASSERT_EQ(catalog.size(), 1U);
+    EXPECT_TRUE(catalog.front().knobs.empty());
+}
+
+TEST(TestIngestorGenericPlanBuilder,
+     ApplyingEachCatalogEntryServesTheFirstRankedKernelWithThoseKnobValues)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", acceptEveryKernel);
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0xA6));
+    const auto properties = testDeviceProperties();
+    const auto ranked = manager->sortedDefinitions(MatchContext{graph, 0, properties});
+    const auto catalog = builder.getKnobCatalog(0, graph);
+    ASSERT_EQ(catalog.size(), 2U);
+
+    for(const auto& entry : catalog)
+    {
+        const auto knobs = projectionOf(entry);
+        ASSERT_EQ(knobs.size(), 1U);
+
+        const auto served = serveEntry(builder, graph, entry);
+
+        EXPECT_EQ(served.getIntMetadata(knobs.front().first), knobs.front().second);
+        // Of the kernels sharing the entry's values, the one served is the best ranked: the
+        // very kernel the entry was projected from.
+        const auto firstWithValues
+            = std::find_if(ranked.begin(), ranked.end(), [&](const KernelDefinition& kernel) {
+                  return kernel.getIntMetadata(knobs.front().first) == knobs.front().second;
+              });
+        ASSERT_NE(firstWithValues, ranked.end());
+        EXPECT_EQ(served.kernelId, firstWithValues->kernelId);
+    }
+}
+
+TEST(TestIngestorGenericPlanBuilder,
+     GetKnobCatalogLogsAnEntryCoveringMoreThanOneKernelWithItsKernelCount)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", acceptEveryKernel);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0xA7));
+    const auto catalog = builder.getKnobCatalog(0, graph);
+    ASSERT_EQ(catalog.size(), 2U);
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "2 entry(s) for 3 matched kernel(s)"))
+        << recorder.getRecordedLogsAsString();
+    // Entry 1 is block_size=64, which kernel_64_float and kernel_64_half both project to.
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_INFO, "entry 1 (block_size=64) covers 2 kernels"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "entry 0"))
+        << recorder.getRecordedLogsAsString();
+}
+
+TEST(TestIngestorGenericPlanBuilder,
+     GetKnobCatalogLogsNoCollapsedEntryWhenEveryProjectionIsDistinct)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0xA8));
+    ASSERT_EQ(builder.getKnobCatalog(0, graph).size(), 2U);
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "2 entry(s) for 2 matched kernel(s)"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "covers"))
+        << recorder.getRecordedLogsAsString();
+}
+
 } // namespace
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

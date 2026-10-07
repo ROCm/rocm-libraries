@@ -7,7 +7,6 @@
 #include <initializer_list>
 #include <optional>
 #include <ostream>
-#include <set>
 #include <sstream>
 
 #include "harness/BundleMetadata.hpp"
@@ -18,10 +17,10 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/VariantPackUtils.hpp>
-#include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/TomlGuards.hpp"
+#include "harness/bundle/BundleInputs.hpp"
 #include "harness/bundle/LoadedEngine.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
@@ -500,115 +499,37 @@ VerificationOutcome IntegrationBundleVerificationHarness::runAutoMode(GraphSessi
 
 std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::prepareInputs()
 {
-    if(!_bundle->blobs.has_value())
-    {
-        return fillBundleInputs();
-    }
+    // The device filler only matters under a DEVICE policy; a HOST run fills on the host.
+    auto prepared = prepareBundleInputs(
+        *_bundle, _inputFillRecipes, _deps.policy.useDevice() ? _deps.deviceFiller.get() : nullptr);
 
-    // Tensors read from blobs are unpacked, but the engine reads sub-byte operands
-    // packed, and only fillBundleInputs() builds the packed set.
-    const auto wrapper = _bundle->graphWrapper();
-    const std::set<int64_t> outputUids(_bundle->outputTensorUids.begin(),
-                                       _bundle->outputTensorUids.end());
-    for(const auto& [uid, attrs] : wrapper.getTensorMap())
+    switch(prepared.status)
     {
-        if(!attrs->virtual_() && outputUids.count(uid) == 0
-           && hipdnn_test_sdk::detail::isSubByteDataType(attrs->data_type()))
-        {
-            return unverifiable("sub-byte input " + std::to_string(uid)
-                                + " has no packed copy for the engine");
-        }
-    }
-
-    // Read here, not at registration, so a golden bundle holds its tensors only while
-    // its own test runs. A blob that is unreadable or the wrong size fails this test
-    // instead of quietly dropping it from the run.
-    try
-    {
-        _inputs = _bundle->loadTensors();
-    }
-    catch(const std::exception& e)
-    {
-        return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
-                                           FailureOrigin::HARNESS,
-                                           std::string("tensor data failed to load: ") + e.what()
-                                               + " (" + _bundlePath.string() + ")");
-    }
-    return std::nullopt;
-}
-
-std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBundleInputs()
-{
-    const auto wrapper = _bundle->graphWrapper();
-    const auto& tensorAttrMap = wrapper.getTensorMap();
-    const std::set<int64_t> outputUids(_bundle->outputTensorUids.begin(),
-                                       _bundle->outputTensorUids.end());
-
-    InputTensorMap inputs;
-    std::vector<int64_t> leafInputUids;
-    bool anySubByte = false;
-    for(const auto& [uid, attrs] : tensorAttrMap)
-    {
-        if(attrs->virtual_() || outputUids.count(uid) != 0)
-        {
-            continue;
-        }
-        inputs[uid] = hipdnn_test_sdk::detail::createTensorFromAttribute(*attrs);
-        leafInputUids.push_back(uid);
-        anySubByte = anySubByte || hipdnn_test_sdk::detail::isSubByteDataType(attrs->data_type());
-    }
-
-    // Sub-byte graphs fill twice, once unpacked and once packed, and the two sets must
-    // hold the same values. rocRAND does not fill sub-byte types and its stream differs
-    // from the host's, so a graph with any sub-byte tensor is filled on the host
-    // throughout. That is a deliberately conservative choice, not a correctness
-    // requirement: a large non-sub-byte operand would get the same device values in
-    // both sets, so relaxing it would only buy back speed on the large MX shapes.
-    DeviceInputFiller* const device
-        = _deps.policy.useDevice() && !anySubByte ? _deps.deviceFiller.get() : nullptr;
-
-    FillResult fillResult;
-    try
-    {
-        fillResult = hipdnn_integration_tests::fillInputs(
-            wrapper.getGraph(), inputs, leafInputUids, _inputFillRecipes, device);
-    }
-    catch(const DeviceInputError& e)
-    {
+    case BundleInputs::Status::READY:
+        _deviceFilledInputs = prepared.deviceFilled;
+        _packedInputs = std::move(prepared.packedInputs);
+        _inputs = std::move(prepared.inputs);
+        return std::nullopt;
+    case BundleInputs::Status::UNVERIFIABLE:
+        return unverifiable(prepared.message);
+    case BundleInputs::Status::DEVICE_FILL_FAILED:
         // The device failed, not the graph, so this is a failure and not an
         // "unverifiable" skip that would let the run go green.
         return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
                                            FailureOrigin::HARNESS,
-                                           std::string(e.what()) + " (" + _bundlePath.string()
+                                           prepared.message + " (" + _bundlePath.string()
                                                + "); set HIPDNN_TEST_HOST_INPUT_FILL=1 to fill on "
                                                  "the host");
+    case BundleInputs::Status::TENSOR_LOAD_FAILED:
+        return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                           FailureOrigin::HARNESS,
+                                           "tensor data failed to load: " + prepared.message + " ("
+                                               + _bundlePath.string() + ")");
+    default:
+        return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                           FailureOrigin::HARNESS,
+                                           "unknown input preparation status");
     }
-    if(!fillResult.filled)
-    {
-        return unverifiable(fillResult.reason);
-    }
-    _deviceFilledInputs = fillResult.deviceFilled;
-
-    if(anySubByte)
-    {
-        InputTensorMap packed;
-        for(const int64_t uid : leafInputUids)
-        {
-            packed[uid] = hipdnn_test_sdk::detail::createTensorFromAttribute(
-                *tensorAttrMap.at(uid), /*packSubByteElements=*/true);
-        }
-
-        auto packedFill = hipdnn_integration_tests::fillInputs(
-            wrapper.getGraph(), packed, leafInputUids, _inputFillRecipes, device);
-        if(!packedFill.filled)
-        {
-            return unverifiable(packedFill.reason);
-        }
-        _packedInputs = std::move(packed);
-    }
-
-    _inputs = std::move(inputs);
-    return std::nullopt;
 }
 
 // ---- engine + reference runs -----------------------------------------------

@@ -1,0 +1,17 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+include "engine_config.fbs";
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+// The catalog of valid engine-specific knob configurations an engine offers for one graph.
+// Each entry in `configs` is an EngineConfig whose `engine_id` equals this table's
+// `engine_id` and whose `knobs` carry engine-specific knobs only (never `global.*`).
+// Entries are ordered by engine preference, best first.
+table EngineKnobCatalog {
+    engine_id: int64;
+    configs: [EngineConfig];
+}
+
+root_type EngineKnobCatalog;

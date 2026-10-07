@@ -4,6 +4,7 @@
 #include "EngineDescriptor.hpp"
 #include "BackendEnumStringUtils.hpp"
 #include "DescriptorAttributeUtils.hpp"
+#include "EngineConfigDescriptor.hpp"
 #include "GraphDescriptor.hpp"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnBackendFlatbufferData.h"
@@ -14,14 +15,174 @@
 #include "plugin/EnginePluginResourceManager.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cstdio>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_knob_catalog_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace hipdnn_backend
 {
+
+namespace
+{
+
+constexpr std::string_view GLOBAL_KNOB_PREFIX = "global.";
+
+bool isGlobalKnob(const std::string& knobId)
+{
+    return knobId.compare(0, GLOBAL_KNOB_PREFIX.size(), GLOBAL_KNOB_PREFIX) == 0;
+}
+
+/// Order-independent identity of an entry's knob settings, used to detect equal entries.
+std::string entryKey(const hipdnn_flatbuffers_sdk::data_objects::EngineConfigT& entry)
+{
+    std::vector<const hipdnn_flatbuffers_sdk::data_objects::KnobSettingT*> knobs;
+    knobs.reserve(entry.knobs.size());
+    for(const auto& knob : entry.knobs)
+    {
+        knobs.push_back(knob.get());
+    }
+    std::sort(knobs.begin(), knobs.end(), [](const auto* lhs, const auto* rhs) {
+        return lhs->knob_id < rhs->knob_id;
+    });
+
+    std::string key;
+    for(const auto* knob : knobs)
+    {
+        key += std::to_string(knob->knob_id.size()) + ':' + knob->knob_id;
+        switch(knob->value.type)
+        {
+        case hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue:
+            key += "i" + std::to_string(knob->value.AsIntValue()->value);
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue:
+        {
+            std::array<char, 64> buffer{};
+            std::snprintf(buffer.data(), buffer.size(), "f%a", knob->value.AsFloatValue()->value);
+            key += buffer.data();
+            break;
+        }
+        case hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue:
+        {
+            const auto& value = knob->value.AsStringValue()->value;
+            key += "s" + std::to_string(value.size()) + ':' + value;
+            break;
+        }
+        default:
+            key += "?";
+            break;
+        }
+        key += ';';
+    }
+    return key;
+}
+
+/// Reports a catalog violation as HIPDNN_STATUS_INTERNAL_ERROR naming the engine and entry.
+[[noreturn]] void failEntry(const std::string& engineLabel, size_t index, const std::string& reason)
+{
+    throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
+                          "Knob catalog for " + engineLabel + " entry " + std::to_string(index)
+                              + " is invalid: " + reason);
+}
+
+/// Checks a plugin-supplied catalog against the five catalog rules. Throws
+/// HIPDNN_STATUS_INTERNAL_ERROR naming the engine and the offending entry index.
+void validateKnobCatalog(
+    const std::string& engineLabel,
+    int64_t engineId,
+    const std::vector<std::shared_ptr<KnobDescriptor>>& advertisedKnobs,
+    const std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineConfigT>>&
+        entries)
+{
+    std::unordered_map<std::string, const KnobDescriptor*> advertised;
+    for(const auto& knob : advertisedKnobs)
+    {
+        advertised.emplace(knob->knobId(), knob.get());
+    }
+
+    std::unordered_map<std::string, size_t> seenEntries;
+
+    for(size_t index = 0; index < entries.size(); ++index)
+    {
+        const auto& entry = entries[index];
+        if(entry == nullptr)
+        {
+            failEntry(engineLabel, index, "the entry is null.");
+        }
+
+        // Rule 5
+        if(entry->engine_id != engineId)
+        {
+            failEntry(engineLabel,
+                      index,
+                      "it carries engine ID " + std::to_string(entry->engine_id)
+                          + " instead of the queried engine ID " + std::to_string(engineId) + ".");
+        }
+
+        std::unordered_set<std::string> knobIds;
+        for(const auto& setting : entry->knobs)
+        {
+            if(setting == nullptr)
+            {
+                failEntry(engineLabel, index, "it contains a null knob setting.");
+            }
+
+            const auto& knobId = setting->knob_id;
+
+            // Rule 2
+            if(isGlobalKnob(knobId))
+            {
+                failEntry(engineLabel,
+                          index,
+                          "knob '" + knobId
+                              + "' is a global knob; catalogs contain engine-specific knobs only.");
+            }
+
+            // Rule 1
+            const auto advertisedIt = advertised.find(knobId);
+            if(advertisedIt == advertised.end())
+            {
+                failEntry(engineLabel,
+                          index,
+                          "knob '" + knobId + "' is not advertised by the engine for this graph.");
+            }
+
+            // Rule 4, within the entry
+            if(!knobIds.insert(knobId).second)
+            {
+                failEntry(engineLabel,
+                          index,
+                          "knob '" + knobId + "' appears more than once in the entry.");
+            }
+
+            // Rule 3
+            if(auto violation = advertisedIt->second->validateValue(setting->value))
+            {
+                failEntry(engineLabel,
+                          index,
+                          "knob '" + knobId + "' has an invalid value: " + *violation);
+            }
+        }
+
+        // Rule 4, across entries
+        const auto [seenIt, inserted] = seenEntries.emplace(entryKey(*entry), index);
+        if(!inserted)
+        {
+            failEntry(engineLabel,
+                      index,
+                      "it sets the same knob values as entry " + std::to_string(seenIt->second)
+                          + ".");
+        }
+    }
+}
+
+} // namespace
 
 void EngineDescriptor::finalize()
 {
@@ -108,6 +269,95 @@ void EngineDescriptor::finalize()
     HipdnnBackendDescriptorImpl<EngineDescriptor>::finalize();
 }
 
+void EngineDescriptor::loadKnobCatalog() const
+{
+    auto pluginResourceManager = _graph->getHandle()->getPluginResourceManager();
+
+    const auto engineLabel = "engine '" + _engineName + "' (ID " + std::to_string(_engineId) + ")";
+
+    auto catalog = pluginResourceManager->getEngineKnobCatalog(_engineId, _graph.get());
+
+    std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineConfigT>> entries;
+    if(catalog != nullptr)
+    {
+        entries = std::move(catalog->configs);
+        validateKnobCatalog(engineLabel, _engineId, _knobDescriptors, entries);
+    }
+    else
+    {
+        // The plugin offers no catalog: an engine without engine-specific knobs has exactly
+        // one configuration, the default one. With knobs, its configurations cannot be
+        // derived from their metadata, so there is nothing valid to report.
+        const auto engineSpecificKnobs = static_cast<size_t>(
+            std::count_if(_knobDescriptors.begin(), _knobDescriptors.end(), [](const auto& knob) {
+                return !isGlobalKnob(knob->knobId());
+            }));
+        THROW_IF_TRUE(engineSpecificKnobs > 0,
+                      HIPDNN_STATUS_NOT_SUPPORTED,
+                      "EngineDescriptor::getAttribute(HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT) failed: "
+                          + engineLabel + " advertises " + std::to_string(engineSpecificKnobs)
+                          + " engine-specific knob(s) but its plugin supplies no knob catalog.");
+
+        auto defaultEntry = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::EngineConfigT>();
+        defaultEntry->engine_id = _engineId;
+        entries.push_back(std::move(defaultEntry));
+    }
+
+    _knobCatalog = std::move(entries);
+}
+
+void EngineDescriptor::getKnobCatalogDescriptors(hipdnnBackendAttributeType_t attributeType,
+                                                 int64_t requestedElementCount,
+                                                 int64_t* elementCount,
+                                                 void* arrayOfElements) const
+{
+    checkGetArgs(HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                 attributeType,
+                 "EngineDescriptor::getAttribute(HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT)");
+
+    // Fetched on first read rather than in finalize(): most callers never ask, and the
+    // plugin may do real work to enumerate its configurations.
+    std::call_once(_knobCatalogOnce, [this]() { loadKnobCatalog(); });
+
+    const auto count = static_cast<int64_t>(_knobCatalog.size());
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      "EngineDescriptor::getAttribute(HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT): "
+                      "elementCount is null");
+        *elementCount = count;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= count,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   "EngineDescriptor::getAttribute(HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT): "
+                   "requestedElementCount < catalog entry count");
+
+    auto self = weak_from_this().lock();
+    THROW_IF_NULL(self,
+                  HIPDNN_STATUS_INTERNAL_ERROR,
+                  "EngineDescriptor::getAttribute(HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT) failed: "
+                  "the descriptor is not owned by a shared_ptr.");
+
+    std::vector<std::shared_ptr<EngineConfigDescriptor>> configs;
+    configs.reserve(_knobCatalog.size());
+    for(const auto& entry : _knobCatalog)
+    {
+        configs.push_back(EngineConfigDescriptor::fromEngineConfigT(self, *entry));
+    }
+
+    if(elementCount != nullptr)
+    {
+        *elementCount = count;
+    }
+
+    HipdnnBackendDescriptor::packDescriptorArray(
+        configs, static_cast<HipdnnBackendDescriptor**>(arrayOfElements));
+}
+
 void EngineDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
                                     hipdnnBackendAttributeType_t attributeType,
                                     int64_t requestedElementCount,
@@ -131,6 +381,10 @@ void EngineDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
         break;
     case HIPDNN_ATTR_ENGINE_KNOB_INFO:
         getKnobInfoDescriptors(attributeType, requestedElementCount, elementCount, arrayOfElements);
+        break;
+    case HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT:
+        getKnobCatalogDescriptors(
+            attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
     case HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE:
         getBehaviorNotes(attributeType, requestedElementCount, elementCount, arrayOfElements);
@@ -228,6 +482,7 @@ void EngineDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
         setGlobalId(attributeType, elementCount, arrayOfElements);
         break;
     case HIPDNN_ATTR_ENGINE_KNOB_INFO:
+    case HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT:
     case HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE:
     case HIPDNN_ATTR_ENGINE_LAYOUT_INFO:
     case HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE:

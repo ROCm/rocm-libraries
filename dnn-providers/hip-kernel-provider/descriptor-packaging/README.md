@@ -19,7 +19,7 @@ The provider wires six roots: production, plus five over the four authored test 
 | Root | Source | Ships |
 |---|---|---|
 | Production | `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT`, a `CACHE PATH` defaulting to the in-tree `src/engines/kernel_ingestor_engine/descriptors/` | yes |
-| Test | `src/engines/kernel_ingestor_engine/test_descriptors/{shared,unit,integration,archive_fixture}/` | only under `HIPKERNELPROVIDER_ENABLE_TESTS` |
+| Test | `src/engines/kernel_ingestor_engine/test_descriptors/{shared,unit,integration,archive_fixture,catalog_sweep_fixture}/` | only under `HIPKERNELPROVIDER_ENABLE_TESTS` |
 
 Production wiring is gated on the root holding at least one non-hidden `*.kdp.json`,
 since a KDP is what arch pruning consumes. With none, packaging is **dormant** and any

@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "id": "c3ae9da6-6d5e-457d-b05b-fee983e184e9",
+  "name": "hipkernel:pointwise_catalog_sweep",
+  "graph_match": {
+    "native": "hipkernel.pointwise.graph_match"
+  },
+  "heuristic": "786d4ec0-b7dc-4647-8fea-12cbffac69bb",
+  "metadata": "3dbccb3c-889b-44cb-995c-ae753f9fe10a",
+  "knobs": [
+    "block_size"
+  ]
+}

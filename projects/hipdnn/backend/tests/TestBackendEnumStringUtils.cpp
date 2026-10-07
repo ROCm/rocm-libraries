@@ -278,6 +278,8 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE),
                  "HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT),
+                 "HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT");
 
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_TENSOR_UNIQUE_ID),
                  "HIPDNN_ATTR_TENSOR_UNIQUE_ID");

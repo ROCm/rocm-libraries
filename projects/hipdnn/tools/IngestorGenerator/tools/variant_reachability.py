@@ -46,13 +46,18 @@ def _load_profile(path: str) -> dict:
     return loaded
 
 
-def load_bundle(kdp_path: str, tree: str | None = None) -> tuple[dict, list[dict]]:
-    """(name -> KMD default_value, kernelDescriptors) for one *.kdp.json.
+def load_bundle(
+    kdp_path: str, tree: str | None = None
+) -> tuple[dict, list[dict], list[str]]:
+    """(name -> KMD default_value, kernelDescriptors, engine knob fields) for
+    one *.kdp.json.
 
     The schema is reached by reference through the id chain the documents
     declare, resolved across `tree` by `hkp_pack.descriptor_context`. Its
     defaults make "wrote the default explicitly" and "left it absent" the same
-    variant at runtime -- see `_resolved_metadata`.
+    variant at runtime -- see `_resolved_metadata`. The knob fields are the
+    engine's declared `knobs`, in declaration order: the fields its catalog
+    API projects each kernel onto (see `knob_projection`).
     """
     kdp = Path(kdp_path)
     if not kdp.name.endswith(".kdp.json"):
@@ -73,7 +78,11 @@ def load_bundle(kdp_path: str, tree: str | None = None) -> tuple[dict, list[dict
         )
     bundle = matching[0]
     defaults = {f["name"]: f.get("default_value") for f in bundle.kmd["fields"]}
-    return defaults, [entry.ukd for entry in bundle.entries]
+    return (
+        defaults,
+        [entry.ukd for entry in bundle.entries],
+        list(bundle.engine.get("knobs") or []),
+    )
 
 
 def _resolved_metadata(descriptor: dict, defaults: dict) -> dict:
@@ -233,6 +242,70 @@ def classify(
     return verdicts
 
 
+def knob_projection(metadata: dict, knob_fields: list[str]) -> tuple:
+    """The `(field, value)` pairs one variant (defaults resolved) contributes to
+    its engine's knob catalog: each of the engine's knob fields it holds an
+    integer for, in the engine's declaration order. This restates, for the
+    pack author, `GenericPlanBuilder::knobProjectionOf`: an integer value is
+    what `getCustomKnobs` advertises and what `applyKnobFilter` can select by,
+    so a field of any other type, and `global.*` knobs, never enter it. A bool
+    is not an integer here -- JSON `true` is not what the C++ reads as one."""
+    return tuple(
+        (field, metadata[field])
+        for field in knob_fields
+        if isinstance(metadata.get(field), int)
+        and not isinstance(metadata.get(field), bool)
+    )
+
+
+@dataclasses.dataclass
+class Collision:
+    projection: tuple
+    #: variants sharing `projection`, in descriptor order
+    variants: list[str]
+    #: corpus shapes that every one of `variants` is applicable to
+    shapes: list[int]
+
+
+def knob_projection_collisions(
+    defaults: dict,
+    descriptors: list[dict],
+    shapes: list[dict],
+    divides: dict,
+    field_map: dict,
+    knob_fields: list[str],
+) -> list[Collision]:
+    """Variants the engine's knob catalog cannot tell apart for some graph.
+
+    The catalog holds one entry per distinct knob projection of the kernels a
+    graph matches, and applying an entry serves the best-ranked kernel with that
+    projection. Two matched kernels sharing one therefore make the worse-ranked
+    one unreachable by any knob setting, so a catalog sweep never runs it. Each
+    corpus shape stands for a representative graph; the kernels it matches are
+    the variants `applicable` admits. An engine declaring no integer knob
+    projects every kernel onto the empty projection, so it collides on any
+    graph two variants both match."""
+    remapped = [_remap(s, field_map) for s in shapes]
+    metas = {d["name"]: _resolved_metadata(d, defaults) for d in descriptors}
+
+    found: dict[tuple, Collision] = {}
+    for idx, shape in enumerate(remapped):
+        by_projection: dict[tuple, list[str]] = {}
+        for name, meta in metas.items():
+            if applicable(meta, shape, divides):
+                by_projection.setdefault(knob_projection(meta, knob_fields), []).append(
+                    name
+                )
+        for projection, names in by_projection.items():
+            if len(names) < 2:
+                continue
+            collision = found.setdefault(
+                (projection, tuple(names)), Collision(projection, names, [])
+            )
+            collision.shapes.append(idx)
+    return list(found.values())
+
+
 def _parse_kv(pairs: list[str], sep: str = "=") -> dict:
     out = {}
     for pair in pairs:
@@ -290,6 +363,12 @@ def main(argv=None) -> int:
         help="Do not fail the exit code on APPLICABLE-BUT-NEVER-WINS or "
         "UNREACHABLE findings; still reports them.",
     )
+    parser.add_argument(
+        "--allow-knob-collisions",
+        action="store_true",
+        help="Do not fail the exit code on variants sharing a knob projection "
+        "on a graph they both match; still reports them.",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -307,12 +386,15 @@ def main(argv=None) -> int:
         if score is not None and ("field" not in score or "prefer" not in score):
             raise ReachabilityError("score needs both 'field' and 'prefer'")
 
-        defaults, descriptors = load_bundle(args.kdp, args.tree)
+        defaults, descriptors, knob_fields = load_bundle(args.kdp, args.tree)
         shapes = json.loads(Path(args.shapes).read_text())
         if not isinstance(shapes, list):
             raise ReachabilityError("--shapes must be a JSON list of field mappings.")
 
         verdicts = classify(defaults, descriptors, shapes, divides, field_map, score)
+        collisions = knob_projection_collisions(
+            defaults, descriptors, shapes, divides, field_map, knob_fields
+        )
     except ReachabilityError as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 2
@@ -343,6 +425,7 @@ def main(argv=None) -> int:
         f"  APPLICABLE-BUT-NEVER-WINS   {len(by_bucket['APPLICABLE-BUT-NEVER-WINS'])}"
     )
     print(f"  UNREACHABLE                 {len(by_bucket['UNREACHABLE'])}")
+    print(f"  KNOB-PROJECTION COLLISIONS  {len(collisions)}")
 
     if by_bucket["APPLICABLE-BUT-NEVER-WINS"]:
         print(
@@ -368,19 +451,53 @@ def main(argv=None) -> int:
             print(f"    {v.name}")
 
     dead_weight = by_bucket["APPLICABLE-BUT-NEVER-WINS"] or by_bucket["UNREACHABLE"]
-    print()
-    if dead_weight and not args.allow_unreachable:
+
+    if collisions:
         print(
-            f"FAIL: {len(dead_weight)} variant(s) no graph in this corpus can select."
+            "\n  KNOB-PROJECTION COLLISIONS: variants the engine's knob catalog cannot "
+            "tell apart on a\n  graph both match. One catalog entry serves the "
+            "best-ranked of them, so no knob setting\n  reaches the rest and a "
+            f"catalog sweep never runs them. Engine knob fields: "
+            f"{', '.join(knob_fields) or '(none declared)'}.\n  The fix is a knob "
+            "field the colliding variants differ in, listed in the engine's `knobs`."
         )
+        for c in collisions:
+            projection = ", ".join(f"{k}={v}" for k, v in c.projection) or "no knobs"
+            print(
+                f"    [{projection}]: {', '.join(c.variants)} -- all applicable "
+                f"to {len(c.shapes)} shape(s), first shape {c.shapes[0]}"
+            )
+
+    problems = []
+    if dead_weight and not args.allow_unreachable:
+        problems.append(
+            f"{len(dead_weight)} variant(s) no graph in this corpus can select."
+        )
+    if collisions and not args.allow_knob_collisions:
+        problems.append(
+            f"{len(collisions)} group(s) of variants share a knob projection on a "
+            f"graph they both match."
+        )
+    print()
+    if problems:
+        for problem in problems:
+            print(f"FAIL: {problem}")
         return 1
     if dead_weight:
         print(
             f"PASSED with --allow-unreachable: {len(dead_weight)} variant(s) still "
             f"unreachable, exit code suppressed."
         )
-        return 0
-    print("PASSED: every variant wins somewhere in this corpus.")
+    if collisions:
+        print(
+            f"PASSED with --allow-knob-collisions: {len(collisions)} collision(s) "
+            f"still present, exit code suppressed."
+        )
+    if not dead_weight and not collisions:
+        print(
+            "PASSED: every variant wins somewhere in this corpus, and no two "
+            "variants share a knob projection on a graph."
+        )
     return 0
 
 

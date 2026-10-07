@@ -411,6 +411,61 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
 HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginGetEngineName(int64_t engine_id, const char** name);
 
+/**
+ * @brief Retrieves the catalog of valid engine-specific knob configurations an engine offers for a graph.
+ *
+ * Introduced in engine plugin API 1.5.0 and optional: the host keys off symbol export alone, ignoring the
+ * API version the plugin reports. A plugin that does not export this function and
+ * hipdnnEnginePluginDestroyEngineKnobCatalog(), or that answers HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, offers
+ * no catalog; the host then returns one empty entry (the default configuration) for an engine that
+ * advertises no engine-specific knobs, and HIPDNN_STATUS_NOT_SUPPORTED for an engine that advertises any.
+ * A plugin must export both functions or neither.
+ *
+ * A catalog is a list of configurations. Each configuration is a complete set of engine-specific knob
+ * settings that the host can apply unchanged to an engine configuration for the same graph and engine.
+ * Knob metadata alone cannot express this: a range is not an enumeration and independent value lists
+ * combine into configurations the engine may not support. Entries are ordered by engine preference,
+ * best first. The catalog contains engine-specific knobs only, never `global.*` knobs.
+ *
+ * @param[in] handle The engine plugin handle.
+ * @param[in] engine_id The ID of the engine whose catalog is to be retrieved.
+ * @param[in] op_graph A pointer to a structure where the serialized `Graph` from `graph.fbs` is stored.
+ * @param[in,out] knob_catalog A pointer to a structure where the serialized `EngineKnobCatalog` from
+ *                             `engine_knob_catalog.fbs` will be stored.
+ *
+ * @return HIPDNN_PLUGIN_STATUS_SUCCESS on success; HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE if this engine
+ *         offers no catalog for the graph; any other status is an error.
+ *
+ * @note The `knob_catalog` structure is provided by the user, while the function fills in its fields,
+ *       including allocating the buffer for the serialized `EngineKnobCatalog`. After use, this memory must
+ *       be freed using hipdnnEnginePluginDestroyEngineKnobCatalog().
+ * @note Every `EngineConfig` in the catalog must carry the queried `engine_id`. The host validates the
+ *       catalog against the knobs the engine advertises for this graph and rejects violations with
+ *       HIPDNN_STATUS_INTERNAL_ERROR.
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnEnginePluginGetEngineKnobCatalog(hipdnnEnginePluginHandle_t handle,
+                                           int64_t engine_id,
+                                           const hipdnnPluginConstData_t* op_graph,
+                                           hipdnnPluginConstData_t* knob_catalog);
+
+/**
+ * @brief Destroys the `knob_catalog` object and releases the associated resources.
+ *
+ * Introduced in engine plugin API 1.5.0. See hipdnnEnginePluginGetEngineKnobCatalog().
+ *
+ * @param[in] handle The engine plugin handle.
+ * @param[in,out] knob_catalog A pointer to a structure where the serialized `EngineKnobCatalog` from
+ *                            `engine_knob_catalog.fbs` is stored.
+ *
+ * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
+ *
+ * @note This function takes a structure as input, deallocates the buffer, and sets all fields to 0.
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnEnginePluginDestroyEngineKnobCatalog(hipdnnEnginePluginHandle_t handle,
+                                               hipdnnPluginConstData_t* knob_catalog);
+
 /** @} */ // End of EnginePluginFunctions group
 
 #ifdef __cplusplus

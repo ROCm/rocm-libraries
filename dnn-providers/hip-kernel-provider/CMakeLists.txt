@@ -353,6 +353,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # still serves, which needs the two archives to be separate files.
     set(HIPKERNELPROVIDER_TEST_SET_SHARED "shared")
     set(HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE "archive_fixture")
+    # catalog_sweep_fixture/ has the same shape as archive_fixture/ and is staged beside it
+    # under the integration root, so the integration binary and hipdnn_integration_tests load it
+    # with the rest of that root. It is test-only and never part of the production
+    # descriptors. It carries a kernel that deliberately writes no output, which competes for
+    # pointwise ADD/f32 like any other engine in that root: a test that enumerates every
+    # configuration of that graph there will meet it.
+    set(HIPKERNELPROVIDER_TEST_SET_CATALOG_SWEEP_FIXTURE "catalog_sweep_fixture")
 
     # The same binary-to-plugin-directory offset, extended to the test descriptor trees.
     file(RELATIVE_PATH HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR

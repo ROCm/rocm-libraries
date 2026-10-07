@@ -272,6 +272,7 @@ Engine descriptor (``HIPDNN_BACKEND_ENGINE_DESCRIPTOR``)
 - Contains engine ID, and a set of behavioral notes and configurable settings.
 - Retrieved from engine config descriptor.
 - Exposes the engine name through the read-only ``HIPDNN_ATTR_ENGINE_NAME_EXT`` attribute (``HIPDNN_TYPE_CHAR``).
+- Exposes the valid engine-specific knob configurations for its graph through the read-only ``HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT`` attribute (an array of finalized engine config descriptors, ``HIPDNN_TYPE_BACKEND_DESCRIPTOR``). The backend fetches the catalog from the plugin on the first read, not at finalize.
 
 Execution plan descriptor (``HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR``)
 ------------------------------------------------------------------------

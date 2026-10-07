@@ -5,12 +5,15 @@
 # HarnessDependencies.cpp are deliberately absent. They are the only places that
 # touch the frontend Graph, a hipdnnHandle_t, or a real reference executor, so
 # leaving them out makes "these unit tests never reach an engine or a device" a
-# link-time guarantee rather than a convention. GoldenDataRegistration.cpp is absent
+# link-time guarantee rather than a convention. The same goes for CatalogSweepRegistration.cpp
+# and FrontendCatalogGraphRunner.cpp: the sweep's loop is tested through ICatalogGraphRunner
+# with a fake, never through a real graph. GoldenDataRegistration.cpp is absent
 # for the same reason: it registers gtest tests and reaches the shared reference
 # executors. Its decisions live in GoldenDataPlan.cpp and GoldenOutputProbe.cpp,
 # which are linked and tested here.
 add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
+    ../src/harness/bundle/BundleInputs.cpp
     ../src/harness/bundle/GraphSession.cpp
     ../src/harness/bundle/IntegrationBundleVerificationHarness.cpp
     ../src/harness/bundle/OutputComparison.cpp
@@ -21,6 +24,11 @@ add_executable(hipdnn_integration_tests_unit_tests
     ../src/harness/bundle/SupportVerdict.cpp
     ../src/harness/bundle/SweepManifestCache.cpp
     ../src/harness/bundle/VariantPackBuilder.cpp
+    ../src/harness/catalog-sweep/CatalogReportWriter.cpp
+    ../src/harness/catalog-sweep/CatalogSweep.cpp
+    ../src/harness/catalog-sweep/CatalogSweepOptions.cpp
+    ../src/harness/catalog-sweep/CatalogSweepTypes.cpp
+    ../src/harness/catalog-sweep/OutputDiffStats.cpp
     ../src/harness/input-init/FillInputs.cpp
     ../src/harness/reference-validation/BundleReferenceValidationHarness.cpp
     ../src/harness/reference-validation/GoldenDataPlan.cpp
@@ -84,6 +92,11 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestProductionPolicy.cpp
     TestGraphSession.cpp
     TestOutputComparison.cpp
+    TestCatalogSweepOptions.cpp
+    TestCatalogSweepTypes.cpp
+    TestCatalogSweep.cpp
+    TestCatalogReportWriter.cpp
+    TestOutputDiffStats.cpp
 )
 
 target_include_directories(hipdnn_integration_tests_unit_tests

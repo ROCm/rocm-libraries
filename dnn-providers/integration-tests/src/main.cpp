@@ -35,6 +35,11 @@
 #include "harness/bundle/SupportObservationLog.hpp"
 #include "harness/bundle/UnverifiableBundleReport.hpp"
 #include "harness/bundle/VerifierTally.hpp"
+#include "harness/catalog-sweep/CatalogSweepOptions.hpp"
+#include "harness/catalog-sweep/CatalogSweepRegistration.hpp"
+#include "harness/catalog-sweep/CatalogSweepRun.hpp"
+
+namespace catalog_sweep = hipdnn_integration_tests::catalog_sweep;
 
 namespace
 {
@@ -98,6 +103,17 @@ int main(int argc, char** argv) noexcept
     auto deviceStatus = hipGetDeviceCount(&deviceCount);
     if(deviceStatus == hipErrorNoDevice || deviceCount == 0)
     {
+        // A sweep that quietly passes having swept nothing is the failure it exists to
+        // rule out, so it is the one mode that does not take the no-GPU shortcut.
+        for(int i = 1; i < argc; ++i)
+        {
+            if(std::string(argv[i]) == "--sweep-knob-catalog")
+            {
+                std::cerr << "Error: --sweep-knob-catalog needs a HIP device and none is "
+                             "available.\n";
+                return 1;
+            }
+        }
         std::cout << "No HIP devices available; skipping " << argv[0] << "\n";
         return 0;
     }
@@ -190,6 +206,33 @@ int main(int argc, char** argv) noexcept
                   "change = zero git diff. Run one at a time: concurrent "
                   "--write-support-claims runs against the same bundle tree race "
                   "on the sidecars and the last writer wins.");
+        // The knob catalog sweep. A mode of its own, not a flavour of the verification
+        // run: it registers one test per bundle graph (--gtest_filter picks graphs by
+        // their bundle name as usual) and runs no other test.
+        parser.add_argument("--sweep-knob-catalog")
+            .default_value(false)
+            .implicit_value(true)
+            .help("Sweep every entry of every applicable engine's knob catalog for each "
+                  "bundle graph and check each against the reference. Requires "
+                  "--catalog-report, HIPDNN_FORCE_BENCHMARKING unset and HIPDNN_CACHE_DIR "
+                  "set to a fresh (absent or empty) directory. Compose with --test-engine, "
+                  "--gtest_filter, --golden-data-dir and --verification-mode. A graph no "
+                  "engine supports is SKIPPED (FAILED with --fail-on-unsupported). See "
+                  "README.md 'Knob catalog sweep'.");
+        parser.add_argument("--catalog-report")
+            .help("With --sweep-knob-catalog: JSON Lines report, one record per catalog "
+                  "entry plus one reconcile record per graph, appended and flushed record "
+                  "by record. Required.");
+        parser.add_argument("--catalog-filter")
+            .help("With --sweep-knob-catalog: run only the (graph, engine) pairs matching "
+                  "<field><op><value> clauses joined by ',' (fields graph|engine; ops = "
+                  "glob, != negated glob, ~ substring, !~ negated substring; '|' separates "
+                  "alternative values), e.g. 'engine=ROCKE*,graph~Pointwise'. Everything "
+                  "else is still enumerated and reported FILTERED.");
+        parser.add_argument("--catalog-shard")
+            .help("With --sweep-knob-catalog: sweep only the graphs shard <i> of <n> owns "
+                  "(0-based, i<n), e.g. '1/4'. A graph's shard is a stable hash of its "
+                  "bundle name; every graph belongs to exactly one shard.");
 
         std::vector<std::string> remainingArgs;
         try
@@ -201,6 +244,45 @@ int main(int argc, char** argv) noexcept
             std::cerr << e.what() << '\n';
             std::cerr << parser;
             return 1;
+        }
+
+        // Resolve the sweep flags first: a malformed or unsafe sweep must stop the run
+        // before any plugin is loaded or any device is touched.
+        catalog_sweep::CatalogSweepRequest sweepRequest;
+        sweepRequest.sweep = parser.get<bool>("--sweep-knob-catalog");
+        if(parser.is_used("--catalog-report"))
+        {
+            sweepRequest.reportPath = parser.get<std::string>("--catalog-report");
+        }
+        if(parser.is_used("--catalog-filter"))
+        {
+            sweepRequest.filter = parser.get<std::string>("--catalog-filter");
+        }
+        if(parser.is_used("--catalog-shard"))
+        {
+            sweepRequest.shard = parser.get<std::string>("--catalog-shard");
+        }
+        auto sweepResolution = catalog_sweep::resolveCatalogSweepOptions(sweepRequest);
+        if(sweepResolution.error.has_value())
+        {
+            std::cerr << "Error: " << *sweepResolution.error << '\n';
+            return 1;
+        }
+        const bool sweepMode = sweepResolution.options.has_value();
+        if(sweepMode)
+        {
+            if(parser.get<bool>("--write-support-claims") || parser.is_used("--capture-bundles"))
+            {
+                std::cerr << "Error: --sweep-knob-catalog cannot be combined with "
+                             "--write-support-claims or --capture-bundles.\n";
+                return 1;
+            }
+            if(auto refusal
+               = catalog_sweep::checkSweepEnvironment(catalog_sweep::processEnvironment()))
+            {
+                std::cerr << "Error: refusing to start --sweep-knob-catalog: " << *refusal << '\n';
+                return 1;
+            }
         }
 
         // Parse --test-engine, --fail-on-unsupported, and --test-config arguments
@@ -358,6 +440,12 @@ int main(int argc, char** argv) noexcept
         }
         claimRequest.writing = writeSupportClaims;
         claimRequest.hasEngine = engineName.has_value();
+        // Support claims belong to the verification run; a sweep neither reads nor
+        // enforces them.
+        if(sweepMode)
+        {
+            claimRequest.enforce = false;
+        }
 
         const auto claimMode = hipdnn_integration_tests::bundle::resolveClaimMode(claimRequest);
         if(claimMode.error.has_value())
@@ -401,6 +489,7 @@ int main(int argc, char** argv) noexcept
         opts.writeSupportClaims = writeSupportClaims;
         opts.enforceSupportClaims
             = claimMode.mode == hipdnn_integration_tests::bundle::ClaimMode::ENFORCE;
+        opts.catalogSweep = std::move(sweepResolution.options);
 
         hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
 
@@ -509,10 +598,89 @@ int main(int argc, char** argv) noexcept
         const auto deviceFiller
             = forceHostInputFill ? std::shared_ptr<hipdnn_integration_tests::DeviceInputFiller>()
                                  : std::make_shared<hipdnn_integration_tests::DeviceInputFiller>();
-        const auto registrationStats
-            = hipdnn_integration_tests::bundle::registerBundleTests(deviceFiller);
+
+        std::shared_ptr<catalog_sweep::CatalogSweepRun> sweepRun;
+        catalog_sweep::SweepRegistrationStats sweepStats;
+        hipdnn_integration_tests::bundle::BundleRegistrationStats registrationStats;
+        if(sweepMode)
+        {
+            // Opened up front so an unwritable report path stops the run before any work.
+            try
+            {
+                const auto& config = hipdnn_integration_tests::TestConfig::get();
+                catalog_sweep::SweepRunContext context;
+                context.deviceArch
+                    = hipdnn_integration_tests::bundle::baseArchToken(config.getCurrentArch());
+                context.hipdnnVersion = hipdnnVersionString_ext();
+                std::optional<std::string> pinnedEngine;
+                if(config.hasEngineName())
+                {
+                    pinnedEngine = std::string(config.getEngineName());
+                }
+                sweepRun = std::make_shared<catalog_sweep::CatalogSweepRun>(
+                    *config.catalogSweep(), std::move(context), std::move(pinnedEngine));
+            }
+            catch(const std::exception& e)
+            {
+                std::cerr << "Error: " << e.what() << '\n';
+                return 1;
+            }
+            sweepStats = catalog_sweep::registerCatalogSweepTests(sweepRun, deviceFiller);
+        }
+        else
+        {
+            registrationStats = hipdnn_integration_tests::bundle::registerBundleTests(deviceFiller);
+        }
 
         const int result = RUN_ALL_TESTS();
+
+        if(sweepMode)
+        {
+            // --gtest_list_tests runs nothing; there is no sweep to summarise.
+            if(GTEST_FLAG_GET(list_tests))
+            {
+                return result;
+            }
+
+            const auto& totals = sweepRun->totals();
+            std::cerr << "\n==== KNOB CATALOG SWEEP SUMMARY ====\n"
+                      << "Graphs:  swept " << totals.graphsSwept << ", skipped "
+                      << totals.graphsSkipped << ", failed " << totals.graphsFailed << "\n"
+                      << "Entries: " << totals.entries.returned
+                      << " = passed=" << totals.entries.passed
+                      << " + failed=" << totals.entries.failed()
+                      << " + filtered=" << totals.entries.filtered << "\n"
+                      << "Report:  " << sweepRun->options().reportPath.string() << "\n";
+
+            // A shard is allowed to own nothing: the partition is by graph name, so with
+            // few graphs some shard is empty. That is the partition working, not a sweep
+            // that silently did nothing, so it is the one empty run that is not an error.
+            if(sweepStats.registered == 0 && sweepStats.excludedByShard > 0)
+            {
+                std::cerr << "Shard " << sweepRun->options().shard.index << "/"
+                          << sweepRun->options().shard.count << " owns none of the "
+                          << sweepStats.excludedByShard
+                          << " selected graph(s); nothing to sweep here.\n";
+                return result;
+            }
+
+            // A sweep that enumerated nothing proves nothing, whatever gtest says.
+            if(sweepStats.registered == 0 || totals.entries.returned == 0)
+            {
+                std::cerr << "Error: the sweep enumerated no catalog entries.\n"
+                          << "  discovered:        " << sweepStats.discovered
+                          << " bundle graph(s)\n"
+                          << "  excluded by --gtest_filter: " << sweepStats.excludedByGTestFilter
+                          << "\n"
+                          << "  excluded by --catalog-shard: " << sweepStats.excludedByShard << "\n"
+                          << "  registered:        " << sweepStats.registered << "\n"
+                          << "  graphs skipped:    " << totals.graphsSkipped
+                          << " (see the reconcile records in the report)\n";
+                return 1;
+            }
+            // handleGuard / streamGuard clean up on the way out.
+            return result != 0 || totals.graphsFailed > 0 || !totals.entries.reconciles() ? 1 : 0;
+        }
 
         // Print bundles that ended without a verdict (no oracle / reference bug).
         // Informational only — these SKIP, so they do not affect `result`.

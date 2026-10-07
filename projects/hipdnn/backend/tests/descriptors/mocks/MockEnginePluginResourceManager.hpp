@@ -6,6 +6,7 @@
 #include "plugin/EnginePluginResourceManager.hpp"
 #include <gmock/gmock.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_knob_catalog_generated.h>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -42,6 +43,11 @@ public:
     MOCK_METHOD(void,
                 destroyEngineDetails,
                 (int64_t engineId, hipdnnPluginConstData_t* engineDetails),
+                (const, override));
+    // Left unstubbed, gmock returns nullptr: the "plugin offers no catalog" case.
+    MOCK_METHOD(std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineKnobCatalogT>,
+                getEngineKnobCatalog,
+                (int64_t engineId, const hipdnn_backend::GraphDescriptor* graphDesc),
                 (const, override));
     MOCK_METHOD(size_t,
                 getWorkspaceSize,

@@ -50,7 +50,7 @@ def env(tmp_path):
     is reached through `KDP.engine -> UED.metadata -> KMD`, so the fixture carries the
     UED that links them."""
 
-    def write_bundle(variants: list[dict], fields=None) -> Path:
+    def write_bundle(variants: list[dict], fields=None, knobs=("block_n",)) -> Path:
         kdp = tmp_path / "engine.kdp.json"
         kdp.write_text(
             json.dumps(
@@ -69,6 +69,7 @@ def env(tmp_path):
                     "id": _UED_ID,
                     "name": "test:Engine",
                     "metadata": _KMD_ID,
+                    "knobs": list(knobs),
                 }
             )
         )
@@ -272,6 +273,119 @@ class TestTheSchemaIsReachedByReference:
         assert "engine" in result.stdout + result.stderr
 
 
+class TestKnobProjectionCollisions:
+    """The engine's knob catalog holds one entry per distinct projection of the kernels a
+    graph matches onto the engine's integer knob fields, and applying an entry serves the
+    best-ranked kernel with that projection. Two kernels one graph matches that share a
+    projection leave the worse one unreachable by any knob setting, so a catalog sweep
+    would silently never run it."""
+
+    #: `stages` is a KMD field the engine does NOT expose as a knob, so variants can
+    #: differ in it while sharing a projection.
+    _FIELDS = _KMD_FIELDS + [{"name": "stages", "type": "int", "default_value": 1}]
+
+    @staticmethod
+    def _staged(name: str, block_n: int, stages: int, dtype: str = "bf16") -> dict:
+        return {
+            "name": name,
+            "metadata": {"dtype": dtype, "block_n": block_n, "stages": stages},
+        }
+
+    # 96 is divisible by 32 but not 64, so each tile wins somewhere and the only finding
+    # a bundle below can draw is a collision.
+    _SHAPES = _DIVISIBLE_SHAPES + [{"dtype": "bf16", "seqlen_kv": 96}]
+
+    def test_kernels_differing_only_in_an_unexposed_field_collide(self, env):
+        kdp = env.write_bundle(
+            [
+                self._staged("two_stage", block_n=64, stages=2),
+                self._staged("three_stage", block_n=64, stages=3),
+                self._staged("narrow", block_n=32, stages=2),
+            ],
+            fields=self._FIELDS,
+        )
+        shapes = env.write_shapes(self._SHAPES)
+        result = env.run(kdp, shapes, *_RANKING)
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "KNOB-PROJECTION COLLISIONS  1" in result.stdout
+        assert "[block_n=64]: two_stage, three_stage" in result.stdout
+        assert "narrow" not in result.stdout.split("KNOB-PROJECTION COLLISIONS:")[1]
+
+    def test_kernels_with_distinct_projections_pass(self, env):
+        kdp = env.write_bundle(
+            [
+                self._staged("wide", block_n=64, stages=2),
+                self._staged("narrow", block_n=32, stages=2),
+            ],
+            fields=self._FIELDS,
+        )
+        shapes = env.write_shapes(self._SHAPES)
+        result = env.run(kdp, shapes, *_RANKING)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "KNOB-PROJECTION COLLISIONS  0" in result.stdout
+
+    def test_a_shared_projection_is_harmless_when_no_graph_matches_both(self, env):
+        """The check is per graph: bf16 and fp16 kernels share block_n=64, but no single
+        graph is both, so one catalog entry never has to stand for the pair."""
+        kdp = env.write_bundle(
+            [
+                self._staged("bf16_kernel", block_n=64, stages=2, dtype="bf16"),
+                self._staged("fp16_kernel", block_n=64, stages=2, dtype="fp16"),
+            ],
+            fields=self._FIELDS,
+        )
+        shapes = env.write_shapes(
+            [
+                {"dtype": "bf16", "seqlen_kv": 256},
+                {"dtype": "fp16", "seqlen_kv": 256},
+            ]
+        )
+        result = env.run(kdp, shapes, *_RANKING)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "KNOB-PROJECTION COLLISIONS  0" in result.stdout
+
+    def test_an_engine_exposing_no_knob_collapses_every_matched_pair(self, env):
+        kdp = env.write_bundle(
+            [
+                self._staged("wide", block_n=64, stages=2),
+                self._staged("narrow", block_n=32, stages=2),
+            ],
+            fields=self._FIELDS,
+            knobs=[],
+        )
+        shapes = env.write_shapes(self._SHAPES)
+        result = env.run(kdp, shapes, *_RANKING)
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "[no knobs]: wide, narrow" in result.stdout
+        assert "(none declared)" in result.stdout
+
+    def test_allow_flag_suppresses_the_exit_code_but_keeps_the_report(self, env):
+        kdp = env.write_bundle(
+            [
+                self._staged("two_stage", block_n=64, stages=2),
+                self._staged("three_stage", block_n=64, stages=3),
+            ],
+            fields=self._FIELDS,
+        )
+        shapes = env.write_shapes(_DIVISIBLE_SHAPES)
+        result = env.run(kdp, shapes, *_RANKING, "--allow-knob-collisions")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "[block_n=64]: two_stage, three_stage" in result.stdout
+        assert "PASSED with --allow-knob-collisions" in result.stdout
+
+    def test_projection_keeps_integer_knobs_in_engine_order_only(self):
+        """A bool is an int in Python but not what `getCustomKnobs` advertises, and a
+        string field never selects a kernel -- either leaking in would make two kernels
+        the C++ separates look identical, or the reverse."""
+        meta = {"a": 1, "label": "x", "flag": True, "c": 3, "d": 4}
+        assert variant_reachability.knob_projection(
+            meta, ["c", "label", "flag", "a"]
+        ) == (
+            ("c", 3),
+            ("a", 1),
+        )
+
+
 class TestGfx950RealBundle:
     """The shipped gfx950 bundle against the shipped shape corpus. Needs no device and no
     build, and every expectation is derived from the bundle rather than written down, so
@@ -374,7 +488,7 @@ class TestGfx950RealBundle:
 
     @classmethod
     def _metas(cls):
-        defaults, descriptors = variant_reachability.load_bundle(str(cls._KDP))
+        defaults, descriptors, _knobs = variant_reachability.load_bundle(str(cls._KDP))
         return [
             variant_reachability._resolved_metadata(d, defaults) for d in descriptors
         ]

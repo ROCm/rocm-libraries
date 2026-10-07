@@ -236,6 +236,31 @@ Both surfaces retain the resolved ID whether or not it selected anything. That I
 
 A policy is handed bare engine IDs through ``hipdnnHeuristicPolicySetEngineIds`` and no handle, so the ``HIPDNN_HEUR_FALLBACK_ENGINE_ORDER`` environment variable and the engine override rules in the heuristic config file turn an operator's string into an ID without the resolver. They can do so exactly: a declared name hashes to the engine's ID, and an engine that declares none is displayed as its ID in hexadecimal, which both surfaces also parse. Either spelling can be pasted from the enumeration.
 
+.. _knob-catalogs:
+
+Knob catalogs
+=============
+
+Knob metadata describes each knob's legal values independently. It cannot say which combinations of engine-specific knob values an engine can really run: a range is not an enumeration, and independent value lists combine into configurations the engine may not support. An engine whose valid configurations form a finite, graph-dependent set, such as one backed by a kernel catalog, can publish that set as a *knob catalog*. Each entry is a complete set of engine-specific knob settings that clients can pass unchanged to ``Graph::create_execution_plan_ext()``.
+
+Clients read a catalog with ``Graph::get_knob_catalog_for_engine()`` or the read-only ``HIPDNN_ATTR_ENGINE_KNOB_CATALOG_EXT`` attribute of an engine descriptor. The offline ``--sweep-knob-catalog`` mode of ``hipdnn_integration_tests`` runs every entry of every applicable engine against the reference implementation.
+
+Export a catalog
+----------------
+
+The catalog is optional and available from engine plugin API version 1.5.0. A plugin built on the Plugin SDK overrides ``IPlanBuilder::getKnobCatalog()`` and returns one ``EngineConfigT`` per entry, best first, each holding engine-specific knobs only, never ``global.*`` knobs. The SDK emits the ``hipdnnEnginePluginGetEngineKnobCatalog`` and ``hipdnnEnginePluginDestroyEngineKnobCatalog`` entry points on your behalf; the default plan builder implementation reports ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE``, meaning the engine has no catalog. ``GenericEngine`` forwards to the plan builder, stamps the engine ID on every entry, and serializes the ``EngineKnobCatalog`` for you. A hand-written ``IEngine`` overrides ``IEngine::getKnobCatalog()`` instead.
+
+A plugin that implements the C ABI directly exports both entry points, using the ``EngineKnobCatalog`` table in ``engine_knob_catalog.fbs``. Export both or neither: a lone symbol is ignored with a warning. hipDNN calls the getter whenever the pair is exported, regardless of the API version the plugin reports. ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`` from the getter declines the catalog for that graph.
+
+What hipDNN does with it
+------------------------
+
+- hipDNN fetches the catalog on the first read of the attribute, not at ``hipdnnBackendFinalize()``, and caches it.
+- hipDNN rejects a catalog with ``HIPDNN_STATUS_INTERNAL_ERROR`` naming the engine and entry when an entry carries a knob the engine does not advertise for the graph, carries a ``global.`` knob, carries a value that does not match the advertised type or constraint, repeats a knob or equals another entry, or carries a different engine ID than the queried engine.
+- An engine that exports no catalog, or declines one, gets a fallback. An engine advertising no engine-specific knobs reports one empty entry, its default configuration. An engine advertising one or more engine-specific knobs reports ``HIPDNN_STATUS_NOT_SUPPORTED`` until it implements a catalog.
+
+For the kernel ingestor, ``GenericPlanBuilder::getKnobCatalog()`` projects every matched kernel onto the engine's exposed knob fields and removes duplicates, keeping the first occurrence so rank order is preserved. Kernels that differ only in a field the engine does not expose collapse into one entry; the plan builder logs each collapsed entry at INFO with its kernel count. Expose every field that distinguishes kernels the engine should be able to select, and use ``tools/IngestorGenerator/tools/variant_reachability.py`` to find pack variants that share a knob projection.
+
 Create a kernel engine plugin
 =============================
 
@@ -657,8 +682,12 @@ To verify your plugin has proper symbol visibility:
   # hipdnnEnginePluginDestroy
   # hipdnnEnginePluginGetAllEngineIds
   # hipdnnEnginePluginGetEngineName
+  # hipdnnEnginePluginGetEngineKnobCatalog
+  # hipdnnEnginePluginDestroyEngineKnobCatalog
   # ... (other plugin API functions)
 
 If you see many internal symbols exported, your visibility settings are incorrect.
 
 ``hipdnnEnginePluginGetEngineName`` is present whether or not your container implements ``getEngineName``. See :ref:`engine-names`.
+
+The ``hipdnnEnginePluginGetEngineKnobCatalog`` and ``hipdnnEnginePluginDestroyEngineKnobCatalog`` pair is present whether or not your plan builders define a catalog. See :ref:`knob-catalogs`.
