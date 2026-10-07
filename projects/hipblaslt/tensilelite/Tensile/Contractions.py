@@ -732,6 +732,11 @@ class SizeMapping:
                  'LocalSplitU',
                  'DirectToLdsA',
                  'DirectToLdsB',
+                 'SourceSwap',
+                 'UnrollMajorLDSA',
+                 'UnrollMajorLDSB',
+                 'enableLDSTrA',
+                 'enableLDSTrB',
                  'ExpertSchedulingMode',
                  'clusterDim'
                  ]
@@ -832,6 +837,11 @@ class SizeMapping:
                    LocalSplitU              = d["LocalSplitU"],
                    DirectToLdsA             = dtlA,
                    DirectToLdsB             = dtlB,
+                   SourceSwap               = bool(d.get('SourceSwap', False)),
+                   UnrollMajorLDSA          = int(bool(d['UnrollMajorLDSA'])) if 'UnrollMajorLDSA' in d else -1,
+                   UnrollMajorLDSB          = int(bool(d['UnrollMajorLDSB'])) if 'UnrollMajorLDSB' in d else -1,
+                   enableLDSTrA             = bool(d.get('enableLDSTrA', False)),
+                   enableLDSTrB             = bool(d.get('enableLDSTrB', False)),
                    ExpertSchedulingMode     = d.get('ExpertSchedulingMode', 0),
                    clusterDim               = d['ClusterDim']
                    )
