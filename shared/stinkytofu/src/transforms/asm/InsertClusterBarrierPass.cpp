@@ -1104,8 +1104,8 @@ bool hasLaterWorkgroupHandoff(StinkyInstruction* entryLocalWait) {
         if (isLabel(inst) || isCall(inst) || isUnconditionalBranch(inst)) break;
         if (isBranch(inst)) {
             const auto opcode = inst.getUnifiedOpcode();
-            if (crossedGuard || (opcode != GFX::s_cbranch_scc0 &&
-                                 opcode != GFX::s_cbranch_scc1)) break;
+            if (crossedGuard || (opcode != GFX::s_cbranch_scc0 && opcode != GFX::s_cbranch_scc1))
+                break;
             crossedGuard = true;
         }
         --start;
@@ -1114,8 +1114,7 @@ bool hasLaterWorkgroupHandoff(StinkyInstruction* entryLocalWait) {
     for (size_t i = start; i <= entry; ++i) {
         const auto& inst = *instructions[i];
         entryFacts.transfer(inst);
-        if (isBranch(inst) &&
-            !entryFacts.assumeScc(inst.getUnifiedOpcode() == GFX::s_cbranch_scc0))
+        if (isBranch(inst) && !entryFacts.assumeScc(inst.getUnifiedOpcode() == GFX::s_cbranch_scc0))
             return false;
     }
 
@@ -1141,8 +1140,9 @@ bool hasLaterWorkgroupHandoff(StinkyInstruction* entryLocalWait) {
         size_t index = paths.front();
         paths.pop_front();
         const auto& inst = *instructions[index];
-        if (isClusterBarrierSignal(inst) || isClusterBarrierWait(inst) ||
-            isCall(inst) || isEndOfFunction(inst)) return false;
+        if (isClusterBarrierSignal(inst) || isClusterBarrierWait(inst) || isCall(inst) ||
+            isEndOfFunction(inst))
+            return false;
 
         if (isWorkgroupBarrierSignal(inst)) {
             // Token annotations describe LDS dependencies, not participation in
