@@ -3093,6 +3093,13 @@ extern "C" int rocblaslt_matmul_is_tuned(rocblaslt_handle        handle,
 extern "C" HIPBLASLT_EXPORT void hipblaslt_debug_reload()
 {
     TensileLite::Debug::Instance().reloadDebugBitsForTest();
+
+    // And the copy inside libtensilelite-host, which is a different object:
+    // see reloadHostDebugBitsForTest(). Without this, bits the host library
+    // reads for itself -- TENSILE_DB2 bit 0, skip-kernel-launch, among them --
+    // keep whatever value they had when that library first looked at the
+    // environment, so a test that sets them in-process appears to be ignored.
+    TensileLite::reloadHostDebugBitsForTest();
 }
 
 // Test support, like hipblaslt_debug_reload: the tuning variables are read on

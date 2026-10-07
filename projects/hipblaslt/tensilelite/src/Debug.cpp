@@ -312,4 +312,9 @@ namespace TensileLite
         }
     }
 
+    void reloadHostDebugBitsForTest()
+    {
+        Debug::Instance().reloadDebugBitsForTest();
+    }
+
 } // namespace TensileLite

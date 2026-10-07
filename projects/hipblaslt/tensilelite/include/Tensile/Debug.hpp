@@ -191,4 +191,14 @@ namespace TensileLite
 
         Debug();
     };
+
+    // Calls reloadDebugBitsForTest() on the Debug this library reads.
+    //
+    // Debug is a LazySingleton, so the instance lives in a function-local
+    // static in a header, and every module that links tensilelite-host with
+    // hidden visibility ends up with its own. A test executable calling
+    // Debug::Instance() therefore reaches its own copy and not the one the
+    // code under test is consulting -- silently, and only when some earlier
+    // test in the same process has already constructed the real one.
+    TENSILELITEHOST_EXPORT void reloadHostDebugBitsForTest();
 } // namespace TensileLite
