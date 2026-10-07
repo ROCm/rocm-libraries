@@ -275,6 +275,8 @@
       'PersistentXCCMapping',
       'PrefetchAcrossPersistent',
       'PrefetchGL2',
+      'PrefetchGL2Inc64Bit',
+      'PrefetchGL2SAddr',
       'PrefetchGlobalRead',
       'PrefetchLocalRead',
       'PreloadKernArgs',
