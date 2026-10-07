@@ -35,15 +35,32 @@ columns 12-15 stored none. The check now requires a multiple of 16 for this layo
 remainders take the per-element edge path. A per-store mask (one per `b128`) would keep 4-row
 remainders on the fast path. `validate.py LOGDIR [SIZE ...]` reruns a build at given sizes.
 
+**Update 2026-10-07, StreamK (`logs/*-gen-v7`, GPU 0):** all 15 regression sizes pass, including
+(128, 64, 3, 4096) and (256, 256, 1, 8192). Both failures were the StreamK partials write
+(`partialsWriteProcedure` / `partialsWriteBatch`), taken only when a tile's K range is split across
+workgroups (few tiles, long K).
+- The write first copies the accumulators into the element registers that `StoreState` checked
+  out of the VGPR pool. Those indices are absolute, but the subtile branch wrote the copy to
+  `ValuC + idx` and stored from `idx + startVgprValu`, both 64 registers too high
+  (`vgprValuC = 64` on gfx1250).
+- So the copies overwrote live accumulators, and the last 32 targeted v1024+ (`s_set_vgpr_msb 257`,
+  "dst: 4"). That wraps to v0-v31 and clobbers `Serial` and the StreamK state in v1-v7.
+- The WS store offset `v15 = Serial * 64` was then accumulator data, so the stores landed 0.7-2 GB
+  past the 128 MiB workspace (TCP write page fault, GPU hang).
+- Fix: use the absolute index on both sides, the same as the fixup read and the D store. The branch
+  was neutral on gfx950, where `startVgprValu` is presumably 0.
+- Found with `rocgdb` (`HSA_ENABLE_PRECISE_MEMORY=1`, `info registers` at the faulting store).
+  `asm_drop.py` (comment out matching lines and reassemble) did the earlier bisection.
+- (256, 512, 1, 16384) shows 1 of 131072 values off by 0.004 (-2.23828 vs -2.24219), a
+  reduction-order rounding difference from the split K.
+
 - Not caused by the 32x16 accumulator row fix-up (`emitWmma32x16AccRowFixup`). Tensile built
   from `e91596bfb48`, before that fix, has the same pass/fail result on every size. The count of
   wrong values differs slightly between the two builds.
 - Every batch > 1 size fails. Some single-batch sizes with partial M/N tiles and K of 1152 or 1280
   also fail. Edge-only (96, 48, 1, 256) and tail-only (128, 64, 1, 384) sizes pass.
 - The crash is one 256x256 tile with a long K, so StreamK 3 splits a single tile's K range
-  across workgroups. The partial-tile fixup is the first suspect.
-- Not yet checked: the same sizes with StreamK 0, and whether the non-subtile MXF4 kernel
-  (`configs/ref_nonsubtile_mxf4.yaml`) passes them.
+  across workgroups (root cause in the StreamK update above).
 
 ## Scale addressing bugs hidden by validation (fixed 2026-10-06)
 

@@ -2486,8 +2486,7 @@ class StreamK(Component):
                 for vi in range(0, gwvw):
                     # loop over registers within one scalar
                     for rIdx in range(0, regsPerScalar):
-                        startVgprValuOffset = 0 if kernel.get("UseSubtileImpl") else writer.states.c.startVgprValu
-                        module.add(replaceHolder(codeAccVgprRead.popFirstItem(), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - startVgprValuOffset))
+                        module.add(replaceHolder(codeAccVgprRead.popFirstItem(), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - writer.states.c.startVgprValu))
                         # if kernel["StoreCInUnroll"] and not edge:
                         #     tempStr = tempStr.replace("__placeholder__",str(elementIdx*gwvw*regsPerScalar + regsPerScalar*vi + rIdx))
                         #     accVgprRead.addCode(tempStr.replace("ValuC","L2GC"))
@@ -2555,14 +2554,9 @@ class StreamK(Component):
             element = batchElements[elementIdx]
             addrCalc: AddrCalculation = ss.elementAddr[elementIdx]
             addr = addrCalc.addrDVgpr
-            # For UseSubtileImpl, vgprValuC is remapped; add the base offset so the
-            # WS store reads from the correct accumulator VGPRs.  For the regular path
-            # (non-subtile), startVgprValu is already accounted for by the vgprValuC
-            # assembler macro, so no offset is needed (matches rebase behaviour).
-            if kernel.get("UseSubtileImpl"):
-                sumIdx = ss.elementSumIdx[elementIdx] + writer.states.c.startVgprValu
-            else:
-                sumIdx = ss.elementSumIdx[elementIdx]
+            # elementSumIdx is an absolute vgpr from the pool (see StoreState), the
+            # same registers the accVgprRead copy above fills.
+            sumIdx = ss.elementSumIdx[elementIdx]
             storeWidth = gwvw  # pitch must match store/load width gwvw, not StoreVectorWidth (differ on source kernels)
             # storeWidth = 2
             increment = (kernel["WavefrontSize"] * WaveNum) * storeWidth * writer.states.bpeCinternal

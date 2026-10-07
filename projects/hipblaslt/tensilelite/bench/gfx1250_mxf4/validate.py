@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Validate one build at a list of problem sizes on physical GPU $GPU_ID (default 3).
 
-usage: validate.py LOGDIR [--jitter N] [--print-max N] [SIZE ...]
+usage: validate.py LOGDIR [--jitter N] [--print-max N] [--timeout S] [SIZE ...]
 
 LOGDIR holds the timing ClientParameters.ini of a build (logs/*-gen-vN). SIZE is M,N,B,K;
 the default is the 10-size edge/StreamK set. --jitter sets mx-scale-jitter (default 4), which
@@ -22,6 +22,7 @@ ap.add_argument("logdir")
 ap.add_argument("sizes", nargs="*", default=DEFAULT)
 ap.add_argument("--jitter", type=int, default=4)
 ap.add_argument("--print-max", type=int, default=4)
+ap.add_argument("--timeout", type=int, default=120, help="seconds before the client is killed")
 args = ap.parse_args()
 
 logdir = os.path.join(BENCH, args.logdir) if not os.path.isabs(args.logdir) else args.logdir
@@ -42,7 +43,11 @@ env = dict(os.environ, HIP_VISIBLE_DEVICES=os.environ.get("GPU_ID", "3"),
            LD_LIBRARY_PATH=f"{ROCM}/lib/llvm/lib/x86_64-unknown-linux-gnu")
 env.pop("ROCR_VISIBLE_DEVICES", None)
 with open(log, "w") as f:
-    rc = subprocess.run([CLIENT, "--config-file", ini], stdout=f, stderr=subprocess.STDOUT, env=env).returncode
+    try:
+        rc = subprocess.run([CLIENT, "--config-file", ini], stdout=f, stderr=subprocess.STDOUT,
+                            env=env, timeout=args.timeout).returncode
+    except subprocess.TimeoutExpired:
+        rc = "timeout (killed)"
 out = open(log).read()
 res = re.findall(r'"\(([0-9,]+)\)".*?,(PASSED|FAILED),', out)
 for size, r in res:
