@@ -3207,13 +3207,15 @@ class KernelWriterAssembly(KernelWriter):
       # remapped PersistentWorkGroupIndex % numQueues skews the per-queue home-workgroup count
       # and the counter drifts off 0. We snapshot the raw id (== physical XCD
       # rank) into the persistent StreamKTileIdx SGPR -- an ALREADY-allocated
-      # slot that is provably dead in the [prologue, queue-read) window on both
-      # the SK4 and SK5 dynamic paths (its first real write is after the queue
-      # read in graWorkGroup; for SK5 it aliases PersistentIteration, whose only
-      # in-window writes live on the mutually-exclusive SK3-static path). Reusing
-      # it costs ZERO additional persistent SGPRs (unlike a dedicated StreamKQueue
-      # SGPR, which overflows the SGPR file on tuned high-register SKXCC kernels).
-      # The queue index reads it, masked % numQueues, in StreamK.graWorkGroup.
+      # slot that is dead between here and the WorkAssignment initialize() on
+      # both the SK4 and SK5 dynamic paths (for SK5 it aliases
+      # PersistentIteration, whose only writes there live on the
+      # mutually-exclusive SK3-static path). Reusing it costs ZERO additional
+      # persistent SGPRs (unlike a dedicated StreamKQueue SGPR, which overflows
+      # the SGPR file on tuned high-register SKXCC kernels). initialize() moves
+      # it into PersistentWorkGroupIndex (emitRawRankRestore) before the first
+      # work item overwrites StreamKTileIdx with a tile index; the queue index
+      # reads it from there, masked % numQueues, on every pop.
       # Once-per-workgroup setup only -- no steady-state instructions added.
       if Component.WorkAssignment.usesRawQueueRank(self, kernel):
         module.add(SMovB32(dst=sgpr("StreamKTileIdx"), src=sgpr("WorkGroup0"),

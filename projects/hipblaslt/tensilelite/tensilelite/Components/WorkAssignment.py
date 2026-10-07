@@ -341,9 +341,10 @@ class WorkAssignment(Component):
     @staticmethod
     def usesRawQueueRank(writer, kernel):
         """True when the per-XCD queue index is taken from the raw pre-remap
-        launch rank snapshotted into the reused, in-window-dead persistent
+        launch rank, snapshotted into the reused, in-window-dead persistent
         ``StreamKTileIdx`` carrier (zero extra SGPR -- see the prologue snapshot
-        in KernelWriterAssembly).
+        in KernelWriterAssembly) and moved into ``PersistentWorkGroupIndex`` by
+        ``emitRawRankRestore`` before the first work item is decoded.
 
         The auto-reset wrap bound (tiles_q + W_q [+ W_p]) assumes each queue's
         home-workgroup count equals ``distribute(skGrid, q)`` -- i.e. that the
@@ -387,9 +388,10 @@ class WorkAssignment(Component):
         ``usesRawQueueRank``).  On gfx9 that raw rank is snapshotted once, before
         wgmXCC / the SKXCC XCCMapping remap rewrites WorkGroup0, into the reused,
         in-window-dead persistent ``StreamKTileIdx`` carrier (KernelWriterAssembly
-        prologue -- zero extra SGPR); here it is read back and reduced
-        ``% numQueues``.  Otherwise (WGMXCC no-op, or gfx12) ``PersistentWorkGroupIndex``
-        already holds the raw id, so fall back to ``PersistentWorkGroupIndex %% numQueues``.
+        prologue -- zero extra SGPR), then moved into ``PersistentWorkGroupIndex``
+        by ``emitRawRankRestore``; here it is reduced ``% numQueues``.
+        Otherwise (WGMXCC no-op, or gfx12) ``PersistentWorkGroupIndex`` already
+        holds the raw id, so fall back to ``PersistentWorkGroupIndex %% numQueues``.
         """
         partition = Component.TileProcessingStrategy.find(writer).queuePartition()
         module = Module("StreamK queue index")
@@ -399,19 +401,52 @@ class WorkAssignment(Component):
             # of home workgroups mapped to queue q equals distribute(skGrid, q) =
             # W_q -- exactly the count the auto-reset wrap bound (tiles_q + W_q)
             # assumes -- and the atomic counter self-resets to 0 every launch.
-            # (PersistentWorkGroupIndex is the wgmXCC CU-count-remapped id, whose % numQueues is
-            # NOT count-preserving and skews the per-queue count.) Uniform for SK4
-            # and SK5 -- the snapshot lives in the reused, in-window-dead
-            # persistent StreamKTileIdx carrier (zero extra SGPR; see
-            # KernelWriterAssembly prologue and usesRawQueueRank).
+            # On the dynamic path PersistentWorkGroupIndex holds that raw rank:
+            # initialize() copied it there from the prologue snapshot (see
+            # emitRawRankRestore). It must not be read from the StreamKTileIdx
+            # snapshot here: that register is overwritten with the tile index of
+            # every work item, so from the second pop on the queue would be
+            # tile & mask instead of the home queue.
             _, numQueuesMask, _, _ = self.queueConstants(writer, kernel)
-            module.add(SAndB32(dst=sgpr(sQueueIdx), src0=sgpr(partition.raw_rank), src1=hex(numQueuesMask),
+            module.add(SAndB32(dst=sgpr(sQueueIdx), src0=sgpr(partition.launch_rank), src1=hex(numQueuesMask),
                                comment="queue = rawWG %% numQueues (dense round-robin => home-WG count == distribute(skGrid,q))"))
         else:
             module.add(SLShiftRightB32(dst=sgpr(sQueueIdx), src=sgpr(partition.launch_rank), shiftHex=wsLog2Queues))
             module.add(SLShiftLeftB32(dst=sgpr(sQueueIdx), src=sgpr(sQueueIdx), shiftHex=wsLog2Queues))
             module.add(SSubU32(dst=sgpr(sQueueIdx), src0=sgpr(partition.launch_rank), src1=sgpr(sQueueIdx),
                                comment="Default queue index"))
+        return module
+
+
+    def emitRawRankRestore(self, writer, kernel, hybrid):
+        """Move the raw launch rank into the queue partition's launch_rank.
+
+        On the raw-rank regimes (``usesRawQueueRank``) the prologue snapshots
+        the pre-remap WorkGroup0 into ``StreamKTileIdx`` before wgmXCC rewrites
+        it. That register only stays valid until the first work item is
+        decoded, which overwrites it with the tile index. The queue index is
+        computed on every pop, so the rank is moved here, once per workgroup,
+        into ``PersistentWorkGroupIndex``: no work-item decode writes it, and
+        the dynamic path reads it for nothing but the queue index.
+
+        SK5 (``hybrid``) keeps the remapped id on its static sub-path, which
+        uses PersistentWorkGroupIndex as the CTA index, so the move is gated on
+        WorkAssignmentMode with a select. Must run after extractMode. Emits
+        nothing when the raw rank is not needed.
+        """
+        partition = Component.TileProcessingStrategy.find(writer).queuePartition()
+        module = Module("StreamK raw rank restore")
+        if not self.usesRawQueueRank(writer, kernel):
+            return module
+        if hybrid:
+            module.add(SCmpEQU32(src0=sgpr("WorkAssignmentMode"), src1=0,
+                                 comment="SK5: static sub-path keeps the remapped CTA index"))
+            module.add(SCSelectB32(dst=sgpr(partition.launch_rank), src0=sgpr(partition.launch_rank),
+                                   src1=sgpr(partition.raw_rank),
+                                   comment="SK5 dynamic: launch rank = raw pre-remap WG id (queue selection)"))
+        else:
+            module.add(SMovB32(dst=sgpr(partition.launch_rank), src=sgpr(partition.raw_rank),
+                               comment="launch rank = raw pre-remap WG id (queue selection)"))
         return module
 
 
@@ -819,6 +854,7 @@ class DynamicWorkQueue(WorkAssignment):
             module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
 
         module.add(SMovB32(dst=sgpr(partition.launch_rank), src=sgpr("WorkGroup0"), comment="Save original StreamK index"))
+        module.add(self.emitRawRankRestore(writer, kernel, hybrid=False))
         # Work stealing: this WG has not yet seen its home queue empty.
         if kernel["WorkQueueStealing"]:
             module.add(SMovB32(dst=sgpr(partition.sticky_empty), src=0, comment="WS: home not yet empty"))
@@ -908,6 +944,7 @@ class Hybrid(WorkAssignment):
 
         # ----- Extract the mode bit once for the whole kernel -----
         module.add(Component.WorkAssignment.find(writer).extractMode(writer, kernel))
+        module.add(self.emitRawRankRestore(writer, kernel, hybrid=True))
 
         # No USO prologue. Bit 30 must still be extracted and cleared above:
         # WorkAssignmentMode's dispatch is a plain SCmpEQU32==0 and the SKTiles
