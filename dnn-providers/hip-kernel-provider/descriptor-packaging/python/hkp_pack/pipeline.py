@@ -1507,6 +1507,20 @@ def _merge_generic_into_member(generic_dir, member_dir, staging_dir):
         ) from exc
 
 
+def generic_passes(flat, arches):
+    """The generics `run_pipeline` compiles for @arches, in table order.
+
+    A generic is compiled when one of @arches is its member and a KDP ships for it.
+    """
+    table = flat.generic_targets
+    return [
+        generic
+        for generic in table.names()
+        if any(a in table.members(generic) for a in arches)
+        and any(kdp_survives(k.doc, flat, generic) for k in flat.kdps())
+    ]
+
+
 def run_pipeline(
     source_root,
     arches,
@@ -1628,12 +1642,8 @@ def run_pipeline(
                 arch=arch, out_dir=out_arch_dir, kpack_path=None, skipped=True
             )
 
-    for generic in generic_targets.names():
+    for generic in generic_passes(flat, arches):
         members = [a for a in arches if a in generic_targets.members(generic)]
-        if not members:
-            continue
-        if not any(kdp_survives(k.doc, flat, generic) for k in flat.kdps()):
-            continue
         generic_out = inter_root / ".generic-out" / generic
         try:
             inter = compile_intermediate(

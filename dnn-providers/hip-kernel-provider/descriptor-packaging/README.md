@@ -344,8 +344,8 @@ Every architecture named explicitly under the production root gets an **automati
 in every lane that does not build it. At configure, `hkp_load_packaging_probes()` runs
 `tools/hkp_probe_derive_root.py --list-arches` on
 `HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT`: the union of the explicit `arch`
-entries of every KDP and UKD (inline and standalone), read with the packer's own loader.
-It subtracts the lane's own architectures (`hkp_selected_arches()`, i.e. `GPU_TARGETS`)
+entries of every KDP and UKD (inline and standalone), read with the packer's own loader and
+the generic target table, generic names mapped as below. It subtracts the lane's own architectures (`hkp_selected_arches()`, i.e. `GPU_TARGETS`)
 and declares `hkp_add_packaging_probe(ARCH <arch>)` for each one left: probe `<arch>`,
 ctest entry `hkp-probe-<arch>`, packing the default sample. Configure prints the result:
 
@@ -364,13 +364,35 @@ build targets, so each lane's own production pack packs it, and its GPU test lan
 on every PR. Only an architecture the lane does not build needs a probe, and only an
 explicit `arch` entry can make a descriptor ship there and nowhere else.
 
-**Non-concrete names are skipped.** An explicit `arch` entry that is not a concrete
-target, such as a generic target (`gfx9-4-generic`) or a TheRock family name, gets no
-automatic probe; configure prints which ones it skipped. No build packs for such a name:
-`GPU_TARGETS` drops it, and the packer matches arch names exactly, so it never selects a
-family member in its place either. Concrete names with a distinct-target word
-(`gfx1250-strict`) are probed like any other arch. The rule is `hkp_is_concrete_arch()`
-in `cmake/HkpPackaging.cmake`, the same one `GPU_TARGETS` goes through.
+**Generic targets are probed through one member.** A generic target in the generic target
+table (`projects/hipdnn/plugin_sdk/data/gpu_generic_targets.json`) that a descriptor names
+gets its probe through the first member the table lists for it: `gfx11-generic` through
+`gfx1100`, `gfx12-generic` through `gfx1200`. The packer compiles the generic once, for the
+generic target, and merges the result into each requested member's folder, so which member
+carries the probe only names the folder; the table's order picks it, with no configuration.
+The probe for `gfx1100` packs every pass that applies to `gfx1100`, its own and the
+generic's: a KDP that ships only for the generic is trimmed like any other, and the
+assertion expects its UKDs with `arch: gfx11-generic` and the generic's archive
+(`kpack/hip_kernel_provider_gfx11-generic.kpack`) in the `gfx1100` folder.
+
+- A lane that targets any member of the generic gets no probe for it: its production pack
+  compiles the generic already. Linux (`gfx942`) probes `gfx11-generic` through `gfx1100`;
+  Windows (`gfx1151`, a member) does not.
+- One probe per member arch: a member that is also named explicitly, or chosen for two
+  generics, is probed once, because `--arches <member>` runs every pass that applies to it.
+
+```
+hkp: generic targets probed through their first member: [gfx11-generic -> gfx1100]
+hkp: automatic probe arches: [gfx1100, gfx950] (probe arches of the explicit arches under <root>: [gfx1100, gfx950]; build targets: [gfx942])
+```
+
+**TheRock family names are skipped; an unlisted generic fails configure.** An explicit `arch`
+entry that is a TheRock family name gets no automatic probe; configure prints which ones it
+skipped. No build packs for such a name: `GPU_TARGETS` drops it. A `*-generic` entry the table
+does not list fails configure with the packer loader's message, since the packer rejects it
+too. Concrete names with a distinct-target word (`gfx1250-strict`) are
+probed like any other arch. The rule is `hkp_is_concrete_arch()` in
+`cmake/HkpPackaging.cmake`, the same one `GPU_TARGETS` goes through.
 
 ### How to use
 

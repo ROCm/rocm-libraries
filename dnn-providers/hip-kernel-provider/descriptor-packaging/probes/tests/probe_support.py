@@ -24,6 +24,14 @@ STAMP_NAME = ".hkp-packed.stamp"
 HKP_PACK = _PKG_DIR / "tools" / "hkp_pack.py"
 PROBE_ASSERT = _PKG_DIR / "tools" / "hkp_probe_assert.py"
 PROBE_DERIVE = _PKG_DIR / "tools" / "hkp_probe_derive_root.py"
+GENERIC_TARGETS_JSON = (
+    _HKP_DIR.parent.parent
+    / "projects"
+    / "hipdnn"
+    / "plugin_sdk"
+    / "data"
+    / "gpu_generic_targets.json"
+)
 FIXTURES = _PKG_DIR / "tests" / "fixtures"
 ROCKE_FIXTURE = FIXTURES / "rocke"
 MAIN_FIXTURE = FIXTURES / "main"
@@ -61,8 +69,8 @@ def comgr_lib():
     return os.environ.get("ROCKE_COMGR_LIB") or None
 
 
-def pack_root(src, work, rocm_kpack_dir, hipcc, comgr_lib):
-    """Pack `src` for ARCH with the real packer; return the output root.
+def pack_root(src, work, rocm_kpack_dir, hipcc, comgr_lib, arch=ARCH):
+    """Pack `src` for `arch` with the real packer; return the output root.
 
     The stamp file is written by CMake in production; it is created here so the
     stamp assertion has something to find.
@@ -85,9 +93,11 @@ def pack_root(src, work, rocm_kpack_dir, hipcc, comgr_lib):
             "--out-root",
             str(out),
             "--arches",
-            ARCH,
+            arch,
             "--hipcc",
             hipcc,
+            "--generic-targets-json",
+            str(GENERIC_TARGETS_JSON),
             "--inter-root",
             str(work / "inter"),
             "--kpack-python-dir",
@@ -114,14 +124,14 @@ def packed_root(tmp_path_factory, rocm_kpack_dir, hipcc, comgr_lib):
     return pack_root(ROCKE_FIXTURE, work, rocm_kpack_dir, hipcc, comgr_lib)
 
 
-def run_assert(out_root, expect_path, rocm_kpack_dir, expect_comgr=None):
+def run_assert(out_root, expect_path, rocm_kpack_dir, expect_comgr=None, arch=ARCH):
     cmd = [
         sys.executable,
         str(PROBE_ASSERT),
         "--out-root",
         str(out_root),
         "--arch",
-        ARCH,
+        arch,
         "--expect",
         str(expect_path),
         "--kpack-python-dir",
@@ -141,6 +151,8 @@ def run_derive(src, arch, out, ukds=()):
         str(PROBE_DERIVE),
         "--from",
         str(src),
+        "--generic-targets-json",
+        str(GENERIC_TARGETS_JSON),
         "--arch",
         arch,
         "--out",
@@ -163,9 +175,11 @@ def hip_source(dst):
     return dst
 
 
-def derive_and_pack(src, work, rocm_kpack_dir, hipcc, comgr_lib, ukds=()):
-    """Derive `src` for ARCH, pack the derived root; return (out root, expect path)."""
-    r = run_derive(src, ARCH, work / "probe" / "root", ukds)
+def derive_and_pack(src, work, rocm_kpack_dir, hipcc, comgr_lib, ukds=(), arch=ARCH):
+    """Derive `src` for `arch`, pack it; return (out root, expect path)."""
+    r = run_derive(src, arch, work / "probe" / "root", ukds)
     assert r.returncode == 0, r.stderr
-    out = pack_root(work / "probe" / "root", work, rocm_kpack_dir, hipcc, comgr_lib)
+    out = pack_root(
+        work / "probe" / "root", work, rocm_kpack_dir, hipcc, comgr_lib, arch
+    )
     return out, work / "probe" / "expect.json"
