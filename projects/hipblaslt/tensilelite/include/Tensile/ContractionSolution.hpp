@@ -1452,6 +1452,9 @@ namespace TensileLite
             // SupportStreamKArrivalFixup (GlobalParameters.py): dynamic tiles
             // are split only for these. Older/custom kernels leave this false.
             bool arrivalFixup       = false;
+            // SupportStreamKDynamicParallel (GlobalParameters.py): the parallel
+            // bit is set only for these. Older/custom kernels leave this false.
+            bool dynamicParallel    = false;
             // Kernel takes the ProbeAddr/ProbeEpoch/ProbeGrid tail args (CU-occupancy probe).
             bool occupancyProbe     = false;
             bool useUniversalArgs   = true;

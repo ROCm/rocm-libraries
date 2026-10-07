@@ -508,6 +508,10 @@ defaultInternalSupportParams = {
     # parts no resident workgroup runs. Derived in Solution.py; False keeps
     # older/custom kernels' dynamic tiles whole.
     "SupportStreamKArrivalFixup": False,
+    # Pure CAPABILITY: the StreamK Hybrid kernel's dynamic sub-mode reduces
+    # split tiles in parallel (PostGSU) when the host sets bit 29 of SKTiles.
+    # Derived in Solution.py; False keeps older/custom kernels from the bit.
+    "SupportStreamKDynamicParallel": False,
     # Kernel takes the ProbeAddr/ProbeEpoch/ProbeGrid tail args and, when
     # ProbeAddr is non-null, stores ProbeEpoch into the slot of the CU each WG
     # runs on; WGs launched past ProbeGrid then end.

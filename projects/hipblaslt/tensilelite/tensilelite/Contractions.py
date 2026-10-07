@@ -977,6 +977,7 @@ class InternalArgsSupport:
                  'staggerU',
                  'perTileExtraIters',
                  'arrivalFixup',
+                 'dynamicParallel',
                  'useUniversalArgs',
                  'useSFC'
                  ]
@@ -994,6 +995,7 @@ class InternalArgsSupport:
                    staggerU = isp['SupportCustomStaggerU'],
                    perTileExtraIters = isp.get('SupportStreamKPerTileExtraIters', False),
                    arrivalFixup = isp.get('SupportStreamKArrivalFixup', False),
+                   dynamicParallel = isp.get('SupportStreamKDynamicParallel', False),
                    occupancyProbe = isp.get('SupportOccupancyProbe', False),
                    useUniversalArgs = isp['UseUniversalArgs'],
                    useSFC = useSFC)
