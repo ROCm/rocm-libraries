@@ -7504,6 +7504,17 @@ namespace TensileLite
             // The split is sized for the CUs, as origami sizes the static
             // grid's split (one part per CU), within the grid above.
             in.splitCUs = std::min(static_cast<size_t>(pAMDGPU->computeUnitCount), in.maxGrid);
+            // ... and for the CU-count hint (smCountTarget), which the static
+            // grid folds into origami's num_cus the same way: every part is
+            // one equal-length work item, so parts that find no resident
+            // workgroup would run as a second round behind another kernel.
+            // Whole tiles keep the device-wide grid; the queues hand them to
+            // whichever workgroups are resident. The workspace query builds
+            // the problem with the same hint as the launch; a launch given
+            // less workspace than its split needs shrinks the split to fit.
+            const int smt = problem.getParams().smCountTarget();
+            if(smt > 0)
+                in.splitCUs = std::min(in.splitCUs, static_cast<size_t>(smt));
             in.overrideTiles = pAMDGPU->skTiles;
             in.overrideSplit = pAMDGPU->skSplit;
         }
