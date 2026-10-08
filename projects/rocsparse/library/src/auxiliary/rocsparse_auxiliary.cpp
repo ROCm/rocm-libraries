@@ -1466,19 +1466,19 @@ catch(...)
  * \brief Set the internal fields of a HYB matrix, without exposing its layout.
  * Ownership of the array pointers is transferred to the HYB matrix on success.
  *******************************************************************************/
-rocsparse_status rocsparse_hyb_mat_set_info(rocsparse_hyb_mat              hyb,
-                                            const rocsparse_int*           m,
-                                            const rocsparse_int*           n,
-                                            const rocsparse_hyb_partition* partition,
-                                            const int64_t*                 ell_nnz,
-                                            const rocsparse_int*           ell_width,
-                                            rocsparse_int* const*          ell_col_ind,
-                                            void* const*                   ell_val,
-                                            const rocsparse_int*           coo_nnz,
-                                            rocsparse_int* const*          coo_row_ind,
-                                            rocsparse_int* const*          coo_col_ind,
-                                            void* const*                   coo_val,
-                                            const rocsparse_datatype*      data_type)
+rocsparse_status rocsparse_hyb_mat_set_info(rocsparse_hyb_mat       hyb,
+                                            rocsparse_int           m,
+                                            rocsparse_int           n,
+                                            rocsparse_hyb_partition partition,
+                                            int64_t                 ell_nnz,
+                                            rocsparse_int           ell_width,
+                                            rocsparse_int*          ell_col_ind,
+                                            void*                   ell_val,
+                                            rocsparse_int           coo_nnz,
+                                            rocsparse_int*          coo_row_ind,
+                                            rocsparse_int*          coo_col_ind,
+                                            void*                   coo_val,
+                                            rocsparse_datatype      data_type)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -1487,102 +1487,53 @@ try
 
     // Validate everything before modifying hyb. Ownership of the incoming
     // arrays is transferred only when this function returns success.
-    if(m != nullptr)
+    ROCSPARSE_CHECKARG_SIZE(1, m);
+    ROCSPARSE_CHECKARG_SIZE(2, n);
+    ROCSPARSE_CHECKARG_ENUM(3, partition);
+    ROCSPARSE_CHECKARG_SIZE(4, ell_nnz);
+    ROCSPARSE_CHECKARG(4,
+                       ell_nnz,
+                       (static_cast<uint64_t>(ell_nnz) > static_cast<uint64_t>(
+                            std::numeric_limits<decltype(hyb->ell_nnz)>::max())),
+                       rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG_SIZE(5, ell_width);
+    ROCSPARSE_CHECKARG_SIZE(8, coo_nnz);
+    ROCSPARSE_CHECKARG_ENUM(12, data_type);
+    // HYB kernels and check_matrix_hyb implement only these four types.
+    const bool hyb_datatype_supported
+        = (data_type == rocsparse_datatype_f32_r) || (data_type == rocsparse_datatype_f64_r)
+          || (data_type == rocsparse_datatype_f32_c) || (data_type == rocsparse_datatype_f64_c);
+    ROCSPARSE_CHECKARG(12, data_type, (!hyb_datatype_supported), rocsparse_status_not_implemented);
+
+    // Reject a matrix that hybmv, hyb2csr, or copy_hyb_mat would index past.
+    // ell_nnz counts stored ELL entries, including padding: m * ell_width.
+    // ell_width may exceed n: csr2hyb builds such rows from duplicate column
+    // indices, and the HYB kernels skip columns outside [0, n).
+    int64_t ell_stored = 0;
+    if(m != 0 && ell_width != 0)
     {
-        ROCSPARSE_CHECKARG_SIZE(1, *m);
-    }
-    if(n != nullptr)
-    {
-        ROCSPARSE_CHECKARG_SIZE(2, *n);
-    }
-    if(partition != nullptr)
-    {
-        ROCSPARSE_CHECKARG_ENUM(3, *partition);
-    }
-    if(ell_nnz != nullptr)
-    {
-        ROCSPARSE_CHECKARG_SIZE(4, *ell_nnz);
         ROCSPARSE_CHECKARG(4,
                            ell_nnz,
-                           (static_cast<uint64_t>(*ell_nnz) > static_cast<uint64_t>(
-                                std::numeric_limits<decltype(hyb->ell_nnz)>::max())),
+                           (static_cast<int64_t>(m) > (std::numeric_limits<int64_t>::max()
+                                                       / static_cast<int64_t>(ell_width))),
                            rocsparse_status_invalid_size);
+        ell_stored = static_cast<int64_t>(m) * static_cast<int64_t>(ell_width);
     }
-    if(ell_width != nullptr)
-    {
-        ROCSPARSE_CHECKARG_SIZE(5, *ell_width);
-    }
-    if(coo_nnz != nullptr)
-    {
-        ROCSPARSE_CHECKARG_SIZE(8, *coo_nnz);
-    }
-    if(data_type != nullptr)
-    {
-        ROCSPARSE_CHECKARG_ENUM(12, *data_type);
-        // HYB kernels and check_matrix_hyb implement only these four types.
-        const bool hyb_datatype_supported = (*data_type == rocsparse_datatype_f32_r)
-                                            || (*data_type == rocsparse_datatype_f64_r)
-                                            || (*data_type == rocsparse_datatype_f32_c)
-                                            || (*data_type == rocsparse_datatype_f64_c);
-        ROCSPARSE_CHECKARG(
-            12, data_type, (!hyb_datatype_supported), rocsparse_status_not_implemented);
-    }
-
-    const rocsparse_int           merged_m = (m != nullptr) ? *m : hyb->m;
-    const rocsparse_int           merged_n = (n != nullptr) ? *n : hyb->n;
-    const rocsparse_hyb_partition merged_partition
-        = (partition != nullptr) ? *partition : hyb->partition;
-    const int64_t merged_ell_nnz
-        = (ell_nnz != nullptr) ? *ell_nnz : static_cast<int64_t>(hyb->ell_nnz);
-    const rocsparse_int merged_ell_width = (ell_width != nullptr) ? *ell_width : hyb->ell_width;
-    const rocsparse_int merged_coo_nnz   = (coo_nnz != nullptr) ? *coo_nnz : hyb->coo_nnz;
-    const rocsparse_datatype merged_data_type
-        = (data_type != nullptr) ? *data_type : hyb->data_type_T;
-
-    rocsparse_int* new_ell_col_ind = (ell_col_ind != nullptr) ? *ell_col_ind : hyb->ell_col_ind;
-    void*          new_ell_val     = (ell_val != nullptr) ? *ell_val : hyb->ell_val;
-    rocsparse_int* new_coo_row_ind = (coo_row_ind != nullptr) ? *coo_row_ind : hyb->coo_row_ind;
-    rocsparse_int* new_coo_col_ind = (coo_col_ind != nullptr) ? *coo_col_ind : hyb->coo_col_ind;
-    void*          new_coo_val     = (coo_val != nullptr) ? *coo_val : hyb->coo_val;
-
-    // Reject a merged matrix that hybmv, hyb2csr, or copy_hyb_mat would index past.
-    // ell_nnz counts stored ELL entries, including padding: m * ell_width.
-    ROCSPARSE_CHECKARG(1, m, (merged_m < 0), rocsparse_status_invalid_size);
-    ROCSPARSE_CHECKARG(2, n, (merged_n < 0), rocsparse_status_invalid_size);
-    ROCSPARSE_CHECKARG(4, ell_nnz, (merged_ell_nnz < 0), rocsparse_status_invalid_size);
-    ROCSPARSE_CHECKARG(5, ell_width, (merged_ell_width < 0), rocsparse_status_invalid_size);
-    ROCSPARSE_CHECKARG(8, coo_nnz, (merged_coo_nnz < 0), rocsparse_status_invalid_size);
-
-    int64_t ell_stored = 0;
-    if(merged_m != 0 && merged_ell_width != 0)
-    {
-        ROCSPARSE_CHECKARG(
-            4,
-            ell_nnz,
-            (static_cast<int64_t>(merged_m)
-             > (std::numeric_limits<int64_t>::max() / static_cast<int64_t>(merged_ell_width))),
-            rocsparse_status_invalid_size);
-        ell_stored = static_cast<int64_t>(merged_m) * static_cast<int64_t>(merged_ell_width);
-    }
-    ROCSPARSE_CHECKARG(4, ell_nnz, (merged_ell_nnz != ell_stored), rocsparse_status_invalid_size);
-    ROCSPARSE_CHECKARG(5, ell_width, (merged_ell_width > merged_n), rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG(4, ell_nnz, (ell_nnz != ell_stored), rocsparse_status_invalid_size);
 
     // A positive count requires its arrays. A zero count ignores a non-null
     // pointer, matching hybmv, which does not read that part.
-    ROCSPARSE_CHECKARG(
-        6,
-        ell_col_ind,
-        (merged_ell_nnz > 0 && (new_ell_col_ind == nullptr || new_ell_val == nullptr)),
-        rocsparse_status_invalid_pointer);
+    ROCSPARSE_CHECKARG(6,
+                       ell_col_ind,
+                       (ell_nnz > 0 && (ell_col_ind == nullptr || ell_val == nullptr)),
+                       rocsparse_status_invalid_pointer);
     ROCSPARSE_CHECKARG(
         9,
         coo_row_ind,
-        (merged_coo_nnz > 0
-         && (new_coo_row_ind == nullptr || new_coo_col_ind == nullptr || new_coo_val == nullptr)),
+        (coo_nnz > 0 && (coo_row_ind == nullptr || coo_col_ind == nullptr || coo_val == nullptr)),
         rocsparse_status_invalid_pointer);
 
-    const void* const new_arrays[]
-        = {new_ell_col_ind, new_ell_val, new_coo_row_ind, new_coo_col_ind, new_coo_val};
+    const void* const new_arrays[] = {ell_col_ind, ell_val, coo_row_ind, coo_col_ind, coo_val};
 
     for(int i = 0; i < 5; ++i)
     {
@@ -1655,18 +1606,18 @@ try
 
     // Install the new fields before releasing the arrays they replace, so a
     // failed release cannot leave hyb pointing at memory that was freed.
-    hyb->m           = merged_m;
-    hyb->n           = merged_n;
-    hyb->partition   = merged_partition;
-    hyb->ell_nnz     = static_cast<decltype(hyb->ell_nnz)>(merged_ell_nnz);
-    hyb->ell_width   = merged_ell_width;
-    hyb->coo_nnz     = merged_coo_nnz;
-    hyb->data_type_T = merged_data_type;
-    hyb->ell_col_ind = new_ell_col_ind;
-    hyb->ell_val     = new_ell_val;
-    hyb->coo_row_ind = new_coo_row_ind;
-    hyb->coo_col_ind = new_coo_col_ind;
-    hyb->coo_val     = new_coo_val;
+    hyb->m           = m;
+    hyb->n           = n;
+    hyb->partition   = partition;
+    hyb->ell_nnz     = static_cast<decltype(hyb->ell_nnz)>(ell_nnz);
+    hyb->ell_width   = ell_width;
+    hyb->coo_nnz     = coo_nnz;
+    hyb->data_type_T = data_type;
+    hyb->ell_col_ind = ell_col_ind;
+    hyb->ell_val     = ell_val;
+    hyb->coo_row_ind = coo_row_ind;
+    hyb->coo_col_ind = coo_col_ind;
+    hyb->coo_val     = coo_val;
 
     void* released[5] = {};
     int   nreleased   = 0;

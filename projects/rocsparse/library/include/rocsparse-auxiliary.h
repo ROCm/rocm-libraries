@@ -696,11 +696,12 @@ rocsparse_status rocsparse_hyb_mat_get_info(const rocsparse_hyb_mat  hyb,
  *  \brief Set the internal fields of a \p HYB matrix structure.
  *
  *  \details
- *  \p rocsparse_hyb_mat_set_info is the counterpart to \ref rocsparse_hyb_mat_get_info
- *  and is intended for test and internal use, so that callers never need to
- *  reinterpret the opaque \ref rocsparse_hyb_mat as a raw struct. Any of the
- *  input pointers may be \p nullptr, in which case the corresponding field is
- *  left untouched. Arguments are validated before \p hyb is modified.
+ *  \p rocsparse_hyb_mat_set_info sets every field of a \p HYB matrix structure
+ *  in one call. It is the counterpart to \ref rocsparse_hyb_mat_get_info and
+ *  lets a user who already holds the \p HYB arrays and sizes build a
+ *  \ref rocsparse_hyb_mat from them directly, without converting from \p CSR
+ *  with rocsparse_Xcsr2hyb() first.
+ *  Arguments are validated before \p hyb is modified.
  *  Ownership of the arrays passed in is transferred to \p hyb only when this
  *  function returns \ref rocsparse_status_success. On error those arrays are
  *  not adopted. A failure before any replaced array is released leaves \p hyb
@@ -718,10 +719,9 @@ rocsparse_status rocsparse_hyb_mat_get_info(const rocsparse_hyb_mat  hyb,
  *  \p hyb that is replaced by a different pointer (and is not kept in another
  *  field) is released with \p hipFree after \p hipDeviceSynchronize, because
  *  freeing a \p hipMallocAsync allocation is asynchronous. Passing the pointer
- *  \p hyb already holds does not release it. A \p nullptr value (as opposed to
- *  a \p nullptr argument) releases the held array when the resulting entry
- *  count is zero. A null array with a positive count is rejected. A zero count
- *  ignores a non-null array, which is not read.
+ *  \p hyb already holds does not release it. A null array releases the held
+ *  array when its entry count is zero. A null array with a positive count is
+ *  rejected. A zero count ignores a non-null array, which is not read.
  *  Pointers adopted by this function are not tracked by the library
  *  memory-statistics allocator. With that tracking enabled, releasing an
  *  adopted pointer is not supported.
@@ -739,7 +739,7 @@ rocsparse_status rocsparse_hyb_mat_get_info(const rocsparse_hyb_mat  hyb,
  *              be non-negative, representable by the internal ELL entry count,
  *              and equal to \p m times \p ell_width.
  *  @param[in]
- *  ell_width   width of the ELL part. It must be less than or equal to \p n.
+ *  ell_width   width of the ELL part.
  *  @param[in]
  *  ell_col_ind column indices of the ELL part (\p hipMallocAsync allocation,
  *              ownership transferred on success).
@@ -767,8 +767,7 @@ rocsparse_status rocsparse_hyb_mat_get_info(const rocsparse_hyb_mat  hyb,
  *          reports an invalid device pointer.
  *  \retval rocsparse_status_invalid_size \p m, \p n, \p ell_nnz, \p ell_width or
  *          \p coo_nnz is negative, \p ell_nnz does not fit the internal ELL
- *          entry count, \p ell_nnz is not \p m times \p ell_width, or
- *          \p ell_width is greater than \p n.
+ *          entry count, or \p ell_nnz is not \p m times \p ell_width.
  *  \retval rocsparse_status_invalid_value \p partition or \p data_type is invalid.
  *  \retval rocsparse_status_not_implemented \p data_type is not
  *          \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r,
@@ -781,19 +780,19 @@ rocsparse_status rocsparse_hyb_mat_get_info(const rocsparse_hyb_mat  hyb,
  *          synchronizing the device or releasing a replaced array.
  */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_hyb_mat_set_info(rocsparse_hyb_mat              hyb,
-                                            const rocsparse_int*           m,
-                                            const rocsparse_int*           n,
-                                            const rocsparse_hyb_partition* partition,
-                                            const int64_t*                 ell_nnz,
-                                            const rocsparse_int*           ell_width,
-                                            rocsparse_int* const*          ell_col_ind,
-                                            void* const*                   ell_val,
-                                            const rocsparse_int*           coo_nnz,
-                                            rocsparse_int* const*          coo_row_ind,
-                                            rocsparse_int* const*          coo_col_ind,
-                                            void* const*                   coo_val,
-                                            const rocsparse_datatype*      data_type);
+rocsparse_status rocsparse_hyb_mat_set_info(rocsparse_hyb_mat       hyb,
+                                            rocsparse_int           m,
+                                            rocsparse_int           n,
+                                            rocsparse_hyb_partition partition,
+                                            int64_t                 ell_nnz,
+                                            rocsparse_int           ell_width,
+                                            rocsparse_int*          ell_col_ind,
+                                            void*                   ell_val,
+                                            rocsparse_int           coo_nnz,
+                                            rocsparse_int*          coo_row_ind,
+                                            rocsparse_int*          coo_col_ind,
+                                            void*                   coo_val,
+                                            rocsparse_datatype      data_type);
 
 /*! \ingroup aux_module
  *  \brief Create a matrix info structure.
