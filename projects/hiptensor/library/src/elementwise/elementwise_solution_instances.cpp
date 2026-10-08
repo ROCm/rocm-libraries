@@ -60,6 +60,8 @@ namespace hiptensor
         ElementwiseTrinarySolution6DDoubleInstances();
         ElementwiseTrinarySolution6DFloatInstances();
         ElementwiseTrinarySolution6DHalfInstances();
+        ElementwisePermuteSolution4DDoubleInstances();
+        ElementwisePermuteSolution4DDoubleNoopInstances();
         ElementwisePermuteSolution4DFloatInstances();
         ElementwisePermuteSolution4DFloatNoopInstances();
         ElementwisePermuteSolution4DHalfInstances();
