@@ -199,14 +199,14 @@ namespace hipblaslt_ext::experimental
         };
 
         // The device and request prologue shared by getJitAlgo and getLibraryAlgos.
-        hipblasStatus_t prepareQuery(int                device,
-                                     const Request&     request,
-                                     const Backend&     backend,
-                                     PreparedQuery&     prepared,
-                                     Diagnostics&       diagnostics)
+        hipblasStatus_t prepareQuery(int                                             device,
+                                     const std::shared_ptr<const GemmRequest>&   request,
+                                     const std::shared_ptr<const hipblaslt_jit::Jit>& jit,
+                                     PreparedQuery&                              prepared,
+                                     Diagnostics&                                diagnostics)
         {
-            prepared.jit       = backend.get();
-            prepared.operation = request.get();
+            prepared.jit       = jit;
+            prepared.operation = request;
             if(!prepared.operation || !prepared.jit)
             {
                 diagnostics.message = "A valid request and backend are required";
@@ -352,9 +352,9 @@ namespace hipblaslt_ext::experimental
                                         const void*             C,
                                         hipblasLtMatrixLayout_t matC,
                                         void*                   D,
-                                        hipblasLtMatrixLayout_t matD,
-                                        Request&                request,
-                                        Diagnostics&            diagnostics)
+                                        hipblasLtMatrixLayout_t                        matD,
+                                        std::shared_ptr<const detail::GemmRequest>& request,
+                                        Diagnostics&                                 diagnostics)
         {
             request     = {};
             diagnostics = {};
@@ -385,7 +385,7 @@ namespace hipblaslt_ext::experimental
                     diagnostics.message = "Empty output needs no GEMM algorithm";
                     return HIPBLAS_STATUS_NOT_SUPPORTED;
                 }
-                request = Request::create(std::move(operation));
+                request = std::move(operation);
                 return HIPBLAS_STATUS_SUCCESS;
             }
             catch(const std::bad_alloc&)
@@ -399,12 +399,12 @@ namespace hipblaslt_ext::experimental
             }
         }
 
-        hipblasStatus_t getJitAlgo(int            device,
-                                   const Request& request,
-                                   const Backend& backend,
-                                   size_t         workspaceLimit,
-                                   Solution&      solution,
-                                   Diagnostics&   diagnostics)
+        hipblasStatus_t getJitAlgo(int                                                 device,
+                                   const std::shared_ptr<const detail::GemmRequest>& request,
+                                   const std::shared_ptr<const hipblaslt_jit::Jit>&  jit,
+                                   size_t                                            workspaceLimit,
+                                   std::shared_ptr<const detail::CompiledSolution>& solution,
+                                   Diagnostics&                                      diagnostics)
         {
             solution    = {};
             diagnostics = {};
@@ -412,7 +412,7 @@ namespace hipblaslt_ext::experimental
             {
                 detail::PreparedQuery prepared;
                 auto                  status = detail::prepareQuery(
-                    device, request, backend, prepared, diagnostics);
+                    device, request, jit, prepared, diagnostics);
                 if(status != HIPBLAS_STATUS_SUCCESS)
                     return status;
                 std::vector<int32_t> indices;
@@ -437,7 +437,7 @@ namespace hipblaslt_ext::experimental
                 compiled->libraryIndex   = indices.front();
                 compiled->workspaceBytes = detail::publishedWorkspace(
                     compiled->target, *compiled->request, compiled->libraryIndex);
-                solution = Solution::create(std::move(compiled));
+                solution = std::move(compiled);
                 return HIPBLAS_STATUS_SUCCESS;
             }
             catch(const std::bad_alloc&)
@@ -455,13 +455,13 @@ namespace hipblaslt_ext::experimental
             }
         }
 
-        hipblasStatus_t getLibraryAlgos(int                   device,
-                                        const Request&        request,
-                                        const Backend&        backend,
-                                        size_t                count,
-                                        size_t                workspaceLimit,
-                                        std::vector<int32_t>& indices,
-                                        Diagnostics&          diagnostics)
+        hipblasStatus_t getLibraryAlgos(int                                               device,
+                                        const std::shared_ptr<const detail::GemmRequest>& request,
+                                        const std::shared_ptr<const hipblaslt_jit::Jit>&  jit,
+                                        size_t                                            count,
+                                        size_t                                            workspaceLimit,
+                                        std::vector<int32_t>&                             indices,
+                                        Diagnostics&                                      diagnostics)
         {
             indices.clear();
             diagnostics = {};
@@ -469,7 +469,7 @@ namespace hipblaslt_ext::experimental
             {
                 detail::PreparedQuery prepared;
                 auto                  status = detail::prepareQuery(
-                    device, request, backend, prepared, diagnostics);
+                    device, request, jit, prepared, diagnostics);
                 if(status != HIPBLAS_STATUS_SUCCESS)
                     return status;
                 return detail::lookupThenPublish(prepared.jit,
@@ -496,9 +496,9 @@ namespace hipblaslt_ext::experimental
             }
         }
 
-        hipblasStatus_t getGemmAlgo(const Solution&                   solution,
-                                    hipblasLtMatmulHeuristicResult_t& result,
-                                    Diagnostics&                      diagnostics)
+        hipblasStatus_t getGemmAlgo(const std::shared_ptr<const detail::CompiledSolution>& solution,
+                                    hipblasLtMatmulHeuristicResult_t&                      result,
+                                    Diagnostics&                                           diagnostics)
         {
             result       = {};
             result.state = HIPBLAS_STATUS_INVALID_VALUE;
@@ -509,7 +509,7 @@ namespace hipblaslt_ext::experimental
             };
             try
             {
-                auto compiled = solution.get();
+                const auto& compiled = solution;
                 if(!compiled || !hipblaslt_jit::isJitIndex(compiled->libraryIndex))
                     return finish(HIPBLAS_STATUS_INVALID_VALUE);
                 diagnostics.backend = compiled->jit->components().backend->info().name;
@@ -559,10 +559,10 @@ namespace hipblaslt_jit
                     hipblaslt_ext::experimental::jit::replay::Options options;
                     for(const auto& bundle : committed::stagePlainPair(HIPBLASLT_JIT_REPLAY_DATA))
                         options.replay.push_back(bundle.u8string());
-                    hipblaslt_ext::experimental::jit::Backend     backend;
+                    std::shared_ptr<const Jit>                    replay;
                     hipblaslt_ext::experimental::jit::Diagnostics diagnostics;
                     const auto status = hipblaslt_ext::experimental::jit::replay::createBackend(
-                        options, backend, diagnostics);
+                        options, replay, diagnostics);
                     if(status != HIPBLAS_STATUS_SUCCESS)
                     {
                         std::cerr
@@ -570,7 +570,7 @@ namespace hipblaslt_jit
                             << diagnostics.message << std::endl;
                         return;
                     }
-                    jit = backend.get();
+                    jit = std::move(replay);
                 }
                 catch(const std::exception& error)
                 {

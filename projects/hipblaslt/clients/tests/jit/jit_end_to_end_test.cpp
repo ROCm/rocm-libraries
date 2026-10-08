@@ -42,7 +42,7 @@ namespace
     void run(hipblasLtHandle_t     handle,
              hipblasLtMatmulDesc_t desc,
              hipStream_t           stream,
-             const jit::Backend&   backend,
+             const std::shared_ptr<const hipblaslt_jit::Jit>& backend,
              int                   K,
              const std::string&    suffix)
     {
@@ -53,8 +53,8 @@ namespace
         Fp16Gemm         matrices(K);
 
         // Generate (replay), build with comgr, then publish a JIT library index.
-        jit::Request  request;
-        jit::Solution solution;
+        std::shared_ptr<const jit::detail::GemmRequest>  request;
+        std::shared_ptr<const jit::detail::CompiledSolution> solution;
         float         alpha = 1.25f, beta = 0.5f;
         BLAS(jit::makeGemmRequest(handle,
                                   desc,
@@ -78,7 +78,7 @@ namespace
             INFO((label + " returned " + std::to_string(index) + ", not a JIT library index"));
             REQUIRE((index >= (1 << 30)));
         }
-        jit::Solution again;
+        std::shared_ptr<const jit::detail::CompiledSolution> again;
         BLAS(jit::getJitAlgo(device, request, backend, 64 << 20, again, diagnostics));
         hipblasLtMatmulHeuristicResult_t repeat{};
         BLAS(jit::getGemmAlgo(again, repeat, diagnostics));
@@ -172,8 +172,8 @@ namespace
         BLAS(hipblasLtMatrixLayoutCreate(&lt, HIP_R_16F, K, M, K));
         BLAS(hipblasLtMatrixLayoutCreate(&lb, HIP_R_16F, K, N, K));
         BLAS(hipblasLtMatrixLayoutCreate(&lc, HIP_R_16F, M, N, M));
-        jit::Request  transposed;
-        jit::Solution unsolved;
+        std::shared_ptr<const jit::detail::GemmRequest>      transposed;
+        std::shared_ptr<const jit::detail::CompiledSolution> unsolved;
         BLAS(jit::makeGemmRequest(handle, tn, &alpha, A.pointer, lt, B.pointer, lb, &beta,
                                   C.pointer, lc, D.pointer, lc, transposed, diagnostics));
         {
@@ -198,7 +198,7 @@ namespace
 
     std::vector<int32_t> libraryAlgos(hipblasLtHandle_t     handle,
                                       hipblasLtMatmulDesc_t desc,
-                                      const jit::Backend&   backend,
+                                      const std::shared_ptr<const hipblaslt_jit::Jit>& backend,
                                       int                   K,
                                       size_t                count,
                                       jit::Diagnostics&     diagnostics)
@@ -206,7 +206,7 @@ namespace
         int device = -1;
         HIP(hipGetDevice(&device));
         Fp16Gemm     matrices(K);
-        jit::Request request;
+        std::shared_ptr<const jit::detail::GemmRequest> request;
         float        alpha = 1.25f, beta = 0.5f;
         BLAS(jit::makeGemmRequest(handle,
                                   desc,
