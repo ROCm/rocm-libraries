@@ -458,7 +458,8 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
     // LDS block descriptors (device-arch aware)
     // =========================================================================
     template <typename DeviceArch>
-    __device__ static constexpr auto GetABlockDescriptor_AK0PerBlock_MPerBlock_AK1(DeviceArch)
+    __host__ __device__ static constexpr auto
+    GetABlockDescriptor_AK0PerBlock_MPerBlock_AK1(DeviceArch)
     {
         if constexpr(is_same_v<DeviceArch, gfx950_t>)
         {
@@ -481,7 +482,8 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
     }
 
     template <typename DeviceArch>
-    __device__ static constexpr auto GetBBlockDescriptor_BK0PerBlock_NPerBlock_BK1(DeviceArch)
+    __host__ __device__ static constexpr auto
+    GetBBlockDescriptor_BK0PerBlock_NPerBlock_BK1(DeviceArch)
     {
         if constexpr(is_same_v<DeviceArch, gfx950_t>)
         {
