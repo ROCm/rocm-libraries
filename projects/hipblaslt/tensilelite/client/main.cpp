@@ -34,6 +34,7 @@
 #include <Tensile/hip/HipUtils.hpp>
 
 #include "BenchmarkTimer.hpp"
+#include "ClientConfig.hpp"
 #include "ClientProblemFactory.hpp"
 #include "DataInitialization.hpp"
 #include "HardwareMonitorListener.hpp"
@@ -41,6 +42,7 @@
 #include "ProgressListener.hpp"
 #include "ReferenceValidator.hpp"
 #include "SolutionIterator.hpp"
+#include "SynchronizerValidator.hpp"
 #include "TimingEvents.hpp"
 #include "TimingInstrumentation.hpp"
 
@@ -54,9 +56,6 @@
 #include "ProgramOptions.hpp"
 #include "Utility.hpp"
 
-#ifndef TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
-#define TENSILELITE_CLIENT_ENABLE_ROCPROFSDK 0
-#endif
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
 #include "Profiler.hpp"
 #endif
@@ -270,6 +269,9 @@ namespace TensileLite
                 ("print-valids",             po::value<bool>()->default_value(false), "Print values that pass validation")
                 ("print-max",                po::value<int>()->default_value(-1), "Max number of values to print")
                 ("num-elements-to-validate", po::value<int>()->default_value(0), "Number of elements to validate")
+                ("check-synchronizer",       po::value<bool>()->default_value(true),
+                "Fail the run if a StreamK, GSU MBSK or output-amax kernel leaves the shared Synchronizer buffer nonzero on exit."
+                " Solutions known not to use the buffer are skipped.")
                 ("bounds-check",             po::value<BoundsCheckMode>()->default_value(BoundsCheckMode::Disable),
                 "1:Use sentinel values to check memory boundaries."
                 "2:Memory bound check by front guard page"
@@ -387,7 +389,8 @@ namespace TensileLite
                 ("activation-no-guard",          po::value<bool>()->default_value(false), "Use activation guard to deall with nan outputs.")
                 ("activation-additional-args",vector_default_empty<std::string>(), "Activation additional floating-point number arguments.")
                 ("activation-enum-args",      po::value<std::vector<ActivationType>>()->default_value(std::vector<ActivationType>(1, ActivationType::None), "[]"), "Activation enum argument.")
-                ("streamk-hybrid-mode",       po::value<std::vector<int>>()->default_value(std::vector<int>(1, 0), "[0]"), "StreamK=5 hybrid-mode toggle values. Each element runs the problem once with setParams().setStreamKTileSchedulingMode(value); accepts {0=OFF (static), 1=ON (dynamic per-XCD work-queue), 2=AUTO (heuristic)}. Use [0, 1] in sweep YAMLs to deterministically exercise both SK5 sub-paths in one run. Use [2] (or `--streamk-hybrid-mode 2` to override a YAML default of [0]) to run the AUTO heuristic end-to-end on a real problem.")
+                ("hybrid-assignment-policy", po::value<std::vector<std::string>>(), "Launch policy for a selected WorkAssignment=Hybrid kernel: Default, DynamicWorkQueue, or Auto. Default preserves the existing behavior, including the heuristic when sm_count_target is positive. Each value runs the problem once.")
+                ("streamk-hybrid-mode",       po::value<std::vector<int>>(), "Legacy alias for hybrid-assignment-policy: 0=Default, 1=DynamicWorkQueue, 2=Auto. Conflicting explicit aliases are rejected.")
                 ("use-bias",                  po::value<int>()->default_value(0), "Use bias.")
                 ("bias-source",               po::value<int>()->default_value(3), "Bias source.")
                 ("use-scaleAB",               po::value<std::string>()->default_value(""), "Use scaleAB.")
@@ -828,7 +831,20 @@ int main(int argc, const char* argv[])
             throw std::runtime_error("Failed to load solution library");
     }
 
+    auto filename = args["library-file"].as<std::string>();
+
+    size_t      directoryPos     = filename.rfind('/');
+    std::string libraryDirectory = filename;
+    if(directoryPos != std::string::npos)
+        libraryDirectory.resize(directoryPos + 1);
+    else
+        libraryDirectory = '.';
+
     TensileLite::hip::SolutionAdapter adapter;
+    // A failed primary code-object load may ask the adapter to reload its
+    // helper HSACOs. Record that context before the first load can enter the
+    // recovery path; actual helper loading remains below.
+    adapter.setLazyLoadingContext(hardware->archName(), libraryDirectory);
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
     RocProfiler::getInstance().start();
 #endif
@@ -859,15 +875,6 @@ int main(int argc, const char* argv[])
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
     RocProfiler::getInstance().stop();
 #endif
-
-    auto filename = args["library-file"].as<std::string>();
-
-    size_t      directoryPos     = filename.rfind('/');
-    std::string libraryDirectory = filename;
-    if(directoryPos != std::string::npos)
-        libraryDirectory.resize(directoryPos + 1);
-    else
-        libraryDirectory = '.';
 
     {
         ScopedTimer timer("lazy_loading_init");
@@ -929,6 +936,10 @@ int main(int argc, const char* argv[])
             bool hasIcacheFlush
                 = std::any_of(begin(icacheFlushArgs), end(icacheFlushArgs), [](auto i) { return i; });
             flushTimeMs = hasIcacheFlush ? estimate_flush_kernel_time(stream, gpuTimer) : 0.f;
+            // Before ReferenceValidator: postSolution runs listeners in
+            // reverse, so the dirty-buffer verdict lands after the reference
+            // one rather than being overwritten by it.
+            listeners.addListener(std::make_shared<SynchronizerValidator>(args));
             listeners.addListener(std::make_shared<ReferenceValidator>(args, dataInit));
             benchmarkTimer = std::make_shared<BenchmarkTimer>(args, *hardware, flushTimeMs * 1000);
             listeners.addListener(benchmarkTimer);

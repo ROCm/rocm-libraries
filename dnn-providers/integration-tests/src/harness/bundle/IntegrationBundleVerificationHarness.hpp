@@ -169,7 +169,21 @@ public:
         // One from_binary, one ranked query, one applicability answer. Everything
         // below takes the session as an argument, so nothing re-derives it and
         // nothing caches it on the harness.
-        GraphSession session = openGraph();
+        //
+        // A throw here leaves before any outcome exists. GTest still fails the test,
+        // so it gets its verifier line too (NONE: nothing was compared), or the
+        // summary tally would be short a body that failed.
+        GraphSession session = [this] {
+            try
+            {
+                return openGraph();
+            }
+            catch(...)
+            {
+                _deps.reporter->recordVerifier(_bundlePath.string(), Verifier::NONE);
+                throw;
+            }
+        }();
 
         if(TestConfig::get().writeSupportClaims())
         {
@@ -207,6 +221,9 @@ public:
         raiseComplaints(
             {claims.complaint,
              shallowPassComplaint(outcome, bundleRequiredDepth(), _bundlePath.string())});
+        // Before the disposition, which returns: a pass must say what it was compared
+        // against, or "auto" landing on a reference is indistinguishable from a skip.
+        _deps.reporter->recordVerifier(_bundlePath.string(), outcome.verifier);
         reportOutcome(outcome);
     }
 
@@ -215,6 +232,20 @@ public:
     InputFillRecipes& inputFillRecipes()
     {
         return _inputFillRecipes;
+    }
+
+    /// Exposed so a test can check the packed copy of the bundle's inputs that the
+    /// engine receives. Empty unless an input is sub-byte.
+    const TensorMap& packedInputs() const
+    {
+        return _packedInputs;
+    }
+
+    /// Exposed so a test can check the inputs this run read or generated. Owned by the
+    /// harness, so they are freed, host and device copies alike, when the test ends.
+    const TensorMap& inputs() const
+    {
+        return _inputs;
     }
 
     /// Mode B/C support observation: which engines take this graph?
@@ -320,6 +351,9 @@ private:
         RAN,
         CAPABILITY_MISS,
         RUNTIME_ERROR,
+        /// The harness could not prepare the reference's outputs on the device. Says
+        /// nothing about the reference, so it is never retried on another one.
+        HARNESS_ERROR,
     };
     struct RefRunResult
     {
@@ -359,9 +393,8 @@ private:
     std::optional<VerificationOutcome> prepareInputs();
     std::optional<VerificationOutcome> fillBundleInputs();
 
-    OutputTensors allocateSentinelOutputs() const;
-    std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs,
-                                                        bool useDevice) const;
+    OutputTensors allocateSentinelOutputs(bool onDevice) const;
+    std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs, bool useDevice);
     EngineRunResult runEngine(GraphSession& session);
     VerificationOutcome engineDidNotRun(const EngineRunResult& run) const;
 
@@ -371,29 +404,43 @@ private:
 
     // Golden data is loaded on the host, so under --validator auto it is compared there.
     VerificationOutcome compareAgainstGolden(OutputTensors& engineOutputs);
-    VerificationOutcome
-        compareOutputs(OutputTensors& engineOutputs, OutputTensors& expected, ValidationSite site);
+    VerificationOutcome compareOutputs(OutputTensors& engineOutputs,
+                                       OutputTensors& expected,
+                                       ValidationSite site,
+                                       Verifier verifier);
 
     // Resolves tolerances, runs bundle::compareOutputs() at `site` — or wherever
     // policy.validator overrides it to — and turns each mismatch it returns into one
     // failure. The comparison itself owns no gtest state.
     VerificationOutcome compareAgainst(OutputTensors& engineOutputs,
                                        const ExpectedTensorLookup& expectedFor,
-                                       ValidationSite site);
+                                       ValidationSite site,
+                                       Verifier verifier);
 
     // VERIFIED either way: the oracle ran and the outputs were examined. A mismatch
     // carries no message because compareAgainst() has already put one failure per
     // drifted tensor on the record — the only place in this harness where that is
     // true, and so the only caller of alreadyReportedFailure().
-    static VerificationOutcome comparisonOutcome(bool allMatched)
+    static VerificationOutcome comparisonOutcome(bool allMatched, Verifier verifier)
     {
-        return allMatched ? VerificationOutcome::passed(VerificationDepth::VERIFIED)
-                          : VerificationOutcome::alreadyReportedFailure(VerificationDepth::VERIFIED,
-                                                                        FailureOrigin::COMPARISON);
+        auto outcome = allMatched ? VerificationOutcome::passed(VerificationDepth::VERIFIED)
+                                  : VerificationOutcome::alreadyReportedFailure(
+                                        VerificationDepth::VERIFIED, FailureOrigin::COMPARISON);
+        outcome.verifier = verifier;
+        return outcome;
     }
 
     void recordRefError(const std::string& reason);
+    // Names the fill path when some inputs were generated on the device, whose values
+    // differ from the host fill's, so a failure can be reproduced on the same path or
+    // re-run on the host. Empty when every input came from the host or from golden data.
+    std::string inputFillNote() const;
     static std::string refLabel(ReferenceExecutorType type);
+    static Verifier verifierFor(ReferenceExecutorType type)
+    {
+        return type == ReferenceExecutorType::GPU ? Verifier::GPU_REFERENCE
+                                                  : Verifier::CPU_REFERENCE;
+    }
 
     HarnessDependencies _deps;
     std::optional<LoadedEngine> _engineUnderTest;
@@ -401,6 +448,13 @@ private:
     SupportClaimLocator _claimLocator;
     std::shared_ptr<IntegrationTestBundle> _bundle;
     InputFillRecipes _inputFillRecipes;
+    TensorMap _packedInputs;
+    // How many of this run's inputs fillBundleInputs() generated on the device.
+    std::size_t _deviceFilledInputs = 0;
+    // This run's inputs, plus the golden outputs when the bundle has them. Read or
+    // generated by prepareInputs() and owned here rather than by the shared bundle, so
+    // they live exactly as long as the test.
+    TensorMap _inputs;
 };
 
 } // namespace hipdnn_integration_tests::bundle

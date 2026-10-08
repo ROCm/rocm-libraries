@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+import sys
 
 from geko.config_generator import cluster_sizes as cs
 from geko.config_generator.fork_params import post_processor as base_pp
@@ -114,6 +115,7 @@ def test_gfx950_postprocessor_adjustments(monkeypatch) -> None:
 
 
 def test_load_cms_groups_import_error(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "Tensile", None)
     monkeypatch.setattr(os.path, "isdir", lambda _p: False)
     raised = False
     try:
@@ -121,3 +123,91 @@ def test_load_cms_groups_import_error(monkeypatch) -> None:
     except ImportError:
         raised = True
     assert raised is True
+
+
+def test_base_postprocessor_ignore_non_temporal_filter(monkeypatch) -> None:
+    monkeypatch.setattr(opt_param, "load_tensile_metadata", lambda: {})
+    cfg = _post_cfg()
+    cfg["IGNORE_NON_TEMPORAL"] = True
+    pp = base_pp.BasePostProcessor(cfg)
+    fork = {
+        "NonTemporalA": ForkParameter(name="NonTemporalA", values=[0, 4], active=True),
+        "NonTemporalB": ForkParameter(name="NonTemporalB", values=[0, 4], active=True),
+        "NonTemporalC": ForkParameter(name="NonTemporalC", values=[0, 4], active=True),
+        "NonTemporalD": ForkParameter(name="NonTemporalD", values=[0, 4], active=True),
+        "WorkGroupMapping": ForkParameter(name="WorkGroupMapping", values=[0], active=True),
+    }
+    groups = [
+        {"MatrixInstruction": ForkParameter(name="MatrixInstruction", values=[16, 16, 4, 1, 1, 2, 2, 2, 2])},
+    ]
+
+    f2, _ = pp.apply(fork, groups, (16, 16, 1, 16))
+
+    for name in ("NonTemporalA", "NonTemporalB", "NonTemporalC", "NonTemporalD"):
+        assert f2[name].active is False
+    assert f2["WorkGroupMapping"].active is True
+
+
+def test_base_postprocessor_ignore_non_temporal_filter_disabled(monkeypatch) -> None:
+    """When IGNORE_NON_TEMPORAL isn't set, NonTemporal* params stay active."""
+    monkeypatch.setattr(opt_param, "load_tensile_metadata", lambda: {})
+    pp = base_pp.BasePostProcessor(_post_cfg())
+    fork = {
+        "NonTemporalA": ForkParameter(name="NonTemporalA", values=[0, 4], active=True),
+    }
+    groups = [
+        {"MatrixInstruction": ForkParameter(name="MatrixInstruction", values=[16, 16, 4, 1, 1, 2, 2, 2, 2])},
+    ]
+
+    f2, _ = pp.apply(fork, groups, (16, 16, 1, 16))
+    assert f2["NonTemporalA"].active is True
+
+
+def test_base_postprocessor_depthu_removed_when_in_all_mi_groups(monkeypatch) -> None:
+    """DepthU is dropped from fork_params when every MI group entry carries it."""
+    monkeypatch.setattr(opt_param, "load_tensile_metadata", lambda: {})
+    pp = base_pp.BasePostProcessor(_post_cfg())
+    fork = {
+        "DepthU": ForkParameter(name="DepthU", values=[128, 256, 512], active=True),
+        "WorkGroupMapping": ForkParameter(name="WorkGroupMapping", values=[0, 1], active=True),
+    }
+    groups = [
+        {
+            "MatrixInstruction": ForkParameter(name="MatrixInstruction", values=[16, 16, 128, 1, 1, 1, 1, 1, 1]),
+            "DepthU": 128,
+        },
+        {
+            "MatrixInstruction": ForkParameter(name="MatrixInstruction", values=[32, 32, 64, 1, 1, 1, 1, 1, 1]),
+            "DepthU": 256,
+        },
+    ]
+
+    f2, g2 = pp.apply(fork, groups, (16, 16, 1, 16))
+
+    assert "DepthU" not in f2
+    assert "WorkGroupMapping" in f2
+    for entry in g2:
+        assert "DepthU" in entry
+
+
+def test_base_postprocessor_depthu_preserved_when_not_in_all_mi_groups(monkeypatch) -> None:
+    """DepthU stays in fork_params if at least one MI group entry lacks it."""
+    monkeypatch.setattr(opt_param, "load_tensile_metadata", lambda: {})
+    pp = base_pp.BasePostProcessor(_post_cfg())
+    fork = {
+        "DepthU": ForkParameter(name="DepthU", values=[128, 256, 512], active=True),
+    }
+    groups = [
+        {
+            "MatrixInstruction": ForkParameter(name="MatrixInstruction", values=[16, 16, 128, 1, 1, 1, 1, 1, 1]),
+            "DepthU": 128,
+        },
+        {
+            "MatrixInstruction": ForkParameter(name="MatrixInstruction", values=[32, 32, 64, 1, 1, 1, 1, 1, 1]),
+            # Missing DepthU in this group
+        },
+    ]
+
+    f2, _ = pp.apply(fork, groups, (16, 16, 1, 16))
+
+    assert "DepthU" in f2

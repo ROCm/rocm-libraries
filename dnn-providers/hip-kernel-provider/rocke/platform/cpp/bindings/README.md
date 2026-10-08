@@ -85,7 +85,8 @@ engine are copied into a `std::string` and `free`'d.
 
    The engine compiles as C++20; the binding sets `CMAKE_CXX_STANDARD 20`. The
    archive's symbols are reached through the `extern "C"` public headers, so it
-   links cleanly (`target_link_libraries(... librocke_core.a m)`).
+   links through the archive with the platform's math, loader, and thread
+   dependencies supplied by the binding's CMake target.
 
 ## Consistency proof
 

@@ -5,21 +5,27 @@
 # HarnessDependencies.cpp are deliberately absent. They are the only places that
 # touch the frontend Graph, a hipdnnHandle_t, or a real reference executor, so
 # leaving them out makes "these unit tests never reach an engine or a device" a
-# link-time guarantee rather than a convention.
+# link-time guarantee rather than a convention. GoldenDataRegistration.cpp is absent
+# for the same reason: it registers gtest tests and reaches the shared reference
+# executors. Its decisions live in GoldenDataPlan.cpp and GoldenOutputProbe.cpp,
+# which are linked and tested here.
 add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
-    ../src/harness/bundle/BundleReferenceValidationHarness.cpp
     ../src/harness/bundle/GraphSession.cpp
     ../src/harness/bundle/IntegrationBundleVerificationHarness.cpp
     ../src/harness/bundle/OutputComparison.cpp
     ../src/harness/bundle/ProductionPolicy.cpp
-    ../src/harness/bundle/ReferenceOpCoverage.cpp
     ../src/harness/bundle/SupportClaimReport.cpp
     ../src/harness/bundle/SupportClaimWriter.cpp
     ../src/harness/bundle/SupportClaims.cpp
     ../src/harness/bundle/SupportVerdict.cpp
+    ../src/harness/bundle/SweepManifestCache.cpp
     ../src/harness/bundle/VariantPackBuilder.cpp
     ../src/harness/input-init/FillInputs.cpp
+    ../src/harness/reference-validation/BundleReferenceValidationHarness.cpp
+    ../src/harness/reference-validation/GoldenDataPlan.cpp
+    ../src/harness/reference-validation/GoldenOutputProbe.cpp
+    ../src/harness/reference-validation/ReferenceOpCoverage.cpp
     TestBundleMetadata.cpp
     TestSupportClaims.cpp
     TestGraphDescription.cpp
@@ -30,6 +36,8 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestTestSettings.cpp
     TestTomlGuards.cpp
     TestGpuReferenceGraphExecutor.cpp
+    TestGpuBatchnormFwdTrainPlan.cpp
+    TestGpuBatchnormFwdTrainSignatureKey.cpp
     TestGpuConvolutionFwdSignatureKey.cpp
     TestGpuConvolutionFwdPlan.cpp
     TestGpuLayernormBwdSignatureKey.cpp
@@ -44,18 +52,22 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuReductionPlan.cpp
     TestGpuRMSNormSignatureKey.cpp
     TestGpuRMSNormPlan.cpp
+    TestGpuSdpaRaggedFwdSignatureKey.cpp
+    TestGpuSdpaRaggedFwdPlan.cpp
     TestGpuBatchnormFwdInfSignatureKey.cpp
     TestGpuBatchnormFwdInfPlan.cpp
     TestGpuBatchnormFwdInfVarianceSignatureKey.cpp
     TestGpuBatchnormFwdInfVariancePlan.cpp
     TestReferenceGraphExecutorFactory.cpp
     TestBundleDiscovery.cpp
+    TestGTestFilter.cpp
     TestVerificationPaths.cpp
     TestBundleVerificationHarness.cpp
     TestInputFillRecipes.cpp
     TestFillInputs.cpp
     TestToleranceResolver.cpp
     TestVerificationModePaths.cpp
+    TestVerifierTally.cpp
     TestErrorPaths.cpp
     TestLoadedEngineTable.cpp
     TestReferenceOpCoverage.cpp
@@ -69,6 +81,8 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestClaimModeResolution.cpp
     TestUnpinnedRunEnforcement.cpp
     TestBundleReferenceValidationHarness.cpp
+    TestGoldenDataPlan.cpp
+    TestGoldenOutputProbe.cpp
     TestProductionPolicy.cpp
     TestGraphSession.cpp
     TestOutputComparison.cpp
@@ -88,6 +102,7 @@ target_link_libraries(hipdnn_integration_tests_unit_tests
         GTest::gmock
         GTest::gtest
         Threads::Threads
+        $<$<BOOL:${USE_ROCRAND}>:roc::rocrand>
         $<$<PLATFORM_ID:Windows>:shlwapi>
 )
 
@@ -96,6 +111,14 @@ target_compile_options(hipdnn_integration_tests_unit_tests
 
 clang_tidy_check(hipdnn_integration_tests_unit_tests)
 
+# FillInputs.cpp generates large inputs with rocRAND (DeviceInputFiller). Only that
+# file is built with USE_ROCRAND: rocrand.h declares a global `half`, which is
+# ambiguous in any file that also pulls in hipdnn_data_sdk::types::half unqualified.
+if(USE_ROCRAND)
+    set_source_files_properties(../src/harness/input-init/FillInputs.cpp
+        PROPERTIES COMPILE_DEFINITIONS USE_ROCRAND)
+endif()
+
 add_unit_test_target(hipdnn_integration_tests_unit_tests ${CMAKE_CURRENT_BINARY_DIR})
 
 add_executable(hipdnn_gpu_ref_tests
@@ -103,6 +126,7 @@ add_executable(hipdnn_gpu_ref_tests
     gpu-ref/TestGpuFpReferencePointwise.cpp
     gpu-ref/TestGpuFpReferenceConvolution.cpp
     gpu-ref/TestGpuFpReferenceSdpa.cpp
+    gpu-ref/TestGpuFpReferenceSdpaRagged.cpp
     gpu-ref/TestGpuFpReferenceDgrad.cpp
     gpu-ref/TestGpuFpReferenceLayernormBwd.cpp
     gpu-ref/TestGpuFpReferenceLayernormFwd.cpp
@@ -121,6 +145,8 @@ add_executable(hipdnn_gpu_ref_tests
     gpu-ref/TestGpuFpReferenceBatchnormFwdInf.cpp
     gpu-ref/TestGpuFpReferenceBatchnormFwdInfWithVariance.cpp
     gpu-ref/TestGpuFpReferenceBatchnormFwdTrain.cpp
+    gpu-ref/TestGpuRefLaunch.cpp
+
 )
 
 target_link_libraries(hipdnn_gpu_ref_tests

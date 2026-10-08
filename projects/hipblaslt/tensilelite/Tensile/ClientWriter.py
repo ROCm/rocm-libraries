@@ -32,20 +32,20 @@ from pathlib import Path
 from enum import Enum
 from glob import glob
 
-from Tensile.SolutionStructs.Problem import ProblemType, ProblemSizesMock, ProblemSizesMockDummy
-from Tensile.SolutionStructs import ActivationArgs, BiasTypeArgs, FactorDimArgs, GateTypeArgs
-from Tensile.Toolchain.Component import Assembler
+from .SolutionStructs.Problem import ProblemType, ProblemSizesMock, ProblemSizesMockDummy
+from .SolutionStructs import ActivationArgs, BiasTypeArgs, FactorDimArgs, GateTypeArgs
+from .Toolchain.Component import Assembler
 
 import rocisa
 
 from . import ROOT_PATH
 from . import LibraryIO
-from Tensile.Common import ensurePath, print1, printExit, printWarning, ClientExecutionLock,\
+from .Common import ensurePath, print1, printExit, printWarning, ClientExecutionLock,\
                            LIBRARY_LOGIC_DIR, LIBRARY_CLIENT_DIR
-from Tensile.Common.Architectures import ARCH_COMPILER_TARGET, baseArchName, gfxToIsa, isaToGfx
-from Tensile.Common.GlobalParameters import globalParameters
-from Tensile.Common.TimingInstrumentation import timing_context
-from .TensileCreateLibrary import computeOutputArchNames, copyStaticFiles, libraryDir
+from .Common.Architectures import archNamesByIsa, isaToGfx
+from .Common.GlobalParameters import globalParameters
+from .Common.TimingInstrumentation import timing_context
+from .TensileCreateLibrary import copyStaticFiles, libraryDir
 from .ParallelExecution import detectAvailableGpus, runClientParallel
 from .Contractions import FreeIndex, BatchIndex
 from .Contractions import ProblemType as ContractionsProblemType
@@ -89,60 +89,23 @@ class ClientLogLevel(Enum):
 ################################################################################
 # Main
 ################################################################################
-def buildTargetGfx(isaInfoMap, archNames=None) -> str:
-  """The architecture to ask TensileCreateLibrary for when rebuilding the client library.
-
-  The rebuild is a fresh process whose only statement of what to build is
-  ``--architecture=``, so it must carry any distinction the ISA cannot express --
-  currently gfx1250's stepping, where deriving the name from the ISA would rebuild
-  v0's client library with the shipping stepping's capabilities.
-
-  Only names that need an alias to reach the compiler are consulted, and they are
-  looked up by ISA rather than by position: a requested qualifier such as
-  ``gfx942:xnack+`` names an architecture the ISA already describes, and forwarding
-  it would build the client library for one xnack setting instead of an
-  xnack-agnostic one. Qualifiers are compared and returned stripped, so that
-  ``gfx1250v0[cu=64]`` still rebuilds for v0 while the predicate -- which the
-  rebuild resolves for itself -- is left behind. Entry paths that never learn a
-  name (config ISA, auto-detect) fall back to the ISA-derived name. Only the first
-  ISA is rebuilt, as before.
-
-  Args:
-      isaInfoMap: The build's capability map, keyed by ISA version.
-      archNames: The gfx names this build was asked for, for the entry points that
-          know them; the config-ISA and auto-detect paths do not.
-
-  Returns:
-      The gfx name to pass to ``--architecture=``.
-  """
-  isa = list(isaInfoMap.keys())[0]
-  requested = {
-      gfxToIsa(name): baseArchName(name)
-      for name in archNames or []
-      if baseArchName(name) in ARCH_COMPILER_TARGET
-  }
-  return requested.get(isa, isaToGfx(isa))
-
-
-def clientLibraryFiles(clientLibraryPath, archs, outArchNames=None):
+def clientLibraryFiles(clientLibraryPath, archs):
   """Return the code objects and master library files built for `archs`.
 
   Kernels fan out into one per-base subdir per arch, so the lists are unioned
-  across them. `outArchNames` maps an ISA-derived arch to the subdir it was
-  written to (see computeOutputArchNames): a stepping such as gfx1250v0 lands
-  in `library/gfx1250v0/` while its master keeps the `gfx1250` suffix. The
-  master is matched by its exact name because lazy-loading shards share the
-  `TensileLibrary_` prefix. Msgpack is written to disk as `<name>.dat.zlib`,
-  but the client must be given the logical `.dat` name; it probes for the
-  `.zlib` variant itself.
+  across them. A stepping such as gfx1250-strict is named for itself in both
+  places: its subdir is `library/gfx1250-strict/` and its master carries the
+  same suffix. The master is matched by its exact name because lazy-loading
+  shards share the `TensileLibrary_` prefix. Msgpack is written to disk as
+  `<name>.dat.zlib`, but the client must be given the logical `.dat` name; it
+  probes for the `.zlib` variant itself.
   """
   libraryExt = ".yaml" if globalParameters["LibraryFormat"] == "yaml" else ".dat"
   masterPrefix = "TensileLibrary_lazy_" if globalParameters["LazyLibraryLoading"] else "TensileLibrary_"
-  outArchNames = outArchNames or {}
   coList = []
   libraryList = []
   for arch in archs:
-    archDir = libraryDir(clientLibraryPath, outArchNames.get(arch, arch))
+    archDir = libraryDir(clientLibraryPath, arch)
     coList.extend(glob(os.path.join(archDir, "*.co")))
     master = os.path.join(archDir, masterPrefix + arch + libraryExt)
     if os.path.exists(master) or os.path.exists(master + ".zlib"):
@@ -177,11 +140,20 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
   else:
     env["PYTHONPATH"] = module_path
 
-  targetGfx = buildTargetGfx(isaInfoMap, archNames)
-  createLibraryScript = getBuildClientLibraryScript(clientLibraryPath, libraryLogicPath, str(assembler.path), targetGfx)
+  # The rebuild is a fresh process whose only statement of what to build is
+  # `--architecture=`, so it must carry any distinction the ISA cannot express.
+  # `gfxName` already is that name -- the caller resolved it for this same ISA --
+  # and resolving it a second time here would be a second place to keep right.
+  createLibraryScript = getBuildClientLibraryScript(clientLibraryPath, libraryLogicPath, str(assembler.path), gfxName)
   subprocess.run(shlex.split(createLibraryScript), env=env, cwd=clientLibraryPath)
-  archs = [isaToGfx(isa) for isa in isaInfoMap.keys()]
-  coList, libraryList = clientLibraryFiles(clientLibraryPath, archs, computeOutputArchNames([targetGfx]))
+  # The re-spawned build wrote its code objects into the subtree named for the
+  # architecture it was asked for -- the same name just passed to it -- so they
+  # have to be read back under that name. An ISA-derived name would
+  # look in library/gfx1250/ for a build that filled library/gfx1250-strict/ and
+  # come back with nothing, leaving the client with no code objects at all.
+  buildArchNames = archNamesByIsa(archNames or [])
+  archs = [buildArchNames.get(isa) or isaToGfx(isa) for isa in isaInfoMap.keys()]
+  coList, libraryList = clientLibraryFiles(clientLibraryPath, archs)
 
   clientParametersPaths = []
   splitGSU = False
@@ -740,13 +712,11 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('activation-no-guard', problemType.activationNoGuard)
         if globalParameters["DataInitValueActivationArgs"]:
           param('activation-additional-args', ','.join(map(str, globalParameters["DataInitValueActivationArgs"])))
-        # Only emit non-default StreamKHybridMode values to keep
-        # existing tests' INIs byte-identical. The C++ client defaults
-        # to a single-element vector [0], which is the same as omitting
-        # the INI key entirely.
-        if globalParameters["StreamKHybridMode"] not in ([0], (0,)):
-          for v in globalParameters["StreamKHybridMode"]:
-            param('streamk-hybrid-mode', int(v))
+        # Global-parameter ingestion resolves the legacy alias before emission.
+        # Omitting Default preserves the client's existing runtime policy.
+        if globalParameters["HybridAssignmentPolicy"] not in (["Default"], ("Default",)):
+          for policy in globalParameters["HybridAssignmentPolicy"]:
+            param('hybrid-assignment-policy', policy)
 
         param("device-idx",               deviceId)
 
@@ -793,6 +763,7 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
          else:
            numElementsToValidate = max(globalParameters["NumElementsToValidateWinner"], globalParameters["NumElementsToValidate"])
         param("num-elements-to-validate", numElementsToValidate)
+        param("check-synchronizer",       globalParameters["CheckSynchronizer"])
         param("num-enqueues-per-sync",    globalParameters["EnqueuesPerSync"])
         param("max-enqueues-per-sync",    globalParameters["MaxEnqueuesPerSync"])
         param("num-syncs-per-benchmark",  globalParameters["SyncsPerBenchmark"])

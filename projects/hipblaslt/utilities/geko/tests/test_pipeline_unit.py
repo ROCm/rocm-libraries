@@ -218,6 +218,26 @@ def test_run_configure_device_alias_overrides_devices(monkeypatch: pytest.Monkey
     assert called["devices"] == [2]
 
 
+def test_run_configure_rejects_mx_on_unsupported_arch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from geko.schemas import GemmConfig, GemmType
+
+    hip = tmp_path / "hip"
+    hip.mkdir()
+    workload = _make_workload(tmp_path / "wkld.yaml")
+
+    monkeypatch.setattr(
+        pipeline.bench.log,
+        "summarize",
+        lambda *_args, **kwargs: (pd.DataFrame(), pd.DataFrame([{"M": 16}])),
+    )
+    gt = GemmType.from_tensile("T", "N", "F8", "S", "S")
+    gc = GemmConfig(gt, [[256, 256, 1, 256]], mx=True)
+    monkeypatch.setattr(pipeline, "gemm_configs_from_gemm_dataframe", lambda _df: [gc])
+
+    with pytest.raises(ValueError, match="MX .* is not supported on ARCH 'gfx942'"):
+        pipeline.run_configure(str(hip), str(workload), devices=[0], arch="gfx942", workdir=str(tmp_path / "w"))
+
+
 def test_run_search_returns_when_filtered_empty(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     hip = tmp_path / "hip"
     hip.mkdir()
@@ -684,3 +704,25 @@ def test_run_optimize_skips_cleanup_when_not_needed(monkeypatch: pytest.MonkeyPa
     pipeline.run_optimize(str(hip), workdir=str(workdir), devices=[0], retry=False)
     assert (workdir / "build" / "keep.txt").is_file()
     assert (workdir / "benchmarks" / "keep.txt").is_file()
+
+
+def test_mx_detected_from_scale_columns_in_workload(tmp_path: Path) -> None:
+    """MX should be detected per-GEMM from scaleA/scaleB in workload log."""
+    from geko.config_generator.load_input_config import gemm_configs_from_gemm_dataframe
+    import pandas as pd
+
+    df = pd.DataFrame([
+        {"transA": "T", "transB": "N", "a_type": "f8_r", "b_type": "f8_r",
+         "c_type": "f32_r", "compute_type": "f32_r", "m": 256, "n": 256,
+         "batch_count": 1, "k": 256, "d_type": "f32_r", "scaleA": 3, "scaleB": 3},
+        {"transA": "N", "transB": "N", "a_type": "bf16_r", "b_type": "bf16_r",
+         "c_type": "bf16_r", "compute_type": "f32_r", "m": 512, "n": 512,
+         "batch_count": 1, "k": 256, "d_type": "bf16_r", "scaleA": 1, "scaleB": 1},
+    ])
+    gcs = gemm_configs_from_gemm_dataframe(df)
+    assert len(gcs) == 2
+    mx_gcs = [gc for gc in gcs if gc.mx]
+    non_mx_gcs = [gc for gc in gcs if not gc.mx]
+    assert len(mx_gcs) == 1
+    assert mx_gcs[0].gemm_type.data_type == "F8"
+    assert len(non_mx_gcs) == 1

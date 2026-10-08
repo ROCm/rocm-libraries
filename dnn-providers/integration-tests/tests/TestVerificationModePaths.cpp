@@ -23,6 +23,7 @@
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
+#include "harness/bundle/VariantPackBuilder.hpp"
 
 // NOLINTBEGIN(readability-identifier-naming)
 
@@ -39,12 +40,14 @@ protected:
     std::optional<hipdnn_test_sdk::utilities::ScopedDirectory> _scopedDir;
     std::filesystem::path _tempDir;
     testing_support::HarnessMocks _mocks;
+    std::vector<Verifier> _verifiers;
 
     void SetUp() override
     {
         testing_support::ensureTestConfigInitialized();
         _scopedDir.emplace(claimScratchDirectory("vmode"));
         _tempDir = _scopedDir->path();
+        testing_support::captureVerifiers(_mocks.reporter, _verifiers);
     }
 
     std::shared_ptr<IntegrationTestBundle> loadBundle(const std::string& name,
@@ -147,6 +150,7 @@ TEST_F(TestVerificationModePathsFixture, AutoWithGoldenUsesGoldenAndPasses)
 
     EXPECT_FALSE(testing_support::anyFailed(results));
     EXPECT_FALSE(testing_support::anySkipped(results));
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::GOLDEN));
 }
 
 TEST_F(TestVerificationModePathsFixture, AutoWithGoldenMismatchFails)
@@ -159,6 +163,8 @@ TEST_F(TestVerificationModePathsFixture, AutoWithGoldenMismatchFails)
                  &results);
 
     EXPECT_TRUE(testing_support::anyFailed(results));
+    // A mismatch still names the oracle it lost against.
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::GOLDEN));
 }
 
 TEST_F(TestVerificationModePathsFixture, AutoNoGoldenRefSucceedsPasses)
@@ -180,6 +186,7 @@ TEST_F(TestVerificationModePathsFixture, AutoNoGoldenRefSucceedsPasses)
 
     EXPECT_FALSE(testing_support::anyFailed(results));
     EXPECT_FALSE(testing_support::anySkipped(results));
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::GPU_REFERENCE));
 }
 
 TEST_F(TestVerificationModePathsFixture, AutoNoGoldenRefMissFallsThroughToCpu)
@@ -206,6 +213,7 @@ TEST_F(TestVerificationModePathsFixture, AutoNoGoldenRefMissFallsThroughToCpu)
 
     EXPECT_FALSE(testing_support::anyFailed(results));
     EXPECT_FALSE(testing_support::anySkipped(results));
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::CPU_REFERENCE));
 }
 
 TEST_F(TestVerificationModePathsFixture, AutoNoGoldenBothRefsMissSkips)
@@ -220,6 +228,25 @@ TEST_F(TestVerificationModePathsFixture, AutoNoGoldenBothRefsMissSkips)
 
     EXPECT_TRUE(testing_support::anySkipped(results));
     EXPECT_FALSE(testing_support::anyFailed(results));
+    // A skip compared nothing and must not be reported as any oracle.
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::NONE));
+}
+
+// openGraph() throwing ends the body before any outcome exists. GTest fails the test
+// on the escaping exception; the body must still report one verifier, NONE, so the
+// summary tally counts it.
+TEST_F(TestVerificationModePathsFixture, OpenGraphThrowStillReportsNoVerifier)
+{
+    using ::testing::_;
+    ON_CALL(_mocks.engineRunner, openGraph(_, _))
+        .WillByDefault(::testing::Throw(std::runtime_error("stub: graph build threw")));
+
+    ::testing::TestPartResultArray results;
+    EXPECT_THROW(runCapturing(loadBundle("open_graph_throws", /*includeGoldenOutput=*/true),
+                              VerificationMode::AUTO,
+                              &results),
+                 std::runtime_error);
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::NONE));
 }
 
 // The other GPU miss form: a real runtime error, not a capability miss. AUTO
@@ -244,6 +271,32 @@ TEST_F(TestVerificationModePathsFixture, AutoNoGoldenRefRuntimeErrorFallsThrough
     ASSERT_EQ(refErrors.size(), 1U);
     EXPECT_THAT(refErrors.front(), ::testing::HasSubstr("GPU reference errored"));
     EXPECT_THAT(refErrors.front(), ::testing::HasSubstr("stub: GPU ref crashed"));
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::CPU_REFERENCE));
+}
+
+// A device that cannot hold the reference's outputs says nothing about the reference.
+// It must fail the run as a harness fault: not fall through to the CPU reference, which
+// would hide it behind a pass, and not be published as a reference error.
+TEST_F(TestVerificationModePathsFixture, AutoNoGoldenDeviceOutputErrorFailsWithoutFallingThrough)
+{
+    using ::testing::_;
+    useMatchingEngine();
+    ON_CALL(_mocks.gpuReference, execute(_, _, _))
+        .WillByDefault(
+            ::testing::Throw(bundle::detail::DeviceOutputError("stub: device memset failed")));
+    EXPECT_CALL(_mocks.referenceExecutors, get(ReferenceExecutorType::CPU)).Times(0);
+
+    std::vector<std::string> refErrors;
+    testing_support::captureReferenceErrors(_mocks.reporter, refErrors);
+
+    ::testing::TestPartResultArray results;
+    runCapturing(loadBundle("auto_device_output_error", /*includeGoldenOutput=*/false),
+                 VerificationMode::AUTO,
+                 &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_TRUE(refErrors.empty());
+    EXPECT_THAT(_verifiers, ::testing::Not(::testing::Contains(Verifier::CPU_REFERENCE)));
 }
 
 // ── GOLDEN mode ─────────────────────────────────────────────────────────────
@@ -260,6 +313,7 @@ TEST_F(TestVerificationModePathsFixture, GoldenModeWithDataPasses)
 
     EXPECT_FALSE(testing_support::anyFailed(results));
     EXPECT_FALSE(testing_support::anySkipped(results));
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::GOLDEN));
 }
 
 // An explicit mode is a demand for a specific oracle, not a preference. Skipping
@@ -277,6 +331,7 @@ TEST_F(TestVerificationModePathsFixture, GoldenModeWithoutDataFails)
 
     EXPECT_TRUE(testing_support::anyFailed(results));
     EXPECT_FALSE(testing_support::anySkipped(results));
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::NONE));
 }
 
 // A live reference is available here and would have produced an answer, but the
@@ -321,6 +376,9 @@ TEST_F(TestVerificationModePathsFixture, DeviceModeRefSucceedsPasses)
 
     EXPECT_FALSE(testing_support::anyFailed(results));
     EXPECT_FALSE(testing_support::anySkipped(results));
+    // The bundle carries golden data, so this also shows an explicit mode is not
+    // reported as the golden data it bypassed.
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::GPU_REFERENCE));
 }
 
 TEST_F(TestVerificationModePathsFixture, DeviceModeCapabilityMissSkips)
@@ -357,6 +415,7 @@ TEST_F(TestVerificationModePathsFixture, CpuModeRefSucceedsPasses)
 
     EXPECT_FALSE(testing_support::anyFailed(results));
     EXPECT_FALSE(testing_support::anySkipped(results));
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::CPU_REFERENCE));
 }
 
 TEST_F(TestVerificationModePathsFixture, CpuModeCapabilityMissSkips)

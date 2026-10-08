@@ -16,6 +16,7 @@ it via ``-m "not gpu"``. Run standalone:
 
 from __future__ import annotations
 
+import dataclasses
 import math
 
 import pytest
@@ -27,13 +28,12 @@ from kernels.gfx950.attention_dense import (
 )
 
 
+torch = pytest.importorskip("torch", reason="ROCm torch required")
+
+
 def _gpu_ready():
     """True only on a gfx950 box with ROCm torch. Gate on ``gcnArchName`` (the ISA
     target), NOT the marketing name."""
-    try:
-        import torch
-    except Exception:  # noqa: BLE001
-        return False
     if not torch.cuda.is_available():
         return False
     arch = torch.cuda.get_device_properties(0).gcnArchName.lower()
@@ -77,15 +77,23 @@ def _spec(
     factory rather than hand-rolled.
 
     Deriving the spec from the factory means a future gfx950 tuning change is picked
-    up here with no edit. Only ``dense_persistent`` is pinned rather than left on
-    "auto": the cohort asserts BOTH grid variants at one fixed Sq.
+    up here with no edit. The candidate is pinned by ``spec_id``: the cohort
+    asserts BOTH bodies at one fixed Sq, and the persistent row runs wide
+    DMA on aligned causal D128 without sinks/SWA (``TestWideDmaFeatures``
+    covers the other masks).
     """
     # Imported lazily: keeps module import (and hence CPU collection of this
     # gpu-marked file) independent of the dispatch package.
-    from dispatch.attention import AttentionRequest
-    from dispatch.attention.gfx950 import dense_spec_for_request
+    from dispatch.attention import AttentionRequest, attention_tuning_spec
 
-    return dense_spec_for_request(
+    wide = d == 128 and causal and not use_sinks and not sliding_window
+    if not persistent:
+        spec_id = "gfx950_dense_grid"
+    elif wide:
+        spec_id = "gfx950_dense_persist_widedma"
+    else:
+        spec_id = "gfx950_dense_persist"
+    return attention_tuning_spec(
         AttentionRequest(
             batch=batch,
             nhead_q=hq,
@@ -97,12 +105,11 @@ def _spec(
             arch="gfx950",
             mask_type=1 if causal else 0,
             dtype=dtype,
-            algorithm="attention_dense",
-            dense_persistent="on" if persistent else "off",
             use_sinks=use_sinks,
             sliding_window=sliding_window,
-        )
-    )
+        ),
+        spec_id,
+    ).kernel_spec
 
 
 def _launcher_for(spec):
@@ -204,6 +211,151 @@ class TestDenseNumeric:
         assert max_abs < tol, (
             f"{dtype} D{d} GQA{hq}/{hkv} "
             f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
+        )
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("persistent", [False, True])
+    def test_bf16_d128_non_default_scale(self, persistent):
+        """BF16 D128 at softmax scale 0.5, well above the default 1/sqrt(D).
+
+        The score error a lossy scale step introduces grows with ``scale``, so
+        the default-scale cohort above cannot see it. Rounding
+        ``Q * scale * log2(e)`` back to bf16 before the QK MFMA puts this shape
+        past the bf16 tolerance; the kernel must apply the scale in fp32.
+        """
+        import torch
+
+        dtype, d, hq, hkv = "bf16", 128, 16, 4
+        tol = _tolerance(dtype)
+        B, S, scale = 1, 512, 0.5
+        torch.manual_seed(0)
+
+        q = torch.randn(B, S, hq, d, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(B, S, hkv, d, device="cuda", dtype=torch.bfloat16)
+        v = torch.randn(B, S, hkv, d, device="cuda", dtype=torch.bfloat16)
+        out = torch.empty(B, S, hq, d, device="cuda", dtype=torch.bfloat16)
+
+        spec = _spec(dtype, d, hq, hkv, persistent, batch=B, sq=S)
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+        torch.cuda.synchronize()
+
+        ref = _standard_reference(q, k, v, scale)
+        max_abs = (ref - out.float()).abs().max().item()
+        assert max_abs < tol, (
+            f"bf16 D128 GQA16/4 scale=0.5 "
+            f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
+        )
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("persistent", [False, True])
+    @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+    @pytest.mark.parametrize("scale", [2.0**-64, 2.0**4], ids=["2^-64", "2^4"])
+    def test_d128_scale_range_edges(self, scale, dtype, persistent):
+        """Both bounds of the supported softmax-scale range, on silicon.
+
+        At 2**-64 every scaled score is about 0, so the softmax is close to
+        uniform; at 2**4 it is close to one-hot and the ordinary kernel's fma
+        residue is at its largest. Both must match the fp32 reference.
+        """
+        import torch
+
+        d, hq, hkv = 128, 16, 4
+        tol = _tolerance(dtype)
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        B, S = 1, 512
+        torch.manual_seed(0)
+
+        q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
+        k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+        v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+        out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
+
+        spec = _spec(dtype, d, hq, hkv, persistent, batch=B, sq=S)
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+        torch.cuda.synchronize()
+
+        assert torch.isfinite(out).all(), "non-finite output"
+        ref = _standard_reference(q, k, v, scale)
+        max_abs = (ref - out.float()).abs().max().item()
+        assert max_abs < tol, (
+            f"{dtype} D128 GQA16/4 scale={scale:g} "
+            f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
+        )
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("persistent", [False, True])
+    @pytest.mark.parametrize(
+        "d,scale", [(64, 1.0 / math.sqrt(64)), (128, 0.5), (128, 1.0), (128, 2.0**4)]
+    )
+    def test_bf16_sliding_window_no_sinks(self, d, scale, persistent):
+        """Causal sliding window without sinks, where whole query rows of the
+        first visited KV tile are masked.
+
+        Those rows start the online softmax from the mask sentinel, not from a
+        real score or a sink logit. The sentinel must survive the softmax scale
+        exactly, or exp2 of a huge rounding residue turns the row into inf/NaN.
+        scale * log2(e) <= 1 (D64 at its default scale, D128 at 0.5) and > 1
+        (D128 at 1.0, the hipDNN default when no scale is given, and at 2**4,
+        the upper bound) take different exact branches in the ordinary kernel;
+        both are covered.
+        """
+        import torch
+
+        dtype, hq, hkv, window = "bf16", 16, 4, 128
+        tol = _tolerance(dtype)
+        B, S = 1, 512
+        torch.manual_seed(0)
+
+        q = torch.randn(B, S, hq, d, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(B, S, hkv, d, device="cuda", dtype=torch.bfloat16)
+        v = torch.randn(B, S, hkv, d, device="cuda", dtype=torch.bfloat16)
+        out = torch.empty(B, S, hq, d, device="cuda", dtype=torch.bfloat16)
+
+        spec = _spec(
+            dtype, d, hq, hkv, persistent, batch=B, sq=S, sliding_window=window
+        )
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+        torch.cuda.synchronize()
+
+        assert torch.isfinite(out).all(), "non-finite output"
+        ref = _standard_reference(q, k, v, scale, sliding_window=window)
+        max_abs = (ref - out.float()).abs().max().item()
+        assert max_abs < tol, (
+            f"bf16 D{d} SWA{window} scale={scale:g} "
+            f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
+        )
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "d,persistent,width",
+        [(128, False, 1), (128, True, 2), (64, False, 2), (64, True, 1)],
+    )
+    def test_bf16_narrow_output_store_is_bit_identical(self, d, persistent, width):
+        """bf16 o_store_width 1/2 must write the same bits as the width-4 store
+        (fp16 is rejected below 4 because it does not)."""
+        import torch
+
+        hq, hkv, B, S = 16, 4, 1, 512
+        scale = 1.0 / math.sqrt(d)
+        torch.manual_seed(0)
+        q = torch.randn(B, S, hq, d, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(B, S, hkv, d, device="cuda", dtype=torch.bfloat16)
+        v = torch.randn(B, S, hkv, d, device="cuda", dtype=torch.bfloat16)
+        base = _spec("bf16", d, hq, hkv, persistent, batch=B, sq=S)
+
+        outs = []
+        for spec in (base, dataclasses.replace(base, o_store_width=width)):
+            out = torch.empty(B, S, hq, d, device="cuda", dtype=torch.bfloat16)
+            run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+            outs.append(out)
+        torch.cuda.synchronize()
+        assert torch.equal(outs[0], outs[1]), (
+            f"bf16 D{d} {'persist' if persistent else 'default'} "
+            f"o_store_width={width} diverged from width 4"
         )
 
     @requires_gfx950_gpu
@@ -732,6 +884,81 @@ class TestDenseBottomRightNumeric:
         assert top_left_err > 1e-3, (
             f"{label}: unexpectedly matches top-left " f"(max_abs={top_left_err:.3e})"
         )
+
+
+# The wide-DMA candidate admits every mask the persistent body implements, not
+# only the causal no-sinks no-SWA shapes the cohort above routes to it.
+_WIDE_DMA_MASKS = [
+    # (name, causal, sliding_window, use_sinks)
+    ("non_causal", False, 0, False),
+    ("causal_sinks", True, 0, True),
+    ("causal_swa", True, 128, False),
+    ("non_causal_sinks", False, 0, True),
+    ("causal_swa_sinks", True, 128, True),
+]
+
+
+class TestWideDmaFeatures:
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("dtype", ("bf16", "fp16"))
+    @pytest.mark.parametrize("block_m", (256, 128))
+    @pytest.mark.parametrize("_name,causal,sliding_window,use_sinks", _WIDE_DMA_MASKS)
+    def test_wide_dma_numeric(
+        self, _name, causal, sliding_window, use_sinks, block_m, dtype
+    ):
+        import torch
+
+        from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
+
+        B, S, Hq, Hkv, D = 1, 512, 32, 8, 128
+        spec = tuning_spec_with_knobs(
+            AttentionRequest(
+                batch=B,
+                nhead_q=Hq,
+                nhead_k=Hkv,
+                seqlen_q=S,
+                seqlen_k=S,
+                hdim_q=D,
+                hdim_v=D,
+                arch="gfx950",
+                mask_type=1 if causal else 0,
+                dtype=dtype,
+                use_sinks=use_sinks,
+                sliding_window=sliding_window,
+            ),
+            "gfx950_dense_persist_widedma",
+            {"block_m": block_m},
+        ).kernel_spec
+        assert spec.wide_lds_dma
+        assert spec.block_m == block_m
+
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        torch.manual_seed(0)
+        q = torch.randn(B, S, Hq, D, device="cuda", dtype=tdt)
+        k = torch.randn(B, S, Hkv, D, device="cuda", dtype=tdt)
+        v = torch.randn(B, S, Hkv, D, device="cuda", dtype=tdt)
+        out = torch.empty_like(q)
+        sinks = torch.randn(Hq, device="cuda", dtype=tdt) if use_sinks else None
+        scale = 1.0 / math.sqrt(D)
+        run_attention_dense_torch(
+            spec=spec, q=q, k=k, v=v, out=out, scale=scale, sinks=sinks
+        )
+        torch.cuda.synchronize()
+
+        # A sink of -inf contributes nothing, so one reference covers both.
+        ref_sinks = (
+            sinks
+            if use_sinks
+            else torch.full((Hq,), float("-inf"), device="cuda", dtype=torch.float32)
+        )
+        ref = _sink_reference(
+            q, k, v, ref_sinks, scale, sliding_window=sliding_window, causal=causal
+        )
+        max_abs = (ref - out.float()).abs().max().item()
+        assert max_abs < _tolerance(
+            dtype
+        ), f"{spec_id} {dtype} {_name}: max_abs={max_abs:.3e}"
 
 
 if __name__ == "__main__":

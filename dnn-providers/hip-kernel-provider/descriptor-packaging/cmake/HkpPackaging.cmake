@@ -26,6 +26,11 @@ set(HKP_FIXTURES "${HKP_PKG_DIR}/tests/fixtures")
 set(HKP_PACK_STAMP_NAME ".hkp-packed.stamp" CACHE INTERNAL
     "Name of the completion stamp each pack writes inside its output root")
 
+# Descriptor families a build option switches on and off, as <folder>=<option>. A
+# family lives in a top-level child folder of any source root; with its option OFF
+# every root is packed with that folder excluded. A new family is one entry here.
+set(HKP_DESCRIPTOR_FAMILIES "rocKE=HIPKERNELPROVIDER_ENABLE_ROCKE")
+
 include(KpackPython)
 
 # ---------------------------------------------------------------------------
@@ -62,7 +67,21 @@ endfunction()
 # hkp_selected_arches(<out_var> <out_source_var>)
 #   Normalize GPU_TARGETS (or AMDGPU_TARGETS) into a bare gfx arch list,
 #   stripping feature suffixes (gfx942:xnack-) and dropping anything that is not
-#   a concrete gfx name. <out_source_var> receives the name of the variable the
+#   a concrete gfx target name.
+#
+#   A concrete name is a lowercase processor id (gfx942) optionally followed by
+#   lowercase hyphen-separated words that name a distinct target (gfx1250-strict).
+#   Dropped:
+#     - TheRock family names, recognised by any hyphen-separated word of
+#       dcgpu, dgpu, igpu or all, so a variant such as gfx950-dcgpu-asan is
+#       dropped with its family (gfx94X-dcgpu, gfx950-dcgpu, gfx906-dgpu,
+#       gfx90c-igpu, gfx950-all);
+#     - generic targets (gfx11-generic), which no device reports;
+#     - anything else not of that shape (native, GFX942, gfx).
+#   Only the shape is checked: an unrecognised lowercase suffix (gfx1250-typo) is
+#   kept and fails in the compiler rather than here.
+#
+#   <out_source_var> receives the name of the variable the
 #   targets came from, or empty when neither is set, so a caller can name it in a
 #   diagnostic. No intersection with a fixed fixture set: the tool compiles from
 #   authored sources for whatever arch is requested.
@@ -95,12 +114,13 @@ function(hkp_selected_arches out_var out_source_var)
         if(NOT _bare)
             continue()
         endif()
-        if(NOT _bare MATCHES "^gfx[0-9a-f]+$")
+        if(NOT _bare MATCHES "^gfx[0-9a-f]+(-[a-z]+)*$"
+           OR _bare MATCHES "-(generic|all|dcgpu|dgpu|igpu)(-|$)")
             message(WARNING
                 "hkp: ignoring '${_arch}' from ${_source}; it is not a concrete gfx "
-                "architecture and cannot be passed to hipcc --offload-arch. Nothing "
-                "is packed for it. Name real gfx architectures in ${_source} to pack "
-                "for them.")
+                "target name (a TheRock family, a generic target, or an unrecognised "
+                "spelling), so no device can select it. Nothing is packed for it. "
+                "Name concrete gfx targets in ${_source} to pack for them.")
             continue()
         endif()
         list(APPEND _selected "${_bare}")
@@ -111,90 +131,86 @@ function(hkp_selected_arches out_var out_source_var)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_wire_pack_target(NAME <label> SOURCE_ROOT <dir>
-#               ARCHES <list> HIPCC <path>
-#               ROCM_KPACK_DIR <dir> OUT_ROOT <dir>
-#               ROCKE_INTERP <path> ROCKE_READY <path> ROCKE_PYTHON_DIR <dir>
-#               ROCKE_WHEEL_STAMP <path> [ROCKE_COMGR_LIB <path>]
-#               [PACK_JOBS <n>])
-#   Wire the compile -> prune -> pack DAG for ONE authored source root.
-#
-#   The root is walked recursively. Each descriptor's authored
-#   subpath is preserved into the packed tree. Producer selection is per-UKD on
-#   kernel_source.kind, never per-folder, so one root feeds all producers into
-#   ONE kpack per arch.
-#
-#   OUT_ROOT is where the packer writes: one output folder, wiped and filled by
-#   this invocation alone. No two invocations may share a destination. One
-#   source root may be invoked more than once, into different output roots.
-#   Installation is not wired here -- a root delivers into arch_content/ or
-#   test_arch_content/ in the build tree, and those two trees are installed
-#   wholesale by hip-kernel-provider/CMakeLists.txt.
-#
-#   A source root that is not a directory, or a missing output root, is a
-#   configure error: each one makes the pack step write nothing, and a consumer
-#   cannot tell that apart from a broken layout.
-#
-#   What actually differs between roots is declared, not forked into a second
-#   function:
-#
-#   Every root runs under the supplied ROCKE_INTERP with ROCKE_PYTHON_DIR
-#   prepended to PYTHONPATH, so `import rocke`/`kernels` resolve from the private
-#   wheels wherever a UKD names them. Producer selection stays per-UKD on
-#   kernel_source.kind, including roots holding only hip descriptors.
-#
-#   ROCKE_READY is the private directory's wheel-install stamp. The pack step
-#   depends on it rather than only the interpreter, so changing a kernel under
-#   rocke/library restages the pack. ROCKE_WHEEL_STAMP is the wheel content
-#   digest, recorded into each rocKE UKD's provenance so a shipped kernel names
-#   the wheel that produced it. ROCKE_COMGR_LIB, if set, is forwarded to the
-#   tool environment.
-#
-#   PACK_JOBS caps the worker processes one pack may spawn; 1 selects the packer's
-#   serial path. Omitted, the packer sizes its pool against the machine. Roots have
-#   no ordering edge between them, so the generator runs them at once: the test
-#   roots name a small cap so their pools do not multiply, and the product root
-#   omits it because it is the root expected to be large enough to repay a full pool.
-#
-#   NAME is the source label written into every descriptor's provenance. NAME, the
-#   absolute SOURCE_ROOT, OUT_ROOT and ARCHES go into a global registry read by
-#   hkp_verify_embedded_sources() and hkp_register_census_tests().
+# _hkp_disabled_kinds(<out_var> <enable_rocke>)
+#   The UKD kinds this build disables, as `<kind>=<option>` pairs naming the build
+#   option that switched each one off: `rocke=HIPKERNELPROVIDER_ENABLE_ROCKE` when
+#   <enable_rocke> is false, empty otherwise. Only producers gated by a build option are
+#   disabled by kind; every other content is switched off by folder
+#   (HKP_DESCRIPTOR_FAMILIES). The pack step, the configure-time probe and the
+#   dormant-root STATUS line all read this one list.
 # ---------------------------------------------------------------------------
-function(hkp_wire_pack_target)
-    set(_one NAME SOURCE_ROOT ARCHES HIPCC ROCM_KPACK_DIR
-        OUT_ROOT ROCKE_INTERP ROCKE_READY ROCKE_PYTHON_DIR ROCKE_COMGR_LIB
-        ROCKE_WHEEL_STAMP PACK_JOBS)
-    cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "")
-
-    if(NOT IS_DIRECTORY "${ARG_SOURCE_ROOT}")
-        message(FATAL_ERROR
-            "hkp: source root '${ARG_NAME}' is not a directory: "
-            "${ARG_SOURCE_ROOT}")
+function(_hkp_disabled_kinds out_var enable_rocke)
+    set(_pairs "")
+    if(NOT enable_rocke)
+        list(APPEND _pairs "rocke=HIPKERNELPROVIDER_ENABLE_ROCKE")
     endif()
-    if(NOT ARG_OUT_ROOT)
+    set(${out_var} "${_pairs}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# _hkp_pack_producer()
+#   Resolve the producer half of one pack step into the caller's scope:
+#
+#     _interp          interpreter the pack tool runs under
+#     _interp_what     how diagnostics name that interpreter
+#     _producer_deps   file-level dependencies of the pack step beyond its inputs
+#     _tool_cmd        `cmake -E env ... -- <interp> <tool>` prefix
+#     _producer_arg    producer flag(s) appended to the tool's arguments
+#
+#   Validates the ENABLE_ROCKE contract documented on hkp_wire_pack_target().
+#
+#   Called only from hkp_wire_pack_target(), and reads that function's variables
+#   rather than taking arguments: its parsed ARG_* values, and _given_keywords,
+#   every keyword the call named.
+# ---------------------------------------------------------------------------
+function(_hkp_pack_producer)
+    if(NOT DEFINED ARG_ENABLE_ROCKE)
         message(FATAL_ERROR
-            "hkp: root '${ARG_NAME}' (${ARG_SOURCE_ROOT}) has no OUT_ROOT, so "
-            "the pack step has nowhere to write.")
+            "hkp: root '${ARG_NAME}' was wired without ENABLE_ROCKE; pass "
+            "ENABLE_ROCKE ON or OFF.")
     endif()
 
-    set(_inter_root "${CMAKE_CURRENT_BINARY_DIR}/hkp-${ARG_NAME}-intermediate")
-    # Inside the output root, so the stamp shares the fate of the tree it vouches for.
-    # A stamp kept anywhere else witnesses only the pack's own run: it can say "the pack
-    # finished", never "the output is still there". Whatever empties the tree -- a partial
-    # restore, a stray clean, a disk that filled -- takes the stamp with it, and the next
-    # build packs again instead of reading a stamp that outlived its descriptors.
-    #
-    # Dot-prefixed to match the convention the packer already uses for the in-progress
-    # shard directories it does not ship.
-    set(_stamp "${ARG_OUT_ROOT}/${HKP_PACK_STAMP_NAME}")
+    if(NOT ARG_ENABLE_ROCKE)
+        foreach(_kw IN LISTS _given_keywords)
+            if(_kw MATCHES "^ROCKE_")
+                message(FATAL_ERROR
+                    "hkp: root '${ARG_NAME}' disables rocKE but was wired with "
+                    "${_kw}, which names a rocKE toolchain this build does not have.")
+            endif()
+        endforeach()
+        set(_tool_env "")
+        if(ARG_PACK_JOBS)
+            list(APPEND _tool_env "HKP_PACK_JOBS=${ARG_PACK_JOBS}")
+        endif()
+        set(_interp "${Python3_EXECUTABLE}" PARENT_SCOPE)
+        set(_interp_what "base interpreter (rocKE disabled, root '${ARG_NAME}')"
+            PARENT_SCOPE)
+        set(_producer_deps "" PARENT_SCOPE)
+        set(_tool_cmd "${CMAKE_COMMAND}" -E env ${_tool_env} --
+            "${Python3_EXECUTABLE}" "${HKP_TOOL}" PARENT_SCOPE)
+        # A kind whose producer this build never made prunes like an arch-pruned UKD
+        # rather than reaching a producer that does not exist.
+        _hkp_disabled_kinds(_disabled_pairs "${ARG_ENABLE_ROCKE}")
+        set(_disable_args "")
+        foreach(_pair IN LISTS _disabled_pairs)
+            string(REGEX REPLACE "=.*$" "" _kind "${_pair}")
+            list(APPEND _disable_args --disable-kind "${_kind}")
+        endforeach()
+        set(_producer_arg ${_disable_args} PARENT_SCOPE)
+        return()
+    endif()
+
+    foreach(_kw IN ITEMS ROCKE_INTERP ROCKE_READY ROCKE_PYTHON_DIR ROCKE_WHEEL_STAMP)
+        if(NOT ARG_${_kw})
+            message(FATAL_ERROR
+                "hkp: root '${ARG_NAME}' enables rocKE but was wired without "
+                "${_kw}.")
+        endif()
+    endforeach()
 
     # All roots use the supplied interpreter and private wheels, including
     # hip-only roots: producer selection is per descriptor, not per root.
-    set(_interp "${ARG_ROCKE_INTERP}")
-    set(_interp_what "rocKE wheel interpreter (root '${ARG_NAME}')")
-    set(_interp_dep "${ARG_ROCKE_READY}")
-    set(_wheel_dep "${ARG_ROCKE_WHEEL_STAMP}")
-
+    #
     # Tool environment. Two backend pins belong here, alongside the in-process
     # ones the producer sets:
     #
@@ -220,11 +236,172 @@ function(hkp_wire_pack_target)
         list(APPEND _tool_env "ROCKE_COMGR_LIB=${ARG_ROCKE_COMGR_LIB}")
     endif()
 
+    set(_interp "${ARG_ROCKE_INTERP}" PARENT_SCOPE)
+    set(_interp_what "rocKE wheel interpreter (root '${ARG_NAME}')" PARENT_SCOPE)
+    set(_producer_deps "${ARG_ROCKE_READY}" "${ARG_ROCKE_WHEEL_STAMP}" PARENT_SCOPE)
+    set(_tool_cmd "${CMAKE_COMMAND}" -E env ${_tool_env}
+        --modify "PYTHONPATH=path_list_prepend:${ARG_ROCKE_PYTHON_DIR}" --
+        "${ARG_ROCKE_INTERP}" "${HKP_TOOL}" PARENT_SCOPE)
+    set(_producer_arg --rocke-wheel-stamp "${ARG_ROCKE_WHEEL_STAMP}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# _hkp_filter_inputs(<out_var> <root> <files> <exclude_folders>)
+#   <files>, minus the ones under <root> the packer never reads: a path with any hidden
+#   segment (one starting with `.`), and a path inside a top-level folder of
+#   <exclude_folders>. Segments are taken from the path relative to <root>, so a hidden
+#   directory above <root> does not matter.
+# ---------------------------------------------------------------------------
+function(_hkp_filter_inputs out_var root files exclude_folders)
+    set(_kept "")
+    set(_excluded "${exclude_folders}")
+    list(TRANSFORM _excluded TOLOWER)
+    foreach(_file IN LISTS files)
+        file(RELATIVE_PATH _rel "${root}" "${_file}")
+        string(REPLACE "/" ";" _segments "${_rel}")
+        list(LENGTH _segments _count)
+        list(GET _segments 0 _first)
+        set(_drop FALSE)
+        foreach(_segment IN LISTS _segments)
+            if("${_segment}" MATCHES "^[.]")
+                set(_drop TRUE)
+            endif()
+        endforeach()
+        string(TOLOWER "${_first}" _first_lower)
+        if(_count GREATER 1 AND "${_first_lower}" IN_LIST _excluded)
+            set(_drop TRUE)
+        endif()
+        if(NOT _drop)
+            list(APPEND _kept "${_file}")
+        endif()
+    endforeach()
+    set(${out_var} "${_kept}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_wire_pack_target(NAME <label> SOURCE_ROOT <dir>
+#               ARCHES <list> HIPCC <path>
+#               ROCM_KPACK_DIR <dir> OUT_ROOT <dir> ENABLE_ROCKE <bool>
+#               [ROCKE_INTERP <path> ROCKE_READY <path> ROCKE_PYTHON_DIR <dir>
+#                ROCKE_WHEEL_STAMP <path> [ROCKE_COMGR_LIB <path>]]
+#               [EXCLUDE_FOLDERS <name>...] [PACK_JOBS <n>])
+#   Wire the compile -> prune -> pack DAG for ONE authored source root.
+#
+#   The root is walked recursively. Each descriptor's authored
+#   subpath is preserved into the packed tree. Producer selection is per-UKD on
+#   kernel_source.kind, never per-folder, so one root feeds all producers into
+#   ONE kpack per arch.
+#
+#   OUT_ROOT is where the packer writes: one output folder, wiped and filled by
+#   this invocation alone. No two invocations may share a destination. One
+#   source root may be invoked more than once, into different output roots.
+#   Installation is not wired here -- a root delivers into arch_content/ or
+#   test_arch_content/ in the build tree, and those two trees are installed
+#   wholesale by hip-kernel-provider/CMakeLists.txt.
+#
+#   A source root that is not a directory, or a missing output root, is a
+#   configure error: each one makes the pack step write nothing, and a consumer
+#   cannot tell that apart from a broken layout.
+#
+#   What actually differs between roots is declared, not forked into a second
+#   function:
+#
+#   ENABLE_ROCKE says whether the rocKE producer may run, and is required so no
+#   caller can reach either mode by omission. It mirrors
+#   HIPKERNELPROVIDER_ENABLE_ROCKE: the rocKE engine and its wheels exist only
+#   when that option is ON, so a root cannot enable a producer the build never made.
+#
+#   ON: ROCKE_INTERP, ROCKE_READY, ROCKE_PYTHON_DIR and ROCKE_WHEEL_STAMP are
+#   required. Every root runs under ROCKE_INTERP with ROCKE_PYTHON_DIR prepended
+#   to PYTHONPATH, so `import rocke`/`kernels` resolve from the private wheels
+#   wherever a UKD names them. Producer selection stays per-UKD on
+#   kernel_source.kind, including roots holding only hip descriptors.
+#   ROCKE_READY is the private directory's wheel-install stamp. The pack step
+#   depends on it rather than only the interpreter, so changing a kernel under
+#   rocke/library restages the pack. ROCKE_WHEEL_STAMP is the wheel content
+#   digest, recorded into each rocKE UKD's provenance so a shipped kernel names
+#   the wheel that produced it. ROCKE_COMGR_LIB, if set, is forwarded to the
+#   tool environment.
+#
+#   OFF: every ROCKE_* keyword is a configure error, since each would name a
+#   toolchain the build does not have. The root runs under the base
+#   Python3_EXECUTABLE (hip compiles shell out to hipcc and are
+#   interpreter-agnostic) with no rocKE environment, no PYTHONPATH prepend and
+#   no wheel edge, and the tool gets --disable-kind for each kind
+#   _hkp_disabled_kinds() lists (rocke): a rocKE UKD prunes as an arch-pruned one
+#   does, and a KDP left with no UKD does not ship.
+#
+#   EXCLUDE_FOLDERS names top-level child folders of the root the pack does not
+#   read at all: the families of HKP_DESCRIPTOR_FAMILIES whose option is OFF.
+#
+#   PACK_JOBS caps the worker processes one pack may spawn; 1 selects the packer's
+#   serial path. Omitted, the packer sizes its pool against the machine. Roots have
+#   no ordering edge between them, so the generator runs them at once: the test
+#   roots name a small cap so their pools do not multiply, and the product root
+#   omits it because it is the root expected to be large enough to repay a full pool.
+#
+#   NAME is the source label written into every descriptor's provenance. NAME, the
+#   absolute SOURCE_ROOT, OUT_ROOT and ARCHES go into a global registry read by
+#   hkp_verify_embedded_sources() and hkp_register_census_tests().
+# ---------------------------------------------------------------------------
+function(hkp_wire_pack_target)
+    set(_one NAME SOURCE_ROOT ARCHES HIPCC ROCM_KPACK_DIR
+        OUT_ROOT ENABLE_ROCKE ROCKE_INTERP ROCKE_READY ROCKE_PYTHON_DIR
+        ROCKE_COMGR_LIB ROCKE_WHEEL_STAMP PACK_JOBS)
+    cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "EXCLUDE_FOLDERS")
+    if(ARG_UNPARSED_ARGUMENTS)
+        message(FATAL_ERROR
+            "hkp_wire_pack_target: unrecognised argument(s): "
+            "${ARG_UNPARSED_ARGUMENTS}")
+    endif()
+    # Every keyword the call named, including one given an empty value: without
+    # CMP0174 (CMake 3.31), PARSE_ARGV leaves such a keyword's ARG_* variable
+    # undefined and out of ARG_KEYWORDS_MISSING_VALUES, so `ROCKE_INTERP ""` is
+    # visible only in the arguments themselves.
+    set(_given_keywords "")
+    foreach(_arg IN LISTS ARGV)
+        if(_arg IN_LIST _one)
+            list(APPEND _given_keywords "${_arg}")
+        endif()
+    endforeach()
+
+    if(NOT IS_DIRECTORY "${ARG_SOURCE_ROOT}")
+        message(FATAL_ERROR
+            "hkp: source root '${ARG_NAME}' is not a directory: "
+            "${ARG_SOURCE_ROOT}")
+    endif()
+    if(NOT ARG_OUT_ROOT)
+        message(FATAL_ERROR
+            "hkp: root '${ARG_NAME}' (${ARG_SOURCE_ROOT}) has no OUT_ROOT, so "
+            "the pack step has nowhere to write.")
+    endif()
+    _hkp_pack_producer()
+    set(_exclude_args "")
+    foreach(_folder IN LISTS ARG_EXCLUDE_FOLDERS)
+        list(APPEND _exclude_args --exclude-folder "${_folder}")
+    endforeach()
+
+    set(_inter_root "${CMAKE_CURRENT_BINARY_DIR}/hkp-${ARG_NAME}-intermediate")
+    # Inside the output root, so the stamp shares the fate of the tree it vouches for.
+    # A stamp kept anywhere else witnesses only the pack's own run: it can say "the pack
+    # finished", never "the output is still there". Whatever empties the tree -- a partial
+    # restore, a stray clean, a disk that filled -- takes the stamp with it, and the next
+    # build packs again instead of reading a stamp that outlived its descriptors.
+    #
+    # Dot-prefixed to match the convention the packer already uses for the in-progress
+    # shard directories it does not ship.
+    set(_stamp "${ARG_OUT_ROOT}/${HKP_PACK_STAMP_NAME}")
+
     # The authored root is a tree: glob recursively so a descriptor added in any
     # child folder retriggers the pack step. The packer itself walks recursively
     # so a flat glob here would drop the dependency edge for every nested descriptor.
-    file(GLOB_RECURSE _source_inputs CONFIGURE_DEPENDS
+    #
+    # Files the packer never reads are no input: hidden paths and the excluded family
+    # folders.
+    file(GLOB_RECURSE _all_source_inputs CONFIGURE_DEPENDS
          "${ARG_SOURCE_ROOT}/*")
+    _hkp_filter_inputs(_source_inputs "${ARG_SOURCE_ROOT}" "${_all_source_inputs}"
+                       "${ARG_EXCLUDE_FOLDERS}")
 
     # Editing the tool's own sources must retrigger the pack step, else the
     # artifacts go stale against the current pipeline code. The resolved
@@ -260,15 +437,6 @@ function(hkp_wire_pack_target)
 
     string(REPLACE ";" "," _arch_csv "${ARG_ARCHES}")
 
-    set(_wheel_stamp_arg "")
-    if(_wheel_dep)
-        set(_wheel_stamp_arg --rocke-wheel-stamp "${_wheel_dep}")
-    endif()
-
-    set(_tool_cmd "${CMAKE_COMMAND}" -E env ${_tool_env}
-        --modify "PYTHONPATH=path_list_prepend:${ARG_ROCKE_PYTHON_DIR}" --
-        "${_interp}" "${HKP_TOOL}")
-
     # The wipe removes the stamp along with the tree, because the stamp lives inside it.
     # So no stamp exists from the moment a pack begins until it completes: a pack that
     # dies after the wipe -- a compiler failure, a killed job, an interrupted build --
@@ -298,12 +466,13 @@ function(hkp_wire_pack_target)
                 --inter-root "${_inter_root}"
                 --kpack-python-dir "${ARG_ROCM_KPACK_DIR}"
                 --source-label "${ARG_NAME}"
-                ${_wheel_stamp_arg}
+                ${_producer_arg}
+                ${_exclude_args}
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${ARG_OUT_ROOT}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
         DEPENDS "${HKP_TOOL}" ${_source_inputs} ${_tool_sources}
                 "${_input_manifest}"
-                ${_interp_dep} ${_wheel_dep}
+                ${_producer_deps}
         COMMENT "hkp: packing root '${ARG_NAME}' for ${ARG_ARCHES}"
         VERBATIM)
 
@@ -406,8 +575,8 @@ endfunction()
 #   contributes its stamp file twice: as a dependency, so packing a root reruns
 #   the check, and as an argument, so the step also fails when a stamped pack
 #   root holds no descriptor at all. A name whose root is not wired contributes
-#   neither, so a dormant root -- production, with no source root set -- is not
-#   held to that rule.
+#   neither, so a dormant root -- one with an empty source root, or with nothing to
+#   pack for this build -- is not held to that rule.
 #
 #   An absent root, an empty root, a root with no embedded_source descriptor and
 #   an empty key table each pass. A root emptied after its pack stamped it does not.
@@ -443,6 +612,10 @@ function(hkp_verify_embedded_sources)
     # Resolved from the defining listfile: the callers are sibling directories that
     # never see this module's include-time variables.
     set(_tool "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../tools/hkp_verify_embedded_sources.py")
+    # The sidecar reader the tool imports; an edit to it changes the verdict.
+    set(_tool_modules
+        "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../python/hkp_pack/provenance_sidecar.py"
+        "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../python/hkp_pack/errors.py")
     set(_stamp "${CMAKE_CURRENT_BINARY_DIR}/hkp-verify-${ARG_TARGET}.stamp")
 
     _hkp_key_manifest_args(_manifest_arg _manifest_dep "${ARG_TARGET}")
@@ -490,7 +663,7 @@ function(hkp_verify_embedded_sources)
                 ${_stamp_args}
                 ${_source_root_args}
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
-        DEPENDS "${_tool}" ${_manifest_dep} ${_pack_stamps}
+        DEPENDS "${_tool}" ${_tool_modules} ${_manifest_dep} ${_pack_stamps}
         COMMENT "hkp: verifying embedded kernel sources (${ARG_TARGET})"
         VERBATIM)
 
@@ -743,7 +916,8 @@ endfunction()
 # hkp_require_kpack_runtime(<interp> <what>)
 #   rocm_kpack is reached by putting a source tree on sys.path, so pip never
 #   resolves the msgpack/zstandard it declares. The supplied interpreter needs
-#   them present independently for every pack, including hip-only roots.
+#   them present independently for every pack, including hip-only roots. pip is
+#   not needed here: only the rocKE wheel install uses it, and checks for it.
 #
 #   Checked at configure time because the failure is otherwise a mid-build
 #   ImportError from inside a dependency, which reads as a packer bug rather
@@ -753,7 +927,7 @@ function(hkp_require_kpack_runtime interp what)
     if(NOT EXISTS "${interp}")
         message(FATAL_ERROR
             "hkp: ${what} does not exist: ${interp}. Set Python3_EXECUTABLE "
-            "to an existing interpreter with pip, msgpack and zstandard supplied.")
+            "to an existing interpreter with msgpack and zstandard supplied.")
     endif()
 
     execute_process(
@@ -808,10 +982,13 @@ function(hkp_rocke_wheel_python_interp out_interp out_ready out_python_dir wheel
     if(NOT _pip_rc EQUAL 0)
         string(STRIP "${_pip_err}" _pip_err)
         message(FATAL_ERROR
-            "hkp: ${Python3_EXECUTABLE} cannot run pip. Supply pip in this "
-            "interpreter's environment, or set Python3_EXECUTABLE to an existing "
-            "interpreter with pip, msgpack and zstandard. Packaging does not "
-            "bootstrap pip or acquire runtime dependencies.\nPython said: ${_pip_err}")
+            "hkp: ${Python3_EXECUTABLE} cannot run pip, which installs the rocke "
+            "wheels because HIPKERNELPROVIDER_ENABLE_ROCKE is ON. Supply pip in "
+            "this interpreter's environment, set Python3_EXECUTABLE to an existing "
+            "interpreter with pip, msgpack and zstandard, or configure with "
+            "-DHIPKERNELPROVIDER_ENABLE_ROCKE=OFF to pack without rocKE. Packaging "
+            "does not bootstrap pip or acquire runtime dependencies.\n"
+            "Python said: ${_pip_err}")
     endif()
 
     set(_import_env "ROCKE_BACKEND=python" "ROCKE_CPP_STRICT=1")
@@ -844,8 +1021,8 @@ endfunction()
 # ---------------------------------------------------------------------------
 # hkp_require_ingestor_toolchain(<out_arches>)
 #   Assert what the ingestor needs to pack anything -- hipcc, a non-empty gfx
-#   list, and the rocke wheel supply -- and return the architecture list. Set
-#   HKP_HIPCC as a side effect.
+#   list, and, when HIPKERNELPROVIDER_ENABLE_ROCKE is ON, the rocke wheel
+#   supply -- and return the architecture list. Set HKP_HIPCC as a side effect.
 #
 #   Without hipcc or a gfx list the packer creates no output root at all, and a
 #   consumer of a packed root reports that as a broken layout rather than as a
@@ -856,6 +1033,9 @@ endfunction()
 #   The wheel check covers SUPPLY, not importability. The private directory
 #   hkp_rocke_wheel_python_interp populates does not exist until the build runs;
 #   imports are asserted there under the environment the pack step will use.
+#   With rocKE disabled no wheel exists or is wanted: the hip producer runs
+#   alone, and the pack step is told to drop the rocke kind, so rocKE UKDs prune
+#   like arch-pruned ones.
 # ---------------------------------------------------------------------------
 function(hkp_require_ingestor_toolchain out_arches)
     # hipcc is the perl/bat driver that honors --genco; on Windows it is
@@ -877,33 +1057,38 @@ function(hkp_require_ingestor_toolchain out_arches)
             "HIPDNN_ENABLE_KERNEL_INGESTOR=OFF.")
     endif()
 
-    if(NOT ROCKE_WHEEL_DIR OR NOT ROCKE_WHEEL_VERSION)
-        message(FATAL_ERROR
-            "hkp: HIPDNN_ENABLE_KERNEL_INGESTOR is ON and requires the rocke "
-            "wheels to pack rocKE kernels, but ROCKE_WHEEL_DIR "
-            "(${ROCKE_WHEEL_DIR}) and ROCKE_WHEEL_VERSION "
-            "(${ROCKE_WHEEL_VERSION}) are not both set. Leave "
-            "ROCKE_BUILD_PYENV=ON to have the build produce the wheels and set "
-            "both variables, or with ROCKE_BUILD_PYENV=OFF set ROCKE_WHEEL_DIR "
-            "and ROCKE_WHEEL_VERSION to the wheels you supply.")
-    endif()
-
-    # ROCKE_BUILD_PYENV=ON makes the wheels build outputs, absent until the build
-    # runs. Only with it OFF are they inputs, and only then can they be checked.
-    if(NOT ROCKE_BUILD_PYENV)
-        set(_platform_wheel
-            "${ROCKE_WHEEL_DIR}/rocke-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
-        set(_library_wheel
-            "${ROCKE_WHEEL_DIR}/rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
-        if(NOT EXISTS "${_platform_wheel}" OR NOT EXISTS "${_library_wheel}")
+    if(HIPKERNELPROVIDER_ENABLE_ROCKE)
+        if(NOT ROCKE_WHEEL_DIR OR NOT ROCKE_WHEEL_VERSION)
             message(FATAL_ERROR
-                "hkp: HIPDNN_ENABLE_KERNEL_INGESTOR is ON and ROCKE_BUILD_PYENV "
-                "is OFF, so the rocke wheels must be supplied, but "
-                "ROCKE_WHEEL_DIR (${ROCKE_WHEEL_DIR}) does not hold both of:\n"
-                "    rocke-${ROCKE_WHEEL_VERSION}-py3-none-any.whl\n"
-                "    rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl\n"
-                "Point ROCKE_WHEEL_DIR at a directory holding both, correct "
-                "ROCKE_WHEEL_VERSION, or set ROCKE_BUILD_PYENV=ON to build them.")
+                "hkp: HIPKERNELPROVIDER_ENABLE_ROCKE is ON and requires the rocke "
+                "wheels to pack rocKE kernels, but ROCKE_WHEEL_DIR "
+                "(${ROCKE_WHEEL_DIR}) and ROCKE_WHEEL_VERSION "
+                "(${ROCKE_WHEEL_VERSION}) are not both set. Leave "
+                "ROCKE_BUILD_PYENV=ON to have the build produce the wheels and set "
+                "both variables, with ROCKE_BUILD_PYENV=OFF set ROCKE_WHEEL_DIR "
+                "and ROCKE_WHEEL_VERSION to the wheels you supply, or configure "
+                "with -DHIPKERNELPROVIDER_ENABLE_ROCKE=OFF to pack without rocKE.")
+        endif()
+
+        # ROCKE_BUILD_PYENV=ON makes the wheels build outputs, absent until the build
+        # runs. Only with it OFF are they inputs, and only then can they be checked.
+        if(NOT ROCKE_BUILD_PYENV)
+            set(_platform_wheel
+                "${ROCKE_WHEEL_DIR}/rocke-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
+            set(_library_wheel
+                "${ROCKE_WHEEL_DIR}/rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
+            if(NOT EXISTS "${_platform_wheel}" OR NOT EXISTS "${_library_wheel}")
+                message(FATAL_ERROR
+                    "hkp: HIPKERNELPROVIDER_ENABLE_ROCKE is ON and ROCKE_BUILD_PYENV "
+                    "is OFF, so the rocke wheels must be supplied, but "
+                    "ROCKE_WHEEL_DIR (${ROCKE_WHEEL_DIR}) does not hold both of:\n"
+                    "    rocke-${ROCKE_WHEEL_VERSION}-py3-none-any.whl\n"
+                    "    rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl\n"
+                    "Point ROCKE_WHEEL_DIR at a directory holding both, correct "
+                    "ROCKE_WHEEL_VERSION, set ROCKE_BUILD_PYENV=ON to build them, or "
+                    "configure with -DHIPKERNELPROVIDER_ENABLE_ROCKE=OFF to pack "
+                    "without rocKE.")
+            endif()
         endif()
     endif()
 
@@ -927,32 +1112,22 @@ function(hkp_require_ingestor_toolchain out_arches)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# _hkp_resolve_production_root(<out_var> <out_is_default>)
+# _hkp_resolve_production_root(<out_var>)
 #   Declare the overridable production source root and resolve it to a path or to empty.
 #   Empty is the dormant case and not an error; a value that is set but is not a
 #   directory is fatal.
-#
-#   <out_is_default> reports whether the resolved root is still the built-in default,
-#   which callers that turn "nothing to ship" into an error read more gently than a root
-#   this build named. A cache entry records no author, so is-default is decided by
-#   comparing against the default path.
 # ---------------------------------------------------------------------------
-function(_hkp_resolve_production_root out_var out_is_default)
+function(_hkp_resolve_production_root out_var)
     set(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT
         "${HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT}" CACHE PATH
         "The authored source root the production pack step compiles from, \
 defaulting to the provider's in-tree shipped descriptors. Walked recursively; child \
 folders under it scope the content (hip/, rocKE/, per-integration folders) and each \
 descriptor's authored subpath is preserved into the staged and installed trees. A root \
-holding no descriptor, like an empty value, leaves production packaging dormant.")
+holding nothing to pack for this build, like an empty value, leaves production \
+packaging dormant.")
 
     set(${out_var} "" PARENT_SCOPE)
-    if("${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}" STREQUAL
-       "${HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT}")
-        set(${out_is_default} TRUE PARENT_SCOPE)
-    else()
-        set(${out_is_default} FALSE PARENT_SCOPE)
-    endif()
 
     if(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT)
         if(NOT IS_DIRECTORY "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
@@ -965,115 +1140,239 @@ holding no descriptor, like an empty value, leaves production packaging dormant.
 endfunction()
 
 # ---------------------------------------------------------------------------
-# _hkp_path_is_hidden(<out_var> <root> <path>)
-#   TRUE when any segment of <path> below <root> is dot-prefixed, which is how
-#   load_flat_input() decides a file is not authored content. Shared so the two functions
-#   below cannot drift apart.
+# _hkp_disabled_families(<out_var>)
+#   The folders of HKP_DESCRIPTOR_FAMILIES whose option is OFF in this build. An entry
+#   that is not `<folder>=<option>`, or whose option is not defined, is a configure error.
 # ---------------------------------------------------------------------------
-function(_hkp_path_is_hidden out_var root path)
-    set(${out_var} FALSE PARENT_SCOPE)
-    file(RELATIVE_PATH _rel "${root}" "${path}")
-    string(REPLACE "/" ";" _segments "${_rel}")
-    foreach(_segment IN LISTS _segments)
-        if(_segment MATCHES "^\\.")
-            set(${out_var} TRUE PARENT_SCOPE)
-            return()
+function(_hkp_disabled_families out_var)
+    set(_folders "")
+    foreach(_family IN LISTS HKP_DESCRIPTOR_FAMILIES)
+        string(REPLACE "=" ";" _pair "${_family}")
+        list(LENGTH _pair _pair_length)
+        list(GET _pair 0 _folder)
+        list(GET _pair -1 _option)
+        if(NOT _pair_length EQUAL 2 OR "${_folder}" STREQUAL "" OR "${_option}" STREQUAL "")
+            message(FATAL_ERROR
+                "hkp: HKP_DESCRIPTOR_FAMILIES entry '${_family}' is not of the form "
+                "<folder>=<option>.")
+        endif()
+        if(NOT DEFINED ${_option})
+            message(FATAL_ERROR
+                "hkp: HKP_DESCRIPTOR_FAMILIES entry '${_family}' names option "
+                "'${_option}', which is not defined, so its folder '${_folder}' would be "
+                "excluded silently. Define the option before wiring packaging.")
+        endif()
+        if(NOT ${_option})
+            list(APPEND _folders "${_folder}")
         endif()
     endforeach()
+    set(${out_var} "${_folders}" PARENT_SCOPE)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# _hkp_root_has_kdp(<out_var> <root>)
-#   TRUE when <root> holds at least one non-hidden *.kdp.json. An empty <root> is FALSE
-#   rather than an error, which is what leaves packaging dormant. CONFIGURE_DEPENDS so
-#   adding the first KDP re-runs configure and wires the target. Dot-prefixed segments
-#   are skipped as load_flat_input() skips them, so a `.git/` under a user-supplied root
-#   is not content.
-# ---------------------------------------------------------------------------
-function(_hkp_root_has_kdp out_var root)
-    set(${out_var} FALSE PARENT_SCOPE)
-    if(NOT root)
-        return()
-    endif()
-
-    file(GLOB_RECURSE _kdps CONFIGURE_DEPENDS "${root}/*.kdp.json")
-    foreach(_kdp IN LISTS _kdps)
-        _hkp_path_is_hidden(_kdp_hidden "${root}" "${_kdp}")
-        if(NOT _kdp_hidden)
-            set(${out_var} TRUE PARENT_SCOPE)
-            return()
-        endif()
-    endforeach()
-endfunction()
-
-# ---------------------------------------------------------------------------
-# _hkp_root_covers_any_arch(<out_var> <root> <arches>)
-#   TRUE when at least one non-hidden *.kdp.json under <root> would survive
-#   arch_matches() for at least one arch in <arches>. Mirrors that predicate exactly: an
-#   absent `arch` key and an empty `arch` array are both wildcards, anything else is
-#   exact string membership in the wired arch list. Consulted for the default root alone
-#   (hkp_add_packaging below).
+# _hkp_root_probe(<out_shipped> <out_offered> <out_ok> <root> <arches>
+#                 <exclude_folders> <disabled_kinds>)
+#   What a pack of <root> would ship, asked of the packer: its own load_flat_input(),
+#   shipped_engines() and offered_engines(), with the same excluded folders and disabled
+#   kinds (bare kind names) the pack step gets, run under the base interpreter.
 #
-#   Only FALSE is authoritative. kdp_survives() tests arch_matches() first, so a root no
-#   arch matches is provably empty; TRUE claims nothing beyond "not provably empty",
-#   since a matching KDP can still prune on its UKD entries. Every ambiguous case
-#   therefore resolves to TRUE -- an unparseable KDP, or an `arch` that is not an array,
-#   counts as covering, so the root stays wired and the packer reports what is wrong
+#   <out_ok> is TRUE when the packer answered. Then <out_shipped> is JSON
+#   {"<arch>": ["<engine name>", ...]}, where every arch mapping to an empty list is a
+#   root with nothing to pack, and <out_offered> is the CMake list of engine names the
+#   root carries for any arch at all, independent of <arches>.
+#
+#   Asked of the packer rather than mirrored here: what survives turns on the KDP arch
+#   list, each UKD's own arch list, standalone-UKD resolution and the filters, and
+#   CMake's JSON reader takes seconds per configure on a KDP of a few hundred UKDs.
+#
+#   When the packer cannot answer -- a malformed root, an interpreter that cannot run
+#   it -- <out_ok> is FALSE, both answers are empty, and a STATUS line carries the
+#   packer's own reason. Callers then wire the root, so the pack reports what is wrong
 #   with it.
 #
-#   CONFIGURE_DEPENDS for the same reason as _hkp_root_has_kdp.
+#   Every descriptor under <root> the packer reads is a configure dependency, since the
+#   answer turns on their contents.
 # ---------------------------------------------------------------------------
-function(_hkp_root_covers_any_arch out_var root arches)
-    # cmake-lint: disable=E1120
-    #   cmake-lint carries no argument spec for foreach(... RANGE ...) and reports
-    #   every spelling of it as missing a positional argument. The index loop below
-    #   is valid CMake.
-    set(${out_var} FALSE PARENT_SCOPE)
-    if(NOT root)
+# cmake-lint: disable=R0913
+function(_hkp_root_probe out_shipped out_offered out_ok root arches exclude_folders
+         disabled_kinds)
+    set(${out_shipped} "" PARENT_SCOPE)
+    set(${out_offered} "" PARENT_SCOPE)
+    set(${out_ok} FALSE PARENT_SCOPE)
+
+    file(GLOB_RECURSE _descriptors CONFIGURE_DEPENDS "${root}/*.json")
+    _hkp_filter_inputs(_descriptors "${root}" "${_descriptors}" "${exclude_folders}")
+    set_property(
+        DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_descriptors})
+
+    # Each list travels as one prefixed argument, so an empty list is still an argument.
+    string(REPLACE ";" "," _arch_csv "${arches}")
+    string(REPLACE ";" "," _folder_csv "${exclude_folders}")
+    string(REPLACE ";" "," _kind_csv "${disabled_kinds}")
+    set(_probe_py "import json, sys
+from hkp_pack.descriptors import load_flat_input
+from hkp_pack.errors import HkpPackError
+from hkp_pack.pipeline import offered_engines, shipped_engines
+lists = {k: tuple(v for v in rest.split(',') if v)
+         for k, _, rest in (a.partition('=') for a in sys.argv[2:])}
+try:
+    flat = load_flat_input(sys.argv[1], log=lambda *_args: None,
+                           exclude_folders=lists['folders'],
+                           disabled_kinds=lists['kinds'])
+    print(json.dumps({'shipped': shipped_engines(flat, lists['arches']),
+                      'offered': offered_engines(flat)}))
+except HkpPackError as exc:
+    sys.exit(str(exc))
+")
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E env "PYTHONPATH=${HKP_PYTHON_ROOT}" --
+                "${Python3_EXECUTABLE}" -c "${_probe_py}" "${root}"
+                "arches=${_arch_csv}" "folders=${_folder_csv}" "kinds=${_kind_csv}"
+        RESULT_VARIABLE _rc
+        OUTPUT_VARIABLE _out
+        ERROR_VARIABLE _err_text
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+    set(_answered FALSE)
+    if(_rc EQUAL 0)
+        string(JSON _type ERROR_VARIABLE _json_err TYPE "${_out}")
+        if(NOT _json_err AND _type STREQUAL "OBJECT")
+            set(_answered TRUE)
+        else()
+            set(_err_text "the probe printed no JSON object")
+        endif()
+    endif()
+
+    if(NOT _answered)
+        # The packer's own reason is the last non-empty line of stderr. The text is
+        # never split as a CMake list: a message may itself contain `;`.
+        string(REGEX MATCH "[^\n]+\n*$" _last "${_err_text}")
+        string(STRIP "${_last}" _last)
+        message(STATUS
+            "hkp: could not ask the packer what '${root}' ships (${_last}); wiring it "
+            "so the pack reports the problem")
         return()
     endif()
 
-    file(GLOB_RECURSE _kdps CONFIGURE_DEPENDS "${root}/*.kdp.json")
-    foreach(_kdp IN LISTS _kdps)
-        _hkp_path_is_hidden(_kdp_hidden "${root}" "${_kdp}")
-        if(_kdp_hidden)
-            continue()
-        endif()
-
-        # CONFIGURE_DEPENDS re-globs when the SET of files changes, but this answer turns
-        # on their CONTENTS: without a content dependency, editing a KDP's `arch` leaves
-        # the previous verdict standing, so a root that starts declaring this build's
-        # architecture stays dormant with no configure to say otherwise.
-        set_property(
-            DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-            APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_kdp}")
-
-        file(READ "${_kdp}" _kdp_json)
-
-        # One error variable covers two ambiguous cases that both resolve to TRUE: the
-        # absent-key wildcard, and an unparseable file the packer must be the one to
-        # report.
-        string(JSON _arch_type ERROR_VARIABLE _arch_err TYPE "${_kdp_json}" arch)
-        if(_arch_err OR NOT _arch_type STREQUAL "ARRAY")
-            set(${out_var} TRUE PARENT_SCOPE)
-            return()
-        endif()
-
-        string(JSON _arch_len ERROR_VARIABLE _len_err LENGTH "${_kdp_json}" arch)
-        if(_len_err OR _arch_len EQUAL 0)
-            set(${out_var} TRUE PARENT_SCOPE)
-            return()
-        endif()
-
-        math(EXPR _arch_last "${_arch_len} - 1")
-        foreach(_i RANGE ${_arch_last})
-            string(JSON _arch ERROR_VARIABLE _get_err GET "${_kdp_json}" arch ${_i})
-            if(_get_err OR _arch IN_LIST arches)
-                set(${out_var} TRUE PARENT_SCOPE)
-                return()
-            endif()
+    string(JSON _shipped GET "${_out}" shipped)
+    set(_offered "")
+    string(JSON _count LENGTH "${_out}" offered)
+    if(_count GREATER 0)
+        math(EXPR _last_index "${_count} - 1")
+        # cmake-lint: disable=E1120
+        foreach(_i RANGE ${_last_index})
+            string(JSON _engine GET "${_out}" offered ${_i})
+            list(APPEND _offered "${_engine}")
         endforeach()
-    endforeach()
+    endif()
+    set(${out_ok} TRUE PARENT_SCOPE)
+    set(${out_shipped} "${_shipped}" PARENT_SCOPE)
+    set(${out_offered} "${_offered}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# _hkp_shipped_engines_for_arch(<out_var> <shipped-json> <arch>)
+#   The engine names <shipped-json> (from _hkp_root_probe) lists for <arch>.
+# ---------------------------------------------------------------------------
+function(_hkp_shipped_engines_for_arch out_var shipped arch)
+    set(_engines "")
+    string(JSON _count ERROR_VARIABLE _err LENGTH "${shipped}" "${arch}")
+    if(NOT _err AND _count GREATER 0)
+        math(EXPR _last "${_count} - 1")
+        # cmake-lint: disable=E1120
+        foreach(_i RANGE ${_last})
+            string(JSON _engine GET "${shipped}" "${arch}" ${_i})
+            list(APPEND _engines "${_engine}")
+        endforeach()
+    endif()
+    set(${out_var} "${_engines}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_gfx950_attention_dense_available(<out>)
+#   TRUE when this configuration actually ships the gfx950 dense-attention bundle: the
+#   `product` pack target is wired, gfx950 is among the architectures it was wired for,
+#   and what that pack ships for gfx950 includes hipkernel:Gfx950AttentionDense.
+#
+#   Arch-aware, for registrations that install into the gfx950 shard and are pruned with
+#   it (the census, the external and the gpu_ref checks). Host and test sources outside
+#   the arch content must not read it: they use hkp_product_offers_engine().
+#
+#   Evaluated fresh each configure and held in no cache entry, so every registration that
+#   depends on the bundle turns on the same answer.
+#
+#   The third conjunct is the packer's own answer, taken after excluded folders and
+#   disabled kinds: `product` carries whatever HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT
+#   points at, and a build pointed at another bundle, or one that filters this engine's
+#   kernels out, must not register its tests. A probe that could not answer reads as
+#   HIPKERNELPROVIDER_ENABLE_ROCKE: the bundle is rocKE content, and the pack then
+#   reports what is wrong with the root.
+# ---------------------------------------------------------------------------
+function(hkp_gfx950_attention_dense_available out_var)
+    set(${out_var} FALSE PARENT_SCOPE)
+
+    get_property(_labels GLOBAL PROPERTY HKP_PACK_LABELS)
+    if(NOT "product" IN_LIST _labels)
+        return()
+    endif()
+
+    get_property(_arches GLOBAL PROPERTY HKP_PACK_ARCHES_product)
+    if(NOT "gfx950" IN_LIST _arches)
+        return()
+    endif()
+
+    get_property(_probe_ok GLOBAL PROPERTY HKP_PACK_PROBE_OK_product)
+    if(NOT _probe_ok)
+        set(${out_var} "${HIPKERNELPROVIDER_ENABLE_ROCKE}" PARENT_SCOPE)
+        return()
+    endif()
+
+    get_property(_shipped GLOBAL PROPERTY HKP_PACK_SHIPPED_ENGINES_product)
+    _hkp_shipped_engines_for_arch(_engines "${_shipped}" gfx950)
+    if("hipkernel:Gfx950AttentionDense" IN_LIST _engines)
+        set(${out_var} TRUE PARENT_SCOPE)
+    endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_product_offers_engine(<out_var> <engine>)
+#   TRUE when the `product` root, under this build's excluded folders and disabled
+#   kinds, carries <engine> for any arch its descriptors are authored for.
+#
+#   Arch-agnostic: it reads what the root offers, never GPU_TARGETS, because it gates
+#   host and test content outside the arch content, which must work with another build's
+#   arch content. Registrations that ship in a per-arch shard use
+#   hkp_gfx950_attention_dense_available() instead.
+#
+#   FALSE when `product` is neither wired nor recorded dormant, and when it was never
+#   probed (an empty root). A probe that could not answer reads as
+#   HIPKERNELPROVIDER_ENABLE_ROCKE.
+# ---------------------------------------------------------------------------
+function(hkp_product_offers_engine out_var engine)
+    set(${out_var} FALSE PARENT_SCOPE)
+
+    get_property(_labels GLOBAL PROPERTY HKP_PACK_LABELS)
+    get_property(_dormant GLOBAL PROPERTY HKP_PACK_DORMANT_LABELS)
+    if(NOT "product" IN_LIST _labels AND NOT "product" IN_LIST _dormant)
+        return()
+    endif()
+
+    get_property(_probed GLOBAL PROPERTY HKP_PACK_PROBE_OK_product SET)
+    if(NOT _probed)
+        return()
+    endif()
+
+    get_property(_probe_ok GLOBAL PROPERTY HKP_PACK_PROBE_OK_product)
+    if(NOT _probe_ok)
+        set(${out_var} "${HIPKERNELPROVIDER_ENABLE_ROCKE}" PARENT_SCOPE)
+        return()
+    endif()
+
+    get_property(_offered GLOBAL PROPERTY HKP_PACK_OFFERED_ENGINES_product)
+    if("${engine}" IN_LIST _offered)
+        set(${out_var} TRUE PARENT_SCOPE)
+    endif()
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -1107,10 +1406,12 @@ the one named here.")
     hkp_probe_comgr_resolvable(_comgr_ok _comgr_detail)
     if(NOT _comgr_ok)
         message(FATAL_ERROR
-            "hkp: comgr could not be resolved, so no rocKE kernel can be "
-            "lowered and no descriptor root can be packed. comgr ships with "
-            "ROCm and is required. Set HIPKERNELPROVIDER_ROCKE_COMGR_LIB to an "
-            "explicit libamd_comgr, or make one discoverable. Resolver said:\n"
+            "hkp: comgr could not be resolved, so no rocKE kernel can be lowered. "
+            "HIPKERNELPROVIDER_ENABLE_ROCKE is ON, which makes comgr a requirement "
+            "of every descriptor root. comgr ships with ROCm. Set "
+            "HIPKERNELPROVIDER_ROCKE_COMGR_LIB to an explicit libamd_comgr, make "
+            "one discoverable, or configure with -DHIPKERNELPROVIDER_ENABLE_ROCKE=OFF "
+            "to pack without rocKE. Resolver said:\n"
             "${_comgr_detail}")
     endif()
     hkp_rocke_wheel_stamp(_rocke_wheel_stamp)
@@ -1135,20 +1436,187 @@ the one named here.")
 endfunction()
 
 # ---------------------------------------------------------------------------
+# _hkp_dormant_reason(<out_var> <root> <shipped-json> <arches>)
+#   Why a root packs nothing in this configuration, or empty when it is wired:
+#   `empty-root`, or `nothing-to-pack` when <shipped-json> (from _hkp_root_probe) lists
+#   no engine for any arch -- every descriptor arch-pruned, or in a disabled folder or
+#   kind. The same rule for every root, named or inherited. A probe that could not
+#   answer leaves the root wired.
+# ---------------------------------------------------------------------------
+function(_hkp_dormant_reason out_var root shipped arches)
+    set(${out_var} "" PARENT_SCOPE)
+    if(NOT root)
+        set(${out_var} "empty-root" PARENT_SCOPE)
+        return()
+    endif()
+    if(NOT shipped)
+        return()
+    endif()
+    foreach(_arch IN LISTS arches)
+        _hkp_shipped_engines_for_arch(_engines "${shipped}" "${_arch}")
+        if(_engines)
+            return()
+        endif()
+    endforeach()
+    set(${out_var} "nothing-to-pack" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# _hkp_report_dormant(<reason> <name> <root> <arches> <exclude_folders>
+#                     <disabled_kinds>)
+#   The STATUS line for a _hkp_dormant_reason() verdict. It names the arch list, the
+#   excluded folders that exist as top-level folders of <root> and the kinds pruned with
+#   the option that pruned them (<disabled_kinds> is _hkp_disabled_kinds()'s output): the
+#   values to change to make packing happen. The production root keeps its own wording.
+# ---------------------------------------------------------------------------
+# cmake-lint: disable=R0913
+function(_hkp_report_dormant reason name root arches exclude_folders disabled_kinds)
+    if(reason STREQUAL "empty-root")
+        if(name STREQUAL "product")
+            message(STATUS
+                "hkp: HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT is empty; production "
+                "packaging dormant (tests still run against the fixtures).")
+        else()
+            message(STATUS
+                "hkp: root '${name}' has an empty SOURCE_ROOT; ${name} packaging dormant.")
+        endif()
+        return()
+    endif()
+
+    set(_present "")
+    if(exclude_folders)
+        set(_excluded "${exclude_folders}")
+        list(TRANSFORM _excluded TOLOWER)
+        file(GLOB _children LIST_DIRECTORIES true RELATIVE "${root}" "${root}/*")
+        foreach(_child IN LISTS _children)
+            string(TOLOWER "${_child}" _child_lower)
+            if(IS_DIRECTORY "${root}/${_child}" AND "${_child_lower}" IN_LIST _excluded)
+                list(APPEND _present "${_child}")
+            endif()
+        endforeach()
+    endif()
+    set(_filters "")
+    if(_present)
+        list(JOIN _present ", " _names)
+        string(APPEND _filters " with disabled folder(s) ${_names} excluded")
+    endif()
+    foreach(_pair IN LISTS disabled_kinds)
+        string(REGEX REPLACE "=.*$" "" _kind "${_pair}")
+        string(REGEX REPLACE "^[^=]*=" "" _option "${_pair}")
+        string(APPEND _filters " and ${_kind} kernels pruned (${_option}=OFF)")
+    endforeach()
+
+    if(name STREQUAL "product")
+        message(STATUS
+            "hkp: the production root '${root}' has nothing to pack for this build's "
+            "architectures (${arches})${_filters}; production packaging dormant (tests "
+            "still run against the fixtures).")
+    else()
+        message(STATUS
+            "hkp: root '${name}' ('${root}') has nothing to pack for this build's "
+            "architectures (${arches})${_filters}; ${name} packaging dormant.")
+    endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
+# _hkp_wire_root(NAME <n> SOURCE_ROOT <dir> ARCHES <list> OUT_ROOT <dir>
+#                ENABLE_ROCKE <bool> [<other hkp_wire_pack_target arguments>]
+#                EXCLUDE_FOLDERS <name>...)
+#   Wire one root as hkp_wire_pack_target() does, unless the root has nothing to pack.
+#   EXCLUDE_FOLDERS must be the last keyword: it is multi-valued, so every other
+#   keyword (HIPCC, ROCM_KPACK_DIR, ROCKE_*, PACK_JOBS) has to come before it to
+#   reach hkp_wire_pack_target() unparsed.
+#
+#   An empty SOURCE_ROOT is `empty-root`. Any other root is probed for what it ships
+#   (_hkp_root_probe(), with the filters the pack step gets); an answered probe that
+#   lists no engine for any arch is `nothing-to-pack`, and a failed probe or any engine
+#   means wired. A dormant root is recorded through _hkp_record_dormant_pack(), its
+#   OUT_ROOT (when given) is removed so a tree from an earlier configuration is not
+#   loaded, and one STATUS line says why. It is never validated by
+#   hkp_wire_pack_target(), so a ROCKE_* keyword on a dormant root is not diagnosed.
+#
+#   Every probed root, wired or dormant, sets the global properties
+#   HKP_PACK_PROBE_OK_<NAME> and HKP_PACK_OFFERED_ENGINES_<NAME>; a wired root also sets
+#   HKP_PACK_SHIPPED_ENGINES_<NAME>. A root with an empty SOURCE_ROOT is never probed and
+#   leaves HKP_PACK_PROBE_OK_<NAME> unset.
+#
+#   Forwards each parsed keyword to hkp_wire_pack_target() by naming it again, never
+#   through ${ARGN} or ${ARGV}: ARCHES is a one-value keyword whose list value would be
+#   split.
+# ---------------------------------------------------------------------------
+function(_hkp_wire_root)
+    cmake_parse_arguments(PARSE_ARGV 0 W ""
+        "NAME;SOURCE_ROOT;ARCHES;OUT_ROOT;ENABLE_ROCKE" "EXCLUDE_FOLDERS")
+    if(NOT DEFINED W_ENABLE_ROCKE)
+        message(FATAL_ERROR
+            "hkp: root '${W_NAME}' was wired without ENABLE_ROCKE; pass "
+            "ENABLE_ROCKE ON or OFF.")
+    endif()
+
+    _hkp_disabled_kinds(_disabled_pairs "${W_ENABLE_ROCKE}")
+    set(_shipped "")
+    if(NOT W_SOURCE_ROOT)
+        set(_reason "empty-root")
+    else()
+        set(_kinds "")
+        foreach(_pair IN LISTS _disabled_pairs)
+            string(REGEX REPLACE "=.*$" "" _kind "${_pair}")
+            list(APPEND _kinds "${_kind}")
+        endforeach()
+        _hkp_root_probe(_shipped _offered _probe_ok "${W_SOURCE_ROOT}" "${W_ARCHES}"
+                        "${W_EXCLUDE_FOLDERS}" "${_kinds}")
+        set_property(GLOBAL PROPERTY HKP_PACK_PROBE_OK_${W_NAME} "${_probe_ok}")
+        set_property(GLOBAL PROPERTY HKP_PACK_OFFERED_ENGINES_${W_NAME} "${_offered}")
+        _hkp_dormant_reason(_reason "${W_SOURCE_ROOT}" "${_shipped}" "${W_ARCHES}")
+    endif()
+
+    if(NOT _reason)
+        hkp_wire_pack_target(
+            NAME "${W_NAME}"
+            SOURCE_ROOT "${W_SOURCE_ROOT}"
+            ARCHES "${W_ARCHES}"
+            OUT_ROOT "${W_OUT_ROOT}"
+            ENABLE_ROCKE "${W_ENABLE_ROCKE}"
+            ${W_UNPARSED_ARGUMENTS}
+            EXCLUDE_FOLDERS ${W_EXCLUDE_FOLDERS})
+        set_property(GLOBAL PROPERTY HKP_PACK_SHIPPED_ENGINES_${W_NAME} "${_shipped}")
+        return()
+    endif()
+
+    # Every dormant reason passes through here, so none can reach a message(STATUS)
+    # while leaving the root looking misspelled to hkp_register_census_tests().
+    _hkp_record_dormant_pack("${W_NAME}")
+
+    # A tree left from an earlier configuration that did pack keeps being loaded: the
+    # engine selects the plugin-relative directory on existence alone, and nothing else
+    # removes it once the pack target and its install rule are gone.
+    if(W_OUT_ROOT)
+        file(REMOVE_RECURSE "${W_OUT_ROOT}")
+    endif()
+    _hkp_report_dormant("${_reason}" "${W_NAME}" "${W_SOURCE_ROOT}" "${W_ARCHES}"
+                        "${W_EXCLUDE_FOLDERS}" "${_disabled_pairs}")
+endfunction()
+
+# ---------------------------------------------------------------------------
 # hkp_add_packaging()
 #   Gate production packaging on ONE source root; producer selection is per-UKD on
-#   kernel_source.kind, so both producers are available to every root. Runs only under
-#   HIPDNN_ENABLE_KERNEL_INGESTOR, whose prerequisites it asserts first through
-#   hkp_require_ingestor_toolchain. rocKE is required for the test roots as much as for
-#   production, so it is resolved once here for every root; unresolvable comgr is fatal
-#   at configure.
+#   kernel_source.kind, so every enabled producer is available to every root. Runs only
+#   under HIPDNN_ENABLE_KERNEL_INGESTOR, whose prerequisites it asserts first through
+#   hkp_require_ingestor_toolchain.
 #
-#   The root defaults to the provider's in-tree descriptor root, which currently holds no
-#   descriptor, so production packaging is dormant unless the root is pointed at a
-#   populated one. Root empty, or holding no descriptor = dormant. The default root also
-#   goes dormant when no descriptor under it declares an architecture this build packs
-#   for; a named root in the same state is the packer's hard failure. Root set but not a
-#   directory = fatal. The tests are wired regardless.
+#   HIPKERNELPROVIDER_ENABLE_ROCKE decides rocKE for every root at once, test roots as
+#   much as production. ON resolves the rocKE toolchain once here for every root, and
+#   unresolvable comgr is fatal at configure. OFF resolves nothing rocKE and wires every
+#   root with ENABLE_ROCKE OFF: the hip producer packs alone and rocke UKDs prune.
+#   Independently, every root is packed with the folders of the HKP_DESCRIPTOR_FAMILIES
+#   whose option is OFF excluded.
+#
+#   The production root defaults to the provider's in-tree descriptor root. Every root,
+#   production and test, is wired through _hkp_wire_root(): dormant when its source root
+#   is empty, or when the packer, asked at configure with the same filters, would ship
+#   nothing for any architecture this build packs for -- a clean skip, not an error,
+#   whether the root was named or inherited. Production root set but not a directory =
+#   fatal.
 # ---------------------------------------------------------------------------
 function(hkp_add_packaging)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
@@ -1156,72 +1624,32 @@ function(hkp_add_packaging)
     hkp_resolve_kpack(_rocm_kpack_dir "${Python3_EXECUTABLE}")
     hkp_require_ingestor_toolchain(_arches)
 
-    _hkp_resolve_production_root(_source_root _source_root_is_default)
+    _hkp_resolve_production_root(_source_root)
 
-    _hkp_resolve_rocke_args(_rocke_args _rocke_comgr_lib)
-
-    # A KDP is what arch pruning consumes, so a root holding none has nothing to ship.
-    # Standalone UKD/UMD/UED/UDD/KMD/UHD files, kernel sources and READMEs do not make
-    # a pack.
-    _hkp_root_has_kdp(_product_has_content "${_source_root}")
-    if(NOT _source_root)
-        set(_product_dormant_reason "empty-root")
+    # One list for every root, so "every root is wired to rocKE identically" holds in
+    # both modes rather than at six sites that have to agree.
+    if(HIPKERNELPROVIDER_ENABLE_ROCKE)
+        _hkp_resolve_rocke_args(_rocke_resolved_args _rocke_comgr_lib)
+        set(_root_args ENABLE_ROCKE ON ${_rocke_resolved_args})
     else()
-        set(_product_dormant_reason "no-kdp")
+        set(_root_args ENABLE_ROCKE OFF)
+        set(_rocke_comgr_lib "")
+        message(STATUS
+            "hkp: rocKE disabled (HIPKERNELPROVIDER_ENABLE_ROCKE=OFF); packing with "
+            "the hip producer only")
     endif()
-
-    # Arch coverage is consulted for the DEFAULT root alone, which builds inherit without
-    # asking for it; a named root reaches the packer and fails there. Safe in one
-    # direction only: arch_matches() runs first inside kdp_survives(), so "no KDP
-    # declares an arch this build packs for" proves no KDP survives, and a root this
-    # misses stays wired for the packer to report.
-    if(_product_has_content AND _source_root_is_default)
-        _hkp_root_covers_any_arch(_product_covers_arch "${_source_root}" "${_arches}")
-        if(NOT _product_covers_arch)
-            set(_product_has_content FALSE)
-            set(_product_dormant_reason "no-arch")
-        endif()
-    endif()
+    _hkp_disabled_families(_exclude_folders)
+    list(APPEND _root_args EXCLUDE_FOLDERS ${_exclude_folders})
 
     # Production descriptors.
-    if(_source_root AND _product_has_content)
-        hkp_wire_pack_target(
-            NAME product
-            SOURCE_ROOT "${_source_root}"
-            ARCHES "${_arches}"
-            HIPCC "${HKP_HIPCC}"
-            ROCM_KPACK_DIR "${_rocm_kpack_dir}"
-            OUT_ROOT "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}"
-            ${_rocke_args})
-    else()
-        # Every dormant reason passes through here, so none can reach a message(STATUS)
-        # while leaving 'product' looking misspelled to hkp_register_census_tests().
-        _hkp_record_dormant_pack(product)
-
-        # A tree left from an earlier configuration that did pack keeps being loaded:
-        # the engine selects the plugin-relative directory on existence alone, and
-        # nothing else removes it once the pack target and its install rule are gone.
-        if(HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR)
-            file(REMOVE_RECURSE "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}")
-        endif()
-        # One message per reason. The arch line names the arch list because that is the
-        # value to change to make packing happen.
-        if(_product_dormant_reason STREQUAL "empty-root")
-            message(STATUS
-                "hkp: HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT is empty; production "
-                "packaging dormant (tests still run against the fixtures).")
-        elseif(_product_dormant_reason STREQUAL "no-arch")
-            message(STATUS
-                "hkp: the default production root '${_source_root}' declares no "
-                "descriptor for any architecture this build packs for (${_arches}), "
-                "so every descriptor under it would prune; production packaging "
-                "dormant (tests still run against the fixtures).")
-        else()
-            message(STATUS
-                "hkp: no *.kdp.json under '${_source_root}'; production packaging "
-                "dormant (tests still run against the fixtures).")
-        endif()
-    endif()
+    _hkp_wire_root(
+        NAME product
+        SOURCE_ROOT "${_source_root}"
+        ARCHES "${_arches}"
+        HIPCC "${HKP_HIPCC}"
+        ROCM_KPACK_DIR "${_rocm_kpack_dir}"
+        OUT_ROOT "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}"
+        ${_root_args})
 
     # Test descriptors, one pack per authored set. The shared root is packed into both
     # test roots, so both test binaries see the same authored descriptors; the two need
@@ -1230,58 +1658,58 @@ function(hkp_add_packaging)
     set(_unit "${HIPKERNELPROVIDER_UNIT_BUILD_DIR}")
     set(_integration "${HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR}")
 
-    hkp_wire_pack_target(
+    _hkp_wire_root(
         NAME unit_shared
         SOURCE_ROOT "${_authored}/${HIPKERNELPROVIDER_TEST_SET_SHARED}"
         ARCHES "${_arches}"
         HIPCC "${HKP_HIPCC}"
         ROCM_KPACK_DIR "${_rocm_kpack_dir}"
         OUT_ROOT "${_unit}/${HIPKERNELPROVIDER_TEST_SET_SHARED}"
-        ${_rocke_args}
-        PACK_JOBS 1)
+        PACK_JOBS 1
+        ${_root_args})
 
-    hkp_wire_pack_target(
+    _hkp_wire_root(
         NAME unit
         SOURCE_ROOT "${_authored}/${HIPKERNELPROVIDER_TEST_SET_UNIT}"
         ARCHES "${_arches}"
         HIPCC "${HKP_HIPCC}"
         ROCM_KPACK_DIR "${_rocm_kpack_dir}"
         OUT_ROOT "${_unit}/${HIPKERNELPROVIDER_TEST_SET_UNIT}"
-        ${_rocke_args}
-        PACK_JOBS 1)
+        PACK_JOBS 1
+        ${_root_args})
 
-    hkp_wire_pack_target(
+    _hkp_wire_root(
         NAME integration_shared
         SOURCE_ROOT "${_authored}/${HIPKERNELPROVIDER_TEST_SET_SHARED}"
         ARCHES "${_arches}"
         HIPCC "${HKP_HIPCC}"
         ROCM_KPACK_DIR "${_rocm_kpack_dir}"
         OUT_ROOT "${_integration}/${HIPKERNELPROVIDER_TEST_SET_SHARED}"
-        ${_rocke_args}
-        PACK_JOBS 1)
+        PACK_JOBS 1
+        ${_root_args})
 
-    hkp_wire_pack_target(
+    _hkp_wire_root(
         NAME integration
         SOURCE_ROOT "${_authored}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}"
         ARCHES "${_arches}"
         HIPCC "${HKP_HIPCC}"
         ROCM_KPACK_DIR "${_rocm_kpack_dir}"
         OUT_ROOT "${_integration}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}"
-        ${_rocke_args}
         # The only test root with enough distinct hip variants to build a worker
         # pool, so it is the one that exercises the parallel path in a real
         # build. Falls back to the serial path if that root ever drops below two.
-        PACK_JOBS 2)
+        PACK_JOBS 2
+        ${_root_args})
 
-    hkp_wire_pack_target(
+    _hkp_wire_root(
         NAME archive_fixture
         SOURCE_ROOT "${_authored}/${HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE}"
         ARCHES "${_arches}"
         HIPCC "${HKP_HIPCC}"
         ROCM_KPACK_DIR "${_rocm_kpack_dir}"
         OUT_ROOT "${_integration}/${HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE}"
-        ${_rocke_args}
-        PACK_JOBS 1)
+        PACK_JOBS 1
+        ${_root_args})
 
     hkp_register_tests("${_rocm_kpack_dir}" "${HKP_HIPCC}" "${_rocke_comgr_lib}")
 endfunction()
@@ -1296,6 +1724,13 @@ endfunction()
 #
 #   hipcc is a requirement of the whole ingestor, so the hipcc-dependent tests
 #   are hard-gated: their fixture fails on a missing hipcc rather than skipping.
+#
+#   Every rocKE test lives under tests/rocke/, which carries its own conftest; a
+#   new rocKE test goes there and nowhere else. With HIPKERNELPROVIDER_ENABLE_ROCKE
+#   OFF the build makes no rocKE toolchain for those tests to exercise, and a
+#   registered test that skips reads as coverage it is not, so both entries pass
+#   --ignore for that directory and never collect it. ON runs every test, and a
+#   rocKE fixture fails rather than skips on a missing toolchain.
 # ---------------------------------------------------------------------------
 function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
     if(NOT HIPKERNELPROVIDER_ENABLE_TESTS)
@@ -1341,13 +1776,20 @@ function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
             "-DHIPKERNELPROVIDER_ENABLE_TESTS=OFF.")
     endif()
 
+    set(_rocke_ignore "")
+    if(NOT HIPKERNELPROVIDER_ENABLE_ROCKE)
+        set(_rocke_ignore "--ignore=${HKP_PKG_DIR}/tests/rocke")
+    endif()
+
     add_test(NAME hip-kernel-provider-hkp-pack-quick
-             COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/tests" -m quick -v)
+             COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/tests" -m quick -v
+                     ${_rocke_ignore})
     set_tests_properties(hip-kernel-provider-hkp-pack-quick PROPERTIES
         ENVIRONMENT "${_pyenv}")
 
     add_test(NAME hip-kernel-provider-hkp-pack
-             COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/tests" -m "not quick" -v)
+             COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/tests" -m "not quick" -v
+                     ${_rocke_ignore})
     set_tests_properties(hip-kernel-provider-hkp-pack PROPERTIES
         ENVIRONMENT "${_pyenv}")
 
@@ -1385,6 +1827,120 @@ endfunction()
 
 
 # ---------------------------------------------------------------------------
+# _hkp_record_census_install_entry(<name> <target> <filter> <env> <pass-regex>)
+#   Accumulate the installed twin of one census entry into this architecture's shard.
+#
+#   The installed entry is the same definition as the build-tree one, differing only in
+#   that every absolute build path becomes a path relative to the shard file that will
+#   carry it. Emitting both from one definition is what stops the two inventories
+#   drifting.
+#
+#   Offsets are not known here. The two descriptor roots are rewritten to placeholders
+#   and the binary is left as one, for hkp_finalize_census_install() to resolve once it
+#   has CMAKE_INSTALL_BINDIR and the plugin engine directory. The test root is rewritten
+#   first: both roots sit under the same engine directory, and doing the shorter one
+#   first would leave the longer one half-substituted.
+#
+#   Labels are not known here either: the build-tree entry receives its tier labels from
+#   HKP_PACK_CTEST_CATEGORIES_YAML only after every entry of the call is registered. The
+#   twin carries a per-entry placeholder that _hkp_resolve_census_install_labels()
+#   replaces with the labels the build-tree entry ends up with.
+# ---------------------------------------------------------------------------
+function(_hkp_record_census_install_entry _name _target _filter _env _pass_regex)
+    # _arch is read from the calling scope rather than passed: every caller is
+    # _hkp_add_census_entry, which already has it, and threading it through would put
+    # both this function and _hkp_add_census_test one argument over the limit. The
+    # guard is what keeps that implicit read honest -- without it an unset _arch files
+    # the entry under an empty architecture and the shard silently never appears.
+    if(NOT _arch)
+        message(FATAL_ERROR
+            "hkp: _hkp_record_census_install_entry reached with no _arch in scope, "
+            "so census entry '${_name}' has no shard to be filed under. It is "
+            "callable only from _hkp_add_census_entry.")
+    endif()
+    set(_install_env "${_env}")
+    if(DEFINED HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR)
+        string(REPLACE "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}"
+                       "@HKP_CENSUS_TEST_ROOT@" _install_env "${_install_env}")
+    endif()
+    if(DEFINED HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR)
+        string(REPLACE "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}"
+                       "@HKP_CENSUS_PRODUCT_ROOT@" _install_env "${_install_env}")
+    endif()
+
+    set(_text "add_test([=[${_name}]=] \"@HKP_CENSUS_BINDIR@/${_target}${CMAKE_EXECUTABLE_SUFFIX}\" \"--gtest_filter=${_filter}\")\n")
+    string(APPEND _text
+        "set_tests_properties([=[${_name}]=] PROPERTIES"
+        " ENVIRONMENT \"${_install_env}\""
+        " LABELS \"@HKP_CENSUS_LABELS:${_name}@\""
+        " TIMEOUT 300")
+    if(DEFINED TEST_ENVIRONMENT_MODIFICATION)
+        string(APPEND _text
+            " ENVIRONMENT_MODIFICATION \"${TEST_ENVIRONMENT_MODIFICATION}\"")
+    endif()
+    if(_pass_regex)
+        string(APPEND _text " PASS_REGULAR_EXPRESSION \"${_pass_regex}\"")
+    else()
+        string(APPEND _text " FAIL_REGULAR_EXPRESSION \"Census: \"")
+    endif()
+    string(APPEND _text ")\n")
+
+    set_property(GLOBAL APPEND_STRING PROPERTY HKP_CENSUS_SHARD_TEXT_${_arch} "${_text}")
+    set_property(GLOBAL APPEND PROPERTY HKP_CENSUS_SHARD_ARCHES "${_arch}")
+    set_property(GLOBAL APPEND PROPERTY HKP_CENSUS_UNLABELLED_${_arch} "${_name}")
+endfunction()
+
+
+# ---------------------------------------------------------------------------
+# _hkp_label_census_entries(<arch>...)
+#   Tier-label the census entries hkp_register_census_tests() just add_test()'d, then give
+#   their installed twins at each <arch> the same labels.
+#
+#   Called from hkp_register_census_tests(); a CMake function opens no directory scope of
+#   its own, so the YAML's regex patterns reach those entries through the parser's
+#   directory-property enumeration (see hkp_register_tests() for why EXPLICIT_TESTS is not
+#   used). Tier expansion is the parser's, which is why _hkp_add_census_test()'s literal
+#   LABELS string cannot carry it.
+# ---------------------------------------------------------------------------
+function(_hkp_label_census_entries)
+    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED
+       AND COMMAND apply_ctest_category_labels)
+        apply_ctest_category_labels("${HKP_PACK_CTEST_CATEGORIES_YAML}")
+    endif()
+    _hkp_resolve_census_install_labels(${ARGN})
+endfunction()
+
+
+# ---------------------------------------------------------------------------
+# _hkp_resolve_census_install_labels(<arch>...)
+#   Give every installed census twin recorded at <arch> the labels its build-tree entry
+#   carries now, and forget it as pending.
+#
+#   Copying the build-tree labels, rather than re-deriving them for the installed file,
+#   is what keeps the two trees in the same tiers. The YAML's census pattern is a regex,
+#   which the parser expands against the directory's registered tests; ctest reading an
+#   installed file has no such enumeration, so a twin labelled only by its literal
+#   descriptive labels would drop out of `ctest -L quick` in the install tree while
+#   running in it in the build tree.
+#
+#   Callable only from the directory scope that add_test()'d the entries, which is the
+#   only scope in which their TEST properties can be read.
+# ---------------------------------------------------------------------------
+function(_hkp_resolve_census_install_labels)
+    foreach(_arch IN LISTS ARGN)
+        get_property(_pending GLOBAL PROPERTY HKP_CENSUS_UNLABELLED_${_arch})
+        get_property(_text GLOBAL PROPERTY HKP_CENSUS_SHARD_TEXT_${_arch})
+        foreach(_name IN LISTS _pending)
+            get_property(_labels TEST "${_name}" PROPERTY LABELS)
+            string(REPLACE "@HKP_CENSUS_LABELS:${_name}@" "${_labels}" _text "${_text}")
+        endforeach()
+        set_property(GLOBAL PROPERTY HKP_CENSUS_SHARD_TEXT_${_arch} "${_text}")
+        set_property(GLOBAL PROPERTY HKP_CENSUS_UNLABELLED_${_arch} "")
+    endforeach()
+endfunction()
+
+
+# ---------------------------------------------------------------------------
 # _hkp_add_census_test(<name> <target> <gtest-filter> <environment> <pass-regex>)
 #
 # One CTest entry of a census family. Entry and controls go through here so a drifting
@@ -1411,6 +1967,9 @@ function(_hkp_add_census_test _name _target _filter _environment _pass_regex)
         list(APPEND _merged_environment ${TEST_ENVIRONMENT})
     endif()
     list(APPEND _merged_environment ${_environment})
+
+    _hkp_record_census_install_entry("${_name}" "${_target}" "${_filter}"
+                                     "${_merged_environment}" "${_pass_regex}")
 
     # A census run is one host-only process -- no device, no compile -- so it lands in
     # seconds. 300 absorbs a sanitizer build's slowdown, well inside ctest's 1500 s
@@ -1483,7 +2042,7 @@ function(_hkp_add_census_entry _target _suite _arch _shard _cases)
 
     # Control: the loaded packs carry a stamp other than the expected one. Identical to
     # the entry but for the expected arch: 'gfxhkpcensuscontrol' fails
-    # hkp_selected_arches()'s ^gfx[0-9a-f]+$ filter, the only path by which an arch
+    # hkp_selected_arches()'s ^gfx[0-9a-f]+(-[a-z]+)*$ filter, the only path by which an arch
     # reaches a shard name. The regex is the stamp comparison's own wording.
     _hkp_add_census_test("${_name}-control-unexpected-stamp" "${_target}" "${_suite}.*"
                          "${_env_without_arch};HIPDNN_TEST_EXPECTED_ARCH=gfxhkpcensuscontrol;HIPDNN_DESCRIPTOR_DIR=${_shard}${_pin}"
@@ -1527,6 +2086,53 @@ endfunction()
 
 
 # ---------------------------------------------------------------------------
+# _hkp_census_resolve_arches(<out> <pack_name> <requested> <suites> <missing_kw>)
+#   The architectures to register <suites> at: every architecture <pack_name> was wired
+#   for when <requested> is empty, otherwise those of <requested> that the pack was also
+#   wired for.
+#
+#   A suite states the inventory its bundle emitted, and a bundle emits for the
+#   architectures it declares -- not for whatever the build selected. Registering the
+#   intersection is what keeps a census addressing a shard its suite has something to say
+#   about; the empty intersection registers nothing, which is a configuration fact rather
+#   than an error, and says so at STATUS.
+# ---------------------------------------------------------------------------
+function(_hkp_census_resolve_arches out_var pack_name requested suites missing_kw)
+    set(${out_var} "" PARENT_SCOPE)
+    if("ARCHES" IN_LIST missing_kw)
+        message(FATAL_ERROR
+            "hkp: census suites are declared (${suites}) with an ARCHES keyword that "
+            "names no architecture. An empty list intersects to nothing, so the census "
+            "would register nothing in every configuration while reading as a narrowed "
+            "one. Name the architectures the suites' bundle emits for, or drop the "
+            "keyword to take every architecture the pack target was wired for.")
+    endif()
+
+    get_property(_wired GLOBAL PROPERTY HKP_PACK_ARCHES_${pack_name})
+    if(NOT requested)
+        set(${out_var} "${_wired}" PARENT_SCOPE)
+        return()
+    endif()
+
+    set(_selected "")
+    foreach(_arch IN LISTS requested)
+        if(_arch IN_LIST _wired)
+            list(APPEND _selected "${_arch}")
+        endif()
+    endforeach()
+
+    if(NOT _selected)
+        message(STATUS
+            "hkp: census suites (${suites}) at pack target '${pack_name}' request "
+            "architectures (${requested}) that this build did not wire it for "
+            "(${_wired}), so no entry is registered. The suites state an inventory for "
+            "architectures this configuration does not pack.")
+    endif()
+    set(${out_var} "${_selected}" PARENT_SCOPE)
+endfunction()
+
+
+# ---------------------------------------------------------------------------
 # The emitted-bundle census. Each generated engine ships a GTest suite that reads what
 # loaded through discoverDescriptorSets() and loadValidatedDescriptorSets<Handle>(), and
 # compares the loaded pack/kernel identities, runtime source kind and SDK version against
@@ -1544,13 +2150,19 @@ endfunction()
 # an unknown name stays fatal. EXPECTED_CASES optionally pins ONE suite's case-name set
 # -- names, never a count, because a case added and a case lost cancel in a count -- and
 # supplying the keyword with no names is fatal.
+#
+# ARCHES optionally narrows which architectures the suites are registered at: omitted
+# takes every architecture the pack target was wired for, given takes the intersection
+# with that list, and naming the keyword with no architecture is fatal. A suite covering
+# the whole root omits it; one stating the inventory of a bundle that emits for specific
+# architectures names them.
 # ---------------------------------------------------------------------------
 function(hkp_register_census_tests)
     if(NOT HIPKERNELPROVIDER_ENABLE_TESTS)
         return()
     endif()
 
-    cmake_parse_arguments(PARSE_ARGV 0 ARG "" "TARGET;PACK_NAME" "SUITES;EXPECTED_CASES")
+    cmake_parse_arguments(PARSE_ARGV 0 ARG "" "TARGET;PACK_NAME" "SUITES;EXPECTED_CASES;ARCHES")
     if(ARG_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR
             "hkp_register_census_tests: unrecognised argument(s): "
@@ -1590,12 +2202,20 @@ function(hkp_register_census_tests)
     endif()
 
     get_property(_out_root GLOBAL PROPERTY HKP_PACK_OUT_ROOT_${ARG_PACK_NAME})
-    get_property(_arches GLOBAL PROPERTY HKP_PACK_ARCHES_${ARG_PACK_NAME})
-    if(NOT _arches)
+    get_property(_wired_arches GLOBAL PROPERTY HKP_PACK_ARCHES_${ARG_PACK_NAME})
+    if(NOT _wired_arches)
         message(FATAL_ERROR
             "hkp: census suites are declared (${ARG_SUITES}) at pack target "
             "'${ARG_PACK_NAME}', which was wired with an empty architecture list, "
             "so no shard exists to census. Set GPU_TARGETS/AMDGPU_TARGETS.")
+    endif()
+
+    # Which of those the suites actually have something to say about; an empty result has
+    # already said why at STATUS.
+    _hkp_census_resolve_arches(_arches "${ARG_PACK_NAME}" "${ARG_ARCHES}"
+                               "${ARG_SUITES}" "${ARG_KEYWORDS_MISSING_VALUES}")
+    if(NOT _arches)
+        return()
     endif()
 
     # A pin names ONE suite's cases. Spread over several it would demand that each
@@ -1632,14 +2252,157 @@ function(hkp_register_census_tests)
         endforeach()
     endforeach()
 
-    # The loop above add_test()'d every entry in THIS directory scope -- a CMake function
-    # opens none of its own -- so the YAML's regex patterns reach them through the
-    # parser's directory-property enumeration; see hkp_register_tests() for why
-    # EXPLICIT_TESTS is not used. Tier expansion is the parser's, which is why
-    # _hkp_add_census_test()'s literal LABELS string cannot carry it. The call sits after
-    # the loop because every return above it registers nothing.
-    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED
-       AND COMMAND apply_ctest_category_labels)
-        apply_ctest_category_labels("${HKP_PACK_CTEST_CATEGORIES_YAML}")
+    # Labelling sits after the loop because every return above it registers nothing.
+    _hkp_label_census_entries(${_arches})
+endfunction()
+
+
+# ---------------------------------------------------------------------------
+# hkp_reserve_census_shard(<out> <arch>)
+#   Reserve <arch>'s census shard and return the prefix-relative directory holding it.
+#
+#   This module owns the layout, so asking it for the path keeps that string out of the
+#   call sites. The reservation is the other half and is why this is not a plain getter:
+#   hkp_finalize_census_install() only visits architectures listed in
+#   HKP_CENSUS_SHARD_ARCHES. An architecture carrying engine-pinned external entries but
+#   no census would otherwise never be visited and its entries would be dropped without a
+#   word.
+#
+#   Reserving an architecture that turns out to hold nothing is harmless -- the finalizer
+#   skips a shard with no content of any kind.
+# ---------------------------------------------------------------------------
+function(hkp_reserve_census_shard out_var arch)
+    set_property(GLOBAL APPEND PROPERTY HKP_CENSUS_SHARD_ARCHES "${arch}")
+    set(${out_var}
+        "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}/census/${arch}"
+        PARENT_SCOPE)
+endfunction()
+
+
+# ---------------------------------------------------------------------------
+# hkp_finalize_census_install(COMMON_TEST_FILE <file> BINDIR <dir> PLUGIN_ENGINE_DIR <dir>)
+#   Materialise the installed census: one CTest file per architecture that actually has
+#   entries, plus the stub in the common entrypoint that finds them. The stub is written
+#   even when this configuration has no shard architecture at all: it is arch-neutral, and
+#   an install may pair this build's common CTest file with shards another build produced,
+#   so the common file must not depend on this build's GPU targets.
+#
+#   Call once, AFTER every hkp_register_census_tests() has run and after <file> exists.
+#   The registrations happen in a test subdirectory that is added before the common file
+#   is created, so they accumulate into global properties and this drains them; appending
+#   directly from the registration site would write into a file that does not exist yet.
+#
+#   Shard files are written into the test descriptor BUILD tree, which an existing
+#   install(DIRECTORY) already ships wholesale to
+#   <plugin-engine-dir>/test_arch_content/hip-kernel-provider. Their destination is
+#   therefore reached without a second install rule, and an architecture pruned out of an
+#   artifact takes its CTest file with it.
+#
+#   Discovery is a working-directory-relative glob plus subdirs(), deliberately. It must
+#   survive the prefix being moved, so it cannot hold a configure-time absolute path; and
+#   CMAKE_CURRENT_LIST_DIR and friends are unset when CTest reads these files, so the
+#   relative form is not merely tidier, it is the only one that resolves. Discovery keys
+#   on a materialised CTest file and nothing else.
+# ---------------------------------------------------------------------------
+function(hkp_finalize_census_install)
+    cmake_parse_arguments(PARSE_ARGV 0 ARG ""
+                          "COMMON_TEST_FILE;BINDIR;PLUGIN_ENGINE_DIR" "")
+
+    # Shards are written at configure time into a tree that is installed wholesale, and
+    # the discovery stub registers every shard it finds, so one left by an earlier
+    # configuration -- an architecture since dropped, a root since redirected -- would
+    # keep shipping its entries. Every shard this configuration carries is rewritten below.
+    if(HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR)
+        file(REMOVE_RECURSE "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/census")
     endif()
+
+    # A prefix that cannot exist, so every offset below is arithmetic on the install
+    # layout alone and nothing resolves against this machine.
+    set(_synthetic "/__hipdnn_install_root__")
+    set(_census_root
+        "${_synthetic}/${ARG_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}/census")
+
+    get_property(_arches GLOBAL PROPERTY HKP_CENSUS_SHARD_ARCHES)
+    if(_arches)
+        list(REMOVE_DUPLICATES _arches)
+    endif()
+
+    foreach(_arch IN LISTS _arches)
+        # A reserved architecture need not hold anything: hkp_reserve_census_shard() is
+        # called wherever a shard destination is needed, which can be ahead of the gate
+        # that decides whether this configuration ships the engine at all. Skip the ones
+        # that ended up empty, and take census text, staged entries and the per-arch file
+        # together so a shard carrying only external entries still gets written.
+        get_property(_text GLOBAL PROPERTY HKP_CENSUS_SHARD_TEXT_${_arch})
+        get_property(_external GLOBAL PROPERTY
+                     EXTERNAL_TEST_INSTALL_STAGING_hkp_census_${_arch})
+        get_property(_external_file GLOBAL PROPERTY
+                     HKP_CENSUS_EXTERNAL_TEST_FILE_${_arch})
+        set(_external_text "")
+        if(_external_file AND EXISTS "${_external_file}")
+            file(READ "${_external_file}" _external_text)
+        endif()
+        if(NOT _text AND NOT _external AND NOT _external_text)
+            continue()
+        endif()
+
+        set(_shard_dir "${_census_root}/${_arch}")
+        file(RELATIVE_PATH _bindir_rel "${_shard_dir}" "${_synthetic}/${ARG_BINDIR}")
+        file(RELATIVE_PATH _test_root_rel "${_shard_dir}"
+             "${_synthetic}/${ARG_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}")
+        file(RELATIVE_PATH _product_root_rel "${_shard_dir}"
+             "${_synthetic}/${ARG_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
+
+        string(REPLACE "@HKP_CENSUS_BINDIR@" "${_bindir_rel}" _text "${_text}")
+        string(REPLACE "@HKP_CENSUS_TEST_ROOT@" "${_test_root_rel}" _text "${_text}")
+        string(REPLACE "@HKP_CENSUS_PRODUCT_ROOT@" "${_product_root_rel}" _text "${_text}")
+
+        # Engine-pinned external entries routed to this architecture's shard, so pruning
+        # removes them along with the engine they name; the call site says why that
+        # matters. Their offsets were computed against this directory at staging time,
+        # which is why nothing here rewrites them.
+        if(_external)
+            string(APPEND _text
+                "\n# Engine-pinned external integration entries for ${_arch}.\n"
+                "${_external}")
+        endif()
+
+        # The categorized half of the same story, which reaches the install tree by being
+        # appended to a file rather than to a property.
+        if(_external_text)
+            string(APPEND _text
+                "\n# Engine-pinned external integration suites for ${_arch}.\n"
+                "${_external_text}")
+        endif()
+
+        file(WRITE
+            "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/census/${_arch}/CTestTestfile.cmake"
+            "# Census entries for ${_arch}, generated by hkp_finalize_census_install().\n"
+            "# Paths are relative to this file's own directory so the prefix can move.\n"
+            "${_text}")
+    endforeach()
+
+    # Callers supply an entrypoint in both categorization modes, so this is a defect
+    # rather than a configuration, and shipping shards nobody can discover is otherwise
+    # silent.
+    if(NOT ARG_COMMON_TEST_FILE)
+        message(WARNING
+            "hkp: no common CTest entrypoint was supplied, so the per-architecture census "
+            "shards are installed but nothing discovers them. Engine-pinned entries routed "
+            "to a shard will be absent from the install tree.")
+        return()
+    endif()
+
+    file(RELATIVE_PATH _discovery_rel
+         "${_synthetic}/${ARG_BINDIR}/hip_kernel_provider" "${_census_root}")
+    file(APPEND "${ARG_COMMON_TEST_FILE}"
+"
+# Census shards. One directory per architecture whose entries this artifact still
+# carries; a pruned architecture leaves no CTest file and contributes no tests.
+file(GLOB _hkp_census_shards \"${_discovery_rel}/*/CTestTestfile.cmake\")
+foreach(_hkp_census_shard IN LISTS _hkp_census_shards)
+    get_filename_component(_hkp_census_dir \"\${_hkp_census_shard}\" DIRECTORY)
+    subdirs(\"\${_hkp_census_dir}\")
+endforeach()
+")
 endfunction()

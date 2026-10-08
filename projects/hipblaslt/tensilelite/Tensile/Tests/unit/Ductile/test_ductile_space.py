@@ -274,3 +274,46 @@ class TestSampleChunk:
         out = sample_chunk(lambda _ind: True, p=p, sizes=sizes, chunk_size=10, seed=321)
         assert len(out) == 10
         assert all(ind["A"] == 0 for ind in out)
+
+
+# ---------------------------------------------------------------------------
+# DUCTILE_LOG_VALIDATION stdout suppression toggle
+# ---------------------------------------------------------------------------
+
+class TestDuctileLogValidation:
+    def test_stdout_suppressed_by_default(self, monkeypatch, capsys):
+        monkeypatch.delenv("DUCTILE_LOG_VALIDATION", raising=False)
+        monkeypatch.setattr(space_mod, "DUCTILE_LOG_VALIDATION", False)
+
+        def valid(ind):
+            print("validating")
+            return True
+
+        sample_chunk(valid, p={}, sizes={"A": 2}, chunk_size=1, seed=1)
+
+        assert capsys.readouterr().out == ""
+
+    def test_stdout_visible_when_env_var_set(self, monkeypatch, capsys):
+        monkeypatch.setattr(space_mod, "DUCTILE_LOG_VALIDATION", True)
+
+        def valid(ind):
+            print("validating")
+            return True
+
+        sample_chunk(valid, p={}, sizes={"A": 2}, chunk_size=1, seed=1)
+
+        assert "validating" in capsys.readouterr().out
+
+    def test_env_var_reload_sets_flag_true(self, monkeypatch):
+        monkeypatch.setenv("DUCTILE_LOG_VALIDATION", "1")
+        reloaded = importlib.reload(space_mod)
+        try:
+            assert reloaded.DUCTILE_LOG_VALIDATION is True
+        finally:
+            monkeypatch.delenv("DUCTILE_LOG_VALIDATION", raising=False)
+            importlib.reload(space_mod)
+
+    def test_env_var_reload_sets_flag_false_when_unset(self, monkeypatch):
+        monkeypatch.delenv("DUCTILE_LOG_VALIDATION", raising=False)
+        reloaded = importlib.reload(space_mod)
+        assert reloaded.DUCTILE_LOG_VALIDATION is False
