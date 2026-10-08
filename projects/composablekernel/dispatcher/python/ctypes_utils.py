@@ -1080,6 +1080,24 @@ def _clip_stderr(text: str, limit: int = _STDERR_REASON_CHARS) -> str:
     return f"{text[:limit]}... [clipped, {len(text)} chars total]"
 
 
+def _fail_reason(what: str, stderr: str, returncode: int) -> str:
+    """``what`` plus the clipped stderr, or an explicit note that there is none.
+
+    A tool can exit non-zero with nothing on stderr -- killed by a signal, or a
+    wrapper that writes only to stdout. Formatting that as a bare
+    ``"Compile failed: "`` hands the caller a *truthy* string with no reason in
+    it, which sails straight past the ``err or "...no reason reported"``
+    fallbacks downstream and reproduces the very symptom this PR is fixing: a
+    `build_fail` line with nothing after it. The exit code goes in because when
+    there is no stderr it is the only evidence left (139 is a segfault, 134 an
+    abort, -9 the OOM killer).
+    """
+    clipped = _clip_stderr(stderr)
+    if not clipped.strip():
+        return f"{what} (exit {returncode}, no stderr output)"
+    return f"{what}: {clipped}"
+
+
 def _run_hipcc_subprocess(args: dict) -> Tuple[bool, Optional[Path], str]:
     """Module-level function to run hipcc compilation in parallel."""
     import subprocess
@@ -1098,11 +1116,13 @@ def _run_hipcc_subprocess(args: dict) -> Tuple[bool, Optional[Path], str]:
             timeout=args.get("compile_timeout", 300),
         )
         if res_c.returncode != 0:
-            return False, None, f"Compile failed: {_clip_stderr(res_c.stderr)}"
+            reason = _fail_reason("Compile failed", res_c.stderr, res_c.returncode)
+            return False, None, reason
 
         res_l = subprocess.run(link_cmd, capture_output=True, text=True, timeout=300)
         if res_l.returncode != 0:
-            return False, None, f"Link failed: {_clip_stderr(res_l.stderr)}"
+            reason = _fail_reason("Link failed", res_l.stderr, res_l.returncode)
+            return False, None, reason
 
         return True, lib_path, ""
     except subprocess.TimeoutExpired:
@@ -1160,7 +1180,8 @@ def _generate_single_kernel_subprocess(args: dict) -> Tuple[bool, Optional[str],
             os.unlink(config_file)
 
             if res.returncode != 0:
-                return False, None, f"Codegen failed: {_clip_stderr(res.stderr)}"
+                reason = _fail_reason("Codegen failed", res.stderr, res.returncode)
+                return False, None, reason
 
             # Only this call's output is in gen_dir, so the match is exact.
             pattern = args["hpp_glob_pattern"]

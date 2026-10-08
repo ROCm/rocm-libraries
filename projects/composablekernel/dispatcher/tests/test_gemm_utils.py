@@ -739,6 +739,54 @@ class TestBuildFailureReasons(unittest.TestCase):
         # subprocess with text=True can hand back None if stderr was not piped.
         self.assertEqual(_cu._clip_stderr(None), "")
 
+    def test_failure_with_no_stderr_still_says_something(self):
+        # A compiler killed by a signal writes nothing. "Compile failed: " is
+        # truthy, so it would slide past every `err or "<placeholder>"` guard
+        # downstream and print as a build_fail with a blank reason -- the exact
+        # symptom this PR exists to remove. The exit code is then the only
+        # evidence there is, so it has to be in the string.
+        res = mock.Mock(returncode=-9, stderr="")
+        with mock.patch("subprocess.run", return_value=res):
+            ok, _, reason = _cu._run_hipcc_subprocess(_hipcc_job())
+        self.assertFalse(ok)
+        self.assertNotEqual(reason.strip(), "Compile failed:")
+        self.assertIn("no stderr output", reason)
+        self.assertIn("-9", reason)
+
+    def test_whitespace_only_stderr_counts_as_no_stderr(self):
+        # A lone newline is not a diagnostic; treating it as one gives a reason
+        # that renders as a blank line in the summary.
+        res = mock.Mock(returncode=1, stderr="\n  \n")
+        with mock.patch("subprocess.run", return_value=res):
+            _, _, reason = _cu._run_hipcc_subprocess(_hipcc_job())
+        self.assertIn("no stderr output", reason)
+
+    def test_every_reason_site_goes_through_one_placeholder(self):
+        # The codegen site (_generate_single_kernel_subprocess) is driven
+        # against a real codegen in test_quant_target_header_regressions, so
+        # assert the shared helper instead of standing up a third subprocess
+        # mock: all three sites format through it, and a new site that does not
+        # is the thing to catch in review.
+        self.assertEqual(
+            _cu._fail_reason("Codegen failed", "bad tile", 1),
+            "Codegen failed: bad tile",
+        )
+        self.assertIn("no stderr output", _cu._fail_reason("Codegen failed", "", 1))
+        self.assertIn("no stderr output", _cu._fail_reason("Codegen failed", None, 1))
+
+    def test_link_failure_with_no_stderr_keeps_its_prefix(self):
+        # The compile/link distinction still has to survive the placeholder.
+        def run(cmd, **kwargs):
+            if "-shared" in cmd:
+                return mock.Mock(returncode=134, stderr="")
+            return mock.Mock(returncode=0, stderr="")
+
+        with mock.patch("subprocess.run", side_effect=run):
+            _, _, reason = _cu._run_hipcc_subprocess(_hipcc_job())
+        self.assertTrue(reason.startswith("Link failed"), reason)
+        self.assertIn("no stderr output", reason)
+        self.assertIn("134", reason)
+
 
 # --- Build-failure reasons reach the caller ---------------------------------
 # The worker end is covered above; this is the bridge end. The reasons used to
@@ -838,6 +886,32 @@ class TestBuildErrorsOutParameter(unittest.TestCase):
         )
         self.assertEqual(paths, [Path("k.so")])
         self.assertEqual(errors, {})
+
+    def test_a_reused_dict_does_not_keep_a_stale_reason(self):
+        # Only failures are written, so without an upfront clear a caller that
+        # reuses one dict -- a sweep rebuilding after a toolchain fix -- reads
+        # last run's "clang++: not found" for a config that now builds clean,
+        # and reports a green build as failed.
+        cfg_name = _buildable_config().name
+        errors = {cfg_name: "Compile failed: clang++: not found"}
+        paths, cfg = self._run_bridge(
+            codegen_result=(True, "k.hpp", ""),
+            compile_result=(True, "k.so", ""),
+            errors=errors,
+        )
+        self.assertEqual(paths, [Path("k.so")])
+        self.assertNotIn(cfg.name, errors)
+
+    def test_clearing_leaves_other_callers_entries_alone(self):
+        # The clear is scoped to the names this call was handed. A dict shared
+        # across two config groups must not lose the other group's reasons.
+        errors = {"some_other_kernel": "Codegen failed: bad tile"}
+        _, _ = self._run_bridge(
+            codegen_result=(True, "k.hpp", ""),
+            compile_result=(True, "k.so", ""),
+            errors=errors,
+        )
+        self.assertEqual(errors, {"some_other_kernel": "Codegen failed: bad tile"})
 
     def test_omitting_errors_is_unchanged(self):
         # The backward-compatibility guarantee for the ~15 other call sites:

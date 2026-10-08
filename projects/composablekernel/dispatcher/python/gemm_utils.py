@@ -2238,7 +2238,10 @@ def setup_multiple_gemm_dispatchers(
     *_full_benchmark.py drivers, the examples bridge, eight tests); changing
     the return type to carry the reasons would have to touch every one of them
     to deliver information only the search-space sweep consumes. Keyword-only
-    so a stray positional third argument can never land in it.
+    so a stray positional third argument can never land in it. The dict is not
+    required to be empty, but every name in ``configs`` is cleared from it
+    first, so on return it describes *this* call for those names and nothing
+    else; entries for names this call never saw are left alone.
 
     Without this the reasons are computed and thrown away unless verbose=True
     -- which is how a TheRock image with a bad HIP_CLANG_PATH produced 64 lines
@@ -2248,6 +2251,18 @@ def setup_multiple_gemm_dispatchers(
 
     n = len(configs)
     results: List[Optional[Path]] = [None] * n
+
+    # Only failures are written below, so a caller that reuses one dict across
+    # calls -- a sweep retrying a config after a toolchain fix, say -- would
+    # keep reading last call's reason for a config that now builds clean. Drop
+    # every name this call is about before anything is recorded, so "absent"
+    # means "built" rather than "never asked". Done before the n == 0 and
+    # permute_n exits too: a call that produced no verdict must not leave an
+    # older one standing in for it.
+    if errors is not None:
+        for c in configs:
+            errors.pop(c.name, None)
+
     if n == 0:
         return results
 
