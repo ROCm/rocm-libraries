@@ -10,6 +10,7 @@ until every required primitive and correctness/perf path is present.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Dict, Optional, Tuple
 
@@ -1436,6 +1437,19 @@ def _kv_storage_dtype(problem: UnifiedAttentionProblem) -> Optional[str]:
     return "fp8e4m3" if problem.use_fp8 else None
 
 
+def _binary_search_iters(problem: UnifiedAttentionProblem) -> int:
+    """Trip count of the seq_idx binary search the tiled kernels bake into IR.
+
+    Mirrors ``binary_search_iters`` on the gfx942/gfx950/gfx1250 tiled 2D and
+    gfx942/gfx950 tiled 3D spec classes, which derive it from ``spec.num_seqs``.
+    It is the only way ``num_seqs`` reaches emitted IR, so the tiled cache keys
+    carry this bucket instead of the raw batch count.
+    """
+    if problem.num_seqs <= 0:
+        return 32
+    return max(1, int(math.ceil(math.log2(problem.num_seqs + 1))))
+
+
 def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
     """Compute the tiled-2D cache key WITHOUT building the spec dataclass.
 
@@ -1445,14 +1459,23 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
     which is material on decode kernels (~20µs). The spec is only built
     on cache miss (first launch per shape) inside ``_get_2d_launcher``.
 
-    Note: this MUST match the spec-derived key — every selector knob
-    that affects the kernel build is included. If a selector changes
-    behaviour, update both this function and ``_tiled_spec_from_problem``.
+    Note: this MUST match the spec-derived key. The key carries static problem
+    fields plus the RESOLVED output of every selector the builder consults, and
+    no raw dynamic shape field (``num_seqs``, ``total_q``, ``max_seqlen_q``,
+    ``max_seqlen_k``). A raw field compiles one binary per value; a selector
+    missing from the key lets two shapes that build different kernels share
+    one cache slot. ``num_seqs`` reaches IR only through
+    ``_binary_search_iters``. Launch values that scale with the shape (the
+    grid) are keyed separately in ``_get_2d_launch_meta``. When adding a
+    selector to ``_tiled_spec_from_problem``, add its resolved output here;
+    ``test_attention_tiled_cache_key.py`` sweeps the selector thresholds and
+    fails if two problems share a key but build different specs.
     """
     return (
         "tiled",
         _resolve_attention_arch(),
         problem.num_seqs,
+        _binary_search_iters(problem),
         problem.num_query_heads,
         problem.num_kv_heads,
         problem.head_size,
@@ -1494,6 +1517,29 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _enable_transposed_subflags(problem),
         _enable_v_double_buffer(problem),
         _enable_early_v_schedule(problem),
+        # The builder derives the scalar-state / mask / skip-qreg / fast-paged-KV
+        # spec fields from the combo predicate, which reads max_seqlen_q.
+        _enable_combo_2d(problem),
+        # gfx950 schedule tail of `_spec_gfx950_generic`. All three are false
+        # outside the single-batch cohort (num_seqs == 1), so gate on it and
+        # spare every other launch the selector walks.
+        (
+            (
+                _enable_sched_barrier(problem),
+                _enable_softmax_mfma_interleave(problem),
+                _enable_k_single_buffer(problem),
+            )
+            if _enable_single_batch_combo(problem)
+            else None
+        ),
+        # Reads max_seqlen_q and max_seqlen_k (the 16 * T threshold). The
+        # gfx1250 builder never sets this field, so keying it there would only
+        # split identical kernels.
+        (
+            _enable_fp8_mfma_qk(problem)
+            if _resolve_attention_arch() != "gfx1250"
+            else None
+        ),
         _enable_register_pv(problem),
         _enable_i64_kv_addr(problem),
         _select_2d_compile_backend(problem),
@@ -1651,12 +1697,13 @@ def _enable_fp8_mfma_qk(problem: UnifiedAttentionProblem) -> bool:
     # path. Never combine them.
     if _enable_combo_2d(problem):
         return False
-    if not _fp8_qk_loader_fits(problem):
-        return False
     # Large prefill (long per-CTA KV loop) prefers the sync-dequant path
     # regardless of sliding window; the K-in-LDS loader only wins when the
-    # KV loop is short (decode / short prefill).
+    # KV loop is short (decode / short prefill). Checked before the loader fit
+    # because the cache key evaluates this on every fp8 launch.
     if problem.max_seqlen_q > 256:
+        return False
+    if not _fp8_qk_loader_fits(problem):
         return False
     T_eff = _select_2d_tile_size(problem)
     return problem.sliding_window > 0 or problem.max_seqlen_k <= 16 * T_eff
@@ -3169,6 +3216,12 @@ def _tiled_3d_spec_from_problem(
 
 
 def _tiled_3d_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
+    """HSACO cache key for the 3D split-KV segment + reduce pair.
+
+    Same contract as ``_tiled_cache_key``: static fields plus resolved selector
+    outputs, no raw dynamic shape field. Grid and workspace values that scale
+    with the shape are keyed separately in ``_get_3d_pipeline``.
+    """
     base = (
         "tiled3d",
         problem.num_seqs,
@@ -3193,6 +3246,9 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
     if _resolve_attention_arch() == "gfx1250":
         sp = _tiled_3d_spec_from_problem(problem)
         return base + (
+            # gfx1250 floors the search at 32 iterations, so read it from the
+            # spec rather than _binary_search_iters.
+            sp.binary_search_iters,
             sp.use_invariant_hoist,
             sp.use_wide_kv_load,
             sp.use_register_p,
@@ -3204,7 +3260,7 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
             getattr(sp, "use_fused_reduce", False),
             getattr(sp, "use_dpp_softmax", False),
         )
-    return base
+    return base + (_binary_search_iters(problem),)
 
 
 def _3d_signature(dtype: str, *, kv_dtype: Optional[str] = None):
