@@ -27,8 +27,9 @@ add_kernels_for_embedding(
     TARGET hip_kernel_provider_impl
     FILES ${HIP_MLOPS_KERNEL_FILES})
 
-# Create custom target for running clang-tidy on embedded kernels
-add_kernel_tidy_target(
+# Compile the embedded kernels into an object library nothing links, so that clang-tidy
+# (and the compiler) check them on every build
+add_kernel_tidy_library(
     NAME hip_mlops_kernel_tidy
     PRELUDE ${CMAKE_CURRENT_SOURCE_DIR}/tidy/KernelTidyDefaults.hpp
     FILES ${HIP_MLOPS_KERNEL_FILES})

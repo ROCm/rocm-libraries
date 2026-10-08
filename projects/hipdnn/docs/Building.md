@@ -496,9 +496,11 @@ Different versions of Clang tools are required. For example, clang-format versio
 Two clang-tidy binaries are used, and they are discovered independently:
 
 * **Host C++** uses the clang-tidy on the system path, pinned by `EXPECTED_CLANG_TIDY_VERSION`.
-* **Embedded HIP kernels** in hip-kernel-provider use the clang-tidy from the ROCm toolchain, pinned by `EXPECTED_ROCM_CLANG_TIDY_VERSION`. Used to tidy HIP kernels that are compiled at runtime by hipRTC, not finding the tool is not an error, instead the kernel tidy target is not created.
+* **Embedded HIP kernels** in hip-kernel-provider use the clang-tidy from the ROCm toolchain, pinned by `EXPECTED_ROCM_CLANG_TIDY_VERSION`. Used to tidy HIP kernels that are compiled at runtime by hipRTC, not finding the tool is not an error, instead the kernel tidy library is not created.
 
 Both binaries share `projects/hipdnn/.clang-tidy`.
+
+The embedded kernels are checked by an object library that nothing links (`hip_mlops_kernel_tidy`), built as part of `all`, which compiles each kernel with the options hipRTC uses at runtime and runs the ROCm clang-tidy on it. A normal build therefore both syntax-checks and tidies the kernels, and editing a header a kernel includes re-checks that kernel. The kernels are excluded from the `tidy` targets, because `run-clang-tidy` drives the host clang-tidy, which cannot parse the hipRTC pre-include header. The library is only created on Linux, and only when `ENABLE_CLANG_TIDY` is on, the C++ compiler is the ROCm clang++, the ROCm clang-tidy is found, and the hipRTC header can be extracted from `libhiprtc-builtins.so`.
 
 #### Version Suffix
 

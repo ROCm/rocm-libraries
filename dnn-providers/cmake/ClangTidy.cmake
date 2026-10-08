@@ -47,6 +47,25 @@ function(setClangTidyVars)
     set(CLANG_TIDY_HIP_ARGS ${CLANG_TIDY_HIP_ARGS} PARENT_SCOPE)
 endfunction()
 
+# Source path fragments that run-clang-tidy must skip, on top of the _deps/ dependencies.
+# Appended to by callers that put sources in compile_commands.json which the host
+# clang-tidy cannot parse, such as the embedded HIP kernels (see KernelTidy.cmake).
+define_property(GLOBAL PROPERTY CLANG_TIDY_SOURCE_EXCLUDE_PATTERNS)
+
+# clangTidySourceFilter(<out-var>)
+#   Set <out-var> to the -source-filter regex for the `tidy` targets: everything except the
+#   dependencies and whatever CLANG_TIDY_SOURCE_EXCLUDE_PATTERNS names.
+function(clangTidySourceFilter out_var)
+    set(_excluded "_deps/")
+    get_property(_extra_excluded GLOBAL PROPERTY CLANG_TIDY_SOURCE_EXCLUDE_PATTERNS)
+    if(_extra_excluded)
+        list(APPEND _excluded ${_extra_excluded})
+    endif()
+    list(REMOVE_DUPLICATES _excluded)
+    list(JOIN _excluded "|" _excluded)
+    set(${out_var} "^(?!.*(${_excluded})).*" PARENT_SCOPE)
+endfunction()
+
 # Add the 'tidy' target to the project to run tidy on all files in the hipDNN folder.
 function(add_clang_tidy_custom_target)
     if(WIN32)
@@ -66,6 +85,8 @@ function(add_clang_tidy_custom_target)
             set(CLANG_TIDY_JOBS 1)
         endif()
 
+        clangtidysourcefilter(_source_filter)
+
         # Use prefixed target names in superbuild to avoid collisions
         if(ROCM_LIBS_SUPERBUILD)
             set(_TIDY_TARGET ${PROJECT_NAME}_tidy)
@@ -80,7 +101,7 @@ function(add_clang_tidy_custom_target)
             ${_TIDY_TARGET}
             COMMAND
                 ${RUN_CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
-                -config-file=${PROJECT_SOURCE_DIR}/.clang-tidy -source-filter "^(?!.*_deps/).*" -quiet
+                -config-file=${PROJECT_SOURCE_DIR}/.clang-tidy -source-filter "${_source_filter}" -quiet
                 -j ${CLANG_TIDY_JOBS} ${CLANG_TIDY_HIP_ARGS}
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
             COMMENT
@@ -94,7 +115,7 @@ function(add_clang_tidy_custom_target)
             COMMAND
                 ${RUN_CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
                 -config-file=${PROJECT_SOURCE_DIR}/.clang-tidy -source-filter
-                "^(?!.*(_deps/)).*" -quiet -j ${CLANG_TIDY_JOBS}
+                "${_source_filter}" -quiet -j ${CLANG_TIDY_JOBS}
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
             COMMENT "Running clang-tidy on ${PROJECT_NAME} C++ files (${CLANG_TIDY_JOBS} parallel jobs)..."
             VERBATIM
