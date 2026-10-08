@@ -26,6 +26,7 @@
 #include <cstdlib>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <string_view>
 #include <vector>
@@ -1115,13 +1116,13 @@ TEST_F(DAGSchedulerPassTest, Layer2RejectsPairWhenDescendantOrderingFormsCycle) 
     afterWait->addDestReg(StinkyRegister("s", 300, 1));
     beforeWait->addDestReg(StinkyRegister("s", 301, 1));
 
-    // This tensor load is a descendant of the after group, so Layer 2 requests
-    // tensorLoad -> beforeGroup. It also consumes the before group's LDS token,
-    // creating the existing reverse DAG path beforeGroup -> tensorLoad. The
-    // requested edge is therefore cycle-forming and final order cannot satisfy
-    // it.
+    // Same LDS token as the after barrier, so the tensor is on that group's
+    // tensor_load chain and Layer 2 requests tensorLoad -> beforeGroup. It also
+    // reads the before wait's SGPR, so the DAG already has beforeWait ->
+    // tensorLoad. The requested edge is cycle-forming and the final order
+    // cannot satisfy it.
     StinkyInstruction* tensorLoad =
-        createMovableTensorLoad(bb, /*src0Reg=*/220, /*src1Reg=*/224, /*ldsToken=*/2);
+        createMovableTensorLoad(bb, /*src0Reg=*/220, /*src1Reg=*/224, /*ldsToken=*/0);
     tensorLoad->addSrcReg(StinkyRegister("s", 300, 1));
     tensorLoad->addSrcReg(StinkyRegister("s", 301, 1));
     createMovableDsLoad(/*destReg=*/0, /*addrReg=*/204, /*ldsToken=*/1);
@@ -1154,6 +1155,103 @@ TEST_F(DAGSchedulerPassTest, Layer2RejectsPairWhenDescendantOrderingFormsCycle) 
     }
     EXPECT_EQ(signals, 2);
     EXPECT_EQ(waits, 2);
+}
+
+// Two tensor_loads write the after barrier's LDS token, with the before-side
+// ds_load between them in program order. The second tensor is not a getUsers()
+// descendant of the barrier; the WAW chain tensor -> tensor is what puts it in
+// the overlap ordering, so the ds_load cannot issue between them.
+TEST_F(DAGSchedulerPassTest, SameTokenTensorChainIssuesBeforeBeforeSideDsLoad) {
+    bb->addSuccessor(bb);
+
+    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/200, /*ldsToken=*/0);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/0);
+    createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    StinkyInstruction* firstTensor =
+        createMovableTensorLoad(bb, /*src0Reg=*/220, /*src1Reg=*/224, /*ldsToken=*/0);
+    createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+    StinkyInstruction* beforeDs =
+        createMovableDsLoad(/*destReg=*/16, /*addrReg=*/204, /*ldsToken=*/1);
+    createVAddInBlock(bb, arch, /*destReg=*/300, /*src0Reg=*/301, /*src1Reg=*/302);
+    StinkyInstruction* secondTensor =
+        createMovableTensorLoad(bb, /*src0Reg=*/228, /*src1Reg=*/232, /*ldsToken=*/0);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/120, /*src0Start=*/16);
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.distributeGlobalRead = true;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+
+    EXPECT_LT(positionOf(*bb, firstTensor), positionOf(*bb, beforeDs)) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, secondTensor), positionOf(*bb, beforeDs)) << scheduleOrder(*bb);
+}
+
+// The before barrier is not ready while the after barrier is held: the overlap
+// edge after -> before keeps it out of the ready queue. The gap yield still
+// has to see that barrier's WMMA threshold, or the hold runs until the ds_load
+// gap expires and the two groups issue back to back.
+TEST_F(DAGSchedulerPassTest, GapHoldSeesThresholdOfUnreadyBarrier) {
+    bb->addSuccessor(bb);
+
+    for (int i = 0; i < 24; ++i)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/400 + i, /*ldsToken=*/0);
+    for (int i = 0; i < 32; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/800 + i * 16, /*src0Start=*/600 + i * 16);
+    auto [afterSignal, afterWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    createMovableTensorLoad(bb, /*src0Reg=*/220, /*src1Reg=*/224, /*ldsToken=*/0);
+    auto [beforeSignal, beforeWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+    createMovableDsLoad(/*destReg=*/500, /*addrReg=*/204, /*ldsToken=*/1);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/1400, /*src0Start=*/500);
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsReadPerCap = 2;
+    ctx.setPassFeatureConfig(pfc);
+    PassManagerDebugConfig::addDebugOnly("StinkyDAGSchedulerPass");
+    std::ostringstream captured;
+    std::streambuf* oldBuf = std::cerr.rdbuf(captured.rdbuf());
+    pass->run(*func, ctx, am);
+    std::cerr.rdbuf(oldBuf);
+    PassManagerDebugConfig::clearDebugOnly();
+
+    const std::string log = captured.str();
+    int finiteHolds = 0;
+    int sentinelHolds = 0;
+    std::string::size_type pos = 0;
+    const std::string key = "nearestWmmaCycles=";
+    while ((pos = log.find("hold barrier", pos)) != std::string::npos) {
+        const auto cyclesAt = log.find(key, pos);
+        ASSERT_NE(cyclesAt, std::string::npos);
+        const int cycles = std::stoi(log.substr(cyclesAt + key.size()));
+        if (cycles == std::numeric_limits<int>::max())
+            ++sentinelHolds;
+        else
+            ++finiteHolds;
+        pos = cyclesAt + key.size();
+    }
+    EXPECT_GT(finiteHolds, 0) << log;
+    EXPECT_EQ(sentinelHolds, 0) << log;
+
+    auto wmmasBetween = [&](const StinkyInstruction* from, const StinkyInstruction* to) {
+        int count = 0;
+        bool started = false;
+        for (const IRBase& ir : *bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr) continue;
+            if (inst == to) return started ? count : -1;
+            if (started && isMatrixInstruction(*inst)) ++count;
+            if (inst == from) started = true;
+        }
+        return -1;
+    };
+    EXPECT_LT(positionOf(*bb, afterWait), positionOf(*bb, beforeSignal)) << scheduleOrder(*bb);
+    EXPECT_GE(wmmasBetween(afterWait, beforeSignal), 1) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, beforeSignal), positionOf(*bb, beforeWait)) << scheduleOrder(*bb);
 }
 
 // LockDsReadOrder chains ds_loads that share a memory token into
