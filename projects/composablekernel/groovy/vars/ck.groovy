@@ -1477,6 +1477,39 @@ String _dispatcherPerfCmd(String compiler, String gpuTarget, String samplingTier
     // comment in runDispatcherPerfTests. Omitting it on one op re-divides the
     // shared TILE_ENGINE_SAMPLING_TIER pool and silently shrinks coverage for
     // every other op in the lane.
+    //
+    // TEMPORARY -- GEMM_PRESHUFFLE_CONFIG_FILE below pins gemm_preshuffle to its
+    // small configs/default_ci_config.json instead of the default_config.json
+    // sweep. Remove that one -D line once the compiler fix lands.
+    //
+    // clang-23 in the ROCm 10.0 image recurses without bound inside the
+    // amdgpu-attributor pass on some preshufflev2 instances:
+    // Attributor::getAssumedSimplifiedValues -> AAPotentialValuesFloating::updateImpl
+    // -> Attributor::updateAA -> getOrCreateAAFor<AAPotentialValues> -> repeat,
+    // for ~250 frames until the 8 MB cc1 thread stack is gone. clang dies with
+    // SIGSEGV and ninja reports [code=134], so the lane is red before a single
+    // benchmark runs. Six targets took it down in PR-12521 build #3 (gfx950):
+    //   192x64x128_2x2x1_16x16x16, 192x128x128_2x2x1_16x16x16,
+    //   192x256x64_1x4x1_32x32x8 (both persistent variants),
+    //   256x64x128_2x2x1_16x16x16, 256x128x64_1x4x1_16x16x16.
+    //
+    // Pinning the config rather than capping tile_m, because tile_m does not
+    // separate the crashing shapes from the healthy ones: 24 of the 58 instances
+    // that build reached had tile_m >= 192 and only 6 crashed --
+    // 192x192x64_2x2x1_16x16x16 and 256x256x64_2x2x1_16x16x16 compile fine.
+    // Neither m_repeat nor k_repeat nor their product draws the line either.
+    // There is no sound CK-side predicate here, so the honest mitigation is a
+    // small known-good instance set, not a guess dressed up as a filter.
+    //
+    // Not gated on gfx950 either, even though that is the only arch observed to
+    // crash: tile_engine/sampling/seed.py seeds the sample from the DATE and the
+    // target, so gfx942 simply draws a different 64 each day and has no claim to
+    // being safe. Same mechanism CONTRACTION_MULTI_ABD_CONFIG_FILE already uses
+    // below. Cost is coverage, not signal: the lane still codegens, builds, links
+    // and launches the operator, which is what it exists to prove. The CI config
+    // yields 4 instances on both arches (verified with --list_kernels), so
+    // benchmark_gemm_preshuffle_all stays non-empty and the driver still has
+    // kernels to discover.
     def cmd = """
             cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
                 -D BUILD_CK_TILE_ENGINE="ON" \
@@ -1519,6 +1552,7 @@ String _dispatcherPerfCmd(String compiler, String gpuTarget, String samplingTier
                 -D GEMM_PRESHUFFLE_DATATYPE="${gemmDatatype}" \
                 -D GEMM_PRESHUFFLE_LAYOUT="${gemmLayout}" \
                 -D GEMM_PRESHUFFLE_MAX_INSTANCES=${perOpInstances} \
+                -D GEMM_PRESHUFFLE_CONFIG_FILE=default_ci_config.json \
                 -D GEMM_AQUANT_DATATYPE="${quantDatatype}" \
                 -D GEMM_AQUANT_LAYOUT="${quantLayout}" \
                 -D GEMM_AQUANT_MAX_INSTANCES=${perOpInstances} \
