@@ -34,6 +34,13 @@ diff against upstream plus the modifications below.
    `batch * seq_len >= 2048`. The guard now goes through
    `ReplaceIfWithDispatch.scf_if_dispatch` (helper `_if_then`), the lowering the
    rewriter applies in kernel bodies. Not yet upstream.
+2. **Runtime softmax scale** (`flash_attn_gfx950.py`, `flash_attn_generic.py`,
+   `flash_attn_utils.py`). Both kernels take a trailing `sm_scale: fx.Float32`
+   argument in place of the scale they derived: the dual-wave kernel from
+   `rsqrt(head_dim_runtime)`, the generic one from a constant baked at build time.
+   The launchers default it to `1/sqrt(head_dim)`, so a caller that passes nothing
+   gets upstream's behaviour. Upstream callers of the contexts that pass no scale
+   are unchanged.
 
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).

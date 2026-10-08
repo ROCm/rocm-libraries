@@ -2573,7 +2573,11 @@ class GenericFlashAttnContext:
         self.c_zero_f = fx.Float32(0.0)
         self.c_zero_i32 = fx.Int32(0)
         self.c_sm_scale = fx.Float32(sm_scale)
-        self.c_sm_scale_log2e = fx.Float32(sm_scale * _LOG2E)
+        if isinstance(sm_scale, float):
+            self.c_sm_scale_log2e = fx.Float32(sm_scale * _LOG2E)
+        else:
+            # A runtime scale argument (modification 2).
+            self.c_sm_scale_log2e = self.c_sm_scale * fx.Float32(_LOG2E)
         self.c_zero_v16f32 = Vec.filled(16, 0.0, fx.Float32)
         self.width_i32 = fx.Int32(traits.WARP_SIZE)
         self.shuf_32_i32 = fx.Int32(32)
@@ -4020,6 +4024,7 @@ class DualwaveKernelContext:
         head_dim_runtime=None,
         block_table_stride=None,
         LSE=None,
+        sm_scale=None,
     ):
         if isinstance(traits_or_ctx, DualwaveKernelContext):
             self.__dict__.update(traits_or_ctx.__dict__)
@@ -4043,6 +4048,7 @@ class DualwaveKernelContext:
         self.stride_kv_n = stride_kv_n
         self.head_dim_runtime = head_dim_runtime
         self.block_table_stride = block_table_stride
+        self.sm_scale = sm_scale
 
     def init_types_and_constants(self, head_dim_runtime=None):
         if head_dim_runtime is None:
@@ -4066,9 +4072,13 @@ class DualwaveKernelContext:
         c_log2e_f = fx.Float32(_LOG2E)
         # LSE store folds the log2->ln conversion (m_row is sm_scale*log2e-scaled).
         self.c_ln2_f = fx.Float32(1.0 / _LOG2E)
-        self.c_sm_scale_log2e = (
-            fx.rsqrt(head_dim_f32, fastmath=self.fm_fast) * c_log2e_f
-        )
+        if self.sm_scale is None:
+            self.c_sm_scale_log2e = (
+                fx.rsqrt(head_dim_f32, fastmath=self.fm_fast) * c_log2e_f
+            )
+        else:
+            # Runtime softmax scale (modification 2).
+            self.c_sm_scale_log2e = fx.Float32(self.sm_scale) * c_log2e_f
 
     def init_runtime_indices(
         self, seq_len=None, seq_len_kv=None, stride_q_n=None, stride_kv_n=None

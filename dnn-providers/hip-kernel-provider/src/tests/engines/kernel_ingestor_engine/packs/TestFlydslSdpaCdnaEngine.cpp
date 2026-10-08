@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <optional>
 #include <string>
@@ -37,8 +38,8 @@
  *        declines, what it binds, which candidate a graph selects, and real launches of
  *        the staged gfx942/gfx950 objects checked against a host reference.
  *
- * The CDNA kernels bake the head counts, head_dim, the scale and contiguous BSHD, and
- * assume equal query and key lengths, so the accepted envelope is narrow on purpose; the
+ * The CDNA kernels bake the head counts, head_dim and contiguous BSHD, and assume equal
+ * query and key lengths, so the accepted envelope is narrow on purpose; the
  * decline cases pin its edges. The GPU cases skip on any device this build packed no CDNA
  * object for.
  */
@@ -70,6 +71,8 @@ const T* tryGetMetadataField(const MetadataValues& values, const char* field)
 }
 
 constexpr const char* CDNA_CAUSAL_TOKEN = "flydsl_sdpa_cdna.causal";
+constexpr const char* CDNA_SCALE_SOURCE_TOKEN = "flydsl_sdpa_cdna.scale_source";
+constexpr const char* CDNA_SCALE_TOKEN = "flydsl_sdpa_cdna.scale";
 
 constexpr const char* CDNA_DTYPE_FIELD = "dtype";
 constexpr const char* CDNA_KERNEL_FIELD = "kernel";
@@ -155,8 +158,14 @@ std::vector<CdnaCase> acceptedCases()
     cases.push_back({"BottomRightCausal", bottomRight});
     auto scaleValue = cdnaSpec();
     scaleValue.scaleKind = SdpaScale::VALUE;
-    scaleValue.scale = 1.0F / std::sqrt(128.0F);
-    cases.push_back({"ScaleEqualToTheBakedOne", scaleValue});
+    scaleValue.scale = 0.125F;
+    cases.push_back({"ScaleValue", scaleValue});
+    auto constantScale = cdnaSpec();
+    constantScale.scaleKind = SdpaScale::CONSTANT_TENSOR;
+    cases.push_back({"ConstantScaleTensor", constantScale});
+    auto runtimeScale = cdnaSpec();
+    runtimeScale.scaleKind = SdpaScale::RUNTIME_TENSOR;
+    cases.push_back({"RuntimeScaleTensor", runtimeScale});
     auto batched = cdnaSpec();
     batched.batch = 3;
     batched.seqLenQ = 333;
@@ -204,13 +213,13 @@ std::vector<CdnaCase> declinedCases()
     auto stats = cdnaSpec();
     stats.stats = SdpaStats::LSE;
     cases.push_back({"SoftmaxStats", stats});
-    auto scaleTensor = cdnaSpec();
-    scaleTensor.scaleKind = SdpaScale::RUNTIME_TENSOR;
-    cases.push_back({"ScaleTensor", scaleTensor});
-    auto otherScale = cdnaSpec();
-    otherScale.scaleKind = SdpaScale::VALUE;
-    otherScale.scale = 0.125F;
-    cases.push_back({"ScaleOtherThanTheBakedOne", otherScale});
+    auto deviceScale = cdnaSpec();
+    deviceScale.scaleKind = SdpaScale::DEVICE_TENSOR;
+    cases.push_back({"DeviceScaleTensor", deviceScale});
+    auto negativeScale = cdnaSpec();
+    negativeScale.scaleKind = SdpaScale::VALUE;
+    negativeScale.scale = -0.125F;
+    cases.push_back({"NegativeScale", negativeScale});
     auto fp32 = cdnaSpec();
     fp32.dataType = DataType::FLOAT;
     cases.push_back({"Fp32", fp32});
@@ -246,6 +255,25 @@ TEST(TestFlydslSdpaCdnaBinding, BindsTheCausalFlag)
     ASSERT_TRUE(plainBound.has_value());
     EXPECT_EQ(tryGetBoundInt(*causalBound, CDNA_CAUSAL_TOKEN), 1);
     EXPECT_EQ(tryGetBoundInt(*plainBound, CDNA_CAUSAL_TOKEN), 0);
+}
+
+TEST(TestFlydslSdpaCdnaBinding, BindsTheScaleAsAValueOrATensor)
+{
+    // No scale on the graph binds the default, 1/sqrt(head_dim), as a value.
+    const auto defaulted = cdnaGraphMatch(cdnaSpec());
+    ASSERT_TRUE(defaulted.has_value());
+    const float expected = 1.0F / std::sqrt(128.0F);
+    int32_t expectedBits = 0;
+    std::memcpy(&expectedBits, &expected, sizeof(expected));
+    EXPECT_EQ(tryGetBoundInt(*defaulted, CDNA_SCALE_SOURCE_TOKEN), 0);
+    EXPECT_EQ(tryGetBoundInt(*defaulted, CDNA_SCALE_TOKEN), expectedBits);
+
+    auto runtime = cdnaSpec();
+    runtime.scaleKind = SdpaScale::RUNTIME_TENSOR;
+    const auto tensor = cdnaGraphMatch(runtime);
+    ASSERT_TRUE(tensor.has_value());
+    EXPECT_EQ(tryGetBoundInt(*tensor, CDNA_SCALE_SOURCE_TOKEN), 1);
+    EXPECT_EQ(tryGetBoundInt(*tensor, CDNA_SCALE_TOKEN), FLYDSL_SDPA_RDNA_SCALE_UID);
 }
 
 // ---------------------------------------------------------------------------
@@ -423,6 +451,12 @@ void expectCandidateMatchesReference(const MatchContext& context,
                                                     {FLYDSL_SDPA_RDNA_K_UID, kDevice},
                                                     {FLYDSL_SDPA_RDNA_V_UID, vDevice},
                                                     {FLYDSL_SDPA_RDNA_O_UID, oDevice}};
+    // A runtime scale arrives with the buffers, as a host scalar.
+    float runtimeScale = spec.scale;
+    if(spec.scaleKind == SdpaScale::RUNTIME_TENSOR)
+    {
+        buffers.push_back({FLYDSL_SDPA_RDNA_SCALE_UID, &runtimeScale});
+    }
     const Handle handle;
     handler.launch(
         handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), nullptr);
@@ -446,7 +480,9 @@ void expectCandidateMatchesReference(const MatchContext& context,
         return static_cast<double>(
             static_cast<float>(t[static_cast<size_t>(((bi * seq + si) * heads + hi) * dim + di)]));
     };
-    const double scale = 1.0 / std::sqrt(static_cast<double>(d));
+    const double scale = spec.scaleKind == SdpaScale::ABSENT
+                             ? 1.0 / std::sqrt(static_cast<double>(d))
+                             : static_cast<double>(spec.scale);
     const int64_t group = h / hk;
     double worst = 0.0;
     std::string where;
@@ -552,6 +588,23 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, NonCausalRaggedTailMatchesTheReference)
     spec.batch = 2;
     spec.seqLenQ = 333;
     spec.seqLenKv = 333;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, AppliesAScaleValue)
+{
+    auto spec = cdnaSpec();
+    spec.scaleKind = SdpaScale::VALUE;
+    spec.scale = 0.07F;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ReadsARuntimeScaleAtExecute)
+{
+    auto spec = cdnaSpec();
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    spec.scaleKind = SdpaScale::RUNTIME_TENSOR;
+    spec.scale = 0.2F;
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 

@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <initializer_list>
 #include <memory>
 #include <optional>
@@ -25,6 +26,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
@@ -51,13 +53,13 @@
  * vendored under `flydsl/kernels_src/kernels/attention_cdna/` -- the dual-wave
  * software-pipelined kernel on gfx950, the generic MFMA kernel on gfx942.
  *
- * Those kernels bake more than the RDNA ones: the query and KV head counts, the softmax
- * scale (1/sqrt(head_dim)), the causal flag, and a contiguous BSHD layout; their causal
- * mask is bottom-right and they assume equal query and key lengths. Batch and sequence
- * length are runtime arguments. So the matcher accepts exactly that envelope and declines
- * everything else, and each object serves one (dtype, head counts, head_dim, causal)
- * model shape. Making the baked ones runtime is the next step (see the provider's CDNA
- * plan); until then this engine brings the CDNA path up end to end.
+ * Those kernels bake more than the RDNA ones: the query and KV head counts, the causal
+ * flag, and a contiguous BSHD layout; their causal mask is bottom-right and they assume
+ * equal query and key lengths. Batch, sequence length and the softmax scale are runtime
+ * arguments. So the matcher accepts exactly that envelope and declines everything else,
+ * and each object serves one (dtype, head counts, head_dim, causal) model shape. The
+ * remaining baked fields become runtime one by one, each measured against the object
+ * it replaces (flydsl/COVERAGE.md section 7).
  *
  * Kernel arguments. FlyDSL lowers each tensor parameter to two kernel arguments: its
  * 8-byte global pointer, then a 40-byte by-value layout -- the four i32 extents of the
@@ -116,8 +118,22 @@ constexpr int64_t DUALWAVE_BLOCK_THREADS = 512;
 constexpr int64_t GENERIC_THREADS_PER_ROW = 2;
 
 constexpr int64_t INT32_LIMIT = 2147483647LL;
-/// The baked scale must be the one the graph asks for; this is f32 rounding headroom.
-constexpr float SCALE_RELATIVE_TOLERANCE = 1e-6F;
+
+/// Where the softmax scale comes from; see ScaleSource.
+constexpr std::string_view SCALE_SOURCE_TOKEN = "flydsl_sdpa_cdna.scale_source";
+/// The scale's f32 bit pattern when it is a value (BoundTokens carry int64_t), else the uid
+/// of the pass-by-value scale tensor.
+constexpr std::string_view SCALE_TOKEN = "flydsl_sdpa_cdna.scale";
+
+/// Where the kernel's `sm_scale` argument comes from.
+enum class ScaleSource : int64_t
+{
+    /// attn_scale_value, or 1/sqrt(head_dim) when the graph gives none -- the default
+    /// hipDNN's CPU reference applies.
+    VALUE = 0,
+    /// A pass-by-value scalar tensor, resolved at execute.
+    TENSOR = 1,
+};
 
 // ---------------------------------------------------------------------------
 // Matching
@@ -379,17 +395,46 @@ std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext& contex
         return std::nullopt;
     }
 
-    // The scale is baked as 1/sqrt(head_dim): the graph must ask for that one.
+    // The softmax scale: a value, a pass-by-value tensor, or the default.
+    ScaleSource scaleSource = ScaleSource::VALUE;
+    int64_t scaleToken = 0;
     if(attributes.scale_tensor_uid().has_value())
     {
-        return std::nullopt;
+        // Only a host scalar can become a kernel argument; a device-resident scale would
+        // need a device read the kernels do not do.
+        const auto* scaleTensor = findTensor(context, attributes.scale_tensor_uid().value());
+        if(scaleTensor == nullptr
+           || !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(scaleTensor))
+        {
+            return std::nullopt;
+        }
+        try
+        {
+            static_cast<void>(hipdnn_plugin_sdk::makeScalarOperand(
+                context.graph.getTensorMap(), attributes.scale_tensor_uid().value(), "scale"));
+        }
+        catch(const hipdnn_plugin_sdk::HipdnnPluginException&)
+        {
+            return std::nullopt;
+        }
+        scaleSource = ScaleSource::TENSOR;
+        scaleToken = attributes.scale_tensor_uid().value();
     }
-    const float baked = 1.0F / std::sqrt(static_cast<float>(problem.headDim));
-    if(attributes.attn_scale_value().has_value()
-       && std::fabs(attributes.attn_scale_value().value() - baked)
-              > SCALE_RELATIVE_TOLERANCE * baked)
+    else
     {
-        return std::nullopt;
+        const float scale = attributes.attn_scale_value().has_value()
+                                ? attributes.attn_scale_value().value()
+                                : 1.0F / std::sqrt(static_cast<float>(problem.headDim));
+        // The kernels take the running max over unscaled scores, which orders them the
+        // same way as the scaled ones only for a positive scale.
+        if(!(scale > 0.0F) || !std::isfinite(scale))
+        {
+            return std::nullopt;
+        }
+        int32_t scaleBits = 0;
+        static_assert(sizeof(scaleBits) == sizeof(scale), "float must be 32-bit to round-trip");
+        std::memcpy(&scaleBits, &scale, sizeof(scale));
+        scaleToken = static_cast<int64_t>(scaleBits);
     }
 
     BoundTokens bound;
@@ -398,6 +443,8 @@ std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext& contex
     bound[std::string(V_TOKEN)] = attributes.v_tensor_uid();
     bound[std::string(O_TOKEN)] = attributes.o_tensor_uid();
     bound[std::string(CAUSAL_TOKEN)] = *causal ? 1 : 0;
+    bound[std::string(SCALE_SOURCE_TOKEN)] = static_cast<int64_t>(scaleSource);
+    bound[std::string(SCALE_TOKEN)] = scaleToken;
     return bound;
 }
 
@@ -409,6 +456,8 @@ struct FlydslSdpaCdnaBinding
     int64_t v = 0;
     int64_t o = 0;
     int64_t causal = 0;
+    ScaleSource scaleSource = ScaleSource::VALUE;
+    int64_t scale = 0;
 };
 
 FlydslSdpaCdnaBinding flydslSdpaCdnaBinding(const BoundTokens& bound)
@@ -431,6 +480,8 @@ FlydslSdpaCdnaBinding flydslSdpaCdnaBinding(const BoundTokens& bound)
     binding.v = read(V_TOKEN);
     binding.o = read(O_TOKEN);
     binding.causal = read(CAUSAL_TOKEN);
+    binding.scaleSource = static_cast<ScaleSource>(read(SCALE_SOURCE_TOKEN));
+    binding.scale = read(SCALE_TOKEN);
     return binding;
 }
 
@@ -595,8 +646,10 @@ FlydslLayout4 bshdLayout(int64_t batch, int64_t sequence, int64_t heads, int64_t
  * Dual-wave (flash_attn_gfx950.py): Q, K, V, O, LSE, DebugCounts, CuSeqQ, CuSeqKv,
  * BlockTable, Bias, AlibiSlopes, Sink (each a pointer and its layout); then seq_len,
  * seq_len_kv, stride_q_n, stride_kv_n, head_dim_runtime, block_table_stride,
- * bias_stride0, alibi_stride_b (i32). Generic (flash_attn_generic.py): Q, K, V, O, LSE;
- * seq_len, seq_len_kv (i32); CuSeqQ, CuSeqKv, BlockTable; block_table_stride (i32).
+ * bias_stride0, alibi_stride_b (i32); sm_scale (f32). Generic (flash_attn_generic.py):
+ * Q, K, V, O, LSE; seq_len, seq_len_kv (i32); CuSeqQ, CuSeqKv, BlockTable;
+ * block_table_stride (i32); sm_scale (f32). A 4-byte scalar slot is the same to the
+ * signature check whichever type it holds.
  */
 std::vector<KernelArgument> signatureOf(std::initializer_list<bool> tensorOrScalar)
 {
@@ -622,15 +675,15 @@ std::vector<KernelArgument> signatureOf(std::initializer_list<bool> tensorOrScal
 const std::vector<KernelArgument>& dualwaveSignature()
 {
     static const std::vector<KernelArgument> s_signature
-        = signatureOf({true, true, true,  true,  true,  true,  true,  true,  true,  true,
-                       true, true, false, false, false, false, false, false, false, false});
+        = signatureOf({true, true,  true,  true,  true,  true,  true,  true,  true,  true, true,
+                       true, false, false, false, false, false, false, false, false, false});
     return s_signature;
 }
 
 const std::vector<KernelArgument>& genericSignature()
 {
     static const std::vector<KernelArgument> s_signature
-        = signatureOf({true, true, true, true, true, false, false, true, true, true, false});
+        = signatureOf({true, true, true, true, true, false, false, true, true, true, false, false});
     return s_signature;
 }
 
@@ -653,11 +706,13 @@ public:
     PreparedFlydslSdpaCdna(IngestorKernelCode code,
                            FlydslSdpaCdnaBinding binding,
                            SdpaProblem problem,
-                           bool dualwave)
+                           bool dualwave,
+                           std::optional<hipdnn_plugin_sdk::ScalarOperand> scaleOperand)
         : _code(std::move(code))
         , _binding(binding)
         , _problem(problem)
         , _dualwave(dualwave)
+        , _scaleOperand(scaleOperand)
     {
     }
 
@@ -681,16 +736,23 @@ public:
         return _dualwave;
     }
 
+    /// Set when the scale is a pass-by-value tensor, read at each launch.
+    const std::optional<hipdnn_plugin_sdk::ScalarOperand>& scaleOperand() const
+    {
+        return _scaleOperand;
+    }
+
 private:
     IngestorKernelCode _code;
     FlydslSdpaCdnaBinding _binding;
     SdpaProblem _problem;
     bool _dualwave = false;
+    std::optional<hipdnn_plugin_sdk::ScalarOperand> _scaleOperand;
 };
 
 /**
  * @brief The native dispatch behind this pack's UDD. Everything graph/kernel-derived
- *        resolves once at prepare(); launch() only resolves buffers.
+ *        resolves once at prepare(); launch() only resolves buffers and the scale.
  */
 class FlydslSdpaCdnaDispatchHandler : public IKernelDispatchHandler<Handle>
 {
@@ -748,8 +810,14 @@ public:
         code.setGridSize(static_cast<unsigned int>((*grid)[0]),
                          static_cast<unsigned int>((*grid)[1]),
                          static_cast<unsigned int>((*grid)[2]));
+        std::optional<hipdnn_plugin_sdk::ScalarOperand> scaleOperand;
+        if(binding.scaleSource == ScaleSource::TENSOR)
+        {
+            scaleOperand = hipdnn_plugin_sdk::makeScalarOperand(
+                context.graph.getTensorMap(), binding.scale, "scale");
+        }
         return std::make_unique<PreparedFlydslSdpaCdna>(
-            std::move(code), binding, problem, tile->dualwave);
+            std::move(code), binding, problem, tile->dualwave, scaleOperand);
     }
 
     void launch(const Handle& handle,
@@ -761,6 +829,19 @@ public:
         const auto& preparedSdpa = dynamic_cast<const PreparedFlydslSdpaCdna&>(prepared);
         const auto& binding = preparedSdpa.binding();
         const auto& problem = preparedSdpa.problem();
+
+        float scale = 0.0F;
+        if(preparedSdpa.scaleOperand().has_value())
+        {
+            scale = static_cast<float>(
+                hipdnn_plugin_sdk::toDouble(hipdnn_plugin_sdk::resolveScalarOperand(
+                    *preparedSdpa.scaleOperand(), deviceBuffers, numDeviceBuffers)));
+        }
+        else
+        {
+            const auto scaleBits = static_cast<int32_t>(binding.scale);
+            std::memcpy(&scale, &scaleBits, sizeof(scale));
+        }
 
         void* q
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.q, deviceBuffers, numDeviceBuffers).ptr;
@@ -819,7 +900,8 @@ public:
                           headDim,
                           zero,
                           zero,
-                          zero);
+                          zero,
+                          scale);
             return;
         }
         kernel.launch(handle.getStream(),
@@ -841,7 +923,8 @@ public:
                       qLayout,
                       o, // BlockTable
                       qLayout,
-                      zero);
+                      zero,
+                      scale);
     }
 
 private:

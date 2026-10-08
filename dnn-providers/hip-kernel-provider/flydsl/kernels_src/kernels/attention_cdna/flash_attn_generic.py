@@ -255,6 +255,8 @@ def build_flash_attn_func_module_primary(
 
     if sm_scale is None:
         sm_scale = 1.0 / host_math.sqrt(head_dim)
+    # The launchers' default for the runtime scale argument (modification 2).
+    _default_sm_scale = sm_scale
 
     _lds_elem_dtype = dtype_to_elem_type(traits.DTYPE_STR)
 
@@ -275,6 +277,7 @@ def build_flash_attn_func_module_primary(
         CuSeqKv: fx.Tensor,
         BlockTable: fx.Tensor,
         block_table_stride: fx.Int32,
+        sm_scale: fx.Float32,
     ):
         # Make shape/mode traits visible to the JIT cache key.
         _ = _flash_attn_generic_cache_tag
@@ -610,6 +613,7 @@ def build_flash_attn_func_module_primary(
         batch_size: fx.Int32,
         seq_len: fx.Int32,
         seq_len_kv: fx.Int32,
+        sm_scale: fx.Float32,
         stream: fx.Stream = fx.Stream(None),
     ):
         bs_idx = fx.Index(batch_size)
@@ -637,6 +641,7 @@ def build_flash_attn_func_module_primary(
             CuSeqKv,
             BlockTable,
             block_table_stride,
+            sm_scale,
             value_attrs={
                 "rocdl.waves_per_eu": waves_per_eu,
                 "rocdl.flat_work_group_size": (
@@ -681,6 +686,7 @@ def build_flash_attn_func_module_primary(
         block_table_stride=0,
         seq_len_kv=None,
         lse=None,
+        sm_scale=None,
         stream=None,
     ):
         # Dense/non-paged pass the output tensor as a placeholder for the unused
@@ -697,6 +703,7 @@ def build_flash_attn_func_module_primary(
             )
         ls = lse if lse is not None else Out
         skv = seq_len if seq_len_kv is None else seq_len_kv
+        scale = _default_sm_scale if sm_scale is None else sm_scale
         with CompilationContext.compile_hints(_fmha_compile_hints):
             return launch_flash_attn_generic(
                 Q,
@@ -711,11 +718,21 @@ def build_flash_attn_func_module_primary(
                 batch_size,
                 seq_len,
                 skv,
+                scale,
                 fx.Stream(stream),
             )
 
     def _compile(
-        Q, K, V, Out, batch_size, seq_len, seq_len_kv=None, lse=None, stream=None
+        Q,
+        K,
+        V,
+        Out,
+        batch_size,
+        seq_len,
+        seq_len_kv=None,
+        lse=None,
+        sm_scale=None,
+        stream=None,
     ):
         if return_lse and lse is None:
             raise ValueError(
@@ -724,6 +741,7 @@ def build_flash_attn_func_module_primary(
             )
         ls = lse if lse is not None else Out
         skv = seq_len if seq_len_kv is None else seq_len_kv
+        scale = _default_sm_scale if sm_scale is None else sm_scale
         with CompilationContext.compile_hints(_fmha_compile_hints):
             return flyc.compile(
                 launch_flash_attn_generic,
@@ -739,6 +757,7 @@ def build_flash_attn_func_module_primary(
                 batch_size,
                 seq_len,
                 skv,
+                scale,
                 fx.Stream(stream),
             )
 

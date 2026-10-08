@@ -94,6 +94,7 @@ _PARAMS = {
         ("block_table_stride", "i32"),
         ("bias_stride0", "i32"),
         ("alibi_stride_b", "i32"),
+        ("sm_scale", "f32"),
     ),
     "generic": (
         ("Q", "tensor"),
@@ -107,6 +108,7 @@ _PARAMS = {
         ("CuSeqKv", "tensor"),
         ("BlockTable", "tensor"),
         ("block_table_stride", "i32"),
+        ("sm_scale", "f32"),
     ),
 }
 

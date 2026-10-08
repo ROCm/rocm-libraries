@@ -21,6 +21,8 @@ the hand-written reference asm (num_records bound on Q/K/V/O, tile count rounded
 up to even, and a kv padding-mask on the non-causal path).
 """
 
+import math as host_math
+
 import flydsl.compiler as flyc
 import flydsl.expr as fx
 from flydsl.compiler.kernel_function import CompilationContext
@@ -226,6 +228,7 @@ def build_flash_attn_dualwave_swp_module(
         block_table_stride: fx.Int32,
         bias_stride0: fx.Int32,
         alibi_stride_b: fx.Int32,
+        sm_scale: fx.Float32,
     ):
         ctx = DualwaveKernelContext(
             traits,
@@ -244,6 +247,7 @@ def build_flash_attn_dualwave_swp_module(
             head_dim_runtime,
             block_table_stride,
             LSE=LSE,
+            sm_scale=sm_scale,
         )
         ctx.init_types_and_constants()
         ctx.init_runtime_indices()
@@ -1089,6 +1093,7 @@ def build_flash_attn_dualwave_swp_module(
         block_table_stride: fx.Int32,
         bias_stride0: fx.Int32,
         alibi_stride_b: fx.Int32,
+        sm_scale: fx.Float32,
         stream: fx.Stream = fx.Stream(None),
     ):
         # Make shape/mode traits visible to the JIT cache key.
@@ -1130,6 +1135,7 @@ def build_flash_attn_dualwave_swp_module(
             block_table_stride,
             bias_stride0,
             alibi_stride_b,
+            sm_scale,
             value_attrs={
                 "rocdl.waves_per_eu": traits.WAVES_PER_EU,
                 "rocdl.flat_work_group_size": f"{traits.BLOCK_SIZE},{traits.BLOCK_SIZE}",
@@ -1263,6 +1269,7 @@ def build_flash_attn_dualwave_swp_module(
         alibi_slopes=None,
         sink=None,
         lse=None,
+        sm_scale=None,
         stream=None,
     ):
         if stride_kv_n is None:
@@ -1271,6 +1278,8 @@ def build_flash_attn_dualwave_swp_module(
             stride_q_n = traits.DEFAULT_STRIDE_Q_N
         if head_dim_runtime is None:
             head_dim_runtime = traits.HEAD_DIM
+        if sm_scale is None:
+            sm_scale = 1.0 / host_math.sqrt(head_dim_runtime)
         # seq_len_kv defaults to seq_len (self-attention / equal Q,KV lengths).
         if seq_len_kv is None:
             seq_len_kv = seq_len
@@ -1328,6 +1337,7 @@ def build_flash_attn_dualwave_swp_module(
                     block_table_stride,
                     bias_stride0,
                     alibi_stride_b,
+                    sm_scale,
                 )
             return launch_flash_attn_dualwave_swp(
                 Q,
@@ -1351,6 +1361,7 @@ def build_flash_attn_dualwave_swp_module(
                 block_table_stride,
                 bias_stride0,
                 alibi_stride_b,
+                sm_scale,
                 stream=stream,
             )
 
@@ -1377,6 +1388,7 @@ def build_flash_attn_dualwave_swp_module(
         alibi_slopes=None,
         sink=None,
         lse=None,
+        sm_scale=None,
         stream=None,
     ):
         if stride_kv_n is None:
@@ -1385,6 +1397,8 @@ def build_flash_attn_dualwave_swp_module(
             stride_q_n = traits.DEFAULT_STRIDE_Q_N
         if head_dim_runtime is None:
             head_dim_runtime = traits.HEAD_DIM
+        if sm_scale is None:
+            sm_scale = 1.0 / host_math.sqrt(head_dim_runtime)
         if seq_len_kv is None:
             seq_len_kv = seq_len
         if return_lse and lse is None:
@@ -1437,6 +1451,7 @@ def build_flash_attn_dualwave_swp_module(
                 block_table_stride,
                 bias_stride0,
                 alibi_stride_b,
+                sm_scale,
                 fx.Stream(stream),
             )
 
