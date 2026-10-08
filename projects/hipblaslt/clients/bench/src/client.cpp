@@ -1295,7 +1295,12 @@ try
     arg.norm_check_assert = false;
     return run_bench_test(arg, filter, any_stride, props);
 }
-catch(const std::exception& exp)
+catch(const std::invalid_argument& exp)
+{
+    hipblaslt_cerr << exp.what() << std::endl;
+    return -1;
+}
+catch(const std::runtime_error& exp)
 {
     hipblaslt_cerr << exp.what() << std::endl;
     return -1;
