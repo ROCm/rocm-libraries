@@ -26,6 +26,7 @@ from rocisa.instruction import (
     TensorLoadToLds,
     VAddU32, VAndB32, VMulLOU32, VReadfirstlaneB32, VXorB32,
     VLShiftLeftB32, VLShiftRightB32,
+    VSubU32, VCmpGEU32, VCndMaskB32,
 )
 
 
@@ -247,14 +248,74 @@ def emitScaleGRLDSSwap(ti, writer, kernel):
   return module
 
 
+def emitLRBufferSwapOffsets(module, writer, kernel, offsets, swaps, tcName=""):
+  """Advance LR read offsets to the next LDS buffer.
+
+  With double buffering (numLDSBlk == 2) this is the classic xor toggle:
+  ``offset ^= swapMask`` flips between buffer 0 and buffer 1.
+
+  With triple+ buffering (numLDSBlk >= 3, TDMPlusLdsBuf) the xor trick cannot
+  express a 3-way rotation, so we rotate explicitly::
+
+      offset += ldsTotalSize                 # step to the next buffer
+      if offset >= swaps[i]:                 # swaps[i] = origOffset + N*ldsTotalSize
+          offset -= numLDSBlk * ldsTotalSize # wrap back to buffer 0
+
+  The compare is per-lane (each lane carries its own ceiling in ``swaps[i]``),
+  so the rotation is self-contained: no shared counter and no assumption about
+  the order in which the per-tensor swaps are emitted.
+  """
+  n      = writer.states.numLDSBlk
+  stride = writer.ldsTotalSize
+  if n < 3:
+    for vOff, vSwap in zip(offsets, swaps):
+      module.add(VXorB32(dst=vgpr(vOff), src0=vgpr(vOff), src1=vgpr(vSwap),
+                         comment="%s LR buffer toggle" % tcName))
+    return
+  laneCnt = 1 if kernel["WavefrontSize"] == 32 else 2
+  with writer.allocTmpSgpr(laneCnt + 1) as tmpRes:
+    maskSgpr = tmpRes.idx
+    cstSgpr  = tmpRes.idx + laneCnt
+    vTmp = writer.vgprPool.checkOut(1, tag="emitLRBufferSwapOffsets_wrap")
+    for vOff, vSwap in zip(offsets, swaps):
+      module.add(SMovB32(dst=sgpr(cstSgpr), src=stride, comment="LDS buffer stride"))
+      module.add(VAddU32(dst=vgpr(vOff), src0=vgpr(vOff), src1=sgpr(cstSgpr),
+                         comment="%s LR -> next LDS buffer" % tcName))
+      module.add(SMovB32(dst=sgpr(cstSgpr), src=n * stride, comment="span of %d LDS buffers" % n))
+      module.add(VSubU32(dst=vgpr(vTmp), src0=vgpr(vOff), src1=sgpr(cstSgpr),
+                         comment="wrapped-to-buffer0 candidate"))
+      module.add(VCmpGEU32(sgpr(maskSgpr, laneCnt), vgpr(vOff), vgpr(vSwap),
+                           comment="past the last LDS buffer?"))
+      module.add(VCndMaskB32(dst=vgpr(vOff), src0=vgpr(vOff), src1=vgpr(vTmp),
+                             src2=sgpr(maskSgpr, laneCnt), comment="wrap LR offset to buffer 0"))
+    writer.vgprPool.checkIn(vTmp)
+
+
+def initLRBufferSwapCeil(module, writer, kernel, offsets, swaps, cstSgpr, tcName=""):
+  """Initialise the per-lane LR swap register.
+
+  numLDSBlk == 2 : swaps[i] = origOffset ^ (origOffset + ldsTotalSize)  (xor mask)
+  numLDSBlk >= 3 : swaps[i] = origOffset + numLDSBlk*ldsTotalSize       (wrap ceiling)
+  """
+  n      = writer.states.numLDSBlk
+  stride = writer.ldsTotalSize
+  span   = (n * stride) if n >= 3 else stride
+  module.add(SMovB32(dst=sgpr(cstSgpr), src=span,
+                     comment="%s LR buffer span (%d)" % (tcName, span)))
+  for vOff, vSwap in zip(offsets, swaps):
+    module.add(VAddU32(dst=vgpr(vSwap), src0=vgpr(vOff), src1=sgpr(cstSgpr),
+                       comment="%s LR swap: offset + span" % tcName))
+    if n < 3:
+      module.add(VXorB32(dst=vgpr(vSwap), src0=vgpr(vOff), src1=vgpr(vSwap),
+                         comment="%s LR swap: xor toggle mask" % tcName))
+
+
 def emitScaleLRLDSSwap(ti, writer, kernel):
-  """Toggle scale LR read offsets between double-buffer halves."""
+  """Toggle/rotate scale LR read offsets between LDS buffers."""
   module = Module()
   module.addComment0("Emit code to swap %s LR vgpr offsets"%ti.tc)
-  for i in range(len(ti.sharedVgprLROffset)):
-    vOff  = ti.sharedVgprLROffset[i]
-    vSwap = ti.sharedVgprLROffsetSwap[i]
-    module.add(VXorB32(dst=vgpr(vOff), src0=vgpr(vOff), src1=vgpr(vSwap), comment=""))
+  emitLRBufferSwapOffsets(module, writer, kernel,
+                          ti.sharedVgprLROffset, ti.sharedVgprLROffsetSwap, tcName=ti.tc)
   return module
 
 
@@ -426,13 +487,10 @@ def _lraTileAssignmentScaleSwizzled_legacy(writer, kernel):
   module.add(VAddU32(dst=vgpr(tiA_.sharedVgprLROffset[0]), src0=vgpr(tiA_.sharedVgprLROffset[0]), src1=sgpr(tmpSgpr), comment="scaleA: +=LDS offset"))
   module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(writer.ldsStartOffsetMXSB), comment="scale: LDS offset for B scale"))
   module.add(VAddU32(dst=vgpr(tiB_.sharedVgprLROffset[0]), src0=vgpr(tiB_.sharedVgprLROffset[0]), src1=sgpr(tmpSgpr), comment="scaleB: +=LDS offset"))
-  module.add(SMovB32(dst=sgpr(tmpSgpr), src=writer.ldsTotalSize, comment="scale: total LDS size for swap"))
   for ti_ in [tiA_, tiB_]:
-    for i in range(len(ti_.sharedVgprLROffset)):
-      vgprId     = ti_.sharedVgprLROffset[i]
-      vgprSwapId = ti_.sharedVgprLROffsetSwap[i]
-      module.add(VAddU32(dst=vgpr(vgprSwapId), src0=vgpr(vgprId), src1=sgpr(tmpSgpr), comment="scale%s: LR swap"%ti_.tc))
-      module.add(VXorB32(dst=vgpr(vgprSwapId), src0=vgpr(vgprId), src1=vgpr(vgprSwapId), comment="scale%s: LR swap"%ti_.tc))
+    initLRBufferSwapCeil(module, writer, kernel,
+                         ti_.sharedVgprLROffset, ti_.sharedVgprLROffsetSwap,
+                         tmpSgpr, tcName="scale%s" % ti_.tc)
   writer.sgprPool.checkIn(tmpSgpr)
   return module
 

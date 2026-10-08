@@ -5994,12 +5994,15 @@ class Solution(collections.abc.Mapping):
         # force 1LDSBuffer = 0
         state["1LDSBuffer"] = 0
 
-    # TEMP: TDMPlusLdsBuf (triple LDS buffer) has an unresolved cross-wave
-    # read-after-write race on the rotating LDS (a fast wave overwrites a buffer
-    # a slow wave is still reading). Silently fall back to 2 buffers for every
-    # value (auto -1 and forced 1) so existing library logic that selected a
-    # triple kernel keeps building. Re-enable once the race is fixed.
-    state["TDMPlusLdsBuf"] = 0
+    # TEMP: the base-path TDMPlusLdsBuf (triple LDS buffer) has an unresolved
+    # cross-wave read-after-write race on the rotating LDS (a fast wave
+    # overwrites a buffer a slow wave is still reading). Keep the safe fallback
+    # to 2 buffers for the auto (-1) value and for the non-subtile path.
+    # The subtile SIA3 path (UseSubtileImpl) implements its own rotating LDS
+    # swap and producer/consumer barrier handshake, so an EXPLICIT
+    # `TDMPlusLdsBuf: 1` is honored there as an opt-in to the deeper pipeline.
+    if state["TDMPlusLdsBuf"] == -1 or not state.get("UseSubtileImpl"):
+      state["TDMPlusLdsBuf"] = 0
 
     # disable TDMPlusLdsBuf if not applicable. TDMPlusLdsBuf asks for PGR+1 (3) LDS
     # buffers for PGR2 without requiring DirectToLds. -1 (auto) is still unresolved
@@ -6012,7 +6015,9 @@ class Solution(collections.abc.Mapping):
       # so plain StreamK keeps the extra buffer and only PAP falls back to two.
       if state["PrefetchAcrossPersistent"]:
         state["TDMPlusLdsBuf"] = 0
-      if state["_ScheduleIterAlg"] != 0:
+      # The subtile SIA3 scheduler supports TDMPlusLdsBuf natively (its own
+      # rotating swap + barrier), so only the legacy base path requires SIA0.
+      if state["_ScheduleIterAlg"] != 0 and not state.get("UseSubtileImpl"):
         if  state["TDMPlusLdsBuf"] == 1:
           reject(state, printRejectionReason, "TDMPlusLdsBuf is not supported with ScheduleIterAlg != 0")
           return

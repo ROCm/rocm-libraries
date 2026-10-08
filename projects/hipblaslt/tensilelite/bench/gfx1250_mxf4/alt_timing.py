@@ -11,8 +11,8 @@ CLIENT = BENCH + "/../../build_tmp/tensilelite/client/tensilelite-client"
 rounds = int(sys.argv[1])
 variants = [a.split("=", 1) for a in sys.argv[2:]]
 inis = {n: glob.glob(f"{BENCH}/{d}/**/ClientParameters.ini", recursive=True)[0] for n, d in variants}
-env = dict(os.environ, HIP_VISIBLE_DEVICES=os.environ.get("GPU_ID", "3"),
-           LD_LIBRARY_PATH="/opt/rocm-10.1.0a20260908+bkc.20260917/lib/llvm/lib/x86_64-unknown-linux-gnu")
+env = dict(os.environ, HIP_VISIBLE_DEVICES=os.environ.get("GPU_ID", "0"),
+           LD_LIBRARY_PATH=os.environ.get("LIBOMP_DIR", "/opt/rocm/lib/llvm/lib"))
 env.pop("ROCR_VISIBLE_DEVICES", None)
 
 times = {n: [] for n, _ in variants}

@@ -38,7 +38,7 @@ which is where `invoke build-client` leaves the compiled `_rocisa*.so`.
 
 ```bash
 cd bench/gfx1250_mxf4
-# Pins physical GPU 3 via HIP_VISIBLE_DEVICES (override with GPU_ID=N).
+# Single-GPU box: runs on GPU 0 with no visibility mask (pin another card with GPU_ID=N).
 ./run.sh tensile          # compile + one timed launch, ISA under tensile/ (KeepBuildTmp)
 ./run.sh att              # ATT on the latest ClientParameters.ini
 ./run.sh pmc              # TX_VMW LDS bank / address / segment-conflict counters

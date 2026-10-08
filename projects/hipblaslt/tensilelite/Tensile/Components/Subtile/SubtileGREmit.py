@@ -25,8 +25,8 @@ from rocisa.enum import RegisterType
 from rocisa.instruction import (
     BufferLoadB128,
     SAddCU32, SAddU32, SAddU64, SAndB32, SMaxI32, SMinU32, SMovB32, SMovB64, SMulI32,
-    SNop, SOrB32, SSubI32, SXorB32,
-    SCBranchSCC1, SCmpEQU32, SCSelectB32, SEndpgm,
+    SNop, SOrB32, SSubI32, SSubU32, SXorB32,
+    SCBranchSCC1, SCmpEQU32, SCmpGeU32, SCSelectB32, SEndpgm,
     SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32,
     VAddU32, VAndB32, VCmpXEqU32,
     VLShiftLeftB32, VLShiftRightB32, VMovB32,
@@ -999,19 +999,37 @@ def _subtileTileInfo(writer, tc):
   raise ValueError(f"unknown subtile tensor {tc}")
 
 
-def _tdmSwapLdsBuffer(tc):
+def _tdmSwapLdsBuffer(tc, writer, kernel):
   module = Module()
-  module.addComment0("TDM: swap %s LDS buffer (XOR with per-tensor swap mask)" % tc)
   ldsAddrSgpr = "tdmLdsAddr%s" % tc
   swapSgpr = "tdmLdsSwapMask%s" % tc
   # refreshTDMDescriptorSubtile copies tdmLdsAddr{tc} into the descriptor before every load.
-  module.add(SXorB32(dst=sgpr(ldsAddrSgpr), src0=sgpr(ldsAddrSgpr), src1=sgpr(swapSgpr), comment=""))
+  n = writer.states.numLDSBlk
+  if n < 3:
+    module.addComment0("TDM: swap %s LDS buffer (XOR with per-tensor swap mask)" % tc)
+    module.add(SXorB32(dst=sgpr(ldsAddrSgpr), src0=sgpr(ldsAddrSgpr), src1=sgpr(swapSgpr), comment=""))
+    return module
+  # numLDSBlk >= 3 (TDMPlusLdsBuf): the xor toggle cannot express a 3-way
+  # rotation, so advance the write address by one buffer and wrap past the
+  # last one. swapSgpr holds the per-tensor ceiling (base + N*ldsTotalSize).
+  stride = writer.ldsTotalSize
+  module.addComment0("TDM: rotate %s LDS write buffer (+1 of %d, wrap at ceiling)" % (tc, n))
+  with writer.allocTmpSgpr(1) as tmpRes:
+    tmp = tmpRes.idx
+    module.add(SAddU32(dst=sgpr(ldsAddrSgpr), src0=sgpr(ldsAddrSgpr), src1=stride,
+                       comment="%s TDM -> next LDS buffer" % tc))
+    module.add(SSubU32(dst=sgpr(tmp), src0=sgpr(ldsAddrSgpr), src1=n * stride,
+                       comment="wrapped-to-buffer0 candidate"))
+    module.add(SCmpGeU32(src0=sgpr(ldsAddrSgpr), src1=sgpr(swapSgpr),
+                         comment="past the last LDS buffer?"))
+    module.add(SCSelectB32(dst=sgpr(ldsAddrSgpr), src0=sgpr(tmp), src1=sgpr(ldsAddrSgpr),
+                           comment="wrap TDM write addr to buffer 0"))
   return module
 
 
 def globalReadLDSBufferSwap(tc, writer, kernel):
   if _subtileEnableTDM(kernel, tc):
-    return _tdmSwapLdsBuffer(tc)
+    return _tdmSwapLdsBuffer(tc, writer, kernel)
   if tc in ['A', 'B']:
     ti_ = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
     return ti_.emitGRLDSBufferSwap(writer, kernel)
@@ -1208,12 +1226,21 @@ def _tdmGlobalOffsetSubtileMX(writer, kernel, tP):
   return mod
 
 
-def _commitSubtileLdsTracking(mod, tc, waveOffsetSgprIdx, ldsTotalSize):
-  """Save the per-wave LDS address and the double-buffer swap mask."""
+def _commitSubtileLdsTracking(mod, tc, waveOffsetSgprIdx, ldsTotalSize, writer):
+  """Save the per-wave LDS write address and the buffer-swap helper sgpr.
+
+  numLDSBlk == 2 : tdmLdsSwapMask = addr ^ (addr + ldsTotalSize)   (xor toggle)
+  numLDSBlk >= 3 : tdmLdsSwapMask = addr + numLDSBlk*ldsTotalSize  (rotate ceiling)
+  """
   ldsTrackSgpr = f"tdmLdsAddr{tc}"
   swapMaskSgpr = f"tdmLdsSwapMask{tc}"
+  n = writer.states.numLDSBlk
   mod.add(SMovB32(dst=sgpr(ldsTrackSgpr), src=sgpr(waveOffsetSgprIdx),
                   comment=f"init {ldsTrackSgpr} for buffer tracking"))
+  if n >= 3:
+    mod.add(SAddU32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=n * ldsTotalSize,
+                    comment=f"ceiling = addr + {n}*ldsTotalSize({ldsTotalSize})"))
+    return
   mod.add(SAddU32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=ldsTotalSize,
                   comment=f"addr + ldsTotalSize({ldsTotalSize})"))
   mod.add(SXorB32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=sgpr(swapMaskSgpr),
@@ -1261,7 +1288,7 @@ def _emitSubtileDataLdsTracking(writer, tc, mt, du, bpe, numWaves, wavelen,
               "woffset = wId * (mt // numWaves * du * bpe)"))
     mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset,
             f"ldsOffset = woffset + {ldsConstOffset} (subtile LDS offset for {tc})"))
-    _commitSubtileLdsTracking(mod, tc, waveOffsetSgprIdx, writer.ldsTotalSize)
+    _commitSubtileLdsTracking(mod, tc, waveOffsetSgprIdx, writer.ldsTotalSize, writer)
   return mod
 
 
@@ -1280,7 +1307,7 @@ def _emitSubtileMxLdsTracking(writer, kernel, tc, ldsConstOffset):
             "woffset += K group column"))
     mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset,
             f"ldsOffset = woffset + {ldsConstOffset} (subtile LDS offset for {tc})"))
-    _commitSubtileLdsTracking(mod, tc, waveOffsetSgprIdx, writer.ldsTotalSize)
+    _commitSubtileLdsTracking(mod, tc, waveOffsetSgprIdx, writer.ldsTotalSize, writer)
   return mod
 
 

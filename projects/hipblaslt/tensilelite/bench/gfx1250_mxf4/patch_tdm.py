@@ -10,7 +10,7 @@ tensorcnt then simply pass earlier. Writes logs/<stamp>-tdm-NAME/ for alt_timing
 import glob, os, re, subprocess, sys, time
 
 BENCH = os.path.dirname(os.path.abspath(__file__))
-LLVM = "/opt/rocm-10.1.0a20260908+bkc.20260917/lib/llvm/bin"
+LLVM = os.environ.get("LLVM_BIN", "/opt/rocm/lib/llvm/bin")
 TC = {"A": "A", "B": "B", "SA": "MXSA", "SB": "MXSB"}
 
 src, name = sys.argv[1], sys.argv[2]

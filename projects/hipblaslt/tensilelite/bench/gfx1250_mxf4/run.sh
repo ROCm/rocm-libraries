@@ -35,20 +35,22 @@ ROCM_ROOT="${ROCM_PATH:-$(dirname "$(dirname "$(readlink -f "$(command -v rocpro
 LIBOMP_DIR="$(dirname "$(find "$ROCM_ROOT/lib/llvm/lib" -name libomp.so -print -quit 2>/dev/null || echo .)")"
 export LD_LIBRARY_PATH="${LIBOMP_DIR}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
-# Physical GPU 3 only (PCI 0004:01:00.0, umr -i 25). Tensile Device: 0 and rocprof
-# att_gpu_index 0 then mean that card. The TX_VMW LDS counters only count after the
-# umr register writes for that card's DRM instance (see README).
-# Set exactly one filter: ROCR_VISIBLE_DEVICES already renumbers the survivor to 0, so
-# also setting HIP_VISIBLE_DEVICES=3 would filter the filtered list and yield hipErrorNoDevice.
-GPU_ID="${GPU_ID:-3}"
-export HIP_VISIBLE_DEVICES="$GPU_ID"
-unset ROCR_VISIBLE_DEVICES
-echo "==> HIP_VISIBLE_DEVICES=$GPU_ID"
+# Single-GPU box: just use GPU 0 (Tensile Device: 0 and rocprof att_gpu_index 0
+# already mean that card) and don't filter visibility. Export GPU_ID=N to pin a
+# specific card if this ever runs on a multi-GPU host; that also fixes the
+# umr/rocprof DRM-instance mapping the TX_VMW LDS counters depend on (see README).
+if [[ -n "${GPU_ID:-}" ]]; then
+  export HIP_VISIBLE_DEVICES="$GPU_ID"
+  unset ROCR_VISIBLE_DEVICES
+  echo "==> HIP_VISIBLE_DEVICES=$GPU_ID"
+else
+  echo "==> using default GPU 0 (no visibility mask)"
+fi
 
 usage() {
   sed -n '2,8p' "$0" | sed 's/^# \?//'
   echo
-  echo "Env: GPU_ID (default 3), TENSILE_YAML, ROCPROFV3, TENSILE_CLIENT, PYTHON, PYTHONPATH"
+  echo "Env: GPU_ID (unset = default GPU 0, no mask), TENSILE_YAML, ROCPROFV3, TENSILE_CLIENT, PYTHON, PYTHONPATH"
   echo "Logs: $LOGS/<stamp>/"
   exit 1
 }

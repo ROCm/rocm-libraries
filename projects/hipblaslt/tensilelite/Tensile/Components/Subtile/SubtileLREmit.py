@@ -29,7 +29,7 @@ from rocisa.instruction import (
 from .SubtileGeometry import (
     LRTag_1x1, LRTag_1x2, LRTag_TLU1,
 )
-from .SubtileScaleEmit import emitScaleLRLDSSwap
+from .SubtileScaleEmit import emitScaleLRLDSSwap, emitLRBufferSwapOffsets, initLRBufferSwapCeil
 
 
 ################################################################################
@@ -385,10 +385,8 @@ def _emitLRLDSSwap_1x2(tag, tile, ti, writer, kernel):
   """
   module = Module()
   module.addComment0("Emit code to swap %s LR vgpr offsets"%ti.tc)
-  for i in range(len(tile.sharedVgprLROffset)):
-    vOff  = tile.sharedVgprLROffset[i]
-    vSwap = tile.sharedVgprLROffsetSwap[i]
-    module.add(VXorB32(dst=vgpr(vOff), src0=vgpr(vOff), src1=vgpr(vSwap), comment=""))
+  emitLRBufferSwapOffsets(module, writer, kernel,
+                          tile.sharedVgprLROffset, tile.sharedVgprLROffsetSwap, tcName=ti.tc)
   return module
 
 
@@ -897,19 +895,10 @@ def localReadDTLInitCommonSwapVgpr(writer, kernel):
   btile = writer.states.b.tileInfo
 
   stmp = writer.sgprPool.checkOut(1, tag="_localReadDTLInitCommonSwapVgpr_stmp")
-  module.add(SMovB32(dst=sgpr(stmp), src=writer.ldsTotalSize, comment="Store Total Lds Size for one buffer"))
-  for i in range(len(atile.sharedVgprLROffset)):
-    vgprId = atile.sharedVgprLROffset[i]
-    vgprSwapId = atile.sharedVgprLROffsetSwap[i]
-    module.add(VAddU32(dst=vgpr(vgprSwapId), src0=vgpr(vgprId), src1=sgpr(stmp), comment=""))
-    module.add(VXorB32(dst=vgpr(vgprSwapId), src0=vgpr(vgprId), src1=vgpr(vgprSwapId), comment=""))
-
-  for i in range(len(btile.sharedVgprLROffset)):
-    vgprId = btile.sharedVgprLROffset[i]
-    vgprSwapId = btile.sharedVgprLROffsetSwap[i]
-    module.add(VAddU32(dst=vgpr(vgprSwapId), src0=vgpr(vgprId), src1=sgpr(stmp), comment=""))
-    module.add(VXorB32(dst=vgpr(vgprSwapId), src0=vgpr(vgprId), src1=vgpr(vgprSwapId), comment=""))
-
+  initLRBufferSwapCeil(module, writer, kernel,
+                       atile.sharedVgprLROffset, atile.sharedVgprLROffsetSwap, stmp, tcName="A")
+  initLRBufferSwapCeil(module, writer, kernel,
+                       btile.sharedVgprLROffset, btile.sharedVgprLROffsetSwap, stmp, tcName="B")
   writer.sgprPool.checkIn(stmp)
   return module
 

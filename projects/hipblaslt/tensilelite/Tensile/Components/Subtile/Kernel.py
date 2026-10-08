@@ -1479,6 +1479,7 @@ def mainLoop(writer, kernel):
           pgr=schedulerPgr,
           grPlacement=grPlacement,
           pgl=kernel.get("PrefetchGL2", 0),
+          numLdsBlk=kernel.get("NumLdsBlk", 2),
       )
 
       scheduler = LogicalScheduler(cfg)

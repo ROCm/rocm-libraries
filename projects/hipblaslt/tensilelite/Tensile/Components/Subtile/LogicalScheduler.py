@@ -339,6 +339,8 @@ class SchedulerConfig:
     pgr: int = 2              # Prefetch Global Read
     grPlacement: GRPlacementStrategy = GRPlacementStrategy.SPREAD
     pgl: int = 0              # Prefetch GL2 (0=off, 1 or 2 tiles ahead)
+    numLdsBlk: int = 2        # LDS double/triple-buffer depth. GR(n) reuses the buffer
+                              # LR(n-numLdsBlk) read, so numLdsBlk-1 fills stay in flight.
 
     # Resolve a partition spec into per-partition sizes along one dimension.
     # spec is either:
@@ -1578,6 +1580,11 @@ class LogicalScheduler:
                        for pi in range(self.config.numPartitions)]
 
         pgr = self.config.pgr
+        # Prefetch distance in MTs. Default 1 (double buffer).
+        # NOTE: scaling this to numLdsBlk-1 (deep prefetch for TDMPlusLdsBuf)
+        # correctly produces mt_offset=-2 GR->LR overlap, but DEADLOCKS at
+        # runtime until the mainloop prologue prefetches numLdsBlk-1 MTs and the
+        # producer/consumer barrier handshake is in place (see deep-pipeline TODO).
         offsetMT = 0 if pgr == 0 else 1
 
         maxUnroll = max(self.config.numUnroll.values())
@@ -1761,10 +1768,11 @@ class LogicalScheduler:
                         lr.deps.append(Dep(
                             ref=gr, mt_offset=_mt_offset(pi, k, 'LR', gr, consumer=lr)))
 
-            # GR: depends on collision LR (LDS double-buffer)
-            # GR(n+x) collides with LR(n+x-2) — same buffer, period 2.
+            # GR: depends on collision LR (LDS multi-buffer)
+            # GR(n+x) collides with LR(n+x-numLdsBlk) — same physical LDS buffer,
+            # period numLdsBlk (2 = double buffer, 3 = triple buffer, ...).
             for gr in slot.grs:
-                target_data = gr.mtIteration - 2
+                target_data = gr.mtIteration - self.config.numLdsBlk
                 for lr in lr_by_tensor.get(gr.tensor, []):
                     if _range_overlaps(lr.tiles, gr.tiles):
                         mt_off = target_data - lr.mtIteration
@@ -2315,6 +2323,21 @@ class LogicalScheduler:
                     lr.preOps = []
                     if gr_deps:
                         dep = gr_deps[0]
+                        # Deep-pipeline anchor (numLdsBlk >= 3, TDMPlusLdsBuf):
+                        # the TDM fill for mxf4 takes ~2 MTs of compute to land,
+                        # so a single-MT overlap (anchoring on the nearest GR,
+                        # mt_offset=-1) leaves s_wait_tensorcnt exposed. Anchor
+                        # instead on the GR from (numLdsBlk-1) iterations back so
+                        # (numLdsBlk-1) fills stay in flight: the wait count scales
+                        # up (0x4 -> 0x8 for 3 buffers) and the consumed buffer had
+                        # that many MTs of compute to complete. The deeper buffer
+                        # must exist (place_GRs emits mt=2 GRs under PGR=2); fall
+                        # back to the deepest available dep otherwise.
+                        if self.config.numLdsBlk >= 3 and len(gr_deps) > 1:
+                            target_off = -(self.config.numLdsBlk - 1)
+                            deeper = [d for d in gr_deps if d.mt_offset == target_off]
+                            dep = deeper[0] if deeper else min(
+                                gr_deps, key=lambda d: d.mt_offset)
                         if self._is_multi_du():
                             wait_dep = self._wait_gr_dep_for_lr(lr, dep)
                             is_cross = (wait_dep.ref.partition != pi
