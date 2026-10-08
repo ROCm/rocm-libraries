@@ -6,6 +6,7 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
+#include <Tensile/SolutionLibrary.hpp>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -65,6 +66,10 @@ namespace hipblaslt_jit
     std::string problemTypeKey(const TensileLite::ContractionProblemGemm& problem);
     // problem.size(i) for every index; a published entry matches only these sizes.
     std::vector<size_t> problemSizes(const TensileLite::ContractionProblemGemm& problem);
+    // One lazy slice: operation identifier, datatypes, the TensileLite scale
+    // suffix (scalar or vector UseScaleAB, MX block and type) and the epilogue
+    // flags that change the kernel family. Sizes stay inside the slice.
+    std::string sliceKey(const TensileLite::ContractionProblemGemm& problem);
     // Filesystem-safe literal of the kernel, the problem type and the sizes.
     // The same identity always names the same entry, so a second publish reuses
     // that entry's index.
@@ -88,17 +93,22 @@ namespace hipblaslt_jit
     extern void (*publishStepHook)(PublishStep);
 #endif
 
-    // A persistent library of generated solutions. Each directory is a
-    // TensileLite lazy-loading library that the stock loader reads: a master
-    // with one row per entry, matching only the entry's ProblemType and exact
-    // sizes, an index mapping, and one entry file and code object per solution.
+    // A persistent library of generated solutions. Each directory holds one
+    // slice per kernel family. A query opens that slice only: a TensileLite
+    // lazy master, its index mapping, and one entry and code object per
+    // solution, matching the full ProblemType and the exact sizes. Shared HIP
+    // helpers live beside the slices, one code object per backend id and name.
     // Library files are MessagePack, including cache-key.msgpack. A solution
     // whose code-object version or kernarg version this build cannot run is
     // skipped; the rest of the library still loads.
     // Publishing holds the root's file lock and replaces files atomically, in an
     // order that never lets a reader see a reference to a missing file, so
     // readers take no lock. Thread-safe.
-    class JitLibrary
+    //
+    // Consulted the same way as the Equality and Origami libraries.
+    // findTopSolutions returns published matches and, on a miss, generates and
+    // publishes when beginQuery allowed it. Grouped-GEMM queries return nothing.
+    class JitLibrary : public TensileLite::SolutionLibrary<TensileLite::ContractionProblemGemm>
     {
     public:
         struct View
@@ -117,18 +127,67 @@ namespace hipblaslt_jit
         JitLibrary& operator=(const JitLibrary&) = delete;
         ~JitLibrary();
 
-        // HIPBLASLT_JIT_LIBRARY_PATH, or /tmp/hipblaslt-jit-<uid>
-        // (%TEMP%\hipblaslt-jit-<user> on Windows).
+        // /tmp/hipblaslt-jit-<uid> (%TEMP%\hipblaslt-jit-<user> on Windows).
+        // HIPBLASLT_JIT_LIBRARY_PATH is applied by process(), not here.
         static std::filesystem::path defaultRoot();
-        // Rooted at defaultRoot(). Never destroyed, so views and adapters stay
-        // valid until exit.
+        // Rooted at HIPBLASLT_JIT_LIBRARY_PATH, or defaultRoot(). Never
+        // destroyed, so views and adapters stay valid until exit.
         static JitLibrary& process();
 
         const std::filesystem::path& root() const noexcept;
         std::filesystem::path        directory(const CacheKey& key) const;
 
+        // Publishes the shortfall. indices receives new library indices. failure
+        // is set when nothing new was published.
+        using GenerateMissing = std::function<void(size_t                          count,
+                                                   const std::vector<std::string>& excludeKernels,
+                                                   std::vector<int32_t>&           indices,
+                                                   Status&                         failure)>;
+
+        // What findTopSolutions may do. Set on the calling thread before the
+        // library call. A capturing stream sets allowGeneration false so a hit
+        // can return and a miss does not build. endQuery clears it.
+        void beginQuery(bool                     allowGeneration,
+                        const DeviceTarget&      target,
+                        const BackendInfo&       backend,
+                        size_t                   workspace,
+                        std::vector<std::string> excludeKernels,
+                        GenerateMissing          generate);
+        void endQuery();
+        // Failure from the query in progress, or success when there is none.
+        Status queryStatus() const;
+
         // Every later call fails with reason.
         void disable(const std::string& reason);
+
+        std::shared_ptr<TensileLite::ContractionSolution>
+            getSolutionByIndex(TensileLite::ContractionProblemGemm const& problem,
+                               TensileLite::Hardware const&               hardware,
+                               const int                                  index) const override;
+        std::shared_ptr<TensileLite::ContractionSolution>
+            findBestSolution(TensileLite::ContractionProblemGemm const& problem,
+                             TensileLite::Hardware const&               hardware,
+                             double*                                    fitness = nullptr) const override;
+        TensileLite::SolutionSet<TensileLite::ContractionSolution>
+            findAllSolutions(TensileLite::ContractionProblemGemm const& problem,
+                             TensileLite::Hardware const&               hardware,
+                             TensileLite::SolutionLibrarySearchType     searchType
+                             = TensileLite::SolutionLibrarySearchType::DEFAULT) const override;
+        TensileLite::SolutionSet<TensileLite::ContractionSolution> findAllSolutionsGroupedGemm(
+            std::vector<TensileLite::ContractionProblemGemm> const& problems,
+            TensileLite::Hardware const&                            hardware,
+            TensileLite::SolutionLibrarySearchType                  searchType
+            = TensileLite::SolutionLibrarySearchType::DEFAULT) const override;
+        std::string type() const override;
+        std::string description() const override;
+        TensileLite::SolutionVector<TensileLite::ContractionSolution>
+            findTopSolutions(TensileLite::ContractionProblemGemm const& problem,
+                             TensileLite::Hardware const&               hardware,
+                             int                                         numSolutions) const override;
+        TensileLite::SolutionVector<TensileLite::ContractionSolution> findTopSolutionsGroupedGemm(
+            std::vector<TensileLite::ContractionProblemGemm> const& problems,
+            TensileLite::Hardware const&                            hardware,
+            int                                                     numSolutions) const override;
 
         // Up to count solutions published for exactly problem's ProblemType and
         // sizes, in index order (the order they were first published) and without

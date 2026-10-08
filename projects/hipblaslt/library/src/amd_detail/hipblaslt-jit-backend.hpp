@@ -29,46 +29,4 @@ namespace hipblaslt_ext::experimental::jit::detail
             = 0;
     };
 
-    struct BackendAccess
-    {
-        static Backend make(std::shared_ptr<const hipblaslt_jit::Jit> jit)
-        {
-            Backend backend;
-            backend.jit = std::move(jit);
-            return backend;
-        }
-        static const auto& get(const Backend& backend)
-        {
-            return backend.jit;
-        }
-    };
-
-    struct RequestAccess
-    {
-        static Request make(std::shared_ptr<const OperationRequest> operation)
-        {
-            Request request;
-            request.implementation = std::move(operation);
-            return request;
-        }
-        static const auto& get(const Request& request)
-        {
-            return request.implementation;
-        }
-    };
-
-    struct SolutionAccess
-    {
-        static Solution make(std::shared_ptr<const CompiledSolution> compiled)
-        {
-            Solution solution;
-            solution.implementation = std::move(compiled);
-            return solution;
-        }
-        static const auto& get(const Solution& solution)
-        {
-            return solution.implementation;
-        }
-    };
-
 }
