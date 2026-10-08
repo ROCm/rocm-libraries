@@ -737,13 +737,15 @@ def _use_exp2_fast(head_size: int, dtype: str, persistent: bool) -> bool:
     seqlen at which exp2_fast wins on the default grid, nor one at which it loses on
     the persistent grid. Keep any future term compile-time for the same reason.
 
-    Scope: measured on gfx942 against the current develop dense builder (causal, square
-    Sq==Skv), both grids forced, with fp16-D128 / bf16-D64 / fp16-D64 controls. Full-mask
-    square shapes take the same cut on the same mechanism (identical kernel/softmax), not
-    separately measured. The gfx950 dense kernel makes an independent exp2_fast decision
-    (its own builder) and is not covered here. This is a gfx942 / ROCm-7.2.2 sweep
-    snapshot -- re-measure via the dense sweep harness on a toolchain or kernel change
-    rather than treating it as fixed.
+    Scope: measured on gfx942 against the develop dense builder of the time (causal,
+    square Sq==Skv), both grids forced, with fp16-D128 / bf16-D64 / fp16-D64 controls.
+    Full-mask square shapes take the same cut on the same mechanism (identical
+    kernel/softmax), not separately measured. The gfx950 dense kernel makes an
+    independent exp2_fast decision (its own builder) and is not covered here. This is
+    a gfx942 / ROCm-7.2.2 sweep snapshot taken BEFORE the softmax scale moved onto the
+    fp32 scores (one extra multiply per score; bf16-D128 default-grid VGPR use rose),
+    and it was not re-measured after that change -- re-measure via the dense sweep
+    harness on a toolchain or kernel change rather than treating it as fixed.
     """
     if dtype == "bf16" and head_size == 128 and not persistent:
         return False
@@ -813,13 +815,13 @@ def _v_row_pad(head_size: int, dtype: str, block_n: int) -> int:
 def _tuned_waves_per_eu(head_size: int, dtype: str) -> int:
     """Tuned ``amdgpu-waves-per-eu`` per config (P3 occupancy).
 
-    Default 2 (one WG/CU = 2 waves/SIMD at this kernel's ~175-217 VGPR). The one
-    override is **bf16 D64 -> 4**, which forces the allocator from 215 VGPR down to
-    ~117 (0 spill). D64's LDS is only 16 KB (allows 4 WGs), so the smaller per-wave
-    budget lets a SECOND WG co-reside (2 WG/CU), and the bf16 ``.1k`` schedule is
-    serialized enough at wpe=2 that its HBM latency is EXPOSED -- the extra resident
-    WG hides it. Measured on MI300X: S512 +~77%, S8192 +~48%, S256 neutral, S2048
-    ~-1.5% (noise); strongly net-positive, so no seqlen gate.
+    Default 2 (one WG/CU = 2 waves/SIMD at this kernel's ~178-220 VGPR on ROCm 10 /
+    LLVM 23). The one override is **bf16 D64 -> 4**, which forces the allocator from
+    215 VGPR down to ~117 (0 spill). D64's LDS is only 16 KB (allows 4 WGs), so the
+    smaller per-wave budget lets a SECOND WG co-reside (2 WG/CU), and the bf16 ``.1k``
+    schedule is serialized enough at wpe=2 that its HBM latency is EXPOSED -- the
+    extra resident WG hides it. Measured on MI300X it is a large win at S512 and S8192
+    and neutral at S256 and S2048, so there is no seqlen gate.
 
     Why not the other configs (all measured, all kept at 2):
       * fp16 D64: wpe=3 already reaches 2 WG/CU at 116 VGPR / 0 spill, but its wpe=2
@@ -1609,20 +1611,17 @@ def _build_attention_dense_single_buffer(
             b.mul(hkv, b.const_i32(D)),
         )
 
-        # Q packs (QK B-operand), scaled once by qk_scale so exp2(s) is direct.
+        # Q packs (QK B-operand), loaded unscaled. qk_scale = softmax_scale *
+        # log2(e) is applied to the fp32 MFMA scores in do_qk instead: rounding
+        # Q * qk_scale back to bf16/fp16 before the MFMA would cost up to 2^-8
+        # relative error per element (bf16), and the score error it causes grows
+        # with the scale.
         q_tok = b.add(q_tok0, lane_m)
         q_packs = []
         for ks in range(K_STEPS):
             col = b.add(b.const_i32(ks * 8), d_base)
             addr = b.add(b.add(q_base, b.mul(q_tok, b.const_i32(stride_q_tok))), col)
-            raw = b.global_load_vN(q, addr, dtype, 4, align=8)
-            elems = [
-                b.cast_f32_to(
-                    b.fmul(b.cast_to_f32(b.vec_extract(raw, j)), qk_scale), dtype
-                )
-                for j in range(4)
-            ]
-            q_packs.append(b.vec_pack(elems, dtype))
+            q_packs.append(b.global_load_vN(q, addr, dtype, 4, align=8))
 
         def _async_load(rsrc, lds_base, tile_key0, group_pad=False):
             if ROWS_PER_INSTR == 1:
@@ -1746,7 +1745,11 @@ def _build_attention_dense_single_buffer(
                             K_lds, b.const_i32(0), krow, col, dtype=dtype, n=4
                         )
                     acc = mfma_32x32x8_for_dtype(b, dtype, k_pack, q_packs[ks], acc)
-                s_reg.append([b.vec_extract(acc, i) for i in range(16)])
+                # Into the log2 domain in fp32, so masking, the row max and
+                # exp2(s - m) all see the same rounded score (s - m <= 0).
+                s_reg.append(
+                    [b.fmul(b.vec_extract(acc, i), qk_scale) for i in range(16)]
+                )
             return s_reg
 
         def do_mask(s_reg, tile_idx, lower=False, upper=True):

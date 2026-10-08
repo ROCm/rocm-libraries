@@ -47,8 +47,14 @@ p_A_stride_{n,hi,wi}, p_D_stride_{n,ho,wo}
 
 | Runtime (kernarg) | Baked (capability / knob) |
 |-------------------|---------------------------|
-| `N`, `H`, `W`, `Ho`, `Wo`, NHWC / NHWK strides | `KH`, `KW`, `stride`, `PAD`, dtype |
+| `N`, `H`, `W`, `Ho`, `Wo`, NHWC / NHWK strides | `KH`, `KW`, `stride`, `PAD`, dilation, dtype |
 | `C` (`p_total_c`), `K` (`p_total_k`) | tile, waves, atom, `ck`, `lds_pad`, swizzle, schedule knobs |
+
+Dilation (`DirectConvProblem.dil_h` / `dil_w`) widens the staged halo to
+`(tile-1)*stride + (K-1)*dil + 1` and spaces the taps `dil` rows / columns apart
+in it; the kernel is the only direct variant that computes a dilated
+convolution. The AOT cache bakes a few dilated 3x3 rows next to the undilated
+ones (`direct_kernel_sweep._NONGROUPED_DILATED`).
 
 Unlike the grouped kernels, the channel counts are runtime too: they only set
 the channel loop's trip count and the staging / store masks. `p_groups` is
@@ -303,7 +309,7 @@ spilling binary; the spilling ones were also the slowest to compile (up to
 | Gate | What it proves | Command |
 |------|----------------|---------|
 | C++ ↔ Python byte-identity | the C++ port emits identical `.ll` for 15 configs covering every atom, dtype, stride, filter size, partial tile, uneven staging pass, DB/SB, swizzle on/off, iglp, waves_per_eu, gfx942/gfx950 | `python platform/tools/check_byte_identity.py --only conv_direct_grouped` (also with `ROCKE_LLVM_FLAVOR=llvm22`) |
-| Emitters | the two sides of that gate; shared with the grouped direct-conv family, non-grouped configs are indices 33+ | `tests/parity/conv_direct_grouped_emit.{py,c}` |
+| Emitters | the two sides of that gate; shared with the grouped direct-conv family, non-grouped configs are indices 42+ (dilated: 63+) | `tests/parity/conv_direct_grouped_emit.{py,c}` |
 | IR golden | Python lowering is byte-stable (5 cases, all llvm flavors) | `conv_direct_nongrouped/*` in `platform/tests/instances/rocke_ir_parity_harness.py` |
 | On-silicon numerics | output vs `torch.nn.functional.conv2d` (fp32 reference), rel. tol 5e-2 fp16 / 1e-1 bf16; includes one binary launched on four unrelated shapes | `pytest tests/test_direct_conv_correctness.py -k Nongrouped` |
 | AOT ABI / shape invariance | kernarg order matches `conv_direct_arg_names("fwd")`; emitted IR independent of `N`/`H`/`W`/`C`/`K` | `pytest tests/test_conv_abi.py -k nongrouped` |

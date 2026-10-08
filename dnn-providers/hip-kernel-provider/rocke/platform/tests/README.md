@@ -25,6 +25,13 @@ python tools/check_byte_identity.py   # build engine fresh + byte-identity gate 
 `pytest.ini` uses `--import-mode=importlib` so same-named test modules coexist
 across layers without `__init__.py`.
 
+On Linux, `test_compiler_detection_native.py` compiles its wrapper and fake COMGR
+libraries from stdin and links the production `librocke_core.a`. Installed tests
+carry that archive beside the test module, including in the test artifact. Source
+runs build it in pytest's temporary directory, or use a matching fresh archive
+specified by `ROCKE_TEST_ENGINE_ARCHIVE`. These fixtures require C/C++ compilers;
+source builds also require CMake. They do not need a GPU or private source headers.
+
 See [the pre-merge testing strategy](../../TESTING.md#51-before-merging-source-backends-and-installed-ci)
 for the required source backend matrix and installed CI replay procedure.
 

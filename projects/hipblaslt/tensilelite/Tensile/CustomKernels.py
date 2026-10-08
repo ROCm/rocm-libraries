@@ -410,8 +410,9 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
         grid = ["TilesXYBatchGSU", "One", "One"]
     else:
         # Version 0 kernels rely on hardware gridDim for tile decomposition,
-        # so the grid must be multi-dimensional.
-        grid = ["TilesX", "TilesY", "Batch"]
+        # so the grid must be multi-dimensional. Like generated kernels, they
+        # take their GSU slices along gridDim.y.
+        grid = ["TilesX", "TilesYGSU", "Batch"]
 
     # Workspace is left unset here and derived in
     # Solution._assignCustomKernelParameters, which sees the logic file's

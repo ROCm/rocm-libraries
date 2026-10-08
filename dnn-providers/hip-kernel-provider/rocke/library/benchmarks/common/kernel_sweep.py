@@ -618,6 +618,79 @@ def _dgrad_jobs(
             )
 
 
+def job_for_identity(identity: KernelIdentity) -> BuildJob:
+    """The job ``--compile-all`` builds ``identity`` from.
+
+    The inverse of the generators above, obtained by running them: the
+    identity's geometry is fed to its direction's generator (with the
+    identity's own split-K degree, sub-GEMM cap and LLVM flavor) and the job
+    whose identity is equal is returned. So a rebuilt job is exactly the one
+    the cache build made, never a reconstruction that could drift from it.
+
+    Raises ``LookupError`` for an identity the generators of this checkout do
+    not produce (a different grid, or a field they never set).
+    """
+    from rocke.core.arch import ArchTarget
+
+    if identity.algorithm != "implicit_gemm" or identity.direction not in (
+        "fwd",
+        "wgrad",
+        "dgrad",
+    ):
+        raise LookupError(
+            f"not an implicit-GEMM conv identity: {identity.direction}/"
+            f"{identity.algorithm}"
+        )
+    if not identity.dtype_a == identity.dtype_b == identity.dtype_d:
+        raise LookupError("the AOT grid builds A, B and D in one dtype")
+    if identity.warp_tile_m != identity.warp_tile_n:
+        raise LookupError("the AOT grid builds square warp tiles only")
+    target = ArchTarget.from_gfx(identity.arch)
+    if target.wave_size != identity.wave_size:
+        raise LookupError(
+            f"{identity.arch} runs wave{target.wave_size}, the identity records "
+            f"wave{identity.wave_size}"
+        )
+    dtype = identity.dtype_a
+    wt = identity.warp_tile_m
+    mma_family = "wmma" if target.wave_size == 32 else "mma"
+    atom = target.mma.select_largest_k(
+        family=mma_family, a_dtype=dtype, b_dtype=dtype, c_dtype="fp32", m=wt, n=wt
+    )
+    if atom is None or atom.k != identity.warp_tile_k:
+        raise LookupError(
+            f"no {wt}x{wt}x{identity.warp_tile_k} {dtype} MMA atom on {identity.arch}"
+        )
+    geometry = (
+        identity.tile_m,
+        identity.tile_n,
+        identity.tile_k,
+        identity.warp_m,
+        identity.warp_n,
+        wt,
+        identity.pipeline,
+        identity.epilogue,
+        atom,
+    )
+    want = identity.stable_hash()
+    for job in _direction_jobs(
+        identity.direction,
+        identity.arch,
+        dtype,
+        target,
+        (identity.split_k,),
+        identity.max_sub_gemms,
+        geometries=[geometry],
+        llvm_flavor=identity.llvm_flavor,
+    ):
+        if job.identity.stable_hash() == want:
+            return job
+    raise LookupError(
+        f"{identity.label()} is not produced by this checkout's "
+        f"{identity.direction} generator (another grid, or a field it never sets)"
+    )
+
+
 def _spec_is_valid(job: BuildJob, arch: str, dtype: str) -> bool:
     """Would this configuration build at all?
 
@@ -1355,7 +1428,7 @@ def compile_jobs(
         if err is not None:
             state["rejected"] += 1
             if state["rejected"] <= 10:
-                log(f"  [skip] {job.identity.short_label()}: {err}")
+                log(f"  [skip] {job.identity.label()}: {err}")
         else:
             first = key not in members
             members.setdefault(key, []).append((job, meta))
@@ -1379,7 +1452,7 @@ def compile_jobs(
             state["failed"] += 1
             if state["failed"] <= 10:
                 job = members[key][0][0]
-                log(f"  [fail] {job.identity.short_label()}: {err}")
+                log(f"  [fail] {job.identity.label()}: {err}")
             return
         cache.put_blob(key, hsaco, kernel_name)
         state["compiled"] += 1
@@ -1571,4 +1644,14 @@ def describe_cache(
             f"since. They still run; rerun --compile-all for those directions to "
             f"refresh them (only kernels whose code changed are recompiled)"
         )
+    # What a rebuild from the names below reproduces against: the binary is a
+    # function of these as well as of the kernel's identity.
+    log(
+        f"  this checkout: emitter {current_emitter_digest()[:12]}, "
+        f"LLVM {current_llvm_flavor()}, comgr {current_comgr_id()}"
+    )
+    log(
+        "  kernel names are complete identities; rebuild one with: "
+        "python -m benchmarks.common.reproduce_kernel <name> --cache <cache dir>"
+    )
     return 0
