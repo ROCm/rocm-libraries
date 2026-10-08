@@ -81,108 +81,94 @@ namespace hipblaslt_jit
         class ComgrBuilder final : public CodeObjectBuilder
         {
         public:
-            Status build(const GeneratedSolution& solution,
-                         const BuildRequest&      request,
-                         BuiltSolution&           built) const override
+            Status build(const SourceCodeBundle& source,
+                         const BuildRequest&     request,
+                         CompiledCode&           built) const override
             {
-                built             = {};
-                const auto target = co::Target::fromTargetId(request.targetId);
+                built              = {};
+                const auto  target = co::Target::fromTargetId(request.targetId);
                 co::Options options;
                 options.codeObjectVersion = request.codeObjectVersion;
                 options.retargetAssembly  = true;
                 options.linkerFlags       = {"-Xlinker", "--build-id=sha1"};
                 options.rocmPath          = co::rocmPath();
 
+                if(source.mainKernel.name.empty() || source.mainKernel.bytes.empty()
+                   || std::any_of(request.kernelNames.begin(),
+                                  request.kernelNames.end(),
+                                  [](const std::string& name) { return name.empty(); }))
+                    return failure(request, "A generated solution needs a main kernel", {});
+
                 int wavefrontSize = 0;
-                for(const auto& unit : solution.units)
+                if(source.mainKernel.kind == Artifact::Kind::Assembly)
                 {
-                    if(unit.kind == BuildUnit::Kind::Hip)
-                        continue;
-                    const auto source   = text(unit.bytes);
-                    const auto declared = declaredTarget(source);
+                    const auto sourceText = text(source.mainKernel.bytes);
+                    const auto declared   = declaredTarget(sourceText);
                     if(!declared.empty() && !compatible(declared, target))
                         return failure(request,
-                                       solution,
-                                       "Assembly " + unit.name + " targets " + declared + ", not "
-                                           + target.targetId(),
+                                       "Assembly " + source.mainKernel.name + " targets " + declared
+                                           + ", not " + target.targetId(),
                                        {});
-                    const auto wave = declaredWavefrontSize(source);
-                    if(wave != 0 && wavefrontSize != 0 && wave != wavefrontSize)
-                        return failure(
-                            request, solution, "Assembly units disagree on the wavefront size", {});
-                    wavefrontSize = wave != 0 ? wave : wavefrontSize;
+                    wavefrontSize = declaredWavefrontSize(sourceText);
                 }
-                const auto& names = solution.kernelNames;
-                std::vector<BuildUnit> mainUnits;
-                std::vector<BuildUnit> helpers;
-                for(const auto& unit : solution.units)
-                    (unit.role == BuildUnit::Role::Helper ? helpers : mainUnits).push_back(unit);
-                if(mainUnits.empty() || names.empty()
-                   || std::any_of(names.begin(), names.end(), [](const std::string& name) {
-                          return name.empty();
-                      }))
-                    return failure(request,
-                                   solution,
-                                   "A generated solution needs source units and kernel names",
-                                   {});
 
                 auto assemblyTarget          = target;
                 assemblyTarget.wavefrontSize = wavefrontSize;
-                auto linked = co::build(mainUnits, assemblyTarget, options);
+                auto linked                  = co::build(source, assemblyTarget, options);
                 if(!linked.ok())
-                    return failure(request, solution, "comgr could not build the code object", linked.log);
+                    return failure(request, "comgr could not build the code object", linked.log);
 
-                const auto metadata = co::inspect(linked.bytes);
+                const auto metadata = co::inspect(linked.codeObject.bytes);
                 if(!metadata.ok())
-                    return failure(request,
-                                   solution,
-                                   "Cannot read the built code object",
-                                   linked.log + metadata.log);
+                    return failure(
+                        request, "Cannot read the built code object", linked.log + metadata.log);
                 if(metadata.isaName != target.isaName())
                     return failure(request,
-                                   solution,
                                    "Built code object targets " + metadata.isaName + ", not "
                                        + target.isaName(),
                                    linked.log);
                 if(metadata.codeObjectVersion != request.codeObjectVersion)
                     return failure(request,
-                                   solution,
                                    "Built code object is version "
                                        + std::to_string(metadata.codeObjectVersion) + ", not "
                                        + std::to_string(request.codeObjectVersion),
                                    linked.log);
+                const auto& names
+                    = request.kernelNames.empty() ? metadata.kernelNames : request.kernelNames;
+                if(names.empty())
+                    return failure(request, "Built code object defines no kernel", linked.log);
                 for(const auto& name : names)
                     if(std::find(metadata.kernelNames.begin(), metadata.kernelNames.end(), name)
                        == metadata.kernelNames.end())
                         return failure(request,
-                                       solution,
                                        "Built code object does not define kernel " + name,
                                        linked.log);
-                built.generated    = solution;
-                built.object.bytes = std::move(linked.bytes);
-                built.object.role  = BuildUnit::Role::Main;
-                for(const auto& helper : helpers)
+                built.codeObject      = std::move(linked.codeObject);
+                built.codeObject.kind = Artifact::Kind::CodeObject;
+                built.codeObject.name = names.front();
+                for(const auto& helper : source.helpers)
                 {
-                    if(helper.name.empty())
-                        return failure(request, solution, "A helper unit has no name", {});
-                    auto helperObject = co::build({helper}, assemblyTarget, options);
+                    if(helper.name.empty() || helper.kind != Artifact::Kind::Hip)
+                        return failure(request, "A helper source has no HIP name", {});
+                    SourceCodeBundle helperSource;
+                    helperSource.mainKernel = helper;
+                    helperSource.includes   = source.includes;
+                    helperSource.hipFlags   = source.hipFlags;
+                    auto helperObject       = co::build(helperSource, assemblyTarget, options);
                     if(!helperObject.ok())
                         return failure(request,
-                                       solution,
                                        "comgr could not build helper " + helper.name,
                                        helperObject.log);
-                    const auto helperMeta = co::inspect(helperObject.bytes);
+                    const auto helperMeta = co::inspect(helperObject.codeObject.bytes);
                     if(!helperMeta.ok() || helperMeta.isaName != target.isaName()
                        || helperMeta.codeObjectVersion != request.codeObjectVersion)
                         return failure(request,
-                                       solution,
                                        "Helper " + helper.name + " is not a code object for "
                                            + target.isaName(),
                                        helperObject.log + helperMeta.log);
-                    BuildUnit builtHelper;
-                    builtHelper.name  = helper.name;
-                    builtHelper.bytes = std::move(helperObject.bytes);
-                    builtHelper.role  = BuildUnit::Role::Helper;
+                    Artifact builtHelper = std::move(helperObject.codeObject);
+                    builtHelper.name     = helper.name;
+                    builtHelper.kind     = Artifact::Kind::CodeObject;
                     built.helpers.push_back(std::move(builtHelper));
                 }
                 return {};
@@ -190,12 +176,10 @@ namespace hipblaslt_jit
 
         private:
             // Appends the comgr log to <scratch>/comgr.log and names it in the message.
-            static Status failure(const BuildRequest&      request,
-                                  const GeneratedSolution& solution,
-                                  std::string              message,
-                                  const std::string&       log)
+            static Status
+                failure(const BuildRequest& request, std::string message, const std::string& log)
             {
-                Status status{Status::Code::Failed, Stage::Build, std::move(message)};
+                Status     status{Status::Code::Failed, Stage::Build, std::move(message)};
                 const auto error = firstError(log);
                 if(!error.empty())
                     status.message += ": " + error;
@@ -204,7 +188,7 @@ namespace hipblaslt_jit
                 const auto    path = request.scratch / "comgr.log";
                 std::ofstream output(path, std::ios::app);
                 output << "==";
-                for(const auto& name : solution.kernelNames)
+                for(const auto& name : request.kernelNames)
                     output << ' ' << name;
                 output << "\n" << log;
                 if(output.flush())

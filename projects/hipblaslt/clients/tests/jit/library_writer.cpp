@@ -41,13 +41,14 @@ TEST_CASE("pre-generated kernels publish into the JIT solution library", "[jit-g
     {
         if(item.arch != arch)
             continue;
-        hj::BuiltSolution built;
-        const auto        builtStatus = hj::makeComgrBuilder()->build(
-            item.solution, {target, hj::jitCodeObjectVersion, scratch}, built);
+        hj::CompiledCode built;
+        hj::BuildRequest request{target, hj::jitCodeObjectVersion, scratch, item.kernelNames};
+        const auto       builtStatus = hj::makeComgrBuilder()->build(item.source, request, built);
         {
             INFO(("The build for " + target + " failed: " + builtStatus.message));
             REQUIRE((builtStatus.ok()));
         }
+        built.record = item.record;
         for(const auto& publication : item.publications)
         {
             std::vector<int32_t>  indices;

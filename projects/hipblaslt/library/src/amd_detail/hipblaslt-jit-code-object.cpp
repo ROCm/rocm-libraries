@@ -26,12 +26,6 @@ namespace hipblaslt_jit::code_object
 {
     namespace
     {
-        struct NamedText
-        {
-            std::string name;
-            std::string text;
-        };
-
         struct Relocatable
         {
             std::string       name;
@@ -397,7 +391,7 @@ namespace hipblaslt_jit::code_object
             return text;
         }
 
-        RelocatableResult assembleImpl(const std::vector<NamedText>& sources,
+        RelocatableResult assembleImpl(const std::vector<hipblaslt_jit::Artifact>& sources,
                                        const Target&                      target,
                                        const Options&                     options,
                                        std::string&                       log)
@@ -418,9 +412,9 @@ namespace hipblaslt_jit::code_object
             std::vector<std::string> names;
             for(size_t i = 0; i < sources.size(); ++i)
             {
-                const auto& text = options.retargetAssembly
-                                       ? retarget(sources[i].text, target.targetId())
-                                       : sources[i].text;
+                const std::string source(sources[i].bytes.begin(), sources[i].bytes.end());
+                const auto& text = options.retargetAssembly ? retarget(source, target.targetId())
+                                                            : source;
                 add(input,
                     AMD_COMGR_DATA_KIND_SOURCE,
                     dataName(i, sources[i].name, ".s"),
@@ -440,7 +434,7 @@ namespace hipblaslt_jit::code_object
             return {Status::Success, {}, relocatablesFrom(output, names)};
         }
 
-        RelocatableResult compileHipImpl(const std::vector<NamedText>& sources,
+        RelocatableResult compileHipImpl(const std::vector<hipblaslt_jit::Artifact>& sources,
                                          const Target&                 target,
                                          const Options&                options,
                                          std::string&                  log)
@@ -479,11 +473,12 @@ namespace hipblaslt_jit::code_object
                     options_i.end(), options.compilerFlags.begin(), options.compilerFlags.end());
                 const auto info  = makeAction(target.isaName(), options_i, true);
                 auto       input = makeSet();
+                const std::string source(sources[i].bytes.begin(), sources[i].bytes.end());
                 add(input,
                     AMD_COMGR_DATA_KIND_SOURCE,
                     dataName(i, sources[i].name, ".hip"),
-                    sources[i].text.data(),
-                    sources[i].text.size());
+                    source.data(),
+                    source.size());
                 addIncludes(input, options);
                 if(options.hipPipeline == HipPipeline::SourceToRelocatable)
                 {
@@ -549,7 +544,10 @@ namespace hipblaslt_jit::code_object
                 fail(Status::NoOutput,
                      "link produced " + std::to_string(executables.size())
                          + " executables; expected one non-empty executable");
-            return {Status::Success, {}, std::move(executables.front().second)};
+            hipblaslt_jit::Artifact codeObject;
+            codeObject.kind  = hipblaslt_jit::Artifact::Kind::CodeObject;
+            codeObject.bytes = std::move(executables.front().second);
+            return {Status::Success, {}, std::move(codeObject)};
         }
 
         template <typename R, typename F>
@@ -788,37 +786,33 @@ namespace hipblaslt_jit::code_object
         return (gfx.size() == 6 && gfx.rfind("gfx9", 0) == 0) ? 64 : 32;
     }
 
-    Result build(const std::vector<hipblaslt_jit::BuildUnit>& units,
-                 const Target&                                 target,
-                 const Options&                                options) noexcept
+    Result build(const hipblaslt_jit::SourceCodeBundle& bundle,
+                 const Target&                           target,
+                 const Options&                          options) noexcept
     {
         return guarded<Result>([&](std::string& log) {
-            if(units.empty())
+            if(bundle.mainKernel.name.empty() || bundle.mainKernel.bytes.empty())
                 fail(Status::InvalidArgument, "no sources supplied");
+            if(bundle.mainKernel.kind == hipblaslt_jit::Artifact::Kind::CodeObject)
+                fail(Status::InvalidArgument, "the main kernel is already a code object");
             Options               merged = options;
             std::set<std::string> includeNames;
             for(const auto& include : merged.includes)
                 includeNames.insert(include.name);
-            std::vector<NamedText> assembly, hip;
-            for(const auto& unit : units)
+            for(const auto& include : bundle.includes)
             {
-                if(unit.name.empty())
-                    fail(Status::InvalidArgument, "source name must not be empty");
-                const std::string text(unit.bytes.begin(), unit.bytes.end());
-                if(unit.kind == hipblaslt_jit::BuildUnit::Kind::Hip)
-                {
-                    for(const auto& include : unit.includes)
-                    {
-                        if(include.name.empty())
-                            fail(Status::InvalidArgument, "include name must not be empty");
-                        if(includeNames.insert(include.name).second)
-                            merged.includes.push_back(include);
-                    }
-                    hip.push_back({unit.name, text});
-                }
-                else
-                    assembly.push_back({unit.name, text});
+                if(include.name.empty())
+                    fail(Status::InvalidArgument, "include name must not be empty");
+                if(includeNames.insert(include.name).second)
+                    merged.includes.push_back(include);
             }
+            std::vector<hipblaslt_jit::Artifact> assembly, hip;
+            merged.compilerFlags.insert(
+                merged.compilerFlags.end(), bundle.hipFlags.begin(), bundle.hipFlags.end());
+            if(bundle.mainKernel.kind == hipblaslt_jit::Artifact::Kind::Hip)
+                hip.push_back(bundle.mainKernel);
+            else
+                assembly.push_back(bundle.mainKernel);
             std::vector<Relocatable> objects;
             if(!assembly.empty())
             {

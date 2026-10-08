@@ -57,55 +57,52 @@ namespace hipblaslt_jit
         }
     };
 
-    // One source the builder assembles or compiles. An include uses the same
-    // shape — name and bytes — and is not a separate type. Kind is read only
-    // for a unit the builder must assemble or compile.
-    struct BuildUnit
+    // One file. Assembly and Hip are sources. CodeObject is a linked executable
+    // or a helper code object stored beside a solution. Relocatables stay inside
+    // the comgr builder.
+    struct Artifact
     {
+        std::string name;
         enum class Kind
         {
             Assembly,
             Hip,
+            CodeObject,
         };
-        enum class Role
-        {
-            Main, // compiled into the solution's code object
-            Helper, // compiled once per backend id and name, then reused
-        };
-        std::string            name;
-        std::vector<uint8_t>   bytes;
-        Kind                   kind = Kind::Assembly;
-        Role                   role = Role::Main;
-        std::vector<BuildUnit> includes; // Hip only; name and bytes
+        Kind                 kind = Kind::Assembly;
+        std::vector<uint8_t> bytes;
     };
 
-    // One CustomKernel library entry plus the code that defines its kernels.
-    struct GeneratedSolution
+    // The sources that become one solution in JitLibrary. Not a TensileLite
+    // library entry. helpers are HIP sources compiled once per backend id and
+    // helper name. includes are headers. hipFlags are appended after the HIP
+    // defaults, so -std=c++20 overrides -std=c++17.
+    struct SourceCodeBundle
     {
-        // A TensileLite library holding local solutions 0 to N-1, best first;
-        // each solution carries its customKernel record.
-        std::vector<uint8_t>     entry;
-        std::vector<std::string> kernelNames; // every main kernel the solutions name
-        std::vector<BuildUnit>   units;
+        Artifact                 mainKernel; // Assembly or Hip
+        std::vector<Artifact>    helpers;
+        std::vector<Artifact>    includes;
+        std::vector<std::string> hipFlags;
     };
 
     constexpr int jitCodeObjectVersion = 4;
 
     struct BuildRequest
     {
-        std::string           targetId; // gcnArchName, e.g. "gfx950:sramecc+:xnack-"
-        int                   codeObjectVersion = jitCodeObjectVersion;
-        std::filesystem::path scratch; // receives comgr.log after a failure, or empty
+        std::string              targetId; // gcnArchName, e.g. "gfx950:sramecc+:xnack-"
+        int                      codeObjectVersion = jitCodeObjectVersion;
+        std::filesystem::path    scratch; // receives comgr.log after a failure, or empty
+        std::vector<std::string> kernelNames; // main kernels the code object must define
     };
 
-    struct BuiltSolution
+    // The linked code object and any helper code objects. The TensileLite
+    // solution record is what JitLibrary writes into the library; it is not a
+    // library object and not part of the generated source.
+    struct CompiledCode
     {
-        GeneratedSolution generated;
-        // The linked code object. Kind is unused; the bytes are already built.
-        BuildUnit object;
-        // One built helper each. The library stores one copy per backend id and
-        // name; entries record the name only.
-        std::vector<BuildUnit> helpers;
+        Artifact              codeObject; // Kind::CodeObject; name is the main kernel
+        std::vector<Artifact> helpers; // Kind::CodeObject, named by the helper source
+        std::vector<uint8_t>  record;
     };
 
     class CodeObjectBuilder
@@ -113,11 +110,11 @@ namespace hipblaslt_jit
     public:
         virtual ~CodeObjectBuilder() = default;
         virtual Status
-            build(const GeneratedSolution&, const BuildRequest&, BuiltSolution&) const = 0;
+            build(const SourceCodeBundle&, const BuildRequest&, CompiledCode&) const = 0;
     };
 
-    // Builds every unit of a solution with comgr and links them into one code
-    // object for BuildRequest::targetId.
+    // Builds the main kernel with comgr and links it into one code object for
+    // BuildRequest::targetId. Helpers are built as their own code objects.
     std::shared_ptr<const CodeObjectBuilder> makeComgrBuilder();
 
     using GemmRequest = hipblaslt_ext::experimental::jit::detail::GemmRequest;
@@ -163,11 +160,24 @@ namespace hipblaslt_jit
     public:
         virtual ~Backend()                               = default;
         virtual const BackendInfo& info() const noexcept = 0;
-        // Returns entries holding up to request.count solutions for the request,
-        // best first, and loads nothing. NotSupported means the request is
-        // outside the backend's domain.
-        virtual Status generate(const GenerationRequest&, std::vector<GeneratedSolution>&) const
+        // Returns up to request.count source bundles for the request, best
+        // first, and loads nothing. NotSupported means the request is outside
+        // the backend's domain.
+        virtual Status generate(const GenerationRequest&, std::vector<SourceCodeBundle>&) const
             = 0;
+        // Main kernels source must define. Empty when the code object may
+        // define whatever kernels it contains.
+        virtual std::vector<std::string> kernelNames(const SourceCodeBundle&) const
+        {
+            return {};
+        }
+        // The TensileLite solution record JitLibrary stores for source, or
+        // empty. Not a library object. Predicate checks may load it with
+        // loadGemmLibrary; do not return a new library type.
+        virtual std::vector<uint8_t> solutionRecord(const SourceCodeBundle&) const
+        {
+            return {};
+        }
     };
 
     class SolutionLoader
@@ -177,7 +187,7 @@ namespace hipblaslt_jit
         // Evaluates the predicates and workspace of the entry's solutions for the
         // request and returns the local indices of those that support it, best
         // first. Loads no code.
-        virtual Status support(const BuiltSolution&,
+        virtual Status support(const CompiledCode&,
                                const GemmRequest&,
                                const DeviceTarget&,
                                size_t            workspaceLimit,
@@ -185,7 +195,7 @@ namespace hipblaslt_jit
             = 0;
         // Loads the code objects once and returns a process-local executable
         // bundle for each of the solutions at indices.
-        virtual Status load(const BuiltSolution&,
+        virtual Status load(const CompiledCode&,
                             const GemmRequest&,
                             const DeviceTarget&,
                             size_t                                            workspaceLimit,
@@ -194,9 +204,9 @@ namespace hipblaslt_jit
             = 0;
     };
 
-    // Built entries, each with the local indices of its solutions that support
-    // a request, best first.
-    using SupportedSolutions = std::vector<std::pair<BuiltSolution, std::vector<int>>>;
+    // Built code objects, each with the local indices of the solutions in its
+    // record that support a request, best first.
+    using SupportedSolutions = std::vector<std::pair<CompiledCode, std::vector<int>>>;
 
     class SolutionStore
     {
