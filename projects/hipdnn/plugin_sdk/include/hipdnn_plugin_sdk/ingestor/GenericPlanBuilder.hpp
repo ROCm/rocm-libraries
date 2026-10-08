@@ -347,6 +347,7 @@ public:
         settings.workspaceLimit = heuristics::workspaceLimit(engineConfig);
         settings.benchmarkingEnabled
             = benchmarkingOverrideFromEnv().value_or(readBenchmarkingEnabled(engineConfig));
+        executionSettings.ingestorSettings.candidateLimit = ingestorCandidateLimitFromEnv();
     }
 
     /// Kernel choice follows the engine configuration's ranking metric (RFC 0019 §11.4):
@@ -371,6 +372,7 @@ public:
         {
             throwUnsatisfiableKnobFilter(settings.knobFilter, catalog.entries.size());
         }
+        applyCandidateLimit(filtered, settings.candidateLimit);
 
         // Orderability is decided once, on the full catalog, in sortedCatalog(); `filtered` is
         // that measured order restricted. Re-asking against `filtered` would let a pin change
@@ -1252,6 +1254,24 @@ private:
             }
         }
         return filtered;
+    }
+
+    /// Keeps the first @p limit of the ranked @p candidates. Runs before the winner-record
+    /// lookup, so coverage is judged against the shortlist a benchmark under the same
+    /// limit measured, not against the whole catalog.
+    void applyCandidateLimit(std::vector<KernelDefinition>& candidates,
+                             const std::optional<size_t>& limit) const
+    {
+        if(!limit.has_value() || candidates.size() <= *limit)
+        {
+            return;
+        }
+
+        HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '" << _engine.name << "' keeps the best-ranked "
+                                                    << *limit << " of " << candidates.size()
+                                                    << " candidate(s) ("
+                                                    << INGESTOR_CANDIDATE_LIMIT_ENV_NAME << ")");
+        candidates.resize(*limit);
     }
 
     [[noreturn]] void throwNoApplicableKernel() const
