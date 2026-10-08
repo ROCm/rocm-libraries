@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 # Corpus harvest tool (RFC 0019.13 §5.3). It uses the hipdnn_frontend::detail engine-query
 # helpers, not the consumer Graph API.
 add_library(hipdnn_bench_lib INTERFACE)

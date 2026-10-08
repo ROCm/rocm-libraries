@@ -8,6 +8,7 @@ import copy
 import functools
 import hashlib
 import json
+import os
 import uuid
 from pathlib import Path
 
@@ -316,6 +317,43 @@ def test_dry_run_makes_no_writes(tmp_path):
     )
     assert run_promote(args) == 0
     assert _files(tmp_path) == before
+
+
+def _fail_on_ued_replace(monkeypatch, plan):
+    """The disk fills while the UED is swapped in, after the model files were."""
+    replace = os.replace
+
+    def failing(source, destination):
+        if Path(destination) == plan.ued_path:
+            raise OSError(28, "No space left on device")
+        replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", failing)
+
+
+def _unencodable_ued(monkeypatch, plan):
+    plan.ued_document["description"] = "\udc80"
+
+
+@pytest.mark.parametrize("failure", [_fail_on_ued_replace, _unencodable_ued])
+def test_a_failed_promotion_leaves_the_tree_as_it_was_and_can_be_retried(
+    tmp_path, monkeypatch, failure
+):
+    """No truncated UED, and no orphan artifact that refuses the next promotion."""
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    before = _files(tmp_path)
+    paths = sorted(tmp_path.rglob("*"))
+    plan = build_plan(model, tree)
+    assert plan.copies and plan.write_descriptor
+    failure(monkeypatch, plan)
+    with pytest.raises((OSError, ValueError)):
+        _apply(plan)
+    assert _files(tmp_path) == before
+    assert sorted(tmp_path.rglob("*")) == paths
+    monkeypatch.undo()
+    _apply(build_plan(model, tree))
+    assert _read(tree / "engine.ued.json")["sort_kernel_catalog"]["gfx942"] == [NEW]
 
 
 @pytest.mark.parametrize(

@@ -6,8 +6,9 @@
  * @brief Runs tools/uhd_gen and loads what it produces.
  *
  * Shells out to Python because the contract is cross-language: the runtime refuses an
- * artifact whose feature-signature hash disagrees with the one uhd_gen computed. Training is
- * deliberately tiny; model quality is out of scope.
+ * artifact whose feature-signature hash disagrees with the one uhd_gen computed, and it
+ * recovers the metric through the transform uhd_gen declares. The corpus is small but
+ * noiseless, so the fit converges and the recovered scores can be checked against it.
  */
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
@@ -16,6 +17,7 @@
 
 #include <hipdnn_plugin_sdk/heuristics/uhd/AdapterFactory.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/ScoreTransform.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
 #include <nlohmann/json.hpp>
@@ -34,7 +36,8 @@
 #include <vector>
 
 // The interpreter and the tools directory are the configuring tree's (see
-// plugin_sdk/tests/CMakeLists.txt); a binary run elsewhere skips when they are absent.
+// plugin_sdk/tests/CMakeLists.txt); a binary run elsewhere skips when they are absent, or
+// fails when HIPDNN_REQUIRE_UHD_GEN_TESTS is set.
 #if !defined(HIPDNN_UHD_GEN_PYTHON) || !defined(HIPDNN_UHD_GEN_TOOLS_DIR)
 #error \
     "HIPDNN_UHD_GEN_PYTHON and HIPDNN_UHD_GEN_TOOLS_DIR must be defined; see plugin_sdk/tests/CMakeLists.txt"
@@ -45,20 +48,31 @@ namespace hipdnn_plugin_sdk::uhd
 namespace
 {
 
-/// A corpus where tflops rises with tile_m. Sized for LightGBM's min_data_in_leaf (20): fewer
-/// rows per tile yield a single constant leaf that scores every candidate identically.
+/// The tflops trainingCsv() records for one row: rising with tile_m, with M a mild second
+/// signal.
+double corpusTflops(int64_t m, int64_t tileM)
+{
+    return (static_cast<double>(tileM) / 4.0) + (static_cast<double>(m) / 4096.0);
+}
+
+/// A corpus where tflops rises with tile_m. Sized, with runUhdGen's round count, so the fit
+/// converges onto the corpus: uhd_gen bags 80% of the rows per round and LightGBM needs 20
+/// rows per leaf (min_data_in_leaf), so with fewer rows per tile many rounds cannot split on
+/// tile_m, and too few rounds leave every prediction shrunk toward the corpus mean.
 std::string trainingCsv()
 {
     std::string csv = "q.M,kernel.tile_m,tflops\n";
     for(const int64_t tileM : {64, 128, 256})
     {
-        for(int row = 0; row < 25; ++row)
+        for(int64_t row = 0; row < 100; ++row)
         {
-            // Deterministic and monotonic in tile_m; M adds a mild second signal.
-            const double m = 1024.0 + (row * 128.0);
-            const double tflops = (static_cast<double>(tileM) / 4.0) + (m / 4096.0);
-            csv += std::to_string(static_cast<int64_t>(m)) + "," + std::to_string(tileM) + ","
-                   + std::to_string(tflops) + "\n";
+            const int64_t m = 1024 + (row * 32);
+            csv += std::to_string(m);
+            csv += ',';
+            csv += std::to_string(tileM);
+            csv += ',';
+            csv += std::to_string(corpusTflops(m, tileM));
+            csv += '\n';
         }
     }
     return csv;
@@ -99,6 +113,14 @@ std::string missingPrerequisite()
     return {};
 }
 
+/// Whether a missing prerequisite fails the test rather than skipping it. Set (to anything
+/// but "0") by ctest when the build is configured with HIPDNN_REQUIRE_UHD_GEN_TESTS.
+bool prerequisitesRequired()
+{
+    const auto value = hipdnn_data_sdk::utilities::getEnv("HIPDNN_REQUIRE_UHD_GEN_TESTS");
+    return !value.empty() && value != "0";
+}
+
 /// Runs `python -m uhd_gen train <arguments>` against the evaluator beside this binary and
 /// returns its exit status. PYTHONPATH, not the working directory, makes the package
 /// importable, so the tools directory may be on a different drive from the test.
@@ -133,7 +155,7 @@ int runUhdGen(const std::filesystem::path& csv, const std::filesystem::path& out
                           + (csv.parent_path() / "provenance.json").string() + "\""
                           + " --output-dir \"" + outputDir.string() + "\""
                           + " --name \"uhd_gen artifact test\""
-                          + " --num-boost-round 40 --early-stopping 10");
+                          + " --num-boost-round 200 --early-stopping 20");
 }
 
 class TestUhdGenArtifact : public ::testing::Test
@@ -143,6 +165,11 @@ protected:
     {
         if(const auto missing = missingPrerequisite(); !missing.empty())
         {
+            if(prerequisitesRequired())
+            {
+                FAIL() << "uhd_gen cannot run from here and HIPDNN_REQUIRE_UHD_GEN_TESTS is set: "
+                       << missing;
+            }
             GTEST_SKIP() << "uhd_gen cannot run from here: " << missing;
         }
 
@@ -223,16 +250,28 @@ TEST_F(TestUhdGenArtifact, TheModelScoresAndOrdersByTheFeatureItWasTrainedOn)
 
     const FeatureExtractor extractor(config.featuresSignature, config.categoricalEncoding);
 
+    constexpr int64_t QUERY_M = 2048;
+    // What the runtime ranks by: the raw model output inverted through the declared transform.
     const auto scoreFor = [&](int64_t tileM) {
         FeatureExtractionContext ctx;
-        ctx.bindQueryVars({{"q.M", int64_t{2048}}});
+        ctx.bindQueryVars({{"q.M", QUERY_M}});
         ctx.bindKernelVars({{"tile_m", tileM}});
-        return adapter->score(extractor.extract(ctx));
+        return score_transform::applyInverse(adapter->score(extractor.extract(ctx)),
+                                             config.scoreTransform);
     };
 
-    // Assert ordering, not values, so a different LightGBM version fitting slightly
-    // differently still passes.
-    EXPECT_GT(scoreFor(256), scoreFor(64));
+    EXPECT_GT(scoreFor(256), scoreFor(128));
+    EXPECT_GT(scoreFor(128), scoreFor(64));
+
+    // The fit converges onto the corpus (within 0.1% with LightGBM 4.7), so the recovered
+    // score is the corpus's tflops. 1% leaves room for another LightGBM version fitting slightly
+    // differently, and is tighter than the gap a mismatched transform opens: inverting a log
+    // fit with expm1 reports one less, 1.5% below the largest value here.
+    for(const int64_t tileM : {64, 128, 256})
+    {
+        const double expected = corpusTflops(QUERY_M, tileM);
+        EXPECT_NEAR(scoreFor(tileM), expected, 0.01 * expected) << "tile_m=" << tileM;
+    }
 }
 
 /// Trains a two-layer artifact and checks the runtime applies the grouping. Group 1 is
@@ -241,6 +280,11 @@ TEST(TestUhdGenArtifactGrouped, TheRuntimeGroupsWhatTheToolTrained)
 {
     if(const auto missing = missingPrerequisite(); !missing.empty())
     {
+        if(prerequisitesRequired())
+        {
+            FAIL() << "uhd_gen cannot run from here and HIPDNN_REQUIRE_UHD_GEN_TESTS is set: "
+                   << missing;
+        }
         GTEST_SKIP() << "uhd_gen cannot run from here: " << missing;
     }
 

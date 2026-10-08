@@ -184,8 +184,10 @@ def add_many(
     """Append contributions in one write: their rows, tagged, and their manifest entries.
 
     Returns one {"added": bool, "rows": n, "contribution_id": id} per contribution. A
-    contribution already present is skipped. A differing binding or contradicting knob
-    addressing is refused, and then nothing of this call is written.
+    contribution already present is skipped. One whose rows are stored but whose manifest
+    entry is not (a write interrupted between the two files) gets its entry, never its rows a
+    second time. A differing binding or contradicting knob addressing is refused, and then
+    nothing of this call is written.
     """
     directory = pathlib.Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
@@ -201,6 +203,14 @@ def add_many(
                 "contributions": [],
             }
         present = {c["contribution_id"] for c in manifest["contributions"]}
+        data = directory / DATA_FILE
+        stored = (
+            pd.read_parquet(data, columns=["contribution_id"])["contribution_id"]
+            .value_counts()
+            .to_dict()
+            if data.is_file()
+            else {}
+        )
         fresh, frames = [], []
         for entry, tagged in prepared:
             identity = entry["contribution_id"]
@@ -210,7 +220,15 @@ def add_many(
             _agree(manifest, entry)
             present.add(identity)
             fresh.append(entry)
-            frames.append(pd.DataFrame(tagged))
+            if identity in stored:
+                if stored[identity] != len(tagged):
+                    raise DatasetError(
+                        f"{data} holds {stored[identity]} row(s) of contribution {identity}, "
+                        f"which its manifest does not record, and the contribution has "
+                        f"{len(tagged)}; the dataset was written by something else"
+                    )
+            else:
+                frames.append(pd.DataFrame(tagged))
             results.append(
                 {"added": True, "rows": len(tagged), "contribution_id": identity}
             )
@@ -224,18 +242,20 @@ def add_many(
             raise DatasetError(
                 f"knob addressing contradicts the dataset: {error}"
             ) from None
-        data = directory / DATA_FILE
-        if data.is_file():
-            frames.insert(0, pd.read_parquet(data))
-        frame = pd.concat(frames, ignore_index=True)
-        try:
-            _write_atomically(data, lambda path: frame.to_parquet(path, index=False))
-        except (
-            Exception
-        ) as error:  # pyarrow refuses a column whose types the rows disagree on
-            raise DatasetError(
-                f"rows cannot be stored as one Parquet table: {error}"
-            ) from None
+        if frames:
+            if data.is_file():
+                frames.insert(0, pd.read_parquet(data))
+            frame = pd.concat(frames, ignore_index=True)
+            try:
+                _write_atomically(
+                    data, lambda path: frame.to_parquet(path, index=False)
+                )
+            except (
+                Exception
+            ) as error:  # pyarrow refuses a column whose types the rows disagree on
+                raise DatasetError(
+                    f"rows cannot be stored as one Parquet table: {error}"
+                ) from None
         manifest["contributions"].extend(fresh)
         _write_atomically(
             directory / MANIFEST_FILE,

@@ -155,7 +155,7 @@ class TestPublishedCsv:
         )
         assert rc == 0, output
         assert len(shapes) == 1
-        assert shapes[0]["mask_type"] == 2, "a windowed row is not causal"
+        assert shapes[0]["mask_type"] == 3, "a windowed row is SLIDING_WINDOW"
         assert shapes[0]["sliding_window"] == 512, (
             "the window WIDTH must reach the request; a swin shape with width 0 is "
             "dispatched as plain causal"
@@ -343,7 +343,7 @@ class TestCausalityComesFromTheGraphNotTheFilename:
             tmp_path / "graphs" / "swa" / "g.json",
             {"causal_mask": False, "left_bound": 128, "right_bound": 0},
         )
-        assert [s["mask_type"] for s in self._mine(tmp_path)] == [2]
+        assert [s["mask_type"] for s in self._mine(tmp_path)] == [3]
 
     def test_the_deprecated_boolean_still_takes_precedence_when_set(self, tmp_path):
         self._graph(
@@ -471,7 +471,7 @@ class TestRocKeBenchTree:
         """Dropping the width sends sliding_window=0 to the dispatcher, which computes a
         full causal triangle for a banded request instead of declining."""
         _, shapes = self._mine_bench(tmp_path, self._record(window_size=[127, 0]))
-        assert shapes[0]["mask_type"] == 2, "a finite left bound is a window"
+        assert shapes[0]["mask_type"] == 3, "a finite left bound is a window"
         assert shapes[0]["sliding_window"] == 128, (
             "the window WIDTH must reach the request; 127 is the left bound and the "
             "band includes the current token"
@@ -699,7 +699,7 @@ class TestEveryRequestSemanticSurvivesMining:
         assert {(s["mask_type"], s["sliding_window"]) for s in shapes} == {
             (0, 0),
             (1, 0),
-            (2, 128),
+            (3, 128),
         }
 
     def test_two_windows_of_different_width_do_not_merge(self, tmp_path):
@@ -805,7 +805,7 @@ class TestAnEmittedBenchmarkShapeListIsMinable:
         assert len(shapes) == 4, output
         assert "1 duplicate shape(s) merged" in output
         by_mask = sorted((s["mask_type"], s["sliding_window"]) for s in shapes)
-        assert by_mask == [(0, 0), (1, 0), (1, 0), (2, 512)], by_mask
+        assert by_mask == [(0, 0), (1, 0), (1, 0), (3, 512)], by_mask
         full = next(s for s in shapes if s["mask_type"] == 0)
         assert (full["nhead_q"], full["nhead_k"]) == (8, 8)
 
@@ -1126,3 +1126,191 @@ class TestQueryCsv:
         record = dict(zip(header.split(","), row.split(",")))
         assert record["q.is_causal"] == "true"
         assert record["q.alignment"] == "bottom_right"
+
+
+def _sdpa_graph(path: Path, seqlen_q: int, seqlen_k: int, attrs: dict) -> None:
+    """One forward SDPA graph, B1 Hq32 Hkv8 D128 bf16, with the given mask attributes."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tensors = [
+        {"uid": uid, "name": name, "dims": [1, heads, seqlen, 128], "data_type": "bf16"}
+        for uid, name, heads, seqlen in (
+            (1, "q", 32, seqlen_q),
+            (2, "k", 8, seqlen_k),
+            (3, "v", 8, seqlen_k),
+        )
+    ]
+    node = {
+        "type": "SdpaAttributes",
+        "attributes": {
+            "q_tensor_uid": 1,
+            "k_tensor_uid": 2,
+            "v_tensor_uid": 3,
+            **attrs,
+        },
+    }
+    path.write_text(
+        json.dumps({"name": path.stem, "tensors": tensors, "nodes": [node]})
+    )
+
+
+_CATALOG = """\
+| model | D | q/kv heads | causal |
+|---|---|---|---|
+| llama | 128 | 32/8 | yes |
+
+### `llama_run.py`
+
+Validated in bf16 at Sq=Skv=4096.
+"""
+
+
+def _mine_sources(tmp_path: Path, *sources: str) -> tuple[list, list[dict]]:
+    """Mine `sources` to both outputs; returns the `--out` shapes and the CSV rows."""
+    out = tmp_path / "shapes.json"
+    query = tmp_path / "model-shapes.csv"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(_MINE),
+            *sources,
+            "--include-windowed",
+            "--out",
+            str(out),
+            "--out-query-csv",
+            str(query),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    header, *rows = query.read_text().splitlines()
+    return json.loads(out.read_text()), [
+        dict(zip(header.split(","), row.split(","))) for row in rows
+    ]
+
+
+class TestCatalogDecodeAttendsTheFullContext:
+    """A decode row is the newest token of a KV-cached sequence: anchored top-left, its
+    single query row would see key 0 alone."""
+
+    def test_decode_rows_are_bottom_right_and_prefill_rows_top_left(self, tmp_path):
+        catalog = tmp_path / "MODEL_CATALOG.md"
+        catalog.write_text(_CATALOG)
+        shapes, rows = _mine_sources(tmp_path, "--catalog", str(catalog))
+
+        by_phase: dict[str, set] = {}
+        for shape in shapes:
+            phase = shape["_provenance"]["phase"]
+            by_phase.setdefault(phase, set()).add(
+                (shape["seqlen_q"], shape["seqlen_k"], shape["mask_type"])
+            )
+        assert by_phase == {"prefill": {(4096, 4096, 1)}, "decode": {(1, 4096, 2)}}
+        assert {(r["name"], r["q.alignment"]) for r in rows} == {
+            ("llama prefill", "top_left"),
+            ("llama decode", "bottom_right"),
+        }
+
+
+class TestABottomRightWindowAcrossLengthsIsRefused:
+    def test_the_window_kind_has_no_anchor_to_carry_it(self, tmp_path):
+        """The request's window kind is top-left; mining a shifted band as one serves
+        a different mask."""
+        _sdpa_graph(
+            tmp_path / "graphs" / "g.json",
+            512,
+            4096,
+            {"left_bound": 127, "right_bound": 0, "diagonal_alignment": "BOTTOM_RIGHT"},
+        )
+        out = tmp_path / "shapes.json"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(_MINE),
+                "--graphs",
+                str(tmp_path / "graphs"),
+                "--include-windowed",
+                "--out",
+                str(out),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "unsupported translation" in result.stdout + result.stderr
+        assert not out.exists()
+
+
+class TestTheOutputIsWhatTheRequestClassAccepts:
+    """`--out` is the corpus `dispatch_parity.py --shapes` hands to rocKE's frozen
+    `AttentionRequest`; a key that class does not declare aborts the whole run."""
+
+    @pytest.fixture
+    def rocke(self, tmp_path, monkeypatch):
+        """The checkout's rocKE request class behind an echoing dispatcher, so what is
+        asserted is the request each mined shape becomes."""
+        monkeypatch.setattr(sys, "path", list(sys.path))
+        monkeypatch.syspath_prepend(str(_MINE.parent))
+        import dispatch_parity
+
+        # Absolute, from this file: a copied source tree has no .git for the
+        # repository-relative form to anchor on.
+        provider = _MINE.parents[5] / "dnn-providers" / "hip-kernel-provider"
+        try:
+            dispatch_parity._bind_provider(str(provider))
+            from dispatch.attention.common import _request_errors
+        except (dispatch_parity.ParityError, ImportError) as exc:
+            pytest.skip(f"the rocKE library cannot be imported here ({exc})")
+        (tmp_path / "echo_dispatch.py").write_text(
+            "def resolve(request):\n    return request\n"
+        )
+        monkeypatch.syspath_prepend(str(tmp_path))
+        monkeypatch.delitem(sys.modules, "echo_dispatch", raising=False)
+        profile = {
+            "arch": "gfx950",
+            "dispatch": {"module": "echo_dispatch", "function": "resolve"},
+            "request": {
+                "module": "dispatch.attention.common",
+                "class": "AttentionRequest",
+            },
+        }
+
+        def resolve(shapes: list) -> list:
+            return dispatch_parity.resolve_shapes(shapes, profile)
+
+        return resolve, _request_errors
+
+    def test_every_mined_mask_resolves_to_the_request_it_describes(
+        self, tmp_path, rocke
+    ):
+        resolve, request_errors = rocke
+        graphs = tmp_path / "graphs"
+        _sdpa_graph(graphs / "br.json", 512, 4096, {"causal_mask_bottom_right": True})
+        _sdpa_graph(
+            graphs / "tl.json",
+            512,
+            4096,
+            {"left_bound": -1, "right_bound": 0, "diagonal_alignment": "TOP_LEFT"},
+        )
+        _sdpa_graph(
+            graphs / "swa.json", 4096, 4096, {"left_bound": 127, "right_bound": 0}
+        )
+        catalog = tmp_path / "MODEL_CATALOG.md"
+        catalog.write_text(_CATALOG)
+        shapes, _ = _mine_sources(
+            tmp_path, "--graphs", str(graphs), "--catalog", str(catalog)
+        )
+
+        features = {}
+        for resolution in resolve(shapes):
+            request = resolution.spec
+            assert request_errors(request) == [], resolution.shape
+            origin = resolution.shape["_provenance"]
+            label = origin.get("graph") or origin["phase"]
+            features.setdefault(label, set()).add(request.features())
+        assert features == {
+            "br": {frozenset({"causal", "causal_bottom_right"})},
+            "tl": {frozenset({"causal"})},
+            "swa": {frozenset({"causal", "sliding_window"})},
+            "prefill": {frozenset({"causal"})},
+            "decode": {frozenset({"causal", "causal_bottom_right"})},
+        }

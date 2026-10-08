@@ -18,6 +18,7 @@ import pandas as pd
 
 from .catalog import candidate_density
 from .corpus_io import read_corpus_frame
+from .correctness import measured_rows
 from .evaluate import regret_of, resolve_grouping
 
 __all__ = [
@@ -154,7 +155,10 @@ def analyse_knobs(
     grouping = resolve_grouping(df, device_column)
     group = list(grouping.columns)
 
-    usable = df[df[target].notna() & (df[target] > 0)]
+    # The rows `train` learns from: a candidate checked wrong, never run or errored has no
+    # time for the right answer, so it is never the oracle or a pinned value's best.
+    usable, _ = measured_rows(df, target)
+    usable = usable[usable[target] > 0]
     if usable.empty:
         raise ValueError(f"no rows carry a positive {target}")
 
@@ -484,7 +488,9 @@ def add_knob_arguments(parser: argparse.ArgumentParser) -> None:
 def run_knobs(args: argparse.Namespace) -> int:
     # Same reader as train/evaluate, so `--input` and device-id typing agree.
     try:
-        df = read_corpus_frame(Path(args.input))
+        # The census sees the rows the ablation does, as `train`'s sees the rows it
+        # trains on.
+        df, _ = measured_rows(read_corpus_frame(Path(args.input)), args.target)
     except (OSError, ValueError, ImportError) as error:
         logger.error("cannot read corpus %s: %s", args.input, error)
         return 1

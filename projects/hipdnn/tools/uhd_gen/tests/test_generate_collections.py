@@ -24,6 +24,9 @@ def world(tmp_path, monkeypatch):
     """An L1 engine behind a fake bench with settable device, revision and speed."""
     pytest.importorskip("lightgbm")
     pytest.importorskip("flatbuffers")
+    # The fake bench reads HIP_VISIBLE_DEVICES as `--device`; one inherited from the
+    # environment would move every run off the default board.
+    monkeypatch.delenv("HIP_VISIBLE_DEVICES", raising=False)
     tree = tmp_path / "descriptors"
     tree.mkdir()
     (tree / "engine.ued.json").write_text(

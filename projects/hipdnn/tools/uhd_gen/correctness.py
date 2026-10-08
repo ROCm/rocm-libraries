@@ -9,6 +9,7 @@ or a wrong-but-fast kernel becomes a label. Pandas only: `uhd_gen.dataset` impor
 from __future__ import annotations
 
 import math
+from dataclasses import astuple, dataclass
 
 import numpy as np
 import pandas as pd
@@ -29,13 +30,16 @@ _SPELLINGS = {
     "none": None,
     "null": None,
     "nan": None,
+    # hipdnn_bench's CSV spelling of a check that could decide nothing.
+    "unknown": None,
 }
 
 
 def numerical_verdict(value) -> bool | None:
     """The tri-state verdict a row carries; ValueError for anything that is not one.
 
-    Accepts bool/NaN/pd.NA and CSV text spellings; never coerces a number.
+    Accepts bool/NaN/pd.NA and CSV text spellings (`Unknown` is undecided); never
+    coerces a number.
     """
     if value is None or value is pd.NA:
         return None
@@ -68,6 +72,46 @@ def known_wrong(frame: pd.DataFrame) -> pd.Series:
     return (
         frame[VERDICT].map(lambda value: numerical_verdict(value) is False).astype(bool)
     )
+
+
+@dataclass(frozen=True)
+class Excluded:
+    """Rows `measured_rows` dropped, counted apart: each points at a different producer."""
+
+    numerically_wrong: int = 0
+    invalid: int = 0
+    errored: int = 0
+    unmeasured: int = 0
+
+    def __bool__(self) -> bool:
+        return any(astuple(self))
+
+
+def measured_rows(frame: pd.DataFrame, target: str) -> tuple[pd.DataFrame, Excluded]:
+    """The rows that may be a label or an oracle, and how many of each kind were dropped.
+
+    A candidate checked wrong (§13.2: a wrong-but-fast kernel would win; null is kept),
+    `is_valid=False` (collected CSV), carrying an `error` (published dataset), or whose
+    `target` is not a finite number has no time for the right answer.
+    """
+    wrong = known_wrong(frame)
+    numerically_wrong = int(wrong.sum())
+    frame = frame[~wrong]
+    invalid = errored = unmeasured = 0
+    if "is_valid" in frame.columns:
+        keep = frame["is_valid"].astype(str).str.strip().str.lower() == "true"
+        invalid = int((~keep).sum())
+        frame = frame[keep]
+    if "error" in frame.columns:
+        failed = frame["error"].fillna("").astype(str).str.strip().str.len() > 0
+        errored = int(failed.sum())
+        frame = frame[~failed]
+    if target in frame.columns:
+        # Coerced: one empty CSV cell reads the column back as `object`.
+        finite = np.isfinite(pd.to_numeric(frame[target], errors="coerce"))
+        unmeasured = int((~finite).sum())
+        frame = frame[finite]
+    return frame, Excluded(numerically_wrong, invalid, errored, unmeasured)
 
 
 def suppress_timings(row: dict) -> dict:

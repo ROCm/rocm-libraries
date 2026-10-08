@@ -1,3 +1,5 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 """Cross-engine comparison of L1 collections over one corpus, per ranking metric.
 
 Joins each engine's `predict_engine` corpus CSVs on `benchmark` (stable across engines)

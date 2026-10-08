@@ -65,7 +65,7 @@ from .evaluate import (
     run_evaluate,
 )
 from .corpus_io import read_corpus_frame
-from .correctness import known_wrong
+from .correctness import known_wrong, measured_rows
 from .coverage import device_field_coverage, enforce_device_coverage
 from .knobs import add_knob_arguments, run_knobs
 from .merge import add_merge_arguments, run_merge
@@ -612,39 +612,21 @@ def _catalog_training_rows(
         raise ValueError("training requires --descriptor-tree or --provenance")
     # The suffix picks the reader. Only the `.parquet` dataset is §8.3-checked; a
     # collected CSV is a local escape hatch. The §11.2 rule below applies to both.
-    df = read_corpus_frame(input_path)
     # A row with no measurement is `is_valid=False` (collected CSV) or carries an
-    # `error` (published dataset). Drop both, as `evaluate` does, so training and
-    # evaluation agree on which rows exist.
-    invalid = errored = unmeasured = 0
-    # RFC 0019 §13.2: a candidate shown wrong is never a label (a wrong-but-fast
-    # kernel would teach the ranker to prefer it). False is dropped; null is kept.
-    wrong = known_wrong(df)
-    numerically_wrong = int(wrong.sum())
-    df = df[~wrong]
-    if "is_valid" in df.columns:
-        keep = df["is_valid"].astype(str).str.strip().str.lower() == "true"
-        invalid = int((~keep).sum())
-        df = df[keep]
-    if "error" in df.columns:
-        failed = df["error"].fillna("").astype(str).str.strip().str.len() > 0
-        errored = int(failed.sum())
-        df = df[~failed]
-    if args.target in df.columns:
-        # Coerced: one empty CSV cell reads the column back as `object`.
-        finite = np.isfinite(pd.to_numeric(df[args.target], errors="coerce"))
-        unmeasured = int((~finite).sum())
-        df = df[finite]
-    if numerically_wrong or invalid or errored or unmeasured:
+    # `error` (published dataset); a row checked wrong is never a label (RFC 0019
+    # §13.2). Dropped as `evaluate` and `knobs` drop them, so the tools agree on
+    # which rows exist.
+    df, excluded = measured_rows(read_corpus_frame(input_path), args.target)
+    if excluded:
         # Counted apart: each points at a different producer.
         logger.info(
             "Dropped %d row(s) checked numerically wrong, %d row(s) with "
             "is_valid=False, %d row(s) carrying a collection error, and %d "
             "row(s) whose %s is not a finite number",
-            numerically_wrong,
-            invalid,
-            errored,
-            unmeasured,
+            excluded.numerically_wrong,
+            excluded.invalid,
+            excluded.errored,
+            excluded.unmeasured,
             args.target,
         )
     # RFC 0019.13 §11.2: a calibrated score MUST train on `avgTimeMs`. Uncalibrated

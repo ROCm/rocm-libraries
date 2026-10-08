@@ -3,7 +3,8 @@
 
 /**
  * @file TestCsvOutput.cpp
- * @brief Covers quoting for the free-text skip_reason column (RFC 0019.13 §7.4).
+ * @brief Covers quoting for the bench CSV's free-text columns: the problem id, query values,
+ *        knob names and values, the engine name, and skip_reason (RFC 0019.13 §7.4).
  */
 
 #include <gtest/gtest.h>
@@ -36,6 +37,19 @@ TEST(TestCsvOutput, AnEmbeddedQuoteIsDoubled)
 TEST(TestCsvOutput, ANewlineIsQuoted)
 {
     EXPECT_EQ(csvField("declined:\nno kernel"), "\"declined:\nno kernel\"");
+}
+
+TEST(TestCsvOutput, ACarriageReturnIsQuoted)
+{
+    // A CRLF-terminated line inside a reason would otherwise end the row early.
+    EXPECT_EQ(csvField("declined\r\nno kernel"), "\"declined\r\nno kernel\"");
+    EXPECT_EQ(csvField("declined\r"), "\"declined\r\"");
+}
+
+TEST(TestCsvOutput, AWindowsPathWithACommaIsOneField)
+{
+    // The problem column defaults to the graph's path.
+    EXPECT_EQ(csvField(R"(C:\graphs\conv,fp16.json)"), R"("C:\graphs\conv,fp16.json")");
 }
 
 TEST(TestCsvOutput, AQuotedFieldRoundTripsBackToItsInput)

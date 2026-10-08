@@ -13,8 +13,14 @@ find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
 # TestUhdGenArtifact runs tools/uhd_gen and loads its output, so it needs the trainer's Python
-# dependencies. Build it only when they import, and warn otherwise so the gap stays visible.
+# dependencies. Build it only when they import, and warn otherwise so the gap stays visible;
+# HIPDNN_REQUIRE_UHD_GEN_TESTS makes the gap a configure error instead.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    if(HIPDNN_REQUIRE_UHD_GEN_TESTS)
+        set(_uhd_gen_missing_severity FATAL_ERROR)
+    else()
+        set(_uhd_gen_missing_severity WARNING)
+    endif()
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
         execute_process(
@@ -24,7 +30,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         if(_uhd_gen_deps_missing EQUAL 0)
             set(HIPDNN_UHD_GEN_RUNNABLE ON)
         else()
-            message(WARNING
+            message(${_uhd_gen_missing_severity}
                     "TestUhdGenArtifact NOT built: uhd_gen's dependencies are not importable "
                     "by ${Python3_EXECUTABLE}. Nothing then checks that a real uhd_gen "
                     "artifact loads at run time. Install "
@@ -32,7 +38,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                     "image, which does.")
         endif()
     else()
-        message(WARNING "TestUhdGenArtifact NOT built: no Python3 interpreter found")
+        message(${_uhd_gen_missing_severity}
+                "TestUhdGenArtifact NOT built: no Python3 interpreter found")
     endif()
 endif()
 
@@ -203,6 +210,13 @@ endif()
 
 clang_tidy_check(hipdnn_plugin_sdk_tests)
 add_hipdnn_test(hipdnn_plugin_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})
+
+# The installed CTestTestfile.cmake does not carry this, so an installed test on a runner
+# without the source tree still skips TestUhdGenArtifact rather than failing it.
+if(HIPDNN_UHD_GEN_RUNNABLE AND HIPDNN_REQUIRE_UHD_GEN_TESTS)
+    set_property(TEST hipdnn_plugin_sdk_tests APPEND PROPERTY ENVIRONMENT
+                 "HIPDNN_REQUIRE_UHD_GEN_TESTS=1")
+endif()
 
 # Cross-process coverage: one process writes a winner record, a SECOND process reads it
 # back. Two ctest invocations of the same binary, sequenced with

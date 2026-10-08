@@ -1248,11 +1248,11 @@ int runBench(const std::vector<std::string>& args)
         std::cout << "problem";
         for(const auto& entry : options.query)
         {
-            std::cout << ",q." << entry.first;
+            std::cout << "," << hipdnn_bench::csvField("q." + entry.first);
         }
         for(const auto& knob : kernelNames)
         {
-            std::cout << ",kernel." << knob;
+            std::cout << "," << hipdnn_bench::csvField("kernel." + knob);
         }
         // Timing column names follow RFC 0019.13 §8.3 (and `robustMeanMs` matches uhd_gen), so
         // they are camelCase. `numerically_valid` is three-valued text, kept separate from
@@ -1266,14 +1266,16 @@ int runBench(const std::vector<std::string>& args)
     for(size_t index = 0; index < results.size(); ++index)
     {
         const auto& result = results[index];
-        std::cout << problemId;
+        // Every text field goes through csvField: the problem id defaults to the graph's path,
+        // and knob values and engine names are free text.
+        std::cout << hipdnn_bench::csvField(problemId);
         for(const auto& entry : options.query)
         {
-            std::cout << "," << entry.second;
+            std::cout << "," << hipdnn_bench::csvField(entry.second);
         }
         for(const auto& knob : kernelNames)
         {
-            std::cout << "," << knobFor(result, knob);
+            std::cout << "," << hipdnn_bench::csvField(knobFor(result, knob));
         }
         // RFC 0019.13 §7.4/§8: untimed pairs are kept with is_valid=False and a skip_reason
         // for coverage auditing; training filters on is_valid.
@@ -1290,7 +1292,9 @@ int runBench(const std::vector<std::string>& args)
             skipReason = "not_timed: autotune reported success without running an iteration";
         }
 
-        std::cout << "," << (options.engineName.empty() ? result.engineName : options.engineName)
+        std::cout << ","
+                  << hipdnn_bench::csvField(options.engineName.empty() ? result.engineName
+                                                                       : options.engineName)
                   << "," << result.rank << "," << (result.succeeded ? 1 : 0) << ","
                   << (timed ? "True" : "False") << ","
                   << hipdnn_bench::verdictText(verdicts[index].verdict) << ","

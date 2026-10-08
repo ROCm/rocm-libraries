@@ -57,6 +57,14 @@ def test_a_target_at_or_past_the_ceiling_is_unreachable():
     assert size_for(fit, 0.80) > 0
 
 
+@pytest.mark.parametrize("b", [0.002, 0.03])
+def test_a_near_flat_curve_is_unreachable_rather_than_astronomical(b):
+    """b=0.002 overflows a float; b=0.03 asks for ~1e33 shapes. Neither is a plan."""
+    fit = {"floor": 0.1, "a": 0.5, "b": b}
+    assert size_for(fit, 0.85) is None
+    assert size_for({**fit, "b": 0.5}, 0.85) == pytest.approx(100.0)
+
+
 def test_two_points_are_not_a_curve():
     assert fit_curve([(100, 0.5), (200, 0.4)], 0.1) is None
 

@@ -11,10 +11,11 @@ namespace hipdnn_bench
 {
 
 /// A CSV field, quoted only when it has to be (RFC 4180). An unquoted comma would silently
-/// shift every later column rather than fail to parse.
+/// shift every later column rather than fail to parse, and an unquoted line break would end
+/// the row.
 inline std::string csvField(const std::string& text)
 {
-    if(text.find_first_of(",\"\n") == std::string::npos)
+    if(text.find_first_of(",\"\r\n") == std::string::npos)
     {
         return text;
     }

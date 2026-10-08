@@ -9,8 +9,10 @@ import copy
 import hashlib
 import json
 import logging
+import os
 import re
 import shutil
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -1230,23 +1232,75 @@ def _same_file(left, right):
     )
 
 
-def _write_json(path, document):
-    path.write_text(
-        json.dumps(document, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-        newline="\n",
+def _serialize_json(document) -> bytes:
+    return (json.dumps(document, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+
+
+def _temp_beside(destination: Path) -> Path:
+    handle, name = tempfile.mkstemp(
+        prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent
     )
+    os.close(handle)
+    return Path(name)
 
 
 def _apply(plan: PromotePlan) -> None:
-    """Execute only the operations approved by build_plan; never restamp provenance."""
-    plan.destination_descriptor.parent.mkdir(parents=True, exist_ok=True)
-    for source, destination in plan.copies:
-        shutil.copy2(source, destination)
+    """Execute only the operations approved by build_plan; never restamp provenance.
+
+    Every output is serialized and staged beside its destination, and every destination
+    it replaces is backed up, before any destination changes. The staged files are then
+    swapped in with os.replace, the UED last because it is what binds the model. A
+    failure at any point restores the replaced destinations and removes the created
+    ones, so the tree is left as it was.
+    """
+    documents = []
     if plan.write_descriptor:
-        _write_json(plan.destination_descriptor, plan.descriptor_document)
+        documents.append(
+            (plan.destination_descriptor, _serialize_json(plan.descriptor_document))
+        )
     if plan.ued_path is not None:
-        _write_json(plan.ued_path, plan.ued_document)
+        documents.append((plan.ued_path, _serialize_json(plan.ued_document)))
+    created_dirs = [
+        directory
+        for directory in (
+            plan.destination_descriptor.parent,
+            *plan.destination_descriptor.parent.parents,
+        )
+        if not directory.exists()
+    ]
+    staged = []
+    backups = {}
+    replaced = []
+    try:
+        plan.destination_descriptor.parent.mkdir(parents=True, exist_ok=True)
+        for source, destination in plan.copies:
+            staged.append((_temp_beside(destination), destination))
+            shutil.copy2(source, staged[-1][0])
+        for destination, data in documents:
+            staged.append((_temp_beside(destination), destination))
+            staged[-1][0].write_bytes(data)
+        for _, destination in staged:
+            if destination.exists():
+                backups[destination] = _temp_beside(destination)
+                shutil.copy2(destination, backups[destination])
+        for temp, destination in staged:
+            os.replace(temp, destination)
+            replaced.append(destination)
+    except BaseException:
+        for destination in reversed(replaced):
+            if destination in backups:
+                os.replace(backups.pop(destination), destination)
+            else:
+                destination.unlink(missing_ok=True)
+        for temp, _ in staged:
+            temp.unlink(missing_ok=True)
+        for directory in created_dirs:
+            if directory.is_dir() and not any(directory.iterdir()):
+                directory.rmdir()
+        raise
+    finally:
+        for backup in backups.values():
+            backup.unlink(missing_ok=True)
 
 
 def _report(plan: PromotePlan, dry_run: bool) -> None:

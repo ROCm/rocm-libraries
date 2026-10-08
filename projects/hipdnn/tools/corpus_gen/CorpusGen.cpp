@@ -257,17 +257,34 @@ void printHelp(const char* program)
               << "corpus; 3 fewer than --count without the engine being shown to serve no more.\n";
 }
 
-bool parseArguments(const std::vector<std::string>& args, Options& options)
+/// What the command line asks for: a run, the help text, or nothing it can parse.
+enum class ParseOutcome
+{
+    RUN,
+    HELP,
+    INVALID
+};
+
+ParseOutcome parseArguments(const std::vector<std::string>& args, Options& options)
 {
     for(size_t i = 1; i < args.size(); ++i)
     {
         const std::string& arg = args[i];
-        const auto next = [&]() { return (i + 1 < args.size()) ? args[++i] : std::string(); };
+        // A following flag is not a value: `--output --count 5` must not write to "--count".
+        bool missingValue = false;
+        const auto next = [&]() {
+            if(i + 1 >= args.size() || args[i + 1].rfind("--", 0) == 0)
+            {
+                missingValue = true;
+                return std::string();
+            }
+            return args[++i];
+        };
 
         if(arg == "--help" || arg == "-h")
         {
             printHelp(args[0].c_str());
-            return false;
+            return ParseOutcome::HELP;
         }
         if(arg == "--operations")
         {
@@ -351,10 +368,12 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
             if(split == std::string::npos || split == 0)
             {
                 options.quotaError = "--regime-quota takes <regime>=<n>, not '" + clause + "'";
-                continue;
             }
-            options.regimeQuotas[""][clause.substr(0, split)]
-                = std::strtoll(clause.substr(split + 1).c_str(), nullptr, 10);
+            else
+            {
+                options.regimeQuotas[""][clause.substr(0, split)]
+                    = std::strtoll(clause.substr(split + 1).c_str(), nullptr, 10);
+            }
         }
         else if(arg == "--regime-quotas")
         {
@@ -405,10 +424,15 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
         {
             std::cerr << "Unknown argument: " << arg << "\n";
             printHelp(args[0].c_str());
-            return false;
+            return ParseOutcome::INVALID;
+        }
+        if(missingValue)
+        {
+            std::cerr << arg << " needs a value\n";
+            return ParseOutcome::INVALID;
         }
     }
-    return true;
+    return ParseOutcome::RUN;
 }
 
 /// The manifest's `served_extent` for one operation. With @p takeEdges, the edge points are
@@ -501,9 +525,14 @@ nlohmann::json
 int runGenerator(const std::vector<std::string>& args)
 {
     Options options;
-    if(!parseArguments(args, options))
+    const auto parse = parseArguments(args, options);
+    if(parse == ParseOutcome::HELP)
     {
         return 0;
+    }
+    if(parse == ParseOutcome::INVALID)
+    {
+        return 1;
     }
     if(options.operationsDir.empty())
     {

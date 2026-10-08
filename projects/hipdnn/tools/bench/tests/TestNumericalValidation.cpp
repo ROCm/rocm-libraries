@@ -266,6 +266,25 @@ TEST(TestNumericalValidation, HalfPrecisionIsDecodedRatherThanComparedAsBytes)
     EXPECT_EQ(split[2].verdict, NumericalVerdict::DISAGREED);
 }
 
+TEST(TestNumericalValidation, HalfPrecisionAgreesWithinTwoPercentAndNoFurther)
+{
+    // The fp16 bar is 2% of the element plus one ulp at the tensor's magnitude (2.0 here, so
+    // 2^-9). 0x3C10 = 1.015625 is 16 ulps from 1.0, inside 0.0223; 0x3C20 = 1.03125 is 32 ulps,
+    // outside 0.0226. A bar half as wide splits the first, one much wider merges the second.
+    const auto inside = crossCheck({ranRaw(halfCodes({0x3C00, 0x4000})),
+                                    ranRaw(halfCodes({0x3C00, 0x4000})),
+                                    ranRaw(halfCodes({0x3C10, 0x4000}))},
+                                   tensors(hipdnn_frontend::DataType::HALF));
+    EXPECT_EQ(inside[2].verdict, NumericalVerdict::AGREED);
+
+    const auto outside = crossCheck({ranRaw(halfCodes({0x3C00, 0x4000})),
+                                     ranRaw(halfCodes({0x3C00, 0x4000})),
+                                     ranRaw(halfCodes({0x3C20, 0x4000}))},
+                                    tensors(hipdnn_frontend::DataType::HALF));
+    EXPECT_EQ(outside[0].verdict, NumericalVerdict::AGREED);
+    EXPECT_EQ(outside[2].verdict, NumericalVerdict::DISAGREED);
+}
+
 TEST(TestNumericalValidation, AnUndecodableDtypeIsUnknownRatherThanAssumedEqual)
 {
     const auto verdicts = crossCheck({ranRaw({0x01, 0x02}), ranRaw({0x40, 0x50})},

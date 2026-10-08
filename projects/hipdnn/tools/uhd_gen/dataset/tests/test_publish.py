@@ -282,6 +282,29 @@ def test_resolution_keeps_the_latest_occasion_per_problem():
     assert out.loc[out["q.M"] == 2048, "minTimeMs"].tolist() == [7.0]
 
 
+@pytest.mark.parametrize("blank", [None, " "])
+def test_resolution_refuses_a_row_it_cannot_order(blank):
+    """An undated row is neither older nor newer; dropping it would lose a problem."""
+    frame = pd.DataFrame(
+        {
+            "q.M": [1024, 1024, 1024],
+            "q.N": [1024, 1024, 1024],
+            "q.K": [1024, 1024, 1024],
+            "q.dtype": ["fp32"] * 3,
+            "kernel.tile_m": [64, 128, 256],
+            "device.cu_count": [80, 80, 80],
+            "minTimeMs": [5.0, 1.0, 7.0],
+            "avgTimeMs": [5.1, 1.1, 7.1],
+            "stddevMs": [0.01] * 3,
+            "iters": [10] * 3,
+            "error": [""] * 3,
+            "date_run": ["2026-01-01", blank, "2026-01-01"],
+        }
+    )
+    with pytest.raises(ValidationError, match="1 row"):
+        resolve_duplicates(frame, "date_run", "minTimeMs")
+
+
 def test_a_repeat_within_one_occasion_keeps_the_fastest():
     """Repeats differ by contention and clocks, not by the kernel."""
     frame = pd.DataFrame(
