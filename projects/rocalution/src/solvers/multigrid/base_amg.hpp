@@ -93,6 +93,14 @@ namespace rocalution
         ROCALUTION_EXPORT
         void SetCoarsestLevel(int coarse_size);
 
+        /** \brief Set the maximal number of levels (including the finest level) for
+         *  hierarchy creation. Coarsening stops when either the coarsest level size or
+         *  the maximal number of levels is reached. The coarsest operator is then
+         *  handled by the coarse grid solver, which can itself be another AMG solver.
+         */
+        ROCALUTION_EXPORT
+        void SetMaxLevels(int max_levels);
+
         /** \brief Set flag to pass smoothers manually for each level */
         ROCALUTION_EXPORT
         void SetManualSmoothers(bool sm_manual);
@@ -132,6 +140,9 @@ namespace rocalution
 
         /** \brief Maximal coarse grid size */
         int coarse_size_;
+
+        /** \brief Maximal number of levels */
+        int max_levels_;
 
         /** \brief Smoother is set manually or not */
         bool set_sm_;

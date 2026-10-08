@@ -79,7 +79,7 @@ that record without importing today's producer.
 
 A packed kernel that declares no specialized `metadata_fields` and carries no
 `effective_spec` resolves by producer origin, per RUNBOOK stage 4: `rocke` is a hard
-failure of full verification, while an absent `origin_kind` or `"hip"` is
+failure of full verification, while an absent `origin_kind`, `"hip"` or `"hsaco"` is
 `NOT VERIFIED HERE`. An absent `origin_kind` is **not** rocKE — descriptors packed
 before the field existed, and hand-authored inputs, carry none.
 

@@ -44,9 +44,9 @@ def ldsPadError(padBytes, stepBytes=LDS_PAD_STEP_BYTES):
     """Why this pad, in bytes, cannot be used.
 
     stepBytes is what the pad has to be a multiple of, and it belongs to the
-    path: LDS_PAD_STEP_BYTES for the even-dword paths, B128_PAD_STEP_BYTES
-    where ds_load_tr16_b128 reads it, and one dword for the sparse metadata,
-    which rounds its pad up from a vector width.
+    path: LDS_PAD_STEP_BYTES for the even-dword paths (including the sparse
+    metadata, which rounds its pad up from a vector width) and
+    B128_PAD_STEP_BYTES where ds_load_tr16_b128 reads it.
     """
     if padBytes % stepBytes:
         return "%dB is not a multiple of %dB" % (padBytes, stepBytes)

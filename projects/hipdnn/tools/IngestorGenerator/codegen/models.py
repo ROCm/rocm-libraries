@@ -14,7 +14,8 @@ KMD_FIELD_TYPES: tuple[str, ...] = ("bool", "int", "float", "string", "int_list"
 #: ``kernel_source`` key names, the ``kind`` vocabulary and the consumer.
 #: ``direct_load`` is read by ``DescriptorLoader.hpp`` from the installed
 #: ``test_descriptors/`` tree; ``packaged`` is read by ``hkp_pack``, which
-#: compiles the kernel and rewrites the descriptor to ``kind: kpack``.
+#: compiles ``hip``/``rocke`` kernels, packs an ``hsaco`` code object as-is
+#: without compiling, and rewrites the descriptor to ``kind: kpack``.
 DIALECT_DIRECT_LOAD = "direct_load"
 DIALECT_PACKAGED = "packaged"
 DIALECTS: tuple[str, ...] = (DIALECT_DIRECT_LOAD, DIALECT_PACKAGED)
@@ -52,7 +53,11 @@ KERNEL_SOURCE_KINDS: tuple[str, ...] = (
 #: Kinds each dialect emits. Anything else is a ConfigError naming the dialect.
 EMITTABLE_KINDS_BY_DIALECT: dict[str, tuple[str, ...]] = {
     DIALECT_DIRECT_LOAD: (KERNEL_SOURCE_KIND_EMBEDDED,),
-    DIALECT_PACKAGED: (KERNEL_SOURCE_KIND_HIP, KERNEL_SOURCE_KIND_ROCKE),
+    DIALECT_PACKAGED: (
+        KERNEL_SOURCE_KIND_HIP,
+        KERNEL_SOURCE_KIND_ROCKE,
+        KERNEL_SOURCE_KIND_HSACO,
+    ),
 }
 
 WORKSPACE_POLICIES: tuple[str, ...] = ("none", "fixed", "derived")
@@ -106,6 +111,8 @@ KNOWN_ARCH_BASE_IDS: frozenset[str] = frozenset(
         "gfx1102",
         "gfx1200",
         "gfx1201",
+        "gfx1250",
+        "gfx1250-strict",
     }
 )
 
@@ -189,6 +196,10 @@ class KernelSource:
     #: ``hkp_pack`` hydrates it with ``Spec(**fields)``, so every non-defaulted
     #: field must be present.
     spec: dict = field(default_factory=dict)
+    #: ``packaged`` / ``hsaco``: a prebuilt code object's path relative to the
+    #: descriptor naming it, and its kernel symbol.
+    file: str = ""
+    symbol: str = ""
 
     def as_document(self) -> dict:
         """The ``kernel_source`` JSON object for this kind, and nothing more.
@@ -216,6 +227,8 @@ class KernelSource:
                 "builder": self.builder,
                 "spec": self.spec,
             }
+        if self.kind == KERNEL_SOURCE_KIND_HSACO:
+            return {"kind": self.kind, "file": self.file, "symbol": self.symbol}
         raise ValueError(
             f"kernel_source kind '{self.kind}' has no emitter; the config "
             f"loader should have rejected it before generation"

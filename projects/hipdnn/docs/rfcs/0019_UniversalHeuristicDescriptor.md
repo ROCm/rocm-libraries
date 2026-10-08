@@ -1712,7 +1712,7 @@ is one more adapter value. Adapters come in the same two delivery classes as ker
 
 **Design constraint:** The model travels as data with the engine, not linked into the provider. The
 engine's descriptor set (UED + UHD + KMD + model) must be a standalone drop-in next to an already-shipped
-provider, exactly like packs' `hsaco`/`kpack` code objects. This rules out statically linking the model
+provider, exactly like the planned `hsaco` drop-in path for code objects (today authored `hsaco` is packed at build time and ships as `kpack`). This rules out statically linking the model
 as the shipping mechanism — the model must be loadable data the running provider reads. The constraint is
 on *linkage*, not compilation: a model may be compiled (e.g. a Treelite `.so`) provided it ships as a
 loadable artifact rather than baked into `libhipdnn_provider.so`.

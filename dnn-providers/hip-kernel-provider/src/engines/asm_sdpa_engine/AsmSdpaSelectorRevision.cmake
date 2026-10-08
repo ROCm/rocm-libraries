@@ -59,8 +59,9 @@ function(hkp_asm_sdpa_fwd_revision _out_revision _engine_dir)
         plans/SdpaFwdArgsBuilder.hpp
         asm/SdpaFwdKernelArgs.hpp
         asm/SgprPadding.hpp)
-    # Not inputs: AsmKernelPath.hpp, SdpaModuleCache.hpp, SdpaKernelUtils.hpp (load and
-    # launch plumbing), pack.py (nothing loads .kpack yet), and CMakeLists.txt.
+    # Not inputs: AsmKernelPath.hpp, AsmKpackArchive.hpp, PluginModuleDir.*,
+    # SdpaModuleCache.hpp, SdpaKernelUtils.hpp (load and launch plumbing), pack.py (it
+    # archives the same .co bytes hashed above), and CMakeLists.txt.
     set(_inputs "")
     foreach(_source IN LISTS _sources)
         if(NOT EXISTS "${_engine_dir}/${_source}")

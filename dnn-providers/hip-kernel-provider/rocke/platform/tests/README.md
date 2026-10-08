@@ -6,6 +6,15 @@ derived relative to each file, so this tree is copy-able verbatim.
 
 ## Entry point
 
+Install test dependencies from the platform directory with
+`python -m pip install -r requirements.txt` or `python -m pip install -e '.[dev]'`.
+Both include `ml_dtypes>=0.6.0`, which supplies independent FP4/FP6/FP8 reference
+types. Host tests that need this optional runtime dependency use
+`pytest.importorskip`; a minimal authoring installation can run the remaining
+tests. Required gfx1250 numerical validation needs `ml_dtypes` installed and
+`ROCKE_REQUIRE_GFX1250=1`; missing dependencies or the requested GPU must fail
+that validation rather than count as successful coverage.
+
 ```
 python tests/run_all.py            # relative-path guard + byte-identity gate + pytest (+ctest if built)
 python tests/run_all.py --only gemm
@@ -15,6 +24,9 @@ python tools/check_byte_identity.py   # build engine fresh + byte-identity gate 
 `conftest.py` puts `rocke/platform/python` on `sys.path` (so `import rocke` works);
 `pytest.ini` uses `--import-mode=importlib` so same-named test modules coexist
 across layers without `__init__.py`.
+
+See [the pre-merge testing strategy](../../TESTING.md#51-before-merging-source-backends-and-installed-ci)
+for the required source backend matrix and installed CI replay procedure.
 
 ## Layout / coverage matrix
 
@@ -119,3 +131,29 @@ An explicit `ROCKE_STORAGE_TEST` overrides discovery and must name an existing
 executable; it does not skip the configured build. With no configured build or
 explicit override, the runner reports native storage parity as skipped; direct
 pytest invocations can use the same override.
+
+## Installed pinned-reference suites
+
+These suites are registered by platform CMake for the installed provider, with
+library tests staged under `tests/library/tests/`. They use NumPy and ROCm in an
+environment without Torch; they do not invoke the offline CPU oracles.
+
+| CTest entry | Scope | Registration |
+|---|---|---|
+| `rocke_reference_common_pytest` | Shared artifact integrity and worker import isolation | Host suite; independent of bundles |
+| `rocke_sdpa_reference_unit_pytest` | SDPA numerical contract and qualification guards | Host suite; independent of bundles |
+| `rocke_conv_reference_unit_pytest` | Convolution numerical contract and qualification guards | Host suite; independent of bundles |
+| `rocke_sdpa_gpu_gfx942_pytest` | Eight gfx942 numerical cases and three failure checks | When the SDPA bundle is installed |
+| `rocke_conv_gpu_gfx942_pytest` | Twelve gfx942 forward cases and three failure checks | When the convolution bundle is installed |
+
+`ROCKE_INSTALL_TEST_GPU_REFERENCES` controls installation of all published
+operation/architecture pairs. SDPA/gfx942 and convolution/gfx942 are published
+and installed by default for provider builds. Local source/lock overrides
+select replacement candidates. Each operation
+and architecture retains a separate archive, lock, and installed payload.
+
+The optional `conv_reference/check_torch_reference.py` is an explicit offline
+oracle audit. It is excluded from installation and normal pytest discovery.
+See [the installed reference procedure](../../TESTING.md#running-installed-reference-tests-without-torch)
+and the [convolution guide](../../docs/conv-test-reference.md) for commands,
+publication requirements, and coverage limits.
