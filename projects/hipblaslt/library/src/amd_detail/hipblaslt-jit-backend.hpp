@@ -26,47 +26,8 @@ namespace hipblaslt_ext::experimental::jit
         struct CompiledSolution;
     }
 
-    // Backend factories configure an opaque, copyable solution generator.
-    class Backend
-    {
-    public:
-        Backend() = default;
-        static Backend create(std::shared_ptr<const hipblaslt_jit::Jit> jit)
-        {
-            Backend backend;
-            backend.m_jit = std::move(jit);
-            return backend;
-        }
-        const std::shared_ptr<const hipblaslt_jit::Jit>& get() const
-        {
-            return m_jit;
-        }
-
-    private:
-        std::shared_ptr<const hipblaslt_jit::Jit> m_jit;
-    };
-
     // Operation factories own the description and host scalar values. Device
     // buffers retain the execution API's normal caller lifetime requirements.
-    class Request
-    {
-    public:
-        Request() = default;
-        static Request create(std::shared_ptr<const detail::GemmRequest> gemm)
-        {
-            Request request;
-            request.m_gemm = std::move(gemm);
-            return request;
-        }
-        const std::shared_ptr<const detail::GemmRequest>& get() const
-        {
-            return m_gemm;
-        }
-
-    private:
-        std::shared_ptr<const detail::GemmRequest> m_gemm;
-    };
-
     namespace detail
     {
         struct KernelBundle
