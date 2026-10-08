@@ -150,7 +150,7 @@ namespace hipblaslt_jit
             throw std::invalid_argument("Jit requires a backend, a builder and a loader");
     }
 
-    Jit::Outcome Jit::generate(const OperationRequest&         request,
+    Jit::Outcome Jit::generate(const GemmRequest&         request,
                                const DeviceTarget&             target,
                                size_t                          count,
                                size_t                          workspaceLimit,

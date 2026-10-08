@@ -11,10 +11,9 @@ namespace hipblaslt_ext::experimental::jit::detail
 {
     // Reuse hipBLASLt's validated GEMM representation. Device buffers and
     // execution resources retain their normal caller lifetime.
-    struct HIPBLASLT_EXPORT GemmRequest final : OperationRequest
+    struct HIPBLASLT_EXPORT GemmRequest
     {
-        static constexpr std::string_view operation = "hipblaslt.gemm.v1";
-        RocblasltContractionProblem       problem;
+        RocblasltContractionProblem problem;
         // RocblasltContractionProblem stores alpha and beta as pointers and does not own the bytes.
         // GemmRequest outlives the caller's scalars, so it copies them and points problem.alpha/beta at that copy.
         alignas(16) std::array<unsigned char, 16> alpha{}, beta{};
@@ -42,10 +41,6 @@ namespace hipblaslt_ext::experimental::jit::detail
         }
         GemmRequest(const GemmRequest&)                = delete;
         GemmRequest&     operator=(const GemmRequest&) = delete;
-        std::string_view kind() const noexcept override
-        {
-            return operation;
-        }
     };
 
     // Captures the common descriptor translation without invoking any provider.
