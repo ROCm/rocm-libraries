@@ -200,10 +200,23 @@ For a newly published architecture, add it to
 [`PublishedGpuReferences.cmake`](../platform/cmake/PublishedGpuReferences.cmake).
 For new operations, add the corresponding list alongside the CMake support from
 step 1. Updating coverage on an already published pair needs no enrollment change.
-CMake consumes only standard archives and committed locks. Missing or corrupt
+CMake consumes only standard archive and baseline-lock paths. Missing or corrupt
 published data fails configuration; it must not silently remove coverage.
 
 ## 6. Validate installation and provider selection
+
+This validation can run before committing or merging the replacement, and before
+uploading it to DVC. CMake reads the files in the working checkout: place the
+reviewed candidate lock and packed archive at the standard paths from step 5,
+and update `PublishedGpuReferences.cmake` locally if adding a new published pair.
+Then use the normal configure/install path below. CMake does not require a Git
+commit, a DVC pointer, or remote availability to install a local archive.
+
+This exercises the actual installation path without candidate-install overrides.
+DVC publication and an empty-cache download check are still required before
+merging, so other checkouts and CI can retrieve the same bundle. Installation
+checks alone do not validate TheRock's final artifact splitting; check the
+assembled artifacts as described below when validating packaging.
 
 Run the source publication/install checks:
 

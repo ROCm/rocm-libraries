@@ -163,11 +163,14 @@ def test_required_reference_prerequisites_fail_configuration(project, problem):
     assert result.returncode != 0
     expected = {
         "archive": "reference archive missing",
-        "lock": "baseline_lock.json",
+        "lock": "No qualified conv baseline lock for gfx942",
         "integrity": "does not match the pinned lock",
         "python": "requires a Python3 interpreter",
     }
     assert expected[problem] in result.stdout + result.stderr
+    if problem == "lock":
+        assert "baseline_lock.json" in result.stdout + result.stderr
+        assert "Traceback" not in result.stdout + result.stderr
 
 
 def test_published_bundles_have_supported_cohorts_and_committed_locks(tmp_path):

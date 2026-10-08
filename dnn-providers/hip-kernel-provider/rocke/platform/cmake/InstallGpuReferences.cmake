@@ -21,6 +21,9 @@ foreach(_operation sdpa conv)
   foreach(_arch IN LISTS ROCKE_PUBLISHED_${_operation_upper}_ARCHITECTURES)
     set(_lock "${_ROCKE_LIBRARY_DIR}/tests/${_operation}_reference/architectures/${_arch}/baseline_lock.json")
     set(_archive "${_ROCKE_LIBRARY_DIR}/tests/reference_bundles/${_operation}/${_arch}.tar.gz")
+    if(NOT EXISTS "${_lock}")
+      message(FATAL_ERROR "No qualified ${_operation} baseline lock for ${_arch}: ${_lock}")
+    endif()
     if(NOT EXISTS "${_archive}")
       message(FATAL_ERROR
               "${_operation_upper} reference archive missing. Run dvc pull for "
