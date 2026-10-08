@@ -15,21 +15,11 @@ void reject(const std::function<void()>& f)
 {
     hipblaslt_jit_test::reject(f, "Malformed artifact was accepted");
 }
-std::vector<std::string> names(const std::vector<hipblaslt_jit::BuildUnit>& files)
+std::vector<std::string> names(const std::vector<hipblaslt_jit::Artifact>& files)
 {
     std::vector<std::string> result;
     for(const auto& file : files)
         result.push_back(file.name);
-    return result;
-}
-
-std::vector<hipblaslt_jit::BuildUnit> ofKind(const std::vector<hipblaslt_jit::BuildUnit>& units,
-                                             hipblaslt_jit::BuildUnit::Kind               kind)
-{
-    std::vector<hipblaslt_jit::BuildUnit> result;
-    for(const auto& unit : units)
-        if(unit.kind == kind)
-            result.push_back(unit);
     return result;
 }
 
@@ -74,48 +64,46 @@ TEST_CASE("the source bundle reader accepts only a contained directory", "[jit-c
     fs::create_directories(bundle / "library");
     fs::create_directories(bundle / "sources");
     writeFile(bundle / "library/TensileLibrary.dat", payload);
-    for(const auto* name : {"b.s", "a.s", "scale.hip", "add.cpp", "kernel.h", "types.h"})
+    for(const auto* name : {"a.s", "scale.hip", "add.cpp", "kernel.h", "types.h"})
         writeFile(bundle / "sources" / name, std::string("// ") + name + "\n");
-    const auto sources  = a::readSourceBundle(bundle);
-    const auto assembly = ofKind(sources.units, hipblaslt_jit::BuildUnit::Kind::Assembly);
-    const auto hip      = ofKind(sources.units, hipblaslt_jit::BuildUnit::Kind::Hip);
+    const auto sources = a::readSourceBundle(bundle);
     {
-        INFO(("Source bundle library changed"));
-        REQUIRE((std::string(sources.library.begin(), sources.library.end()) == payload));
+        INFO(("The main kernel is not the assembly source"));
+        REQUIRE((sources.mainKernel.name == "a.s"
+                 && sources.mainKernel.kind == hipblaslt_jit::Artifact::Kind::Assembly));
     }
     {
-        INFO(("Assembly is not every sources/*.s by name"));
-        REQUIRE((names(assembly) == std::vector<std::string>({"a.s", "b.s"})));
+        INFO(("HIP sources are not helpers by name"));
+        REQUIRE((names(sources.helpers) == std::vector<std::string>({"add.cpp", "scale.hip"})));
     }
     {
-        INFO(("HIP sources are not every sources/*.hip and *.cpp by name"));
-        REQUIRE((names(hip) == std::vector<std::string>({"add.cpp", "scale.hip"})));
-    }
-    {
-        INFO(("Headers are not includes of each HIP unit"));
-        REQUIRE((!hip.empty()
-                 && names(hip[0].includes) == std::vector<std::string>({"kernel.h", "types.h"})
-                 && names(hip[1].includes) == std::vector<std::string>({"kernel.h", "types.h"})));
+        INFO(("Headers are not the bundle includes"));
+        REQUIRE((names(sources.includes) == std::vector<std::string>({"kernel.h", "types.h"})));
     }
     {
         INFO(("Source bytes changed"));
-        REQUIRE((std::string(assembly[0].bytes.begin(), assembly[0].bytes.end()) == "// a.s\n"));
+        REQUIRE((std::string(sources.mainKernel.bytes.begin(), sources.mainKernel.bytes.end())
+                 == "// a.s\n"));
     }
+    writeFile(bundle / "sources/b.s", "// b.s\n");
+    reject([&] { a::readSourceBundle(bundle); });
+    fs::remove(bundle / "sources/b.s");
     fs::rename(bundle / "sources/a.s", root / "a.s");
-    fs::rename(bundle / "sources/b.s", root / "b.s");
     {
         INFO(("A bundle of HIP sources was rejected"));
-        REQUIRE((ofKind(a::readSourceBundle(bundle).units, hipblaslt_jit::BuildUnit::Kind::Assembly)
-                     .empty()));
+        REQUIRE((a::readSourceBundle(bundle).mainKernel.kind == hipblaslt_jit::Artifact::Kind::Hip
+                 && a::readSourceBundle(bundle).mainKernel.name == "add.cpp"
+                 && names(a::readSourceBundle(bundle).helpers)
+                        == std::vector<std::string>{"scale.hip"}));
     }
     fs::rename(root / "a.s", bundle / "sources/a.s");
-    fs::rename(root / "b.s", bundle / "sources/b.s");
     fs::remove(bundle / "sources/scale.hip");
     fs::remove(bundle / "sources/add.cpp");
     {
         INFO(("A bundle of assembly was rejected"));
-        REQUIRE((ofKind(a::readSourceBundle(bundle).units, hipblaslt_jit::BuildUnit::Kind::Hip)
-                     .empty()));
+        REQUIRE((a::readSourceBundle(bundle).helpers.empty()
+                 && a::readSourceBundle(bundle).mainKernel.kind
+                        == hipblaslt_jit::Artifact::Kind::Assembly));
     }
     auto damage = [&](const std::function<void()>& change, const std::function<void()>& undo) {
         change();
@@ -125,28 +113,8 @@ TEST_CASE("the source bundle reader accepts only a contained directory", "[jit-c
     };
     damage([&] { fs::rename(bundle / "sources", root / "moved"); },
            [&] { fs::rename(root / "moved", bundle / "sources"); });
-    damage(
-        [&] {
-            fs::rename(bundle / "library/TensileLibrary.dat",
-                       bundle / "library/TensileLibrary.yaml");
-        },
-        [&] {
-            fs::rename(bundle / "library/TensileLibrary.yaml",
-                       bundle / "library/TensileLibrary.dat");
-        });
-    damage([&] { fs::rename(bundle / "library", root / "moved"); },
-           [&] { fs::rename(root / "moved", bundle / "library"); });
-    damage([&] { writeFile(bundle / "library/TensileLibrary.dat", ""); },
-           [&] { writeFile(bundle / "library/TensileLibrary.dat", payload); });
-    damage(
-        [&] {
-            fs::rename(bundle / "sources/a.s", root / "a.s");
-            fs::rename(bundle / "sources/b.s", root / "b.s");
-        },
-        [&] {
-            fs::rename(root / "a.s", bundle / "sources/a.s");
-            fs::rename(root / "b.s", bundle / "sources/b.s");
-        });
+    damage([&] { fs::rename(bundle / "sources/a.s", root / "a.s"); },
+           [&] { fs::rename(root / "a.s", bundle / "sources/a.s"); });
     damage([&] { fs::create_directory(bundle / "sources/nested"); },
            [&] { fs::remove(bundle / "sources/nested"); });
     damage([&] { writeFile(bundle / "sources/empty.h", ""); },

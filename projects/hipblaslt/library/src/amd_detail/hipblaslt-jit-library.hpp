@@ -187,7 +187,10 @@ namespace hipblaslt_jit
                       std::vector<int32_t>&                     indices);
 
         // Returns one index per supported solution, in order. A solution already
-        // published for the same kernel and sizes keeps its index.
+        // published for the same kernel and sizes keeps its index. solutions are
+        // code-object artifacts plus the TensileLite record JitLibrary writes.
+        // The problem's ContractionSolution::ProblemType is what problemTypeKey
+        // stores.
         Status publish(const CacheKey&                           key,
                        int                                       device,
                        const TensileLite::ContractionProblemGemm& problem,

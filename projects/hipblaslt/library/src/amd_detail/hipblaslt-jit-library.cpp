@@ -860,11 +860,10 @@ namespace hipblaslt_jit
             Directory* directory = nullptr;
             if(auto status = attach(key, device, directory); !status.ok())
                 return status;
-            // Each supported solution as a one-solution entry with its built
-            // entry's code object.
+            // Each supported solution as a one-solution entry with its code object.
             struct Candidate
             {
-                const BuildUnit*     object = nullptr;
+                const Artifact*      object = nullptr;
                 std::vector<uint8_t> entry;
                 std::string          kernel;
                 std::vector<std::pair<std::string, const std::vector<uint8_t>*>> helpers;
@@ -872,14 +871,17 @@ namespace hipblaslt_jit
             std::vector<Candidate> candidates;
             for(const auto& supported : solutions)
             {
-                if(supported.first.object.bytes.empty())
+                if(supported.first.codeObject.bytes.empty()
+                   || supported.first.codeObject.kind != Artifact::Kind::CodeObject)
                     return failed(Stage::Publish, "A built solution has no code object");
+                if(supported.first.record.empty())
+                    return failed(Stage::Publish, "A built solution has no TensileLite record");
                 for(const auto local : supported.second)
                 {
-                    Candidate               candidate{&supported.first.object};
+                    Candidate               candidate{&supported.first.codeObject};
                     msgpack_io::EntryFields fields;
                     if(auto status = msgpack_io::rewriteEntryIndex(
-                           supported.first.generated.entry, local, 0, candidate.entry);
+                           supported.first.record, local, 0, candidate.entry);
                        !status.ok())
                         return status;
                     if(auto status = msgpack_io::readEntry(candidate.entry, fields); !status.ok())
