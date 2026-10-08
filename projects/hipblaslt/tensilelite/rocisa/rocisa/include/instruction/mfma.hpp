@@ -23,7 +23,6 @@
 #pragma once
 #include "enum.hpp"
 #include "instruction/instruction.hpp"
-#include <optional>
 
 namespace rocisa
 {
@@ -1131,5 +1130,4 @@ namespace rocisa
             return issueLatency;
         }
     };
-
 } // namespace rocisa
