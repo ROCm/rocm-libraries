@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """Fail CI when a pytest suite skipped a test its allow-list does not name.
@@ -20,6 +21,16 @@ line is ``<pattern> # <reason>``, split on the first ``#``, both parts non-empty
 pattern is an fnmatch glob over ``<junit file stem>::<classname>::<name>``. Several
 allow-lists may be given; their patterns are pooled, so a lane can add its own entries to
 the shared ones.
+
+Usage:
+    check_pytest_junit.py --junit build/tooling-junit/<ctest test name>.xml \\
+        --allow-skips .github/hipdnn-tooling-allowed-skips.txt
+
+Exit codes:
+    0  no skipped testcase outside the allow-lists, and every entry matched one
+    1  one or more checks failed; each prints
+       "check_pytest_junit: FAIL <id>: <detail>", where <id> is one of the
+       identifiers above
 """
 
 import argparse
@@ -31,7 +42,7 @@ from pathlib import Path
 PREFIX = "check_pytest_junit"
 
 
-def _parse_allow_list(allow_path, failures):
+def _parse_allow_list(allow_path: Path, failures: list[tuple[str, str]]) -> list[str]:
     """Return the allow-list's patterns; append any problem to ``failures``."""
     try:
         text = Path(allow_path).read_text(encoding="utf-8")
@@ -57,7 +68,7 @@ def _parse_allow_list(allow_path, failures):
     return patterns
 
 
-def check(junit_paths, allow_paths):
+def check(junit_paths: list[Path], allow_paths: list[Path]) -> list[tuple[str, str]]:
     """Return ``(kind, detail)`` for every problem; empty means the check passed."""
     failures = []
     patterns = []
@@ -91,7 +102,7 @@ def check(junit_paths, allow_paths):
     return failures
 
 
-def _count(junit_paths):
+def _count(junit_paths: list[Path]) -> tuple[int, int]:
     """``(testcases, allow-listed skips)`` over the readable junit files."""
     testcases = skips = 0
     for junit_path in map(Path, junit_paths):
@@ -105,12 +116,13 @@ def _count(junit_paths):
     return testcases, skips
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument(
         "--junit",
         action="append",
         required=True,
+        type=Path,
         metavar="PATH",
         help="pytest junit XML file; repeat for several suites",
     )
@@ -118,6 +130,7 @@ def main(argv=None):
         "--allow-skips",
         action="append",
         required=True,
+        type=Path,
         metavar="PATH",
         help=(
             "allow-list of '<pattern> # <reason>' lines naming the skips to accept; "
