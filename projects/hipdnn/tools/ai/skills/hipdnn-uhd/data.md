@@ -44,13 +44,12 @@ dataset. The tools are hipDNN's own: `hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_g
   `<build>/lib/hipdnn_plugins/engines/` and a non-empty `arch_content/` beside it. Configure's
   `hipDNN: SDPA support disabled` is about the frontend's SDPA API; the tools and the SDPA
   engines do not need it.
-- **Kernel files.** An engine that loads kernel files at run time looks for them at the
-  install path, so from a build tree point it at the build's copy, for every step that runs
-  the engine (collection, validation, `hipdnn_bench`): for AITER's `ASM_SDPA_ENGINE`,
-  `HIPDNN_AITER_ASM_DIR=<build>/hip_kernel_provider/asm_kernels`. The provider's integration
-  tests set the same variables (`dnn-providers/hip-kernel-provider/src/integration_tests/CMakeLists.txt`).
-  Missed, every graph fails at collection with `failed to load kernel module`, although the
-  shape set (which only asks whether the engine applies) succeeded.
+- **Kernel archives.** AITER's `ASM_SDPA_ENGINE` loads its kernels from
+  `<plugin dir>/arch_content/asm_sdpa/<arch>/hip_kernel_provider_sdpa_<arch>.kpack`, which the
+  build stages beside the plugin for the archs `ASM_SDPA_GPU_ARCHS` lists
+  (`dnn-providers/hip-kernel-provider/src/engines/asm_sdpa_engine/CMakeLists.txt`). Without
+  that archive every graph fails at collection with `kpack_open failed`, although the shape
+  set (which only asks whether the engine applies) succeeded.
 - **uhd_gen** needs LightGBM, pandas and pyarrow. Run it from the checkout with
   `PYTHONPATH=<checkout>/projects/hipdnn/tools`, or install it into your own environment with
   `pip install -e projects/hipdnn/tools/uhd_gen`. Pass
@@ -64,12 +63,10 @@ dataset. The tools are hipDNN's own: `hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_g
     --group-add $(getent group render | cut -d: -f3) \
     -v <checkout>:<checkout> -v <build>:<build> -v <store>:<store> -v $UHD:$UHD \
     -e PYTHONPATH=<checkout>/projects/hipdnn/tools \
-    -e HIPDNN_AITER_ASM_DIR=<build>/hip_kernel_provider/asm_kernels \
     -w <checkout> <image> ...
   ```
   Mount every directory a step reads or writes at its own path (the checkout, the build, the
-  store, scratch, and `$UHD` for the scripts), and pass `PYTHONPATH` and the engine's
-  kernel-file variables.
+  store, scratch, and `$UHD` for the scripts), and pass `PYTHONPATH`.
   On a machine whose GPUs are shared out (a scheduler grants you some), the container sees
   every GPU whose device node it is given, and an index such as `ROCR_VISIBLE_DEVICES` counts
   within your grant, not within the container's view. Give it only your GPU's nodes: read

@@ -19,8 +19,7 @@ graphs per operation) gives every slice graph, about 20 per operation. A closed 
 no slice: its whole set is the graph list, and the verdict is recall.
 
 `<model dir>` below is the model's `models[i].model_dir` (the directory holding
-`heuristic.uhd.json`). Every run that executes the engine needs its kernel-file variables
-([data.md](data.md), "Kernel files").
+`heuristic.uhd.json`).
 
 ## Stage V: engine predictor (L1)
 

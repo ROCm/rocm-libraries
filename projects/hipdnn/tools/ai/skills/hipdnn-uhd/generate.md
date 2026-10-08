@@ -117,9 +117,8 @@ Read it from the checkout:
 4. **Evaluation slice** (not for a closed shape set):
    `python3 $UHD/scripts/eval_slice.py choose <set>/*/manifest.json`, every
    operation of the set in one slice.
-5. **Collect, per role, L2 first** (one GPU run each; `--output-dir` must not exist), with
-   the engine's kernel-file variables set ([data.md](data.md), "Kernel files"). One collection
-   covers every operation of the set (`--graphs` takes each `<set>/<op>`):
+5. **Collect, per role, L2 first** (one GPU run each; `--output-dir` must not exist). One
+   collection covers every operation of the set (`--graphs` takes each `<set>/<op>`):
    ```bash
    python3 -m uhd_gen generate --graphs <set>/<op> ... --collect-only \
      --engine <engine> --engine-id <signed decimal id> --role <role> \
@@ -202,7 +201,7 @@ was scored (`eval_benchmarks`, `holdout` or `recall`).
 | a tool fails to start, `lib...so: cannot open shared object file` | the build was configured at another path: use a build configured at this checkout's path ([data.md](data.md)) |
 | corpus_gen refuses a pack-coverage engine | pass `--kdp-root` |
 | `--output-dir must not exist` | each run writes a new directory |
-| every graph fails collection with `failed to load kernel module` (after a shape set that succeeded) | the engine's kernel files are not where it looks: set its kernel-file variables ([data.md](data.md)) |
+| every graph fails collection with `kpack_open failed` (after a shape set that succeeded) | the engine's kernel archive is not beside the plugin for this arch ([data.md](data.md), "Kernel archives") |
 | `N of M graph(s) failed collection` | read `failed_graphs` in `generation_manifest.json`: one kernel, or the device |
 | generate: no training data | the dataset holds no `training` rows at that revision/role |
 | an opaque model installs but the engine never reads it | trained without the declared `--uhd-id` |
