@@ -12,6 +12,10 @@ from Tensile.CustomKernels import validateCustomPersistentArgs
 pytestmark = pytest.mark.unit
 
 
+_SPATIAL_SHAPES = [(2, 1), (4, 1), (8, 1), (2, 2), (2, 4), (4, 2),
+                   (2, 8), (4, 4), (8, 2)]
+
+
 def test_abi2_is_derived_from_cluster_geometry_and_custom_descriptors_are_rejected():
     state = normalize_execution_policy({"TileProcessingStrategy": "StreamK",
                                         "ClusterDim": [2, 1]})
@@ -58,7 +62,7 @@ def test_existing_unclustered_kernel_identity_retains_its_payload_marker(strateg
     assert fragment in after if fragment else "_PLAV" not in after
 
 
-@pytest.mark.parametrize("shape", [(2, 1), (4, 1), (2, 2), (2, 4)])
+@pytest.mark.parametrize("shape", _SPATIAL_SHAPES)
 def test_supported_shapes_match_host_capability(shape):
     from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
     from test_streamk_multicast import _mc_state, _isa_map
@@ -68,7 +72,7 @@ def test_supported_shapes_match_host_capability(shape):
 
 
 @pytest.mark.parametrize("overrides", [
-    {"ClusterDim": [8, 1]}, {"ClusterDim": [4, 2]}, {"ClusterDim": [4, 4]},
+    {"ClusterDim": [3, 1]}, {"ClusterDim": [4, 8]},
     {"PrefetchAcrossPersistent": 1}, {"PrefetchGlobalRead": 0},
     {"StreamKFixupTreeReduction": 0}, {"StreamKAtomic": 1}, {"UseSubtileImpl": 1},
     {"StoreRemapVectorWidth": 4}, {"ReuseAcrossPersistent": 1}, {"SpaceFillingAlgo": [1]},

@@ -5176,9 +5176,9 @@ namespace TensileLite
         if(usesStreamKSpatialCluster())
         {
             const auto& c = sizeMapping.clusterDim;
-            const bool supportedShape = c.z == 1
-                && ((c.x == 2 && (c.y == 1 || c.y == 2 || c.y == 4))
-                    || (c.x == 4 && c.y == 1));
+            const bool supportedShape = c.z == 1 && c.x > 1 && c.x < 16
+                && c.y > 0 && c.y <= 8 && (c.x & (c.x - 1)) == 0
+                && (c.y & (c.y - 1)) == 0 && c.x * c.y <= 16;
             if(!sizeMapping.isStreamK() || !sizeMapping.hasStaticAssignment()
                || sizeMapping.streamKAtomic || sizeMapping.prefetchAcrossPersistent
                || !supportedShape || sizeMapping.useSubtileImpl)
@@ -6521,6 +6521,24 @@ namespace TensileLite
                 static_cast<size_t>(std::max(gpu->skFullTiles, 0)), cluster.blocks / launch.grid));
             cluster.split = streamKStaticSplit(cluster.blocks, iters, launch.grid,
                                                 fullTiles, false);
+            if(problem.getParams().uniformSummationOrder()
+               && !streamKStaticSplitRowUniform(cluster.split, cluster.blocks, iters,
+                                                launch.grid, internalArgsSupport.perTileExtraIters, true))
+            {
+                // Scheduling and fixup retain ABI2's global first-E mapping.
+                // Equal chunks of every spatial block have the same reduction
+                // order for every real peer, including ragged boundary blocks.
+                size_t factor = launch.grid / cluster.blocks;
+                while(factor >= 2 && (iters % factor != 0 || iters / factor < 8))
+                    --factor;
+                if(factor >= 2)
+                {
+                    launch.grid = checkedMultiply(cluster.blocks, factor);
+                    cluster.split = streamKStaticSplit(cluster.blocks, iters, launch.grid, 0, false);
+                }
+                else
+                    wholeBlocks("uniform-whole-blocks");
+            }
             const bool hasPartials = cluster.split.extraIters != 0
                                     || cluster.split.skItersPerWG % iters != 0;
             if(!hasPartials)
@@ -6754,10 +6772,6 @@ namespace TensileLite
                     *obstacleToken = token;
                 return detail;
             };
-
-            if(solution.usesStreamKSpatialCluster())
-                return refuse("StreamKSpatialCluster",
-                              "StreamK spatial cluster reduction is not yet audited for uniform summation order");
 
             // Atomic fixup accumulates partial tiles in arrival order.
             if(sizeMapping.streamKAtomic != 0)
@@ -6997,7 +7011,8 @@ namespace TensileLite
 
             // Batch-inclusive tile count, matching the value the StreamK
             // resolution and the kernel-arg packing both use.
-            const size_t tiles = problem.getNumTiles(sizeMapping, 1);
+            const size_t tiles = usesStreamKSpatialCluster()
+                ? launch.clusterSchedule.blocks : problem.getNumTiles(sizeMapping, 1);
 
             if(launch.reduction == origami::reduction_t::parallel)
             {
@@ -7030,11 +7045,10 @@ namespace TensileLite
                     // The same helper generateSingleCall() packs from, so the gate
                     // reasons about the split the kernel actually performs.
                     const StreamKStaticSplit split
-                        = streamKStaticSplit(tiles,
-                                             itersPerTile,
-                                             launch.grid,
-                                             pAMDGPU != nullptr ? pAMDGPU->skFullTiles : 1,
-                                             sizeMapping.isPersistentDataParallel());
+                        = usesStreamKSpatialCluster() ? launch.clusterSchedule.split
+                          : streamKStaticSplit(tiles, itersPerTile, launch.grid,
+                                               pAMDGPU != nullptr ? pAMDGPU->skFullTiles : 1,
+                                               sizeMapping.isPersistentDataParallel());
 
                     // Capability AND the mode bit: the packer only sets
                     // MagicShiftItersPerTile bit 29 -- the bit the kernel

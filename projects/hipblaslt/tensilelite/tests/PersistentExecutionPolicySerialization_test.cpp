@@ -862,7 +862,7 @@ namespace
         }
         canonical(policies[2]);
         for(const auto& shape : std::vector<std::vector<uint32_t>>{
-                {1, 1, 1}, {1, 2, 1}, {3, 1, 1}, {4, 2, 1}, {2, 8, 1}, {2, 1, 2}})
+                {1, 1, 1}, {1, 2, 1}, {3, 1, 1}, {16, 1, 1}, {4, 8, 1}, {2, 1, 2}})
         {
             size["clusterDim"] = object(shape);
             EXPECT_THROW(readSolution(), std::runtime_error);

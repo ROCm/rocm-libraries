@@ -56,8 +56,8 @@ def _check_kernel(base, src):
 
 
 def test_static_streamk_cluster_shapes_and_pgr_assemble():
-    results = emit_kernels_from_config(str(_CONFIG), limit=8, arch="gfx1250", canonical=False)
-    assert len(results) == 8
+    results = emit_kernels_from_config(str(_CONFIG), limit=18, arch="gfx1250", canonical=False)
+    assert len(results) == 18
     assert_real_gfx1250_kernels(results)
     for base, src, _ in results:
         _check_kernel(base, src)

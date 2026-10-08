@@ -575,7 +575,7 @@ namespace
 
 TEST(PersistentArgumentLayout, ClusterStreamKUsesOneResolvedBlockSchedule)
 {
-    for(auto [cs, cn] : std::vector<std::pair<uint32_t, uint32_t>>{{2, 1}, {4, 1}, {2, 2}, {2, 4}})
+    for(auto [cs, cn] : std::vector<std::pair<uint32_t, uint32_t>>{{2, 1}, {4, 1}, {8, 1}, {2, 2}, {2, 4}, {2, 8}, {4, 2}, {4, 4}, {8, 2}})
     for(auto [m, n, k, batches, physicalBudget] :
         std::vector<std::tuple<size_t, size_t, size_t, size_t, size_t>>{
             {1, 1, 0, 1, 256}, {1, 1, 1, 1, 256}, {129, 257, 65, 3, 35},
@@ -695,7 +695,7 @@ TEST(PersistentArgumentLayout, ClusterStreamKBoundsAndUniformOrderAreExplicit)
     EXPECT_THROW(solution.requiredWorkspaceSize(problem, device), std::overflow_error);
     solution.sizeMapping.workspaceSizePerElemC = sizeof(float);
     problem.setParams().setUniformSummationOrder(true);
-    EXPECT_FALSE(solution.uniformSummationOrderSupported(problem, device));
+    EXPECT_TRUE(solution.uniformSummationOrderSupported(problem, device));
 }
 
 TEST(PersistentArgumentLayout, ClusterStreamKVersionZeroKeepsPrebuiltScheduling)
@@ -767,8 +767,8 @@ TEST(PersistentArgumentLayout, ClusterStreamKVersionTwoRequiresSupportedCapabili
         EXPECT_THROW(solution.resolvePersistentSettings(problem, device), std::runtime_error);
     }
     for(auto shape : {TensileLite::dim3(1, 1, 1), TensileLite::dim3(1, 2, 1),
-                      TensileLite::dim3(3, 1, 1), TensileLite::dim3(4, 2, 1),
-                      TensileLite::dim3(2, 8, 1), TensileLite::dim3(2, 1, 2)})
+                      TensileLite::dim3(3, 1, 1), TensileLite::dim3(16, 1, 1),
+                      TensileLite::dim3(4, 8, 1), TensileLite::dim3(2, 1, 2)})
     {
         ContractionSolution solution;
         configureClusterStreamK(solution, shape.x, shape.y);
@@ -883,4 +883,36 @@ TEST(PersistentArgumentLayout, SharedClusterGeometryPreservesDataParallelGridAnd
         // Preserve the legacy DP launch-header convention in this extraction.
         EXPECT_EQ(value<uint32_t>(invocation.args, "numWorkGroups"), expectedGrid / cn);
     }
+}
+
+TEST(PersistentArgumentLayout, ClusterUniformOrderKeepsIdenticalSplitSignatures)
+{
+    for(auto shape : {TensileLite::dim3(2, 1, 1), TensileLite::dim3(4, 2, 1),
+                      TensileLite::dim3(2, 8, 1)})
+    {
+        ContractionSolution solution;
+        configureClusterStreamK(solution, shape.x, shape.y);
+        // Ragged spatial blocks and two batches still have identical K folds.
+        auto problem = clusterProblem(129, 129, 65 * 64, 2);
+        auto device = persistentDevice(256);
+        device.computeUnitCount = 256;
+        problem.setParams().setUniformSummationOrder(true);
+        const auto launch = solution.resolvePersistentSettings(problem, device);
+        const auto& cluster = launch.clusterSchedule;
+        ASSERT_GT(cluster.partialSlots, 0u);
+        ASSERT_GT(launch.grid, cluster.blocks);
+        EXPECT_EQ(cluster.split.extraIters, 0u);
+        EXPECT_EQ(cluster.split.skTiles, cluster.blocks);
+        EXPECT_TRUE(streamKStaticSplitRowUniform(cluster.split, cluster.blocks,
+            cluster.itersPerTile, launch.grid, false, true));
+        EXPECT_TRUE(solution.uniformSummationOrderSupported(problem, device));
+        const auto call = solution.generateSingleCall<true>(
+            problem, clusterInputs(), device, launch, GSUSettings{});
+        EXPECT_EQ(value<uint32_t>(call.args, "magicShiftItersPerTile") & 0x20000000u, 0u);
+        // Capability checks still refuse coordinate-dependent partial storage.
+        solution.problemType.useInitialStridesCD = true;
+        EXPECT_FALSE(solution.uniformSummationOrderSupported(problem, device));
+    }
+    const auto irregular = streamKStaticSplit(3, 65, 7, 1, false);
+    EXPECT_FALSE(streamKStaticSplitRowUniform(irregular, 3, 65, 7, false, true));
 }
