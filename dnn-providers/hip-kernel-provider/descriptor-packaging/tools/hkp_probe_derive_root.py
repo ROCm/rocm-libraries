@@ -60,7 +60,9 @@ Descriptors with no `arch` (wildcards) contribute nothing.
 Standalone UKDs (a `kernelDescriptors` entry that is a bare id) are out of probe
 scope by policy: a KDP that would be trimmed and references one is refused.
 
-Exit code 0 on success. Exit code 2, with a `hkp_probe_derive: ...` message on
+Exit code 0 on success. Exit code 3 (EXIT_FILTERED), with a message on stderr, when
+`--ukd` names UKDs that ship for `--arch` but that `--exclude-folder` or `--disable-kind`
+removes: the probe does not apply to this build. Exit code 2, with a `hkp_probe_derive: ...` message on
 stderr, when the root cannot be derived: the packer's loader rejects the root
 (malformed or unreadable descriptor, dangling reference, UKD arch outside its KDP's),
 a KDP that keeps UKDs (or, in default mode, any KDP shipping for `--arch`) references
@@ -95,10 +97,19 @@ from hkp_pack.errors import HkpPackError  # noqa: E402
 from hkp_probe_kinds import KINDS  # noqa: E402
 
 _PREFIX = "hkp_probe_derive:"
+EXIT_ERROR = 2
+# Every listed UKD is removed by the build's filters: not an error, the probe is skipped.
+EXIT_FILTERED = 3
 
 
 class DeriveError(Exception):
     pass
+
+
+class FilteredOut(DeriveError):
+    """Every listed UKD exists and would ship for the arch, but the build's filters
+    (an excluded folder, a disabled kind) remove it: the probe does not apply to this
+    build, which is not an authoring error."""
 
 
 def _discard(*_args, **_kwargs):
@@ -285,6 +296,16 @@ def _plan(src, arch, ukds=None, filters=((), ())):
 
     if ukds is not None:
         missing = sorted(wanted - {e["name"] for e in expect})
+        if missing and filters != ((), ()):
+            try:
+                _, unfiltered = _plan(src, arch, ukds)
+            except DeriveError:
+                unfiltered = []
+            if not set(missing) - {e["name"] for e in unfiltered}:
+                raise FilteredOut(
+                    f"--ukd {missing} ship for {arch} but are of a disabled kind or in "
+                    "an excluded folder in this build"
+                )
         if missing:
             raise DeriveError(
                 f"--ukd {missing} matched no inline UKD shipping for {arch} in a KDP "
@@ -354,17 +375,19 @@ def derive_root(
     out: Path,
     ukds: list[str] | None = None,
     filters=((), ()),
-) -> str | None:
-    """Write the derived root to `out`; return an error message, or None on success.
+) -> tuple[int, str] | None:
+    """Write the derived root to `out`; return (exit code, message), or None on success.
 
     `ukds` lists the UKD names to keep (`--ukd`); None selects per compile group.
     """
     if not src.is_dir():
-        return f"{_PREFIX} {src} is not a directory"
+        return EXIT_ERROR, f"{_PREFIX} {src} is not a directory"
     try:
         files, expect = _plan(src, arch, ukds, filters)
+    except FilteredOut as exc:
+        return EXIT_FILTERED, f"{_PREFIX} {exc}"
     except DeriveError as exc:
-        return f"{_PREFIX} {exc}"
+        return EXIT_ERROR, f"{_PREFIX} {exc}"
 
     _sync(out, files)
     expect_text = json.dumps(expect, indent=2) + "\n"
@@ -435,8 +458,9 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--arch and --out are required unless --list-arches is given")
     error = derive_root(args.src, args.arch, args.out, args.ukds, filters)
     if error is not None:
-        print(error, file=sys.stderr)
-        return 2
+        code, message = error
+        print(message, file=sys.stderr)
+        return code
     return 0
 
 

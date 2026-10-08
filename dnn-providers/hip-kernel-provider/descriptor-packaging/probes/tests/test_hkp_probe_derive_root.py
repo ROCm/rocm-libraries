@@ -654,6 +654,38 @@ def test_list_arches_ignores_content_of_disabled_kind_and_excluded_folder(tmp_pa
     assert _list_arches(src, "--disable-kind", "rocke") == ["gfx942"]
 
 
+def _derive_filtered(src, out, ukds, *filters):
+    cmd = [sys.executable, str(PROBE_DERIVE), "--from", str(src), "--arch", "gfx950"]
+    cmd += ["--out", str(out), *filters]
+    for name in ukds:
+        cmd += ["--ukd", name]
+    return subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+
+def test_listed_ukd_of_disabled_kind_exits_3_not_an_error(tmp_path):
+    src = tmp_path / "src"
+    _write_root(src, [_rocke("r"), _hip("h")])
+    out = tmp_path / "w" / "root"
+    # Listed UKD removed by the filter: the probe does not apply, exit 3.
+    r = _derive_filtered(src, out, ["r"], "--disable-kind", "rocke")
+    assert r.returncode == 3, r.stderr
+    assert "disabled kind" in r.stderr
+    # The same name without the filter derives normally; one that does not exist
+    # is still an authoring error, filter or not.
+    assert _derive_filtered(src, out, ["r"]).returncode == 0
+    r = _derive_filtered(src, out, ["nope"], "--disable-kind", "rocke")
+    assert r.returncode == 2, r.stderr
+    # A listed UKD that survives the filter is packed as usual.
+    assert _derive_filtered(src, out, ["h"], "--disable-kind", "rocke").returncode == 0
+
+
+def test_listed_ukd_missing_for_the_arch_is_an_error_even_when_filtered(tmp_path):
+    src = tmp_path / "src"
+    _write_root(src, [_rocke("r", arch=["gfx942"]), _hip("h")], kdp_arch=("gfx950",))
+    r = _derive_filtered(src, tmp_path / "w" / "root", ["r"], "--disable-kind", "rocke")
+    assert r.returncode == 2, r.stderr
+
+
 # --- the kinds registry -----------------------------------------------------
 def _tool_module(name):
     sys.path.insert(0, str(PROBE_DERIVE.parent))

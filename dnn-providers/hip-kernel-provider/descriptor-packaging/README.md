@@ -322,7 +322,9 @@ Probes read and pack the root under the same filters the production pack gets. W
 `HIPKERNELPROVIDER_ENABLE_ROCKE=OFF` the `rocKE/` family folder and every `rocke` UKD are
 neither packed nor expected, so a probe covers whatever other kinds the arch carries, and
 an architecture whose only content is rocKE gets no probe. Probes run for every producer
-the build has; none is skipped wholesale.
+the build has; none is skipped wholesale. A named probe whose listed `UKDS` all ship for its
+`ARCH` but are removed by those filters is skipped with a STATUS line (derive exit 3); a
+listed name that does not exist, or does not ship for `ARCH`, still fails configure.
 
 **What a probe proves**
 
@@ -509,7 +511,9 @@ python3 .github/scripts/check_probe_junit.py \
 
 The selector is `^hkp-probe-`, anchored: `-R` is an unanchored regex. It matches every
 probe (`hkp-probe-<NAME>`) and `hkp-probe-tools`, the pytest suite of the probe tooling
-(`probes/tests/`). `--no-tests=error` makes an empty selection a failure instead of a
+(`probes/tests/`; the tests that pack rocKE content live in `probes/tests/rocke/` and
+nowhere else, which a build with `HIPKERNELPROVIDER_ENABLE_ROCKE=OFF` never collects).
+`--no-tests=error` makes an empty selection a failure instead of a
 green run that proved nothing. `manifest.txt` is written at configure and lists the ctest
 names that must run; the junit check fails unless every one ran and passed (a skipped,
 disabled or missing entry fails), and ignores testcases not in the manifest, so it also
@@ -564,7 +568,8 @@ does not build it, with the default sample; nothing needs declaring.
 - **Another descriptor root:** one line with `ROOT <dir>`.
 - **New producer kind:** the packer must support the `kernel_source.kind` first. Then one
   `KINDS` entry in `tools/hkp_probe_kinds.py` (compile-group fields, provenance checks by
-  name, output type), one end-to-end test in `probes/tests/`, and the kinds list above.
+  name, output type), one end-to-end test in `probes/tests/` (in `probes/tests/rocke/` when it needs the rocKE
+  toolchain; `pack_root` packs without it unless `rocke=True`), and the kinds list above.
 - **New provenance check:** a function in `_PROVENANCE_CHECKS` (`tools/hkp_probe_assert.py`),
   its name in the kind's `provenance`, a row in the assertion-id table and a test showing
   the check fails on a mutated output.

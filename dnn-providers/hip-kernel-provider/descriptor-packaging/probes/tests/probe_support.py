@@ -61,46 +61,55 @@ def comgr_lib():
     return os.environ.get("ROCKE_COMGR_LIB") or None
 
 
-def pack_root(src, work, rocm_kpack_dir, hipcc, comgr_lib):
+def pack_root(
+    src, work, rocm_kpack_dir, hipcc, comgr_lib, *, rocke=False, filters=((), ())
+):
     """Pack `src` for ARCH with the real packer; return the output root.
+
+    `rocke` packs with the rocKE toolchain (wheel stamp, in-tree rocke on PYTHONPATH,
+    comgr), as a build with HIPKERNELPROVIDER_ENABLE_ROCKE=ON does; the default packs
+    as an OFF build does, with none of it, so a test that does not pack rocKE content
+    needs no rocKE toolchain. `filters` is (exclude_folders, disabled_kinds), the
+    packer's own flags.
 
     The stamp file is written by CMake in production; it is created here so the
     stamp assertion has something to find.
     """
     out = work / "out"
-    wheel_stamp = work / "rocke-wheel.stamp"
-    wheel_stamp.write_text(hashlib.sha256(b"probe-test-wheel").hexdigest() + "\n")
     env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join(
-        [str(p) for p in _ROCKE_SOURCE_DIRS] + [env.get("PYTHONPATH", "")]
-    ).rstrip(os.pathsep)
-    if comgr_lib:
-        env["ROCKE_COMGR_LIB"] = comgr_lib
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(HKP_PACK),
-            "--source-root",
-            str(src),
-            "--out-root",
-            str(out),
-            "--arches",
-            ARCH,
-            "--hipcc",
-            hipcc,
-            "--inter-root",
-            str(work / "inter"),
-            "--kpack-python-dir",
-            rocm_kpack_dir,
-            "--source-label",
-            "probe_assert_test",
-            "--rocke-wheel-stamp",
-            str(wheel_stamp),
-        ],
-        env=env,
-        capture_output=True,
-        text=True,
-    )
+    cmd = [
+        sys.executable,
+        str(HKP_PACK),
+        "--source-root",
+        str(src),
+        "--out-root",
+        str(out),
+        "--arches",
+        ARCH,
+        "--hipcc",
+        hipcc,
+        "--inter-root",
+        str(work / "inter"),
+        "--kpack-python-dir",
+        rocm_kpack_dir,
+        "--source-label",
+        "probe_assert_test",
+    ]
+    if rocke:
+        wheel_stamp = work / "rocke-wheel.stamp"
+        wheel_stamp.write_text(hashlib.sha256(b"probe-test-wheel").hexdigest() + "\n")
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(p) for p in _ROCKE_SOURCE_DIRS] + [env.get("PYTHONPATH", "")]
+        ).rstrip(os.pathsep)
+        if comgr_lib:
+            env["ROCKE_COMGR_LIB"] = comgr_lib
+        cmd += ["--rocke-wheel-stamp", str(wheel_stamp)]
+    exclude_folders, disabled_kinds = filters
+    for folder in exclude_folders:
+        cmd += ["--exclude-folder", folder]
+    for kind in disabled_kinds:
+        cmd += ["--disable-kind", kind]
+    result = subprocess.run(cmd, env=env, capture_output=True, text=True)
     if result.returncode != 0:
         pytest.fail(f"hkp_pack failed ({result.returncode}):\n{result.stderr}")
     (out / STAMP_NAME).write_text("")
@@ -109,9 +118,9 @@ def pack_root(src, work, rocm_kpack_dir, hipcc, comgr_lib):
 
 @pytest.fixture(scope="module")
 def packed_root(tmp_path_factory, rocm_kpack_dir, hipcc, comgr_lib):
-    """The rocke fixture packed once for ARCH."""
+    """The rocke fixture packed once for ARCH, with the rocKE toolchain."""
     work = tmp_path_factory.mktemp("probe_pack")
-    return pack_root(ROCKE_FIXTURE, work, rocm_kpack_dir, hipcc, comgr_lib)
+    return pack_root(ROCKE_FIXTURE, work, rocm_kpack_dir, hipcc, comgr_lib, rocke=True)
 
 
 def run_assert(out_root, expect_path, rocm_kpack_dir, expect_comgr=None):
@@ -134,8 +143,9 @@ def run_assert(out_root, expect_path, rocm_kpack_dir, expect_comgr=None):
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
-def run_derive(src, arch, out, ukds=()):
-    """Run the derive tool; one --ukd per entry of `ukds`."""
+def run_derive(src, arch, out, ukds=(), filters=((), ())):
+    """Run the derive tool; one --ukd per entry of `ukds`, and the same
+    (exclude_folders, disabled_kinds) `filters` pack_root takes."""
     cmd = [
         sys.executable,
         str(PROBE_DERIVE),
@@ -148,6 +158,11 @@ def run_derive(src, arch, out, ukds=()):
     ]
     for name in ukds:
         cmd += ["--ukd", name]
+    exclude_folders, disabled_kinds = filters
+    for folder in exclude_folders:
+        cmd += ["--exclude-folder", folder]
+    for kind in disabled_kinds:
+        cmd += ["--disable-kind", kind]
     return subprocess.run(cmd, capture_output=True, text=True, check=False)
 
 
@@ -163,9 +178,28 @@ def hip_source(dst):
     return dst
 
 
-def derive_and_pack(src, work, rocm_kpack_dir, hipcc, comgr_lib, ukds=()):
-    """Derive `src` for ARCH, pack the derived root; return (out root, expect path)."""
-    r = run_derive(src, ARCH, work / "probe" / "root", ukds)
+def derive_and_pack(
+    src,
+    work,
+    rocm_kpack_dir,
+    hipcc,
+    comgr_lib,
+    ukds=(),
+    *,
+    rocke=False,
+    filters=((), ()),
+):
+    """Derive `src` for ARCH, pack the derived root under the same `filters`; return
+    (out root, expect path). `rocke` as in pack_root."""
+    r = run_derive(src, ARCH, work / "probe" / "root", ukds, filters)
     assert r.returncode == 0, r.stderr
-    out = pack_root(work / "probe" / "root", work, rocm_kpack_dir, hipcc, comgr_lib)
+    out = pack_root(
+        work / "probe" / "root",
+        work,
+        rocm_kpack_dir,
+        hipcc,
+        comgr_lib,
+        rocke=rocke,
+        filters=filters,
+    )
     return out, work / "probe" / "expect.json"

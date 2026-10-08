@@ -67,6 +67,14 @@ function(_hkp_probe_derive_root name from_dir arch out_dir expect_var)
         RESULT_VARIABLE _derive_rc
         OUTPUT_VARIABLE _derive_out
         ERROR_VARIABLE _derive_err)
+    # Exit 3: every listed UKD ships for <arch> but this build's filters (rocKE OFF)
+    # remove it. The probe does not apply to this build; <expect_var> is set empty.
+    set(${expect_var} "" PARENT_SCOPE)
+    if(_derive_rc EQUAL 3)
+        string(STRIP "${_derive_err}" _derive_err)
+        message(STATUS "hkp: probe ${name} skipped: ${_derive_err}")
+        return()
+    endif()
     if(NOT _derive_rc EQUAL 0)
         message(FATAL_ERROR
             "hkp probe '${name}': deriving the probe root failed (exit "
@@ -148,7 +156,9 @@ endfunction()
 #   (combinations of values are not guaranteed). So the probe packs the real
 #   descriptors but compiles each compile path, and each value, once. With UKDS, the probe packs exactly the listed UKDs (by
 #   UKD name): KDPs keeping none of them are left out of the derived root, and
-#   configure fails when a listed name is kept by no KDP shipping for ARCH. The
+#   configure fails when a listed name is kept by no KDP shipping for ARCH, except that
+#   a probe whose listed UKDs all ship for ARCH but are removed by this build's filters
+#   (a rocke UKD with rocKE OFF) is skipped with a STATUS line, declaring nothing. The
 #   assertion expects exactly the kept UKDs, each with the provenance of its producer
 #   kind (see hkp_probe_assert.py). Adding a pack under an already probed ARCH needs no
 #   new declaration unless the probe lists UKDS.
@@ -225,6 +235,9 @@ function(hkp_add_packaging_probe)
     set(_root "${_probe_dir}/root")
     _hkp_probe_derive_root("${ARG_NAME}" "${ARG_ROOT}" "${ARG_ARCH}" "${_root}"
                            _expect_file ${ARG_UKDS})
+    if(NOT _expect_file)
+        return()
+    endif()
 
     # Empty PACK_JOBS passes nothing to the packer, which then uses its own default.
     hkp_wire_pack_target(
@@ -320,6 +333,23 @@ function(_hkp_probe_automatic_arches out_var)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# _hkp_probe_filter_args(<out_var> <enable_rocke> [<exclude_folder>...])
+#   The derive tool's --exclude-folder / --disable-kind flags for the filters the
+#   production roots are wired with, the disabled kinds from _hkp_disabled_kind_names().
+# ---------------------------------------------------------------------------
+function(_hkp_probe_filter_args out_var enable_rocke)
+    _hkp_disabled_kind_names(_kinds "${enable_rocke}")
+    set(_args "")
+    foreach(_folder IN LISTS ARGN)
+        list(APPEND _args --exclude-folder "${_folder}")
+    endforeach()
+    foreach(_kind IN LISTS _kinds)
+        list(APPEND _args --disable-kind "${_kind}")
+    endforeach()
+    set(${out_var} "${_args}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
 # hkp_load_packaging_probes(<rocm_kpack_dir> <hipcc> <rocke_comgr_lib> [<root args>...])
 #   Store the toolchain hkp_add_packaging resolved (<root args> are the keywords every
 #   production root is wired with: ENABLE_ROCKE, the ROCKE_* toolchain when ON, and
@@ -346,14 +376,7 @@ function(hkp_load_packaging_probes rocm_kpack_dir hipcc rocke_comgr_lib)
     # derive and the arch listing see the root as the pack step does, so what a probe
     # expects is what its pack ships.
     cmake_parse_arguments(_F "" "ENABLE_ROCKE" "EXCLUDE_FOLDERS" ${ARGN})
-    _hkp_disabled_kind_names(_kinds "${_F_ENABLE_ROCKE}")
-    set(_filter_args "")
-    foreach(_folder IN LISTS _F_EXCLUDE_FOLDERS)
-        list(APPEND _filter_args --exclude-folder "${_folder}")
-    endforeach()
-    foreach(_kind IN LISTS _kinds)
-        list(APPEND _filter_args --disable-kind "${_kind}")
-    endforeach()
+    _hkp_probe_filter_args(_filter_args "${_F_ENABLE_ROCKE}" ${_F_EXCLUDE_FOLDERS})
     set_property(GLOBAL PROPERTY HKP_PROBE_FILTER_ARGS "${_filter_args}")
     set_property(GLOBAL PROPERTY HKP_PROBE_NAMES "")
     set_property(GLOBAL PROPERTY HKP_PROBE_TOOLCHAIN_SET TRUE)
@@ -390,8 +413,16 @@ function(hkp_load_packaging_probes rocm_kpack_dir hipcc rocke_comgr_lib)
     if(rocke_comgr_lib)
         list(APPEND _pyenv "ROCKE_COMGR_LIB=${rocke_comgr_lib}")
     endif()
+    # Tests that pack rocKE content live under probes/tests/rocke/ and nowhere else; a
+    # build with rocKE OFF has no rocKE toolchain to run them, so it never collects them
+    # (as hkp_register_tests does for tests/rocke).
+    set(_rocke_ignore "")
+    if(NOT _F_ENABLE_ROCKE)
+        set(_rocke_ignore "--ignore=${HKP_PKG_DIR}/probes/tests/rocke")
+    endif()
     add_test(NAME hkp-probe-tools
-             COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/probes/tests" -v)
+             COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/probes/tests" -v
+                     ${_rocke_ignore})
     set_tests_properties(hkp-probe-tools PROPERTIES ENVIRONMENT "${_pyenv}")
 
     set(_test_names hkp-probe-tools)
