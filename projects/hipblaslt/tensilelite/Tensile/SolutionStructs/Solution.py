@@ -6207,6 +6207,10 @@ class Solution(collections.abc.Mapping):
       # SIA==3 only
       if state["_ScheduleIterAlg"] != 3:
         state["DtlPlusLdsBuf"] = 0
+      # PAP records the DTL LDS bank as a single LdsOffsetA_Blk bit in
+      # SkPrefetchPrimed, which cannot name a third buffer.
+      if state.get("PrefetchAcrossPersistent", 0):
+        state["DtlPlusLdsBuf"] = 0
       # restrict feature combinations
       if state["DtlPlusLdsBuf"]:
         # force 1LDSBuffer = 0
@@ -6705,6 +6709,21 @@ class Solution(collections.abc.Mapping):
       state["LdsOffsetBiasNonGSU"] = ldsNumBytesRemapCNonGSU
       state["LdsOffsetBiasGSU"] = ldsNumBytesRemapCGSU
       state["LdsOffsetBias"] = ldsNumBytesRemapC
+    # A DTL PAP prefetch keeps the next tile's first PGR group in one of the A/B
+    # LDS banks through the whole epilogue. TDM A+B uses _SeparateEpilogueLds.
+    if state.get("PrefetchAcrossPersistent", 0) and \
+        (state["DirectToLdsA"] or state["DirectToLdsB"]) and \
+        not (state["enableTDMA"] and state["enableTDMB"]):
+      if state["LocalSplitU"] > 1:
+        reject(state, printRejectionReason, "PrefetchAcrossPersistent with DirectToLds not supported with LocalSplitU > 1 (reduction reuses the A/B LDS banks)")
+        return
+      if state["ProblemType"]["UseBias"] and state["ProblemType"]["Gradient"]:
+        reject(state, printRejectionReason, "PrefetchAcrossPersistent with DirectToLds not supported with bias reduction (stores from LDS offset 0)")
+        return
+      ldsOffsetEpilogue = roundUpToNearestMultiple(ldsNumBytesAB, 16)
+      state["LdsOffsetBiasNonGSU"] = ldsOffsetEpilogue
+      state["LdsOffsetBiasGSU"] = ldsOffsetEpilogue
+      state["LdsOffsetBias"] = ldsOffsetEpilogue
 
     # Calcualte the correct LDS usages
     def calcEpilogueTurns(factorDims: List) -> int:

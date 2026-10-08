@@ -1,0 +1,78 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  PrintLevel: 1
+  KernelTime: false
+  BoundsCheck: 0
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeC: 12
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+BenchmarkProblems:
+- - OperationType: GEMM
+    DataType: s
+    TransposeA: false
+    TransposeB: true
+    UseBeta: true
+    Batched: true
+  - InitialSolutionParameters: null
+    BenchmarkCommonParameters:
+    - KernelLanguage:
+      - Assembly
+    ForkParameters:
+    - StreamK:
+      - 3
+    - StreamKForceDPOnly:
+      - 0
+    - GlobalSplitU:
+      - 0
+    - WavefrontSize:
+      - 64
+    - DepthU:
+      - 16
+    - 1LDSBuffer:
+      - 0
+    - DirectToLds:
+      - 1
+    - ExpandPointerSwap:
+      - false
+    - GlobalReadVectorWidthA:
+      - 4
+    - GlobalReadVectorWidthB:
+      - 4
+    - MatrixInstruction:
+      - [16, 16, 4, 1, 1, 4, 4, 2, 2]
+    - MIArchVgpr:
+      - false
+    - PrefetchAcrossPersistent:
+      - 1
+    - PrefetchLocalRead:
+      - 1
+    - ScheduleIterAlg:
+      - 3
+    - SourceSwap:
+      - true
+    - StoreRemapVectorWidth:
+      - 0
+    - StoreVectorWidth:
+      - 4
+    - TransposeLDS:
+      - 0
+    - VectorWidthA:
+      - 4
+    - VectorWidthB:
+      - 4
+    - WorkGroupMapping:
+      - 1
+    - UseSgprForGRO:
+      - 0
+    - StaggerU:
+      - 0
+    BenchmarkJoinParameters: null
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [1024, 1024, 1, 512]
