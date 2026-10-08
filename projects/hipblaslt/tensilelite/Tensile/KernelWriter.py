@@ -267,20 +267,17 @@ class StateValues:
   # Diagnostic carried alongside overflowedResources == 9.
   rapStoreNeutralityMsg: str             = ""
   numVgprBufferPackA: int                = 0
-  numVgprBufferPackMXSA: int             = 0
   numVgprBufferPackB: int                = 0
   numVgprBufferPackMXSA: int             = 0
   numVgprBufferPackMXSB: int             = 0
   numVgprBufferPackMetadata: int         = 0
   numPackBuffer: int                     = 0
   lrvwTileA: int                         = 0
-  lrvwTileMXSA: int                      = 0
   lrvwTileB: int                         = 0
   lrvwTileMXSA: int                      = 0
   lrvwTileMXSB: int                      = 0
   lrvwTileMetadata: int                  = 0 # For Sparse Metadat
   lrvwUnrollA: int                       = 0
-  lrvwUnrollMXSB: int                    = 0
   lrvwUnrollB: int                       = 0
   lrvwUnrollMXSA: int                    = 0
   lrvwUnrollMXSB: int                    = 0
@@ -292,19 +289,16 @@ class StateValues:
   subtileIterateModeA: bool              = False
   subtileIterateModeB: bool              = False
   numReadsIterCoalescedA: int            = 0
-  numReadsIterCoalescedMXSA: int         = 0
   numReadsIterCoalescedB: int            = 0
   numReadsIterCoalescedMXSA: int         = 0
   numReadsIterCoalescedMXSB: int         = 0
   numReadsIterCoalescedMetadata: int     = 0
   numIterPerCoalescedReadA: int          = 0
-  numIterPerCoalescedReadMXSA: int       = 0
   numIterPerCoalescedReadB: int          = 0
   numIterPerCoalescedReadMXSA: int       = 0
   numIterPerCoalescedReadMXSB: int       = 0
   numIterPerCoalescedReadMetadata: int   = 0
   numReadsPerUnrollA: int                = 0
-  numReadsPerUnrollMXSA: int             = 0
   numReadsPerUnrollB: int                = 0
   numReadsPerUnrollMXSA: int             = 0
   numReadsPerUnrollMXSB: int             = 0
@@ -329,7 +323,6 @@ class StateValues:
   subtileTotalMOffsetSgpr: Optional[int] = None
 
   a: ABMatrixInfo                        = field(default_factory=ABMatrixInfo)
-  mxsa: ABMatrixInfo                     = field(default_factory=ABMatrixInfo)
   b: ABMatrixInfo                        = field(default_factory=ABMatrixInfo)
   mxsa: ABMatrixInfo                     = field(default_factory=ABMatrixInfo)
   mxsb: ABMatrixInfo                     = field(default_factory=ABMatrixInfo)
@@ -422,7 +415,6 @@ class StateValues:
   localReadDoCntMXSB: int                = 0
   localReadDoCntMetadata: int            = 0
   savedLocalReadDoCntA: int              = 0
-  savedLocalReadDoCntMXSA: int           = 0
   savedLocalReadDoCntB: int              = 0
   savedLocalReadDoCntMXSA: int           = 0
   savedLocalReadDoCntMXSB: int           = 0
@@ -680,21 +672,18 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     self.do = {}
     self.do["PreLoop"]     = True
     self.do["GlobalReadA"] = True
-    self.do["GlobalReadMXSA"] = True
     self.do["GlobalReadB"] = True
     self.do["GlobalReadMXSA"] = True
     self.do["GlobalReadMXSB"] = True
     self.do["GlobalReadMetadata"] = True
     self.do["GlobalInc"]   = True
     self.do["LocalWriteA"]  = True
-    self.do["LocalWriteMXSA"]  = True
     self.do["LocalWriteB"]  = True
     self.do["LocalWriteMXSA"]  = True
     self.do["LocalWriteMXSB"]  = True
     self.do["LocalWriteMetadata"]  = True
     self.do["LocalWriteCVT"]  = True
     self.do["LocalReadA"]  = True
-    self.do["LocalReadMXSA"] = True
     self.do["LocalReadB"]  = True
     self.do["LocalReadMXSA"] = True
     self.do["LocalReadMXSB"] = True
@@ -745,7 +734,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # Only works if the problem uses full tiles (no edges)
     # Mismatches will assert (generate GPUVM fault)
     self.db["CheckValue1A"] = self.debugConfig.enableDebugA
-    self.db["CheckValue1MXSA"] = False
     self.db["CheckValue1B"] = self.debugConfig.enableDebugB
     self.db["CheckValue1MXSA"] = False
     self.db["CheckValue1MXSB"] = False
@@ -777,7 +765,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     assert (not (self.db["ForceExpectedValue"] and self.db["ForceVSerial"]))
 
     self.db["ForceInputValueA"] = False
-    self.db["ForceInputValueMXSA"] = False
     self.db["ForceInputValueB"] = False
     self.db["ForceInputValueMXSA"] = False
     self.db["ForceInputValueMXSB"] = False
@@ -1541,8 +1528,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         # TODO: findNamedItem return Module() if not found
         if not localReadCodeA:
           localReadCodeA = Module()
-        if not localReadCodeMXSA:
-          localReadCodeMXSA = Module()
         if not localReadCodeB:
           localReadCodeB = Module()
         if not localReadCodeMXSA:
@@ -1560,8 +1545,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           localReadCodeAB.add(localReadCodeMXSB.popFirstItem())
         if localReadCodeM.items():
           localReadCodeAB.add(localReadCodeM.popFirstItem())
-        if localReadCodeMXSB.items():
-          localReadCodeAB.add(localReadCodeMXSB.popFirstItem())
         if localReadCodeB.items():
           localReadCodeAB.add(localReadCodeB.popFirstItem())
 
@@ -1573,8 +1556,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           localReadCodeAB.addItems(localReadCodeMXSB.popFirstNItems(localReadCodeMXSB.itemsSize()))
         if localReadCodeM.itemsSize():
           localReadCodeAB.addItems(localReadCodeM.popFirstNItems(localReadCodeM.itemsSize()))
-        if localReadCodeMXSB.itemsSize():
-          localReadCodeAB.addItems(localReadCodeMXSB.popFirstNItems(localReadCodeMXSB.itemsSize()))
         if localReadCodeB.itemsSize():
           localReadCodeAB.addItems(localReadCodeB.popFirstNItems(localReadCodeB.itemsSize()))
 
@@ -2819,7 +2800,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         # dataAtIter      : the data we wait is read at which iteration
         # numReadsIter    : in this loop, number of iteration we have read (data used in current loop)
         dataAtIterA = iteration//self.states.numIterPerCoalescedReadA - self.states.numItersPLR
-        dataAtIterMXSA = iteration//self.states.numIterPerCoalescedReadMXSA - self.states.numItersPLR if kernel["ProblemType"]["MXBlockA"] else (-self.states.numItersPLR)
         dataAtIterB = iteration//self.states.numIterPerCoalescedReadB - self.states.numItersPLR
         dataAtIterMXSA = iteration//self.states.numIterPerCoalescedReadMXSA - self.states.numItersPLR if kernel["ProblemType"]["MXBlockA"] else (-self.states.numItersPLR)
         dataAtIterMXSB = iteration//self.states.numIterPerCoalescedReadMXSB - self.states.numItersPLR if kernel["ProblemType"]["MXBlockB"] else (-self.states.numItersPLR)
@@ -2828,7 +2808,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         maxDataAtIter = max(dataAtIterA, dataAtIterB, dataAtIterMXSA, dataAtIterMXSB, dataAtIterMetadata)
 
         numReadsIterA = min(iteration+1, kernel["LoopIters"]//self.states.numIterPerCoalescedReadA - self.states.numItersPLR)
-        numReadsIterMXSA = min(iteration+1, kernel["LoopIters"]//self.states.numIterPerCoalescedReadMXSA - self.states.numItersPLR) if kernel["ProblemType"]["MXBlockA"] else 0
         numReadsIterB = min(iteration+1, kernel["LoopIters"]//self.states.numIterPerCoalescedReadB - self.states.numItersPLR)
         numReadsIterMXSA = min(iteration+1, kernel["LoopIters"]//self.states.numIterPerCoalescedReadMXSA - self.states.numItersPLR) if kernel["ProblemType"]["MXBlockA"] else 0
         numReadsIterMXSB = min(iteration+1, kernel["LoopIters"]//self.states.numIterPerCoalescedReadMXSB - self.states.numItersPLR) if kernel["ProblemType"]["MXBlockB"] else 0
@@ -2848,7 +2827,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         numPrefetchIter = (iteration//(kernel["LoopIters"]-self.states.numItersPLR))*((iteration+1)-(kernel["LoopIters"]-self.states.numItersPLR)) if kernel["PrefetchGlobalRead"] else 0
         numPrefetchIter = 0 if iteration >= isBarrier and not hasLocalRead else numPrefetchIter
         skipReadsIterA += numPrefetchIter
-        skipReadsIterMXSA += numPrefetchIter
         skipReadsIterB += numPrefetchIter
         skipReadsIterMXSA += numPrefetchIter
         skipReadsIterMXSB += numPrefetchIter
@@ -2900,8 +2878,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         dscnt += localReads
         iterCode.addComment0("numPrefetchIter=%u" % numPrefetchIter)
         iterCode.addComment0("dataAtIterA=%u numReadsIterA=%u skipReadsIterA=%u readsPerIterA=%u" % (dataAtIterA, numReadsIterA, skipReadsIterA, self.states.numReadsPerIterA))
-        if kernel["ProblemType"]["MXBlockA"]:
-          iterCode.addComment0("dataAtIterMXSA=%u numReadsIterMXSA=%u skipReadsIterMXSA=%u readsPerIterMXSA=%u" % (dataAtIterMXSA, numReadsIterMXSA, skipReadsIterMXSA, self.states.numReadsPerIterMXSA))
         iterCode.addComment0("dataAtIterB=%u numReadsIterB=%u skipReadsIterB=%u readsPerIterB=%u" % (dataAtIterB, numReadsIterB, skipReadsIterB, self.states.numReadsPerIterB))
         if kernel["ProblemType"]["MXBlockA"]:
           iterCode.addComment0("dataAtIterMXSA=%u numReadsIterMXSA=%u skipReadsIterMXSA=%u readsPerIterMXSA=%u" % (dataAtIterMXSA, numReadsIterMXSA, skipReadsIterMXSA, self.states.numReadsPerIterMXSA))
@@ -4063,8 +4039,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         doReadMXSB = 1 if u == 0 else 0
         doReadB = 1 if u == 0 else 0
         doReadM = 1 if u == 0 else 0
-        doReadMXSA = 1 if u == 0 else 0
-        doReadMXSB = 1 if u == 0 else 0
       # reads for next loop
       doNext = uNext > localWriteEndIter
       doReadA = doReadA or (hasLiveLdsData and doNext)
@@ -4073,8 +4047,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       doReadMXSB = doReadMXSB or (hasLiveLdsData and doNext)
       doReadMXSB = doReadMXSB and kernel["ProblemType"]["MXBlockB"]
       doReadB = doReadB or (hasLiveLdsData and doNext)
-      doReadMXSB = doReadMXSB or (hasLiveLdsData and doNext)
-      doReadMXSB = doReadMXSB and kernel["ProblemType"]["MXBlockB"]
       doReadM = doReadM or (hasLiveLdsData and doNext)
       doReadM = doReadM and (kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"])
       rapIdxA = self.rapResidentBufferIdx(kernel, "A", u + pflr, plrIdx)
@@ -4108,7 +4080,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         doReadMXSA = doReadMXSA and iui*self.states.numReadsIterCoalescedMXSA < kernel["InnerUnroll"]
         doReadMXSB = doReadMXSB and iui*self.states.numReadsIterCoalescedMXSB < kernel["InnerUnroll"]
         doReadB = doReadB and iui*self.states.numReadsIterCoalescedB < kernel["InnerUnroll"]
-        doReadMXSB = doReadMXSB and iui*self.states.numReadsIterCoalescedMXSB < kernel["InnerUnroll"]
         doReadM = doReadM and iui*self.states.numReadsIterCoalescedMetadata < kernel["InnerUnroll"]
         if doReadA:
           localReadsA.addComment1("local read a")
@@ -4293,9 +4264,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             if not kernel["ForceUnrollSubIter"] or (doReadB and (u<localWriteEndIter)):
               pointerLRCode.addComment1("local read swap offsets b")
               pointerLRCode.add(self.localReadSwapOffsets(kernel, internalPointerSwap, tensorParametersB))
-            if kernel["ProblemType"]["MXBlockB"] and ((not kernel["ForceUnrollSubIter"]) or (doReadMXSB and (u<localWriteEndIter))):
-              pointerLRCode.addComment1("local read swap offsets mxsb")
-              pointerLRCode.add(self.localReadSwapOffsets(kernel, internalPointerSwap, tensorParametersB["MX"]))
             if (kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]) and\
                (not kernel["ForceUnrollSubIter"] or (doReadM and (u<localWriteEndIter))):
               pointerLRCode.addComment1("local read swap offsets metadata")
@@ -4312,9 +4280,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersB["MX"]))
           pointerLRCode.addComment1("local read init pointers b")
           pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersB))
-          if kernel["ProblemType"]["MXBlockB"]:
-            pointerLRCode.addComment1("local read init pointers mxsb")
-            pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersB["MX"]))
           if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
             pointerLRCode.addComment1("local read init pointers metadata")
             pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tPM))
@@ -4771,13 +4736,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               module.add(localReadCodeM)
               pack[plrIdx].add(packPreM) # no packPre scheduling for PGR0
               pack[plrIdx].add(packCodeM)
-          if kernel["ProblemType"]["MXBlockB"]:
-            if iui*self.states.numReadsIterCoalescedMXSB < kernel["InnerUnroll"]:
-              module.addComment1("prefetch local mxsb")
-              localReadCodeMXSB, packCodeMXSB, packPreMXSB = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadMXSB, iui*self.states.numReadsIterCoalescedMXSB, 0, tensorParametersB["MX"])
-              module.add(localReadCodeMXSB)
-              pack[plrIdx].add(packPreMXSB)
-              pack[plrIdx].add(packCodeMXSB)
           if iui*self.states.numReadsIterCoalescedB < kernel["InnerUnroll"]:
             module.addComment1("prefetch local b")
             localReadCodeB, packCodeB, packPreB = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadB, iui*self.states.numReadsIterCoalescedB, 0, tensorParametersB)
@@ -4804,10 +4762,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           if iui*self.states.numReadsIterCoalescedB < kernel["InnerUnroll"]:
             module.addComment0("local read increment b")
             module.add(self.localReadInc(kernel, iui, tensorParametersB))
-          if kernel["ProblemType"]["MXBlockB"]:
-            if iui*self.states.numReadsIterCoalescedMXSB < kernel["InnerUnroll"]:
-              module.addComment0("local read increment mxsb")
-              module.add(self.localReadInc(kernel, iui, tensorParametersB["MX"]))
 
     pflr = self.states.numItersPLR  # how many pf already done above
 
@@ -5410,266 +5364,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     self.vgprPool.checkIn(tmp)
     self.vgprPool.checkIn(lane4)
     return module
-
-
-  ##############################################################################
-  # Kernel Body - Subtiled version
-  ##############################################################################
-  def kernelBodySubtile(self, kernel, tensorParametersA, tensorParametersB):
-    #expand = kernel["ExpandPointerSwap"]
-    self.dontAppendCode = False
-
-    tPM = tensorParametersA["tpsMetadata"] if tensorParametersA["is_sparse"] else tensorParametersB["tpsMetadata"]
-
-    ####################################
-    # Begin String
-    moduleKernelBody = KernelBody("kernelBody")
-
-    ####################################
-    # Function Signature
-    ####################################
-    fs = self.functionSignature()
-    moduleKernelBody.addSignature(fs)
-
-    module = Module("body")
-    module.add(Label("ASM_Start", "Main body of the asm kernel"))
-    module.add(self.defineAndResources(kernel, tensorParametersA, tensorParametersB, tPM))
-
-    # Initialize stream-k loop
-    skComponent = Component.StreamK.find(self)
-    module.add(skComponent.preLoop(self, kernel))
-
-    # Should check for is swizzled instead of usesubtileimpl
-    # TODO: Move this calculation to host-side?
-    if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"] and kernel["UseSubtileImpl"]:
-      module.addComment("Scale StridesMXSA by 32")
-      module.add(SLShiftLeftB32(sgpr("StridesMXSA"), 5, sgpr("StridesMXSA")))
-      module.add(SLShiftLeftB32(sgpr("StridesMXSB"), 5, sgpr("StridesMXSB")))
-
-    # Open persistent loop
-    loopComponent = Component.PersistentLoop.find(self)
-
-    module.add(loopComponent.openPersistentLoop(self, kernel))
-
-    module.addComment0("Number of subtiles for A: %u"%(len(self.states.a.tileInfo.localSubtiles)))
-    module.addComment0("Number of subtiles for B: %u"%(len(self.states.b.tileInfo.localSubtiles)))
-
-    module.add(self.setupNewTile(kernel, tensorParametersA, tensorParametersB, isOptNLL=False))
-    module.add(self.removeGROffsetsVariableSgprsFromPool(kernel))
-    #self.removeSgprVarFromPool("SrdD")
-    #self.removeSgprVarFromPool("SrdC")
-
-    atileInfo = self.states.a.tileInfo
-    btileInfo = self.states.b.tileInfo
-    # TODO: Need corresponding ctileInfo for GSU/StreamK
-    dtileInfo = self.states.d.tileInfo
-    mxsatileInfo = self.states.mxsa.tileInfo if kernel["ProblemType"].get("MXBlockA", 0) else None
-    mxsbtileInfo = self.states.mxsb.tileInfo if kernel["ProblemType"].get("MXBlockB", 0) else None
-
-    ##
-    # TODOBS: need to add init c code, and also init sum unroll code.
-    #
-
-    module.add(globalReadDTLInitCommonSgpr(self, kernel))
-
-    if mxsatileInfo != None and mxsbtileInfo != None:
-      module.add(globalReadScaleSwizzledDTLInitCommonSgpr(self, kernel))
-
-    # TODOBS: globalWriteWorkGroupInit can be emitted here or later on, check..
-    if self.states.doShadowInit:
-      #module.add(self.openShadowInit())
-      # SrdD/SrdC are used starting now, remove from sgpr pool
-      self.removeSgprVarFromPool("SrdD")
-      self.removeSgprVarFromPool("SrdC")
-      self.removeSgprVarFromPool("SrdWS")
-      module.add(self.globalWriteWorkGroupInit(kernel))
-      #if self.states.doShadowInit == 2:
-      #  module.add(self.initC(kernel)) # initC while waiting for global reads
-      #  if kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["UseBias"] and (kernel["ProblemType"]["BiasSrc"] == "A" or kernel["ProblemType"]["BiasSrc"] == "B"):
-      #    module.add(self.initSumUnroll(kernel))
-      #module.add(self.closeShadowInit(kernel))
-
-
-    module.addComment1("global read addresses: addresses a")
-    module.add(self.graAddresses(kernel, tensorParametersA))
-    if kernel["ProblemType"]["MXBlockA"]:
-      module.addComment1("global read addresses: addresses mxsa")
-      module.add(self.graAddresses(kernel, tensorParametersA["MX"]))
-    module.addComment1("global read addresses: addresses b")
-    module.add(self.graAddresses(kernel, tensorParametersB))
-    if kernel["ProblemType"]["MXBlockB"]:
-      module.addComment1("global read addresses: addresses mxsb")
-      module.add(self.graAddresses(kernel, tensorParametersB["MX"]))
-
-
-
-    # List of tiles that need to be read form
-    readtileInfoList = [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo]
-
-    # Printout tile info
-    for tileInfo in [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo, dtileInfo]:
-      if tileInfo != None:
-        module.addComment0(str(tileInfo))
-
-    # Allocate registers for GR/LR
-    for tileInfo in [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo]:
-      if tileInfo != None:
-        tileInfo.allocOffsetRegisters(self, kernel)
-        module.addComment("Allocating v%s for %s GR"%(str(tileInfo.sharedVgprGROffset), tileInfo.tc))
-        module.addComment("Allocating v%s for %s LR"%(str(tileInfo.sharedVgprLROffset), tileInfo.tc))
-        module.addComment("Allocating v%s for %s LR Swap"%(str(tileInfo.sharedVgprLROffsetSwap), tileInfo.tc))
-
-    for tileInfo in [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo]:
-      if tileInfo != None:
-        for st in tileInfo.localSubtiles:
-          # Print out, only if register is allocated
-          if len(tileInfo.localSubtilesRegister):
-            linearId = tileInfo.localSubtiles.index(st)
-            sId0, sId1 = tileInfo.getLocalSubtileIdFromLinearId(linearId)
-            regstr = 's' if st.useSgpr else 'v'
-            module.addComment0("Using %s%s for %s GR, subtile: [%u, %u]"%(\
-                               tileInfo.tc, \
-                               regstr, str(tileInfo.localSubtilesRegister[st.regListId]), sId0, sId1))
-
-
-    module.add(graTileAssignment(self, kernel))
-    module.add(lraTileAssignment(self, kernel))
-
-    module.add(localReadDTLInitCommonSwapVgpr(self, kernel))
-
-    module.add(graTileAssignmentScaleSwizzled(self, kernel))
-    module.add(lraTileAssignmentScaleSwizzled(self, kernel))
-
-
-    module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx))
-
-    # Allocate registers for VGPR tiles
-    pgr = kernel["PrefetchGlobalRead"]
-    if pgr != 2:
-      # PGR=2: A/B vgprTiles are allocated by the subtile scheduler in mainLoop
-      # TMP HACK to still use legacy path for PGR=0
-      for tileInfo in [atileInfo, btileInfo]:
-        tileInfo.allocVgprTileRegisters(self, kernel)
-
-      for tileInfo in [mxsatileInfo, mxsbtileInfo]:
-        if tileInfo:
-          tileInfo.allocVgprTileRegisters(self, kernel)
-
-    for tileInfo in [dtileInfo]:
-        tileInfo.allocVgprTileRegisters(self, kernel)
-
-
-
-    module.add(initVgprTilesToZero(self, kernel, dtileInfo))
-
-    if pgr != 2:
-      for tileInfo in [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo]:
-        if tileInfo:
-          for vtiles in tileInfo.vgprTiles:
-            regStr = "Vgpr" if vtiles.regList.regPool == self.vgprPool else "Agpr" # shouldn't this only be vgpr pool?
-            module.addComment("%ss used for %s mma tile %u: %s"%(regStr, tileInfo.tc, tileInfo.vgprTiles.index(vtiles), str(vtiles)))
-
-    for tileInfo in [dtileInfo]:
-      if tileInfo:
-        for vtiles in tileInfo.vgprTiles:
-          regStr = "Vgpr" if vtiles.regList.regPool == self.vgprPool else "Agpr" # shouldn't this only be vgpr pool?
-          module.addComment("%ss used for %s mma tile %u: %s"%(regStr, tileInfo.tc, tileInfo.vgprTiles.index(vtiles), str(vtiles)))
-
-
-    vtmp = self.vgprPool.checkOut(1)
-    module.addComment("Checking out %u"%vtmp)
-    self.vgprPool.checkIn(vtmp)
-
-    if self.do["executeToPrefetchEnd"]:
-      module.add(self.functionEnd(kernel, addLabel=False))
-
-    #module.add(preLoop(self, kernel))
-    module.add(mainLoop(self, kernel))
-
-
-    # Deallocate registers used for GR/LR offsets
-    for tileInfo in [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo]:
-      if tileInfo != None:
-        tileInfo.deallocOffsetRegisters(self, kernel)
-
-    # Deallocate registers used for VGPR A/B/MXS tiles
-    if pgr != 2:
-      for tileInfo in [atileInfo, btileInfo,mxsatileInfo, mxsbtileInfo]:
-        if tileInfo:
-          tileInfo.deallocVgprTileRegisters(self, kernel)
-
-    # Start of post-loop code
-    if 1:
-      module.addComment0(" =============================================================== ")
-      module.addComment0(" =================== Start of post-loop code =================== ")
-      module.addComment0(" =============================================================== ")
-
-      self.states.c.startVgprValu = self.vgprPool.checkOutAligned(1, 4)
-
-      module.addComment0("ValuC range: [%u-%u), %s"%(self.states.c.startVgprValu, self.states.c.startVgprValu+self.states.c.numVgprValu, \
-                             "serializedStore enabled" if self.states.serializedStore else ""))
-      module.add(RegSet("v", "vgprValuC", self.states.c.startVgprValu))
-      self.states.serializedStore = True
-
-
-      # SrdWS must be removed from the free pool before endSummation so that
-      # defineSgpr() calls within endSummation don't see it as Available while
-      # defineMultiSgprIndex (checkOutMulti) may have grabbed those registers.
-      if not self.states.doShadowInit:
-        self.removeSgprVarFromPool("SrdWS")
-      module.add(self.endSummation(kernel, tensorParametersA, tensorParametersB))
-      if not self.states.doShadowInit:
-        self.removeSgprVarFromPool("SrdD")
-        self.removeSgprVarFromPool("SrdC")
-        module.add(self.globalWriteWorkGroupInit(kernel))
-
-      ####################################
-      # NOT LocalSplitU
-      ####################################
-
-      # global write indices
-      module.addComment1("not-LocalSplitU: global write indices")
-      module.add(self.notLocalSplitUGlobalWriteIndices(kernel))
-
-      # global write
-      #module.addComment1("not-LocalSplitU: global write")
-      module.add(self.notLocalSplitUGlobalWrite(kernel, tensorParametersA, tensorParametersB))
-
-      self.vgprPool.checkIn(self.states.c.startVgprValu)
-
-    # Deallocate registers used for C/D tiles after store code instructions are emitted
-    dtileInfo.deallocVgprTileRegisters(self, kernel)
-
-
-
-    module.add(self.functionEnd(kernel, addLabel=True))
-
-    # Add a label at the end of the asm for indexing.
-    module.add(Label("ASM_End", "The end of the kernel"))
-
-    moduleKernelBody.addBody(module)
-    self.checkResources(kernel, moduleKernelBody) # check resource available or not
-
-
-    # TODO: Check what does this do and enable this if needed
-    # Tensile instruction pass, temporarily disable due to build time.
-    # Kernels with epilog especially with activation is too long (50000~ lines).
-    # Need to refactor global write elements.
-    #ripo = rocIsaPassOption()
-    #ripo.removeDupFunc = bool(kernel["ActivationFuncCall"])
-    #ripo.numWaves = kernel["NumThreads"] // kernel["WavefrontSize"]
-    #if kernel["ProblemType"]["ActivationType"] == "all":
-    #  ripo.removeDupAssign = False
-    #if self.states.archCaps["HasSchedMode"]:
-    #  ripo.insertDelayAlu = True
-    #passResult = rocIsaPass(moduleKernelBody, ripo)
-    #kernel["MathClocksUnrolledLoop"] = passResult.cycles
-
-
-    error = self.states.overflowedResources
-    print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")
-
-    return (error, str(moduleKernelBody))
 
 
   ##############################################################################
@@ -7469,16 +7163,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           if mValue < mEnd and mValue % self.states.numReadsIterCoalescedB == 0:
             module.addComment1("local read inc b")
             module.add(self.localReadInc(kernel, iuiParam, tensorParametersB))
-          if kernel["ProblemType"]["MXBlockA"]:
-            iuiParam = iui + tailLoopInnerUnroll * mValue//self.states.numReadsIterCoalescedMXSA
-            if mValue < mEnd and mValue % self.states.numReadsIterCoalescedMXSA == 0:
-              module.addComment1("local read inc mxsa")
-              module.add(self.localReadInc(kernel, iuiParam, tensorParametersA["MX"]))
-          if kernel["ProblemType"]["MXBlockB"]:
-            iuiParam = iui + tailLoopInnerUnroll * mValue//self.states.numReadsIterCoalescedMXSB
-            if mValue < mEnd and mValue % self.states.numReadsIterCoalescedMXSB == 0:
-              module.addComment1("local read inc mxsb")
-              module.add(self.localReadInc(kernel, iuiParam, tensorParametersB["MX"]))
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, -1, 0, "4wait for local read"))
         self.states.SubTileIdx = (self.states.SubTileIdx + 1) % kernel["numSubTiles"]
 
@@ -8082,8 +7766,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     if kernel["ClusterLocalRead"]:
       self.states.numVgprBufferPackA = kernel["LoopIters"]
-      if kernel["ProblemType"]["MXBlockA"]:
-        self.states.numVgprBufferPackMXSA = kernel["LoopIters"]
       self.states.numVgprBufferPackB = kernel["LoopIters"]
       if kernel["ProblemType"]["MXBlockA"]:
         self.states.numVgprBufferPackMXSA = kernel["LoopIters"]
@@ -8091,8 +7773,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         self.states.numVgprBufferPackMXSB = kernel["LoopIters"]
     else:
       self.states.numVgprBufferPackA = self.states.numItersPLR + 1
-      if kernel["ProblemType"]["MXBlockA"]:
-        self.states.numVgprBufferPackMXSA = self.states.numItersPLR + 1
       self.states.numVgprBufferPackB = self.states.numItersPLR + 1
       if kernel["ProblemType"]["MXBlockA"]:
         self.states.numVgprBufferPackMXSA = self.states.numItersPLR + 1
@@ -8107,8 +7787,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     # TODO load sub-vector
     vwa = kernel["GlobalReadVectorWidthA"]
-    if kernel["ProblemType"]["MXBlockA"]:
-      vwmxsa = kernel["GlobalReadVectorWidthMXSA"]
     vwb = kernel["GlobalReadVectorWidthB"]
     if kernel["ProblemType"]["MXBlockA"]:
       vwmxsa = kernel["GlobalReadVectorWidthMXSA"]
@@ -10283,8 +9961,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # num sgprs: global read increments
     if self.states.globalReadIncsUseVgpr:
       self.states.a.numSgprGlobalReadIncs = 0
-      if kernel["ProblemType"]["MXBlockA"]:
-        self.states.mxsa.numSgprGlobalReadIncs = 0
       self.states.b.numSgprGlobalReadIncs = 0
       if kernel["ProblemType"]["MXBlockA"]:
         self.states.mxsa.numSgprGlobalReadIncs = 0
@@ -10293,8 +9969,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.states.m.numSgprGlobalReadIncs = 0
     else:
       self.states.a.numSgprGlobalReadIncs = kernel["ProblemType"]["NumIndicesSummation"] * self.states.rpgo
-      if kernel["ProblemType"]["MXBlockA"]:
-        self.states.mxsa.numSgprGlobalReadIncs = kernel["ProblemType"]["NumIndicesSummation"] * self.states.rpgo
       self.states.b.numSgprGlobalReadIncs = kernel["ProblemType"]["NumIndicesSummation"] * self.states.rpgo
       if kernel["ProblemType"]["MXBlockA"]:
         self.states.mxsa.numSgprGlobalReadIncs = kernel["ProblemType"]["NumIndicesSummation"] * self.states.rpgo

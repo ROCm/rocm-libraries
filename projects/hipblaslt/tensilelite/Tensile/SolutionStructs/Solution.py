@@ -1123,14 +1123,6 @@ class Solution(collections.abc.Mapping):
       state["tailLoopOptMXSA"] = False
       state["tailLoopOptMXSB"] = False
 
-    # so far, disable tailLoopOpt in MX case
-    # TODO: enable tailLoopOpt for MX
-    if state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]:
-      state["tailLoopOptA"] = False
-      state["tailLoopOptB"] = False
-      state["tailLoopOptMXSA"] = False
-      state["tailLoopOptMXSB"] = False
-
     # reorder globalread instructions if dtv and TN cases. (along coalesced dim)
     if state["_ScheduleIterAlg"] == 3:
       state["reorderGRInstForDTVA"] = True if state["ProblemType"]["TransposeA"] and \
@@ -1162,36 +1154,6 @@ class Solution(collections.abc.Mapping):
         state["UseMFMAF32XEmulation"] = True # MFMA version for gfx950 etc.
 
     state["MfmaInitCVgprs"] = False
-    # Enable UseSubtileImpl on gfx950 and gfx1250; ignore user request on other ISAs.
-    isa = tuple(state["ISA"])
-    isgfx950 = isa[:2] == (9, 5)
-    isgfx1250 = isa[:2] == (12, 5)
-    state["UseSubtileImpl"] = state["UseSubtileImpl"] and (isgfx950 or isgfx1250)
-
-    if isgfx950 and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]) and not state["UseSubtileImpl"]:
-        reject(state, printRejectionReason, "gfx950 MX requires UseSubtileImpl")
-
-    if state["UseSubtileImpl"]:
-      state["VectorWidthA"] = 1
-      state["VectorWidthB"] = 1
-      state["SourceSwap"] = False
-      # Force BufferStore=True: UseSubtileImpl optimized storeD path is only implemented
-      # for buffer stores for now.
-      state["BufferStore"] = True
-      # Not currently implemented in subtile implementation
-      state["Use64bShadowLimit"] = False
-      state["Use64bShadowLimitMX"] = False
-
-      bytesLoaded = state["NumThreads"] * 16
-      if state["ProblemType"]["MXBlockA"]:
-        numBytesMXSA = (state["DepthU"] // state["ProblemType"]["MXBlockA"]) * state["MacroTile0"]
-        if bytesLoaded < numBytesMXSA:
-          reject(state, printRejectionReason, "Unable to load MXSA scales using one load per wave")
-      if state["ProblemType"]["MXBlockB"]:
-        numBytesMXSB = (state["DepthU"] // state["ProblemType"]["MXBlockB"]) * state["MacroTile1"]
-        if bytesLoaded < numBytesMXSB:
-          reject(state, printRejectionReason, "Unable to load MXSB scales using one load per wave")
-
 
     # UseDualFMAC (VOPD v_dual_fmac_f32) applies only to plain f32 source/MAC (non-MFMA) kernels
     # on archs whose assembler accepts the dual-issue form (gfx11/gfx12). The 2x2 block-diagonal
@@ -6250,11 +6212,6 @@ class Solution(collections.abc.Mapping):
     state["LdsNumElementsAlignedMetadata"] = int(ldsNumBytesAlignedMetadata)
 
     state["LdsOffsetA"] = 0
-    state["LdsNumElementsAlignedA"] = int(ldsNumBytesAlignedA)
-    state["LdsNumElementsAlignedMXSA"] = int(ldsNumBytesAlignedMXSA)
-    state["LdsNumElementsAlignedB"] = int(ldsNumBytesAlignedB)
-    state["LdsNumElementsAlignedMXSB"] = int(ldsNumBytesAlignedMXSB)
-    state["LdsNumElementsAlignedMetadata"] = int(ldsNumBytesAlignedMetadata)
 
     # Per-tensor PrefetchGlobalRead ("Decouple PGR").
     decouplePGR, pgrA, pgrB = pgrLevelsForTensors(state)
