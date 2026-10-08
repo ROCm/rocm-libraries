@@ -326,6 +326,29 @@ def _spec(idx: int):
             "gfx1250",
         )
 
+    if idx == 14:
+        # Rejected by both validators: an explicit vector_size_a of 8 on a
+        # 16x32 dY tile gives 64 chunks for a 128-thread block, which the
+        # loader cannot split evenly (coalesced_load_reason).
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=16,
+                tile_n=32,
+                tile_k=32,
+                warp_m=1,
+                warp_n=2,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+                pipeline="mem",
+                epilogue="default",
+                vector_size_a=8,
+            ),
+            "gfx950",
+        )
+
     raise SystemExit(f"unknown config index {idx}")
 
 

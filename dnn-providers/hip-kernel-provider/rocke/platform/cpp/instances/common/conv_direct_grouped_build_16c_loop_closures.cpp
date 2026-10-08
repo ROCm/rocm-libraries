@@ -21,6 +21,8 @@
  * chunk_meta, descriptors) are declared in the internal header and resolved at
  * link time.
  */
+#include <stdio.h>
+
 #include "rocke/instance_conv_direct_grouped_internal.h"
 
 #include <string.h>
@@ -310,47 +312,99 @@ rocke_kernel_def_t* rocke_dconv16c_stream_h_loop(rocke_dconv_16c_ctx_t* ctx)
     const rocke_direct_conv_problem_t* p = &ctx->p;
     int KH = p->KH;
     int KW = p->KW;
-    int y;
-
-    /* n_iters = p.H + p.KH - 1  (already in ctx->n_iters) */
-    int n_iters = ctx->n_iters;
     int q_subtiles = ctx->q_subtiles;
+    int num_accs = q_subtiles * KH;
+    int j;
+    int qt;
 
-    /* acc_tiles seeded to zero_acc (q_subtiles x KH circular slots). Python:
-     *   acc_tiles = [[zero_acc, zero_acc, zero_acc] for _ in range(q_subtiles)]
-     * Mirror that here; the prologue/descriptor phase may have seeded it, but the
-     * Python builds this list at the top of the streaming section. */
+    /* AOT: Hi is a kernarg, so the row count is runtime. Two things in the
+     * body are build-time-periodic and would break under a runtime induction
+     * variable -- the LDS ping-pong (period 2, and an LDS allocation cannot
+     * be selected by a runtime index) and the accumulator slot rotation
+     * (period KH). Unrolling the body lcm(2, KH) times aligns both periods
+     * with the body boundary: the step is a multiple of KH, so the loop
+     * variable is always 0 mod KH at the top and every buffer choice and
+     * slot index inside reduces to a constant again.
+     *
+     * The trip count rounds up, so the last body may run past Hi + KH - 2.
+     * That costs nothing and needs no guard: the A descriptor's 0 <= h < Hi
+     * bound zero-fills those loads, and the flush predicate drops any row
+     * outside [0, Hi). */
+    int UNROLL = rocke_dconv_row_loop_unroll(KH, /*lds_ping_pong=*/true);
+    rocke_value_t* c_unroll = rocke_b_const_i32(b, UNROLL);
+    rocke_value_t* n_iters_v = rocke_b_add(b, ctx->params.p_Hi, rocke_b_const_i32(b, KH - 1));
+
+    /* Output descriptor D[N, Ho, Wo, total_k], built ONCE here (Python builds
+     * it at this exact point) so each iteration only pays one offset
+     * emission. */
     {
-        int qt, slot;
-        for(qt = 0; qt < q_subtiles; ++qt)
+        rocke_dynamic_tensor_descriptor_t* d_dyn
+            = rocke_dconv_d_descriptor_dynamic(b, &ctx->params);
+        if(!d_dyn)
+            return NULL;
+        ctx->d_desc = &d_dyn->base;
+    }
+
+    rocke_iter_arg_t iter_args[ROCKE_DCONV_MAX_QTILES * ROCKE_DCONV_MAX_ACC_SLOTS];
+    char acc_names[ROCKE_DCONV_MAX_QTILES * ROCKE_DCONV_MAX_ACC_SLOTS][32];
+    rocke_value_t* accs_flat[ROCKE_DCONV_MAX_QTILES * ROCKE_DCONV_MAX_ACC_SLOTS];
+    rocke_for_t for_op;
+    rocke_value_t* y_base;
+
+    if(num_accs > (int)(sizeof(iter_args) / sizeof(iter_args[0])))
+    {
+        if(b->status == ROCKE_OK)
+            b->status = ROCKE_ERR_VALUE; /* too many accumulator slots */
+        return NULL;
+    }
+
+    /* acc_args = [(f"acc_q{qt}_p{pi}", zero_acc) for qt ... for pi ...] */
+    for(qt = 0; qt < q_subtiles; ++qt)
+    {
+        int pi;
+        for(pi = 0; pi < KH; ++pi)
         {
-            for(slot = 0; slot < KH; ++slot)
-            {
-                ctx->acc_tiles[qt][slot] = ctx->zero_acc;
-            }
+            int idx = qt * KH + pi;
+            snprintf(acc_names[idx], sizeof(acc_names[0]), "acc_q%d_p%d", qt, pi);
+            iter_args[idx].name = acc_names[idx];
+            iter_args[idx].init = ctx->zero_acc;
         }
     }
 
-    for(y = 0; y < n_iters; ++y)
+    for_op = rocke_b_scf_for_iter(b,
+                                  ctx->c0,
+                                  n_iters_v,
+                                  c_unroll,
+                                  iter_args,
+                                  num_accs,
+                                  "y_row",
+                                  /*unroll=*/false,
+                                  /*elide_trailing_barrier=*/false);
+    y_base = for_op.iv;
+    {
+        int i;
+        for(i = 0; i < for_op.num_iter_vars; ++i)
+            accs_flat[i] = for_op.iter_vars[i];
+    }
+
+    rocke_b_region_enter(b, for_op.body);
+    for(j = 0; j < UNROLL; ++j)
     {
         rocke_value_t* cur;
         rocke_value_t* nxt;
-        /* Per-q inputs. fold_k32: inputs_by_q[qt] = (input_k32, input_s2).
-         * else: inputs_by_q[qt][s] for s in range(KW). */
         rocke_value_t* in_k32[ROCKE_DCONV_MAX_QTILES];
         rocke_value_t* in_s2[ROCKE_DCONV_MAX_QTILES];
         rocke_value_t* in_s[ROCKE_DCONV_MAX_QTILES][16];
         rocke_value_t* loads_next_vecs[ROCKE_DCONV16C_MAX_PASSES];
         rocke_value_t* loads_next_lds[ROCKE_DCONV16C_MAX_PASSES];
-        int n_loads_next = 0;
-        bool has_loads_next = false;
-        int qt;
-        int p_flush_val;
+        int n_loads_next;
         int P_FLUSH;
+        rocke_value_t* p_flush_v;
+        rocke_value_t* row_ok;
+        rocke_value_t* ho_row_v;
 
-        /* cur = A_smem if (y % 2 == 0 or not double_buffer) else B_smem
-         * nxt = B_smem if (y % 2 == 0 or not double_buffer) else A_smem */
-        if((y % 2 == 0) || !ctx->spec->double_buffer)
+        /* cur = A_smem if (j % 2 == 0 or not double_buffer) else B_smem */
+        if((j % 2 == 0) || !ctx->spec->double_buffer)
         {
             cur = ctx->A_smem;
             nxt = ctx->B_smem;
@@ -361,12 +415,12 @@ rocke_kernel_def_t* rocke_dconv16c_stream_h_loop(rocke_dconv_16c_ctx_t* ctx)
             nxt = ctx->A_smem;
         }
 
-        /* Read inputs from the current buffer first. */
+        /* Read inputs from the current buffer first; no writes to `cur` are
+         * issued until the next time it becomes `nxt`. */
         if(ctx->spec->fold_k32)
         {
             for(qt = 0; qt < q_subtiles; ++qt)
             {
-                /* (lds_read_input_k32(qt, cur), lds_read_input_s2_k32(qt, cur)) */
                 in_k32[qt] = rocke_dconv16c_lds_read_input_k32(ctx, qt, cur);
                 in_s2[qt] = rocke_dconv16c_lds_read_input_s2_k32(ctx, qt, cur);
             }
@@ -375,55 +429,44 @@ rocke_kernel_def_t* rocke_dconv16c_stream_h_loop(rocke_dconv_16c_ctx_t* ctx)
         {
             for(qt = 0; qt < q_subtiles; ++qt)
             {
-                int s;
-                for(s = 0; s < KW; ++s)
-                {
-                    in_s[qt][s] = rocke_dconv16c_lds_read_input(ctx, qt, s, cur);
-                }
+                int s_const;
+                for(s_const = 0; s_const < KW; ++s_const)
+                    in_s[qt][s_const] = rocke_dconv16c_lds_read_input(ctx, qt, s_const, cur);
             }
         }
 
-        /* loads_next = issue_dram_load(b.const_i32(y + 1)) if y+1 < n_iters */
-        if(y + 1 < n_iters)
-        {
-            n_loads_next = rocke_dconv16c_issue_dram_load(ctx,
-                                                          rocke_b_const_i32(b, y + 1),
-                                                          loads_next_vecs,
-                                                          loads_next_lds,
-                                                          ROCKE_DCONV16C_MAX_PASSES);
-            if(n_loads_next < 0)
-            {
-                return NULL;
-            }
-            has_loads_next = true;
-        }
+        /* Issue DRAM reads for the next row into registers before the MFMAs
+         * and commit them after, so the VMEM latency overlaps this row's
+         * compute. Rows past the image zero-fill through the descriptor
+         * bound, so this is unconditional. */
+        n_loads_next
+            = rocke_dconv16c_issue_dram_load(ctx,
+                                             rocke_b_add(b, y_base, rocke_b_const_i32(b, j + 1)),
+                                             loads_next_vecs,
+                                             loads_next_lds,
+                                             ROCKE_DCONV16C_MAX_PASSES);
+        if(n_loads_next < 0)
+            return NULL;
 
-        /* MFMA chain into the circular acc slot. */
         for(qt = 0; qt < q_subtiles; ++qt)
         {
             int r_const;
             for(r_const = 0; r_const < KH; ++r_const)
             {
-                /* p_idx = (y - r_const) % KH */
-                int p_idx = (((y - r_const) % KH) + KH) % KH;
-                rocke_value_t* acc_in = ctx->acc_tiles[qt][p_idx];
+                /* y_base is 0 mod KH (the step is a multiple of KH), so the
+                 * rotating slot index collapses to a constant. */
+                int p_idx = (((j - r_const) % KH) + KH) % KH;
+                int flat = qt * KH + p_idx;
+                rocke_value_t* acc_in = accs_flat[flat];
 
                 if(ctx->spec->fold_k32)
                 {
-                    /* All-wide fold (CORRECTNESS-CRITICAL): both folded MFMAs
-                     * are the SAME width (16x16x32). S=0/1 fold into one wide
-                     * atom; S=2 is promoted to a SECOND wide atom with its
-                     * upper 16 K zero-padded (weights_s2_k32 / in_s2). Chaining
-                     * two same-width atoms on one accumulator matches the
-                     * mfma_gemm hero path. Mixing a 16x16x16 residual into the
-                     * same accumulator as the 16x16x32 atom -- a narrow MFMA
-                     * whose C-operand is the just-written result of a wide MFMA
-                     * (or vice versa) -- is a read-after-write accumulator
-                     * hazard that BOTH comgr and hipcc miscompile in this
-                     * fully-unrolled kernel, corrupting H-edge output rows in a
-                     * shape-dependent way. Op order matches Python:
-                     *   acc_in = mfma_f32_16x16x32_{f16,bf16}(weights_k32[r], in_k32, acc_in)
-                     *   acc_in = mfma_f32_16x16x32_{f16,bf16}(weights_s2_k32[r], in_s2, acc_in) */
+                    /* CORRECTNESS-CRITICAL: both folded MFMAs are the SAME
+                     * width (16x16x32). S=0/1 fold into one wide atom; S=2 is
+                     * promoted to a SECOND wide atom with its upper 16 K
+                     * zero-padded. Mixing a 16x16x16 residual into the same
+                     * accumulator is a read-after-write accumulator hazard
+                     * that both comgr and hipcc miscompile here. */
                     if(is_bf16)
                     {
                         acc_in = rocke_b_mfma_f32_16x16x32_bf16(
@@ -444,7 +487,6 @@ rocke_kernel_def_t* rocke_dconv16c_stream_h_loop(rocke_dconv_16c_ctx_t* ctx)
                     int s_const;
                     for(s_const = 0; s_const < KW; ++s_const)
                     {
-                        /* w_idx = r_const * KW + s_const */
                         int w_idx = r_const * KW + s_const;
                         if(is_bf16)
                             acc_in = rocke_b_mfma_f32_16x16x16_bf16(
@@ -454,119 +496,110 @@ rocke_kernel_def_t* rocke_dconv16c_stream_h_loop(rocke_dconv_16c_ctx_t* ctx)
                                 b, ctx->weights[w_idx], in_s[qt][s_const], acc_in);
                     }
                 }
-                /* accs[p_idx] = acc_in */
-                ctx->acc_tiles[qt][p_idx] = acc_in;
+                accs_flat[flat] = acc_in;
             }
         }
 
-        /* if loads_next is not None: store_to_lds(loads_next, nxt) */
-        if(has_loads_next)
-        {
-            /* Single-buffer correctness barrier. When double_buffer is
-             * False, cur and nxt are the SAME LDS allocation, so the
-             * store_to_lds below overwrites the row this iteration just read
-             * via lds_read_input. With more than one wave per workgroup
-             * (block_groups > 1) the only barrier used to be the one at the
-             * end of the iteration, so a fast wave could begin storing row
-             * y+1 into LDS while a slower wave was still issuing its ds_reads
-             * for row y -- a read-after-write race that corrupted the slower
-             * waves' inputs (seen as nondeterministic wrong outputs in the
-             * interior waves/groups and near the H/W edges). The next-row
-             * DRAM loads were already issued into registers above, so this
-             * barrier only forces every wave to finish reading the current
-             * LDS row before any wave overwrites it; the MFMAs above overlap
-             * the ds_read latency. The double-buffer path doesn't need it
-             * (the store targets the other ping-pong buffer). */
-            if(!ctx->spec->double_buffer)
-            {
-                rocke_b_sync(b);
-            }
-            rocke_dconv16c_store_to_lds(ctx, loads_next_vecs, loads_next_lds, n_loads_next, nxt);
-        }
-        /* b.sync() */
+        /* Single-buffer correctness barrier: with double_buffer False, `cur`
+         * and `nxt` are the SAME allocation, so the store below overwrites
+         * the row this iteration just read. The next-row DRAM loads are
+         * already in registers, so this only orders the LDS access. */
+        if(!ctx->spec->double_buffer)
+            rocke_b_sync(b);
+        rocke_dconv16c_store_to_lds(ctx, loads_next_vecs, loads_next_lds, n_loads_next, nxt);
         rocke_b_sync(b);
 
-        /* p_flush_val = y - (KH - 1) ; P_FLUSH = p_flush_val % KH */
-        p_flush_val = y - (KH - 1);
-        P_FLUSH = ((p_flush_val % KH) + KH) % KH;
-
-        /* if 0 <= p_flush_val < p.H and p_flush_val % c_stride == 0:
-         *     ho_row = p_flush_val // c_stride
-         *     flush each qt to D */
-        if(0 <= p_flush_val && p_flush_val < p->H && p_flush_val % p->stride == 0)
+        /* Flush the slot completed by this row, then ALWAYS reset it. The
+         * unconditional reset is load-bearing: the first KH-1 iterations have
+         * a negative flush row and would otherwise leak their r = KH-1
+         * contributions into the slot a later, real output row flushes. */
+        P_FLUSH = (((j - (KH - 1)) % KH) + KH) % KH;
+        p_flush_v = rocke_b_add(b, y_base, rocke_b_const_i32(b, j - (KH - 1)));
         {
-            int ho_row = p_flush_val / p->stride;
-            for(qt = 0; qt < q_subtiles; ++qt)
-            {
-                rocke_value_t* acc_to_flush = ctx->acc_tiles[qt][P_FLUSH];
-                rocke_value_t* out_q;
-                rocke_value_t* out_q_valid;
-                rocke_value_t* k_val;
-                rocke_value_t* d_base;
-                rocke_value_t* d_valid;
-                rocke_value_t* d_base_bytes;
-                rocke_value_t* safe_d_off;
-                rocke_value_t* acc_h;
-                const char* off_names[4];
-                rocke_value_t* off_vals[4];
-
-                /* out_q = b.add(b.add(q_tile_start, b.const_i32(qt * 16)), q_in_lane) */
-                out_q
-                    = rocke_b_add(b,
-                                  rocke_b_add(b, ctx->q_tile_start, rocke_b_const_i32(b, qt * 16)),
-                                  ctx->q_in_lane);
-                /* out_q_valid = b.cmp_lt(out_q, c_W) */
-                out_q_valid = rocke_b_cmp_lt(b, out_q, ctx->c_W);
-                /* k_val = b.add(b.mul(g, c_kpg), b.mul(c4, b.const_i32(4)))
-                 * Force Python left-to-right SSA emission (C arg eval order
-                 * is unspecified). */
-                {
-                    rocke_value_t* mul_g = rocke_b_mul(b, ctx->g, ctx->c_kpg);
-                    rocke_value_t* mul_c4 = rocke_b_mul(b, ctx->c4, rocke_b_const_i32(b, 4));
-                    k_val = rocke_b_add(b, mul_g, mul_c4);
-                }
-
-                /* d_base, _ = d_desc.offset(b, n=n, h=const_i32(ho_row),
-                 *                           w=out_q, k=k_val) */
-                off_names[0] = "n";
-                off_vals[0] = ctx->n;
-                off_names[1] = "h";
-                off_vals[1] = rocke_b_const_i32(b, ho_row);
-                off_names[2] = "w";
-                off_vals[2] = out_q;
-                off_names[3] = "k";
-                off_vals[3] = k_val;
-                if(!rocke_transforms_descriptor_offset(
-                       b, ctx->d_desc, off_names, off_vals, 4, &d_base, &d_valid))
-                {
-                    return NULL;
-                }
-
-                /* d_base_bytes = b.mul(d_base, c_half_bytes) */
-                d_base_bytes = rocke_b_mul(b, d_base, ctx->c_half_bytes);
-                /* safe_d_off = b.select(out_q_valid, d_base_bytes, oob_sentinel) */
-                safe_d_off = rocke_b_select(b, out_q_valid, d_base_bytes, ctx->oob_sentinel);
-                /* acc_h = vec_trunc_f32_to_{f16,bf16}(acc_to_flush) */
-                if(is_bf16)
-                {
-                    acc_h = rocke_b_vec_trunc_f32_to_bf16(b, acc_to_flush);
-                    rocke_b_buffer_store_vN_bf16(b, ctx->d_rsrc, safe_d_off, ctx->c0, acc_h, 2);
-                }
-                else
-                {
-                    acc_h = rocke_b_vec_trunc_f32_to_f16(b, acc_to_flush);
-                    rocke_b_buffer_store_vN_f16(b, ctx->d_rsrc, safe_d_off, ctx->c0, acc_h, 2);
-                }
-            }
+            rocke_value_t* ge = rocke_b_cmp_ge(b, p_flush_v, ctx->c0);
+            rocke_value_t* lt = rocke_b_cmp_lt(b, p_flush_v, ctx->params.p_Hi);
+            row_ok = rocke_b_land(b, ge, lt);
         }
+        if(p->stride > 1)
+        {
+            rocke_value_t* c_stride_v = rocke_b_const_i32(b, p->stride);
+            rocke_value_t* md = rocke_b_mod(b, p_flush_v, c_stride_v);
+            rocke_value_t* eq = rocke_b_cmp_eq(b, md, ctx->c0);
+            row_ok = rocke_b_land(b, row_ok, eq);
+            ho_row_v = rocke_b_div(b, p_flush_v, c_stride_v);
+        }
+        else
+        {
+            ho_row_v = p_flush_v;
+        }
+        /* Clamp the row index so an out-of-range flush cannot build a wild
+         * descriptor offset before the store predicate drops it. */
+        ho_row_v = rocke_b_select(b, row_ok, ho_row_v, ctx->c0);
 
-        /* Unconditional slot reset: accs[P_FLUSH] = zero_acc for each qt. */
         for(qt = 0; qt < q_subtiles; ++qt)
         {
-            ctx->acc_tiles[qt][P_FLUSH] = ctx->zero_acc;
+            int flat = qt * KH + P_FLUSH;
+            rocke_value_t* acc_to_flush = accs_flat[flat];
+            rocke_value_t* out_q;
+            rocke_value_t* store_ok;
+            rocke_value_t* k_val;
+            rocke_value_t* d_base;
+            rocke_value_t* d_valid;
+            rocke_value_t* d_base_bytes;
+            rocke_value_t* safe_d_off;
+            rocke_value_t* acc_h;
+            const char* off_names[4];
+            rocke_value_t* off_vals[4];
+
+            /* out_q = b.add(b.add(q_tile_start, const_i32(qt*16)), q_in_lane) */
+            {
+                rocke_value_t* inner
+                    = rocke_b_add(b, ctx->q_tile_start, rocke_b_const_i32(b, qt * 16));
+                out_q = rocke_b_add(b, inner, ctx->q_in_lane);
+            }
+            /* store_ok = b.land(row_ok, b.cmp_lt(out_q, c_W)) */
+            store_ok = rocke_b_land(b, row_ok, rocke_b_cmp_lt(b, out_q, ctx->c_W));
+            /* k_val = b.add(b.mul(g, c_kpg), b.mul(c4, b.const_i32(4))) --
+             * force Python left-to-right SSA emission. */
+            {
+                rocke_value_t* mul_g = rocke_b_mul(b, ctx->g, ctx->c_kpg);
+                rocke_value_t* mul_c4 = rocke_b_mul(b, ctx->c4, rocke_b_const_i32(b, 4));
+                k_val = rocke_b_add(b, mul_g, mul_c4);
+            }
+
+            off_names[0] = "n";
+            off_vals[0] = ctx->n;
+            off_names[1] = "h";
+            off_vals[1] = ho_row_v;
+            off_names[2] = "w";
+            off_vals[2] = out_q;
+            off_names[3] = "k";
+            off_vals[3] = k_val;
+            if(!rocke_transforms_descriptor_offset(
+                   b, ctx->d_desc, off_names, off_vals, 4, &d_base, &d_valid))
+            {
+                return NULL;
+            }
+
+            d_base_bytes = rocke_b_mul(b, d_base, ctx->c_half_bytes);
+            safe_d_off = rocke_b_select(b, store_ok, d_base_bytes, ctx->oob_sentinel);
+            /* The 4 per-lane output elements are contiguous in NHWK, so one
+             * 64-bit vector store replaces four scalar stores. */
+            if(is_bf16)
+            {
+                acc_h = rocke_b_vec_trunc_f32_to_bf16(b, acc_to_flush);
+                rocke_b_buffer_store_vN_bf16(b, ctx->d_rsrc, safe_d_off, ctx->c0, acc_h, 2);
+            }
+            else
+            {
+                acc_h = rocke_b_vec_trunc_f32_to_f16(b, acc_to_flush);
+                rocke_b_buffer_store_vN_f16(b, ctx->d_rsrc, safe_d_off, ctx->c0, acc_h, 2);
+            }
+            accs_flat[flat] = ctx->zero_acc;
         }
     }
+    rocke_b_scf_yield(b, accs_flat, num_accs);
+    rocke_b_region_leave(b);
 
-    /* return b.kernel */
     return rocke_ir_builder_kernel(b);
 }

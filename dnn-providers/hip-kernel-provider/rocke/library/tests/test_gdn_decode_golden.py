@@ -35,7 +35,6 @@ from pathlib import Path
 _GOLDEN = (
     Path(__file__).resolve().parent / "golden" / "gdn_decode_gfx950_ir_sha256.json"
 )
-_FLAVORS = ("llvm20", "llvm22", "llvm23")
 _ARCH = "gfx950"
 
 # Pin the library root ahead of everything on sys.path so that running this file
@@ -99,10 +98,22 @@ def _sha_for(build, flavor):
     return hashlib.sha256(data).hexdigest(), len(data)
 
 
+def _run(flavor):
+    """One flavor's golden sub-document, for ``check_golden``. A lowering error
+    propagates with its traceback."""
+    cases = {}
+    for cid, build in _cases().items():
+        sha, nbytes = _sha_for(build, flavor)
+        cases[cid] = {"sha256": sha, "bytes": nbytes}
+    return {"cases": cases}
+
+
 def _build_doc():
+    from rocke.core.ir_golden import GOLDEN_FLAVORS
+
     doc = {"schema": "gdn_decode_gfx950.ir_golden_sha256/v1", "flavors": {}}
     failures = []
-    for flavor in _FLAVORS:
+    for flavor in GOLDEN_FLAVORS:
         cases = {}
         for cid, build in _cases().items():
             try:
@@ -122,24 +133,22 @@ def _build_doc():
 
 def test_gdn_decode_ir_matches_golden():
     import pytest
+    from rocke.core.ir_golden import check_golden
 
     if not _GOLDEN.exists():
         pytest.skip("gdn_decode golden fixture missing; generate with --write")
     golden = json.loads(_GOLDEN.read_text())
-    flavor = _current_flavor()
-    recorded = golden.get("flavors", {}).get(flavor)
-    if not recorded:
-        pytest.skip(f"no gdn_decode golden recorded for llvm flavor {flavor!r}")
-    drift = []
-    for cid, build in _cases().items():
-        entry = recorded["cases"].get(cid, {})
-        want = entry.get("sha256")
-        if not want:
-            drift.append(f"{cid}: no sha256 recorded ({entry})")
-            continue
-        got, _ = _sha_for(build, flavor)
-        if got != want:
-            drift.append(f"{cid}: {want} -> {got}")
+    # An entry without a hash would otherwise surface as a sha mismatch; name it.
+    unrecorded = [
+        f"{flavor}/{cid}: no sha256 recorded ({entry})"
+        for flavor, sub in golden.get("flavors", {}).items()
+        for cid, entry in sub.get("cases", {}).items()
+        if not entry.get("sha256")
+    ]
+    assert not unrecorded, "\n  ".join(unrecorded)
+    # Every flavor in LLVM_FLAVORS, from any host, so a datalayout or intrinsic
+    # change for a flavor this host does not run still fails here.
+    drift = check_golden(_GOLDEN, _run)
     assert not drift, (
         "gdn_decode IR drift vs golden (re-record with --write if intended):\n  "
         + "\n  ".join(drift)
@@ -149,16 +158,18 @@ def test_gdn_decode_ir_matches_golden():
 def test_every_shipped_configuration_is_recorded():
     """A new tuned tile must arrive with a golden entry, not silently uncovered."""
     import pytest
+    from rocke.core.ir_golden import GOLDEN_FLAVORS
 
     if not _GOLDEN.exists():
         pytest.skip("gdn_decode golden fixture missing; generate with --write")
     golden = json.loads(_GOLDEN.read_text())
-    flavor = _current_flavor()
-    recorded = golden.get("flavors", {}).get(flavor)
-    if not recorded:
-        pytest.skip(f"no gdn_decode golden recorded for llvm flavor {flavor!r}")
+    flavors = golden.get("flavors", {})
+    # A flavor with no sub-document leaves every configuration unrecorded.
     missing = sorted(
-        cid for cid in _cases() if not recorded["cases"].get(cid, {}).get("sha256")
+        f"{flavor}/{cid}"
+        for flavor in GOLDEN_FLAVORS
+        for cid in _cases()
+        if not flavors.get(flavor, {}).get("cases", {}).get(cid, {}).get("sha256")
     )
     assert not missing, f"configurations without a SHA-256: {missing}"
 

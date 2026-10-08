@@ -199,6 +199,9 @@ if(BUILD_TESTING)
     if(UNIX)
       target_link_libraries(rocke_portable_ir_replay_cli PRIVATE m)
     endif()
+    # Python recipe tests need the native VM in relocated test artifacts.
+    install(TARGETS rocke_portable_ir_replay_cli
+            RUNTIME DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/portable_ir")
   endif()
 
   # --- instances layer --------------------------------------------------------
