@@ -388,8 +388,8 @@ Whether the `Gm = 8, VectorSizeC = 4` instance issues a genuinely 4-wide *valid*
 store, or a 4-wide store with three lanes masked off, is not decidable by reading
 the descriptors. Settle it by building that one instance and counting
 `global_store_dwordx2/x4` versus `global_store_short` in the ISA. **This does not
-block the ROCKE port** — §12 shows the port can take the A-side win with the
-store left scalar, exactly as ROCKE's wgrad path already does.
+affect the ROCKE port**: ROCKE fwd spends the diagonal on the B load, so its
+store is dense and `vec_c` widens to `_vec(Gm)` (§12.2).
 
 ---
 
@@ -404,18 +404,21 @@ decouples the store pattern from the MFMA output layout.
 
 | | CK Tile | ROCKE |
 |---|---|---|
-| Class / function | `CShuffleEpilogue`, `ops/epilogue/cshuffle_epilogue.hpp:82` | `_emit_cshuffle_epilogue`, `library/kernels/common/conv_implicit_gemm.py:1796` |
-| Selected for grouped conv fwd | **unconditionally** — `example/ck_tile/20_grouped_convolution/grouped_convolution_forward_invoker.hpp:94`, `:119` (`TdmEpilogue` only for TDM pipelines) | opt-in `epilogue="cshuffle"`; **mandatory** whenever `vec_c > 1` (`conv_implicit_gemm.py:439-452`) |
+| Class / function | `CShuffleEpilogue`, `ops/epilogue/cshuffle_epilogue.hpp:82` | `CShuffleEpilogue` (`platform/python/rocke/helpers/epilogues.py`), built by `_emit_fwd_epilogue` in `_build_implicit_gemm_conv_impl` (`library/kernels/common/conv_implicit_gemm.py`); C++: `rocke_conv_emit_cshuffle_epilogue` |
+| Selected for grouped conv fwd | **unconditionally** — `example/ck_tile/20_grouped_convolution/grouped_convolution_forward_invoker.hpp:94`, `:119` (`TdmEpilogue` only for TDM pipelines) | opt-in `epilogue="cshuffle"`; **mandatory** whenever the effective `vec_c > 1` (`is_valid_spec` in `conv_implicit_gemm.py`, derived from `spec.merged_problem`), i.e. on every merged spec unless `vector_size_c=1` is pinned |
 | Conditioned on `NumGroupsToMerge` / `group_merge` | **No** | No |
-| Store width source | `GetVectorSizeC()` `:192-213`; `FixedVectorSize = true` (`grouped_convolution_utils.hpp:165`) returns the host-supplied `VectorSizeC` verbatim | `store_vec` from `CShuffleEpilogue.from_grid()`, capped 16 B |
-| **Where the diagonal mask lives** | in the **C descriptor** — `xor` + `pad(1,0,Gm-1)` makes off-diagonal coords invalid (§7) | in the **`addr_fn` `valid` predicate** the epilogue already ANDs into its store guard |
+| Store width source | `GetVectorSizeC()` `:192-213`; `FixedVectorSize = true` (`grouped_convolution_utils.hpp:165`) returns the host-supplied `VectorSizeC` verbatim | `store_vec` from `CShuffleEpilogue.from_grid(max_store_vec=...)`; `max_store_vec` is `vector_size_c` or `_vec(merged kpg)`, i.e. `_vec(Gm)` under merge (≤ 16 B) |
+| **Where the diagonal mask lives** | in the **C descriptor** — `xor` + `pad(1,0,Gm-1)` makes off-diagonal coords invalid (§7) | **fwd:** on the **B (weight) load** — `b_descriptor_merged` returns `valid = (y < Y) && (g_k == g_n)`, so off-diagonal weights load as hardware zeros and the store (`d_addr`) is dense and unmasked. **wgrad:** in the `addr_fn` `valid` predicate (`_gm_dw_addr_fn`) the epilogue ANDs into its store guard |
 
-So the user-visible behaviour is the same (a masked store); the difference is
-*where* the mask is expressed. CK encodes it in the coordinate transform chain;
-ROCKE folds an extra `cmp_eq(xor(gm_m, gm_n), 0)` term into a predicate the
-epilogue computes anyway. The rationale comment at
-`conv_implicit_gemm_wgrad.py:402-423` argues ROCKE's form is strictly cheaper —
-the descriptor form costs an extra magic-division scan and buys nothing.
+CK and ROCKE wgrad both mask the store and differ only in *where* the mask is
+expressed: CK encodes it in the coordinate transform chain; ROCKE wgrad folds an
+extra `cmp_eq(xor(gm_m, gm_n), 0)` term into the store predicate
+(`_gm_dw_addr_fn`). The rationale comment on `WgradConvSpec.group_merge` argues
+this is strictly cheaper — the descriptor form costs an extra magic-division
+scan and buys nothing. ROCKE fwd does not mask the store at all: it puts `Gm` on
+GemmN/GemmK and spends the diagonal on the B load (`b_descriptor_merged`), so
+the redundant MACs multiply a hardware-zero weight and every stored lane is a
+real output.
 
 One consequence worth flagging: **CShuffle is not the merged-groups mechanism in
 CK either.** It is the baseline epilogue for *all* grouped convolution — forward,
@@ -427,13 +430,13 @@ instantiate it, at `Gm == 1` as well. It is not something merged groups turns on
 ROCKE already implements this idea for **wgrad** implicit GEMM
 (`dnn-providers/hip-kernel-provider/rocke/library/kernels/common/conv_implicit_gemm_wgrad.py`):
 
-- `group_merge: int = 1` field with a rationale comment (`:402-423`) that names
+- `group_merge: int = 1` field with a rationale comment that names
   CK's `NumGroupsToMerge` and the xor-onto-padded-dim trick explicitly;
-- the `merged_problem` property (`:507-518`) — divide `groups` by `Gm` on a copy
+- the `WgradConvSpec.merged_problem` property — divide `groups` by `Gm` on a copy
   of the frozen `ConvProblem`; since `cpg`/`kpg` are *derived*, every downstream
   consumer automatically sees `Gm`-wide channel runs, and nothing else moves;
 - masking done as an explicit **diagonal store predicate** in the epilogue
-  (`_gm_dw_addr_fn`, `:935-967`) rather than CK's descriptor xor:
+  (`_gm_dw_addr_fn`) rather than CK's descriptor xor:
 
   ```python
   diag = b_.cmp_eq(b_.xor(gm_m, gm_n), c_zero)
@@ -443,13 +446,13 @@ ROCKE already implements this idea for **wgrad** implicit GEMM
   The comment argues this is strictly cheaper, since these epilogues already
   guard the store with a predicate that an extra term folds into, whereas the
   descriptor form costs an extra magic-division scan.
-- `_GROUP_MERGE_DEGREES = (2, 4, 8, 16, 32, 64)` (`:897`) — same power-of-two
+- `_GROUP_MERGE_DEGREES = (2, 4, 8, 16, 32, 64)` — same power-of-two
   set as CK, for the same reason.
 
 **What store width wgrad's merged path actually achieves: 1.** The gate
-(`wgrad_group_merge_available`, `:993-998`) requires `cpg == kpg == 1`, so
+(`wgrad_group_merge_available`) requires `cpg == kpg == 1`, so
 `default_vector_sizes(1, 1, dtype)` returns `vec_c = 1`. The comment at
-`_emit_wgrad_cshuffle_epilogue` `:2800-2806` says so outright — *"the store stays
+`_emit_wgrad_cshuffle_epilogue` says so outright — *"the store stays
 scalar — cpg == 1 under the group-merge gate, so the vector width derived below
 is 1"*. Whether the config routes through `_emit_wgrad_direct_epilogue`,
 `_emit_wgrad_cshuffle_epilogue`, or the two-stage `_emit_wgrad_workspace_store_epilogue`
@@ -458,13 +461,14 @@ valid lane**. ROCKE's existing merged path takes the load-side win and leaves th
 store scalar — which, per §11, is exactly what CK's `Gm = 32` instance does too.
 
 **The one-line lever for the fwd port.** On the forward path,
-`ImplicitGemmConvSpec.default_vector_sizes(C, K, dtype)` (`conv_implicit_gemm.py:351-366`)
+`ImplicitGemmConvSpec.default_vector_sizes(C, K, dtype)`
 returns `vec_a = vec_b = _vec(cpg)` and `vec_c = _vec(kpg)`. For depthwise
 `cpg == kpg == 1`, so all three are 1. Feeding it `merged_problem` instead of
 `problem` makes `cpg == Gm`, so `vec_a = vec_b = _vec(Gm)` — up to 8. That is
 precisely CK's A-side win, obtained through the same `merged_problem`
-substitution wgrad already uses, with `vec_c` pinned to 1 and the diagonal test
-folded into the epilogue predicate.
+substitution wgrad already uses. As shipped, `vec_c` also becomes `_vec(Gm)`
+(dense store), while `vec_b` is forced to 1 (`fwd_group_merge_available` rejects
+`vector_size_b > 1`) because the diagonal is spent on the B load.
 
 The forward port reuses this machinery on `conv_implicit_gemm.py`, but **it did
 not end up a transplant**: fwd's stride-1 axis already sits inside the reduction
@@ -507,8 +511,10 @@ forward port.
 10. CK Tile grouped conv fwd uses `CShuffleEpilogue` **unconditionally**, at
     `Gm == 1` too. It is the baseline epilogue for all grouped conv, not
     something merged groups enables. (§12.1)
-11. ROCKE's `_emit_cshuffle_epilogue` is the structural equivalent; the only
-    real difference is that CK puts the diagonal mask in the C descriptor while
-    ROCKE puts it in the `addr_fn` validity predicate. (§12.1)
+11. ROCKE's fwd cshuffle epilogue (`CShuffleEpilogue`, built by
+    `_emit_fwd_epilogue`) is the structural equivalent. CK and ROCKE wgrad both
+    mask the store — CK in the C descriptor, wgrad in the `addr_fn` validity
+    predicate. ROCKE fwd instead masks the B (weight) load, so its store is
+    dense and unmasked. (§12.1)
 12. ROCKE's merged wgrad path stores **one element per valid lane** on every
     route, and takes its win entirely on the load side. (§12.2)

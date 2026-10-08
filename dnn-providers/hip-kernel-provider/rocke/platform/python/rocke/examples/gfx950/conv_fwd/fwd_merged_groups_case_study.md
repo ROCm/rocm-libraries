@@ -72,8 +72,13 @@ the merged per-group channel run is exactly `Gm` (a constant), and only the
 merged reduction `K_gemm*Gm` is a runtime product. Host-side choices -- the
 default vector widths, the launch grid -- bind to `spec.merged_problem`
 (`dc_replace(problem, groups=groups // group_merge)`), which is the identity at
-`group_merge == 1`. Nothing merge-related is emitted at `group_merge == 1`,
-which is what keeps the default path byte-identical.
+`group_merge == 1`. Nothing merge-related is emitted at `group_merge == 1`.
+The one deliberate `Gm == 1` change is that the Python cshuffle store width now
+derives from `kpg` (`_vec(kpg)`, matching `is_valid_spec` and the C++ engine)
+instead of a fixed 8: cshuffle specs with `vector_size_c=None` and
+`kpg % 8 != 0` (fp32: `% 4`) emit a narrower, now correct store, where the old
+8-wide store failed the whole-vector bound and was dropped. All other `Gm == 1`
+specs are byte-identical.
 
 Total MFMA issue is **unchanged** against `Gm == 1`: `grid.z` shrinks by exactly
 the factor `K_gemm` grows by. The redundant FLOPs are absorbed by the previously
@@ -173,11 +178,22 @@ mechanism follows directly from Finding 1: merging divides
 parallelism. Past the point where the part runs out of blocks, the `grid.z`
 shrink stops buying re-read savings and starts starving the machine.
 
-`_pick_group_merge` in
-[`grouped_convolution.py`](../../../../../../library/dispatch/grouped_convolution.py)
+The degree model, `_fwd_merge_pick` in
+[`benchmark_implicit_gemm_conv.py`](../../../../../../library/benchmarks/common/benchmark_implicit_gemm_conv.py),
 therefore evaluates a **closed-form cost for every admissible degree and takes
-the argmin**. Two conditions decide what is admissible at all — they are hard
-constraints on what the kernel can build, not preferences:
+the argmin**. It does not decide what ships. Its one job in this change is to
+centre the sweep's per-tile degree window (Finding 4). The AOT kernel cache
+builds every admissible degree (`CACHE_FWD_GROUP_MERGES`, 2..64, cshuffle,
+plain and `unroll_k`), `_group_merge_fits` in
+[`kernel_cache.py`](../../../../../../library/benchmarks/common/kernel_cache.py)
+decides which cached binaries can serve a problem, and the run-from-cache path
+times those candidates and keeps the fastest. The shipped degree is chosen by
+measurement, not by this model. Dispatcher integration (an analytic pick in
+dispatch) is deferred until the grouped-conv dispatcher refactor; the model
+and the evidence below are what that integration would start from.
+
+Two conditions decide what is admissible at all — they are hard constraints on
+what the kernel can build, not preferences:
 
 - **`tile_n`** — `Gm` must fit the GEMM-N tile, or the block-N offset can exceed
   `Gm`.
@@ -208,10 +224,11 @@ still turn over at 8..16, and they turn over sooner the larger `Y*X` is — the
 measured 64-vs-32 ratio is a monotone function of `Y*X` alone, crossing 1.0 near
 `Y*X = 7`. Charging the penalty against the whole per-CTA cost rather than only
 the DRAM bucket is worth 1.6 points of cross-validated geomean. Occupancy
-survives as a secondary `ceil(CTAs / _FWD_MERGE_CUPAR)` term, which is what still
-saves the `N = 1` rows. `_FWD_MERGE_CUPAR` is a fitted constant rather than a
-device query: a query inside dispatch would make selection non-deterministic and
-unusable for cross-compile.
+survives as a secondary `ceil(CTAs / cupar)` term, which is what still saves
+the `N = 1` rows. `cupar` (an entry of `_FWD_MERGE_CONSTS`) is a fitted constant
+rather than a device query: a query would make the model's picks — and so the
+sweep's window, or any future dispatch policy built on the model — depend on
+the host device, and unusable for cross-compile.
 
 Eight constants are fitted (scale is free, so the MFMA coefficient is pinned at
 1). They are not independently interpretable — `B` and `W` are ratios against a
@@ -221,13 +238,17 @@ bucket another 1.3.
 
 ### Why there is no degree ceiling
 
-An earlier revision capped dispatch at `Gm = 32`, on the reading that 64 wins on
-too few shapes to be worth the shapes it breaks, and that **dispatch has no cheap
-request-side signal that separates the winners from the losers**. That second
-claim is what a **428-configuration measured corpus** — real depthwise stages
-from published models plus generated grid points, all swept at the fixed 64x64
-dispatch tile — refutes. `(groups, M, Y, X, stride, esize, tile)` is exactly such
-a signal; the cost model above reads it.
+An earlier revision of the degree policy capped at `Gm = 32`, on the reading
+that 64 wins on too few shapes to be worth the shapes it breaks, and that **there
+is no cheap request-side signal that separates the winners from the losers**.
+That second claim is what a **428-configuration measured corpus** — real
+depthwise stages from published models plus generated grid points, all swept at
+one fixed 64x64 tile (Finding 5) — refutes. `(groups, M, Y, X, stride, esize,
+tile)` is exactly such a signal; the cost model above reads it.
+
+The scoring below measures the model as a degree policy. In this change that
+policy only centres the sweep's window; the same numbers are the evidence for
+it as a future dispatch policy.
 
 Scored against every shape's own measured optimum (fraction of that optimum
 realised; held-out split of 128 shapes the constants were never fitted on):
@@ -243,17 +264,28 @@ Over all 428 configurations: 0.9777 / 214 exact / 53 below 0.95, against 0.9322 
 the model declines 64 on the shapes that should decline it, without needing to be
 told.
 
-Two residuals are known and pinned with explicit floors in
-`test_known_residuals_stay_bounded` rather than left to a geomean: a `G = 576`
-5x5 shape whose curve is flat from 2 to 8 and then jumps at 16 (the model takes
-the flat region, realising 0.591), and a large stride-2 3x3 shape where the
-CTA-count term keeps paying to 64 while the brake turns over at 32 (0.894). A
-refit that fixes either shows up as a bound that wants tightening; a refit that
-makes either worse fails the test instead of quietly moving a geomean.
+Two residuals are known and recorded here rather than left inside a geomean: a
+`G = 576` 5x5 shape whose curve is flat from 2 to 8 and then jumps at 16 (the
+model takes the flat region, realising 0.591), and a large stride-2 3x3 shape
+where the CTA-count term keeps paying to 64 while the brake turns over at 32
+(0.894). Neither is pinned by a test in this tree; a refit should re-score both
+explicitly.
 
 The 35-configuration case-study corpus this document is built on is a subset of
-that 428; the measured-ratio tables above are the held-out evidence, and the
-constants in dispatch are the ones fitted on the complementary 300-shape split.
+that 428; the measured-ratio tables above are the held-out evidence, and
+`_FWD_MERGE_CONSTS` holds the constants fitted on the complementary 300-shape
+split.
+
+The corpus, the fitting driver and the scoring harness are not part of this
+tree. They live on the
+[`users/jakpiase/rocke-conv-fwd-merge-degree-model`](https://github.com/ROCm/rocm-libraries/tree/users/jakpiase/rocke-conv-fwd-merge-degree-model/dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/examples/gfx950/conv_fwd/merge_degree_model)
+branch, under `platform/python/rocke/examples/gfx950/conv_fwd/merge_degree_model/`,
+with a README runbook. Check out that branch to refit or re-score the model.
+That tooling was written while the model lived in the dispatcher:
+`score_shipped.py` re-derives the shipped picks from the dispatcher's degree
+function, which this tree does not have. Point it at `_fwd_merge_pick` before
+re-scoring against this tree, and copy refitted constants into
+`_FWD_MERGE_CONSTS`.
 
 ## Finding 3: the diagonal belongs on the B load
 
@@ -309,14 +341,16 @@ in it lives in the approved access-controlled record, not here.
 
 Two observations make most of that volume redundant.
 
-**The degree axis is already answered.** `_pick_group_merge` (Finding 2) exists
-precisely to deduce the right `Gm` from shape geometry, and it recovers most of
-each shape's measured optimum on the depthwise corpus. Sweeping all six degrees
-to rediscover a number the dispatcher will compute analytically anyway is the
-single largest redundancy. But pruning to exactly the picked degree would make
-the sweep unable to contradict the policy it is supposed to validate — so the
-sweep keeps a **±1 window** over the *admissible* degrees, bracketing the pick
-rather than assuming it. `--group-merge-window RADIUS` controls the radius.
+**The degree axis is mostly answered.** `_fwd_merge_pick` (Finding 2) deduces
+the right `Gm` from shape geometry, and it recovers most of each shape's
+measured optimum on the depthwise corpus. Sweeping all six degrees to
+rediscover a number the model already predicts is the single largest
+redundancy. But pruning to exactly the picked degree would make the sweep
+unable to contradict the model it is centred on — so the sweep keeps a **±1
+window** over the *admissible* degrees (`_group_merge_window`), bracketing the
+pick rather than assuming it. `--group-merge-window RADIUS` controls the radius.
+The window only prunes the sweep; the AOT cache still builds every admissible
+degree, so what users get is not narrowed by it.
 
 The window must be over admissible degrees, not over `_FWD_MERGE_DEGREES` slots.
 `groups=72` caps at 8 and admits only `(8, 4, 2)`; a raw-tuple window around 8
@@ -338,13 +372,13 @@ window was scored on **12 synthesised held-out depthwise shapes** that appear
 nowhere in the corpus, chosen to populate each of the three regimes the policy
 can land in — brake-bound (large `tile_m * Y*X * Gm` working set), divisor-bound
 (group counts with poor 2-adic valuation), and occupancy-bound (small `M`, where
-the `ceil(CTAs / CUPAR)` term dominates). Each was swept across
+the `ceil(CTAs / cupar)` term dominates). Each was swept across
 the **full** degree axis and the **full** unmerged leg, and both the full and the
 pruned answer were then computed offline from those same measured rows, so no
 kernel is timed twice and the comparison isolates the pruning.
 
 The metric is `pruned / full`: how much slower is the kernel the pruned sweep
-ships. The obvious alternative — realised gain fraction,
+reports. The obvious alternative — realised gain fraction,
 `(pruned - base) / (full - base)` — is not sufficient on its own, and the gap is
 not academic. On a shape whose exhaustive winner is the *unmerged* leg,
 `full == base`, so realised gain is 1.0 by construction no matter how badly the
@@ -352,7 +386,7 @@ unmerged sampling hurt: the metric is blind to the only loss that shape can
 suffer. Exactly one of the 12 held-out shapes is that shape, which is why both
 are computed and `pruned / full` is the one that decides.
 
-Scored across the held-out shapes and 64 sampling seeds each, at the shipped
+Scored across the held-out shapes and 64 sampling seeds each, at the default
 settings (radius 1, 10% unmerged), the conclusions are:
 
 - The pruned sweep's winner is **indistinguishable from the exhaustive sweep's**
@@ -388,38 +422,41 @@ dominated by that noise. Reading a winner out of it would be reading noise as
 signal — which is why the question above is answered offline from one set of
 measured rows rather than from two runs.
 
-### Keeping the copy honest
+### Pinning the model
 
-The benchmark deliberately does **not** import the dispatcher — the sweep is the
-ground truth the policy is tuned against, so importing the policy into the sweep
-would make the measurement depend on the thing being measured. The cost is a
-hand-copied `_fwd_merge_pick`, and the mirror is what makes that copy safe:
-`fwd_group_merge_for_geometry` was extracted from `_pick_group_merge` as a pure
-refactor (no emission change), and
+There is one copy of the model, in the sweep driver, and nothing in the library
+reads it; there is no dispatcher copy for it to drift from. What has to stay
+true across a refit is pinned by
 [`library/tests/test_fwd_merge_window.py`](../../../../../../library/tests/test_fwd_merge_window.py)
-asserts the two agree across 96,525 `(groups, M, tile_m, tile_n, Y, X, stride)`
-points, plus `_FWD_MERGE_DEGREES`, the two byte constants and the eight fitted
-constants compared as an **ordered tuple**. The drift now guarded against is no
-longer only a changed constant: a reordered `_FWD_MERGE_CONSTS` tuple, or a term
-dropped from one body and not the other, fails there too — rather than silently
-producing a sweep that brackets the wrong degree.
+over a `(groups, M, Y, X, stride)` grid that includes the awkward group counts
+(primes, 2-adic-poor values such as 72, and 1/3 with no admissible degree):
 
-The same file also pins three structural properties that survive a refit — the
-pick is admissible, it is non-increasing in filter size, and pointwise never
-merges — so a refit is free to move individual picks but not to change the shape
-of the policy without saying so.
+- the model's pick is admissible (bf16 and fp32), is non-increasing in filter
+  size, and pointwise never merges;
+- the window is admissible, ordered and bounded, always contains the pick,
+  respects the `tile_n` cap, and is empty when no degree is admissible.
+
+A refit is free to move individual picks but not to change the shape of the
+policy without saying so. When dispatcher integration lands, the dispatch
+policy has to be this function or be pinned to it by test: a sweep window
+centred on one policy and a dispatcher running another would bracket degrees
+the dispatcher never picks.
 
 ## Finding 5: the degree model is tile-local, and the fixed tile costs more than the degree wins
 
-Findings 2–4 were all measured at one tile, `64x64x64 / w2x2 / a32x32x16` — the
-tile dispatch hard-codes. That is not a depthwise decision: the block in
+The 428-configuration corpus and the fit behind Findings 2–4 used one fixed
+tile, `64x64x64 / w2x2 / a32x32x16` — the tile the gfx950 forward dispatch
+candidate pinned, because the corpus was built when the model was meant to
+drive a merged dispatch candidate. That is not a depthwise decision: the block
+in
 [`library/dispatch/grouped_convolution.py`](../../../../../../library/dispatch/grouped_convolution.py)
 that defines it is labelled *"Hard-coded tile parameters (to be replaced by
 sweep-derived tuning tables)"* and is shared by **every** implicit-GEMM
-convolution candidate on gfx950. The merged candidate's `_tile()` returns the
-same seven globals as the plain one; there is no tile selection anywhere in the
-depthwise path. So the single-tile corpus was an artefact of the harness, not a
-statement that the tile was right.
+convolution candidate on gfx950; the merged dispatch candidate the corpus was
+built for (now deferred) inherited the same seven globals. So the single-tile
+corpus was an artefact of the harness, not a statement that the tile was right
+— and the model is tile-local: it is fitted at that tile and only assumed
+elsewhere.
 
 Two independent reasons to doubt it. Composable Kernel's merged-groups instance
 list — `device_grouped_conv_fwd_xdl_merged_groups_instance.hpp`, the direct
@@ -428,7 +465,7 @@ analogue of this feature — ships six distinct tiles, every one of them with
 grouped-conv-forward set contains **no `64x64x64` instance at all**; exactly one
 of its instances uses `KPerBlock = 64`.
 
-So the whole corpus was re-measured at **eight** tiles: the shipped one as a
+So the whole corpus was re-measured at **eight** tiles: the dispatch tile as a
 control, six copied from the CK instance lists above, and `256x32x64` — the tile
 family the earlier 35-shape tile-swept study found winning. 18,105 configurations,
 every one verified PASS, one CSV per tile.
@@ -460,7 +497,7 @@ only the products `64*W` and the ratio `64/C` were ever identified.
 Refitting on the pooled eight-tile corpus confirms the diagnosis. Held-out TEST
 (shapes split whole, so no curve straddles the split), geomean per tile:
 
-| | shipped | pooled refit | per-tile refit |
+| | current constants | pooled refit | per-tile refit |
 |---|---|---|---|
 | mean over the 8 tiles | 0.9312 | 0.9439 | 0.9622 |
 | at the control tile | 0.9681 | 0.9591 | 0.9610 |
@@ -475,11 +512,15 @@ functional form, and it is *not* tight: the residual +0.018 is concentrated at
 times fewer constraints per fit, so some of its margin is overfitting and it
 should be read as a loose ceiling.
 
-**This does not change what ships.** Dispatch emits exactly one tile, the model
-is accurate at that tile, and the mirror test pins them together. The finding is
-a precondition: the moment tile selection widens, these constants must be refit
-against a corpus that varies `tile_m`, or the degree policy silently degrades on
-every newly reachable tile.
+**This does not change what ships.** No shipped path takes the model's pick:
+the AOT cache carries every admissible degree at every cached tile and timing
+chooses. In the sweep the window is centred per tile, so at `tile_m != 64` its
+centre is less accurate; the ±1 bracket is what tolerates that, and
+`--group-merge-window -1` removes the model entirely. The finding is a
+precondition for dispatcher integration: before an analytic pick drives
+dispatch at any tile other than the one it was fitted at, these constants must
+be refit against a corpus that varies `tile_m`, or the degree policy silently
+degrades on every newly reachable tile.
 
 ### `64x64x64` is not the right tile
 
@@ -496,7 +537,7 @@ per shape (each side free to choose its own best degree):
 | `64x16x16` | 0.920 | 187 / 396 |
 | `32x64x32` | 0.673 | 66 / 396 |
 
-The shipped tile is the best of the eight on **40 of 396 shapes** — behind
+The control tile is the best of the eight on **40 of 396 shapes** — behind
 `64x16x32` (92) and `128x32x32` (91). Per-shape headroom reaches 2.87x. Note
 that the best single tile and the best per-shape tile are far apart: no one tile
 exceeds 1.08x geomean, while picking per shape is worth considerably more, which
@@ -509,8 +550,8 @@ tile and 1.04x at `128x32x32`: `M = 1600`, so halving the M-tile count from 25 t
 which is why the degree model stays usable at a tile it was not fitted at even
 when that tile is much faster.
 
-This is the "widening dispatch's tile selection" item in Caveats, now with a
-number on it: it is worth more than merged groups was.
+This is the forward tile-selection item in Caveats, now with a number on it:
+at this tile set it is worth more than merged groups was.
 
 ## Correctness gate
 
@@ -533,31 +574,47 @@ Separately, and not a substitute for the above:
 
 - Byte-identity is GREEN for all four convolution families at both LLVM flavors.
   Merged groups is implemented in **both** engines, and the forward parity
-  emitters build five merged/depthwise configs (indices 17–21), so the gate
-  byte-compares merged emission directly rather than only proving the default
-  path is undisturbed. No existing config's output changed, so no golden
-  re-bless was required; the five new configs register as new-and-unblessed,
-  which the golden check reports as informational.
-- `TestConvFwdGroupMergeNumerics` (on-GPU, 27 subtests) covers merged numerics
+  emitters (`conv_implicit_gemm_emit.{py,c}`) build eight depthwise configs
+  (indices 20–27: 21–26 merged, 20 and 27 the unmerged default/cshuffle
+  controls), so the gate byte-compares merged Python-vs-C++ emission directly
+  rather than only proving the default path is undisturbed. The parity
+  emitters compare the two engines against each other; they have no golden.
+- Separately, the representative IR golden
+  (`platform/tests/golden/rocke_representative_ir_sha256.json`) was re-blessed
+  to add merged/depthwise cases at every LLVM flavor (llvm20/llvm22/llvm23):
+  `conv/gfx950/n2h14c64k64r3g64/{dw_unmerged, dw_unmerged_cshuffle,
+  dw_gm4_direct, dw_gm8_cshuffle, dw_gm32_cshuffle, dw_gm64_cshuffle}` and
+  `conv/gfx942/n2h14c64k64r3g64/dw_gm8_cshuffle`. Every pre-existing digest is
+  unchanged.
+- `TestConvFwdGroupMergeNumerics` (on-GPU) covers merged numerics
   across degrees, including an `_assert_case_ran` guard — wgrad's merged cases
   silently skipped their entire `group_merge > 1` axis until an equivalent guard
-  existed, and a sweep whose subtests all skip still reports `passed`.
-- `test_conv_fwd_group_merge_gate.py` (10 tests) asserts the predicate and
+  existed, and a sweep whose subtests all skip still reports `passed`. Its
+  `test_merged_direct_epilogue` pins `vector_size_c=1` on the default epilogue,
+  so the direct (non-cshuffle) store path is covered under merge too.
+- `test_conv_fwd_group_merge_gate.py` asserts the predicate and
   `validate()` agree, that each degree gets a distinct kernel name, and that the
   scalar case emits **zero** vector buffer loads while `gm8` emits some.
-- `test_grouped_conv_fwd_merge_dispatch.py` (10 tests, 26 subtests) asserts the
-  host grid equals the kernel's own grid under merge. That is the highest
-  severity failure mode on this path: a grid taken off the *true* problem
-  launches `Gm`x redundant CTAs in z while covering 1 of `Gm` columns in x — it
-  does not crash, it just produces a plausible-looking wrong answer in most
-  channels.
+- The host launch grid is the highest-severity failure mode on this path: a
+  grid taken off the *true* problem launches `Gm`x redundant CTAs in z while
+  covering 1 of `Gm` columns in x — it does not crash, it just produces a
+  plausible-looking wrong answer in most channels. Both launch paths take the
+  grid from the merge: the sweep's `_grid_for_spec` reads `spec.grid_*` (the
+  merged extents), and the run-from-cache `_grid_for` divides `grid.z` by the
+  cached binary's `group_merge`.
+  `test_sweep_launch_grids_match_the_kernels_own_grid` in
+  `test_conv_fwd_group_merge_gate.py` pins both helpers to
+  `implicit_gemm_conv_grid` (CPU-only, `Gm` in 1/2/8/64), and
+  `TestConvFwdGroupMergeNumerics` launches off the same merged extents on GPU,
+  so a wrong grid fails numerically too.
 
 ## Results
 
 All 35 forward depthwise configurations, NHWC, `gfx950`. **Before** is the best
 `group_merge == 1` configuration and **after** is the best configuration at any
-degree, both taken from the same sweep process under the same sampling seed, so
-the ratio is a like-for-like comparison of rocke against rocke. `Gm` is the
+degree, both taken from the same sweep process and the same seeded draw over the
+union of both arms (see the sampling caveat below), so the ratio compares rocke
+against rocke. `Gm` is the
 degree the winning configuration used. `vs MIOpen` is rocke against MIOpen 3.5.1
 on the same shape; values below 1.00x mean MIOpen is ahead. Every arm below
 passed the `--verify` gate described above.
@@ -625,23 +682,29 @@ compresses toward 1.00x — the occupancy cap's job is to keep it from going
 below.
 
 One configuration is unchanged at 1.00x: `G = 3` admits no power-of-two merge
-degree, so `_pick_group_merge` returns 1 and the shape takes the unmerged path
-untouched. That is the designed fallback, not a failure to improve.
+degree, so no merged kernel is admissible (the window is empty and
+`_group_merge_fits` rejects every cached merged binary) and the shape takes the
+unmerged path untouched. That is the designed fallback, not a failure to improve.
 
 ## Caveats
 
-- **The measurement vehicle is the sweep, not dispatch.** The before/after
-  ratios are best-config against best-config over the same config space in the
-  same process. Library dispatch ships one fixed tile
+- **The measurement vehicle is the sweep, not a shipped path.** The
+  before/after ratios are best-config against best-config over the same config
+  space in the same process. Merged kernels reach users only through the AOT
+  kernel cache, which builds them at every cached cshuffle geometry and every
+  admissible degree and times the candidates per problem; its geometry grid is
+  its own, not the sweep's config space, and how much of the sweep's ratio the
+  cache path realises on a given shape was not measured here. Dispatch never
+  selects a merged kernel in this change (dispatcher integration is deferred to
+  the dispatcher refactor). Separately, library dispatch ships one fixed tile
   (`64x64x64 / w2x2 / a32x32x16`) for every forward grouped shape, while the
-  depthwise optimum measured here is `256x32x64 / w2x2 / a16x16x32`. The merged
-  candidate inherits that fixed tile, so the dispatch path will realise less
-  than the sweep shows. Widening dispatch's tile selection is pre-existing work,
-  out of scope for this change, and the single largest remaining lever —
-  Finding 5 measures it across eight tiles and puts the shipped tile first on
+  depthwise optimum measured here is `256x32x64 / w2x2 / a16x16x32`. Widening
+  dispatch's forward tile selection is pre-existing work, out of scope for this
+  change, and the single largest remaining lever on the dispatch path —
+  Finding 5 measures it across eight tiles and puts the dispatch tile first on
   only 40 of 396 shapes.
 - **Finding 5's eight tiles are not a tuning table.** They are a transfer test
-  for the degree model and a sanity check on the shipped tile, swept at one
+  for the degree model and a sanity check on the dispatch tile, swept at one
   warp split per tile (the one the CK instance being copied uses). A real tile
   policy would have to sweep the warp and atom axes too, which this did not.
 - **This compares rocke against rocke.** The MIOpen column is a reference point
@@ -654,11 +717,17 @@ untouched. That is the designed fallback, not a failure to improve.
   implicit-GEMM remains behind it. The end-to-end effect is therefore
   concentrated on the configurations that implicit-GEMM actually serves.
 - Results are from a `--sample 0.10` sweep with a fixed seed, not an exhaustive
-  one. A sampled sweep can miss a shape's true optimum in either arm; the
-  sampling is identical for both arms, so the ratio is the defensible quantity
-  and the per-arm bests are not.
-- **Pruning the sweep by the dispatch policy is mildly circular**, and the ±1
-  window mitigates that without removing it. A degree the policy is wrong about
+  one. `--sample` is a single uniform draw over the *union* of the unmerged and
+  merged pools, so the two arms get unequal, random draw counts roughly
+  proportional to their pool sizes, not identical sampling. A sampled sweep can
+  miss a shape's true optimum in either arm, and the thinner arm is likelier
+  to. The table below predates `--unmerged-frac`; on current defaults the
+  unmerged leg is additionally pre-thinned by `--unmerged-frac 0.10` before
+  that draw, which skews the arms further and would bias a before/after ratio
+  in favour of merging. For an unbiased baseline, re-sweep with
+  `--unmerged-frac 1.0 --group-merge-window -1` and no `--sample`.
+- **Pruning the sweep by the degree model is mildly circular**, and the ±1
+  window mitigates that without removing it. A degree the model is wrong about
   by more than one admissible step is outside the bracket and the pruned sweep
   cannot report it. The held-out validation in Finding 4 is what bounds the
   residual risk — it was designed for this specific question and found no loss at
@@ -717,7 +786,7 @@ Pin them for any measurement whose purpose is to *evaluate* the degree policy;
 leaving them at their defaults would score the policy against itself. Everything
 in Findings 1–3 predates the flags and corresponds to `-1 / 1.0`.
 
-The mirror test is CPU-only and needs no device:
+The model and window tests are CPU-only and need no device:
 
 ```bash
 python3 -m pytest library/tests/test_fwd_merge_window.py -q
@@ -728,16 +797,16 @@ Correctness and gate:
 ```bash
 python3 -m pytest library/tests/test_conv_fwd_correctness.py -q -rs \
     -k GroupMerge
-python3 -m pytest library/tests/test_conv_fwd_group_merge_gate.py \
-    library/tests/dispatch/test_grouped_conv_fwd_merge_dispatch.py -q
+python3 -m pytest library/tests/test_conv_fwd_group_merge_gate.py -q
 python3 tools/run_checks.py --op conv
 ```
 
 Read the `-rs` skip list. `_assert_case_ran` makes an all-skipped merged sweep
 a hard failure, but only for those cases.
 
-Byte-identity, both flavors — must be GREEN. `conv_implicit_gemm` reports 22
-configs; 17–21 are the merged/depthwise ones:
+Byte-identity, both flavors — must be GREEN. `conv_implicit_gemm` reports 28
+configs (0–27); 20–27 are the depthwise ones (21–26 merged, 20 and 27 the
+unmerged default/cshuffle controls):
 
 ```bash
 cd platform && export ROCKE=$(pwd) PYTHONPATH=$ROCKE/python
@@ -752,14 +821,15 @@ ROCKE_LLVM_FLAVOR=llvm22 python3 tools/check_byte_identity.py
 | `Gm` on GemmN and GemmK (rather than wgrad/CK's M and N) | **Keep** | Leaves `M` untouched, keeps the C store dense and unmasked, and needs no transposed A window |
 | Diagonal mask on the B load | **Keep** | Off-diagonal elements become hardware zeros with no memory traffic; this is what lets the store stay wide |
 | `vector_size_b = 1` under merge | **Keep** | The B tile is `1/Gm` dense by construction; for depthwise, weights are negligible against activations |
-| Shape-dependent `_pick_group_merge` rather than a constant | **Keep** | The winning degree spreads across five values over 35 shapes, and every flat choice regresses some shape below unmerged |
+| Shape-dependent degree (`_fwd_merge_pick` centring the sweep window; AOT cache carrying every admissible degree) rather than a constant | **Keep** | The winning degree spreads across five values over 35 shapes, and every flat choice regresses some shape below unmerged |
 | Closed-form cost model (8 fitted constants) in place of the three-cap rule | **Keep** | On a 128-shape held-out split of a 428-configuration measured corpus it realises 0.9692 of each shape's own optimum against 0.9232 for the cap rule, and leaves 23 shapes more than 5% short against 43 |
 | No `_FWD_MERGE_MAX` ceiling | **Keep** | A hard `Gm <= 32` cap on top of the model does not help (0.9682 TEST / 0.9743 ALL, against 0.9692 / 0.9777 without it). The model declines 64 where 64 should be declined, so the ceiling only costs the shapes that want it |
-| `group_merge` default of 1 | **Keep** | Additive by construction: parity config 17 is the unmerged depthwise control and byte-compares identical, so the knob is provably inert where it is not asked for |
+| `group_merge` default of 1 | **Keep** | The field emits no merge-specific IR at 1: parity configs 20 (default) and 27 (cshuffle) are the unmerged depthwise controls and byte-compare Python vs C++, and golden cases `dw_unmerged` / `dw_unmerged_cshuffle` pin them. The one Gm=1 IR change in this PR (cshuffle store width derived from kpg) is independent of the field |
 | Merge + `async_dma` | **Defer** | `AsyncTileLoader`'s predicate is chunk-granular and cannot express a per-element diagonal |
 | Merge + pointwise (`Y == X == 1`) | **Defer** | The flat fast path builds `valid` from scratch with no slot for the diagonal. Highest-value follow-up: this is where merging should pay most |
 | Merge + WMMA / `wave_size != 64` | **Defer** | Separate fragment mapping; gated off rather than guessed |
-| Widening dispatch's forward tile selection | **Defer** | Pre-existing and independent of merging, but it is what stands between the dispatch path and the sweep result |
+| Dispatcher integration (gfx950 depthwise merged candidate + analytic degree pick) | **Defer** | The grouped-conv dispatcher is due for a refactor; extending it now would be reworked immediately. Merged kernels reach users through the AOT cache, where timing picks the degree. The model and the evidence for it are kept in this study and on the side branch |
+| Widening dispatch's forward tile selection | **Defer** | Pre-existing and independent of merging, but it is what stands between the dispatch path and the sweep result. Refit the degree model against a `tile_m`-varying corpus before it drives dispatch at any other tile (Finding 5) |
 | `--group-merge-window` default of 1 | **Keep** | Substantially cheaper sweeps for an out-of-sample shortfall small enough not to matter. Radius 0 is visibly worse on one held-out shape; radius 2 is indistinguishable from radius 1 |
 | `--unmerged-frac` default of 0.10 | **Keep** | The unmerged leg is the baseline control, not a search; sampling it is nearly free out of sample |
-| Both pruning axes flag-gated rather than hardcoded | **Keep** | A sweep pruned by the dispatch policy cannot be used to evaluate that policy. `-1 / 1.0` restores the exhaustive pool exactly, and is the required setting for any future degree-policy work |
+| Both pruning axes flag-gated rather than hardcoded | **Keep** | A sweep pruned by the degree model cannot be used to evaluate that model. `-1 / 1.0` restores the exhaustive pool exactly, and is the required setting for any future degree-policy work |

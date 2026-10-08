@@ -323,8 +323,8 @@ class ImplicitGemmConvSpec:
     # Total MFMA issue is unchanged vs Gm == 1: grid.z shrinks by Gm exactly as
     # K_gemm grows by Gm. The redundant MACs land in the previously idle N lanes.
     #
-    # Default 1: strictly additive, so every existing config emits
-    # byte-identical IR and keeps its kernel name.
+    # Default 1 emits no merge-specific IR and keeps the kernel name. (The
+    # cshuffle store width derived from kpg is a separate Gm=1 change.)
     group_merge: int = 1
 
     @property

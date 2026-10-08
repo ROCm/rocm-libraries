@@ -63,8 +63,6 @@ class Result:
     tflops: float
     gbps: float
     passed: bool | None = None  # None when --verify was not requested
-    # Conv groups merged per workgroup (fwd depthwise only; 1 = unmerged).
-    group_merge: int = 1
 
 
 # ---------------------------------------------------------------------------
@@ -895,7 +893,6 @@ def _run_fwd(
     import torch
     from kernels.common.conv_abi import conv_args_signature
     from kernels.common.conv_args import ConvArgs
-    from kernels.common.conv_implicit_gemm import implicit_gemm_conv_grid
 
     _u8 = u8
     p = problem
@@ -914,16 +911,13 @@ def _run_fwd(
             else torch.empty(*shape).uniform_(-1.0, 1.0)
         )
 
-    # The weight tensor is K[Z]YX(C/groups): each filter spans one group's
-    # channels. A full-C weight disagrees with both the kernel's strides and
-    # the reference on every grouped problem.
     if p.is_3d:
         _A_f32 = _make(p.N, p.Di, p.Hi, p.Wi, p.C)
-        _B_f32 = _make(p.K, p.Z, p.Y, p.X, p.cpg)
+        _B_f32 = _make(p.K, p.Z, p.Y, p.X, p.C)
         D_t = torch.empty(p.N, p.Do, p.Ho, p.Wo, p.K, dtype=_torch_dtype)
     else:
         _A_f32 = _make(p.N, p.Hi, p.Wi, p.C)
-        _B_f32 = _make(p.K, p.Y, p.X, p.cpg)
+        _B_f32 = _make(p.K, p.Y, p.X, p.C)
         D_t = torch.empty(p.N, p.Ho, p.Wo, p.K, dtype=_torch_dtype)
     A_t = _A_f32.to(_torch_dtype)
     B_t = _B_f32.to(_torch_dtype)
@@ -996,10 +990,9 @@ def _run_fwd(
             kernel_name=artifact.kernel_name,
             signature=sig,
         )
-        # From the spec that was built, not the problem: a group-merged kernel
-        # (the depthwise dispatcher candidate) runs one workgroup per Gm groups,
-        # and launching z = groups writes past K into other pixels' outputs.
-        grid = implicit_gemm_conv_grid(instance_spec)
+        gm = (p.M + dspec.tile_m - 1) // dspec.tile_m
+        gn = (p.N_gemm + dspec.tile_n - 1) // dspec.tile_n
+        grid = (gn, gm, p.groups)
         block = (instance_spec.block_size, 1, 1)
         stream = 0
 
@@ -1069,7 +1062,6 @@ def _run_fwd(
                 tflops=cur_tflops,
                 gbps=cur_gbps,
                 passed=kernel_passed,
-                group_merge=instance_spec.group_merge,
             )
         )
 
@@ -1109,7 +1101,6 @@ def _run_fwd(
             f"warp={r.warp_m}x{r.warp_n} "
             f"atom={r.warp_tile_mn}x{r.warp_tile_mn}x{r.warp_tile_k} "
             f"{r.pipeline}/{r.epilogue}"
-            f"{f' gm{r.group_merge}' if r.group_merge > 1 else ''}"
         )
         if show_verify:
             v = "PASS" if r.passed else "FAIL"

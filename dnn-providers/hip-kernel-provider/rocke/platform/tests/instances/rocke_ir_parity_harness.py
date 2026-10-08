@@ -1754,6 +1754,10 @@ def cases():
     #   - dw_unmerged is the group_merge=1 control. Without it a drift in the
     #     merged hashes could not be attributed to the merge path rather than
     #     to the depthwise path, which carried no coverage here at all.
+    #   - dw_unmerged_cshuffle pins the Gm=1 cshuffle store width: it derives
+    #     from kpg (_vec(1) = 1 here) rather than a fixed 8, which failed the
+    #     whole-vector bound and dropped every output. Python twin of parity
+    #     config 27.
     #   - gm4/gm8/gm32 vary the shift and mask width (log2 Gm) of the merged
     #     k decode that feeds both the A channel and the B-load diagonal.
     #   - gm64 is Gm == groups: one merged group, but the grouped decode stays
@@ -1767,6 +1771,7 @@ def cases():
     conv_dw = (2, 14, 14, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1, 64)
     for tag, gm, epi, vec_c in (
         ("dw_unmerged", 1, "default", None),
+        ("dw_unmerged_cshuffle", 1, "cshuffle", None),
         ("dw_gm4_direct", 4, "default", 1),
         ("dw_gm8_cshuffle", 8, "cshuffle", None),
         ("dw_gm32_cshuffle", 32, "cshuffle", None),

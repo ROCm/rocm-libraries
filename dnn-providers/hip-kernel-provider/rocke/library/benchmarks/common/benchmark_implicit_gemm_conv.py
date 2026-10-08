@@ -118,29 +118,43 @@ _COMPILE_DTYPES = ("fp16", "bf16")
 _GROUP_MERGE_SWEEP = (2, 4, 8, 16, 32, 64)
 
 
-# Mirrors dispatch.grouped_convolution._FWD_MERGE_DEGREES, the eight fitted
-# _FWD_MERGE_* constants and the body of fwd_group_merge_for_geometry /
-# _fwd_merge_cost -- this file is a standalone sweep driver
-# that deliberately does not import the dispatcher (see _MAX_GRID_DIM_Z above),
-# and that separation matters more here than anywhere else in the file: the sweep
-# is the ground truth the dispatch policy is *tuned against*, so importing the
-# policy into it would make the measurement depend on the thing being measured.
+# Analytic merge-degree model for depthwise fwd. It centres the sweep's
+# per-tile degree window (_group_merge_window); it does not pick what ships --
+# the AOT cache carries every admissible degree and the timed run chooses.
 #
-# The copy is kept honest by test_fwd_merge_window.py, which imports both and
-# asserts they agree over the whole (groups, M, tile) grid the sweep can reach.
-_FWD_MERGE_DEGREES_MIRROR = (1, 2, 4, 8, 16, 32, 64)
-_FWD_MERGE_CONSTS_MIRROR = (
+# The functional form is hand-derived from the four things that move when Gm
+# changes -- K padding, A-load vector width, cache-line utilisation, and the
+# CTA's A working set. Only the weights are fitted, by random search over a
+# measured depthwise corpus (the objective is an argmin over degrees, so it is
+# piecewise constant in the constants and has no gradient). The cost has no
+# physical unit -- only ratios between degrees are compared -- so a constant's
+# absolute magnitude says nothing about its influence. Scope: gfx950, forward;
+# refit before relying on it elsewhere. Method and fitting tooling are described
+# in examples/gfx950/conv_fwd/fwd_merged_groups_case_study.md.
+_FWD_MERGE_DEGREES = (1, 2, 4, 8, 16, 32, 64)
+_FWD_MERGE_CONSTS = (
+    # Cost of issuing the A load per K step, divided by the achieved vector
+    # width, so narrow loads cost more issue.
     0.014175,  # b_aload_issue
+    # Weight of the DRAM bucket against the compute bucket.
     0.00030657,  # w_memory
+    # Share of the W-direction halo reuse the cache actually delivers.
     0.4249,  # r_reuse
+    # Per-CTA overhead no degree can avoid (launch, prologue, epilogue).
     1.9548e6,  # d_cta_fixed
+    # Effective CTAs resident machine-wide; turns the CTA count into waves.
     558.42,  # cupar
+    # Footprint scale of the per-CTA A working-set brake, in elements -- the
+    # only term that argues against merging.
     130.64,  # c_footprint
+    # Exponent on cache-line utilisation (partial lines also burn requests).
     2.7279,  # a_util
+    # Exponent on the brake; above 1 it can overturn the halved CTA count.
     1.6812,  # q_brake
 )
-_FWD_MERGE_LINE_BYTES_MIRROR = 128
-_FWD_MERGE_VEC_BYTES_MIRROR = 16
+# Machine constants, not fitted: a 128-byte cache line, a 16-byte widest load.
+_FWD_MERGE_LINE_BYTES = 128
+_FWD_MERGE_VEC_BYTES = 16
 
 
 def _fwd_merge_pick(
@@ -154,28 +168,26 @@ def _fwd_merge_pick(
     esize: int = 2,
     tile_k: int = 64,
 ) -> int:
-    """Local mirror of the dispatch-side merge-degree policy. See note above.
+    """Merge degree the cost model prefers for one depthwise fwd geometry.
 
-    An eight-constant cost model evaluated at every admissible degree; the
-    argmin wins and ties go to the smaller degree. The mechanisms and the fit
-    are documented on ``dispatch.grouped_convolution._fwd_merge_cost`` -- this
-    copy exists only so the sweep driver does not import the dispatcher, and is
-    pinned to it by test_fwd_merge_window.py.
+    Evaluates the cost at every admissible degree and returns the argmin; ties
+    go to the smaller degree. Pointwise (``Y*X == 1``) returns 1, matching the
+    emitter gate.
     """
-    B, W, r, D, P, F, A, q = _FWD_MERGE_CONSTS_MIRROR
+    B, W, r, D, P, F, A, q = _FWD_MERGE_CONSTS
     if y * x <= 1:
         return 1
     m = max(int(m), 1)
     stride = max(int(stride), 1)
     tile_m = max(int(tile_m), 1)
     best, best_cost = 1, None
-    for gm in _FWD_MERGE_DEGREES_MIRROR:
+    for gm in _FWD_MERGE_DEGREES:
         if gm > tile_n or groups % gm != 0:
             continue
         ctas = -(-m // tile_m) * (groups // gm)
         kpad = tile_k * -(-(y * x * gm) // tile_k)
-        vw = min(gm, _FWD_MERGE_VEC_BYTES_MIRROR // esize)
-        u = min(1.0, gm * esize / _FWD_MERGE_LINE_BYTES_MIRROR)
+        vw = min(gm, _FWD_MERGE_VEC_BYTES // esize)
+        u = min(1.0, gm * esize / _FWD_MERGE_LINE_BYTES)
         footprint = tile_m * y * x * gm * esize
         reuse = (1.0 + (x - 1) / stride) ** r
         compute = kpad * (1.0 + B / vw)
@@ -201,14 +213,13 @@ def _group_merge_window(
     """Merge degrees worth sweeping for one tile geometry.
 
     The full degree axis is a free cross-product: six degrees multiply the whole
-    tile/warp/pipeline/epilogue grid, and on a depthwise fwd shape that is what
-    takes the sweep from ~8.9k combos to ~34.5k. But the degree is not a free
-    variable at *dispatch* time -- the policy chooses it analytically from the
-    request geometry -- so the sweep only has to confirm that pick and its
-    immediate neighbours, not rediscover the whole curve.
+    tile/warp/pipeline/epilogue grid. The cost model (:func:`_fwd_merge_pick`)
+    already predicts where the optimum sits from the geometry, so the sweep only
+    has to confirm that pick and its immediate neighbours, not rediscover the
+    whole curve.
 
-    So: centre a window of ``2 * radius + 1`` degrees on what dispatch would pick
-    for this geometry. ``radius = 0`` sweeps the pick alone; the default 1 brackets
+    So: centre a window of ``2 * radius + 1`` degrees on the model's pick for
+    this geometry. ``radius = 0`` sweeps the pick alone; the default 1 brackets
     it on both sides, which is what lets the sweep still *disagree* with the policy
     (it can report that a neighbour won) rather than merely ratifying it.
 
@@ -218,7 +229,7 @@ def _group_merge_window(
     the gate rejects anyway. Clipping at both ends keeps the width at
     ``2 * radius + 1`` whenever that many degrees are admissible at all.
 
-    Returns descending degrees, matching ``_FWD_MERGE_DEGREES`` order. Empty when
+    Returns degrees in descending order. Empty when
     no degree is admissible -- the shape then sweeps unmerged only, which is what
     the emitter gate would force regardless.
     """
@@ -1030,13 +1041,12 @@ def main() -> int:
         metavar="RADIUS",
         help=(
             "depthwise fwd only: sweep only the merge degrees within RADIUS of "
-            "the degree dispatch would pick for each tile geometry, instead of "
+            "the cost model's pick for each tile geometry, instead of "
             "all of %(sweep)s. RADIUS=0 sweeps the pick alone, 1 (default) "
             "brackets it on both sides so the sweep can still report that a "
             "neighbour beat the pick, -1 restores the exhaustive degree axis. "
-            "The degree is chosen analytically at dispatch time, so sweeping it "
-            "as a free cross-product multiplies the whole tile/warp/pipeline "
-            "grid to confirm a curve that is never searched in production."
+            "Sweeping the degree as a free cross-product multiplies the whole "
+            "tile/warp/pipeline grid by the size of the degree axis."
         ).replace("%(sweep)s", str(list(_GROUP_MERGE_SWEEP))),
     )
     parser.add_argument(
@@ -1048,9 +1058,8 @@ def main() -> int:
         help=(
             "depthwise fwd only: fraction of the unmerged (Gm=1) combos to keep "
             "(default: 0.10). On depthwise the unmerged leg is a baseline rather "
-            "than a candidate -- a merged degree wins on nearly every shape in "
-            "the corpus -- and it is also the slowest leg to compile, so keeping "
-            "all of it spends much of the sweep on a ratio nothing ships. "
+            "than the expected winner, and it is the slower leg to compile "
+            "(scalar activation loads), so sampling it keeps the sweep short. "
             "Use 1.0 to restore the exhaustive baseline. Seeded by --seed."
         ),
     )
@@ -2444,18 +2453,15 @@ def _run_sweep(
     # Depthwise (cpg == kpg == 1) additionally sweeps group-merged instances.
     # This is the one shape class where the unmerged sweep has nothing to find:
     # the GEMM-N extent is a single element, so every activation load and every
-    # store is scalar no matter which tile/pipeline/epilogue wins, and the
-    # measured ceiling sits at a couple of percent of HBM. Merging folds Gm
-    # groups onto GemmN and GemmK so both regain a Gm-wide run.
+    # store is scalar no matter which tile/pipeline/epilogue wins. Merging folds
+    # Gm groups onto GemmN and GemmK so both regain a Gm-wide run.
     _depthwise = p.cpg == 1 and p.kpg == 1 and p.groups > 1
     if _depthwise:
-        # The unmerged leg is a *baseline* here, not a candidate: across the
-        # depthwise corpus a merged degree wins on all but one shape. It is also
-        # the expensive leg to compile -- scalar activation loads make an
-        # unmerged kernel markedly slower through comgr than a merged one -- so
-        # sweeping it exhaustively spends much of the budget pinning down a
-        # ratio nothing ships. Sample it by default; --unmerged-frac 1.0
-        # restores the exhaustive baseline.
+        # The unmerged leg is a *baseline* here rather than the expected
+        # winner, and it is the slower leg to compile (scalar activation loads
+        # keep the B tile wide), so sweeping it exhaustively spends the budget on
+        # the baseline. Sample it by default; --unmerged-frac 1.0 restores the
+        # exhaustive baseline.
         if args.unmerged_frac < 1.0:
             _n_unmerged = len(combos)
             combos = _sample_combos(combos, args.unmerged_frac, args.seed + case_idx)
@@ -2520,7 +2526,7 @@ def _run_sweep(
         print(
             f"  depthwise: +{len(_gm_combos)} group-merged combos "
             f"(Gm in {_swept_degrees or [1]}"
-            f"{'' if _full_degrees else ', windowed per tile on the dispatch pick'}"
+            f"{'' if _full_degrees else ', windowed per tile on the cost-model pick'}"
             f") swept alongside the unmerged ones. "
             f"Merging divides the grid by Gm and multiplies GemmK by it, so "
             f"MFMA issue is unchanged and the redundant MACs land in lanes that "

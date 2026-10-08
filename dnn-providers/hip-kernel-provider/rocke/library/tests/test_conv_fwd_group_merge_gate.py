@@ -267,6 +267,33 @@ class TestConvFwdGroupMergeGate(unittest.TestCase):
             scalar_loads(merged), 0, "B must still issue scalar loads under merge"
         )
 
+    def test_sweep_launch_grids_match_the_kernels_own_grid(self):
+        # The sweep (_grid_for_spec) and the run-from-cache path (_grid_for)
+        # each derive the launch grid on their own. Both must agree with
+        # implicit_gemm_conv_grid, or a merged kernel runs Gm x redundant CTAs
+        # in z while covering 1 of Gm columns -- a wrong answer, not a crash.
+        from types import SimpleNamespace
+
+        from benchmarks.common.benchmark_implicit_gemm_conv import (
+            _grid_for,
+            _grid_for_spec,
+        )
+        from kernels.common.conv_implicit_gemm import implicit_gemm_conv_grid
+
+        for gm in (1, 2, 8, 64):
+            with self.subTest(gm=gm):
+                spec = self._spec(group_merge=gm)
+                want = implicit_gemm_conv_grid(spec)
+                self.assertEqual(_grid_for_spec(spec, spec.problem), want)
+                ident = SimpleNamespace(
+                    tile_m=spec.tile_m,
+                    tile_n=spec.tile_n,
+                    tile_k=spec.tile_k,
+                    group_merge=gm,
+                    split_k=1,
+                )
+                self.assertEqual(tuple(_grid_for("fwd", spec.problem, ident)), want)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

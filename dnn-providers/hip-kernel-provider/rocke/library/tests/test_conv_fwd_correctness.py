@@ -604,6 +604,28 @@ class TestConvFwdGroupMergeNumerics(unittest.TestCase):
                 )
                 _assert_case_ran(self, ok, f"{shape.id} unroll_k gm={gm}: {why}")
 
+    def test_merged_direct_epilogue(self):
+        # Every case above stores through cshuffle, because merged kpg derives
+        # vec_c > 1. _run_one pins vector_size_c=1 for the default epilogue,
+        # which reaches the direct epilogue -- its store bound and group base
+        # are merge-routed too.
+        if not _IS_MFMA:
+            self.skipTest("group_merge is MFMA-only (wave_size 64)")
+        for shape in _DW_SHAPES:
+            for gm in (4, 8):
+                if shape.groups % gm:
+                    continue
+                with self.subTest(shape=shape.id, gm=gm):
+                    ok, why = _run_one(
+                        GPU_ARCH,
+                        shape,
+                        _DTYPES[0],
+                        "mem",
+                        "default",
+                        group_merge=gm,
+                    )
+                    _assert_case_ran(self, ok, f"{shape.id} default gm={gm}: {why}")
+
 
 @unittest.skipIf(_skip_reason(), _skip_reason())
 class TestConvFwdDoubleBufferedOddTiles(unittest.TestCase):

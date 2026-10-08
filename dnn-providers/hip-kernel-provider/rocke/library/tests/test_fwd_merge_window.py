@@ -1,28 +1,19 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""The sweep's copy of the fwd merge-degree policy must not drift from dispatch.
+"""The sweep's depthwise fwd merge-degree model and the degree window it centres.
 
-``benchmark_implicit_gemm_conv`` deliberately does not import the dispatcher --
-the same separation ``_MAX_GRID_DIM_Z`` is kept under, and it matters more for
-the merge policy than anywhere else in that file: the sweep is the ground truth
-the policy is *tuned against*, so importing the policy into the sweep would make
-the measurement depend on the thing being measured.
+``benchmark_implicit_gemm_conv`` prunes the merged leg of a depthwise fwd sweep to
+a window of degrees around what an analytic cost model (``_fwd_merge_pick``)
+prefers. These tests pin the structural properties of that model -- the ones a
+refit of its constants must not break -- and the window's contract: admissible,
+ordered, bounded, and always containing the pick.
 
-The cost of that separation is a hand-copied ``_fwd_merge_pick``. This test is
-what makes the copy safe: it imports both and asserts they agree over the whole
-(groups, M, tile_m, tile_n, Y, X, stride) grid the sweep can actually reach. The
-policy is a cost model now rather than a pair of caps, so the drift this guards
-against is no longer only a changed constant -- a reordered ``_FWD_MERGE_CONSTS``
-tuple or a term dropped from one body and not the other fails here rather than
-silently producing a sweep that brackets the wrong degree.
-
-CPU-only: both modules import nothing but stdlib at module scope.
+CPU-only: the module imports nothing but stdlib at module scope.
 """
 
 import unittest
 
 from benchmarks.common import benchmark_implicit_gemm_conv as B
-from dispatch import grouped_convolution as D
 
 # Groups the depthwise corpus and the held-out set actually contain, plus the
 # awkward ones: primes, 2-adic-poor values (72 -> caps at 8), and 1/3 which have
@@ -90,91 +81,6 @@ _YXS = (
 )
 
 
-class TestFwdMergePickMirror(unittest.TestCase):
-    def test_constants_match(self):
-        self.assertEqual(B._FWD_MERGE_DEGREES_MIRROR, D._FWD_MERGE_DEGREES)
-        self.assertEqual(
-            B._FWD_MERGE_CONSTS_MIRROR,
-            (
-                D._FWD_MERGE_B_ALOAD_ISSUE,
-                D._FWD_MERGE_W_MEMORY,
-                D._FWD_MERGE_R_REUSE,
-                D._FWD_MERGE_D_CTA_FIXED,
-                D._FWD_MERGE_CUPAR,
-                D._FWD_MERGE_C_FOOTPRINT,
-                D._FWD_MERGE_A_UTIL,
-                D._FWD_MERGE_Q_BRAKE,
-            ),
-        )
-        self.assertEqual(B._FWD_MERGE_LINE_BYTES_MIRROR, D._FWD_MERGE_LINE_BYTES)
-        self.assertEqual(B._FWD_MERGE_VEC_BYTES_MIRROR, D._FWD_MERGE_VEC_BYTES)
-
-    def test_pick_matches_dispatch_over_full_grid(self):
-        checked = 0
-        for groups in _GROUPS:
-            for m in _M:
-                for tile_m in B._TILE_MN:
-                    for tile_n in B._TILE_MN:
-                        for y, x, stride in _YXS:
-                            got = B._fwd_merge_pick(
-                                groups, m, tile_m, tile_n, y, x, stride
-                            )
-                            want = D.fwd_group_merge_for_geometry(
-                                groups,
-                                m,
-                                tile_m,
-                                tile_n,
-                                y=y,
-                                x=x,
-                                stride=stride,
-                            )
-                            self.assertEqual(
-                                got,
-                                want,
-                                f"drift at groups={groups} M={m} "
-                                f"tile={tile_m}x{tile_n} {y}x{x}s{stride}: "
-                                f"sweep={got} dispatch={want}",
-                            )
-                            checked += 1
-        # Guard against the loops silently collapsing to nothing.
-        self.assertEqual(
-            checked, len(_GROUPS) * len(_M) * len(B._TILE_MN) ** 2 * len(_YXS)
-        )
-
-    def test_pick_matches_dispatch_at_fp32(self):
-        """esize is a policy input, not a constant -- mirror it too.
-
-        ``support()`` admits only fp16/bf16 today so dispatch always passes 2,
-        but the sweep passes 4 for fp32 shapes and the two bodies have to stay
-        one body.
-        """
-        for groups in (64, 96, 512, 1280):
-            for m in (1024, 50176):
-                for y, x, stride in ((3, 3, 1), (5, 5, 2), (7, 7, 1)):
-                    got = B._fwd_merge_pick(groups, m, 64, 64, y, x, stride, 4)
-                    want = D.fwd_group_merge_for_geometry(
-                        groups, m, 64, 64, y=y, x=x, stride=stride, esize=4
-                    )
-                    self.assertEqual(got, want, f"{groups} {m} {y}x{x}s{stride}")
-
-    def test_pointwise_never_merges(self):
-        """Y==X==1 is outside the emitter's fwd merge gate -- the policy agrees.
-
-        Not a cost comparison: the cost model has no term that would rule 1x1
-        out, so the gate is reproduced as an explicit early return and this is
-        what pins it.
-        """
-        for groups in _GROUPS:
-            for m in (1, 12544, 3211264):
-                self.assertEqual(B._fwd_merge_pick(groups, m, 64, 64, 1, 1, 1), 1)
-                self.assertEqual(
-                    D.fwd_group_merge_for_geometry(
-                        groups, m, 64, 64, y=1, x=1, stride=1
-                    ),
-                    1,
-                )
-
-
 class TestFwdMergePickShape(unittest.TestCase):
     """Properties the cost model must hold regardless of how it is refitted.
 
@@ -183,13 +89,31 @@ class TestFwdMergePickShape(unittest.TestCase):
     them is mis-specified, not merely retuned.
     """
 
+    def test_pointwise_never_merges(self):
+        """Y==X==1 is outside the emitter's fwd merge gate -- the model agrees.
+
+        Not a cost comparison: the cost model has no term that would rule 1x1
+        out, so the gate is reproduced as an explicit early return and this is
+        what pins it.
+        """
+        for groups in _GROUPS:
+            for m in (1, 12544, 3211264):
+                self.assertEqual(B._fwd_merge_pick(groups, m, 64, 64, 1, 1, 1), 1)
+
+    def test_pick_is_admissible_at_fp32(self):
+        for groups in (64, 96, 512, 1280):
+            for y, x, stride in ((3, 3, 1), (5, 5, 2), (7, 7, 1)):
+                gm = B._fwd_merge_pick(groups, 50176, 64, 64, y, x, stride, 4)
+                self.assertIn(gm, B._FWD_MERGE_DEGREES)
+                self.assertEqual(groups % gm, 0)
+
     def test_pick_is_admissible(self):
         for groups in _GROUPS:
             for tile_n in B._TILE_MN:
                 for y, x, stride in _YXS:
                     gm = B._fwd_merge_pick(groups, 12544, 64, tile_n, y, x, stride)
                     ctx = f"groups={groups} tile_n={tile_n} {y}x{x}s{stride} -> {gm}"
-                    self.assertIn(gm, B._FWD_MERGE_DEGREES_MIRROR, ctx)
+                    self.assertIn(gm, B._FWD_MERGE_DEGREES, ctx)
                     self.assertLessEqual(gm, tile_n, ctx)
                     self.assertEqual(groups % gm, 0, ctx)
 
@@ -269,12 +193,12 @@ class TestGroupMergeWindow(unittest.TestCase):
                                     len(win), min(2 * radius + 1, len(adm)), ctx
                                 )
 
-    def test_window_brackets_the_dispatch_pick(self):
+    def test_window_brackets_the_model_pick(self):
         """r>=1 must contain the picked degree whenever that degree is swept.
 
-        This is the property the pruning rests on: the sweep still contains the
-        configuration dispatch would actually select, so a pruned sweep can
-        never report a winner the dispatcher cannot reach.
+        This is the property the pruning rests on: the pruned sweep always
+        contains the degree the cost model prefers, so it can confirm or
+        overturn the model but never skip its pick.
         """
         for groups in _GROUPS:
             for m in _M:
