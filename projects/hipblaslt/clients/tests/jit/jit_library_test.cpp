@@ -108,14 +108,15 @@ namespace
         return {std::vector<uint8_t>(buffer.data(), buffer.data() + buffer.size()), kernel};
     }
 
-    // The entry built, with its solution 0 supporting the request.
-    std::pair<hj::BuiltSolution, std::vector<int>> built(const Entry& entry)
+    // The code object built, with its solution 0 supporting the request.
+    std::pair<hj::CompiledCode, std::vector<int>> built(const Entry& entry)
     {
-        hj::BuiltSolution result;
-        result.generated.entry       = entry.bytes;
-        result.generated.kernelNames = {entry.kernel};
-        const std::string object     = "code object of " + entry.kernel;
-        result.object.bytes.assign(object.begin(), object.end());
+        hj::CompiledCode  result;
+        result.record = entry.bytes;
+        const std::string object = "code object of " + entry.kernel;
+        result.codeObject        = {entry.kernel,
+                             hj::Artifact::Kind::CodeObject,
+                             std::vector<uint8_t>(object.begin(), object.end())};
         return {std::move(result), {0}};
     }
 
@@ -574,7 +575,7 @@ namespace
         }
         {
             INFO(("The code object was not stored unchanged"));
-            REQUIRE((read(slice / (prefix + ".co")) == built(ctx.entry).first.object.bytes));
+            REQUIRE((read(slice / (prefix + ".co")) == built(ctx.entry).first.codeObject.bytes));
         }
         int64_t next = 0;
         ok(hj::msgpack_io::readAllocator(read(root / "v1" / "allocator.dat"), next), "allocator");
@@ -1334,7 +1335,7 @@ void runLibrary(const fs::path& scratch, int writers, int perWriter)
         INFO(("No plain entry for " + ctx.arch));
         REQUIRE((plain != prepared.end()));
     }
-    ctx.entry.bytes = plain->solution.entry;
+    ctx.entry.bytes = plain->record;
     const auto library = std::dynamic_pointer_cast<hj::GemmMaster>(
         TensileLite::LoadLibraryData<ContractionProblemGemm>(ctx.entry.bytes));
     {

@@ -177,7 +177,7 @@ namespace hipblaslt_jit
         }
         const GenerationRequest generation{
             request, target, count, workspaceLimit, excludeKernels, scratch->path()};
-        std::vector<GeneratedSolution> generated;
+        std::vector<SourceCodeBundle> generated;
         generations.fetch_add(1, std::memory_order_relaxed);
         status = guarded([&] { return c.backend->generate(generation, generated); });
         if(!status.ok())
@@ -190,23 +190,25 @@ namespace hipblaslt_jit
         }
         outcome.summary = std::move(status.message);
 
-        const BuildRequest build{target.targetId, generation.codeObjectVersion, scratch->path()};
+        BuildRequest build{target.targetId, generation.codeObjectVersion, scratch->path()};
         SupportedSolutions supported;
         size_t             solutions = 0;
-        for(const auto& solution : generated)
+        for(const auto& source : generated)
         {
             if(solutions == count)
                 break;
-            BuiltSolution built;
-            status = guarded([&] { return c.builder->build(solution, build, built); });
+            build.kernelNames = c.backend->kernelNames(source);
+            CompiledCode code;
+            status = guarded([&] { return c.builder->build(source, build, code); });
             if(!status.ok())
             {
                 record(Stage::Build, std::move(status));
                 continue;
             }
+            code.record = c.backend->solutionRecord(source);
             std::vector<int> indices;
             status = guarded([&] {
-                return c.loader->support(built, request, target, workspaceLimit, indices);
+                return c.loader->support(code, request, target, workspaceLimit, indices);
             });
             if(status.ok() && indices.empty())
                 status = {Status::Code::Failed, Stage::Support, "Loader supported no solution"};
@@ -217,7 +219,7 @@ namespace hipblaslt_jit
             }
             indices.resize(std::min(indices.size(), count - solutions));
             solutions += indices.size();
-            supported.emplace_back(std::move(built), std::move(indices));
+            supported.emplace_back(std::move(code), std::move(indices));
         }
 
         bool load = true;
@@ -242,11 +244,11 @@ namespace hipblaslt_jit
         {
             for(const auto& entry : supported)
             {
-                const auto& built   = entry.first;
+                const auto& code    = entry.first;
                 const auto& indices = entry.second;
                 std::vector<std::shared_ptr<const KernelBundle>> bundles;
                 status = guarded([&] {
-                    return c.loader->load(built, request, target, workspaceLimit, indices, bundles);
+                    return c.loader->load(code, request, target, workspaceLimit, indices, bundles);
                 });
                 if(status.ok()
                    && (bundles.size() != indices.size()
