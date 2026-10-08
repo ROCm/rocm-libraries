@@ -34,6 +34,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include <Tensile/Tensile.hpp>
@@ -139,6 +140,10 @@ namespace TensileLite
         X_MACRO(SKItersPerWG) \
         X_MACRO(SKGrid) \
         X_MACRO(SKTilesAndSplit) \
+        X_MACRO(TotalItems) \
+        X_MACRO(SKTiles) \
+        X_MACRO(SKSplit) \
+        X_MACRO(SKItersPerWI) \
         /* Packed batch dimension divisors */ \
         X_MACRO(MagicNumberSize) \
         X_MACRO(MagicShiftSize) \
@@ -506,6 +511,46 @@ namespace TensileLite
         int expertSchedulingMode = 0;
 
         std::array<int, 2> waveGroup;
+    };
+
+    struct StreamK
+    {
+        /**
+         * High bits of slot2
+         */
+        struct StreamKSlot2Bits
+        {
+            static constexpr uint32_t MagicAddBit              = 1u << 31; // magicNumberAlg2's "add" indicator
+            static constexpr uint32_t HybridModeBit            = 1u << 30; // set: dynamic work queue; clear: static 
+            static constexpr uint32_t UniformSummationOrderBit = 1u << 29; 
+
+            static constexpr uint32_t TileReservedMask
+                = MagicAddBit | HybridModeBit | UniformSummationOrderBit;
+            static constexpr uint32_t ShiftReservedMask = HybridModeBit | UniformSummationOrderBit;
+        };
+
+        struct StreamK3
+        {
+            uint32_t magicNumber = 0;
+            uint32_t magicShift  = 0;
+            uint32_t itersPerWG  = 0;
+            uint32_t grid        = 0;
+            uint32_t skTiles     = 0;
+        };
+
+        struct StreamK4
+        {
+            uint32_t totalItems = 0;
+            uint32_t skTiles    = 0;
+            uint32_t skSplit    = 0;
+            uint32_t itersPerWI = 0;
+            uint32_t grid       = 0;
+        };
+
+        struct StreamKArgSlots
+        {
+            std::variant<StreamK3, StreamK4> words = StreamK3{};
+        };
     };
 
     struct PersistentLaunchSettings
@@ -1437,6 +1482,29 @@ namespace TensileLite
                                                    Hardware const* hardware) const;
 
     private:
+        struct CustomCallSchedulingArgs
+        {
+            uint32_t                 itersPerTile = 0;
+            StreamK::StreamKArgSlots streamKArgSlots{};
+        };
+
+        CustomCallSchedulingArgs
+        calculateStreamKArgs(Problem const&         problem,
+                                           Hardware const&        hardware,
+                                           StreamKSettings const& sk,
+                                           dim3 const&            tiles) const;
+
+        StreamK::StreamK4 fillStreamK4(size_t   numTiles,
+                                  uint32_t itersPerTile,
+                                  int      skTiles,
+                                  int      skSplit) const;
+
+        StreamK::StreamK3 fillStreamK3(size_t                 numTiles,
+                                  uint32_t               itersPerTile,
+                                  StreamKSettings const& sk,
+                                  int                    skFullTiles,
+                                  bool                   forceDPOnly) const;
+
         // tiles is the total number of partial tiles, including batches and
         // splits. The caller supplies it using either GSU tiles or a StreamK grid.
         // Preserve the auxiliary-workspace rules even when gsu is zero or one.

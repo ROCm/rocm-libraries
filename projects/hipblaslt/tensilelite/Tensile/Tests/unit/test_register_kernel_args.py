@@ -191,6 +191,31 @@ def test_data_parallel_omits_streamk_partition_args():
         assert omitted not in sems
 
 
+def test_streamk_work_stealing_uses_its_own_scalar_names():
+    sems = _sems(_writer(), _kernel(
+        TileProcessingStrategy="StreamK",
+        WorkAssignment="DynamicWorkQueue",
+        StreamKAtomic=0,
+    ))
+    assert ["TotalItems", "SKTiles", "SKSplit", "SKItersPerWI", "SKGrid"] == [
+        s for s in sems if s.startswith(("TotalItems", "SKTiles", "SKSplit", "SKIters", "SKGrid"))
+    ]
+    assert "MagicNumberItersPerTile" not in sems
+
+
+def test_streamk_hybrid_uses_the_sk3_scalar_names():
+    sems = _sems(_writer(), _kernel(
+        TileProcessingStrategy="StreamK",
+        WorkAssignment="Hybrid",
+        StreamKAtomic=0,
+    ))
+    for expected in ["ItersPerTile", "MagicNumberItersPerTile",
+                     "MagicShiftItersPerTile", "SKItersPerWG", "SKGrid",
+                     "SKTilesAndSplit"]:
+        assert expected in sems
+    assert "MagicNumberItersPerTileOrTotalItems" not in sems
+
+
 def test_streamk_atomic_omits_workspace_addresses():
     sems = _sems(_writer(), _kernel(TileProcessingStrategy="StreamK", StreamKAtomic=1))
     assert "AddressWorkspace" not in sems and "AddressFlags" not in sems

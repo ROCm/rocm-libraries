@@ -2801,6 +2801,115 @@ namespace TensileLite
         return rv;
     }
 
+    StreamK::StreamK4 ContractionSolution::fillStreamK4(size_t   numTiles,
+                                                    uint32_t itersPerTile,
+                                                    int      skTiles,
+                                                    int      skSplit) const
+    {
+        constexpr uint32_t defaultSplit = 2;
+
+        uint32_t split = skSplit > -1 ? static_cast<uint32_t>(skSplit) : defaultSplit;
+        uint32_t tiles = skTiles > -1 ? static_cast<uint32_t>(skTiles) : 0;
+
+        const uint32_t itersPerWI = CeilDivide(itersPerTile, split);
+        split                     = CeilDivide(itersPerTile, itersPerWI);
+        StreamK::StreamK4   streamk4;
+        streamk4.totalItems = static_cast<uint32_t>(numTiles - tiles) + tiles * split;
+        streamk4.skTiles    = tiles;
+        streamk4.skSplit    = split;
+        streamk4.itersPerWI = itersPerWI;
+        return streamk4;
+    }
+
+    StreamK::StreamK3 ContractionSolution::fillStreamK3(size_t                 numTiles,
+                                                    uint32_t               itersPerTile,
+                                                    StreamKSettings const& sk,
+                                                    int                    skFullTiles,
+                                                    bool                   forceDPOnly) const
+    {
+        StreamK::StreamK3 streamk3;
+        if(sk.reduction == origami::reduction_t::parallel)
+        {
+            const uint32_t skSplit = static_cast<uint32_t>(sk.grid / numTiles);
+            streamk3.skTiles       = skSplit;
+            streamk3.itersPerWG    = itersPerTile / max(skSplit, uint32_t(1));
+        }
+        else
+        {
+            const StreamKStaticSplit split
+                = streamKStaticSplit(numTiles, itersPerTile, sk.grid, skFullTiles, forceDPOnly);
+            streamk3.skTiles    = split.skTiles;
+            streamk3.itersPerWG = split.skItersPerWG;
+        }
+        return streamk3;
+    }
+
+    ContractionSolution::CustomCallSchedulingArgs
+        ContractionSolution::calculateStreamKArgs(Problem const&         problem,
+                                                            Hardware const&        hardware,
+                                                            StreamKSettings const& sk,
+                                                            dim3 const&            tiles) const
+    {
+        CustomCallSchedulingArgs args;
+
+        AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
+        assert(pAMDGPU);
+
+        args.itersPerTile
+            = static_cast<uint32_t>(max(size_t(1), problem.getItersPerTile(sizeMapping)));
+        uint32_t       magicShift = 0;
+        const uint32_t magicNum = magicNumber(2, args.itersPerTile, &magicShift);
+
+        size_t numTiles = tiles.x * tiles.y * tiles.z;
+        const bool sk5Dynamic
+            = sizeMapping.hasHybridAssignment() && streamK5EffectiveDynamic(problem, hardware);
+        const size_t workQueueTiles
+            = (sizeMapping.hasHybridAssignment() && !handwrittenCustomKernel())
+                  ? problem.getNumTiles(sizeMapping, 1)
+                  : numTiles;
+        const uint32_t gridWord = static_cast<uint32_t>(sk.grid);
+        if(sk5Dynamic || sizeMapping.hasDynamicAssignment())
+        {
+            auto streamk4 = fillStreamK4(workQueueTiles,
+                                                 args.itersPerTile,
+                                                 pAMDGPU->skTiles,
+                                                 pAMDGPU->skSplit);
+            if(sk5Dynamic)
+            {
+                TENSILE_ASSERT_EXC(
+                    (streamk4.skTiles & StreamK::StreamKSlot2Bits::TileReservedMask) == 0u
+                    && "SK5 SK4 skTiles collides with mode/magic bits");
+                streamk4.skTiles |= StreamK::StreamKSlot2Bits::HybridModeBit;
+            }
+            streamk4.grid               = gridWord;
+            args.streamKArgSlots.words = streamk4;
+        }
+        else
+        {
+            StreamK::StreamK3 streamk3
+                = fillStreamK3(sizeMapping.hasHybridAssignment() ? workQueueTiles : numTiles,
+                               args.itersPerTile,
+                               sk,
+                               pAMDGPU->skFullTiles,
+                               false);
+
+            assert((magicShift & StreamK::StreamKSlot2Bits::ShiftReservedMask) == 0u);
+    
+            if(internalArgsSupport.perTileExtraIters
+               && problem.getParams().uniformSummationOrder())
+            {
+                magicShift |= StreamK::StreamKSlot2Bits::UniformSummationOrderBit;
+            }
+
+            streamk3.magicNumber        = magicNum;
+            streamk3.magicShift         = magicShift;
+            streamk3.grid               = gridWord;
+            args.streamKArgSlots.words = streamk3;
+        }
+
+        return args;
+    }
+
     template <bool T_Debug>
     KernelInvocation ContractionSolution::generateCustomCall(ContractionSolution::Problem const& problem,
                                                 ContractionInputs const&            inputs,
@@ -2841,59 +2950,26 @@ namespace TensileLite
         // for small/low-tile problems).
         size_t adaptiveGlobalAccumulation = problem.getAccumulation(hardware, sizeMapping, gsu);
 
-        const uint32_t itersPerTile = launch.grid > 0
-            ? static_cast<uint32_t>(max(size_t(1), problem.getItersPerTile(sizeMapping))) : 0;
-        // Legacy/custom scheduling adapter. DataParallel version-1 descriptors use only
-        // ItersPerTile and PersistentGrid and never compute iteration splits.
-        uint32_t skTotalIters              = 0;
-        uint32_t skMagicNumberItersPerTile = 0;
-        uint32_t skMagicShiftItersPerTile  = 0;
-        uint32_t skItersPerWG              = 0;
-        uint32_t skTotalTiles              = 0;
-        if(launch.grid > 0 && internalArgsSupport.persistentLoopArgsVersion == 0)
+        const bool streamKKernel
+            = sizeMapping.isStreamK()
+              || customKernel.workspaceType == CustomWorkspaceType::StreamK
+              || customKernel.workspaceType == CustomWorkspaceType::StreamKWithReduction;
+        CustomCallSchedulingArgs schedulingArgs;
+        if(streamKKernel)
         {
-            size_t numTiles = tiles.x * tiles.y * tiles.z;
-            skTotalIters    = static_cast<uint32_t>(numTiles * itersPerTile);
-            skMagicNumberItersPerTile = magicNumber(2, itersPerTile, &skMagicShiftItersPerTile);
-
-            bool twoTileStreamK = sizeMapping.isStreamK()
-                                  || customKernel.workspaceType == CustomWorkspaceType::StreamK
-                                  || customKernel.workspaceType == CustomWorkspaceType::StreamKWithReduction;
-
-            if(twoTileStreamK) // Two-tile K partitioning
-            {
-                if(launch.reduction == origami::reduction_t::parallel)
-                {
-                    uint32_t skSplit = static_cast<uint32_t>(launch.grid / numTiles);
-                    skItersPerWG     = itersPerTile / max(skSplit, uint32_t(1));
-                    skTotalTiles     = skSplit;
-                }
-                else
-                {
-                    int  fullTiles = pAMDGPU->skFullTiles;
-                    bool bigEnough = numTiles > launch.grid;
-
-                    // skTotalTiles is the number of Stream-K tiles to complete.
-                    // Two-tile SK gives each WG an even number of Stream-K iterations,
-                    // followed by an even number of data-parallel tiles.
-                    skTotalTiles   = static_cast<uint32_t>(launch.grid);
-                    if(numTiles % launch.grid != 0)
-                    {
-                        // If tiles are not evenly divisible, determine the number of
-                        // Stream-K tiles and cap it at the total tile count.
-                        size_t skT = bigEnough ? launch.grid * fullTiles + numTiles % launch.grid : numTiles;
-                        skTotalTiles = static_cast<uint32_t>(min(skT, numTiles));
-                    }
-                    skItersPerWG = skTotalTiles * itersPerTile / max(uint32_t(1), static_cast<uint32_t>(launch.grid));
-                }
-            }
+            schedulingArgs = calculateStreamKArgs(problem, hardware, launch, tiles);
+        }
+        else
+        {
+            schedulingArgs.itersPerTile
+                = static_cast<uint32_t>(max(size_t(1), problem.getItersPerTile(sizeMapping)));
         }
 
         rv.workGroupSize.x = customKernel.threads.x;
         rv.workGroupSize.y = customKernel.threads.y;
         rv.workGroupSize.z = customKernel.threads.z;
 
-        if(T_Debug)
+        if constexpr(T_Debug)
         {
             std::cout << "Wavefront size: " << pAMDGPU->wavefrontSize << std::endl;
             std::cout << "Threads: " << customKernel.threads.x << ", " << customKernel.threads.y << ", " << customKernel.threads.z << std::endl;
@@ -2901,7 +2977,7 @@ namespace TensileLite
             std::cout << "Macrotile: " << customKernel.macrotile.x << ", " << customKernel.macrotile.y << ", " << customKernel.macrotile.z << std::endl;
         }
 
-        if(T_Debug)
+        if constexpr(T_Debug)
         {
             std::cout << "Tiles: " << tiles.x << ", " << tiles.y << ", " << tiles.z << std::endl;
         }
@@ -3010,7 +3086,7 @@ namespace TensileLite
             rv.numWorkGroups.z = 1;
         }
 
-        if(T_Debug)
+        if constexpr(T_Debug)
         {
             std::cout << "Num work groups: " << rv.numWorkGroups.x << ", " << rv.numWorkGroups.y << ", " << rv.numWorkGroups.z << std::endl;
         }
@@ -3062,13 +3138,22 @@ namespace TensileLite
             return s;
         };
 
-        if(T_Debug)
+        if constexpr(T_Debug)
+        {
             std::cout << "Custom call arguments:" << std::endl;
+        }
+
+        const uint32_t totalIters
+            = static_cast<uint32_t>((tiles.x * tiles.y * tiles.z) * schedulingArgs.itersPerTile);
+        const bool sk5Dynamic
+            = sizeMapping.hasHybridAssignment() && streamK5EffectiveDynamic(problem, hardware);
 
         for(auto arg : customKernel.args)
         {
-            if(T_Debug)
+            if constexpr(T_Debug)
+            {
                 std::cout << "Type: " << toString(arg.type) << " Semantic: " << toString(arg.semantic) << std::endl;
+            }
 
             switch(arg.semantic)
             {
@@ -3501,30 +3586,79 @@ namespace TensileLite
 
                 // ---- DataParallel scheduling args ----
                 case CustomArgSemantic::ItersPerTile:
-                    rv.args.template append<uint32_t>("ItersPerTile", itersPerTile);
+                    rv.args.template append<uint32_t>("ItersPerTile", schedulingArgs.itersPerTile);
                     break;
                 case CustomArgSemantic::PersistentGrid:
                     rv.args.template append<uint32_t>("PersistentGrid", static_cast<uint32_t>(launch.grid));
                     break;
                 // ---- Legacy/custom scheduling adapter ----
                 case CustomArgSemantic::MagicNumberItersPerTile:
-                    rv.args.template append<uint32_t>("MagicNumberItersPerTile", skMagicNumberItersPerTile);
+                {
+                    const auto magicNumber = sk5Dynamic
+                        ? std::get<StreamK::StreamK4>(schedulingArgs.streamKArgSlots.words).totalItems
+                        : std::get<StreamK::StreamK3>(schedulingArgs.streamKArgSlots.words).magicNumber;
+                    rv.args.template append<uint32_t>("MagicNumberItersPerTile", magicNumber);
                     break;
+                }
                 case CustomArgSemantic::MagicShiftItersPerTile:
-                    rv.args.template append<uint32_t>("MagicShiftItersPerTile", skMagicShiftItersPerTile);
+                {
+                    const auto magicShift = sk5Dynamic
+                        ? std::get<StreamK::StreamK4>(schedulingArgs.streamKArgSlots.words).skTiles
+                        : std::get<StreamK::StreamK3>(schedulingArgs.streamKArgSlots.words).magicShift;
+                    rv.args.template append<uint32_t>("MagicShiftItersPerTile", magicShift);
                     break;
+                }
                 case CustomArgSemantic::TotalIters:
-                    rv.args.template append<uint32_t>("TotalIters", skTotalIters);
+                    rv.args.template append<uint32_t>("TotalIters", totalIters);
                     break;
                 case CustomArgSemantic::SKItersPerWG:
-                    rv.args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
+                {
+                    const auto itersPerWG = sk5Dynamic
+                        ? std::get<StreamK::StreamK4>(schedulingArgs.streamKArgSlots.words).skSplit
+                        : std::get<StreamK::StreamK3>(schedulingArgs.streamKArgSlots.words).itersPerWG;
+                    rv.args.template append<uint32_t>("SKItersPerWG", itersPerWG);
                     break;
+                }
                 case CustomArgSemantic::SKGrid:
-                    rv.args.template append<uint32_t>("SKGrid", static_cast<uint32_t>(launch.grid));
+                {
+                    const auto skGrid = sk5Dynamic
+                        ? std::get<StreamK::StreamK4>(schedulingArgs.streamKArgSlots.words).itersPerWI
+                        : static_cast<uint32_t>(launch.grid);
+                    rv.args.template append<uint32_t>("SKGrid", skGrid);
                     break;
+                }
                 case CustomArgSemantic::SKTilesAndSplit:
-                    rv.args.appendCustomType(toString(arg.semantic), skTotalTiles, arg.type);
+                {
+                    const auto skTiles = sk5Dynamic
+                        ? std::get<StreamK::StreamK4>(schedulingArgs.streamKArgSlots.words).grid
+                        : std::get<StreamK::StreamK3>(schedulingArgs.streamKArgSlots.words).skTiles;
+                    rv.args.appendCustomType(toString(arg.semantic), skTiles, arg.type);
                     break;
+                }
+                case CustomArgSemantic::TotalItems:
+                {
+                    const auto totalItems = std::get<StreamK::StreamK4>(schedulingArgs.streamKArgSlots.words).totalItems;
+                    rv.args.template append<uint32_t>("TotalItems", totalItems);
+                    break;
+                }
+                case CustomArgSemantic::SKTiles:
+                {
+                    const auto skTiles = std::get<StreamK::StreamK4>(schedulingArgs.streamKArgSlots.words).skTiles;
+                    rv.args.template append<uint32_t>("SKTiles", skTiles);
+                    break;
+                }
+                case CustomArgSemantic::SKSplit:
+                {
+                    const auto skSplit = std::get<StreamK::StreamK4>(schedulingArgs.streamKArgSlots.words).skSplit;
+                    rv.args.template append<uint32_t>("SKSplit", skSplit);
+                    break;
+                }
+                case CustomArgSemantic::SKItersPerWI:
+                {
+                    const auto itersPerWI = std::get<StreamK::StreamK4>(schedulingArgs.streamKArgSlots.words).itersPerWI;
+                    rv.args.template append<uint32_t>("SKItersPerWI", itersPerWI);
+                    break;
+                }
 
                 // ---- Packed batch dimension divisors ----
                 // arg.index comes from the kernel's custom.config, so it is untrusted;
