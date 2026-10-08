@@ -89,7 +89,7 @@ namespace hipblaslt_jit::code_object
     {
         Status            status = Status::InternalError;
         std::string       log;
-        std::vector<char> bytes; // uncompressed, unbundled executable ELF
+        std::vector<uint8_t> bytes; // uncompressed, unbundled executable ELF
         bool              ok() const noexcept
         {
             return status == Status::Success;
@@ -120,7 +120,7 @@ namespace hipblaslt_jit::code_object
                  const Options&                                options) noexcept;
 
     ObjectCheck inspect(const void* elf, std::size_t size) noexcept;
-    ObjectCheck inspect(const std::vector<char>& elf) noexcept;
+    ObjectCheck inspect(const std::vector<uint8_t>& elf) noexcept;
 
     // "major.minor" of the loaded comgr library, for diagnostics.
     std::string comgrVersion() noexcept;

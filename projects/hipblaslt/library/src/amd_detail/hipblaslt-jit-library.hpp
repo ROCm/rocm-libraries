@@ -62,7 +62,8 @@ namespace hipblaslt_jit
         std::string directoryName() const; // filesystem-safe literal, not a hash
     };
 
-    // The problem's ProblemType as canonical JSON. Throws like problemTypeFields.
+    // Filesystem-safe literal of problemTypeFields, the operation identifier and
+    // grouped GEMM. Throws like problemTypeFields.
     std::string problemTypeKey(const TensileLite::ContractionProblemGemm& problem);
     // problem.size(i) for every index; a published entry matches only these sizes.
     std::vector<size_t> problemSizes(const TensileLite::ContractionProblemGemm& problem);
