@@ -278,6 +278,11 @@ class SchedulerConfig:
     grPlacement: GRPlacementStrategy = GRPlacementStrategy.SPREAD
     pgl: int = 0              # Prefetch GL2 (0=off, 1 or 2 tiles ahead)
     blockSched: bool = False  # Tile is scoped for block scheduling (see plsinBlockSchedTile)
+    # Kernel is on the MXF4 subtile path (see isMxf4SubtilePath). Optimizations
+    # that change the schedule for every subtile kernel, not just this PR's
+    # target, are bounded by this; it defaults False so a config built without
+    # it keeps the pre-existing behavior.
+    isMxf4Subtile: bool = False
     # Forces spanNgllMerge instead of reading the environment. The four-deep
     # tail is scheduled by its own LogicalScheduler, and under
     # under tail-own-tiles that sub-scheduler is the only one that spans
@@ -927,11 +932,22 @@ class LogicalScheduler:
         partition 0 to partition 3 just gives it a longer live range rather
         than letting something else land on it. PGR=0 retains nothing -- one
         set, no prefetch, nothing to carry.
+
+        All of that applies only on the MXF4 subtile path. Elsewhere the
+        distinction did not exist and the answer is unconditionally "all".
         """
         cfg = self.config
+        grans = [(t, g) for t, g in self._lr_tensors() if g is not None]
+        if not cfg.isMxf4Subtile:
+            # Off the MXF4 subtile path, every tensor is treated as retained.
+            # That is not a claim about register lifetimes -- it is what the
+            # scheduler did before this distinction existed, where the skip
+            # decision rested on the tile range alone and the dedup pool was
+            # shared unconditionally. Narrowing the set here would change the
+            # schedule for MX-scaled subtile kernels this PR does not target.
+            return {t for t, _ in grans}
         if cfg.pgr == 0:
             return set()
-        grans = [(t, g) for t, g in self._lr_tensors() if g is not None]
         if self._use_free_list_vgpr_allocation():
             return {t for t, _ in grans}
         return {t for t, g in grans

@@ -13,7 +13,7 @@ from .LogicalScheduler import (
       ReadGranularity, GRPlacementStrategy, plsinTailOwnTiles)
 
 from ...Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
-  INDEX_CHARS, IsaVersion, ceilDivide, plsinStagingEligible
+  INDEX_CHARS, IsaVersion, ceilDivide, plsinStagingEligible, isMxf4SubtilePath
 
 
 from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, Label
@@ -1467,6 +1467,7 @@ def mainLoop(writer, kernel):
           grPlacement=grPlacement,
           pgl=kernel.get("PrefetchGL2", 0),
           blockSched=plsinStagingEligible(kernel),
+          isMxf4Subtile=isMxf4SubtilePath(kernel),
           tailOwnTiles=tailOwnTiles,
           tailPartitionSizeN=tailPartitionSizeN,
           tailPartitionSizeM=tailPartitionSizeM,

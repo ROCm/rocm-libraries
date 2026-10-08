@@ -255,6 +255,10 @@ class GlobalWriteBatchWriter:
     # names its own row through soffset. See _subtileStoreSoffset.
     self._subtileAbsRowAddr = parentWriter.states.subtileAbsRowAddr
     self._align8NMaskBlockIdxN = -1       # last blockIdxN for which N mask was computed
+    # align8 exec mask scratch, allocated in paired-store Phase1 and freed in
+    # Phase2. None outside that window, so an unpaired phase faults here rather
+    # than quietly indexing SGPR 0.
+    self._pairedStoreMaskSgpr = None
     # Hoisted store address: the lane-adjusted dwordx4 base
     # (addrDVgpr + lane_group*8) is identical for every paired store that shares
     # the same addrDVgpr and N-group (the M-subtile stride is carried by the MUBUF
@@ -4380,8 +4384,6 @@ class GlobalWriteBatchWriter:
     module = Module("16bitSubtilePairedStorePhase1")
     isFp16 = self.kernel["ProblemType"]["DestDataType"].isHalf()
 
-    # align8 exec mask uses scratch, not tmpS01 (primer).
-    tmpInrSgpr = self._epilogScratchSgpr(2*self.laneSGPRC)
     # Reuse cvtVgprStruct.vgprBf16Temp..vgprBf16Inc (+0..+3) as 4 scratch vgprs.
     # The cvtVgpr block is allocated with 2-alignment (64-bit aligned) in KWA so that
     # vgprBf16Temp is at an even VGPR index, satisfying buffer_store_dwordx4's
@@ -4493,7 +4495,13 @@ class GlobalWriteBatchWriter:
       self.parentWriter.states.subtileHoistedAddrDVgpr = addrDVgpr
       self.parentWriter.states.subtileHoistedAddrBlockN = blockIdxN
     if useAlign8:
-      self._emitAlign8ExecMask(module, self.tmpS01, self.tmpS23, blockIdxM, blockIdxN,
+      # Scratch, not tmpS01/tmpS23: those hold the delayed incrementToNextRow
+      # primer, which under CompactLoopStore has to survive this store. The
+      # allocation is held until Phase2 has applied the mask.
+      self._pairedStoreMaskSgpr = self._epilogScratchSgpr(2*self.laneSGPRC)
+      self._emitAlign8ExecMask(module, self._pairedStoreMaskSgpr,
+                               self._pairedStoreMaskSgpr + 1*self.laneSGPRC,
+                               blockIdxM, blockIdxN,
                                mGuardOffset=2, rowScaleShift=1)
 
     assert not any(isinstance(i, SBarrier) for i in module.flatitems()), \
@@ -4519,7 +4527,7 @@ class GlobalWriteBatchWriter:
                                    cvt must not overwrite vPack before the store has
                                    latched its source VGPRs.
 
-    Consumes the vPack / vgprAddrScratch / tmpS01 state produced by Phase 1.
+    Consumes the vPack / vgprAddrScratch / align8-mask state produced by Phase 1.
     """
     module = Module("16bitSubtilePairedStorePhase2")
 
@@ -4534,8 +4542,8 @@ class GlobalWriteBatchWriter:
     bpeCurr = self.parentWriter.states.bpeCexternal
     bpeDest = self.parentWriter.states.bpeCexternalGSU1
     globalOffset = addrCalc.globalOffset * bpeDest // bpeCurr
-    # Must match Phase1's predicate exactly: Phase1 produces the mask in tmpS01 and this
-    # is its only consumer (see the Phase1 note).
+    # Must match Phase1's predicate exactly: Phase1 produces the mask in the scratch
+    # pair it allocated, and this is its only consumer (see the Phase1 note).
     # A fully-interior block yields exec mask -1 (no lanes disabled), and in the full-tile
     # fused store the mask is all-ones for every block, so either alone elides it.
     useAlign8 = (self.parentWriter.states.storeAlign8 and not interior
@@ -4565,7 +4573,7 @@ class GlobalWriteBatchWriter:
       return module
 
     if useAlign8:
-      module.add(self.getEdgeMovInstType()(EXEC(), sgpr(self.tmpS01, self.laneSGPRC), "apply exec mask"))
+      module.add(self.getEdgeMovInstType()(EXEC(), sgpr(self._pairedStoreMaskSgpr, self.laneSGPRC), "apply exec mask"))
 
     module.addComment1("buffer_store_dwordx4: write 8 16bit values (4 dwords, 2-aligned src)")
     _soff, _soffTmp = self._subtileStoreSoffset(module, addrCalc)
@@ -4582,6 +4590,8 @@ class GlobalWriteBatchWriter:
 
     if useAlign8:
       module.add(self.getEdgeMovInstType()(EXEC(), -1, "restore exec"))
+      self._epilogScratchFree(self._pairedStoreMaskSgpr)
+      self._pairedStoreMaskSgpr = None
 
     # WAR hazard: buffer_store_dwordx4 reads vPack[0:3] as source operands.
     # The next paired store's v_cvt_pk_bf16_f32 will overwrite vPack.

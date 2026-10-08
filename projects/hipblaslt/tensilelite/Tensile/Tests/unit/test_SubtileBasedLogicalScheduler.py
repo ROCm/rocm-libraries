@@ -132,7 +132,7 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
 
 def make_cfg_256x256_fp4(depthU=256, k_gran=1, partSizeM=0, partSizeN=0,
                          grSA_k_gran=1, grSA_mn_gran=1, grSB_k_gran=1, grSB_mn_gran=1, pgr=2,
-                         miWaveGroup=None):
+                         miWaveGroup=None, isMxf4Subtile=False):
     """Build FP4 config with scale tensors. k_gran applies to LR A/B.
     grSA/SB_k_gran and grSA/SB_mn_gran are multipliers on the tile-info-derived values."""
     kernel = create_kernel(256, 256, fp4=True, depthU=depthU, miWaveGroup=miWaveGroup)
@@ -159,6 +159,7 @@ def make_cfg_256x256_fp4(depthU=256, k_gran=1, partSizeM=0, partSizeN=0,
         partitionSizeM=partSizeM,
         partitionSizeN=partSizeN,
         pgr=pgr,
+        isMxf4Subtile=isMxf4Subtile,
     )
 
 
@@ -660,12 +661,47 @@ class TestPlaceLRs:
         _assert_slot_lrs(p0[0], ['A', 'B', 'SA'])
         _assert_slot_lrs(p0[1], ['A', 'B', 'SB'])
         _assert_slot_lrs(p0[2], ['A', 'B', 'SA'])
+        _assert_slot_lrs(p0[3], ['A'])
+
+        # P3: last partition — last 2 slots load for MT n+1
+        p3 = partitions[3]
+        assert len(p3[0].lrs) == 0
+        assert len(p3[1].lrs) == 0
+        _assert_slot_lrs(p3[2], ['SA'])
+        _assert_slot_lrs(p3[3], ['A', 'B', 'SB'])
+        _assert_lr(p3[3], 'A', 1,0, 1, 0, 4)
+        _assert_lr(p3[3], 'B', 1,0, 1, 0, 4)
+
+    def test_2x2_k1_DU512_mxf4_retains_across_partitions(self):
+        """Same config as test_2x2_k1_DU512, but on the MXF4 subtile path.
+
+        At DepthU 512 A and B have four k chunks per unroll iteration, more
+        than the two register sets the deterministic allocator gives a tile
+        group, so each overwrites its own earliest chunks before the partition
+        loop comes back around and a later partition cannot read it out of
+        registers. Only the scales, at two chunks, survive. Recognising that
+        makes A and B reload in every partition -- 4.4% more ds_read at DepthU
+        512 (2.6% at 256) -- in exchange for the idle slots going away.
+
+        Off the MXF4 path the scheduler must not make this trade -- see
+        test_2x2_k1_DU512, which asserts the unchanged schedule for the same
+        tile. The two together are the scope gate.
+        """
+        cfg = make_cfg_256x256_fp4(depthU=512, partSizeM=4, partSizeN=4,
+                                   isMxf4Subtile=True)
+        sched = LogicalScheduler(cfg)
+
+        assert sched._lr_tensors_retained_across_partitions() == {'SA', 'SB'}
+
+        partitions = sched.place_LRs()
+        p0 = partitions[0]
+        _assert_slot_lrs(p0[0], ['A', 'B', 'SA'])
+        _assert_slot_lrs(p0[1], ['A', 'B', 'SB'])
+        _assert_slot_lrs(p0[2], ['A', 'B', 'SA'])
         _assert_slot_lrs(p0[3], ['A', 'B', 'SB'])
 
-        # A and B now issue in every slot rather than alternating across
-        # partitions, so the last partition is no longer idle and the MT n+1
-        # scales both land in its final slot. Measured on the emitted assembly,
-        # this costs 4.4% more ds_read at DepthU 512 (2.6% at 256).
+        # No idle slots: A and B issue in every slot, and both MT n+1 scales
+        # land in the final one.
         p3 = partitions[3]
         _assert_slot_lrs(p3[0], ['A', 'B'])
         _assert_slot_lrs(p3[1], ['A', 'B'])
@@ -673,6 +709,27 @@ class TestPlaceLRs:
         _assert_slot_lrs(p3[3], ['A', 'B', 'SA', 'SB'])
         _assert_lr(p3[3], 'A', 1,0, 1, 0, 4)
         _assert_lr(p3[3], 'B', 1,0, 1, 0, 4)
+
+    def test_retention_is_gated_on_mxf4_subtile_path(self):
+        """The ungated path retains everything, which is what develop did.
+
+        Returning the full set is not a claim about register lifetimes; it is
+        what makes the load decision fall back to the tile range alone and the
+        dedup pool stay shared, i.e. the pre-existing schedule.
+        """
+        off = LogicalScheduler(make_cfg_256x256_fp4(depthU=512, partSizeM=4, partSizeN=4))
+        on  = LogicalScheduler(make_cfg_256x256_fp4(depthU=512, partSizeM=4, partSizeN=4,
+                                                    isMxf4Subtile=True))
+        assert off._lr_tensors_retained_across_partitions() == {'A', 'B', 'SA', 'SB'}
+        assert on._lr_tensors_retained_across_partitions() == {'SA', 'SB'}
+
+        # pgr=0 short-circuits to "nothing retained" -- but only on the gated
+        # path; off it the answer stays "all" so the schedule is untouched.
+        # (pgr=0 forces a single partition, so no partition sizes here.)
+        off0 = LogicalScheduler(make_cfg_256x256_fp4(depthU=512, pgr=0))
+        on0  = LogicalScheduler(make_cfg_256x256_fp4(depthU=512, pgr=0, isMxf4Subtile=True))
+        assert off0._lr_tensors_retained_across_partitions() == {'A', 'B', 'SA', 'SB'}
+        assert on0._lr_tensors_retained_across_partitions() == set()
 
     def test_2x2_k2_DU256(self):
         """MT=256x256, DU=256, FP4, k=2, 2x2 partition.
@@ -1393,12 +1450,10 @@ class TestAnnotateDeps:
         assert ('LR', 'A', 3, 3, -1) in mfma_p0_s0
         assert len(mfma_p0_s0) == 4
 
-        # P3 MFMA(k=0): deps on LRs that loaded subIterK=0 data for P3 tiles.
-        # A and B issue in every slot now, so the feeding loads are the previous
-        # partition's last slots rather than P0's.
+        # P3 MFMA(k=0): deps on LRs that loaded subIterK=0 data for P3 tiles
         mfma_p3_s0 = _dep_refs(parts[3][0].mfma)
-        assert ('LR', 'A', 2, 3, 0) in mfma_p3_s0
-        assert ('LR', 'SA', 2, 2, 0) in mfma_p3_s0
+        assert ('LR', 'A', 0, 3, 0) in mfma_p3_s0
+        assert ('LR', 'SA', 0, 2, 0) in mfma_p3_s0
 
     def test_1x1_multi_du_unroll2_AB(self):
         """Multi-DU: uid=0 and uid=1 GRs get correct collision deps.
@@ -1576,10 +1631,9 @@ class TestRemoveCrossDeps:
         lr_a_p3_s3 = _get_lr(parts[3][3], 'A')
         assert lr_a_p3_s3.preOps[0].wait_gr_counts.A == 20
 
-        # LR SA @P3:s3: wait_gr_sync with SA=1. The scales sit in the final slot
-        # now that A/B occupy every slot; the count itself is unchanged.
-        lr_sa_p3_s3 = _get_lr(parts[3][3], 'SA')
-        assert lr_sa_p3_s3.preOps[0].wait_gr_counts.SA == 1
+        # LR SA @P3:s2: wait_gr_sync with SA=1
+        lr_sa_p3_s2 = _get_lr(parts[3][2], 'SA')
+        assert lr_sa_p3_s2.preOps[0].wait_gr_counts.SA == 1
 
     def test_320x256_5part_reanchor_pi1(self):
         """Single-DU 5-partition: wait_gr counts match develop legacy inflight walk."""
