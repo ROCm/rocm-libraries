@@ -626,7 +626,7 @@ _OPERAND_RE = re.compile(r"(?<!\w)[sv](?:\d+|\[\d+:\d+\])(?!\w)")
 def with_symbol_names(src):
     """Return ``src`` with allocator-renumbered operands spelled by name again.
 
-    ``StinkyTofuRegisterAllocation >= 2`` compacts SGPRs, and an operand it moves
+    A kernel with ``StinkyTofuRegisterAllocation >= 2`` compacts SGPRs, and an operand it moves
     loses its symbolic name whenever the name's ``.set`` cannot be resolved --
     which is most of them, because TensileLite ends a name's scope with a second
     ``.set NAME, UNDEF``. So ``s[sgprMulticastMaskA]`` prints as ``s0``. The
