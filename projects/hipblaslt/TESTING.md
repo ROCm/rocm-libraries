@@ -765,7 +765,6 @@ the sanitizer runtime on real hardware.
 | Sanitizer | What it catches | Where it runs | Gating |
 | --- | --- | --- | --- |
 | **HOST_ASAN** (host-side AddressSanitizer) | Host-side heap and stack overflows, use-after-free, and leaks (via LeakSanitizer) in the library and client code | Every PR touching hipBLASLt, gfx90a | **Yes** |
-| **HOST_ASAN** | Same, second architecture | Opt-in via the `ci:asan` PR label, gfx942 | No, explicitly non-blocking |
 | **Full ASAN** (host plus device instrumentation) | Adds device-side memory errors in kernels | TheRock nightly and manual dispatch, gfx94X | No |
 | **TSAN** | Data races | **Nowhere.** Build options exist; no CI lane uses them | No |
 
@@ -784,6 +783,12 @@ sanitizer options intentionally stand down when the superbuild is driving.
 **GPU-specific limitations.** Host ASAN does not instrument device code, so nothing in the generated
 kernels is checked by the gating lane. Device-side ASAN requires XNACK-capable configurations, is
 substantially slower, and is why full ASAN is nightly rather than per PR.
+
+There is currently no gfx90a device-ASAN runtime test lane. Before enabling one, runner capacity
+and stability with full ASAN and `HSA_XNACK=1` must be reviewed with DevOps. A dedicated pool,
+potentially for nightly testing, is a separate follow-up; the hang investigation remains tracked
+in [rocm-libraries #12727](https://github.com/ROCm/rocm-libraries/issues/12727) and
+[TheRock-Infra #978](https://github.com/ROCm/TheRock-Infra/issues/978).
 
 **Explicitly not covered:** thread safety (no TSAN lane, despite the build option existing);
 undefined behavior (no UBSAN); device-side memory errors on any per-PR lane; and any test outside
