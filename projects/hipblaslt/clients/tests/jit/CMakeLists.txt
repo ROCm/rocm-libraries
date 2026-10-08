@@ -161,7 +161,7 @@ add_executable(hipblaslt-jit-library-test
 target_include_directories(hipblaslt-jit-library-test PRIVATE
     "${hipblaslt_jit_source}/rocblaslt/src/include")
 target_compile_definitions(hipblaslt-jit-library-test PRIVATE
-    HIPBLASLT_ENABLE_JIT HIPBLASLT_JIT_LIBRARY_TESTING
+    HIPBLASLT_ENABLE_JIT
     "HIPBLASLT_JIT_DATA=\"${hipblaslt_jit_data}\"")
 target_link_libraries(hipblaslt-jit-library-test PRIVATE
     roc::hipblaslt roc::tensilelite-host ${hipblaslt_msgpack_target} amd_comgr
