@@ -509,13 +509,49 @@ class TestExtentValidation:
             fe.extract_batch(_frame(k=0))
 
 
-class TestScalarRequiresLayoutAndDtype:
-    """_required() replaced defaults of "rcr" and "fp8". Nothing exercised the
-    absent case, so restoring either default left the whole suite green -- and
-    the scalar path is production inference, where a fabricated layout silently
-    computes all three fractions for a problem that never said it was rcr."""
+#: Every scalar key the vec engine resolves across the (problem, kernel) pair:
+#: (moves_probe, desync_probe, dict the BASE engine reads the key from).
+#:
+#: Two probes, because the two guards pull in opposite directions:
+#:
+#: * `moves_probe` must differ from the FIXTURE value, or the key's value never
+#:   changes the vector and test_the_alternate_value_actually_moves_the_vector
+#:   is decorative.
+#: * `desync_probe` must differ from the BASE READER'S DEFAULT, or spelling it
+#:   on the dict the base half does not read gives the same vector as spelling
+#:   it correctly, and the asymmetry below is invisible.
+#:
+#: They coincide for `layout` (fixture rcr, base default rcr) and `dtype`
+#: (fixture bf16, base default fp8). They cannot coincide for `epilogue`: the
+#: fixture is `default`, the base default is `cshuffle`, and EPILOGUE_MAP has
+#: only those two, so one probe cannot differ from both.
+#:
+#: `dtype` is why this is written down. The probe was `fp8` -- exactly the base
+#: reader's default -- so the desync was unmeasurable, and that got recorded in
+#: a docstring as a property of the CODE rather than of the probe. `fp32`
+#: differs from the bf16 fixture (4 bytes vs 2) and from the fp8 default (vs 1).
+#:
+#: `arch` has no base reader, hence the `None` desync probe: it is the one key
+#: that is genuinely either-side, and so the one key with no desync to measure.
+SCALAR_KEYS = {
+    "layout": ("ccr", "ccr", "problem"),
+    "dtype": ("fp32", "fp32", "problem"),
+    "arch": ("gfx1250", None, None),
+    "epilogue": ("cshuffle", "default", "kernel"),
+}
 
-    @pytest.mark.parametrize("key", ["layout", "dtype"])
+
+class TestScalarKeysAreResolvedNotDefaulted:
+    """Every one of these replaced a hardcoded default, and each default was a
+    plausible-looking value that silently computed a full feature vector for a
+    problem that never said it was rcr / fp8 / gfx950 / cshuffle.
+
+    `layout` and `dtype` were covered; `arch` and `epilogue` were not, and
+    restoring THEIR defaults left all 417 tests green. `arch` picks the
+    wavefront size, so on a wave-32 part the defaulted value yields confident,
+    wrong native widths -- the exact failure this engine exists to prevent."""
+
+    @pytest.mark.parametrize("key", sorted(SCALAR_KEYS))
     def test_absent_from_both_dicts_raises(self, key):
         fe = GemmUniversalVecFeatureEngine()
         problem = {k: v for k, v in _problem().items() if k != key}
@@ -523,13 +559,94 @@ class TestScalarRequiresLayoutAndDtype:
         with pytest.raises(KeyError, match="required to compute vector-width"):
             fe.extract(problem, kernel)
 
-    @pytest.mark.parametrize("key", ["layout", "dtype"])
-    def test_supplied_on_the_kernel_side_is_accepted(self, key):
-        """The scalar path is handed two dicts; either may carry the value."""
+    @pytest.mark.parametrize("key", sorted(SCALAR_KEYS))
+    def test_the_alternate_value_actually_moves_the_vector(self, key):
+        """Each probe must be a value the engine distinguishes from the
+        fixture's. It does not guard the other tests in this class -- none of
+        them consumes a probe -- it guards SCALAR_KEYS itself, so a probe that
+        drifts onto the fixture value fails here rather than silently weakening
+        the desync tests that do consume it.
+
+        DISCRIMINATING is required for `arch`: under the default geometry the
+        wave-64 and wave-32 native widths both clamp to the bf16 cap of 8, so
+        the wavefront size drops out entirely and gfx950 and gfx1250 produce
+        the same vector for every choice of M/N/K."""
         fe = GemmUniversalVecFeatureEngine()
-        problem = {k: v for k, v in _problem().items() if k != key}
-        kernel = {**_kernel(), key: _problem()[key]}
-        assert fe.extract(problem, kernel).shape[0] == len(fe.get_feature_names())
+        value = SCALAR_KEYS[key][0]
+        baseline = fe.extract(_problem(), _kernel(**DISCRIMINATING))
+        moved = fe.extract(
+            {**_problem(), key: value},
+            {**_kernel(**DISCRIMINATING), key: value},
+        )
+        assert np.isfinite(baseline).all() and np.isfinite(moved).all(), (
+            "a non-finite feature makes `not allclose` pass for the wrong "
+            "reason -- NaN compares unequal to everything"
+        )
+        assert not np.allclose(baseline, moved), (
+            f"{key}={value!r} produced the fixtures' vector, so the desync "
+            "tests that consume this probe prove nothing"
+        )
+
+
+class TestTheBaseHalfReadsOneDictOnly:
+    """The vec half resolves these keys from EITHER dict; the base half does
+    not. `GemmUniversalFeatureEngine.extract` reads `dtype` and `layout` from
+    the problem only and `epilogue` from the kernel only, each with its own
+    hardcoded default, and never reads `arch` at all.
+
+    So for `layout`, `dtype` and `epilogue` the value must be spelled on the
+    dict the BASE half reads, or the six vec features move while the matching
+    base feature stays on its default -- one vector describing two kernels.
+    The asymmetry is inherited; the two-dict lookup is what makes the wrong
+    spelling reachable. Filed rather than fixed: unifying it changes what the
+    base engine encodes, which is an ENCODING_VERSION bump and its own change.
+
+    Pinned rather than merely described, so that unifying one half without the
+    other fails loudly. An earlier revision of this docstring claimed a desync
+    test was impossible for `dtype`; it is possible, and the claim was really
+    about the probe then in SCALAR_KEYS (`fp8`, which is the base reader's own
+    default) rather than about the code.
+
+    Scoped to `extract`. `extract_batch` sees one flat frame, so "which dict"
+    is meaningless there -- and its defaults differ anyway: a null epilogue
+    batches as `default` (`.fillna(0)`) where the scalar path defaults to
+    `cshuffle`. That divergence is pre-existing and out of scope here."""
+
+    @pytest.mark.parametrize(
+        "key", [k for k, (_, d, _) in SCALAR_KEYS.items() if d is not None]
+    )
+    def test_the_wrong_side_desynchronises_the_two_halves(self, key):
+        """Spelling the value on the dict the base half does NOT read leaves
+        the base feature defaulted while the vec features move."""
+        fe = GemmUniversalVecFeatureEngine()
+        _, probe, base_side = SCALAR_KEYS[key]
+
+        def spelled_on(side):
+            problem = {k: v for k, v in _problem().items() if k != key}
+            kernel = {k: v for k, v in _kernel().items() if k != key}
+            (problem if side == "problem" else kernel)[key] = probe
+            return fe.extract(problem, kernel)
+
+        other = "kernel" if base_side == "problem" else "problem"
+        assert not np.allclose(spelled_on(base_side), spelled_on(other)), (
+            f"{key}={probe!r} now gives the same vector from either dict. If "
+            "the base engine was unified to search both, delete this test; "
+            "otherwise the two halves are agreeing by accident."
+        )
+
+    def test_arch_is_genuinely_either_side(self):
+        """`arch` is the one key with no base-engine reader, so both spellings
+        must give the same vector. Asserting the width instead -- as the
+        original test did -- passes with the kernel-side search deleted."""
+        fe = GemmUniversalVecFeatureEngine()
+        on_problem = fe.extract(
+            {**_problem(), "arch": "gfx1250"}, _kernel(**DISCRIMINATING)
+        )
+        on_kernel = fe.extract(
+            {k: v for k, v in _problem().items() if k != "arch"},
+            {**_kernel(**DISCRIMINATING), "arch": "gfx1250"},
+        )
+        np.testing.assert_allclose(on_problem, on_kernel)
 
 
 class TestLayoutSetTracksTheBaseEngine:
@@ -936,13 +1053,25 @@ class TestKeyPrecedence:
         poisoned = fe.extract({**_problem(**self.P), "epilogue": "default"}, k)
         np.testing.assert_allclose(honest, poisoned)
 
-    @pytest.mark.parametrize("key", ["layout", "dtype", "arch", "epilogue"])
-    def test_a_kernel_side_value_is_accepted_when_the_problem_omits_it(self, key):
-        """predict._predict_single hands two dicts; either may carry it."""
+    def test_a_kernel_side_arch_is_reached_when_the_problem_omits_it(self):
+        """predict._predict_single hands two dicts; the vec half searches both.
+
+        Asserts the value is USED, not merely that a vector came back: the
+        original form of this test checked `shape[0] == 78`, which holds for
+        whatever the lookup returns, so deleting the kernel-side search or
+        restoring a hardcoded default left it green.
+
+        `arch` only -- it is the one key with no base-engine reader, so the two
+        halves cannot disagree about it. See TestTheBaseHalfReadsOneDictOnly."""
         fe = GemmUniversalVecFeatureEngine()
-        problem = {k: v for k, v in _problem(**self.P).items() if k != key}
-        kernel = {**_kernel((0, 0, 0)), key: _problem(**self.P).get(key, "default")}
-        assert fe.extract(problem, kernel).shape[0] == 78
+        problem = {k: v for k, v in _problem(**self.P).items() if k != "arch"}
+        kernel = _kernel((0, 0, 0), **DISCRIMINATING)
+        wave32 = fe.extract(problem, {**kernel, "arch": "gfx1250"})
+        wave64 = fe.extract(problem, {**kernel, "arch": "gfx950"})
+        assert not np.allclose(wave32, wave64), (
+            "a kernel-side arch did not reach the features, so the kernel half "
+            "of the search is untested"
+        )
 
 
 if __name__ == "__main__":
