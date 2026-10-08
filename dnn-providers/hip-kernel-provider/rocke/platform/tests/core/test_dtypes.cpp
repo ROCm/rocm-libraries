@@ -7,6 +7,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <utility>
 
 int main()
 {
@@ -24,6 +25,8 @@ int main()
                               {"XF32", "tf32"},
                               {" TF32 ", "tf32"},
                               {"INT8", "i8"},
+                              {"UINT8", "u8"},
+                              {"uint4", "u4"},
                               {" Custom_Format ", "custom_format"},
                               {"", ""}};
     for(const auto& entry : cases)
@@ -45,5 +48,12 @@ int main()
     const rocke_dtype_info_t* i4 = rocke_dtype_info("i4");
     if(!i4 || i4->encoded_bits != 4 || rocke_dtype_info("iu8") || rocke_dtype_info("iu4"))
         return 1;
+    /* u8/u4 are logical unsigned integer types. */
+    for(const auto& [name, bits] : {std::pair{"u8", 8}, std::pair{"u4", 4}})
+    {
+        const rocke_dtype_info_t* info = rocke_dtype_info(name);
+        if(!info || info->encoded_bits != bits || info->category != ROCKE_DTYPE_INTEGER)
+            return 1;
+    }
     return 0;
 }

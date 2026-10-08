@@ -182,3 +182,39 @@ def test_quant_dtype_annotations_match_scalar_and_logical_contracts():
     assert all(ir_to_qdtype(quant_ir_type(dtype)) == dtype for dtype in logical)
     assert helpers.QDType is quant.QDType
     assert helpers.LogicalQDType is quant.LogicalQDType
+
+
+def test_u8_and_u4_are_logical_unsigned_types():
+    # Types only: they name unsigned data for matrix instructions with a signedness flag.
+    import rocke
+    from rocke.core.ir import U4, U8, IRBuilder, PtrType
+    from rocke.tests.engines import (
+        lower_hip_with_both_engines,
+        lower_with_both_engines,
+    )
+    from rocke.tests.ir_validity import assert_target_accepts
+
+    for spelling, ir_type, bits in (
+        ("u8", U8, 8),
+        ("uint8", U8, 8),
+        ("u4", U4, 4),
+        ("uint4", U4, 4),
+    ):
+        assert dtype_to_ir_type(spelling) is ir_type
+        assert dtype_info(spelling).encoded_bits == bits
+        assert dtype_info(spelling).category.value == "integer"
+    assert U8 != I8
+    assert rocke.U8 is U8 and rocke.U4 is U4
+    assert storage_ir_type("u4") is I8
+    # U8 values are LLVM i8 (LLVM integers carry no sign) and HIP uint8_t.
+    b = IRBuilder("u8_pointer")
+    src = b.param("SRC", PtrType(U8, "global"))
+    dst = b.param("DST", PtrType(U8, "global"))
+    tid = b.thread_id_x()
+    loaded = b.global_load(src, tid, U8)
+    b.global_store(dst, tid, loaded)
+    ir_text = lower_with_both_engines(b.kernel, "gfx90a")
+    assert "load i8, ptr addrspace(1)" in ir_text
+    assert_target_accepts(ir_text, "gfx90a")
+    hip = lower_hip_with_both_engines(b.kernel, "gfx90a")
+    assert "uint8_t* __restrict__ SRC" in hip

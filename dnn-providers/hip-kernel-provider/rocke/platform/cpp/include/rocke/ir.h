@@ -113,6 +113,8 @@ typedef enum rocke_scalar_kind
     ROCKE_SCALAR_TF32,
     ROCKE_SCALAR_F64,
     ROCKE_SCALAR_I4,
+    ROCKE_SCALAR_U4,
+    ROCKE_SCALAR_U8,
     ROCKE_SCALAR__COUNT
 } rocke_scalar_kind_t;
 
@@ -457,6 +459,12 @@ typedef enum rocke_opcode
     ROCKE_OP_ARITH_CVT_F32_TO_F64,
     ROCKE_OP_ARITH_CVT_F64_TO_F32,
 
+    /* arith.* unsigned (u8) ops. Appended so no existing opcode index shifts. */
+    ROCKE_OP_ARITH_UMAX,
+    ROCKE_OP_ARITH_UMIN,
+    ROCKE_OP_ARITH_UITOFP_F32,
+    ROCKE_OP_ARITH_CVT_F32_TO_U8_SAT,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -641,6 +649,8 @@ typedef struct rocke_mem_opts
  * never NULL; never arena-owned (static storage). */
 const rocke_type_t* rocke_i1(void);
 const rocke_type_t* rocke_i4(void);
+const rocke_type_t* rocke_u4(void);
+const rocke_type_t* rocke_u8(void);
 const rocke_type_t* rocke_i8(void);
 const rocke_type_t* rocke_i16(void);
 const rocke_type_t* rocke_i32(void);
@@ -677,6 +687,11 @@ const rocke_type_t* rocke_smem_type(
 /* Structural type equality (matches Python frozen-dataclass __eq__: compares by
  * canonical name, which encodes kind + components). */
 bool rocke_type_eq(const rocke_type_t* a, const rocke_type_t* b);
+
+/* True when `t`, or the element of a vector `t`, is an unsigned integer (u8,
+ * u4). The twin of core/ir.py::_is_unsigned: every op whose result depends on
+ * signedness asks it which form to emit. NULL-safe. */
+bool rocke_type_is_unsigned(const rocke_type_t* t);
 
 /* AMDGPU buffer-load AUX cache-coherency hints (Python module constants). */
 typedef enum rocke_cache_policy
@@ -784,8 +799,12 @@ rocke_value_t* rocke_b_mod(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_
 rocke_value_t* rocke_b_land(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_lor(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_lnot(rocke_ir_builder_t* b, rocke_value_t* a);
+/* Signed max / min; an unsigned operand is refused (TypeError). */
 rocke_value_t* rocke_b_smax(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_smin(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
+/* Unsigned max / min of two u8 values. */
+rocke_value_t* rocke_b_umax(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
+rocke_value_t* rocke_b_umin(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_xor(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_shl(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_lshr(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
@@ -852,6 +871,8 @@ rocke_value_t* rocke_b_cast_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t*
     rocke_b_cast_f32_to(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
 rocke_value_t* rocke_b_sitofp_f32(rocke_ir_builder_t* b, rocke_value_t* v);
+/* u8 -> f32 (LLVM uitofp). Exact. */
+rocke_value_t* rocke_b_uitofp_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 /* f32 <-> f64 have their own opcodes; cast_to_f32 / cast_f32_to reject f64. */
 rocke_value_t* rocke_b_cvt_f32_to_f64(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_f64_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
@@ -870,6 +891,8 @@ rocke_value_t* rocke_b_cvt_f32_to_tf32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_f32_to_fp8(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_f32_to_bf8(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_f32_to_i8_sat(rocke_ir_builder_t* b, rocke_value_t* v);
+/* f32 -> u8, round to nearest even and saturate to [0, 255]; NaN gives 0. */
+rocke_value_t* rocke_b_cvt_f32_to_u8_sat(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_fp8_f32x4(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_bf8_f32x4(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_i8_f32x4(rocke_ir_builder_t* b, rocke_value_t* v);

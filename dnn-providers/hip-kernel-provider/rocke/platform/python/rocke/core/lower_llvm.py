@@ -59,6 +59,8 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    _is_unsigned,
+    _refuse_unsigned_operands,
     _sync_attr,
     check_cluster_dims,
     dpp_ctrl_attr,
@@ -787,6 +789,9 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "rint.f32": "declare float @llvm.rint.f32(float)",
     "smax.i32": "declare i32 @llvm.smax.i32(i32, i32)",
     "smin.i32": "declare i32 @llvm.smin.i32(i32, i32)",
+    # Unsigned u8 maximum / minimum (u8 renders as i8).
+    "umax.i8": "declare i8 @llvm.umax.i8(i8, i8)",
+    "umin.i8": "declare i8 @llvm.umin.i8(i8, i8)",
     # AMDGPU ``v_perm_b32`` byte-select. Used by P09's packed i8 quant
     # to fuse four clamped i32s into one i32 in 2 perm calls (lo half +
     # hi half) followed by one perm to interleave.
@@ -1121,7 +1126,8 @@ def _llvm_type(t: Type) -> str:
     # keeps its values out of the IR.
     if t.name == "i1":
         return "i1"
-    if t.name == "i8":
+    if t.name in ("i8", "u8"):
+        # LLVM integers carry no sign; signedness lives in the operations.
         return "i8"
     if t.name == "i16":
         return "i16"
@@ -1947,6 +1953,7 @@ class _Lowerer:
         # refuses its LDS tiles.
         _elem_bytes = {
             "i8": 1,
+            "u8": 1,
             "fp8e4m3": 1,
             "bf8e5m2": 1,
             "f16": 2,
@@ -1978,7 +1985,7 @@ class _Lowerer:
             # _refuse_packed_only_value refuses its LDS tiles.
             if stype.elem.name == "f64":
                 return 8
-            return 16 if stype.elem.name in ("i8", "fp8e4m3", "bf8e5m2") else 4
+            return 16 if stype.elem.name in ("i8", "u8", "fp8e4m3", "bf8e5m2") else 4
 
         # ---- live intervals from the kernel body ----
         live, used = self._collect_smem_liveness(self.kernel.body)
@@ -2194,20 +2201,26 @@ class _Lowerer:
             f"{self._operand(a)}, {self._operand(b)}"
         )
 
+    def _wrapping_binop(self, op: Op, llvm_op: str) -> None:
+        # ``nsw`` makes a signed overflow poison, as C does for signed types;
+        # unsigned values wrap modulo 2**N, so they get no flag.
+        flag = "" if _is_unsigned(op.result.type) else " nsw"
+        self._binop(op, llvm_op + flag)
+
     def _op_arith_add(self, op: Op) -> None:
-        self._binop(op, "add nsw")
+        self._wrapping_binop(op, "add")
 
     def _op_arith_sub(self, op: Op) -> None:
-        self._binop(op, "sub nsw")
+        self._wrapping_binop(op, "sub")
 
     def _op_arith_mul(self, op: Op) -> None:
-        self._binop(op, "mul nsw")
+        self._wrapping_binop(op, "mul")
 
     def _op_arith_div(self, op: Op) -> None:
-        self._binop(op, "sdiv")
+        self._binop(op, "udiv" if _is_unsigned(op.result.type) else "sdiv")
 
     def _op_arith_mod(self, op: Op) -> None:
-        self._binop(op, "srem")
+        self._binop(op, "urem" if _is_unsigned(op.result.type) else "srem")
 
     def _op_arith_fadd(self, op: Op) -> None:
         self._binop(op, "fadd")
@@ -2317,18 +2330,10 @@ class _Lowerer:
         )
 
     def _op_arith_cmp(self, op: Op) -> None:
-        pred = op.attrs.get("pred", "lt")
-        pmap = {
-            "lt": "slt",
-            "le": "sle",
-            "gt": "sgt",
-            "ge": "sge",
-            "eq": "eq",
-            "ne": "ne",
-        }
         a, b = op.operands
+        pred = _icmp_predicate(op.attrs.get("pred", "lt"), a.type)
         self._current().emit(
-            f"  {op.result.name} = icmp {pmap[pred]} {_llvm_type(a.type)} "
+            f"  {op.result.name} = icmp {pred} {_llvm_type(a.type)} "
             f"{self._operand(a)}, {self._operand(b)}"
         )
 
@@ -2423,6 +2428,7 @@ class _Lowerer:
         )
 
     def _op_arith_smax(self, op: Op) -> None:
+        _refuse_unsigned_operands(op, "arith.umax")
         a, b = op.operands
         self._need("smax.i32")
         self._current().emit(
@@ -2431,12 +2437,28 @@ class _Lowerer:
         )
 
     def _op_arith_smin(self, op: Op) -> None:
+        _refuse_unsigned_operands(op, "arith.umin")
         a, b = op.operands
         self._need("smin.i32")
         self._current().emit(
             f"  {op.result.name} = call i32 @llvm.smin.i32(i32 {self._operand(a)}, "
             f"i32 {self._operand(b)})"
         )
+
+    def _unsigned_min_max(self, op: Op, which: str) -> None:
+        a, b = op.operands
+        ty = _llvm_type(a.type)
+        self._need(f"{which}.{ty}")
+        self._current().emit(
+            f"  {op.result.name} = call {ty} @llvm.{which}.{ty}({ty} {self._operand(a)}, "
+            f"{ty} {self._operand(b)})"
+        )
+
+    def _op_arith_umax(self, op: Op) -> None:
+        self._unsigned_min_max(op, "umax")
+
+    def _op_arith_umin(self, op: Op) -> None:
+        self._unsigned_min_max(op, "umin")
 
     def _op_arith_zext(self, op: Op) -> None:
         (v,) = op.operands
@@ -2446,6 +2468,7 @@ class _Lowerer:
         )
 
     def _op_arith_sext(self, op: Op) -> None:
+        _refuse_unsigned_operands(op, "arith.zext")
         (v,) = op.operands
         self._current().emit(
             f"  {op.result.name} = sext {_llvm_type(v.type)} {self._operand(v)} "
@@ -2504,6 +2527,12 @@ class _Lowerer:
             )
         self._current().emit(
             f"  {op.result.name} = sitofp i32 {self._operand(v)} to float"
+        )
+
+    def _op_arith_uitofp_f32(self, op: Op) -> None:
+        (v,) = op.operands
+        self._current().emit(
+            f"  {op.result.name} = uitofp {_llvm_type(v.type)} {self._operand(v)} to float"
         )
 
     def _op_arith_cvt_fp8_to_f32(self, op: Op) -> None:
@@ -2841,6 +2870,37 @@ class _Lowerer:
             f"  {smin_v} = call i32 @llvm.smin.i32(i32 127, i32 {smax_v})"
         )
         self._current().emit(f"  {op.result.name} = trunc i32 {smin_v} to i8")
+
+    def _op_arith_cvt_f32_to_u8_sat(self, op: Op) -> None:
+        """Lower saturating f32->u8 (round-to-nearest-even).
+
+        .. code-block:: text
+
+        %r = call float @llvm.rint.f32(float %v)
+        %lo = call float @llvm.maxnum.f32(float %r, float 0.0)
+        %hi = call float @llvm.minnum.f32(float %lo, float 255.0)
+        %q = fptoui float %hi to i8
+
+        Clamping in f32 keeps ``fptoui`` in range; ``maxnum`` turns a NaN
+        into 0.
+        """
+        (v,) = op.operands
+        self._need("rint.f32")
+        self._need("maxnum.f32")
+        self._need("minnum.f32")
+        rounded = f"{op.result.name}r"
+        low = f"{op.result.name}lo"
+        high = f"{op.result.name}hi"
+        self._current().emit(
+            f"  {rounded} = call float @llvm.rint.f32(float {self._operand(v)})"
+        )
+        self._current().emit(
+            f"  {low} = call float @llvm.maxnum.f32(float {rounded}, float 0.000000e+00)"
+        )
+        self._current().emit(
+            f"  {high} = call float @llvm.minnum.f32(float {low}, float 2.550000e+02)"
+        )
+        self._current().emit(f"  {op.result.name} = fptoui float {high} to i8")
 
     def _op_arith_rint_f32(self, op: Op) -> None:
         """Round an f32 to nearest integer (still f32), round-to-nearest-even."""
@@ -3298,11 +3358,12 @@ class _Lowerer:
             f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(gidx)}"
         )
-        # Alignment is the element byte size: 1 for i8, 2 for f16/bf16,
+        # Alignment is the element byte size: 1 for i8/u8, 2 for f16/bf16,
         # 4 for f32/i32, 8 for i64/f64. The AMDGPU backend rejects loads /
         # stores with under-aligned addresses on ``addrspace(3)``.
         align = {
             "i8": 1,
+            "u8": 1,
             "fp8e4m3": 1,
             "bf8e5m2": 1,
             "f16": 2,
@@ -3369,6 +3430,7 @@ class _Lowerer:
         elem_ty = _llvm_type(value.type.elem)  # type: ignore[attr-defined]
         elem_bytes = {
             "i8": 1,
+            "u8": 1,
             "fp8e4m3": 1,
             "bf8e5m2": 1,
             "f16": 2,
@@ -3456,6 +3518,7 @@ class _Lowerer:
         # (i64 / f64): 8 bytes.
         elem_bytes = {
             "i8": 1,
+            "u8": 1,
             "f16": 2,
             "bf16": 2,
             "i32": 4,
@@ -6055,6 +6118,7 @@ class _Lowerer:
         )
         elem_bytes = {
             "i8": 1,
+            "u8": 1,
             "fp8e4m3": 1,
             "bf8e5m2": 1,
             "i16": 2,
@@ -6222,22 +6286,15 @@ class _Lowerer:
         self._vector_binop(op, "lshr")
 
     def _op_vector_cmp(self, op: Op) -> None:
-        pred = op.attrs.get("pred", "lt")
-        pmap = {
-            "lt": "slt",
-            "le": "sle",
-            "gt": "sgt",
-            "ge": "sge",
-            "eq": "eq",
-            "ne": "ne",
-        }
         a, b = op.operands
+        pred = _icmp_predicate(op.attrs.get("pred", "lt"), a.type)
         self._current().emit(
-            f"  {op.result.name} = icmp {pmap[pred]} {_llvm_type(a.type)} "
+            f"  {op.result.name} = icmp {pred} {_llvm_type(a.type)} "
             f"{self._operand(a)}, {self._operand(b)}"
         )
 
     def _op_vector_smax(self, op: Op) -> None:
+        _refuse_unsigned_operands(op)
         a, b = op.operands
         # Prefer the ``llvm.smax.v<N>i<W>`` intrinsic over icmp+select: the
         # AMDGPU backend reliably lowers the i16 vector form to packed
@@ -6258,6 +6315,7 @@ class _Lowerer:
         )
 
     def _op_vector_smin(self, op: Op) -> None:
+        _refuse_unsigned_operands(op)
         a, b = op.operands
         cmp = self._fresh("vsmin.cmp")
         self._current().emit(
@@ -6276,6 +6334,7 @@ class _Lowerer:
         )
 
     def _op_vector_sext(self, op: Op) -> None:
+        _refuse_unsigned_operands(op)
         (v,) = op.operands
         self._current().emit(
             f"  {op.result.name} = sext {_llvm_type(v.type)} {self._operand(v)} "
@@ -6964,6 +7023,24 @@ def _encode_waitcnt_gfx11(vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
     ec_b = 0x7 if expcnt < 0 else min(max(expcnt, 0), 0x7)
     lk_b = 0x3F if lgkmcnt < 0 else min(max(lgkmcnt, 0), 0x3F)
     return (ec_b & 0x7) | ((lk_b & 0x3F) << 4) | ((vm_b & 0x3F) << 10)
+
+
+# arith.cmp / vector.cmp predicate -> (signed icmp predicate, unsigned one).
+_ICMP_PREDICATES = {
+    "lt": ("slt", "ult"),
+    "le": ("sle", "ule"),
+    "gt": ("sgt", "ugt"),
+    "ge": ("sge", "uge"),
+    "eq": ("eq", "eq"),
+    "ne": ("ne", "ne"),
+}
+
+
+def _icmp_predicate(pred: str, t: Type) -> str:
+    """The icmp predicate for ``pred`` on operands of type ``t``: ordered
+    compares of unsigned integers are unsigned."""
+    signed, unsigned = _ICMP_PREDICATES[pred]
+    return unsigned if _is_unsigned(t) else signed
 
 
 def _fp64_hex(x: float) -> str:

@@ -2,11 +2,19 @@
 # SPDX-License-Identifier: MIT
 """Packed-only types have no IR value.
 
-I4 values only ever live packed in 32-bit words: a kernel keeps the words in
-i32 storage and unpacks them explicitly. So the IR builder refuses every op
-result, kernel parameter and LDS tile of i4 elements, and the lowerings, which
-have no rendering for the type, still refuse one that reaches them.
+I4 and U4 values only ever live packed in 32-bit words: a kernel keeps the
+words in i32 storage and unpacks them explicitly. So the IR builder of each
+engine refuses every op result, kernel parameter and LDS tile of i4 or u4
+elements with the same text, and the lowerings, which have no rendering for
+either type, still refuse one that reaches them.
+
+The serialized-IR seam (rocke.tests.engines) lowers kernels the Python builder
+built, so the C++ builder's refusals are asked of the rocke_ir_types test
+binary (ROCKE_IR_TYPES_TEST).
 """
+
+import os
+import subprocess
 
 import pytest
 
@@ -16,10 +24,11 @@ from rocke.tests.engines import (
     assert_both_engines_reject_hip,
 )
 
-PACKED_ONLY_DTYPES = ["i4"]
+PACKED_ONLY_DTYPES = ["i4", "u4"]
 
 # Builders that would make an IR value, or an LDS tile, of the element type
-# they are given, with the IR op each refusal names.
+# they are given, with the IR op each refusal names. rocke_ir_types builds the
+# same calls under the same names.
 _BUILDERS = {
     "param": ("param", lambda b, t: b.param("X", t)),
     "param_vector": ("param", lambda b, t: b.param("X", VectorType(t, 8))),
@@ -55,6 +64,22 @@ def test_builder_refuses_a_packed_only_value(builder, dtype):
     with pytest.raises(TypeError) as error:
         build(b, dtype_to_ir_type(dtype))
     assert str(error.value) == _refusal(op, dtype)
+
+
+@pytest.mark.parametrize("dtype", PACKED_ONLY_DTYPES)
+@pytest.mark.parametrize("builder", sorted(_BUILDERS))
+def test_native_builder_refuses_a_packed_only_value(builder, dtype):
+    executable = os.environ.get("ROCKE_IR_TYPES_TEST")
+    if not executable:
+        pytest.skip("set ROCKE_IR_TYPES_TEST to the built rocke_ir_types test")
+    native = subprocess.run(
+        [executable, "--packed-only", builder, dtype],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.rstrip("\n")
+    op, _ = _BUILDERS[builder]
+    assert native == f"error: {_refusal(op, dtype)}"
 
 
 @pytest.mark.parametrize("dtype", PACKED_ONLY_DTYPES)

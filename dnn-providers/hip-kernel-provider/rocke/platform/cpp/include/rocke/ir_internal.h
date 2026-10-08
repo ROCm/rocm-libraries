@@ -136,12 +136,25 @@ bool rocke_i_is_vector(const rocke_type_t* t, const char* elem_name, int count);
  * `v.type.elem if isinstance(...,VectorType) else v.type`). */
 const rocke_type_t* rocke_i_elem_of(const rocke_type_t* t);
 
-/* Throw ckc::TypeError when `t` is a packed-only scalar (i4), a vector of one
+/* Throw ckc::TypeError when `t` is a packed-only scalar (i4, u4), a vector of one
  * or an LDS tile of one: the twin of core/ir.py::_refuse_packed_only_value,
  * which states the rule and the message. rocke_i_op calls it for every result
  * and rocke_b_param for every parameter, so no builder makes such a value.
  * NULL-safe. */
 void rocke_i_refuse_packed_only_value(const char* op_name, const rocke_type_t* t);
+
+/* Throw ckc::TypeError when `t` is unsigned (rocke_type_is_unsigned) and
+ * `op_name` treats its operands as signed; `instead` names the unsigned op to
+ * use, or is NULL when there is none. The twin of core/ir.py::_refuse_unsigned,
+ * with the same message. NULL-safe. */
+void rocke_i_refuse_unsigned(const char* op_name, const rocke_type_t* t, const char* instead);
+
+/* rocke_i_refuse_unsigned for every operand of `op`, a signed op, under the
+ * op's dotted name. The builders refuse such an op when it is built; the
+ * lowerings call this for IR that did not come through them (hand-assembled
+ * or deserialized), so no signed op lowers on unsigned data. The twin of
+ * core/ir.py::_refuse_unsigned_operands. */
+void rocke_i_refuse_unsigned_operands(const rocke_op_t* op, const char* instead);
 
 /* Lane count of a vector type, or 1 for a scalar. */
 int rocke_i_count_of(const rocke_type_t* t);

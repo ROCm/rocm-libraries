@@ -112,6 +112,41 @@ static int rocke_elem_bytes_name(const char* elem_name)
     return 2;
 }
 
+/* Element types an LDS vector access (smem_load_vN and smem_store_vN) admits,
+ * in the order its refusal lists them (Python core/ir.py
+ * _SMEM_VECTOR_ELEMENTS). One list for both directions keeps the pair
+ * symmetric: whatever one stores as a vector can be loaded back. */
+static const char* const ROCKE_SMEM_VECTOR_ELEMENTS[]
+    = {"f16", "bf16", "i16", "f32", "i32", "tf32", "f64", "fp8e4m3", "bf8e5m2", "i8"};
+
+/* Python _require_smem_vector_element: refuse an LDS vector `access` of an
+ * element outside ROCKE_SMEM_VECTOR_ELEMENTS, listing the admitted types. */
+static void
+    rocke_require_smem_vector_elem(rocke_ir_builder_t* b, const char* access, const char* elem)
+{
+    char admitted[128];
+    size_t used = 0;
+    for(const char* name : ROCKE_SMEM_VECTOR_ELEMENTS)
+    {
+        if(strcmp(elem, name) == 0)
+        {
+            return;
+        }
+    }
+    admitted[0] = '\0';
+    for(const char* name : ROCKE_SMEM_VECTOR_ELEMENTS)
+    {
+        const int n
+            = snprintf(admitted + used, sizeof admitted - used, "%s%s", used ? " / " : "", name);
+        if(n < 0 || (size_t)n >= sizeof admitted - used)
+        {
+            break; /* cannot happen: the list fits; stop rather than overrun */
+        }
+        used += (size_t)n;
+    }
+    rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s supports %s, got %s", access, admitted, elem);
+}
+
 static bool rocke_n_in(int n, const int* allowed, int count)
 {
     int i;
@@ -276,6 +311,7 @@ void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
         return;
     }
     elem_name = value->type->elem->name;
+    rocke_require_smem_vector_elem(b, "smem_store_vN", elem_name);
     {
         const int* allowed = allowed_other;
         int acount = 3;
@@ -380,18 +416,7 @@ rocke_value_t* rocke_b_smem_load_vN(rocke_ir_builder_t* b,
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "smem_load_vN dtype is NULL");
     }
     dn = dtype->name;
-    if(!(strcmp(dn, "f16") == 0 || strcmp(dn, "bf16") == 0 || strcmp(dn, "i16") == 0
-         || strcmp(dn, "f32") == 0 || strcmp(dn, "tf32") == 0 || strcmp(dn, "i32") == 0
-         || strcmp(dn, "f64") == 0 || strcmp(dn, "fp8e4m3") == 0 || strcmp(dn, "bf8e5m2") == 0
-         || strcmp(dn, "i8") == 0))
-    {
-        return (rocke_value_t*)rocke_i_set_err(
-            b,
-            ROCKE_ERR_VALUE,
-            "smem_load_vN supports f16 / bf16 / i16 / f32 / i32 / tf32 / f64 / "
-            "fp8e4m3 / bf8e5m2 / i8, got %s",
-            dn);
-    }
+    rocke_require_smem_vector_elem(b, "smem_load_vN", dn);
     {
         const int* allowed = allowed_32bit;
         int acount = 5;

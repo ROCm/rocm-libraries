@@ -182,12 +182,55 @@ rocke_value_t* rocke_b_lnot(rocke_ir_builder_t* b, rocke_value_t* a)
 
 rocke_value_t* rocke_b_smax(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
 {
+    if(a && c)
+    {
+        rocke_i_refuse_unsigned("smax", a->type, "umax");
+        rocke_i_refuse_unsigned("smax", c->type, "umax");
+    }
     return rocke_i_binop(b, ROCKE_OP_ARITH_SMAX, a, c, "smax");
 }
 
 rocke_value_t* rocke_b_smin(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
 {
+    if(a && c)
+    {
+        rocke_i_refuse_unsigned("smin", a->type, "umin");
+        rocke_i_refuse_unsigned("smin", c->type, "umin");
+    }
     return rocke_i_binop(b, ROCKE_OP_ARITH_SMIN, a, c, "smin");
+}
+
+/* umax / umin take two scalar operands of one unsigned type (u8). */
+static rocke_value_t* unsigned_min_max(rocke_ir_builder_t* b,
+                                       rocke_opcode_t opcode,
+                                       const char* op_name,
+                                       rocke_value_t* a,
+                                       rocke_value_t* c)
+{
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!a || !c)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s NULL operand", op_name);
+    if(a->type->kind == ROCKE_TYPE_VECTOR || !rocke_type_is_unsigned(a->type)
+       || !rocke_type_eq(a->type, c->type))
+        return (rocke_value_t*)rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "%s expects two operands of one unsigned integer type, got %s and %s",
+            op_name,
+            a->type->name,
+            c->type->name);
+    return rocke_i_binop(b, opcode, a, c, op_name);
+}
+
+rocke_value_t* rocke_b_umax(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
+{
+    return unsigned_min_max(b, ROCKE_OP_ARITH_UMAX, "umax", a, c);
+}
+
+rocke_value_t* rocke_b_umin(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
+{
+    return unsigned_min_max(b, ROCKE_OP_ARITH_UMIN, "umin", a, c);
 }
 
 rocke_value_t* rocke_b_xor(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
@@ -512,6 +555,7 @@ rocke_value_t* rocke_b_sext(rocke_ir_builder_t* b, rocke_value_t* v, const rocke
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "sext NULL value");
     if(!target)
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "sext NULL target");
+    rocke_i_refuse_unsigned("sext", v->type, "zext");
     operands[0] = v;
     return rocke_i_op1(b, ROCKE_OP_ARITH_SEXT, operands, 1, target, NULL, "sx");
 }
@@ -700,6 +744,23 @@ rocke_value_t* rocke_b_sitofp_f32(rocke_ir_builder_t* b, rocke_value_t* v)
             b, ROCKE_ERR_VALUE, "sitofp_f32 expects i32 input, got %s", v->type->name);
     operands[0] = v;
     return rocke_i_op1(b, ROCKE_OP_ARITH_SITOFP_F32, operands, 1, rocke_f32(), NULL, "sitof");
+}
+
+rocke_value_t* rocke_b_uitofp_f32(rocke_ir_builder_t* b, rocke_value_t* v)
+{
+    rocke_value_t* operands[1];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!v)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "uitofp_f32 NULL value");
+    if(v->type->kind == ROCKE_TYPE_VECTOR || !rocke_type_is_unsigned(v->type))
+        return (rocke_value_t*)rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "uitofp_f32 expects an unsigned integer input, got %s",
+            v->type->name);
+    operands[0] = v;
+    return rocke_i_op1(b, ROCKE_OP_ARITH_UITOFP_F32, operands, 1, rocke_f32(), NULL, "uitof");
 }
 
 /* f32 <-> f64 has its own opcode per direction rather than riding on
@@ -900,6 +961,20 @@ rocke_value_t* rocke_b_cvt_f32_to_i8_sat(rocke_ir_builder_t* b, rocke_value_t* v
             b, ROCKE_ERR_VALUE, "cvt_f32_to_i8_sat expects f32 input, got %s", v->type->name);
     operands[0] = v;
     return rocke_i_op1(b, ROCKE_OP_ARITH_CVT_F32_TO_I8_SAT, operands, 1, rocke_i8(), NULL, "qi8");
+}
+
+rocke_value_t* rocke_b_cvt_f32_to_u8_sat(rocke_ir_builder_t* b, rocke_value_t* v)
+{
+    rocke_value_t* operands[1];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!v)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "cvt_f32_to_u8_sat NULL value");
+    if(!rocke_i_type_is(v->type, "f32"))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "cvt_f32_to_u8_sat expects f32 input, got %s", v->type->name);
+    operands[0] = v;
+    return rocke_i_op1(b, ROCKE_OP_ARITH_CVT_F32_TO_U8_SAT, operands, 1, rocke_u8(), NULL, "qu8");
 }
 
 rocke_value_t* rocke_b_cvt_pk_fp8_f32x4(rocke_ir_builder_t* b, rocke_value_t* v)

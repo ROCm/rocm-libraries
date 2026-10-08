@@ -31,6 +31,7 @@ _SIGNATURE_DTYPE = {
     np.int32: "i32",
     np.int16: "i16",
     np.int8: "i8",
+    np.uint8: "u8",
 }
 
 

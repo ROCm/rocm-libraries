@@ -60,6 +60,11 @@ static const rocke_dtype_alias_t k_dtype_aliases[] = {
     {"int4", "i4"},
     {"i32", ROCKE_DTYPE_I32},
     {"int32", ROCKE_DTYPE_I32},
+    /* Unsigned integers (logical types; no unsigned arithmetic yet). */
+    {"u8", "u8"},
+    {"uint8", "u8"},
+    {"u4", "u4"},
+    {"uint4", "u4"},
 };
 #define K_NUM_DTYPE_ALIASES ((int)(sizeof(k_dtype_aliases) / sizeof(k_dtype_aliases[0])))
 
@@ -163,6 +168,8 @@ static const rocke_dtype_info_t k_dtype_info[] = {
     /* Integers. */
     {"i4", ROCKE_DTYPE_INTEGER, 4},
     {"i8", ROCKE_DTYPE_INTEGER, 8},
+    {"u4", ROCKE_DTYPE_INTEGER, 4},
+    {"u8", ROCKE_DTYPE_INTEGER, 8},
     {"i16", ROCKE_DTYPE_INTEGER, 16},
     {"i32", ROCKE_DTYPE_INTEGER, 32},
     {"i64", ROCKE_DTYPE_INTEGER, 64},
