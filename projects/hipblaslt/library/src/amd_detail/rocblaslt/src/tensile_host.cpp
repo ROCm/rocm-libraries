@@ -27,6 +27,9 @@
 // The implementation of the rocblaslt<->Tensile interface layer.
 
 #include "rocblaslt.h"
+#ifdef HIPBLASLT_ENABLE_USER_KERNELS
+#include "include/user_kernel_registry.hpp"
+#endif
 
 /*****************************************************************************
  * This is the only file in rocblaslt which should #include Tensile headers    *
@@ -5736,3 +5739,376 @@ std::atomic_bool& rocblaslt_internal_tensile_is_initialized()
                                                           size_t&                       workspaceSizeInBytes);
 // clang-format on
 CREATECOMPATIBILITYFUNCTION(rocblaslt::RocTuningV2)
+
+#ifdef HIPBLASLT_ENABLE_USER_KERNELS
+/***********************************************************************************
+ * User kernel library
+ ***********************************************************************************/
+
+namespace
+{
+    // Identifies a registered kernel across runs: the payload and the index the
+    // payload gave it. Assigned indices change from run to run.
+    struct UserKernelOrigin
+    {
+        std::string datHash;
+        int         shardIndex = -1;
+    };
+
+    std::mutex                      g_userKernelOriginMutex;
+    std::map<int, UserKernelOrigin> g_userKernelOrigin;
+
+    // Adds a payload's solutions to the running library. Returns, per solution,
+    // the index the payload used and the index this process assigned.
+    rocblaslt_status registerPayloadInMemory(
+        std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
+                                           library,
+        TensileLite::hip::SolutionAdapter* adapter,
+        std::string const&                 datPath,
+        std::string const&                 coPath,
+        std::vector<std::pair<int, int>>*  shardToAssigned)
+    {
+        auto loaded = TensileLite::LoadLibraryFile<TensileLite::ContractionProblemGemm,
+                                                   TensileLite::ContractionSolution>(datPath);
+        auto shard  = std::dynamic_pointer_cast<
+             TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>(loaded);
+        if(!shard)
+            return rocblaslt_status_invalid_value;
+
+        // An indexed shard parses solutions on demand; parse them all first.
+        shard->materializeAllSolutions();
+        if(shard->solutions.empty())
+            return rocblaslt_status_invalid_value;
+
+        // Load by absolute path: lazy loading only searches the shipped library
+        // directory. It matches on basename, so setting each solution's
+        // codeObjectFilename to the basename marks the module as loaded.
+        if(adapter->loadCodeObjectFile(coPath) != hipSuccess)
+            return rocblaslt_status_invalid_value;
+
+        const std::string coBasename = std::filesystem::path(coPath).filename().string();
+
+        std::vector<int>                                               shardIndices;
+        std::vector<std::shared_ptr<TensileLite::ContractionSolution>> solutions;
+        shardIndices.reserve(shard->solutions.size());
+        solutions.reserve(shard->solutions.size());
+        for(auto const& entry : shard->solutions)
+        {
+            if(!entry.second)
+                continue;
+            entry.second->codeObjectFilename = coBasename;
+            shardIndices.push_back(entry.first);
+            solutions.push_back(entry.second);
+        }
+
+        const std::vector<int> assigned = library->userLibrary->addSolutions(solutions);
+        if(assigned.size() != shardIndices.size())
+            return rocblaslt_status_internal_error;
+
+        // Dispatch by index reads the master library's solution map.
+        {
+            std::lock_guard<std::mutex> lock(library->solutionsGuard);
+            for(auto const& solution : solutions)
+                library->solutions[solution->index] = solution;
+        }
+
+        if(shardToAssigned)
+        {
+            shardToAssigned->clear();
+            for(size_t i = 0; i < assigned.size(); ++i)
+                shardToAssigned->emplace_back(shardIndices[i], assigned[i]);
+        }
+        return rocblaslt_status_success;
+    }
+
+    rocblaslt_status getUserKernelLibrary(
+        rocblaslt_handle handle,
+        std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>*
+                                            library,
+        TensileLite::hip::SolutionAdapter** adapter)
+    {
+        std::shared_ptr<hipDeviceProp_t>       deviceProp;
+        std::shared_ptr<TensileLite::Hardware> hardware;
+
+        auto* a = get_library_and_adapter(library, &deviceProp, &hardware, handle->device);
+        if(!*library || !a || !(*library)->userLibrary)
+            return rocblaslt_status_internal_error;
+        if(adapter)
+            *adapter = a;
+        return rocblaslt_status_success;
+    }
+} // namespace
+
+rocblaslt_status rocblaslt_user_kernel_library_open(rocblaslt_handle handle, const char* path)
+try
+{
+    if(!handle)
+        return rocblaslt_status_invalid_handle;
+    if(!path)
+        return rocblaslt_status_invalid_pointer;
+
+    std::string error;
+    if(!rocblaslt::user_kernel::open(path, &error))
+    {
+        log_error(__func__, error.c_str());
+        return rocblaslt_status_invalid_value;
+    }
+    return rocblaslt_status_success;
+}
+catch(const std::exception& e)
+{
+    log_error(__func__, e.what());
+    return rocblaslt_status_internal_error;
+}
+catch(...)
+{
+    return rocblaslt_status_internal_error;
+}
+
+rocblaslt_status rocblaslt_user_kernel_register(rocblaslt_handle  handle,
+                                                const char*       libraryPath,
+                                                const char*       codeObjectPath,
+                                                std::vector<int>& kernelIndices)
+try
+{
+    kernelIndices.clear();
+
+    if(!handle)
+        return rocblaslt_status_invalid_handle;
+    if(!libraryPath || !codeObjectPath)
+        return rocblaslt_status_invalid_pointer;
+
+    std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
+                                       library;
+    TensileLite::hip::SolutionAdapter* adapter = nullptr;
+    if(auto st = getUserKernelLibrary(handle, &library, &adapter); st != rocblaslt_status_success)
+        return st;
+
+    // Store before registering, so every kernel visible here can be restored.
+    std::string datHash, coHash, storedDat, storedCo, error;
+    const bool  persist = rocblaslt::user_kernel::isOpen();
+    if(persist)
+    {
+        if(!rocblaslt::user_kernel::storePayload(
+               libraryPath, codeObjectPath, &datHash, &coHash, &storedDat, &storedCo, &error))
+        {
+            log_error(__func__, error.c_str());
+            return rocblaslt_status_invalid_value;
+        }
+    }
+
+    // Load the stored copy so this run uses the same files a later refresh will.
+    std::vector<std::pair<int, int>> shardToAssigned;
+    if(auto st = registerPayloadInMemory(library,
+                                         adapter,
+                                         persist ? storedDat : std::string(libraryPath),
+                                         persist ? storedCo : std::string(codeObjectPath),
+                                         &shardToAssigned);
+       st != rocblaslt_status_success)
+        return st;
+
+    {
+        std::lock_guard<std::mutex> lock(g_userKernelOriginMutex);
+        for(auto const& pair : shardToAssigned)
+            g_userKernelOrigin[pair.second] = UserKernelOrigin{datHash, pair.first};
+    }
+
+    kernelIndices.reserve(shardToAssigned.size());
+    for(auto const& pair : shardToAssigned)
+        kernelIndices.push_back(pair.second);
+
+    return rocblaslt_status_success;
+}
+catch(const std::exception& e)
+{
+    log_error(__func__, e.what());
+    return rocblaslt_status_internal_error;
+}
+catch(...)
+{
+    return rocblaslt_status_internal_error;
+}
+
+rocblaslt_status rocblaslt_user_kernel_set_exact_match(
+    rocblaslt_handle handle, int kernelIndex, size_t m, size_t n, size_t batch, size_t k)
+try
+{
+    if(!handle)
+        return rocblaslt_status_invalid_handle;
+    if(!TensileLite::isUserKernelIndex(kernelIndex))
+        return rocblaslt_status_invalid_value;
+
+    std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
+        library;
+    if(auto st = getUserKernelLibrary(handle, &library, nullptr); st != rocblaslt_status_success)
+        return st;
+
+    const TensileLite::UserExactKey key{m, n, batch, k};
+    if(!library->userLibrary->setExactMatch(key, kernelIndex))
+        return rocblaslt_status_invalid_value;
+
+    if(rocblaslt::user_kernel::isOpen())
+    {
+        UserKernelOrigin origin;
+        {
+            std::lock_guard<std::mutex> lock(g_userKernelOriginMutex);
+            auto                        it = g_userKernelOrigin.find(kernelIndex);
+            if(it != g_userKernelOrigin.end())
+                origin = it->second;
+        }
+
+        // A kernel registered before the library was opened has no stored
+        // payload, so the mapping applies only to this process.
+        if(origin.datHash.empty())
+        {
+            log_error(__func__,
+                      "kernel was registered before the library was opened; the mapping "
+                      "applies to this process only");
+        }
+        else
+        {
+            std::string                         error;
+            rocblaslt::user_kernel::ExactRecord record;
+            record.datHash    = origin.datHash;
+            record.shardIndex = origin.shardIndex;
+            record.m          = m;
+            record.n          = n;
+            record.batch      = batch;
+            record.k          = k;
+            if(!rocblaslt::user_kernel::recordExactMatch(record, &error))
+            {
+                log_error(__func__, error.c_str());
+                return rocblaslt_status_internal_error;
+            }
+        }
+    }
+
+    return rocblaslt_status_success;
+}
+catch(const std::exception& e)
+{
+    log_error(__func__, e.what());
+    return rocblaslt_status_internal_error;
+}
+catch(...)
+{
+    return rocblaslt_status_internal_error;
+}
+
+rocblaslt_status rocblaslt_user_kernel_refresh(rocblaslt_handle handle, int* numRegistered)
+try
+{
+    if(numRegistered)
+        *numRegistered = 0;
+    if(!handle)
+        return rocblaslt_status_invalid_handle;
+    if(!rocblaslt::user_kernel::isOpen())
+        return rocblaslt_status_invalid_value;
+
+    std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
+                                       library;
+    TensileLite::hip::SolutionAdapter* adapter = nullptr;
+    if(auto st = getUserKernelLibrary(handle, &library, &adapter); st != rocblaslt_status_success)
+        return st;
+
+    // Replay must not append to the journal.
+    std::string                     error;
+    rocblaslt::user_kernel::Journal journal;
+    if(!rocblaslt::user_kernel::readJournal(&journal, &error))
+    {
+        log_error(__func__, error.c_str());
+        return rocblaslt_status_internal_error;
+    }
+
+    // Payload hash -> (payload's own index -> index assigned in this process).
+    std::map<std::string, std::map<int, int>> replayed;
+    int                                       count = 0;
+
+    for(auto const& payload : journal.payloads)
+    {
+        if(replayed.count(payload.datHash))
+            continue;
+
+        const std::string dat = rocblaslt::user_kernel::objectPath(payload.datHash, ".dat");
+        const std::string co  = rocblaslt::user_kernel::objectPath(payload.coHash, ".co");
+
+        std::vector<std::pair<int, int>> shardToAssigned;
+        if(registerPayloadInMemory(library, adapter, dat, co, &shardToAssigned)
+           != rocblaslt_status_success)
+        {
+            // The store may hold code objects for other architectures.
+            log_error(__func__, ("skipping unusable payload " + payload.datHash).c_str());
+            continue;
+        }
+
+        auto& map = replayed[payload.datHash];
+        for(auto const& pair : shardToAssigned)
+        {
+            map[pair.first] = pair.second;
+            std::lock_guard<std::mutex> lock(g_userKernelOriginMutex);
+            g_userKernelOrigin[pair.second] = UserKernelOrigin{payload.datHash, pair.first};
+        }
+        count += static_cast<int>(shardToAssigned.size());
+    }
+
+    for(auto const& exact : journal.exacts)
+    {
+        auto payload = replayed.find(exact.datHash);
+        if(payload == replayed.end())
+            continue;
+        auto assigned = payload->second.find(exact.shardIndex);
+        if(assigned == payload->second.end())
+            continue;
+
+        const TensileLite::UserExactKey key{exact.m, exact.n, exact.batch, exact.k};
+        static_cast<void>(library->userLibrary->setExactMatch(key, assigned->second));
+    }
+
+    if(numRegistered)
+        *numRegistered = count;
+    return rocblaslt_status_success;
+}
+catch(const std::exception& e)
+{
+    log_error(__func__, e.what());
+    return rocblaslt_status_internal_error;
+}
+catch(...)
+{
+    return rocblaslt_status_internal_error;
+}
+
+rocblaslt_status
+    rocblaslt_user_kernel_counts(rocblaslt_handle handle, size_t* registered, size_t* selectable)
+try
+{
+    if(!handle)
+        return rocblaslt_status_invalid_handle;
+
+    std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
+        library;
+    if(auto st = getUserKernelLibrary(handle, &library, nullptr); st != rocblaslt_status_success)
+        return st;
+
+    if(registered)
+        *registered = library->userLibrary->registeredCount();
+    if(selectable)
+        *selectable = library->userLibrary->selectableCount();
+
+    return rocblaslt_status_success;
+}
+catch(const std::exception& e)
+{
+    log_error(__func__, e.what());
+    return rocblaslt_status_internal_error;
+}
+catch(...)
+{
+    return rocblaslt_status_internal_error;
+}
+
+bool rocblaslt_is_user_kernel_index(int index)
+{
+    return TensileLite::isUserKernelIndex(index);
+}
+#endif // HIPBLASLT_ENABLE_USER_KERNELS

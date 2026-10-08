@@ -21,6 +21,14 @@ target_sources(hipblaslt
 )
 target_include_directories(hipblaslt PRIVATE "${PROJECT_SOURCE_DIR}/device-library")
 
+if(HIPBLASLT_ENABLE_USER_KERNELS)
+    target_sources(hipblaslt
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/user_kernel_registry.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/user_kernel_registry.cpp"
+    )
+endif()
+
 if(HIPBLASLT_ENABLE_ROCROLLER)
     add_subdirectory(rocroller)
 endif()
