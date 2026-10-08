@@ -48,11 +48,11 @@ def _pinned(req, spec_id):
     )
     return dataclasses.replace(req, algorithm=candidate.algorithm, spec_id=spec_id)
 
+
 @pytest.mark.parametrize("bad_emit_lse", ["false", 0, 1, None])
 def test_emit_lse_rejects_non_boolean_values(bad_emit_lse):
     with pytest.raises(ValueError, match="emit_lse must be a bool"):
         dispatch_attention(_request("gfx950", emit_lse=bad_emit_lse))
-
 
 
 @pytest.mark.parametrize("arch", sorted(_DENSE_SPEC_IDS))
