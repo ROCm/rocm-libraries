@@ -218,7 +218,6 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
     }
 
     _kernelVariant = config.variant;
-    _invInChannelSliceSize = 1.0f / static_cast<float>(problem.inChannelSliceSize());
 
     size_t xlocalsize = config.xlocalsize;
     const size_t ylocalsize = config.ylocalsize;
@@ -318,12 +317,12 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
         options.update("HIP_PLUGIN_BN_LDS_SIZE", ldsSize);
         options.update("HIP_PLUGIN_BN_VEC_SIZE", config.vectorsize);
         options.update("HIP_PLUGIN_BN_STASH_METHOD", stashMethod);
-
-        options.add("HIP_PLUGIN_BN_NGRPS", ygridsize / ylocalsize);
-        options.add("HIP_PLUGIN_BN_NGRPS2", zgridsize / zlocalsize);
-        options.add("HIP_PLUGIN_BN_GRP0_FINAL", xlocalsizeFinal);
-        options.add("HIP_PLUGIN_BN_GRP1_FINAL", ylocalsizeFinal);
-        options.add("HIP_PLUGIN_BN_GRP2_FINAL", zlocalsizeFinal);
+        options.update("HIP_PLUGIN_BN_GRPS0", xgridsize / xlocalsize);
+        options.update("HIP_PLUGIN_BN_GRPS1", ygridsize / ylocalsize);
+        options.update("HIP_PLUGIN_BN_GRPS2", zgridsize / zlocalsize);
+        options.update("HIP_PLUGIN_BN_GRP0_FINAL", xlocalsizeFinal);
+        options.update("HIP_PLUGIN_BN_GRP1_FINAL", ylocalsizeFinal);
+        options.update("HIP_PLUGIN_BN_GRP2_FINAL", zlocalsizeFinal);
 
         _compiledProgram = kernelCompiler.compile("BatchNormBwdSpatial.cpp", options);
         _runnableKernels.push_back(
@@ -420,7 +419,6 @@ void BatchnormBwdPlan::execute(const Handle& handle,
                                         dbiasBuffer.ptr,
                                         savedMeanPtr,
                                         savedInvVariancePtr,
-                                        _invInChannelSliceSize,
                                         _activationAlpha,
                                         _activationBeta);
         }
@@ -435,7 +433,6 @@ void BatchnormBwdPlan::execute(const Handle& handle,
                                         dscaleBuffer.ptr,
                                         dbiasBuffer.ptr,
                                         _epsilon,
-                                        _invInChannelSliceSize,
                                         _activationAlpha,
                                         _activationBeta);
         }
@@ -466,15 +463,13 @@ void BatchnormBwdPlan::execute(const Handle& handle,
                                     dbiasBuffer.ptr,
                                     savedMeanPtr,
                                     savedInvVariancePtr,
-                                    _invInChannelSliceSize,
                                     _activationAlpha,
                                     _activationBeta);
     }
     else
     {
         _runnableKernels[0]->launch(handle.getStream(), xBuffer.ptr, dxBuffer.ptr);
-        _runnableKernels[1]->launch(
-            handle.getStream(), dxBuffer.ptr, _invInChannelSliceSize, _epsilon);
+        _runnableKernels[1]->launch(handle.getStream(), dxBuffer.ptr, _epsilon);
         _runnableKernels[2]->launch(handle.getStream(),
                                     xBuffer.ptr,
                                     dyBuffer.ptr,
@@ -493,7 +488,6 @@ void BatchnormBwdPlan::execute(const Handle& handle,
                                     biasPtr,
                                     dscaleBuffer.ptr,
                                     dbiasBuffer.ptr,
-                                    _invInChannelSliceSize,
                                     _activationAlpha,
                                     _activationBeta);
     }

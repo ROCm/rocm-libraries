@@ -307,11 +307,17 @@ TEST(TestBatchnormFwdInferenceWithVariancePlanFp32, CompileDefaultSetsCorrectDef
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SAVE_MEAN_VARIANCE=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_RUNNING_RESULT=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_BATCHES=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_CHANNELS=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SPATIAL_SIZE=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_CHANNELS=3"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SPATIAL_SIZE=50176"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP0_FINAL=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP1_FINAL=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP2_FINAL=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP0=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP1=256"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP2=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRPS0=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRPS1=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRPS2=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_BATCH_ELEMENTS=HIP_PLUGIN_BN_BATCHES"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_AMDGCN=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAX_BATCH=768"));
@@ -360,6 +366,9 @@ TEST(TestBatchnormFwdInferenceWithVariancePlanFp32, CompileSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP32=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_BATCHES=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_CHANNELS=3"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SPATIAL_SIZE=50176"));
 }
 
 TEST(TestBatchnormFwdInferenceWithVariancePlanFp16, CompileSetsCorrectDefines)
@@ -399,6 +408,9 @@ TEST(TestBatchnormFwdInferenceWithVariancePlanFp16, CompileSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FPMIX=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_BATCHES=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_CHANNELS=3"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SPATIAL_SIZE=50176"));
 }
 
 TEST(TestBatchnormFwdInferenceWithVariancePlanBfp16, CompileSetsCorrectDefines)
@@ -439,6 +451,9 @@ TEST(TestBatchnormFwdInferenceWithVariancePlanBfp16, CompileSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFPMIX=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_BATCHES=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_CHANNELS=3"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SPATIAL_SIZE=50176"));
 }
 
 TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileNchwLayoutSetsCorrectDefine)

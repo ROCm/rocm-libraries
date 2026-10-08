@@ -932,8 +932,9 @@ TEST(TestBatchnormFwdTrainingActivPlan, CompileDefaultSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP0=1024"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP1=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP2=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NGRPS=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NGRPS2=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRPS0=3"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRPS1=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRPS2=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_BATCH_ELEMENTS=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_AMDGCN=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAX_BATCH=768"));

@@ -34,7 +34,6 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
                                                       const MeanVarType* invVariance,
                                                       const ScaleType* scale,
                                                       const ScaleType* bias,
-                                                      unsigned int batches,
                                                       unsigned int channelStride,
                                                       unsigned int spatialStride,
                                                       unsigned int batchStride,
@@ -49,7 +48,7 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
     // NOTE: We use zlocalsize = 1 and zgridsize = min(batches, maxGridSizeToFillTheGPU). So the
     // idea here is to use the blocks in z-dimension to cover the batch dimension first, and then
     // each block will loop over the remaining batches with stride of gridDim.z if necessary.
-    for(unsigned int batch = blockIdx.z; batch < batches; batch += gridDim.z)
+    for(unsigned int batch = blockIdx.z; batch < HIP_PLUGIN_BN_BATCHES; batch += gridDim.z)
     {
         // load input value
         const unsigned int batchIndex = (batch * batchStride) + (tidx * channelStride * vecSizeX)
@@ -104,9 +103,6 @@ extern "C" __global__ void __launch_bounds__(blockSize)
                                 const ScaleType* __restrict scale,
                                 const ScaleType* __restrict bias,
                                 double epsilon,
-                                unsigned int channels,
-                                unsigned int spatialSize,
-                                unsigned int batches,
                                 unsigned int channelStride,
                                 unsigned int spatialStride,
                                 unsigned int batchStride,
@@ -122,7 +118,8 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     constexpr unsigned int vecSizeY = HIP_PLUGIN_LAYOUT_CHANNEL_LAST ? 1 : HIP_PLUGIN_BN_VEC_SIZE;
 
     // skip execution for out-of-bound threads
-    if(tidx * vecSizeX >= channels || tidy * vecSizeY >= spatialSize || tidz >= batches)
+    if(tidx * vecSizeX >= HIP_PLUGIN_BN_CHANNELS || tidy * vecSizeY >= HIP_PLUGIN_BN_SPATIAL_SIZE
+       || tidz >= HIP_PLUGIN_BN_BATCHES)
     {
         return;
     }
@@ -177,7 +174,6 @@ extern "C" __global__ void __launch_bounds__(blockSize)
                                               invVariance,
                                               pscale,
                                               pbias,
-                                              batches,
                                               channelStride,
                                               spatialStride,
                                               batchStride,
@@ -194,9 +190,6 @@ extern "C" __global__ void __launch_bounds__(blockSize)
                                       const MeanVarType* __restrict estimatedInvVariance,
                                       const ScaleType* __restrict scale,
                                       const ScaleType* __restrict bias,
-                                      unsigned int channels,
-                                      unsigned int spatialSize,
-                                      unsigned int batches,
                                       unsigned int channelStride,
                                       unsigned int spatialStride,
                                       unsigned int batchStride,
@@ -212,7 +205,8 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     constexpr unsigned int vecSizeY = HIP_PLUGIN_LAYOUT_CHANNEL_LAST ? 1 : HIP_PLUGIN_BN_VEC_SIZE;
 
     // skip execution for out-of-bound threads
-    if(tidx * vecSizeX >= channels || tidy * vecSizeY >= spatialSize || tidz >= batches)
+    if(tidx * vecSizeX >= HIP_PLUGIN_BN_CHANNELS || tidy * vecSizeY >= HIP_PLUGIN_BN_SPATIAL_SIZE
+       || tidz >= HIP_PLUGIN_BN_BATCHES)
     {
         return;
     }
@@ -260,7 +254,6 @@ extern "C" __global__ void __launch_bounds__(blockSize)
                                               invVariance,
                                               pscale,
                                               pbias,
-                                              batches,
                                               channelStride,
                                               spatialStride,
                                               batchStride,
