@@ -200,6 +200,12 @@ class KernelIdentity:
     # binary's identity rather than a default the two could drift apart on.
     # 0 = no scratch (not two-stage).
     ws_replicas: int = 0
+    # wgrad stream-K (WgradConvSpec.streamk / streamk_reduction): the launch
+    # mode ("dp_sk" or "persistent") and the partial-sum reduction are baked
+    # into the ISA; the CTA pool is a kernarg, so it is not here. "off" / ""
+    # for every other kernel.
+    streamk: str = "off"
+    streamk_reduction: str = ""
     group_merge: int = 1
     num_load_waves: int = 0
     cshuffle_no_alias: bool = False
@@ -271,6 +277,9 @@ class KernelIdentity:
         # field keep their hash (and their cache entries).
         if not fields["ws_replicas"]:
             del fields["ws_replicas"]
+        # Same for the stream-K pair at "no stream-K".
+        if fields["streamk"] == "off" and not fields["streamk_reduction"]:
+            del fields["streamk"], fields["streamk_reduction"]
         payload = json.dumps(fields, sort_keys=True, separators=(",", ":"))
         return hashlib.sha1(payload.encode()).hexdigest()
 

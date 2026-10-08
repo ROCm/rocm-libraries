@@ -156,9 +156,6 @@ from kernels.common.conv_implicit_gemm_wgrad import (
     _DEFAULT_WS_REPLICAS as _WGRAD_WS_REPLICAS,
     is_valid_wgrad_spec as _wgrad_is_valid_spec,
     wgrad_atomic_epilogue_available as _wgrad_atomic_epilogue_available,
-    wgrad_streamk_default_pool as _wgrad_streamk_default_pool,
-    wgrad_streamk_grid as _wgrad_streamk_grid,
-    wgrad_streamk_launch_values as _wgrad_streamk_launch_values,
 )
 from kernels.common.conv_implicit_gemm_dgrad import (
     DgradConvSpec,
@@ -278,13 +275,6 @@ class ConvGroupedRequest(OperatorRequest):
     dilation_d: Optional[int] = None
     # optional vec_size_c override; None = let the candidate decide
     vec_size_c: Optional[int] = None
-    # wgrad only: "auto" (default) picks stream-K for the shapes it is measured
-    # to win on (_wgrad_streamk_auto) and the grid-per-tile kernel with auto
-    # split-K otherwise; "off" never uses stream-K; "dp_sk" / "persistent"
-    # force it. streamk_reduction picks how the CTAs sharing an output tile
-    # combine their partial sums; "auto" is the f32 workspace reduction.
-    streamk: str = "auto"
-    streamk_reduction: str = "auto"
     op: str = "conv_grouped"
     algorithm: str = "auto"
     spec_id: str = "auto"
@@ -379,19 +369,6 @@ def _request_errors(req: OperatorRequest) -> list[str]:
         errors.append(f"unsupported dtype {req.dtype!r}; fp16 or bf16 only")
     if req.layout.upper() != "NHWC":
         errors.append(f"unsupported layout {req.layout!r}; NHWC only")
-    if req.streamk not in ("off", "auto", "dp_sk", "persistent"):
-        errors.append(
-            "streamk must be 'off', 'auto', 'dp_sk' or 'persistent', got "
-            f"{req.streamk!r}"
-        )
-    elif req.streamk in ("dp_sk", "persistent") and req.direction != "wgrad":
-        errors.append(f"streamk is wgrad-only, got direction={req.direction!r}")
-    if req.streamk_reduction not in ("auto", "linear", "tree", "workspace"):
-        # 'atomic' needs an fp32 dW, which a fp16/bf16 request never has.
-        errors.append(
-            "streamk_reduction must be 'auto', 'linear', 'tree' or 'workspace', "
-            f"got {req.streamk_reduction!r}"
-        )
     try:
         ArchTarget.from_gfx(req.arch)
     except KeyError as e:
@@ -459,9 +436,7 @@ def _epilogue_for(req: ConvGroupedRequest) -> str:
     return "cshuffle" if _vec_size_c(req) > 1 else "default"
 
 
-def _wgrad_grouped_overrides(
-    req: ConvGroupedRequest, streamk: str = "off"
-) -> Tuple[str, int]:
+def _wgrad_grouped_overrides(req: ConvGroupedRequest) -> Tuple[str, int]:
     """(epilogue, split_k) for a wgrad spec.
 
     Grouping is orthogonal to the epilogue and split-K: every epilogue (direct,
@@ -471,100 +446,8 @@ def _wgrad_grouped_overrides(
     same vec-derived epilogue and auto split-K formula (split_k=-1) as ungrouped.
     (WMMA grouped is handled by its own candidate, which forces
     default@split_k=1 -- WMMA has neither a cshuffle nor a split-K path.)
-
-    ``streamk`` is the resolved mode from :func:`_wgrad_streamk_choice`.
     """
-    if streamk != "off":
-        # Stream-K owns the K range (no split-K) and stores each tile through
-        # the direct epilogue once per tile inside its tile loop.
-        return "default", 1
     return _epilogue_for(req), -1
-
-
-# Auto-selection thresholds for stream-K wgrad, in units of the candidate's
-# own tiles. Stream-K pays off when a handful of output tiles sit on a long
-# reduction: split-K can only cut that reduction into equal slices per tile,
-# while stream-K balances iterations across the whole CTA pool. With many
-# tiles, or a short reduction, the grid-per-tile kernel is already balanced and
-# stream-K's per-tile fixup is pure overhead. Fitted on a benchmark corpus of
-# production wgrad shapes on gfx950 and kept deliberately coarse (two
-# thresholds) so it does not encode that corpus.
-_WGRAD_STREAMK_MAX_TILES = 128
-_WGRAD_STREAMK_MIN_ITERS_PER_TILE = 1024
-
-
-def _wgrad_streamk_auto(
-    req: ConvGroupedRequest,
-    tile_m: int,
-    tile_n: int,
-    tile_k: int,
-    reduction: str = "workspace",
-) -> bool:
-    """Whether ``streamk="auto"`` should pick stream-K for this request.
-
-    Besides the two thresholds, the partition the launch will use must give
-    the stream-K CTAs work: a pool larger than ``tiles * iters_per_tile``
-    (one tile on a bigger arch's pool) falls back to all-DP, which runs each
-    tile's whole reduction on one CTA, slower than the split-K path it would
-    replace.
-    """
-    from rocke.helpers.streamk import streamk_iter_partition
-
-    p = _problem(req)
-    spatial = (p.Z if p.is_3d else 1) * p.Y * p.X
-    wg_M = p.K // p.groups
-    wg_N = spatial * (p.C // p.groups)
-    wg_K = p.N * p.Ho * p.Wo * (p.Do if p.is_3d else 1)
-    tiles = -(-wg_M // tile_m) * -(-wg_N // tile_n) * p.groups
-    iters_per_tile = -(-wg_K // tile_k)
-    if (
-        tiles > _WGRAD_STREAMK_MAX_TILES
-        or iters_per_tile < _WGRAD_STREAMK_MIN_ITERS_PER_TILE
-    ):
-        return False
-    part = streamk_iter_partition(
-        m_tiles=tiles,
-        n_tiles=1,
-        iters_per_tile=iters_per_tile,
-        max_active_wgs=_wgrad_streamk_default_pool(reduction, req.arch),
-    )
-    return part.sk_ctas > 0
-
-
-def _wgrad_streamk_choice(
-    req: ConvGroupedRequest, tile_m: int, tile_n: int, tile_k: int
-) -> Tuple[str, str]:
-    """Resolve the request's ``(streamk, streamk_reduction)`` to concrete values.
-
-    The one resolver every wgrad candidate's instance spec, dispatch spec and
-    grid go through, so they cannot disagree on whether the kernel is stream-K.
-    """
-    # The f32 workspace reduction never waits on another CTA, so its pool can be
-    # sized for occupancy; it is also the fastest of the reductions measured.
-    reduction = (
-        "workspace" if req.streamk_reduction == "auto" else req.streamk_reduction
-    )
-    mode = req.streamk
-    if mode == "auto":
-        mfma = req.arch in ("gfx942", "gfx950")
-        mode = (
-            "dp_sk"
-            if mfma and _wgrad_streamk_auto(req, tile_m, tile_n, tile_k, reduction)
-            else "off"
-        )
-    return mode, reduction
-
-
-def _wgrad_streamk_fields(mode: str, reduction: str) -> dict:
-    """The WgradConvSpec stream-K fields for a resolved choice.
-
-    ``streamk_ctas`` stays -1 (sized by the instance from the arch and the
-    reduction) so the spec, the kernel and the launch grid all derive the pool
-    from the same place.
-    """
-    if mode == "off":
-        return {}
-    return {"streamk": mode, "streamk_reduction": reduction, "streamk_ctas": -1}
 
 
 def _data_spec(req: ConvGroupedRequest) -> ConvDataSpec:
@@ -610,8 +493,6 @@ class ConvGroupedSpec:
     arch: str
     split_k: int = 1  # wgrad only
     lds_k_outer: bool = False  # wgrad only
-    streamk: str = "off"  # wgrad only
-    streamk_reduction: str = "linear"  # wgrad only
     name: str = "rocke_conv_grouped"
 
     def kernel_name(self) -> str:
@@ -635,9 +516,6 @@ class ConvGroupedSpec:
         #     fetch rather than a transpose-on-store.
         if self.direction in ("wgrad", "dgrad") and self.lds_k_outer:
             parts.append("kouter")
-        #   streamk: a different grid, K ranges and fixup epilogue.
-        if self.direction == "wgrad" and self.streamk != "off":
-            parts.append(f"sk_{self.streamk}_{self.streamk_reduction}")
         return kernel_name_join(self.name, *parts)
 
     def to_fwd_spec(self, problem: "ConvProblem") -> "ImplicitGemmConvSpec":
@@ -675,18 +553,7 @@ class ConvGroupedSpec:
         """
         assert self.direction == "wgrad", "to_wgrad_spec is only valid for wgrad specs"
         target = ArchTarget.from_gfx(self.arch)
-        if self.streamk != "off":
-            # Stream-K owns the K range: no split-K, no two-stage, and the
-            # direct epilogue runs per tile.
-            resolved_split_k, two_stage = 1, False
-            streamk = {
-                "streamk": self.streamk,
-                "streamk_reduction": self.streamk_reduction,
-                "streamk_ctas": -1,
-            }
-        else:
-            resolved_split_k, two_stage, _ = _resolve_wgrad_split_k(self, problem)
-            streamk = {}
+        resolved_split_k, two_stage, _ = _resolve_wgrad_split_k(self, problem)
         return WgradConvSpec(
             problem=problem,
             name=self.name,
@@ -708,8 +575,7 @@ class ConvGroupedSpec:
             pipeline=self.pipeline,
             # two_stage writes one f32 per element via workspace store; cshuffle
             # is not used and would produce an invalid spec (validator rejects it).
-            # Stream-K likewise stores through the direct epilogue.
-            epilogue="default" if (two_stage or streamk) else self.epilogue,
+            epilogue="default" if two_stage else self.epilogue,
             split_k=resolved_split_k,
             two_stage=two_stage,
             # Pin the replica count explicitly rather than inheriting the
@@ -717,7 +583,6 @@ class ConvGroupedSpec:
             # the i32 ws_bytes ABI using this same constant, and a cap computed
             # over a different R than the spec carries bounds nothing.
             ws_replicas=_WGRAD_WS_REPLICAS,
-            **streamk,
         )
 
     def to_dgrad_spec(self, problem: "ConvProblem") -> "DgradConvSpec":
@@ -857,10 +722,6 @@ def _resolve_wgrad_split_k(
 def _wgrad_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, int]:
     assert isinstance(req, ConvGroupedRequest)
     p = _problem(req)
-    if spec.streamk != "off":
-        # One-dimensional stream-K launch, sized from the same spec the kernel
-        # is built from so the two cannot disagree on the CTA pool.
-        return _wgrad_streamk_grid(spec.to_wgrad_spec(p), arch=spec.arch, problem=p)
     spatial = (p.Z if p.is_3d else 1) * p.Y * p.X
     # Per-group GEMM dims. For the ungrouped path G==1 these reduce to wg_M=K,
     # wg_N=spatial*C.
@@ -1248,8 +1109,7 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
 
     def _build_instance_spec(req: ConvGroupedRequest) -> WgradConvSpec:
         tm, tn, tk, wm, wn, wtmn, wtk = _tile(req)
-        _skm, _skr = _wgrad_streamk_choice(req, tm, tn, tk)
-        _ep, _sk = _wgrad_grouped_overrides(req, _skm)
+        _ep, _sk = _wgrad_grouped_overrides(req)
         return WgradConvSpec(
             problem=_problem(req),
             name=name,
@@ -1266,7 +1126,6 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
             pipeline=_PIPELINE,
             epilogue=_ep,
             split_k=_sk,
-            **_wgrad_streamk_fields(_skm, _skr),
         )
 
     def support(req: OperatorRequest) -> Tuple[bool, str]:
@@ -1292,8 +1151,7 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, ConvGroupedRequest)
         tm, tn, tk, wm, wn, wtmn, wtk = _tile(req)
-        _skm, _skr = _wgrad_streamk_choice(req, tm, tn, tk)
-        _ep, _sk = _wgrad_grouped_overrides(req, _skm)
+        _ep, _sk = _wgrad_grouped_overrides(req)
         return ConvGroupedSpec(
             direction="wgrad",
             tile_m=tm,
@@ -1308,8 +1166,6 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
             dtype=req.dtype.lower(),
             arch=req.arch,
             split_k=_sk,
-            streamk=_skm,
-            streamk_reduction=_skr,
             name=name,
         )
 
@@ -1444,8 +1300,7 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
 
     def _build_instance_spec(req: ConvGroupedRequest) -> WgradConvSpec:
         tm, tn, tk, wm, wn, wtmn, wtk = _tile(req)
-        _skm, _skr = _wgrad_streamk_choice(req, tm, tn, tk)
-        _ep, _sk = _wgrad_grouped_overrides(req, _skm)
+        _ep, _sk = _wgrad_grouped_overrides(req)
         return WgradConvSpec(
             problem=_problem(req),
             name=name,
@@ -1463,7 +1318,6 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
             pipeline=_pipeline(req),
             epilogue=_ep,
             split_k=_sk,
-            **_wgrad_streamk_fields(_skm, _skr),
         )
 
     def support(req: OperatorRequest) -> Tuple[bool, str]:
@@ -1489,8 +1343,7 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, ConvGroupedRequest)
         tm, tn, tk, wm, wn, wtmn, wtk = _tile(req)
-        _skm, _skr = _wgrad_streamk_choice(req, tm, tn, tk)
-        _ep, _sk = _wgrad_grouped_overrides(req, _skm)
+        _ep, _sk = _wgrad_grouped_overrides(req)
         return ConvGroupedSpec(
             direction="wgrad",
             tile_m=tm,
@@ -1506,8 +1359,6 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
             dtype=req.dtype.lower(),
             arch=req.arch,
             split_k=_sk,
-            streamk=_skm,
-            streamk_reduction=_skr,
             name=name,
         )
 
@@ -1680,9 +1531,7 @@ def _make_gfx1250_wgrad_candidate() -> KernelCandidate:
     test_gfx1250_grouped_wgrad_dual_engine). Group merging (``group_merge > 1``)
     is MFMA-only and additionally needs split_k > 1 on the two-stage path, so it
     is unreachable here on both counts: is_valid_wgrad_spec rejects it for
-    wave32 and for the split_k=1 this candidate forces. Stream-K is MFMA-only
-    too, so a stream-K request is turned away rather than silently served by
-    the grid-per-tile kernel.
+    wave32 and for the split_k=1 this candidate forces.
     """
     name = "implicit_gemm_conv_wgrad_gfx1250"
     spec_id = "igemm_conv_wgrad_gfx1250_32x32"
@@ -1729,8 +1578,6 @@ def _make_gfx1250_wgrad_candidate() -> KernelCandidate:
             return False, f"gfx1250 candidate requires arch=gfx1250 (got {req.arch!r})"
         if req.direction != "wgrad":
             return False, f"candidate handles 'wgrad', got direction={req.direction!r}"
-        if req.streamk in ("dp_sk", "persistent"):
-            return False, "stream-K wgrad is MFMA-only (gfx942, gfx950)"
         ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
@@ -1912,23 +1759,13 @@ def _signature_for(req: ConvGroupedRequest, spec: ConvGroupedSpec) -> tuple:
 
     The trailing args are not cosmetic: dgrad always carries the tilde record
     buffer, wgrad always carries ``ks``/``ks_count``, and a two-stage wgrad
-    also carries the workspace pair; a stream-K wgrad carries its reduction's
-    buffers and the partition block. Kernargs pack positionally, so omitting
+    also carries the workspace pair. Kernargs pack positionally, so omitting
     one shifts every argument after it.
     """
     from kernels.common.conv_abi import conv_args_signature
 
     p = _problem(req)
     dtype = req.dtype
-    if req.direction == "wgrad" and spec.streamk != "off":
-        return tuple(
-            conv_args_signature(
-                dtype,
-                direction="wgrad",
-                is_3d=p.is_3d,
-                streamk=spec.streamk_reduction,
-            )
-        )
     if req.direction == "wgrad":
         # Two-stage is decided by the resolver, not carried on the dispatcher
         # spec: it is what to_wgrad_spec builds the kernel from, so asking
@@ -1961,8 +1798,6 @@ def launch_values_for(
     ws_bytes: Optional[int] = None,
     sub_gemm_buf: Optional[int] = None,
     num_sub_gemms: Optional[int] = None,
-    sk_flags: Optional[int] = None,
-    sk_partials: Optional[int] = None,
 ) -> dict:
     """Compute the full AOT ``values`` dict for a dispatch request.
 
@@ -1973,34 +1808,11 @@ def launch_values_for(
 
     The tile size comes from ``spec`` because the chiplet-swizzle path decodes
     the workgroup id against ``p_num_pid_m/n``, which are tile-count values.
-
-    A stream-K wgrad launch takes ``ws_ptr``/``ws_bytes`` for the workspace
-    reduction or ``sk_flags``/``sk_partials`` for linear/tree (laid out by
-    ``wgrad_streamk_workspace_layout``); its partition block is computed here
-    from the request's shape and the arch's CTA pool.
     """
     from kernels.common.conv_args import ConvArgs
 
     p = _problem(req)
     tile_m, tile_n = spec.tile_m, spec.tile_n
-    if req.direction == "wgrad" and spec.streamk != "off":
-        return _wgrad_streamk_launch_values(
-            spec.to_wgrad_spec(p),
-            A_ptr,
-            B_ptr,
-            D_ptr,
-            A_bytes,
-            B_bytes,
-            D_bytes,
-            arch=spec.arch,
-            problem=p,
-            ws_ptr=ws_ptr,
-            ws_bytes=ws_bytes,
-            sk_flags=sk_flags,
-            sk_partials=sk_partials,
-        )
-    if sk_flags is not None or sk_partials is not None:
-        raise ValueError("sk_flags/sk_partials belong to a stream-K wgrad launch")
     if req.direction == "wgrad":
         # The resolved degree, not spec.split_k: the latter may be -1 (auto)
         # or exceed the clamp, while the kernel and _wgrad_grid both use the
@@ -2070,18 +1882,7 @@ def dispatch_conv_grouped(
         f"spec_hash={kid.spec_hash}",
         f"request_hash={kid.request_hash}",
     ]
-    if req.direction == "wgrad" and spec.streamk != "off":
-        why = (
-            f"auto: <= {_WGRAD_STREAMK_MAX_TILES} tiles over >= "
-            f"{_WGRAD_STREAMK_MIN_ITERS_PER_TILE} K iterations each"
-            if req.streamk == "auto"
-            else "requested"
-        )
-        explanation.append(
-            f"streamk={spec.streamk} reduction={spec.streamk_reduction} ({why}; "
-            "split-K off)"
-        )
-    elif req.direction == "wgrad":
+    if req.direction == "wgrad":
         split_k, _two_stage, requested = _resolve_wgrad_split_k(spec, _problem(req))
         if split_k != requested:
             explanation.append(

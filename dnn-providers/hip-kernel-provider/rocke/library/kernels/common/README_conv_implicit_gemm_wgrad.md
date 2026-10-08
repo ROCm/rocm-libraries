@@ -323,16 +323,20 @@ exact for any `wg_M`, avoiding CK's `GemmM % MPerBlock` caveat.
   straddles the dispatch front (its owner for `linear`, about one per round
   for `tree`) can wait on a CTA that has not started yet.
 
-Reachable from dispatch: `ConvGroupedRequest.streamk` defaults to `"auto"`,
-which selects stream-K (with the `workspace` reduction) for few output tiles on
-a long reduction -- at most `_WGRAD_STREAMK_MAX_TILES` tiles of at least
-`_WGRAD_STREAMK_MIN_ITERS_PER_TILE` K iterations each -- and the grid-per-tile
-split-K kernel otherwise. Elsewhere split-K's equal slices already balance the
-grid and stream-K's per-tile fixup is pure overhead. `"off"` never selects it;
-`"dp_sk"` / `"persistent"` force it. A stream-K choice pins `split_k=1` and the
-direct epilogue and routes `_wgrad_grid` through the instance's own
-`wgrad_streamk_grid`, so the spec, the kernargs and the launch grid cannot
-disagree about the pool.
+Not selected by the grouped-convolution dispatcher: `ConvGroupedRequest` has
+no stream-K field and the dispatcher only builds the grid-per-tile kernels, so
+stream-K is reached by building a `WgradConvSpec` with `streamk` set. To
+measure it, use the implicit-GEMM sweep
+(`library/benchmarks/common/benchmark_implicit_gemm_conv.py`, also driven by
+`benchmark_conv_compare.py`) with `--direction wgrad --streamk {dp_sk,persistent,all}`,
+optionally narrowed with `--streamk-reductions` and pinned to a pool with
+`--streamk-ctas` (default `-1`, the per-reduction pool above). The JIT sweep then
+adds a stream-K leg, one kernel per geometry x pipeline x mode x reduction
+(`atomic` only for fp32 dW); `--compile-all --streamk ...` adds the same kernels
+to the AOT cache (`kernel_sweep.py`, opt-in because it more than doubles the
+wgrad grid) and `--run-from-cache --streamk ...` runs the cached ones. Every
+launch follows the zeroing contract above, and `workspace` launches are timed
+together with their Stage 2 reduce.
 
 ## Next steps
 
