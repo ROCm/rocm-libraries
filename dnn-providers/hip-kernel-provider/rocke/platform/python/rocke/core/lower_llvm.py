@@ -38,6 +38,7 @@ from dataclasses import dataclass, field
 from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple
 
 from .codegen_policy import codegen_policy_for_kernel
+from .dtypes import dtype_info
 from .ir import (
     BF16,
     F32,
@@ -1049,7 +1050,23 @@ def _llvm_type(t: Type) -> str:
         return "i8"
     if t.name == "f32":
         return "float"
+    if t.name == "f64":
+        return "double"
     raise NotImplementedError(f"no LLVM mapping for type {t!r}")
+
+
+_LLVM_FLOAT_TYPES = frozenset({"f16", "bf16", "f32", "f64"})
+
+
+def _is_llvm_float(t: Type) -> bool:
+    """Whether a scalar IR type renders as an LLVM floating-point type."""
+    return t.name in _LLVM_FLOAT_TYPES
+
+
+def _float_resize_op(src: Type, dst: Type) -> str:
+    """The LLVM cast between two floating-point types of different widths."""
+    widen = dtype_info(dst.name).encoded_bits > dtype_info(src.name).encoded_bits
+    return "fpext" if widen else "fptrunc"
 
 
 def _llvm_loop_carried_type(t: Type) -> str:
@@ -1556,6 +1573,8 @@ class _Lowerer:
                 return _fp32_hex(val)
             if ity == "f16":
                 return _fp16_hex(val)
+            if ity == "f64":
+                return _fp64_hex(val)
             return str(int(val))
         return v.name
 
@@ -1843,6 +1862,7 @@ class _Lowerer:
             "tf32": 4,
             "f32": 4,
             "i64": 8,
+            "f64": 8,
         }
 
         pool_name = f"@smem_pool.{self.kernel.name}"
@@ -2344,14 +2364,16 @@ class _Lowerer:
 
     def _op_arith_cast_to_f32(self, op: Op) -> None:
         (v,) = op.operands
+        cast = _float_resize_op(v.type, op.result.type)
         self._current().emit(
-            f"  {op.result.name} = fpext {_llvm_type(v.type)} {self._operand(v)} to float"
+            f"  {op.result.name} = {cast} {_llvm_type(v.type)} {self._operand(v)} to float"
         )
 
     def _op_arith_cast_f32_to(self, op: Op) -> None:
         (v,) = op.operands
+        cast = _float_resize_op(v.type, op.result.type)
         self._current().emit(
-            f"  {op.result.name} = fptrunc float {self._operand(v)} to {_llvm_type(op.result.type)}"
+            f"  {op.result.name} = {cast} float {self._operand(v)} to {_llvm_type(op.result.type)}"
         )
 
     def _op_arith_sitofp_f32(self, op: Op) -> None:
@@ -3067,6 +3089,7 @@ class _Lowerer:
             "tf32": 4,
             "f32": 4,
             "i64": 8,
+            "f64": 8,
         }.get(value.type.name, 2)
         self._current().emit(
             f"  store {_llvm_type(value.type)} {self._operand(value)}, ptr addrspace(3) {gep}, align {align}"
@@ -3132,6 +3155,7 @@ class _Lowerer:
             "tf32": 4,
             "f32": 4,
             "i64": 8,
+            "f64": 8,
         }.get(
             value.type.elem.name, 2
         )  # type: ignore[attr-defined]
@@ -3215,6 +3239,7 @@ class _Lowerer:
             "tf32": 4,
             "f32": 4,
             "i64": 8,
+            "f64": 8,
         }.get(
             op.result.type.elem.name,
             2,  # type: ignore[attr-defined]
@@ -5450,6 +5475,7 @@ class _Lowerer:
             "tf32": 4,
             "f32": 4,
             "i64": 8,
+            "f64": 8,
         }.get(elem_name, 2)
         align = int(op.attrs.get("align", vec * elem_bytes))
         if align <= 0 or align & (align - 1):
@@ -5569,16 +5595,16 @@ class _Lowerer:
         )
 
     def _op_vector_add(self, op: Op) -> None:
-        elem = op.result.type.elem.name  # type: ignore[attr-defined]
-        self._vector_binop(op, "fadd" if elem in ("f16", "bf16", "f32") else "add")
+        elem = op.result.type.elem  # type: ignore[attr-defined]
+        self._vector_binop(op, "fadd" if _is_llvm_float(elem) else "add")
 
     def _op_vector_mul(self, op: Op) -> None:
-        elem = op.result.type.elem.name  # type: ignore[attr-defined]
-        self._vector_binop(op, "fmul" if elem in ("f16", "bf16", "f32") else "mul")
+        elem = op.result.type.elem  # type: ignore[attr-defined]
+        self._vector_binop(op, "fmul" if _is_llvm_float(elem) else "mul")
 
     def _op_vector_sub(self, op: Op) -> None:
-        elem = op.result.type.elem.name  # type: ignore[attr-defined]
-        self._vector_binop(op, "fsub" if elem in ("f16", "bf16", "f32") else "sub")
+        elem = op.result.type.elem  # type: ignore[attr-defined]
+        self._vector_binop(op, "fsub" if _is_llvm_float(elem) else "sub")
 
     def _op_vector_and(self, op: Op) -> None:
         self._vector_binop(op, "and")
@@ -6336,6 +6362,14 @@ def _fp32_hex(x: float) -> str:
     # precision source literal).
     rounded = struct.unpack("<f", struct.pack("<f", float(x)))[0]
     bits = struct.unpack("<Q", struct.pack("<d", rounded))[0]
+    return f"0x{bits:016X}"
+
+
+def _fp64_hex(x: float) -> str:
+    import struct
+
+    # LLVM textual IR spells `double` constants as the 64-bit hex encoding.
+    bits = struct.unpack("<Q", struct.pack("<d", float(x)))[0]
     return f"0x{bits:016X}"
 
 

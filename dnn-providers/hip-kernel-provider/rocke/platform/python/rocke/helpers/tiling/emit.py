@@ -58,18 +58,27 @@ def _align_of(dtype: Any) -> int:
         ) from exc
 
 
-def _cast_element(b: Any, value: Any, src: Any, dst: Any) -> Any:
-    """Honest, fail-fast element cast: identity, or the proven f32->{f16,bf16} accumulator
-    narrowing. Any other conversion raises rather than silently doing the wrong thing.
-    """
-    if src.name == dst.name:
-        return value
-    if src.name == "f32":
-        return b.cast_f32_to(value, dst)  # validates the target itself
-    raise NotImplementedError(
-        f"unsupported fragment cast on store -- src={src.name!r}, dst={dst.name!r}, "
-        f"expected src==dst or src=='f32'"
+# Legacy behaviour, not extended: a store still narrows an f32 fragment into an f16 or
+# bf16 tensor. It goes away once element-type conversion is an explicit verb; no other
+# conversion happens on store.
+_LEGACY_STORE_NARROWINGS = frozenset({("f32", "bf16"), ("f32", "f16")})
+
+
+def _check_store_cast(src: Any, dst: Any) -> None:
+    """Raise, before any IR is emitted, when storing a ``src`` fragment into a ``dst`` tensor
+    would need an element-type conversion the store does not perform."""
+    if src.name == dst.name or (src.name, dst.name) in _LEGACY_STORE_NARROWINGS:
+        return
+    raise ValueError(
+        f"store_fragment does not convert element types: the fragment is {src.name}, the "
+        f"tensor is {dst.name}; store a fragment whose element type matches the tensor"
     )
+
+
+def _cast_element(b: Any, value: Any, src: Any, dst: Any) -> Any:
+    """One register of a ``src`` fragment as a ``dst`` tensor element, for a pair
+    ``_check_store_cast`` accepted."""
+    return value if src.name == dst.name else b.cast_f32_to(value, dst)
 
 
 def emit_lane_contributors(
@@ -494,7 +503,8 @@ def store_fragment(
     lds_swizzle: bool | Callable[[Any, list], list] = False,
 ) -> None:
     """Generic per-lane store: `Fragment` -> memory (`ptr` + `window`), casting the fragment
-    dtype to ``window.tensor.dtype`` only along the honest path (identity or f32->{f16,bf16}).
+    dtype to ``window.tensor.dtype`` only for identity or the legacy f32->{f16,bf16}
+    narrowing; any other pair raises ``ValueError`` before any IR is emitted.
 
     M1 keeps the explicit per-element scatter + cast; the general MMA->memory relayout is
     reserved -- this is not a transparent memcpy. `ptr` is the DEST: a global ``ptr<...>`` OR an LDS
@@ -504,6 +514,7 @@ def store_fragment(
     layout positions (unclipped; strides unused).
     """
     out_dtype = window.tensor.dtype
+    _check_store_cast(fragment.dtype, out_dtype)
     align = _align_of(out_dtype)
     lds = _is_lds(ptr)
     # Wide LDS stores when the innermost register run is contiguous (ds_write_b{32,64,128}); the

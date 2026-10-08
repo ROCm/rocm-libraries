@@ -7,6 +7,7 @@
 - [Conversions](#3-conversion-coverage-helpers-layer)
 - [Hardware atom support](#4-hardware-atom--dtype-support-the-hardware-ceiling)
 - [Kernel-family support](#5-per-family-support-snapshot)
+- [Python-engine-only support](#6-python-engine-only-support)
 
 **What this is.** A source-backed record of which data types rocKE supports, at
 which layer, and what each gap consists of. It covers the **compiler** (the two
@@ -50,6 +51,7 @@ The definitions in both engines are:
 | `f16` | `half` | 16 | float |
 | `bf16` | `bfloat` | 16 | float |
 | `f32` | `float` | 32 | float |
+| `f64` | `double` | 64 | float (Python engine only, §6) |
 | `tf32` | `i32` (carrier) | 32 | logical float; native gfx942 XF32 input |
 | `fp8e4m3` | `i8` (storage) | 8 | float (OCP E4M3) |
 | `bf8e5m2` | `i8` (storage) | 8 | float (OCP E5M2) |
@@ -108,7 +110,7 @@ equivalent; `USE_TF32` output is not a bit-accuracy oracle for BF16 compute.
 The matrix below therefore labels this possible mode `bf16-mode`. It is separate
 from logical TF32; no production selector maps TF32 requests to BF16 compute.
 
-**Types that are entirely absent from the vocabulary:** `f64`, unsigned
+**Types that are entirely absent from the vocabulary:** unsigned
 `u8/u16/u32/u64`, and a distinct `bool` (predicates reuse `i1`). No engine
 references them.
 
@@ -197,7 +199,7 @@ Gap categories: **[C]** conversion gap · **[P]** partial/plumbing gap ·
 | `f32` | 3 | 3 | 3 | 3 | 3 | 3 | **100%** | — |
 | `f16` | 3 | 3 | 2 | 3 | 3 | 3 | **94%** | [C] |
 | `bf16` | 3 | 3 | 2 | 3 | 3 | 3 | **94%** | [C] |
-| `f64` | 0 | 0 | 0 | 0 | 0 | 0 | **0%** | [M] |
+| `f64` | 1 | 1 | 2 | 1 | 0 | 2 | **39%** | [M] |
 | **Float — 8-bit** | | | | | | | | |
 | `fp8e4m3` (OCP) | 3 | 3 | 1 | 1 | 1 | 1 | **56%** | [C][P] |
 | `bf8e5m2` (OCP) | 3 | 3 | 1 | 1 | 1 | 1 | **56%** | [C][P] |
@@ -329,11 +331,15 @@ mode. The missing selector and precision contract are described in §2.5.
   `cast_f32_to(v, BF16)` (C3=2), and bf16 MFMA/WMMA atoms (C2=3).
   **C6=1** records the need for a caller-visible BF16 precision contract when
   the mode is exposed; see [§1](#1-the-canonical-dtype-set).
-- **`f64` / `u16-64` — 0 at every layer.** Absent from the hipDNN enum, rejected
-  by the MIOpen provider, and not requested by any family. For `f64` specifically
-  `V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950, where f64 is unwired
-  software. gfx1250 has no F64 matrix instruction: LLVM gates
-  `V_WMMA_F64_16X16X4_F64` on `gfx1251-gemm-insts` (§4A).
+- **`f64`** — an IR type in the Python engine only (C1=1, §6). Scalar and
+  vector arithmetic lower, but no matrix atom accepts it (C2=1); explicit conversions to and from
+  `f32` exist, direct `f16`/`bf16` casts do not (C3=2); raw global and LDS loads
+  and stores exist, `helpers/io.py` does not take it (C4=1); no family uses it
+  (C5=0); IEEE rounding, no dialect question (C6=2). `V_MFMA_F64_*` is present
+  on gfx90a/gfx942/gfx950 but not declared as an atom. gfx1250 has no F64 matrix
+  instruction: LLVM gates `V_WMMA_F64_16X16X4_F64` on `gfx1251-gemm-insts` (§4A).
+- **`u16-64` — 0 at every layer.** Absent from the hipDNN enum, rejected
+  by the MIOpen provider, and not requested by any family.
 
 ### 2.6 Source anchors for the scores
 
@@ -453,7 +459,7 @@ The original basis snapshot, with the gfx942 XF32 addition noted below:
 ### 4C. Deltas — silicon capability vs. rocKE's declared atoms
 
 The following gaps compare §4A with §4B. The first five concern atom declarations
-only; f64 (4C.6) also lacks an IR type. The gfx942 XF32 declaration gap is now
+only; f64 (4C.6) has an IR type (Python engine only) but no atom. The gfx942 XF32 declaration gap is now
 closed; §4D describes its logical dtype and remaining integration boundaries.
 
 #### 4C.1 gfx1250 — fp4/fp6/bf6 block-scaled atoms are omitted (deliberately)
@@ -489,8 +495,8 @@ catalog declares no sparse atom on any arch, and no family requests one. No dtyp
 in §2.4 is blocked on it.
 
 #### 4C.6 f64 matrix is in silicon but undeclared
-`V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950. `f64` is not an IR type
-at all (§1), so those targets have a vocabulary gap as well as missing atoms.
+`V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950. `f64` is an IR type in the
+Python engine (§1, §6), but no f64 matrix atom is declared on those targets.
 gfx1250 has no native F64 matrix instruction and is excluded from this gap.
 
 ### 4D. XF32 / TF32 across the arch set
@@ -561,3 +567,16 @@ scheduled to gain.
 | Quant epilogues (`add_rmsnorm2d_rdquant`) | out i8, fp8e4m3, bf8e5m2 | — |
 
 ---
+
+## 6. Python-engine-only support
+
+rocKE's two engines must emit the same LLVM IR (byte identity). The items below
+exist in the Python engine only; the C++ engine rejects them, and the default
+dispatch falls back to the Python engine for a kernel that uses them. Each line
+names the C++ files a mirror must change.
+
+| Item | Python engine | C++ files to mirror |
+|---|---|---|
+| `F64` scalar type: constants, arithmetic, `cvt_f32_to_f64` / `cvt_f64_to_f32`, global and LDS loads and stores | `core/ir.py`, `core/lower_llvm.py`, `core/dtypes.py` | `cpp/core/dtypes.cpp`, `cpp/core/ir/core_types.cpp`, `cpp/core/ir/ir_arith.cpp`, `cpp/core/ir/ir_mem.cpp` (vector load/store widths), `cpp/core/lower_llvm/core.cpp`, `cpp/core/lower_llvm/convert.cpp` (`fpext`/`fptrunc` choice), `cpp/core/lower_llvm/control.cpp` (vector float add/sub/mul), `cpp/core/lower_llvm/mem.cpp` (element sizes) |
+| `zero_vec` of `i16` and `f64` | `IRBuilder.zero_vec` | `cpp/core/ir/ir_arith.cpp` |
+| LDS loads and stores of `i16` and `f64` (`smem_load_vN`, `smem_store_vN`) | `core/ir.py`, LDS element sizes in `core/lower_llvm.py` | `cpp/core/ir/ir_tile.cpp`, `cpp/core/lower_llvm/mem.cpp` |

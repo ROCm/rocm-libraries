@@ -52,6 +52,7 @@ I64 = Type("i64")
 BF16 = Type("bf16")
 F16 = Type("f16")
 F32 = Type("f32")
+F64 = Type("f64")
 TF32 = Type("tf32")
 FP8E4M3 = Type("fp8e4m3")
 BF8E5M2 = Type("bf8e5m2")
@@ -77,6 +78,7 @@ def dtype_to_ir_type(dtype: str) -> Type:
         "fp16": F16,
         "bf16": BF16,
         "fp32": F32,
+        "fp64": F64,
         "tf32": TF32,
         "fp8e4m3": FP8E4M3,
         "bf8e5m2": BF8E5M2,
@@ -712,6 +714,16 @@ class IRBuilder:
         )
         return op.result
 
+    def const_f64(self, value: float) -> Value:
+        """An f64 constant; lowers to its 64-bit hex encoding."""
+        op = self._op(
+            "arith.constant",
+            result_types=[F64],
+            attrs={"value": float(value), "ity": "f64"},
+            result_name_hint="c",
+        )
+        return op.result
+
     def add(self, a: Value, b: Value) -> Value:
         return self._op("arith.add", [a, b], [a.type], result_name_hint="add").result
 
@@ -1021,6 +1033,27 @@ class IRBuilder:
             attrs={"target": target.name},
             result_name_hint="cast",
         ).result
+
+    def cvt_f32_to_f64(self, v: Value) -> Value:
+        """Convert an f32 to f64. Exact. Lowers to one ``fpext float to double``."""
+        if v.type != F32:
+            raise ValueError(f"cvt_f32_to_f64 expects f32 input, got {v.type.name}")
+        return self._op(
+            "arith.cast_f32_to",
+            [v],
+            [F64],
+            attrs={"target": F64.name},
+            result_name_hint="f64",
+        ).result
+
+    def cvt_f64_to_f32(self, v: Value) -> Value:
+        """Convert an f64 to f32, rounding to nearest even.
+
+        Lowers to one ``fptrunc double to float``.
+        """
+        if v.type != F64:
+            raise ValueError(f"cvt_f64_to_f32 expects f64 input, got {v.type.name}")
+        return self._op("arith.cast_to_f32", [v], [F32], result_name_hint="f32").result
 
     def sitofp_f32(self, v: Value) -> Value:
         """Signed-integer to f32 conversion (LLVM sitofp). Inputs must be `i32`.
@@ -1498,7 +1531,7 @@ class IRBuilder:
     def zero_vec(self, elem: Type, n: int) -> Value:
         if elem == F32:
             return self.zero_vec_f32(n)
-        if elem in (F16, BF16, FP8E4M3, BF8E5M2, I8, I32):
+        if elem in (F16, BF16, F64, FP8E4M3, BF8E5M2, I8, I16, I32):
             return self._op(
                 "arith.constant_vec",
                 result_types=[VectorType(elem, n)],
@@ -1662,7 +1695,8 @@ class IRBuilder:
         """Vectorised global load of N consecutive values.
 
         Supports f16/bf16/i16 (N in {2, 4, 6, 8, 16}), f32/i32/tf32
-        (N in {2, 3, 4, 8}), and fp8e4m3/bf8e5m2/i8 (N in {2, 4, 8, 12, 16}).
+        (N in {2, 3, 4, 8}), f64 (N = 2), and fp8e4m3/bf8e5m2/i8
+        (N in {2, 4, 8, 12, 16}).
         Loads exactly N elements. Instruction selection depends on target and
         alignment; 96-bit payloads do not require a 96-bit scalar type.
 
@@ -1693,6 +1727,12 @@ class IRBuilder:
                 raise ValueError(
                     f"unsupported vector width for {dtype.name} global_load_vN: {n}"
                 )
+        elif dtype.name == "f64":
+            elem_bytes = 8
+            if n != 2:
+                raise ValueError(
+                    f"unsupported vector width for f64 global_load_vN: {n}"
+                )
         elif dtype.name in ("fp8e4m3", "bf8e5m2", "i8"):
             elem_bytes = 1
             if n not in (2, 4, 8, 12, 16):
@@ -1701,8 +1741,8 @@ class IRBuilder:
                 )
         else:
             raise ValueError(
-                "global_load_vN supports f16/bf16/i16/f32/i32/tf32/fp8e4m3/bf8e5m2/i8, "
-                f"got {dtype.name}"
+                "global_load_vN supports f16/bf16/i16/f32/i32/tf32/f64/fp8e4m3/bf8e5m2/"
+                f"i8, got {dtype.name}"
             )
         attrs = {
             "elem_type": dtype.name,
@@ -1879,7 +1919,9 @@ class IRBuilder:
             raise ValueError("smem_store_vN expects vector value for n > 1")
         elem_name = value.type.elem.name
         allowed_n = (
-            (2, 4, 8, 16) if elem_name in ("i8", "fp8e4m3", "bf8e5m2") else (2, 4, 8)
+            (2, 4, 8, 16)
+            if elem_name in ("i8", "fp8e4m3", "bf8e5m2")
+            else (2,) if elem_name == "f64" else (2, 4, 8)
         )
         if n not in allowed_n:
             raise ValueError(
@@ -1889,7 +1931,11 @@ class IRBuilder:
         elem_bytes = (
             1
             if elem_name in ("i8", "fp8e4m3", "bf8e5m2")
-            else 4 if elem_name in ("f32", "i32", "tf32") else 2
+            else (
+                4
+                if elem_name in ("f32", "i32", "tf32")
+                else 8 if elem_name == "f64" else 2
+            )
         )
         self._op(
             "tile.smem_store_vN",
@@ -1922,7 +1968,8 @@ class IRBuilder:
 
     def smem_load_vN(self, smem: Value, *indices, dtype: Type, n: int = 0) -> Value:
         """LDS load of ``<N x dtype>``. Supports 8-bit (fp8e4m3 / bf8e5m2 /
-        i8), 16-bit (f16 / bf16) and 32-bit (f32 / i32) element types;
+        i8), 16-bit (f16 / bf16 / i16), 32-bit (f32 / i32) and 64-bit (f64, at
+        most 16 bytes) element types;
         loads exactly N elements. In addition to power-of-two widths, accepts
         96-bit payloads (12 bytes, six halfwords, or three words), using element
         alignment. The target and alignment determine instruction selection.
@@ -1930,22 +1977,27 @@ class IRBuilder:
         if dtype.name not in (
             "f16",
             "bf16",
+            "i16",
             "f32",
             "i32",
             "tf32",
+            "f64",
             "fp8e4m3",
             "bf8e5m2",
             "i8",
         ):
             raise ValueError(
-                "smem_load_vN supports f16 / bf16 / f32 / i32 / tf32 / fp8e4m3 / "
-                f"bf8e5m2 / i8, got {dtype.name}"
+                "smem_load_vN supports f16 / bf16 / i16 / f32 / i32 / tf32 / f64 / "
+                f"fp8e4m3 / bf8e5m2 / i8, got {dtype.name}"
             )
-        allowed_n = (
-            (1, 2, 4, 8, 12, 16)
-            if dtype.name in ("fp8e4m3", "bf8e5m2", "i8")
-            else (1, 2, 4, 6, 8) if dtype.name in ("f16", "bf16") else (1, 2, 3, 4, 8)
-        )
+        if dtype.name in ("fp8e4m3", "bf8e5m2", "i8"):
+            allowed_n = (1, 2, 4, 8, 12, 16)
+        elif dtype.name in ("f16", "bf16", "i16"):
+            allowed_n = (1, 2, 4, 6, 8)
+        elif dtype.name == "f64":
+            allowed_n = (1, 2)
+        else:
+            allowed_n = (1, 2, 3, 4, 8)
         if n not in allowed_n:
             raise ValueError(
                 f"unsupported vector width {n} for smem_load_vN of {dtype.name} "
@@ -4324,12 +4376,16 @@ class IRBuilder:
             elem_bytes = 4
             if n == 16:
                 raise ValueError(f"global_store_vN n=16 not supported for {elem_name}")
+        elif elem_name == "f64":
+            elem_bytes = 8
+            if n not in (1, 2):
+                raise ValueError(f"global_store_vN n must be 1 or 2 for f64 (got {n})")
         elif elem_name in ("i8", "fp8e4m3", "bf8e5m2"):
             elem_bytes = 1
         else:
             raise ValueError(
-                "global_store_vN supports f16/bf16/i16/f32/i32/tf32/i8/fp8e4m3/bf8e5m2, "
-                f"got {elem_name}"
+                "global_store_vN supports f16/bf16/i16/f32/i32/tf32/f64/i8/fp8e4m3/"
+                f"bf8e5m2, got {elem_name}"
             )
         attrs = {
             "elem_type": elem_name,

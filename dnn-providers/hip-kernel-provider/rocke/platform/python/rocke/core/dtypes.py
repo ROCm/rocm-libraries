@@ -23,6 +23,9 @@ _DTYPE_ALIASES = {
     "f32": "fp32",
     "float": "fp32",
     "fp32": "fp32",
+    "f64": "fp64",
+    "double": "fp64",
+    "fp64": "fp64",
     "tf32": "tf32",
     "xf32": "tf32",
     "fp8": "fp8e4m3",
@@ -77,6 +80,7 @@ _DTYPE_INFO = {
         (
             DTypeCategory.FLOAT,
             (
+                ("fp64", 64),
                 ("fp32", 32),
                 ("tf32", 32),
                 ("fp16", 16),

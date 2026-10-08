@@ -32,6 +32,8 @@ from rocke.helpers.quant import (
         ("f16", 16),
         ("bf16", 16),
         ("f32", 32),
+        ("f64", 64),
+        ("double", 64),
         ("e8m0", 8),
         ("e4m3", 8),
         ("e5m3", 8),
@@ -165,3 +167,16 @@ def test_quant_dtype_annotations_match_scalar_and_logical_contracts():
     assert all(ir_to_qdtype(quant_ir_type(dtype)) == dtype for dtype in logical)
     assert helpers.QDType is quant.QDType
     assert helpers.LogicalQDType is quant.LogicalQDType
+
+
+def test_f64_is_a_public_logical_type():
+    import rocke
+    import rocke.core
+    from rocke.core.ir import F64
+
+    for spelling in ("f64", "fp64", "double", " FP64 "):
+        assert normalize_dtype(spelling) == "fp64"
+        assert dtype_to_ir_type(spelling) is F64
+    assert dtype_info("f64").encoded_bits == 64
+    assert rocke.F64 is rocke.core.F64 is F64
+    assert "F64" in rocke.__all__ and "F64" in rocke.core.__all__
