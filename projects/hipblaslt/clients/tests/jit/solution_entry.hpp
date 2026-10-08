@@ -23,15 +23,17 @@ namespace hipblaslt_jit_test
     using Predicate = std::shared_ptr<
         TensileLite::Predicates::Predicate<TensileLite::ContractionProblemGemm>>;
 
-    // Solutions from one assembled kernel: the source that links its
-    // relocatable into an executable, and the K values at which the tests
-    // publish them.
+    // The workspace the tests offer a solution.
+    constexpr size_t workspaceLimit = 64 << 20;
+
+    // One assembled kernel: the bundle that links its relocatable into an
+    // executable, with the solutions that executable runs, and the K values at
+    // which the tests publish them.
     struct Prepared
     {
-        std::string                        name;
-        hipblaslt_jit::TensileliteAssembly assembly;
-        hipblaslt_jit::SourceCodeBundle    source;
-        std::vector<size_t>                ks;
+        std::string                     name;
+        hipblaslt_jit::SourceCodeBundle source;
+        std::vector<size_t>             ks;
     };
 
     // A copy of solution named <kernel><suffix> with workGroupMapping and the
@@ -57,69 +59,38 @@ namespace hipblaslt_jit_test
         return copy;
     }
 
-    // Assembles the device's committed plain kernel once and returns plain,
-    // its solution as the kernel records it, and plain-pair, that kernel as two
-    // solutions: the first only for K a multiple of 512, with WorkGroupMapping
-    // 8, the second for any K, with WorkGroupMapping 1.
+    // Reads the device's committed plain bundle once with
+    // readTensileSourceBundle and returns plain, its solution as the kernel
+    // records it, and plain-pair, that kernel as two solutions: the first only
+    // for K a multiple of 512, with WorkGroupMapping 8, the second for any K,
+    // with WorkGroupMapping 1.
     inline std::vector<Prepared> prepareSolutions(const fs::path&              data,
                                                   const hipblaslt_jit::Target& target,
                                                   const fs::path&              scratch = {})
     {
-        std::vector<hipblaslt_jit::Artifact> units;
-        const auto sources = data / fs::u8path(target.processorName()) / "plain" / "sources";
-        {
-            INFO(("No committed plain kernel in " + sources.u8string()));
-            REQUIRE((fs::is_directory(sources)));
-        }
-        for(const auto& file : fs::directory_iterator(sources))
-            if(file.path().extension() == ".s")
-            {
-                const auto text = readFile(file.path());
-                units.push_back({file.path().filename().u8string(),
-                                 hipblaslt_jit::Artifact::Kind::Assembly,
-                                 std::vector<uint8_t>(text.begin(), text.end())});
-            }
-        {
-            INFO(("A source bundle has one main kernel in " + sources.u8string()));
-            REQUIRE((units.size() == 1));
-        }
-
+        const auto bundle = data / fs::u8path(target.processorName()) / "plain";
         hipblaslt_jit::SourceCodeBundle source;
-        source.mainKernel = units.front();
-        source.target     = target;
-        hipblaslt_jit::TensileliteAssembly assembly;
-        hipblaslt_jit::Artifact            relocatable;
-        auto                               status = hipblaslt_jit::TensileliteAssembly::make(
-            *hipblaslt_jit::makeComgrBuilder(), source, assembly, relocatable);
+        auto status = hipblaslt_jit::readTensileSourceBundle(*hipblaslt_jit::makeComgrBuilder(),
+                                                             bundle,
+                                                             target,
+                                                             hipblaslt_jit::jitCodeObjectVersion,
+                                                             source);
         hipblaslt_jit::keepBuildLog(status, scratch);
         {
-            INFO(("Cannot read the solution of " + source.mainKernel.name + ": " + status.message));
-            REQUIRE((status.ok() && assembly.solutions.size() == 1));
+            INFO(("Cannot read the solution of " + bundle.u8string() + ": " + status.message));
+            REQUIRE((status.ok() && source.solutions.size() == 1
+                     && source.mainKernel.kind == hipblaslt_jit::Artifact::Kind::Relocatable));
         }
-        const auto& solution = assembly.solutions.front();
-        source.mainKernel    = relocatable;
-        source.kernelNames   = {solution->kernelName};
 
-        auto pair      = assembly;
-        pair.solutions = {
+        const auto solution = source.solutions.front();
+        auto       pair     = source;
+        pair.solutions      = {
             variant(solution,
                     "_K512_WGM8",
                     8,
                     {std::make_shared<TensileLite::Predicates::Contraction::BoundSizeMultiple>(
                         0, 512)}),
             variant(solution, "_WGM1", 1, {})};
-        return {{"plain", assembly, source, {512}}, {"plain-pair", pair, source, {1024, 256}}};
-    }
-
-    // The solutions whose hardware and problem predicates accept problem.
-    inline std::vector<Solution> supported(const std::vector<Solution>&               solutions,
-                                           const TensileLite::ContractionProblemGemm& problem,
-                                           const TensileLite::Hardware&               hardware)
-    {
-        std::vector<Solution> result;
-        for(const auto& solution : solutions)
-            if((*solution->hardwarePredicate)(hardware) && (*solution->problemPredicate)(problem))
-                result.push_back(solution);
-        return result;
+        return {{"plain", source, {512}}, {"plain-pair", pair, {1024, 256}}};
     }
 }

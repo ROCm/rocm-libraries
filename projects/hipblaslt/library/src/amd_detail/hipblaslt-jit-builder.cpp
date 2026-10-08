@@ -3,6 +3,8 @@
 
 #include "hipblaslt-jit-code-object.hpp"
 #include "hipblaslt-jit-component.hpp"
+#include "hipblaslt-jit-source-bundle.hpp"
+#include <Tensile/ContractionSolution.hpp>
 #include <algorithm>
 #include <fstream>
 #include <sstream>
@@ -91,11 +93,17 @@ namespace hipblaslt_jit
                 options.linkerFlags       = {"-Xlinker", "--build-id=sha1"};
                 options.rocmPath          = co::rocmPath();
 
-                if(source.mainKernel.name.empty() || source.mainKernel.bytes.empty()
-                   || std::any_of(source.kernelNames.begin(),
-                                  source.kernelNames.end(),
-                                  [](const std::string& name) { return name.empty(); }))
+                if(source.mainKernel.name.empty() || source.mainKernel.bytes.empty())
                     return failure("A generated solution needs a main kernel", {});
+                std::vector<std::string> required;
+                for(const auto& solution : source.solutions)
+                    required.push_back(solution ? solution->kernelName : std::string());
+                required.insert(
+                    required.end(), source.kernelNames.begin(), source.kernelNames.end());
+                if(std::any_of(required.begin(), required.end(), [](const std::string& name) {
+                       return name.empty();
+                   }))
+                    return failure("A bundle has a null solution or an empty kernel name", {});
                 if(target.processor == Processor::gfx000)
                     return failure("A build needs the device's target processor", {});
                 if(kind == BuildKind::Relocatable && !source.helpers.empty())
@@ -180,14 +188,14 @@ namespace hipblaslt_jit
                                        + std::to_string(source.codeObjectVersion),
                                    linked.log);
                 const auto& names = metadata.kernelNames;
-                for(const auto& name : source.kernelNames)
+                for(const auto& name : required)
                     if(std::find(names.begin(), names.end(), name) == names.end())
                         return failure("The executable does not define kernel " + name,
                                        linked.log);
                 out      = std::move(linked.artifact);
-                out.name = names.empty()                 ? source.mainKernel.name
-                           : source.kernelNames.empty() ? names.front()
-                                                        : source.kernelNames.front();
+                out.name = names.empty()      ? source.mainKernel.name
+                           : required.empty() ? names.front()
+                                              : required.front();
                 return {};
             }
 
@@ -228,6 +236,7 @@ namespace hipblaslt_jit
         const auto&      name  = source.mainKernel.name;
         SourceCodeBundle alone = source;
         alone.helpers.clear();
+        alone.solutions.clear();
         alone.kernelNames.clear();
         Artifact object;
         if(auto status = builder.build(alone, BuildKind::Relocatable, object); !status.ok())
@@ -272,6 +281,37 @@ namespace hipblaslt_jit
 #else
         return failed("A TensileLite assembly needs a MessagePack build of TensileLite");
 #endif
+    }
+
+    Status readTensileSourceBundle(const CodeObjectBuilder& builder,
+                                   const fs::path&          bundle,
+                                   const Target&            target,
+                                   int                      codeObjectVersion,
+                                   SourceCodeBundle&        source)
+    {
+        source = {};
+        SourceCodeBundle read;
+        try
+        {
+            read = source_bundle::readSourceBundle(bundle);
+        }
+        catch(const std::exception& error)
+        {
+            return {Status::Code::Failed,
+                    Stage::Generate,
+                    "Cannot read source bundle " + bundle.u8string() + ": " + error.what()};
+        }
+        read.target            = target;
+        read.codeObjectVersion = codeObjectVersion;
+        TensileliteAssembly assembly;
+        Artifact            relocatable;
+        if(auto status = TensileliteAssembly::make(builder, read, assembly, relocatable);
+           !status.ok())
+            return status;
+        read.mainKernel = std::move(relocatable);
+        read.solutions  = std::move(assembly.solutions);
+        source          = std::move(read);
+        return {};
     }
 
     void keepBuildLog(Status& status, const fs::path& scratch)

@@ -1,14 +1,10 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-#include "hipblaslt-jit-loader.hpp"
 #include "library_fixture.hpp"
 #include "solution_entry.hpp"
-#include <Tensile/ExactLogicLibrary.hpp>
-#include <Tensile/SingleSolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 #include <Tensile/hip/HipSolutionAdapter.hpp>
-#include <Tensile/msgpack/Writing.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
@@ -17,35 +13,11 @@
 
 // Loads the JIT solution library written for this device and finds the
 // pre-generated kernel's solutions, including both solutions of one published
-// executable in one entry. Also checks that a library whose solutions are not
-// 0 to N-1 is rejected. Launches nothing.
+// executable in one entry. Launches nothing.
 namespace
 {
     namespace fs = std::filesystem;
     namespace hj = hipblaslt_jit;
-
-    // A library of copies of solutions under indices, written by TensileLite.
-    std::vector<uint8_t> numbered(const std::vector<hipblaslt_jit_test::Solution>& solutions,
-                                  const std::vector<int>&                         indices)
-    {
-        using Gemm = TensileLite::ContractionProblemGemm;
-        using Rows = TensileLite::ProblemSelectionLibrary<Gemm, TensileLite::ContractionSolution>;
-        auto rows  = std::make_shared<Rows>();
-        hj::GemmMaster library;
-        for(size_t i = 0; i < solutions.size(); ++i)
-        {
-            auto copy   = hj::copySolution(solutions[i]);
-            copy->index = indices[i];
-            library.solutions.emplace(copy->index, copy);
-            rows->rows.emplace_back(
-                copy->problemPredicate,
-                std::make_shared<
-                    TensileLite::SingleSolutionLibrary<Gemm, TensileLite::ContractionSolution>>(
-                    copy));
-        }
-        library.library = rows;
-        return TensileLite::MessagePackWriteLibraryData(library);
-    }
 }
 
 TEST_CASE("the loader reads the JIT solution library", "[jit-gpu]")
@@ -72,9 +44,9 @@ TEST_CASE("the loader reads the JIT solution library", "[jit-gpu]")
             pair = &item;
         for(const auto k : item.ks)
         {
-            const auto problem = hipblaslt_jit_test::fp16Gemm(false, k);
-            const auto expected
-                = hipblaslt_jit_test::supported(item.assembly.solutions, problem, *hardware);
+            const auto problem  = hipblaslt_jit_test::fp16Gemm(false, k);
+            const auto expected = hj::supportingSolutions(
+                item.source.solutions, problem, *hardware, hipblaslt_jit_test::workspaceLimit);
             const auto           label = item.name + " K=" + std::to_string(k);
             std::vector<int32_t> indices;
             const auto status = library.lookup(key, device, problem, *hardware, 4, {}, indices);
@@ -166,12 +138,4 @@ TEST_CASE("the loader reads the JIT solution library", "[jit-gpu]")
         INFO(("A transposed A found a published solution"));
         REQUIRE((status.ok() && transposed.empty()));
     }
-
-    const auto& solutions = pair->assembly.solutions;
-    {
-        INFO(("The loader rejected solutions 0 and 1"));
-        REQUIRE((hj::loadGemmLibrary(numbered(solutions, {0, 1}))->solutions.size() == 2));
-    }
-    hipblaslt_jit_test::reject([&] { hj::loadGemmLibrary(numbered(solutions, {0, 2})); },
-                               "The loader accepted solutions 0 and 2");
 }

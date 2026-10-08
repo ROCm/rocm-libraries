@@ -98,7 +98,7 @@ TEST_CASE("a published JIT solution launches", "[jit-gpu]")
     const auto prepared
         = hipblaslt_jit_test::prepareSolutions(fs::u8path(HIPBLASLT_JIT_DATA), target, scratch);
     const auto& plain  = prepared.front();
-    const auto  kernel = plain.assembly.solutions.front()->kernelName;
+    const auto  kernel = plain.source.solutions.front()->kernelName;
     REQUIRE((plain.name == "plain" && plain.ks.size() == 1));
 
     hj::BackendInfo backend;
@@ -116,10 +116,13 @@ TEST_CASE("a published JIT solution launches", "[jit-gpu]")
     }
 
     hj::JitLibrary       library(libraryRoot);
-    const auto           problem = hipblaslt_jit_test::fp16Gemm(false, plain.ks.front());
+    const auto           problem   = hipblaslt_jit_test::fp16Gemm(false, plain.ks.front());
+    constexpr auto       workspace = hipblaslt_jit_test::workspaceLimit;
+    const auto           solutions = hj::supportingSolutions(
+        plain.source.solutions, problem, *target.hardware, workspace);
     std::vector<int32_t> published;
     const auto           publishedStatus
-        = library.publish(key, device, problem, executable, plain.assembly.solutions, published);
+        = library.publish(key, device, problem, executable, solutions, published);
     {
         INFO(("publish: " + publishedStatus.message));
         REQUIRE((publishedStatus.ok()));
@@ -129,7 +132,6 @@ TEST_CASE("a published JIT solution launches", "[jit-gpu]")
         REQUIRE((published.size() == 1 && hj::isJitIndex(published.front())));
     }
 
-    constexpr size_t workspace = 64 * 1024 * 1024;
     library.beginQuery(false, target, backend, workspace, {}, nullptr);
     const auto found   = library.findTopSolutions(problem, *target.hardware, 1);
     const auto byIndex = library.getSolutionByIndex(problem, *target.hardware, published.front());

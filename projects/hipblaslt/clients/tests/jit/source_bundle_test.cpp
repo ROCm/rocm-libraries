@@ -61,9 +61,7 @@ TEST_CASE("the source bundle reader accepts only a contained directory", "[jit-c
     std::cout << "PASS relative paths, missing artifacts and containment\n";
 
     const auto bundle = root / fs::u8path("bundle π");
-    fs::create_directories(bundle / "library");
     fs::create_directories(bundle / "sources");
-    writeFile(bundle / "library/TensileLibrary.dat", payload);
     for(const auto* name : {"a.s", "scale.hip", "add.cpp", "kernel.h", "types.h"})
         writeFile(bundle / "sources" / name, std::string("// ") + name + "\n");
     const auto sources = a::readSourceBundle(bundle);
@@ -89,7 +87,7 @@ TEST_CASE("the source bundle reader accepts only a contained directory", "[jit-c
         INFO(("The reader set a build input that the directory does not hold"));
         REQUIRE((sources.target.processor == hipblaslt_jit::Processor::gfx000
                  && sources.codeObjectVersion == hipblaslt_jit::jitCodeObjectVersion
-                 && sources.kernelNames.empty()));
+                 && sources.solutions.empty() && sources.kernelNames.empty()));
     }
     writeFile(bundle / "sources/b.s", "// b.s\n");
     reject([&] { a::readSourceBundle(bundle); });
@@ -121,6 +119,12 @@ TEST_CASE("the source bundle reader accepts only a contained directory", "[jit-c
            [&] { fs::rename(root / "moved", bundle / "sources"); });
     damage([&] { fs::rename(bundle / "sources/a.s", root / "a.s"); },
            [&] { fs::rename(root / "a.s", bundle / "sources/a.s"); });
+    damage(
+        [&] {
+            fs::create_directory(bundle / "library");
+            writeFile(bundle / "library/TensileLibrary.dat", payload);
+        },
+        [&] { fs::remove_all(bundle / "library"); });
     damage([&] { fs::create_directory(bundle / "sources/nested"); },
            [&] { fs::remove(bundle / "sources/nested"); });
     damage([&] { writeFile(bundle / "sources/empty.h", ""); },
@@ -146,5 +150,6 @@ TEST_CASE("the source bundle reader accepts only a contained directory", "[jit-c
         [&] { fs::create_symlink(fs::absolute(root / "outside.h"), bundle / "sources/outside.h"); },
         [&] { fs::remove(bundle / "sources/outside.h"); });
 #endif
-    std::cout << "PASS source bundle convention, containment, file and count caps\n";
+    std::cout << "PASS source bundle convention, no library entry, containment, file and count "
+                 "caps\n";
 }
