@@ -581,52 +581,21 @@ struct target
     }
 };
 
-constexpr target_arch current_arch()
+/**
+ * \brief Get the current architecture in device compilation.
+ * 
+ * This function will always return `unknown` when called from the host, host could should instead
+ * call host_target_arch to query the current device from the HIP API. It also returns
+ * unknown if it is using spirv.
+ * 
+ * \return target_arch the architecture currently being compiled for on the device.
+ */
+constexpr target_arch device_target_arch()
 {
-#if defined(__gfx1250__) || defined(__gfx1250_strict__)
-    return target_arch::gfx1250;
-#elif defined(__gfx950__)
-    return target_arch::gfx950;
-#elif defined(__gfx942__)
-    return target_arch::gfx942;
-#elif defined(__gfx90a__)
-    return target_arch::gfx90a;
-#elif defined(__gfx908__)
-    return target_arch::gfx908;
-#elif defined(__gfx906__)
-    return target_arch::gfx906;
-#elif defined(__gfx900__)
-    return target_arch::gfx900;
-#elif defined(__gfx803__)
-    return target_arch::gfx803;
-#elif defined(__gfx1201__)
-    return target_arch::gfx1201;
-#elif defined(__gfx1200__)
-    return target_arch::gfx1200;
-#elif defined(__gfx1153__)
-    return target_arch::gfx1153;
-#elif defined(__gfx1152__)
-    return target_arch::gfx1152;
-#elif defined(__gfx1151__)
-    return target_arch::gfx1151;
-#elif defined(__gfx1150__)
-    return target_arch::gfx1150;
-#elif defined(__gfx1103__)
-    return target_arch::gfx1103;
-#elif defined(__gfx1102__)
-    return target_arch::gfx1102;
-#elif defined(__gfx1101__)
-    return target_arch::gfx1101;
-#elif defined(__gfx1100__)
-    return target_arch::gfx1100;
-#elif defined(__gfx1030__)
-    return target_arch::gfx1030;
-#elif defined(__gfx1012__)
-    return target_arch::gfx1012;
-#elif defined(__gfx1011__)
-    return target_arch::gfx1011;
-#elif defined(__gfx1010__)
-    return target_arch::gfx1010;
+#if defined(__amdgcn_processor__) && (!defined(ROCPRIM_TARGET_SPIRV) || ROCPRIM_TARGET_SPIRV == 0)
+    // The terminating zero is not counted in the length of the string
+    return get_target_arch_from_name(__amdgcn_processor__,
+                                     sizeof(__amdgcn_processor__) - sizeof('\0'));
 #else
     return target_arch::unknown;
 #endif
@@ -642,7 +611,7 @@ struct comp_targets
     }
 
 private:
-    static constexpr target_arch cur_arch = current_arch();
+    static constexpr target_arch cur_arch = device_target_arch();
     static constexpr gen         cur_gen  = gen_from_target_arch(cur_arch);
 
     static constexpr bool has_arch_match = ((Ts{}.i == cur_arch) || ...);
@@ -724,25 +693,6 @@ constexpr arch::wavefront::target get_wavefront_size(const gen gen = gen::unknow
     }
 }
 
-/**
- * \brief Get the current architecture in device compilation.
- * 
- * This function will always return `unknown` when called from the host, host could should instead
- * call host_target_arch to query the current device from the HIP API.
- * 
- * \return target_arch the architecture currently being compiled for on the device.
- */
-constexpr target_arch device_target_arch()
-{
-#if defined(__amdgcn_processor__)
-    // The terminating zero is not counted in the length of the string
-    return get_target_arch_from_name(__amdgcn_processor__,
-                                     sizeof(__amdgcn_processor__) - sizeof('\0'));
-#else
-    return target_arch::unknown;
-#endif
-}
-
 template<typename Kernel>
 struct launch_plan
 {
@@ -766,6 +716,8 @@ constexpr target most_common_config(target target_current)
 {
     // Takes unknown as default.
     target ret{};
+    // The for_each loop also does a compile time filtering on gen and arch,
+    // if you want to change the fallback path also look at the logic there.
     Targets::for_each(
         [&](auto t)
         {
@@ -862,27 +814,7 @@ ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS((LaunchSelector<Config, Selector, Target>::
     trampoline_kernel(Kernel kernel)
 {
     using TargetConfig = target_config<Config, Selector, Target, TargetWaveSize>;
-
-#if !defined(ROCPRIM_TARGET_SPIRV) || ROCPRIM_TARGET_SPIRV == 0
-    using Targets = typename Selector::targets;
-    // If the arch does not exist in the Targets it should run the arch for the most_common_config.
-    constexpr target device_arch_target = most_common_config<Targets>(target(device_target_arch()));
-    // If the build time arch from device_target_arch is a generic arch it is not the same as the runtime arch.
-    if constexpr(Target::i == device_arch_target.i)
-    {
-        kernel(TargetConfig{});
-    }
-    else if constexpr(ROCPRIM_IS_GENERIC())
-    {
-        kernel(TargetConfig{});
-    }
-    else
-    {
-        __builtin_unreachable();
-    }
-#else
     kernel(TargetConfig{});
-#endif
 }
 
 template<class Config,
