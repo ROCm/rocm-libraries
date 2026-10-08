@@ -288,12 +288,26 @@ missing_required_padding_m, missing_required_padding_n,
 missing_required_padding_k, missing_any_required_padding`
 
 These encode how the kernel's tile sits against the problem and whether the
-padding needed to make it legal is actually enabled. Note that
-`missing_any_required_padding` is 0 on every row of a dataset built from
-measurements: a kernel that needed padding and lacked it was rejected at launch
-and produced no measurement, so the feature carries no signal from such data.
-See `gemm_tile_divides_problem` in `dispatcher/codegen/codegen_common.py` for
-the rule a candidate pool has to apply itself.
+padding needed to make it legal is actually enabled.
+
+They test **all three dimensions globally**, which the launch rule does not:
+that rule checks one dimension per tensor, whichever is contiguous for that
+tensor's layout, so `rcr`/`rrr` never check M and `crr` never checks K. The two
+therefore disagree, and `missing_any_required_padding` is **not** uniformly 0 on
+measured data -- a kernel flagged here can have launched perfectly well. On a
+gfx950 sweep about 0.3% of rows are flagged, every one of them an `rrr` row
+flagged on M or a `crr` row flagged on K -- exactly the dimensions those layouts
+never check.
+
+The feature still carries little signal, but for a different reason than
+"always 0": a kernel that needed padding on a dimension that *is* checked, and
+lacked it, was rejected at launch and produced no measurement at all. So the
+flagged rows are the layout-mismatch residue, not examples of failure.
+
+Reconciling the two would change these features' values under unchanged names
+and so needs an `ENCODING_VERSION` bump. See `gemm_tile_divides_problem` in
+`dispatcher/codegen/codegen_common.py` for the rule a candidate pool has to
+apply itself.
 
 ### Hardware profile features (12)
 `hw_num_cus, hw_simds_per_cu, hw_total_simds, hw_shader_engines,
