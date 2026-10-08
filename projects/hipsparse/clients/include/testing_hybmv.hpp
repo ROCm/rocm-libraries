@@ -60,8 +60,7 @@ void testing_hybmv_bad_arg(const Arguments& argus)
     hipsparseHybMat_t           hyb = unique_ptr_hyb->hyb;
 
     // A consistent safe_size x safe_size matrix with one ELL entry per row, so
-    // the routine does not quick-return before its argument checks. hyb owns
-    // the ELL arrays once SetInfo succeeds.
+    // the routine does not quick-return before its argument checks.
     auto ell_col_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(int) * safe_size), device_free};
     auto ell_val_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * safe_size), device_free};
@@ -78,8 +77,6 @@ void testing_hybmv_bad_arg(const Arguments& argus)
                                                  nullptr,
                                                  nullptr,
                                                  getDataType<T>()));
-    ell_col_managed.release();
-    ell_val_managed.release();
 
     auto dx_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * safe_size), device_free};
     auto dy_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * safe_size), device_free};

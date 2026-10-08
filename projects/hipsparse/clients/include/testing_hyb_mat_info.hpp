@@ -181,16 +181,9 @@ void testing_hyb_mat_info_bad_arg(void)
     int expected_m = keep_m;
     unit_check_general(1, 1, 1, &expected_m, &get_m);
 
-    // Two non-null arrays that alias one pointer are rejected, and the caller
-    // keeps ownership when the call fails.
-    auto alias_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * 4), device_free};
-    args               = set_info_args{};
-    args.ell_col_ind   = static_cast<int*>(alias_managed.get());
-    args.coo_col_ind   = args.ell_col_ind;
-    verify_hipsparse_status_invalid_value(set_info(hyb, args), "Error: array arguments alias");
-
     // Round trip of sizes, partition, data type, ELL column indices and COO
-    // arrays. Ownership transfers only after SetInfo succeeds.
+    // arrays. The caller keeps ownership: the managed arrays outlive every use
+    // of hyb below, and hipsparseDestroyHybMat does not free them.
     set_info_args full;
     full.m         = 4;
     full.n         = 5;
@@ -223,11 +216,6 @@ void testing_hyb_mat_info_bad_arg(void)
     {
         return;
     }
-    ell_col_managed.release();
-    ell_val_managed.release();
-    coo_row_managed.release();
-    coo_col_managed.release();
-    coo_val_managed.release();
 
     int                     got_m;
     int                     got_n;
@@ -311,8 +299,6 @@ void testing_hyb_mat_info_bad_arg(void)
     unit_check_general(1, 1, 1, &expected_ptr, &actual_ptr);
 
     // Move the COO row array into the ELL column field and drop the COO part.
-    // The previous ELL column array and the other COO arrays are released;
-    // the moved pointer is not.
     set_info_args moved = full;
     moved.ell_col_ind   = full.coo_row_ind;
     moved.coo_nnz       = 0;
@@ -346,8 +332,7 @@ void testing_hyb_mat_info_bad_arg(void)
     actual_ptr   = reinterpret_cast<size_t>(got_coo_row);
     unit_check_general(1, 1, 1, &expected_ptr, &actual_ptr);
 
-    // Replacing ell_val releases the previous buffer; passing the same pointer
-    // again is a no-op. The last one is freed by hipsparseDestroyHybMat.
+    // Replace ell_val, then pass the same pointer again.
     auto new_ell_val_managed = hipsparse_unique_ptr{
         device_malloc(sizeof(hipDoubleComplex) * moved.ell_nnz), device_free};
     moved.ell_val = new_ell_val_managed.get();
@@ -357,10 +342,9 @@ void testing_hyb_mat_info_bad_arg(void)
     {
         return;
     }
-    new_ell_val_managed.release();
     verify_hipsparse_status_success(set_info(hyb, moved), "Success");
 
-    // Releasing the ELL arrays requires the ELL count to be zero.
+    // Clearing the ELL arrays requires the ELL count to be zero.
     moved.ell_nnz     = 0;
     moved.ell_width   = 0;
     moved.ell_col_ind = nullptr;

@@ -288,10 +288,11 @@ hipsparseStatus_t hipsparseDestroyHybMat(hipsparseHybMat_t hybA);
  *  in CUDA 11. That deprecation does not apply to the ROCm backend.
  *
  *  \note
- *  The returned array pointers are borrowed: they remain owned by \p hyb and
- *  stay valid until \p hyb is destroyed with \ref hipsparseDestroyHybMat or the
- *  corresponding array is replaced with \ref hipsparseHybMatSetInfo. The caller
- *  must not free them.
+ *  The returned array pointers are borrowed. An array that hipSPARSE allocated
+ *  (for example with hipsparseXcsr2hyb()) stays valid until \p hyb is destroyed
+ *  with \ref hipsparseDestroyHybMat, hipsparseXcsr2hyb() is called on the same
+ *  \p hyb, or \ref hipsparseHybMatSetInfo replaces it; the caller must not free
+ *  it. An array set with \ref hipsparseHybMatSetInfo belongs to the caller.
  *
  *  \note
  *  Only \p ell_nnz is \p int64_t. \p m, \p n, \p ell_width and \p coo_nnz remain
@@ -372,22 +373,20 @@ hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t  hyb,
  *  The rocSPARSE backend rejects a negative size, an \p ell_nnz that does not
  *  fit the stored ELL count, an \p ell_nnz that is not
  *  <tt>m * ell_width</tt>, a positive ELL or COO count whose arrays are null,
- *  and an invalid \p partition or
- *  \p data_type. Those checks run before \p hyb is modified, so a validation
- *  error leaves \p hyb unchanged. Allocation lengths are not checked. Two
- *  non-null array arguments that refer to the same pointer are rejected before
- *  the rocSPARSE call.
+ *  and an invalid \p partition or \p data_type. Those checks run before \p hyb
+ *  is modified, so a validation error leaves \p hyb unchanged. Allocation
+ *  lengths are not checked.
  *
  *  \note
- *  Ownership of the arrays passed in \p ell_col_ind, \p ell_val, \p coo_row_ind,
- *  \p coo_col_ind and \p coo_val is transferred to \p hyb. They must have been
- *  allocated with \p hipMalloc, must not be freed by the caller, and must be
- *  distinct allocations; they are released by \ref hipsparseDestroyHybMat.
- *  An array previously held by \p hyb that is replaced by a different pointer
- *  (and is not kept in another field) is released by this function; passing the
- *  pointer \p hyb already holds is a no-op. A \p nullptr array releases the
- *  previously held array when its ELL or COO count is zero. A \p nullptr array
- *  with a positive count is rejected.
+ *  Like \ref hipsparseCreateCsr, this function only stores the array pointers.
+ *  It does not take ownership of \p ell_col_ind, \p ell_val, \p coo_row_ind,
+ *  \p coo_col_ind and \p coo_val: they must stay valid while \p hyb uses them,
+ *  and the caller frees them after \p hyb is destroyed or the arrays are
+ *  replaced. \ref hipsparseDestroyHybMat never frees them, and
+ *  hipsparseXcsr2hyb() rejects a \p hyb that holds them. Arrays that hipSPARSE allocated for \p hyb (for example with
+ *  hipsparseXcsr2hyb()) are released by this function when they are replaced;
+ *  passed back unchanged, they stay owned by \p hyb. A \p nullptr array with a
+ *  positive count is rejected.
  *
  *  \note
  *  Only \p ell_nnz is \p int64_t. \p m, \p n, \p ell_width and \p coo_nnz remain
@@ -413,31 +412,29 @@ hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t  hyb,
  *  @param[in]
  *  ell_width   width of the ELL part.
  *  @param[in]
- *  ell_col_ind column indices of the ELL part (\p hipMalloc'd, ownership transferred).
+ *  ell_col_ind column indices of the ELL part (device memory, not owned by \p hyb).
  *  @param[in]
- *  ell_val     values of the ELL part (\p hipMalloc'd, ownership transferred).
+ *  ell_val     values of the ELL part (device memory, not owned by \p hyb).
  *  @param[in]
  *  coo_nnz     number of non-zero elements of the COO part.
  *  @param[in]
- *  coo_row_ind row indices of the COO part (\p hipMalloc'd, ownership transferred).
+ *  coo_row_ind row indices of the COO part (device memory, not owned by \p hyb).
  *  @param[in]
- *  coo_col_ind column indices of the COO part (\p hipMalloc'd, ownership transferred).
+ *  coo_col_ind column indices of the COO part (device memory, not owned by \p hyb).
  *  @param[in]
- *  coo_val     values of the COO part (\p hipMalloc'd, ownership transferred).
+ *  coo_val     values of the COO part (device memory, not owned by \p hyb).
  *  @param[in]
  *  data_type   data type of the values stored in \p ell_val and \p coo_val.
  *
  *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p hyb is invalid, a size is negative,
  *          \p ell_nnz does not fit the stored ELL count or is not
- *          <tt>m * ell_width</tt>, a positive count has a null array, \p partition or \p data_type is invalid, or two
- *          non-null array arguments alias the same pointer.
+ *          <tt>m * ell_width</tt>, a positive count has a null array, or
+ *          \p partition or \p data_type is invalid.
  *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED the cuSPARSE backend does not support
  *          this routine.
- *  \retval HIPSPARSE_STATUS_ALLOC_FAILED the rocSPARSE backend reported a memory
- *          error while releasing a replaced array.
- *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR releasing a replaced array failed, or
- *          the rocSPARSE backend reported an internal error.
+ *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR releasing a replaced hipSPARSE array
+ *          failed, or the rocSPARSE backend reported an internal error.
  */
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT

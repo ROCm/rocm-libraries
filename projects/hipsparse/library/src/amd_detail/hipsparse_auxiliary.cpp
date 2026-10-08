@@ -221,23 +221,6 @@ hipsparseStatus_t hipsparseDestroyHybMat(hipsparseHybMat_t hybA)
         rocsparse_destroy_hyb_mat((rocsparse_hyb_mat)hybA));
 }
 
-static bool hipsparse_hyb_array_alias(const void* ptr, const void** seen, int* nseen)
-{
-    if(ptr == nullptr)
-    {
-        return false;
-    }
-    for(int i = 0; i < *nseen; ++i)
-    {
-        if(seen[i] == ptr)
-        {
-            return true;
-        }
-    }
-    seen[(*nseen)++] = ptr;
-    return false;
-}
-
 hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t  hyb,
                                          int*                     m,
                                          int*                     n,
@@ -378,22 +361,9 @@ hipsparseStatus_t hipsparseHybMatSetInfo(hipsparseHybMat_t       hyb,
                                          void*                   coo_val,
                                          hipDataType             data_type)
 {
-    // Two non-null arrays that alias one allocation would be freed twice when
-    // hyb is destroyed. Reject that before calling rocSPARSE.
     // rocSPARSE set_info checks negative sizes, that ell_nnz fits the stored
     // ELL non-zero count, and that the enums are valid. It does not check that
     // the arrays are long enough for those sizes; do not add a second policy.
-    const void* seen[5];
-    int         nseen = 0;
-    if(hipsparse_hyb_array_alias(ell_col_ind, seen, &nseen)
-       || hipsparse_hyb_array_alias(ell_val, seen, &nseen)
-       || hipsparse_hyb_array_alias(coo_row_ind, seen, &nseen)
-       || hipsparse_hyb_array_alias(coo_col_ind, seen, &nseen)
-       || hipsparse_hyb_array_alias(coo_val, seen, &nseen))
-    {
-        return HIPSPARSE_STATUS_INVALID_VALUE;
-    }
-
     // The enum conversions throw on values they do not know.
     rocsparse_hyb_partition rocsparse_partition;
     rocsparse_datatype      rocsparse_data_type;
