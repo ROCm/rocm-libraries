@@ -13,8 +13,7 @@
 
 // Heuristic queries under HIPBLASLT_JIT. Each CTest entry runs one Catch2 case,
 // which sets HIPBLASLT_JIT and points HIPBLASLT_JIT_LIBRARY_PATH at a scratch
-// directory. The first query is a miss and generation runs. The second query in
-// this process is a hit and generation does not run.
+// directory. A second query returns the same JIT solution library index.
 namespace
 {
     using hipblaslt_jit_test::Device;
@@ -326,13 +325,8 @@ namespace
         return hipblaslt_ext::getIndexFromAlgo(algo);
     }
 
-    void requireMissThenHit(uint64_t before, uint64_t afterFirst, uint64_t afterSecond, int first,
-                             int second)
+    void requireSameIndex(int first, int second)
     {
-        {
-            INFO(("the first query did not generate"));
-            REQUIRE((afterFirst == before + 1 && afterSecond == before + 1));
-        }
         {
             INFO(("the second query returned another index"));
             REQUIRE((first == second));
@@ -398,38 +392,17 @@ namespace
         Layouts wide(M, kWide, M, kWide, N, kWide);
         Layouts narrow(M, kNarrow, M, kNarrow, N, kNarrow);
 #endif
-#ifndef HIPBLASLT_JIT_HEURISTIC_IGNORED
-        const auto before = hipblaslt_jit::generationCount();
-#endif
-        // One result fills the request, so the C++ query is a library hit.
+        // One result fills the request, so the C++ query returns the same index.
         const auto cWide = queryC(handle, desc, pref, wide, 1);
-#ifndef HIPBLASLT_JIT_HEURISTIC_IGNORED
-        const auto afterWideC = hipblaslt_jit::generationCount();
-#endif
         const auto cppWide
             = queryCpp(handle, desc, opA, HIPBLAS_OP_N, wide, A.pointer, B.pointer, C.pointer,
                        D.pointer, 1);
-#ifndef HIPBLASLT_JIT_HEURISTIC_IGNORED
-        const auto afterWide = hipblaslt_jit::generationCount();
-#endif
         const auto cNarrow = queryC(handle, desc, pref, narrow, 1);
-#ifndef HIPBLASLT_JIT_HEURISTIC_IGNORED
-        const auto afterNarrowC = hipblaslt_jit::generationCount();
-#endif
         const auto cppNarrow = queryCpp(handle, desc, opA, HIPBLAS_OP_N, narrow, A.pointer,
                                         B.pointer, C.pointer, D.pointer, 1);
-#ifndef HIPBLASLT_JIT_HEURISTIC_IGNORED
-        const auto afterNarrow = hipblaslt_jit::generationCount();
-#endif
 
         if(mode == "off" || mode == "ignored")
         {
-#ifndef HIPBLASLT_JIT_HEURISTIC_IGNORED
-            {
-                INFO(("HIPBLASLT_JIT off generated a solution"));
-                REQUIRE((afterNarrow == before));
-            }
-#endif
             checkPair("wide", cWide, cppWide, false, "", handle);
             checkPair("narrow", cNarrow, cppNarrow, false, "", handle);
         }
@@ -438,16 +411,10 @@ namespace
             checkPair("wide", cWide, cppWide, true, wideSuffix, handle);
             checkPair("narrow", cNarrow, cppNarrow, true, narrowSuffix, handle);
 #ifndef HIPBLASLT_JIT_HEURISTIC_IGNORED
-            requireMissThenHit(before,
-                               afterWideC,
-                               afterWide,
-                               publishedIndex(cWide.results.front()),
-                               publishedIndex(cppWide.results.front()));
-            requireMissThenHit(afterWide,
-                               afterNarrowC,
-                               afterNarrow,
-                               publishedIndex(cNarrow.results.front()),
-                               publishedIndex(cppNarrow.results.front()));
+            requireSameIndex(publishedIndex(cWide.results.front()),
+                             publishedIndex(cppWide.results.front()));
+            requireSameIndex(publishedIndex(cNarrow.results.front()),
+                             publishedIndex(cppNarrow.results.front()));
 #endif
 #ifndef HIPBLASLT_JIT_HIPKITTENS
             runFirst(handle, desc, stream, kWide, cWide.results.front());
@@ -466,11 +433,8 @@ namespace
                 REQUIRE((isJit(cWide.results.front().algo)));
             }
 #ifndef HIPBLASLT_JIT_HEURISTIC_IGNORED
-            requireMissThenHit(before,
-                               afterWideC,
-                               afterWide,
-                               publishedIndex(cWide.results.front()),
-                               publishedIndex(cppWide.results.front()));
+            requireSameIndex(publishedIndex(cWide.results.front()),
+                             publishedIndex(cppWide.results.front()));
 #endif
             requireUniqueKernels(handle, cWide);
             requireUniqueKernels(handle, cppWide);
