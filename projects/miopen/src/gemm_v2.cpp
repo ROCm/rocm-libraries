@@ -352,23 +352,6 @@ struct HipBLASLtMemoryHandles
     }
 };
 
-static std::string HipDataTypeString(hipDataType type)
-{
-    if(type == HIP_R_16F)
-        return "HIP_R_16F";
-    if(type == HIP_R_16BF)
-        return "HIP_R_16BF";
-    if(type == HIP_R_32F)
-        return "HIP_R_32F";
-    if(type == HIP_R_8F_E4M3_FNUZ)
-        return "HIP_R_8F_E4M3_FNUZ";
-#ifdef ENABLE_HIPBLASLT_BF8
-    if(type == HIP_R_8F_E5M2_FNUZ)
-        return "HIP_R_8F_E5M2_FNUZ";
-#endif
-    return "hipDataType(" + std::to_string(static_cast<int>(type)) + ")";
-}
-
 template <typename DataTypeAB, typename DataTypeC>
 static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
                                   const miopen::GemmDescriptor& gemm_desc,
@@ -393,8 +376,8 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
     const auto failure_context = [&] {
         std::ostringstream message;
         message << "; device=" << handle.GetDeviceName() << "; gemm_desc=" << gemm_desc
-                << "; hip_type_AB=" << HipDataTypeString(hip_type_AB)
-                << "; hip_type_C=" << HipDataTypeString(hip_type_C)
+                << "; hip_type_AB=" << static_cast<int>(hip_type_AB)
+                << "; hip_type_C=" << static_cast<int>(hip_type_C)
                 << "; skip_batches=" << skip_batches
                 << "; deterministic=" << gemm_desc.deterministic
                 << "; offered_workspace_bytes=" << offered_workspace_size
