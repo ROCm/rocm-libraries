@@ -7001,6 +7001,41 @@ inline void promoteOnlineTuningCandidate(
 //
 // Empty on anything less than that, which leaves the caller to fetch and to
 // answer the way it always has.
+//
+// KNOWN CAVEAT, MEASURED. That last sentence is the whole cost of the merged
+// key, and it is a stated limit rather than a defect: a problem the key covers
+// but that is not the one the record names never reaches this shortcut, and
+// pays more per dispatch than it would with the tuner switched off. On gfx950
+// at 256^3 f16 with K=5, one rdtsc scope around this whole lookup and 200,000
+// steady-state dispatches differenced against a shorter run so the cold start
+// cancels:
+//
+//     the pinned problem        408.6ns off ->  91.9ns online   (0.22x)
+//     sibling, workspace only   412.6ns off -> 699.1ns online   (1.69x)
+//     sibling, ReLU epilogue    429.3ns off -> 681.6ns online   (1.59x)
+//     two siblings alternating  471.1ns off -> 745.7ns online   (1.58x)
+//
+// So roughly +280ns a dispatch for a sibling, against -317ns for the problem
+// that owns the record; about 4% of wall time at this size, and less at every
+// larger one. Per segment it is ~76ns here, for the problem hash that has to
+// be computed to learn this caller is not the one named, ~145ns in
+// promoteResolvedOnlineTuningWinner and the resize back to the caller's depth,
+// and ~35ns of key, table lookup and extra fetch depth.
+//
+// It is NOT the position hint. Two problems under one key get the same ranking
+// by construction -- onlineTuningProblemKey() hashes what the ranking model
+// ranks on and nothing else -- so the winner sits at the same index for all of
+// them and the hint, written once during exploration, hits from then on. Over
+// those same 200,000 dispatches the full promote path ran 28 to 32 times in
+// every sibling arm, exploration included. Siblings can only shift each
+// other's hint where one of them cannot afford a candidate ranked above the
+// winner, so the workspace filter drops it and renumbers what is left.
+//
+// Removing the +280ns means a record per problem identity rather than per
+// resolution key, which is a second lock-free table and a separation of "the
+// problem a cache row is written under" from "the problem this answer is for".
+// That is a design change, not a fix, and wants a workload that shows merged
+// siblings are both common and hot before it is worth the surface.
 inline std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
     resolvedOnlineTuningAnswer(const TensileLite::ContractionProblemGemm& tensile_prob,
                                const rocblaslt::OnlineTuner::Resolution&  resolved,
