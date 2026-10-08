@@ -17609,7 +17609,7 @@ class KernelWriterAssembly(KernelWriter):
     edgeModule.add(SAddU32(dst=sgpr(tmpM), src0=sgpr(tmpM), src1=sgpr("SubtileMGuard"),
                            comment="totalMOffset = waveBase + WG0*MT0"))
     edgeModule.add(SSubU32(dst=sgpr("SubtileMGuard"), src0=sgpr("SizeI"), src1=sgpr(tmpM),
-                           comment="validM_wave = SizeI - totalMOffset; SCC=0 if OOB"))
+                           comment="validM_wave = SizeI - totalMOffset; SCC=1 if OOB"))
     edgeModule.add(SCSelectB32(dst=sgpr("SubtileMGuard"), src0=0, src1=sgpr("SubtileMGuard"),
                                comment="remainder = 0 if OOB"))
     # Precompute clamped validM_wave for per-store exec mask (avoids recomputing per store)
@@ -17637,12 +17637,12 @@ class KernelWriterAssembly(KernelWriter):
       edgeModule.add(SMulI32(dst=sgpr(tmpN), src0=sgpr(tmpN), src1=waveGroupN,
                              comment="waveBaseN = waveIdN * waveGroupN(%d)" % waveGroupN))
       edgeModule.add(SSubU32(dst=sgpr("SubtileNGuard"), src0=sgpr("SubtileNGuard"), src1=sgpr(tmpN),
-                             comment="validN - waveBaseN; SCC=0 if OOB"))
+                             comment="validN - waveBaseN; SCC=1 if OOB"))
       edgeModule.add(SCSelectB32(dst=sgpr("SubtileNGuard"), src0=0, src1=sgpr("SubtileNGuard"),
                                  comment="validN_wave = 0 if OOB"))
-    # clamped = min(validN_wave, waveGroupN); SCC=1 on no borrow → use waveGroupN.
+    # clamped = min(validN_wave, waveGroupN); SCC=1 on borrow → keep validN_wave, else waveGroupN.
     edgeModule.add(SSubU32(dst=sgpr(tmpN), src0=sgpr("SubtileNGuard"), src1=waveGroupN,
-                           comment="validN_wave - waveGroupN; SCC=1 if validN_wave >= waveGroupN"))
+                           comment="validN_wave - waveGroupN; SCC=1 if validN_wave < waveGroupN"))
     edgeModule.add(SCSelectB32(dst=sgpr("SubtileNGuard"), src0=sgpr("SubtileNGuard"), src1=waveGroupN,
                                comment="min(validN_wave, waveGroupN)"))
     if self.states.storeAlign8:
