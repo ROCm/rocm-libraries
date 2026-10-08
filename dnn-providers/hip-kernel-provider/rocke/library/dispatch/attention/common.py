@@ -28,14 +28,19 @@ where ``path`` is ``"2d"`` or ``"3d"``.
 DEFERRED -- arch-tuned block geometry
 -------------------------------------
 The 2D-tiled kernel's exact CTA geometry (``num_warps`` / ``block_m_per_warp`` /
-``tile_size``) is chosen by heuristics in ``attention_unified`` that query the
-running device arch (``_resolve_attention_arch``) and encode many measured,
-shape-specific thresholds (see ``_select_2d_num_warps`` et al.). Those are
-downstream PERFORMANCE-TUNING knobs, not a "which kernel family" decision, and
-they are not reproducible CPU-only without a device. They are intentionally OUT
-of the parity identity here; modelling them faithfully across C++/Python is a
-separate, larger effort. This dispatcher selects the path + backend; geometry is
-left to the instance builder at launch time.
+``tile_size``) is chosen by heuristics in ``attention_unified`` that encode many
+measured, shape-specific thresholds (see ``_select_2d_num_warps`` et al.). Those
+are downstream PERFORMANCE-TUNING knobs, not a "which kernel family" decision.
+They are intentionally OUT of the parity identity here; modelling them faithfully
+across C++/Python is a separate, larger effort. This dispatcher selects the path
++ backend; geometry is left to the instance builder at launch time.
+
+Since AICK-2146 those heuristics take ``arch`` as an explicit argument rather
+than probing the running device, so they ARE reproducible CPU-only: geometry for
+``gfx950`` can be computed from a ``gfx942`` host. That makes the deferral a
+scoping choice about the C++ parity identity, not a capability limit. The one
+remaining host read on the selection path is the CU count when ``num_cus`` is
+left at 0 -- see :func:`_resolve_num_cus` for the exact scope of the guarantee.
 
 That deferral is also why the unified candidates report ``grid=(0, 0, 0)`` and
 an empty ``signature``, and so cannot carry a ``bind``: there is no geometry to
@@ -160,19 +165,18 @@ class AttentionRequest(OperatorRequest):
     use_fp8: bool = False
     fp8_fnuz: bool = False
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
+        # ONE ``__post_init__``, normalizing both fields. Two of them is not two
+        # hooks -- Python keeps the last binding and the earlier one never runs.
+        #
         # Callers rebuild pins from stored JSON; a bad value fails here, with
         # its name, rather than as an unhashable key inside a cache.
         object.__setattr__(self, "tuning_knobs", normalize_knobs(self.tuning_knobs))
-
-    def __post_init__(self) -> None:
         # The one place ``arch`` is canonicalized. The class calls itself
         # "Normalized" -- this is what makes that true of the arch, so every
         # downstream comparison can be an exact ``==`` against a base name
         # without each site re-normalizing (and disagreeing about how).
-        # ``object.__setattr__`` because the dataclass is frozen; the base
-        # ``OperatorRequest`` defines no ``__post_init__``, so nothing is
-        # shadowed.
+        # ``object.__setattr__`` because the dataclass is frozen.
         object.__setattr__(self, "arch", canonical_arch(self.arch))
 
     def normalized(self) -> dict:
@@ -303,11 +307,24 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
          device.
     The on-box count is floored at ``120`` for **gfx950 only** (see below); every
     other arch passes the live count through exactly as develop does.
+
     An explicit ``target_ctas`` on the spec supersedes all of the above. Because
     the resolved value feeds the 3D ``num_segments`` (a compiled-kernel constant),
     the on-box value is device-dependent within an arch (varies across parts); for
     a reproducible or cross-compile target pass an explicit ``num_cus`` or the
     ``target_ctas`` spec override rather than relying on the live query.
+
+    **``120`` is a develop-inherited placeholder, not a per-arch CU count.**
+    Branch 3 returns it for *every* arch outside ``_AUTO_RESOLVE_ARCHS`` --
+    gfx1250, gfx90a and anything else alike -- so those arches route against a
+    number that describes none of them. That is develop's behaviour and this
+    change deliberately preserves it: replacing it with real per-arch counts
+    moves 2D/3D routing and ``num_segments`` for every caller leaving
+    ``num_cus`` at 0, which wants measurement rather than a refactor (the same
+    reasoning as the scope limit below). Until then, a caller dispatching for an
+    arch outside ``_AUTO_RESOLVE_ARCHS`` and relying on CU-sensitive routing
+    should pass an explicit ``num_cus``; adding an arch to
+    ``_AUTO_RESOLVE_ARCHS`` only helps a host that IS that arch.
 
     **Scope limit of AICK-2146's host-independence guarantee.** Branch 2 is the
     one surviving host read on the selection path, and it is deliberate: it is

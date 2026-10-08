@@ -134,6 +134,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         Gfx950AttentionDenseSpec,
     )
 
+    # Exact compare: ``arch`` is canonical by construction. See gfx942_dense.py.
     if req.arch != "gfx950":
         raise ValueError(
             f"gfx950 dense spec factory requires arch='gfx950', got {req.arch!r}"

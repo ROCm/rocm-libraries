@@ -400,7 +400,7 @@ def dispatch_for_arches(
     *,
     ranker: Ranker | None = None,
     strict: bool = True,
-) -> Dict[str, "DispatchResult | Exception"]:
+) -> Dict[str, "DispatchResult | ValueError"]:
     """Run :func:`dispatch_attention` for each of ``arches``.
 
     Returns a ``{canonical_arch: DispatchResult}`` mapping so the caller can
@@ -441,7 +441,11 @@ def dispatch_for_arches(
                 ``False`` maps each failing arch to its exception instead, so
                 one unsupported arch does not discard the results for the
                 others -- the point of a cross-arch comparison. Values are then
-                ``DispatchResult | Exception``; test with ``isinstance``.
+                ``DispatchResult | ValueError``; test with ``isinstance``.
+                Only ``ValueError`` (the dispatcher's "unsupported" answer,
+                including ``PinRefused``) is collected: any other exception is a
+                bug on the dispatch path and propagates under both settings
+                rather than being filed as an unsupported arch.
 
     Raises:
         ValueError: if ``arches`` is empty, or an entry does not canonicalize.
@@ -466,7 +470,7 @@ def dispatch_for_arches(
     if not requested:
         raise ValueError("arches is empty: nothing to dispatch for")
 
-    results: Dict[str, "DispatchResult | Exception"] = {}
+    results: Dict[str, "DispatchResult | ValueError"] = {}
     for raw in requested:
         arch = canonical_arch(raw)
         if not arch:
@@ -475,7 +479,14 @@ def dispatch_for_arches(
             continue  # deduplicate after canonicalization
         try:
             results[arch] = dispatch_attention(replace(req, arch=arch), ranker=ranker)
-        except Exception as exc:
+        except ValueError as exc:
+            # ``ValueError`` ONLY, deliberately -- it is the dispatcher's "this
+            # arch cannot run this request" answer (``PinRefused`` subclasses it).
+            # A bare ``except Exception`` would also swallow ``TypeError`` /
+            # ``AttributeError``, i.e. a bug in the dispatch path, and report it
+            # in the results mapping as though the arch were merely unsupported.
+            # That is the failure mode that let the missing-arch ``TypeError`` in
+            # ``gfx942_unified`` read as an unsupported arch instead of a crash.
             if strict:
                 raise
             results[arch] = exc

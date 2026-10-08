@@ -152,6 +152,32 @@ class TestPerArchFailureHandling(unittest.TestCase):
         with self.assertRaises(ValueError):
             dispatch_for_arches(_request(), ["gfx942", ""], strict=False)
 
+    def test_non_strict_does_not_swallow_a_bug_on_the_dispatch_path(self):
+        """A crash must stay a crash, not be filed as "arch unsupported".
+
+        ``strict=False`` collects the dispatcher's *unsupported* answer
+        (``ValueError`` / ``PinRefused``). A ``TypeError`` from a selector called
+        with the wrong arguments is a defect in dispatch, and a caller reading
+        the results mapping cannot tell the two apart once it is in there. This
+        is not hypothetical: a develop merge dropped the ``arch`` argument at a
+        ``_enable_gfx942_fp16_flash`` call site, and under a bare
+        ``except Exception`` every gfx942 fp16 request would have reported as an
+        unsupported arch instead of surfacing the ``TypeError``.
+        """
+
+        def _boom(req, ranker=None):
+            raise TypeError("selector called with the wrong arguments")
+
+        original = dispatch_for_arches.__globals__["dispatch_attention"]
+        dispatch_for_arches.__globals__["dispatch_attention"] = _boom
+        try:
+            for strict in (True, False):
+                with self.subTest(strict=strict):
+                    with self.assertRaises(TypeError):
+                        dispatch_for_arches(_request(), ["gfx942"], strict=strict)
+        finally:
+            dispatch_for_arches.__globals__["dispatch_attention"] = original
+
 
 class TestCrossArchComparison(unittest.TestCase):
     """The use case the helper exists for."""
