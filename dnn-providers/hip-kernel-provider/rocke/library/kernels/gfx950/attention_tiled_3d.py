@@ -914,7 +914,12 @@ def build_unified_attention_3d_tiled(
                     ab_row = b.add(ab_base, b.mul(additive_bias_sq_stride_p, qp_r))
                     ab_idx = b.add(ab_row, col_abs)
                     ab_v = b.masked_global_load(
-                        additive_bias_ptr, ab_idx, m_ok, b.const_f32(0.0), dtype=F32, align=4
+                        additive_bias_ptr,
+                        ab_idx,
+                        m_ok,
+                        b.const_f32(0.0),
+                        dtype=F32,
+                        align=4,
                     )
                     s_scaled = b.fadd(s_scaled, b.fmul(ab_v, rcp_ln2))
                 masked[(n, reg)] = b.select(m_ok, s_scaled, neg_inf)

@@ -3541,7 +3541,9 @@ def build_unified_attention_2d_tiled(
                                     b.mul(additive_bias_batch_stride_p, seq_idx),
                                     b.mul(additive_bias_head_stride_p, ab_qh),
                                 )
-                                ab_row = b.add(ab_base, b.mul(additive_bias_sq_stride_p, qp_r))
+                                ab_row = b.add(
+                                    ab_base, b.mul(additive_bias_sq_stride_p, qp_r)
+                                )
                                 ab_idx = b.add(ab_row, col_abs)
                                 ab_v = b.masked_global_load(
                                     additive_bias_ptr,

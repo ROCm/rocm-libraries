@@ -1145,9 +1145,7 @@ class TestAttentionHelpers(unittest.TestCase):
                     include_qq_bias_stride=True,
                     include_additive_bias=use_ab,
                 )
-                self.assertEqual(
-                    [p.name for p in k.params], [a["name"] for a in sig]
-                )
+                self.assertEqual([p.name for p in k.params], [a["name"] for a in sig])
                 self.assertEqual(
                     use_ab, any("additive_bias" in p.name for p in k.params)
                 )
@@ -1158,9 +1156,7 @@ class TestAttentionHelpers(unittest.TestCase):
                     )
                 )
                 sig = _3d_signature("bf16", include_additive_bias=use_ab)
-                self.assertEqual(
-                    [p.name for p in seg.params], [a["name"] for a in sig]
-                )
+                self.assertEqual([p.name for p in seg.params], [a["name"] for a in sig])
 
     def test_unified_attention_3d_tiled_kernel_compiles(self):
         from kernels import (

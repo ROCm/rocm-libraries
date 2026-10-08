@@ -74,9 +74,7 @@ def _make_inputs(seq_lens, hq, hkv, dtype, seed=0):
     max_blocks = (max(kv_lens) + _BLOCK_SIZE - 1) // _BLOCK_SIZE
     num_blocks = len(seq_lens) * max_blocks
     q = torch.randn(sum(query_lens), hq, _HEAD_SIZE, dtype=tdt, device="cuda")
-    k = torch.randn(
-        num_blocks, _BLOCK_SIZE, hkv, _HEAD_SIZE, dtype=tdt, device="cuda"
-    )
+    k = torch.randn(num_blocks, _BLOCK_SIZE, hkv, _HEAD_SIZE, dtype=tdt, device="cuda")
     v = torch.randn_like(k)
     # Disjoint shuffled pages so every sequence reads distinct KV.
     block_table = (
@@ -188,9 +186,9 @@ def test_additive_bias_matches_reference(backend, dtype, bias_mode, heads):
     ref_nobias = _reference(q, k, v, block_table, seq_lens, scale, None)
     tol = _TOL[dtype]
     max_abs = (ref - out.float()).abs().max().item()
-    assert max_abs < tol, (
-        f"{backend}/{dtype}/{bias_mode}/{heads}: max_abs={max_abs:.3e} >= {tol}"
-    )
+    assert (
+        max_abs < tol
+    ), f"{backend}/{dtype}/{bias_mode}/{heads}: max_abs={max_abs:.3e} >= {tol}"
     # Guard against a silently ignored bias: the bias must move the output.
     shift = (ref - ref_nobias).abs().max().item()
     assert shift > 10 * tol, f"bias too weak to be observable (shift={shift:.3e})"

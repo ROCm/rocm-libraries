@@ -584,9 +584,7 @@ def supports_native_unified_attention_tiled(
         ),
         # Additive bias is gfx950-only for now; same #10126 rule as above.
         **(
-            {"use_additive_bias": problem.use_additive_bias}
-            if arch == "gfx950"
-            else {}
+            {"use_additive_bias": problem.use_additive_bias} if arch == "gfx950" else {}
         ),
     )
 
@@ -615,9 +613,7 @@ def supports_native_unified_attention_3d_tiled(
         kv_storage_dtype=_kv_storage_dtype(problem),
         arch=arch,
         **(
-            {"use_additive_bias": problem.use_additive_bias}
-            if arch == "gfx950"
-            else {}
+            {"use_additive_bias": problem.use_additive_bias} if arch == "gfx950" else {}
         ),
     )
 
@@ -2489,7 +2485,12 @@ def _enable_register_pv(problem: UnifiedAttentionProblem) -> bool:
         return False
     # register-pv v1 does not implement softcap, ALiBi, or QQ-bias paths;
     # the spec __post_init__ enforces this.
-    if problem.softcap > 0 or problem.use_alibi or problem.use_qq_bias or problem.use_additive_bias:
+    if (
+        problem.softcap > 0
+        or problem.use_alibi
+        or problem.use_qq_bias
+        or problem.use_additive_bias
+    ):
         return False
     # use_register_pv requires the 16x16x32 MFMA path; it conflicts with
     # use_mfma_32x32. When the 32x32 path is selected we leave it disabled
@@ -2583,7 +2584,12 @@ def _enable_transposed_subflags(problem: UnifiedAttentionProblem) -> bool:
         return False
     # use_transposed_mask_limit (and the other VALU sub-flags) do not support
     # softcap, ALiBi, QQ bias, or additive bias; the spec __post_init__ enforces this.
-    if problem.softcap > 0 or problem.use_alibi or problem.use_qq_bias or problem.use_additive_bias:
+    if (
+        problem.softcap > 0
+        or problem.use_alibi
+        or problem.use_qq_bias
+        or problem.use_additive_bias
+    ):
         return False
     return _enable_transposed_qk_32x32(problem)
 
@@ -3783,7 +3789,12 @@ def _recommend_graph_replay(problem: UnifiedAttentionProblem) -> bool:
     excluded for now. The dispatcher only engages an internal graph when the
     caller is not already capturing (frameworks that graph the whole forward
     take precedence)."""
-    if problem.use_sinks or problem.use_alibi or problem.use_qq_bias or problem.use_additive_bias:
+    if (
+        problem.use_sinks
+        or problem.use_alibi
+        or problem.use_qq_bias
+        or problem.use_additive_bias
+    ):
         return False
     if problem.softcap > 0 or problem.sliding_window > 0 or problem.use_fp8:
         return False
@@ -3807,7 +3818,12 @@ def _enable_3d_graph_replay(problem: UnifiedAttentionProblem) -> bool:
         # exercised (``HIPDNN_GFX1250_3D_GRAPH=1``).
         if problem.max_seqlen_q > 768:
             return False
-        if problem.use_alibi or problem.use_qq_bias or problem.use_additive_bias or problem.softcap > 0:
+        if (
+            problem.use_alibi
+            or problem.use_qq_bias
+            or problem.use_additive_bias
+            or problem.softcap > 0
+        ):
             return False
         if problem.sliding_window > 0:
             return False

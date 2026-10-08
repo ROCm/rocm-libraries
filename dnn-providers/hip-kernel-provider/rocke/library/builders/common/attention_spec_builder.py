@@ -405,7 +405,9 @@ def _spec_generic_3d(problem: UnifiedAttentionProblem):
         use_wide_kv_load=_enable_gfx942_3d_wide_kv_load(problem),
         use_i64_kv_addr=_enable_i64_kv_addr(problem),
         # Additive bias is gfx950-only for now; gfx942's spec has no such field.
-        **({"use_additive_bias": problem.use_additive_bias} if arch == "gfx950" else {}),
+        **(
+            {"use_additive_bias": problem.use_additive_bias} if arch == "gfx950" else {}
+        ),
     )
 
 
