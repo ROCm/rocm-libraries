@@ -15,7 +15,7 @@ whether a graph may run on them and how to launch them — lives one level up, o
 file per op:
 [`FlydslRmsNormNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslRmsNormNative.cpp)
 and
-[`FlydslSdpaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaNative.cpp).
+[`FlydslSdpaRdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaNative.cpp).
 
 **Nothing here is compiled by the build.** The `.hsaco` objects are committed
 artifacts; the provider's shared packer packs and stages them. That is the central fact about this
@@ -57,7 +57,7 @@ phase, bias, other dtypes, non-packed operands — are enumerated in
 [COVERAGE.md §3](COVERAGE.md), each with the reason the shipped objects cannot
 compute it.
 
-**SDPA forward** (`hipkernel:flydsl_sdpa`), 96 objects: bf16 and f16 ×
+**SDPA forward** (`hipkernel:flydsl_sdpa_rdna`), 96 objects: bf16 and f16 ×
 `head_dim` 64, 96, 128 and 256 × causal on and off × with and without an
 additive f32 bias (`attn_mask`, broadcast over any axis), plus a generic tier
 that serves every other `head_dim` that is a multiple of 8 up to 256, and a
@@ -169,7 +169,7 @@ provider tree; everything else is relative to this directory.
 | `generators/_codeobject.py` | reads and verifies a compiled object (target, ELF generic machine), shared by every generator |
 | `generators/arch_families.json`, `_arch_families.py` | the generic targets and their member arches; read by the generators and `CMakeLists.txt` |
 | `generators/_generic_targets.py` | the FlyDSL 0.3.4 shim that lets MLIR lower for a generic target |
-| `generators/gen_rmsnorm.py`, `gen_sdpa.py` | compile one op's rows into objects + manifest + `<target>.SOURCE.md` |
+| `generators/gen_rmsnorm.py`, `gen_sdpa_rdna.py` | compile one op's rows into objects + manifest + `<target>.SOURCE.md` |
 | `gen_descriptors.py` | derives descriptors from the objects; `--check` re-verifies |
 | `tools/diff_upstream.py` | vendored sources vs. their upstream checkouts, black-normalized |
 | `tools/check_shards.py` | after the pack: every member's shard ships exactly the checked-in objects |

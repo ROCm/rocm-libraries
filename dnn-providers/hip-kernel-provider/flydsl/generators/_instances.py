@@ -169,7 +169,7 @@ def rmsnorm_instances() -> list[Instance]:
 
 # --- SDPA forward ------------------------------------------------------------
 
-# The vendored kernel (kernels_src/kernels/attention/flash_attn_func_gfx1151.py)
+# The vendored kernel (kernels_src/kernels/attention_rdna/flash_attn_func_rdna.py)
 # bakes only head_dim, the causal flag, dtype and its tile. Batch, both sequence
 # lengths, both head counts (GQA/MQA), every stride, the softmax scale and the
 # causal offset are runtime arguments, so each row below serves every shape and
@@ -238,7 +238,7 @@ PRIORITY_SDPA_GENERIC = {
     256: PRIORITY_GENERIC,
 }
 
-# The decode family (flash_attn_decode_gfx11.py): split-KV with the GQA group packed
+# The decode family (flash_attn_decode_rdna.py): split-KV with the GQA group packed
 # into 16-row tiles, for graphs with g * Sq <= 128. Its own kernel and its own launch
 # geometry, so a separate set of objects; above the prefill ones in priority, so a
 # graph both serve runs here. Each object also carries the merge kernel that combines
@@ -255,7 +255,7 @@ SDPA_DECODE_HEAD_DIMS = (64, 96, 128, 256)
 # narrower tier above the wider.
 SDPA_DECODE_GENERIC_HEAD_DIM_MAX = {96: 1, 256: 2}
 PRIORITY_SDPA_DECODE_GENERIC = {96: 145, 256: 140}
-SDPA_DECODE_MERGE_SYMBOL = "flash_attn_decode_merge_gfx11_kernel_1"
+SDPA_DECODE_MERGE_SYMBOL = "flash_attn_decode_merge_rdna_kernel_1"
 PRIORITY_SDPA_DECODE = 150
 SDPA_DECODE_ROWS = 16
 
@@ -291,7 +291,7 @@ def sdpa_instances() -> list[Instance]:
                     )
                     instances.append(
                         Instance(
-                            op="sdpa",
+                            op="sdpa_rdna",
                             dtype=dtype,
                             priority=PRIORITY_SPECIALIZED,
                             knobs={
@@ -315,7 +315,7 @@ def sdpa_instances() -> list[Instance]:
             for causal in SDPA_CAUSAL:
                 instances.append(
                     Instance(
-                        op="sdpa",
+                        op="sdpa_rdna",
                         dtype=dtype,
                         priority=PRIORITY_SDPA_GENERIC[head_dim_max],
                         knobs={
@@ -337,7 +337,7 @@ def sdpa_instances() -> list[Instance]:
                 for has_bias in SDPA_HAS_BIAS:
                     instances.append(
                         Instance(
-                            op="sdpa",
+                            op="sdpa_rdna",
                             dtype=dtype,
                             priority=PRIORITY_SDPA_DECODE,
                             knobs={
@@ -358,7 +358,7 @@ def sdpa_instances() -> list[Instance]:
             for causal in SDPA_CAUSAL:
                 instances.append(
                     Instance(
-                        op="sdpa",
+                        op="sdpa_rdna",
                         dtype=dtype,
                         priority=PRIORITY_SDPA_DECODE_GENERIC[head_dim_max],
                         knobs={
@@ -392,7 +392,7 @@ def _assert_unique(instances: list[Instance]) -> None:
         seen[instance.name] = instance
 
 
-OPS = {"rmsnorm": rmsnorm_instances, "sdpa": sdpa_instances}
+OPS = {"rmsnorm": rmsnorm_instances, "sdpa_rdna": sdpa_instances}
 
 
 def instances_for(op: str) -> list[Instance]:

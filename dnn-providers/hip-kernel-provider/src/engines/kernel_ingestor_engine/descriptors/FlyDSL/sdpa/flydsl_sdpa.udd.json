@@ -1,6 +1,0 @@
-{
-  "version": "1.0",
-  "id": "7108fe9d-26db-51a4-9d75-6770b2162dd1",
-  "name": "flydsl sdpa dispatch",
-  "dispatch_symbol": "hipkernel.flydsl_sdpa.dispatch"
-}

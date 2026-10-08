@@ -176,6 +176,18 @@ def collect(content_dir: Path, arch: str) -> list[KernelEntry]:
                 f"{current}. Regenerate ({op}, {arch}) as flydsl/REGEN.md describes; "
                 "the regenerated objects are published to DVC by a maintainer."
             )
+        # An object the manifest no longer names is left behind when an instance is
+        # renamed or dropped; the generators write objects but never delete them.
+        named = {record["file"] for record in manifest["instances"]}
+        stray = sorted(
+            p.name for p in manifest_path.parent.glob("*.hsaco") if p.name not in named
+        )
+        if stray:
+            raise ValueError(
+                f"{manifest_path.parent}: {len(stray)} object(s) the manifest does not "
+                f"name, e.g. '{stray[0]}'. Delete them: they are left over from a "
+                "previous generation and would ship unreferenced."
+            )
         for record in manifest["instances"]:
             path = manifest_path.parent / record["file"]
             if not path.is_file():

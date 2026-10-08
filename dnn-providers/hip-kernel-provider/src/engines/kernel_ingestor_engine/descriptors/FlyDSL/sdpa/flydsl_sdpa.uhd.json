@@ -1,7 +1,0 @@
-{
-  "version": "1.0",
-  "id": "7099af4c-6b1c-5e1f-b97b-328ced0add72",
-  "name": "flydsl sdpa selector",
-  "kind": "native",
-  "payload": "hipkernel.flydsl_sdpa.score"
-}

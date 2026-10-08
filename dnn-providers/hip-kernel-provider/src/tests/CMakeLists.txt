@@ -260,7 +260,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # no set. ACTIVE rather than the option: with the option ON for an architecture no
     # kernels are checked in for, FlyDSL stands down and there is nothing to census.
     #
-    # TestFlydslRmsNormPacks and TestFlydslSdpaPacks are the FlyDSL suites that
+    # TestFlydslRmsNormPacks and TestFlydslSdpaRdnaPacks are the FlyDSL suites that
     # qualify, and they have files of their own in the census binary for that reason. FlyDSL's GPU suites skip, which a
     # census entry treats as a failure; its matcher-acceptance suites are TEST_P; and its
     # remaining host suites build graphs in-process instead of reading loadedSet(), so
@@ -282,7 +282,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             TARGET hip_kernel_provider_census_tests
             PACK_NAME product
             ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS}
-            SUITES TestFlydslSdpaPacks
+            SUITES TestFlydslSdpaRdnaPacks
             EXPECTED_CASES
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsEverySpecializedAndGenericVariantOnce

@@ -110,7 +110,7 @@ CONTENT=$CONTENT $PY - <<'PY'
 import hashlib, json, os, pathlib, sys
 
 bad = total = 0
-for op in ("rmsnorm", "sdpa"):
+for op in ("rmsnorm", "sdpa_rdna"):
     manifest = json.loads((pathlib.Path(os.environ["CONTENT"]) / f"{op}/gfx11-generic/manifest.json").read_text())
     regen = pathlib.Path(os.environ["REGEN_OUT"]) / f"{op}/gfx11-generic"
     for instance in manifest["instances"]:
@@ -163,10 +163,10 @@ cd dnn-providers/hip-kernel-provider/flydsl
 # (1) Compile. Writes $CONTENT/<op>/<arch>/*.hsaco + manifest.json, and
 #     $CONTENT/<op>/<arch>.SOURCE.md
 #     for each op. The SDPA kernels carry the gfx11 (RDNA3 / RDNA3.5) and gfx12
-#     (RDNA4) WMMA ABIs; gen_sdpa refuses any other arch before compiling.
+#     (RDNA4) WMMA ABIs; gen_sdpa_rdna refuses any other arch before compiling.
 for ARCH in gfx11-generic gfx12-generic; do
   $PY -m generators.gen_rmsnorm --arch $ARCH
-  $PY -m generators.gen_sdpa --arch $ARCH
+  $PY -m generators.gen_sdpa_rdna --arch $ARCH
 
   # (2) Descriptors. Every field is derived from the manifest and the objects it
   #     names, so a descriptor cannot disagree with the object it describes.
@@ -190,7 +190,7 @@ FlyDSL 0.3.4 cannot name a generic target to MLIR, so `prepare()` installs
 `generators/_generic_targets.py`, a shim pinned to that release, which hands
 MLIR the family's lowest member (`gfx1100`) as its chipset while the object is
 still built for, and stamped as, `gfx11-generic`. The manifest's toolchain block
-records it (`generic_target_shim`). `gen_sdpa` also builds the generic objects
+records it (`generic_target_shim`). `gen_sdpa_rdna` also builds the generic objects
 with `amdgpu-use-amdgpu-trackers`, added to the kernel's own LLVM options (the
 effective set is recorded per instance as `llvm_options`):
 without it the d128 causal objects spill a few VGPRs, because the generic ISA
@@ -279,7 +279,7 @@ about which compiler built it.
 come from FlyDSL; the attention kernel comes from AITER, which carries FlyDSL
 kernels upstream FlyDSL does not. Two carry deliberate modifications recorded in
 their own headers: `kernels_src/kernels/norm/rmsnorm_kernel.py` (three) and
-`kernels_src/kernels/attention/flash_attn_func_gfx1151.py` (sixteen — the gfx11
+`kernels_src/kernels/attention_rdna/flash_attn_func_rdna.py` (sixteen — the gfx11
 port and the runtime arguments that let a few objects cover many shapes). Each
 file's header names the upstream and path it came from, and the tool reads that
 header to decide what to diff it against. To see what has drifted:
@@ -293,7 +293,7 @@ Expected against the pinned checkouts, and the state of the tree as committed:
 ```
 FlyDSL (v0.3.4.1-19-g89ad52f) at the pinned commit 89ad52fbbb9e
 AITER at the pinned commit 8253efc40595
-=== kernels/attention/flash_attn_func_gfx1151.py
+=== kernels/attention_rdna/flash_attn_func_rdna.py
   …
 === kernels/norm/rmsnorm_kernel.py
   …

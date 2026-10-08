@@ -194,13 +194,13 @@ do not compute, declined rather than approximated.
 
 ---
 
-## 5. SDPA forward — `hipkernel:flydsl_sdpa`
+## 5. SDPA forward — `hipkernel:flydsl_sdpa_rdna`
 
 The kernel is FlyDSL's RDNA4 flash-attention forward from AITER, ported to the
 gfx11 WMMA ABI and widened so a handful of objects cover many shapes
-([`kernels_src/kernels/attention/flash_attn_func_gfx1151.py`](kernels_src/kernels/attention/flash_attn_func_gfx1151.py),
+([`kernels_src/kernels/attention_rdna/flash_attn_func_rdna.py`](kernels_src/kernels/attention_rdna/flash_attn_func_rdna.py),
 whose header lists every modification). The native half is
-[`FlydslSdpaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaNative.cpp).
+[`FlydslSdpaRdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaNative.cpp).
 
 ### 5.1 What is baked, and what is not
 
@@ -273,7 +273,7 @@ pressure. Everything else about the mask is a runtime argument, served by both.
 **Decode** has its own forty objects (`decode` 1; bf16 and f16 × causal × `head_dim`
 64, 96, 128, 256 with and without a bias, plus two generic tiers), from a kernel
 written for it
-([`flash_attn_decode_gfx11.py`](kernels_src/kernels/attention/flash_attn_decode_gfx11.py)).
+([`flash_attn_decode_rdna.py`](kernels_src/kernels/attention_rdna/flash_attn_decode_rdna.py)).
 The prefill objects give a decode step 128 query rows of which one is used, and read
 each KV head once per query head. The decode kernel packs the query heads of one KV
 head (the GQA group) and the query positions into 16-row tiles, one workgroup per tile,
@@ -374,12 +374,12 @@ objects.
 | Claim | Checked by |
 |---|---|
 | The 96 objects are what the pinned toolchain produces | [REGEN.md](REGEN.md) §2 — 96/96 byte-identical |
-| Each decode object carries its merge kernel, with both argument layouts as declared | `gen_sdpa.py`, before the object is written; the 38-slot main layout by `TestFlydslSdpaPacks` |
-| Each object has the declared 36-argument layout and spills no registers | `gen_sdpa.py`, before the object is written |
+| Each decode object carries its merge kernel, with both argument layouts as declared | `gen_sdpa_rdna.py`, before the object is written; the 38-slot main layout by `TestFlydslSdpaRdnaPacks` |
+| Each object has the declared 36-argument layout and spills no registers | `gen_sdpa_rdna.py`, before the object is written |
 | The vendored kernel matches AITER but for its recorded modifications | `tools/diff_upstream.py --aiter` ([REGEN.md](REGEN.md) §5) |
-| The shard ships exactly one object per `dtype × head_dim × causal × has_bias × head_dim_max` class, each with the 36-slot signature | `TestFlydslSdpaPacks`, and the shard census that runs it |
-| The accept/decline rules above, the bindings, and candidate selection | `TestFlydslSdpaGraphAccepts`, `TestFlydslSdpaGraphDeclines`, `TestFlydslSdpaBinding`, `TestFlydslSdpaKernelMatch` |
-| The staged objects compute attention and LSE — GQA, ragged lengths, cross-attention, both causal corners, windows, bands, keyless rows, decode, `head_dim` 96, runtime and default scale — against a double-precision reference | `TestGpuFlydslSdpaDispatch` |
+| The shard ships exactly one object per `dtype × head_dim × causal × has_bias × head_dim_max` class, each with the 36-slot signature | `TestFlydslSdpaRdnaPacks`, and the shard census that runs it |
+| The accept/decline rules above, the bindings, and candidate selection | `TestFlydslSdpaRdnaGraphAccepts`, `TestFlydslSdpaRdnaGraphDeclines`, `TestFlydslSdpaRdnaBinding`, `TestFlydslSdpaRdnaKernelMatch` |
+| The staged objects compute attention and LSE — GQA, ragged lengths, cross-attention, both causal corners, windows, bands, keyless rows, decode, `head_dim` 96, runtime and default scale — against a double-precision reference | `TestGpuFlydslSdpaRdnaDispatch` |
 
 ---
 
