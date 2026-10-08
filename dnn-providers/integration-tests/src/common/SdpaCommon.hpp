@@ -7,8 +7,10 @@
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
+#include <cstdint>
 #include <optional>
 #include <ostream>
+#include <utility>
 #include <vector>
 
 namespace test_sdpa_common
@@ -99,17 +101,16 @@ void fillForwardOutputsForBackward(const hipdnn_data_sdk::utilities::TensorBase<
 {
     using hipdnn_test_sdk::utilities::CpuFpReferenceSdpa;
 
-    CpuFpReferenceSdpa::forward<DataType, DataType, DataType, DataType, float>(
-        q,
-        k,
-        v,
-        o,
-        tc.attnScaleValue,
-        /*attnMask=*/nullptr,
-        tc.leftBound,
-        tc.rightBound,
-        tc.topLeftAlignment,
-        &stats);
+    CpuFpReferenceSdpa::forward<DataType, DataType, DataType, DataType, float>(q,
+                                                                               k,
+                                                                               v,
+                                                                               o,
+                                                                               tc.attnScaleValue,
+                                                                               /*attnMask=*/nullptr,
+                                                                               tc.leftBound,
+                                                                               tc.rightBound,
+                                                                               tc.topLeftAlignment,
+                                                                               &stats);
 }
 
 // Engine-agnostic backward coverage, ported verbatim from the ASM SDPA
