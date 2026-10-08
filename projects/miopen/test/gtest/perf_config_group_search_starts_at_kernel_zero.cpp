@@ -11,8 +11,10 @@
 // Two layers of coverage:
 //   * GPU_* : exercise the real CK lazy-init path end-to-end for the 2D Fwd/Bwd/Wrw solvers, so
 //     they require a ROCm device and the installed CK grouped-conv library (GTEST_SKIP otherwise).
-//     The 3D Fwd/Bwd end-to-end equivalents live in their own perf_config_HipImplicitGemm3DGroup*
-//     Xdlops.cpp files.
+//     They use a canonical group=1, C=K=64, 3x3 shape that CK should always enumerate kernels for;
+//     if SetNextValue() returns no kernels the ASSERT fails on purpose -- that signals a real CK /
+//     applicability regression, not a bad test shape. The 3D Fwd/Bwd end-to-end equivalents live in
+//     their own perf_config_HipImplicitGemm3DGroup*Xdlops.cpp files.
 //   * CPU_* : host-only checks of SeedFirstValidKernel() -- the populate-branch seed extracted for
 //     testability -- for all five fixed solvers. valid_kernels is injected directly, so no device
 //     or CK library is needed and these run in the CPU-only test stage.
@@ -69,7 +71,7 @@ TEST(GPU_PerfConfig_HipImplicitGemmGroupFwdXdlops_FP16, SearchStartsAtKernelZero
         GTEST_SKIP() << "CK grouped conv library not installed for " << device_name;
 
     const auto problem =
-        MakeSearchProblem({1, 256, 192, 192, {28, 28}, {3, 3}, {1, 1}, {1, 1}, {1, 1}},
+        MakeSearchProblem({1, 64, 64, 64, {28, 28}, {3, 3}, {1, 1}, {1, 1}, {1, 1}},
                           miopenHalf,
                           miopenTensorNHWC,
                           Direction::Forward);
@@ -93,7 +95,7 @@ TEST(GPU_PerfConfig_HipImplicitGemmGroupBwdXdlops_FP16, SearchStartsAtKernelZero
         GTEST_SKIP() << "CK grouped conv library not installed for " << device_name;
 
     const auto problem =
-        MakeSearchProblem({8, 256, 192, 192, {28, 28}, {3, 3}, {1, 1}, {1, 1}, {1, 1}},
+        MakeSearchProblem({1, 64, 64, 64, {28, 28}, {3, 3}, {1, 1}, {1, 1}, {1, 1}},
                           miopenHalf,
                           miopenTensorNHWC,
                           Direction::BackwardData);
@@ -118,7 +120,7 @@ TEST(GPU_PerfConfig_HipImplicitGemmGroupWrwXdlops_FP32, SearchStartsAtKernelZero
         GTEST_SKIP() << "CK grouped conv library not installed for " << device_name;
 
     const auto problem =
-        MakeSearchProblem({8, 256, 192, 192, {28, 28}, {3, 3}, {1, 1}, {1, 1}, {1, 1}},
+        MakeSearchProblem({1, 64, 64, 64, {28, 28}, {3, 3}, {1, 1}, {1, 1}, {1, 1}},
                           miopenFloat,
                           miopenTensorNHWC,
                           Direction::BackwardWeights);
