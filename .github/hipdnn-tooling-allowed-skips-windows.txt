@@ -1,0 +1,7 @@
+# Skips the Windows superbuild lane accepts from the hipDNN tooling pytest suites, on top of
+# the shared list in hipdnn-tooling-allowed-skips.txt. check_pytest_junit.py is given both
+# files on this lane and only the shared one on Linux, so an entry here may not match a
+# skip Linux makes, and the stale-allow check keeps it from outliving the skip it excuses.
+#
+# Format and rules are the shared file's: `<pattern> # <reason>`, every entry needs a reason.
+hipdnn_ingestor_generator_pytest::tests.test_sweep_tools.*::* # sweep.py drives a benchmark on an allocated Linux device host: it selects the interpreter from the benchmark's shebang, runs it directly, and the cases withdraw directory write access with chmod, which Windows ignores

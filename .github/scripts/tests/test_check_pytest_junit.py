@@ -117,3 +117,44 @@ def test_several_junit_files_are_all_checked(tmp_path, capsys):
     out = capsys.readouterr().out
     assert rc == 1
     assert "b::tests.t::test_two" in out
+
+
+def test_several_allow_lists_are_pooled(tmp_path, capsys):
+    junit = _junit(
+        tmp_path / "suite.xml",
+        [("tests.a", "test_one", "skip"), ("tests.b", "test_two", "skip")],
+    )
+    shared = _allow(tmp_path / "shared.txt", "suite::tests.a::* # shared skip\n")
+    lane = _allow(tmp_path / "lane.txt", "suite::tests.b::* # lane-only skip\n")
+    rc = cpj.main(
+        [
+            "--junit",
+            str(junit),
+            "--allow-skips",
+            str(shared),
+            "--allow-skips",
+            str(lane),
+        ]
+    )
+    assert rc == 0
+    assert "2 allow-listed skip(s)" in capsys.readouterr().out
+
+
+def test_a_lane_entry_that_matches_nothing_is_stale_even_when_the_shared_list_matches(
+    tmp_path, capsys
+):
+    junit = _junit(tmp_path / "suite.xml", [("tests.a", "test_one", "skip")])
+    shared = _allow(tmp_path / "shared.txt", "suite::tests.a::* # shared skip\n")
+    lane = _allow(tmp_path / "lane.txt", "suite::tests.gone::* # no longer skipped\n")
+    rc = cpj.main(
+        [
+            "--junit",
+            str(junit),
+            "--allow-skips",
+            str(shared),
+            "--allow-skips",
+            str(lane),
+        ]
+    )
+    assert rc == 1
+    assert "stale-allow" in capsys.readouterr().out

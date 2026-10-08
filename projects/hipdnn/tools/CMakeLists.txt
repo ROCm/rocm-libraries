@@ -298,34 +298,33 @@ endif()
                 "HIPDNN_VALIDATE_DESCRIPTORS=$<TARGET_FILE:hipdnn_validate_descriptors>"
             )
 
-            # The native-stub tests need a POSIX C++ compiler; the Windows lane is out of scope.
-            if(NOT WIN32)
-                # TARGET_PROPERTY does not follow ALIAS targets, so resolve to the real target.
-                set(_hipdnn_stub_include_exprs "")
-                foreach(_stub_dep flatbuffers::flatbuffers hip::host hip::amdhip64)
-                    if(TARGET ${_stub_dep})
-                        get_target_property(_stub_real ${_stub_dep} ALIASED_TARGET)
-                        if(NOT _stub_real)
-                            set(_stub_real ${_stub_dep})
-                        endif()
-                        string(
-                            APPEND
-                            _hipdnn_stub_include_exprs
-                            "$<JOIN:$<TARGET_PROPERTY:${_stub_real},INTERFACE_INCLUDE_DIRECTORIES>,\n>\n"
-                        )
+            # test_native_stub.py compiles generated stubs against the flatbuffers and HIP
+            # headers listed in this file, one directory per line.
+            # TARGET_PROPERTY does not follow ALIAS targets, so resolve to the real target.
+            set(_hipdnn_stub_include_exprs "")
+            foreach(_stub_dep flatbuffers::flatbuffers hip::host hip::amdhip64)
+                if(TARGET ${_stub_dep})
+                    get_target_property(_stub_real ${_stub_dep} ALIASED_TARGET)
+                    if(NOT _stub_real)
+                        set(_stub_real ${_stub_dep})
                     endif()
-                endforeach()
-                file(
-                    GENERATE
-                    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/ingestor_stub_include_dirs.txt"
-                    CONTENT "${_hipdnn_stub_include_exprs}"
-                )
-                list(
-                    APPEND
-                    _hipdnn_ingestor_pytest_env
-                    "HIPDNN_INGESTOR_STUB_INCLUDE_FILE=${CMAKE_CURRENT_BINARY_DIR}/ingestor_stub_include_dirs.txt"
-                )
-            endif()
+                    string(
+                        APPEND
+                        _hipdnn_stub_include_exprs
+                        "$<JOIN:$<TARGET_PROPERTY:${_stub_real},INTERFACE_INCLUDE_DIRECTORIES>,\n>\n"
+                    )
+                endif()
+            endforeach()
+            file(
+                GENERATE
+                OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/ingestor_stub_include_dirs.txt"
+                CONTENT "${_hipdnn_stub_include_exprs}"
+            )
+            list(
+                APPEND
+                _hipdnn_ingestor_pytest_env
+                "HIPDNN_INGESTOR_STUB_INCLUDE_FILE=${CMAKE_CURRENT_BINARY_DIR}/ingestor_stub_include_dirs.txt"
+            )
 
             if(DEFINED TEST_ENVIRONMENT)
                 list(APPEND _hipdnn_ingestor_pytest_env ${TEST_ENVIRONMENT})
@@ -335,10 +334,23 @@ endif()
                                                             "${_hipdnn_ingestor_pytest_env}"
             )
 
+            # PATH prepends (Windows ASAN runtime / ROCm / build DLL dirs) go through
+            # ENVIRONMENT_MODIFICATION so the runtime PATH is extended rather than replaced.
+            set(_hipdnn_ingestor_pytest_env_mod "")
             if(DEFINED TEST_ENVIRONMENT_MODIFICATION)
+                list(APPEND _hipdnn_ingestor_pytest_env_mod ${TEST_ENVIRONMENT_MODIFICATION})
+            endif()
+            if(WIN32)
+                # test_native_stub.py looks for g++ or clang++ on PATH. The ROCm clang++ that
+                # builds this tree lives in lib/llvm/bin, which the lane does not put on PATH.
+                get_filename_component(_hipdnn_stub_cxx_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+                list(APPEND _hipdnn_ingestor_pytest_env_mod
+                     "PATH=path_list_prepend:${_hipdnn_stub_cxx_dir}")
+            endif()
+            if(_hipdnn_ingestor_pytest_env_mod)
                 set_tests_properties(
                     hipdnn_ingestor_generator_pytest
-                    PROPERTIES ENVIRONMENT_MODIFICATION "${TEST_ENVIRONMENT_MODIFICATION}"
+                    PROPERTIES ENVIRONMENT_MODIFICATION "${_hipdnn_ingestor_pytest_env_mod}"
                 )
             endif()
 

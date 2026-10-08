@@ -17,7 +17,9 @@ visible. This reads one or more of them and fails on:
 
 Allow-list format: blank lines and lines starting with ``#`` are ignored; every other
 line is ``<pattern> # <reason>``, split on the first ``#``, both parts non-empty. The
-pattern is an fnmatch glob over ``<junit file stem>::<classname>::<name>``.
+pattern is an fnmatch glob over ``<junit file stem>::<classname>::<name>``. Several
+allow-lists may be given; their patterns are pooled, so a lane can add its own entries to
+the shared ones.
 """
 
 import argparse
@@ -55,10 +57,12 @@ def _parse_allow_list(allow_path, failures):
     return patterns
 
 
-def check(junit_paths, allow_path):
+def check(junit_paths, allow_paths):
     """Return ``(kind, detail)`` for every problem; empty means the check passed."""
     failures = []
-    patterns = _parse_allow_list(allow_path, failures)
+    patterns = []
+    for allow_path in allow_paths:
+        patterns += _parse_allow_list(allow_path, failures)
     matched = set()
     for junit_path in map(Path, junit_paths):
         try:
@@ -112,9 +116,13 @@ def main(argv=None):
     )
     parser.add_argument(
         "--allow-skips",
+        action="append",
         required=True,
         metavar="PATH",
-        help="allow-list of '<pattern> # <reason>' lines naming the skips to accept",
+        help=(
+            "allow-list of '<pattern> # <reason>' lines naming the skips to accept; "
+            "repeat to pool several"
+        ),
     )
     args = parser.parse_args(argv)
 
