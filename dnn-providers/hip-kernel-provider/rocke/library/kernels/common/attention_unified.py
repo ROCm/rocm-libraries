@@ -676,7 +676,13 @@ def _enable_d128_small_tile(problem: UnifiedAttentionProblem) -> bool:
     )
 
 
-def _enable_k_single_buffer(problem: UnifiedAttentionProblem) -> bool:
+def _enable_k_single_buffer(
+    problem: UnifiedAttentionProblem,
+    *,
+    num_warps: int | None = None,
+    block_m_per_warp: int | None = None,
+    tile_size: int | None = None,
+) -> bool:
     """d128 long-context lever: K single-buffer at T=64 (== 2*block_size).
 
     For the same single-batch d128 cohort that ``_enable_d128_small_tile`` gates,
@@ -704,9 +710,15 @@ def _enable_k_single_buffer(problem: UnifiedAttentionProblem) -> bool:
     if not _enable_d128_small_tile(problem):
         return False
     # block_m <= tile_size, asked of the selectors that actually set the geometry
-    # (no recursion: none of these consult _enable_k_single_buffer).
-    block_m = _select_2d_num_warps(problem) * _select_2d_block_m_per_warp(problem)
-    return block_m <= _select_2d_tile_size(problem)
+    # (no recursion: none of these consult _enable_k_single_buffer). The cache key
+    # passes the values it already resolved instead of walking them again.
+    if num_warps is None:
+        num_warps = _select_2d_num_warps(problem)
+    if block_m_per_warp is None:
+        block_m_per_warp = _select_2d_block_m_per_warp(problem)
+    if tile_size is None:
+        tile_size = _select_2d_tile_size(problem)
+    return num_warps * block_m_per_warp <= tile_size
 
 
 def _d256_gfx950_cohort(problem: "UnifiedAttentionProblem") -> bool:
@@ -1471,6 +1483,13 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
     ``test_attention_tiled_cache_key.py`` sweeps the selector thresholds and
     fails wherever key equality and built-spec equality disagree.
     """
+    # Resolved once and reused by the predicates below that would otherwise walk
+    # the same selectors again. Those predicates size against the generic 2D
+    # warp count, so they only take it when that is the count keyed here.
+    fp16_flash = _enable_gfx942_fp16_flash(problem)
+    num_warps_2d = None if fp16_flash else _select_2d_num_warps(problem)
+    tile_size = _select_2d_tile_size(problem)
+    block_m_per_warp = _select_2d_block_m_per_warp(problem)
     return (
         "tiled",
         _resolve_attention_arch(),
@@ -1485,15 +1504,11 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         bool(problem.softcap > 0),
         bool(problem.use_alibi),
         bool(problem.use_qq_bias),
-        (
-            _select_gfx942_flash_num_warps(problem)
-            if _enable_gfx942_fp16_flash(problem)
-            else _select_2d_num_warps(problem)
-        ),
+        (_select_gfx942_flash_num_warps(problem) if fp16_flash else num_warps_2d),
         _kv_storage_dtype(problem),
-        _select_2d_tile_size(problem),
+        tile_size,
         _select_2d_waves_per_eu(problem),
-        _select_2d_block_m_per_warp(problem),
+        block_m_per_warp,
         # Layer-2 override marker: flips the key exactly when the D256 gfx950
         # codegen override applies in `_tiled_spec_from_problem`, so the key stays
         # faithful to the built kernel (key === built kernel) without duplicating
@@ -1526,7 +1541,12 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
             (
                 _enable_sched_barrier(problem),
                 _enable_softmax_mfma_interleave(problem),
-                _enable_k_single_buffer(problem),
+                _enable_k_single_buffer(
+                    problem,
+                    num_warps=num_warps_2d,
+                    block_m_per_warp=block_m_per_warp,
+                    tile_size=tile_size,
+                ),
             )
             if _enable_single_batch_combo(problem)
             else None
@@ -1535,7 +1555,7 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         # gfx1250 builder never sets this field, so keying it there would only
         # split identical kernels.
         (
-            _enable_fp8_mfma_qk(problem)
+            _enable_fp8_mfma_qk(problem, tile_size=tile_size, num_warps=num_warps_2d)
             if _resolve_attention_arch() != "gfx1250"
             else None
         ),
@@ -1656,16 +1676,26 @@ def _select_2d_waves_per_eu(problem: UnifiedAttentionProblem) -> Optional[int]:
     return 2
 
 
-def _fp8_qk_loader_fits(problem: UnifiedAttentionProblem) -> bool:
+def _fp8_qk_loader_fits(
+    problem: UnifiedAttentionProblem,
+    *,
+    tile_size: int | None = None,
+    num_warps: int | None = None,
+) -> bool:
     """True iff the async-fp8 K loader can tile the per-iter K bytes.
 
     ``raw.ptr.buffer.load.lds`` accepts dwords ∈ {1, 3, 4} = {4, 12, 16}
     bytes per lane (a hardware quirk -- dwords=2 is rejected). We need
     one of those per-call payloads to evenly tile ``T*HD`` bytes given
-    ``num_warps * 64`` lanes per CTA.
+    ``num_warps * 64`` lanes per CTA. ``tile_size`` / ``num_warps`` take the
+    already-resolved selector outputs when the caller has them.
     """
-    tile_bytes = _select_2d_tile_size(problem) * problem.head_size
-    threads = _select_2d_num_warps(problem) * 64
+    if tile_size is None:
+        tile_size = _select_2d_tile_size(problem)
+    if num_warps is None:
+        num_warps = _select_2d_num_warps(problem)
+    tile_bytes = tile_size * problem.head_size
+    threads = num_warps * 64
     for bpl in (16, 12, 4):
         payload = threads * bpl
         if tile_bytes >= payload and tile_bytes % payload == 0:
@@ -1673,7 +1703,12 @@ def _fp8_qk_loader_fits(problem: UnifiedAttentionProblem) -> bool:
     return False
 
 
-def _enable_fp8_mfma_qk(problem: UnifiedAttentionProblem) -> bool:
+def _enable_fp8_mfma_qk(
+    problem: UnifiedAttentionProblem,
+    *,
+    tile_size: int | None = None,
+    num_warps: int | None = None,
+) -> bool:
     """Heuristic: enable the ULP-correct fp8-K-LDS path when it helps.
 
     The path is bit-identical to the sync-dequant default. The win
@@ -1702,10 +1737,11 @@ def _enable_fp8_mfma_qk(problem: UnifiedAttentionProblem) -> bool:
     # because the cache key evaluates this on every fp8 launch.
     if problem.max_seqlen_q > 256:
         return False
-    if not _fp8_qk_loader_fits(problem):
+    if tile_size is None:
+        tile_size = _select_2d_tile_size(problem)
+    if not _fp8_qk_loader_fits(problem, tile_size=tile_size, num_warps=num_warps):
         return False
-    T_eff = _select_2d_tile_size(problem)
-    return problem.sliding_window > 0 or problem.max_seqlen_k <= 16 * T_eff
+    return problem.sliding_window > 0 or problem.max_seqlen_k <= 16 * tile_size
 
 
 def _enable_single_batch_combo(problem: UnifiedAttentionProblem) -> bool:
