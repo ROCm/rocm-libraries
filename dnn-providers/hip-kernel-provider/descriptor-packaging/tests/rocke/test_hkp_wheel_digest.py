@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-TOOL = Path(__file__).resolve().parent.parent / "tools" / "hkp_wheel_digest.py"
+TOOL = Path(__file__).resolve().parents[2] / "tools" / "hkp_wheel_digest.py"
 
 
 def _run(stamp, *wheels):
