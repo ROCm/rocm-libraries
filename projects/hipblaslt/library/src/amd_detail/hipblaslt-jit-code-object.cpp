@@ -35,7 +35,7 @@ namespace hipblaslt_jit::code_object
         struct Relocatable
         {
             std::string       name;
-            std::vector<char> bytes;
+            std::vector<uint8_t> bytes;
         };
 
         struct RelocatableResult
@@ -137,23 +137,25 @@ namespace hipblaslt_jit::code_object
         void add(DataSet&              set,
                  amd_comgr_data_kind_t kind,
                  const std::string&    name,
-                 const char*           bytes,
+                 const void*           bytes,
                  size_t                size)
         {
             Data data;
             check(amd_comgr_create_data(kind, data.out()), "amd_comgr_create_data");
-            check(amd_comgr_set_data(data.get(), size, bytes), "amd_comgr_set_data");
+            check(amd_comgr_set_data(data.get(), size, static_cast<const char*>(bytes)),
+                  "amd_comgr_set_data");
             check(amd_comgr_set_data_name(data.get(), name.c_str()), "amd_comgr_set_data_name");
             check(amd_comgr_data_set_add(set.get(), data.get()), "amd_comgr_data_set_add");
         }
 
-        std::vector<char> bytesOf(amd_comgr_data_t data)
+        std::vector<uint8_t> bytesOf(amd_comgr_data_t data)
         {
             size_t size = 0;
             check(amd_comgr_get_data(data, &size, nullptr), "amd_comgr_get_data");
-            std::vector<char> bytes(size);
+            std::vector<uint8_t> bytes(size);
             if(size)
-                check(amd_comgr_get_data(data, &size, bytes.data()), "amd_comgr_get_data");
+                check(amd_comgr_get_data(data, &size, reinterpret_cast<char*>(bytes.data())),
+                      "amd_comgr_get_data");
             bytes.resize(size);
             return bytes;
         }
@@ -171,13 +173,13 @@ namespace hipblaslt_jit::code_object
             return name;
         }
 
-        std::vector<std::pair<std::string, std::vector<char>>>
+        std::vector<std::pair<std::string, std::vector<uint8_t>>>
             collect(const DataSet& set, amd_comgr_data_kind_t kind)
         {
             size_t count = 0;
             check(amd_comgr_action_data_count(set.get(), kind, &count),
                   "amd_comgr_action_data_count");
-            std::vector<std::pair<std::string, std::vector<char>>> items;
+            std::vector<std::pair<std::string, std::vector<uint8_t>>> items;
             for(size_t i = 0; i < count; ++i)
             {
                 Data data;
@@ -844,7 +846,7 @@ namespace hipblaslt_jit::code_object
             [&](std::string& log) { return readMetadataImpl(elf, size, log); });
     }
 
-    ObjectCheck inspect(const std::vector<char>& elf) noexcept
+    ObjectCheck inspect(const std::vector<uint8_t>& elf) noexcept
     {
         return inspect(elf.data(), elf.size());
     }
