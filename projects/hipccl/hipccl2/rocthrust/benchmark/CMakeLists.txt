@@ -104,7 +104,17 @@ function(add_thrust_benchmark BENCHMARK_SOURCE)
         PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/benchmark/
     )
-    rocm_install(TARGETS ${BENCHMARK_TARGET} COMPONENT benchmarks)
+    # NOTE(hipccl2): installed to <bindir>/<project>; see hipcub/benchmark/CMakeLists.txt.
+    set_property(TARGET ${BENCHMARK_TARGET} APPEND PROPERTY INSTALL_RPATH "$ORIGIN/../../lib")
+    set(_hipccl_bench_bindir "${CMAKE_INSTALL_BINDIR}")
+    if(ENABLE_ASAN_PACKAGING AND NOT WIN32)
+      string(APPEND _hipccl_bench_bindir "/asan")
+    endif()
+    install(
+      TARGETS ${BENCHMARK_TARGET}
+      RUNTIME DESTINATION "${_hipccl_bench_bindir}/${PROJECT_NAME}"
+      COMPONENT benchmarks
+    )
 endfunction()
 
 add_thrust_benchmark(bench/adjacent_difference/basic.cu)

@@ -105,7 +105,24 @@ function(add_hipcub_benchmark BENCHMARK_SOURCE)
     OUTPUT_NAME "${BENCHMARK_NAME}"
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/benchmark"
   )
-  rocm_install(TARGETS ${BENCHMARK_TARGET} COMPONENT benchmarks)
+  # NOTE(hipccl3): install to <bindir>/<project>, not <bindir>. hipCUB and rocPRIM
+  # ship benchmarks with identical filenames (OUTPUT_NAME above keeps hipCUB's
+  # unprefixed), so a shared bin/ lets one silently overwrite the other.
+  # rocm_install(TARGETS) has no DESTINATION option and sets an RPATH of
+  # $ORIGIN/../lib, wrong one level deeper - hence plain install() with an
+  # explicit RPATH, as for generate_resource_spec.
+  # Under ENABLE_ASAN_PACKAGING (not on Windows) the directory is
+  # <bindir>/asan/<project>, as rocm_install would have used.
+  set_property(TARGET ${BENCHMARK_TARGET} APPEND PROPERTY INSTALL_RPATH "$ORIGIN/../../lib")
+  set(_hipccl_bench_bindir "${CMAKE_INSTALL_BINDIR}")
+  if(ENABLE_ASAN_PACKAGING AND NOT WIN32)
+    string(APPEND _hipccl_bench_bindir "/asan")
+  endif()
+  install(
+    TARGETS ${BENCHMARK_TARGET}
+    RUNTIME DESTINATION "${_hipccl_bench_bindir}/${PROJECT_NAME}"
+    COMPONENT benchmarks
+  )
 
   if(WIN32 AND NOT DEFINED DLLS_COPIED)
     set(DLLS_COPIED "YES")
