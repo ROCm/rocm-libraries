@@ -5190,7 +5190,7 @@ namespace TensileLite
                 && (c.y & (c.y - 1)) == 0 && c.x * c.y <= 16;
             if(!sizeMapping.isStreamK() || !sizeMapping.hasStaticAssignment()
                || sizeMapping.streamKAtomic || sizeMapping.prefetchAcrossPersistent
-               || !supportedShape || sizeMapping.useSubtileImpl)
+               || !supportedShape)
                 throw std::runtime_error("StreamK cluster multicast requires static non-atomic scheduling, a supported spatial cluster, and PAP off");
             if(!customKernel.name.empty() && !customKernel.generated)
                 throw std::runtime_error("External custom kernels do not support StreamK scheduling ABI 2");

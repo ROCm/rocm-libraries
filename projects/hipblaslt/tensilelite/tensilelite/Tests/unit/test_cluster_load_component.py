@@ -205,13 +205,15 @@ class TestDeclareUndeclare:
 
     @pytest.mark.parametrize("sparse", [1, 2])
     @pytest.mark.parametrize("cluster_dim", [(4, 1), (2, 2)])
-    def test_persistent_metadata_mask_survives_descriptor_refresh(self, sparse, cluster_dim):
+    @pytest.mark.parametrize("strategy", ["DataParallel", "StreamK"])
+    def test_persistent_metadata_mask_survives_descriptor_refresh(self, sparse, cluster_dim, strategy):
         # Sparse metadata descriptors are rebuilt for each persistent tile just
         # like A/B descriptors. A freed mask can be overwritten by store scratch
         # before the next tile uses it, corrupting multicast destinations.
         w = _StubWriter()
         kernel = _kernel(streamKMulticast=True, clusterDim=cluster_dim,
                          sparse=sparse, tdmMeta=True)
+        kernel["StreamKForceDPOnly"] = int(strategy == "DataParallel")
         component = _c()
         component.declareSgprs(w, kernel)
         component.undeclareSgprs(w, kernel)

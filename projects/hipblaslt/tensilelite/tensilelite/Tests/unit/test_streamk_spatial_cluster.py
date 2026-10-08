@@ -77,9 +77,9 @@ def test_supported_shapes_match_host_capability(shape, tree):
 @pytest.mark.parametrize("overrides", [
     {"ClusterDim": [3, 1]}, {"ClusterDim": [4, 8]},
     {"PrefetchAcrossPersistent": 1}, {"PrefetchGlobalRead": 0},
-    {"StreamKAtomic": 1}, {"UseSubtileImpl": 1},
-    {"StoreRemapVectorWidth": 4}, {"ReuseAcrossPersistent": 1}, {"SpaceFillingAlgo": [1]},
-    {"TDMInst": 2}, {"ProblemType": {"Sparse": 1}}, {"DebugStreamK": 1},
+    {"StreamKAtomic": 1},
+    {"ReuseAcrossPersistent": 1}, {"SpaceFillingAlgo": [1]},
+    {"TDMInst": 2}, {"DebugStreamK": 1},
     {"ProblemType": {"OutputAmaxD": True}},
     {"ProblemType": {"Gradient": True, "UseBias": True}},
 ])
