@@ -42,13 +42,17 @@ The CTest tests are:
   `jit-library-concurrency`, `jit-end-to-end`, `jit-end-to-end-library`,
   `jit-heuristic-off`, `jit-heuristic-fallback` and `jit-heuristic-forced`,
   when `GPU_TARGETS` include an architecture with committed assembly. CTest
-  runs `jit-publish` before `jit-loader`. The library tests load no code, but
-  TensileLite queries the current device when it reads a library entry, and
-  they publish the `plain` entry of that architecture. Replay and the heuristic
-  queries use its `plain-pair`. A build with `HIPBLASLT_ENABLE_JIT=OFF` has
-  `jit-heuristic-ignored` instead, which sets `HIPBLASLT_JIT=2` and requires
-  that the queries still do not return JIT algorithms. A build with
-  `HIPBLASLT_ENABLE_YAML=ON` has none of the MsgPack tests.
+  runs `jit-publish` before `jit-loader`. A build with
+  `HIPBLASLT_JIT_ENABLE_HIPKITTENS=ON` and gfx950 also has `jit-hipkittens`.
+  The library tests load no code, but TensileLite queries the current device
+  when it reads a library entry, and they publish the `plain` entry of that
+  architecture. Replay tests use its `plain-pair`. Heuristic queries use that
+  replay, except a HipKittens build, whose heuristic queries use the TN
+  256x256 kernels. A build with `HIPBLASLT_ENABLE_JIT=OFF` has
+  `jit-heuristic-ignored` instead, which
+  sets `HIPBLASLT_JIT=2` and requires that the queries still do not return JIT
+  algorithms. A build with `HIPBLASLT_ENABLE_YAML=ON` has none of the MsgPack
+  tests.
 
 ## What each test checks
 
@@ -67,6 +71,7 @@ The CTest tests are:
 | `jit-heuristic-fallback` | `HIPBLASLT_JIT=1`. With no device library, every returned algorithm is JIT and the first result for K=512 matches the host. With a device library, an Equality size returns Equality algorithms, then JIT, then the others, with no repeated kernel, and an untuned size starts with JIT. Without such a library the ordering check prints `SKIP heuristic-provider-order: the build has no device library with an Equality size` |
 | `jit-heuristic-forced` | `HIPBLASLT_JIT=2`. Both queries return only JIT library indices. K=512 selects the solution ending in `_K512_WGM8` and K=256 the one ending in `_WGM1`. A transposed A returns no algorithm. The first K=512 result matches the host. The first query is a miss and generation runs. The C++ query of the same problem is a hit and generation does not run |
 | `jit-heuristic-ignored` | Built only with `HIPBLASLT_ENABLE_JIT=OFF`, with `HIPBLASLT_JIT=2`. The queries do not return JIT algorithms |
+| `jit-hipkittens` | Built only with `HIPBLASLT_JIT_ENABLE_HIPKITTENS` and gfx950. The compiled-in BF16 and FP16 variants, a capturing stream that returns no solution without compiling when the library is empty, a BF16 TN 256x256x128 GEMM whose D is 128 and which publishes a library index, a later capture that returns that index without compiling, and M=128 rejected. The test points `HIPBLASLT_JIT_LIBRARY_PATH` at a scratch directory it creates |
 
 ## Test parameters
 

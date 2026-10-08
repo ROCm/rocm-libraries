@@ -92,6 +92,9 @@ namespace hipblaslt_jit
                 options.retargetAssembly  = true;
                 options.linkerFlags       = {"-Xlinker", "--build-id=sha1"};
                 options.rocmPath          = co::rocmPath();
+                options.compilerFlags.insert(options.compilerFlags.end(),
+                                             solution.hipFlags.begin(),
+                                             solution.hipFlags.end());
 
                 int wavefrontSize = 0;
                 for(const auto& unit : solution.units)

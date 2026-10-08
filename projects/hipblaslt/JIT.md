@@ -70,8 +70,8 @@ application owns its buffers and workspace. The request owns descriptor values
 and host scalars; it does not take ownership of device pointers. Compilation
 and support checks finish before graphics processing unit (GPU) work is
 submitted. A capturing stream may return a solution already in the JIT
-solution library and does not start a build. GEMM is the implemented
-operation.
+solution library and does not start a build. A null stream and the legacy
+stream are not capturing. GEMM is the implemented operation.
 
 Internally, the GEMM request reuses `RocblasltContractionProblem` with owned
 scalar values. A matmul algorithm is a JIT solution library index from 2^30.
@@ -90,12 +90,12 @@ once and leaves the mode off.
 | `1` | The override file, then the Equality provider rows, then the JIT library, then the other provider rows, then the `getAllSolutions` fill. Each source fills only the remaining request, and a kernel already returned is skipped. |
 | `2` | The JIT library only. The override file is not read. A problem the library does not solve returns success with no algorithms. |
 
-A JIT build with no HipKittens backend replays the committed kernels under
-`clients/tests/jit/data` when that tree is compiled in. Those queries publish
-into the JIT solution library, and a later query in the process reuses the
-index. A build with no such kernels warns once: mode `1` leaves the query
-unchanged, and mode `2` returns no algorithms. The replay backend implements
-generation only.
+A HipKittens build publishes through that backend. A JIT build with no
+HipKittens backend replays the committed kernels under `clients/tests/jit/data`
+when that tree is compiled in. Those queries publish into the JIT solution
+library, and a later query in the process reuses the index. A build with
+neither warns once: mode `1` leaves the query unchanged, and mode `2` returns
+no algorithms. Either backend implements generation only.
 
 The algorithms those queries return are JIT solution library indices, from
 2^30, and they run through the same path as a prebuilt index.
@@ -168,6 +168,13 @@ The implementations are:
   builder and loader as any other backend. Tests reach it through
   `jit::replay::createBackend` in `hipblaslt-jit-replay.hpp`, and every JIT
   build compiles it.
+- HipKittens backend: `hipblaslt-jit-hipkittens.cpp`, built when
+  `HIPBLASLT_JIT_ENABLE_HIPKITTENS` is on and `GPU_TARGETS` includes gfx950.
+  It compiles the gfx950 TN templates in `library/src/amd_detail/hipkittens`
+  with comgr's generic HIP path. The HipKittens headers are staged next to
+  the library; `HIPBLASLT_JIT_HIPKITTENS_PATH` overrides that directory.
+  Heuristic queries use this backend when it is compiled in. A build without
+  the option replays the committed kernels.
 
 ### Build
 
@@ -188,19 +195,20 @@ cmake --build "$project_build" --parallel
 ```
 
 `GPU_TARGETS` is `gfx90a`, `gfx942` or `gfx950`. The command above uses
-`gfx950`. The [JIT test guide](clients/tests/jit/README.md) lists the test
-targets and the validation commands.
+`gfx950`. `HIPBLASLT_JIT_ENABLE_HIPKITTENS=ON` adds the gfx950 HipKittens
+backend. It needs a network fetch of the pinned HipKittens commit unless
+`FETCHCONTENT_SOURCE_DIR_HIPKITTENS` points at an unpacked archive. The
+[JIT test guide](clients/tests/jit/README.md) lists the test targets and the
+validation commands.
 
 ### Algorithm lifetime and failures
 
 The returned heuristic result contains the required workspace size. Supply that
 workspace and follow the same handle, stream and workspace sharing rules as
-`hipblasLtMatmul` and `Gemm` calls using prebuilt algorithms. The algorithm
-carries its solution's local index, resolves to its bundle's library and
-adapter, and then runs through the same launch path as a prebuilt algorithm,
-including its synchronization storage. Registry synchronization
-protects algorithm lookup; it does not protect application buffers or make
-simultaneous calls on one `Gemm` object safe.
+`hipblasLtMatmul` and `Gemm` calls using prebuilt algorithms. A heuristic
+result is a JIT solution library index, from 2^30, and it runs through the
+same launch path as a prebuilt index. Another process that queries the same
+problem receives that index.
 
 `getJitAlgo` and `getGemmAlgo` return a JIT solution library index from 2^30.
 `hipblaslt_ext::getIndexFromAlgo` returns that index, and another process that
