@@ -32,8 +32,6 @@ import Tensile.Common as Common
 
 import os
 
-import pytest
-
 
 @pytest.fixture
 def clearStrictEnv():

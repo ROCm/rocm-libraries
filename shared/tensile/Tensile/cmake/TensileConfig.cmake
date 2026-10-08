@@ -82,17 +82,38 @@ else()
     set(TENSILE_STATIC_ONLY OFF CACHE BOOL "Disable exporting symbols from shared library.")
 endif()
 
-# Find HIP in the package scope before add_subdirectory so HIP_VERSION is
-# available here. add_subdirectory creates a child scope and variables set
-# there (including HIP_VERSION from find_package(HIP)) do not propagate back,
-# leaving TensileCreateLibraryFiles with an empty ROCM_VERSION.
-if(TENSILE_USE_HIP)
-  file(TO_CMAKE_PATH "$ENV{ROCM_PATH}" Tensile_ROCM_PATH)
-  find_package(HIP REQUIRED CONFIG PATHS ${Tensile_ROCM_PATH} /opt/rocm)
-  set(Tensile_HIP_VERSION "${HIP_VERSION}")
-  if(NOT Tensile_HIP_VERSION)
+# Discover HIP_VERSION before add_subdirectory so it is available in this
+# scope (add_subdirectory creates a child scope whose variables do not
+# propagate back).  The call is wrapped in a function that saves and
+# restores the GPU_TARGETS cache entry because hip-config-amd.cmake
+# unconditionally writes GPU_TARGETS (via amdgpu-arch auto-detection),
+# which would interfere with Tensile's own GPU_TARGETS initialisation in
+# Source/CMakeLists.txt.
+function(_tensile_discover_hip_version out_var)
+  # Remember whether GPU_TARGETS was already in the cache.
+  get_property(_had_gpu_targets CACHE GPU_TARGETS PROPERTY TYPE)
+  if(_had_gpu_targets)
+    get_property(_saved_gpu_targets CACHE GPU_TARGETS PROPERTY VALUE)
+  endif()
+
+  file(TO_CMAKE_PATH "$ENV{ROCM_PATH}" _rocm_path)
+  find_package(HIP REQUIRED CONFIG PATHS ${_rocm_path} /opt/rocm)
+  if(NOT HIP_VERSION)
     message(FATAL_ERROR "The HIP package did not provide HIP_VERSION")
   endif()
+  set(${out_var} "${HIP_VERSION}" PARENT_SCOPE)
+
+  # Restore GPU_TARGETS to its prior state so Tensile initialises it fresh.
+  if(_had_gpu_targets)
+    set(GPU_TARGETS "${_saved_gpu_targets}" CACHE STRING
+        "AMD GPU targets to compile for" FORCE)
+  else()
+    unset(GPU_TARGETS CACHE)
+  endif()
+endfunction()
+
+if(TENSILE_USE_HIP)
+  _tensile_discover_hip_version(Tensile_HIP_VERSION)
 endif()
 
 add_subdirectory("${Tensile_ROOT}/Source" "Tensile")
