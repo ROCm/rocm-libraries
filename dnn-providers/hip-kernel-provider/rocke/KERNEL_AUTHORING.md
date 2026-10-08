@@ -281,6 +281,14 @@ documented in [library/builders/common/README.md](library/builders/common/README
    `_enable_<knob>()` predicate, following the branch order documented in
    [library/builders/common/README.md](library/builders/common/README.md). Default-OFF opt-in
    knobs may stay unwired (env/flag-only) until a sweep proves a win.
+   **Add the predicate's resolved output to the launcher cache key**
+   (`_tiled_cache_key` / `_tiled_3d_cache_key` in
+   [attention_unified.py](library/kernels/common/attention_unified.py)). The key is
+   computed per launch without building the spec, so a selector missing from it lets
+   two shapes that build different kernels share one cached binary.
+   [test_attention_tiled_cache_key.py](library/tests/test_attention_tiled_cache_key.py)
+   sweeps the selector thresholds and fails when key equality and built-spec equality
+   disagree.
 5. **Document the knob** in the "Knob reference" section of
    [library/builders/common/README.md](library/builders/common/README.md): what it rewrites, its
    correctness guarantee, its measured effect, and its enable condition.

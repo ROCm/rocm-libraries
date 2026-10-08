@@ -81,6 +81,15 @@ All remaining shapes.  Key knob decisions:
 
 ### Knob reference
 
+Every knob a selector resolves must also reach the launcher cache key
+(`_tiled_cache_key` / `_tiled_3d_cache_key` in
+[`attention_unified.py`](../../kernels/common/attention_unified.py)): add the
+selector's resolved output there when you wire it. The key is computed per launch
+without building the spec, so a missing entry lets two shapes that build different
+kernels share one cached binary.
+[`test_attention_tiled_cache_key.py`](../../tests/test_attention_tiled_cache_key.py)
+fails when key equality and built-spec equality disagree.
+
 **`use_transposed_half_local_pv`** — Rewrites the PV phase of the transposed
 32x32 kernel so each 32-lane warp-half reads only the P rows it owns,
 eliminating the cross-half `lane^32` shuffle fetch.  Bit-identical to the
