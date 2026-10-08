@@ -186,6 +186,24 @@ TEST_CASE("a published JIT solution launches", "[jit-gpu]")
         INFO(("the launched kernel did not complete"));
         REQUIRE((hipDeviceSynchronize() == hipSuccess));
     }
+
+    // Another hipBLASLt build owns a sibling revision directory and never reads this one.
+    {
+        INFO(("The library is not under <root>/v1/<git revision>"));
+        REQUIRE((!hj::JitLibrary::buildRevision().empty()
+                 && library.buildDirectory().parent_path() == libraryRoot / "v1"
+                 && fs::is_directory(library.directory(key))));
+    }
+    const auto other = library.buildDirectory().parent_path() / "another-build";
+    fs::rename(library.buildDirectory(), other);
+    hj::JitLibrary fresh(libraryRoot);
+    fresh.beginQuery(false, target, backend, workspace, {}, nullptr);
+    const auto unseen = fresh.findTopSolutions(problem, *target.hardware, 1);
+    fresh.endQuery();
+    {
+        INFO(("A library published by another build was read"));
+        REQUIRE((unseen.empty()));
+    }
 }
 
 TEST_CASE("a helper entry loads as a TensileLite solution", "[jit-cpu]")
