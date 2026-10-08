@@ -30,6 +30,10 @@
     {
       "name": "block_m",
       "type": "int"
+    },
+    {
+      "name": "kv_align",
+      "type": "int"
     }
   ]
 }

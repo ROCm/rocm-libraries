@@ -90,6 +90,9 @@ constexpr std::string_view NUM_KV_HEADS_FIELD = "num_kv_heads";
 constexpr std::string_view HEAD_DIM_FIELD = "head_dim";
 constexpr std::string_view CAUSAL_FIELD = "causal";
 constexpr std::string_view BLOCK_M_FIELD = "block_m";
+/// 0 for an object that serves any key length; otherwise the multiple the key length must
+/// be, because the object skips the KV tail mask.
+constexpr std::string_view KV_ALIGN_FIELD = "kv_align";
 
 constexpr std::string_view DUALWAVE = "dualwave";
 constexpr std::string_view GENERIC = "generic";
@@ -509,7 +512,9 @@ std::optional<std::array<int64_t, 3>> candidateGrid(const SdpaProblem& problem,
  * @brief Kernel-scoped applicability: do THIS candidate's baked fields fit the graph?
  *
  * dtype, both head counts, head_dim and the causal flag are all baked, so each must equal
- * the graph's; and the candidate must declare a launch shape this pack knows.
+ * the graph's; the key length must be a multiple of the candidate's `kv_align`, since an
+ * object built without the KV tail mask reads past the end of a ragged last tile; and the
+ * candidate must declare a launch shape this pack knows.
  */
 bool flydslSdpaCdnaKernelMatches(const MatchContext& context,
                                  const BoundTokens& bound,
@@ -529,6 +534,12 @@ bool flydslSdpaCdnaKernelMatches(const MatchContext& context,
     const auto problem = problemFor(*q, *k);
     const auto tile = candidateTile(kernel);
     if(!tile.has_value() || !candidateGrid(problem, *tile).has_value())
+    {
+        return false;
+    }
+
+    const auto kvAlign = integerMetadata(kernel, KV_ALIGN_FIELD);
+    if(!kvAlign.has_value() || *kvAlign < 0 || (*kvAlign > 0 && problem.seqLen % *kvAlign != 0))
     {
         return false;
     }

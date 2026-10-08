@@ -174,6 +174,11 @@ def _build_one(instance: Instance, dump_dir: Path) -> bytes:
             num_kv_heads=kv_heads,
             block_m=knobs["block_m"],
             flat_work_group_size=_BLOCK_THREADS["generic"](knobs["block_m"]),
+            # Always explicit: left unset, the launcher picks the variant by the
+            # tracing length, and one that skips the KV tail mask is wrong at any
+            # length that is not a multiple of the KV tile. `kv_align` says which
+            # this object is, and the kernel matcher holds the graph to it.
+            skip_kv_pad_mask=bool(knobs["kv_align"]),
         )
     launch(q, k, v, o, _TRACE_BATCH, _TRACE_SEQ)
     blob, _ = hsaco_from_dump(dump_dir)

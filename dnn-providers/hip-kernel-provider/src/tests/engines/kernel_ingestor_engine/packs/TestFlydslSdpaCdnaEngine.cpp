@@ -78,6 +78,7 @@ constexpr const char* CDNA_NUM_KV_HEADS_FIELD = "num_kv_heads";
 constexpr const char* CDNA_HEAD_DIM_FIELD = "head_dim";
 constexpr const char* CDNA_CAUSAL_FIELD = "causal";
 constexpr const char* CDNA_BLOCK_M_FIELD = "block_m";
+constexpr const char* CDNA_KV_ALIGN_FIELD = "kv_align";
 
 /// The model shape the first CDNA objects are built for.
 SdpaGraphSpec cdnaSpec()
@@ -100,7 +101,8 @@ KernelDefinition makeCdnaKernel(const std::string& family = "dualwave",
                                 int64_t headDim = 128,
                                 int64_t causal = 0,
                                 const std::string& dtype = "bf16",
-                                int64_t blockM = 256)
+                                int64_t blockM = 256,
+                                int64_t kvAlign = 0)
 {
     KernelDefinition kernel;
     kernel.name = "sdpa_cdna_" + dtype + "_" + family;
@@ -110,7 +112,8 @@ KernelDefinition makeCdnaKernel(const std::string& family = "dualwave",
                        {CDNA_NUM_KV_HEADS_FIELD, kvHeads},
                        {CDNA_HEAD_DIM_FIELD, headDim},
                        {CDNA_CAUSAL_FIELD, causal},
-                       {CDNA_BLOCK_M_FIELD, blockM}};
+                       {CDNA_BLOCK_M_FIELD, blockM},
+                       {CDNA_KV_ALIGN_FIELD, kvAlign}};
     kernel.priority = 100;
     return kernel;
 }
@@ -277,6 +280,30 @@ TEST(TestFlydslSdpaCdnaKernelMatch, DeclinesEachBakedFieldThatDisagrees)
     EXPECT_TRUE(declines(makeCdnaKernel("wmma")));
 }
 
+TEST(TestFlydslSdpaCdnaKernelMatch, HoldsTheKeyLengthToTheCandidatesAlignment)
+{
+    const auto admits = [](int64_t seqLen, const KernelDefinition& kernel) {
+        auto spec = cdnaSpec();
+        spec.seqLenQ = seqLen;
+        spec.seqLenKv = seqLen;
+        const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+        const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
+        return bound.has_value()
+               && matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), kernel, *bound);
+    };
+    const auto aligned = makeCdnaKernel("generic", 32, 8, 128, 0, "bf16", 128, 64);
+    const auto anyLength = makeCdnaKernel("generic", 32, 8, 128, 0, "bf16", 128, 0);
+    EXPECT_TRUE(admits(256, aligned));
+    EXPECT_FALSE(admits(333, aligned)) << "the object skips the KV tail mask";
+    EXPECT_TRUE(admits(256, anyLength));
+    EXPECT_TRUE(admits(333, anyLength));
+
+    // An object that does not say which it is may be either, so it is not run.
+    auto unstated = anyLength;
+    unstated.metadata.erase(std::string(CDNA_KV_ALIGN_FIELD));
+    EXPECT_FALSE(admits(256, unstated));
+}
+
 // ---------------------------------------------------------------------------
 // GPU: the staged objects against a host reference
 // ---------------------------------------------------------------------------
@@ -292,18 +319,21 @@ DeviceProperties packedArchDeviceProperties()
     return properties;
 }
 
-/// The staged candidate for the spec's shape on this device's arch, if this build packed one.
-std::optional<KernelDefinition> findStagedCdnaKernel(const SdpaGraphSpec& spec, int64_t causal)
+/// Every staged object for this device's arch that the kernel matcher admits for the graph.
+/// Each must compute the same answer, so the GPU cases run them all: at an aligned length
+/// that is both a masked object and one that skips the KV tail mask.
+std::vector<KernelDefinition> stagedCdnaCandidates(const MatchContext& context,
+                                                   const BoundTokens& bound)
 {
+    std::vector<KernelDefinition> candidates;
     // A build for RDNA targets only stages no CDNA set at all.
     const auto* staged = findLoadedSet(FLYDSL_SDPA_CDNA.engineName);
     if(staged == nullptr)
     {
-        return std::nullopt;
+        return candidates;
     }
-    const auto& set = *staged;
     const auto device = packedArchDeviceProperties().gcnArchName;
-    for(const auto& pack : set.packs)
+    for(const auto& pack : staged->packs)
     {
         for(const auto& kernel : pack.kernels)
         {
@@ -312,30 +342,23 @@ std::optional<KernelDefinition> findStagedCdnaKernel(const SdpaGraphSpec& spec, 
             {
                 continue;
             }
-            const auto* heads = tryGetMetadataField<int64_t>(kernel.metadata, CDNA_NUM_HEADS_FIELD);
-            const auto* kvHeads
-                = tryGetMetadataField<int64_t>(kernel.metadata, CDNA_NUM_KV_HEADS_FIELD);
-            const auto* dim = tryGetMetadataField<int64_t>(kernel.metadata, CDNA_HEAD_DIM_FIELD);
-            const auto* isCausal = tryGetMetadataField<int64_t>(kernel.metadata, CDNA_CAUSAL_FIELD);
-            if(heads == nullptr || kvHeads == nullptr || dim == nullptr || isCausal == nullptr
-               || *heads != spec.heads || *kvHeads != spec.kvHeads || *dim != spec.headDim
-               || *isCausal != causal)
+            KernelDefinition definition{kernel.id,
+                                        pack.id,
+                                        pack.dispatchId,
+                                        kernel.source,
+                                        kernel.metadata,
+                                        kernel.priority,
+                                        arches,
+                                        kernel.originDirectory,
+                                        kernel.name,
+                                        kernel.treeRoot};
+            if(matchesKernel(FLYDSL_SDPA_CDNA, context, definition, bound))
             {
-                continue;
+                candidates.push_back(std::move(definition));
             }
-            return KernelDefinition{kernel.id,
-                                    pack.id,
-                                    pack.dispatchId,
-                                    kernel.source,
-                                    kernel.metadata,
-                                    kernel.priority,
-                                    arches,
-                                    kernel.originDirectory,
-                                    kernel.name,
-                                    kernel.treeRoot};
         }
     }
-    return std::nullopt;
+    return candidates;
 }
 
 using Bf16 = hipdnn_data_sdk::types::bfloat16;
@@ -355,24 +378,17 @@ std::vector<Bf16> fillValues(size_t count, uint32_t seed)
     return values;
 }
 
-/// Runs the staged kernel for @p spec through prepare() and launch() and checks every output
-/// element against a double-precision reference. BSHD memory throughout.
-void expectCdnaMatchesReference(const SdpaGraphSpec& spec, double absoluteTolerance)
+/// Runs @p kernel for @p spec through prepare() and launch() and checks every output element
+/// against a double-precision reference. BSHD memory throughout.
+void expectCandidateMatchesReference(const MatchContext& context,
+                                     const BoundTokens& bound,
+                                     const KernelDefinition& kernel,
+                                     const SdpaGraphSpec& spec,
+                                     double absoluteTolerance)
 {
     const bool causal = spec.mask != SdpaMask::NONE;
-    const auto kernel = findStagedCdnaKernel(spec, causal ? 1 : 0);
-    if(!kernel.has_value())
-    {
-        GTEST_SKIP() << "no CDNA object packed for this device ("
-                     << packedArchDeviceProperties().gcnArchName << ") and shape";
-    }
-
-    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec), packedArchDeviceProperties());
-    const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
-    ASSERT_TRUE(bound.has_value());
-    ASSERT_TRUE(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), *kernel, *bound));
     const auto& handler = dispatchHandler(FLYDSL_SDPA_CDNA);
-    const auto prepared = handler.prepare(fixture.context(), *bound, *kernel);
+    const auto prepared = handler.prepare(context, bound, kernel);
     ASSERT_NE(prepared, nullptr);
 
     const int64_t b = spec.batch;
@@ -484,6 +500,25 @@ void expectCdnaMatchesReference(const SdpaGraphSpec& spec, double absoluteTolera
     EXPECT_LE(worst, absoluteTolerance) << "worst error at " << where;
 }
 
+/// Every staged candidate the matcher admits for @p spec must match the reference.
+void expectCdnaMatchesReference(const SdpaGraphSpec& spec, double absoluteTolerance)
+{
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec), packedArchDeviceProperties());
+    const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    const auto candidates = stagedCdnaCandidates(fixture.context(), *bound);
+    if(candidates.empty())
+    {
+        GTEST_SKIP() << "no CDNA object packed for this device ("
+                     << packedArchDeviceProperties().gcnArchName << ") and shape";
+    }
+    for(const auto& kernel : candidates)
+    {
+        SCOPED_TRACE(kernel.name);
+        expectCandidateMatchesReference(fixture.context(), *bound, kernel, spec, absoluteTolerance);
+    }
+}
+
 /// bf16 output rounding is ~2^-8 relative on values of magnitude <= 1.
 constexpr double BF16_TOLERANCE = 2e-2;
 
@@ -506,6 +541,17 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, BatchedRaggedTailMatchesTheReference)
     spec.seqLenQ = 333;
     spec.seqLenKv = 333;
     spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, NonCausalRaggedTailMatchesTheReference)
+{
+    // A key length that is not a multiple of the KV tile: only an object that masks the
+    // last tile may run it.
+    auto spec = cdnaSpec();
+    spec.batch = 2;
+    spec.seqLenQ = 333;
+    spec.seqLenKv = 333;
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 

@@ -78,9 +78,11 @@ TEST(TestFlydslSdpaCdnaPacks, ShipsOneObjectPerClassAndOneKernelFamilyPerArch)
 {
     const auto& set = loadedSet(ENGINE);
 
-    // dtype x family x heads x KV heads x head_dim x causal is the whole instance key
-    // today: a duplicate would make the choice between two objects an accident of ids.
-    std::set<std::tuple<std::string, std::string, int64_t, int64_t, int64_t, int64_t>> classes;
+    // dtype x family x heads x KV heads x head_dim x causal x kv_align is the whole
+    // instance key today: a duplicate would make the choice between two objects an
+    // accident of ids.
+    std::set<std::tuple<std::string, std::string, int64_t, int64_t, int64_t, int64_t, int64_t>>
+        classes;
     std::set<std::string> families;
     size_t kernels = 0;
     for(const auto& pack : set.packs)
@@ -93,13 +95,15 @@ TEST(TestFlydslSdpaCdnaPacks, ShipsOneObjectPerClassAndOneKernelFamilyPerArch)
             const auto* kvHeads = tryGetMetadataField<int64_t>(kernel.metadata, "num_kv_heads");
             const auto* headDim = tryGetMetadataField<int64_t>(kernel.metadata, "head_dim");
             const auto* causal = tryGetMetadataField<int64_t>(kernel.metadata, "causal");
+            const auto* kvAlign = tryGetMetadataField<int64_t>(kernel.metadata, "kv_align");
             ASSERT_NE(dtype, nullptr) << kernel.name;
             ASSERT_NE(family, nullptr) << kernel.name;
             ASSERT_NE(heads, nullptr) << kernel.name;
             ASSERT_NE(kvHeads, nullptr) << kernel.name;
             ASSERT_NE(headDim, nullptr) << kernel.name;
             ASSERT_NE(causal, nullptr) << kernel.name;
-            classes.emplace(*dtype, *family, *heads, *kvHeads, *headDim, *causal);
+            ASSERT_NE(kvAlign, nullptr) << kernel.name;
+            classes.emplace(*dtype, *family, *heads, *kvHeads, *headDim, *causal, *kvAlign);
             families.insert(*family);
             ++kernels;
 

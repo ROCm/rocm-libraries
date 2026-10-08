@@ -7,7 +7,7 @@
     "flydsl_kernels_commit": "89ad52fbbb9e252396829a8a44b12e18b7acd970",
     "flydsl_kernels_describe": "v0.3.4.1-19-g89ad52f",
     "rocm_version": "7.13.0",
-    "inputs_sha256": "41980f2679b5afe1af248dae6c73f5c4772f719cbdba1e765a0a9af48f4a1403"
+    "inputs_sha256": "781560aaadfbc51e9c310a6b9391ecdbc94a4ad05dfb49312c8b785ecb6bed05"
   },
   "instances": [
     {
@@ -22,7 +22,8 @@
         "num_kv_heads": 8,
         "head_dim": 128,
         "causal": 0,
-        "block_m": 256
+        "block_m": 256,
+        "kv_align": 0
       },
       "block": [
         512,
@@ -86,7 +87,8 @@
         "num_kv_heads": 8,
         "head_dim": 128,
         "causal": 1,
-        "block_m": 256
+        "block_m": 256,
+        "kv_align": 0
       },
       "block": [
         512,
