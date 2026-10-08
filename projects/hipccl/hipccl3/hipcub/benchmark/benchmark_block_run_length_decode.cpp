@@ -165,7 +165,8 @@ class block_run_length_decode_benchmark : public primbench::benchmark_interface
                     stream,
                     d_run_items,
                     d_run_offsets,
-                    d_output);
+                    d_output,
+                    true);
             });
     }
 };
