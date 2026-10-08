@@ -18,8 +18,8 @@ from .rocke_compile import compile_rocke_variant, rocke_variant_key
 from .descriptors import (
     KPACK_DIR_NAME,
     arch_matches,
-    _selected_entries,
     canonical_id,
+    _selected_entries,
     kdp_survives,
     load_flat_input,
     reachable_generic_ids,

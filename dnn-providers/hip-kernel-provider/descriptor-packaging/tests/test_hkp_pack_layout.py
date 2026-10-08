@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import _restem_uuid_ids
+from pack_helpers import _restem_uuid_ids
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.hip_compile import hip_variant_key
