@@ -199,6 +199,7 @@ def load_config(path: Path) -> IngestorConfig:
         ),
         knobs=_require_sequence(engine_raw.get("knobs"), "engine.knobs"),
         heuristic=engine_raw.get("heuristic", "native"),
+        native_symbols_from=engine_raw.get("native_symbols_from", ""),
     )
 
     kmd_fields = []
@@ -976,6 +977,7 @@ _KNOWN_ENGINE = frozenset(
         "behavior_notes",
         "knobs",
         "heuristic",
+        "native_symbols_from",
     }
 )
 _KNOWN_KMD_FIELD = frozenset({"name", "type", "default_value", "builder_default"})
@@ -1182,6 +1184,18 @@ def _check_engine_name_scoped(config: IngestorConfig) -> None:
             f"collision two vendors would both pick -- the loader hashes it "
             f"(FNV-1a) into the global 64-bit engine-id space and requires "
             f"global uniqueness."
+        )
+    borrowed = config.engine.native_symbols_from
+    if borrowed and (
+        not isinstance(borrowed, str)
+        or not ENGINE_NAME_PATTERN.match(borrowed)
+        or borrowed == config.engine.name
+    ):
+        raise ConfigError(
+            f"engine.native_symbols_from {borrowed!r} must name ANOTHER engine, "
+            f"scoped 'namespace:local' like engine.name: the engine whose registered "
+            f"native symbols this engine's descriptors name. Omit it to name this "
+            f"engine's own."
         )
     if config.engine.heuristic not in ("native", "none"):
         raise ConfigError(

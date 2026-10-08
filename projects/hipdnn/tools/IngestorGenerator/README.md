@@ -463,6 +463,11 @@ engine:
   behavior_notes: [runtime_compilation]   # optional, closed vocabulary
   knobs: [block_size]             # optional; must all be int-typed kmd_fields
   heuristic: native | none        # optional, default "native"; "none" omits the UHD
+  native_symbols_from: hipkernel:Other   # optional: the descriptors name that engine's
+                                  # registered native symbols instead of minting this
+                                  # engine's own (e.g. a test-only engine serving a
+                                  # subset of a shipped catalog). Ignore the emitted
+                                  # native stub then: nothing registers it.
 
 kmd_fields:                       # the KMD's fields[] -- one per axis this engine's
   - name: block_size              # kernels vary along
