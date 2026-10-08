@@ -117,7 +117,7 @@ def run_tuning(
                 continue
 
             print(f"Working directory: {Path.cwd()}")
-            print(f"Output directory: {output_dir.absolute()}")
+            print(f"Output directory:  {output_dir.absolute()}")
             try:
                 if hasattr(tuning_module, "Tuner"):
                     args: TunerArgs = tuning_module.Tuner._get_default_args()

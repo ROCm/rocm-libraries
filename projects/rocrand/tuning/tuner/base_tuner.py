@@ -147,11 +147,15 @@ class BaseTuner(ABC):
             self.device_properties = hip.hipDeviceProp_t()
             hip.hipGetDeviceProperties(self.device_properties, self.device_id)
             self.arch_name = self.device_properties.gcnArchName.decode().split(":")[0]
+            self.cached_grid_sizes = None
         else:
             assert (
                 args.arch_name
             ), "Simulation mode requires --arch-name to be specified"
             self.arch_name = args.arch_name
+            with open(self._get_cache_file_path()) as f:
+                self.cached_grid_sizes = json.load(f)["tune_params"]["grid_size"]
+
         self.exclude_default_config = args.exclude_default_config
         self.max_fevals = args.max_fevals
         self.save_metadata = args.save_metadata
@@ -189,6 +193,10 @@ class BaseTuner(ABC):
         cls(defaults).tune()
 
     def _get_grid_sizes(self) -> str:
+
+        if self.cached_grid_sizes:
+            return self.cached_grid_sizes
+
         num_compute_units = self.device_properties.multiProcessorCount
 
         compute_unit_multipliers = [4, 5, 8, 10, 16, 32]
