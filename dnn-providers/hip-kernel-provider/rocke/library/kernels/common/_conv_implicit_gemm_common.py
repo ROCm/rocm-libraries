@@ -618,6 +618,12 @@ def coalesced_load_reason(
 # or 4 x fp32 -- the top rung of every default_vector_sizes ladder.
 MAX_VECTOR_BYTES = 16
 
+# Per-dtype element size for the vector-width check. Keyed explicitly (rather
+# than a fp32-vs-everything-else ternary) so a future 1- or 8-byte dtype is a
+# one-line table edit here and in the C++ twin's rocke_conv_vector_width_elem_bytes,
+# instead of a silent fallthrough to the 2-byte default.
+_VECTOR_WIDTH_DTYPE_BYTES = {"fp16": 2, "bf16": 2, "fp32": 4}
+
 
 def vector_width_reason(
     widths: Sequence[Tuple[str, Optional[int], str]],
@@ -635,7 +641,7 @@ def vector_width_reason(
     for operand, vec, dtype in widths:
         if vec is None:
             continue
-        nbytes = vec * (4 if dtype == "fp32" else 2)
+        nbytes = vec * _VECTOR_WIDTH_DTYPE_BYTES.get(dtype, 2)
         if nbytes > MAX_VECTOR_BYTES:
             return (
                 f"vector_size_{operand}={vec} x {dtype} is {nbytes} bytes "
