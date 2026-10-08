@@ -302,25 +302,38 @@ class TestBandDistinctIdentity(unittest.TestCase):
     def test_dense_serves_the_bands_it_implements_and_rejects_the_rest(self):
         # Dense implements the (left, right) band on the top-left diagonal and full
         # attention (including ragged cross-length). Anything it cannot compute exactly
-        # is rejected rather than served as a different mask.
+        # is rejected rather than served as a different mask. Dense candidates are
+        # opt-in, so probe them pinned (what a sweep does).
+        from dispatch.attention import attention_candidates
+        from rocke.dispatch.core import opt_in_probe
+
+        def dense(req):
+            return {
+                c.name: c.admits(opt_in_probe(req, c))
+                for c in attention_candidates()
+                if c.algorithm.startswith("attention_dense")
+            }
+
         for kw in (
             dict(mask_type=NO_MASK, sliding_window=256),
             dict(mask_type=NO_MASK, right_bound=16),
             dict(mask_type=NO_MASK, sliding_window=256, right_bound=64),
         ):
             with self.subTest(**kw):
-                r = dispatch_attention(_req(algorithm="attention_dense", **kw))
-                self.assertTrue(r.candidate.name.startswith("attention_gfx950_dense"))
+                admitted = [n for n, (ok, _) in dense(_req(**kw)).items() if ok]
+                self.assertIn("attention_gfx950_dense_grid", admitted)
         with self.subTest("bottom-right alignment + window"):
-            with self.assertRaisesRegex(ValueError, "bottom-right alignment"):
-                dispatch_attention(
-                    _req(
-                        algorithm="attention_dense",
-                        mask_type=NO_MASK,
-                        sliding_window=256,
-                        diagonal_alignment=BR_ALIGN,
-                    )
+            results = dense(
+                _req(
+                    mask_type=NO_MASK,
+                    sliding_window=256,
+                    diagonal_alignment=BR_ALIGN,
                 )
+            )
+            self.assertFalse(results["attention_gfx950_dense_grid"][0])
+            self.assertIn(
+                "bottom-right alignment", results["attention_gfx950_dense_grid"][1]
+            )
         # Auto still routes the bands to the unified kernels (dense is opt-in).
         self.assertEqual(
             dispatch_attention(
