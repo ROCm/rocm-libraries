@@ -39,9 +39,8 @@ extern "C" {
 *  \p rocsparse_csr2hyb converts a CSR matrix into a HYB matrix. It is assumed
 *  that \p hyb has been initialized with \ref rocsparse_create_hyb_mat().
 *  \p hyb may hold the result of an earlier conversion, which is released.
-*  It must not hold arrays set with \ref rocsparse_hyb_mat_set_info: those
-*  belong to the caller, and the call returns
-*  \ref rocsparse_status_invalid_pointer without modifying \p hyb.
+*  Arrays set with \ref rocsparse_hyb_mat_set_info belong to the caller: \p hyb
+*  stops referencing them, and the caller still frees them.
 *
 *  \note
 *  This function requires a significant amount of storage for the HYB matrix,

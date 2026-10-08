@@ -641,9 +641,8 @@ rocsparse_status rocsparse_destroy_hyb_mat(rocsparse_hyb_mat hyb);
  *  \note
  *  The returned array pointers are borrowed. An array that rocSPARSE allocated
  *  (for example with rocsparse_Xcsr2hyb()) stays valid until \p hyb is
- *  destroyed with \ref rocsparse_destroy_hyb_mat, rocsparse_Xcsr2hyb() is
- *  called on the same \p hyb, or \ref rocsparse_hyb_mat_set_info replaces it.
- *  An array set with \ref rocsparse_hyb_mat_set_info is returned as is and
+ *  destroyed with \ref rocsparse_destroy_hyb_mat or rocsparse_Xcsr2hyb() is
+ *  called on the same \p hyb. An array set with \ref rocsparse_hyb_mat_set_info is returned as is and
  *  belongs to the caller. The caller must not free the arrays rocSPARSE
  *  allocated.
  *
@@ -710,11 +709,10 @@ rocsparse_status rocsparse_hyb_mat_get_info(const rocsparse_hyb_mat  hyb,
  *  pointers. It does not take ownership of \p ell_col_ind, \p ell_val,
  *  \p coo_row_ind, \p coo_col_ind and \p coo_val: they must stay valid while
  *  \p hyb uses them, and the caller frees them after \p hyb is destroyed or
- *  the arrays are replaced. \ref rocsparse_destroy_hyb_mat never frees them,
- *  and rocsparse_Xcsr2hyb() rejects a \p hyb that holds them. Arrays that
- *  rocSPARSE allocated for \p hyb (for example with rocsparse_Xcsr2hyb()) are
- *  released by this function when they are replaced, after a device
- *  synchronization; passed back unchanged, they stay owned by \p hyb.
+ *  the arrays are replaced. rocSPARSE never frees them. Arrays that rocSPARSE
+ *  allocated for \p hyb (for example with rocsparse_Xcsr2hyb()) stay owned by
+ *  \p hyb, and are freed by \ref rocsparse_destroy_hyb_mat or the next
+ *  rocsparse_Xcsr2hyb() on \p hyb, even after this function replaces them.
  *  A null array with a positive entry count is rejected. A zero count ignores
  *  a non-null array, which is not read.
  *
@@ -757,8 +755,6 @@ rocsparse_status rocsparse_hyb_mat_get_info(const rocsparse_hyb_mat  hyb,
  *  \retval rocsparse_status_not_implemented \p data_type is not
  *          \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r,
  *          \ref rocsparse_datatype_f32_c, or \ref rocsparse_datatype_f64_c.
- *  \retval rocsparse_status_internal_error a HIP error occurred while
- *          synchronizing the device or releasing a replaced rocSPARSE array.
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_hyb_mat_set_info(rocsparse_hyb_mat       hyb,

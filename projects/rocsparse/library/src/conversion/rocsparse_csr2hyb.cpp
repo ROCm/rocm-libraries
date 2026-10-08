@@ -67,36 +67,38 @@ namespace rocsparse
             hyb->data_type_T = rocsparse_datatype_f64_c;
         }
 
-        if(hyb->ell_col_ind_owned)
+        // Arrays set with rocsparse_hyb_mat_set_info belong to the caller and
+        // are only dropped here.
+        if(hyb->allocated_ell_col_ind)
         {
-            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->ell_col_ind, handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->allocated_ell_col_ind, handle->stream));
         }
-        hyb->ell_col_ind       = nullptr;
-        hyb->ell_col_ind_owned = false;
-        if(hyb->ell_val_owned)
+        if(hyb->allocated_ell_val)
         {
-            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->ell_val, handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->allocated_ell_val, handle->stream));
         }
-        hyb->ell_val       = nullptr;
-        hyb->ell_val_owned = false;
-        if(hyb->coo_row_ind_owned)
+        if(hyb->allocated_coo_row_ind)
         {
-            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->coo_row_ind, handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->allocated_coo_row_ind, handle->stream));
         }
-        hyb->coo_row_ind       = nullptr;
-        hyb->coo_row_ind_owned = false;
-        if(hyb->coo_col_ind_owned)
+        if(hyb->allocated_coo_col_ind)
         {
-            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->coo_col_ind, handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->allocated_coo_col_ind, handle->stream));
         }
-        hyb->coo_col_ind       = nullptr;
-        hyb->coo_col_ind_owned = false;
-        if(hyb->coo_val_owned)
+        if(hyb->allocated_coo_val)
         {
-            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->coo_val, handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->allocated_coo_val, handle->stream));
         }
-        hyb->coo_val       = nullptr;
-        hyb->coo_val_owned = false;
+        hyb->allocated_ell_col_ind = nullptr;
+        hyb->allocated_ell_val     = nullptr;
+        hyb->allocated_coo_row_ind = nullptr;
+        hyb->allocated_coo_col_ind = nullptr;
+        hyb->allocated_coo_val     = nullptr;
+        hyb->ell_col_ind           = nullptr;
+        hyb->ell_val               = nullptr;
+        hyb->coo_row_ind           = nullptr;
+        hyb->coo_col_ind           = nullptr;
+        hyb->coo_val               = nullptr;
 
         return rocsparse_status_success;
     }
@@ -144,16 +146,6 @@ rocsparse_status rocsparse::csr2hyb_template(rocsparse_handle          handle,
                        rocsparse_status_requires_sorted_storage);
     ROCSPARSE_CHECKARG_POINTER(7, hyb);
     ROCSPARSE_CHECKARG_ENUM(9, partition_type);
-
-    // csr2hyb allocates its own arrays. It may replace arrays it allocated
-    // before, but not arrays set with rocsparse_hyb_mat_set_info, which belong
-    // to the caller.
-    const bool holds_caller_arrays = (hyb->ell_col_ind != nullptr && !hyb->ell_col_ind_owned)
-                                     || (hyb->ell_val != nullptr && !hyb->ell_val_owned)
-                                     || (hyb->coo_row_ind != nullptr && !hyb->coo_row_ind_owned)
-                                     || (hyb->coo_col_ind != nullptr && !hyb->coo_col_ind_owned)
-                                     || (hyb->coo_val != nullptr && !hyb->coo_val_owned);
-    ROCSPARSE_CHECKARG(7, hyb, holds_caller_arrays, rocsparse_status_invalid_pointer);
 
     // Quick return if possible
     if(m == 0 || n == 0)
@@ -275,8 +267,8 @@ rocsparse_status rocsparse::csr2hyb_template(rocsparse_handle          handle,
             &hyb->ell_col_ind, sizeof(rocsparse_int) * hyb->ell_nnz, handle->stream));
         RETURN_IF_HIP_ERROR(
             rocsparse_hipMallocAsync(&hyb->ell_val, sizeof(T) * hyb->ell_nnz, handle->stream));
-        hyb->ell_col_ind_owned = true;
-        hyb->ell_val_owned     = true;
+        hyb->allocated_ell_col_ind = hyb->ell_col_ind;
+        hyb->allocated_ell_val     = hyb->ell_val;
     }
 
     // Allocate workspace
@@ -353,9 +345,9 @@ rocsparse_status rocsparse::csr2hyb_template(rocsparse_handle          handle,
             &hyb->coo_col_ind, sizeof(rocsparse_int) * hyb->coo_nnz, handle->stream));
         RETURN_IF_HIP_ERROR(
             rocsparse_hipMallocAsync(&hyb->coo_val, sizeof(T) * hyb->coo_nnz, handle->stream));
-        hyb->coo_row_ind_owned = true;
-        hyb->coo_col_ind_owned = true;
-        hyb->coo_val_owned     = true;
+        hyb->allocated_coo_row_ind = hyb->coo_row_ind;
+        hyb->allocated_coo_col_ind = hyb->coo_col_ind;
+        hyb->allocated_coo_val     = hyb->coo_val;
     }
 
     dim3 csr2ell_blocks((m - 1) / CSR2ELL_DIM + 1);
