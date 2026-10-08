@@ -19,16 +19,16 @@
 #   - rocisa_tests/            (rocisa pytest modules)
 #   - Tensile/Tests/unit/      (TensileLite unit tests, incl. GPU subtile tests)
 #
-# comprehensive/full reproduce that legacy set exactly (GPU tests included).
-# quick/standard run the same suites minus GPU-hardware tests (marker `gpu`) so
-# the pre-commit / PR tiers stay fast and host-only.
+# standard/comprehensive/full reproduce that legacy set exactly (GPU tests
+# included). quick runs the same suites minus GPU-hardware tests (marker `gpu`)
+# so it stays fast and host-only.
 #
 # test_paths are relative to the installed component root
 # (share/hipblaslt/tensilelite/), which is the pytest working directory.
 
 test_categories:
-  # The unit categories run a partial slice of the suite (quick/standard exclude
-  # GPU tests), so syrupy would flag the un-exercised snapshots as failures.
+  # quick runs a partial slice of the suite (it excludes GPU tests), so syrupy
+  # would flag the un-exercised snapshots as failures.
   # `--snapshot-warn-unused` downgrades those to warnings instead of errors.
   quick:
     description: "Fast host-only sanity checks (rocisa + TensileLite unit, no GPU)"
@@ -45,12 +45,10 @@ test_categories:
       - "smoke"
 
   standard:
-    description: "Pre-checkin validation (rocisa + TensileLite unit, no GPU)"
+    description: "Pre-checkin validation (rocisa + TensileLite unit, incl. GPU)"
     test_paths:
       - "rocisa_tests"
       - "Tensile/Tests/unit"
-    exclude_markers:
-      - "gpu"
     pytest_args:
       - "--snapshot-warn-unused"
     labels:
