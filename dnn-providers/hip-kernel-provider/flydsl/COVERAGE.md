@@ -453,7 +453,7 @@ shard, so the shipped count per arch is the same as the authored count.
 | SDPA prefill schedules (§5.1) | not an axis: `block_m` 64 for `head_dim` 64, non-causal 128 without a bias and the generic tier up to 64, and head-dim pairs (`hd_pair`) for 256 and the generic tiers above 128, replace the schedules of the same classes | ±0 | shipped; the 66 objects whose schedule did not change rebuilt byte-identical with kernel modification 18 in the source |
 | **gfx12-generic** | the same table, built from the same sources for RDNA4 | **108** | shipped; GPU suites pass on gfx1201 |
 | **Total, both families** | | **216** | |
-| SDPA forward, CDNA (§7) | per arch: dtype (2) × `head_dim` × causal (2), the kernel family fixed by arch and `head_dim`; the generic non-causal class also by `kv_align`, the dual-wave causal class by `any_diagonal` | 18 on gfx950, 12 on gfx942 | shipped; GPU suites pass on both |
+| SDPA forward, CDNA (§7) | per arch: dtype (2) × `head_dim` × causal (2), the kernel family fixed by arch and `head_dim`; the generic non-causal class also by `kv_align`, the dual-wave causal class by `any_diagonal`, the dual-wave classes by `has_bias` | 30 on gfx950, 12 on gfx942 | shipped; GPU suites pass on both |
 
 Adding a row here, with its gate result in §6.1 where it introduces a runtime
 feature, is part of adding the feature.
@@ -470,7 +470,7 @@ vendored whole under
 whose README lists the modifications (an import path, a runtime row guard in
 the cooperative K/V loads that FlyDSL 0.3.4 cannot trace in a helper, a runtime
 softmax scale, runtime head counts and token strides, a runtime LSE switch, a
-runtime causal diagonal, and runtime operand strides).
+runtime causal diagonal, runtime operand strides, and a per-(batch, head) bias view).
 The native half is
 [`FlydslSdpaCdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaNative.cpp).
 
@@ -504,8 +504,10 @@ baked field at a time (§7.3).
 | | whether to write the LSE output |
 | gfx942 non-causal: whether the KV tail is masked (`kv_align`) | |
 | gfx950 causal: whether any diagonal is served (`any_diagonal`) | |
+| gfx950: whether an additive bias is added (`has_bias`) | the bias's (batch, head, query) strides |
 
-Eighteen objects on gfx950, twelve on gfx942: three per (dtype, `head_dim`). The
+Thirty objects on gfx950, twelve on gfx942: three per (dtype, `head_dim`), and on gfx950
+the dual-wave ones again with a bias. The
 generic kernel can skip masking the last KV tile when the key length is a multiple
 of its 64-row KV tile, which is measurably faster; so its non-causal class ships
 twice -- `kv_align` 0, masked, for any
@@ -535,7 +537,8 @@ One SDPA-forward node, and:
 | Scale: `attn_scale_value` (> 0), a pass-by-value scalar tensor, or absent | Absent is `1/√head_dim`, the reference's default. The running max is over unscaled scores, which orders them correctly only for a positive scale. |
 | Key length a multiple of 64, for a `kv_align` 64 object | That object does not mask the last KV tile. |
 | Stats, if requested: a named f32 `[B, H, Sq, 1]` device tensor in packed (batch, head, query) order | The kernels write the natural-log LSE of the scaled scores as one contiguous `[B, H, Sq]`. |
-| Declined outright: bias, padding / varlen, dropout, paged KV, block masks, sinks, FP8 descales, ALiBi, the split max / sum-exp stats, a non-`AUTO` implementation | The objects are built without them. |
+| Bias (`attn_mask`), if present, gfx950 `head_dim` 64 and 128 only: in the query's dtype, rank 1–4 right-aligned to `[B, H, Sq, Skv]`, any of B, H and Sq broadcast, the key axis contiguous; strides multiples of 8 elements, a query stride of at least `Skv` (or 0); one (batch, head) slice within 32-bit addressing | Added to the scaled scores, as PyTorch adds a float `attn_mask`, which it requires in the query's dtype. Only the dual-wave kernel can add a bias; rows move as 16-byte vectors; each slice is one buffer view. A bias in another dtype, broadcast along the keys, or misaligned (a key length not a multiple of 8 in a packed bias) declines. |
+| Declined outright: padding / varlen, dropout, paged KV, block masks, sinks, FP8 descales, ALiBi, the split max / sum-exp stats, a non-`AUTO` implementation | The objects are built without them. |
 | Batch pitch and grid within int32 | 32-bit addressing. |
 
 ### 7.3 What comes next, and the rule it follows
@@ -555,7 +558,7 @@ against the coverage it buys. In order:
 | ~~`Sq ≠ Skv`, both causal alignments, right-side bands~~ | Done: the diagonal offset is a kernel argument (modification 5). Top-left with more queries than keys and wider bands need the last KV tile's padding masked apart from the diagonal; sliding windows need a left bound in the mask and the KV loop's start. |
 | ~~`head_dim` 64 and 256, f16~~ | Done: rows in the instance table. Other head dims need the generic kernel's row loads generalised past powers of two; 256 on gfx942 needs a smaller tile. |
 | Varlen, paged KV | Both kernels already take cumulative sequence offsets and a block table, passed unused today. |
-| Additive bias | The dual-wave kernel takes a bias operand; the generic one has none, so gfx942 needs a kernel change. |
+| ~~Additive bias~~ | Done on gfx950 (modification 8). gfx942 and gfx950's `head_dim` 256 run the generic kernel, which has no bias operand; f32 bias and misaligned rows need a conversion or unaligned path. |
 
 Then the instance set is chosen by the provider's AOT selection process
 (build every candidate, tune, cover, prune) rather than by hand.
@@ -565,11 +568,11 @@ Then the instance set is chosen by the provider's AOT selection process
 | Claim | Checked by |
 |---|---|
 | The objects are what the pinned toolchain produces | [REGEN.md](REGEN.md) §2 |
-| Each object has its family's argument layout, workgroup size and arch, spills no registers, and fits the arch's LDS | `gen_sdpa_cdna.py`, before the object is written |
+| Each object has its family's argument layout, workgroup size and arch, fits the arch's LDS, and spills no registers but where a class's spill is explicitly allowed and recorded (`vgpr_spills`) | `gen_sdpa_cdna.py`, before the object is written |
 | The vendored kernels match FlyDSL but for their recorded modifications | `tools/diff_upstream.py` ([REGEN.md](REGEN.md) §5) |
 | Each arch's shard ships one object per class, one kernel family per (dtype, `head_dim`), each with its family's signature | `TestFlydslSdpaCdnaPacks`, and the shard census that runs it for gfx950 and gfx942 |
 | The accept/decline rules above, the causal and scale bindings, and candidate selection, including `kv_align` | `TestFlydslSdpaCdnaGraphAccepts`, `TestFlydslSdpaCdnaGraphDeclines`, `TestFlydslSdpaCdnaBinding`, `TestFlydslSdpaCdnaKernelMatch` |
-| Every staged object the matcher admits computes attention — non-causal and causal, ragged tails, a longer sequence, a scale value, a runtime scale tensor, MHA, MQA and an odd group size, cross-attention, chunked prefill, decode, rows no key reaches, a top-left band, `head_dim` 64 and 256, f16, BHSD and packed QKV — and the LSE output, against a reference | `TestGpuFlydslSdpaCdnaDispatch`, on gfx950 and gfx942 |
+| Every staged object the matcher admits computes attention — non-causal and causal, ragged tails, a longer sequence, a scale value, a runtime scale tensor, MHA, MQA and an odd group size, cross-attention, chunked prefill, decode, rows no key reaches, a top-left band, `head_dim` 64 and 256, f16, BHSD and packed QKV, a per-head bias and a padding mask — and the LSE output, against a reference | `TestGpuFlydslSdpaCdnaDispatch`, on gfx950 and gfx942 |
 
 ### 7.5 Measured costs, and deferred performance work
 
@@ -587,6 +590,7 @@ the harness's own bias. The measurements are kept outside the repository.
 | LSE output, switched at runtime | 2–4 more VGPRs, no occupancy step; with LSE off, no measurable cost but on the gfx942 causal object, which is slower by a fraction of a percent on every shape | runtime, for coverage — **deferred** (gfx942 causal) |
 | Causal diagonal as an argument, and `cross_seqlen` on gfx950 | neutral on gfx942. On gfx950 the `cross_seqlen` build is a few percent slower on every causal shape; the plain build at offset 0 (`any_diagonal` 0) recovers most of it, still slower by under a percent than computing the offset in-kernel | two gfx950 causal objects; the residual cost **deferred** |
 | Runtime operand strides (per-(batch, head) views) | neutral on the gfx950 dual-wave objects. On gfx942 the d64 objects grew past the three-waves-per-SIMD register step, measurably slower; LLVM's register-pressure trackers bring them back under it and recover the time, but on the d128 objects the same option schedules the loop much worse, so it applies at d64 only. The remaining cost -- gfx942 d128, gfx950 d256 -- is under a few percent | runtime, for coverage; trackers at gfx942 d64; the rest **deferred** |
+| Additive bias (`has_bias`, a compile-time axis) | the plain dual-wave objects carry two unused bias-stride arguments, neutral but for a fraction of a percent on two d64 shapes. A bias object costs what reading its bias costs -- a full `[B, H, S, S]` bias is as many bytes as the scores. At `head_dim` 128 the bias objects spill a few VGPRs (upstream's own bias addressing spills too), with no cost visible beyond the bias's own | two objects per class on gfx950; the d128 spill allowed and recorded |
 
 **Deferred performance work** -- costs accepted for coverage, to revisit:
 

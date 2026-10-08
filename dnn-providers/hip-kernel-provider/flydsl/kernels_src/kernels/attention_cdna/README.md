@@ -69,6 +69,14 @@ diff against upstream plus the modifications below.
 7. **Extra LLVM options** (`flash_attn_generic.py`). An `extra_llvm_options`
    builder argument merged into the kernel's own compile options, and forwarded
    through the builder's internal re-builds; none by default.
+8. **Per-(batch, head) bias view** (`flash_attn_gfx950.py`). Trailing
+   `stride_bias_b, stride_bias_h`; the bias is read through a view rebased at
+   `batch * stride_bias_b + head * stride_bias_h` and ending at
+   `(seq_len - 1) * bias_stride0 + seq_len_kv`, so any of batch, head and query can
+   be broadcast (stride 0) and rows and columns past the scores read as zero.
+   `_prep_bias` passes the bias as given rather than flattened, keeping the
+   argument's layout rank-4 like every other tensor's. The launchers pass 0, 0: a
+   dense `[seq_len, seq_len_kv]` bias, upstream's contract.
 
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).

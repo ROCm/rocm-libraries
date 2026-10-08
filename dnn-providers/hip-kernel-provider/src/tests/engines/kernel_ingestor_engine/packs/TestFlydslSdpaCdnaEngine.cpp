@@ -83,6 +83,8 @@ constexpr const char* CDNA_CAUSAL_FIELD = "causal";
 constexpr const char* CDNA_BLOCK_M_FIELD = "block_m";
 constexpr const char* CDNA_KV_ALIGN_FIELD = "kv_align";
 constexpr const char* CDNA_ANY_DIAGONAL_FIELD = "any_diagonal";
+constexpr const char* CDNA_HAS_BIAS_FIELD = "has_bias";
+constexpr const char* CDNA_BIAS_TOKEN = "flydsl_sdpa_cdna.bias.uid";
 
 /// The model shape the first CDNA objects are built for.
 SdpaGraphSpec cdnaSpec()
@@ -105,7 +107,8 @@ KernelDefinition makeCdnaKernel(const std::string& family = "dualwave",
                                 const std::string& dtype = "bf16",
                                 int64_t blockM = 256,
                                 int64_t kvAlign = 0,
-                                int64_t anyDiagonal = 1)
+                                int64_t anyDiagonal = 1,
+                                int64_t hasBias = 0)
 {
     KernelDefinition kernel;
     kernel.name = "sdpa_cdna_" + dtype + "_" + family;
@@ -115,7 +118,8 @@ KernelDefinition makeCdnaKernel(const std::string& family = "dualwave",
                        {CDNA_CAUSAL_FIELD, causal},
                        {CDNA_BLOCK_M_FIELD, blockM},
                        {CDNA_KV_ALIGN_FIELD, kvAlign},
-                       {CDNA_ANY_DIAGONAL_FIELD, anyDiagonal}};
+                       {CDNA_ANY_DIAGONAL_FIELD, anyDiagonal},
+                       {CDNA_HAS_BIAS_FIELD, hasBias}};
     kernel.priority = 100;
     return kernel;
 }
@@ -179,6 +183,17 @@ std::vector<CdnaCase> acceptedCases()
     auto bhsd = cdnaSpec();
     bhsd.layout = SdpaLayout::BHSD;
     cases.push_back({"BhsdLayout", bhsd});
+    auto bias = cdnaSpec();
+    bias.withBias = true;
+    bias.biasDataType = DataType::BFLOAT16;
+    cases.push_back({"BiasInTheQueryDtype", bias});
+    auto fullBias = bias;
+    fullBias.biasDims = {1, 32, 256, 256};
+    cases.push_back({"BiasPerHead", fullBias});
+    auto paddingMask = bias;
+    paddingMask.batch = 2;
+    paddingMask.biasDims = {2, 1, 1, 256};
+    cases.push_back({"BiasBroadcastOverHeadsAndQueries", paddingMask});
     auto packed = cdnaSpec();
     packed.kvHeads = 32;
     packed.packedQkv = true;
@@ -238,9 +253,20 @@ std::vector<CdnaCase> declinedCases()
     band.mask = SdpaMask::TOP_LEFT_CAUSAL;
     band.rightBound = 16;
     cases.push_back({"RightBoundBand", band});
-    auto bias = cdnaSpec();
-    bias.withBias = true;
-    cases.push_back({"Bias", bias});
+    auto f32Bias = cdnaSpec();
+    f32Bias.withBias = true;
+    cases.push_back({"BiasInAnotherDtype", f32Bias});
+    auto keyBroadcast = cdnaSpec();
+    keyBroadcast.withBias = true;
+    keyBroadcast.biasDataType = DataType::BFLOAT16;
+    keyBroadcast.biasDims = {1, 1, 256, 1};
+    cases.push_back({"BiasBroadcastAlongTheKeys", keyBroadcast});
+    auto unaligned = cdnaSpec();
+    unaligned.withBias = true;
+    unaligned.biasDataType = DataType::BFLOAT16;
+    unaligned.seqLenQ = 333;
+    unaligned.seqLenKv = 333;
+    cases.push_back({"BiasRowsNotSixteenByteAligned", unaligned});
     auto bf16Stats = cdnaSpec();
     bf16Stats.stats = SdpaStats::LSE_BF16;
     cases.push_back({"Bf16Stats", bf16Stats});
@@ -305,6 +331,37 @@ TEST(TestFlydslSdpaCdnaBinding, BindsTheDiagonalOffset)
     EXPECT_EQ(offsetOf(SdpaMask::BOTTOM_RIGHT_CAUSAL, 256, 1024, std::nullopt), 768);
     EXPECT_EQ(offsetOf(SdpaMask::BOTTOM_RIGHT_CAUSAL, 1024, 256, std::nullopt), -768);
     EXPECT_EQ(offsetOf(SdpaMask::TOP_LEFT_CAUSAL, 256, 1024, 100), 100);
+}
+
+TEST(TestFlydslSdpaCdnaBinding, BindsTheBiasOrNone)
+{
+    auto withBias = cdnaSpec();
+    withBias.withBias = true;
+    withBias.biasDataType = DataType::BFLOAT16;
+    const auto biasBound = cdnaGraphMatch(withBias);
+    const auto plainBound = cdnaGraphMatch(cdnaSpec());
+    ASSERT_TRUE(biasBound.has_value());
+    ASSERT_TRUE(plainBound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*biasBound, CDNA_BIAS_TOKEN), FLYDSL_SDPA_RDNA_BIAS_UID);
+    EXPECT_EQ(tryGetBoundInt(*plainBound, CDNA_BIAS_TOKEN), -1);
+}
+
+TEST(TestFlydslSdpaCdnaKernelMatch, RunsABiasGraphOnlyOnAnObjectBuiltToAddIt)
+{
+    auto withBias = cdnaSpec();
+    withBias.withBias = true;
+    withBias.biasDataType = DataType::BFLOAT16;
+    for(const auto& [spec, graphHasBias] :
+        {std::pair<SdpaGraphSpec, bool>{withBias, true}, {cdnaSpec(), false}})
+    {
+        const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+        const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
+        ASSERT_TRUE(bound.has_value());
+        const auto plain = makeCdnaKernel("dualwave", 128, 0, "bf16", 256, 0, 1, 0);
+        const auto biased = makeCdnaKernel("dualwave", 128, 0, "bf16", 256, 0, 1, 1);
+        EXPECT_EQ(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), plain, *bound), !graphHasBias);
+        EXPECT_EQ(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), biased, *bound), graphHasBias);
+    }
 }
 
 TEST(TestFlydslSdpaCdnaBinding, BindsTheStatsTensorOrNone)
@@ -587,6 +644,42 @@ void expectCandidateMatchesReference(const MatchContext& context,
     {
         buffers.push_back({FLYDSL_SDPA_RDNA_STATS_UID, statsDevice});
     }
+    // The bias, in the query's dtype, right-aligned to [B, H, Sq, Skv] as the graph states it.
+    const auto biasLayout = sdpaBiasLayout(spec);
+    const auto& biasDims = biasLayout.first;
+    const auto& biasStrideList = biasLayout.second;
+    size_t biasCount = 1;
+    for(size_t axis = 0; axis < biasDims.size(); ++axis)
+    {
+        biasCount += static_cast<size_t>((biasDims[axis] - 1) * biasStrideList[axis]);
+    }
+    const auto biasValues = spec.withBias ? fillValues<T>(biasCount, 4U) : std::vector<T>{};
+    void* biasDevice = nullptr;
+    if(spec.withBias)
+    {
+        ASSERT_EQ(hipSuccess, hipMalloc(&biasDevice, biasCount * sizeof(T)));
+        ASSERT_EQ(
+            hipSuccess,
+            hipMemcpy(biasDevice, biasValues.data(), biasCount * sizeof(T), hipMemcpyHostToDevice));
+        buffers.push_back({FLYDSL_SDPA_RDNA_BIAS_UID, biasDevice});
+    }
+    // The bias element for (batch, head, query, key): broadcast axes are absent or of
+    // extent 1, and right-alignment maps the trailing axes.
+    const auto biasAt = [&](int64_t bi, int64_t hi, int64_t si, int64_t j) {
+        const std::array<int64_t, 4> index{bi, hi, si, j};
+        int64_t offset = 0;
+        const auto rank = static_cast<int64_t>(biasDims.size());
+        for(int64_t axis = 0; axis < rank; ++axis)
+        {
+            const auto full = static_cast<size_t>(4 - rank + axis);
+            const auto declared = static_cast<size_t>(axis);
+            if(biasDims[declared] > 1)
+            {
+                offset += index[full] * biasStrideList[declared];
+            }
+        }
+        return static_cast<double>(static_cast<float>(biasValues[static_cast<size_t>(offset)]));
+    };
     // A runtime scale arrives with the buffers, as a host scalar.
     float runtimeScale = spec.scale;
     if(spec.scaleKind == SdpaScale::RUNTIME_TENSOR)
@@ -605,6 +698,10 @@ void expectCandidateMatchesReference(const MatchContext& context,
         static_cast<void>(hipFree(vDevice));
     }
     static_cast<void>(hipFree(oDevice));
+    if(spec.withBias)
+    {
+        static_cast<void>(hipFree(biasDevice));
+    }
     if(withStats)
     {
         ASSERT_EQ(
@@ -656,7 +753,8 @@ void expectCandidateMatchesReference(const MatchContext& context,
                         dot += at(q, qStrides, 0, bi, hi, si, e)
                                * at(k, kvStrides, kStart, bi, hi / group, j, e);
                     }
-                    scores[static_cast<size_t>(j)] = dot * scale;
+                    scores[static_cast<size_t>(j)]
+                        = dot * scale + (spec.withBias ? biasAt(bi, hi, si, j) : 0.0);
                     maxScore = std::max(maxScore, scores[static_cast<size_t>(j)]);
                 }
                 double sum = 0.0;
@@ -952,6 +1050,33 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesPackedQkvViews)
     spec.seqLenKv = 300;
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
     spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, AddsABiasPerHead)
+{
+    // gfx950 only: the generic gfx942 kernel adds no bias, so there it skips.
+    auto spec = cdnaSpec();
+    spec.withBias = true;
+    spec.biasDataType = DataType::BFLOAT16;
+    spec.batch = 2;
+    spec.biasDims = {2, 32, 256, 256};
+    spec.stats = SdpaStats::LSE;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, AddsAPaddingMaskWithBottomRightCausalCrossAttention)
+{
+    auto spec = cdnaSpec();
+    spec.withBias = true;
+    spec.batch = 2;
+    spec.seqLenQ = 200;
+    spec.seqLenKv = 328;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.headDim = 64;
+    spec.dataType = DataType::HALF;
+    spec.biasDataType = DataType::HALF;
+    spec.biasDims = {2, 1, 1, 328};
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 

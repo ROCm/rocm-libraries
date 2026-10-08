@@ -457,28 +457,33 @@ def sdpa_cdna_instances(arch: str) -> list[Instance]:
                         variants.append((SDPA_CDNA_KV_ALIGN, 1))
                     if kernel == "dualwave" and causal:
                         variants.append((0, 0))
-                    for kv_align, any_diagonal in variants:
-                        priority = PRIORITY_SPECIALIZED
-                        if kv_align:
-                            priority = PRIORITY_SDPA_CDNA_KV_ALIGNED
-                        elif not any_diagonal:
-                            priority = PRIORITY_SDPA_CDNA_DIAGONAL_ZERO
-                        instances.append(
-                            Instance(
-                                op="sdpa_cdna",
-                                dtype=dtype,
-                                priority=priority,
-                                knobs={
-                                    "kernel": kernel,
-                                    "head_dim": head_dim,
-                                    "causal": causal,
-                                    "block_m": SDPA_CDNA_BLOCK_M[kernel],
-                                    "kv_align": kv_align,
-                                    "any_diagonal": any_diagonal,
-                                    "waves_per_eu": waves_per_eu,
-                                },
+                    # The dual-wave kernel adds an additive bias in the query's dtype
+                    # as a compile-time axis; the generic kernel has none.
+                    biases = (0, 1) if kernel == "dualwave" else (0,)
+                    for has_bias in biases:
+                        for kv_align, any_diagonal in variants:
+                            priority = PRIORITY_SPECIALIZED
+                            if kv_align:
+                                priority = PRIORITY_SDPA_CDNA_KV_ALIGNED
+                            elif not any_diagonal:
+                                priority = PRIORITY_SDPA_CDNA_DIAGONAL_ZERO
+                            instances.append(
+                                Instance(
+                                    op="sdpa_cdna",
+                                    dtype=dtype,
+                                    priority=priority,
+                                    knobs={
+                                        "kernel": kernel,
+                                        "head_dim": head_dim,
+                                        "causal": causal,
+                                        "block_m": SDPA_CDNA_BLOCK_M[kernel],
+                                        "kv_align": kv_align,
+                                        "any_diagonal": any_diagonal,
+                                        "waves_per_eu": waves_per_eu,
+                                        "has_bias": has_bias,
+                                    },
+                                )
                             )
-                        )
     _assert_unique(instances)
     return instances
 

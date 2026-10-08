@@ -11,6 +11,7 @@
     "block_m",
     "kv_align",
     "any_diagonal",
-    "waves_per_eu"
+    "waves_per_eu",
+    "has_bias"
   ]
 }

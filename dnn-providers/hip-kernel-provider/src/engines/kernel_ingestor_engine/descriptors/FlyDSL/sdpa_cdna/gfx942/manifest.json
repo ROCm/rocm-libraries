@@ -7,7 +7,7 @@
     "flydsl_kernels_commit": "89ad52fbbb9e252396829a8a44b12e18b7acd970",
     "flydsl_kernels_describe": "v0.3.4.1-19-g89ad52f",
     "rocm_version": "7.13.0",
-    "inputs_sha256": "e374ac7ab5fc5b38b83ca3ea0ad9a0b2f80e7ee0177d2ff619e37b15c874e462"
+    "inputs_sha256": "7907994cccc8fd96eb33a7346ccc212aeca733f5a093e6869fbb1428044442f4"
   },
   "instances": [
     {
@@ -23,7 +23,8 @@
         "block_m": 128,
         "kv_align": 0,
         "any_diagonal": 1,
-        "waves_per_eu": 0
+        "waves_per_eu": 0,
+        "has_bias": 0
       },
       "block": [
         256,
@@ -73,6 +74,7 @@
       "kernarg_segment_size": 452,
       "lds_bytes": 17152,
       "vgprs": 159,
+      "vgpr_spills": 0,
       "llvm_options": {
         "amdgpu-use-amdgpu-trackers": true
       },
@@ -91,7 +93,8 @@
         "block_m": 128,
         "kv_align": 64,
         "any_diagonal": 1,
-        "waves_per_eu": 0
+        "waves_per_eu": 0,
+        "has_bias": 0
       },
       "block": [
         256,
@@ -141,6 +144,7 @@
       "kernarg_segment_size": 452,
       "lds_bytes": 17152,
       "vgprs": 165,
+      "vgpr_spills": 0,
       "llvm_options": {
         "amdgpu-use-amdgpu-trackers": true
       },
@@ -159,7 +163,8 @@
         "block_m": 128,
         "kv_align": 0,
         "any_diagonal": 1,
-        "waves_per_eu": 0
+        "waves_per_eu": 0,
+        "has_bias": 0
       },
       "block": [
         256,
@@ -209,6 +214,7 @@
       "kernarg_segment_size": 452,
       "lds_bytes": 17152,
       "vgprs": 164,
+      "vgpr_spills": 0,
       "llvm_options": {
         "amdgpu-use-amdgpu-trackers": true
       },
@@ -227,7 +233,8 @@
         "block_m": 128,
         "kv_align": 0,
         "any_diagonal": 1,
-        "waves_per_eu": 0
+        "waves_per_eu": 0,
+        "has_bias": 0
       },
       "block": [
         256,
@@ -277,6 +284,7 @@
       "kernarg_segment_size": 452,
       "lds_bytes": 33792,
       "vgprs": 288,
+      "vgpr_spills": 0,
       "llvm_options": {},
       "named_args": 0
     },
@@ -293,7 +301,8 @@
         "block_m": 128,
         "kv_align": 64,
         "any_diagonal": 1,
-        "waves_per_eu": 0
+        "waves_per_eu": 0,
+        "has_bias": 0
       },
       "block": [
         256,
@@ -343,6 +352,7 @@
       "kernarg_segment_size": 452,
       "lds_bytes": 33792,
       "vgprs": 264,
+      "vgpr_spills": 0,
       "llvm_options": {},
       "named_args": 0
     },
@@ -359,7 +369,8 @@
         "block_m": 128,
         "kv_align": 0,
         "any_diagonal": 1,
-        "waves_per_eu": 0
+        "waves_per_eu": 0,
+        "has_bias": 0
       },
       "block": [
         256,
@@ -409,6 +420,7 @@
       "kernarg_segment_size": 452,
       "lds_bytes": 33792,
       "vgprs": 258,
+      "vgpr_spills": 0,
       "llvm_options": {},
       "named_args": 0
     },
@@ -425,7 +437,8 @@
         "block_m": 128,
         "kv_align": 0,
         "any_diagonal": 1,
-        "waves_per_eu": 0
+        "waves_per_eu": 0,
+        "has_bias": 0
       },
       "block": [
         256,
@@ -475,6 +488,7 @@
       "kernarg_segment_size": 452,
       "lds_bytes": 17152,
       "vgprs": 164,
+      "vgpr_spills": 0,
       "llvm_options": {
         "amdgpu-use-amdgpu-trackers": true
       },
@@ -493,7 +507,8 @@
         "block_m": 128,
         "kv_align": 64,
         "any_diagonal": 1,
-        "waves_per_eu": 0
+        "waves_per_eu": 0,
+        "has_bias": 0
       },
       "block": [
         256,
@@ -543,6 +558,7 @@
       "kernarg_segment_size": 452,
       "lds_bytes": 17152,
       "vgprs": 182,
+      "vgpr_spills": 0,
       "llvm_options": {
         "amdgpu-use-amdgpu-trackers": true
       },
@@ -561,7 +577,8 @@
         "block_m": 128,
         "kv_align": 0,
         "any_diagonal": 1,
-        "waves_per_eu": 0
+        "waves_per_eu": 0,
+        "has_bias": 0
       },
       "block": [
         256,
@@ -611,6 +628,7 @@
       "kernarg_segment_size": 452,
       "lds_bytes": 17152,
       "vgprs": 162,
+      "vgpr_spills": 0,
       "llvm_options": {
         "amdgpu-use-amdgpu-trackers": true
       },
@@ -629,7 +647,8 @@
         "block_m": 128,
         "kv_align": 0,
         "any_diagonal": 1,
-        "waves_per_eu": 0
+        "waves_per_eu": 0,
+        "has_bias": 0
       },
       "block": [
         256,
@@ -679,6 +698,7 @@
       "kernarg_segment_size": 452,
       "lds_bytes": 33792,
       "vgprs": 258,
+      "vgpr_spills": 0,
       "llvm_options": {},
       "named_args": 0
     },
@@ -695,7 +715,8 @@
         "block_m": 128,
         "kv_align": 64,
         "any_diagonal": 1,
-        "waves_per_eu": 0
+        "waves_per_eu": 0,
+        "has_bias": 0
       },
       "block": [
         256,
@@ -745,6 +766,7 @@
       "kernarg_segment_size": 452,
       "lds_bytes": 33792,
       "vgprs": 264,
+      "vgpr_spills": 0,
       "llvm_options": {},
       "named_args": 0
     },
@@ -761,7 +783,8 @@
         "block_m": 128,
         "kv_align": 0,
         "any_diagonal": 1,
-        "waves_per_eu": 0
+        "waves_per_eu": 0,
+        "has_bias": 0
       },
       "block": [
         256,
@@ -811,6 +834,7 @@
       "kernarg_segment_size": 452,
       "lds_bytes": 33792,
       "vgprs": 249,
+      "vgpr_spills": 0,
       "llvm_options": {},
       "named_args": 0
     }

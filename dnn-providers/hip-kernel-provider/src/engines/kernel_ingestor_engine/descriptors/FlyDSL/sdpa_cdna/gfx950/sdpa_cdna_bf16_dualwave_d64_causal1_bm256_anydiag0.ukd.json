@@ -18,7 +18,8 @@
     "block_m": 256,
     "kv_align": 0,
     "any_diagonal": 0,
-    "waves_per_eu": 0
+    "waves_per_eu": 0,
+    "has_bias": 0
   },
   "priority": 110,
   "provenance": {
@@ -37,7 +38,8 @@
             "block_m",
             "kv_align",
             "any_diagonal",
-            "waves_per_eu"
+            "waves_per_eu",
+            "has_bias"
           ],
           "bindings": {},
           "vocabulary": {}

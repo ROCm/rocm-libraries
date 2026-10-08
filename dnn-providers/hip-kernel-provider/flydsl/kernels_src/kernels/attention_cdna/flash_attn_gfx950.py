@@ -31,6 +31,7 @@ from flydsl.expr import math as fmath
 from flydsl.expr.typing import Vector as Vec
 from flydsl.runtime.device import get_rocm_arch as get_hip_arch
 from kernels.attention_cdna.flash_attn_utils import (
+    _make_rebased_view,
     DualwaveGemmHelper,
     DualwaveKernelContext,
     DualwaveKvGmemToLdsLoader,
@@ -240,6 +241,8 @@ def build_flash_attn_dualwave_swp_module(
         stride_o_h: fx.Int32,
         stride_kv_b: fx.Int32,
         stride_kv_h: fx.Int32,
+        stride_bias_b: fx.Int32,
+        stride_bias_h: fx.Int32,
     ):
         ctx = DualwaveKernelContext(
             traits,
@@ -312,9 +315,24 @@ def build_flash_attn_dualwave_swp_module(
                 )
                 // 4
             ) * 4
-            _bias_div = fx.logical_divide(
-                fx.rocdl.make_buffer_tensor(Bias, num_records_bytes=_bias_rec_bytes),
-                fx.make_layout(1, 1),
+            # One (batch, query head) slice of the bias, rebased and bounded at its
+            # last element, (seq_len - 1) * bias_stride0 + seq_len_kv, so rows and
+            # columns past the scores read as zero; a stride of 0 broadcasts that
+            # axis (modification 8).
+            _bias_elems = (ctx.seqlen_q_v - fx.Index(1)) * fx.Index(
+                bias_stride0
+            ) + ctx.seqlen_kv_v
+            _bias_div = _make_rebased_view(
+                fx.get_iter(Bias),
+                (
+                    fx.Index(ctx.batch_idx) * fx.Index(stride_bias_b)
+                    + ctx.q_head_idx * fx.Index(stride_bias_h)
+                )
+                * fx.Index(traits.BF16_BYTES),
+                _bias_elems * fx.Index(traits.BF16_BYTES),
+                fx.make_layout(fx.Int32(_bias_elems), fx.Int32(1)),
+                _buf_flags_i32=ctx.buf_flags_i32,
+                _elem_ir=ctx.elem_ir,
             )
             _BIAS_VEC = 8 if const_expr(traits.KV_VECTORIZED) else 4
             _BIAS_GROUPS = 16 // _BIAS_VEC
@@ -1129,6 +1147,8 @@ def build_flash_attn_dualwave_swp_module(
         stride_o_h: fx.Int32,
         stride_kv_b: fx.Int32,
         stride_kv_h: fx.Int32,
+        stride_bias_b: fx.Int32,
+        stride_bias_h: fx.Int32,
         stream: fx.Stream = fx.Stream(None),
     ):
         # Make shape/mode traits visible to the JIT cache key.
@@ -1182,6 +1202,8 @@ def build_flash_attn_dualwave_swp_module(
             stride_o_h,
             stride_kv_b,
             stride_kv_h,
+            stride_bias_b,
+            stride_bias_h,
             value_attrs={
                 "rocdl.waves_per_eu": traits.WAVES_PER_EU,
                 "rocdl.flat_work_group_size": f"{traits.BLOCK_SIZE},{traits.BLOCK_SIZE}",
@@ -1235,8 +1257,9 @@ def build_flash_attn_dualwave_swp_module(
                 )
         bias = bias.contiguous()
         if bias_stride0 is None:
-            bias_stride0 = bias.stride(0)
-        return bias.view(-1), bias_stride0
+            bias_stride0 = bias.stride(-2)
+        # Passed as given: the kernel reads only its base pointer (modification 8).
+        return bias, bias_stride0
 
     def _prep_alibi(alibi_slopes, placeholder):
         if alibi_slopes is None:
@@ -1395,6 +1418,8 @@ def build_flash_attn_dualwave_swp_module(
                     traits.HEAD_DIM,
                     seq_len_kv * stride_kv_n,
                     traits.HEAD_DIM,
+                    0,
+                    0,
                 )
             return launch_flash_attn_dualwave_swp(
                 Q,
@@ -1430,6 +1455,8 @@ def build_flash_attn_dualwave_swp_module(
                 traits.HEAD_DIM,
                 seq_len_kv * stride_kv_n,
                 traits.HEAD_DIM,
+                0,
+                0,
                 stream=stream,
             )
 
@@ -1531,6 +1558,8 @@ def build_flash_attn_dualwave_swp_module(
                 traits.HEAD_DIM,
                 seq_len_kv * stride_kv_n,
                 traits.HEAD_DIM,
+                0,
+                0,
                 fx.Stream(stream),
             )
 

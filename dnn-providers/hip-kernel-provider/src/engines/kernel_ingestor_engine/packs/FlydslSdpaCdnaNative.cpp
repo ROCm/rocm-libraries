@@ -96,6 +96,8 @@ constexpr std::string_view KV_ALIGN_FIELD = "kv_align";
 /// 1 for an object that serves any diagonal offset; 0 for one built without the handling
 /// an offset other than 0 needs, which only an offset-0 graph may run.
 constexpr std::string_view ANY_DIAGONAL_FIELD = "any_diagonal";
+/// 1 for an object built to add a bias to the scores, 0 for one built without.
+constexpr std::string_view HAS_BIAS_FIELD = "has_bias";
 
 constexpr std::string_view DUALWAVE = "dualwave";
 constexpr std::string_view GENERIC = "generic";
@@ -111,6 +113,9 @@ constexpr std::string_view DIAG_OFFSET_TOKEN = "flydsl_sdpa_cdna.diag_offset";
 /// The uid of the softmax-statistics (LSE) output, or NO_STATS when the graph wants none.
 constexpr std::string_view STATS_TOKEN = "flydsl_sdpa_cdna.stats.uid";
 constexpr int64_t NO_STATS = -1;
+/// The uid of the additive bias (attn_mask), or NO_BIAS when the graph has none.
+constexpr std::string_view BIAS_TOKEN = "flydsl_sdpa_cdna.bias.uid";
+constexpr int64_t NO_BIAS = -1;
 
 constexpr uint32_t SDPA_RANK = 4;
 constexpr uint32_t BATCH_AXIS = 0;
@@ -340,6 +345,81 @@ std::optional<ViewStrides> viewStridesFor(const data_objects::TensorAttributes& 
     return ViewStrides{*qStrides, *oStrides, *kStrides};
 }
 
+/// The bias's (batch, head, query) strides as the kernels take them; 0 broadcasts an axis.
+struct BiasStrides
+{
+    int64_t batch = 0;
+    int64_t head = 0;
+    int64_t query = 0;
+};
+
+/**
+ * @brief The bias's strides, or nullopt for one the kernels cannot add.
+ *
+ * The objects that add a bias read it in the query's dtype, as PyTorch requires of a float
+ * attn_mask, right-aligned to [B, H, Sq, Skv] with any of B, H and Sq broadcast (extent 1 or
+ * absent); the key axis is read contiguously and cannot be. Rows move as 16-byte vectors, so
+ * every stride is a multiple of 8 elements, and one (batch, head) slice is one buffer view
+ * of (Sq - 1) * stride_q + Skv elements within 32-bit addressing. A row stride below Skv
+ * would overlap rows, so it declines.
+ */
+std::optional<BiasStrides> servableBias(const data_objects::TensorAttributes& bias,
+                                        const SdpaProblem& problem)
+{
+    const auto* dims = bias.dims();
+    const auto* strides = bias.strides();
+    if(dims == nullptr || strides == nullptr || dims->empty() || dims->size() > SDPA_RANK
+       || strides->size() != dims->size() || bias.data_type() != problem.dataType || bias.virtual_()
+       || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&bias)
+       || bias.ragged_offset_tensor_uid().has_value())
+    {
+        return std::nullopt;
+    }
+    // Right-aligned: the last axis is the keys, then the queries, heads and batch.
+    const auto rank = static_cast<int64_t>(dims->size());
+    const std::array<int64_t, 4> full{
+        problem.batch, problem.numHeads, problem.seqLenQ, problem.seqLenKv};
+    std::array<int64_t, 4> stride{0, 0, 0, 0};
+    for(int64_t axis = 0; axis < SDPA_RANK; ++axis)
+    {
+        const int64_t declared = axis - (SDPA_RANK - rank);
+        const int64_t extent
+            = declared < 0 ? 1 : dims->Get(static_cast<flatbuffers::uoffset_t>(declared));
+        if(extent == 1 && full[static_cast<size_t>(axis)] != 1 && axis != 3)
+        {
+            continue; // broadcast
+        }
+        if(extent != full[static_cast<size_t>(axis)])
+        {
+            return std::nullopt;
+        }
+        const int64_t value
+            = extent == 1 ? 0 : strides->Get(static_cast<flatbuffers::uoffset_t>(declared));
+        stride[static_cast<size_t>(axis)] = value;
+    }
+    if(problem.seqLenKv > 1 && stride[3] != 1)
+    {
+        return std::nullopt;
+    }
+    for(size_t axis = 0; axis < 3; ++axis)
+    {
+        if(stride[axis] < 0 || stride[axis] % VECTOR_ELEMENTS != 0 || stride[axis] > INT32_LIMIT)
+        {
+            return std::nullopt;
+        }
+    }
+    if(stride[2] != 0 && stride[2] < problem.seqLenKv)
+    {
+        return std::nullopt;
+    }
+    const auto span = checkedProduct({problem.seqLenQ - 1, stride[2]});
+    if(!span.has_value() || (*span + problem.seqLenKv) * BYTES_PER_ELEMENT > INT32_LIMIT)
+    {
+        return std::nullopt;
+    }
+    return BiasStrides{stride[0], stride[1], stride[2]};
+}
+
 /// Whether @p stats is an LSE output the kernels write: f32 [B, H, Sq, 1] in packed
 /// (batch, head, query) order -- the kernels address it as one contiguous [B, H, Sq].
 bool isServableStats(const data_objects::TensorAttributes& stats,
@@ -489,8 +569,7 @@ std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext& contex
     }
 
     // Every optional feature the kernels as built do not implement, declined explicitly.
-    if(attributes.attn_mask_tensor_uid().has_value()
-       || attributes.seq_len_q_tensor_uid().has_value()
+    if(attributes.seq_len_q_tensor_uid().has_value()
        || attributes.seq_len_kv_tensor_uid().has_value())
     {
         return std::nullopt;
@@ -525,6 +604,16 @@ std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext& contex
        || attributes.rng_dump_tensor_uid().has_value())
     {
         return std::nullopt;
+    }
+    int64_t biasUid = NO_BIAS;
+    if(attributes.attn_mask_tensor_uid().has_value())
+    {
+        const auto* bias = findTensor(context, attributes.attn_mask_tensor_uid().value());
+        if(bias == nullptr || !servableBias(*bias, problem).has_value())
+        {
+            return std::nullopt;
+        }
+        biasUid = attributes.attn_mask_tensor_uid().value();
     }
     int64_t statsUid = NO_STATS;
     if(attributes.stats_tensor_uid().has_value())
@@ -606,6 +695,7 @@ std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext& contex
     bound[std::string(CAUSAL_TOKEN)] = mask->causal ? 1 : 0;
     bound[std::string(DIAG_OFFSET_TOKEN)] = mask->offset;
     bound[std::string(STATS_TOKEN)] = statsUid;
+    bound[std::string(BIAS_TOKEN)] = biasUid;
     bound[std::string(SCALE_SOURCE_TOKEN)] = static_cast<int64_t>(scaleSource);
     bound[std::string(SCALE_TOKEN)] = scaleToken;
     return bound;
@@ -621,6 +711,7 @@ struct FlydslSdpaCdnaBinding
     int64_t causal = 0;
     int64_t diagOffset = 0;
     int64_t stats = NO_STATS;
+    int64_t bias = NO_BIAS;
     ScaleSource scaleSource = ScaleSource::VALUE;
     int64_t scale = 0;
 };
@@ -647,6 +738,7 @@ FlydslSdpaCdnaBinding flydslSdpaCdnaBinding(const BoundTokens& bound)
     binding.causal = read(CAUSAL_TOKEN);
     binding.diagOffset = read(DIAG_OFFSET_TOKEN);
     binding.stats = read(STATS_TOKEN);
+    binding.bias = read(BIAS_TOKEN);
     binding.scaleSource = static_cast<ScaleSource>(read(SCALE_SOURCE_TOKEN));
     binding.scale = read(SCALE_TOKEN);
     return binding;
@@ -755,6 +847,13 @@ bool flydslSdpaCdnaKernelMatches(const MatchContext& context,
         return false;
     }
 
+    const auto hasBias = integerMetadata(kernel, HAS_BIAS_FIELD);
+    const auto boundBias = tryGetBoundInt(bound, BIAS_TOKEN);
+    if(!hasBias.has_value() || !boundBias.has_value()
+       || *hasBias != (*boundBias != NO_BIAS ? 1 : 0))
+    {
+        return false;
+    }
     const auto anyDiagonal = integerMetadata(kernel, ANY_DIAGONAL_FIELD);
     const auto diagOffset = tryGetBoundInt(bound, DIAG_OFFSET_TOKEN);
     if(!anyDiagonal.has_value() || !diagOffset.has_value()
@@ -821,7 +920,8 @@ FlydslLayout4 bshdLayout(int64_t batch, int64_t sequence, int64_t heads, int64_t
  * seq_len_kv, stride_q_n, stride_kv_n, head_dim_runtime, block_table_stride,
  * bias_stride0, alibi_stride_b (i32); sm_scale (f32); num_heads_q, num_heads_kv, lse_on,
  * diag_offset, then the strides stride_q_b, stride_q_h, stride_o_b, stride_o_n,
- * stride_o_h, stride_kv_b, stride_kv_h (i32). Generic (flash_attn_generic.py): Q, K, V, O,
+ * stride_o_h, stride_kv_b, stride_kv_h, stride_bias_b, stride_bias_h (i32); its bias
+ * row stride is bias_stride0. Generic (flash_attn_generic.py): Q, K, V, O,
  * LSE; seq_len, seq_len_kv (i32); CuSeqQ, CuSeqKv, BlockTable; block_table_stride (i32);
  * sm_scale (f32); num_heads_q, num_heads_kv, stride_q_n, stride_kv_n, lse_on, diag_offset
  * and the same seven strides (i32). A 4-byte scalar slot is the same to the
@@ -860,7 +960,7 @@ std::vector<KernelArgument> signatureOf(std::initializer_list<ArgumentRun> runs)
 
 const std::vector<KernelArgument>& dualwaveSignature()
 {
-    static const std::vector<KernelArgument> s_signature = signatureOf({{12, true}, {20, false}});
+    static const std::vector<KernelArgument> s_signature = signatureOf({{12, true}, {22, false}});
     return s_signature;
 }
 
@@ -892,14 +992,21 @@ public:
                            SdpaProblem problem,
                            bool dualwave,
                            std::optional<hipdnn_plugin_sdk::ScalarOperand> scaleOperand,
-                           ViewStrides strides)
+                           ViewStrides strides,
+                           BiasStrides biasStrides)
         : _code(std::move(code))
         , _binding(binding)
         , _problem(problem)
         , _dualwave(dualwave)
         , _scaleOperand(scaleOperand)
         , _strides(strides)
+        , _biasStrides(biasStrides)
     {
+    }
+
+    const BiasStrides& biasStrides() const
+    {
+        return _biasStrides;
     }
 
     const ViewStrides& strides() const
@@ -940,6 +1047,7 @@ private:
     bool _dualwave = false;
     std::optional<hipdnn_plugin_sdk::ScalarOperand> _scaleOperand;
     ViewStrides _strides;
+    BiasStrides _biasStrides;
 };
 
 /**
@@ -1019,8 +1127,20 @@ public:
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "flydsl_sdpa_cdna: the bound operands' strides are not ones the kernels read");
         }
+        BiasStrides biasStrides;
+        if(binding.bias != NO_BIAS)
+        {
+            const auto servable = servableBias(requireTensor(context, binding.bias), problem);
+            if(!servable.has_value())
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    "flydsl_sdpa_cdna: the bound bias is not one the kernels can add");
+            }
+            biasStrides = *servable;
+        }
         return std::make_unique<PreparedFlydslSdpaCdna>(
-            std::move(code), binding, problem, tile->dualwave, scaleOperand, *strides);
+            std::move(code), binding, problem, tile->dualwave, scaleOperand, *strides, biasStrides);
     }
 
     void launch(const Handle& handle,
@@ -1062,6 +1182,13 @@ public:
                                 .ptr
                           : o;
         const int32_t lseFlag = lseOn ? 1 : 0;
+        // The bias, when one is bound; otherwise O stands in, and the objects built
+        // without a bias never read it.
+        void* bias = binding.bias != NO_BIAS ? hipdnn_plugin_sdk::findDeviceBuffer(
+                                                   binding.bias, deviceBuffers, numDeviceBuffers)
+                                                   .ptr
+                                             : o;
+        const auto& biasStrides = preparedSdpa.biasStrides();
 
         const auto qLayout
             = bshdLayout(problem.batch, problem.seqLenQ, problem.numHeads, problem.headDim);
@@ -1102,8 +1229,8 @@ public:
                           qLayout,
                           o, // BlockTable
                           qLayout,
-                          o, // Bias
-                          qLayout,
+                          bias,
+                          qLayout, // read for its pointer only
                           o, // AlibiSlopes
                           qLayout,
                           o, // Sink
@@ -1114,7 +1241,7 @@ public:
                           i32(strides.kv.sequence),
                           headDim,
                           zero,
-                          zero,
+                          i32(biasStrides.query),
                           zero,
                           scale,
                           numHeads,
@@ -1127,7 +1254,9 @@ public:
                           i32(strides.o.sequence),
                           i32(strides.o.head),
                           i32(strides.kv.batch),
-                          i32(strides.kv.head));
+                          i32(strides.kv.head),
+                          i32(biasStrides.batch),
+                          i32(biasStrides.head));
             return;
         }
         kernel.launch(handle.getStream(),

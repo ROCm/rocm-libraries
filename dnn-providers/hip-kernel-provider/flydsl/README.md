@@ -73,7 +73,8 @@ objects built per arch: FlyDSL's own dual-wave MFMA kernel on **gfx950** and its
 generic MFMA kernel on **gfx942** and for `head_dim` 256 on gfx950: bf16 and f16 at
 `head_dim` 64 and 128, and 256 on gfx950, causal and non-causal; both sequence
 lengths, the head counts, every operand's strides (BSHD, BHSD, packed QKV), the
-softmax scale, the causal diagonal and the LSE output are runtime arguments. It is the first set that carries
+softmax scale, the causal diagonal and the LSE output are runtime arguments, and
+gfx950 adds a bias in the query's dtype at `head_dim` 64 and 128. It is the first set that carries
 these kernels through the whole path -- generation, packing, selection and
 launch -- and is verified on both arches; the order in which it widens is in
 [COVERAGE.md §7](COVERAGE.md). The RDNA SDPA kernels stay RDNA-only.

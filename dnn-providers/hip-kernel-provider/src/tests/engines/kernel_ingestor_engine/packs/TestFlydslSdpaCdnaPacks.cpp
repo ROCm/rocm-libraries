@@ -79,9 +79,11 @@ TEST(TestFlydslSdpaCdnaPacks, ShipsOneObjectPerClassAndOneFamilyPerHeadDim)
 {
     const auto& set = loadedSet(ENGINE);
 
-    // dtype x family x head_dim x causal x kv_align x any_diagonal is the whole instance
-    // key today: a duplicate would make the choice between two objects an accident of ids.
-    std::set<std::tuple<std::string, std::string, int64_t, int64_t, int64_t, int64_t>> classes;
+    // dtype x family x head_dim x causal x kv_align x any_diagonal x has_bias is the whole
+    // instance key today: a duplicate would make the choice between two objects an
+    // accident of ids.
+    std::set<std::tuple<std::string, std::string, int64_t, int64_t, int64_t, int64_t, int64_t>>
+        classes;
     // Which kernel family serves each (dtype, head_dim): gfx950 ships the dual-wave
     // kernel beside the generic one, each for its own head dims.
     std::map<std::pair<std::string, int64_t>, std::set<std::string>> families;
@@ -96,13 +98,15 @@ TEST(TestFlydslSdpaCdnaPacks, ShipsOneObjectPerClassAndOneFamilyPerHeadDim)
             const auto* causal = tryGetMetadataField<int64_t>(kernel.metadata, "causal");
             const auto* kvAlign = tryGetMetadataField<int64_t>(kernel.metadata, "kv_align");
             const auto* anyDiagonal = tryGetMetadataField<int64_t>(kernel.metadata, "any_diagonal");
+            const auto* hasBias = tryGetMetadataField<int64_t>(kernel.metadata, "has_bias");
             ASSERT_NE(dtype, nullptr) << kernel.name;
             ASSERT_NE(family, nullptr) << kernel.name;
             ASSERT_NE(headDim, nullptr) << kernel.name;
             ASSERT_NE(causal, nullptr) << kernel.name;
             ASSERT_NE(kvAlign, nullptr) << kernel.name;
             ASSERT_NE(anyDiagonal, nullptr) << kernel.name;
-            classes.emplace(*dtype, *family, *headDim, *causal, *kvAlign, *anyDiagonal);
+            ASSERT_NE(hasBias, nullptr) << kernel.name;
+            classes.emplace(*dtype, *family, *headDim, *causal, *kvAlign, *anyDiagonal, *hasBias);
             families[{*dtype, *headDim}].insert(*family);
             ++kernels;
 
@@ -125,7 +129,7 @@ TEST(TestFlydslSdpaCdnaPacks, EveryKernelDeclaresItsFamilysSignature)
     const auto& set = loadedSet(ENGINE);
 
     // Dual-wave: 12 tensors, then 8 i32, the f32 scale, the two head counts, lse_on,
-    // diag_offset and seven strides. Generic: 5 tensors, 2 i32, 3 tensors, then 1 i32, the
+    // diag_offset, seven operand strides and two bias strides. Generic: 5 tensors, 2 i32, 3 tensors, then 1 i32, the
     // f32 scale, the two head counts, the two token strides, lse_on, diag_offset and the
     // same seven strides. Every scalar slot is 4 bytes.
     using Slot = std::pair<std::string, uint32_t>;
@@ -147,7 +151,7 @@ TEST(TestFlydslSdpaCdnaPacks, EveryKernelDeclaresItsFamilysSignature)
         if(family == "dualwave")
         {
             tensors(12);
-            scalars(20);
+            scalars(22);
         }
         else
         {

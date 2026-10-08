@@ -34,6 +34,10 @@
     {
       "name": "waves_per_eu",
       "type": "int"
+    },
+    {
+      "name": "has_bias",
+      "type": "int"
     }
   ]
 }
