@@ -19,7 +19,7 @@ namespace hipblaslt_ext::experimental::jit
 {
     namespace detail
     {
-        struct OperationRequest;
+        struct GemmRequest;
         struct CompiledSolution;
     }
 
@@ -49,19 +49,19 @@ namespace hipblaslt_ext::experimental::jit
     {
     public:
         Request() = default;
-        static Request create(std::shared_ptr<const detail::OperationRequest> operation)
+        static Request create(std::shared_ptr<const detail::GemmRequest> gemm)
         {
             Request request;
-            request.m_operation = std::move(operation);
+            request.m_gemm = std::move(gemm);
             return request;
         }
-        const std::shared_ptr<const detail::OperationRequest>& get() const
+        const std::shared_ptr<const detail::GemmRequest>& get() const
         {
-            return m_operation;
+            return m_gemm;
         }
 
     private:
-        std::shared_ptr<const detail::OperationRequest> m_operation;
+        std::shared_ptr<const detail::GemmRequest> m_gemm;
     };
 
     // Names one published JIT solution library index. An operation adapter
