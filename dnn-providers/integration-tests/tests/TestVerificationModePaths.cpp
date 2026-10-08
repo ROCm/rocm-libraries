@@ -23,6 +23,7 @@
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
+#include "harness/bundle/VariantPackBuilder.hpp"
 
 // NOLINTBEGIN(readability-identifier-naming)
 
@@ -271,6 +272,31 @@ TEST_F(TestVerificationModePathsFixture, AutoNoGoldenRefRuntimeErrorFallsThrough
     EXPECT_THAT(refErrors.front(), ::testing::HasSubstr("GPU reference errored"));
     EXPECT_THAT(refErrors.front(), ::testing::HasSubstr("stub: GPU ref crashed"));
     EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::CPU_REFERENCE));
+}
+
+// A device that cannot hold the reference's outputs says nothing about the reference.
+// It must fail the run as a harness fault: not fall through to the CPU reference, which
+// would hide it behind a pass, and not be published as a reference error.
+TEST_F(TestVerificationModePathsFixture, AutoNoGoldenDeviceOutputErrorFailsWithoutFallingThrough)
+{
+    using ::testing::_;
+    useMatchingEngine();
+    ON_CALL(_mocks.gpuReference, execute(_, _, _))
+        .WillByDefault(
+            ::testing::Throw(bundle::detail::DeviceOutputError("stub: device memset failed")));
+    EXPECT_CALL(_mocks.referenceExecutors, get(ReferenceExecutorType::CPU)).Times(0);
+
+    std::vector<std::string> refErrors;
+    testing_support::captureReferenceErrors(_mocks.reporter, refErrors);
+
+    ::testing::TestPartResultArray results;
+    runCapturing(loadBundle("auto_device_output_error", /*includeGoldenOutput=*/false),
+                 VerificationMode::AUTO,
+                 &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_TRUE(refErrors.empty());
+    EXPECT_THAT(_verifiers, ::testing::Not(::testing::Contains(Verifier::CPU_REFERENCE)));
 }
 
 // ── GOLDEN mode ─────────────────────────────────────────────────────────────

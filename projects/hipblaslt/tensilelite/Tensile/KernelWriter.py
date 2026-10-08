@@ -7226,8 +7226,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       stinky_module_options["PrefetchLeadWmmas"] = \
         4 if not kernel["HalfPLR"] else \
         25 if kernel["ProblemType"]["DataTypeA"].numBytes() < 1 else 40
+      # ds_load issue cap shape (see GlobalParameters); 0/0 keeps the scheduler defaults.
+      stinky_module_options["DsIssueCapMode"] = int(globalParameters.get("StinkyTofuDsIssueCapMode") or 0)
+      stinky_module_options["DsIssueCapSpanCycles"] = int(globalParameters.get("StinkyTofuDsIssueCapSpanCycles") or 0)
       if self.states.localReadSideOrder[0] == "B":
         stinky_module_options["DsReadOrder"] = 0  # Preserve selected B-then-A emission.
+      # Tuning overrides from GlobalParameters win over the values above.
+      stinky_module_options.update(globalParameters.get("StinkyTofuModuleOptions") or {})
 
       print2(f"StinkyTofu module options: {stinky_module_options}")
       # Convert rocisa module to stinkytofu with signature
@@ -7322,6 +7327,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     isgfx950 = kernel["ISA"][:2] == (9, 5)
     ti = rocIsa.getInstance()
     ti.setKernel(version, kernel["WavefrontSize"])
+    # gfx1250 low-precision WMMA scaled-form workaround applies only to the V0/strict
+    # steppings (gfx1250-strict / gfx1250v0), not the base gfx1250 build. All three
+    # share ISA (12,5,0), so gate on the concrete arch name instead. Persists across
+    # later setKernel calls (e.g. activation codegen); see rocIsa::setForceScaledWMMA.
+    _stArchName = globalParameters.get("StinkyTofuArchName") or ""
+    ti.setForceScaledWMMA(_stArchName in ("gfx1250-strict", "gfx1250v0"))
 
     self.consts = ConstValues()
     self.states = StateValues(version=version, kernel=kernel, kernelName=getKernelNameMin(kernel, self.debugConfig.splitGSU))

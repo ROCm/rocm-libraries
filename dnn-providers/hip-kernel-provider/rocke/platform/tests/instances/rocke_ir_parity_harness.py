@@ -12,6 +12,9 @@ import traceback
 from collections import Counter
 from pathlib import Path
 
+from rocke.core.ir_golden import GOLDEN_FLAVORS
+from rocke.core.ir_golden import check_golden as _check_golden
+
 
 def sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -23,8 +26,8 @@ def safe(name: str) -> str:
 
 def current_flavor() -> str:
     """The llvm flavor this host would autodetect (llvm20 for ROCm < 7.2,
-    llvm22 for 7.2-7.12, llvm23 for 7.13+). The golden stores all of them; the
-    gate compares only this one."""
+    llvm22 for 7.2-7.12, llvm23 for 7.13+). Only the plain dump run (no
+    ``--check`` / ``--write``) uses it; the gate checks every flavor."""
     from rocke.core.lower_llvm import _resolve_llvm_flavor
 
     return _resolve_llvm_flavor()
@@ -1079,6 +1082,138 @@ def build_direct_depthwise_dgrad(
             block_waves=block_waves,
         )
         return _build_dw_dgrad(spec, arch=arch)
+
+    return _build
+
+
+def build_direct_nongrouped(
+    name,
+    arch,
+    N,
+    H,
+    W,
+    C,
+    K,
+    KH=3,
+    KW=3,
+    PAD=1,
+    stride=1,
+    dtype="bf16",
+    dil_h=1,
+    dil_w=1,
+    **spec_kw,
+):
+    """Non-grouped (groups == 1) direct conv; ``spec_kw`` overrides
+    DirectNongroupedConvSpec fields. Configs mirror parity/conv_direct_grouped_emit.*
+    (indices 42+), where the C++ engine is gated byte-identical by
+    check_byte_identity.py."""
+
+    def _build():
+        from kernels.common.conv_direct_grouped import DirectConvProblem
+        from kernels.common.conv_direct_nongrouped import (
+            DirectNongroupedConvSpec,
+            build_direct_conv_nongrouped,
+        )
+
+        p = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=1,
+            cpg=C,
+            kpg=K,
+            KH=KH,
+            KW=KW,
+            PAD=PAD,
+            stride=stride,
+            dtype=dtype,
+            dil_h=dil_h,
+            dil_w=dil_w,
+        )
+        spec = DirectNongroupedConvSpec(problem=p, name=name, **spec_kw)
+        return build_direct_conv_nongrouped(spec, arch=arch)
+
+    return _build
+
+
+def build_direct_depthwise_tiled(
+    name, arch, N, H, W, groups, KH, PAD, stride=1, dtype="bf16", **spec_kw
+):
+    """Output-stationary depthwise direct conv; ``spec_kw`` overrides
+    DirectDepthwiseTiledSpec fields. Configs mirror parity/conv_direct_grouped_emit.*
+    (indices 57+)."""
+
+    def _build():
+        from kernels.common.conv_direct_grouped import (
+            DirectConvProblem,
+            DirectDepthwiseTiledSpec,
+            build_direct_depthwise_tiled,
+        )
+
+        p = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=groups,
+            cpg=1,
+            kpg=1,
+            KH=KH,
+            KW=KH,
+            PAD=PAD,
+            stride=stride,
+            dtype=dtype,
+        )
+        spec = DirectDepthwiseTiledSpec(problem=p, name=name, **spec_kw)
+        return build_direct_depthwise_tiled(spec, arch=arch)
+
+    return _build
+
+
+def build_direct_depthwise_col(
+    name,
+    arch,
+    N,
+    H,
+    W,
+    groups,
+    KH=3,
+    KW=3,
+    PAD=1,
+    stride=1,
+    *,
+    block_h=16,
+    block_w=4,
+    block_waves=1,
+    dtype="fp16",
+):
+    def _build():
+        from kernels.common.conv_direct_grouped import (
+            DirectConvProblem,
+            DirectDepthwiseColSpec,
+            build_direct_depthwise_col as _build_dwcol,
+        )
+
+        p = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=groups,
+            cpg=1,
+            kpg=1,
+            KH=KH,
+            KW=KW,
+            PAD=PAD,
+            stride=stride,
+        )
+        spec = DirectDepthwiseColSpec(
+            problem=p,
+            name=name,
+            block_h=block_h,
+            block_w=block_w,
+            block_waves=block_waves,
+            dtype=dtype,
+        )
+        return _build_dwcol(spec, arch=arch)
 
     return _build
 
@@ -2987,6 +3122,237 @@ def cases():
         ),
     )
 
+    # --- column-streamed depthwise (DirectDepthwiseColSpec) ---
+    # Mirrors library parity emit indices 32-40.  Both gfx950 and gfx942 are covered.
+    #
+    # Those emit indices pin the two engines against each other; these hashes do
+    # the other half of the job.  Byte-identity says the engines *agree*, while a
+    # recorded hash says the emission has not *moved*: a change that edits both
+    # engines in lockstep keeps the parity gate GREEN and still lands here, which
+    # is what makes a refactor meant to be behaviour-preserving shown to be so
+    # rather than argued to be.
+    #
+    # The stride-1 fp16 cases carry the extra weight.  The stride generalization
+    # (n_iters / tap-pruning / accumulator-index formulas parameterized by
+    # p.stride) claims to reduce to the original expressions at stride == 1;
+    # these hashes are what turns that claim into a check.
+    #
+    # Each case pins one axis the emitter branches on: the static tap grid
+    # (KH, PAD, stride), the accumulator band (block_h x block_w), the channel
+    # tiling (block_waves), and the element type.  Review the IR diff before
+    # re-blessing any of them.
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/dw_col_s1_fp16",
+        "gfx950",
+        build_direct_depthwise_col(
+            "irhash_dwcol_950_s1_fp16",
+            "gfx950",
+            N=2,
+            H=8,
+            W=8,
+            groups=128,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            block_w=4,
+            block_waves=2,
+            dtype="fp16",
+        ),
+    )
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/dw_col_s2_bf16_tail",
+        "gfx950",
+        build_direct_depthwise_col(
+            "irhash_dwcol_950_s2_bf16",
+            "gfx950",
+            N=1,
+            H=9,
+            W=9,
+            groups=70,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=2,
+            block_h=2,
+            block_w=4,
+            block_waves=1,
+            dtype="bf16",
+        ),
+    )
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/dw_col_k31_fp16",
+        "gfx950",
+        build_direct_depthwise_col(
+            "irhash_dwcol_950_k31",
+            "gfx950",
+            N=1,
+            H=8,
+            W=8,
+            groups=64,
+            KH=31,
+            KW=31,
+            PAD=15,
+            stride=1,
+            block_h=4,
+            block_w=4,
+            block_waves=1,
+            dtype="fp16",
+        ),
+    )
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/dw_col_k1_pad0",
+        "gfx950",
+        build_direct_depthwise_col(
+            "irhash_dwcol_950_k1",
+            "gfx950",
+            N=2,
+            H=6,
+            W=6,
+            groups=3,
+            KH=1,
+            KW=1,
+            PAD=0,
+            stride=1,
+            block_w=2,
+            block_waves=1,
+            dtype="fp16",
+        ),
+    )
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/dw_col_kh5kw3_bf16",
+        "gfx950",
+        build_direct_depthwise_col(
+            "irhash_dwcol_950_kh5kw3",
+            "gfx950",
+            N=1,
+            H=8,
+            W=8,
+            groups=128,
+            KH=5,
+            KW=3,
+            PAD=2,
+            stride=1,
+            block_w=4,
+            block_waves=2,
+            dtype="bf16",
+        ),
+    )
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/dw_col_bw1_tail",
+        "gfx950",
+        build_direct_depthwise_col(
+            "irhash_dwcol_950_bw1",
+            "gfx950",
+            N=1,
+            H=10,
+            W=10,
+            groups=100,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            block_w=1,
+            block_waves=2,
+            dtype="bf16",
+        ),
+    )
+    # stride=3: the only case above stride 2, so the (y - r) % stride tap
+    # pruning is pinned at a stride where more than one tap is dropped.
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/dw_col_s3_k5_bw3",
+        "gfx950",
+        build_direct_depthwise_col(
+            "irhash_dwcol_950_s3_k5",
+            "gfx950",
+            N=1,
+            H=12,
+            W=12,
+            groups=64,
+            KH=5,
+            KW=5,
+            PAD=2,
+            stride=3,
+            block_w=3,
+            block_waves=1,
+            dtype="bf16",
+        ),
+    )
+    # PAD > (KH-1)/2: padded-input overhang, where the last row tile's input
+    # rows run past H.  Unreachable at the PAD/KH pairs the cases above use.
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/dw_col_s2_pad2_ovh",
+        "gfx950",
+        build_direct_depthwise_col(
+            "irhash_dwcol_950_pad2_ovh",
+            "gfx950",
+            N=1,
+            H=12,
+            W=12,
+            groups=64,
+            KH=3,
+            KW=3,
+            PAD=2,
+            stride=2,
+            block_h=2,
+            block_w=2,
+            block_waves=1,
+            dtype="fp16",
+        ),
+    )
+    # KW >> KH: the regime the column-streamed variant exists for -- KW rides
+    # the runtime loop, so only KH weights are live regardless of how wide the
+    # filter gets.  dw_col_k31 has KH == KW and so cannot show that separation.
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/dw_col_k3x31",
+        "gfx950",
+        build_direct_depthwise_col(
+            "irhash_dwcol_950_k3x31",
+            "gfx950",
+            N=1,
+            H=16,
+            W=32,
+            groups=64,
+            KH=3,
+            KW=31,
+            PAD=1,
+            stride=1,
+            block_w=1,
+            block_waves=1,
+            dtype="fp16",
+        ),
+    )
+    # gfx942 target -- exercises the arch-specific VGPR budget path
+    add(
+        "conv_direct",
+        "conv_direct/gfx942/dw_col_s1_fp16",
+        "gfx942",
+        build_direct_depthwise_col(
+            "irhash_dwcol_942_s1_fp16",
+            "gfx942",
+            N=2,
+            H=8,
+            W=8,
+            groups=128,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            block_w=4,
+            block_waves=2,
+            dtype="fp16",
+        ),
+    )
+
     # --- conv_direct_dgrad: grouped dgrad (scalar FMA, any cpg/kpg) ---
     # Mirrors parity emit indices 12-14.  Both gfx950 and gfx942 are covered.
     add(
@@ -3074,6 +3440,94 @@ def cases():
             block_waves=1,
         ),
     )
+
+    # --- conv_direct_nongrouped: non-grouped (groups == 1) direct conv ---
+    # LDS halo-reuse tile, tap-shared activation fragments, fragment-order
+    # weights, hoisted staging predication. One case per structural branch; the
+    # full branch matrix (and the C++ twin) lives in
+    # library/tests/parity/conv_direct_grouped_emit.* (indices 42+).
+    _nongrouped_base = dict(
+        tile_h=8, tile_w=32, tile_k=64, ck=32, waves_m=2, waves_n=2, iglp=0
+    )
+    for _case_id, _arch, _shape, _over in (
+        ("bf16_t8x32x64_iglp0", "gfx950", dict(N=2, H=16, W=32, C=64, K=128), {}),
+        (
+            "fp16_db_s2",
+            "gfx950",
+            dict(N=1, H=32, W=64, C=64, K=64, stride=2, dtype="fp16"),
+            dict(ck=16, double_buffer=True),
+        ),
+        (
+            "bf16_a16x16x32_partial_w",
+            "gfx950",
+            dict(N=2, H=20, W=40, C=64, K=64),
+            dict(tile_w=48, tile_k=32, waves_m=1, atom="16x16x32"),
+        ),
+        (
+            "bf16_noswizzle_we3",
+            "gfx950",
+            dict(N=2, H=16, W=32, C=64, K=128),
+            dict(chiplet_swizzle=False, iglp=None, waves_per_eu=3),
+        ),
+        (
+            "fp16_a32x32x8",
+            "gfx942",
+            dict(N=1, H=16, W=32, C=64, K=64, dtype="fp16"),
+            dict(atom="32x32x8", ck=16),
+        ),
+        # Dilation: a taller / wider staged halo, taps dil rows / columns apart.
+        ("bf16_dil3x1", "gfx950", dict(N=2, H=16, W=32, C=64, K=128, dil_h=3), {}),
+        (
+            "bf16_dil1x4_p4",
+            "gfx950",
+            dict(N=1, H=32, W=32, C=64, K=64, PAD=4, dil_w=4),
+            {},
+        ),
+    ):
+        add(
+            "conv_direct_nongrouped",
+            f"conv_direct_nongrouped/{_arch}/{_case_id}",
+            _arch,
+            build_direct_nongrouped(
+                f"irhash_direct_nongrouped_{_case_id}",
+                _arch,
+                **_shape,
+                **{**_nongrouped_base, **_over},
+            ),
+        )
+
+    # --- conv_direct_depthwise_tiled: output-stationary depthwise direct conv ---
+    # Runtime filter-row loop, sliding input-row window, one weight row in
+    # registers. Mirrors library/tests/parity/conv_direct_grouped_emit.*
+    # (indices 57+).
+    for _case_id, _arch, _shape, _over in (
+        (
+            "bf16_k31_bw8_bh2",
+            "gfx950",
+            dict(N=1, H=56, W=56, groups=192, KH=31, PAD=15),
+            dict(block_w=8, block_h=2),
+        ),
+        (
+            "fp16_k7_bw14_bh7_ur",
+            "gfx950",
+            dict(N=4, H=14, W=14, groups=128, KH=7, PAD=3, dtype="fp16"),
+            dict(block_w=14, block_h=7, unroll_rows=True),
+        ),
+        (
+            "bf16_k5_s2_bwv2",
+            "gfx942",
+            dict(N=2, H=28, W=28, groups=256, KH=5, PAD=2, stride=2),
+            dict(block_w=8, block_h=4, block_waves=2),
+        ),
+    ):
+        add(
+            "conv_direct_depthwise_tiled",
+            f"conv_direct_depthwise_tiled/{_arch}/{_case_id}",
+            _arch,
+            build_direct_depthwise_tiled(
+                f"irhash_direct_dw_tiled_{_case_id}", _arch, **_shape, **_over
+            ),
+        )
 
     # gfx942 GQA head-fold (D128 sliding-window bf16). Registered SEPARATELY from
     # the D256 case above because that one early-returns into the lean D256 kernel
@@ -3165,8 +3619,8 @@ def cases():
 # gate (check_golden) verifies all of them from any host: the flavor is an
 # argument to lowering, so nothing about the running ROCm vintage limits which
 # sub-documents can be checked. The same committed golden is therefore valid,
-# and verified, on ROCm < 7.2 (llvm20), 7.2-7.12 (llvm22), and 7.13+ (llvm23).
-GOLDEN_FLAVORS = ("llvm20", "llvm22", "llvm23")
+# and verified, on every ROCm vintage. GOLDEN_FLAVORS is LLVM_FLAVORS, so a new
+# flavor fails the gate until the golden is re-blessed.
 GOLDEN_SCHEMA = "ck.dsl.ir_golden_sha256/v2"
 
 
@@ -3218,55 +3672,9 @@ def check_golden(golden_path: Path, flavor: str | None = None) -> list[str]:
     """Compare a fresh run against the golden sub-doc(s). Empty list == OK.
 
     With no ``flavor``, every flavor in :data:`GOLDEN_FLAVORS` is checked, not
-    just the one this host autodetects. Lowering takes the flavor as an
-    argument, so the extra runs cost a few hundred milliseconds -- whereas
-    checking only the host's flavor leaves the other sub-documents unverified
-    by any machine that does not happen to run that ROCm vintage. The llvm23
-    sub-document, for instance, is only reachable on ROCm >= 7.13, so it would
-    otherwise sit in the golden untested.
-
-    Drift strings are prefixed with the flavor when more than one is checked.
+    just the one this host autodetects; see :func:`rocke.core.ir_golden.check_golden`.
     """
-    doc = json.loads(golden_path.read_text())
-    have = doc.get("flavors", {})
-    wanted = [flavor] if flavor else list(GOLDEN_FLAVORS)
-    errors: list[str] = []
-    for fl in wanted:
-        base = have.get(fl)
-        if base is None:
-            errors.append(
-                f"golden has no entry for flavor {fl!r} (have {sorted(have)})"
-            )
-            continue
-        prefix = "" if len(wanted) == 1 else f"[{fl}] "
-        errors.extend(prefix + e for e in compare(base, run(flavor=fl)))
-    return errors
-
-
-def compare(base, cur):
-    errors = []
-    for section in ("cases", "expected_failures"):
-        bkeys = set(base.get(section, {}))
-        ckeys = set(cur.get(section, {}))
-        for missing in sorted(bkeys - ckeys):
-            errors.append(f"{section}: missing current {missing}")
-        for new in sorted(ckeys - bkeys):
-            errors.append(f"{section}: new current {new}")
-    for cid, brec in sorted(base.get("cases", {}).items()):
-        crec = cur.get("cases", {}).get(cid)
-        if not crec:
-            continue
-        if brec.get("sha256") != crec.get("sha256"):
-            errors.append(f"{cid}: {brec.get('sha256')} -> {crec.get('sha256')}")
-    for cid, brec in sorted(base.get("expected_failures", {}).items()):
-        crec = cur.get("expected_failures", {}).get(cid)
-        if not crec:
-            continue
-        if brec.get("type") != crec.get("type") or brec.get("message") != crec.get(
-            "message"
-        ):
-            errors.append(f"{cid}: failure changed {brec} -> {crec}")
-    return errors
+    return _check_golden(golden_path, lambda fl: run(flavor=fl), flavor)
 
 
 def main():

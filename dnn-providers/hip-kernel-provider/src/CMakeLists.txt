@@ -210,6 +210,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             "${PROJECT_BINARY_DIR}/staging"
             "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
             ENVIRONMENT ${hip_kernel_provider_tests_TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
         )
         # hip_kernel_provider_integration_tests_TEST_ENVIRONMENT is TEST_ENVIRONMENT
         # merged with any per-target ENVIRONMENT passed to add_integration_test_target(),
@@ -221,6 +222,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             "${PROJECT_BINARY_DIR}/staging"
             "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
             ENVIRONMENT ${hip_kernel_provider_integration_tests_TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
         )
     endif()
 
@@ -231,6 +233,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             INSTALL_TEST_FILE "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
             TEST_NAME_PREFIX ${PROJECT_NAME}-external-integration
             ENVIRONMENT ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
         )
     endif()
 
@@ -300,6 +303,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             INSTALL_TEST_FILE "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
             TEST_NAME_PREFIX ${PROJECT_NAME}-asm-sdpa-external-integration
             ENVIRONMENT ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
         )
     endif()
 
@@ -364,7 +368,6 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         hkp_gfx950_attention_dense_available(_hkp_gfx950_attention_dense)
     endif()
     if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
-       AND HIPKERNELPROVIDER_ENABLE_ROCKE
        AND _hkp_gfx950_attention_dense
        AND TARGET hipdnn_integration_tests)
         # Route the installed entry and its TOML into the gfx950 shard, so pruning to
@@ -382,7 +385,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
             INSTALL_STAGING_KEY hkp_census_gfx950)
 
-        # GTEST_FILTER and ENVIRONMENT belong here rather than in
+        # GTEST_FILTER, ENVIRONMENT and ENVIRONMENT_MODIFICATION belong here rather than in
         # _gfx950_attention_dense_category_args: that list is populated only under YAML
         # categorization, so anything folded into it is absent from a legacy-label build,
         # which then enumerates the whole bundle tree pinned to this engine and runs
@@ -397,6 +400,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950AttentionDense.toml
             GTEST_FILTER   "quick_SdpaFwd_bshd_*:standard_SdpaFwd_bshd_*"
             ENVIRONMENT    ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
             ${_gfx950_attention_dense_category_args}
         )
         message(STATUS "Created ${PROJECT_NAME}-gfx950-attention-dense-external-integration-check target")
