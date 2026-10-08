@@ -2383,10 +2383,40 @@ class DirectConvSpec:
     fold_k32: bool = (
         False  # True = use mfma_f32_16x16x32_f16 (2× fewer MFMAs) + LOAD_VEC=8
     )
+    # Read cpg / kpg from the kernargs (p_total_c / p_groups and p_total_k /
+    # p_groups) instead of baking them. What stays build-time is the register
+    # and LDS footprint they imply: ``k_atoms`` K-atoms (``ceil(cpg / atom)``,
+    # the atom being 32 channels with fold_k32 and 16 otherwise) and
+    # ``m_tiles`` 16-row M-tiles (``ceil(kpg / 16)``). One binary then serves
+    # every cpg / kpg with those tile counts; the validators check that per
+    # problem. The LDS row keeps the baked kernel's layout (a runtime cpg
+    # stride, sized for ``k_atoms * atom`` channels), a partial last K-atom is
+    # masked against the runtime cpg (fold_k32 has none: its cpg is a multiple
+    # of 32) and the last M-tile's store against the runtime kpg.
+    runtime_channels: bool = False
+    k_atoms: int = 0  # runtime_channels only: K-atoms the binary is built for
+    m_tiles: int = 0  # runtime_channels only: M-tiles the binary is built for
 
     @property
     def threads_per_block(self) -> int:
         return self.block_groups * self.waves_q * self.waves_k * self.wave_size
+
+    @property
+    def k_atom_size(self) -> int:
+        """Channels one K-atom reduces: 32 with ``fold_k32``, else 16."""
+        return 32 if self.fold_k32 else 16
+
+    def problem_k_atoms(self) -> int:
+        """K-atoms ``problem.cpg`` needs (floor with fold_k32, whose cpg is a
+        multiple of 32; ceil otherwise, the last atom being partial)."""
+        cpg = self.problem.cpg
+        if self.fold_k32:
+            return cpg // 32
+        return (cpg + 15) // 16
+
+    def problem_m_tiles(self) -> int:
+        """16-row M-tiles ``problem.kpg`` needs."""
+        return (self.problem.kpg + 15) // 16
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -2398,6 +2428,11 @@ class DirectConvSpec:
         rk_flag = "rk" if self.runtime_k_loop else ""
         k32_flag = "k32" if self.fold_k32 else ""
         bf16_flag = "bf16" if p.dtype == "bf16" else ""
+        # A runtime-channel kernel emits different IR from the baked one for
+        # the same problem, and its tile counts are what it is built for.
+        rtc_flag = (
+            f"rtc_ka{self.k_atoms}_mt{self.m_tiles}" if self.runtime_channels else ""
+        )
         return kernel_name_join(
             self.name,
             p.short(),
@@ -2410,6 +2445,7 @@ class DirectConvSpec:
             rk_flag,
             k32_flag,
             bf16_flag,
+            rtc_flag,
         )
 
     def validate(self) -> None:
@@ -2456,6 +2492,39 @@ class DirectConvSpec:
         if self.block_q // self.waves_q < 16:
             raise ValueError(
                 f"block_q//waves_q must be >= 16 (got {self.block_q}//{self.waves_q}={self.block_q//self.waves_q})"
+            )
+        if not self.runtime_channels:
+            if self.k_atoms or self.m_tiles:
+                raise ValueError(
+                    "DirectConvSpec k_atoms / m_tiles only apply with "
+                    "runtime_channels (a baked kernel takes them from the problem)"
+                )
+            return
+        if self.k_atoms < 1 or self.m_tiles < 1:
+            raise ValueError(
+                f"DirectConvSpec runtime_channels needs k_atoms >= 1 and "
+                f"m_tiles >= 1 (got {self.k_atoms}, {self.m_tiles})"
+            )
+        if self.k_atoms % self.waves_k != 0:
+            raise ValueError(
+                f"k_atoms={self.k_atoms} must be divisible by waves_k={self.waves_k}"
+            )
+        if self.problem_k_atoms() != self.k_atoms:
+            raise ValueError(
+                f"cpg={p.cpg} needs {self.problem_k_atoms()} K-atoms of "
+                f"{self.k_atom_size}; this kernel is built for k_atoms={self.k_atoms}"
+            )
+        if self.problem_m_tiles() != self.m_tiles:
+            raise ValueError(
+                f"kpg={p.kpg} needs {self.problem_m_tiles()} M-tiles; this kernel "
+                f"is built for m_tiles={self.m_tiles}"
+            )
+        if p.kpg % 4 != 0:
+            # The epilogue stores 4 output channels per lane and masks the last
+            # M-tile in steps of 4, so a ragged kpg would spill into the next
+            # group's channels.
+            raise ValueError(
+                f"DirectConvSpec runtime_channels requires kpg % 4 == 0 (got {p.kpg})"
             )
 
 
@@ -2555,18 +2624,34 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
     # For fold_k32=True cpg must be divisible by K_ATOM_SIZE (validated); use floor div.
     # For fold_k32=False use ceil to support partial K-atoms (e.g. cpg=24 → 2 atoms of 16,
     # second atom covers only channels 16..23 and is OOB-masked in the inner loop).
-    if FOLD_K32:
+    # Runtime channels: the tile counts are the spec's, the exact cpg / kpg
+    # are kernargs. The LDS row keeps the runtime cpg as its channel stride;
+    # the loader passes and the LDS allocation are sized for the capacity
+    # CPG_LDS = k_atoms * K_ATOM_SIZE channels per group.
+    RTC = spec.runtime_channels
+    if RTC:
+        N_K_ATOMS = spec.k_atoms
+    elif FOLD_K32:
         N_K_ATOMS = p.cpg // K_ATOM_SIZE
     else:
         N_K_ATOMS = (
             p.cpg + K_ATOM_SIZE - 1
         ) // K_ATOM_SIZE  # ceil — restores original behaviour
     N_K_LOCAL = N_K_ATOMS // WAVES_K  # K-atoms per wave (each wave preloads this slice)
-    N_M_TILES = (p.kpg + 15) // 16  # M-tiles per q_subtile
+    N_M_TILES = spec.m_tiles if RTC else (p.kpg + 15) // 16  # M-tiles per q_subtile
+    CPG_LDS = N_K_ATOMS * K_ATOM_SIZE if RTC else p.cpg
+    # A partial last K-atom reads past the group's channels in LDS (and in B
+    # on the plain-weight path), so those lanes are zeroed. With runtime
+    # channels any cpg may leave one, against the runtime bound -- except
+    # under fold_k32, whose cpg is a multiple of the atom (validated).
+    if RTC:
+        mask_k_tail = not FOLD_K32
+    else:
+        mask_k_tail = p.cpg % K_ATOM_SIZE != 0
     N_CH_PER_VEC = LOAD_VEC  # channels per LDS vec load (4 or 8)
     # For LDS chunk loading: use exact chunks (cpg must be divisible by LOAD_VEC).
     # LOAD_VEC=4 always divides standard cpg values; LOAD_VEC=8 requires cpg%8==0.
-    N_VECS = p.cpg // N_CH_PER_VEC  # vec-chunks per group (for chunk_desc)
+    N_VECS = CPG_LDS // N_CH_PER_VEC  # vec-chunks per group (for chunk_desc)
     N_CH4 = p.cpg // 4  # kept for LDS address math (unchanged)
     # Each wave handles block_q // WAVES_Q W positions.
     BLOCK_Q_WAVE = BLOCK_Q // WAVES_Q
@@ -2596,13 +2681,27 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
     c_wave = b.const_i32(WAVE)
     c_BG = b.const_i32(BLOCK_GROUPS)
     c_BQ = b.const_i32(BLOCK_Q)
-    c_cpg = b.const_i32(p.cpg)
-    c_kpg = b.const_i32(p.kpg)
+    if RTC:
+        # Per-group channel counts from the kernargs, computed once. The host
+        # passes total_c = groups * cpg and total_k = groups * kpg.
+        c_cpg = b.div(params["p_total_c"], params["p_groups"])
+        c_kpg = b.div(params["p_total_k"], params["p_groups"])
+    else:
+        c_cpg = b.const_i32(p.cpg)
+        c_kpg = b.const_i32(p.kpg)
     c_W = p_Wo  # output-width bound for the store guard (runtime)
+
+    def k_tail_bound() -> Value:
+        """Channels of a group: the K-tail masks compare against it."""
+        return c_cpg if RTC else b.const_i32(p.cpg)
+
     c_KW = b.const_i32(p.KW)
     # Runtime K-atom loop now runs only N_K_LOCAL iterations per wave (its slice).
     c_N_K_LOCAL = b.const_i32(N_K_LOCAL)
-    c_BG_cpg = b.const_i32(BLOCK_GROUPS * p.cpg)
+    if RTC:
+        c_BG_cpg = b.mul(c_cpg, b.const_i32(BLOCK_GROUPS))
+    else:
+        c_BG_cpg = b.const_i32(BLOCK_GROUPS * p.cpg)
     c_half_bytes = b.const_i32(2)
     oob_sentinel = b.const_i32((1 << 31) - 1)
 
@@ -2731,11 +2830,18 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
     a_desc = direct_a_descriptor_dynamic(b, params, pad=p.PAD, stride=p.stride)
     c_stride_gen = p.stride
 
-    b_desc = TensorDescriptor.naive(
-        "B",
-        lengths=[p.total_k, p.KH, p.KW, p.cpg],
-        coord_names=("k_out", "r", "s", "c"),
-    )
+    uses_plain_weights = WAVES_K == 1 and not spec.runtime_k_loop
+    if RTC and uses_plain_weights:
+        # B[total_k, KH, KW, cpg] with the runtime cpg: strides
+        # [KH*KW*cpg, KW*cpg, cpg, 1]. Only the plain-weight loop reads B
+        # through this descriptor; the other paths index the coalesced layout.
+        b_desc = _krsc_descriptor_dynamic(b, "B", ("k_out", "r", "s", "c"), c_cpg, p)
+    else:
+        b_desc = TensorDescriptor.naive(
+            "B",
+            lengths=[p.total_k, p.KH, p.KW, p.cpg],
+            coord_names=("k_out", "r", "s", "c"),
+        )
 
     d_desc = direct_d_descriptor_dynamic(b, params)
 
@@ -2753,11 +2859,28 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
         ),
     )
 
+    if RTC:
+        # The row holds BLOCK_GROUPS * cpg channels per column at the runtime
+        # cpg, so the chunk decode divides by runtime extents. It runs once
+        # per loader pass, outside the row loop.
+        rtc_n_vecs = b.div(c_cpg, b.const_i32(LOAD_VEC))
+        rtc_col_vecs = b.mul(c_BG, rtc_n_vecs)
+        rtc_num_chunks = b.mul(b.const_i32(LDS_W), rtc_col_vecs)
+
     chunk_meta = []
     for pass_idx in range(PASSES):
         chunk_idx = b.add(tid, b.const_i32(pass_idx * THREADS))
-        decoded = chunk_desc.unmerge_lower(b, chunk_idx=chunk_idx)
-        in_bounds = b.cmp_lt(chunk_idx, b.const_i32(NUM_CHUNKS))
+        if RTC:
+            rem = b.mod(chunk_idx, rtc_col_vecs)
+            decoded = {
+                "W_lds": b.div(chunk_idx, rtc_col_vecs),
+                "group_in_wg": b.div(rem, rtc_n_vecs),
+                "ch_block": b.mod(rem, rtc_n_vecs),
+            }
+            in_bounds = b.cmp_lt(chunk_idx, rtc_num_chunks)
+        else:
+            decoded = chunk_desc.unmerge_lower(b, chunk_idx=chunk_idx)
+            in_bounds = b.cmp_lt(chunk_idx, b.const_i32(NUM_CHUNKS))
         chunk_meta.append(
             {
                 "chunk_idx": chunk_idx,
@@ -2996,8 +3119,8 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                             x_frag_pw = b.smem_load_vN(
                                 cur, c0, lds_idx_pw, dtype=io_type, n=LOAD_VEC
                             )
-                            if p.cpg % K_ATOM_SIZE != 0:
-                                c4_oob_pw = b.cmp_ge(ch_off, b.const_i32(p.cpg))
+                            if mask_k_tail:
+                                c4_oob_pw = b.cmp_ge(ch_off, k_tail_bound())
                                 _zero_pw = b.zero_vec(io_type, LOAD_VEC)
                                 x_frag_pw = b.select(c4_oob_pw, _zero_pw, x_frag_pw)
 
@@ -3074,8 +3197,8 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                             x_frag_rk = b.smem_load_vN(
                                 cur, c0, lds_idx_rk, dtype=io_type, n=LOAD_VEC
                             )
-                            if p.cpg % K_ATOM_SIZE != 0:
-                                c4_oob_rk = b.cmp_ge(ch_off_rk, b.const_i32(p.cpg))
+                            if mask_k_tail:
+                                c4_oob_rk = b.cmp_ge(ch_off_rk, k_tail_bound())
                                 _zero_rk = b.zero_vec(io_type, LOAD_VEC)
                                 x_frag_rk = b.select(c4_oob_rk, _zero_rk, x_frag_rk)
                             for m in range(N_M_TILES):
@@ -3202,8 +3325,8 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                             cur, c0, lds_idx, dtype=io_type, n=LOAD_VEC
                         )
 
-                        if p.cpg % K_ATOM_SIZE != 0:
-                            c4_oob = b.cmp_ge(ch_off, b.const_i32(p.cpg))
+                        if mask_k_tail:
+                            c4_oob = b.cmp_ge(ch_off, k_tail_bound())
                             _zero_std = b.zero_vec(io_type, LOAD_VEC)
                             x_frag = b.select(c4_oob, _zero_std, x_frag)
 
@@ -3228,7 +3351,7 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                                 c0,
                                 LOAD_VEC // 2,
                             )
-                            if p.cpg % K_ATOM_SIZE != 0:
+                            if mask_k_tail:
                                 w_frag = b.select(c4_oob, _zero_std, w_frag)
 
                             mfma_shape = "16x16x32" if FOLD_K32 else "16x16x16"
@@ -3303,14 +3426,26 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                         b.mul(g, c_kpg),
                         b.add(b.const_i32(m * 16), b.mul(c4, b.const_i32(4))),
                     )
-                    rows_in_tile = p.kpg - m * 16
-                    if rows_in_tile < 16:
-                        c4_ok = b.cmp_lt(
-                            b.mul(c4, b.const_i32(4)), b.const_i32(rows_in_tile)
-                        )
-                        store_ok = b.land(out_q_ok, c4_ok)
+                    if RTC:
+                        # Only the last M-tile can be partial; its row count
+                        # follows the runtime kpg.
+                        if m == N_M_TILES - 1:
+                            c4_ok = b.cmp_lt(
+                                b.mul(c4, b.const_i32(4)),
+                                b.sub(c_kpg, b.const_i32(m * 16)),
+                            )
+                            store_ok = b.land(out_q_ok, c4_ok)
+                        else:
+                            store_ok = out_q_ok
                     else:
-                        store_ok = out_q_ok
+                        rows_in_tile = p.kpg - m * 16
+                        if rows_in_tile < 16:
+                            c4_ok = b.cmp_lt(
+                                b.mul(c4, b.const_i32(4)), b.const_i32(rows_in_tile)
+                            )
+                            store_ok = b.land(out_q_ok, c4_ok)
+                        else:
+                            store_ok = out_q_ok
 
                     if BLOCK_H > 0 and in_h_range is not None:
                         store_ok = b.land(store_ok, in_h_range)
@@ -3448,6 +3583,12 @@ class DirectConvWgradSpec:
     wave_size: int = 64
     ho_per_block: int = 4  # output rows per block; tunes grid occupancy
     mfma_k: int = 32  # MFMA K-inner: 32 (gfx950, default) or 16
+    # Read cpg / kpg from the kernargs (p_total_c / p_groups and p_total_k /
+    # p_groups) instead of baking them. The channel counts only reach the grid
+    # decode, the dW strides, the group base and the epilogue masks, so one
+    # binary then serves every cpg / kpg its knobs fit. The validators still
+    # check the problem's channel counts, so that becomes a per-problem check.
+    runtime_channels: bool = False
 
     @property
     def block_k(self) -> int:
@@ -3497,6 +3638,10 @@ class DirectConvWgradSpec:
         flags = {"wq": self.waves_q} if self.waves_q > 1 else {}
         if p.dtype == "bf16":
             flags["bf16"] = True
+        # A runtime-channel kernel emits different IR from the baked one for
+        # the same problem, so the two must not share a name.
+        if self.runtime_channels:
+            flags["rtc"] = True
         return kernel_name_join(
             self.name,
             p.short(),
@@ -3666,7 +3811,10 @@ def build_direct_conv_wgrad(
     ``n_q_blocks`` the ``bz`` decode divides by -- is derived in-kernel from
     ``p_Wo``. The filter extents, ``PAD``, ``stride`` and the per-group channel
     counts stay build-time: they shape the tap ring, the strip width and the
-    k/c tiling.
+    k/c tiling. With ``spec.runtime_channels`` the per-group channel counts
+    are derived from ``p_total_c`` / ``p_total_k`` / ``p_groups`` instead
+    (only the k/c tile counts, the dW strides, the group base and the
+    epilogue masks read them), so the binary serves any ``cpg`` / ``kpg``.
 
     The caller must zero-initialise dW before launch.
     """
@@ -3796,10 +3944,17 @@ def build_direct_conv_wgrad(
     A_bytes = params["A_bytes"]
     B_bytes = params["B_bytes"]
 
+    RTC = spec.runtime_channels
     c0 = b.const_i32(0)
     c_wave = b.const_i32(WAVE)
-    c_cpg = b.const_i32(p.cpg)
-    c_kpg = b.const_i32(p.kpg)
+    if RTC:
+        # Per-group channel counts from the kernargs, computed once. The host
+        # passes total_c = groups * cpg and total_k = groups * kpg.
+        c_cpg = b.div(params["p_total_c"], params["p_groups"])
+        c_kpg = b.div(params["p_total_k"], params["p_groups"])
+    else:
+        c_cpg = b.const_i32(p.cpg)
+        c_kpg = b.const_i32(p.kpg)
     c_half_bytes = b.const_i32(2)
     oob_sentinel = b.const_i32((1 << 31) - 1)
     c_H = params["p_Hi"]  # INPUT height
@@ -3833,8 +3988,18 @@ def build_direct_conv_wgrad(
     by = b.block_id_y()  # hi_block
     bz = b.block_id_z()  # n * n_q_blocks + q_block
 
-    c_n_k_tiles = b.const_i32(n_k_tiles)
-    c_n_c_tiles = b.const_i32(n_c_tiles)
+    if RTC:
+        # n_k_tiles = ceil(kpg / block_k), n_c_tiles = ceil(cpg / block_c),
+        # from the runtime channel counts; the host sizes grid x the same way.
+        c_n_k_tiles = b.div(
+            b.add(c_kpg, b.const_i32(spec.block_k - 1)), b.const_i32(spec.block_k)
+        )
+        c_n_c_tiles = b.div(
+            b.add(c_cpg, b.const_i32(spec.block_c - 1)), b.const_i32(spec.block_c)
+        )
+    else:
+        c_n_k_tiles = b.const_i32(n_k_tiles)
+        c_n_c_tiles = b.const_i32(n_c_tiles)
     # AOT: the wo-tile count follows the runtime output width.
     #   n_wo_tiles = ceil(Wo / WO_BLOCK);  n_q_blocks = ceil(n_wo_tiles / WAVES_Q)
     # The host sizes grid z from the same two ceilings (spec.n_q_blocks()).
@@ -3920,11 +4085,25 @@ def build_direct_conv_wgrad(
     # dW[total_k, KH, KW, cpg]: every stride is a product of build-time
     # extents, so it stays a static descriptor. total_k is only a length,
     # which offset() never reads -- the emitted IR does not depend on groups.
-    dw_desc = TensorDescriptor.naive(
-        "D",
-        lengths=[p.total_k, p.KH, p.KW, p.cpg],
-        coord_names=("k", "r", "s", "c"),
-    )
+    # With runtime channels the strides scale with the runtime cpg instead:
+    # [KH*KW*cpg, KW*cpg, cpg, 1].
+    if RTC:
+        dw_desc = DynamicTensorDescriptor.create(
+            "D",
+            coord_names=["k", "r", "s", "c"],
+            strides=[
+                b.mul(c_cpg, b.const_i32(KH * KW)),
+                b.mul(c_cpg, b.const_i32(KW)),
+                c_cpg,
+                b.const_i32(1),
+            ],
+        )
+    else:
+        dw_desc = TensorDescriptor.naive(
+            "D",
+            lengths=[p.total_k, p.KH, p.KW, p.cpg],
+            coord_names=("k", "r", "s", "c"),
+        )
 
     # ---- LDS allocation ----
     #
@@ -4234,17 +4413,35 @@ def build_direct_conv_wgrad(
 
 @dataclass(frozen=True)
 class DirectTransposeWeightsDgradSpec:
-    """Spec for :func:`build_direct_transpose_weights_dgrad`."""
+    """Spec for :func:`build_direct_transpose_weights_dgrad`.
+
+    ``runtime_channels``: read the per-group channel counts from two extra
+    kernargs (:data:`DIRECT_WEIGHT_TRANSFORM_RTC_ARGS`) instead of baking
+    them, so one binary per filter serves every channel count.
+    """
 
     problem: "DirectConvProblem"
+    runtime_channels: bool = False
 
 
 @dataclass(frozen=True)
 class DirectReorganizeWeightsSpec:
-    """Spec for :func:`build_direct_reorganize_weights`."""
+    """Spec for :func:`build_direct_reorganize_weights`.
+
+    ``runtime_channels`` as for :class:`DirectTransposeWeightsDgradSpec`; the
+    K-atom and M-tile counts of the output layout are then derived in-kernel
+    from the runtime channel counts.
+    """
 
     problem: "DirectConvProblem"
     fold_k32: bool = False
+    runtime_channels: bool = False
+
+
+# Extra i32 kernargs of the runtime-channel weight transforms, after A, D,
+# A_bytes and D_bytes: the per-group channel counts of the *original* dgrad
+# problem (cpg = dX channels, kpg = dY channels per group).
+DIRECT_WEIGHT_TRANSFORM_RTC_ARGS = ("p_cpg", "p_kpg")
 
 
 @dataclass(frozen=True)
@@ -4280,14 +4477,19 @@ def build_direct_transpose_weights_dgrad(
     p = spec.problem
     io_type = _io_type(p.dtype)
     BLOCK = 64
+    RTC = spec.runtime_channels
 
-    b = IRBuilder(f"direct_transpose_weights_dgrad_{p.short()}")
+    rtc_tag = "_rtc" if RTC else ""
+    b = IRBuilder(f"direct_transpose_weights_dgrad_{p.short()}{rtc_tag}")
     b.kernel.attrs["max_workgroup_size"] = BLOCK
 
     A = b.param("A", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
     D = b.param("D", PtrType(io_type, "global"), noalias=True, writeonly=True, align=16)
     A_bytes = b.param("A_bytes", I32)
     D_bytes = b.param("D_bytes", I32)
+    if RTC:
+        rtc_cpg = b.param(DIRECT_WEIGHT_TRANSFORM_RTC_ARGS[0], I32)
+        rtc_kpg = b.param(DIRECT_WEIGHT_TRANSFORM_RTC_ARGS[1], I32)
 
     c0 = b.const_i32(0)
     c_half_bytes = b.const_i32(2)
@@ -4320,17 +4522,29 @@ def build_direct_transpose_weights_dgrad(
     k_in_g = b.add(b.mul(by, b.const_i32(BLOCK)), tid)
     c_in_g = bz  # one c per block in z-dim (scalar dispatch)
 
-    k_abs = b.add(b.mul(grp, b.const_i32(p.kpg)), k_in_g)
-    c_abs = b.add(b.mul(grp, b.const_i32(p.cpg)), c_in_g)
+    if RTC:
+        c_kpg, c_cpg = rtc_kpg, rtc_cpg
+        k_abs = b.add(b.mul(grp, c_kpg), k_in_g)
+        c_abs = b.add(b.mul(grp, c_cpg), c_in_g)
+        k_ok = b.cmp_lt(k_in_g, c_kpg)
+        c_ok = b.cmp_lt(c_in_g, c_cpg)
+    else:
+        k_abs = b.add(b.mul(grp, b.const_i32(p.kpg)), k_in_g)
+        c_abs = b.add(b.mul(grp, b.const_i32(p.cpg)), c_in_g)
 
-    k_ok = b.cmp_lt(k_in_g, b.const_i32(p.kpg))
-    c_ok = b.cmp_lt(c_in_g, b.const_i32(p.cpg))
+        k_ok = b.cmp_lt(k_in_g, b.const_i32(p.kpg))
+        c_ok = b.cmp_lt(c_in_g, b.const_i32(p.cpg))
     valid = b.land(k_ok, c_ok)
 
     # Source: W[k_abs, r_flip, s_flip, c_in_g]
-    src_desc = TensorDescriptor.naive(
-        "A", lengths=[p.total_k, p.KH, p.KW, p.cpg], coord_names=("k", "r", "s", "c")
-    )
+    if RTC:
+        src_desc = _krsc_descriptor_dynamic(b, "A", ("k", "r", "s", "c"), c_cpg, p)
+    else:
+        src_desc = TensorDescriptor.naive(
+            "A",
+            lengths=[p.total_k, p.KH, p.KW, p.cpg],
+            coord_names=("k", "r", "s", "c"),
+        )
     src_off, _ = src_desc.offset(b, k=k_abs, r=r_flip, s=s_flip, c=c_in_g)
     src_safe = b.select(valid, b.mul(src_off, c_half_bytes), oob_sentinel)
     a_rsrc = b.buffer_rsrc(A, A_bytes)
@@ -4341,9 +4555,14 @@ def build_direct_transpose_weights_dgrad(
         val = b.buffer_load_f16(a_rsrc, src_safe, c0)
 
     # Destination: W_T[c_abs, r', s', k_in_g]
-    dst_desc = TensorDescriptor.naive(
-        "D", lengths=[p.total_c, p.KH, p.KW, p.kpg], coord_names=("c", "r", "s", "k")
-    )
+    if RTC:
+        dst_desc = _krsc_descriptor_dynamic(b, "D", ("c", "r", "s", "k"), c_kpg, p)
+    else:
+        dst_desc = TensorDescriptor.naive(
+            "D",
+            lengths=[p.total_c, p.KH, p.KW, p.kpg],
+            coord_names=("c", "r", "s", "k"),
+        )
     dst_off, _ = dst_desc.offset(b, c=c_abs, r=r_prime, s=s_prime, k=k_in_g)
     dst_safe = b.select(valid, b.mul(dst_off, c_half_bytes), oob_sentinel)
     if p.dtype == "bf16":
@@ -4352,6 +4571,21 @@ def build_direct_transpose_weights_dgrad(
         b.buffer_store_f16(d_rsrc, dst_safe, c0, val)
 
     return b.kernel
+
+
+def _krsc_descriptor_dynamic(b: IRBuilder, name: str, coords, inner: Value, p):
+    """``[rows, KH, KW, inner]`` with a runtime innermost extent: strides
+    ``[KH*KW*inner, KW*inner, inner, 1]``."""
+    return DynamicTensorDescriptor.create(
+        name,
+        coord_names=list(coords),
+        strides=[
+            b.mul(inner, b.const_i32(p.KH * p.KW)),
+            b.mul(inner, b.const_i32(p.KW)),
+            inner,
+            b.const_i32(1),
+        ],
+    )
 
 
 def direct_dgrad_workspace_bytes(problem: "DirectConvProblem") -> int:
@@ -4424,8 +4658,10 @@ def build_direct_reorganize_weights(
     N_K_ATOMS = (p.kpg + K_ATOM_SZ - 1) // K_ATOM_SZ  # ceil; matches workspace sizing
     N_M_TILES = (p.cpg + 15) // 16  # cpg = kpg of transposed fprop
     WAVE = 64
+    RTC = spec.runtime_channels
 
-    b = IRBuilder(f"direct_reorg_wt{'32' if fold_k32 else ''}_{p.short()}")
+    rtc_tag = "_rtc" if RTC else ""
+    b = IRBuilder(f"direct_reorg_wt{'32' if fold_k32 else ''}_{p.short()}{rtc_tag}")
     b.kernel.attrs["max_workgroup_size"] = WAVE
 
     io_type = _io_type(p.dtype)
@@ -4433,6 +4669,9 @@ def build_direct_reorganize_weights(
     D = b.param("D", PtrType(io_type, "global"), noalias=True, writeonly=True, align=16)
     A_bytes = b.param("A_bytes", I32)
     D_bytes = b.param("D_bytes", I32)
+    if RTC:
+        rtc_cpg = b.param(DIRECT_WEIGHT_TRANSFORM_RTC_ARGS[0], I32)
+        rtc_kpg = b.param(DIRECT_WEIGHT_TRANSFORM_RTC_ARGS[1], I32)
 
     c0 = b.const_i32(0)
     c_half_bytes = b.const_i32(2)
@@ -4440,6 +4679,25 @@ def build_direct_reorganize_weights(
 
     tid = b.thread_id_x()
     bx = b.block_id_x()
+
+    if RTC:
+        return _reorganize_weights_rtc_body(
+            b,
+            p,
+            K_ATOM_SZ=K_ATOM_SZ,
+            ELEMS_PER_LANE=ELEMS_PER_LANE,
+            A=A,
+            D=D,
+            A_bytes=A_bytes,
+            D_bytes=D_bytes,
+            c_cpg=rtc_cpg,
+            c_kpg=rtc_kpg,
+            c0=c0,
+            c_half_bytes=c_half_bytes,
+            oob_sentinel=oob_sentinel,
+            tid=tid,
+            bx=bx,
+        )
 
     n_per_group = p.KH * p.KW * N_K_ATOMS * N_M_TILES
     grp = b.div(bx, b.const_i32(n_per_group))
@@ -4506,6 +4764,80 @@ def build_direct_reorganize_weights(
     safe_dst = b.select(src_ok, b.mul(dst_off, c_half_bytes), oob_sentinel)
     _buf_store_vN(b, p.dtype, d_rsrc, safe_dst, c0, val, ELEMS_PER_LANE // 2)
 
+    return b.kernel
+
+
+def _reorganize_weights_rtc_body(
+    b: IRBuilder,
+    p,
+    *,
+    K_ATOM_SZ: int,
+    ELEMS_PER_LANE: int,
+    A: Value,
+    D: Value,
+    A_bytes: Value,
+    D_bytes: Value,
+    c_cpg: Value,
+    c_kpg: Value,
+    c0: Value,
+    c_half_bytes: Value,
+    oob_sentinel: Value,
+    tid: Value,
+    bx: Value,
+) -> "KernelDef":
+    """The runtime-channel body of :func:`build_direct_reorganize_weights`.
+
+    Same W_T -> W_coa mapping (the W_T column is the K slice within the
+    group's row), with the K-atom and M-tile counts of the W_coa layout
+    derived from the runtime channel counts (``ceil(kpg / K_ATOM_SZ)``
+    and ``ceil(cpg / 16)``, the counts the compute pass is built for). Lanes
+    past the channel tails still store: their load is redirected out of
+    bounds and returns zero, so the workspace tail is zero-filled and the
+    compute pass can multiply a partial last K-atom without masking it.
+    """
+    WAVE = 64
+    n_k_atoms = b.div(b.add(c_kpg, b.const_i32(K_ATOM_SZ - 1)), b.const_i32(K_ATOM_SZ))
+    n_m_tiles = b.div(b.add(c_cpg, b.const_i32(15)), b.const_i32(16))
+    n_am = b.mul(n_k_atoms, n_m_tiles)
+    n_s_am = b.mul(b.const_i32(p.KW), n_am)
+    n_per_group = b.mul(b.const_i32(p.KH), n_s_am)
+    grp = b.div(bx, n_per_group)
+    rem = b.mod(bx, n_per_group)
+    r_prime = b.div(rem, n_s_am)
+    rem2 = b.mod(rem, n_s_am)
+    s_prime = b.div(rem2, n_am)
+    rem3 = b.mod(rem2, n_am)
+    atom_idx = b.div(rem3, n_m_tiles)
+    m_idx = b.mod(rem3, n_m_tiles)
+
+    q_in_lane = b.mod(tid, b.const_i32(16))
+    c4 = b.div(tid, b.const_i32(16))
+
+    a_rsrc = b.buffer_rsrc(A, A_bytes)
+    d_rsrc = b.buffer_rsrc(D, D_bytes)
+
+    # W_T[total_C, KH, KW, kpg]: (k_new, r, s, c_new) with c_new innermost.
+    wt_desc = _krsc_descriptor_dynamic(b, "A", ("k_new", "r", "s", "c_new"), c_kpg, p)
+    m_row = b.add(b.mul(m_idx, b.const_i32(16)), q_in_lane)
+    k_slice = b.add(
+        b.mul(atom_idx, b.const_i32(K_ATOM_SZ)),
+        b.mul(c4, b.const_i32(ELEMS_PER_LANE)),
+    )
+    src_ok = b.land(b.cmp_lt(m_row, c_cpg), b.cmp_lt(k_slice, c_kpg))
+    # The group selects the W_T row; within a row the kpg channels of that
+    # group start at 0, so the column is the K slice alone.
+    k_new_val = b.add(b.mul(grp, c_cpg), m_row)
+    src_off, _ = wt_desc.offset(b, k_new=k_new_val, r=r_prime, s=s_prime, c_new=k_slice)
+    safe_src = b.select(src_ok, b.mul(src_off, c_half_bytes), oob_sentinel)
+    val = _buf_load_vN(b, p.dtype, a_rsrc, safe_src, c0, ELEMS_PER_LANE // 2)
+
+    dst_off = b.add(
+        b.mul(bx, b.const_i32(WAVE * ELEMS_PER_LANE)),
+        b.mul(tid, b.const_i32(ELEMS_PER_LANE)),
+    )
+    _buf_store_vN(
+        b, p.dtype, d_rsrc, b.mul(dst_off, c_half_bytes), c0, val, ELEMS_PER_LANE // 2
+    )
     return b.kernel
 
 
@@ -4675,6 +5007,9 @@ def make_dgrad_fprop_spec(
     waves_k: int = 1,
     runtime_k_loop: bool = False,
     persistent_grid: bool = False,
+    runtime_channels: bool = False,
+    k_atoms: int = 0,
+    m_tiles: int = 0,
 ) -> "DirectConvSpec":
     """Build the ``DirectConvSpec`` for the transposed-fprop pass of dgrad.
 
@@ -4693,6 +5028,10 @@ def make_dgrad_fprop_spec(
     rows, giving ``ceil(Ho/block_h)`` more blocks in the Z-grid dimension.
     H-tiling increases block count for large H: ``block_h = 16`` gives
     ``ceil(Ho/16)`` extra blocks in the Z-grid dimension.
+
+    ``runtime_channels`` / ``k_atoms`` / ``m_tiles`` pass through to the
+    spec; in the transposed problem ``k_atoms`` counts atoms of the original
+    ``kpg`` and ``m_tiles`` the 16-row tiles of the original ``cpg``.
     """
     p = problem
     assert p.stride == 1, "make_dgrad_fprop_spec requires stride=1"
@@ -4722,6 +5061,9 @@ def make_dgrad_fprop_spec(
         waves_k=waves_k,
         runtime_k_loop=runtime_k_loop,
         persistent_grid=persistent_grid,
+        runtime_channels=runtime_channels,
+        k_atoms=k_atoms,
+        m_tiles=m_tiles,
     )
 
 

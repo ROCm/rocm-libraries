@@ -605,6 +605,31 @@ class DgradConvSpec:
     # is_valid_dgrad_spec rather than silently mis-dispatched.
     max_sub_gemms: int = 64
 
+    # Decode the reduction index once per K tile, in uniform registers.
+    #
+    # The kernel is shape-generic: kpg, the filter-tap counts and every stride
+    # are kernargs or sub-GEMM record fields, so the plain K loop splits each
+    # load chunk's k index into (ydot, xdot, k_out) with two runtime signed
+    # divisions and then forms its offset from runtime-stride products -- per
+    # chunk, per iteration, on the path to the first buffer_load.
+    #
+    # When kpg is a multiple of tile_k (checked at run time), a K tile never
+    # straddles a filter tap: k_out of every element is the tile's base k_out
+    # plus its column. This flag adds a K loop that carries the tile's
+    # (k_out, xdot, ydot) as uniform iteration arguments, advances it with a
+    # compare-and-wrap per tile, and splits every offset into a loop-invariant
+    # per-element part and a uniform per-tile part. Problems whose kpg is not a
+    # multiple of tile_k run the original loop instead, which the kernel also
+    # carries, so the binary serves the same problems either way. Both orders
+    # visit the same k values in the same sequence, so the results match.
+    #
+    # The wavelet pipeline has its own K loop and rejects the flag.
+    #
+    # Default False: strictly additive, so every existing config emits
+    # byte-identical IR and keeps its kernel name. See
+    # ``default_uniform_k_decode`` for the selection policy.
+    uniform_k_decode: bool = False
+
     @property
     def block_size(self) -> int:
         return self.warp_m * self.warp_n * self.wave_size
@@ -780,6 +805,8 @@ class DgradConvSpec:
                 "kouter": self.lds_k_outer,
                 f"spk{self.split_k}": self.split_k > 1,
                 "spkauto": self.split_k == -1,
+                # A different K-loop body; only tagged when set.
+                "ukd": self.uniform_k_decode,
             },
         )
 
@@ -883,6 +910,9 @@ class DgradConvSpec:
                     "K-outer allocation (wrong row stride, and out of bounds "
                     "when tile_n > tile_k)"
                 )
+        _ukd_why = _uniform_k_decode_conflict(self)
+        if _ukd_why:
+            raise ValueError(_ukd_why)
         layout = self.effective_lds_layout()
         if self.async_dma:
             layout.validate_for_async()
@@ -912,6 +942,51 @@ class DgradConvSpec:
             layout = LdsLayout.padded_k(self.tile_k, 8 if self.tile_k >= 16 else 0)
         layout.validate()
         return layout
+
+    @staticmethod
+    def default_uniform_k_decode(
+        *,
+        arch: str,
+        wave_size: int = 64,
+        pipeline: str = "mem",
+    ) -> bool:
+        """Whether a dgrad spec should decode its reduction index per K tile.
+
+        Selection policy only, in the same role as ``default_lds_k_outer``:
+        the ``uniform_k_decode`` field itself defaults to ``False`` and callers
+        that build specs for a sweep or a cache ask this what to pass.
+
+        The flag replaces the per-chunk division chain of the K loop with
+        uniform per-tile arithmetic whenever the problem allows it and keeps
+        the original loop for the problems that do not, so it never needs a
+        problem extent to decide and holds for a shape-generic AOT kernel.
+        Measured on gfx950 over a grid of tiles and problems, the decode loop
+        was faster than the plain loop for every tile and problem, and the
+        problems that take the fallback loop ran as fast as the plain kernel,
+        so there is no tile-dependent split as wgrad's ``prefetch_addr`` has.
+        Gated to that regime -- gfx950 wave64, not the wavelet loop -- until
+        measured elsewhere.
+        """
+        if arch != "gfx950" or wave_size != 64:
+            return False
+        return pipeline != "wavelet"
+
+
+def _uniform_k_decode_conflict(spec: "DgradConvSpec") -> str:
+    """Why ``spec.uniform_k_decode`` cannot be honoured, or ``""`` if it can.
+
+    The flag rewrites the synchronous K loop. The wavelet pipeline is a
+    separate load/math-wave body that never reaches it, so accepting the flag
+    there would only rename a kernel whose code it does not change. Shared by
+    ``validate`` and ``is_valid_dgrad_spec`` so the hard and soft gates cannot
+    drift apart.
+    """
+    if spec.uniform_k_decode and spec.pipeline == "wavelet":
+        return (
+            "uniform_k_decode is not supported with pipeline='wavelet': the "
+            "wavelet load/math split has its own K loop"
+        )
+    return ""
 
 
 # ---------------------------------------------------------------------
@@ -1068,6 +1143,9 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             f"> {target.lds_capacity_bytes} cap on {arch}"
         )
 
+    _ukd_why = _uniform_k_decode_conflict(spec)
+    if _ukd_why:
+        return False, _ukd_why
     if spec.pipeline == "wavelet":
         if spec.num_load_waves < 1:
             return False, "pipeline='wavelet' requires num_load_waves >= 1"
@@ -2090,6 +2168,139 @@ def _build_tilde_dgrad(
                     b, spec, atom, grid, final_accs, dx_rsrc, **_tilde_kwargs
                 )
 
+    def _emit_uniform_k_decode_loops() -> List[Value]:
+        """The ``uniform_k_decode`` K loops. Returns the final accumulators.
+
+        Loop 1 runs when kpg is a multiple of tile_k. It carries the K tile's
+        decoded reduction coordinate (k_out, xdot, ydot) -- uniform across the
+        workgroup -- and advances it by one tile per iteration. Every element
+        of the tile then has k_out = tile k_out + column, so each load offset is
+        a loop-invariant per-element part plus a uniform per-tile part, and the
+        A bounds compare the invariant (ho, wo) base against shifted uniform
+        limits. The k_out < kpg term of the plain descriptors is always true
+        here and is dropped; B keeps its (y, x) test, which is what zeroes the
+        split-K tiles past gemm_k.
+
+        Loop 2 is the plain K loop and runs otherwise. Exactly one of the two
+        has a non-empty range, chosen per problem from the kernargs.
+        """
+        c_kd = c_kpg if grouped else c_K
+        c_xs = rec_x_dot_slice
+        c1 = b.const_i32(1)
+        uk_ok = b.cmp_eq(b.mod(c_kd, c_block_k), c0)
+        q_lo = b.div(k_lo, c_kd)
+        uk_k0 = b.mod(k_lo, c_kd)
+        uk_x0 = b.mod(q_lo, c_xs)
+        uk_y0 = b.div(q_lo, c_xs)
+        # dY (NHWK): ho moves by ydot*a_embed_h_coeff rows of Wo*K, wo by
+        # xdot*a_embed_w_coeff rows of K.
+        wo_k = b.mul(c_Wo, c_K)
+        a_step_y = b.mul(rec_a_embed_h_coeff, wo_k)
+        a_step_x = b.mul(rec_a_embed_w_coeff, c_K)
+        # W (KYXC, per-group packed): offset = k*Y*X*Cs + y*X*Cs + x*Cs + c.
+        c_cs = c_dg_N if grouped else c_C
+        b_step_y = b.mul(c_X, c_cs)
+        b_step_k = b.mul(c_Y, b_step_y)
+        uk_hi = b.select(uk_ok, k_hi, k_lo)
+
+        uk_cap: List[Optional[Tuple[Value, ...]]] = [None]
+
+        def tile_uniforms(ko: Value, xd: Value, yd: Value) -> Tuple[Value, ...]:
+            a_h = b.mul(yd, rec_a_embed_h_coeff)
+            a_w = b.mul(xd, rec_a_embed_w_coeff)
+            ho_lo = b.sub(c0, a_h)
+            ho_hi = b.sub(c_Ho, a_h)
+            wo_lo = b.sub(c0, a_w)
+            wo_hi = b.sub(c_Wo, a_w)
+            a_off = b.add(b.add(ko, b.mul(yd, a_step_y)), b.mul(xd, a_step_x))
+            if grouped:
+                a_off = b.add(a_off, k_out_group_base)
+            y = b.add(b.mul(yd, rec_b_y_stride), rec_b_y_offset)
+            x = b.add(b.mul(xd, rec_b_x_stride), rec_b_x_offset)
+            k_abs = b.add(ko, k_out_group_base) if grouped else ko
+            b_off = b.add(
+                b.mul(k_abs, b_step_k), b.add(b.mul(y, b_step_y), b.mul(x, c_cs))
+            )
+            b_ok = b.land(b.cmp_lt(y, c_Y), b.cmp_lt(x, c_X))
+            return (ho_lo, ho_hi, wo_lo, wo_hi, a_off, b_off, b_ok)
+
+        def dy_uk(b_: IRBuilder, row: Value, col: Value):
+            ho_lo, ho_hi, wo_lo, wo_hi, a_off = uk_cap[0][:5]
+            m_sub = b_.add(block_m_off_v, row)
+            n = b_.div(m_sub, hw_tilde)
+            m_rem = b_.mod(m_sub, hw_tilde)
+            htl = b_.div(m_rem, rec_w_tilde_slice)
+            wtl = b_.mod(m_rem, rec_w_tilde_slice)
+            ho_b = b_.add(htl, rec_h_tilde_slice_begin)
+            wo_b = b_.add(wtl, rec_w_tilde_slice_begin)
+            valid = b_.land(
+                b_.land(b_.cmp_ge(ho_b, ho_lo), b_.cmp_lt(ho_b, ho_hi)),
+                b_.land(b_.cmp_ge(wo_b, wo_lo), b_.cmp_lt(wo_b, wo_hi)),
+            )
+            row_off = b_.add(
+                b_.mul(b_.add(b_.mul(n, c_Ho), ho_b), wo_k), b_.mul(wo_b, c_K)
+            )
+            offset = b_.add(b_.add(row_off, col), a_off)
+            return b_.select(valid, offset, c0), valid
+
+        def w_uk(b_: IRBuilder, row: Value, col: Value):
+            b_off, b_ok = uk_cap[0][5:]
+            c_val = b_.add(block_n_off_v, row)
+            offset = b_.add(b_.add(b_.mul(col, b_step_k), c_val), b_off)
+            return b_.select(b_ok, offset, c0), b_ok
+
+        if spec.lds_k_outer:
+
+            def w_uk_fn(b_: IRBuilder, row: Value, col: Value):
+                return w_uk(b_, col, row)
+
+        else:
+            w_uk_fn = w_uk
+
+        n_acc = len(accs)
+        uk_iter = list(accs) + [("uk_k", uk_k0), ("uk_x", uk_x0), ("uk_y", uk_y0)]
+        for_uk = b.scf_for_iter(k_lo, uk_hi, c_block_k, uk_iter, iv_name="k0")
+        with for_uk as (_k0, iter_vars):
+            ko, xd, yd = iter_vars[n_acc:]
+            uk_cap[0] = tile_uniforms(ko, xd, yd)
+            # Every global read of the tile before the first LDS write. With
+            # the address math this short there is nothing left to interleave
+            # with, and a read-then-write per chunk lets the register allocator
+            # recycle one staging register across all chunks, which serialises
+            # the reads on their full latency.
+            a_staged = a_sync_loader.load_global(
+                b, tid=tid, descriptor=dy_uk, rsrc=dy_rsrc
+            )
+            b_staged = b_sync_loader.load_global(
+                b, tid=tid, descriptor=w_uk_fn, rsrc=w_rsrc
+            )
+            a_sync_loader.store_lds(b, smem_dst=A_smem, staged=a_staged)
+            b_sync_loader.store_lds(b, smem_dst=B_smem, staged=b_staged)
+            b.sync()
+            new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_vars[:n_acc]))
+            b.sync()
+            # Next tile: k_out wraps into the next filter tap.
+            nk = b.add(ko, c_block_k)
+            wrap_k = b.cmp_ge(nk, c_kd)
+            nk = b.select(wrap_k, c0, nk)
+            nx = b.add(xd, b.select(wrap_k, c1, c0))
+            wrap_x = b.cmp_ge(nx, c_xs)
+            nx = b.select(wrap_x, c0, nx)
+            ny = b.add(yd, b.select(wrap_x, c1, c0))
+            b.scf_yield(*new_accs, nk, nx, ny)
+        uk_accs = list(for_uk.results)[:n_acc]
+
+        fb_lo = b.select(uk_ok, k_hi, k_lo)
+        fb_iter = [(f"fb_{name}", v) for (name, _), v in zip(accs, uk_accs)]
+        for_fb = b.scf_for_iter(fb_lo, k_hi, c_block_k, fb_iter, iv_name="k1")
+        with for_fb as (k1, iter_vars):
+            emit_load_phase(k1, A_smem, B_smem)
+            b.sync()
+            new_accs = emit_mfma_phase(A_smem, B_smem, iter_vars)
+            b.sync()
+            b.scf_yield(*new_accs)
+        return list(for_fb.results)
+
     # ---- K loop ----
     if spec.pipeline == "wavelet":
         # Wavelet load/math wave specialization (gfx1250/WMMA only).
@@ -2130,14 +2341,17 @@ def _build_tilde_dgrad(
         )
         return b.kernel
 
-    for_op = b.scf_for_iter(k_lo, k_hi, c_block_k, accs, iv_name="k0")
-    with for_op as (k0, iter_vars):
-        emit_load_phase(k0, A_smem, B_smem)
-        b.sync()
-        new_accs = emit_mfma_phase(A_smem, B_smem, iter_vars)
-        b.sync()
-        b.scf_yield(*new_accs)
-    final_accs = for_op.results
+    if spec.uniform_k_decode:
+        final_accs = _emit_uniform_k_decode_loops()
+    else:
+        for_op = b.scf_for_iter(k_lo, k_hi, c_block_k, accs, iv_name="k0")
+        with for_op as (k0, iter_vars):
+            emit_load_phase(k0, A_smem, B_smem)
+            b.sync()
+            new_accs = emit_mfma_phase(A_smem, B_smem, iter_vars)
+            b.sync()
+            b.scf_yield(*new_accs)
+        final_accs = for_op.results
 
     # ---- epilogue ----
     # Epilogue dispatch.  Two independent axes:

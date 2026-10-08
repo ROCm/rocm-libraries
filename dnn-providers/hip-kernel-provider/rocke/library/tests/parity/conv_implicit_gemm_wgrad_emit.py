@@ -33,6 +33,11 @@
 #   20 -- K-outer + async_dma + split-K=2 with the fp16 cshuffle atomic epilogue,
 #         3 K tiles per slice (odd: the phase-B prefetch is redirected to the
 #         zero-fill offset), gfx950
+#   21-37 -- prefetch_addr=True on a base config (see _PFA_BASES): the
+#         carried-offset K loop across mem/compv3/compv4/basic, M-outer and
+#         K-outer, split-K atomic, two-stage, scalar loads, pointwise, 3-D,
+#         gfx942 and chiplet swizzle; 35-37 pair it with async_dma, unroll_k
+#         and WMMA, which both engines must reject
 #   (no grouped or bf16 case: the C++ engine does not build grouped wgrad, and
 #    its tile loader has no elem_dtype, so bf16 operands load as half)
 #
@@ -51,6 +56,28 @@ from kernels.common._conv_implicit_gemm_common import ConvProblem
 from _emit_common import run_emit
 
 
+# prefetch_addr configs: index -> (base config index, extra overrides).
+_PFA_BASES = {
+    21: (1, {}),  # mem/cshuffle, M-outer
+    22: (11, {}),  # mem/cshuffle, K-outer
+    23: (4, {}),  # compv4, 128x128 tile
+    24: (13, {}),  # K-outer, 16x16x16 atom, tile_k 16
+    25: (7, {}),  # split-K atomic, fp32 dW
+    26: (11, {"split_k": 2}),  # split-K packed fp16 atomic, K-outer cshuffle
+    27: (15, {}),  # two-stage
+    28: (19, {}),  # two-stage, C=3 (scalar loads)
+    29: (14, {}),  # pipeline="basic", split-K fp32
+    30: (3, {}),  # pointwise 1x1
+    31: (8, {}),  # 3-D
+    32: (16, {}),  # gfx942 two-stage
+    33: (0, {"pipeline": "compv3"}),  # compv3
+    34: (10, {}),  # chiplet swizzle
+    35: (12, {}),  # + async_dma: rejected
+    36: (18, {}),  # + unroll_k: rejected
+    37: (5, {}),  # WMMA gfx1151: rejected
+}
+
+
 def _spec(idx: int):
     """Return (spec, arch) for config index `idx`.
 
@@ -59,6 +86,13 @@ def _spec(idx: int):
     illustrative of the validator contract; no differential harness consumes
     them (see the module header).
     """
+    if idx in _PFA_BASES:
+        from dataclasses import replace
+
+        base_idx, extra = _PFA_BASES[idx]
+        spec, arch = _spec(base_idx)
+        return replace(spec, prefetch_addr=True, **extra), arch
+
     if idx == 0:
         # Baseline: 3x3 conv, mem pipeline, default epilogue, gfx950.
         p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)

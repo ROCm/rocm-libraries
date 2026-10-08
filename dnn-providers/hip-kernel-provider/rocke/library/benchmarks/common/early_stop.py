@@ -30,6 +30,12 @@ DEFAULT_FACTOR = 5.0
 # Kernels timed in full before early stopping engages: until then the best
 # result is too young to judge the rest against.
 DEFAULT_AFTER = 100
+# A kernel whose first launch alone is this many times past the stop bound
+# (factor x best) is skipped without the rest of its warmup. Grids hold
+# kernels hundreds of times off the best -- the wrong tile for the shape --
+# and on them the warmup is most of the sweep's clock. The margin keeps a
+# cold first launch from ever stopping a kernel the full warmup would keep.
+HOPELESS_MARGIN = 4.0
 
 
 def add_early_stop_arg(parser) -> None:
@@ -52,7 +58,8 @@ def add_early_stop_arg(parser) -> None:
         metavar="N",
         help="time the first N kernels of a sweep in full before --early-stop "
         f"starts skipping (default: {DEFAULT_AFTER}); a seeded case skips from "
-        "the first kernel",
+        "the first kernel. A kernel whose first launch is "
+        f"{HOPELESS_MARGIN:g} x past the --early-stop bound is skipped either way",
     )
     parser.add_argument(
         "--early-stop-seed",
@@ -120,8 +127,10 @@ class EarlyStop:
     :meth:`measure` replaces ``time_launches``: it times the ``warmup``
     launches first (they also serve as the warmup) and, when their average is
     more than ``factor`` times the best result so far, returns ``None`` without
-    running the timed loop. The first ``after`` kernels of a sweep are always
-    measured in full, so the best result is established before it is used.
+    running the timed loop. The first ``after`` kernels of a sweep are measured
+    in full, so the best result is established before it is used -- except a
+    kernel whose first launch is already ``HOPELESS_MARGIN`` times past that
+    bound, which no later best can rescue.
     A kernel measured with ``passed=False`` (it failed verification) neither
     counts towards ``after`` nor updates the best result or the record file.
     """
@@ -143,6 +152,9 @@ class EarlyStop:
         self.best_ms: Optional[float] = seed_ms
         self.n_stopped = 0
         self.last_warmup_ms: Optional[float] = None
+        # Whether the last stop came from the first launch alone
+        # (HOPELESS_MARGIN past the bound) rather than the full warmup.
+        self.last_hopeless = False
         self.record_key = record_key
 
     @classmethod
@@ -168,20 +180,38 @@ class EarlyStop:
     ) -> Optional[float]:
         from rocke.runtime import time_launches
 
-        engaged = (
-            self.factor > 0
-            and self.best_ms is not None
-            and (self.seed_ms is not None or self.n_measured >= self.after)
-            and warmup > 0
+        # The one-launch hopeless probe needs only some best result: the best
+        # so far can only overstate the true best, so a kernel past
+        # HOPELESS_MARGIN x factor x it can never rank. The full warmup
+        # comparison waits for ``after`` kernels (or a seed), as it is the
+        # one a young best could mislead.
+        probing = self.factor > 0 and self.best_ms is not None and warmup > 0
+        engaged = probing and (
+            self.seed_ms is not None or self.n_measured >= self.after
         )
+        self.last_hopeless = False
+        if probing:
+            bound = self.factor * self.best_ms
+            probe = time_launches(fn, warmup=0, iters=1, stream=stream)
+            if probe > HOPELESS_MARGIN * bound:
+                self.last_warmup_ms = probe
+                self.last_hopeless = True
+                self.n_stopped += 1
+                return None
         if engaged:
-            warm = time_launches(fn, warmup=0, iters=warmup, stream=stream)
+            warm = probe
+            if warmup > 1:
+                rest = time_launches(fn, warmup=0, iters=warmup - 1, stream=stream)
+                warm = (probe + rest * (warmup - 1)) / warmup
             self.last_warmup_ms = warm
-            if warm > self.factor * self.best_ms:
+            if warm > bound:
                 self.n_stopped += 1
                 return None
             # The probe was the warmup; only the timed loop is left.
             ms = time_launches(fn, warmup=0, iters=iters, stream=stream)
+        elif probing:
+            # The probe was the first warmup launch.
+            ms = time_launches(fn, warmup=warmup - 1, iters=iters, stream=stream)
         else:
             ms = time_launches(fn, warmup=warmup, iters=iters, stream=stream)
         if passed is False:

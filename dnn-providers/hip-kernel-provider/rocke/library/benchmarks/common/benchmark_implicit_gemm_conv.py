@@ -95,6 +95,11 @@ _WARP_MN_GFX1250 = _WARP_MN + (16,)
 _ASYNC_PIPELINE = "mem"
 # Split-K degrees swept when --split-k 0 (auto) is passed for wgrad.
 _SPLIT_K_AUTO = (128, 64, 32, 16, 8, 4, 2, 1)
+# Launch-time degrees of the wgrad split-K kernel. The degree is a kernarg, so
+# trying one more costs a launch, not a build. Reductions over N*Ho*Wo run to
+# hundreds of thousands of elements on large-batch, large-image shapes, where
+# 256 and 512 slices are what fill the device.
+_WGRAD_SPLIT_K_DEGREES = (512, 256) + _SPLIT_K_AUTO
 # The spec split_k that builds the wgrad split-K kernel. Any value > 1 builds
 # the same kernel (the degree is a kernarg); this one is only its label.
 _SPLIT_K_BUILD = 2
@@ -948,7 +953,7 @@ def main() -> int:
         dest="split_k_prune",
         metavar="PCT",
         help=(
-            "Only effective with --split-k 0 (sweep). "
+            "Only effective with --split-k 0 (sweep) or --run-from-cache. "
             "If a kernel's TFLOPS at a given split-K degree drops by at least PCT%% "
             "relative to its best split-K seen so far, skip all remaining split-K "
             "degrees for that tile/warp/pipeline/epilogue configuration. "
@@ -1638,6 +1643,16 @@ def _build_wgrad_one(args_tuple):
         group_merge=group_merge,
         lds_k_outer=lds_k_outer,
         async_dma=async_dma,
+        # Per-combo, from the same policy the AOT cache generator uses.
+        prefetch_addr=WgradConvSpec.default_prefetch_addr(
+            arch=arch,
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            lds_k_outer=lds_k_outer,
+            wave_size=target.wave_size,
+            async_dma=async_dma,
+        ),
     )
     ok, _ = is_valid_wgrad_spec(spec, arch)
     if not ok:
@@ -1776,6 +1791,20 @@ def _build_wgrad_two_stage_one(args_tuple):
             wave_size=target.wave_size,
         ),
     )
+    # Same per-combo policy as the single-stage leg, so the two legs stay
+    # comparable.
+    spec = dc_replace(
+        spec,
+        prefetch_addr=WgradConvSpec.default_prefetch_addr(
+            arch=arch,
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            lds_k_outer=spec.lds_k_outer,
+            wave_size=target.wave_size,
+            async_dma=async_dma,
+        ),
+    )
     ok, _ = is_valid_wgrad_spec(spec, arch)
     if not ok:
         return None
@@ -1905,6 +1934,10 @@ def _build_dgrad_one(args_tuple):
         # The default epilogue stores scalar; the validator rejects any wider
         # vector_size_c with it.
         vector_size_c=1 if epilogue == "default" else vec_c,
+        # Per-combo, from the same policy the AOT cache generator uses.
+        uniform_k_decode=DgradConvSpec.default_uniform_k_decode(
+            arch=arch, wave_size=target.wave_size, pipeline=pipeline
+        ),
     )
     ok, _ = is_valid_dgrad_spec(spec, arch)
     if not ok:
@@ -3686,6 +3719,11 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 )
                 continue
 
+            if direction == "wgrad" and problem.cpg == problem.kpg == 1 < problem.groups:
+                # Depthwise: the non-split kernel leaves one workgroup per
+                # group and cannot fill the device, so -- as in the JIT
+                # sweep -- only split-K kernels are offered.
+                candidates = [c for c in candidates if c[0].split_k > 1]
             if direction == "wgrad" and args.two_stage != "always":
                 # Same rule as the JIT sweep's --two-stage: by default the
                 # two-stage (scratch + reduce) kernels only run when C/groups
@@ -3779,6 +3817,10 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
             n_failed = 0
 
             n_cand = len(candidates)
+            # Device scratch of the launch configs in flight (two-stage
+            # workspaces, dgrad sub-GEMM tables): one per (kernel, degree),
+            # so it is freed as the sweep goes rather than per case.
+            live_extras: list = []
             for cand_idx, (ident, hsaco_path, meta) in enumerate(candidates, 1):
                 kernel_name = meta.get("kernel_name")
                 if not kernel_name:
@@ -3813,7 +3855,22 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 else:
                     degrees = (None,)
 
+                # --split-k-prune, as in the JIT sweep: degrees run from the
+                # largest down, and once this kernel is PCT% off its best
+                # degree (or early-stopped after one was measured) the
+                # smaller degrees are not tried. A degree that is
+                # early-stopped before any was measured does not prune: the
+                # largest splits can be the slowest (K slices of a tile or
+                # two, all contending on the output atomics) on a kernel
+                # whose best degree is several steps down.
+                kernel_best_ms = None
+                _prune_stop = False
                 for split_k in degrees:
+                    if _prune_stop:
+                        break
+                    # The previous launch config's scratch is no longer used
+                    # (timing synchronizes); free it before allocating the next.
+                    _free_extras(rt, live_extras)
                     try:
                         extras, grid = _extras_and_grid(
                             direction, problem, ident, rt, case_dtype, split_k=split_k
@@ -3821,6 +3878,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     except ValueError as e:
                         print(f"  [skip] {ident.short_label()}: {e}", flush=True)
                         continue
+                    live_extras.append(extras)
                     values = _launch_values_for(
                         direction,
                         problem,
@@ -3921,7 +3979,19 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                         continue
                     if ms is None:
                         _stop.report(label)
+                        if args.split_k_prune is not None and (
+                            kernel_best_ms is not None
+                        ):
+                            break
                         continue
+                    if args.split_k_prune is not None and split_k is not None:
+                        # TFLOPS down PCT% from this kernel's best degree.
+                        if kernel_best_ms is not None and kernel_best_ms <= ms * (
+                            1.0 - args.split_k_prune / 100.0
+                        ):
+                            _prune_stop = True
+                        if kernel_best_ms is None or ms < kernel_best_ms:
+                            kernel_best_ms = ms
                     results.append(
                         (flop / (ms * 1e9), bytes_xfer / (ms * 1e6), ms, label)
                     )
@@ -3934,6 +4004,9 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     )
 
             synchronize_and_release()
+            _free_extras(rt, live_extras)
+            for buf in (A_dev, B_dev, D_dev):
+                rt.free(buf)
             if ref_out is not None:
                 print(
                     f"  verify: {n_failed} of the launched kernels failed",
@@ -3960,6 +4033,15 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
             print(f"\nBest: {tflops:.1f} TFLOPS — {label}  {ms:.3f} ms", flush=True)
 
     return overall_rc
+
+
+def _free_extras(rt, live_extras: list) -> None:
+    """Free the device buffers :func:`_extras_and_grid` allocated, and forget them."""
+    for extras in live_extras:
+        for key in ("ws_ptr", "sub_gemm_buf"):
+            if key in extras:
+                rt.free(extras[key])
+    live_extras.clear()
 
 
 def _widest_vector_sizes(candidates):
@@ -4116,7 +4198,7 @@ def _split_k_degrees(problem, tile_m: int, tile_n: int, tile_k: int) -> tuple:
     """Split-K degrees to launch a wgrad split-K kernel with.
 
     The degree is a kernarg, so one split-K binary is timed at every degree of
-    ``_SPLIT_K_AUTO`` that is > 1 (degree 1 is the separate non-atomic
+    ``_WGRAD_SPLIT_K_DEGREES`` that is > 1 (degree 1 is the separate non-atomic
     kernel), does not exceed the number of K tiles (a larger degree only adds
     empty slices), and keeps ``groups * degree`` inside the grid's z limit.
     """
@@ -4133,7 +4215,7 @@ def _split_k_degrees(problem, tile_m: int, tile_n: int, tile_k: int) -> tuple:
     groups = max(1, problem.groups)
     return tuple(
         sk
-        for sk in _SPLIT_K_AUTO
+        for sk in _WGRAD_SPLIT_K_DEGREES
         if 1 < sk <= k_tiles and groups * sk <= _MAX_GRID_DIM_Z
     )
 

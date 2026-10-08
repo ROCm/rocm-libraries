@@ -9,6 +9,7 @@ GPU is touched.
 
 from __future__ import annotations
 
+import itertools
 import json
 
 import pytest
@@ -25,7 +26,9 @@ _ARCH = "gfx950"
 @pytest.fixture(scope="module")
 def jobs():
     return dks.enumerate_direct_jobs(
-        arch=_ARCH, target=ArchTarget.from_gfx(_ARCH), directions=("fwd", "dgrad")
+        arch=_ARCH,
+        target=ArchTarget.from_gfx(_ARCH),
+        directions=("fwd", "dgrad", "wgrad"),
     )
 
 
@@ -250,9 +253,18 @@ def test_capabilities_outside_the_list_are_not_served(cache):
 
 def test_dgrad_stride1_offers_mfma_pipeline_and_scalar(cache):
     plans, _ = dks.direct_plans(cache, _problem(), "dgrad", _ARCH)
-    assert _variants(plans) == {"direct_grouped_dgrad", "direct_grouped_dgrad_mfma"}
+    # cpg = kpg = 16 has the fixed-channel MFMA entries and also the
+    # runtime-channel ones (one K-atom, one M-tile).
+    assert _variants(plans) == {
+        "direct_grouped_dgrad",
+        "direct_grouped_dgrad_mfma",
+        "direct_dgrad_mfma_rtc",
+    }
     for plan in plans:
-        if plan.identity.algorithm != "direct_grouped_dgrad_mfma":
+        if plan.identity.algorithm not in (
+            "direct_grouped_dgrad_mfma",
+            "direct_dgrad_mfma_rtc",
+        ):
             continue
         # transpose, then the forward compute pass reading the transposed weights
         assert [s.buffers for s in plan.steps] == [
@@ -273,15 +285,233 @@ def test_dgrad_stride1_offers_mfma_pipeline_and_scalar(cache):
         ("dgrad", _problem(groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=0, stride=2)),
         ("dgrad", _problem(cpg=8, kpg=8, stride=2)),
         ("dgrad", _problem()),
+        ("wgrad", _problem()),
+        ("wgrad", _problem(groups=1, cpg=48, kpg=192, KH=5, KW=5, PAD=0)),
+        # Dense MFMA dgrad (runtime channels): transforms take two scalars.
+        ("dgrad", _problem(groups=1, cpg=48, kpg=192)),
+        ("dgrad", _problem(groups=1, cpg=24, kpg=24)),
     ],
 )
 def test_plans_pack_against_their_signatures(cache, direction, problem):
     plans, _ = dks.direct_plans(cache, problem, direction, _ARCH)
     assert plans
-    names = ("x", "w", "y", "dy", "dx", "ws_t", "ws_coa")
+    names = ("x", "w", "y", "dy", "dx", "dw", "ws_t", "ws_coa")
     ptrs = {n: 0x1000 * (i + 1) for i, n in enumerate(names)}
     sizes = {n: 1 << 20 for n in names}
     for plan in plans:
         for step in plan.steps:
             compile_packer(step.signature)(dks.launch_values(step, ptrs, sizes))
             assert all(g > 0 for g in step.grid)
+
+
+def _wgrad(plans):
+    return [p for p in plans if p.identity.algorithm == "direct_wgrad"]
+
+
+@pytest.mark.parametrize(
+    "groups,cpg,kpg",
+    [(1, 24, 24), (1, 48, 192), (1, 128, 128), (4, 64, 64), (32, 16, 16)],
+)
+def test_wgrad_channels_are_runtime(cache, groups, cpg, kpg):
+    """One wgrad binary per knob serves any channel count its knobs fit, and
+    the launch grid follows the real problem, not the probe it was built on."""
+    from kernels.common.conv_direct_grouped import direct_launch_geometry
+
+    problem = _problem(groups=groups, cpg=cpg, kpg=kpg)
+    plans, rejected = dks.direct_plans(cache, problem, "wgrad", _ARCH)
+    plans = _wgrad(plans)
+    assert plans
+    c_tiles = -(-cpg // 16)
+    for plan in plans:
+        assert plan.identity.cpg == 0 and plan.identity.kpg == 0
+        knobs = json.loads(plan.identity.knobs)
+        assert knobs["waves_c"] <= c_tiles
+        (step,) = plan.steps
+        assert step.buffers == ("dy", "x", "dw")
+        spec = dks.make_spec("direct_wgrad", problem, knobs)
+        assert spec.runtime_channels
+        assert (step.grid, step.block) == direct_launch_geometry(spec)
+    # Every knob combination too wide for the channels is turned away, with
+    # the reason; nothing else is.
+    for ident, why in rejected:
+        if ident.algorithm == "direct_wgrad":
+            assert json.loads(ident.knobs)["waves_c"] > c_tiles, why
+    offered = {json.loads(p.identity.knobs)["waves_c"] for p in plans}
+    assert 1 in offered
+    if c_tiles in {w[1] for w in dks.wgrad_waves()}:
+        assert c_tiles in offered
+
+
+def test_wgrad_serves_valid_and_same_padding_only_at_stride_1(cache):
+    for pad in (0, 1):
+        plans, _ = dks.direct_plans(cache, _problem(PAD=pad), "wgrad", _ARCH)
+        assert _wgrad(plans) and all(p.identity.pad_h == pad for p in plans)
+    # The kernel is stride-1 only; nothing is cached for stride 2.
+    assert dks.direct_plans(cache, _problem(stride=2), "wgrad", _ARCH)[0] == []
+    assert not [j for j in dks.DIRECT_CAPABILITIES["direct_wgrad"][1] if j.stride != 1]
+
+
+def test_wgrad_needs_a_full_wave_tile_of_channels(cache):
+    """cpg/kpg below the 16-wide wave tile are a per-problem rejection now."""
+    plans, rejected = dks.direct_plans(
+        cache, _problem(cpg=8, kpg=8, groups=32), "wgrad", _ARCH
+    )
+    assert not _wgrad(plans)
+    assert any(i.algorithm == "direct_wgrad" for i, _ in rejected)
+
+
+# ---------------------------------------------------------------------------
+# Runtime-channel MFMA dgrad (direct_dgrad_mfma_rtc)
+# ---------------------------------------------------------------------------
+
+
+def _rtc(plans):
+    return [p for p in plans if p.identity.algorithm == "direct_dgrad_mfma_rtc"]
+
+
+def _jit_dgrad_mfma_combos(problem):
+    """The (block_q, block_groups, block_h, waves) combos the JIT dgrad sweep
+    builds for ``problem`` (benchmark_direct_conv._run_dgrad_sweep), as knobs."""
+    out = set()
+    for bq, bg, bh, (wq, wk, rk, pg, k32) in itertools.product(
+        dks.BLOCK_Q, dks.BLOCK_GROUPS, dks.DGRAD_BLOCK_H, dks.DGRAD_WAVES
+    ):
+        if problem.groups % bg or bq // wq < 16:
+            continue
+        if k32:
+            if problem.kpg % 32:
+                continue
+            n_atoms = problem.kpg // 32
+        else:
+            n_atoms = (problem.kpg + 15) // 16
+        if n_atoms == 0 or n_atoms % wk:
+            continue
+        out.add((bq, bg, bh, wq, wk, rk, pg, k32))
+    return out
+
+
+@pytest.mark.parametrize(
+    "groups,cpg,kpg",
+    [
+        (1, 48, 192),
+        (1, 4, 320),
+        (1, 24, 24),
+        (1, 64, 128),
+        (1, 16, 512),
+        (4, 40, 20),
+        (16, 16, 16),
+    ],
+)
+def test_dgrad_rtc_serves_any_channels_its_tiles_fit(cache, groups, cpg, kpg):
+    """One runtime-channel binary per tile count serves every channel count
+    that rounds to it; the knobs offered are the JIT sweep's, less the
+    duplicated runtime_k_loop splits and the configs that would spill."""
+    from kernels.common.conv_direct_grouped import direct_launch_geometry
+
+    problem = _problem(groups=groups, cpg=cpg, kpg=kpg)
+    plans = _rtc(dks.direct_plans(cache, problem, "dgrad", _ARCH)[0])
+    assert plans
+    offered = set()
+    for plan in plans:
+        ident = plan.identity
+        assert (ident.cpg, ident.kpg) == (0, 0)
+        knobs = json.loads(ident.knobs)
+        atom = 32 if knobs["fold_k32"] else 16
+        assert knobs["m_tiles"] == -(-cpg // 16)
+        assert knobs["k_atoms"] == (kpg // atom if knobs["fold_k32"] else -(-kpg // 16))
+        offered.add(
+            (
+                knobs["block_q"],
+                knobs["block_groups"],
+                knobs["block_h"],
+                knobs["waves_q"],
+                knobs["waves_k"],
+                knobs["runtime_k_loop"],
+                knobs["persistent_grid"],
+                knobs["fold_k32"],
+            )
+        )
+        *helpers, fprop = plan.steps
+        assert helpers[0].buffers == ("w", None, "ws_t")
+        for step in helpers:
+            assert dict(step.scalars) == {"p_cpg": cpg, "p_kpg": kpg}
+            assert [a["name"] for a in step.signature][-2:] == ["p_cpg", "p_kpg"]
+        # The compute pass launches on the real (transposed) problem.
+        spec = dks.make_spec("direct_dgrad_mfma_rtc", problem, knobs)
+        assert spec.runtime_channels
+        assert (fprop.grid, fprop.block) == direct_launch_geometry(spec)
+        coalesced = knobs["waves_k"] > 1 or knobs["runtime_k_loop"]
+        assert fprop.buffers[1] == ("ws_coa" if coalesced else "ws_t")
+        assert len(helpers) == (2 if coalesced else 1)
+    jit = _jit_dgrad_mfma_combos(problem)
+    assert offered <= jit
+    missing = jit - offered
+    for bq, bg, bh, wq, wk, rk, pg, k32 in missing:
+        knobs = dict(
+            block_q=bq,
+            block_groups=bg,
+            block_h=bh,
+            waves_q=wq,
+            waves_k=wk,
+            runtime_k_loop=rk,
+            persistent_grid=pg,
+            fold_k32=k32,
+            k_atoms=(kpg // 32 if k32 else -(-kpg // 16)),
+            m_tiles=-(-cpg // 16),
+        )
+        why = (
+            (wk > 1 and rk)
+            or knobs["k_atoms"] not in dks.dgrad_rtc_k_atoms(wk, k32)
+            or knobs["m_tiles"] not in dks.DGRAD_RTC_M_TILES
+            or dks.dgrad_rtc_spills(knobs, 3, 3, _ARCH)
+        )
+        assert why, f"JIT config {knobs} has no cached binary"
+
+
+def test_dgrad_rtc_cached_scope(jobs):
+    """The tile counts built, and only binaries that fit their registers."""
+    built = [
+        json.loads(j.identity.knobs)
+        for j in jobs
+        if j.identity.algorithm == "direct_dgrad_mfma_rtc"
+    ]
+    assert built
+    assert {k["m_tiles"] for k in built} == set(dks.DGRAD_RTC_M_TILES)
+    for k in built:
+        assert k["k_atoms"] in dks.dgrad_rtc_k_atoms(k["waves_k"], k["fold_k32"])
+        assert not dks.dgrad_rtc_spills(k, 3, 3, _ARCH)
+        assert not (k["waves_k"] > 1 and k["runtime_k_loop"])
+    # One transpose binary and one reorganize binary per fold_k32 serve them.
+    helpers = [
+        j.identity
+        for j in jobs
+        if j.identity.algorithm
+        in ("direct_dgrad_transpose_rtc", "direct_dgrad_reorganize_rtc")
+    ]
+    assert sorted((i.algorithm, i.knobs) for i in helpers) == sorted(
+        [
+            ("direct_dgrad_reorganize_rtc", json.dumps({"fold_k32": False})),
+            ("direct_dgrad_reorganize_rtc", json.dumps({"fold_k32": True})),
+            ("direct_dgrad_transpose_rtc", json.dumps({})),
+        ]
+    )
+    assert all((i.cpg, i.kpg) == (0, 0) for i in helpers)
+
+
+@pytest.mark.parametrize(
+    "groups,cpg,kpg,why",
+    [
+        # 640 dY channels: more K-atoms than any cached binary holds.
+        (1, 48, 640, "K-atoms"),
+        # 80 dX channels: five M-tiles, past the cached range.
+        (1, 80, 192, "M-tiles"),
+        # A ragged dX channel count: the epilogue stores 4 channels per lane.
+        (1, 6, 64, "kpg % 4"),
+    ],
+)
+def test_dgrad_rtc_rejects_what_no_binary_fits(cache, groups, cpg, kpg, why):
+    problem = _problem(groups=groups, cpg=cpg, kpg=kpg)
+    plans, rejected = dks.direct_plans(cache, problem, "dgrad", _ARCH)
+    assert not _rtc(plans)
+    reasons = [r for i, r in rejected if i.algorithm == "direct_dgrad_mfma_rtc"]
+    assert reasons and any(why in r for r in reasons), reasons[:3]

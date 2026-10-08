@@ -139,6 +139,16 @@ typedef struct rocke_dgrad_conv_spec
      * A launch whose record count exceeds this must pick a kernel built with
      * a larger bound. Default 64. */
     int max_sub_gemms;
+
+    /* uniform_k_decode: decode the reduction index once per K tile, in uniform
+     * registers. Adds a K loop that carries the tile's (k_out, xdot, ydot) and
+     * splits every load offset into a loop-invariant per-element part and a
+     * uniform per-tile part; it runs when K is a multiple of tile_k (checked at
+     * run time), and the plain K loop -- also emitted -- runs otherwise.
+     * Rejected with pipeline="wavelet". Mirrors DgradConvSpec.uniform_k_decode.
+     * Appended last so existing aggregate initialisers keep their layout.
+     * Default false: every existing config emits byte-identical IR. */
+    bool uniform_k_decode; /* default false */
 } rocke_dgrad_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */

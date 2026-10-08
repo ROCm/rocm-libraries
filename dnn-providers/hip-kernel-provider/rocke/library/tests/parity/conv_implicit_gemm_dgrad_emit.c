@@ -180,6 +180,62 @@ static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
         spec->vector_size_a = 8;
         *arch = "gfx950";
         return 0;
+    case 15:
+        /* uniform_k_decode, stride 1: the per-tile decode loop plus the plain
+         * fallback loop, sharing one MFMA phase. */
+        spec->problem = rocke_conv_problem_make(8, 56, 56, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->uniform_k_decode = true;
+        *arch = "gfx950";
+        return 0;
+    case 16:
+        /* uniform_k_decode on the strided tilde path with the K-outer B tile
+         * and the cshuffle epilogue. */
+        spec->problem = rocke_conv_problem_make(4, 28, 28, 64, 64, 3, 3, 2, 2, 1, 1, 1, 1);
+        spec->tile_m = 128;
+        spec->tile_n = 128;
+        spec->tile_k = 64;
+        spec->pipeline = "compv3";
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        spec->uniform_k_decode = true;
+        *arch = "gfx950";
+        return 0;
+    case 17:
+        /* uniform_k_decode with split-K: decode from a non-zero k_lo. */
+        spec->problem = rocke_conv_problem_make(8, 56, 56, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->tile_k = 32;
+        spec->split_k = 2;
+        spec->uniform_k_decode = true;
+        *arch = "gfx950";
+        return 0;
+    case 18:
+        /* uniform_k_decode on a pointwise problem. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 1, 1);
+        spec->uniform_k_decode = true;
+        *arch = "gfx950";
+        return 0;
+    case 19:
+        /* uniform_k_decode on WMMA wave32 (gfx1201). */
+        spec->problem = rocke_conv_problem_make(8, 56, 56, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 16;
+        spec->wave_size = 32;
+        spec->uniform_k_decode = true;
+        *arch = "gfx1201";
+        return 0;
+    case 20:
+        /* Rejected by both validators: wavelet has its own K loop. */
+        spec->problem = rocke_conv_problem_make(8, 56, 56, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->tile_k = 32;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->wave_size = 32;
+        spec->pipeline = "wavelet";
+        spec->uniform_k_decode = true;
+        *arch = "gfx1250";
+        return 0;
     default:
         return -1;
     }

@@ -349,6 +349,142 @@ def _spec(idx: int):
             "gfx950",
         )
 
+    if idx == 15:
+        # uniform_k_decode, stride 1: the per-tile decode loop plus the plain
+        # fallback loop, sharing one MFMA phase.
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                uniform_k_decode=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 16:
+        # uniform_k_decode on the strided tilde path with the K-outer B tile
+        # (the swapped W descriptor) and the cshuffle epilogue.
+        p = _cp(N=4, Hi=28, Wi=28, C=64, K=64, Y=3, X=3, sH=2, sW=2, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=128,
+                tile_n=128,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="compv3",
+                epilogue="cshuffle",
+                lds_k_outer=True,
+                uniform_k_decode=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 17:
+        # uniform_k_decode with split-K: the decode starts from a non-zero
+        # k_lo, and the B (y, x) test zeroes the tiles past gemm_k.
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                split_k=2,
+                uniform_k_decode=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 18:
+        # uniform_k_decode on a pointwise problem: the fallback loop keeps the
+        # pointwise descriptors, the decode loop does not use them.
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, Y=1, X=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                uniform_k_decode=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 19:
+        # uniform_k_decode on WMMA wave32: the shared MFMA phase takes its
+        # WMMA branch in both loops.
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+                wave_size=32,
+                pipeline="mem",
+                epilogue="default",
+                uniform_k_decode=True,
+            ),
+            "gfx1201",
+        )
+
+    if idx == 20:
+        # Rejected by both validators: the wavelet pipeline has its own K
+        # loop, so uniform_k_decode would only rename the kernel.
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+                wave_size=32,
+                pipeline="wavelet",
+                epilogue="default",
+                uniform_k_decode=True,
+            ),
+            "gfx1250",
+        )
+
     raise SystemExit(f"unknown config index {idx}")
 
 

@@ -223,6 +223,12 @@ rocke_status_t
         int pos = n;
         n += snprintf(out + pos, out_cap - pos, "_spk%d", s->split_k);
     }
+    /* A different K-loop body; only tagged when set (Python flag "ukd"). */
+    if(s->uniform_k_decode)
+    {
+        int pos = n;
+        n += snprintf(out + pos, out_cap - pos, "_ukd");
+    }
     if(n >= (int)out_cap)
         return ROCKE_ERR_VALUE;
     return ROCKE_OK;
@@ -407,6 +413,17 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
                  total_lds,
                  tgt->lds_capacity_bytes,
                  arch);
+        return false;
+    }
+
+    /* Python: _uniform_k_decode_conflict. The wavelet load/math split has its
+     * own K loop, so the flag would only rename a kernel it does not change. */
+    if(s->uniform_k_decode && s->pipeline && strcmp(s->pipeline, "wavelet") == 0)
+    {
+        snprintf(reason,
+                 reason_cap,
+                 "uniform_k_decode is not supported with pipeline='wavelet': the "
+                 "wavelet load/math split has its own K loop");
         return false;
     }
 
@@ -1550,6 +1567,102 @@ static rocke_value_t* _tilde_w_descriptor_kouter(rocke_ir_builder_t* b_,
                                                  void* user)
 {
     return _tilde_w_descriptor(b_, col, row, out_valid, user);
+}
+
+/* ---- uniform_k_decode descriptors (Python _emit_uniform_k_decode_loops) ----
+ *
+ * Used by the K loop that carries the tile's decoded (k_out, xdot, ydot). Each
+ * offset is a loop-invariant per-element part plus the uniform per-tile part
+ * the loop body computes into the context before every load; the A bounds
+ * compare the invariant (ho, wo) base against shifted uniform limits. */
+struct uk_dy_ctx_t
+{
+    rocke_value_t* block_m_off;
+    rocke_value_t* hw_tilde;
+    rocke_value_t* rec_w_tilde_slice;
+    rocke_value_t* rec_h_tilde_slice_begin;
+    rocke_value_t* rec_w_tilde_slice_begin;
+    rocke_value_t* c_Ho;
+    rocke_value_t* c_K;
+    rocke_value_t* wo_k; /* Wo*K */
+    rocke_value_t* c0;
+    /* per-tile uniforms */
+    rocke_value_t* ho_lo;
+    rocke_value_t* ho_hi;
+    rocke_value_t* wo_lo;
+    rocke_value_t* wo_hi;
+    rocke_value_t* a_off;
+};
+
+static rocke_value_t* _uk_dy_descriptor(rocke_ir_builder_t* b_,
+                                        rocke_value_t* row,
+                                        rocke_value_t* col,
+                                        rocke_value_t** out_valid,
+                                        void* user)
+{
+    uk_dy_ctx_t* ctx = (uk_dy_ctx_t*)user;
+    rocke_value_t* m_sub = rocke_b_add(b_, ctx->block_m_off, row);
+    rocke_value_t* n_val = rocke_b_div(b_, m_sub, ctx->hw_tilde);
+    rocke_value_t* m_rem = rocke_b_mod(b_, m_sub, ctx->hw_tilde);
+    rocke_value_t* htl = rocke_b_div(b_, m_rem, ctx->rec_w_tilde_slice);
+    rocke_value_t* wtl = rocke_b_mod(b_, m_rem, ctx->rec_w_tilde_slice);
+    rocke_value_t* ho_b = rocke_b_add(b_, htl, ctx->rec_h_tilde_slice_begin);
+    rocke_value_t* wo_b = rocke_b_add(b_, wtl, ctx->rec_w_tilde_slice_begin);
+
+    rocke_value_t* ho_ge = rocke_b_cmp_ge(b_, ho_b, ctx->ho_lo);
+    rocke_value_t* ho_lt = rocke_b_cmp_lt(b_, ho_b, ctx->ho_hi);
+    rocke_value_t* ho_ok = rocke_b_land(b_, ho_ge, ho_lt);
+    rocke_value_t* wo_ge = rocke_b_cmp_ge(b_, wo_b, ctx->wo_lo);
+    rocke_value_t* wo_lt = rocke_b_cmp_lt(b_, wo_b, ctx->wo_hi);
+    rocke_value_t* wo_ok = rocke_b_land(b_, wo_ge, wo_lt);
+    rocke_value_t* valid = rocke_b_land(b_, ho_ok, wo_ok);
+
+    rocke_value_t* n_ho = rocke_b_add(b_, rocke_b_mul(b_, n_val, ctx->c_Ho), ho_b);
+    rocke_value_t* hi_part = rocke_b_mul(b_, n_ho, ctx->wo_k);
+    rocke_value_t* wo_part = rocke_b_mul(b_, wo_b, ctx->c_K);
+    rocke_value_t* row_off = rocke_b_add(b_, hi_part, wo_part);
+    rocke_value_t* offset = rocke_b_add(b_, rocke_b_add(b_, row_off, col), ctx->a_off);
+    rocke_value_t* safe_offset = rocke_b_select(b_, valid, offset, ctx->c0);
+
+    if(out_valid)
+        *out_valid = valid;
+    return safe_offset;
+}
+
+struct uk_w_ctx_t
+{
+    rocke_value_t* block_n_off;
+    rocke_value_t* b_step_k; /* Y*X*C */
+    rocke_value_t* c0;
+    /* per-tile uniforms */
+    rocke_value_t* b_off;
+    rocke_value_t* b_ok;
+};
+
+static rocke_value_t* _uk_w_descriptor(rocke_ir_builder_t* b_,
+                                       rocke_value_t* row,
+                                       rocke_value_t* col,
+                                       rocke_value_t** out_valid,
+                                       void* user)
+{
+    uk_w_ctx_t* ctx = (uk_w_ctx_t*)user;
+    rocke_value_t* c_val = rocke_b_add(b_, ctx->block_n_off, row);
+    rocke_value_t* k_part = rocke_b_mul(b_, col, ctx->b_step_k);
+    rocke_value_t* offset = rocke_b_add(b_, rocke_b_add(b_, k_part, c_val), ctx->b_off);
+    rocke_value_t* safe_offset = rocke_b_select(b_, ctx->b_ok, offset, ctx->c0);
+    if(out_valid)
+        *out_valid = ctx->b_ok;
+    return safe_offset;
+}
+
+/* K-outer coordinate swap, as _tilde_w_descriptor_kouter. */
+static rocke_value_t* _uk_w_descriptor_kouter(rocke_ir_builder_t* b_,
+                                              rocke_value_t* row,
+                                              rocke_value_t* col,
+                                              rocke_value_t** out_valid,
+                                              void* user)
+{
+    return _uk_w_descriptor(b_, col, row, out_valid, user);
 }
 
 // ===========================================================================
@@ -2717,36 +2830,10 @@ static rocke_kernel_def_t*
         return b->kernel;
     }
 
-    // ---- K loop (simple scf.for_iter) ----
-    rocke_for_t for_op
-        = rocke_b_scf_for_iter(b, k_lo, k_hi, c_block_k, iter_args, num_accs, "k0", false, true);
-
-    rocke_value_t* k0 = for_op.iv;
-    rocke_value_t* iter_vars[ROCKE_CONV_MAX_ACCS];
-    for(int i = 0; i < for_op.num_iter_vars; i++)
-        iter_vars[i] = for_op.iter_vars[i];
-
-    rocke_b_region_enter(b, for_op.body);
-    {
-        // Set k_off_capture for descriptor closures
-        dy_tctx.k_off = k0;
-        w_tctx.k_off = k0;
-
-        rocke_coalesced_tile_loader_load(
-            b, &a_sync_loader, tid, A_smem, _tilde_dy_descriptor, &dy_tctx, dy_rsrc, NULL);
-        rocke_coalesced_tile_loader_load(b,
-                                         &b_sync_loader,
-                                         tid,
-                                         B_smem,
-                                         spec->lds_k_outer ? _tilde_w_descriptor_kouter
-                                                           : _tilde_w_descriptor,
-                                         &w_tctx,
-                                         w_rsrc,
-                                         NULL);
-        rocke_b_sync(b);
-
-        // MFMA phase
-        rocke_value_t* new_accs[ROCKE_CONV_MAX_ACCS];
+    // ---- MFMA phase (shared by every synchronous K loop below) ----
+    // Emits exactly the ops of the former inline loop body, so a spec with
+    // a single K loop lowers byte-identically.
+    auto emit_mfma_phase = [&](rocke_value_t* const* in_vars, rocke_value_t** new_accs) {
         if(!is_wmma && atom)
         {
             rocke_lane_decode_t decoded = rocke_decode_mfma_lanes(b, atom, lane);
@@ -2757,7 +2844,7 @@ static rocke_kernel_def_t*
             rocke_value_t* warp_n_off = rocke_warp_grid_warp_n_off(b, &grid);
 
             for(int i = 0; i < num_accs; i++)
-                new_accs[i] = iter_vars[i];
+                new_accs[i] = in_vars[i];
 
             for(int kk = 0; kk < k_atoms; kk++)
             {
@@ -2781,9 +2868,9 @@ static rocke_kernel_def_t*
                     if(spec->lds_k_outer)
                     {
                         /* Python skips the b_row computation entirely on this
-                         * path, so emitting it here would add ops the Python
-                         * engine never emits. Operands sequenced into
-                         * temporaries to preserve left-to-right evaluation. */
+                             * path, so emitting it here would add ops the Python
+                             * engine never emits. Operands sequenced into
+                             * temporaries to preserve left-to-right evaluation. */
                         rocke_value_t* mn_c = rocke_b_const_i32(b, ni * spec->warp_tile_n);
                         rocke_value_t* mn_base = rocke_b_add(b, warp_n_off, mn_c);
                         rocke_value_t* k_c = rocke_b_const_i32(b, kk * spec->warp_tile_k);
@@ -2824,24 +2911,196 @@ static rocke_kernel_def_t*
         }
         else if(is_wmma)
         {
-            emit_wmma_phase(A_smem, B_smem, iter_vars, new_accs);
+            emit_wmma_phase(A_smem, B_smem, in_vars, new_accs);
         }
         else
         {
             for(int i = 0; i < num_accs; i++)
-                new_accs[i] = iter_vars[i];
+                new_accs[i] = in_vars[i];
         }
+    };
+
+    // ---- plain K-loop body: per-element descriptors, read+write per chunk ----
+    auto emit_plain_body = [&](rocke_value_t* kv, rocke_value_t* const* in_vars) {
+        // Set k_off_capture for descriptor closures
+        dy_tctx.k_off = kv;
+        w_tctx.k_off = kv;
+
+        rocke_coalesced_tile_loader_load(
+            b, &a_sync_loader, tid, A_smem, _tilde_dy_descriptor, &dy_tctx, dy_rsrc, NULL);
+        rocke_coalesced_tile_loader_load(b,
+                                         &b_sync_loader,
+                                         tid,
+                                         B_smem,
+                                         spec->lds_k_outer ? _tilde_w_descriptor_kouter
+                                                           : _tilde_w_descriptor,
+                                         &w_tctx,
+                                         w_rsrc,
+                                         NULL);
+        rocke_b_sync(b);
+
+        rocke_value_t* new_accs[ROCKE_CONV_MAX_ACCS];
+        emit_mfma_phase(in_vars, new_accs);
 
         rocke_b_sync(b);
         rocke_b_scf_yield(b, new_accs, num_accs);
-    }
-    rocke_b_region_leave(b);
+    };
 
-    // ---- final_accs ----
     rocke_value_t* final_accs[ROCKE_CONV_MAX_ACCS];
-    for(int i = 0; i < for_op.op->num_results; i++)
-        final_accs[i] = for_op.op->results[i];
-    int num_final = for_op.op->num_results;
+    int num_final = 0;
+    if(spec->uniform_k_decode)
+    {
+        /* Python _emit_uniform_k_decode_loops. Loop 1 carries the K tile's
+         * decoded (k_out, xdot, ydot) and runs when K is a multiple of tile_k;
+         * loop 2 is the plain loop and runs otherwise. Exactly one has a
+         * non-empty range. Ungrouped only, like the rest of this builder. */
+        rocke_value_t* c_kd = c_K;
+        rocke_value_t* c_xs = rec_x_dot_slice;
+        rocke_value_t* c1 = rocke_b_const_i32(b, 1);
+        rocke_value_t* kd_rem = rocke_b_mod(b, c_kd, c_block_k);
+        rocke_value_t* uk_ok = rocke_b_cmp_eq(b, kd_rem, c0);
+        rocke_value_t* q_lo = rocke_b_div(b, k_lo, c_kd);
+        rocke_value_t* uk_k0 = rocke_b_mod(b, k_lo, c_kd);
+        rocke_value_t* uk_x0 = rocke_b_mod(b, q_lo, c_xs);
+        rocke_value_t* uk_y0 = rocke_b_div(b, q_lo, c_xs);
+        /* dY (NHWK): ho moves by ydot*a_embed_h_coeff rows of Wo*K, wo by
+         * xdot*a_embed_w_coeff rows of K. */
+        rocke_value_t* wo_k = rocke_b_mul(b, c_Wo, c_K);
+        rocke_value_t* a_step_y = rocke_b_mul(b, rec_a_embed_h_coeff, wo_k);
+        rocke_value_t* a_step_x = rocke_b_mul(b, rec_a_embed_w_coeff, c_K);
+        /* W (KYXC): offset = k*Y*X*C + y*X*C + x*C + c. */
+        rocke_value_t* c_cs = c_C;
+        rocke_value_t* b_step_y = rocke_b_mul(b, c_X, c_cs);
+        rocke_value_t* b_step_k = rocke_b_mul(b, c_Y, b_step_y);
+        rocke_value_t* uk_hi = rocke_b_select(b, uk_ok, k_hi, k_lo);
+
+        uk_dy_ctx_t uk_dy;
+        uk_dy.block_m_off = block_m_off_v;
+        uk_dy.hw_tilde = hw_tilde;
+        uk_dy.rec_w_tilde_slice = rec_w_tilde_slice;
+        uk_dy.rec_h_tilde_slice_begin = rec_h_tilde_slice_begin;
+        uk_dy.rec_w_tilde_slice_begin = rec_w_tilde_slice_begin;
+        uk_dy.c_Ho = c_Ho;
+        uk_dy.c_K = c_K;
+        uk_dy.wo_k = wo_k;
+        uk_dy.c0 = c0;
+        uk_dy.ho_lo = uk_dy.ho_hi = uk_dy.wo_lo = uk_dy.wo_hi = uk_dy.a_off = NULL;
+        uk_w_ctx_t uk_w;
+        uk_w.block_n_off = block_n_off_v;
+        uk_w.b_step_k = b_step_k;
+        uk_w.c0 = c0;
+        uk_w.b_off = uk_w.b_ok = NULL;
+
+        rocke_iter_arg_t uk_args[ROCKE_CONV_MAX_ACCS + 3];
+        for(int i = 0; i < num_accs; i++)
+            uk_args[i] = iter_args[i];
+        uk_args[num_accs + 0].name = "uk_k";
+        uk_args[num_accs + 0].init = uk_k0;
+        uk_args[num_accs + 1].name = "uk_x";
+        uk_args[num_accs + 1].init = uk_x0;
+        uk_args[num_accs + 2].name = "uk_y";
+        uk_args[num_accs + 2].init = uk_y0;
+        rocke_for_t for_uk = rocke_b_scf_for_iter(
+            b, k_lo, uk_hi, c_block_k, uk_args, num_accs + 3, "k0", false, true);
+        rocke_b_region_enter(b, for_uk.body);
+        {
+            rocke_value_t* ko = for_uk.iter_vars[num_accs + 0];
+            rocke_value_t* xd = for_uk.iter_vars[num_accs + 1];
+            rocke_value_t* yd = for_uk.iter_vars[num_accs + 2];
+
+            /* Per-tile uniforms (Python tile_uniforms). */
+            rocke_value_t* a_h = rocke_b_mul(b, yd, rec_a_embed_h_coeff);
+            rocke_value_t* a_w = rocke_b_mul(b, xd, rec_a_embed_w_coeff);
+            uk_dy.ho_lo = rocke_b_sub(b, c0, a_h);
+            uk_dy.ho_hi = rocke_b_sub(b, c_Ho, a_h);
+            uk_dy.wo_lo = rocke_b_sub(b, c0, a_w);
+            uk_dy.wo_hi = rocke_b_sub(b, c_Wo, a_w);
+            rocke_value_t* ay = rocke_b_mul(b, yd, a_step_y);
+            rocke_value_t* a_k = rocke_b_add(b, ko, ay);
+            rocke_value_t* ax = rocke_b_mul(b, xd, a_step_x);
+            uk_dy.a_off = rocke_b_add(b, a_k, ax);
+            rocke_value_t* y = rocke_b_add(b, rocke_b_mul(b, yd, rec_b_y_stride), rec_b_y_offset);
+            rocke_value_t* x = rocke_b_add(b, rocke_b_mul(b, xd, rec_b_x_stride), rec_b_x_offset);
+            rocke_value_t* bk = rocke_b_mul(b, ko, b_step_k);
+            rocke_value_t* by = rocke_b_mul(b, y, b_step_y);
+            rocke_value_t* bx = rocke_b_mul(b, x, c_cs);
+            rocke_value_t* byx = rocke_b_add(b, by, bx);
+            uk_w.b_off = rocke_b_add(b, bk, byx);
+            rocke_value_t* y_lt = rocke_b_cmp_lt(b, y, c_Y);
+            rocke_value_t* x_lt = rocke_b_cmp_lt(b, x, c_X);
+            uk_w.b_ok = rocke_b_land(b, y_lt, x_lt);
+
+            /* Every global read of the tile before the first LDS write. */
+            rocke_ctl_staged_t a_staged;
+            rocke_ctl_staged_t b_staged;
+            rocke_coalesced_tile_loader_load_global(
+                b, &a_sync_loader, tid, _uk_dy_descriptor, &uk_dy, dy_rsrc, NULL, &a_staged);
+            rocke_coalesced_tile_loader_load_global(b,
+                                                    &b_sync_loader,
+                                                    tid,
+                                                    spec->lds_k_outer ? _uk_w_descriptor_kouter
+                                                                      : _uk_w_descriptor,
+                                                    &uk_w,
+                                                    w_rsrc,
+                                                    NULL,
+                                                    &b_staged);
+            rocke_coalesced_tile_loader_store_lds(b, &a_sync_loader, A_smem, &a_staged);
+            rocke_coalesced_tile_loader_store_lds(b, &b_sync_loader, B_smem, &b_staged);
+            rocke_b_sync(b);
+
+            rocke_value_t* uk_new[ROCKE_CONV_MAX_ACCS + 3];
+            emit_mfma_phase(for_uk.iter_vars, uk_new);
+            rocke_b_sync(b);
+
+            /* Next tile: k_out wraps into the next filter tap. */
+            rocke_value_t* nk = rocke_b_add(b, ko, c_block_k);
+            rocke_value_t* wrap_k = rocke_b_cmp_ge(b, nk, c_kd);
+            nk = rocke_b_select(b, wrap_k, c0, nk);
+            rocke_value_t* cx = rocke_b_select(b, wrap_k, c1, c0);
+            rocke_value_t* nx = rocke_b_add(b, xd, cx);
+            rocke_value_t* wrap_x = rocke_b_cmp_ge(b, nx, c_xs);
+            nx = rocke_b_select(b, wrap_x, c0, nx);
+            rocke_value_t* cy = rocke_b_select(b, wrap_x, c1, c0);
+            rocke_value_t* ny = rocke_b_add(b, yd, cy);
+            uk_new[num_accs + 0] = nk;
+            uk_new[num_accs + 1] = nx;
+            uk_new[num_accs + 2] = ny;
+            rocke_b_scf_yield(b, uk_new, num_accs + 3);
+        }
+        rocke_b_region_leave(b);
+
+        rocke_value_t* fb_lo = rocke_b_select(b, uk_ok, k_hi, k_lo);
+        rocke_iter_arg_t fb_args[ROCKE_CONV_MAX_ACCS];
+        char fb_name_bufs[ROCKE_CONV_MAX_ACCS][40];
+        for(int i = 0; i < num_accs; i++)
+        {
+            snprintf(fb_name_bufs[i], sizeof(fb_name_bufs[0]), "fb_%s", iter_args[i].name);
+            fb_args[i].name = fb_name_bufs[i];
+            fb_args[i].init = for_uk.op->results[i];
+        }
+        rocke_for_t for_fb
+            = rocke_b_scf_for_iter(b, fb_lo, k_hi, c_block_k, fb_args, num_accs, "k1", false, true);
+        rocke_b_region_enter(b, for_fb.body);
+        emit_plain_body(for_fb.iv, for_fb.iter_vars);
+        rocke_b_region_leave(b);
+
+        for(int i = 0; i < for_fb.op->num_results; i++)
+            final_accs[i] = for_fb.op->results[i];
+        num_final = for_fb.op->num_results;
+    }
+    else
+    {
+        // ---- K loop (simple scf.for_iter) ----
+        rocke_for_t for_op = rocke_b_scf_for_iter(
+            b, k_lo, k_hi, c_block_k, iter_args, num_accs, "k0", false, true);
+        rocke_b_region_enter(b, for_op.body);
+        emit_plain_body(for_op.iv, for_op.iter_vars);
+        rocke_b_region_leave(b);
+
+        for(int i = 0; i < for_op.op->num_results; i++)
+            final_accs[i] = for_op.op->results[i];
+        num_final = for_op.op->num_results;
+    }
 
     // ---- accumulator epilogue ----
     rocke_value_t* epi_accs[ROCKE_CONV_MAX_ACCS];
