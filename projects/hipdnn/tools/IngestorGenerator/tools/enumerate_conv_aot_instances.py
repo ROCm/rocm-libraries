@@ -3,9 +3,11 @@
 # SPDX-License-Identifier: MIT
 """Enumerate the rocKE gfx950 forward-conv AOT instances the hipkernel pack ships.
 
-The instances are a filtered slice of rocKE's own AOT sweep grid
+The instances come from rocKE's own sweep grids, per dtype, in two families.
+
+Implicit GEMM is a filtered slice of the AOT sweep grid
 (``benchmarks/common/kernel_sweep.py``): every valid gfx950 forward implicit-GEMM
-``KernelIdentity`` for each dtype, then
+``KernelIdentity``, then
 
 1. the knob rule (:data:`KNOB_RULE`): only the listed values of each compile-time
    knob are kept; every other knob value is dominated by a kept one;
@@ -21,8 +23,15 @@ candidate on the CPU (no GPU) in a process pool. COMGR's own cache
 records a digest of the candidates it was computed over, so a changed grid or knob
 rule is refused instead of silently filtered with a stale list.
 
-The output is a JSON list with one identity per line for every dtype, sorted by
-``(dtype, stable_hash)``. Each entry is compact (:func:`compact_identity`): the
+Direct depthwise is every forward identity of the direct sweep grid
+(``benchmarks/common/direct_kernel_sweep.py``) whose algorithm the packaged direct
+launch runs (``direct_depthwise`` and ``direct_depthwise_spatial``) and that
+``make_conv_aot_config.py`` accepts. The direct grid validates each kernel itself,
+so neither rule above applies to it.
+
+The output is a JSON list with one identity per line, ordered by dtype, then family
+(implicit GEMM first), then ``stable_hash``. Each entry is compact
+(:func:`compact_identity`): the
 ``KernelIdentity`` fields without a plain default, plus every field that differs
 from its default; ``KernelIdentity.from_dict`` restores the rest, so the entry
 keeps its ``stable_hash()``. The list is the input of
@@ -98,6 +107,15 @@ def _bind_rocke(rocke_root: Path) -> None:
             sys.path.insert(0, path)
 
 
+def _converter():
+    """``make_conv_aot_config``, the tool that consumes the list."""
+    if str(_HERE) not in sys.path:
+        sys.path.insert(0, str(_HERE))
+    import make_conv_aot_config
+
+    return make_conv_aot_config
+
+
 def knob_rule_rejection(identity: dict) -> str:
     """The first knob of ``identity`` outside :data:`KNOB_RULE`, as a reason; ``""``
     when the identity passes."""
@@ -120,6 +138,32 @@ def grid_identities(dtype: str, jobs: int) -> list:
         jobs=jobs,
     )
     return [job.identity.to_dict() for job in found]
+
+
+def direct_identities(dtype: str, jobs: int) -> tuple:
+    """``(packaged, grid_count)``: the forward identities of rocKE's direct sweep grid
+    that the packaged direct launch runs, as dicts, and how many forward identities the
+    grid has in all. An identity is packaged when its algorithm is one of
+    ``make_conv_aot_config.DIRECT_ALGORITHMS`` and the converter accepts it."""
+    from benchmarks.common.direct_kernel_sweep import enumerate_direct_jobs
+    from rocke.core.arch import ArchTarget
+
+    converter = _converter()
+    found = enumerate_direct_jobs(
+        arch=ARCH,
+        target=ArchTarget.from_gfx(ARCH),
+        directions=("fwd",),
+        dtype=dtype,
+        jobs=jobs,
+    )
+    forward = [job.identity.to_dict() for job in found]
+    packaged = [
+        identity
+        for identity in forward
+        if identity["algorithm"] in converter.DIRECT_ALGORITHMS
+        and converter.instance_spec(identity)[0] is not None
+    ]
+    return packaged, len(forward)
 
 
 def stable_hash(identity: dict) -> str:
@@ -277,12 +321,9 @@ def read_spill_list(path: Path, candidates: dict) -> set:
 
 def validate(identities: list) -> list:
     """``(stable_hash, reason)`` for each identity the converter rejects."""
-    sys.path.insert(0, str(_HERE))
-    from make_conv_aot_config import instance_spec
-
     rejected = []
     for identity in identities:
-        spec, reason = instance_spec(identity)
+        spec, reason = _converter().instance_spec(identity)
         if spec is None:
             rejected.append((stable_hash(identity), reason))
     return rejected
@@ -370,7 +411,10 @@ def main(argv=None) -> int:
     excluded = read_spill_list(args.spills, hashes)
 
     kept = []
-    print(f"{'dtype':6s} {'grid':>7s} {'knob rule':>9s} {'R1':>7s} {'distinct':>8s}")
+    print(
+        f"{'dtype':6s} {'grid':>7s} {'knob rule':>9s} {'R1':>7s} {'distinct':>8s} "
+        f"{'direct grid':>11s} {'direct':>6s}"
+    )
     for dtype in sorted(DTYPES):
         survivors = [
             (h, i)
@@ -378,11 +422,13 @@ def main(argv=None) -> int:
             if h not in excluded
         ]
         distinct = len({h for h, _ in survivors})
+        direct, direct_grid = direct_identities(dtype, args.jobs)
         print(
             f"{dtype:6s} {len(grid[dtype]):7d} {len(candidates[dtype]):9d} "
-            f"{len(survivors):7d} {distinct:8d}"
+            f"{len(survivors):7d} {distinct:8d} {direct_grid:11d} {len(direct):6d}"
         )
         kept.extend(sorted(survivors, key=lambda pair: pair[0]))
+        kept.extend(sorted(((stable_hash(i), i) for i in direct), key=lambda p: p[0]))
     identities = [identity for _, identity in kept]
 
     rejected = validate(identities)
