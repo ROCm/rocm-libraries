@@ -45,6 +45,7 @@ class Type:
 
 
 I1 = Type("i1")
+I4 = Type("i4")
 I8 = Type("i8")
 I16 = Type("i16")
 I32 = Type("i32")
@@ -71,6 +72,7 @@ def dtype_to_ir_type(dtype: str) -> Type:
     info = dtype_info(dtype)
     types = {
         "i1": I1,
+        "i4": I4,
         "i8": I8,
         "i16": I16,
         "i32": I32,
@@ -260,6 +262,27 @@ def _is_flag_ptr(t: "Type") -> bool:
 def _check_flag_ptr(op_name: str, ptr: "Value") -> None:
     if not _is_flag_ptr(ptr.type):
         raise ValueError(f"{op_name} expects a global i32 pointer, got {ptr.type.name}")
+
+
+# I4 is packed-only: its values only ever live packed in 32-bit words, so no IR
+# value, scalar or vector, and no LDS tile has that element type. IRBuilder
+# enforces it for every op result and kernel parameter through
+# _refuse_packed_only_value, the one home of that rule; the lowerers' type
+# tables have no entry for a packed-only type.
+_PACKED_ONLY_SCALARS = ("i4",)
+
+
+def _refuse_packed_only_value(op_name: str, t: "Type") -> None:
+    """Refuse an ``op_name`` result or parameter of type ``t`` whose elements
+    are packed-only: a scalar, a vector of one, or an LDS tile of one. An
+    untyped placeholder (``None``) has no elements and passes."""
+    elem = t.elem if isinstance(t, (VectorType, SmemType)) else t
+    if elem is not None and elem.name in _PACKED_ONLY_SCALARS:
+        raise TypeError(
+            f"{op_name}: {elem.name} values travel packed in 32-bit words and have "
+            "no scalar or vector form -- keep them in i32 storage and unpack "
+            "explicitly"
+        )
 
 
 def _sync_attr(op: "Op", key: str, allowed: Sequence[str]) -> str:
@@ -831,6 +854,7 @@ class IRBuilder:
         """
         if name in self._param_values:
             raise ValueError(f"duplicate kernel parameter {name!r}")
+        _refuse_packed_only_value("param", t)
         v = Value(name=f"%{name}", type=t)
         self._param_values[name] = v
         self._params.append(Param(name=name, type=t, attrs=dict(attrs)))
@@ -881,6 +905,8 @@ class IRBuilder:
         result_name_hint: str = "v",
         loc: Optional[str] = None,
     ) -> Op:
+        for t in result_types:
+            _refuse_packed_only_value(name, t)
         results = [Value(self._fresh(result_name_hint), t) for t in result_types]
         op = Op(
             name=name,
@@ -1815,6 +1841,7 @@ class IRBuilder:
         ).result
 
     def zero_vec(self, elem: Type, n: int) -> Value:
+        _refuse_packed_only_value("zero_vec", elem)
         if elem == F32:
             return self.zero_vec_f32(n)
         if elem in (F16, BF16, F64, FP8E4M3, BF8E5M2, I8, I16, I32):

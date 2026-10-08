@@ -385,6 +385,12 @@ rocke_op_t* rocke_i_op(rocke_ir_builder_t* b,
     if(num_regions < 0)
         num_regions = 0;
 
+    for(i = 0; i < num_results; i++)
+    {
+        rocke_i_refuse_packed_only_value(rocke_opcode_name(opcode),
+                                         result_types ? result_types[i] : NULL);
+    }
+
     op = (rocke_op_t*)rocke_arena_calloc(&b->arena, sizeof(*op));
     if(!op)
     {
@@ -640,6 +646,24 @@ int rocke_i_count_of(const rocke_type_t* t)
     return 1;
 }
 
+void rocke_i_refuse_packed_only_value(const char* op_name, const rocke_type_t* t)
+{
+    const rocke_type_t* elem
+        = (t != NULL && t->kind == ROCKE_TYPE_SMEM) ? t->elem : rocke_i_elem_of(t);
+    if(elem == NULL || elem->kind != ROCKE_TYPE_SCALAR)
+    {
+        return;
+    }
+    if(elem->scalar == ROCKE_SCALAR_I4)
+    {
+        throw ckc::TypeError(
+            ckc::format_error("%s: %s values travel packed in 32-bit words and have no scalar or "
+                              "vector form -- keep them in i32 storage and unpack explicitly",
+                              op_name,
+                              elem->name));
+    }
+}
+
 /* ============================== BUILDER ================================= */
 
 rocke_status_t rocke_ir_builder_init(rocke_ir_builder_t* b, const char* kernel_name)
@@ -819,6 +843,8 @@ rocke_value_t* rocke_b_param(rocke_ir_builder_t* b,
                 b, ROCKE_ERR_VALUE, "duplicate kernel parameter '%s'", name);
         }
     }
+
+    rocke_i_refuse_packed_only_value("param", t);
 
     /* Value name carries the leading '%'. */
     full_name = rocke_arena_printf(&b->arena, "%%%s", name);

@@ -112,6 +112,7 @@ typedef enum rocke_scalar_kind
     ROCKE_SCALAR_E5M3,
     ROCKE_SCALAR_TF32,
     ROCKE_SCALAR_F64,
+    ROCKE_SCALAR_I4,
     ROCKE_SCALAR__COUNT
 } rocke_scalar_kind_t;
 
@@ -639,6 +640,7 @@ typedef struct rocke_mem_opts
 /* Interned scalar singletons (Python module-level I1, F32, ...). Always valid;
  * never NULL; never arena-owned (static storage). */
 const rocke_type_t* rocke_i1(void);
+const rocke_type_t* rocke_i4(void);
 const rocke_type_t* rocke_i8(void);
 const rocke_type_t* rocke_i16(void);
 const rocke_type_t* rocke_i32(void);

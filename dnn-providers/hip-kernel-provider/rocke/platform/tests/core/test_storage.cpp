@@ -354,7 +354,8 @@ int main(int argc, char** argv)
         CHECK(rocke_strbuf_init(&text, 256) == 0);
         rocke_lower_hip_opts_t opts = {};
         opts.arch = "gfx1250";
-        CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &text) == ROCKE_ERR_KEY);
+        CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &text) == ROCKE_ERR_NOTIMPL);
+        CHECK(strstr(rocke_ir_builder_error(&b), "no HIP mapping for type vec<"));
         CHECK(text.len > 0); // The prologue is assembled before the vector walk.
         rocke_strbuf_free(&text);
         rocke_ir_builder_free(&b);

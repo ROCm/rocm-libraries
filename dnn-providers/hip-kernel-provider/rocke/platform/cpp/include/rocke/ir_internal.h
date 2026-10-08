@@ -136,6 +136,13 @@ bool rocke_i_is_vector(const rocke_type_t* t, const char* elem_name, int count);
  * `v.type.elem if isinstance(...,VectorType) else v.type`). */
 const rocke_type_t* rocke_i_elem_of(const rocke_type_t* t);
 
+/* Throw ckc::TypeError when `t` is a packed-only scalar (i4), a vector of one
+ * or an LDS tile of one: the twin of core/ir.py::_refuse_packed_only_value,
+ * which states the rule and the message. rocke_i_op calls it for every result
+ * and rocke_b_param for every parameter, so no builder makes such a value.
+ * NULL-safe. */
+void rocke_i_refuse_packed_only_value(const char* op_name, const rocke_type_t* t);
+
 /* Lane count of a vector type, or 1 for a scalar. */
 int rocke_i_count_of(const rocke_type_t* t);
 

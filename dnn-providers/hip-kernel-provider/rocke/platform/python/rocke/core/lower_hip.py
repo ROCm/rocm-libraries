@@ -38,6 +38,8 @@ from .ir import (
 )
 
 
+# No packed-only type has an entry: core/ir.py _refuse_packed_only_value
+# keeps its values out of the IR.
 _HIP_TYPE = {
     "i1": "bool",
     "i8": "int8_t",
@@ -52,6 +54,24 @@ _HIP_TYPE = {
     "fp8e4m3": "fp8e4m3",
     "bf8e5m2": "bf8e5m2",
 }
+
+
+def _hip_scalar_type(type_name: str) -> str:
+    """Return the HIP scalar spelling of the IR type named ``type_name``, or refuse it.
+
+    Every handler that needs a scalar spelling asks here, and
+    :func:`_type_to_hip` sends here every type it does not compose itself, so
+    one message refuses them all (only the ``scf.for`` iter-arg declarations
+    fall back to ``auto``). A type with no HIP spelling -- a logical sub-byte
+    type such as ``i4`` whose values travel packed, or a vector of an unmapped
+    element -- is refused with the HIP twin of the LLVM lowering's ``no LLVM
+    mapping for type <name>``.
+    """
+    try:
+        return _HIP_TYPE[type_name]
+    except KeyError:
+        raise NotImplementedError(f"no HIP mapping for type {type_name}") from None
+
 
 _HIP_UNSIGNED_INT_TYPE = {
     "i1": "bool",
@@ -69,6 +89,8 @@ def _type_to_hip(t) -> str:
     if isinstance(t, VectorType):
         # Naming convention matches the prologue's typedefs:
         # ``f16xN``, ``bf16xN``, ``f32xN``, ``i32xN``, ``i8xN`` for N>=1.
+        # No packed-only type has an entry: core/ir.py _refuse_packed_only_value
+        # keeps its values out of the IR.
         elem = t.elem.name
         if elem == "f16":
             return f"f16x{t.count}"
@@ -98,7 +120,7 @@ def _type_to_hip(t) -> str:
         # smem allocations expand into __shared__ arrays at the top of
         # the kernel; the value at the use site is a typed pointer-ish.
         return f"{_type_to_hip(t.elem)}*"
-    return _HIP_TYPE[t.name]
+    return _hip_scalar_type(t.name)
 
 
 # Compilable-HIP prologue. Pasted at the top of every lowered source so
@@ -394,7 +416,7 @@ class _Lowerer:
         res = op.result
         ity = op.attrs.get("ity", "i32")
         val = op.attrs["value"]
-        cpp_t = _HIP_TYPE[ity]
+        cpp_t = _hip_scalar_type(ity)
         if ity in ("f16", "f32"):
             literal = _f32_literal(float(val))
             if ity == "f16":
@@ -531,7 +553,7 @@ class _Lowerer:
         st = op.result.type
         assert isinstance(st, SmemType)
         dims = "][".join(str(d) for d in st.shape)
-        elem = _HIP_TYPE[st.elem.name]
+        elem = _hip_scalar_type(st.elem.name)
         nice = _name(op.result)
         decl = f"    __shared__ {elem} {nice}_storage[{dims}];"
         self.smem_decls.append(decl)
@@ -1073,7 +1095,7 @@ class _Lowerer:
         # 4-byte types (f32, i32) → __builtin_amdgcn_raw_buffer_load_b32.
         rsrc, voffset, soffset = op.operands
         elem_type = op.attrs["elem_type"]
-        hip_t = _HIP_TYPE[elem_type]
+        hip_t = _hip_scalar_type(elem_type)
         tmp = f"_bl_{_name(op.result).lstrip('%')}"
         if elem_type in ("f16", "bf16"):
             self._emit(
@@ -1327,7 +1349,9 @@ class _Lowerer:
         (v,) = op.operands
         i = op.attrs["index"]
         elem_t = v.type.elem if isinstance(v.type, VectorType) else v.type
-        self._emit(f"{_HIP_TYPE[elem_t.name]} {_name(op.result)} = {_name(v)}[{i}];")
+        self._emit(
+            f"{_hip_scalar_type(elem_t.name)} {_name(op.result)} = {_name(v)}[{i}];"
+        )
 
     def _op_vector_trunc_f32_to_f16(self, op: Op) -> None:
         # Legacy op name; the post-merge IR emits ``vector.trunc_f32_to``
@@ -2402,7 +2426,7 @@ class _Lowerer:
         (v,) = op.operands
         n = v.type.count if isinstance(v.type, VectorType) else 1
         elem_t = v.type.elem.name if isinstance(v.type, VectorType) else v.type.name
-        cpp_t = _HIP_TYPE[elem_t]
+        cpp_t = _hip_scalar_type(elem_t)
         nice = _name(op.result)
         self._emit(f"{cpp_t} {nice} = {_name(v)}[0];")
         for i in range(1, n):
@@ -2545,7 +2569,7 @@ class _Lowerer:
         (v,) = op.operands
         n = v.type.count if isinstance(v.type, VectorType) else 1
         elem_t = v.type.elem.name if isinstance(v.type, VectorType) else v.type.name
-        cpp_t = _HIP_TYPE[elem_t]
+        cpp_t = _hip_scalar_type(elem_t)
         nice = _name(op.result)
         self._emit(f"{cpp_t} {nice} = {_name(v)}[0];")
         for i in range(1, n):
@@ -2560,7 +2584,7 @@ class _Lowerer:
         (v,) = op.operands
         n = v.type.count if isinstance(v.type, VectorType) else 1
         res_t = _type_to_hip(op.result.type)
-        elem_cpp = _HIP_TYPE[op.attrs.get("target", "f16")]
+        elem_cpp = _hip_scalar_type(op.attrs.get("target", "f16"))
         nice = _name(op.result)
         self._emit(f"{res_t} {nice};")
         for i in range(n):
@@ -2581,7 +2605,7 @@ class _Lowerer:
         iter_inits = op.operands[3 : 3 + num_iter]
         iter_meta = op.attrs.get("iter_args", [])
         iv_name = op.attrs["iv"][1:]
-        iv_ty = _HIP_TYPE[op.attrs["iv_type"]]
+        iv_ty = _hip_scalar_type(op.attrs["iv_type"])
 
         def cpp_type_for(type_name: str) -> str:
             if type_name.startswith("vec<f32x"):
@@ -2675,7 +2699,7 @@ def _extra_vector_declarations(kernel: KernelDef) -> list[str]:
                 if t.elem.name == "i1"
                 else _vec_prefix(t.elem.name, "vector type")
             )
-            scalar = "int8_t" if prefix == "i8x" else _HIP_TYPE[t.elem.name]
+            scalar = "int8_t" if prefix == "i8x" else _hip_scalar_type(t.elem.name)
             if f"_ROCKE_VEC({scalar}, {prefix}, {t.count})" not in HIP_PROLOGUE:
                 declarations[name] = (
                     f"using {name} = {scalar} __attribute__((ext_vector_type({t.count})));"

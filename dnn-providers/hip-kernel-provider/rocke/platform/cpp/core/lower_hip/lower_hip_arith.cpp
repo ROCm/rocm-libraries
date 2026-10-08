@@ -7,7 +7,7 @@
  *
  * Each `_op_*` Python method becomes a static `rocke_h_op_*` handler with the
  * (lw, op) signature from lower_hip_internal.h. Shared helpers (rocke_h_emit /
- * rocke_h_emitf / rocke_h_name / rocke_h_type_to_hip / rocke_h_hip_scalar /
+ * rocke_h_emitf / rocke_h_name / rocke_h_type_to_hip / rocke_h_require_hip_scalar /
  * rocke_h_f32_literal / rocke_attr_get_*) are DEFINED in lower_hip_core.c and only
  * called here. The registration table is exported via rocke_h_handlers_arith(),
  * which the core bucket stitches into the dispatch table.
@@ -81,11 +81,7 @@ static rocke_status_t rocke_h_op_arith_constant(rocke_h_lowerer_t* lw, const roc
     {
         ity = "i32";
     }
-    cpp_t = rocke_h_hip_scalar(ity);
-    if(!cpp_t)
-    {
-        return rocke_h_fail(lw, ROCKE_ERR_KEY, "arith.constant: unknown ity %s", ity);
-    }
+    cpp_t = rocke_h_require_hip_scalar(lw, ity);
     val = rocke_attr_get(&op->attrs, "value");
     if(!val)
     {
