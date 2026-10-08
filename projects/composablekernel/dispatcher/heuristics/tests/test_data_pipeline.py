@@ -451,5 +451,316 @@ class TestVectorWidthSuffix:
         assert parse_kernel_name(self.BASE + "_vec16_2_16")["vec_a"] == 16
 
 
+class TestHardwareProfileLdsCapacity:
+    """rocminfo does not report LDS capacity, so --capture_hw omitted it and
+    the feature engine fell back to its 64 KB constructor default. On any part
+    with more LDS, lds_usage_ratio -- which divides by the capacity -- then
+    saturates: ~91% of a gfx950 sweep's rows, against ~1% at the true
+    160 KB. It now comes from the generated arch table."""
+
+    @pytest.mark.parametrize(
+        "reported,expected",
+        [
+            # The form rocminfo actually emits: a full target triple, not a
+            # bare target. Passing it straight to normalize_gfx_arch strips
+            # only the feature suffix and leaves "amdgcn-amd-amdhsa--gfx90a",
+            # which matches no entry and silently restores the default.
+            ("amdgcn-amd-amdhsa--gfx950:sramecc+:xnack-", 163840),
+            ("amdgcn-amd-amdhsa--gfx90a:sramecc+:xnack-", 65536),
+            ("amdgcn-amd-amdhsa--gfx1250", 327680),
+            ("gfx950", 163840),
+            ("gfx950:xnack-", 163840),
+        ],
+    )
+    def test_the_capacity_is_resolved_from_the_reported_name(
+        self, reported, expected, monkeypatch
+    ):
+        import subprocess
+
+        import data_pipeline as dp
+
+        def fake_run(*a, **k):
+            class R:
+                stdout = (
+                    "  Device Type:             GPU\n"
+                    f"  Name:                    {reported}\n"
+                    "  Compute Unit:            256\n"
+                )
+
+            return R()
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        assert dp.get_hardware_profile()["lds_capacity"] == expected
+
+    def test_an_unrecognised_name_omits_the_key(self, monkeypatch):
+        """Omitted rather than guessed: build_hw_kwargs then leaves the engine
+        on its own default instead of a value invented here."""
+        import subprocess
+
+        import data_pipeline as dp
+
+        def fake_run(*a, **k):
+            class R:
+                stdout = "  Device Type:   GPU\n  Name:   not-a-target\n"
+
+            return R()
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        assert "lds_capacity" not in dp.get_hardware_profile()
+
+    def test_every_profile_matches_the_arch_table(self):
+        """The CSV route and the rocminfo route are two paths to the same
+        number; they disagreed before, with only one corrected. Parametrised
+        over every profile, not just gfx950 -- the other entries restated the
+        constant, so the claimed invariant held for one of three."""
+        from convert_csv_to_parquet import HW_PROFILES
+
+        from arch_specs_generated import LDS_TOTAL_CAPACITY_BY_ARCH
+
+        assert HW_PROFILES, "no hardware profiles"
+        for arch, profile in HW_PROFILES.items():
+            assert arch in LDS_TOTAL_CAPACITY_BY_ARCH, arch
+            assert profile["hw_lds_capacity"] == LDS_TOTAL_CAPACITY_BY_ARCH[arch], arch
+
+    def test_the_profiles_are_sourced_not_restated(self, monkeypatch):
+        """Pins the MECHANISM, not the value.
+
+        Asserting `== 163840` guards against a revert to 64 KB but not against
+        the number being hardcoded again -- replacing the table lookup with the
+        literal left the suite green, while the comment claims the producers
+        and the arch specs 'cannot disagree again'. Moving the table must move
+        the profile."""
+        import importlib
+
+        import arch_specs_generated as specs
+        import convert_csv_to_parquet as cc
+
+        monkeypatch.setitem(specs.LDS_TOTAL_CAPACITY_BY_ARCH, "gfx950", 12345)
+        try:
+            reloaded = importlib.reload(cc)
+            assert reloaded.HW_PROFILES["gfx950"]["hw_lds_capacity"] == 12345, (
+                "the profile did not follow the arch table, so the value is "
+                "restated rather than sourced"
+            )
+        finally:
+            monkeypatch.undo()
+            importlib.reload(cc)
+
+    #: The gfx1250 constants measured from rocminfo's GPU agent on a gfx1250
+    #: node: 256 compute units, 4 SIMDs per CU, 2400 MHz, wavefront 32.
+    #:
+    #: Pinned because an earlier draft of that profile said num_cus=128 and
+    #: simds_per_cu=2 -- both half -- and 128 is what a parser reading
+    #: rocminfo's FIRST agent picks up: the host CPU's "Compute Unit". Nothing
+    #: failed. num_cus is not a passthrough: it divides cu_utilization and
+    #: scales total_simds, so the wrong value reaches the features and the
+    #: recorded spec.
+    MEASURED_GFX1250 = {
+        "hw_num_cus": 256,
+        "hw_simds_per_cu": 4,
+        "hw_max_clock_mhz": 2400,
+        "hw_wavefront_size": 32,
+    }
+
+    def test_the_measured_gfx1250_constants(self):
+        from convert_csv_to_parquet import HW_PROFILES
+
+        got = HW_PROFILES["gfx1250"]
+        for key, want in self.MEASURED_GFX1250.items():
+            assert got[key] == want, (
+                f"gfx1250 {key} is {got[key]}, measured value is {want}"
+            )
+
+    def test_gfx1250_carries_no_unmeasured_constant(self):
+        """Absent rather than guessed. An earlier draft filled the remaining six
+        from other parts' profiles; absent keys produce no column, so the
+        engine applies its own defaults, which claim nothing about this part.
+        Adding a guess back -- however plausible -- fails here."""
+        from convert_csv_to_parquet import HW_PROFILES
+
+        assert set(HW_PROFILES["gfx1250"]) == set(self.MEASURED_GFX1250) | {
+            "hw_lds_capacity"
+        }
+
+    def test_gfx950_num_cus(self):
+        """The same class of constant on the arch this ticket measures."""
+        from convert_csv_to_parquet import HW_PROFILES
+
+        assert HW_PROFILES["gfx950"]["hw_num_cus"] == 256
+        assert HW_PROFILES["gfx950"]["hw_wavefront_size"] == 64
+
+    def test_the_profiles_are_not_interchangeable(self):
+        """Guard the guard: if every part had the same LDS, substituting one
+        profile for another would be harmless and the test below would pin
+        nothing. gfx1250 has 320 KB, gfx950 160 KB, gfx942/gfx90a 64 KB."""
+        from convert_csv_to_parquet import HW_PROFILES
+
+        caps = {a: p["hw_lds_capacity"] for a, p in HW_PROFILES.items()}
+        assert len(set(caps.values())) > 1, caps
+        assert caps["gfx1250"] != caps["gfx950"]
+
+    def test_an_unknown_arch_emits_no_hardware_columns(self, tmp_path):
+        """Omit rather than borrow another part's constants.
+
+        This used to substitute gfx950's profile. That was survivable only
+        while every value in it equalled the engine default; correcting
+        hw_lds_capacity to gfx950's real 160 KB made the substitution actively
+        wrong for any other part.
+
+        Calls the function. An earlier version grepped the source for the
+        literal 'HW_PROFILES["gfx950"]', which any rephrasing defeats -- a
+        `.get(arch) or .get("gfx950")` fully restored the defect and the test
+        still passed."""
+        import pandas as pd
+
+        from convert_csv_to_parquet import HW_PROFILES, convert_csv_to_parquet
+
+        assert "gfx1250" in HW_PROFILES, (
+            "gfx1250 must have its own profile; it has 320 KB and would "
+            "otherwise be stamped with gfx950's 160 KB"
+        )
+        csv = tmp_path / "in.csv"
+        csv.write_text(
+            "kernel,problem_idx,M,N,K,device,latency_ms,tflops,"
+            "non_zero,max_rel,verified\n"
+            "gemm_bf16_rcr_compv3_cshuffle_intrawave_0_0_0_0_"
+            "128x128x64_2x2x1_32x32x16,0,512,1024,1024,0,0.5,4.3,1,1e-3,True\n"
+        )
+        out = tmp_path / "out.parquet"
+        convert_csv_to_parquet(csv, out, arch="gfx_not_a_real_target")
+        hw_cols = [c for c in pd.read_parquet(out).columns if c.startswith("hw_")]
+        assert hw_cols == [], (
+            f"an unknown arch was given another part's constants: {hw_cols}"
+        )
+
+    def test_a_known_arch_does_emit_them(self, tmp_path):
+        """Guard the guard: if the converter emitted no hw_ columns for any
+        arch, the test above would pass while the feature is dead."""
+        import pandas as pd
+
+        from convert_csv_to_parquet import convert_csv_to_parquet
+
+        csv = tmp_path / "in.csv"
+        csv.write_text(
+            "kernel,problem_idx,M,N,K,device,latency_ms,tflops,"
+            "non_zero,max_rel,verified\n"
+            "gemm_bf16_rcr_compv3_cshuffle_intrawave_0_0_0_0_"
+            "128x128x64_2x2x1_32x32x16,0,512,1024,1024,0,0.5,4.3,1,1e-3,True\n"
+        )
+        out = tmp_path / "out.parquet"
+        convert_csv_to_parquet(csv, out, arch="gfx950")
+        df = pd.read_parquet(out)
+        assert df["hw_lds_capacity"].iloc[0] == 163840
+
+    def test_capture_hw_refuses_a_foreign_arch(self):
+        """--capture_hw reads THIS node; the rows are labelled --arch. The
+        gfx1250 workflow converts a bare-node log on a login node of another
+        architecture, so the two routinely differ -- and the profile now
+        carries lds_capacity, so the mismatch writes half a part's LDS into
+        feature_spec.json.
+
+        An earlier version of this test asserted that two string literals were
+        unequal and never invoked the guard at all; it passed with the guard
+        deleted."""
+        from data_pipeline import check_capture_hw_arch
+
+        gfx950_node = {"gfx_name": "amdgcn-amd-amdhsa--gfx950:sramecc+:xnack-"}
+        with pytest.raises(SystemExit, match="gfx1250"):
+            check_capture_hw_arch(gfx950_node, "gfx1250")
+
+    def test_capture_hw_accepts_a_matching_arch(self):
+        from data_pipeline import check_capture_hw_arch
+
+        node = {"gfx_name": "amdgcn-amd-amdhsa--gfx950:sramecc+:xnack-"}
+        assert check_capture_hw_arch(node, "gfx950") is None
+        assert check_capture_hw_arch(node, "gfx950:xnack-") is None
+
+    def test_capture_hw_allows_an_unidentifiable_node(self):
+        """No gfx token means nothing to contradict, so the profile stands --
+        refusing would break a node whose rocminfo output we cannot parse.
+
+        Asserts by not raising; inverting the no-token branch fails it."""
+        from data_pipeline import check_capture_hw_arch
+
+        assert check_capture_hw_arch({"gfx_name": "not-a-target"}, "gfx1250") is None
+        assert check_capture_hw_arch({}, "gfx1250") is None
+
+    #: A log that parses to a real row. An earlier version used a bare
+    #: "Shape 1: 512x1024x1024", which matches nothing and yields an empty
+    #: frame -- so main was only ever exercised on a shape no production run
+    #: produces, and its stamping loop and write were never reached.
+    LOG = (
+        "Shape 1: M=512 N=1024 K=1024 dtype=bf16 layout=rcr\n"
+        "{\n"
+        '  "name": "gemm_universal_bf16_rcr_compv3_cshuffle_intrawave_'
+        '0_0_0_0_128x128x64_2x2x1_32x32x16",\n'
+        '  "perf_result": { "latency(ms)": 0.5, "tflops(TFlops)": 4.3,\n'
+        '                   "bandwidth(GB/s)": 100.0 }\n'
+        "}\n"
+    )
+
+    def test_the_log_fixture_parses_to_a_real_row(self, tmp_path):
+        """Guard the guard: an unparseable log makes every main() test below
+        exercise an empty frame while still passing."""
+        from data_pipeline import parse_streaming_log
+
+        log = tmp_path / "run.log"
+        log.write_text(self.LOG)
+        assert len(parse_streaming_log(log, arch="gfx950")) >= 1
+
+    def test_main_actually_invokes_the_arch_check(self, tmp_path, monkeypatch):
+        """The guard was tested; the line that calls it was not.
+
+        Its only caller used to sit inside `if __name__ == "__main__":`, which
+        no test can reach -- deleting the call left the whole suite green. That
+        is the same defect the extraction was meant to fix, one line further
+        down, so the CLI entry point is now a function and this exercises it."""
+        import data_pipeline as dp
+
+        log = tmp_path / "run.log"
+        log.write_text(self.LOG)
+        out = tmp_path / "out.parquet"
+        monkeypatch.setattr(
+            dp,
+            "get_hardware_profile",
+            lambda: {
+                "gfx_name": "amdgcn-amd-amdhsa--gfx950:xnack-",
+                "num_cus": 256,
+                "lds_capacity": 163840,
+            },
+        )
+        with pytest.raises(SystemExit, match="gfx1250"):
+            dp.main([str(log), "-o", str(out), "--arch", "gfx1250", "--capture_hw"])
+        # Raising is not enough: it has to raise BEFORE the write. Moving the
+        # call below save_parquet leaves the suite green while the foreign
+        # part's constants are stamped onto every row and the poisoned parquet
+        # lands on disk -- which is the only thing the guard exists to stop.
+        assert not out.exists(), "the parquet was written before the guard ran"
+
+    def test_main_writes_the_profile_when_the_arch_matches(self, tmp_path, monkeypatch):
+        """main's happy path -- the stamping loop and the write -- had no test
+        at all; the guard test exercised it only on an empty frame."""
+        import pandas as pd
+
+        import data_pipeline as dp
+
+        log = tmp_path / "run.log"
+        log.write_text(self.LOG)
+        out = tmp_path / "out.parquet"
+        monkeypatch.setattr(
+            dp,
+            "get_hardware_profile",
+            lambda: {
+                "gfx_name": "amdgcn-amd-amdhsa--gfx950:xnack-",
+                "num_cus": 256,
+                "lds_capacity": 163840,
+            },
+        )
+        dp.main([str(log), "-o", str(out), "--arch", "gfx950", "--capture_hw"])
+        assert out.exists()
+        df = pd.read_parquet(out)
+        assert df["hw_lds_capacity"].iloc[0] == 163840
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

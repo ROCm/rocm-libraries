@@ -188,5 +188,117 @@ class TestSearchEdgeCases:
             assert s1_ == pytest.approx(s2_)
 
 
+class TestTheSearchEngineMatchesTheModel:
+    """SurrogateSearch built its engine bare while the predictor scored with
+    the model's own constants, so the candidate FILTER and the SCORER could
+    disagree about the same hardware. get_constraints rejects on
+    self._hw["lds_capacity"], so against a 160 KB model the filter discarded
+    legal configs at the 64 KB default and they never reached the scorer.
+
+    The existing model_dir fixture cannot show this: its spec records no
+    `hardware` key, so both paths resolve to a default engine and the bug is
+    invisible. This fixture records one."""
+
+    #: Needs 128 KB of LDS ((256*256 + 256*256) bytes): rejected at the
+    #: 64 KB default, accepted at 160 KB.
+    BIG_TILE = dict(
+        tile_m=256,
+        tile_n=256,
+        tile_k=256,
+        warp_m=2,
+        warp_n=2,
+        warp_k=1,
+        warp_tile_m=32,
+        warp_tile_n=32,
+        warp_tile_k=16,
+        pipeline="compv3",
+    )
+
+    @pytest.fixture
+    def big_lds_model(self, tmp_path):
+        fe = GemmUniversalFeatureEngine()
+        n = len(fe.get_feature_names())
+        np.random.seed(0)
+        model = lgb.LGBMRegressor(n_estimators=5, verbose=-1)
+        model.fit(np.random.rand(50, n), np.random.rand(50))
+        model.booster_.save_model(str(tmp_path / "model_tflops.lgbm"))
+        (tmp_path / "feature_spec.json").write_text(
+            json.dumps(
+                {
+                    "feature_names": fe.get_feature_names(),
+                    "categorical_features": fe.get_categorical_features(),
+                    "hardware": {"lds_capacity": 163840},
+                }
+            )
+        )
+        return tmp_path
+
+    def test_the_config_discriminates(self):
+        """Guard the guard: if BIG_TILE were legal at both capacities the test
+        below would hold with the fix reverted."""
+        assert not GemmUniversalFeatureEngine().validate_config(self.BIG_TILE)
+        assert GemmUniversalFeatureEngine(lds_capacity=163840).validate_config(
+            self.BIG_TILE
+        )
+
+    def test_the_search_filter_uses_the_models_constants(self, big_lds_model):
+        search = SurrogateSearch(Predictor(big_lds_model))
+        assert search._fe.validate_config(self.BIG_TILE), (
+            "the search engine was built bare, so it filters candidates at the "
+            "64 KB default while the predictor scores at the model's 160 KB"
+        )
+
+    def test_an_explicitly_passed_engine_is_not_replaced(self, big_lds_model):
+        """A caller's engine must win even though the predictor now has one."""
+        mine = GemmUniversalFeatureEngine()
+        search = SurrogateSearch(Predictor(big_lds_model), feature_engine=mine)
+        assert search._fe is mine
+
+    def test_a_falsy_engine_is_still_honoured(self, big_lds_model):
+        """Pins `is not None` rather than `or`, which the test above cannot.
+
+        No engine defines __bool__ today, so every instance is truthy and the
+        two spellings are behaviourally identical -- rewriting the resolution
+        as a chain of `or` left the suite green. A deliberately falsy engine
+        makes the distinction observable, so the claim in the production
+        comment is guarded rather than merely asserted."""
+
+        class FalsyEngine(GemmUniversalFeatureEngine):
+            def __bool__(self):
+                return False
+
+        mine = FalsyEngine()
+        assert not mine
+        search = SurrogateSearch(Predictor(big_lds_model), feature_engine=mine)
+        assert search._fe is mine, (
+            "a falsy engine was discarded, so the resolution is testing "
+            "truthiness instead of presence"
+        )
+
+    def test_a_falsy_engine_from_the_predictor_is_still_honoured(self):
+        """The same distinction on the OTHER branch.
+
+        The test above passes an engine explicitly, so it only exercises the
+        caller-supplied branch; rewriting the predictor branch as `or` left it
+        green. A stub predictor is enough -- SurrogateSearch reads only
+        `feature_engine` from it during construction."""
+
+        class FalsyEngine(GemmUniversalFeatureEngine):
+            def __bool__(self):
+                return False
+
+        class StubPredictor:
+            def __init__(self, engine):
+                self.feature_engine = engine
+
+        engine = FalsyEngine()
+        search = SurrogateSearch(StubPredictor(engine))
+        assert search._fe is engine, (
+            "the predictor's engine was discarded because it is falsy, so the "
+            "search filters on default constants while the model scores on its "
+            "own"
+        )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

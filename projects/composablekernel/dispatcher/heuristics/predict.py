@@ -47,6 +47,15 @@ def _engine_for_spec(spec: dict):
 
     Names resolve through ``feature_engine.feature_engine_class``, which reads
     the same table ``train.get_feature_engine`` builds from.
+
+    The engine is rebuilt with the hardware constants the spec recorded, not
+    bare. ``train.main`` reads those from the dataset, and several features
+    divide by one of them -- ``lds_usage_ratio`` by ``lds_capacity``,
+    ``cu_utilisation`` by ``num_cus`` -- so a bare rebuild scores against
+    different numbers under identical feature names. ``feature_encoding_version``
+    cannot catch it: the formulas are unchanged, only their inputs. An absent
+    ``hardware`` key predates this, and those models were trained with the
+    constructor defaults, which ``**{}`` reproduces exactly.
     """
     from feature_engine import OPERATION_ENGINES, feature_engine_class
 
@@ -54,7 +63,7 @@ def _engine_for_spec(spec: dict):
     if name is None:
         op = spec.get("op_type")
         name = OPERATION_ENGINES.get(op, "GemmUniversalFeatureEngine")
-    return feature_engine_class(name)()
+    return feature_engine_class(name)(**spec.get("hardware", {}))
 
 
 class Predictor:

@@ -40,6 +40,13 @@ SCHEDULER_MAP = {"intrawave": 0, "interwave": 1}
 EPILOGUE_MAP = {"default": 0, "cshuffle": 1}
 
 
+#: Keys an engine may hold in ``_hw`` that ``__init__`` does not accept because
+#: they are computed from the others. Registered explicitly so that a constant
+#: accidentally missing from the constructor is an error rather than a silent
+#: drop -- see FeatureEngine.hardware_config.
+_DERIVED_HW = frozenset({"total_simds"})
+
+
 class FeatureEngine(ABC):
     """Abstract base for per-op feature extraction."""
 
@@ -52,6 +59,57 @@ class FeatureEngine(ABC):
     #: encodings into one booster with nothing to detect it. Engines that have
     #: never been re-encoded stay at 0.
     ENCODING_VERSION = 0
+
+    @property
+    def hardware_config(self) -> dict:
+        """The hardware constants this engine was constructed with.
+
+        ENCODING_VERSION pins what the feature FORMULAS mean; this pins what
+        they were evaluated against. Several features divide by one of these --
+        lds_usage_ratio by lds_capacity, cu_utilisation by num_cus -- so an
+        engine rebuilt with different constants emits different values under
+        unchanged names, which is the same undetectable mismatch and is not
+        covered by the version.
+
+        Recorded in feature_spec.json and passed back when the engine is
+        rebuilt, so a model always scores against the constants it was fitted
+        with. An absent key means the model predates this, and those models were
+        trained with the constructor defaults -- which is exactly what an empty
+        dict rebuilds, so they stay correct without a version bump.
+
+        Filtered to what ``__init__`` actually accepts, derived from the
+        signature rather than a hand-listed set: ``_hw`` also holds values
+        computed from the others (``total_simds`` is ``num_cus *
+        simds_per_cu``), and feeding those back raises TypeError. A hardcoded
+        list would need editing every time a constant is added, and forgetting
+        is silent -- the engine rebuilds with a default for whatever was
+        dropped, which is the defect this property exists to close.
+        """
+        import inspect
+
+        params = inspect.signature(type(self).__init__).parameters
+        if any(p.kind in (p.VAR_KEYWORD, p.VAR_POSITIONAL) for p in params.values()):
+            # Fails OPEN otherwise: **kwargs resolves `accepted` to {"kwargs"},
+            # every constant is filtered out, and the property returns {} --
+            # which build_feature_spec records and _engine_for_spec cannot tell
+            # apart from a legacy model, so the engine silently rebuilds on
+            # defaults. That is the exact desync this property exists to stop.
+            raise TypeError(
+                f"{type(self).__name__}.__init__ takes *args/**kwargs, so its "
+                "hardware constants cannot be resolved from the signature. "
+                "Declare them explicitly, or override hardware_config."
+            )
+        accepted = set(params) - {"self"}
+        hw = getattr(self, "_hw", {})
+        dropped = set(hw) - accepted - _DERIVED_HW
+        if dropped:
+            raise TypeError(
+                f"{type(self).__name__} stores hardware values {sorted(dropped)} "
+                "that __init__ does not accept and that are not registered as "
+                "derived in _DERIVED_HW. Silently dropping them would rebuild "
+                "the engine on defaults for those constants."
+            )
+        return {k: v for k, v in hw.items() if k in accepted}
 
     @abstractmethod
     def get_feature_names(self) -> list[str]:
@@ -114,8 +172,6 @@ class FeatureEngine(ABC):
 
 
 class GemmUniversalFeatureEngine(FeatureEngine):
-    #: Bumped when the MEANING of a feature changes while its name does not.
-    #: 0 means "never re-encoded". See FeatureEngine.ENCODING_VERSION.
     """Feature engine for gemm_universal kernels."""
 
     def __init__(

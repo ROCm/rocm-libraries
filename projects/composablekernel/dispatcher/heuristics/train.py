@@ -169,6 +169,37 @@ def check_feature_compatibility(
             "rather than warm-starting."
         )
 
+    # Same failure one level down: the version pins what the feature FORMULAS
+    # mean, these pin what they were evaluated against. Several features divide
+    # by one of them, so mixing two sets into one booster is undetectable from
+    # names, count and version alike.
+    #
+    # An absent key is compared against the CONSTRUCTOR DEFAULTS, not against
+    # {}: a spec predating this was rebuilt bare at inference, so the defaults
+    # are what it effectively scored with. Comparing against {} instead would
+    # accept every legacy warm start, which is the hole this closes -- before
+    # lds_capacity was read from the data, training always used the default, so
+    # a legacy warm start was consistent; now it is not.
+    prev_hw = prev_spec.get("hardware")
+    if prev_hw is None:
+        prev_hw = type(feature_engine)().hardware_config
+    curr_hw = feature_engine.hardware_config
+    differing = {
+        k: (prev_hw.get(k), curr_hw.get(k))
+        for k in set(prev_hw) | set(curr_hw)
+        if prev_hw.get(k) != curr_hw.get(k)
+    }
+    if differing:
+        detail = ", ".join(
+            f"{k}: {a} -> {b}" for k, (a, b) in sorted(differing.items())
+        )
+        raise ValueError(
+            f"Hardware constant mismatch: {detail}. The previous model's "
+            "features were computed against different constants, and the "
+            "names, count and encoding version all match, so this would "
+            "otherwise go unnoticed. Train fresh rather than warm-starting."
+        )
+
     prev_cats = prev_spec.get("categorical_features", [])
     curr_cats = feature_engine.get_categorical_features()
     if sorted(prev_cats) != sorted(curr_cats):
@@ -207,6 +238,83 @@ def load_warm_start_model(prev_model_dir: Path, target: str) -> str | None:
     return str(model_path)
 
 
+def build_hw_kwargs(df: pd.DataFrame, operation: str) -> dict:
+    """Hardware constants read from the dataset, keyed as engine kwargs.
+
+    The column name is the parameter name with an ``hw_`` prefix, and the set of
+    parameters is taken from the engine's own constructor signature rather than
+    from a hand-written list of columns.
+
+    That is the point of the function. The hand-written version omitted
+    ``lds_capacity`` and ``num_xcd`` for as long as it existed, and
+    ``lds_capacity`` is the only constant whose real value differs from its
+    default -- 160 KB on gfx950 against a 64 KB default. So the engine divided
+    ``lds_usage_ratio`` by the wrong capacity and it saturated at 1.0 on ~91% of
+    a gfx950 sweep's rows, against ~1% at the true capacity, while
+    ``hw_lds_capacity`` sat at a constant carrying the wrong number. Every
+    other constant happened to equal its default, which is exactly why the
+    omission produced no symptom for anyone to notice.
+
+    Values absent from the frame are left out, so the engine applies its own
+    default rather than one restated here -- two sources for the same default
+    is how they drift.
+    """
+    import inspect
+
+    from feature_engine import OPERATION_ENGINES, feature_engine_class
+
+    # Keyed on the operation as given, NOT through base_operation. That helper
+    # answers "whose DATA does this train on"; the engine actually constructed
+    # is OPERATION_ENGINES[operation], and for gemm_universal_vec those are
+    # different classes. They agree today only because the vec engine inherits
+    # __init__ -- the day it declares a constant of its own, the base class's
+    # signature would silently fail to read it from the data.
+    name = OPERATION_ENGINES.get(operation)
+    if name is None:
+        return {}
+    params = set(inspect.signature(feature_engine_class(name).__init__).parameters)
+    params.discard("self")
+
+    if df.empty:
+        return {}
+    out = {}
+    for p in sorted(params):
+        col = f"hw_{p}"
+        if col not in df.columns:
+            continue
+        # The whole column, not row 0. A NaN first row would drop the constant
+        # and silently restore the default, and a data_dir mixing architectures
+        # would apply row 0's value to every row -- build_training_dataset
+        # filters on op_type and dtype only, never on arch. Both used to be
+        # transient; now the value is written into feature_spec.json and
+        # governs inference, so disagreement has to be loud.
+        values = pd.unique(df[col].dropna())
+        if len(values) == 0:
+            continue
+        if len(values) > 1:
+            raise ValueError(
+                f"{col} holds {len(values)} distinct values "
+                f"({sorted(values, key=repr)[:4]}...); a single hardware profile cannot "
+                "describe this dataset. Train one architecture at a time."
+            )
+        try:
+            value = int(values[0])
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"{col} is {values[0]!r}, not an integer. Hardware constants "
+                "are divisors in several features; fix the producer rather "
+                "than letting a placeholder reach the engine."
+            ) from None
+        if value <= 0:
+            raise ValueError(
+                f"{col} is {value}; hardware constants are divisors in several "
+                "features and a non-positive value is clamped to 1, inflating "
+                "them silently."
+            )
+        out[p] = value
+    return out
+
+
 def build_feature_spec(
     operation: str,
     fe,
@@ -236,6 +344,14 @@ def build_feature_spec(
         # same data through different engines, and loading a vec-trained model
         # with the base engine raises on the missing feature names.
         "feature_engine": type(fe).__name__,
+        # The hardware constants the engine was built with. main() reads these
+        # from the dataset, so an engine rebuilt bare at inference divides by
+        # different numbers -- lds_usage_ratio by lds_capacity, cu_utilisation
+        # by num_cus -- and emits different values under unchanged names. The
+        # encoding version cannot see that: the formulas are identical, only
+        # their inputs moved. An absent key predates this and rebuilds with the
+        # constructor defaults, which is what those models were trained with.
+        "hardware": fe.hardware_config,
         "dtype": dtype,
         "arch": arch,
         "feature_names": fe.get_feature_names(),
@@ -665,29 +781,7 @@ def main():
     print(f"  Unique kernels: {df['kernel_name'].nunique()}")
     print()
 
-    # Extract hardware parameters from data (if available)
-    hw_cols = [c for c in df.columns if c.startswith("hw_")]
-    hw_kwargs = {}
-    if hw_cols:
-        row0 = df.iloc[0]
-        if "hw_num_cus" in df.columns:
-            hw_kwargs["num_cus"] = int(row0.get("hw_num_cus", 256))
-        if "hw_max_clock_mhz" in df.columns:
-            hw_kwargs["max_clock_mhz"] = int(row0.get("hw_max_clock_mhz", 2400))
-        if "hw_simds_per_cu" in df.columns:
-            hw_kwargs["simds_per_cu"] = int(row0.get("hw_simds_per_cu", 4))
-        if "hw_shader_engines" in df.columns:
-            hw_kwargs["shader_engines"] = int(row0.get("hw_shader_engines", 32))
-        if "hw_max_waves_per_cu" in df.columns:
-            hw_kwargs["max_waves_per_cu"] = int(row0.get("hw_max_waves_per_cu", 32))
-        if "hw_wavefront_size" in df.columns:
-            hw_kwargs["wavefront_size"] = int(row0.get("hw_wavefront_size", 64))
-        if "hw_l1_cache_kb" in df.columns:
-            hw_kwargs["l1_cache_kb"] = int(row0.get("hw_l1_cache_kb", 32))
-        if "hw_l2_cache_kb" in df.columns:
-            hw_kwargs["l2_cache_kb"] = int(row0.get("hw_l2_cache_kb", 4096))
-        if "hw_l3_cache_kb" in df.columns:
-            hw_kwargs["l3_cache_kb"] = int(row0.get("hw_l3_cache_kb", 262144))
+    hw_kwargs = build_hw_kwargs(df, operation)
 
     # Get operation-specific feature engine
     print(f"Initializing {operation} feature engine...")

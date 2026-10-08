@@ -15,11 +15,22 @@ Supports:
 import json
 import re
 import subprocess
+import sys
 import hashlib
 from pathlib import Path
 from typing import Optional
 
 import pandas as pd
+
+# LDS capacity is generated from the real arch specs and is not something
+# rocminfo reports, so it has to come from the table rather than the probe.
+# The sys.path hop matches feature_engine_vec.py, dispatcher_integration.py and
+# ml_heuristic_sweep.py, which reach into sibling dispatcher directories the
+# same way.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "codegen"))
+
+from arch_specs_generated import LDS_TOTAL_CAPACITY_BY_ARCH  # noqa: E402
+from codegen_common import normalize_gfx_arch  # noqa: E402
 
 
 CANONICAL_COLUMNS = [
@@ -284,6 +295,35 @@ def parse_streaming_log(
     return df
 
 
+def check_capture_hw_arch(hw: dict, arch: str) -> None:
+    """Refuse a profile that describes a different part than ``--arch``.
+
+    ``--capture_hw`` reads THIS node; the rows are labelled ``--arch``. Those
+    differ in the normal gfx1250 workflow, where the log is produced on a bare
+    node and converted on a login node of another architecture -- and the
+    mismatch used to be harmless only because the profile carried nothing the
+    engine would not have defaulted to anyway. It now carries ``lds_capacity``,
+    so converting a gfx1250 log on a gfx950 host would stamp half that part's
+    LDS onto every row and write it into ``feature_spec.json``, where it
+    governs inference.
+
+    Factored out of ``main`` so it can be tested: the check was unreachable
+    inside argument parsing, and the test written for it asserted two string
+    literals were unequal and passed with the guard deleted.
+    """
+    local = re.search(r"(gfx[0-9a-f]+)", str(hw.get("gfx_name", "")))
+    if not local:
+        return
+    local_arch = local.group(1)
+    if normalize_gfx_arch(str(arch)) != local_arch:
+        raise SystemExit(
+            f"--capture_hw reads this node's hardware ({local_arch}) but "
+            f"--arch says {arch}. Run the conversion on a {arch} node, or drop "
+            "--capture_hw and let the engine use its own defaults rather than "
+            "another part's constants."
+        )
+
+
 def get_hardware_profile() -> dict:
     """Capture GPU hardware profile from rocminfo."""
     profile = {}
@@ -354,6 +394,26 @@ def get_hardware_profile() -> dict:
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
 
+    # rocminfo does not report LDS capacity, so it comes from the generated
+    # arch table. Without it the feature engine falls back to its 64 KB
+    # constructor default, and lds_usage_ratio -- which divides by the capacity
+    # -- saturates at 1.0 on the great majority of rows for any part with more
+    # than 64 KB. gfx950 has 160 KB, so that was ~91% of a gfx950 sweep.
+    # rocminfo's Name is a full target triple, not a bare target --
+    # "amdgcn-amd-amdhsa--gfx90a:sramecc+:xnack-" -- so the gfx token has to be
+    # pulled out before normalising. Passing the triple straight to
+    # normalize_gfx_arch strips the feature suffix and leaves
+    # "amdgcn-amd-amdhsa--gfx90a", which matches no table entry and silently
+    # restores the 64 KB default: the defect this is here to fix.
+    # The regex subsumes normalize_gfx_arch here: it cannot capture a colon,
+    # so the token it returns is already bare. Calling the helper as well reads
+    # as load-bearing and is not -- removing it changes nothing.
+    match = re.search(r"(gfx[0-9a-f]+)", str(profile.get("gfx_name", "")))
+    if match:
+        gfx = match.group(1)
+        if gfx in LDS_TOTAL_CAPACITY_BY_ARCH:
+            profile["lds_capacity"] = LDS_TOTAL_CAPACITY_BY_ARCH[gfx]
+
     return profile
 
 
@@ -392,7 +452,16 @@ def build_training_dataset(
     return pd.concat(frames, ignore_index=True)
 
 
-if __name__ == "__main__":
+def main(argv=None):
+    """CLI entry point.
+
+    A function rather than a bare ``__main__`` block so the wiring can be
+    tested. check_capture_hw_arch was factored out for exactly that
+    reason, and its only caller then sat in here where no test could
+    reach it -- deleting the call left the whole suite green. Testing a
+    guard without testing that it is invoked is the same defect, one
+    line further down.
+    """
     import argparse
     import time
 
@@ -406,7 +475,7 @@ if __name__ == "__main__":
         action="store_true",
         help="Capture hardware profile from rocminfo",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     input_path = Path(args.input)
 
@@ -431,9 +500,22 @@ if __name__ == "__main__":
 
     if args.capture_hw:
         hw = get_hardware_profile()
+        # The profile describes THIS node; the rows are labelled --arch. Those
+        # differ in the normal gfx1250 workflow, where the log is produced on a
+        # bare node and converted on a login node of another architecture --
+        # and the mismatch used to be harmless only because the profile carried
+        # nothing the engine would not have defaulted to anyway. Now it carries
+        # lds_capacity, so converting a gfx1250 log on a gfx950 host would
+        # stamp half that part's LDS onto every row and write it into
+        # feature_spec.json.
+        check_capture_hw_arch(hw, args.arch)
         print(f"  Hardware profile: {hw}")
         for k, v in hw.items():
             df[f"hw_{k}"] = v
 
     save_parquet(df, args.output)
     print(f"Saved to {args.output}")
+
+
+if __name__ == "__main__":
+    main()

@@ -493,6 +493,23 @@ Each contains:
 - `cv_metrics_tflops.json` - Cross-validation metrics
 - `feature_importances_tflops.json` - Feature importance rankings
 
+`feature_spec.json` carries three keys that govern how the engine is rebuilt at
+inference, each closing a mismatch the others cannot see:
+
+- `feature_engine` - the engine class. `op_type` alone is ambiguous, since
+  `gemm_universal` and `gemm_universal_vec` read the same data through
+  different engines.
+- `feature_encoding_version` - bumped when a feature's MEANING changes while
+  its name does not.
+- `hardware` - the constants the engine was built with. Several features divide
+  by one of these (`lds_usage_ratio` by `lds_capacity`, `cu_utilization` by
+  `num_cus`), so an engine rebuilt with different constants emits different
+  values under identical names and an unchanged version.
+
+All three are absent from models written before they existed. An absent
+`hardware` key rebuilds the constructor defaults, which is what those models
+were scored against, so they keep working unchanged.
+
 Models are automatically decompressed on first use.
 
 ### Usage
