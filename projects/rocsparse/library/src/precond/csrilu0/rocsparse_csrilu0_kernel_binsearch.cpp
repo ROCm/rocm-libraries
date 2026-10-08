@@ -23,6 +23,7 @@
  * ************************************************************************ */
 
 #include "rocsparse_csrilu0_kernel_binsearch.hpp"
+#include "rocsparse_assert.hpp"
 #include "rocsparse_common.hpp"
 #include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
@@ -267,12 +268,12 @@ namespace rocsparse
                 m,
                 csr_row_ptr,
                 csr_col_ind,
-                csr_val + i * csr_val_stride,
+                rocsparse::load_pointer(csr_val, i, csr_val_stride),
                 csr_diag_ind,
-                done + i * done_stride,
+                rocsparse::load_pointer(done, i, done_stride),
                 map,
-                zero_pivot + i * zero_pivot_stride,
-                singular_pivot + i * singular_pivot_stride,
+                rocsparse::load_pointer(zero_pivot, i, zero_pivot_stride),
+                rocsparse::load_pointer(singular_pivot, i, singular_pivot_stride),
                 tolerance,
                 idx_base,
                 boost_enable,
@@ -327,6 +328,10 @@ namespace rocsparse
         dim3 csrilu0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1,
                             rocsparse::get_grid_size_y(handle, A_batch_count));
         dim3 csrilu0_threads(BLOCKSIZE);
+
+        rocsparse_host_assert(done_array_stride != 0 && numeric_exact->get_stride() != 0,
+                              "done_array and zero_pivot strides must be non-zero: "
+                              "each batch needs its own state.");
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::csrilu0_kernel_binsearch<BLOCKSIZE, WFSIZE, SLEEP, T, I, J>),

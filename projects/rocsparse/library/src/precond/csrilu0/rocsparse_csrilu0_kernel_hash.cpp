@@ -23,6 +23,7 @@
  * ************************************************************************ */
 
 #include "rocsparse_csrilu0_kernel_hash.hpp"
+#include "rocsparse_assert.hpp"
 #include "rocsparse_common.hpp"
 #include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
@@ -335,12 +336,12 @@ namespace rocsparse
                 m,
                 csr_row_ptr,
                 csr_col_ind,
-                csr_val + batch_index * csr_val_stride,
+                rocsparse::load_pointer(csr_val, batch_index, csr_val_stride),
                 csr_diag_ind,
-                done + batch_index * done_stride,
+                rocsparse::load_pointer(done, batch_index, done_stride),
                 map,
-                zero_pivot + batch_index * zero_pivot_stride,
-                singular_pivot + batch_index * singular_pivot_stride,
+                rocsparse::load_pointer(zero_pivot, batch_index, zero_pivot_stride),
+                rocsparse::load_pointer(singular_pivot, batch_index, singular_pivot_stride),
                 tolerance,
                 idx_base,
                 enable_boost,
@@ -396,6 +397,10 @@ namespace rocsparse
             = reinterpret_cast<const float*>(numeric_near->get_tolerance_pointer());
         const double* tolerance_pointer_64
             = reinterpret_cast<const double*>(numeric_near->get_tolerance_pointer());
+
+        rocsparse_host_assert(done_array_stride != 0 && numeric_exact->get_stride() != 0,
+                              "done_array and zero_pivot strides must be non-zero: "
+                              "each batch needs its own state.");
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::csrilu0_kernel_hash<BLOCKSIZE, WFSIZE, HASH>),

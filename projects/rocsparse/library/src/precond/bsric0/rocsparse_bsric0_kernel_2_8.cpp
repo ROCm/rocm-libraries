@@ -23,6 +23,7 @@
  * ************************************************************************ */
 
 #include "rocsparse_bsric0_kernel_2_8.hpp"
+#include "rocsparse_assert.hpp"
 #include "rocsparse_bsric0_info.hpp"
 #include "rocsparse_common.hpp"
 #include "rocsparse_grid.hpp"
@@ -398,17 +399,18 @@ namespace rocsparse
         for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
             batch_index += hipGridDim_y)
         {
-            rocsparse::bsric0_2_8_device<MX_NNZB>(dir,
-                                                  mb,
-                                                  bsr_dim,
-                                                  bsr_row_ptr,
-                                                  bsr_col_ind,
-                                                  bsr_val + batch_index * bsr_val_stride,
-                                                  bsr_diag_ind,
-                                                  done_array + batch_index * done_array_stride,
-                                                  map,
-                                                  zero_pivot + batch_index * zero_pivot_stride,
-                                                  idx_base);
+            rocsparse::bsric0_2_8_device<MX_NNZB>(
+                dir,
+                mb,
+                bsr_dim,
+                bsr_row_ptr,
+                bsr_col_ind,
+                rocsparse::load_pointer(bsr_val, batch_index, bsr_val_stride),
+                bsr_diag_ind,
+                rocsparse::load_pointer(done_array, batch_index, done_array_stride),
+                map,
+                rocsparse::load_pointer(zero_pivot, batch_index, zero_pivot_stride),
+                idx_base);
         }
     }
 
@@ -424,6 +426,10 @@ namespace rocsparse
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
         auto          numeric_exact     = bsric0_info->get_singularity_numeric_exact();
+
+        rocsparse_host_assert(done_array_stride != 0 && numeric_exact->get_stride() != 0,
+                              "done_array and zero_pivot strides must be non-zero: "
+                              "each batch needs its own state.");
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsric0_kernel_2_8<MX_NNZB>),

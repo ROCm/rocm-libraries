@@ -24,6 +24,7 @@
 
 #include "rocsparse_csrildlt0_kernel_binsearch.hpp"
 #include "rocsparse-complex-types.h"
+#include "rocsparse_assert.hpp"
 #include "rocsparse_common.hpp"
 #include "rocsparse_floating_data_t.hpp"
 #include "rocsparse_grid.hpp"
@@ -280,12 +281,12 @@ namespace rocsparse
                 m,
                 csr_row_ptr,
                 csr_col_ind,
-                csr_val + batch_index * csr_val_stride,
+                rocsparse::load_pointer(csr_val, batch_index, csr_val_stride),
                 csr_diag_ind,
-                done + batch_index * done_stride,
+                rocsparse::load_pointer(done, batch_index, done_stride),
                 map,
-                zero_pivot + batch_index * zero_pivot_stride,
-                singular_pivot + batch_index * singular_pivot_stride,
+                rocsparse::load_pointer(zero_pivot, batch_index, zero_pivot_stride),
+                rocsparse::load_pointer(singular_pivot, batch_index, singular_pivot_stride),
                 tolerance,
                 idx_base,
                 boost,
@@ -337,6 +338,10 @@ namespace rocsparse
                                                                   : nullptr;
         const floating_data_t<T>*    boost_val_ptr
             = reinterpret_cast<const floating_data_t<T>*>(boost->get_val());
+
+        rocsparse_host_assert(done_array_stride != 0 && numeric_exact->get_stride() != 0,
+                              "done_array and zero_pivot strides must be non-zero: "
+                              "each batch needs its own state.");
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::csrildlt0_kernel_binsearch<SLEEP, BLOCKSIZE, WF_SIZE, T, I, J>),
