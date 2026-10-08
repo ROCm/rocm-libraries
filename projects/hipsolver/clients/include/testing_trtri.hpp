@@ -242,14 +242,14 @@ void trtri_getError(const hipsolverHandle_t   handle,
     CHECK_HIP_ERROR(hInfoRes.transfer_from(dInfo));
 
     // CPU lapack
-    for(rocblas_int b = 0; b < bc; ++b)
+    for(int b = 0; b < bc; ++b)
         cpu_trtri(uplo, diag, n, hA[b], lda, hInfo[0]);
 
     // error is ||hA - hARes|| / ||hA||
     // (THIS DOES NOT ACCOUNT FOR NUMERICAL REPRODUCIBILITY ISSUES.
     // IT MIGHT BE REVISITED IN THE FUTURE)
     // using frobenius norm
-    for(rocblas_int b = 0; b < bc; ++b)
+    for(int b = 0; b < bc; ++b)
     {
         if(hInfoRes[b][0] == 0)
         {
@@ -274,7 +274,7 @@ void trtri_getError(const hipsolverHandle_t   handle,
 
     // check info for singularities
     double err = 0;
-    for(rocblas_int b = 0; b < bc; ++b)
+    for(int b = 0; b < bc; ++b)
     {
         EXPECT_EQ(hInfo[b][0], hInfoRes[b][0]) << "where b = " << b;
         if(hInfo[b][0] != hInfoRes[b][0])
@@ -318,7 +318,7 @@ void trtri_getPerfData(const hipsolverHandle_t   handle,
 
         // cpu-lapack performance (only if not in perf mode)
         *cpu_time_used = get_time_us_no_sync();
-        for(rocblas_int b = 0; b < bc; ++b)
+        for(int b = 0; b < bc; ++b)
             cpu_trtri(uplo, diag, n, hA[b], lda, hInfo[b]);
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
@@ -380,8 +380,8 @@ void testing_trtri(Arguments& argus)
     hipsolver_local_handle handle;
     char                   uploC = argus.get<char>("uplo");
     char                   diagC = argus.get<char>("diag");
-    I                      n     = argus.get<rocblas_int>("n");
-    I                      lda   = argus.get<rocblas_int>("lda");
+    I                      n     = argus.get<int>("n");
+    I                      lda   = argus.get<int>("lda", n);
 
     hipsolverFillMode_t uplo      = char2hipsolver_fill(uploC);
     hipsolverDiagType_t diag      = char2hipsolver_diag(diagC);

@@ -136,39 +136,6 @@ rocblas_status rocsolver_zpotrf_info32(rocblas_handle          handle,
                                        const int64_t           lda,
                                        rocblas_int*            info);
 
-// Triangular matrix inversion - NOTE: Currently only 32-bit versions exist in rocSOLVER
-rocblas_status rocsolver_strtri(rocblas_handle         handle,
-                                const rocblas_fill     uplo,
-                                const rocblas_diagonal diag,
-                                const rocblas_int      n,
-                                float*                 A,
-                                const rocblas_int      lda,
-                                rocblas_int*           info);
-
-rocblas_status rocsolver_dtrtri(rocblas_handle         handle,
-                                const rocblas_fill     uplo,
-                                const rocblas_diagonal diag,
-                                const rocblas_int      n,
-                                double*                A,
-                                const rocblas_int      lda,
-                                rocblas_int*           info);
-
-rocblas_status rocsolver_ctrtri(rocblas_handle         handle,
-                                const rocblas_fill     uplo,
-                                const rocblas_diagonal diag,
-                                const rocblas_int      n,
-                                rocblas_float_complex* A,
-                                const rocblas_int      lda,
-                                rocblas_int*           info);
-
-rocblas_status rocsolver_ztrtri(rocblas_handle          handle,
-                                const rocblas_fill      uplo,
-                                const rocblas_diagonal  diag,
-                                const rocblas_int       n,
-                                rocblas_double_complex* A,
-                                const rocblas_int       lda,
-                                rocblas_int*            info);
-
 /******************** PARAMS ********************/
 struct hipsolverParams
 {
@@ -3008,11 +2975,11 @@ try
     *lworkOnDevice = 0;
     *lworkOnHost   = 0;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
-    hipsolverStatus_t status;
-
     rocblas_fill     roc_uplo = hipsolver::hip2rocblas_fill(uplo);
     rocblas_diagonal roc_diag = hipsolver::hip2rocblas_diag(diag);
+
+    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    hipsolverStatus_t status;
 
     // TODO: Update to call 64-bit versions once rocSOLVER adds rocsolver_*trtri_64
     // Currently rocSOLVER only has 32-bit versions, so we cast int64_t to rocblas_int
