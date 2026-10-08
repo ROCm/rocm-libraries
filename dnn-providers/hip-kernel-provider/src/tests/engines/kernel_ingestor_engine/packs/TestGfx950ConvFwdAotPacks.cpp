@@ -4,6 +4,8 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <set>
@@ -61,42 +63,55 @@ struct ExpectedInventory
 /// cannot be filed under a concrete id.
 constexpr const char* ARCH_WILDCARD = "*";
 
+// The emitted inventory's names, one pair of arrays per architecture row. The rows
+// build their sets from these at run time: a braced std::set<std::string> initializer
+// constructs every name inside one function, which takes the compiler impractically
+// long for a catalog of tens of thousands of kernels.
+// clang-format off
+
+// "gfx950"
+constexpr std::array<const char*, 1> ARCH0_PACK_NAMES = {
+    "hipkernel:gfx950_conv_fwd_aot",
+};
+constexpr std::array<const char*, 24> ARCH0_KERNEL_NAMES = {
+    "gfx950_conv_fwd_aot_bf16_320d13d55f49b010e8762b78fb1a5580775c5c0d",
+    "gfx950_conv_fwd_aot_bf16_491ce61a97465092b975aa3c1a8b6ad798d5e823",
+    "gfx950_conv_fwd_aot_bf16_65f31070a89e18572bccd30f8962cc8d5b031dd9",
+    "gfx950_conv_fwd_aot_bf16_7789c3119e8f10f333d1cf1fd1477a1962830a03",
+    "gfx950_conv_fwd_aot_bf16_8fadd920ba00a56c9e72b7441272276bc32f9f02",
+    "gfx950_conv_fwd_aot_bf16_a19d8fa53eb5aeecee42f86232855c3fe6ce871f",
+    "gfx950_conv_fwd_aot_bf16_b604f664962522fa17460431d4eb10234d732afa",
+    "gfx950_conv_fwd_aot_bf16_ee66277efaa31ec317f45115139212a525d31b52",
+    "gfx950_conv_fwd_aot_dw_bf16_023b14c719e2f2f8f6afe38d2ef9833a3e85f683",
+    "gfx950_conv_fwd_aot_dw_bf16_41c9d65026e500f76ecbddc9452c972e5b4088ed",
+    "gfx950_conv_fwd_aot_dw_bf16_cf100d174aea389ed5904cab4068d96634fa9ef3",
+    "gfx950_conv_fwd_aot_dw_bf16_dc6ea991953168a0b98967b106516fdc60959042",
+    "gfx950_conv_fwd_aot_dw_fp16_1391e6d6aabd15bd79acd1c354761f44c9b8f4b0",
+    "gfx950_conv_fwd_aot_dw_fp16_4850fcf3a30d3227f089ea1febb2b53639c2dd05",
+    "gfx950_conv_fwd_aot_dw_fp16_ac4f5eefab4dd228ba5f9539bd33b67b90442f6b",
+    "gfx950_conv_fwd_aot_dw_fp16_cc0658dde3c5d19753e494156c61b1c2aca837b8",
+    "gfx950_conv_fwd_aot_fp16_2b2e4f5d672f9d9f194c5af658f166b345ae3149",
+    "gfx950_conv_fwd_aot_fp16_2e13942a39d8d277fd4341df6d0f211811802701",
+    "gfx950_conv_fwd_aot_fp16_2e61a9a1472e1d38b6602edb7cc2769eba3990d1",
+    "gfx950_conv_fwd_aot_fp16_5956b4421f06ae3fa2032753af9baafce5a6679d",
+    "gfx950_conv_fwd_aot_fp16_634fd33fb6b4656d4295210ae151fe5bf3bc4c9c",
+    "gfx950_conv_fwd_aot_fp16_7283ebf6c1d5f8e7f84ad811ca387b1cf7a8de5d",
+    "gfx950_conv_fwd_aot_fp16_e7ebc978a77a58f14b9af52d996c93676aeff9d8",
+    "gfx950_conv_fwd_aot_fp16_f84f45411995eea50269b23a96eb664e903144e5",
+};
+// clang-format on
+
+template <std::size_t N>
+std::set<std::string> nameSet(const std::array<const char*, N>& names)
+{
+    return std::set<std::string>(names.begin(), names.end());
+}
+
 /// The emitted inventory, keyed by architecture.
 const std::map<std::string, ExpectedInventory>& expectedByArch()
 {
     static const std::map<std::string, ExpectedInventory> s_expected = {
-        {"gfx950",
-         ExpectedInventory{
-             {
-                 "hipkernel:gfx950_conv_fwd_aot",
-             },
-             {
-                 "gfx950_conv_fwd_aot_bf16_320d13d55f49b010e8762b78fb1a5580775c5c0d",
-                 "gfx950_conv_fwd_aot_bf16_491ce61a97465092b975aa3c1a8b6ad798d5e823",
-                 "gfx950_conv_fwd_aot_bf16_65f31070a89e18572bccd30f8962cc8d5b031dd9",
-                 "gfx950_conv_fwd_aot_bf16_7789c3119e8f10f333d1cf1fd1477a1962830a03",
-                 "gfx950_conv_fwd_aot_bf16_8fadd920ba00a56c9e72b7441272276bc32f9f02",
-                 "gfx950_conv_fwd_aot_bf16_a19d8fa53eb5aeecee42f86232855c3fe6ce871f",
-                 "gfx950_conv_fwd_aot_bf16_b604f664962522fa17460431d4eb10234d732afa",
-                 "gfx950_conv_fwd_aot_bf16_ee66277efaa31ec317f45115139212a525d31b52",
-                 "gfx950_conv_fwd_aot_dw_bf16_023b14c719e2f2f8f6afe38d2ef9833a3e85f683",
-                 "gfx950_conv_fwd_aot_dw_bf16_41c9d65026e500f76ecbddc9452c972e5b4088ed",
-                 "gfx950_conv_fwd_aot_dw_bf16_cf100d174aea389ed5904cab4068d96634fa9ef3",
-                 "gfx950_conv_fwd_aot_dw_bf16_dc6ea991953168a0b98967b106516fdc60959042",
-                 "gfx950_conv_fwd_aot_dw_fp16_1391e6d6aabd15bd79acd1c354761f44c9b8f4b0",
-                 "gfx950_conv_fwd_aot_dw_fp16_4850fcf3a30d3227f089ea1febb2b53639c2dd05",
-                 "gfx950_conv_fwd_aot_dw_fp16_ac4f5eefab4dd228ba5f9539bd33b67b90442f6b",
-                 "gfx950_conv_fwd_aot_dw_fp16_cc0658dde3c5d19753e494156c61b1c2aca837b8",
-                 "gfx950_conv_fwd_aot_fp16_2b2e4f5d672f9d9f194c5af658f166b345ae3149",
-                 "gfx950_conv_fwd_aot_fp16_2e13942a39d8d277fd4341df6d0f211811802701",
-                 "gfx950_conv_fwd_aot_fp16_2e61a9a1472e1d38b6602edb7cc2769eba3990d1",
-                 "gfx950_conv_fwd_aot_fp16_5956b4421f06ae3fa2032753af9baafce5a6679d",
-                 "gfx950_conv_fwd_aot_fp16_634fd33fb6b4656d4295210ae151fe5bf3bc4c9c",
-                 "gfx950_conv_fwd_aot_fp16_7283ebf6c1d5f8e7f84ad811ca387b1cf7a8de5d",
-                 "gfx950_conv_fwd_aot_fp16_e7ebc978a77a58f14b9af52d996c93676aeff9d8",
-                 "gfx950_conv_fwd_aot_fp16_f84f45411995eea50269b23a96eb664e903144e5",
-             },
-         }},
+        {"gfx950", ExpectedInventory{nameSet(ARCH0_PACK_NAMES), nameSet(ARCH0_KERNEL_NAMES)}},
     };
     return s_expected;
 }
