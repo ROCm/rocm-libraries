@@ -1,11 +1,10 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""generate from a published dataset: §8.3 rows from any producer, trained as `train` trains them.
+"""generate from a published dataset: §8.3 rows with no engine binding or UED.
 
-A published dataset (a sweep run elsewhere, the MIOpen perf DB's translation) carries no engine
-binding and no UED -- an opaque catalog. generate trains it with the label and features stated,
-holds problems out as it does for every dataset, and refuses to promote what has nowhere to go.
+generate trains it with the label and features stated, holds problems out as for any dataset,
+and refuses to promote it.
 """
 
 from __future__ import annotations
@@ -202,9 +201,8 @@ def test_a_published_dataset_has_no_ued_to_promote_into(published, evaluator, ca
 def test_trained_on_every_row_it_is_the_model_train_makes_from_the_same_rows(
     published, evaluator
 ):
-    """What uhd-train did, generate does: with nothing held out (--recall), the model is the
-    one the old path made -- `publish` to a Parquet file, then `train` on it with the same
-    options -- byte for byte."""
+    """With nothing held out (--recall), the model is byte-identical to `publish` then `train`
+    on the same CSV and options."""
     from uhd_gen.__main__ import main
     from uhd_gen.dataset.publish import publish_frame, write_parquet
 
@@ -226,7 +224,7 @@ def test_trained_on_every_row_it_is_the_model_train_makes_from_the_same_rows(
     arguments = json.loads((output / "generation_manifest.json").read_text())["models"][
         0
     ]["training_arguments"]
-    # The command generate ran, on the old path's input: the CSV published straight to Parquet.
+    # The same training command, on the CSV published straight to Parquet.
     parquet = published["root"] / "published.parquet"
     write_parquet(
         publish_frame(

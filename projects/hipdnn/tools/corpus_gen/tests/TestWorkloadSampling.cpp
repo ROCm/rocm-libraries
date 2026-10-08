@@ -15,6 +15,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "OperationsDir.hpp"
 #include <fstream>
 #include <set>
 #include <string>
@@ -75,8 +76,7 @@ int64_t at(const ProblemPoint& point, const std::string& name)
 /// A shipped declaration, read as the generator reads it.
 OperationMetadata shipped(const std::string& operation)
 {
-    const auto path
-        = std::string(HIPDNN_CORPUS_GEN_OPERATIONS_DIR) + "/" + operation + ".opmeta.json";
+    const auto path = hipdnn_corpus_gen::test::operationsDir() + "/" + operation + ".opmeta.json";
     std::ifstream file(path);
     EXPECT_TRUE(file.is_open()) << path;
     const auto load = parseOperationMetadata(nlohmann::json::parse(file));

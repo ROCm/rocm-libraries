@@ -1,9 +1,11 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-add_subdirectory(bench)
-
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    # The training-corpus harvester; it feeds uhd_gen, so it ships with the rest of the UHD
+    # training tooling.
+    add_subdirectory(bench)
+
     # Both evaluate UHD descriptor expressions through plugin_sdk's heuristics/uhd/, which
     # exists only with the kernel ingestor.
     add_subdirectory(corpus_gen)

@@ -15,6 +15,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "OperationsDir.hpp"
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -75,7 +76,7 @@ bool looksLikeALayer(const ProblemPoint& point)
 
 OperationMetadata shippedConvolution()
 {
-    std::ifstream file(HIPDNN_CORPUS_GEN_OPERATIONS_DIR "/conv_fwd.opmeta.json");
+    std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/conv_fwd.opmeta.json");
     EXPECT_TRUE(file.good());
     auto load = parseOperationMetadata(nlohmann::json::parse(file));
     EXPECT_TRUE(load.ok()) << (load.errors.empty() ? "" : load.errors.front());
@@ -283,7 +284,8 @@ TEST(TestCorpusRealism, TheAnchoredGeometriesCoverStridePaddingAndDilation)
 TEST(TestCorpusRealism, EveryDeclaredArchetypeSetIsActuallyDrawnFrom)
 {
     // A declaration whose archetypes never match a combination still parses and validates.
-    for(const auto& file : std::filesystem::directory_iterator(HIPDNN_CORPUS_GEN_OPERATIONS_DIR))
+    for(const auto& file :
+        std::filesystem::directory_iterator(hipdnn_corpus_gen::test::operationsDir()))
     {
         if(file.path().string().find(".opmeta.json") == std::string::npos)
         {

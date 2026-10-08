@@ -156,7 +156,7 @@ def run_merge(args: argparse.Namespace) -> int:
     if Path(args.output).suffix == ".parquet":
         merged.to_parquet(args.output, index=False)
     else:
-        merged.to_csv(args.output, index=False)
+        merged.to_csv(args.output, index=False, lineterminator="\n")
 
     print(f"\nMerged {len(report['corpora'])} corpora -> {args.output}")
     print(f"  {'rows':>10}  {'problems':>9}  {'devices':>7}  corpus")

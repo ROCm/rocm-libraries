@@ -66,18 +66,22 @@ def signature_references(signature: list) -> list[str]:
 
 
 _KERNEL_REFERENCE = "$kernel."
+# The kernel's declared priority, bound for every candidate: not a KMD field or knob
+# (RFC 0019 §6.1).
+_KERNEL_PRIORITY = "$kernel.priority"
 
 
 def kernel_axes(signature: list) -> set[str]:
     """The KMD fields a signature reads through `$kernel.*`, by base name.
 
-    `$kernel.tile[0]` reads `tile`; nested references count. The single definition of the
-    axes RFC 0019 §6.3 check 2 admits a model on.
+    `$kernel.tile[0]` reads `tile`; nested references count; `$kernel.priority` reads no
+    KMD field. The single definition of the axes RFC 0019 §6.3 check 2 admits a model on,
+    mirroring the runtime's `FeatureExtractor::kernelFieldOf`.
     """
     return {
         reference[len(_KERNEL_REFERENCE) :].split("[", 1)[0]
         for reference in signature_references(signature)
-        if reference.startswith(_KERNEL_REFERENCE)
+        if reference.startswith(_KERNEL_REFERENCE) and reference != _KERNEL_PRIORITY
     }
 
 
@@ -86,9 +90,9 @@ def require_admissible_kernel_axes(
 ) -> None:
     """Refuse a signature the runtime would refuse to rank with (RFC 0019 §6.3 check 2).
 
-    Every `$kernel.*` axis must be a KMD field AND a knob of the shipping UED (not the
-    collection UED, which exposes every field). Graph-bound fields belong in the graph's
-    own column.
+    Every `$kernel.*` axis other than `$kernel.priority` must be a KMD field AND a knob of
+    the shipping UED (not the collection UED, which exposes every field). Graph-bound
+    fields belong in the graph's own column.
     """
     axes = kernel_axes(signature)
     undeclared = sorted(axes - set(kmd_fields))

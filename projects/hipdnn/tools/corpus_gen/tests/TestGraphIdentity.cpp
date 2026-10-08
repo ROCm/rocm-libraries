@@ -11,6 +11,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "OperationsDir.hpp"
 #include <fstream>
 #include <string>
 #include <vector>
@@ -31,8 +32,7 @@ namespace sdk = hipdnn_flatbuffers_sdk::utilities;
 /// One real graph built through the shipped declaration, as the tool builds them.
 std::vector<uint8_t> someGraph()
 {
-    const std::string path
-        = std::string(HIPDNN_CORPUS_GEN_OPERATIONS_DIR) + "/sdpa_fwd.opmeta.json";
+    const std::string path = hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json";
     std::ifstream file(path);
     EXPECT_TRUE(file.is_open()) << path;
     const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));

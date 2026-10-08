@@ -240,7 +240,11 @@ so is the id installed twice.
 It validates everything before writing anything, and refuses rather than half-succeed:
 
 - the descriptor must satisfy the canonical schema and its artifact must exist;
-  missing or incompatible models otherwise leave runtime selection in fallback;
+  missing or incompatible models otherwise leave runtime selection in fallback. As the
+  runtime parser requires, the `artifact` or `library` path is relative, `/`-separated and
+  names a file inside the descriptor's directory (no leading `/`, no `\`, `:` or NUL, no
+  `..` segment anywhere, and a final segment other than empty or `.`), a declared `hash` is 64
+  lowercase hex digits with no prefix, and a `custom_library` body declares its `hash`;
 - the artifact must pass the checks the runtime applies when it loads it: for
   `tree_data`, the declared digest, the `HGBM` file identifier, the FlatBuffers
   verifier's structural checks (every offset, vtable, vector, string terminator and nested
@@ -471,7 +475,7 @@ is backwards, and `evaluate` fails instead of printing a plausible small number.
 | `metrics.references` | §11.4's `oracle`, `static_order` and `random`, each carrying the same `top1_regret`/`regret_tail`/`topk_recall`/`per_regime` block plus a note on how it was derived |
 | `ties` | tolerance, sigma, whether the noise band applied, and the policy |
 | `model` | artifact, features, what it was trained on, how many rows |
-| `holdout_integrity` | `held_out`, `COMPROMISED`, or `unknown`, with the reason |
+| `holdout_integrity` | `held_out`, `COMPROMISED`, or `unknown`, with the reason; `generate --recall` records `recall` |
 | `not_implemented` | the parts of §11.2/§11.3/§11.4 this command does not compute |
 | `warnings` | every loud condition, in the order printed |
 | `per_problem` | with `--include-per-problem`: key, regime, candidate count, oracle, pick, regret, ranks |
@@ -683,7 +687,12 @@ nothing is injected there.
 bench crashes, or its response fails validation) is skipped for every device and metric
 and recorded with its error under `failed_graphs` in `generation_manifest.json`. Up to
 `--max-graph-failures` of the graphs (a fraction, default `0.05`) may fail; more fails
-the run and lists them, since failures that common are systematic, not incidental.
+the run and lists them, since failures that common are systematic, not incidental. The
+measurements of the graphs that did collect are not lost: the run writes them as a
+collection (`collection_manifest.json`, with every failure under `failed_graphs`) in the
+staging directory it reports, publishes no output directory and trains nothing. After
+investigating the failures, `python -m uhd_gen.dataset add --collection <staging-directory>`
+converts that collection, and `generate --dataset` trains on it without measuring again.
 
 Collection times **one invocation per graph**: `hipdnn_bench enumerate` decides the
 candidate set, then a single `hipdnn_bench --sweep --json` times every candidate in
@@ -696,7 +705,7 @@ enumerated candidates — a subset is silent data loss and fails the run.
 
 The trade is crash granularity: a candidate that fails to build or run is reported
 as an unsuccessful result and still reaches the corpus, but a candidate that crashes
-the process now costs its graph's remaining rows rather than only its own.
+the process costs its graph's remaining rows rather than only its own.
 
 Each candidate is timed with STANDARD autotune; an internal exhaustive sweep must
 not substitute a different kernel. Providers that do not implement enumeration
@@ -737,11 +746,45 @@ in both paths. Both take the count from the engine and differ only in which of i
 outputs they read. `--resolve-duplicates` keys a problem on its shape, graph and device
 together, so one shape measured on two boards stays two problems.
 
+### Regenerating a shipped model
+
+On a GPU of the target architecture, with the provider built and its descriptors staged:
+
+```bash
+cd projects/hipdnn/tools
+PLUGINS=<build>/lib/hipdnn_plugins/engines
+
+# 1. A corpus for the engine: every candidate problem is offered to it, so the corpus is
+#    what that engine serves. Deterministic from the seed and the in-tree inputs.
+<build>/bin/hipdnn_corpus_gen --operations corpus_gen/operations --operation sdpa_fwd \
+    --plugin-dir $PLUGINS --engine-name <engine> --output corpus --count 1000 --seed 0
+
+# 2. L2 (catalog ranker), then L1 (engine estimate). L2 goes first because an immediate
+#    run executes whatever the installed catalog ranker picks, so L1's labels then
+#    describe the selector that ships. An engine with no catalog to rank takes L1 alone.
+COMMON="--graphs corpus --descriptor-tree <tree> --engine <engine> --engine-id <id> \
+    --bench <build>/bin/hipdnn_bench --plugin-dir $PLUGINS \
+    --feature-evaluator <build>/bin/hipdnn_uhd_features --metric tflops time --arch <arch>"
+python -m uhd_gen generate $COMMON --role sort_kernel_catalog --output-dir out/l2
+python -m uhd_gen generate $COMMON --role predict_engine --output-dir out/l1
+```
+
+`--engine-id` is the id `hipdnn_list_engines` reports for the engine. `generate` promotes
+into `--descriptor-tree`; `promote` installs a kept model (`out/l1/model_<metric>/`) into
+the source tree, run with `--dry-run` first. `reproduce/compare_engines.py` joins
+several engines' L1 `corpus*.csv` on the corpus manifest's `benchmark` ids and reports,
+per ranking metric, coverage and per-regime winners over the graphs more than one engine
+serves. A row counts only toward the metric its `binding.metric` was collected under, so a
+label may name both of an engine's corpora (`MIOpen=corpus_tflops.csv`,
+`MIOpen=corpus_time.csv`).
+
 ### Engine-level immediate predictions
 
 `predict_engine` trains an engine's **normal untuned performance**, not the best
 configuration found by a sweep. Collection builds only that engine's plan with
-`global.benchmarking=0`, warms it up, and measures ordinary execution with HIP events.
+`global.benchmarking=0`, and `generate` runs the bench with `HIPDNN_FORCE_BENCHMARKING=0` so
+an inherited override cannot turn the search back on; it warms the plan up and measures
+ordinary execution with HIP events.
 It does not enumerate configurations or invoke autotune; normal engine cache behavior is
 unchanged. Full-graph work and elapsed time determine the TFLOPS label; unsupported work
 accounting is not replaced with a guessed label. Only a `tflops` collection needs
@@ -838,9 +881,11 @@ declared id resolves to nothing contributes no score and falls back to static or
 An opaque engine's UHD must not name a descriptor set in `trained_against` -- it has no UED,
 KMD or UMD to be trained against, and one that names them is refused. It must instead record
 `trained_against.selector_revision`: the exact selector-revision string the engine reports in
-its prediction binding, which is the provider build the measurements were taken on. A model
-recording a different revision, or none, is refused -- the engine stays applicable and reports
-UNAVAILABLE naming both revisions.
+its prediction binding, which names the selection logic the measurements were taken under.
+The binding's `provider_build` (the loaded plugin's name, version and API version) is a
+diagnostic, never a compatibility key: measurements from two builds reporting one selector
+revision are repeats of each other. A model recording a different revision, or none, is
+refused -- the engine stays applicable and reports UNAVAILABLE naming both revisions.
 Start a fresh consumer process after installing a model: a compiled model is cached
 for the lifetime of the engine that owns it.
 
@@ -929,9 +974,18 @@ python -m uhd_gen generate --collect-only --graphs corpus/sdpa_fwd/graphs \
 # Or across N GPUs: --shard K/N measures every N-th graph, one collection per shard.
 python -m uhd_gen generate --collect-only --shard 0/4 --graphs corpus/sdpa_fwd/graphs ... --output-dir col_1_s0
 
-# Train on any number of collections.
-python -m uhd_gen generate --collection col_1 col_2 col_3 --descriptor-tree tree ... --output-dir model
+# Convert collections into a stored dataset (Parquet; appends, and skips a collection already
+# added), then train on it.
+python -m uhd_gen.dataset add --into store/sdpa_fwd --collection col_1 col_2 col_3
+python -m uhd_gen generate --dataset store/sdpa_fwd --descriptor-tree tree ... --output-dir model
 ```
+
+A dataset is `dataset.parquet` plus `dataset_manifest.json`, one entry per contribution
+(collection, one-shot `generate` folder via `--generation`, or §8.3 CSVs via `--csv` with the
+binding stated). Every contribution must share one engine binding. `generate --contribution
+ID...` trains on a subset; `python -m uhd_gen.dataset export` writes contributions' rows back
+out as JSON. A dataset of §8.3 CSVs alone trains as `train` would (`--target`, `--objective`,
+`--group-by-feature`, `--no-promote`).
 
 Training takes **one measurement of each configuration on each shape**: the newest session's
 (a session is one collection on one device). The same shape measured on two GPUs of an arch is
@@ -948,7 +1002,7 @@ features.
 ### `size`: how many more shapes, and from which regimes
 
 ```bash
-python -m uhd_gen size --collection col_1 col_2 col_3 \
+python -m uhd_gen size --dataset store/sdpa_fwd \
     --test-set store/test_set.json --create-test-set --target 0.70 --tolerance 0.10 \
     --descriptor-tree tree --engine-id 4714091817493728420 --arch gfx950 --uhd-id <id> \
     --output-dir sizing_1
@@ -956,7 +1010,7 @@ python -m uhd_gen size --collection col_1 col_2 col_3 \
 
 1. **A pinned test set.** It is stratified by regime and created once. It is reused every
    round, so rounds are comparable, and never replaced.
-2. **A learning curve.** `generate --collection` trains on nested subsets of the other shapes
+2. **A learning curve.** `generate --dataset` trains on nested subsets of the other shapes
    (`--draws` random subsets per size), and `evaluate` scores each model on the test set.
 3. **A measured ceiling.** A repeat measurement (another collection or GPU) disagrees with the
    label by two measurement errors, where a perfect model faces only one. The ceiling is how
@@ -1084,13 +1138,12 @@ That command emits both the C++ header and these bindings from one invocation, s
 the two cannot drift. Requires flatc 25.9.23 on PATH (see
 `projects/hipdnn/CONTRIBUTING.md`).
 
-**Do not hand-write FlatBuffers vtables here.** The writer this tool replaced did,
-declaring `StartObject(11)` against a 13-field table: every field from
-`features_signature` on landed one slot low, so every descriptor it produced failed
-verification. Nothing caught it, because the only structural assertion in the test
-suite was the four-byte file identifier — which sits before the root table and
-survives any vtable error. The descriptor is JSON now; `model.bin` is the only
-FlatBuffer this tool writes, and it goes through generated bindings.
+**Do not hand-write FlatBuffers vtables here.** A hand-written vtable whose slot count
+disagrees with the schema shifts every later field one slot, so every artifact fails
+verification, and a test asserting only the four-byte file identifier still passes: the
+identifier sits before the root table and survives any vtable error. The descriptor is
+JSON; `model.bin` is the only FlatBuffer this tool writes, and it goes through
+generated bindings.
 
 ### `<stem>.uhd.json`
 

@@ -41,7 +41,7 @@ def test_published_names_are_not_rewritten_into_q_namespace():
 @pytest.mark.parametrize(
     "entry", ['"$q.batch"', '{"log2":["$q.batch"]}', "q.batch", "", 1, None, []]
 )
-def test_legacy_stringified_or_noncanonical_entries_are_rejected(entry):
+def test_stringified_or_noncanonical_entries_are_rejected(entry):
     with pytest.raises(ValueError):
         parse_signature_entry(entry)
 

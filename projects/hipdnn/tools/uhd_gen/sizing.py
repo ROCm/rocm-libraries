@@ -4,8 +4,7 @@
 
 Trains on nested subsets of the pool, scores each on a test set pinned across rounds,
 fits miss(n) = floor + a * n^-b with floor = 1 - the ceiling measured from repeats, and
-splits new shapes over regimes as `--regime-quotas` for `hipdnn_corpus_gen`. With
-`--previous`, it also scores the last round's prediction against this round's result.
+splits new shapes over regimes as `--regime-quotas` for `hipdnn_corpus_gen`.
 Engine-immediate (L1) models only: a catalog ranker's accuracy is regret, not row error.
 """
 from __future__ import annotations

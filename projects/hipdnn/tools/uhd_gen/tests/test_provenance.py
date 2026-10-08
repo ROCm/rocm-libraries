@@ -146,7 +146,7 @@ def test_malformed_explicit_revision_does_not_default(tmp_path, revision):
         snapshot_provenance(tree)
 
 
-def test_snapshot_rejects_legacy_version_only_provenance():
+def test_snapshot_rejects_version_only_provenance():
     with pytest.raises(ProvenanceError):
         validate_provenance({"ued": "1.0", "kmd": "1.0", "umd": "1.0"})
 

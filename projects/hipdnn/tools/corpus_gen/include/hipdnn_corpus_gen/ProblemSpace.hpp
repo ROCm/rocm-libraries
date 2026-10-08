@@ -110,10 +110,9 @@ struct CombinationResult
     bool searchCapped = false;
 
     /// Per numeric parameter (in @ref ProblemCorpus::numericParameters order), the served point
-    /// with the smallest and the largest value of it, over every point the engine accepted in
-    /// this combination -- not only those selected. Selection spreads over the interior and can
-    /// leave the edges out; these are the edges, as far as the walk reached. Empty when nothing
-    /// was served. Ties go to the lexicographically first shape, so a seed reproduces them.
+    /// with its smallest and largest value over every point the engine accepted here, selected
+    /// or not. Empty when nothing was served. Ties go to the lexicographically first shape, so a
+    /// seed reproduces them.
     std::vector<ProblemPoint> lowest;
     std::vector<ProblemPoint> highest;
 };
@@ -761,8 +760,8 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         }
     }
 
-    // The served edges, from every answer the engine gave: the memo holds the whole of what
-    // each walk reached, grown or not, and anchored draws were asked outside it.
+    // The served edges, from every answer the engine gave: the memo holds all each walk reached,
+    // and anchored draws were asked outside it.
     for(size_t index = 0; index < corpus.combinations.size() && !numericWindow.empty(); ++index)
     {
         auto& result = corpus.combinations[index];
@@ -819,6 +818,8 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
             }
             return point;
         };
+        result.lowest.reserve(dimensions);
+        result.highest.reserve(dimensions);
         for(size_t d = 0; d < dimensions; ++d)
         {
             result.lowest.push_back(pointOf(*low[d]));

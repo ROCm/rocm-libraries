@@ -1,28 +1,17 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""The stored form of training data: one Parquet dataset per engine, arch, revision and role.
+"""Training data stored as one Parquet dataset per engine, arch, revision and role.
 
-RFC 0019.13 collects as CSV and trains from Parquet. Collection keeps its raw record -- a run
-lasting hours must be resumable from a partial file, and its shards merge by appending, which
-Parquet does not do -- and conversion turns that record, or any other source's, into the one
-form training reads. This module is the conversion and the store; it decides nothing about
-training.
+Collection writes a resumable raw record; this module converts it, or any other source, into
+the form training reads. A dataset is a directory:
 
-A dataset is a directory:
+* `dataset.parquet` -- every converted row, tagged with its `contribution_id`, `collected_at`,
+  metric `source`, `purpose` (training, holdout or eval) and `corpus_id`.
+* `dataset_manifest.json` -- one entry per contribution with what its collection manifest
+  recorded, and the binding every contribution must share.
 
-* `dataset.parquet` -- every row ever converted in, each tagged with the contribution it came
-  from (`contribution_id`), when it was measured (`collected_at`), the metric source it answers
-  (`source`), what it is for (`purpose`: training, holdout or eval) and the corpus it measured.
-* `dataset_manifest.json` -- what the rows cannot say: one entry per contribution with
-  everything a collection's manifest recorded (devices, graphs, commands, knob addressing,
-  published features, failed graphs), and the binding every contribution must share.
-
-Rows are only ever appended. Which measurement of a shape is the label is decided when a run
-reads the dataset (`uhd_gen.generate.load_dataset`), as it was when collections were read
-directly: the file keeps every measurement, as the collections did.
-
-Needs pandas and a Parquet engine, nothing else -- the same budget as `publish`.
+Rows are append-only; `uhd_gen.generate.load_dataset` picks each shape's label when it reads.
 """
 
 from __future__ import annotations
@@ -96,8 +85,8 @@ def _native(value: Any) -> Any:
 
 
 def read_rows(directory: pathlib.Path) -> list[dict[str, Any]]:
-    """Every row of the dataset as records, missing values None -- the records a collection's
-    JSON corpus held, so a reader cannot tell which store they came from."""
+    """Every row of the dataset as records, missing values None, as a collection's JSON
+    corpus held them."""
     path = pathlib.Path(directory) / DATA_FILE
     if not path.is_file():
         return []
@@ -176,9 +165,8 @@ def _tag(
             )
     if not tagged:
         raise DatasetError(f"contribution {identity} holds no rows")
-    # The keys this contribution's rows carried, per source. The table holds every
-    # contribution's columns, so without this a row read back would gain keys its collection
-    # never wrote -- and a reader that iterates a record's keys would see them.
+    # The keys each source's rows carried, so a row reads back without other contributions'
+    # columns.
     entry = {
         **entry,
         "columns": {
@@ -195,10 +183,9 @@ def add_many(
 ) -> list[dict[str, Any]]:
     """Append contributions in one write: their rows, tagged, and their manifest entries.
 
-    Returns one {"added": bool, "rows": n, "contribution_id": id} per contribution. One already
-    in the dataset is not added again -- converting the same collection twice is a no-op, not a
-    duplicate measurement. One whose binding differs from the dataset's, or whose knob
-    addressing contradicts it, is refused, and then nothing of this call is written.
+    Returns one {"added": bool, "rows": n, "contribution_id": id} per contribution. A
+    contribution already present is skipped. A differing binding or contradicting knob
+    addressing is refused, and then nothing of this call is written.
     """
     directory = pathlib.Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
@@ -253,7 +240,7 @@ def add_many(
         _write_atomically(
             directory / MANIFEST_FILE,
             lambda path: path.write_text(
-                json.dumps(manifest, indent=1) + "\n", encoding="utf-8"
+                json.dumps(manifest, indent=1) + "\n", encoding="utf-8", newline="\n"
             ),
         )
     return results
@@ -321,11 +308,10 @@ def from_generation(
     corpus_id: str | None = None,
     contribution_id: str | None = None,
 ) -> tuple[dict[str, Any], dict[Any, list[dict[str, Any]]]]:
-    """An old one-shot `generate` run's measurements, which lived only in its model's folder.
+    """A one-shot `generate` run's measurements, read from its model folder, as a contribution.
 
-    Every manifest field is taken from what that run recorded: its rows (engine, arch, devices,
-    binding), its generation manifest (engine id, provenance, graphs, commands), and the time of
-    its first bench call, the closest record of when it measured.
+    Fields come from its rows (engine, arch, devices, binding), its generation manifest (engine
+    id, provenance, graphs, commands), and its first bench call's time as `collected_at`.
     """
     from datetime import datetime, timezone
 
@@ -409,11 +395,9 @@ def from_csv(
     resolve_duplicates_by: str | None = None,
     best_column: str = "avgTimeMs",
 ) -> tuple[dict[str, Any], dict[Any, list[dict[str, Any]]]]:
-    """§8.3 CSVs from any producer (a sweep run elsewhere, the MIOpen perf DB's translation),
-    validated and expanded exactly as `publish` does, as one contribution.
-
-    Such rows carry no engine binding, so the binding is what the caller states: the engine,
-    and the selector revision the measurements were taken under.
+    """§8.3 CSVs from any producer, validated and expanded as `publish` does, as one
+    contribution. The rows carry no binding, so the caller states the engine and selector
+    revision.
     """
     frame = publish_frame(
         [pathlib.Path(p) for p in csvs],
@@ -480,13 +464,10 @@ def export_rows(
     source: str | None = None,
 ) -> list[dict[str, Any]]:
     """Rows of the named contributions (or of every contribution with one of `purposes`), each
-    exactly as its source wrote it: no bookkeeping, only the keys it carried.
+    as its source wrote it: no bookkeeping, only the keys it carried.
 
-    `source` keeps one metric's rows where a contribution measured several; a contribution that
-    measured one answers in it whatever it is called, as its collection's lone `corpus.json` did.
-
-    For a stage that reads rows rather than a dataset -- `evaluate` scoring a model on an
-    evaluation corpus's measurements.
+    `source` keeps one metric's rows where a contribution measured several; a single-metric
+    contribution answers whatever `source` is.
     """
     manifest = read_manifest(directory)
     if manifest is None:
@@ -548,7 +529,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Raw collection directories (appended in one write)",
     )
     source.add_argument(
-        "--generation", type=pathlib.Path, help="An old generate run's folder"
+        "--generation", type=pathlib.Path, help="A one-shot generate run's folder"
     )
     source.add_argument("--csv", nargs="+", type=pathlib.Path, help="§8.3 CSV files")
     parser.add_argument("--purpose", default="training", choices=PURPOSES)
@@ -652,6 +633,6 @@ def export_main(argv: list[str] | None = None) -> int:
     except DatasetError as error:
         print(f"uhd_gen.dataset export: {error}", file=sys.stderr)
         return 1
-    args.out.write_text(json.dumps(rows) + "\n", encoding="utf-8")
+    args.out.write_text(json.dumps(rows) + "\n", encoding="utf-8", newline="\n")
     print(json.dumps({"out": str(args.out), "rows": len(rows)}))
     return 0

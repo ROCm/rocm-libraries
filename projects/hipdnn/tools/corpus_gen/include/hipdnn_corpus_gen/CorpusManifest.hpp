@@ -117,8 +117,8 @@ inline std::string digestOf(const std::filesystem::path& path)
 } // namespace detail
 
 /// @brief The `manifest.json` document.
-/// Key names are a contract with `uhd_gen/reproduce` scripts (`graphs`, `benchmark`, `name`,
-/// `regime`); renaming one breaks them silently.
+/// Key names are a contract with `uhd_gen/reproduce/compare_engines.py` (`graphs`, `benchmark`,
+/// `name`, `regime`); renaming one breaks it silently.
 inline nlohmann::json corpusManifest(const std::vector<ManifestEntry>& entries,
                                      const ManifestContext& context)
 {

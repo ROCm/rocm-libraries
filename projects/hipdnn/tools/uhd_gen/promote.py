@@ -14,7 +14,12 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .artifact import artifact_digest, is_grouped_tree, verify_tree_artifact
+from .artifact import (
+    artifact_digest,
+    is_contained_relative_path,
+    is_grouped_tree,
+    verify_tree_artifact,
+)
 from .correctness import REASON, VERDICT, numerical_reason, numerical_verdict
 from .features import (
     compute_features_hash,
@@ -42,6 +47,8 @@ logger = logging.getLogger(__name__)
 UHD_SUFFIX = ".uhd.json"
 _ARCH = re.compile(r"^gfx[a-z0-9_-]+$")
 _ADAPTERS = ("static_order", "native", "tree_data", "table", "onnx", "custom_library")
+#: A model `hash`: the SHA-256 of the file it names, as UhdParser and the adapters spell it.
+_SHA256 = re.compile(r"[0-9a-f]{64}")
 #: Roles whose arch key binds a list of UHDs, one per ranking metric (RFC 0019 §3.1).
 _METRIC_ROLES = ("sort_kernel_catalog", ROLE)
 
@@ -976,7 +983,7 @@ def _rebind(
 def _role_references(path: Path, document: dict):
     if "heuristic" in document:
         raise PromoteError(
-            f"{path}: legacy heuristic field is not supported; use role/arch maps"
+            f"{path}: a top-level 'heuristic' field is not supported; use role/arch maps"
         )
     for role in ROLES:
         if role not in document:
@@ -1004,6 +1011,8 @@ def _validate_descriptor(document: dict, path: Path) -> None:
         "features_hash",
         "categorical_encoding",
         "trained_against",
+        # Free-form authoring notes, which the loader admits at the root and never reads.
+        "provenance",
         *_ADAPTERS,
     }
     if set(document) - known:
@@ -1116,8 +1125,26 @@ def _validate_descriptor(document: dict, path: Path) -> None:
     )
     if set(body) - allowed:
         raise PromoteError(f"{path}: unknown {adapter} body fields")
-    if "hash" in body and (not isinstance(body["hash"], str) or not body["hash"]):
-        raise PromoteError(f"{path}: model hash must be a nonempty string")
+    if adapter not in ("static_order", "native"):
+        key = "library" if adapter == "custom_library" else "artifact"
+        payload = body.get(key)
+        if not isinstance(payload, str) or not payload:
+            raise PromoteError(f"{path}: missing {adapter}.{key}")
+        if not is_contained_relative_path(payload):
+            raise PromoteError(
+                f"{path}: {adapter}.{key} {payload!r} must be a relative path inside "
+                "the descriptor's directory"
+            )
+        # A library is loaded as code, so it must declare the digest it is verified against.
+        if adapter == "custom_library" and "hash" not in body:
+            raise PromoteError(f"{path}: custom_library.hash is required")
+        if "hash" in body and (
+            not isinstance(body["hash"], str) or not _SHA256.fullmatch(body["hash"])
+        ):
+            raise PromoteError(
+                f"{path}: {adapter}.hash must be the SHA-256 of the {key} as 64 "
+                f"lowercase hexadecimal digits, got {body['hash']!r}"
+            )
     # UhdParser admits only an omitted or empty config.
     if adapter == "custom_library" and "config" in body and body["config"] != {}:
         raise PromoteError(
@@ -1131,10 +1158,7 @@ def _artifact_path(descriptor, descriptor_path, model_dir):
     if adapter in ("static_order", "native"):
         return None, None
     key = "library" if adapter == "custom_library" else "artifact"
-    payload = descriptor[adapter].get(key)
-    if not isinstance(payload, str) or not payload:
-        raise PromoteError(f"{descriptor_path}: missing {adapter}.{key}")
-    resolved = (descriptor_path.parent / payload).resolve()
+    resolved = (descriptor_path.parent / descriptor[adapter][key]).resolve()
     _contained(resolved, model_dir, "model artifact")
     if not resolved.is_file():
         raise PromoteError(f"model artifact does not exist: {resolved}")
@@ -1177,7 +1201,9 @@ def _same_file(left, right):
 
 def _write_json(path, document):
     path.write_text(
-        json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        json.dumps(document, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+        newline="\n",
     )
 
 

@@ -8,6 +8,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "OperationsDir.hpp"
 #include <algorithm>
 #include <fstream>
 #include <sstream>
@@ -17,8 +18,8 @@
 /// @file TestCorpusManifest.cpp
 /// @brief The record that makes a corpus joinable to its measurements.
 ///
-/// `uhd_gen/reproduce/score_predictions.py` and `compare_engines.py` read `benchmark`, `name`
-/// and `regime` from `manifest["graphs"]`, so those keys are asserted by name.
+/// `uhd_gen/reproduce/compare_engines.py` reads `benchmark`, `name` and `regime` from
+/// `manifest["graphs"]`, so those keys are asserted by name.
 
 using namespace hipdnn_corpus_gen;
 
@@ -27,8 +28,7 @@ namespace
 
 std::vector<RegimeAxis> shippedSdpaAxes()
 {
-    const std::string path
-        = std::string(HIPDNN_CORPUS_GEN_OPERATIONS_DIR) + "/sdpa_fwd.opmeta.json";
+    const std::string path = hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json";
     std::ifstream file(path);
     EXPECT_TRUE(file.is_open()) << path;
     const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));

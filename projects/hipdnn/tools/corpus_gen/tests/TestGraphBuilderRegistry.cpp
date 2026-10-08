@@ -15,6 +15,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "OperationsDir.hpp"
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -265,7 +266,8 @@ TEST(TestGraphBuilderRegistry, EveryShippedDeclarationNamesABuilderThatExists)
     const auto names = registeredBuilders();
 
     int declarationsSeen = 0;
-    for(const auto& file : std::filesystem::directory_iterator(HIPDNN_CORPUS_GEN_OPERATIONS_DIR))
+    for(const auto& file :
+        std::filesystem::directory_iterator(hipdnn_corpus_gen::test::operationsDir()))
     {
         if(file.path().string().find(".opmeta.json") == std::string::npos)
         {
@@ -289,7 +291,7 @@ TEST(TestGraphBuilderRegistry, EveryShippedDeclarationNamesABuilderThatExists)
 TEST(TestGraphBuilderRegistry, TheShippedConvolutionMetadataBuildsRealGraphs)
 {
     // Uses the shipped file, through the same path as a corpus run.
-    std::ifstream file(HIPDNN_CORPUS_GEN_OPERATIONS_DIR "/conv_fwd.opmeta.json");
+    std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/conv_fwd.opmeta.json");
     ASSERT_TRUE(file.good()) << "conv_fwd.opmeta.json is not where the build says it is";
 
     const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
@@ -338,7 +340,7 @@ TEST(TestGraphBuilderRegistry, TheShippedConvolutionMetadataBuildsRealGraphs)
 
 TEST(TestGraphBuilderRegistry, TheShippedMetadataCoversEveryDeclaredDtype)
 {
-    std::ifstream file(HIPDNN_CORPUS_GEN_OPERATIONS_DIR "/conv_fwd.opmeta.json");
+    std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/conv_fwd.opmeta.json");
     ASSERT_TRUE(file.good());
     const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
     ASSERT_TRUE(parsed.ok());
@@ -378,7 +380,7 @@ TEST(TestGraphBuilderRegistry, TheShippedMetadataCoversEveryDeclaredDtype)
 TEST(TestGraphBuilderRegistry, TheShippedConvolutionAdmitsARealLayer)
 {
     // Overly strong constraints would silently empty the corpus.
-    std::ifstream file(HIPDNN_CORPUS_GEN_OPERATIONS_DIR "/conv_fwd.opmeta.json");
+    std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/conv_fwd.opmeta.json");
     ASSERT_TRUE(file.good());
     const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
     ASSERT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
@@ -418,7 +420,8 @@ TEST(TestGraphBuilderRegistry, EveryDeclaredParameterReachesTheGraph)
 {
     // Test SDK fixtures may ignore parameters (createValidLayernormFpropGraph ignores its
     // dtypes), which is fatal for a corpus. Perturb each parameter and require the bytes change.
-    for(const auto& entry : std::filesystem::directory_iterator(HIPDNN_CORPUS_GEN_OPERATIONS_DIR))
+    for(const auto& entry :
+        std::filesystem::directory_iterator(hipdnn_corpus_gen::test::operationsDir()))
     {
         if(entry.path().string().find(".opmeta.") == std::string::npos)
         {
@@ -491,7 +494,8 @@ TEST(TestGraphBuilderRegistry, ADeclaredDtypeReachesTheGraphHeaderAndEveryTensor
 {
     // The byte check misses a dtype applied only partially (tensors but not the header), so
     // follow dtype_of to the graph header.
-    for(const auto& entry : std::filesystem::directory_iterator(HIPDNN_CORPUS_GEN_OPERATIONS_DIR))
+    for(const auto& entry :
+        std::filesystem::directory_iterator(hipdnn_corpus_gen::test::operationsDir()))
     {
         if(entry.path().string().find(".opmeta.") == std::string::npos)
         {
@@ -678,7 +682,7 @@ TEST(TestGraphBuilderRegistry, TheShippedSdpaMetadataBuildsGraphsTheEnginesAccep
     //  - an explicit attn_scale_value: rocKE requires one.
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
-    std::ifstream file(HIPDNN_CORPUS_GEN_OPERATIONS_DIR "/sdpa_fwd.opmeta.json");
+    std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json");
     ASSERT_TRUE(file.good()) << "sdpa_fwd.opmeta.json is not where the build says it is";
     const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
     ASSERT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
@@ -739,7 +743,7 @@ TEST(TestGraphBuilderRegistry, ACausalSdpaGraphSaysCausalWithBoundsNotTheDepreca
     // bottom-right problem must use bounds instead.
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
-    std::ifstream file(HIPDNN_CORPUS_GEN_OPERATIONS_DIR "/sdpa_fwd.opmeta.json");
+    std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json");
     ASSERT_TRUE(file.good());
     const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
     ASSERT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
@@ -777,7 +781,7 @@ TEST(TestGraphBuilderRegistry, AShippedUnaryActivationLeavesItsParametersUnset)
     // A present relu_upper_clip turns ReLU into a clamp.
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
-    std::ifstream file(HIPDNN_CORPUS_GEN_OPERATIONS_DIR "/pointwise_unary.opmeta.json");
+    std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/pointwise_unary.opmeta.json");
     ASSERT_TRUE(file.good());
     const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
     ASSERT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
@@ -803,7 +807,7 @@ TEST(TestGraphBuilderRegistry, AShippedUnaryActivationLeavesItsParametersUnset)
 TEST(TestGraphBuilderRegistry, TheTrainingForwardWritesTheStatisticsItPromises)
 {
     // generate_stats requires the stats tensor in the graph, named by the node.
-    std::ifstream file(HIPDNN_CORPUS_GEN_OPERATIONS_DIR "/sdpa_fwd.opmeta.json");
+    std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json");
     ASSERT_TRUE(file.good());
     const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
     ASSERT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());

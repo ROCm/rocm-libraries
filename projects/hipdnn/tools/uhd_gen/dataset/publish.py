@@ -366,9 +366,8 @@ def publish_frame(
 ) -> pd.DataFrame:
     """Collected CSVs -> the validated dataset, as `python -m uhd_gen.dataset` publishes it.
 
-    The order is the point. Resolution happens first because it settles the very duplicates
-    validation would reject; expansion happens last so those checks see the producer's own
-    columns rather than this tool's derived ones.
+    Resolve first: it settles duplicates validation would reject. Expand last, so the checks
+    see the producer's columns rather than derived ones.
     """
     frame = load_csvs(csvs)
     if resolve_duplicates_by is not None:

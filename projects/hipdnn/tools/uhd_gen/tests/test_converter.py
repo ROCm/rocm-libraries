@@ -518,7 +518,7 @@ class TestReproducibility:
             )
             == 0
         )
-        document = (output / "heuristic.uhd.json").read_text(encoding="utf-8")
+        document = (output / "heuristic.uhd.json").read_bytes()
         descriptor = json.loads(document)
         manifest = json.loads(
             (output / "train_manifest.json").read_text(encoding="utf-8")
@@ -529,10 +529,7 @@ class TestReproducibility:
         assert descriptor["tree_data"]["hash"] == hashlib.sha256(artifact).hexdigest()
         # RFC 0019.13 §10.5 wants the pair: the document and the artifact it names.
         assert manifest["model_sha256"] == descriptor["tree_data"]["hash"]
-        assert (
-            manifest["uhd_sha256"]
-            == hashlib.sha256(document.encode("utf-8")).hexdigest()
-        )
+        assert manifest["uhd_sha256"] == hashlib.sha256(document).hexdigest()
 
 
 if __name__ == "__main__":

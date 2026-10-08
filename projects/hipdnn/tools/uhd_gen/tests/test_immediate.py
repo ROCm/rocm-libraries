@@ -308,6 +308,25 @@ def test_runtime_prediction_must_match_measured_request_but_can_use_new_l1_model
         prediction_scorer(model, [wrong_metric])
 
 
+def test_a_runtime_prediction_from_another_provider_build_scores_the_measurement(
+    evaluator,
+):
+    """`binding.provider_build` is a diagnostic: a rebuilt provider answers the same request."""
+    row = measurement()
+    build = {"name": "provider", "version": "1.0+aaaaaaa", "api_version": "1"}
+    row["binding"]["provider_build"] = build
+    response = copy.deepcopy(row)
+    response.update(model=UHD, status="available", metric="tflops", value=1234)
+    response["binding"]["provider_build"] = {**build, "version": "1.0+bbbbbbb"}
+    scorer = prediction_scorer(descriptor(row), [response])
+    assert scorer(normalize_corpus(pd.DataFrame([row]))).tolist() == [1234]
+    response["binding"]["selector_revision"] = "another-selector"
+    with pytest.raises(ValueError, match="differs from the measured"):
+        prediction_scorer(descriptor(row), [response])(
+            normalize_corpus(pd.DataFrame([row]))
+        )
+
+
 def test_time_predictions_rank_lower_first_and_report_in_milliseconds(evaluator):
     """RFC 0019 §4.4: `time` is avgTimeMs directly and lower wins."""
     fast, slow = measurement(metric="time"), measurement(

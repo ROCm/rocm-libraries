@@ -7,6 +7,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "OperationsDir.hpp"
 #include <fstream>
 #include <string>
 
@@ -16,7 +17,7 @@ namespace hipdnn_corpus_gen
 TEST(TestEngineCoverage, TheShippedTableParses)
 {
     // The contents are data; only that CorpusGen can parse it is asserted.
-    std::ifstream file(HIPDNN_CORPUS_GEN_OPERATIONS_DIR "/engines.json");
+    std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/engines.json");
     ASSERT_TRUE(file.good()) << "engines.json is not beside the declarations";
     EngineCoverageTable table;
     std::string error;

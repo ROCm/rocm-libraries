@@ -12,8 +12,6 @@
 
 /// @file TestPoolAssembly.cpp
 /// @brief What a corpus is made of, and in what proportion.
-///
-/// Cases carried over from the retired Python assembler's suite.
 
 using namespace hipdnn_corpus_gen;
 
@@ -300,9 +298,8 @@ TEST(TestPoolAssembly, AQuotaTakesARecordedShapeBeforeASample)
 
 TEST(TestPoolAssembly, ReservedPointsAreTakenFirstAndCountAgainstTheTotal)
 {
-    // The served edges: a spread cut treats each as one more point of its stratum and can drop
-    // it. Reserved, they are in the corpus whatever the cut, they count against the total, and
-    // one in a quota's regime counts towards that quota.
+    // Reserved points (the served edges) are taken whatever the cut, count against the total,
+    // and count towards their regime's quota.
     std::vector<PoolEntry> pool;
     pool.reserve(100);
     for(int64_t index = 0; index < 100; ++index)

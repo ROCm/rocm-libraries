@@ -180,17 +180,14 @@ target_link_libraries(
 target_include_directories(hipdnn_plugin_sdk_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../flatbuffers_sdk/tests)
 if(HIPDNN_UHD_GEN_RUNNABLE)
-    # The interpreter that passed the probe above, and the directory `python -m uhd_gen` must
-    # run from (the tool is a source tree, not an installed package).
+    # The interpreter that passed the probe above, and the directory `python -m uhd_gen`
+    # imports from (the tool is a source tree, not an installed package). Both are paths on
+    # this machine, so the test skips where they do not exist. It finds hipdnn_uhd_features
+    # beside itself: both are built into and installed to the same bin directory.
+    get_filename_component(_uhd_gen_tools_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../tools" ABSOLUTE)
     target_compile_definitions(hipdnn_plugin_sdk_tests
         PRIVATE HIPDNN_UHD_GEN_PYTHON="${Python3_EXECUTABLE}"
-                HIPDNN_UHD_GEN_TOOLS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../tools")
-
-    # uhd_gen reads the evaluator path from this variable, so every invocation gets it.
-    # Appended, not set: Sanitizers.cmake also populates TEST_ENVIRONMENT, and
-    # add_hipdnn_test() replaces the test property rather than adding to it.
-    list(APPEND TEST_ENVIRONMENT
-         "HIPDNN_UHD_FEATURE_EVALUATOR=$<TARGET_FILE:hipdnn_uhd_features>")
+                HIPDNN_UHD_GEN_TOOLS_DIR="${_uhd_gen_tools_dir}")
 
     add_dependencies(hipdnn_plugin_sdk_tests hipdnn_uhd_features)
 endif()

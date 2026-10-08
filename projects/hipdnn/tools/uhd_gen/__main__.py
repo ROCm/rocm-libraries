@@ -228,9 +228,10 @@ def main(argv: list[str] | None = None) -> int:
                 destination.write_text(
                     json.dumps(records, indent=2, allow_nan=False) + "\n",
                     encoding="utf-8",
+                    newline="\n",
                 )
             else:
-                frame.to_csv(destination, index=False)
+                frame.to_csv(destination, index=False, lineterminator="\n")
             return 0
         except (OSError, TypeError, ValueError, KeyError) as error:
             logger.error("%s", error)
@@ -917,7 +918,8 @@ def _run_train(args: argparse.Namespace) -> int:
         descriptor["categorical_encoding"] = categorical_encoding
     descriptor_path = output_dir / f"{args.descriptor_name}.uhd.json"
     descriptor_document = json.dumps(descriptor, indent=2) + "\n"
-    descriptor_path.write_text(descriptor_document, encoding="utf-8")
+    # LF on every platform: `uhd_sha256` below hashes these exact bytes.
+    descriptor_path.write_text(descriptor_document, encoding="utf-8", newline="\n")
     manifest = {
         "uhd_id": uhd_id,
         "requested_features": args.features or requested_signature,
@@ -977,7 +979,7 @@ def _run_train(args: argparse.Namespace) -> int:
             set(problem_keys(df, resolve_grouping(df)))
         )
     (output_dir / "train_manifest.json").write_text(
-        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n"
     )
     print(
         f"UHD generated: {descriptor_path}\nModel: {fb_path}\nFeatures hash: {features_hash}"

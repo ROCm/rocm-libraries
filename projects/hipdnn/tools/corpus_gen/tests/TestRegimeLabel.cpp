@@ -9,6 +9,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "OperationsDir.hpp"
+
 #include <algorithm>
 #include <fstream>
 #include <set>
@@ -27,8 +29,7 @@ namespace
 
 OperationMetadata shippedSdpa()
 {
-    const std::string path
-        = std::string(HIPDNN_CORPUS_GEN_OPERATIONS_DIR) + "/sdpa_fwd.opmeta.json";
+    const std::string path = hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json";
     std::ifstream file(path);
     EXPECT_TRUE(file.is_open()) << path;
     const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
@@ -318,9 +319,8 @@ TEST(TestRegimeFocus, ARegimeTheEngineDoesNotServeIsReportedSaturated)
 
 TEST(TestRegimeFocus, EveryLabelTheFacetsCanSpellIsListedAndCompiles)
 {
-    // What `--regime-floor` asks a floor of: each facet's labels and its `otherwise`, crossed.
-    // A label in the list can still name nothing the engine serves -- that is the search's
-    // finding -- but it can always be compiled into a focus.
+    // `--regime-floor`'s list: each facet's labels and `otherwise`, crossed; every label compiles
+    // to a focus, even one the engine may not serve.
     const auto metadata = shippedSdpa();
     const auto labels = declaredRegimeLabels(metadata);
     size_t expected = 1;

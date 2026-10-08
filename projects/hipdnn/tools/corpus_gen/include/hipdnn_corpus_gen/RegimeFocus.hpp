@@ -229,9 +229,8 @@ inline std::optional<RegimeFocus> compileRegimeFocus(const OperationMetadata& me
 /// @brief Every label @p metadata's regime facets can spell: each facet's declared labels and its
 /// `otherwise`, crossed in declaration order and joined as `regimeLabel` joins them.
 ///
-/// A label here may still name nothing the engine serves, or nothing a declared constraint
-/// admits -- cross attention, under a constraint that rules it out. That is for a focused search
-/// to find, and to report as a shortfall, not for this list to guess.
+/// A label may still name nothing the engine serves or a constraint admits; a focused search
+/// reports that as a shortfall.
 inline std::vector<std::string> declaredRegimeLabels(const OperationMetadata& metadata)
 {
     std::vector<std::string> joined;
@@ -243,6 +242,7 @@ inline std::vector<std::string> declaredRegimeLabels(const OperationMetadata& me
     for(const auto& axis : metadata.regimeLabel)
     {
         std::vector<std::string> options;
+        options.reserve(axis.labels.size() + 1);
         for(const auto& label : axis.labels)
         {
             if(std::find(options.begin(), options.end(), label) == options.end())
@@ -256,11 +256,20 @@ inline std::vector<std::string> declaredRegimeLabels(const OperationMetadata& me
             options.push_back(axis.otherwise);
         }
         std::vector<std::string> next;
+        next.reserve(joined.size() * options.size());
         for(const auto& prefix : joined)
         {
             for(const auto& option : options)
             {
-                next.push_back(prefix.empty() ? option : prefix + "_" + option);
+                if(prefix.empty())
+                {
+                    next.push_back(option);
+                    continue;
+                }
+                std::string label = prefix;
+                label += '_';
+                label += option;
+                next.push_back(std::move(label));
             }
         }
         joined = std::move(next);
@@ -268,11 +277,8 @@ inline std::vector<std::string> declaredRegimeLabels(const OperationMetadata& me
     return joined;
 }
 
-/// @brief A floor of @p floor problems for every regime @p metadata spells that @p quotas does not
-/// already name, as a focus per regime (`--regime-floor`).
-///
-/// A combination of facet labels no single assignment spells is left out rather than refused:
-/// the list is the cross product, and a floor is asked of what exists.
+/// @brief A focus per regime @p metadata spells that @p quotas does not already name, for
+/// `--regime-floor`. A label no assignment can satisfy is left out rather than refused.
 inline std::map<std::string, RegimeFocus> regimeFloors(const OperationMetadata& metadata,
                                                        const std::map<std::string, int64_t>& quotas)
 {

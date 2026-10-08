@@ -1214,6 +1214,7 @@ def _flatbuffer_scorer(
     model_hash: str | None = None,
     objective: str | None = None,
     score_transform: str = TRAINED_TRANSFORM,
+    engine_prediction: bool = False,
     physical: bool,
 ) -> Scorer:
     """Score with the shipped `model.bin`, summed as `TreeDataAdapter::score()` does.
@@ -1289,6 +1290,12 @@ def _flatbuffer_scorer(
     groups = {
         float(group.value): arrays_of(group.trees) for group in (model.groups or [])
     }
+    # EnginePredictor refuses to bind a grouped artifact: an L1 score is per row.
+    if groups and engine_prediction:
+        raise ValueError(
+            f"{artifact}: a grouped tree_data artifact cannot be bound to the predict_engine "
+            "role; grouped L1 models have no per-row contract"
+        )
     if groups and objective not in ("max", "min"):
         raise ValueError(
             f"{artifact}: a grouped artifact chooses its group in the objective's "
@@ -1427,6 +1434,7 @@ def load_model(
         evaluator_feature_semantics_revision,
         signature_references,
     )
+    from .artifact import is_contained_relative_path
     from .provenance import require_feature_semantics
 
     signature = descriptor.get("features_signature") or manifest.get(
@@ -1494,10 +1502,25 @@ def load_model(
             raise ValueError(
                 "native/custom models require --predictions from hipdnn_bench --predict-engine"
             )
+        declared = descriptor.get("tree_data", {})
+        named = None
+        if "artifact" in declared:
+            artifact = declared["artifact"]
+            # UhdParser's rule, so an artifact the runtime would never open is not scored.
+            if (
+                not isinstance(artifact, str)
+                or not artifact
+                or not is_contained_relative_path(artifact)
+            ):
+                raise ValueError(
+                    f"tree_data.artifact {artifact!r} must be a relative path inside the "
+                    "descriptor's directory"
+                )
+            named = model_dir / artifact
         if model_file is not None:
             candidate = model_file
-        elif descriptor.get("tree_data", {}).get("artifact"):
-            candidate = model_dir / descriptor["tree_data"]["artifact"]
+        elif named is not None:
+            candidate = named
         elif (model_dir / "model.lgbm").exists() and not group_feature:
             # A grouped model's `model.lgbm` holds layer 1 only; use `model.bin` instead.
             candidate = model_dir / "model.lgbm"
@@ -1516,10 +1539,6 @@ def load_model(
             )
         else:
             # The declared digest covers only the artifact the descriptor names.
-            declared = descriptor.get("tree_data", {})
-            named = (
-                model_dir / declared["artifact"] if declared.get("artifact") else None
-            )
             model_hash = (
                 declared.get("hash")
                 if named is not None and candidate.resolve() == named.resolve()
@@ -1535,6 +1554,7 @@ def load_model(
                 model_hash=model_hash,
                 objective=objective,
                 score_transform=transform,
+                engine_prediction=immediate,
                 physical=score_is_physical(descriptor.get("score")),
             )
 
@@ -1809,14 +1829,18 @@ def run_evaluate(args: argparse.Namespace) -> int:
                 held_out = {tuple(key) for key in report["split"]["eval_problem_keys"]}
                 slice_path = Path(args.emit_train_slice)
                 slice_path.parent.mkdir(parents=True, exist_ok=True)
-                frame[~keys.isin(held_out)].to_csv(slice_path, index=False)
+                frame[~keys.isin(held_out)].to_csv(
+                    slice_path, index=False, lineterminator="\n"
+                )
                 report["split"]["train_slice"] = str(slice_path)
             output_path = (
                 Path(args.output) if args.output else model_dir / "eval_report.json"
             )
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_text(
-                json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8"
+                json.dumps(report, indent=2, allow_nan=False) + "\n",
+                encoding="utf-8",
+                newline="\n",
             )
             metrics = report["metrics"]
             print(f"Immediate prediction report: {output_path}")
@@ -1921,13 +1945,13 @@ def run_evaluate(args: argparse.Namespace) -> int:
         held_out = {tuple(key) for key in report["split"]["eval_problem_keys"]}
         slice_path = Path(args.emit_train_slice)
         slice_path.parent.mkdir(parents=True, exist_ok=True)
-        df[~keys.isin(held_out)].to_csv(slice_path, index=False)
+        df[~keys.isin(held_out)].to_csv(slice_path, index=False, lineterminator="\n")
         report["split"]["train_slice"] = str(slice_path)
         logger.info("Wrote training slice to %s", slice_path)
 
     output_path = Path(args.output) if args.output else model_dir / "eval_report.json"
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w", encoding="utf-8") as handle:
+    with open(output_path, "w", encoding="utf-8", newline="\n") as handle:
         json.dump(report, handle, indent=2)
         handle.write("\n")
 

@@ -40,8 +40,8 @@
 #include <functional>
 #include <iostream>
 #include <map>
-#include <optional>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -173,12 +173,11 @@ struct Options
     std::vector<std::filesystem::path> regimeQuotaFiles;
     std::string quotaError;
 
-    /// At least this many problems in every declared regime the engine serves
-    /// (`--regime-floor`); an unserved regime is reported short, not a failure.
+    /// `--regime-floor`: at least this many problems in every regime the declaration can spell.
+    /// Unlike a quota, a regime the engine does not serve is reported short and the run succeeds.
     int64_t regimeFloor = 0;
 
-    /// Take each numeric parameter's smallest and largest served point first
-    /// (`--include-extremes`).
+    /// `--include-extremes`: take each numeric parameter's served min and max points first.
     bool includeExtremes = false;
 
     /// Ceiling in bytes across a searched problem's tensors.
@@ -211,9 +210,8 @@ void printHelp(const char* program)
               << "                         serves are searched further until it is met; fewer\n"
               << "                         is returned only when every one saturates (exit 0,\n"
               << "                         with a warning) and otherwise fails (exit 3).\n"
-              << "                         0 (default) takes what the first pass finds. NOTE:\n"
-              << "                         this used to mean problems per combination -- that\n"
-              << "                         is --per-combination.\n"
+              << "                         0 (default) takes what the first pass finds. The\n"
+              << "                         per-combination count is --per-combination.\n"
               << "  --per-combination <n>  First-pass problems per categorical combination\n"
               << "                         (default 50)\n"
               << "  --kdp-root <path>      A *.kdp.json pack, or a directory of them (repeatable)\n"
@@ -413,10 +411,12 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
     return true;
 }
 
-/// The manifest's `served_extent` for one operation; with @p takeEdges the edge points also join
-/// the sweep pool and @p reserved, so the cut keeps them. @p admit stamps an entry and returns its
-/// graph id, or empty when held out. A served maximum within a tenth of @p searchCeiling is
-/// `at_search_ceiling` (the search's edge, not the engine's) unless the declaration bounds it.
+/// The manifest's `served_extent` for one operation. With @p takeEdges, the edge points are
+/// added to the sweep pool (where no pool holds them) and named in @p reserved so the cut keeps
+/// them. @p admit stamps a new pool entry and returns its graph id, or empty when held out.
+///
+/// A served maximum within a tenth of @p searchCeiling is marked `at_search_ceiling` (the walk
+/// proposes nothing above it), unless the declaration bounds the parameter there.
 nlohmann::json
     reportServedExtent(const hipdnn_corpus_gen::OperationMetadata& metadata,
                        const hipdnn_corpus_gen::ProblemCorpus& corpus,
@@ -427,7 +427,13 @@ nlohmann::json
                        std::set<std::string>& reserved,
                        const std::function<std::string(hipdnn_corpus_gen::PoolEntry&)>& admit)
 {
+    size_t pooledCount = 0;
+    for(const auto& pool : pools)
+    {
+        pooledCount += pool.second.size();
+    }
     std::vector<hipdnn_corpus_gen::ProblemPoint> pooled;
+    pooled.reserve(pooledCount);
     std::set<std::string> pooledKeys;
     for(const auto& pool : pools)
     {
@@ -482,8 +488,8 @@ nlohmann::json
     {
         capped = capped || combination.searchCapped;
     }
-    // A lower bound on the served region; `search_capped` means some search stopped while still
-    // finding new points.
+    // How far the walks reached: a lower bound on the served region, not its edge.
+    // `search_capped`: some search stopped while still finding points.
     return {{"parameters", parameters},
             {"search_ceiling", searchCeiling},
             {"served_points", extent.servedPoints},
@@ -950,14 +956,18 @@ int runGenerator(const std::vector<std::string>& args)
         return 0;
     }
 
-    // Filters run inside the search so its target is spent on surviving points.
+    // `--keep` runs inside the search, ahead of the engine, so the search's target is spent on
+    // points the corpus may contain.
     const hipdnn_corpus_gen::CorpusFilter searchFilter
         = [&](const std::string&, const ProblemPoint& point) {
               return hipdnn_corpus_gen::keeps(keep, point);
           };
 
-    // An excluded configuration is held, not refused, so the walk can pass through the region
-    // the excluded corpora cover. Its id must be computed exactly as emission computes it.
+    // An excluded configuration is valid -- the engine serves it -- and only not returned: the
+    // search holds it, as it holds a point already pooled, and keeps walking through it. Refused
+    // instead, it fences the walk out of the region the excluded corpora cover, and a search that
+    // starts there finds nothing new however many problems are asked for. The id is the one the
+    // graph would be written under, content-derived, computed exactly as emission computes it.
     std::set<std::string> heldOutIds;
     std::map<std::string, bool> excludedByKey;
     const auto excludedPoint = [&](const std::string& operation, const ProblemPoint& point) {
@@ -981,13 +991,13 @@ int runGenerator(const std::vector<std::string>& args)
             const auto graph = hipdnn_corpus_gen::buildGraphFor(declaration->second, point);
             if(graph.ok())
             {
-                const auto id = hipdnn_corpus_gen::stampGraphIdentity(
-                                    graph.bytes,
-                                    graphNameFor(operation,
-                                                 hipdnn_corpus_gen::regimeLabel(
-                                                     declaration->second, point),
-                                                 point))
-                                    .id;
+                const auto id
+                    = hipdnn_corpus_gen::stampGraphIdentity(
+                          graph.bytes,
+                          graphNameFor(operation,
+                                       hipdnn_corpus_gen::regimeLabel(declaration->second, point),
+                                       point))
+                          .id;
                 held = excluded.count(id) > 0;
                 if(held)
                 {
@@ -1024,7 +1034,6 @@ int runGenerator(const std::vector<std::string>& args)
     std::vector<std::string> quotaShort;
     /// Per operation: each numeric parameter's served extent, and the extremes taken.
     nlohmann::json servedExtent = nlohmann::json::object();
-    /// Whether the search found any served problem beyond the pack and model shapes.
     bool searchFoundMore = false;
     std::ofstream commands;
     std::filesystem::path root;
@@ -1486,10 +1495,16 @@ int runGenerator(const std::vector<std::string>& args)
 
             // Stem must equal manifest `name`: scoring joins bench output by stem.
             const auto name = graph.name + ".fb";
-            std::ofstream problem(root / "graphs" / name, std::ios::binary);
+            const auto graphPath = root / "graphs" / name;
+            std::ofstream problem(graphPath, std::ios::binary);
             problem.write(reinterpret_cast<const char*>(graph.bytes.data()),
                           static_cast<std::streamsize>(graph.bytes.size()));
             problem.close();
+            // The manifest lists this file, so a corpus missing its bytes must not be written.
+            if(!problem)
+            {
+                throw std::runtime_error("Failed to write graph file: " + graphPath.string());
+            }
 
             hipdnn_corpus_gen::ManifestEntry row;
             row.entry = entry;
@@ -1514,7 +1529,7 @@ int runGenerator(const std::vector<std::string>& args)
             {
                 commands << " --plugin-dir " << dir;
             }
-            commands << " --graph " << (root / "graphs" / name).string();
+            commands << " --graph " << graphPath.string();
             if(!options.engineName.empty())
             {
                 commands << " --engine-name " << options.engineName;
@@ -1528,8 +1543,7 @@ int runGenerator(const std::vector<std::string>& args)
     if(!heldOutIds.empty())
     {
         std::cerr << "Held out " << heldOutIds.size()
-                  << " problem(s) already in the excluded corpora"
-                  << "\n";
+                  << " problem(s) already in the excluded corpora" << "\n";
     }
 
     if(!root.empty())

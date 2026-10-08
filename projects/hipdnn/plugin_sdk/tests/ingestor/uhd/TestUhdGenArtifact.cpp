@@ -20,7 +20,9 @@
 #include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
 #include <nlohmann/json.hpp>
 
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -31,8 +33,8 @@
 #include <string>
 #include <vector>
 
-// uhd_gen reads HIPDNN_UHD_FEATURE_EVALUATOR from the environment; ctest sets it
-// (plugin_sdk/tests/CMakeLists.txt).
+// The interpreter and the tools directory are the configuring tree's (see
+// plugin_sdk/tests/CMakeLists.txt); a binary run elsewhere skips when they are absent.
 #if !defined(HIPDNN_UHD_GEN_PYTHON) || !defined(HIPDNN_UHD_GEN_TOOLS_DIR)
 #error \
     "HIPDNN_UHD_GEN_PYTHON and HIPDNN_UHD_GEN_TOOLS_DIR must be defined; see plugin_sdk/tests/CMakeLists.txt"
@@ -62,20 +64,76 @@ std::string trainingCsv()
     return csv;
 }
 
-/// Runs uhd_gen into @p outputDir from the tools directory, so `python -m uhd_gen` resolves
-/// without installing the package. Returns the command's exit status.
+#ifdef _WIN32
+constexpr char PATH_LIST_SEPARATOR = ';';
+#else
+constexpr char PATH_LIST_SEPARATOR = ':';
+#endif
+
+/// hipdnn_uhd_features, which the build and install trees both put beside this binary.
+std::filesystem::path featureEvaluator()
+{
+    return hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
+           / hipdnn_data_sdk::utilities::getExecutableName("hipdnn_uhd_features");
+}
+
+/// Why uhd_gen cannot run here, or empty when it can. The interpreter and the uhd_gen
+/// sources are absolute paths into the configuring machine, so a binary run anywhere else,
+/// such as an installed test on a runner without the source tree, finds neither.
+std::string missingPrerequisite()
+{
+    const auto package = std::filesystem::path(HIPDNN_UHD_GEN_TOOLS_DIR) / "uhd_gen";
+    if(!std::filesystem::is_directory(package))
+    {
+        return "the uhd_gen sources are not at " + package.string();
+    }
+    if(!std::filesystem::exists(HIPDNN_UHD_GEN_PYTHON))
+    {
+        return std::string("the configured Python interpreter is not at ") + HIPDNN_UHD_GEN_PYTHON;
+    }
+    if(!std::filesystem::exists(featureEvaluator()))
+    {
+        return "hipdnn_uhd_features is not beside the test binary at "
+               + featureEvaluator().string();
+    }
+    return {};
+}
+
+/// Runs `python -m uhd_gen train <arguments>` against the evaluator beside this binary and
+/// returns its exit status. PYTHONPATH, not the working directory, makes the package
+/// importable, so the tools directory may be on a different drive from the test.
+int runUhdGenTrain(const std::string& arguments)
+{
+    std::string pythonPath = HIPDNN_UHD_GEN_TOOLS_DIR;
+    const auto inherited = hipdnn_data_sdk::utilities::getEnv("PYTHONPATH");
+    if(!inherited.empty())
+    {
+        pythonPath += PATH_LIST_SEPARATOR + inherited;
+    }
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter pythonPathForChild(
+        "PYTHONPATH", pythonPath);
+
+    std::string command = std::string("\"") + HIPDNN_UHD_GEN_PYTHON + "\" -m uhd_gen train"
+                          + " --feature-evaluator \"" + featureEvaluator().string() + "\" "
+                          + arguments
+                          // Keep the tool's traceback in the test output.
+                          + " 1>&2";
+#ifdef _WIN32
+    // cmd.exe strips the first and last quote from a command line that starts with one.
+    command = "\"" + command + "\"";
+#endif
+    return std::system(command.c_str());
+}
+
+/// Trains on @p csv's single-layer corpus into @p outputDir.
 int runUhdGen(const std::filesystem::path& csv, const std::filesystem::path& outputDir)
 {
-    const std::string command
-        = std::string("cd \"") + HIPDNN_UHD_GEN_TOOLS_DIR + "\" && \"" + HIPDNN_UHD_GEN_PYTHON
-          + "\" -m uhd_gen train" + " --input \"" + csv.string() + "\""
-          + " --features q.M kernel.tile_m" + " --target tflops" + " --provenance \""
-          + (csv.parent_path() / "provenance.json").string() + "\"" + " --output-dir \""
-          + outputDir.string() + "\"" + " --name \"uhd_gen artifact test\""
-          + " --num-boost-round 40 --early-stopping 10"
-          // Keep the tool's traceback in the test output.
-          + " 1>&2";
-    return std::system(command.c_str());
+    return runUhdGenTrain("--input \"" + csv.string() + "\""
+                          + " --features q.M kernel.tile_m --target tflops --provenance \""
+                          + (csv.parent_path() / "provenance.json").string() + "\""
+                          + " --output-dir \"" + outputDir.string() + "\""
+                          + " --name \"uhd_gen artifact test\""
+                          + " --num-boost-round 40 --early-stopping 10");
 }
 
 class TestUhdGenArtifact : public ::testing::Test
@@ -83,6 +141,11 @@ class TestUhdGenArtifact : public ::testing::Test
 protected:
     void SetUp() override
     {
+        if(const auto missing = missingPrerequisite(); !missing.empty())
+        {
+            GTEST_SKIP() << "uhd_gen cannot run from here: " << missing;
+        }
+
         _dir = std::make_unique<hipdnn_test_sdk::utilities::ScopedDirectory>(
             std::filesystem::temp_directory_path() / "hipdnn_uhd_gen_artifact");
 
@@ -95,8 +158,8 @@ protected:
 
         _outputDir = _dir->path() / "out";
 
-        // Not a skip: the tool's dependencies are part of the build environment, so a missing
-        // interpreter is a broken environment, not "nothing to run".
+        // Not a skip: the configure step checked the tool's dependencies import, so a failure
+        // here is a broken environment, not "nothing to run".
         ASSERT_EQ(runUhdGen(csv, _outputDir), 0)
             << "uhd_gen failed. Its dependencies are in "
                "projects/hipdnn/tools/uhd_gen/requirements.txt, which the hipDNN dev image "
@@ -176,6 +239,11 @@ TEST_F(TestUhdGenArtifact, TheModelScoresAndOrdersByTheFeatureItWasTrainedOn)
 /// strictly better than group 0, and tflops rises with tile_m inside each group.
 TEST(TestUhdGenArtifactGrouped, TheRuntimeGroupsWhatTheToolTrained)
 {
+    if(const auto missing = missingPrerequisite(); !missing.empty())
+    {
+        GTEST_SKIP() << "uhd_gen cannot run from here: " << missing;
+    }
+
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(std::filesystem::temp_directory_path()
                                                           / "hipdnn_uhd_gen_grouped");
 
@@ -206,17 +274,16 @@ TEST(TestUhdGenArtifactGrouped, TheRuntimeGroupsWhatTheToolTrained)
         {"umd", nlohmann::json::array()}}.dump();
 
     const auto outputDir = dir.path() / "out";
-    const std::string command
-        = std::string("cd \"") + HIPDNN_UHD_GEN_TOOLS_DIR + "\" && \"" + HIPDNN_UHD_GEN_PYTHON
-          + "\" -m uhd_gen train" + " --input \"" + csv.string() + "\""
-          + " --features q.M kernel.group kernel.tile_m"
-          + " --group-by-feature kernel.group"
-          // Layer 1 is fitted per (problem, group), so the problem key is required.
-          + " --group-by q.M" + " --target tflops" + " --provenance \""
-          + (dir.path() / "provenance.json").string() + "\"" + " --output-dir \""
-          + outputDir.string() + "\"" + " --name \"uhd_gen grouped test\""
-          + " --num-boost-round 40 --early-stopping 10 1>&2";
-    ASSERT_EQ(std::system(command.c_str()), 0);
+    ASSERT_EQ(runUhdGenTrain("--input \"" + csv.string() + "\""
+                             + " --features q.M kernel.group kernel.tile_m"
+                             + " --group-by-feature kernel.group"
+                             // Layer 1 is fitted per (problem, group), so the problem key is
+                             // required.
+                             + " --group-by q.M --target tflops --provenance \""
+                             + (dir.path() / "provenance.json").string() + "\"" + " --output-dir \""
+                             + outputDir.string() + "\"" + " --name \"uhd_gen grouped test\""
+                             + " --num-boost-round 40 --early-stopping 10"),
+              0);
 
     const auto path = outputDir / "heuristic.uhd.json";
     std::ifstream file(path);

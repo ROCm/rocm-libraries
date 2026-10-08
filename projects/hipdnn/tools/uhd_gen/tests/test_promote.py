@@ -205,14 +205,29 @@ def test_role_and_explicit_default_target_preserve_other_maps(tmp_path):
     assert _read(tree / "engine.ued.json") == expected
 
 
-def test_install_rewrites_nested_artifact_path_portably(tmp_path):
+@pytest.mark.parametrize(
+    "payload", ["nested/model.bin", "./nested/model.bin", "nested//model.bin"]
+)
+def test_install_rewrites_nested_artifact_path_portably(tmp_path, payload):
     tree = _tree(tmp_path / "tree")
-    model = _model(tmp_path / "model", tree, artifact="nested/model.bin")
+    model = _model(tmp_path / "model", tree, artifact=payload)
     plan = build_plan(model, tree)
     _apply(plan)
     installed = _read(plan.destination_descriptor)
     artifact = plan.destination_descriptor.parent / installed["tree_data"]["artifact"]
     assert artifact.read_bytes() == _weights()
+
+
+def test_root_provenance_notes_are_admitted_and_installed(tmp_path):
+    """UhdParser admits a root `provenance` it never reads, so promotion keeps it."""
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    document = _read(model / "heuristic.uhd.json")
+    notes = {"collected_on": "board-7", "commit": "a" * 40}
+    _write(model / "heuristic.uhd.json", {**document, "provenance": notes})
+    plan = build_plan(model, tree)
+    _apply(plan)
+    assert _read(plan.destination_descriptor)["provenance"] == notes
 
 
 @pytest.mark.parametrize("binding", ["role", "architecture", "engine"])
@@ -340,8 +355,9 @@ def test_shared_artifact_collision_is_found_outside_destination_directory(tmp_pa
     destination = build_plan(model, tree).destination_descriptor.parent
     incumbent = _read(model / "heuristic.uhd.json")
     incumbent["id"] = OTHER
-    incumbent["tree_data"]["artifact"] = "../model.bin"
-    _write(destination / "other" / "other.uhd.json", incumbent)
+    incumbent["tree_data"]["artifact"] = f"{destination.name}/model.bin"
+    _write(destination.parent / "other.uhd.json", incumbent)
+    destination.mkdir(parents=True)
     (destination / "model.bin").write_bytes(b"untargeted model")
     before = _files(tmp_path)
     with pytest.raises(PromoteError):
@@ -605,9 +621,7 @@ def test_a_static_order_declaring_criteria_is_refused_before_any_write(tmp_path)
     assert _files(tmp_path) == before
 
 
-@pytest.mark.parametrize(
-    "payload", ["missing.bin", "../outside.bin", "metadata.kmd.json"]
-)
+@pytest.mark.parametrize("payload", ["missing.bin", "metadata.kmd.json"])
 def test_invalid_artifact_destination_or_source_never_writes(tmp_path, payload):
     tree = _tree(tmp_path / "tree")
     model = _model(tmp_path / "model", tree)
@@ -620,6 +634,54 @@ def test_invalid_artifact_destination_or_source_never_writes(tmp_path, payload):
     with pytest.raises(PromoteError):
         build_plan(model, tree)
     assert _files(tmp_path) == before
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "/model.bin",
+        "\\\\server\\share\\model.bin",
+        "C:model.bin",
+        "C:/model.bin",
+        "../model.bin",
+        "..\\model.bin",
+        "nested\\model.bin",
+        "a/../../model.bin",
+        "scratch/../nested/model.bin",
+        ".",
+        "nested/..",
+        "nested/",
+        "nested/.",
+    ],
+)
+def test_an_artifact_path_leaving_the_descriptors_directory_is_refused(
+    tmp_path, payload
+):
+    """UhdParser reads only a relative path naming a file inside the descriptor's directory."""
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    doc = _read(model / "heuristic.uhd.json")
+    doc["tree_data"]["artifact"] = payload
+    _write(model / "heuristic.uhd.json", doc)
+    with pytest.raises(
+        PromoteError, match=r"tree_data\.artifact .* must be a relative path inside"
+    ):
+        build_plan(model, tree)
+
+
+@pytest.mark.parametrize(
+    "spell",
+    [str.upper, lambda digest: "sha256:" + digest, lambda digest: digest[:63]],
+    ids=["uppercase", "prefixed", "short"],
+)
+def test_a_model_hash_that_is_not_bare_lowercase_sha256_is_refused(tmp_path, spell):
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    doc = _read(model / "heuristic.uhd.json")
+    doc["tree_data"]["hash"] = spell(hashlib.sha256(_weights()).hexdigest())
+    _write(model / "heuristic.uhd.json", doc)
+    with pytest.raises(PromoteError, match="tree_data.hash must be the SHA-256"):
+        build_plan(model, tree)
 
 
 def _train(tmp_path, *extra):
@@ -951,27 +1013,38 @@ def test_a_fixed_id_model_serving_another_slot_is_not_replaced(
     assert _files(tmp_path) == before
 
 
+def _custom_library_model(root, **body):
+    model = _opaque_model(root)
+    doc = _read(model / "heuristic.uhd.json")
+    doc["adapter"] = "custom_library"
+    doc.pop("tree_data")
+    doc["custom_library"] = {"library": "scorer.dll", "symbol": "score", **body}
+    _write(model / "heuristic.uhd.json", doc)
+    (model / "scorer.dll").write_bytes(b"MZ")
+    return model
+
+
 @pytest.mark.parametrize("config", [{}, {"x": 1}])
 def test_a_custom_library_configuration_is_promoted_only_when_empty(tmp_path, config):
     """UhdParser refuses any non-empty `custom_library.config`."""
     tree = _tree(tmp_path / "tree")
-    model = _opaque_model(tmp_path / "model")
-    doc = _read(model / "heuristic.uhd.json")
-    doc["adapter"] = "custom_library"
-    doc.pop("tree_data")
-    doc["custom_library"] = {
-        "library": "scorer.dll",
-        "symbol": "score",
-        "config": config,
-    }
-    _write(model / "heuristic.uhd.json", doc)
-    (model / "scorer.dll").write_bytes(b"MZ")
+    model = _custom_library_model(
+        tmp_path / "model", hash=hashlib.sha256(b"MZ").hexdigest(), config=config
+    )
     if config:
         with pytest.raises(PromoteError, match="configuration is not supported"):
             build_plan(
                 model, tree, "ASM_SDPA_ENGINE", role="predict_engine", arch="gfx950"
             )
     else:
+        build_plan(model, tree, "ASM_SDPA_ENGINE", role="predict_engine", arch="gfx950")
+
+
+def test_a_custom_library_without_a_hash_is_refused(tmp_path):
+    """A library is loaded as code, so UhdParser requires the digest it is verified against."""
+    tree = _tree(tmp_path / "tree")
+    model = _custom_library_model(tmp_path / "model")
+    with pytest.raises(PromoteError, match="custom_library.hash is required"):
         build_plan(model, tree, "ASM_SDPA_ENGINE", role="predict_engine", arch="gfx950")
 
 

@@ -40,6 +40,7 @@ from .provenance import ROLES, descriptor_id, snapshot_provenance
 from .immediate import (
     LABEL_STATISTIC,
     ROLE,
+    binding_identity,
     normalize_row,
     normalize_corpus,
     training_binding,
@@ -151,9 +152,8 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
         help="With --dataset: train on these contributions only (default: every training "
         "contribution)",
     )
-    # A published dataset (§8.3 rows converted from CSV -- a sweep run elsewhere, the MIOpen
-    # perf DB) carries no engine binding and no UED, so what the binding would have decided is
-    # stated here, as `train` takes it.
+    # A published dataset (§8.3 CSV rows, e.g. the MIOpen perf DB) has no engine binding or
+    # UED, so these state what the binding would decide, as `train` takes them.
     parser.add_argument(
         "--target",
         help="Published dataset: the label column (default: the --metric's label)",
@@ -228,6 +228,7 @@ def _write_json(path: Path, value) -> None:
     path.write_text(
         json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False) + "\n",
         encoding="utf-8",
+        newline="\n",
     )
 
 
@@ -309,7 +310,7 @@ def write_collection(
             provenance = binding["trained_against"]
             selector_revision = binding["selector_revision"]
         name = _corpus_name(sources, source)
-        frame.to_csv(stage / f"{name}.csv", index=False)
+        frame.to_csv(stage / f"{name}.csv", index=False, lineterminator="\n")
         _write_json(stage / f"{name}.json", _absent_as_null(rows[source]))
     every = [row for source in sources for row in rows[source]]
     manifest = {
@@ -375,13 +376,19 @@ def one_measurement_per_shape(measured: list) -> tuple[list, int]:
 
     `measured` is `(session, row)` in measurement order; returns (rows, dropped). A repeat
     kept twice is weighted twice and can straddle the holdout split, which keys on device.
-    A repeat under another binding is refused, not superseded, so a mix cannot hide.
+    A repeat under another binding is refused, not superseded, so a mix cannot hide. The
+    binding's `provider_build` is diagnostic: a rebuilt provider's measurement supersedes.
     """
     newest: dict = {}
     binding: dict = {}
     for session, row in measured:
         key = _measurement_key(row)
-        if binding.setdefault(key, row.get("binding")) != row.get("binding"):
+        current = row.get("binding")
+        if current is not None:
+            current = binding_identity(
+                json.loads(current) if isinstance(current, str) else current
+            )
+        if binding.setdefault(key, current) != current:
             raise ValueError(
                 f"{key[0]} on {key[1]} was measured under two engine bindings; "
                 "the selector or descriptor provenance changed between measurements"
@@ -398,8 +405,8 @@ def dataset_contributions(
 ) -> tuple[Path, list]:
     """(resolved dataset directory, its contributions of `purposes`, oldest first).
 
-    `only` narrows to the named contribution ids; a name the dataset does not hold is
-    refused, not ignored.
+    Ordered by `collected_at`, not the order named. `only` narrows to the named
+    contribution ids; an id the dataset does not hold is refused.
     """
     from .dataset.store import read_manifest
 
@@ -482,16 +489,10 @@ def load_dataset(
 ) -> dict:
     """The training rows of a stored dataset: one measurement per shape, the newest winning.
 
-    A dataset (`uhd_gen.dataset.store`) keeps every measurement every contribution brought;
-    this decides the label exactly as reading the collections themselves did. Contributions
-    are taken oldest to newest by `collected_at`, and `one_measurement_per_shape` keeps the
-    newest measurement of each configuration on each shape; the count set aside is returned
-    so the model can say how much of the store it did not use. Only contributions whose
-    purpose is in `purposes` are read: evaluation measurements never train.
-
-    What every contribution must share (role, engine, binding, collection knobs) was refused
-    when it was added; what is refused here is a request the dataset cannot answer -- another
-    role, a metric a contribution did not measure, knob addressing that contradicts itself.
+    Contributions are read oldest to newest by `collected_at`, only those whose purpose is in
+    `purposes`; `one_measurement_per_shape` picks each label and the superseded count is
+    returned. Binding mismatches are refused when a contribution is added; this refuses
+    another role, an unmeasured metric, or contradicting knob addressing.
     """
     directory, chosen = dataset_contributions(
         directory, role=role, purposes=purposes, only=only
@@ -504,7 +505,7 @@ def load_dataset(
                 f"it holds {contribution['sources']}"
             )
     # Each contribution records only the ordinals its candidates showed (shards split them);
-    # merging refuses a pin two of them read differently.
+    # merging refuses a pin two contributions read differently.
     try:
         knob_encodings = addressing.merge_manifests(
             c.get("knob_encodings") for c in chosen
@@ -547,8 +548,7 @@ def load_dataset(
             for failure in c.get("failed_graphs") or []
         ],
         "dataset": str(directory),
-        # Every contribution was converted from §8.3 CSV: rows with no engine binding, already
-        # validated by publish, trained as `train` trains them (generate's published mode).
+        # Every contribution came from §8.3 CSV: no engine binding, trained as `train` does.
         "from_published": _all_published(chosen),
         "training_options": [c.get("training_options") for c in chosen],
         "collections": [
@@ -934,7 +934,8 @@ def _measure(
 ) -> dict:
     """Run the benchmark over `--graphs` into `stage`: the measuring half of generate.
 
-    Returns exactly what training reads, which `--dataset` can later hand back.
+    Returns exactly what training reads, which a dataset converted from `--collect-only`
+    output (`--dataset`) can later hand back.
     """
     if args.engine_id is None:
         raise ValueError("--engine-id is required to measure")
@@ -963,6 +964,9 @@ def _measure(
     environment.pop("HIPDNN_DESCRIPTOR_RUNTIME_DIR", None)
     if immediate:
         environment["HIPDNN_DESCRIPTOR_DIR"] = str(tree)
+        # An L1 label is the engine's untuned pick. HIPDNN_FORCE_BENCHMARKING overrides the
+        # bench's global.benchmarking=0 in every provider that implements the knob.
+        environment["HIPDNN_FORCE_BENCHMARKING"] = "0"
     else:
         collection_tree = stage / "collection_descriptors"
         shutil.copytree(tree, collection_tree)
@@ -994,7 +998,7 @@ def _measure(
         }
         graph_inputs.append(graph_input)
         # A failing graph is skipped whole (every device and metric, so all corpora cover
-        # one problem set); the failure budget below catches systematic failures.
+        # one problem set); `run_generate`'s failure budget catches systematic failures.
         try:
             if immediate and not binary:
                 graph_document = json.loads(payload.decode("utf-8"))
@@ -1070,22 +1074,6 @@ def _measure(
         for source in sources:
             rows[source].extend(graph_rows[source])
         published.update(graph_names)
-    if len(failed_graphs) > args.max_graph_failures * len(graphs):
-        _write_json(stage / "failed_graphs.json", failed_graphs)
-        listed = "\n".join(
-            f"  {failure['source']}: {failure['error']}"
-            for failure in failed_graphs[:10]
-        )
-        more = (
-            f"\n  ... and {len(failed_graphs) - 10} more"
-            if len(failed_graphs) > 10
-            else ""
-        )
-        raise ValueError(
-            f"{len(failed_graphs)} of {len(graphs)} graph(s) failed collection, over "
-            f"the --max-graph-failures budget of {args.max_graph_failures:g}:\n"
-            f"{listed}{more}"
-        )
     regimes = corpus_regimes(graphs)
     for source in sources:
         for row in rows[source]:
@@ -1103,6 +1091,31 @@ def _measure(
         "collection_knobs": exposed.get("knobs", []),
         "failed_graphs": failed_graphs,
     }
+
+
+def _over_budget(
+    failed_graphs: list, graph_count: int, budget: float, saved: bool
+) -> ValueError:
+    """The refusal of a run whose failed graphs exceed `--max-graph-failures`, listing them.
+
+    `saved`: the graphs that did measure were written as a collection in the stage.
+    """
+    listed = "\n".join(
+        f"  {failure['source']}: {failure['error']}" for failure in failed_graphs[:10]
+    )
+    more = (
+        f"\n  ... and {len(failed_graphs) - 10} more" if len(failed_graphs) > 10 else ""
+    )
+    recovery = (
+        "\nThe measured graphs are kept as a collection; `python -m uhd_gen.dataset add "
+        "--collection` converts it for `generate --dataset` without measuring again"
+        if saved
+        else ""
+    )
+    return ValueError(
+        f"{len(failed_graphs)} of {graph_count} graph(s) failed collection, over "
+        f"the --max-graph-failures budget of {budget:g}:\n{listed}{more}{recovery}"
+    )
 
 
 def discover_graphs(supplied: list[str]) -> list[Path]:
@@ -1310,12 +1323,9 @@ def _generate_published(
 ) -> int:
     """Train and score a model from a published dataset, as `train` and `evaluate` would.
 
-    A published dataset's rows came through `publish` (§8.3 checks, descriptor expansion) and
-    carry no engine binding and no UED: an opaque catalog such as MIOpen's, ranked by solver
-    and configuration. So nothing generate infers from a binding or a UED is inferred here --
-    the features, the label and its direction are stated, as `train` requires them -- and the
-    model cannot be promoted (there is no UED to bind it in). The holdout is generate's own:
-    the named evaluation set, a drawn fraction of the problems, or recall.
+    Published rows carry no engine binding and no UED, so the features, label and direction
+    are stated rather than inferred, and the model cannot be promoted. The holdout is
+    generate's own: `--eval-benchmarks`, `--eval-fraction`, or `--recall`.
     """
     from .__main__ import main
 
@@ -1345,7 +1355,7 @@ def _generate_published(
     if target not in frame.columns:
         raise ValueError(f"the dataset has no {target!r} column to train on")
     _write_json(stage / "provenance.json", measured["provenance"])
-    frame.to_csv(stage / "corpus.csv", index=False)
+    frame.to_csv(stage / "corpus.csv", index=False, lineterminator="\n")
     _write_json(stage / "corpus.json", _absent_as_null(rows))
     grouping = resolve_grouping(frame)
     keys = problem_keys(frame, grouping)
@@ -1369,7 +1379,7 @@ def _generate_published(
             "generation needs at least five training problems plus held-out ones"
         )
     train_path, eval_path = stage / "train.json", stage / "eval_corpus.json"
-    train_frame.to_csv(stage / "train.csv", index=False)
+    train_frame.to_csv(stage / "train.csv", index=False, lineterminator="\n")
     _write_json(train_path, _absent_as_null(train_frame.to_dict(orient="records")))
     _write_json(eval_path, _absent_as_null(eval_frame.to_dict(orient="records")))
     arches = (
@@ -1580,7 +1590,15 @@ def run_generate(args: argparse.Namespace) -> int:
         if args.graphs:
             measured = _measure(args, tree, stage, sources, immediate)
             engine_id = args.engine_id
-            if args.collect_only:
+            failed_graphs = measured["failed_graphs"]
+            graph_count = len(measured["graph_inputs"])
+            over_budget = len(failed_graphs) > args.max_graph_failures * graph_count
+            # An over-budget run still records what it measured, as a collection in the
+            # preserved stage, so a dataset can take it without measuring again.
+            saved = (args.collect_only and not over_budget) or (
+                over_budget and any(measured["rows"].values())
+            )
+            if saved:
                 manifest = write_collection(
                     stage,
                     collected_at=measured["collected_at"],
@@ -1598,8 +1616,14 @@ def run_generate(args: argparse.Namespace) -> int:
                     collection_knobs=measured["collection_knobs"],
                     kernel_fields=measured["kernel_fields"],
                     shard=args.shard,
-                    failed_graphs=measured["failed_graphs"],
+                    failed_graphs=failed_graphs,
                 )
+            if over_budget:
+                _write_json(stage / "failed_graphs.json", failed_graphs)
+                raise _over_budget(
+                    failed_graphs, graph_count, args.max_graph_failures, saved
+                )
+            if args.collect_only:
                 stage.rename(output)
                 stage = None
                 print(
@@ -1692,7 +1716,11 @@ def run_generate(args: argparse.Namespace) -> int:
                 raise ValueError(
                     "the graph/device corpus contains duplicate candidate measurements"
                 )
-            frame.to_csv(stage / f"{staged('corpus', source)}.csv", index=False)
+            frame.to_csv(
+                stage / f"{staged('corpus', source)}.csv",
+                index=False,
+                lineterminator="\n",
+            )
             corpora[source] = stage / f"{staged('corpus', source)}.json"
             _write_json(corpora[source], _absent_as_null(rows[source]))
             frames[source] = frame
@@ -1839,7 +1867,11 @@ def run_generate(args: argparse.Namespace) -> int:
             model_dir = stage / ("model" if single else f"model_{requested}")
             source_train = train_frames[source]
             train_path = stage / f"{staged('train', source)}.json"
-            source_train.to_csv(stage / f"{staged('train', source)}.csv", index=False)
+            source_train.to_csv(
+                stage / f"{staged('train', source)}.csv",
+                index=False,
+                lineterminator="\n",
+            )
             _write_json(
                 train_path, _absent_as_null(source_train.to_dict(orient="records"))
             )
@@ -1929,10 +1961,17 @@ def run_generate(args: argparse.Namespace) -> int:
             # Only a holdout run must keep evaluation disjoint from training.
             if not args.recall and training_keys & evaluated_keys:
                 raise ValueError("evaluation includes a problem seen during training")
-            report["holdout_integrity"] = {
-                "status": "held_out",
-                "detail": "Verified disjoint graph/device identities in recorded training and evaluation slices",
-            }
+            report["holdout_integrity"] = (
+                {
+                    "status": "recall",
+                    "detail": "--recall trains on and scores every shape of a closed shape space",
+                }
+                if args.recall
+                else {
+                    "status": "held_out",
+                    "detail": "Verified disjoint graph/device identities in recorded training and evaluation slices",
+                }
+            )
             _write_json(report_path, report)
             models.append(
                 {

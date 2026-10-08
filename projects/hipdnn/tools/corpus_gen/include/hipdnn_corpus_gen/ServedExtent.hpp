@@ -17,15 +17,9 @@
 /// @brief How far the engine's served region reaches along each numeric parameter, and the
 /// points at its edges.
 ///
-/// A corpus that is to represent what an engine serves -- an evaluation set, scoring a model on
-/// everything it may be asked to choose for -- has to reach the edges of that region, and say
-/// how far they are. Spread selection does not guarantee the first: it places points over the
-/// interior and can leave the largest served `seqlen_k` out in favour of a better-spread one.
-/// Nothing reported the second. This is both: per numeric parameter, the smallest and largest
-/// value over every point the engine is known to serve, and a served point carrying each.
-///
-/// The extent is how far the search reached, which is a lower bound on the served region and
-/// never a proof of its edge: nothing declares a parameter's range, and a walk can stop short.
+/// Spread selection can leave a parameter's largest served value out; a corpus that has to
+/// represent what an engine serves reports these edges and can take them. The extent is how far
+/// the search reached: a lower bound on the served region, not a proof of its edge.
 namespace hipdnn_corpus_gen
 {
 
@@ -51,8 +45,8 @@ struct ServedExtent
 
 /// @brief The served extent of @p served under @p metadata's numeric parameters.
 ///
-/// Ties go to the point that collates first under `detail::describe`, so the same served set
-/// yields the same edges -- a corpus regenerated from one seed takes the same points.
+/// Ties go to the point that collates first under `detail::describe`, so a seed reproduces the
+/// edges.
 inline ServedExtent servedExtent(const OperationMetadata& metadata,
                                  const std::vector<ProblemPoint>& served)
 {
@@ -64,6 +58,7 @@ inline ServedExtent servedExtent(const OperationMetadata& metadata,
     {
         keys.push_back(detail::describe(point));
     }
+    extent.edges.reserve(metadata.parameters.size() * 2);
     for(const auto& parameter : metadata.parameters)
     {
         if(parameter.type != ParameterType::INT64 && parameter.type != ParameterType::FLOAT64)
@@ -105,9 +100,8 @@ inline ServedExtent servedExtent(const OperationMetadata& metadata,
     return extent;
 }
 
-/// @brief Every point the run knows the engine serves: the pooled points, and each searched
-/// combination's edges -- which come from every point its walk was answered yes for, selected
-/// or not.
+/// @brief Every point the run knows the engine serves: the pooled points and each searched
+/// combination's edges, selected or not.
 inline std::vector<ProblemPoint> servedPoints(const ProblemCorpus& corpus,
                                               const std::vector<ProblemPoint>& pooled)
 {

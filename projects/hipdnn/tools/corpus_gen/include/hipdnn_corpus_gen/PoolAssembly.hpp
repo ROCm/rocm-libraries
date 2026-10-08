@@ -244,10 +244,10 @@ struct RegimeQuotaOutcome
 ///
 /// Every pool is spread (see @ref detail::spread) and cut from its front, in source
 /// precedence. @p count below the quotas' sum does not trim them. @p allocation receives
-/// each source's total ask; @p quotaOutcome each regime's asked and taken (an unfilled quota is
-/// a finding about what the engine serves).
-/// @p reserved names points (by `detail::describe`) taken before anything else, counted against
-/// @p count and their regime's quota.
+/// each source's total ask; @p quotaOutcome each regime's asked and taken (an unfilled
+/// quota is a finding about what the engine serves). @p reserved names points (by
+/// `detail::describe`) taken first, the served edges; they count against @p count and
+/// towards their regime's quota.
 inline std::vector<PoolEntry> select(const SourcePools& pools,
                                      int64_t count,
                                      const std::map<std::string, double>& shares,
