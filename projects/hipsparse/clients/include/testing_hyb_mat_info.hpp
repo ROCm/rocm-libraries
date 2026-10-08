@@ -40,6 +40,38 @@ void testing_hyb_mat_info_bad_arg(void)
     std::unique_ptr<hyb_struct> unique_ptr_hyb(new hyb_struct);
     hipsparseHybMat_t           hyb = unique_ptr_hyb->hyb;
 
+    // A valid empty matrix. Each case below changes some of its fields.
+    struct set_info_args
+    {
+        int                     m           = 0;
+        int                     n           = 0;
+        hipsparseHybPartition_t partition   = HIPSPARSE_HYB_PARTITION_AUTO;
+        int64_t                 ell_nnz     = 0;
+        int                     ell_width   = 0;
+        int*                    ell_col_ind = nullptr;
+        void*                   ell_val     = nullptr;
+        int                     coo_nnz     = 0;
+        int*                    coo_row_ind = nullptr;
+        int*                    coo_col_ind = nullptr;
+        void*                   coo_val     = nullptr;
+        hipDataType             data_type   = HIP_R_32F;
+    };
+    auto set_info = [](hipsparseHybMat_t h, const set_info_args& args) {
+        return hipsparseHybMatSetInfo(h,
+                                      args.m,
+                                      args.n,
+                                      args.partition,
+                                      args.ell_nnz,
+                                      args.ell_width,
+                                      args.ell_col_ind,
+                                      args.ell_val,
+                                      args.coo_nnz,
+                                      args.coo_row_ind,
+                                      args.coo_col_ind,
+                                      args.coo_val,
+                                      args.data_type);
+    };
+
     // Null HYB handle.
     verify_hipsparse_status_invalid_value(hipsparseHybMatGetInfo(nullptr,
                                                                  nullptr,
@@ -55,22 +87,10 @@ void testing_hyb_mat_info_bad_arg(void)
                                                                  nullptr,
                                                                  nullptr),
                                           "Error: hyb is nullptr");
-    verify_hipsparse_status_invalid_value(hipsparseHybMatSetInfo(nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr),
+    verify_hipsparse_status_invalid_value(set_info(nullptr, set_info_args{}),
                                           "Error: hyb is nullptr");
 
-    // nullptr fields: nothing requested / nothing changed.
+    // nullptr outputs: nothing requested. The valid empty matrix is accepted.
     verify_hipsparse_status_success(hipsparseHybMatGetInfo(hyb,
                                                            nullptr,
                                                            nullptr,
@@ -85,142 +105,38 @@ void testing_hyb_mat_info_bad_arg(void)
                                                            nullptr,
                                                            nullptr),
                                     "Success");
-    verify_hipsparse_status_success(hipsparseHybMatSetInfo(hyb,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr),
-                                    "Success");
+    verify_hipsparse_status_success(set_info(hyb, set_info_args{}), "Success");
 
     // Negative or out-of-range sizes and invalid enums are rejected.
-    const int                     neg_int       = -1;
-    const int64_t                 neg_i64       = -1;
-    const int64_t                 big_ell_nnz   = int64_t(std::numeric_limits<int>::max()) + 1;
     const hipsparseHybPartition_t bad_partition = static_cast<hipsparseHybPartition_t>(-1);
     const hipDataType             bad_data_type = static_cast<hipDataType>(-1);
 
-    verify_hipsparse_status_invalid_value(hipsparseHybMatSetInfo(hyb,
-                                                                 &neg_int,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr),
-                                          "Error: m is negative");
-    verify_hipsparse_status_invalid_value(hipsparseHybMatSetInfo(hyb,
-                                                                 nullptr,
-                                                                 &neg_int,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr),
-                                          "Error: n is negative");
-    verify_hipsparse_status_invalid_value(hipsparseHybMatSetInfo(hyb,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 &neg_i64,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr),
-                                          "Error: ell_nnz is negative");
-    verify_hipsparse_status_invalid_value(hipsparseHybMatSetInfo(hyb,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 &neg_int,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr),
-                                          "Error: ell_width is negative");
-    verify_hipsparse_status_invalid_value(hipsparseHybMatSetInfo(hyb,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 &neg_int,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr),
-                                          "Error: coo_nnz is negative");
-    verify_hipsparse_status_invalid_value(hipsparseHybMatSetInfo(hyb,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 &bad_partition,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr),
-                                          "Error: partition is invalid");
-    verify_hipsparse_status_invalid_value(hipsparseHybMatSetInfo(hyb,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 &bad_data_type),
-                                          "Error: data_type is invalid");
+    set_info_args args;
+    args.m = -1;
+    verify_hipsparse_status_invalid_value(set_info(hyb, args), "Error: m is negative");
+    args   = set_info_args{};
+    args.n = -1;
+    verify_hipsparse_status_invalid_value(set_info(hyb, args), "Error: n is negative");
+    args         = set_info_args{};
+    args.ell_nnz = -1;
+    verify_hipsparse_status_invalid_value(set_info(hyb, args), "Error: ell_nnz is negative");
+    args           = set_info_args{};
+    args.ell_width = -1;
+    verify_hipsparse_status_invalid_value(set_info(hyb, args), "Error: ell_width is negative");
+    args         = set_info_args{};
+    args.coo_nnz = -1;
+    verify_hipsparse_status_invalid_value(set_info(hyb, args), "Error: coo_nnz is negative");
+    args           = set_info_args{};
+    args.partition = bad_partition;
+    verify_hipsparse_status_invalid_value(set_info(hyb, args), "Error: partition is invalid");
+    args           = set_info_args{};
+    args.data_type = bad_data_type;
+    verify_hipsparse_status_invalid_value(set_info(hyb, args), "Error: data_type is invalid");
 
     // TODO: update this when a later PR widens the stored ELL non-zero count.
-    verify_hipsparse_status_invalid_value(hipsparseHybMatSetInfo(hyb,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 &big_ell_nnz,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr),
-                                          "Error: ell_nnz does not fit");
+    args         = set_info_args{};
+    args.ell_nnz = int64_t(std::numeric_limits<int>::max()) + 1;
+    verify_hipsparse_status_invalid_value(set_info(hyb, args), "Error: ell_nnz does not fit");
     int64_t get_ell_nnz = -1;
     verify_hipsparse_status_success(hipsparseHybMatGetInfo(hyb,
                                                            nullptr,
@@ -240,36 +156,13 @@ void testing_hyb_mat_info_bad_arg(void)
     unit_check_general(1, 1, 1, &expected_ell_nnz, &get_ell_nnz);
 
     // A valid size paired with an invalid enum must not change hyb.
-    const int keep_m  = 6;
-    const int other_m = 11;
-    verify_hipsparse_status_success(hipsparseHybMatSetInfo(hyb,
-                                                           &keep_m,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr),
-                                    "Success");
-    verify_hipsparse_status_invalid_value(hipsparseHybMatSetInfo(hyb,
-                                                                 &other_m,
-                                                                 nullptr,
-                                                                 &bad_partition,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr),
-                                          "Error: partition is invalid");
+    const int keep_m = 6;
+    args             = set_info_args{};
+    args.m           = keep_m;
+    verify_hipsparse_status_success(set_info(hyb, args), "Success");
+    args.m         = 11;
+    args.partition = bad_partition;
+    verify_hipsparse_status_invalid_value(set_info(hyb, args), "Error: partition is invalid");
     int get_m = -1;
     verify_hipsparse_status_success(hipsparseHybMatGetInfo(hyb,
                                                            &get_m,
@@ -288,65 +181,43 @@ void testing_hyb_mat_info_bad_arg(void)
     int expected_m = keep_m;
     unit_check_general(1, 1, 1, &expected_m, &get_m);
 
-    // Two non-null array arguments that alias one pointer are rejected, and
-    // the caller keeps ownership when the call fails.
+    // Two non-null arrays that alias one pointer are rejected, and the caller
+    // keeps ownership when the call fails.
     auto alias_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * 4), device_free};
-    int* alias_ptr     = static_cast<int*>(alias_managed.get());
-    verify_hipsparse_status_invalid_value(hipsparseHybMatSetInfo(hyb,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 &alias_ptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 &alias_ptr,
-                                                                 nullptr,
-                                                                 nullptr),
-                                          "Error: array arguments alias");
+    args               = set_info_args{};
+    args.ell_col_ind   = static_cast<int*>(alias_managed.get());
+    args.coo_col_ind   = args.ell_col_ind;
+    verify_hipsparse_status_invalid_value(set_info(hyb, args), "Error: array arguments alias");
 
     // Round trip of sizes, partition, data type, ELL column indices and COO
     // arrays. Ownership transfers only after SetInfo succeeds.
-    const int                     set_m         = 4;
-    const int                     set_n         = 5;
-    const hipsparseHybPartition_t set_partition = HIPSPARSE_HYB_PARTITION_USER;
-    const int64_t                 set_ell_nnz   = 8;
-    const int                     set_ell_width = 2;
-    const int                     set_coo_nnz   = 3;
-    const hipDataType             set_data_type = HIP_C_64F;
+    set_info_args full;
+    full.m         = 4;
+    full.n         = 5;
+    full.partition = HIPSPARSE_HYB_PARTITION_USER;
+    full.ell_nnz   = 8;
+    full.ell_width = 2;
+    full.coo_nnz   = 3;
+    full.data_type = HIP_C_64F;
 
     auto ell_col_managed
-        = hipsparse_unique_ptr{device_malloc(sizeof(int) * set_ell_nnz), device_free};
+        = hipsparse_unique_ptr{device_malloc(sizeof(int) * full.ell_nnz), device_free};
     auto ell_val_managed
-        = hipsparse_unique_ptr{device_malloc(sizeof(hipDoubleComplex) * set_ell_nnz), device_free};
+        = hipsparse_unique_ptr{device_malloc(sizeof(hipDoubleComplex) * full.ell_nnz), device_free};
     auto coo_row_managed
-        = hipsparse_unique_ptr{device_malloc(sizeof(int) * set_coo_nnz), device_free};
+        = hipsparse_unique_ptr{device_malloc(sizeof(int) * full.coo_nnz), device_free};
     auto coo_col_managed
-        = hipsparse_unique_ptr{device_malloc(sizeof(int) * set_coo_nnz), device_free};
+        = hipsparse_unique_ptr{device_malloc(sizeof(int) * full.coo_nnz), device_free};
     auto coo_val_managed
-        = hipsparse_unique_ptr{device_malloc(sizeof(hipDoubleComplex) * set_coo_nnz), device_free};
+        = hipsparse_unique_ptr{device_malloc(sizeof(hipDoubleComplex) * full.coo_nnz), device_free};
 
-    int*  set_ell_col = static_cast<int*>(ell_col_managed.get());
-    void* set_ell_val = ell_val_managed.get();
-    int*  set_coo_row = static_cast<int*>(coo_row_managed.get());
-    int*  set_coo_col = static_cast<int*>(coo_col_managed.get());
-    void* set_coo_val = coo_val_managed.get();
+    full.ell_col_ind = static_cast<int*>(ell_col_managed.get());
+    full.ell_val     = ell_val_managed.get();
+    full.coo_row_ind = static_cast<int*>(coo_row_managed.get());
+    full.coo_col_ind = static_cast<int*>(coo_col_managed.get());
+    full.coo_val     = coo_val_managed.get();
 
-    hipsparseStatus_t status = hipsparseHybMatSetInfo(hyb,
-                                                      &set_m,
-                                                      &set_n,
-                                                      &set_partition,
-                                                      &set_ell_nnz,
-                                                      &set_ell_width,
-                                                      &set_ell_col,
-                                                      &set_ell_val,
-                                                      &set_coo_nnz,
-                                                      &set_coo_row,
-                                                      &set_coo_col,
-                                                      &set_coo_val,
-                                                      &set_data_type);
+    hipsparseStatus_t status = set_info(hyb, full);
     verify_hipsparse_status_success(status, "Success");
     if(status != HIPSPARSE_STATUS_SUCCESS)
     {
@@ -383,15 +254,15 @@ void testing_hyb_mat_info_bad_arg(void)
                                                            &got_coo_val,
                                                            &got_data_type),
                                     "Success");
-    int expected_n         = set_n;
-    int expected_partition = static_cast<int>(set_partition);
+    int expected_n         = full.n;
+    int expected_partition = static_cast<int>(full.partition);
     int actual_partition   = static_cast<int>(got_partition);
-    int expected_width     = set_ell_width;
-    int expected_coo_nnz   = set_coo_nnz;
-    int expected_data_type = static_cast<int>(set_data_type);
+    int expected_width     = full.ell_width;
+    int expected_coo_nnz   = full.coo_nnz;
+    int expected_data_type = static_cast<int>(full.data_type);
     int actual_data_type   = static_cast<int>(got_data_type);
-    expected_m             = set_m;
-    expected_ell_nnz       = set_ell_nnz;
+    expected_m             = full.m;
+    expected_ell_nnz       = full.ell_nnz;
     unit_check_general(1, 1, 1, &expected_m, &got_m);
     unit_check_general(1, 1, 1, &expected_n, &got_n);
     unit_check_general(1, 1, 1, &expected_partition, &actual_partition);
@@ -399,40 +270,28 @@ void testing_hyb_mat_info_bad_arg(void)
     unit_check_general(1, 1, 1, &expected_width, &got_ell_width);
     unit_check_general(1, 1, 1, &expected_coo_nnz, &got_coo_nnz);
     unit_check_general(1, 1, 1, &expected_data_type, &actual_data_type);
-    size_t expected_ptr = reinterpret_cast<size_t>(set_ell_col);
+    size_t expected_ptr = reinterpret_cast<size_t>(full.ell_col_ind);
     size_t actual_ptr   = reinterpret_cast<size_t>(got_ell_col);
     unit_check_general(1, 1, 1, &expected_ptr, &actual_ptr);
-    expected_ptr = reinterpret_cast<size_t>(set_ell_val);
+    expected_ptr = reinterpret_cast<size_t>(full.ell_val);
     actual_ptr   = reinterpret_cast<size_t>(got_ell_val);
     unit_check_general(1, 1, 1, &expected_ptr, &actual_ptr);
-    expected_ptr = reinterpret_cast<size_t>(set_coo_row);
+    expected_ptr = reinterpret_cast<size_t>(full.coo_row_ind);
     actual_ptr   = reinterpret_cast<size_t>(got_coo_row);
     unit_check_general(1, 1, 1, &expected_ptr, &actual_ptr);
-    expected_ptr = reinterpret_cast<size_t>(set_coo_col);
+    expected_ptr = reinterpret_cast<size_t>(full.coo_col_ind);
     actual_ptr   = reinterpret_cast<size_t>(got_coo_col);
     unit_check_general(1, 1, 1, &expected_ptr, &actual_ptr);
-    expected_ptr = reinterpret_cast<size_t>(set_coo_val);
+    expected_ptr = reinterpret_cast<size_t>(full.coo_val);
     actual_ptr   = reinterpret_cast<size_t>(got_coo_val);
     unit_check_general(1, 1, 1, &expected_ptr, &actual_ptr);
 
-    // Nulling ell_val while ell_nnz stays positive is rejected, and the
-    // field is unchanged.
-    void* released_ell_val = nullptr;
-    status                 = hipsparseHybMatSetInfo(hyb,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    &released_ell_val,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr);
-    verify_hipsparse_status_invalid_value(
-        status, "Error: ell_val is null while ell_nnz is positive");
+    // A null ell_val while ell_nnz stays positive is rejected, and the field
+    // is unchanged.
+    args         = full;
+    args.ell_val = nullptr;
+    verify_hipsparse_status_invalid_value(set_info(hyb, args),
+                                          "Error: ell_val is null while ell_nnz is positive");
     verify_hipsparse_status_success(hipsparseHybMatGetInfo(hyb,
                                                            nullptr,
                                                            nullptr,
@@ -447,30 +306,20 @@ void testing_hyb_mat_info_bad_arg(void)
                                                            nullptr,
                                                            nullptr),
                                     "Success");
-    expected_ptr = reinterpret_cast<size_t>(set_ell_val);
+    expected_ptr = reinterpret_cast<size_t>(full.ell_val);
     actual_ptr   = reinterpret_cast<size_t>(got_ell_val);
     unit_check_general(1, 1, 1, &expected_ptr, &actual_ptr);
 
-    // Move the COO row array into the ELL column field. coo_nnz must drop to
-    // zero in the same call, because a positive COO count cannot have a null
-    // row pointer. The previous ELL column array is released; the moved
-    // pointer is not.
-    const int released_coo_nnz = 0;
-    int*      moved_col        = set_coo_row;
-    int*      released_row     = nullptr;
-    status                     = hipsparseHybMatSetInfo(hyb,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    &moved_col,
-                                    nullptr,
-                                    &released_coo_nnz,
-                                    &released_row,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr);
+    // Move the COO row array into the ELL column field and drop the COO part.
+    // The previous ELL column array and the other COO arrays are released;
+    // the moved pointer is not.
+    set_info_args moved = full;
+    moved.ell_col_ind   = full.coo_row_ind;
+    moved.coo_nnz       = 0;
+    moved.coo_row_ind   = nullptr;
+    moved.coo_col_ind   = nullptr;
+    moved.coo_val       = nullptr;
+    status              = set_info(hyb, moved);
     verify_hipsparse_status_success(status, "Success");
     if(status != HIPSPARSE_STATUS_SUCCESS)
     {
@@ -490,7 +339,7 @@ void testing_hyb_mat_info_bad_arg(void)
                                                            nullptr,
                                                            nullptr),
                                     "Success");
-    expected_ptr = reinterpret_cast<size_t>(moved_col);
+    expected_ptr = reinterpret_cast<size_t>(moved.ell_col_ind);
     actual_ptr   = reinterpret_cast<size_t>(got_ell_col);
     unit_check_general(1, 1, 1, &expected_ptr, &actual_ptr);
     expected_ptr = 0;
@@ -499,61 +348,24 @@ void testing_hyb_mat_info_bad_arg(void)
 
     // Replacing ell_val releases the previous buffer; passing the same pointer
     // again is a no-op. The last one is freed by hipsparseDestroyHybMat.
-    auto new_ell_val_managed
-        = hipsparse_unique_ptr{device_malloc(sizeof(hipDoubleComplex) * set_ell_nnz), device_free};
-    void* new_ell_val = new_ell_val_managed.get();
-    status            = hipsparseHybMatSetInfo(hyb,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    &new_ell_val,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr);
+    auto new_ell_val_managed = hipsparse_unique_ptr{
+        device_malloc(sizeof(hipDoubleComplex) * moved.ell_nnz), device_free};
+    moved.ell_val = new_ell_val_managed.get();
+    status        = set_info(hyb, moved);
     verify_hipsparse_status_success(status, "Success");
     if(status != HIPSPARSE_STATUS_SUCCESS)
     {
         return;
     }
     new_ell_val_managed.release();
-    verify_hipsparse_status_success(hipsparseHybMatSetInfo(hyb,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr,
-                                                           &new_ell_val,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr,
-                                                           nullptr),
-                                    "Success");
+    verify_hipsparse_status_success(set_info(hyb, moved), "Success");
 
-    // Releasing the ELL arrays requires the merged count to be zero.
-    const int64_t zero_ell_nnz   = 0;
-    const int     zero_ell_width = 0;
-    int*          clear_ell_col  = nullptr;
-    void*         clear_ell_val  = nullptr;
-    status                       = hipsparseHybMatSetInfo(hyb,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    &zero_ell_nnz,
-                                    &zero_ell_width,
-                                    &clear_ell_col,
-                                    &clear_ell_val,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr);
+    // Releasing the ELL arrays requires the ELL count to be zero.
+    moved.ell_nnz     = 0;
+    moved.ell_width   = 0;
+    moved.ell_col_ind = nullptr;
+    moved.ell_val     = nullptr;
+    status            = set_info(hyb, moved);
     verify_hipsparse_status_success(status, "Success");
     if(status != HIPSPARSE_STATUS_SUCCESS)
     {

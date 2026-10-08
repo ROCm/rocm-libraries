@@ -217,18 +217,18 @@ hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t,
 }
 
 hipsparseStatus_t hipsparseHybMatSetInfo(hipsparseHybMat_t,
-                                         const int*,
-                                         const int*,
-                                         const hipsparseHybPartition_t*,
-                                         const int64_t*,
-                                         const int*,
-                                         int* const*,
-                                         void* const*,
-                                         const int*,
-                                         int* const*,
-                                         int* const*,
-                                         void* const*,
-                                         const hipDataType*)
+                                         int,
+                                         int,
+                                         hipsparseHybPartition_t,
+                                         int64_t,
+                                         int,
+                                         int*,
+                                         void*,
+                                         int,
+                                         int*,
+                                         int*,
+                                         void*,
+                                         hipDataType)
 {
     return HIPSPARSE_STATUS_NOT_SUPPORTED;
 }

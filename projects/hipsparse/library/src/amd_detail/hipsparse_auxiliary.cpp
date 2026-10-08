@@ -364,57 +364,43 @@ hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t  hyb,
     return HIPSPARSE_STATUS_SUCCESS;
 }
 
-hipsparseStatus_t hipsparseHybMatSetInfo(hipsparseHybMat_t              hyb,
-                                         const int*                     m,
-                                         const int*                     n,
-                                         const hipsparseHybPartition_t* partition,
-                                         const int64_t*                 ell_nnz,
-                                         const int*                     ell_width,
-                                         int* const*                    ell_col_ind,
-                                         void* const*                   ell_val,
-                                         const int*                     coo_nnz,
-                                         int* const*                    coo_row_ind,
-                                         int* const*                    coo_col_ind,
-                                         void* const*                   coo_val,
-                                         const hipDataType*             data_type)
+hipsparseStatus_t hipsparseHybMatSetInfo(hipsparseHybMat_t       hyb,
+                                         int                     m,
+                                         int                     n,
+                                         hipsparseHybPartition_t partition,
+                                         int64_t                 ell_nnz,
+                                         int                     ell_width,
+                                         int*                    ell_col_ind,
+                                         void*                   ell_val,
+                                         int                     coo_nnz,
+                                         int*                    coo_row_ind,
+                                         int*                    coo_col_ind,
+                                         void*                   coo_val,
+                                         hipDataType             data_type)
 {
-    // Two non-null array arguments that alias one allocation would be freed
-    // twice when hyb is destroyed. Reject that before calling rocSPARSE.
+    // Two non-null arrays that alias one allocation would be freed twice when
+    // hyb is destroyed. Reject that before calling rocSPARSE.
     // rocSPARSE set_info checks negative sizes, that ell_nnz fits the stored
     // ELL non-zero count, and that the enums are valid. It does not check that
     // the arrays are long enough for those sizes; do not add a second policy.
     const void* seen[5];
     int         nseen = 0;
-    if((ell_col_ind != nullptr
-        && hipsparse_hyb_array_alias(static_cast<const void*>(*ell_col_ind), seen, &nseen))
-       || (ell_val != nullptr && hipsparse_hyb_array_alias(*ell_val, seen, &nseen))
-       || (coo_row_ind != nullptr
-           && hipsparse_hyb_array_alias(static_cast<const void*>(*coo_row_ind), seen, &nseen))
-       || (coo_col_ind != nullptr
-           && hipsparse_hyb_array_alias(static_cast<const void*>(*coo_col_ind), seen, &nseen))
-       || (coo_val != nullptr && hipsparse_hyb_array_alias(*coo_val, seen, &nseen)))
+    if(hipsparse_hyb_array_alias(ell_col_ind, seen, &nseen)
+       || hipsparse_hyb_array_alias(ell_val, seen, &nseen)
+       || hipsparse_hyb_array_alias(coo_row_ind, seen, &nseen)
+       || hipsparse_hyb_array_alias(coo_col_ind, seen, &nseen)
+       || hipsparse_hyb_array_alias(coo_val, seen, &nseen))
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
 
-    const rocsparse_int rocsparse_m         = (m != nullptr) ? *m : 0;
-    const rocsparse_int rocsparse_n         = (n != nullptr) ? *n : 0;
-    const rocsparse_int rocsparse_ell_width = (ell_width != nullptr) ? *ell_width : 0;
-    const rocsparse_int rocsparse_coo_nnz   = (coo_nnz != nullptr) ? *coo_nnz : 0;
-
     // The enum conversions throw on values they do not know.
-    rocsparse_hyb_partition rocsparse_partition = rocsparse_hyb_partition_auto;
-    rocsparse_datatype      rocsparse_data_type = rocsparse_datatype_f32_r;
+    rocsparse_hyb_partition rocsparse_partition;
+    rocsparse_datatype      rocsparse_data_type;
     try
     {
-        if(partition != nullptr)
-        {
-            rocsparse_partition = hipsparse::hipHybPartToHCCHybPart(*partition);
-        }
-        if(data_type != nullptr)
-        {
-            rocsparse_data_type = hipsparse::hipDataTypeToHCCDataType(*data_type);
-        }
+        rocsparse_partition = hipsparse::hipHybPartToHCCHybPart(partition);
+        rocsparse_data_type = hipsparse::hipDataTypeToHCCDataType(data_type);
     }
     catch(...)
     {
@@ -423,18 +409,18 @@ hipsparseStatus_t hipsparseHybMatSetInfo(hipsparseHybMat_t              hyb,
 
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_hyb_mat_set_info((rocsparse_hyb_mat)hyb,
-                                   m != nullptr ? &rocsparse_m : nullptr,
-                                   n != nullptr ? &rocsparse_n : nullptr,
-                                   partition != nullptr ? &rocsparse_partition : nullptr,
+                                   m,
+                                   n,
+                                   rocsparse_partition,
                                    ell_nnz,
-                                   ell_width != nullptr ? &rocsparse_ell_width : nullptr,
-                                   (rocsparse_int* const*)ell_col_ind,
+                                   ell_width,
+                                   (rocsparse_int*)ell_col_ind,
                                    ell_val,
-                                   coo_nnz != nullptr ? &rocsparse_coo_nnz : nullptr,
-                                   (rocsparse_int* const*)coo_row_ind,
-                                   (rocsparse_int* const*)coo_col_ind,
+                                   coo_nnz,
+                                   (rocsparse_int*)coo_row_ind,
+                                   (rocsparse_int*)coo_col_ind,
                                    coo_val,
-                                   data_type != nullptr ? &rocsparse_data_type : nullptr));
+                                   rocsparse_data_type));
 }
 
 hipsparseStatus_t hipsparseCreateBsrsv2Info(bsrsv2Info_t* info)

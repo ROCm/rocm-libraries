@@ -9,7 +9,7 @@ Documentation for hipSPARSE is available at
 ### Added
 * Added the generic API routines `hipsparseSpGEAM_createDescr`, `hipsparseSpGEAM_destroyDescr`, `hipsparseSpGEAM_bufferSize`, `hipsparseSpGEAM_nnz`, and `hipsparseSpGEAM` for sparse matrix-matrix addition (`C = alpha * op(A) + beta * op(B)`), along with the `hipsparseSpGEAMDescr_t` type and the `hipsparseSpGEAMAlg_t` algorithm enum, to match the cuSPARSE 13.3 generic `SpGEAM` API.
 * Added batched support to `hipsparseSDDMM` for CSR format.
-* Added `hipsparseHybMatGetInfo` and `hipsparseHybMatSetInfo`. HYB tests use them on the rocSPARSE backend; the cuSPARSE backend returns `HIPSPARSE_STATUS_NOT_SUPPORTED`.
+* Added `hipsparseHybMatGetInfo` and `hipsparseHybMatSetInfo` to read the fields of a `HYB` matrix and to build one from existing arrays without `hipsparseXcsr2hyb`. HYB tests use them on the rocSPARSE backend; the cuSPARSE backend returns `HIPSPARSE_STATUS_NOT_SUPPORTED`.
 
 ## hipSPARSE 4.7.0 for ROCm 10.0
 

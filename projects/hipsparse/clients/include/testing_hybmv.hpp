@@ -59,23 +59,27 @@ void testing_hybmv_bad_arg(const Arguments& argus)
     std::unique_ptr<hyb_struct> unique_ptr_hyb(new hyb_struct);
     hipsparseHybMat_t           hyb = unique_ptr_hyb->hyb;
 
-    const int     h_m       = safe_size;
-    const int     h_n       = safe_size;
-    const int64_t h_ell_nnz = safe_size;
-    const int     h_coo_nnz = safe_size;
+    // A consistent safe_size x safe_size matrix with one ELL entry per row, so
+    // the routine does not quick-return before its argument checks. hyb owns
+    // the ELL arrays once SetInfo succeeds.
+    auto ell_col_managed
+        = hipsparse_unique_ptr{device_malloc(sizeof(int) * safe_size), device_free};
+    auto ell_val_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * safe_size), device_free};
     CHECK_HIPSPARSE_ERROR(hipsparseHybMatSetInfo(hyb,
-                                                 &h_m,
-                                                 &h_n,
+                                                 safe_size,
+                                                 safe_size,
+                                                 HIPSPARSE_HYB_PARTITION_AUTO,
+                                                 safe_size,
+                                                 1,
+                                                 (int*)ell_col_managed.get(),
+                                                 ell_val_managed.get(),
+                                                 0,
                                                  nullptr,
-                                                 &h_ell_nnz,
                                                  nullptr,
                                                  nullptr,
-                                                 nullptr,
-                                                 &h_coo_nnz,
-                                                 nullptr,
-                                                 nullptr,
-                                                 nullptr,
-                                                 nullptr));
+                                                 getDataType<T>()));
+    ell_col_managed.release();
+    ell_val_managed.release();
 
     auto dx_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * safe_size), device_free};
     auto dy_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * safe_size), device_free};

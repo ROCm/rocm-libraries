@@ -357,9 +357,11 @@ hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t  hyb,
  *  \brief Set the internal fields of a \p HYB matrix structure.
  *
  *  \details
- *  \p hipsparseHybMatSetInfo is the counterpart to \ref hipsparseHybMatGetInfo.
- *  Any of the input pointers may be \p nullptr, in which case the corresponding
- *  field is left untouched. The cuSPARSE backend returns
+ *  \p hipsparseHybMatSetInfo sets every field of a \p HYB matrix structure in
+ *  one call. It is the counterpart to \ref hipsparseHybMatGetInfo and lets a
+ *  user who already holds the \p HYB arrays and sizes build a
+ *  \p hipsparseHybMat_t from them directly, without converting from \p CSR with
+ *  hipsparseXcsr2hyb() first. The cuSPARSE backend returns
  *  \ref HIPSPARSE_STATUS_NOT_SUPPORTED, because cuSPARSE has no public accessor
  *  for its opaque HYB matrix.
  *
@@ -368,9 +370,9 @@ hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t  hyb,
  *  in CUDA 11. That deprecation does not apply to the ROCm backend.
  *
  *  The rocSPARSE backend rejects a negative size, an \p ell_nnz that does not
- *  fit the stored ELL count, a merged matrix whose \p ell_nnz is not
- *  <tt>m * ell_width</tt> or whose \p ell_width exceeds \p n, a positive ELL or
- *  COO count whose arrays are null, and an invalid \p partition or
+ *  fit the stored ELL count, an \p ell_nnz that is not
+ *  <tt>m * ell_width</tt>, a positive ELL or COO count whose arrays are null,
+ *  and an invalid \p partition or
  *  \p data_type. Those checks run before \p hyb is modified, so a validation
  *  error leaves \p hyb unchanged. Allocation lengths are not checked. Two
  *  non-null array arguments that refer to the same pointer are rejected before
@@ -383,9 +385,9 @@ hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t  hyb,
  *  distinct allocations; they are released by \ref hipsparseDestroyHybMat.
  *  An array previously held by \p hyb that is replaced by a different pointer
  *  (and is not kept in another field) is released by this function; passing the
- *  pointer \p hyb already holds is a no-op. A \p nullptr value releases the
- *  previously held array only when the merged ELL or COO count no longer
- *  requires it. Nulling one array while its count stays positive is rejected.
+ *  pointer \p hyb already holds is a no-op. A \p nullptr array releases the
+ *  previously held array when its ELL or COO count is zero. A \p nullptr array
+ *  with a positive count is rejected.
  *
  *  \note
  *  Only \p ell_nnz is \p int64_t. \p m, \p n, \p ell_width and \p coo_nnz remain
@@ -428,8 +430,7 @@ hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t  hyb,
  *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p hyb is invalid, a size is negative,
  *          \p ell_nnz does not fit the stored ELL count or is not
- *          <tt>m * ell_width</tt>, \p ell_width exceeds \p n, a positive count
- *          has a null array, \p partition or \p data_type is invalid, or two
+ *          <tt>m * ell_width</tt>, a positive count has a null array, \p partition or \p data_type is invalid, or two
  *          non-null array arguments alias the same pointer.
  *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED the cuSPARSE backend does not support
  *          this routine.
@@ -440,19 +441,19 @@ hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t  hyb,
  */
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT
-hipsparseStatus_t hipsparseHybMatSetInfo(hipsparseHybMat_t              hyb,
-                                         const int*                     m,
-                                         const int*                     n,
-                                         const hipsparseHybPartition_t* partition,
-                                         const int64_t*                 ell_nnz,
-                                         const int*                     ell_width,
-                                         int* const*                    ell_col_ind,
-                                         void* const*                   ell_val,
-                                         const int*                     coo_nnz,
-                                         int* const*                    coo_row_ind,
-                                         int* const*                    coo_col_ind,
-                                         void* const*                   coo_val,
-                                         const hipDataType*             data_type);
+hipsparseStatus_t hipsparseHybMatSetInfo(hipsparseHybMat_t       hyb,
+                                         int                     m,
+                                         int                     n,
+                                         hipsparseHybPartition_t partition,
+                                         int64_t                 ell_nnz,
+                                         int                     ell_width,
+                                         int*                    ell_col_ind,
+                                         void*                   ell_val,
+                                         int                     coo_nnz,
+                                         int*                    coo_row_ind,
+                                         int*                    coo_col_ind,
+                                         void*                   coo_val,
+                                         hipDataType             data_type);
 #endif
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 14000)
