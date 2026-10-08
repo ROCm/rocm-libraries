@@ -66,10 +66,13 @@ endif()
 get_target_property(composable_kernel_INCLUDES composable_kernel::device_other_operations INTERFACE_INCLUDE_DIRECTORIES)
 
 # ABI export-surface guard. Host-only (no GPU): runs scripts/check_exported_symbols.py over the
-# built libhiptensor.so and fails if any symbol outside the public allowlist is exported. The nm
-# tool is resolved preferring llvm-nm (ROCm ships the LLVM toolchain) and falling back to system
-# nm. The whole check is POSIX/ELF-only: on Windows the DLL export set is driven by __declspec and
-# there is no version script, so it is skipped there (matching library/src/hiptensor.map's guard).
+# built libhiptensor.so and fails if any symbol outside the public allowlist is exported. The
+# checker resolves nm at runtime (prefers llvm-nm, falls back to nm) from PATH, and python3 is
+# likewise taken from PATH at ctest time -- the build-stage interpreter and the build-tree llvm-nm
+# do not exist when the packaged tests run on a separate machine. find_package/find_program here
+# are only configure-time existence gates, not paths baked into the test command. The whole check
+# is POSIX/ELF-only: on Windows the DLL export set is driven by __declspec and there is no version
+# script, so it is skipped there (matching library/src/hiptensor.map's guard).
 if(NOT WIN32)
     find_package(Python3 3.9 COMPONENTS Interpreter)
     find_program(HIPTENSOR_NM_EXECUTABLE NAMES llvm-nm nm)
@@ -382,8 +385,7 @@ add_subdirectory(03_reduction)
 if(HIPTENSOR_ABI_CHECKER)
     add_test(
         NAME abi_exported_symbols
-        COMMAND ${Python3_EXECUTABLE} ${HIPTENSOR_ABI_CHECKER}
-                $<TARGET_FILE:hiptensor> --nm ${HIPTENSOR_NM_EXECUTABLE})
+        COMMAND python3 ${HIPTENSOR_ABI_CHECKER} $<TARGET_FILE:hiptensor>)
     set_tests_properties(abi_exported_symbols PROPERTIES LABELS "symbol-visibility")
 endif()
 
@@ -592,8 +594,10 @@ foreach(_hiptensor_family "quick|validation/quick" "standard|validation/standard
             _hiptensor_emit_test("${_hiptensor_host} ${_hiptensor_suffix}" "\"../${_hiptensor_host}\"")
         endforeach()
         if(HIPTENSOR_ABI_CHECKER)
+            # Resolve python3/nm from PATH at ctest time: the build-stage interpreter and the
+            # build-tree llvm-nm do not exist when the packaged tests run on a separate machine.
             _hiptensor_emit_test("abi_exported_symbols ${_hiptensor_suffix}"
-                "${Python3_EXECUTABLE} abi/check_exported_symbols.py ../../lib/libhiptensor.so --nm ${HIPTENSOR_NM_EXECUTABLE}")
+                "python3 abi/check_exported_symbols.py ../../lib/libhiptensor.so")
         endif()
     endif()
 

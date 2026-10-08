@@ -18,6 +18,7 @@
 # Exit status: 0 = clean, 1 = disallowed exports found, 2 = usage/tooling error.
 
 import argparse
+import os
 import re
 import shutil
 import subprocess
@@ -54,12 +55,34 @@ def is_allowed(name: str) -> bool:
 def main() -> int:
     parser = argparse.ArgumentParser(description="ABI export allowlist guard for libhiptensor.so")
     parser.add_argument("lib", help="Path to libhiptensor.so (or versioned .so)")
-    parser.add_argument("--nm", default="nm", help="nm binary to use (default: nm)")
+    parser.add_argument(
+        "--nm",
+        action="append",
+        default=[],
+        help="nm binary to use. May be given multiple times; the first one found on PATH "
+        "(or as an absolute path) wins. Defaults to trying llvm-nm then nm.",
+    )
     args = parser.parse_args()
 
-    nm = shutil.which(args.nm)
+    # Resolve nm at runtime so no build-time absolute path is baked into the test command.
+    # An absolute path is used as-is if it exists; a bare name is looked up on PATH.
+    candidates = args.nm or ["llvm-nm", "nm"]
+    nm = None
+    for cand in candidates:
+        if os.path.isabs(cand):
+            if os.path.exists(cand):
+                nm = cand
+                break
+        else:
+            found = shutil.which(cand)
+            if found:
+                nm = found
+                break
     if nm is None:
-        print(f"error: nm tool '{args.nm}' not found on PATH", file=sys.stderr)
+        print(
+            f"error: no nm tool found (tried: {', '.join(candidates)})",
+            file=sys.stderr,
+        )
         return 2
 
     try:
