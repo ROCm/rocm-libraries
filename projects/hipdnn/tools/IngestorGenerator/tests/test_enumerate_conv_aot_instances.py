@@ -6,6 +6,7 @@
 import dataclasses
 import itertools
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -309,3 +310,23 @@ def test_main_writes_the_same_list_twice(
         tmp_path, monkeypatch, list(reversed(implicit)), list(reversed(direct))
     )
     assert first == second
+
+
+def test_committed_instance_list_is_what_the_tool_enumerates(tmp_path):
+    """The shipped catalog's list is the tool's output for the rocKE tree beside it: a
+    rocKE grid or rule change that moves the catalog has to regenerate the list (and
+    the bundle make_conv_aot_config.py builds from it)."""
+    from benchmarks.common.kernel_cache import current_llvm_flavor
+
+    committed = _CONFIGS / "gfx950_conv_fwd_aot.instances.json"
+    flavor = json.loads(committed.read_text())[0]["llvm_flavor"]
+    if flavor != current_llvm_flavor():
+        pytest.skip(
+            f"the list is for LLVM flavor {flavor}, this process lowers to "
+            f"{current_llvm_flavor()}, so every identity differs"
+        )
+    out = tmp_path / "instances.json"
+    jobs = str(min(16, os.cpu_count() or 1))
+    argv = ["--rocke-root", str(_ROCKE), "--output", str(out), "--jobs", jobs]
+    assert tool.main(argv) == 0
+    assert out.read_bytes() == committed.read_bytes()
