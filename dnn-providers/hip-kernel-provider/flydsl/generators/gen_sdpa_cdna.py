@@ -42,7 +42,7 @@ from ._codeobject import (
     verify_arch,
 )
 from ._extract_hsaco import hsaco_from_dump
-from ._instances import SDPA_CDNA_KERNEL, Instance, instances_for
+from ._instances import SDPA_CDNA_FAMILIES, Instance, instances_for
 from ._manifest import refresh_source_md, sha256, write_op_manifest
 
 OP = "sdpa_cdna"
@@ -203,6 +203,9 @@ def _build_one(instance: Instance, dump_dir: Path) -> bytes:
             # this object is, and the kernel matcher holds the graph to it.
             skip_kv_pad_mask=bool(knobs["kv_align"]),
             return_lse=True,
+            **(
+                {"waves_per_eu": knobs["waves_per_eu"]} if knobs["waves_per_eu"] else {}
+            ),
         )
     launch(q, k, v, o, _TRACE_BATCH, _TRACE_SEQ, lse=lse)
     blob, _ = hsaco_from_dump(dump_dir)
@@ -215,11 +218,21 @@ def _max_flat_workgroup_size(blob: bytes, where: str) -> int:
     return int(document["amdhsa.kernels"][0][".max_flat_workgroup_size"])
 
 
+# LDS one workgroup may allocate. The compiler reports an object over it as an
+# error, yet still emits the object, which then fails to launch.
+_LDS_LIMIT_BYTES = {"gfx942": 65536, "gfx950": 163840}
+
+
 def _verify(
     described: dict, blob: bytes, instance: Instance, arch: str, where: str
 ) -> None:
     """Fail before writing, rather than shipping a mislabelled object."""
     verify_arch(described, arch, where)
+    if described["group_segment_fixed_size"] > _LDS_LIMIT_BYTES[arch]:
+        raise GeneratorError(
+            f"{where}: needs {described['group_segment_fixed_size']} bytes of LDS; "
+            f"{arch} allows {_LDS_LIMIT_BYTES[arch]} per workgroup"
+        )
     kernel = instance.knobs["kernel"]
     expected, _ = _signature(_PARAMS[kernel])
     if described["signature"] != expected:
@@ -312,7 +325,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--arch",
         required=True,
-        help=f"GPU target: one of {', '.join(sorted(SDPA_CDNA_KERNEL))}; one arch per invocation.",
+        help=f"GPU target: one of {', '.join(sorted(SDPA_CDNA_FAMILIES))}; one arch per invocation.",
     )
     parser.add_argument(
         "--out-dir",
@@ -329,9 +342,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     # Refused before compiling: these kernels are CDNA MFMA code.
-    if args.arch not in SDPA_CDNA_KERNEL:
+    if args.arch not in SDPA_CDNA_FAMILIES:
         print(
-            f"error: the CDNA SDPA kernels target {', '.join(sorted(SDPA_CDNA_KERNEL))}; "
+            f"error: the CDNA SDPA kernels target {', '.join(sorted(SDPA_CDNA_FAMILIES))}; "
             f"{args.arch!r} is neither",
             file=sys.stderr,
         )

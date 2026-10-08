@@ -17,7 +17,8 @@
     "causal": 0,
     "block_m": 128,
     "kv_align": 64,
-    "any_diagonal": 1
+    "any_diagonal": 1,
+    "waves_per_eu": 0
   },
   "priority": 110,
   "provenance": {
@@ -35,7 +36,8 @@
             "causal",
             "block_m",
             "kv_align",
-            "any_diagonal"
+            "any_diagonal",
+            "waves_per_eu"
           ],
           "bindings": {},
           "vocabulary": {}

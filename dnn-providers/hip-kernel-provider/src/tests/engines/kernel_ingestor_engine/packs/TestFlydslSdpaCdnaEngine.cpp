@@ -491,15 +491,16 @@ using Bf16 = hipdnn_data_sdk::types::bfloat16;
 
 /// Deterministic k/32 values for |k| <= 32: exact in bf16, so the reference reads exactly
 /// what the device does.
-std::vector<Bf16> fillValues(size_t count, uint32_t seed)
+template <typename T>
+std::vector<T> fillValues(size_t count, uint32_t seed)
 {
-    std::vector<Bf16> values(count);
+    std::vector<T> values(count);
     uint32_t state = seed;
     for(auto& value : values)
     {
         state = state * 1664525U + 1013904223U;
         const auto k = static_cast<int32_t>((state >> 16) % 65U) - 32;
-        value = Bf16(static_cast<float>(k) / 32.0F);
+        value = T(static_cast<float>(k) / 32.0F);
     }
     return values;
 }
@@ -509,6 +510,7 @@ constexpr double LSE_TOLERANCE = 1e-2;
 
 /// Runs @p kernel for @p spec through prepare() and launch() and checks every output element
 /// against a double-precision reference. BSHD memory throughout.
+template <typename T>
 void expectCandidateMatchesReference(const MatchContext& context,
                                      const BoundTokens& bound,
                                      const KernelDefinition& kernel,
@@ -528,26 +530,23 @@ void expectCandidateMatchesReference(const MatchContext& context,
     const int64_t d = spec.headDim;
     const auto qCount = static_cast<size_t>(b * s * h * d);
     const auto kvCount = static_cast<size_t>(b * skv * hk * d);
-    const auto q = fillValues(qCount, 1U);
-    const auto k = fillValues(kvCount, 2U);
-    const auto v = fillValues(kvCount, 3U);
-    std::vector<Bf16> o(qCount, Bf16(0.0F));
+    const auto q = fillValues<T>(qCount, 1U);
+    const auto k = fillValues<T>(kvCount, 2U);
+    const auto v = fillValues<T>(kvCount, 3U);
+    std::vector<T> o(qCount, T(0.0F));
 
     void* qDevice = nullptr;
     void* kDevice = nullptr;
     void* vDevice = nullptr;
     void* oDevice = nullptr;
-    ASSERT_EQ(hipSuccess, hipMalloc(&qDevice, qCount * sizeof(Bf16)));
-    ASSERT_EQ(hipSuccess, hipMalloc(&kDevice, kvCount * sizeof(Bf16)));
-    ASSERT_EQ(hipSuccess, hipMalloc(&vDevice, kvCount * sizeof(Bf16)));
-    ASSERT_EQ(hipSuccess, hipMalloc(&oDevice, qCount * sizeof(Bf16)));
-    ASSERT_EQ(hipSuccess,
-              hipMemcpy(qDevice, q.data(), qCount * sizeof(Bf16), hipMemcpyHostToDevice));
-    ASSERT_EQ(hipSuccess,
-              hipMemcpy(kDevice, k.data(), kvCount * sizeof(Bf16), hipMemcpyHostToDevice));
-    ASSERT_EQ(hipSuccess,
-              hipMemcpy(vDevice, v.data(), kvCount * sizeof(Bf16), hipMemcpyHostToDevice));
-    ASSERT_EQ(hipSuccess, hipMemset(oDevice, 0, qCount * sizeof(Bf16)));
+    ASSERT_EQ(hipSuccess, hipMalloc(&qDevice, qCount * sizeof(T)));
+    ASSERT_EQ(hipSuccess, hipMalloc(&kDevice, kvCount * sizeof(T)));
+    ASSERT_EQ(hipSuccess, hipMalloc(&vDevice, kvCount * sizeof(T)));
+    ASSERT_EQ(hipSuccess, hipMalloc(&oDevice, qCount * sizeof(T)));
+    ASSERT_EQ(hipSuccess, hipMemcpy(qDevice, q.data(), qCount * sizeof(T), hipMemcpyHostToDevice));
+    ASSERT_EQ(hipSuccess, hipMemcpy(kDevice, k.data(), kvCount * sizeof(T), hipMemcpyHostToDevice));
+    ASSERT_EQ(hipSuccess, hipMemcpy(vDevice, v.data(), kvCount * sizeof(T), hipMemcpyHostToDevice));
+    ASSERT_EQ(hipSuccess, hipMemset(oDevice, 0, qCount * sizeof(T)));
     // The LSE output, [B, H, Sq] f32, when the graph asks for it.
     const bool withStats = spec.stats == SdpaStats::LSE;
     const auto statsCount = static_cast<size_t>(b * h * s);
@@ -577,8 +576,7 @@ void expectCandidateMatchesReference(const MatchContext& context,
     handler.launch(
         handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), nullptr);
     ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
-    ASSERT_EQ(hipSuccess,
-              hipMemcpy(o.data(), oDevice, qCount * sizeof(Bf16), hipMemcpyDeviceToHost));
+    ASSERT_EQ(hipSuccess, hipMemcpy(o.data(), oDevice, qCount * sizeof(T), hipMemcpyDeviceToHost));
     static_cast<void>(hipFree(qDevice));
     static_cast<void>(hipFree(kDevice));
     static_cast<void>(hipFree(vDevice));
@@ -593,7 +591,7 @@ void expectCandidateMatchesReference(const MatchContext& context,
     }
 
     // BSHD element (batch, token, head, d).
-    const auto at = [](const std::vector<Bf16>& t,
+    const auto at = [](const std::vector<T>& t,
                        int64_t heads,
                        int64_t seq,
                        int64_t dim,
@@ -703,7 +701,16 @@ void expectCdnaMatchesReference(const SdpaGraphSpec& spec, double absoluteTolera
     for(const auto& kernel : candidates)
     {
         SCOPED_TRACE(kernel.name);
-        expectCandidateMatchesReference(fixture.context(), *bound, kernel, spec, absoluteTolerance);
+        if(spec.dataType == DataType::HALF)
+        {
+            expectCandidateMatchesReference<hipdnn_data_sdk::types::half>(
+                fixture.context(), *bound, kernel, spec, absoluteTolerance);
+        }
+        else
+        {
+            expectCandidateMatchesReference<Bf16>(
+                fixture.context(), *bound, kernel, spec, absoluteTolerance);
+        }
     }
 }
 
@@ -860,6 +867,41 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesNonCausalCrossAttentionAndDecode)
     decode.seqLenKv = 1000;
     decode.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
     expectCdnaMatchesReference(decode, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHeadDim64InBothDtypes)
+{
+    auto spec = cdnaSpec();
+    spec.headDim = 64;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    spec.dataType = DataType::HALF;
+    spec.mask = SdpaMask::NONE;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 300;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHalfAtHeadDim128)
+{
+    auto spec = cdnaSpec();
+    spec.dataType = DataType::HALF;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.stats = SdpaStats::LSE;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHeadDim256WhereShipped)
+{
+    // gfx950 only: gfx942's LDS cannot hold the 256-wide tile, so there it skips.
+    auto spec = cdnaSpec();
+    spec.headDim = 256;
+    spec.seqLenQ = 200;
+    spec.seqLenKv = 200;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.dataType = DataType::HALF;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, LongerSequenceMatchesTheReference)

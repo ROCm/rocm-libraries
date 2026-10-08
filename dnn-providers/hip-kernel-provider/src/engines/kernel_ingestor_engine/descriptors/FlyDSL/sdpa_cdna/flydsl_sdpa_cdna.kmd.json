@@ -30,6 +30,10 @@
     {
       "name": "any_diagonal",
       "type": "int"
+    },
+    {
+      "name": "waves_per_eu",
+      "type": "int"
     }
   ]
 }

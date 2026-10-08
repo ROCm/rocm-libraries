@@ -289,7 +289,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             SUITES TestFlydslSdpaCdnaPacks
             EXPECTED_CASES
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
-                ShipsOneObjectPerClassAndOneKernelFamilyPerArch
+                ShipsOneObjectPerClassAndOneFamilyPerHeadDim
                 EveryKernelDeclaresItsFamilysSignature
         )
     endif()

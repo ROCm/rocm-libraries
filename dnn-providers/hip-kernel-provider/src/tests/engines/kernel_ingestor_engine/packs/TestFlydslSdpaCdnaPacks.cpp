@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <set>
 #include <string>
 #include <tuple>
@@ -74,14 +75,16 @@ TEST(TestFlydslSdpaCdnaPacks, IsOnePackWithAGraphMatchAndOneKernelScopedMatcher)
     EXPECT_EQ(kernelScoped, 1U);
 }
 
-TEST(TestFlydslSdpaCdnaPacks, ShipsOneObjectPerClassAndOneKernelFamilyPerArch)
+TEST(TestFlydslSdpaCdnaPacks, ShipsOneObjectPerClassAndOneFamilyPerHeadDim)
 {
     const auto& set = loadedSet(ENGINE);
 
     // dtype x family x head_dim x causal x kv_align x any_diagonal is the whole instance
     // key today: a duplicate would make the choice between two objects an accident of ids.
     std::set<std::tuple<std::string, std::string, int64_t, int64_t, int64_t, int64_t>> classes;
-    std::set<std::string> families;
+    // Which kernel family serves each (dtype, head_dim): gfx950 ships the dual-wave
+    // kernel beside the generic one, each for its own head dims.
+    std::map<std::pair<std::string, int64_t>, std::set<std::string>> families;
     size_t kernels = 0;
     for(const auto& pack : set.packs)
     {
@@ -100,7 +103,7 @@ TEST(TestFlydslSdpaCdnaPacks, ShipsOneObjectPerClassAndOneKernelFamilyPerArch)
             ASSERT_NE(kvAlign, nullptr) << kernel.name;
             ASSERT_NE(anyDiagonal, nullptr) << kernel.name;
             classes.emplace(*dtype, *family, *headDim, *causal, *kvAlign, *anyDiagonal);
-            families.insert(*family);
+            families[{*dtype, *headDim}].insert(*family);
             ++kernels;
 
             EXPECT_EQ(kernel.source.kind, KernelSourceKind::KPACK) << kernel.name;
@@ -110,8 +113,11 @@ TEST(TestFlydslSdpaCdnaPacks, ShipsOneObjectPerClassAndOneKernelFamilyPerArch)
     }
     EXPECT_GT(kernels, 0U);
     EXPECT_EQ(kernels, classes.size()) << "two objects claim one class";
-    // gfx950 ships the dual-wave kernel, gfx942 the generic one; a shard is one arch.
-    EXPECT_EQ(families.size(), 1U);
+    for(const auto& [key, served] : families)
+    {
+        EXPECT_EQ(served.size(), 1U) << key.first << " head_dim " << key.second
+                                     << " is served by more than one kernel family";
+    }
 }
 
 TEST(TestFlydslSdpaCdnaPacks, EveryKernelDeclaresItsFamilysSignature)

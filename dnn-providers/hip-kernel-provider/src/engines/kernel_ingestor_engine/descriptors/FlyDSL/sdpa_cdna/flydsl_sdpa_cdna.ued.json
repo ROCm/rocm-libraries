@@ -10,6 +10,7 @@
   "knobs": [
     "block_m",
     "kv_align",
-    "any_diagonal"
+    "any_diagonal",
+    "waves_per_eu"
   ]
 }

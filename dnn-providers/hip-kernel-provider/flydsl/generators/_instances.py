@@ -93,6 +93,7 @@ _ABBREV = {
     "num_kv_heads": "hkv",
     "kv_align": "kva",
     "any_diagonal": "anydiag",
+    "waves_per_eu": "wpe",
 }
 
 # Knobs omitted from an instance's name when they add nothing to it; see
@@ -105,6 +106,7 @@ _NAME_OMITTED_WHEN = {
     "hd_pair": lambda knobs: knobs["hd_pair"] == 0,
     "kv_align": lambda knobs: knobs["kv_align"] == 0,
     "any_diagonal": lambda knobs: knobs["any_diagonal"] == 1,
+    "waves_per_eu": lambda knobs: knobs["waves_per_eu"] == 0,
     # A symbol, not a choice: the object's name already says it is a decode one.
     "merge_symbol": lambda knobs: True,
 }
@@ -405,7 +407,15 @@ def _assert_unique(instances: list[Instance]) -> None:
 # gfx950 takes the dual-wave software-pipelined kernel, gfx942 the generic one.
 # Unlike every table above, which tables an op for all of its targets, this one
 # differs by target, so it takes the arch.
-SDPA_CDNA_KERNEL = {"gfx950": "dualwave", "gfx942": "generic"}
+# Which kernel serves which head dims, per arch: (family, head dims, waves_per_eu),
+# with waves_per_eu 0 the kernel's own default. The dual-wave kernel takes 64 and
+# 128 only; the generic one takes powers of two, and at 256 on gfx950 needs one
+# wave per SIMD (waves_per_eu 1) to hold its tile without spilling. At 256 its tile
+# needs more LDS than gfx942's 64 KiB, so gfx942 stops at 128.
+SDPA_CDNA_FAMILIES = {
+    "gfx950": (("dualwave", (64, 128), 0), ("generic", (256,), 1)),
+    "gfx942": (("generic", (64, 128), 0),),
+}
 # Query rows per workgroup: the dual-wave kernel's is fixed; the generic kernel's
 # launcher picks 128 or 256 by problem size, and only 128 is built here.
 SDPA_CDNA_BLOCK_M = {"dualwave": 256, "generic": 128}
@@ -426,50 +436,49 @@ PRIORITY_SDPA_CDNA_KV_ALIGNED = 110
 # offset 0 only, ranked above it. The generic kernel needs no such split.
 PRIORITY_SDPA_CDNA_DIAGONAL_ZERO = 110
 
-# The head counts and the softmax scale are kernel arguments (vendored-kernel
-# modifications 2 and 3); head_dim and dtype are still baked, and this set is one
-# of each while the remaining runtime features land.
-SDPA_CDNA_HEAD_DIMS = (128,)
-SDPA_CDNA_DTYPES = ("bf16",)
+# Everything but dtype, head_dim and causal is a kernel argument (vendored-kernel
+# modifications 2-5).
+SDPA_CDNA_DTYPES = ("bf16", "f16")
 
 
 def sdpa_cdna_instances(arch: str) -> list[Instance]:
     """The CDNA SDPA-forward instance table for one target."""
-    if arch not in SDPA_CDNA_KERNEL:
+    if arch not in SDPA_CDNA_FAMILIES:
         raise KeyError(
-            f"no CDNA SDPA kernel for {arch!r}; known: {', '.join(sorted(SDPA_CDNA_KERNEL))}"
+            f"no CDNA SDPA kernel for {arch!r}; known: {', '.join(sorted(SDPA_CDNA_FAMILIES))}"
         )
-    kernel = SDPA_CDNA_KERNEL[arch]
     instances: list[Instance] = []
     for dtype in SDPA_CDNA_DTYPES:
-        for head_dim in SDPA_CDNA_HEAD_DIMS:
-            for causal in SDPA_CAUSAL:
-                variants = [(0, 1)]
-                if kernel == "generic" and not causal:
-                    variants.append((SDPA_CDNA_KV_ALIGN, 1))
-                if kernel == "dualwave" and causal:
-                    variants.append((0, 0))
-                for kv_align, any_diagonal in variants:
-                    priority = PRIORITY_SPECIALIZED
-                    if kv_align:
-                        priority = PRIORITY_SDPA_CDNA_KV_ALIGNED
-                    elif not any_diagonal:
-                        priority = PRIORITY_SDPA_CDNA_DIAGONAL_ZERO
-                    instances.append(
-                        Instance(
-                            op="sdpa_cdna",
-                            dtype=dtype,
-                            priority=priority,
-                            knobs={
-                                "kernel": kernel,
-                                "head_dim": head_dim,
-                                "causal": causal,
-                                "block_m": SDPA_CDNA_BLOCK_M[kernel],
-                                "kv_align": kv_align,
-                                "any_diagonal": any_diagonal,
-                            },
+        for kernel, head_dims, waves_per_eu in SDPA_CDNA_FAMILIES[arch]:
+            for head_dim in head_dims:
+                for causal in SDPA_CAUSAL:
+                    variants = [(0, 1)]
+                    if kernel == "generic" and not causal:
+                        variants.append((SDPA_CDNA_KV_ALIGN, 1))
+                    if kernel == "dualwave" and causal:
+                        variants.append((0, 0))
+                    for kv_align, any_diagonal in variants:
+                        priority = PRIORITY_SPECIALIZED
+                        if kv_align:
+                            priority = PRIORITY_SDPA_CDNA_KV_ALIGNED
+                        elif not any_diagonal:
+                            priority = PRIORITY_SDPA_CDNA_DIAGONAL_ZERO
+                        instances.append(
+                            Instance(
+                                op="sdpa_cdna",
+                                dtype=dtype,
+                                priority=priority,
+                                knobs={
+                                    "kernel": kernel,
+                                    "head_dim": head_dim,
+                                    "causal": causal,
+                                    "block_m": SDPA_CDNA_BLOCK_M[kernel],
+                                    "kv_align": kv_align,
+                                    "any_diagonal": any_diagonal,
+                                    "waves_per_eu": waves_per_eu,
+                                },
+                            )
                         )
-                    )
     _assert_unique(instances)
     return instances
 

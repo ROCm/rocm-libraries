@@ -70,10 +70,10 @@ in [COVERAGE.md §5](COVERAGE.md).
 
 **SDPA forward on CDNA** (`hipkernel:flydsl_sdpa_cdna`), a separate engine with
 objects built per arch: FlyDSL's own dual-wave MFMA kernel on **gfx950** and its
-generic MFMA kernel on **gfx942**, three objects each (causal and non-causal, bf16,
-`head_dim` 128; both sequence lengths, the head counts, the softmax scale, the
-causal diagonal and the LSE output are runtime arguments). It
-is the first, narrow set that carries
+generic MFMA kernel on **gfx942** and for `head_dim` 256 on gfx950: bf16 and f16 at
+`head_dim` 64 and 128, and 256 on gfx950, causal and non-causal; both sequence
+lengths, the head counts, the softmax scale, the causal diagonal and the LSE output
+are runtime arguments. It is the first set that carries
 these kernels through the whole path -- generation, packing, selection and
 launch -- and is verified on both arches; the order in which it widens is in
 [COVERAGE.md §7](COVERAGE.md). The RDNA SDPA kernels stay RDNA-only.
