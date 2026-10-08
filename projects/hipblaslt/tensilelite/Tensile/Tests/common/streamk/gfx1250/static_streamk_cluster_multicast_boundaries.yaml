@@ -1,0 +1,151 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Set TENSILE_PERSISTENT_FIXED_GRID=256 to split block K ranges between
+# logical clusters, including the sixteen-peer shapes. TENSILE_DB=0x200000
+# reports spatialBlocks, logicalClusters and wholeBlocksOnly for each launch.
+# Ragged tiles, a K tail, batches, one iteration and K=0 exercise completion
+# and multicast barrier paths. Re-run with DataInitTypeAlpha=0 for beta-only.
+TestParameters:
+  marks:
+  - skip-gfx900
+  - skip-gfx906
+  - skip-gfx908
+  - skip-gfx90a
+  - skip-gfx940
+  - skip-gfx941
+  - skip-gfx942
+  - skip-gfx950
+  - skip-gfx1010
+  - skip-gfx1011
+  - skip-gfx1012
+  - skip-gfx1030
+  - skip-gfx1100
+  - skip-gfx1101
+  - skip-gfx1102
+  - skip-gfx1200
+  - skip-gfx1201
+  - skip-gfx1250-strict
+GlobalParameters:
+  Architecture: gfx1250
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: false
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeD: 2
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  ForceGenerateKernel: true
+  CpuThreads: 8
+  PrintLevel: 1
+  NumWarmups: 1
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  PrintSolutionRejectionReason: true
+BenchmarkProblems:
+- - OperationType: GEMM
+    DataType: b
+    DestDataType: s
+    ComputeDataType: s
+    HighPrecisionAccumulate: true
+    TransposeA: true
+    TransposeB: false
+    UseBeta: true
+    Batched: true
+  - BenchmarkCommonParameters:
+    - KernelLanguage:
+      - Assembly
+    ForkParameters:
+    - MatrixInstruction:
+      - - 16
+        - 16
+        - 32
+        - 1
+        - 1
+        - 1
+        - 1
+        - 2
+        - 2
+    - DepthU:
+      - 64
+    - TileProcessingStrategy:
+      - StreamK
+    - WorkAssignment:
+      - StaticGrid
+    - ClusterDim:
+      - - 2
+        - 1
+      - - 4
+        - 1
+      - - 8
+        - 1
+      - - 2
+        - 2
+      - - 2
+        - 4
+      - - 4
+        - 2
+      - - 2
+        - 8
+      - - 4
+        - 4
+      - - 8
+        - 2
+    - TDMInst:
+      - 3
+    - WavefrontSize:
+      - 32
+    - WorkGroupMapping:
+      - 1
+    - GlobalSplitU:
+      - 0
+    - StaggerU:
+      - 0
+    - PrefetchGlobalRead:
+      - 1
+      - 2
+    - PrefetchLocalRead:
+      - 1
+    - ForceDisableShadowInit:
+      - false
+    - ScheduleIterAlg:
+      - 4
+    - 1LDSBuffer:
+      - 0
+    - ExpandPointerSwap:
+      - false
+    - StoreRemapVectorWidth:
+      - 0
+    - StreamKFixupTreeReduction:
+      - 1
+    - PrefetchAcrossPersistent:
+      - 0
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact:
+        - 32
+        - 32
+        - 1
+        - 1024
+      - Exact:
+        - 33
+        - 65
+        - 2
+        - 1031
+      - Exact:
+        - 96
+        - 96
+        - 1
+        - 64
+      - Exact:
+        - 96
+        - 96
+        - 3
+        - 0
+      - Exact:
+        - 256
+        - 256
+        - 2
+        - 8192
