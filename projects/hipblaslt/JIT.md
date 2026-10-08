@@ -116,7 +116,7 @@ interface, so that each implementation can be replaced and tested on its own.
 | Stage | Interface | Contract |
 | --- | --- | --- |
 | Generate | `Backend::generate(GenerationRequest, std::vector<SourceCodeBundle>&)` | Returns up to `GenerationRequest::count` source bundles, best first, and builds and loads nothing. A `SourceCodeBundle` is the main kernel, HIP helpers and headers that become one solution. It is not a TensileLite library entry. `NotSupported` means the request is outside the backend's domain. |
-| Build | `CodeObjectBuilder::build(SourceCodeBundle, BuildRequest, CompiledCode&)` | Compiles the main kernel with comgr into one code-object `Artifact`, and each HIP helper into its own code object. |
+| Build | `CodeObjectBuilder::build(SourceCodeBundle, BuildRequest, CompiledCode&)` | Links the main kernel and its helpers into one code-object `Artifact`. Helper relocatables come from the helper library when the caller has one. |
 | Support | `SolutionLoader::support` | Evaluates the predicates and workspace of the record's solutions for the request, returns the local indices of those that support it, best first, and loads no code. |
 | Publish | `SolutionStore::publish` | Stores the supported code objects and returns one library index per solution, in order. `JitLibrary` writes the TensileLite solution record. `SolutionStore::lookup` returns the indices of stored solutions for exactly a request. |
 | Load | `SolutionLoader::load` | Loads the code objects once and returns a process-local executable `KernelBundle` for each supported solution. |
@@ -260,9 +260,11 @@ MX block and type) and the epilogue flags that change the kernel family. The
 slice is a standard lazy TensileLite library that the stock loader reads: a
 master file, the index mapping, and one entry (`.dat`) and code object (`.co`)
 per solution. Other slices stay unread. Code objects load for the chosen index.
-A HIP helper is compiled once per backend id and helper name and stored beside
-the slices; an entry records the helper name. The files the library reads and
-writes are MessagePack. For example:
+The directory also holds a helper-only library, in the same TensileLite lazy
+format, keyed by helper name. A solution's code object is the fully linked
+executable, produced by linking the main kernel with the helper relocatables
+from that library. The files the library reads and writes are MessagePack. For
+example:
 
 ```text
 $HIPBLASLT_JIT_LIBRARY_PATH/
@@ -272,7 +274,11 @@ $HIPBLASLT_JIT_LIBRARY_PATH/
     └── gfx950_..._replay_1/           one directory per device and backend
         ├── cache-key.msgpack
         ├── indices.msgpack            solution index to slice key
-        ├── helpers/<backend>/<name>.co
+        ├── helpers/                       helper-only TensileLite library
+        │   ├── TensileLibrary_lazy_gfx950.dat
+        │   ├── TensileLiteLibrary_lazy_gfx950_Mapping.dat
+        │   ├── <helper>.dat
+        │   └── <helper>.co              relocatable linked into a solution
         ├── slices/<slice key>/
         │   ├── TensileLibrary_lazy_gfx950.dat
         │   ├── TensileLiteLibrary_lazy_gfx950_Mapping.dat
@@ -352,13 +358,13 @@ code objects in process through AMD comgr (`hipblaslt-jit-builder.cpp` and
   ID. The declared wavefront size is the one the assembler uses.
 - HIP source: `AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE` with
   `--rocm-path` and a `-cuid` taken from the source name. A HIP helper is its
-  own code object. `JitLibrary` is the helper cache, keyed by backend id and
-  helper name. A hit reuses the code object stored in the library. A miss
-  compiles it once, stores it in the library, and then compiles the main
-  kernel. A build with no library compiles each helper and does not keep a
-  second cache. comgr's `AMD_COMGR_CACHE` stays comgr's; it cannot be stored
-  in the library. The ROCm path is `HIP_PATH` when set, otherwise the prefix
-  of the loaded HIP runtime.
+  own code object. The helper library stores that relocatable. A hit reuses
+  it. A miss compiles it once and publishes it into the helper library. The
+  solution library then stores one executable: the main kernel linked with
+  those helpers. A build with no library compiles and links each helper and
+  does not keep a second cache. comgr's `AMD_COMGR_CACHE` stays comgr's; it
+  cannot be stored in the library. The ROCm path is `HIP_PATH` when set,
+  otherwise the prefix of the loaded HIP runtime.
 - Link: `AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE` links the main kernel
   into one code object, with `-Xlinker --build-id=sha1`. The helper code
   objects and the main kernel are ready to add to `JitLibrary`.

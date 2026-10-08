@@ -314,6 +314,18 @@ namespace hipblaslt_jit::committed
         return bytes;
     }
 
+    // A one-solution entry for a helper kernel. The helper library stores it
+    // with the same TensileLite library format as a GEMM solution.
+    inline std::vector<uint8_t> helperEntry(const std::string& kernel, const std::string& isa)
+    {
+        Assembly assembly;
+        assembly.kernel          = kernel;
+        assembly.target          = isa;
+        assembly.kernArgsVersion = 2;
+        Bundle   bundle;
+        bundle.solutions.push_back(Solution{});
+        return libraryEntry(bundle, {assembly});
+    }
 
     // One solution published for an exact K, and the name recorded in the entry.
     struct Publication
