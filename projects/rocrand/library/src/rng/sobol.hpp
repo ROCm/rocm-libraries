@@ -494,33 +494,31 @@ private:
     std::enable_if_t<IsDevice && !IsScrambled> deallocate()
     {
         hipError_t error = hipFree(m_direction_vectors);
-        if(error == hipErrorInvalidValue)
+        // hipErrorInvalidValue is returned when hipFree tries to call an already
+        // deallocated section of memory. This may occur when 'hipDeviceReset()' is
+        // used before the current class' destructor is called.
+        if(error != hipErrorInvalidValue)
         {
-            // hipErrorInvalidValue is thrown when hipFree tries to call an already
-            // deallocated section of memory. This may occur when 'hipDeviceReset()' is
-            // used before the current class' deconstructor is called.
-            return;
+            ROCRAND_HIP_FATAL_ASSERT(error);
         }
-        ROCRAND_HIP_FATAL_ASSERT(error);
     }
 
     // Device, scrambled
     template<bool IsDevice = system_type::is_device(), bool IsScrambled = Scrambled>
     std::enable_if_t<IsDevice && IsScrambled> deallocate()
     {
-        hipError_t m_dir_error   = hipFree(m_direction_vectors);
-        hipError_t m_scram_error = hipFree(m_scramble_constants);
+        hipError_t dir_error   = hipFree(m_direction_vectors);
+        hipError_t scram_error = hipFree(m_scramble_constants);
         // hipErrorInvalidValue is returned when hipFree is given a pointer that was
         // already deallocated. This may occur when 'hipDeviceReset()' is used before
-        // the current class' destructor is called. Each pointer is judged on its own
-        // so a benign result on one cannot hide a real failure on the other.
-        if(m_dir_error != hipErrorInvalidValue)
+        // the current class' destructor is called.
+        if(dir_error != hipErrorInvalidValue)
         {
-            ROCRAND_HIP_FATAL_ASSERT(m_dir_error);
+            ROCRAND_HIP_FATAL_ASSERT(dir_error);
         }
-        if(m_scram_error != hipErrorInvalidValue)
+        if(scram_error != hipErrorInvalidValue)
         {
-            ROCRAND_HIP_FATAL_ASSERT(m_scram_error);
+            ROCRAND_HIP_FATAL_ASSERT(scram_error);
         }
     }
 };
@@ -552,7 +550,7 @@ public:
         {
             throw status;
         }
-        status = get_constants().get_direction_vectors(&m_scramble_constants);
+        status = get_constants().get_scramble_constants(&m_scramble_constants);
         if(status != ROCRAND_STATUS_SUCCESS)
         {
             throw status;
