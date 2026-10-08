@@ -6233,9 +6233,9 @@ def depthwise_stream_register_reason(spec) -> Optional[str]:
     :class:`DirectDepthwiseSpatialSpec` (one output column per lane). Not a
     validity rule -- a spilling kernel is still correct -- but both hold all
     ``KH x KW`` weights and ``KH`` accumulators per output column in
-    registers, and past the register file the backend spends minutes spilling
-    a loop body of ``KH^2 x KW`` FMAs per column into a kernel that runs
-    orders of magnitude slower. A sweep should leave such shapes to the
+    registers, and past the register file the backend spends a long time
+    spilling a loop body of ``KH^2 x KW`` FMAs per column into a kernel that
+    runs much slower. A sweep should leave such shapes to the
     output-stationary kernel (:class:`DirectDepthwiseTiledSpec`). The estimate
     counts the weights, the accumulators and the prefetched input rows.
     """
@@ -6275,8 +6275,8 @@ class DirectDepthwiseTiledSpec:
     The row-streaming :class:`DirectDepthwiseSpec` keeps all ``KH x KW``
     weights and ``KH`` accumulator slots per output column in registers and
     unrolls ``KH`` streaming rows per loop iteration, so its register use and
-    loop body grow with ``KH^2 * KW``. Past 11x11 that spills heavily and takes
-    minutes to compile. This kernel's footprint is linear in the filter width:
+    loop body grow with ``KH^2 * KW``. Past 11x11 that spills heavily and
+    compiles slowly. This kernel's footprint is linear in the filter width:
 
       - A block owns a ``block_h x block_w`` output tile of ``block_ch``
         channels (one lane per channel); the grid also splits the output rows,
@@ -6379,6 +6379,12 @@ class DirectDepthwiseTiledSpec:
             raise ValueError(
                 f"DirectDepthwiseTiledSpec: stride must be >= 1 and PAD >= 0 "
                 f"(got stride={p.stride}, PAD={p.PAD})"
+            )
+        if p.Ho < 1 or p.Wo < 1:
+            raise ValueError(
+                f"DirectDepthwiseTiledSpec: filter does not fit the padded "
+                f"input: Ho={p.Ho}, Wo={p.Wo} (H={p.H}, W={p.W}, KH={p.KH}, "
+                f"KW={p.KW}, PAD={p.PAD}, stride={p.stride})"
             )
 
 
@@ -6756,7 +6762,7 @@ class DirectDepthwiseColSpec:
         return kernel_name_join(*parts)
 
     def validate(self) -> None:
-        """Prerequisite check only (cpg=kpg=1, block_h > 0).
+        """Prerequisite check only (cpg=kpg=1, no dilation, block_h > 0).
 
         Call :func:`is_valid_depthwise_col_spec` for the full constraint set
         (dtype, geometry, VGPR budget) before dispatch.
@@ -6767,6 +6773,10 @@ class DirectDepthwiseColSpec:
                 f"DirectDepthwiseColSpec requires cpg=kpg=1 "
                 f"(got cpg={p.cpg}, kpg={p.kpg})"
             )
+        # The tap indexing has no dilation term.
+        why = dilation_reason(p)
+        if why is not None:
+            raise ValueError(why)
         if self.block_h <= 0:
             raise ValueError(
                 f"DirectDepthwiseColSpec block_h must be > 0 (got {self.block_h}): "
