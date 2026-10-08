@@ -320,14 +320,12 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
   if isStreamKSpatialCluster(state):
     constraints = (
         (not state.get("PrefetchAcrossPersistent", 0), "PrefetchAcrossPersistent=0"),
-        (state.get("PrefetchGlobalRead", 1) in (1, 2), "PrefetchGlobalRead in (1,2)"),
+        (state.get("PrefetchGlobalRead", 1) in (1, 2) or state.get("UseSubtileImpl", False),
+         "PrefetchGlobalRead in (1,2) without UseSubtileImpl"),
         (state.get("StreamKFixupTreeReduction", 0) == 1, "StreamKFixupTreeReduction=1"),
-        (not state.get("UseSubtileImpl", 0), "UseSubtileImpl=0"),
-        (not state.get("ProblemType", {}).get("Sparse", 0), "dense input"),
         (not state.get("ProblemType", {}).get("OutputAmaxD", False), "OutputAmaxD=False"),
         (not (state.get("ProblemType", {}).get("Gradient", False)
               and state.get("ProblemType", {}).get("UseBias", False)), "no bias-gradient reduction"),
-        (not state.get("StoreRemapVectorWidth", 0), "StoreRemapVectorWidth=0"),
         (not state.get("DebugStreamK", 0), "DebugStreamK=0"),
     )
     for supported, requirement in constraints:

@@ -101,3 +101,62 @@ def test_ordinary_streamk_tree_reduction_still_assembles(tmp_path):
         assert "Tree reduction" in src
         assert "reset flag" in src
         assert "global_wb" in src and "global_inv" in src
+
+
+@pytest.mark.parametrize("strategy", ["DataParallel", "StreamK"])
+@pytest.mark.parametrize("feature", ["subtile", "subtile_pgr0", "subtile_pgr2",
+                                     "sparse_a", "sparse_b", "store_remap"])
+def test_non_pap_multicast_compute_and_store_parity_assembles(tmp_path, strategy, feature):
+    """The same DP input modes must emit complete SK partial/fixup kernels."""
+    from Tensile import __file__ as tensile_file
+    from config_harness import derive_states
+
+    root = Path(tensile_file).parent
+    source = {
+        "subtile": "Tests/common/streamk/gfx1250/core/sk_bf16gemm_tdm_subtile.yaml",
+        "sparse_a": "Tests/common/sparse/gfx1250/spmm_tdm_multicast.yaml",
+        "sparse_b": "Tests/common/sparse/gfx1250/spmm_tdm_multicast.yaml",
+    }.get("subtile" if feature.startswith("subtile") else feature)
+    config = yaml.safe_load((root / source if source else _CONFIG).read_text())
+    index = int(feature == "sparse_b")
+    config["BenchmarkProblems"] = [config["BenchmarkProblems"][index]]
+    group = config["BenchmarkProblems"][0][1]
+    values = {key: value[:1] for entry in group["ForkParameters"]
+              for key, value in entry.items()}
+    values.update(TileProcessingStrategy=[strategy], WorkAssignment=["StaticGrid"],
+                  ClusterDim=[[2, 2]], PrefetchAcrossPersistent=[0], GlobalSplitU=[0],
+                  StreamKFixupTreeReduction=[int(strategy == "StreamK")])
+    if feature.startswith("subtile_pgr"):
+        values["PrefetchGlobalRead"] = [int(feature[-1])]
+    if feature == "store_remap":
+        values["StoreRemapVectorWidth"] = [4]
+    group["ForkParameters"] = [{key: value} for key, value in values.items()]
+    path = tmp_path / (feature + ".yaml")
+    path.write_text(yaml.safe_dump(config))
+    states = derive_states(str(path), arch="gfx1250", limit_solutions=1)
+    assert len(states) == 1
+    state = states[0]
+    assert state["Multicast"] and state["ClusterBarrier"]
+    assert not state["PrefetchAcrossPersistent"]
+    if feature.startswith("subtile"):
+        assert state["UseSubtileImpl"]
+    elif feature.startswith("sparse"):
+        assert state["ProblemType"]["Sparse"] == index + 1
+        assert state["enableTDMMetadata"]
+    else:
+        assert state["StoreRemapVectorWidth"] == 4
+    results = emit_kernels_from_config(str(path), limit=1, arch="gfx1250", canonical=False)
+    assert len(results) == 1
+    assert_real_gfx1250_kernels(results)
+    for base, src, _ in results:
+        assert_assembles(src, base)
+        assert "phantom tiles skip the store" in src
+        assert "s_barrier_wait -3" in src and "s_barrier_signal -3" in src
+        if feature.startswith("sparse"):
+            # The descriptor is refreshed after each persistent back edge.
+            assert "s[sgprMulticastMaskMetadata]" in src
+        if strategy == "StreamK":
+            assert "physical partial slot = cluster * peers + peer" in src
+            assert "Tree reduction" in src
+            assert src.index("phantom tiles skip the store") < src.index(
+                "flag offset based on physical partial slot")
