@@ -424,17 +424,6 @@ globalParameters["StinkyTofuModuleOptions"] = {}
 # StinkyTofuModule.setOutputDir (see KernelWriter._convertToStinkyTofu).
 globalParameters["StinkyTofuCostOutputDir"] = ""
 
-# StinkyTofu allocation:
-#   0  off
-#   1  shadow      colour and report, rewrite nothing
-#   2  apply       rewrite operands; an over-budget kernel is still rejected
-#                  before allocation is asked, as it always was
-#   3  force apply as 2, but an over-budget kernel reaches allocation and its
-#                  verdict is re-judged against the count that comes out
-# Higher values clamp to 3. Only mode 3 changes which kernels are accepted;
-# 1 and 2 change only how the accepted ones are coloured.
-globalParameters["StinkyTofuRegisterAllocation"] = 2
-
 globalParameters["DisableSTWaitCnt"] = True
 
 # Internal plumbing for the --cpu-only CLI switch (see tensilelite.py addCommonArguments).
@@ -674,6 +663,9 @@ defaultBenchmarkCommonParameters = [
     # ahead of execution. Legacy booleans are accepted as a deprecated alias
     # (True -> Relative, False -> Off) so shipped library-logic YAMLs keep loading.
     {"SwInstructionPrefetch": [1]},
+    # StinkyTofuRegisterAllocation — per kernel. See ValidParameters.py.
+    # 0 leaves the colouring Tensile emitted.
+    {"StinkyTofuRegisterAllocation": [0]},
     # ClusterDim — workgroup cluster dimensions [x, y] for clustered kernel launch.
     # [1, 1] disables clustering. Non-[1, 1] enables Multicast so workgroups within
     # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.
