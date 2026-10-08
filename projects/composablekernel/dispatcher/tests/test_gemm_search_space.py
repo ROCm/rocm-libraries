@@ -22,7 +22,8 @@ those scripts never verify numerics and always exit 0. This one validates every
 kernel against a numpy reference and exits 1 on any mismatch or build failure.
 
 Exit codes: 0 = all pass, 1 = failure, 77 = skipped (no GPU) per the ctest
-SKIP_RETURN_CODE convention.
+SKIP_RETURN_CODE convention. An arch that is given or detected while HIP sees
+no usable device is a failure (1), reported once with the cause.
 
 Usage:
     python3 test_gemm_search_space.py --arch gfx942 --budget 500
@@ -50,6 +51,7 @@ sys.path.insert(0, str(_DISPATCHER / "python"))
 import numpy as np
 
 from ctypes_utils import detect_gpu_arch
+from dispatcher_common import hip_device_problem, hip_last_error
 from gemm_utils import (
     GemmProblem,
     GpuGemmRunner,
@@ -369,8 +371,17 @@ def run(args) -> int:
           f"({len(configs)-build_ok} failed)")
 
     # --- Run ---
-    print(f"\nRunning {build_ok} kernels on GPU (M=N=K={size}, "
-          f"warmup={args.warmup}, repeat={args.repeat})...")
+    # Without a GPU every kernel fails with the same opaque status=-1; report
+    # the cause once instead of one run_fail line per kernel.
+    # The kernels are still built first, so a box without a GPU keeps the
+    # compile coverage.
+    gpu_problem = hip_device_problem()
+    if gpu_problem:
+        print(f"\nERROR: no usable GPU, so no kernel was run or verified: "
+              f"{gpu_problem}")
+    else:
+        print(f"\nRunning {build_ok} kernels on GPU (M=N=K={size}, "
+              f"warmup={args.warmup}, repeat={args.repeat})...")
     # num_d is per-kernel, but every config in a sweep shares the same operand
     # shapes, so generate the largest D set once and slice per kernel.
     max_num_d = max((getattr(c, "num_d_tensors", 0) for c in configs), default=0)
@@ -378,13 +389,18 @@ def run(args) -> int:
     flops = ops.grouped_problem.flops if variant == "grouped" else ops.problem.flops
 
     results = []
-    n_pass = n_fail = n_build_fail = n_skip = 0
+    n_pass = n_fail = n_build_fail = n_skip = n_not_run = 0
 
     for cfg, so in zip(configs, so_paths):
         if so is None:
             n_build_fail += 1
             results.append({"name": cfg.name, "status": "build_fail"})
             continue
+        if gpu_problem:
+            n_not_run += 1
+            results.append({"name": cfg.name, "status": "not_run"})
+            continue
+        hip_last_error()  # drop errors left by earlier kernels
         try:
             runner = _make_runner(variant, cfg, so)
             for _ in range(args.warmup):
@@ -409,8 +425,11 @@ def run(args) -> int:
             continue
         if result is None or not result.success:
             n_fail += 1
-            results.append({"name": cfg.name, "status": "run_fail",
-                            "error": f"status={getattr(result, 'status', 'unknown')}"})
+            error = f"status={getattr(result, 'status', 'unknown')}"
+            hip_error = hip_last_error()
+            if hip_error:
+                error += f" ({hip_error})"
+            results.append({"name": cfg.name, "status": "run_fail", "error": error})
             continue
         # Use avg TFLOPS from timed repeat runs; fall back to result.tflops (single run).
         if times:
@@ -433,12 +452,14 @@ def run(args) -> int:
     # --- Report ---
     print(f"\n{'='*60}")
     print(f"Results: {n_pass} pass / {n_fail} fail / {n_build_fail} build-fail "
-          f"/ {n_skip} unsupported-skip / {len(configs)} total")
+          f"/ {n_skip} unsupported-skip / {n_not_run} not-run "
+          f"/ {len(configs)} total")
 
     if args.json:
         out = {"variant": variant, "arch": arch, "size": size, "seed": seed,
                "budget": budget, "total_configs": total, "n_pass": n_pass,
                "n_fail": n_fail, "n_build_fail": n_build_fail, "n_skip": n_skip,
+               "n_not_run": n_not_run, "gpu_problem": gpu_problem,
                "kernels": results}
         Path(args.json).write_text(json.dumps(out, indent=2))
         print(f"Results written to {args.json}")
@@ -446,7 +467,7 @@ def run(args) -> int:
     if n_fail > 0 or n_build_fail > 0:
         print("\nFailed kernels:")
         for r in results:
-            if r["status"] not in ("pass", "unsupported"):
+            if r["status"] not in ("pass", "unsupported", "not_run"):
                 print(f"  {r['name']}: {r['status']} "
                       f"{r.get('error', r.get('max_rel', ''))}")
 
@@ -458,7 +479,7 @@ def run(args) -> int:
     if n_pass == 0 and n_skip > 0:
         print("\nNo kernel was verified: every built kernel was unsupported.")
         return 1
-    return 0 if n_fail == 0 and n_build_fail == 0 else 1
+    return 0 if n_fail == 0 and n_build_fail == 0 and not gpu_problem else 1
 
 
 def main() -> int:

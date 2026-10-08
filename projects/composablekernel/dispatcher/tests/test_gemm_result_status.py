@@ -10,7 +10,8 @@ The ctypes run() entry point returns -3 when the selected kernel rejects the
 problem (IsSupportedArgument throws "... not supported ..." inside run()). That is not a
 numerical failure: the kernel never launched. GemmResult and friends expose it
 as ``unsupported`` (``success`` stays False for backward compatibility), and the
-search-space sweep counts it as a skip without verifying the output.
+search-space sweep counts it as a skip without verifying the output. When HIP
+sees no usable GPU the sweep runs nothing and fails once with the cause.
 
 -1 (host/HIP/launch error) and -2 (no suitable kernel) stay real failures.
 The ctypes library is mocked, so no GPU or built .so is needed.
@@ -19,8 +20,10 @@ Run: python3 -m pytest tests/test_gemm_result_status.py -v
 """
 
 import argparse
+import json
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -135,7 +138,7 @@ class TestSearchSpaceCountsSkip(unittest.TestCase):
 
         cls.sweep = sweep
 
-    def _args(self):
+    def _args(self, json_path=None):
         return argparse.Namespace(
             arch="gfx942",
             variant="standard",
@@ -147,18 +150,20 @@ class TestSearchSpaceCountsSkip(unittest.TestCase):
             groups=1,
             warmup=0,
             repeat=1,
-            json=None,
+            json=json_path,
             elementwise_op=None,
         )
 
-    def _run(self, statuses):
+    def _run(self, statuses, gpu_problem=None, json_path=None):
         sweep = self.sweep
         cfgs = [SimpleNamespace(name=f"k{i}") for i in range(len(statuses))]
         sos = [Path(f"k{i}.so") for i in range(len(statuses))]
         by_name = dict(zip((c.name for c in cfgs), statuses))
         verified = []
+        self.ran = []
 
         def make_runner(variant, cfg, so):
+            self.ran.append(cfg.name)
             return SimpleNamespace(name=cfg.name)
 
         def invoke(variant, runner, ops):
@@ -178,8 +183,12 @@ class TestSearchSpaceCountsSkip(unittest.TestCase):
             sweep, "_make_runner", side_effect=make_runner
         ), mock.patch.object(sweep, "_invoke", side_effect=invoke), mock.patch.object(
             sweep, "_verify", side_effect=verify
+        ), mock.patch.object(
+            sweep, "hip_device_problem", return_value=gpu_problem
+        ), mock.patch.object(
+            sweep, "hip_last_error", return_value=""
         ), mock.patch("builtins.print"):
-            rc = sweep.run(self._args())
+            rc = sweep.run(self._args(json_path))
         return rc, verified
 
     def test_unsupported_is_skipped_not_failed(self):
@@ -198,6 +207,20 @@ class TestSearchSpaceCountsSkip(unittest.TestCase):
         rc, verified = self._run([STATUS_UNSUPPORTED, STATUS_UNSUPPORTED])
         self.assertEqual(rc, 1)
         self.assertEqual(verified, [])
+
+    def test_no_gpu_fails_without_running(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out.json"
+            rc, verified = self._run(
+                [STATUS_OK, STATUS_OK], gpu_problem="no /dev/kfd", json_path=out
+            )
+            data = json.loads(out.read_text())
+        self.assertEqual(rc, 1)
+        self.assertEqual(self.ran, [], "no kernel may run without a GPU")
+        self.assertEqual(verified, [])
+        self.assertEqual(data["gpu_problem"], "no /dev/kfd")
+        self.assertEqual(data["n_not_run"], 2)
+        self.assertEqual([k["status"] for k in data["kernels"]], ["not_run"] * 2)
 
 
 if __name__ == "__main__":
