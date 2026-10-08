@@ -66,8 +66,8 @@ try
     }
 
     I const max_batch_count = 64 * 1024;
-    I const nsweep = (batch_count_arg == 0) ? 0 : ceildiv(batch_count_arg, max_batch_count);
-    I const bid_inc = (batch_count_arg == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
+    I const nsweep = ceildiv(batch_count_arg, max_batch_count);
+    I const bid_inc = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
 
     // memory workspace sizes:
     // size for constants in rocblas calls
@@ -76,8 +76,8 @@ try
     size_t size_pivotval;
     size_t size_pivotidx;
     {
-        I const lbatch_count = bid_inc;
-        rocsolver_getf2_getMemorySize<true, T>(m, n, pivot, lbatch_count, &size_scalars,
+        I const batch_count = bid_inc;
+        rocsolver_getf2_getMemorySize<true, T>(m, n, pivot, batch_count, &size_scalars,
                                                &size_pivotval, &size_pivotidx);
     }
 

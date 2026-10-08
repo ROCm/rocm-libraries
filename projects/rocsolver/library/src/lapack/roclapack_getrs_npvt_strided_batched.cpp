@@ -63,18 +63,18 @@ try
     }
 
     I const max_batch_count = 64 * 1024;
-    I const nsweep = (batch_count_arg == 0) ? 0 : ceildiv(batch_count_arg, max_batch_count);
-    I const bid_inc = (batch_count_arg == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
+    I const nsweep = ceildiv(batch_count_arg, max_batch_count);
+    I const bid_inc = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
 
     // memory workspace sizes:
     // size of workspace (for calling TRSM)
     bool optim_mem;
     size_t size_work1, size_work2, size_work3, size_work4;
     {
-        I const lbatch_count = bid_inc;
-        rocsolver_getrs_npvt_getMemorySize<false, true, T>(trans, n, nrhs, lbatch_count,
-                                                           &size_work1, &size_work2, &size_work3,
-                                                           &size_work4, &optim_mem, lda, ldb);
+        I const batch_count = bid_inc;
+        rocsolver_getrs_npvt_getMemorySize<false, true, T>(trans, n, nrhs, batch_count, &size_work1,
+                                                           &size_work2, &size_work3, &size_work4,
+                                                           &optim_mem, lda, ldb);
     }
 
     if(rocblas_is_device_memory_size_query(handle))
