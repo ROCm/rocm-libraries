@@ -145,6 +145,10 @@ namespace hipblaslt_cotenant
             &blocks_per_cu, reinterpret_cast<const void*>(&busy_spin<Stoppable>), 256, reserve));
         if(blocks_per_cu < 1 || blocks_per_cu > max_occupancy)
             throw std::runtime_error("cotenant: reported occupancy is outside the requested cap");
+        if(verbose && blocks_per_cu < max_occupancy)
+            log("cotenant: warning: wave slots limit occupancy to %d blocks per CU (requested %d)\n",
+                blocks_per_cu,
+                max_occupancy);
 
         if(verbose)
             log("cotenant: device=%d (%s) grid=%d block=256 max_occupancy=%d "

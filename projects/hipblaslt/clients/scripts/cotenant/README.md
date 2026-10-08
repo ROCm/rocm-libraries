@@ -51,6 +51,9 @@ The log reports the reserved bytes and HIP's theoretical maximum blocks per CU.
 This flag changes only LDS reservation; register usage and block size stay fixed.
 For values above 1, workgroups may share CUs, so `--cus` is not a guarantee of
 distinct CUs. `READY` confirms workgroup residency, not distinct-CU placement.
+The wave-slot limit also caps occupancy (8 blocks per CU on gfx950 with 256-thread
+blocks), so values above that reserve less than `LDS per CU / N` per CU in
+effect; the launcher logs a warning when the reported limit is below `N`.
 
 Written for mi300 and mi350 architectures; it might not work
 correctly on other targets.
