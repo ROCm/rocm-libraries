@@ -3,9 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-#include <cstddef>
 #include <cstdint>
-#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
@@ -14,7 +12,6 @@
 
 #include <hip/hip_runtime_api.h>
 
-#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
@@ -22,22 +19,16 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 
 #include "core/Handle.hpp"
-#include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPlanCapture.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPlanRestore.hpp"
 #include "engines/kernel_ingestor_engine/PackedPlanTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvFwdPackedCase.hpp"
-#include "engines/kernel_ingestor_engine/packs/PointwisePackedCase.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanCodec.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanTestUtilities.hpp"
 
 /**
  * @file TestIngestorPlanRoundTrip.cpp
- * @brief A kpack plan is captured, encoded and restored. The original plan computes the
- *        exact expected output. The restored plan computes the same bytes on a new handle
- *        after the original plan is destroyed. Restore needs no archive, loads the code
- *        object on the handle's device, and refuses bytes or a symbol the driver does not
- *        accept.
+ * @brief Restore refuses code bytes or a symbol that the driver does not accept.
  *
  * Every case reads a copy of the packed set in a scratch directory. Other suites corrupt
  * or delete the staged archives.
@@ -55,7 +46,6 @@ namespace packs = hip_kernel_provider::kernel_ingestor_engine::testing;
 
 using packs::PackedPlan;
 using packs::PackedPlanCase;
-using packs::runPlan;
 
 constexpr const char* SCRATCH_LABEL = "ingestorplanroundtrip";
 
@@ -82,98 +72,6 @@ std::unique_ptr<hipdnn_plugin_sdk::IPlan<Handle>> restore(const std::vector<uint
 {
     return restoreIngestorPlan(encoded.data(), encoded.size(), handle);
 }
-
-// ---------------------------------------------------------------------------
-// Round trips, for each packed set
-// ---------------------------------------------------------------------------
-
-class TestIngestorPlanRoundTripKpack : public ::testing::TestWithParam<const PackedPlanCase*>
-{
-};
-
-TEST_P(TestIngestorPlanRoundTripKpack, RestoredPlanComputesWhatTheOriginalComputes)
-{
-    SKIP_IF_NO_DEVICES();
-    const PackedPlanCase& packedCase = *GetParam();
-
-    const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
-    PackedPlan built;
-    ASSERT_NO_FATAL_FAILURE(buildFilledPlan(packedCase, scratch, built));
-    if(built.plan == nullptr)
-    {
-        GTEST_SKIP() << "nothing was packed for this device (" << built.deviceProperties.gcnArchName
-                     << ")";
-    }
-
-    const Handle originalHandle;
-    std::vector<uint8_t> original;
-    ASSERT_NO_FATAL_FAILURE(runPlan(*built.plan, originalHandle, built.tensors, original));
-    packedCase.expectExactOutput(original);
-
-    const size_t originalWorkspaceBytes = built.plan->getWorkspaceSize(originalHandle);
-    const auto encoded
-        = serialization::encodeIngestorPlan(captureIngestorPlan(*built.plan, originalHandle));
-
-    // Destroy the original plan and drop the cached modules, so that no code object of the
-    // original plan stays loaded.
-    built.plan.reset();
-    resetIngestorModuleCachesForTesting();
-
-    const Handle restoreHandle;
-    const auto restored = restore(encoded, restoreHandle);
-    ASSERT_NE(restored, nullptr);
-
-    EXPECT_EQ(restored->getWorkspaceSize(restoreHandle), originalWorkspaceBytes);
-    for(int run = 0; run < 2; ++run)
-    {
-        std::vector<uint8_t> output;
-        ASSERT_NO_FATAL_FAILURE(runPlan(*restored, restoreHandle, built.tensors, output));
-        EXPECT_EQ(output, original) << "run " << run;
-    }
-}
-
-TEST_P(TestIngestorPlanRoundTripKpack, RestoresWithoutTheArchive)
-{
-    SKIP_IF_NO_DEVICES();
-    const PackedPlanCase& packedCase = *GetParam();
-
-    const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
-    PackedPlan built;
-    ASSERT_NO_FATAL_FAILURE(buildFilledPlan(packedCase, scratch, built));
-    if(built.plan == nullptr)
-    {
-        GTEST_SKIP() << "nothing was packed for this device (" << built.deviceProperties.gcnArchName
-                     << ")";
-    }
-
-    const Handle handle;
-    std::vector<uint8_t> original;
-    ASSERT_NO_FATAL_FAILURE(runPlan(*built.plan, handle, built.tensors, original));
-    packedCase.expectExactOutput(original);
-
-    const auto encoded
-        = serialization::encodeIngestorPlan(captureIngestorPlan(*built.plan, handle));
-
-    const auto archive = built.archive();
-    ASSERT_TRUE(std::filesystem::remove(archive)) << archive;
-    resetIngestorModuleCachesForTesting();
-    const size_t cachedBefore = packs::packModuleCacheEntries();
-
-    const auto restored = restore(encoded, handle);
-    ASSERT_NE(restored, nullptr);
-    std::vector<uint8_t> output;
-    ASSERT_NO_FATAL_FAILURE(runPlan(*restored, handle, built.tensors, output));
-    EXPECT_EQ(output, original);
-    EXPECT_EQ(packs::packModuleCacheEntries(), cachedBefore);
-}
-
-INSTANTIATE_TEST_SUITE_P(,
-                         TestIngestorPlanRoundTripKpack,
-                         ::testing::Values(&packs::POINTWISE_PACKED_PLAN_CASE,
-                                           &packs::CONV_FWD_PACKED_PLAN_CASE),
-                         [](const ::testing::TestParamInfo<const PackedPlanCase*>& info) {
-                             return std::string(info.param->name);
-                         });
 
 // ---------------------------------------------------------------------------
 // Refusals at the module load

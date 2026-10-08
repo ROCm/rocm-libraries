@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -18,10 +19,6 @@
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
-#include <hipdnn_plugin_sdk/ingestor/BenchmarkPlan.hpp>
-#include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
-#include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
-#include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -32,15 +29,16 @@
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/PackedPlanTestSupport.hpp"
-#include "engines/kernel_ingestor_engine/RestoredIngestorPlan.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvFwdPackedCase.hpp"
-#include "engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwisePackedCase.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanRefusal.hpp"
 
 /**
  * @file TestPluginSerialization.cpp
  * @brief The plan serialization hooks, called through the C API: the null checks, the
- *        refusals of a save and a load, and a kpack plan saved, loaded and executed.
+ *        refusals of a save and a load, and for each packed set a kpack plan saved,
+ *        loaded without its archive and executed. A save is refused once the archive is
+ *        removed.
  *
  * Every case that reads a packed archive reads a copy of the packed set in a scratch
  * directory. Other suites corrupt or delete the staged archives.
@@ -51,25 +49,16 @@ namespace
 {
 
 using hip_kernel_provider::core::Container;
-using hipdnn_plugin_sdk::ingestor::BenchmarkPlan;
-using hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler;
-using hipdnn_plugin_sdk::ingestor::PreparedDispatch;
 using hipdnn_test_sdk::utilities::claimScratchDirectory;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
 
 namespace packs = hip_kernel_provider::kernel_ingestor_engine::testing;
 
-using packs::makeStubPlan;
 using packs::NO_WINNER_PHRASE;
 using packs::NOT_AN_INGESTOR_ENGINE_PHRASE;
 using packs::runPlan;
 
 constexpr const char* SCRATCH_LABEL = "pluginserialization";
-
-const packs::PackedPlanCase& convFwdCase()
-{
-    return packs::CONV_FWD_PACKED_PLAN_CASE;
-}
 
 // A handle whose container loads the engines of the unit descriptor root.
 std::unique_ptr<Handle> makeHandleWithContainer()
@@ -103,19 +92,6 @@ std::string expectHookRefusal(hipdnnPluginStatus_t status,
 hipdnnPluginStatus_t save(Handle& handle, Context& context, hipdnnPluginConstData_t& serialized)
 {
     return hipdnnEnginePluginSerializeExecutionContext(&handle, &context, &serialized);
-}
-
-// A context that holds a benchmarking plan of two stub plans, which has no chosen kernel.
-std::unique_ptr<Context> makeBenchmarkContext(const IKernelDispatchHandler<Handle>& handler,
-                                              const Handle& handle)
-{
-    std::vector<BenchmarkPlan<Handle>::Candidate> candidates;
-    candidates.push_back({{}, makeStubPlan(handler, 0x01)});
-    candidates.push_back({{}, makeStubPlan(handler, 0x02)});
-
-    auto context = std::make_unique<Context>();
-    context->setPlan(std::make_unique<BenchmarkPlan<Handle>>(std::move(candidates), handle));
-    return context;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,13 +143,16 @@ TEST(TestPluginSerialization, SaveRefusesAPlanNoIngestorEngineBuilt)
     Context context;
     context.setPlan(std::make_unique<packs::NonIngestorPlan>());
 
-    hipdnnPluginConstData_t serialized{};
+    const uint8_t byte = 0;
+    hipdnnPluginConstData_t serialized{&byte, 7};
     const std::string message
         = expectHookRefusal(save(*handle, context, serialized),
                             HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
                             serialization::INGESTOR_PLAN_SAVE_INCOMPATIBLE_PREFIX,
                             NOT_AN_INGESTOR_ENGINE_PHRASE);
     EXPECT_EQ(message.find(NO_WINNER_PHRASE), std::string::npos) << message;
+    EXPECT_EQ(serialized.ptr, static_cast<const void*>(&byte));
+    EXPECT_EQ(serialized.size, 7U);
 }
 
 TEST(TestPluginSerialization, SaveRefusesAContextWithoutAPlan)
@@ -190,59 +169,6 @@ TEST(TestPluginSerialization, SaveRefusesAContextWithoutAPlan)
                             serialization::INGESTOR_PLAN_SAVE_INCOMPATIBLE_PREFIX,
                             NOT_AN_INGESTOR_ENGINE_PHRASE);
     EXPECT_EQ(message.find(NO_WINNER_PHRASE), std::string::npos) << message;
-    EXPECT_EQ(serialized.ptr, static_cast<const void*>(&byte));
-    EXPECT_EQ(serialized.size, 7U);
-}
-
-TEST(TestPluginSerialization, SaveRefusesABenchmarkPlanWithoutAWinner)
-{
-    const auto handle = makeHandleWithContainer();
-    const packs::StubDispatchHandler handler;
-    const auto context = makeBenchmarkContext(handler, *handle);
-
-    hipdnnPluginConstData_t serialized{};
-    const std::string message
-        = expectHookRefusal(save(*handle, *context, serialized),
-                            HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
-                            serialization::INGESTOR_PLAN_SAVE_INCOMPATIBLE_PREFIX,
-                            NO_WINNER_PHRASE);
-    EXPECT_EQ(message.find(NOT_AN_INGESTOR_ENGINE_PHRASE), std::string::npos) << message;
-}
-
-TEST(TestPluginSerialization, SaveRefusesARestoredPlan)
-{
-    const auto handle = makeHandleWithContainer();
-    const packs::StubDispatchHandler handler;
-    Context context;
-    context.setPlan(std::make_unique<RestoredIngestorPlan<Handle>>(
-        handler, std::make_unique<PreparedDispatch>(), 0, "restored test plan"));
-
-    hipdnnPluginConstData_t serialized{};
-    const std::string message
-        = expectHookRefusal(save(*handle, context, serialized),
-                            HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
-                            serialization::INGESTOR_PLAN_SAVE_INCOMPATIBLE_PREFIX,
-                            "loaded from a saved payload");
-    EXPECT_EQ(message.find(NO_WINNER_PHRASE), std::string::npos) << message;
-}
-
-TEST(TestPluginSerialization, SaveLeavesTheOutputUntouchedOnRefusal)
-{
-    const auto handle = makeHandleWithContainer();
-    const packs::StubDispatchHandler handler;
-    const auto benchmarkContext = makeBenchmarkContext(handler, *handle);
-    const uint8_t byte = 0;
-
-    // A benchmarking plan without a chosen kernel.
-    hipdnnPluginConstData_t serialized{&byte, 7};
-    EXPECT_EQ(save(*handle, *benchmarkContext, serialized), HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE);
-    EXPECT_EQ(serialized.ptr, static_cast<const void*>(&byte));
-    EXPECT_EQ(serialized.size, 7U);
-
-    // A plan that no ingestor engine built.
-    Context nonIngestorContext;
-    nonIngestorContext.setPlan(std::make_unique<packs::NonIngestorPlan>());
-    EXPECT_EQ(save(*handle, nonIngestorContext, serialized), HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE);
     EXPECT_EQ(serialized.ptr, static_cast<const void*>(&byte));
     EXPECT_EQ(serialized.size, 7U);
 }
@@ -346,73 +272,135 @@ private:
     hipdnnEnginePluginExecutionContext_t _context = nullptr;
 };
 
-TEST(TestPluginSerialization, RoundTripsAKpackPlanThroughTheHooks)
+class TestPluginSerializationKpack : public ::testing::TestWithParam<const packs::PackedPlanCase*>
+{
+};
+
+TEST_P(TestPluginSerializationKpack, RoundTripsAKpackPlanThroughTheHooks)
 {
     SKIP_IF_NO_DEVICES();
-    const packs::PackedPlanCase& packedCase = convFwdCase();
+    const packs::PackedPlanCase& packedCase = *GetParam();
 
     const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
     packs::PackedPlan built;
-    ASSERT_NO_FATAL_FAILURE(
-        packs::buildPackedPlan(packedCase, packedCase.roundTripGraph(), scratch.path(), built));
-    if(built.plan == nullptr)
-    {
-        GTEST_SKIP() << "nothing was packed for this device (" << built.deviceProperties.gcnArchName
-                     << ")";
-    }
-    packedCase.fillInputs(built.tensors);
-
-    const auto saveHandle = makeHandleWithContainer();
+    std::unique_ptr<Handle> saveHandle;
     std::vector<uint8_t> original;
-    ASSERT_NO_FATAL_FAILURE(runPlan(*built.plan, *saveHandle, built.tensors, original));
-    packedCase.expectExactOutput(original);
+    size_t originalWorkspaceBytes = 0;
+    {
+        SCOPED_TRACE("original run");
+        ASSERT_NO_FATAL_FAILURE(
+            packs::buildPackedPlan(packedCase, packedCase.roundTripGraph(), scratch.path(), built));
+        if(built.plan == nullptr)
+        {
+            GTEST_SKIP() << "nothing was packed for this device ("
+                         << built.deviceProperties.gcnArchName << ")";
+        }
+        packedCase.fillInputs(built.tensors);
+
+        saveHandle = makeHandleWithContainer();
+        ASSERT_NO_FATAL_FAILURE(runPlan(*built.plan, *saveHandle, built.tensors, original));
+        packedCase.expectExactOutput(original);
+        originalWorkspaceBytes = built.plan->getWorkspaceSize(*saveHandle);
+    }
 
     auto context = std::make_unique<Context>();
     context->setPlan(std::move(built.plan));
 
     const auto loadHandle = makeHandleWithContainer();
     ScopedSerializedContext serialized(*loadHandle);
-    ASSERT_EQ(save(*saveHandle, *context, serialized.data()), HIPDNN_PLUGIN_STATUS_SUCCESS)
-        << lastPluginError();
-    ASSERT_NE(serialized.data().ptr, nullptr);
-    ASSERT_GT(serialized.data().size, 0U);
-
-    // Destroy the original plan and drop the cached modules, so that no code object of the
-    // original plan stays loaded.
-    context.reset();
-    resetIngestorModuleCachesForTesting();
-
-    ScopedExecutionContext restored(*loadHandle);
-    ASSERT_EQ(hipdnnEnginePluginCreateExecutionContextFromSerialized(
-                  loadHandle.get(), &serialized.data(), &restored.context()),
-              HIPDNN_PLUGIN_STATUS_SUCCESS)
-        << lastPluginError();
-    ASSERT_NE(restored.context(), nullptr);
-
-    for(int run = 0; run < 2; ++run)
     {
-        std::vector<uint8_t> output;
-        ASSERT_NO_FATAL_FAILURE(runPlan(restored.plan(), *loadHandle, built.tensors, output));
-        EXPECT_EQ(output, original) << "run " << run;
-        packedCase.expectExactOutput(output);
+        SCOPED_TRACE("save");
+        ASSERT_EQ(save(*saveHandle, *context, serialized.data()), HIPDNN_PLUGIN_STATUS_SUCCESS)
+            << lastPluginError();
+        ASSERT_NE(serialized.data().ptr, nullptr);
+        ASSERT_GT(serialized.data().size, 0U);
     }
 
-    // A restored plan cannot be saved again.
-    const uint8_t byte = 0;
-    hipdnnPluginConstData_t resaved{&byte, 7};
-    const std::string message = expectHookRefusal(
-        hipdnnEnginePluginSerializeExecutionContext(loadHandle.get(), restored.context(), &resaved),
-        HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
-        serialization::INGESTOR_PLAN_SAVE_INCOMPATIBLE_PREFIX,
-        "loaded from a saved payload");
-    EXPECT_EQ(message.find(NOT_AN_INGESTOR_ENGINE_PHRASE), std::string::npos) << message;
-    EXPECT_EQ(resaved.ptr, static_cast<const void*>(&byte));
-    EXPECT_EQ(resaved.size, 7U);
+    {
+        SCOPED_TRACE("save after the archive is removed");
+        const std::filesystem::path archive = built.archive();
+        ASSERT_TRUE(std::filesystem::remove(archive)) << archive;
 
-    ASSERT_EQ(serialized.destroy(), HIPDNN_PLUGIN_STATUS_SUCCESS) << lastPluginError();
-    EXPECT_EQ(serialized.data().ptr, nullptr);
-    EXPECT_EQ(serialized.data().size, 0U);
+        const uint8_t byte = 0;
+        hipdnnPluginConstData_t refused{&byte, 7};
+        const std::string message
+            = expectHookRefusal(save(*saveHandle, *context, refused),
+                                HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                                serialization::INGESTOR_PLAN_SAVE_INCOMPATIBLE_PREFIX,
+                                "OPEN_ARCHIVE");
+        EXPECT_NE(message.find(archive.string()), std::string::npos) << message;
+        EXPECT_EQ(refused.ptr, static_cast<const void*>(&byte));
+        EXPECT_EQ(refused.size, 7U);
+    }
+
+    {
+        SCOPED_TRACE("original run after the archive is removed");
+        std::vector<uint8_t> again;
+        ASSERT_NO_FATAL_FAILURE(runPlan(context->plan(), *saveHandle, built.tensors, again));
+        EXPECT_EQ(again, original);
+    }
+
+    ScopedExecutionContext restored(*loadHandle);
+    size_t cachedBefore = 0;
+    {
+        SCOPED_TRACE("load without the archive");
+        // Destroy the original plan and drop the cached modules, so that no code object of the
+        // original plan stays loaded.
+        context.reset();
+        resetIngestorModuleCachesForTesting();
+        cachedBefore = packs::packModuleCacheEntries();
+
+        ASSERT_EQ(hipdnnEnginePluginCreateExecutionContextFromSerialized(
+                      loadHandle.get(), &serialized.data(), &restored.context()),
+                  HIPDNN_PLUGIN_STATUS_SUCCESS)
+            << lastPluginError();
+        ASSERT_NE(restored.context(), nullptr);
+        EXPECT_EQ(restored.plan().getWorkspaceSize(*loadHandle), originalWorkspaceBytes);
+    }
+
+    {
+        SCOPED_TRACE("restored runs");
+        for(int run = 0; run < 2; ++run)
+        {
+            std::vector<uint8_t> output;
+            ASSERT_NO_FATAL_FAILURE(runPlan(restored.plan(), *loadHandle, built.tensors, output));
+            EXPECT_EQ(output, original) << "run " << run;
+            packedCase.expectExactOutput(output);
+        }
+        EXPECT_EQ(packs::packModuleCacheEntries(), cachedBefore);
+    }
+
+    {
+        SCOPED_TRACE("re-save of the restored plan");
+        // A restored plan cannot be saved again.
+        const uint8_t byte = 0;
+        hipdnnPluginConstData_t resaved{&byte, 7};
+        const std::string message
+            = expectHookRefusal(hipdnnEnginePluginSerializeExecutionContext(
+                                    loadHandle.get(), restored.context(), &resaved),
+                                HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                                serialization::INGESTOR_PLAN_SAVE_INCOMPATIBLE_PREFIX,
+                                "loaded from a saved payload");
+        EXPECT_EQ(message.find(NOT_AN_INGESTOR_ENGINE_PHRASE), std::string::npos) << message;
+        EXPECT_EQ(resaved.ptr, static_cast<const void*>(&byte));
+        EXPECT_EQ(resaved.size, 7U);
+    }
+
+    {
+        SCOPED_TRACE("destroy of the saved bytes");
+        ASSERT_EQ(serialized.destroy(), HIPDNN_PLUGIN_STATUS_SUCCESS) << lastPluginError();
+        EXPECT_EQ(serialized.data().ptr, nullptr);
+        EXPECT_EQ(serialized.data().size, 0U);
+    }
 }
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestPluginSerializationKpack,
+                         ::testing::Values(&packs::POINTWISE_PACKED_PLAN_CASE,
+                                           &packs::CONV_FWD_PACKED_PLAN_CASE),
+                         [](const ::testing::TestParamInfo<const packs::PackedPlanCase*>& info) {
+                             return std::string(info.param->name);
+                         });
 
 } // namespace
 } // namespace hip_kernel_provider::kernel_ingestor_engine

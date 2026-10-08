@@ -23,8 +23,6 @@
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
-#include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
-#include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SavedDispatch.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
@@ -64,7 +62,6 @@ using hipdnn_plugin_sdk::ingestor::BenchmarkPlan;
 using hipdnn_plugin_sdk::ingestor::DeviceProperties;
 using hipdnn_plugin_sdk::ingestor::GenericPlan;
 using hipdnn_plugin_sdk::ingestor::KernelDefinition;
-using hipdnn_plugin_sdk::ingestor::KernelDispatcher;
 using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
 using hipdnn_plugin_sdk::ingestor::MetadataValues;
 using hipdnn_plugin_sdk::ingestor::PreparedDispatch;
@@ -173,6 +170,43 @@ TEST(TestIngestorPlanCapture, RefusesARestoredPlan)
     EXPECT_EQ(message.find(NO_WINNER_PHRASE), std::string::npos) << message;
 }
 
+// Saving accepts only kpack kernels: embedded_source kernels have no recorded argument
+// signature, and their code bytes are not exposed. When either fact changes, change this
+// test together with the gate.
+class TestIngestorPlanCaptureGate : public ::testing::TestWithParam<KernelSourceKind>
+{
+};
+
+TEST_P(TestIngestorPlanCaptureGate, AppliesTheSourceKindGate)
+{
+    const packs::StubDispatchHandler handler;
+    const auto plan = makeStubPlan(handler, 0x05, GetParam());
+
+    if(GetParam() == KernelSourceKind::KPACK)
+    {
+        const std::string message
+            = expectSaveRefusal(*plan,
+                                HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                                "this dispatch handler does not support saving");
+        EXPECT_EQ(message.find("which saving does not yet support"), std::string::npos) << message;
+        return;
+    }
+
+    const std::string message
+        = expectSaveRefusal(*plan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "embedded_source");
+    EXPECT_NE(message.find("which saving does not yet support"), std::string::npos) << message;
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestIngestorPlanCaptureGate,
+                         ::testing::Values(KernelSourceKind::KPACK,
+                                           KernelSourceKind::EMBEDDED_SOURCE),
+                         [](const ::testing::TestParamInfo<KernelSourceKind>& info) {
+                             return info.param == KernelSourceKind::KPACK
+                                        ? std::string("KPACK")
+                                        : std::string("EMBEDDED_SOURCE");
+                         });
+
 // ---------------------------------------------------------------------------
 // Real kpack plans
 // ---------------------------------------------------------------------------
@@ -259,94 +293,6 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<CaptureCase>& info) {
         return std::string(info.param.packedCase->name);
     });
-
-// Saving accepts only kpack kernels: embedded_source kernels have no recorded argument
-// signature, and their code bytes are not exposed. When either fact changes, change this
-// test together with the gate.
-class TestIngestorPlanCaptureGate : public ::testing::TestWithParam<KernelSourceKind>
-{
-};
-
-TEST_P(TestIngestorPlanCaptureGate, AppliesTheSourceKindGate)
-{
-    SKIP_IF_NO_DEVICES();
-    const Handle handle;
-
-    if(GetParam() == KernelSourceKind::KPACK)
-    {
-        const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
-        PackedPlan built;
-        ASSERT_NO_FATAL_FAILURE(
-            packs::buildPackedPlan(packs::CONV_FWD_PACKED_PLAN_CASE,
-                                   packs::CONV_FWD_PACKED_PLAN_CASE.captureGraph(),
-                                   scratch.path(),
-                                   built));
-        if(built.plan == nullptr)
-        {
-            GTEST_SKIP() << "nothing was packed for this device ("
-                         << built.deviceProperties.gcnArchName << ")";
-        }
-
-        const auto payload = captureIngestorPlan(*built.plan, handle);
-        EXPECT_EQ(payload.sourceKind, KernelSourceKind::KPACK);
-        return;
-    }
-
-    const packs::GraphFixture fixture(packs::buildPointwiseGraph(),
-                                      packs::currentDeviceProperties());
-    const auto bound = packs::matchesGraph(packs::POINTWISE_ADD, fixture.context());
-    ASSERT_TRUE(bound.has_value());
-    const auto kernel = packs::makeKernel(64, "FLOAT");
-    ASSERT_EQ(kernel.source.kind, KernelSourceKind::EMBEDDED_SOURCE);
-    const GenericPlan<Handle> plan(
-        KernelDispatcher<Handle>{kernel, &packs::dispatchHandler(packs::POINTWISE_ADD)},
-        fixture.context(),
-        *bound);
-
-    expectSaveRefusal(plan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "embedded_source");
-}
-
-INSTANTIATE_TEST_SUITE_P(,
-                         TestIngestorPlanCaptureGate,
-                         ::testing::Values(KernelSourceKind::KPACK,
-                                           KernelSourceKind::EMBEDDED_SOURCE),
-                         [](const ::testing::TestParamInfo<KernelSourceKind>& info) {
-                             return info.param == KernelSourceKind::KPACK
-                                        ? std::string("KPACK")
-                                        : std::string("EMBEDDED_SOURCE");
-                         });
-
-TEST(TestIngestorPlanCapture, RefusesWhenTheArchiveIsGone)
-{
-    SKIP_IF_NO_DEVICES();
-
-    const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
-    PackedPlan built;
-    ASSERT_NO_FATAL_FAILURE(packs::buildPackedPlan(packs::CONV_FWD_PACKED_PLAN_CASE,
-                                                   packs::CONV_FWD_PACKED_PLAN_CASE.captureGraph(),
-                                                   scratch.path(),
-                                                   built));
-    if(built.plan == nullptr)
-    {
-        GTEST_SKIP() << "nothing was packed for this device (" << built.deviceProperties.gcnArchName
-                     << ")";
-    }
-
-    const Handle handle;
-    const auto buffers = packs::deviceBuffersOf(built.tensors);
-    built.plan->execute(handle, buffers.data(), static_cast<uint32_t>(buffers.size()));
-    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-
-    const std::filesystem::path archive = built.archive();
-    ASSERT_TRUE(std::filesystem::remove(archive)) << archive;
-
-    expectSaveRefusal(*built.plan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "OPEN_ARCHIVE");
-    expectSaveRefusal(*built.plan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, archive.string());
-
-    // The plan keeps its loaded module, so it still executes.
-    built.plan->execute(handle, buffers.data(), static_cast<uint32_t>(buffers.size()));
-    EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
-}
 
 TEST(TestIngestorPlanCapture, CapturesTheBenchmarkWinnersOwnWorkspace)
 {

@@ -728,7 +728,8 @@ class IntegrationGpuKernelIngestorSaveLoad : public IntegrationGpuKernelIngestor
 protected:
     // Builds graph with pinnedEngineId, validates one run and saves the plan in form. Then
     // it destroys graph, loads the plan with a new handle and validates two runs of the
-    // loaded plan. Every run uses the CPU reference of the original graph.
+    // loaded plan. Every run uses the CPU reference of the original graph. Then it checks
+    // that the loaded plan cannot be saved again.
     void roundTripInAFreshHandle(std::shared_ptr<Graph> graph,
                                  int64_t pinnedEngineId,
                                  SaveForm form,
@@ -818,6 +819,10 @@ protected:
 
         ASSERT_NO_FATAL_FAILURE(executeAndValidate(run, *loaded, _handle));
         ASSERT_NO_FATAL_FAILURE(executeAndValidate(run, *loaded, _handle));
+
+        const auto resave = detail::saveInForm(*loaded, form);
+        expectPluginRefusal(
+            resave.second, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "loaded from a saved payload");
     }
 };
 
@@ -904,71 +909,56 @@ TEST_F(IntegrationGpuKernelIngestorSaveLoadRefusals,
     }
 }
 
-TEST_F(IntegrationGpuKernelIngestorSaveLoadRefusals, RefusesToSaveAPlanItLoaded)
+// The FlatBuffers Verifier accepts a body with one changed code-object byte, so only the
+// body digest finds that damage.
+TEST_F(IntegrationGpuKernelIngestorSaveLoadRefusals,
+       RefusesToLoadDamagedBytesOrAnotherFormatMajorVersion)
 {
-    auto graph = buildPointwiseAddGraph();
-    ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, engineId()));
+    std::vector<uint8_t> saved;
+    ASSERT_NO_FATAL_FAILURE(saveAConvFwdPlanOnly(saved));
 
-    for(const SaveForm form : SAVE_FORMS)
-    {
-        SCOPED_TRACE(saveFormName(form));
-        const auto save = detail::saveInForm(*graph, form);
-        ASSERT_EQ(save.second.code, ErrorCode::OK) << save.second.err_msg;
+    const auto loadWithOneCodeObjectByteChanged = [this](std::vector<uint8_t> copy) {
+        SCOPED_TRACE("one code-object byte changed");
+        size_t codeOffset = 0;
+        size_t codeSize = 0;
+        ASSERT_NO_FATAL_FAILURE(findCodeObject(copy, codeOffset, codeSize));
+
+        const size_t middleOfCode = codeOffset + (codeSize / 2);
+        copy.at(middleOfCode) = static_cast<uint8_t>(copy.at(middleOfCode) ^ 0xFFU);
 
         auto loaded = std::make_shared<Graph>();
-        const auto result = detail::loadInForm(*loaded, _handle, save.first, form);
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-        const auto resave = detail::saveInForm(*loaded, form);
+        const auto result = detail::loadInForm(*loaded, _handle, copy, SaveForm::PLAN_ONLY);
         expectPluginRefusal(
-            resave.second, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "loaded from a saved payload");
-    }
-}
+            result, HIPDNN_PLUGIN_STATUS_INVALID_VALUE, "ingestor plan data is damaged");
+        EXPECT_NE(result.err_msg.find("body digest mismatch"), std::string::npos) << result.err_msg;
+    };
 
-// Changes one byte of the stored code object. The FlatBuffers Verifier accepts the changed
-// body, so only the body digest finds the damage.
-TEST_F(IntegrationGpuKernelIngestorSaveLoadRefusals, RefusesToLoadDamagedBytes)
-{
-    std::vector<uint8_t> saved;
-    ASSERT_NO_FATAL_FAILURE(saveAConvFwdPlanOnly(saved));
-    size_t codeOffset = 0;
-    size_t codeSize = 0;
-    ASSERT_NO_FATAL_FAILURE(findCodeObject(saved, codeOffset, codeSize));
+    const auto loadWithAnotherFormatMajorVersion = [this](std::vector<uint8_t> copy) {
+        SCOPED_TRACE("another format major version");
+        size_t payloadOffset = 0;
+        size_t payloadSize = 0;
+        ASSERT_NO_FATAL_FAILURE(findIngestorPlanPayload(copy, payloadOffset, payloadSize));
 
-    const size_t middleOfCode = codeOffset + (codeSize / 2);
-    saved.at(middleOfCode) = static_cast<uint8_t>(saved.at(middleOfCode) ^ 0xFFU);
+        const uint16_t major
+            = readLittleEndianU16(copy, payloadOffset + INGESTOR_PLAN_FORMAT_MAJOR_OFFSET);
+        const uint16_t minor
+            = readLittleEndianU16(copy, payloadOffset + INGESTOR_PLAN_FORMAT_MINOR_OFFSET);
+        const auto otherMajor = static_cast<uint16_t>(major + 1);
+        writeLittleEndianU16(copy, payloadOffset + INGESTOR_PLAN_FORMAT_MAJOR_OFFSET, otherMajor);
 
-    auto loaded = std::make_shared<Graph>();
-    const auto result = detail::loadInForm(*loaded, _handle, saved, SaveForm::PLAN_ONLY);
-    expectPluginRefusal(
-        result, HIPDNN_PLUGIN_STATUS_INVALID_VALUE, "ingestor plan data is damaged");
-    EXPECT_NE(result.err_msg.find("body digest mismatch"), std::string::npos) << result.err_msg;
-}
+        auto loaded = std::make_shared<Graph>();
+        const auto result = detail::loadInForm(*loaded, _handle, copy, SaveForm::PLAN_ONLY);
+        expectPluginRefusal(result,
+                            HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                            "payload format version " + std::to_string(otherMajor) + "."
+                                + std::to_string(minor) + " is not readable");
+        EXPECT_NE(result.err_msg.find("reads format versions " + std::to_string(major) + "."),
+                  std::string::npos)
+            << result.err_msg;
+    };
 
-TEST_F(IntegrationGpuKernelIngestorSaveLoadRefusals, RefusesToLoadAnotherFormatMajorVersion)
-{
-    std::vector<uint8_t> saved;
-    ASSERT_NO_FATAL_FAILURE(saveAConvFwdPlanOnly(saved));
-    size_t payloadOffset = 0;
-    size_t payloadSize = 0;
-    ASSERT_NO_FATAL_FAILURE(findIngestorPlanPayload(saved, payloadOffset, payloadSize));
-
-    const uint16_t major
-        = readLittleEndianU16(saved, payloadOffset + INGESTOR_PLAN_FORMAT_MAJOR_OFFSET);
-    const uint16_t minor
-        = readLittleEndianU16(saved, payloadOffset + INGESTOR_PLAN_FORMAT_MINOR_OFFSET);
-    const auto otherMajor = static_cast<uint16_t>(major + 1);
-    writeLittleEndianU16(saved, payloadOffset + INGESTOR_PLAN_FORMAT_MAJOR_OFFSET, otherMajor);
-
-    auto loaded = std::make_shared<Graph>();
-    const auto result = detail::loadInForm(*loaded, _handle, saved, SaveForm::PLAN_ONLY);
-    expectPluginRefusal(result,
-                        HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
-                        "payload format version " + std::to_string(otherMajor) + "."
-                            + std::to_string(minor) + " is not readable");
-    EXPECT_NE(result.err_msg.find("reads format versions " + std::to_string(major) + "."),
-              std::string::npos)
-        << result.err_msg;
+    ASSERT_NO_FATAL_FAILURE(loadWithOneCodeObjectByteChanged(saved));
+    ASSERT_NO_FATAL_FAILURE(loadWithAnotherFormatMajorVersion(saved));
 }
 
 INSTANTIATE_TEST_SUITE_P(,

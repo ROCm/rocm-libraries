@@ -220,27 +220,30 @@ inline void runPlan(const hipdnn_plugin_sdk::IPlan<Handle>& plan,
     output.assign(bytes, bytes + (result.elementSpace() * result.elementSize()));
 }
 
-// A kpack kernel definition that names nothing on disk. A stub dispatch handler never reads
-// it.
-inline hipdnn_plugin_sdk::ingestor::KernelDefinition stubKpackKernel(uint8_t seed)
+// A kernel definition of `kind` that names nothing on disk. A stub dispatch handler never
+// reads it.
+inline hipdnn_plugin_sdk::ingestor::KernelDefinition
+    stubKernel(uint8_t seed, hipdnn_plugin_sdk::ingestor::KernelSourceKind kind)
 {
     hipdnn_plugin_sdk::ingestor::KernelDefinition kernel;
     kernel.kernelId.fill(seed);
-    kernel.name = "stub_kpack_kernel";
-    kernel.source.kind = hipdnn_plugin_sdk::ingestor::KernelSourceKind::KPACK;
+    kernel.name = "stub_kernel";
+    kernel.source.kind = kind;
     return kernel;
 }
 
-// A GenericPlan over `handler` for the stub kpack kernel of `seed`, on the Pointwise test
-// graph. Builds no code object and needs no device.
+// A GenericPlan over `handler` for the stub kernel of `seed` and `kind`, on the Pointwise
+// test graph. Builds no code object and needs no device.
 inline std::unique_ptr<hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>>
     makeStubPlan(const hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>& handler,
-                 uint8_t seed)
+                 uint8_t seed,
+                 hipdnn_plugin_sdk::ingestor::KernelSourceKind kind
+                 = hipdnn_plugin_sdk::ingestor::KernelSourceKind::KPACK)
 {
     const GraphFixture fixture(buildPointwiseGraph());
     const hipdnn_plugin_sdk::ingestor::BoundTokens bound;
     return std::make_unique<hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>>(
-        hipdnn_plugin_sdk::ingestor::KernelDispatcher<Handle>{stubKpackKernel(seed), &handler},
+        hipdnn_plugin_sdk::ingestor::KernelDispatcher<Handle>{stubKernel(seed, kind), &handler},
         fixture.context(),
         bound);
 }
