@@ -44,15 +44,11 @@ struct SdpaBwdTestCase
     std::vector<int64_t> vStrides;
 
     std::optional<float> attnScaleValue;
-    // fillForwardOutputsForBackward() passes these three straight to the CPU
-    // forward, and the backward is graded against a reference that re-derives
-    // its own band from the graph through extractDiagonalBandParams(). The two
-    // agree only while no case sets the deprecated causal_mask or
-    // causal_mask_bottom_right: either one makes that function discard the
-    // bounds and substitute (-1, 0, top-left), while these fields keep what was
-    // asked for, so O and the LSE would describe a different band than the one
-    // under test. Adding such a field here means teaching the helper to check
-    // the derived triple first.
+    // These fields feed the CPU forward directly, while the backward reference
+    // derives its band from the graph. Either deprecated causal boolean makes
+    // extractDiagonalBandParams discard explicit bounds and use (-1, 0):
+    // top-left for causal_mask or bottom-right for causal_mask_bottom_right.
+    // Keep the helper and the graph in sync if adding either flag to a case.
     int64_t leftBound;
     int64_t rightBound;
     bool topLeftAlignment;
