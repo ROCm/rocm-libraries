@@ -1235,6 +1235,24 @@ namespace
         EXPECT_GE(counters().hits, 1u) << "tuned entry did not replay";
     }
 
+    // Provenance is what the tuning_mode column is for, so the mode that
+    // recorded a row has to stamp it rather than inherit it. Tune's search
+    // descriptor set every other field and left this one to the struct's
+    // default, which says Tune because tune was the only writer when the
+    // column was added -- correct by accident of ordering, and silently wrong
+    // for the next writing mode that forgets the line.
+    TEST_F(TuningTune_pre_checkin, ATuneRowSaysTuneRecordedIt)
+    {
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(128, 128, 128, 0.0f, false, false, true));
+        ASSERT_GT(valueRowCount(m_path), 0u) << "tune mode recorded nothing";
+
+        const std::vector<std::string> modes = columnValues(m_path, "tuning_mode");
+        ASSERT_FALSE(modes.empty()) << "the rows carry no tuning_mode column";
+        for(const std::string& mode : modes)
+            EXPECT_EQ(mode, "tune") << "a row tune mode wrote does not say tune recorded it";
+    }
+
     // A recorded datatype must parse back as the datatype it was written from.
     //
     // The FNUZ and OCP FP8 types share one bench spelling, "f8_r", which the
@@ -2294,6 +2312,10 @@ namespace
 
         EXPECT_EQ(valueRowCount(m_path), 1u) << "online recorded no winner";
         EXPECT_EQ(counters().tuned, 1u);
+
+        // The other half of the provenance pair: online stamps its own mode, so
+        // the two writers are distinguishable in a file they share.
+        EXPECT_EQ(columnValues(m_path, "tuning_mode"), std::vector<std::string>{"online"});
     }
 
     // The defect this case exists for: online used to decide whether to explore
