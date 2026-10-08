@@ -53,6 +53,28 @@ class TestEngineNameCheck:
         config = make_minimal_config(engine=make_engine(name="hipkernel:Pointwise"))
         _check_engine_name_scoped(config)  # does not raise
 
+    @pytest.mark.parametrize(
+        "borrowed", ["Unscoped", "hipkernel:Test", 3], ids=["unscoped", "self", "int"]
+    )
+    def test_native_symbols_from_must_name_another_scoped_engine(self, borrowed):
+        from codegen.config_loader import _check_engine_name_scoped
+
+        config = make_minimal_config(
+            engine=make_engine(name="hipkernel:Test", native_symbols_from=borrowed)
+        )
+        with pytest.raises(ConfigError, match="native_symbols_from"):
+            _check_engine_name_scoped(config)
+
+    def test_native_symbols_from_another_engine_accepted(self):
+        from codegen.config_loader import _check_engine_name_scoped
+
+        config = make_minimal_config(
+            engine=make_engine(
+                name="hipkernel:TestSeed", native_symbols_from="hipkernel:Test"
+            )
+        )
+        _check_engine_name_scoped(config)  # does not raise
+
     def test_invalid_heuristic_value_rejected(self):
         from codegen.config_loader import _check_engine_name_scoped
 

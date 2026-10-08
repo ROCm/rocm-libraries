@@ -26,21 +26,28 @@ import make_conv_aot_config as tool  # noqa: E402
 _REPO = launch_surface.find_repo_root(_TOOLS)
 _ROCKE = _REPO / "dnn-providers" / "hip-kernel-provider" / "rocke"
 _CONFIGS = Path(__file__).resolve().parent.parent / "configs"
-_INSTANCES = _CONFIGS / "gfx950_conv_fwd_aot.instances.json"
-_CONFIG = _CONFIGS / "gfx950_conv_fwd_aot.yaml"
-_SHIPPED_DIR = (
-    _REPO
-    / "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors"
-    / "rocKE/gfx950_conv_fwd_aot"
+_SEED_ENGINE = "hipkernel:Gfx950ConvFwdAotSeed"
+_INSTANCES = _CONFIGS / "gfx950_conv_fwd_aot_seed.instances.json"
+_CONFIG = _CONFIGS / "gfx950_conv_fwd_aot_seed.yaml"
+_PROVIDER = (
+    _REPO / "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine"
 )
-#: One shipped shard, for the tests that rewrite a KDP.
-_SHIPPED_KDP = _SHIPPED_DIR / "gfx950_conv_fwd_aot_fp16.kdp.json"
+_SHIPPED_DIR = _PROVIDER / "descriptors/rocKE/gfx950_conv_fwd_aot"
+_SEED_DIR = _PROVIDER / "test_descriptors/integration/rocKE/gfx950_conv_fwd_aot_seed"
+#: One small shipped shard, for the tests that rewrite a KDP.
+_SEED_KDP = _SEED_DIR / "gfx950_conv_fwd_aot_seed_fp16.kdp.json"
 #: GitHub warns about any file above 50 MB; every emitted file stays below it.
 _FILE_SIZE_LIMIT = 50 * 1000 * 1000
 
-
-def _shipped_kdps():
-    return sorted(_SHIPPED_DIR.glob("*.kdp.json"))
+#: Each bundle the tool emits: (engine, its descriptor folder, its instance list).
+_BUNDLES = {
+    "product": (
+        tool.PRODUCT_ENGINE,
+        _SHIPPED_DIR,
+        _CONFIGS / "gfx950_conv_fwd_aot_seed.instances.json",
+    ),
+    "seed": (_SEED_ENGINE, _SEED_DIR, _INSTANCES),
+}
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -53,6 +60,15 @@ def _rocke_on_path():
     sys.path[:] = before
 
 
+def _specs(identities):
+    specs = []
+    for identity in identities:
+        spec, reason = tool.instance_spec(identity)
+        assert spec is not None, reason
+        specs.append(spec)
+    return sorted(specs, key=lambda s: (s.dtype, s.instance_id))
+
+
 @pytest.fixture(scope="module")
 def seed_identities():
     return json.loads(_INSTANCES.read_text())
@@ -60,36 +76,91 @@ def seed_identities():
 
 @pytest.fixture(scope="module")
 def seed_specs(seed_identities):
-    specs = []
-    for identity in seed_identities:
-        spec, reason = tool.instance_spec(identity)
-        assert spec is not None, reason
-        specs.append(spec)
-    return sorted(specs, key=lambda s: (s.dtype, s.instance_id))
+    return _specs(seed_identities)
+
+
+@pytest.fixture(scope="module", params=sorted(_BUNDLES))
+def bundle(request):
+    """``(engine, descriptor folder, specs)`` of each emitted bundle."""
+    engine, folder, instances = _BUNDLES[request.param]
+    return engine, folder, _specs(json.loads(instances.read_text()))
 
 
 def test_seed_config_is_what_the_tool_generates(seed_specs):
-    assert yaml.safe_load(_CONFIG.read_text()) == tool.build_config(seed_specs)
+    assert yaml.safe_load(_CONFIG.read_text()) == tool.build_config(
+        seed_specs, _SEED_ENGINE
+    )
 
 
-def test_shipped_bundle_is_the_seed_catalog_with_instance_derived_ids(seed_specs):
+def test_shipped_bundle_is_its_catalog_with_instance_derived_ids(bundle):
+    engine, folder, specs = bundle
+    slug = tool.engine_slug(engine)
     shipped = {}
-    for kdp in _shipped_kdps():
+    for kdp in sorted(folder.glob("*.kdp.json")):
         document = json.loads(kdp.read_text())
         dtype = kdp.name[: -len(".kdp.json")].rsplit("_", 1)[1]
-        assert document["name"] == f"hipkernel:gfx950_conv_fwd_aot_{dtype}"
+        assert document["name"] == f"hipkernel:{slug}_{dtype}"
         for kernel in document["kernelDescriptors"]:
             assert kernel["metadata"]["dtype"] == dtype
             shipped[kernel["metadata"]["instance_id"]] = kernel
-    assert sorted(shipped) == sorted(s.instance_id for s in seed_specs)
-    for spec in seed_specs:
+    assert sorted(shipped) == sorted(s.instance_id for s in specs)
+    for spec in specs:
         kernel = shipped[spec.instance_id]
         expected = {name: getattr(spec, name) for name in tool.spec_order(spec)}
         assert kernel["kernel_source"]["spec"] == expected
         assert kernel["metadata"] == expected
         assert kernel["kernel_source"]["builder"] == "build_gfx950_conv_fwd_aot"
-        assert kernel["id"] == str(
-            uuid.uuid5(tool.INSTANCE_UUID_NAMESPACE, spec.instance_id)
+        assert kernel["id"] == tool.kernel_uuid(spec.instance_id, engine)
+
+
+def test_shipped_bundle_is_sharded_below_the_hosting_size_limit(bundle):
+    engine, folder, _ = bundle
+    slug = tool.engine_slug(engine)
+    names = sorted(path.name for path in folder.iterdir())
+    assert names == sorted(
+        [f"{slug}.{kind}.json" for kind in ("kmd", "udd", "ued", "uhd")]
+        + [f"{slug}_{dtype}.kdp.json" for dtype in ("bf16", "fp16")]
+        + ["kernel_dtype_matches_graph.umd.json"]
+    )
+    matcher = json.loads((folder / "kernel_dtype_matches_graph.umd.json").read_text())
+    for path in folder.iterdir():
+        assert path.stat().st_size < _FILE_SIZE_LIMIT, path.name
+    # No operation-scoped matcher: every shard names the shared kernel matcher only.
+    for kdp in folder.glob("*.kdp.json"):
+        assert json.loads(kdp.read_text())["matchers"] == [matcher["id"]]
+
+
+def test_every_bundle_runs_the_shipped_engines_native_code():
+    for engine, folder, _ in _BUNDLES.values():
+        ued = json.loads((folder / f"{tool.engine_slug(engine)}.ued.json").read_text())
+        assert ued["name"] == engine
+        assert ued["graph_match"] == {
+            "native": "hipkernel.gfx950_conv_fwd_aot.graph_match"
+        }
+        udd = json.loads((folder / f"{tool.engine_slug(engine)}.udd.json").read_text())
+        assert udd["dispatch_symbol"] == "hipkernel.gfx950_conv_fwd_aot.dispatch"
+
+
+def test_the_seed_is_a_second_engine_with_its_own_ids(seed_specs):
+    config = tool.build_config(seed_specs, _SEED_ENGINE)
+    assert config["engine"]["name"] == _SEED_ENGINE
+    assert config["engine"]["native_symbols_from"] == tool.PRODUCT_ENGINE
+    assert config["authored_subpath"] == "rocKE/gfx950_conv_fwd_aot_seed"
+    assert "native_symbols_from" not in tool.build_config(seed_specs)["engine"]
+    # Both engines load into one process, so neither a document id nor a kernel id
+    # may repeat across their bundles.
+    ids = {}
+    for _, folder, _ in _BUNDLES.values():
+        for path in folder.glob("*.json"):
+            document = json.loads(path.read_text())
+            found = [document["id"]] + [
+                kernel["id"] for kernel in document.get("kernelDescriptors", [])
+            ]
+            for value in found:
+                assert ids.setdefault(value, path) == path, value
+    for spec in seed_specs:
+        assert tool.kernel_uuid(spec.instance_id, _SEED_ENGINE) != tool.kernel_uuid(
+            spec.instance_id
         )
 
 
@@ -112,27 +183,6 @@ def test_config_shards_the_catalog_into_one_pack_per_dtype(tmp_path, seed_specs)
         "gfx950_conv_fwd_aot_bf16",
         "gfx950_conv_fwd_aot_fp16",
     ]
-
-
-def test_shipped_bundle_is_sharded_below_the_hosting_size_limit():
-    names = sorted(path.name for path in _SHIPPED_DIR.iterdir())
-    assert names == [
-        "gfx950_conv_fwd_aot.kmd.json",
-        "gfx950_conv_fwd_aot.udd.json",
-        "gfx950_conv_fwd_aot.ued.json",
-        "gfx950_conv_fwd_aot.uhd.json",
-        "gfx950_conv_fwd_aot_bf16.kdp.json",
-        "gfx950_conv_fwd_aot_fp16.kdp.json",
-        "kernel_dtype_matches_graph.umd.json",
-    ]
-    matcher = json.loads(
-        (_SHIPPED_DIR / "kernel_dtype_matches_graph.umd.json").read_text()
-    )
-    for path in _SHIPPED_DIR.iterdir():
-        assert path.stat().st_size < _FILE_SIZE_LIMIT, path.name
-    # No operation-scoped matcher: every shard names the shared kernel matcher only.
-    for kdp in _shipped_kdps():
-        assert json.loads(kdp.read_text())["matchers"] == [matcher["id"]]
 
 
 def test_instance_id_is_the_identity_stable_hash(seed_identities):
@@ -208,12 +258,12 @@ def test_main_dedups_and_refuses_unsupported_unless_asked(
 
 def test_stabilize_ids_rewrites_kernel_ids_and_refuses_referenced_ones(tmp_path):
     kdp = tmp_path / "x.kdp.json"
-    document = json.loads(_SHIPPED_KDP.read_text())
+    document = json.loads(_SEED_KDP.read_text())
     for kernel in document["kernelDescriptors"]:
         kernel["id"] = str(uuid.uuid4())
     kdp.write_text(json.dumps(document))
-    assert tool.stabilize_ids(kdp) == len(document["kernelDescriptors"])
-    assert json.loads(kdp.read_text()) == json.loads(_SHIPPED_KDP.read_text())
+    assert tool.stabilize_ids(kdp, _SEED_ENGINE) == len(document["kernelDescriptors"])
+    assert json.loads(kdp.read_text()) == json.loads(_SEED_KDP.read_text())
 
     first = document["kernelDescriptors"][0]
     document["provenance"] = {"note": first["id"]}
@@ -368,7 +418,7 @@ def _stabilize_ids_one_kernel_at_a_time(kdp_path):
 
 
 def test_stabilize_ids_matches_the_one_kernel_at_a_time_rewrite(tmp_path):
-    document = json.loads(_SHIPPED_KDP.read_text())
+    document = json.loads(_SEED_KDP.read_text())
     for kernel in document["kernelDescriptors"]:
         kernel["id"] = str(uuid.uuid4())
     # An unrelated UUID elsewhere in the file is left alone.
@@ -389,7 +439,7 @@ def test_stabilize_ids_matches_the_one_kernel_at_a_time_rewrite(tmp_path):
 
 
 def test_stabilize_ids_refuses_a_kernel_id_shared_by_two_kernels(tmp_path):
-    document = json.loads(_SHIPPED_KDP.read_text())
+    document = json.loads(_SEED_KDP.read_text())
     first, second = document["kernelDescriptors"][:2]
     second["id"] = first["id"]
     kdp = tmp_path / "x.kdp.json"
