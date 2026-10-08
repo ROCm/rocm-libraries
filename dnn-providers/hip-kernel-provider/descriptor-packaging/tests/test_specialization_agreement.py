@@ -25,11 +25,11 @@ from pathlib import Path
 
 import pytest
 
-from conftest import GENERIC_TARGETS, GENERIC_TARGETS_JSON
 from hkp_pack import agreement, pipeline
 from hkp_pack.errors import HkpPackError
 from hkp_pack.desk_check import compiled_agreement, load_kernels
 from hkp_pack.kpack_resolver import load_kpack
+from pack_helpers import GENERIC_TARGETS, GENERIC_TARGETS_JSON
 
 ARCH = "gfx942"
 PAYLOAD = b"\x7fELF-not-really-a-code-object"

@@ -7,12 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from conftest import GENERIC_TARGETS, GENERIC_TARGETS_JSON
 from hkp_pack import pipeline
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.generic_targets import GenericTargets
 from hkp_pack.pipeline import _merge_generic_into_member, run_pipeline
+from pack_helpers import GENERIC_TARGETS, GENERIC_TARGETS_JSON
 
 GENERIC = "gfx11-generic"
 MEMBER_A = "gfx1100"

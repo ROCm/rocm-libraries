@@ -565,7 +565,7 @@ def test_rederive_follows_source_changes(tmp_path):
 
 
 # --- --list-arches ----------------------------------------------------------
-def _list_cmd(src: Path, exclude=()):
+def _list_cmd(src: Path, *filters: str, exclude=()):
     cmd = [
         sys.executable,
         str(PROBE_DERIVE),
@@ -574,15 +574,16 @@ def _list_cmd(src: Path, exclude=()):
         str(src),
         "--generic-targets-json",
         str(GENERIC_TARGETS_JSON),
+        *filters,
     ]
     for arch in exclude:
         cmd += ["--exclude", arch]
     return cmd
 
 
-def _list_arches(src: Path, exclude=()):
+def _list_arches(src: Path, *filters: str, exclude=()):
     r = subprocess.run(
-        _list_cmd(src, exclude),
+        _list_cmd(src, *filters, exclude=exclude),
         capture_output=True,
         text=True,
         check=False,
@@ -730,6 +731,144 @@ def test_derive_for_a_member_outside_the_generic_ignores_its_kdps(tmp_path):
     # gfx1200 is no member of gfx11-generic: no pass for it, nothing to expect.
     assert _derive(src, "gfx1200", out) == []
     assert (out / "x.kdp.json").read_bytes() == (src / "x.kdp.json").read_bytes()
+
+
+# --- disabled kinds and excluded folders -------------------------------------
+def test_disabled_kind_is_neither_kept_nor_expected(tmp_path):
+    src = tmp_path / "src"
+    _write_root(src, [_rocke("r", "b1"), _hip("h", "a.cpp")])
+    out = tmp_path / "w" / "root"
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(PROBE_DERIVE),
+            "--from",
+            str(src),
+            "--generic-targets-json",
+            str(GENERIC_TARGETS_JSON),
+            "--arch",
+            "gfx950",
+            "--out",
+            str(out),
+            "--disable-kind",
+            "rocke",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert r.returncode == 0, r.stderr
+    assert _kept(out) == ["h"]
+    expect = json.loads((out.parent / "expect.json").read_text())
+    assert [(e["kind"], e["name"]) for e in expect] == [("hip", "h")]
+
+
+def test_list_arches_ignores_content_of_disabled_kind_and_excluded_folder(tmp_path):
+    src = tmp_path / "src"
+    _write_root(src, [_hip("h", arch=["gfx942"])], kdp_arch=("gfx942",))
+    _write_root(src, [_rocke("r", arch=["gfx950"])], kdp_file="rocKE/r.kdp.json")
+    _write_root(
+        src,
+        [_rocke("q", arch=["gfx1201"])],
+        kdp_arch=("gfx1201",),
+        kdp_file="q.kdp.json",
+    )
+    assert _list_arches(src, "--exclude-folder", "rocKE") == ["gfx1201", "gfx942"]
+    assert _list_arches(src, "--disable-kind", "rocke") == ["gfx942"]
+
+
+def _derive_filtered(src, out, ukds, *filters):
+    cmd = [
+        sys.executable,
+        str(PROBE_DERIVE),
+        "--from",
+        str(src),
+        "--generic-targets-json",
+        str(GENERIC_TARGETS_JSON),
+        "--arch",
+        "gfx950",
+    ]
+    cmd += ["--out", str(out), *filters]
+    for name in ukds:
+        cmd += ["--ukd", name]
+    return subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+
+def test_listed_ukd_of_disabled_kind_exits_3_not_an_error(tmp_path):
+    src = tmp_path / "src"
+    _write_root(src, [_rocke("r"), _hip("h")])
+    out = tmp_path / "w" / "root"
+    # Listed UKD removed by the filter: the probe does not apply, exit 3.
+    r = _derive_filtered(src, out, ["r"], "--disable-kind", "rocke")
+    assert r.returncode == 3, r.stderr
+    assert "disabled kind" in r.stderr
+    # The same name without the filter derives normally; one that does not exist
+    # is still an authoring error, filter or not.
+    assert _derive_filtered(src, out, ["r"]).returncode == 0
+    r = _derive_filtered(src, out, ["nope"], "--disable-kind", "rocke")
+    assert r.returncode == 2, r.stderr
+    # A listed UKD that survives the filter is packed as usual.
+    assert _derive_filtered(src, out, ["h"], "--disable-kind", "rocke").returncode == 0
+
+
+def test_listed_ukd_missing_for_the_arch_is_an_error_even_when_filtered(tmp_path):
+    src = tmp_path / "src"
+    _write_root(src, [_rocke("r", arch=["gfx942"]), _hip("h")], kdp_arch=("gfx950",))
+    r = _derive_filtered(src, tmp_path / "w" / "root", ["r"], "--disable-kind", "rocke")
+    assert r.returncode == 2, r.stderr
+
+
+def test_arch_only_a_disabled_kind_ships_for_is_not_listed_or_derived_as_empty(
+    tmp_path,
+):
+    src = tmp_path / "src"
+    _write_root(
+        src,
+        [_hip("h", arch=["gfx950"]), _rocke("r", arch=["gfx1201"])],
+        kdp_arch=("gfx950", "gfx1201"),
+    )
+    assert _list_arches(src) == ["gfx1201", "gfx950"]
+    assert _list_arches(src, "--disable-kind", "rocke") == ["gfx950"]
+    # Asked anyway, derive reports the filters as the reason rather than writing an
+    # empty probe for configure to reject.
+    r = _derive_filtered(src, tmp_path / "w" / "root", [], "--disable-kind", "rocke")
+    assert r.returncode == 0  # gfx950 keeps h
+    cmd = [
+        sys.executable,
+        str(PROBE_DERIVE),
+        "--from",
+        str(src),
+        "--generic-targets-json",
+        str(GENERIC_TARGETS_JSON),
+        "--arch",
+        "gfx1201",
+    ]
+    cmd += ["--out", str(tmp_path / "w2" / "root"), "--disable-kind", "rocke"]
+    r = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    assert r.returncode == 3, r.stderr
+
+
+def test_listed_mixed_ukds_with_one_filtered_out_skip_the_probe_whole(tmp_path):
+    src = tmp_path / "src"
+    _write_root(src, [_rocke("r"), _hip("h")])
+    r = _derive_filtered(
+        src, tmp_path / "w" / "root", ["h", "r"], "--disable-kind", "rocke"
+    )
+    assert r.returncode == 3, r.stderr
+
+
+def test_excluded_folder_alone_removes_its_ukds_from_the_expectation(tmp_path):
+    src = tmp_path / "src"
+    _write_root(src, [_hip("top")])
+    _write_root(src, [_hip("inside")], kdp_file="rocKE/in.kdp.json")
+    out = tmp_path / "w" / "root"
+    r = _derive_filtered(src, out, [], "--exclude-folder", "rocKE")
+    assert r.returncode == 0, r.stderr
+    expect = json.loads((out.parent / "expect.json").read_text())
+    assert [e["name"] for e in expect] == ["top"]
+    assert _derive_filtered(src, out, []).returncode == 0
+    expect = json.loads((out.parent / "expect.json").read_text())
+    assert sorted(e["name"] for e in expect) == ["inside", "top"]
 
 
 # --- the kinds registry -----------------------------------------------------

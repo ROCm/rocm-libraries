@@ -19,9 +19,10 @@ Neither set reaches a product build: `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` 
 the provider's shipped descriptor root, so nothing points at this tree unless a build
 overrides it, and no install rule copies it. Two things do use it.
 `hipdnn-superbuild-ci.yml` points the production source root here in the Linux lane, which
-runs the production packaging path end to end on these fixtures. `test_hkp_pack_layout.py` packs
-the tree directly, which is what makes its layout assertion strict: changing anything here
-changes what those tests pin.
+runs the production packaging path end to end on these fixtures.
+`tests/rocke/test_hkp_pack_layout_rocke.py` packs the whole tree and
+`tests/test_hkp_pack_layout.py` packs its `hip/` subtree, which is what makes their layout
+assertions strict: changing anything here changes what those tests pin.
 
 ## Layout
 

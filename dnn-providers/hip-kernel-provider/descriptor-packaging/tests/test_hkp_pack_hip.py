@@ -4,12 +4,12 @@ import shutil
 
 import pytest
 
-from conftest import GENERIC_TARGETS, run_pipeline
 from hkp_pack import agreement
 from hkp_pack.hip_compile import hip_variant_key as variant_key
 from hkp_pack.descriptors import load_flat_input, reachable_generic_ids
 from hkp_pack.errors import HkpPackError
 from hkp_pack.kernel_signature import kernel_signature
+from pack_helpers import GENERIC_TARGETS, run_pipeline
 
 ARCHES = ["gfx942", "gfx950", "gfx90a"]
 

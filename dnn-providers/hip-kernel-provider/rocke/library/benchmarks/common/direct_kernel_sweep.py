@@ -15,6 +15,10 @@ Which capabilities to build is a product decision. :data:`DIRECT_CAPABILITIES`
 follows the set the reference direct-conv library covers on CDNA and drops
 what rocke's kernels cannot compute (see the table's comments).
 
+The non-grouped (``groups == 1``) forward kernel bakes less: its channel counts
+are kernargs as well, so its capabilities record ``cpg = kpg = 0`` (runtime)
+and one binary serves every ``C``/``K`` its tile divides.
+
 The run side is split in two. :func:`direct_plans` is pure CPU: it picks the
 cached kernels that fit a problem, re-validates each spec against the real
 shape, and returns a launch plan -- binaries, signatures, grids and the
@@ -51,9 +55,38 @@ DIRECT_DTYPE = "fp16"  # the default dtype
 BLOCK_Q = (16, 32)
 BLOCK_GROUPS = (1, 2, 4, 8, 16)
 DOUBLE_BUFFER = (True, False)
-# Depthwise forward and dgrad.
-DW_BLOCK_W = (4, 8, 16, 32)
+# Depthwise (cpg == 1) forward and dgrad.
+# block_w=32 is omitted from both directions: across the depthwise corpus, at
+# both dtypes, it never won a single geometry -- every shape whose best config
+# used a wide block_w landed on 8 or 16 -- while still costing a quarter of the
+# candidate builds and tuning launches.
+#
+# The surviving values differ by direction, because the two directions do not
+# have the same fallback.  Forward is overwhelmingly a block_w=4 story: the
+# column-streamed variant (its own grid below) covers the wide-block cases, so
+# the preloading kernel rarely needs to go wide, and the few shapes that do go
+# wide land on 16 rather than 8.  Dropping 8 from the forward grid is therefore
+# free, while dropping 16 is not.  Dgrad has no second variant to fall back on,
+# so its tail keeps both 8 and 16 -- dropping either regresses small-spatial /
+# large-filter shapes, 8 the more severely of the two.  Neither tuple is
+# reducible further without giving up a shape's best config.
+DW_BLOCK_W_FWD = (4, 16)
+DW_BLOCK_W_DGRAD = (4, 8, 16)
 DW_BLOCK_WAVES = (1, 2, 4)
+# Column-streamed depthwise forward. It keeps only ``block_h*block_w + KH`` f32
+# live per lane instead of ``KH*KW + KH*block_w``, so its sweet spot sits at far
+# smaller block_w than the weight-preloading kernel's. block_h is the output-row
+# tile: the row loop is unrolled at build time, so the tile height is a
+# capability while the image height stays a kernarg. Pairs whose band does not
+# fit the arch's live-f32 budget are dropped by the spec validator.
+#
+# Measured on gfx950 over 15 depthwise shapes (3x3..11x11, stride 1 and 2,
+# 7x7..112x112 images, large enough batches to clear launch latency): block_w
+# 8/16/32 never won a shape, and this 3x3x3 grid matches the best of the full
+# 3x6x3 grid on every one. All three block_h values are needed -- dropping 32
+# costs up to 16% on a shape, dropping 8 up to 74%.
+DW_COL_BLOCK_W = (1, 2, 4)
+DW_COL_BLOCK_H = (8, 16, 32)
 # Grouped scalar-FMA dgrad.
 DGRAD_BLOCK_Q = (4, 8, 16, 32)
 # MFMA dgrad fprop pass: output rows per block, then
@@ -75,7 +108,11 @@ DGRAD_WAVES = (
 
 @dataclass(frozen=True)
 class DirectCaps:
-    """What one binary is baked for; everything else about a shape is runtime."""
+    """What one binary is baked for; everything else about a shape is runtime.
+
+    ``cpg = kpg = 0`` means the channel counts are runtime too (the non-grouped
+    kernel).
+    """
 
     KH: int
     PAD: int
@@ -96,6 +133,9 @@ def _grouped_channels() -> Tuple[int, ...]:
 
 _DEPTHWISE_FILTERS = (3, 5, 7, 9, 11)
 _STRIDES = (1, 2)
+# The non-grouped kernel exists for 3x3: its LDS halo reuse is what lets it beat
+# implicit GEMM there. A 1x1 has no halo to share and is a plain GEMM.
+_NONGROUPED_FILTERS = (3,)
 
 
 def _same_pad(kh: int) -> int:
@@ -105,6 +145,16 @@ def _same_pad(kh: int) -> int:
 def _all_pads(kh: int) -> range:
     # The reference library takes the padding as a runtime value in [0, KH-1].
     return range(kh)
+
+
+def _col_pads(kh: int) -> Tuple[int, ...]:
+    # The column-streamed kernel can compute any PAD in [0, KH-1] (bar stride-1
+    # over-padding, which its validator rejects), but every padding is its own
+    # binary. The cache carries the two networks actually use -- "valid"
+    # (PAD=0) and "same" -- rather than the whole range: the intermediate ones
+    # would be two thirds of the variant's entries for shapes that are rare in
+    # practice. Other paddings still build on demand (the JIT sweep).
+    return tuple(sorted({0, _same_pad(kh)}))
 
 
 # variant -> (direction, capability list). Forward rows only list "same"
@@ -122,12 +172,44 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             DirectCaps(KH=3, PAD=1, stride=1, cpg=c, kpg=c) for c in _grouped_channels()
         ),
     ),
+    # Non-grouped forward (groups == 1), C and K runtime. The kernel bounds
+    # rows and columns against the runtime output extents, so it is not tied
+    # to "same" padding the way the row-streaming kernels are; the cache bakes
+    # the "same" padding the forward rows here share.
+    "direct_nongrouped": (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=s, cpg=0, kpg=0)
+            for k, s in itertools.product(_NONGROUPED_FILTERS, _STRIDES)
+        ),
+    ),
     # Depthwise forward: square odd filters 3..11, stride 1 and 2.
     "direct_depthwise": (
         "fwd",
         tuple(
             DirectCaps(KH=k, PAD=_same_pad(k), stride=s, cpg=1, kpg=1)
             for k, s in itertools.product(_DEPTHWISE_FILTERS, _STRIDES)
+        ),
+    ),
+    # Depthwise forward for groups < wave_size: lanes split over channels and
+    # output columns. Same capabilities; the spec validator offers it only to
+    # problems with fewer groups than a wave.
+    "direct_depthwise_spatial": (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=s, cpg=1, kpg=1)
+            for k, s in itertools.product(_DEPTHWISE_FILTERS, _STRIDES)
+        ),
+    ),
+    # Column-streamed depthwise forward: same filters and strides. It bounds
+    # its output rows against p_Ho rather than streaming them by input row, so
+    # unlike the other forward kernels it also serves "valid" padding.
+    "direct_depthwise_col": (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=s, cpg=1, kpg=1)
+            for k, s in itertools.product(_DEPTHWISE_FILTERS, _STRIDES)
+            for pad in _col_pads(k)
         ),
     ),
     # Depthwise dgrad (row-streaming kernel): same filters and strides.
@@ -166,13 +248,29 @@ _TRANSPOSE = "direct_dgrad_transpose"
 _REORGANIZE = "direct_dgrad_reorganize"
 
 
-def _knob_grid(variant: str) -> Iterator[dict]:
-    if variant == "direct_grouped":
+def _knob_grid(variant: str, arch: str, dtype: str) -> Iterator[dict]:
+    if variant == "direct_nongrouped":
+        from kernels.common.conv_direct_nongrouped import nongrouped_knobs
+
+        # Every width (no Wo to pick from): plan_for keeps those that fit.
+        yield from nongrouped_knobs(arch, dtype)
+    elif variant == "direct_grouped":
         for bq, bg, db in itertools.product(BLOCK_Q, BLOCK_GROUPS, DOUBLE_BUFFER):
             yield dict(block_q=bq, block_groups=bg, double_buffer=db)
-    elif variant in ("direct_depthwise", "direct_depthwise_dgrad"):
-        for bw, waves in itertools.product(DW_BLOCK_W, DW_BLOCK_WAVES):
+    elif variant == "direct_depthwise":
+        for bw, waves in itertools.product(DW_BLOCK_W_FWD, DW_BLOCK_WAVES):
             yield dict(block_w=bw, block_waves=waves)
+    elif variant == "direct_depthwise_spatial":
+        for waves in DW_BLOCK_WAVES:
+            yield dict(block_waves=waves)
+    elif variant == "direct_depthwise_dgrad":
+        for bw, waves in itertools.product(DW_BLOCK_W_DGRAD, DW_BLOCK_WAVES):
+            yield dict(block_w=bw, block_waves=waves)
+    elif variant == "direct_depthwise_col":
+        for bh, bw, waves in itertools.product(
+            DW_COL_BLOCK_H, DW_COL_BLOCK_W, DW_BLOCK_WAVES
+        ):
+            yield dict(block_h=bh, block_w=bw, block_waves=waves)
     elif variant == "direct_grouped_dgrad":
         for bq, bg in itertools.product(DGRAD_BLOCK_Q, BLOCK_GROUPS):
             yield dict(block_q=bq, block_groups=bg)
@@ -208,12 +306,30 @@ def make_spec(variant: str, problem, knobs: dict):
     derived from the original problem separately.
     """
     from kernels.common import conv_direct_grouped as dc
+    from kernels.common import conv_direct_nongrouped as dn
 
     if variant == "direct_grouped":
         return dc.DirectConvSpec(problem=problem, name="rocke_direct_conv", **knobs)
+    if variant == "direct_nongrouped":
+        return dn.DirectNongroupedConvSpec(
+            problem=problem, name="rocke_direct_conv_nongrouped", **knobs
+        )
     if variant == "direct_depthwise":
         return dc.DirectDepthwiseSpec(
             problem=problem, name="rocke_direct_depthwise", **knobs
+        )
+    if variant == "direct_depthwise_spatial":
+        return dc.DirectDepthwiseSpatialSpec(
+            problem=problem, name="rocke_direct_depthwise_spatial", **knobs
+        )
+    if variant == "direct_depthwise_col":
+        # The col spec carries its own element type; a binary serves only the
+        # dtype it was built for, so it follows the problem's.
+        return dc.DirectDepthwiseColSpec(
+            problem=problem,
+            name="rocke_direct_depthwise_col",
+            dtype=problem.dtype,
+            **knobs,
         )
     if variant == "direct_depthwise_dgrad":
         return dc.DirectDepthwiseDgradStreamSpec(
@@ -263,16 +379,35 @@ def _uses_coalesced_weights(knobs: dict) -> bool:
     return knobs["waves_k"] > 1 or knobs["runtime_k_loop"]
 
 
+def _nongrouped_spills(spec, arch: str) -> bool:
+    """Would this non-grouped kernel spill registers? Such a binary pays scratch
+    traffic every channel chunk and is the slowest to compile, so it is not
+    cached.
+    Its register footprint is fixed by the baked capabilities and the tile, not
+    by the probe shape, so one answer holds for every problem it would serve."""
+    from kernels.common.conv_direct_nongrouped import nongrouped_register_reason
+
+    return nongrouped_register_reason(spec, arch) is not None
+
+
 def validate_spec(variant: str, spec, arch: str) -> Tuple[bool, str]:
     """``(ok, reason)`` for ``spec`` on ``arch``, from the kernel's own validator."""
     from kernels.common import conv_direct_grouped as dc
+    from kernels.common import conv_direct_nongrouped as dn
 
     try:
+        if variant == "direct_nongrouped":
+            return dn.is_valid_nongrouped_spec(spec, arch=arch)
         if variant in ("direct_grouped", "direct_grouped_dgrad_mfma"):
             spec.validate()
             return dc.is_valid_spec(spec, arch=arch)
         if variant == "direct_depthwise":
             return dc.is_valid_depthwise_spec(spec, arch=arch)
+        if variant == "direct_depthwise_spatial":
+            return dc.is_valid_depthwise_spatial_spec(spec, arch=arch)
+        if variant == "direct_depthwise_col":
+            spec.validate()
+            return dc.is_valid_depthwise_col_spec(spec, arch=arch)
         if variant == "direct_depthwise_dgrad":
             return dc.is_valid_depthwise_dgrad_stream_spec(spec, arch=arch)
         if variant == "direct_grouped_dgrad":
@@ -286,11 +421,15 @@ def validate_spec(variant: str, spec, arch: str) -> Tuple[bool, str]:
 
 def _build_kernel(variant: str, spec, arch: str):
     from kernels.common import conv_direct_grouped as dc
+    from kernels.common import conv_direct_nongrouped as dn
 
     builders = {
         "direct_grouped": dc.build_direct_conv,
+        "direct_nongrouped": dn.build_direct_conv_nongrouped,
         "direct_grouped_dgrad_mfma": dc.build_direct_conv,
         "direct_depthwise": dc.build_direct_depthwise,
+        "direct_depthwise_spatial": dc.build_direct_depthwise_spatial,
+        "direct_depthwise_col": dc.build_direct_depthwise_col,
         "direct_depthwise_dgrad": dc.build_direct_depthwise_dgrad_streaming,
         "direct_grouped_dgrad": dc.build_direct_conv_dgrad,
         _TRANSPOSE: dc.build_direct_transpose_weights_dgrad,
@@ -381,18 +520,40 @@ def _caps_of(identity: KernelIdentity) -> DirectCaps:
     )
 
 
-def probe_problem(caps: DirectCaps, dtype: str = DIRECT_DTYPE):
+def probe_problem(
+    caps: DirectCaps, dtype: str = DIRECT_DTYPE, variant: Optional[str] = None
+):
     """A problem with exactly ``caps`` that every knob in the grid fits.
 
     The emitted IR does not depend on N, H, W or groups (the shape-invariance
     cases in test_conv_abi.py assert it), so the probe only has to satisfy the
     spec validators: 64 groups divide every block_groups, 256 depthwise
-    channels fill the widest depthwise block, and 64x64 leaves every stride-2
-    output wider than the widest W tile.
+    channels fill the widest depthwise block (the spatial depthwise kernel
+    takes fewer groups than a wave, so it gets 8), and 64x64 leaves every
+    stride-2 output wider than the widest W tile. Runtime channel counts
+    (``cpg == 0``, the non-grouped kernel) take one group of 256: a multiple of
+    every channel chunk and of every channel tile.
     """
     from kernels.common.conv_direct_grouped import DirectConvProblem
 
-    groups = 256 if caps.cpg == 1 else 64
+    if caps.cpg == 0:
+        return DirectConvProblem(
+            N=1,
+            H=64,
+            W=64,
+            groups=1,
+            cpg=256,
+            kpg=256,
+            KH=caps.KH,
+            KW=caps.KW,
+            PAD=caps.PAD,
+            stride=caps.stride,
+            dtype=dtype,
+        )
+    if variant == "direct_depthwise_spatial":
+        groups = 8
+    else:
+        groups = 256 if caps.cpg == 1 else 64
     return DirectConvProblem(
         N=1,
         H=64,
@@ -435,13 +596,15 @@ def _caps_jobs(
     """
     out: List[Tuple[str, BuildJob]] = []
     n_raw = 0
-    probe = probe_problem(caps, dtype)
-    for knobs in _knob_grid(variant):
+    probe = probe_problem(caps, dtype, variant)
+    for knobs in _knob_grid(variant, arch, dtype):
         n_raw += 1
         if variant == "direct_grouped_dgrad_mfma" and _mfma_knobs_reason(probe, knobs):
             continue
         spec = make_spec(variant, probe, knobs)
         if not validate_spec(variant, spec, arch)[0]:
+            continue
+        if variant == "direct_nongrouped" and _nongrouped_spills(spec, arch):
             continue
         cell = [
             _job(
@@ -479,11 +642,13 @@ def _caps_worker(payload):
     return _caps_jobs(*payload)
 
 
-def count_direct_jobs(directions: Sequence[str]) -> int:
+def count_direct_jobs(
+    directions: Sequence[str], arch: str, dtype: str = DIRECT_DTYPE
+) -> int:
     """Raw candidate count :func:`enumerate_direct_jobs` walks (the progress
     denominator): capabilities times tuning knobs, before validation."""
     return sum(
-        len(caps_list) * sum(1 for _ in _knob_grid(variant))
+        len(caps_list) * sum(1 for _ in _knob_grid(variant, arch, dtype))
         for variant, (direction, caps_list) in DIRECT_CAPABILITIES.items()
         if direction in directions
     )
@@ -526,7 +691,7 @@ def enumerate_direct_jobs(
 
     total = 0
     if log is not None:
-        total = count_direct_jobs(directions)
+        total = count_direct_jobs(directions, arch, dtype)
         log(f"  {total} candidates to check with {jobs} process(es)")
 
     n_raw = n_valid = 0
@@ -598,7 +763,7 @@ def build_direct_job(job: BuildJob, arch: str, dtype: str):
         raise ValueError(f"direct conv builds {DIRECT_DTYPES}, not {dtype!r}")
     caps = DirectCaps(**job.caps)
     variant = job.identity.algorithm
-    spec = make_spec(variant, probe_problem(caps, dtype), job.spec_kwargs)
+    spec = make_spec(variant, probe_problem(caps, dtype, variant), job.spec_kwargs)
     ok, why = validate_spec(variant, spec, arch)
     if not ok:
         raise ValueError(why)
@@ -698,8 +863,12 @@ def _conv_step(identity, hsaco_path, meta, spec, problem, direction, buffers):
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_direct_grouped import direct_launch_geometry
+    from kernels.common.conv_direct_nongrouped import DirectNongroupedConvSpec
 
-    grid, block = direct_launch_geometry(spec)
+    if isinstance(spec, DirectNongroupedConvSpec):
+        grid, block = spec.grid(), (spec.threads_per_block, 1, 1)
+    else:
+        grid, block = direct_launch_geometry(spec)
     return DirectStep(
         kernel_name=meta["kernel_name"],
         hsaco_path=hsaco_path,
@@ -742,6 +911,18 @@ def plan_for(
     ok, why = validate_spec(variant, spec, arch)
     if not ok:
         return None, why
+    if variant == "direct_nongrouped":
+        # The cache holds every width; offer only those a sweep for this
+        # shape would try, so no binary spends MFMA work past the image edge
+        # when one that does not is cached.
+        from kernels.common.conv_direct_nongrouped import tile_w_candidates
+
+        widths = tile_w_candidates(problem.Wo, spec.atom_tile)
+        if spec.tile_w not in widths:
+            return None, (
+                f"tile_w={spec.tile_w} does not fit Wo={problem.Wo} "
+                f"(widths tried for it: {widths})"
+            )
 
     if identity.direction == "direct_fwd":
         step = _conv_step(
@@ -818,6 +999,10 @@ def direct_plans(
     ):
         # A binary only serves the operand dtype it was built for.
         if identity.dtype_a != getattr(problem, "dtype", DIRECT_DTYPE):
+            continue
+        # The non-grouped family only exists for one group; offering it to a
+        # grouped problem would bury the grouped kernels' reasons in noise.
+        if identity.algorithm == "direct_nongrouped" and problem.groups != 1:
             continue
         plan, why = plan_for(cache, identity, hsaco_path, meta, problem, arch)
         if plan is None:

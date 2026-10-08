@@ -53,6 +53,7 @@ function(_hkp_probe_derive_root name from_dir arch out_dir expect_var)
                           "${HKP_PKG_DIR}/tools/hkp_probe_derive_root.py"
                           "${HKP_PKG_DIR}/tools/hkp_probe_kinds.py"
                           "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}")
+    get_property(_filter_args GLOBAL PROPERTY HKP_PROBE_FILTER_ARGS)
     set(_ukd_args "")
     foreach(_ukd IN LISTS ARGN)
         list(APPEND _ukd_args --ukd "${_ukd}")
@@ -64,10 +65,19 @@ function(_hkp_probe_derive_root name from_dir arch out_dir expect_var)
                 --generic-targets-json "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}"
                 --arch "${arch}"
                 --out "${out_dir}"
+                ${_filter_args}
                 ${_ukd_args}
         RESULT_VARIABLE _derive_rc
         OUTPUT_VARIABLE _derive_out
         ERROR_VARIABLE _derive_err)
+    # Exit 3: every listed UKD ships for <arch> but this build's filters (rocKE OFF)
+    # remove it. The probe does not apply to this build; <expect_var> is set empty.
+    set(${expect_var} "" PARENT_SCOPE)
+    if(_derive_rc EQUAL 3)
+        string(STRIP "${_derive_err}" _derive_err)
+        message(STATUS "hkp: probe ${name} skipped: ${_derive_err}")
+        return()
+    endif()
     if(NOT _derive_rc EQUAL 0)
         message(FATAL_ERROR
             "hkp probe '${name}': deriving the probe root failed (exit "
@@ -149,7 +159,10 @@ endfunction()
 #   (combinations of values are not guaranteed). So the probe packs the real
 #   descriptors but compiles each compile path, and each value, once. With UKDS, the probe packs exactly the listed UKDs (by
 #   UKD name): KDPs keeping none of them are left out of the derived root, and
-#   configure fails when a listed name is kept by no KDP shipping for ARCH. The
+#   configure fails when a listed name is kept by no KDP shipping for ARCH, except that
+#   a probe for which this build's filters (rocKE OFF) remove any listed UKD, or every UKD
+#   shipping for ARCH when none are listed, is skipped whole with a STATUS line,
+#   declaring nothing. The
 #   assertion expects exactly the kept UKDs, each with the provenance of its producer
 #   kind (see hkp_probe_assert.py). Adding a pack under an already probed ARCH needs no
 #   new declaration unless the probe lists UKDS.
@@ -216,7 +229,7 @@ function(hkp_add_packaging_probe)
     get_property(_kpack_dir GLOBAL PROPERTY HKP_PROBE_ROCM_KPACK_DIR)
     get_property(_hipcc GLOBAL PROPERTY HKP_PROBE_HIPCC)
     get_property(_comgr_lib GLOBAL PROPERTY HKP_PROBE_COMGR_LIB)
-    get_property(_rocke_args GLOBAL PROPERTY HKP_PROBE_ROCKE_ARGS)
+    get_property(_root_args GLOBAL PROPERTY HKP_PROBE_ROOT_ARGS)
 
     set(_probe_dir "${CMAKE_BINARY_DIR}/hkp-probes/${ARG_NAME}")
     set(_out_root "${_probe_dir}/out")
@@ -226,6 +239,9 @@ function(hkp_add_packaging_probe)
     set(_root "${_probe_dir}/root")
     _hkp_probe_derive_root("${ARG_NAME}" "${ARG_ROOT}" "${ARG_ARCH}" "${_root}"
                            _expect_file ${ARG_UKDS})
+    if(NOT _expect_file)
+        return()
+    endif()
 
     # Empty PACK_JOBS passes nothing to the packer, which then uses its own default.
     hkp_wire_pack_target(
@@ -235,7 +251,7 @@ function(hkp_add_packaging_probe)
         HIPCC "${_hipcc}"
         ROCM_KPACK_DIR "${_kpack_dir}"
         OUT_ROOT "${_out_root}"
-        ${_rocke_args}
+        ${_root_args}
         PACK_JOBS "${ARG_PACK_JOBS}")
 
     set(_assert_args
@@ -274,6 +290,7 @@ endfunction()
 #   changes.
 # ---------------------------------------------------------------------------
 function(_hkp_probe_automatic_arches out_var)
+    get_property(_filter_args GLOBAL PROPERTY HKP_PROBE_FILTER_ARGS)
     set(_root "${HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT}")
     file(GLOB_RECURSE _root_inputs CONFIGURE_DEPENDS "${_root}/*")
     set_property(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" APPEND
@@ -292,6 +309,7 @@ function(_hkp_probe_automatic_arches out_var)
                 --list-arches --from "${_root}"
                 --generic-targets-json "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}"
                 ${_exclude_args}
+                ${_filter_args}
         RESULT_VARIABLE _rc
         OUTPUT_VARIABLE _out
         ERROR_VARIABLE _err)
@@ -346,9 +364,31 @@ function(_hkp_probe_automatic_arches out_var)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_load_packaging_probes(<rocm_kpack_dir> <hipcc> <rocke_comgr_lib> [<rocke args>...])
-#   Store the toolchain hkp_add_packaging resolved, load the named probes from
-#   probes/probes.cmake, then declare one automatic probe per architecture the production
+# _hkp_probe_filter_args(<out_var> <enable_rocke> [<exclude_folder>...])
+#   The derive tool's --exclude-folder / --disable-kind flags for the filters the
+#   production roots are wired with, the disabled kinds from _hkp_disabled_kind_names().
+# ---------------------------------------------------------------------------
+function(_hkp_probe_filter_args out_var enable_rocke)
+    _hkp_disabled_kind_names(_kinds "${enable_rocke}")
+    set(_args "")
+    foreach(_folder IN LISTS ARGN)
+        list(APPEND _args --exclude-folder "${_folder}")
+    endforeach()
+    foreach(_kind IN LISTS _kinds)
+        list(APPEND _args --disable-kind "${_kind}")
+    endforeach()
+    set(${out_var} "${_args}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_load_packaging_probes(<rocm_kpack_dir> <hipcc> <rocke_comgr_lib> [<root args>...])
+#   Store the toolchain hkp_add_packaging resolved (<root args> are the keywords every
+#   production root is wired with: ENABLE_ROCKE, the ROCKE_* toolchain when ON, and
+#   EXCLUDE_FOLDERS). A build lacking a producer (rocKE OFF) still probes: derive and the
+#   pack read the root under the same excluded folders and disabled kinds the production
+#   pack gets, so rocKE content is neither packed nor expected and every other kind is
+#   probed as usual; an arch left with no content names no probe. Load the named
+#   probes from probes/probes.cmake, then declare one automatic probe per architecture the production
 #   root names that the build does not target: the explicit `arch` entries of its KDPs
 #   and UKDs (hkp_probe_derive_root.py --list-arches; wildcard descriptors name none,
 #   generic targets map to a member, see _hkp_probe_automatic_arches) minus
@@ -363,7 +403,13 @@ function(hkp_load_packaging_probes rocm_kpack_dir hipcc rocke_comgr_lib)
     set_property(GLOBAL PROPERTY HKP_PROBE_ROCM_KPACK_DIR "${rocm_kpack_dir}")
     set_property(GLOBAL PROPERTY HKP_PROBE_HIPCC "${hipcc}")
     set_property(GLOBAL PROPERTY HKP_PROBE_COMGR_LIB "${rocke_comgr_lib}")
-    set_property(GLOBAL PROPERTY HKP_PROBE_ROCKE_ARGS "${ARGN}")
+    set_property(GLOBAL PROPERTY HKP_PROBE_ROOT_ARGS "${ARGN}")
+    # The filters the production roots were wired with, read from those very arguments:
+    # derive and the arch listing see the root as the pack step does, so what a probe
+    # expects is what its pack ships.
+    cmake_parse_arguments(_F "" "ENABLE_ROCKE" "EXCLUDE_FOLDERS" ${ARGN})
+    _hkp_probe_filter_args(_filter_args "${_F_ENABLE_ROCKE}" ${_F_EXCLUDE_FOLDERS})
+    set_property(GLOBAL PROPERTY HKP_PROBE_FILTER_ARGS "${_filter_args}")
     set_property(GLOBAL PROPERTY HKP_PROBE_NAMES "")
     set_property(GLOBAL PROPERTY HKP_PROBE_TOOLCHAIN_SET TRUE)
 
@@ -399,8 +445,16 @@ function(hkp_load_packaging_probes rocm_kpack_dir hipcc rocke_comgr_lib)
     if(rocke_comgr_lib)
         list(APPEND _pyenv "ROCKE_COMGR_LIB=${rocke_comgr_lib}")
     endif()
+    # Tests that pack rocKE content live under probes/tests/rocke/ and nowhere else; a
+    # build with rocKE OFF has no rocKE toolchain to run them, so it never collects them
+    # (as hkp_register_tests does for tests/rocke).
+    set(_rocke_ignore "")
+    if(NOT _F_ENABLE_ROCKE)
+        set(_rocke_ignore "--ignore=${HKP_PKG_DIR}/probes/tests/rocke")
+    endif()
     add_test(NAME hkp-probe-tools
-             COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/probes/tests" -v)
+             COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/probes/tests" -v
+                     ${_rocke_ignore})
     set_tests_properties(hkp-probe-tools PROPERTIES ENVIRONMENT "${_pyenv}")
 
     set(_test_names hkp-probe-tools)

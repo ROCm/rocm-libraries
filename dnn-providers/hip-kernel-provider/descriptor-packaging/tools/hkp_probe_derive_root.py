@@ -14,6 +14,11 @@ ship for a pass `p` is the packer's `kdp_survives(kdp, flat, p)`, and which of t
 ship is the packer's `arch_matches`: an empty or absent `arch` list is a wildcard. A KDP
 that ships for the generic pass is trimmed like one that ships for `m`.
 
+`--exclude-folder` and `--disable-kind` are the packer's `exclude_folders` and
+`disabled_kinds`: the filters of a build that lacks a producer (rocKE OFF). Derive reads
+the root under them, so a UKD of a disabled kind is neither kept nor expected, and a KDP
+left with no UKD names no arch. The probe's pack step gets the same filters.
+
 Default mode (no `--ukd`): UKDs are partitioned into compile groups, where the group
 key is the kind plus the kernel_source fields hkp_probe_kinds.KINDS names for it:
 
@@ -71,7 +76,11 @@ stands for, space separated:
 Standalone UKDs (a `kernelDescriptors` entry that is a bare id) are out of probe
 scope by policy: a KDP that would be trimmed and references one is refused.
 
-Exit code 0 on success. Exit code 2, with a `hkp_probe_derive: ...` message on
+Exit code 0 on success. Exit code 3 (EXIT_FILTERED), with a message on stderr, when
+`--exclude-folder` or `--disable-kind` leaves nothing to probe that would otherwise ship
+for `--arch`: in default mode, every UKD shipping for it is removed; with `--ukd`, any
+listed UKD is removed (the probe is skipped whole, not trimmed, so it never claims
+coverage it does not give). The probe does not apply to this build. Exit code 2, with a `hkp_probe_derive: ...` message on
 stderr, when the root cannot be derived: the packer's loader rejects the root
 (malformed or unreadable descriptor, dangling reference, UKD arch outside its KDP's),
 a KDP that keeps UKDs (or, in default mode, any KDP shipping for `--arch`) references
@@ -108,20 +117,38 @@ from hkp_pack.pipeline import generic_passes  # noqa: E402
 from hkp_probe_kinds import KINDS  # noqa: E402
 
 _PREFIX = "hkp_probe_derive:"
+EXIT_ERROR = 2
+# Every listed UKD is removed by the build's filters: not an error, the probe is skipped.
+EXIT_FILTERED = 3
 
 
 class DeriveError(Exception):
     pass
 
 
+class FilteredOut(DeriveError):
+    """Every listed UKD exists and would ship for the arch, but the build's filters
+    (an excluded folder, a disabled kind) remove it: the probe does not apply to this
+    build, which is not an authoring error."""
+
+
 def _discard(*_args, **_kwargs):
     pass
 
 
-def _load(src, table):
-    """The packer's view of `src`; DeriveError when the packer rejects it."""
+def _load(src, table, filters):
+    """The packer's view of `src` under `table` and `filters` (a (exclude_folders,
+    disabled_kinds) pair, as the pack step gets them); DeriveError when the packer
+    rejects it."""
+    exclude_folders, disabled_kinds = filters
     try:
-        return load_flat_input(src, table, log=_discard)
+        return load_flat_input(
+            src,
+            table,
+            log=_discard,
+            exclude_folders=exclude_folders,
+            disabled_kinds=disabled_kinds,
+        )
     except HkpPackError as exc:
         raise DeriveError(str(exc)) from exc
 
@@ -248,7 +275,7 @@ def _derive_kdp_listed(kdp, rel, arch, wanted):
     return kept
 
 
-def _plan(src, arch, table, ukds=None):
+def _plan(src, arch, table, ukds=None, filters=((), ())):
     """Return (files, expect): files maps relative posix path -> source Path or bytes.
 
     `ukds` is the list of UKD names to keep, or None for the default selection.
@@ -259,7 +286,7 @@ def _plan(src, arch, table, ukds=None):
             raise DeriveError(f"--ukd lists {dupes} more than once")
         wanted = set(ukds)
 
-    flat = _load(src, table)
+    flat = _load(src, table, filters)
     passes = [arch] + generic_passes(flat, [arch])
     files = {}
     for p in sorted(src.rglob("*")):
@@ -297,6 +324,25 @@ def _plan(src, arch, table, ukds=None):
                 entry["kernel_source"] = u["kernel_source"]
             expect.append(entry)
 
+    if filters != ((), ()):
+        # What the filters removed, if that is why there is nothing (listed mode: a
+        # listed UKD) to probe, is not an authoring error.
+        missing = sorted(wanted - {e["name"] for e in expect}) if ukds else ()
+        if missing or (ukds is None and not expect):
+            try:
+                _, unfiltered = _plan(src, arch, table, ukds)
+            except DeriveError:
+                unfiltered = []
+            unfiltered_names = {e["name"] for e in unfiltered}
+            if (missing and not set(missing) - unfiltered_names) or (
+                not missing and unfiltered
+            ):
+                raise FilteredOut(
+                    f"{'--ukd ' + str(missing) if missing else 'every UKD'} shipping "
+                    f"for {arch} is of a disabled kind or in an excluded folder in "
+                    "this build"
+                )
+
     if ukds is not None:
         missing = sorted(wanted - {e["name"] for e in expect})
         if missing:
@@ -321,9 +367,18 @@ def _named_arches(flat):
     return arches
 
 
-def list_arches(src: Path, table, excluded) -> list[str]:
-    """The probe arch lines for `src`; see the module docstring for the format."""
-    named = _named_arches(_load(src, table))
+def list_arches(src: Path, table, excluded, filters=((), ())) -> list[str]:
+    """The probe arch lines for `src`; see the module docstring for the format.
+
+    Only names some KDP actually ships for under `filters` are considered (the packer's
+    `kdp_survives`): an arch only a disabled-kind UKD or an excluded folder carries is
+    not listed, so a probe of a listed arch always has content to pack.
+    """
+    flat = _load(src, table, filters)
+    kdps = [kdp.doc for kdp in flat.kdps()]
+    named = [
+        a for a in _named_arches(flat) if any(kdp_survives(k, flat, a) for k in kdps)
+    ]
     probes = {}
     for name in named:
         if not table.has(name):
@@ -374,18 +429,25 @@ def _sync(out, files):
 
 
 def derive_root(
-    src: Path, arch: str, out: Path, table, ukds: list[str] | None = None
-) -> str | None:
-    """Write the derived root to `out`; return an error message, or None on success.
+    src: Path,
+    arch: str,
+    out: Path,
+    table,
+    ukds: list[str] | None = None,
+    filters=((), ()),
+) -> tuple[int, str] | None:
+    """Write the derived root to `out`; return (exit code, message), or None on success.
 
     `ukds` lists the UKD names to keep (`--ukd`); None selects per compile group.
     """
     if not src.is_dir():
-        return f"{_PREFIX} {src} is not a directory"
+        return EXIT_ERROR, f"{_PREFIX} {src} is not a directory"
     try:
-        files, expect = _plan(src, arch, table, ukds)
+        files, expect = _plan(src, arch, table, ukds, filters)
+    except FilteredOut as exc:
+        return EXIT_FILTERED, f"{_PREFIX} {exc}"
     except DeriveError as exc:
-        return f"{_PREFIX} {exc}"
+        return EXIT_ERROR, f"{_PREFIX} {exc}"
 
     _sync(out, files)
     expect_text = json.dumps(expect, indent=2) + "\n"
@@ -421,6 +483,22 @@ def main(argv: list[str] | None = None) -> int:
         help="with --list-arches: a build target (repeatable); a generic with a "
         "member among them gets no probe arch",
     )
+    parser.add_argument(
+        "--exclude-folder",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="top-level folder of the root this build does not pack (repeatable); "
+        "the packer's own exclude_folders",
+    )
+    parser.add_argument(
+        "--disable-kind",
+        action="append",
+        default=[],
+        metavar="KIND",
+        help="kernel_source kind this build has no producer for (repeatable); "
+        "the packer's own disabled_kinds",
+    )
     parser.add_argument("--arch", help="architecture to probe, e.g. gfx950")
     parser.add_argument("--out", type=Path)
     parser.add_argument(
@@ -432,6 +510,7 @@ def main(argv: list[str] | None = None) -> int:
         "one UKD or a value sweep (see the module docstring)",
     )
     args = parser.parse_args(argv)
+    filters = (tuple(args.exclude_folder), tuple(args.disable_kind))
 
     if args.excluded and not args.list_arches:
         parser.error("--exclude requires --list-arches")
@@ -444,13 +523,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.list_arches:
         if args.arch or args.out or args.ukds:
             parser.error(
-                "--list-arches takes only --from, --generic-targets-json and --exclude"
+                "--list-arches takes only --from, --generic-targets-json, --exclude, "
+                "--exclude-folder and --disable-kind"
             )
         if not args.src.is_dir():
             print(f"{_PREFIX} {args.src} is not a directory", file=sys.stderr)
             return 2
         try:
-            arches = list_arches(args.src, table, set(args.excluded))
+            arches = list_arches(args.src, table, set(args.excluded), filters)
         except DeriveError as exc:
             print(f"{_PREFIX} {exc}", file=sys.stderr)
             return 2
@@ -460,10 +540,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.arch or args.out is None:
         parser.error("--arch and --out are required unless --list-arches is given")
-    error = derive_root(args.src, args.arch, args.out, table, args.ukds)
+    error = derive_root(args.src, args.arch, args.out, table, args.ukds, filters)
     if error is not None:
-        print(error, file=sys.stderr)
-        return 2
+        code, message = error
+        print(message, file=sys.stderr)
+        return code
     return 0
 
 
