@@ -323,7 +323,8 @@ int main(int argc, char* argv[])
     settings.batch_window_size       = 3;
     settings.noise_tolerance_percent = 3;
 
-    primbench::executor executor(argc, argv, settings, primbench::flags::sync);
+    settings.sync = true;
+    primbench::executor executor(argc, argv, settings);
 
     add_sort_keys_benchmarks(executor);
     add_sort_pairs_benchmarks(executor);
