@@ -79,8 +79,8 @@ bool isOutsideBand(int64_t sq, int64_t skv, int64_t seqQ, int64_t seqKv, const S
 template <class DataType>
 struct ForwardOutputs
 {
-    explicit ForwardOutputs(const SdpaBwdTestCase& testCase, uint32_t seed = 0)
-        : tc(testCase)
+    explicit ForwardOutputs(SdpaBwdTestCase testCase, uint32_t seed = 0)
+        : tc(std::move(testCase))
         , oDims{tc.qDims[0], tc.qDims[1], tc.qDims[2], tc.vDims[3]}
         , statsDims{tc.qDims[0], tc.qDims[1], tc.qDims[2], 1}
         , q(static_cast<size_t>(elementCount(tc.qDims)))
