@@ -4,6 +4,7 @@
 #include "hipblaslt-jit-problem-type.hpp"
 #include <Tensile/ContractionProblem.hpp>
 #include <stdexcept>
+#include <string>
 
 namespace hipblaslt_jit
 {
@@ -13,6 +14,17 @@ namespace hipblaslt_jit
         {
             if(!condition)
                 throw std::runtime_error(message);
+        }
+
+        ProblemType::Scale scaleOf(const std::string& value)
+        {
+            if(value.empty())
+                return ProblemType::Scale::None;
+            if(value == "Scalar")
+                return ProblemType::Scale::Scalar;
+            if(value == "Vector")
+                return ProblemType::Scale::Vector;
+            throw std::runtime_error("UseScaleAB '" + value + "' is not none, scalar or vector");
         }
     }
 
@@ -58,69 +70,57 @@ namespace hipblaslt_jit
         return gemm;
     }
 
-    json::Members problemTypeFields(const TensileLite::ContractionProblemGemm& problem)
+    ProblemType problemTypeFields(const TensileLite::ContractionProblemGemm& problem)
     {
-        using json::literal;
-        using Type      = rocisa::DataType;
-        const auto    gemm = canonicalGemm(problem);
-        json::Members fields{
-            {"OperationType", json::quote("GEMM")},
-            {"Batched", literal(true)},
-            {"StridedBatched", literal(true)},
-            {"TransposeA", literal(gemm.transA)},
-            {"TransposeB", literal(gemm.transB)},
-            {"ComplexConjugateA", literal(gemm.conjugateA)},
-            {"ComplexConjugateB", literal(gemm.conjugateB)},
-        };
-        const auto add = [&](const char* name, std::string value) {
-            fields.emplace_back(name, std::move(value));
-        };
-        const auto dataType
-            = [&](const char* name, Type value) { add(name, literal(static_cast<int>(value))); };
-        dataType("DataType", problem.computeInputTypeA());
-        dataType("DataTypeA", problem.a().dataType());
-        dataType("DataTypeB", problem.b().dataType());
-        dataType("MacDataTypeA", problem.computeInputTypeA());
-        dataType("MacDataTypeB", problem.computeInputTypeB());
-        dataType("DestDataType", problem.d().dataType());
-        dataType("ComputeDataType", problem.computeType());
-        dataType("F32XdlMathOp", problem.f32XdlMathOp());
+        const auto gemm = canonicalGemm(problem);
+        ProblemType fields;
+        fields.batched             = true;
+        fields.stridedBatched      = true;
+        fields.transposeA          = gemm.transA;
+        fields.transposeB          = gemm.transB;
+        fields.complexConjugateA   = gemm.conjugateA;
+        fields.complexConjugateB   = gemm.conjugateB;
+        fields.dataType            = problem.computeInputTypeA();
+        fields.dataTypeA           = problem.a().dataType();
+        fields.dataTypeB           = problem.b().dataType();
+        fields.macDataTypeA        = problem.computeInputTypeA();
+        fields.macDataTypeB        = problem.computeInputTypeB();
+        fields.destDataType        = problem.d().dataType();
+        fields.computeDataType     = problem.computeType();
+        fields.f32XdlMathOp        = problem.f32XdlMathOp();
+        fields.highPrecisionAccumulate = problem.highPrecisionAccumulate();
+        fields.useBias             = problem.useBias();
+        fields.useE                = problem.useE();
+        fields.gradient            = problem.useGradient();
+        fields.scale               = scaleOf(problem.useScaleAB());
+        fields.useScaleCD          = problem.useScaleCD();
+        fields.useScaleAlphaVec    = problem.useScaleAlphaVec();
+        fields.outputAmaxD         = problem.outputAmaxD();
+        fields.mxBlockA            = static_cast<int>(problem.mxBlockA());
+        fields.mxBlockB            = static_cast<int>(problem.mxBlockB());
+        fields.sparse              = problem.sparse();
+        fields.swizzleTensorA      = problem.swizzleTensorA();
+        fields.swizzleTensorB      = problem.swizzleTensorB();
+        fields.useGateResidual     = problem.useGateResidual();
         if(problem.mxBlockA())
-            dataType("DataTypeMXSA", problem.mxTypeA());
+            fields.dataTypeMxsa = problem.mxTypeA();
         if(problem.mxBlockB())
-            dataType("DataTypeMXSB", problem.mxTypeB());
-        add("HighPrecisionAccumulate", literal(problem.highPrecisionAccumulate()));
-        add("UseBias", literal(problem.useBias()));
-        add("UseE", literal(problem.useE()));
-        add("Gradient", literal(problem.useGradient()));
-        add("UseScaleAB", json::quote(problem.useScaleAB()));
-        add("UseScaleCD", literal(problem.useScaleCD()));
-        add("UseScaleAlphaVec", literal(problem.useScaleAlphaVec()));
-        add("OutputAmaxD", literal(problem.outputAmaxD()));
-        add("MXBlockA", literal(problem.mxBlockA()));
-        add("MXBlockB", literal(problem.mxBlockB()));
-        add("Sparse", literal(problem.sparse()));
-        add("SwizzleTensorA", literal(problem.swizzleTensorA()));
-        add("SwizzleTensorB", literal(problem.swizzleTensorB()));
-        add("UseGateResidual", literal(problem.useGateResidual()));
+            fields.dataTypeMxsb = problem.mxTypeB();
         if(problem.useBias())
         {
-            add("BiasDataTypeList",
-                "[" + literal(static_cast<int>(problem.bias().dataType())) + "]");
-            add("BiasSrc", json::quote(std::string(1, 'A' + problem.biasSrc())));
+            fields.biasDataType = problem.bias().dataType();
+            fields.biasSrc      = problem.biasSrc();
         }
         if(problem.useGateResidual())
-            add("GateResidualDataTypeList",
-                "[" + literal(static_cast<int>(problem.gateResidual().dataType())) + "]");
+            fields.gateResidualDataType = problem.gateResidual().dataType();
         if(problem.useE())
-            dataType("DataTypeE", problem.e().dataType());
+            fields.dataTypeE = problem.e().dataType();
         if(problem.outputAmaxD())
-            dataType("DataTypeAmaxD", problem.amaxd().dataType());
+            fields.dataTypeAmaxD = problem.amaxd().dataType();
         if(problem.activationType() != TensileLite::ActivationType::None)
         {
-            add("Activation", literal(true));
-            add("ActivationType", json::quote("hipblaslt_all"));
-            dataType("ActivationComputeDataType", problem.activationComputeType());
+            fields.activation                  = problem.activationType();
+            fields.activationComputeDataType   = problem.activationComputeType();
         }
         return fields;
     }
