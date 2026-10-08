@@ -9,7 +9,9 @@
 
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
@@ -32,6 +34,7 @@ using hipdnn_integration_tests::bundle::observeSupport;
 using hipdnn_integration_tests::bundle::promoteAcceptedClaim;
 using hipdnn_integration_tests::bundle::RankedEngines;
 using hipdnn_integration_tests::bundle::requiredDepth;
+using hipdnn_integration_tests::bundle::shallowPassComplaint;
 using hipdnn_integration_tests::bundle::SidecarState;
 using hipdnn_integration_tests::bundle::SupportClaimLocator;
 using hipdnn_integration_tests::bundle::SupportObservation;
@@ -378,6 +381,7 @@ TEST(TestSupportVerdict, SweepClaimAppliesToNamedCase)
     ASSERT_EQ(observation.results.size(), 1u);
     EXPECT_EQ(observation.results.front().verdict, SupportVerdict::CLAIM_BROKEN);
     EXPECT_EQ(observation.results.front().bundlePath, "dir/sweep.json#case_one");
+    EXPECT_EQ(observation.results.front().caseId, "case_one");
 }
 
 TEST(TestSupportVerdict, SweepClaimDoesNotApplyToUnnamedCase)
@@ -426,6 +430,7 @@ TEST(TestSupportVerdict, ResultCarriesLocatorAndCellMetadata)
     ASSERT_EQ(observation.results.size(), 1u);
     const auto& r = observation.results.front();
     EXPECT_EQ(r.bundlePath, "dir/Bundle.json");
+    EXPECT_TRUE(r.caseId.empty());
     EXPECT_EQ(r.engineName, UNDER_TEST);
     EXPECT_EQ(r.arch, ARCH);
     EXPECT_EQ(r.platform, PLAT);
@@ -752,6 +757,72 @@ TEST(TestSupportVerdict, FinalizeLeavesOtherEnginesDetailAlone)
     EXPECT_EQ(records[0].detail.find("engine died"), std::string::npos);
 }
 
+// The depths are what the summary reports for a claim the run decided: how far it
+// got, against how far the bundle asked. Every verdict promotion can land on carries
+// them, and so does drift, which is how a reader tells a cell ready to claim from one
+// the ranked list merely offered.
+TEST(TestSupportVerdict, FinalizeRecordsTheDepthsOnEveryDecidedRecord)
+{
+    const auto confirmed = finalizeClaims({verdict(SupportVerdict::CLAIM_ACCEPTED)},
+                                          UNDER_TEST,
+                                          VerificationOutcome::passed(VerificationDepth::VERIFIED),
+                                          VerificationDepth::VERIFIED);
+    const auto accepted
+        = finalizeClaims({verdict(SupportVerdict::CLAIM_ACCEPTED)},
+                         UNDER_TEST,
+                         VerificationOutcome::skipped(VerificationDepth::EXECUTED, "no oracle"),
+                         VerificationDepth::VERIFIED);
+    const auto failedInUse
+        = finalizeClaims({verdict(SupportVerdict::CLAIM_ACCEPTED)},
+                         UNDER_TEST,
+                         VerificationOutcome::failed(
+                             VerificationDepth::EXECUTED, FailureOrigin::COMPARISON, "mismatch"),
+                         VerificationDepth::VERIFIED);
+    const auto drift
+        = finalizeClaims({verdict(SupportVerdict::UNCLAIMED_SUPPORT)},
+                         UNDER_TEST,
+                         VerificationOutcome::skipped(VerificationDepth::BUILDABLE, "no data"),
+                         VerificationDepth::VERIFIED);
+
+    const std::vector<std::pair<std::vector<SupportResult>, VerificationDepth>> cases{
+        {confirmed, VerificationDepth::VERIFIED},
+        {accepted, VerificationDepth::EXECUTED},
+        {failedInUse, VerificationDepth::EXECUTED},
+        {drift, VerificationDepth::BUILDABLE},
+    };
+    for(const auto& [records, reached] : cases)
+    {
+        ASSERT_EQ(records.size(), 1u);
+        const auto& r = records[0];
+        EXPECT_EQ(r.reachedDepth, reached) << toString(r.verdict);
+        EXPECT_EQ(r.requiredDepth, VerificationDepth::VERIFIED) << toString(r.verdict);
+    }
+    EXPECT_EQ(confirmed[0].verdict, SupportVerdict::CLAIM_CONFIRMED);
+    EXPECT_EQ(accepted[0].verdict, SupportVerdict::CLAIM_ACCEPTED);
+    EXPECT_EQ(failedInUse[0].verdict, SupportVerdict::CLAIM_FAILED_IN_USE);
+    EXPECT_EQ(drift[0].verdict, SupportVerdict::UNCLAIMED_SUPPORT);
+}
+
+// A failing verdict was decided at the query, before anything ran, and another
+// engine's record was never run at all. Neither has a depth to report.
+TEST(TestSupportVerdict, FinalizeLeavesTheDepthsUnsetWhereTheRunDecidedNothing)
+{
+    const auto records = finalizeClaims({verdict(SupportVerdict::CLAIM_BROKEN),
+                                         verdict(SupportVerdict::QUERY_ERRORED),
+                                         verdict(SupportVerdict::CLAIM_ACCEPTED, OTHER_ENGINE),
+                                         verdict(SupportVerdict::UNCLAIMED_SUPPORT, OTHER_ENGINE)},
+                                        UNDER_TEST,
+                                        VerificationOutcome::passed(VerificationDepth::VERIFIED),
+                                        VerificationDepth::VERIFIED);
+
+    ASSERT_EQ(records.size(), 4u);
+    for(const auto& r : records)
+    {
+        EXPECT_FALSE(r.reachedDepth.has_value()) << toString(r.verdict) << " " << r.engineName;
+        EXPECT_FALSE(r.requiredDepth.has_value()) << toString(r.verdict) << " " << r.engineName;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // chooseVerdict(): the whole table, one row at a time.
 //
@@ -827,6 +898,77 @@ TEST(TestSupportVerdict, FailingVerdictDetailsNameTheStatus)
     EXPECT_NE(verdictDetail(SupportVerdict::CLAIM_BROKEN, ErrorCode::GRAPH_NOT_SUPPORTED)
                   .find(hipdnn_frontend::to_string(ErrorCode::GRAPH_NOT_SUPPORTED)),
               std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// shallowPassComplaint(): the green run that compared nothing.
+//
+// Every oracle in the chain may decline, so a bundle can reach PASSED having been
+// checked against nothing at all. The complaint is what stops that reading as
+// success.
+//
+// It is self-guarding -- only a PASSED outcome can trip it -- and TestBody() banks
+// on that by handing it every outcome with no surrounding condition. The FAILED and
+// SKIPPED cases below are what make that call site safe.
+// ---------------------------------------------------------------------------
+
+TEST(TestShallowPassComplaint, PassingBelowTheRequiredDepthIsAComplaint)
+{
+    const auto complaint
+        = shallowPassComplaint(VerificationOutcome::passed(VerificationDepth::EXECUTED),
+                               VerificationDepth::VERIFIED,
+                               "bundles/conv_fp32");
+
+    ASSERT_TRUE(complaint.has_value());
+    // Both halves matter to whoever reads the log: the rung that was owed, and the
+    // bundle that owed it.
+    EXPECT_NE(complaint->message.find(toString(VerificationDepth::VERIFIED)), std::string::npos)
+        << complaint->message;
+    EXPECT_NE(complaint->message.find("bundles/conv_fp32"), std::string::npos)
+        << complaint->message;
+}
+
+TEST(TestShallowPassComplaint, PassingAtTheRequiredDepthIsSilent)
+{
+    EXPECT_FALSE(shallowPassComplaint(VerificationOutcome::passed(VerificationDepth::BUILDABLE),
+                                      VerificationDepth::BUILDABLE,
+                                      "bundles/conv_fp32")
+                     .has_value());
+}
+
+// An `applicability` bundle whose run went all the way to VERIFIED did more than was
+// asked of it, not less.
+TEST(TestShallowPassComplaint, PassingAboveTheRequiredDepthIsSilent)
+{
+    EXPECT_FALSE(shallowPassComplaint(VerificationOutcome::passed(VerificationDepth::VERIFIED),
+                                      VerificationDepth::APPLICABLE,
+                                      "bundles/conv_fp32")
+                     .has_value());
+}
+
+// A failure already carries its own origin and message. Adding "and it did not reach
+// verified" puts a second, vaguer grievance on top of the real one -- and a blocked
+// claim reaches this call site as exactly that.
+TEST(TestShallowPassComplaint, FailingShortOfTheDepthIsNotAShallowPass)
+{
+    EXPECT_FALSE(shallowPassComplaint(VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                                                  FailureOrigin::ENGINE,
+                                                                  "engine declined"),
+                                      VerificationDepth::VERIFIED,
+                                      "bundles/conv_fp32")
+                     .has_value());
+}
+
+// A skipped test never claimed to have verified anything, so there is no false
+// success to object to. This and the case above are the whole reason TestBody() can
+// hand every outcome here unguarded.
+TEST(TestShallowPassComplaint, SkippingShortOfTheDepthIsNotAShallowPass)
+{
+    EXPECT_FALSE(shallowPassComplaint(
+                     VerificationOutcome::skipped(VerificationDepth::NOT_REACHED, "no device"),
+                     VerificationDepth::VERIFIED,
+                     "bundles/conv_fp32")
+                     .has_value());
 }
 
 // NOLINTEND(readability-identifier-naming)

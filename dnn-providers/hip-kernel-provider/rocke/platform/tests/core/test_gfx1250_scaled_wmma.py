@@ -10,11 +10,15 @@ from unittest import mock
 
 from rocke.core.arch import ArchTarget
 from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
+from rocke.core.backend import _cpp_strict, resolve_backend
 from rocke.core.isa.wmma_scale import ScaledWmmaLLVM
 from rocke.core.ir import F32, I32, I64, IRBuilder, PtrType
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
-from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.core.lower_llvm import (
+    _lower_kernel_to_llvm_python,
+    lower_kernel_to_llvm,
+)
 from rocke.instances.gfx1250.block_scaled_gemm import (
     BlockScaledGemmSpec,
     block_scaled_gemm_signature,
@@ -229,10 +233,16 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
                 self.assertIn(f", {scale_ty} %", ll)
 
     def test_scaled_wmma_rejects_pre_llvm23_flavors(self):
+        # A native rejection is retried in Python unless strict C++ is requested.
+        error_type = (
+            RuntimeError
+            if resolve_backend() == "cpp" and _cpp_strict()
+            else NotImplementedError
+        )
         for flavor in ("llvm20", "llvm22"):
             with (
                 self.subTest(flavor=flavor),
-                self.assertRaisesRegex(NotImplementedError, "requires llvm23"),
+                self.assertRaisesRegex(error_type, "requires llvm23"),
             ):
                 lower_kernel_to_llvm(
                     _build_scaled_atom(scale16=False),
@@ -274,8 +284,8 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
 
     def test_native_block_scaled_gemm_uses_packed_e8m0_in_instruction(self):
         for matrix_path, block_k, scale_ty, fragment_load, load_count in (
-            ("wmma_scale", 32, "i32", "load <16 x i8>", 8),
-            ("wmma_scale16", 16, "i64", "load <16 x i8>", 8),
+            ("wmma_scale", 32, "i32", "load <4 x i32>", 8),
+            ("wmma_scale16", 16, "i64", "load <4 x i32>", 8),
         ):
             with self.subTest(matrix_path=matrix_path):
                 spec = BlockScaledGemmSpec(
@@ -338,14 +348,14 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
             M=16,
             N=16,
             K=128,
-            dtype_b="bf8",
+            dtype_b="fp16",
             scale_dtype="e8m0",
             block_k=32,
             matrix_path="wmma_scale",
         )
         ok, why = is_valid_spec(bad_dtype)
         self.assertFalse(ok)
-        self.assertIn("requested operand and scale contract", why)
+        self.assertIn("A/B must be", why)
 
         bad_block = BlockScaledGemmSpec(
             name="bad_block",
@@ -360,7 +370,8 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("requires block_k=16", why)
 
-    def test_unknown_scaled_atom_reports_supported_operations(self):
+    def test_python_unknown_scaled_atom_reports_supported_operations(self):
+        # The supported-operation listing is a Python lowerer diagnostic.
         for scale16 in (False, True):
             with self.subTest(scale16=scale16):
                 kernel = _build_scaled_atom(scale16=scale16)
@@ -370,7 +381,9 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
                 with self.assertRaisesRegex(
                     NotImplementedError, "not yet wired for gfx1250"
                 ) as error:
-                    lower_kernel_to_llvm(kernel, arch="gfx1250", llvm_flavor="llvm23")
+                    _lower_kernel_to_llvm_python(
+                        kernel, arch="gfx1250", llvm_flavor="llvm23"
+                    )
                 self.assertIn(_scaled_atom("bf8", scale16).op_id, str(error.exception))
                 with self.assertRaisesRegex(NotImplementedError, "no HIP lowering"):
                     lower_kernel_to_hip(kernel, arch="gfx1250")

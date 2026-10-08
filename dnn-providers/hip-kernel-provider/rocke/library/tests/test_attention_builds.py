@@ -95,6 +95,61 @@ def _compile_or_skip(kernel, *, arch: str):
         pytest.skip(f"comgr toolchain unavailable: {e}")
 
 
+# Two shipped attention kernels are tuned to sit at the VGPR ceiling their
+# occupancy target dictates, and the compiler holds that occupancy by spilling a
+# handful of dwords rather than dropping a resident wave -- the correct trade, not
+# a regression. Erasing the spill would mean either halving occupancy (e.g. the
+# gfx942 tiled-2d kernel wants 354 VGPR unconstrained; forcing scratch==0 drops it
+# to 1 wave/EU) or ~100 VGPR of register-pressure surgery on a perf-tuned kernel
+# -- a bad deal for the 20-40 B of scratch, which costs no *incremental* occupancy
+# once VGPR is already pegged at the ceiling. So these named kernels carry
+# per-kernel budgets; every other kernel keeps the strict defaults (0 scratch, no
+# occupancy floor). The key is the exact kernel name, so if the shipped geometry
+# changes (and with it the name) the budget evaporates and strict checking
+# returns.
+#
+# The two budget axes catch DIFFERENT regressions, and neither subsumes the other
+# -- a kernel is healthy only if both hold:
+#
+#   * ``max_scratch_bytes`` -- how much the kernel may spill. Catches spill GROWTH
+#     at fixed occupancy: a change that balloons register demand while VGPR stays
+#     pegged at the ceiling just spills more (e.g. 40 B -> 400 B) at unchanged
+#     occupancy, so an occupancy check is blind to it; the byte bound is not. Kept
+#     tight enough that a real blow-up (spill into the hundreds) still fails.
+#   * ``min_waves_per_simd`` -- the occupancy the kernel is tuned for. Catches an
+#     occupancy DROP: a change that pushes register or LDS pressure past the point
+#     where the tuned wave count still fits. The scratch bound cannot see this --
+#     spilling is exactly the mechanism that holds occupancy constant -- so it is a
+#     distinct signal. Occupancy is the static multi-limiter estimate
+#     (``benchmark.perf.occupancy.estimate_occupancy_detail``: min over VGPR / AGPR
+#     / LDS / workgroup / wave cap, no GPU). Its per-arch caps are still PROVISIONAL
+#     (gfx942 in particular models a conservative 8 waves/SIMD) pending rocprofv3
+#     calibration on real hardware, so treat it as a floor, not an exact oracle.
+_KERNEL_RESOURCE_BUDGETS = {
+    # gfx950 dense persistent prefill: the 512-thread (8-wave) workgroup pins VGPR
+    # at the 256 ceiling independent of waves_per_eu; it needs a hair more -> 20 B.
+    # Tuned for 2 waves/SIMD (512 VGPR/SIMD // 256).
+    "rocke_attention_dense_d128_hq32_kv8_bn64_bf16_sq2048_sk2048_causal_lazyrs_persist256": {
+        "max_scratch_bytes": 32,
+        "min_waves_per_simd": 2,
+    },
+    # gfx942 fp16 D128 tiled-2d (shipped default geometry): 2 waves/EU caps VGPR at
+    # 256; the kernel wants 354, so it spills ~40 B to hold 2-wave occupancy.
+    "rocke_uattn2d_tiled_d128_b64_h32kv8_fp16_w4_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_cfvst_ksring_rd2": {
+        "max_scratch_bytes": 64,
+        "min_waves_per_simd": 2,
+    },
+}
+
+# Every kernel_name ``_assert_resources_fit`` is handed, so a budget whose key no
+# longer matches any built kernel (name drift from a re-tuned selector) becomes a
+# red test rather than a silently-orphaned entry -- see
+# ``test_every_declared_budget_was_exercised``. The scratch bound already fails
+# loud on drift (its default is 0); the occupancy floor defaults to no check, so
+# without this a renamed kernel would just stop being floored.
+_SEEN_KERNEL_NAMES: set = set()
+
+
 def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
     """Assert the emitted HSACO fits ``arch``'s resource budget.
 
@@ -108,7 +163,14 @@ def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
     - **Register (VGPR) over-subscription** -- the compiler does NOT fail; it
       *spills to scratch* and the kernel still compiles, then runs at reduced
       occupancy with scratch traffic. A pass/fail compile check is blind to this,
-      so we assert ``scratch_bytes == 0`` as the arch-agnostic no-spill signal.
+      so we assert ``scratch_bytes`` stays within its no-spill budget (0 for all
+      but a few occupancy-bound shipped kernels; see
+      ``_KERNEL_RESOURCE_BUDGETS``).
+    - **Occupancy drop** -- a change can push register/LDS pressure past the point
+      where the kernel's tuned wave count still fits; the scratch bound cannot see
+      this (spilling holds occupancy constant), so for kernels with a declared
+      ``min_waves_per_simd`` we also assert the static multi-limiter occupancy stays
+      at or above that floor.
 
     Resource fields come from ``group_segment_fixed_size`` /
     ``private_segment_fixed_size`` in the code object, read via ``llvm-readelf``
@@ -130,6 +192,8 @@ def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
             pytest.skip(f"HSACO introspection tool unavailable: {e}")
 
     name = kernel_name or "kernel"
+    if kernel_name:
+        _SEEN_KERNEL_NAMES.add(kernel_name)
     lds = res.lds_bytes
     if lds is None:  # pragma: no cover - metadata shape drift
         pytest.skip("could not parse group_segment_fixed_size from HSACO")
@@ -137,13 +201,40 @@ def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
         f"{name} LDS {lds} B exceeds {arch} cap {cap} B (over by {lds - cap} B) "
         f"-- comgr codegen rejection at larger tiles / seq"
     )
-    # Register overflow does not fail the compile -- it spills. Any scratch use is
-    # a register-budget regression (occupancy cliff), so treat it as a failure.
+    budgets = _KERNEL_RESOURCE_BUDGETS.get(kernel_name, {})
+    # Register overflow does not fail the compile -- it spills. Scratch use above
+    # the kernel's budget (0 unless it is a known occupancy-bound kernel) is a
+    # register-budget regression, so treat it as a failure.
     scratch = res.scratch_bytes
     if scratch is not None:
-        assert scratch == 0, (
-            f"{name} spills {scratch} B to scratch on {arch} (VGPR {res.vgpr_count}) "
-            f"-- register over-subscription; kernel compiles but loses occupancy"
+        max_scratch = budgets.get("max_scratch_bytes", 0)
+        assert scratch <= max_scratch, (
+            f"{name} spills {scratch} B to scratch on {arch} (VGPR {res.vgpr_count}), "
+            f"over its {max_scratch} B budget -- register over-subscription; kernel "
+            f"compiles but loses occupancy"
+        )
+    # Occupancy floor: for kernels tuned to a known wave count, assert the static
+    # multi-limiter occupancy has not fallen below it. Complementary to the scratch
+    # bound above -- catches an occupancy drop the byte count cannot see.
+    min_waves = budgets.get("min_waves_per_simd")
+    if min_waves is not None:
+        from rocke.benchmark.perf.occupancy import estimate_occupancy_detail
+
+        det = estimate_occupancy_detail(hsaco, arch)
+        if not det:
+            # A declared floor with no occupancy model for this arch is an author
+            # error, not an environment condition -- the readelf-unavailable case
+            # already pytest.skip'd above, so {} here means "arch not in _ARCH_CAPS"
+            # (e.g. a gfx1250 budget). Skip loudly rather than pass the floor silently.
+            pytest.skip(
+                f"no occupancy model for {arch}; cannot enforce the "
+                f"min_waves_per_simd floor for {name}"
+            )
+        occ = det["waves_per_simd"]
+        assert occ >= min_waves, (
+            f"{name} achieves {occ} waves/SIMD on {arch} "
+            f"(limiter {det.get('limited_by')}, VGPR {res.vgpr_count}), below "
+            f"its tuned floor of {min_waves} -- occupancy regression"
         )
 
 
@@ -2222,6 +2313,65 @@ class TestAttentionHelpers(unittest.TestCase):
             self.assertFalse(au._enable_gfx942_3d_invariant_hoist(p))
             self.assertFalse(au._enable_gfx942_3d_wide_kv_load(p))
 
+    def test_gfx950_3d_graph_replay_is_opt_in(self):
+        """gfx950 3D split-KV graph replay stays off unless explicitly enabled.
+
+        Unset and ``=0`` disable. ``HIPDNN_GFX950_3D_GRAPH=1`` enables decode.
+        Long prefill and feature-flagged shapes stay off even when enabled.
+        """
+        import os
+        from unittest import mock
+
+        import kernels.common.attention_unified as au
+
+        decode = UnifiedAttentionProblem(
+            total_q=1,
+            num_seqs=1,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            block_size=16,
+            max_seqlen_q=1,
+            max_seqlen_k=1024,
+            dtype="bf16",
+        )
+        prefill = UnifiedAttentionProblem(
+            total_q=2048,
+            num_seqs=1,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            block_size=16,
+            max_seqlen_q=2048,
+            max_seqlen_k=2048,
+            dtype="bf16",
+        )
+        sinks = UnifiedAttentionProblem(
+            total_q=1,
+            num_seqs=1,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            block_size=16,
+            max_seqlen_q=1,
+            max_seqlen_k=1024,
+            dtype="bf16",
+            use_sinks=True,
+        )
+        with _patch_resolved_arch("gfx950"):
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("HIPDNN_GFX950_3D_GRAPH", None)
+                self.assertFalse(au._enable_3d_graph_replay(decode))
+                self.assertFalse(au._enable_3d_graph_replay(prefill))
+                self.assertFalse(au._enable_3d_graph_replay(sinks))
+            with mock.patch.dict(os.environ, {"HIPDNN_GFX950_3D_GRAPH": "1"}):
+                self.assertFalse(au._enable_3d_graph_replay(prefill))
+                self.assertFalse(au._enable_3d_graph_replay(sinks))
+            with mock.patch.dict(os.environ, {"HIPDNN_GFX950_3D_GRAPH": "0"}):
+                self.assertFalse(au._enable_3d_graph_replay(decode))
+            with mock.patch.dict(os.environ, {"HIPDNN_GFX950_3D_GRAPH": "1"}):
+                self.assertTrue(au._enable_3d_graph_replay(decode))
+
     def test_tiled_2d_spec_builder_constructs_per_arch_all_branches(self):
         """Drive ``_tiled_spec_from_problem`` through its three branches and
         assert each constructs the arch's 2D spec without signature drift:
@@ -2579,11 +2729,13 @@ class TestAttentionDenseWavesPerEu(unittest.TestCase):
                 )
 
         # Sanity: the two waves_per_eu variants are otherwise indistinguishable,
-        # so the split above is attributable to waves_per_eu alone.
+        # so the split above is attributable to waves_per_eu alone. The name
+        # tags a non-default waves_per_eu (2 keeps the shipped symbol), so the
+        # names differ by exactly that tag.
         self.assertEqual(
             specs[1].kernel_name(),
-            specs[2].kernel_name(),
-            "kernel_name() differed unexpectedly — test setup error",
+            specs[2].kernel_name() + "_wpe1",
+            "kernel_name() differed beyond the waves_per_eu tag — test setup error",
         )
 
     def test_waves_per_eu_cache_isolation_artifacts(self):
@@ -2630,6 +2782,233 @@ class TestAttentionDenseWavesPerEu(unittest.TestCase):
             "waves_per_eu is not reaching the emitted kernel, so the two "
             "cache slots would hold the same artifact",
         )
+
+
+# ---------------------------------------------------------------------
+# Gfx950AttentionDenseSpec — performance-only codegen knobs
+# ---------------------------------------------------------------------
+
+
+class TestAttentionDenseGfx950CodegenKnobs(unittest.TestCase):
+    """Every performance knob on the gfx950 dense spec reaches the emitted IR.
+
+    Defaults must reproduce the shipped kernel (the representative-IR golden
+    guards the bytes); each non-default value must change the lowered IR, the
+    cache key and the symbol, and illegal values must be rejected at
+    construction. CPU-only: lowering needs no comgr.
+    """
+
+    _GRID = dict(
+        batch=1,
+        seqlen_q=512,
+        seqlen_kv=512,
+        num_query_heads=8,
+        num_kv_heads=1,
+        head_size=128,
+        causal=True,
+        dtype="bf16",
+    )
+    _WIDE = dict(
+        batch=1,
+        seqlen_q=512,
+        seqlen_kv=512,
+        num_query_heads=32,
+        num_kv_heads=8,
+        head_size=128,
+        causal=True,
+        dtype="fp16",
+        persistent=True,
+        num_persistent=16,
+        persist_decode="gqa_pair",
+        wide_lds_dma=True,
+    )
+
+    @staticmethod
+    def _spec(base, **over):
+        from kernels.gfx950.attention_dense import Gfx950AttentionDenseSpec
+
+        return Gfx950AttentionDenseSpec(**base, **over)
+
+    @staticmethod
+    def _lower(spec) -> str:
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from kernels.gfx950.attention_dense import build_attention_dense
+
+        return lower_kernel_to_llvm(build_attention_dense(spec, arch="gfx950"))
+
+    def test_defaults_resolve_to_the_shipped_policy(self):
+        grid = self._spec(self._GRID)
+        persistent = self._spec(self._GRID, persistent=True, num_persistent=16)
+        wide = self._spec(self._WIDE)
+        self.assertEqual(grid.resolved_exp_per_pv_step(), 2)
+        self.assertEqual(persistent.resolved_exp_per_pv_step(), 1)
+        for spec in (grid, persistent):
+            self.assertTrue(spec.resolved_pv_sched_fence())
+            self.assertTrue(spec.resolved_pv_sched_group_template())
+            self.assertEqual(spec.resolved_iglp_mode(), -1)
+            self.assertEqual(spec.resolved_pv_loop_order(), "d_major")
+        self.assertFalse(wide.resolved_pv_sched_fence())
+        self.assertFalse(wide.resolved_pv_sched_group_template())
+        self.assertEqual(wide.resolved_iglp_mode(), 1)
+        self.assertEqual(wide.resolved_pv_loop_order(), "k_major")
+        for spec in (grid, persistent, wide):
+            self.assertNotRegex(spec.kernel_name(), r"_cg[0-9a-f]{8}")
+            self.assertNotIn("kpad", spec.kernel_name())
+
+    def test_illegal_values_are_rejected(self):
+        bad = (
+            ("lds_num_buffers", 3),
+            ("lazy_rescale_threshold", 0.0),
+            ("lazy_rescale_threshold", 8.5),
+            ("exp_per_pv_step", 0),
+            ("pv_priority", 4),
+            ("pv_priority", -1),
+            ("pv_sched_fence_mask", 0x800),
+            ("pv_sched_group_ds_read", 0),
+            ("iglp_mode", 2),
+            ("pv_loop_order", "row_major"),
+            ("o_store_width", 3),
+            ("o_store_width", 8),
+        )
+        for name, value in bad:
+            with self.subTest(**{name: value}):
+                with self.assertRaises(ValueError):
+                    self._spec(self._GRID, **{name: value})
+
+    def test_narrow_output_stores_are_bf16_only(self):
+        fp16 = dict(self._GRID, dtype="fp16")
+        for width in (1, 2):
+            with self.subTest(o_store_width=width):
+                with self.assertRaisesRegex(ValueError, "bf16-only"):
+                    self._spec(fp16, o_store_width=width)
+                self._spec(self._GRID, o_store_width=width)
+        self._spec(fp16, o_store_width=4)
+
+    def test_iglp_is_exclusive_with_manual_scheduling(self):
+        with self.assertRaisesRegex(ValueError, "iglp_mode"):
+            self._spec(self._GRID, iglp_mode=1)
+        self._spec(
+            self._GRID,
+            iglp_mode=1,
+            pv_sched_fence=False,
+            pv_sched_group_template=False,
+        )
+        with self.assertRaisesRegex(ValueError, "iglp_mode"):
+            self._spec(self._WIDE, pv_sched_fence=True)
+        self._spec(self._WIDE, iglp_mode=-1, pv_sched_fence=True)
+
+    def test_each_knob_changes_ir_cache_key_and_symbol(self):
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+
+        no_manual = dict(pv_sched_fence=False, pv_sched_group_template=False)
+        cases = (
+            ("grid", self._GRID, dict(lazy_rescale_threshold=4.0), None),
+            ("grid", self._GRID, dict(use_exp2_fast=False), None),
+            ("grid", self._GRID, dict(exp_per_pv_step=1), None),
+            ("grid", self._GRID, dict(partial_vmcnt_prefetch=False), None),
+            (
+                "grid",
+                self._GRID,
+                dict(pv_priority=0),
+                ("call void @llvm.amdgcn.s.setprio", False),
+            ),
+            (
+                "grid",
+                self._GRID,
+                dict(pv_priority=2),
+                ("call void @llvm.amdgcn.s.setprio(i16 2)", True),
+            ),
+            ("grid", self._GRID, dict(pv_sched_fence=False), None),
+            (
+                "grid",
+                self._GRID,
+                dict(pv_sched_fence_mask=0x008),
+                ("call void @llvm.amdgcn.sched.barrier(i32 8)", True),
+            ),
+            (
+                "grid",
+                self._GRID,
+                dict(pv_sched_group_template=False),
+                ("call void @llvm.amdgcn.sched.group.barrier", False),
+            ),
+            ("grid", self._GRID, dict(pv_sched_group_ds_read=4), None),
+            (
+                "grid",
+                self._GRID,
+                dict(iglp_mode=0, **no_manual),
+                ("call void @llvm.amdgcn.iglp.opt(i32 0)", True),
+            ),
+            ("grid", self._GRID, dict(pv_loop_order="k_major"), None),
+            ("grid", self._GRID, dict(causal_diag_split=False), None),
+            ("grid", self._GRID, dict(o_store_width=2), None),
+            ("grid", self._GRID, dict(o_store_width=1), None),
+            (
+                "persistent",
+                dict(self._GRID, persistent=True, num_persistent=16),
+                dict(exp_per_pv_step=2),
+                None,
+            ),
+            (
+                "persistent",
+                dict(self._GRID, persistent=True, num_persistent=16),
+                dict(causal_diag_split=False),
+                None,
+            ),
+            ("wide", self._WIDE, dict(pv_loop_order="d_major"), None),
+            (
+                "wide",
+                self._WIDE,
+                dict(iglp_mode=-1),
+                ("call void @llvm.amdgcn.iglp.opt", False),
+            ),
+        )
+        baselines = {}
+        for kind, base, over, marker in cases:
+            with self.subTest(kind=kind, **over):
+                if kind not in baselines:
+                    default = self._spec(base)
+                    baselines[kind] = (default, self._lower(default))
+                default, default_ir = baselines[kind]
+                tuned = self._spec(base, **over)
+                tuned_ir = self._lower(tuned)
+                self.assertNotEqual(tuned_ir, default_ir, "knob did not reach IR")
+                self.assertNotEqual(
+                    attention_dense_cache_key(tuned, arch="gfx950"),
+                    attention_dense_cache_key(default, arch="gfx950"),
+                )
+                self.assertNotEqual(tuned.kernel_name(), default.kernel_name())
+                self.assertRegex(tuned.kernel_name(), r"_cg[0-9a-f]{8}")
+                if marker is not None:
+                    text, present = marker
+                    if present:
+                        self.assertIn(text, tuned_ir)
+                    else:
+                        self.assertNotIn(text, tuned_ir)
+
+    def test_codegen_token_is_deterministic_per_setting(self):
+        first = self._spec(self._GRID, pv_priority=2, o_store_width=2)
+        again = self._spec(self._GRID, o_store_width=2, pv_priority=2)
+        other = self._spec(self._GRID, pv_priority=3, o_store_width=2)
+        self.assertEqual(first.kernel_name(), again.kernel_name())
+        self.assertNotEqual(first.kernel_name(), other.kernel_name())
+
+    def test_d128_k_row_pad_reaches_the_lds_layout(self):
+        """The D128 row pad is its own knob; the D64 group pad stays inert here
+        (test_attention_dense_d64_lds.py locks that side)."""
+        default = self._spec(self._GRID)
+        padded = self._spec(self._GRID, lds_k_row_pad=16)
+        self.assertNotEqual(self._lower(padded), self._lower(default))
+        self.assertIn("krpad16", padded.kernel_name())
+        self.assertNotIn("krpad", default.kernel_name())
+        d64 = dict(self._GRID, head_size=64)
+        self.assertEqual(
+            self._lower(self._spec(d64, lds_k_row_pad=16)),
+            self._lower(self._spec(d64)),
+        )
+        with self.assertRaises(ValueError):
+            self._spec(self._GRID, lds_k_row_pad=12)
+        with self.assertRaisesRegex(ValueError, "wide_lds_dma"):
+            self._spec(self._WIDE, lds_k_row_pad=16)
 
 
 # ---------------------------------------------------------------------
@@ -2782,9 +3161,9 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
     spec.kernel_name()`` in ``run_attention_dense_torch`` trips on the second
     shape served from the cache. The name assertion below covers that.
 
-    The control uses ``persistent`` rather than ``sliding_window``: gfx942
-    rejects sliding_window in ``supports_attention_dense``, so a swa spec never
-    reaches the builder at all and could not lower for the comparison.
+    The baked-shape control below uses ``persistent`` to leave the runtime path;
+    ``sliding_window`` is the other off-path spec on gfx942 now that
+    ``supports_attention_dense`` admits it.
     """
 
     # fp16 is arbitrary here -- every dtype takes the same runtime-shape cut now
@@ -2928,9 +3307,10 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
 
         Without it, a builder that ignored batch/seqlen_q/seqlen_kv entirely --
         emitting one kernel that is wrong everywhere -- would satisfy the guard
-        above vacuously. ``persistent`` is the only way off the runtime path on
-        gfx942; ragged/varlen/paged/swa are rejected by
-        ``supports_attention_dense`` and never reach the builder.
+        above vacuously. ``persistent`` and ``sliding_window`` are the two specs
+        off the runtime path on gfx942 (``runtime_shape`` excludes both); this
+        control uses ``persistent``. ``ragged``/``varlen``/``paged`` are rejected
+        by ``supports_attention_dense`` and never reach the builder.
         """
         from dataclasses import replace
         from kernels.common.attention_dense_spec import attention_dense_cache_key
@@ -3011,7 +3391,7 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         gfx942 IR golden: this fails fast with a readable message if the
         predicate is ever loosened, instead of surfacing as an opaque hash diff.
         """
-        from dispatch.attention.gfx942 import _dense_spec
+        from dispatch.attention import attention_tuning_spec
         from dispatch.attention.common import AttentionRequest
 
         req = AttentionRequest(
@@ -3026,7 +3406,7 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
             dtype="bf16",
             mask_type=1,  # causal
         )
-        spec = _dense_spec(req)
+        spec = attention_tuning_spec(req, "gfx942_dense").kernel_spec
         if not spec.persistent:
             self.skipTest(
                 "shipped gfx942 dispatch no longer selects persistent for this "
@@ -3348,6 +3728,69 @@ class TestAttentionCdnaPrimitives(unittest.TestCase):
         )
         ll = lower_kernel_to_llvm(build_unified_attention_2d_tiled(spec))
         self.assertIn('"amdgpu-waves-per-eu"="2,2"', ll)
+
+    def test_gfx950_fp16_sinks_gate_selection(self):
+        """Gate firing and waves_per_eu for fp16+sinks on gfx950 — verified by
+        selector output, not by inference.
+
+        Gate 1 (_enable_combo_2d): fp16, D=64, block_size=32, GQA-8, sinks,
+          multi-seq prefill. Must fire -> wpe=4 from _select_2d_waves_per_eu.
+        Gate 2 (_enable_gfx950_sink_prefill_wpe3): fp16, D=64, block_size=16,
+          num_seqs<=1, full-causal, sinks. Must fire -> wpe=3.
+
+        CPU-only (no GPU, no comgr): exercises the selector logic in isolation.
+        """
+        from unittest.mock import patch
+
+        import kernels.common.attention_unified as au
+        from kernels.common.attention_unified import UnifiedAttentionProblem
+
+        gate1_problem = UnifiedAttentionProblem(
+            head_size=64,
+            block_size=32,
+            dtype="fp16",
+            num_query_heads=64,
+            num_kv_heads=8,
+            total_q=1280,
+            max_seqlen_q=2048,
+            max_seqlen_k=2048,
+            use_sinks=True,
+            num_seqs=2,
+        )
+        gate2_problem = UnifiedAttentionProblem(
+            head_size=64,
+            block_size=16,
+            dtype="fp16",
+            num_query_heads=64,
+            num_kv_heads=8,
+            total_q=2048,
+            max_seqlen_q=2048,
+            max_seqlen_k=2048,
+            use_sinks=True,
+            num_seqs=1,
+        )
+
+        with patch.object(au, "_resolve_attention_arch", return_value="gfx950"):
+            # Gate 1: combo must fire, selecting wpe=4
+            self.assertTrue(
+                au._enable_combo_2d(gate1_problem),
+                "_enable_combo_2d did not fire for fp16+sinks Gate 1 cohort",
+            )
+            self.assertEqual(
+                au._select_2d_waves_per_eu(gate1_problem),
+                4,
+                "waves_per_eu for fp16+sinks Gate 1 (combo) should be 4",
+            )
+            # Gate 2: wpe3 gate must fire, selecting wpe=3
+            self.assertTrue(
+                au._enable_gfx950_sink_prefill_wpe3(gate2_problem),
+                "_enable_gfx950_sink_prefill_wpe3 did not fire for fp16+sinks Gate 2 cohort",
+            )
+            self.assertEqual(
+                au._select_2d_waves_per_eu(gate2_problem),
+                3,
+                "waves_per_eu for fp16+sinks Gate 2 (wpe3) should be 3",
+            )
 
 
 # ---------------------------------------------------------------------
@@ -3828,6 +4271,25 @@ class TestAttentionHarnessTimers(unittest.TestCase):
         self.assertTrue(hasattr(mod, "_time_lane_ms"))
         self.assertFalse(hasattr(mod, "_time_torch_call_loop"))
         self.assertFalse(hasattr(mod, "_time_rocke_call_loop"))
+
+
+# Module-level so it collects/runs after the class-based budget tests above.
+def test_every_declared_budget_was_exercised():
+    """A budget key that matches no built kernel (name drift from a re-tuned
+    selector -- these names carry tokens like wpe2 / persist256 / ksring that get
+    re-tuned) would silently drop that kernel's occupancy floor. Turn it into a red
+    test: every ``_KERNEL_RESOURCE_BUDGETS`` key must have been handed to
+    ``_assert_resources_fit`` by some test in this run.
+
+    Skips under a partial selection (``pytest -k``) that builds none of the
+    budgeted kernels, so the check is meaningful on a full-file / CI run without
+    false-failing an unrelated targeted run."""
+    if not _SEEN_KERNEL_NAMES:
+        pytest.skip("no budgeted kernels built in this selection")
+    orphaned = set(_KERNEL_RESOURCE_BUDGETS) - _SEEN_KERNEL_NAMES
+    assert (
+        not orphaned
+    ), f"budget declared for kernels never built (name drift?): {sorted(orphaned)}"
 
 
 if __name__ == "__main__":

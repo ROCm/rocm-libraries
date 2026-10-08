@@ -9,6 +9,8 @@
  *   - ROCKE_LL_INTRINSIC_DECLS[]   (+ _COUNT)      (Python _INTRINSIC_DECLS)
  *   - ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[]  (+ _COUNT)
  *                                                (Python ..._LLVM22_OVERRIDES)
+ *   - ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[]  (+ _COUNT)
+ *                                                (Python ..._LLVM23_OVERRIDES)
  *
  * The decl table is INSERTION-ORDERED exactly like the Python dict; that order
  * drives finalize()'s emit order. Transcribed verbatim from
@@ -51,13 +53,14 @@ const char* const ROCKE_LL_DATALAYOUT_LLVM22
       "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
       "-n32:64-S32-A5-G1-ni:7:8:9";
 
-/* LLVM 23 (ROCm 7.13+): re-derived on an LLVM 23 host and found to drift from
- * LLVM 22 by one field -- it emits the ELF symbol-mangling spec m:e that LLVM 22
- * omits. The p8-indexed layout is otherwise identical (Python
- * _DATALAYOUT_LLVM23). */
+/* Layout emitted for rocKE's llvm23 flavor: the llvm22 layout plus the ELF
+ * symbol-mangling spec m:e and address spaces p10-p15 (upstream 5bf967cb132b).
+ * Older compiler builds may omit p10-p15; see Python _DATALAYOUT_LLVM23 for the
+ * full rationale. Must stay byte-identical with it. */
 const char* const ROCKE_LL_DATALAYOUT_LLVM23
     = "e-m:e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-      "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
+      "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-p10:32:32-p11:32:32"
+      "-p12:32:32-p13:32:32-p14:32:32-p15:32:32-i64:64-v16:16-v24:32"
       "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
       "-n32:64-S32-A5-G1-ni:7:8:9";
 
@@ -147,7 +150,6 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"sqrt.f32", "declare float @llvm.sqrt.f32(float)"},
     {"rsqrt.f32", "declare float @llvm.amdgcn.rsq.f32(float)"},
     {"rcp.f32", "declare float @llvm.amdgcn.rcp.f32(float)"},
-    {"tanh.f32", "declare float @llvm.tanh.f32(float)"},
     {"maxnum.f32", "declare float @llvm.maxnum.f32(float, float)"},
     {"maxnum.f16", "declare half @llvm.maxnum.f16(half, half)"},
     {"maxnum.bf16", "declare bfloat @llvm.maxnum.bf16(bfloat, bfloat)"},
@@ -242,6 +244,12 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"mfma.f32.32x32x16.f16",
      "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.f16(<8 x half>, <8 x half>, <16 x "
      "float>, i32 immarg, i32 immarg, i32 immarg)"},
+    {"mfma.f32.16x16x8.xf32",
+     "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x8.xf32(<2 x float>, <2 x float>, <4 x "
+     "float>, i32 immarg, i32 immarg, i32 immarg)"},
+    {"mfma.f32.32x32x4.xf32",
+     "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x4.xf32(<2 x float>, <2 x float>, <16 x "
+     "float>, i32 immarg, i32 immarg, i32 immarg)"},
     {"mfma.f32.16x16x4f32",
      "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x4f32(float, float, <4 x float>, i32 immarg, "
      "i32 immarg, i32 immarg)"},
@@ -270,9 +278,6 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"update.dpp.i32",
      "declare i32 @llvm.amdgcn.update.dpp.i32(i32, i32, i32 immarg, i32 immarg, i32 immarg, i1 "
      "immarg)"},
-    {"global.atomic.fadd.v2bf16",
-     "declare <2 x bfloat> @llvm.amdgcn.global.atomic.fadd.v2bf16.p1("
-     "ptr addrspace(1), <2 x bfloat>)"},
     {"global.atomic.fadd.v2f16",
      "declare <2 x half> @llvm.amdgcn.global.atomic.fadd.v2f16.p1("
      "ptr addrspace(1), <2 x half>)"},
@@ -337,10 +342,6 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
      "declare <2 x float> @llvm.amdgcn.cvt.scalef32.pk.f32.fp8(i32, float, i1)"},
     {"amdgcn.cvt.scalef32.pk.f32.bf8",
      "declare <2 x float> @llvm.amdgcn.cvt.scalef32.pk.f32.bf8(i32, float, i1)"},
-    {"amdgcn.cvt.scalef32.pk.fp8.f32",
-     "declare i32 @llvm.amdgcn.cvt.scalef32.pk.fp8.f32(i32, <2 x float>, float, i1)"},
-    {"amdgcn.cvt.scalef32.pk.bf8.f32",
-     "declare i32 @llvm.amdgcn.cvt.scalef32.pk.bf8.f32(i32, <2 x float>, float, i1)"},
     {"amdgcn.ds.swizzle", "declare i32 @llvm.amdgcn.ds.swizzle(i32, i32 immarg)"},
     /* Not overloaded, so no name suffix, but the flags are immarg like every
      * other permlane* flag pair. */
@@ -473,8 +474,7 @@ const int ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT
 
 /* ---------------------------------------------------------------------- */
 /* LLVM23 overrides (Python _INTRINSIC_DECLS_LLVM23_OVERRIDES)            */
-/* Identical to the LLVM22 set for the declares rocke emits today; split  */
-/* entries here if an LLVM 23 host proves drift.                          */
+/* Inherits the LLVM22 entries plus declarations whose ABI changed again. */
 /* ---------------------------------------------------------------------- */
 
 const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[] = {
@@ -493,6 +493,9 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[] = {
     {"make.buffer.rsrc.p1",
      "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
      "ptr addrspace(1) nocapture readnone, i16, i64, i32)"},
+    {"mfma.scale.f32.16x16x128.f8f6f4",
+     "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4(<8 x i32>, <8 x i32>, <4 x "
+     "float>, i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32)"},
 };
 
 const int ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT

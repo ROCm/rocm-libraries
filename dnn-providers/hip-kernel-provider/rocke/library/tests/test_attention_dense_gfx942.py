@@ -31,6 +31,8 @@ what keeps the gfx950 goldens untouched by anything in this file.
 
 import dataclasses
 import hashlib
+import inspect
+import re
 
 import pytest
 
@@ -80,6 +82,66 @@ def _spec(**kw) -> Gfx942AttentionDenseSpec:
     )
     base.update(kw)
     return Gfx942AttentionDenseSpec(**base)
+
+
+def test_bottom_right_field_is_keyword_only_without_shifting_concrete_signatures():
+    """Adding a shared semantic flag must not move existing positional callers."""
+    from kernels.gfx950.attention_dense import Gfx950AttentionDenseSpec
+
+    shared_positionals = (
+        "batch",
+        "seqlen_q",
+        "seqlen_kv",
+        "num_query_heads",
+        "num_kv_heads",
+        "head_size",
+        "causal",
+        "dtype",
+        "sliding_window",
+        "ragged",
+        "varlen",
+        "block_m",
+        "block_n",
+        "waves_per_eu",
+        "lds_k_group_pad",
+        "persistent",
+        "num_persistent",
+        "interleave",
+        "persist_decode",
+        "lazy_rescale",
+        "paged",
+        "block_size",
+        "num_kv_blocks",
+        "use_sinks",
+    )
+    concrete_suffixes = {
+        Gfx942AttentionDenseSpec: (
+            "lds_row_pad",
+            "v_row_pad",
+            "use_cfvst",
+            "use_v_swizzle",
+            "use_exp2_fast",
+            "iglp",
+        ),
+        Gfx950AttentionDenseSpec: ("lds_v_row_pad", "wide_lds_dma"),
+    }
+
+    for spec_type, suffix in concrete_suffixes.items():
+        params = inspect.signature(spec_type).parameters
+        assert (
+            params["causal_bottom_right"].kind is inspect.Parameter.KEYWORD_ONLY
+        ), spec_type.__name__
+        assert params["causal_bottom_right"].default is False
+        positionals = tuple(
+            name
+            for name, param in params.items()
+            if param.kind
+            in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            )
+        )
+        assert positionals == shared_positionals + suffix, spec_type.__name__
 
 
 def _lower(kd) -> str:
@@ -189,11 +251,12 @@ _UNBUILDABLE_SPEC_FIELDS = frozenset(
     {
         "varlen",
         "ragged",
-        "sliding_window",
         "paged",
         "block_size",
         "num_kv_blocks",
         "use_sinks",
+        "causal_bottom_right",
+        "lds_num_buffers",
     }
 )
 
@@ -219,8 +282,9 @@ _SPEC_PERTURBATIONS = {
     "num_kv_heads": (8, 2),
     "head_size": (64, 128),
     "causal": (False, True),
+    "causal_bottom_right": (),  # unbuildable on gfx942
     "dtype": ("bf16", "fp16"),
-    "sliding_window": (),  # unbuildable -- see _UNBUILDABLE_SPEC_FIELDS
+    "sliding_window": (64, 128),  # multiples of block_n=64; base is causal
     "ragged": (),  # unbuildable
     "varlen": (),  # unbuildable
     "paged": (),  # unbuildable (not yet supported)
@@ -249,6 +313,13 @@ _PRIVATE_PERTURBATIONS = {
     "use_v_swizzle": (False, True),
     "use_exp2_fast": (False, True),
     "iglp": (True, False),
+    "lds_num_buffers": (2,),  # unbuildable: only NBUF=1 is implemented
+    "iglp_mode": (1,),  # legal only with iglp=True -> the *_iglp base
+    "pv_loop_order": ("k_major",),
+    "o_store_width": (1, 2),
+    "pv_priority": (1, 3),
+    "pv_sched_fence_mask": (0, 0x108),
+    "causal_diag_split": (True,),
 }
 
 _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
@@ -258,8 +329,10 @@ _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
 # cfvst off at D128 (bf16, exp2_fast), both D64 dtypes (packed 2-rows-per-DMA + the
 # K row-group pad + the wpe=4 tune), and the P4 persistent grid -- without which
 # num_persistent / interleave / persist_decode are inert and their coverage vacuous.
+# The iglp base is what makes iglp_mode (read only under iglp=True) reachable.
 _INJECTIVITY_BASES = {
     "d128_fp16_cfvst": dict(head_size=128, dtype="fp16"),
+    "d128_fp16_cfvst_iglp": dict(head_size=128, dtype="fp16", iglp=True),
     "d128_bf16_naive": dict(head_size=128, dtype="bf16"),
     "d64_fp16": dict(head_size=64, dtype="fp16"),
     "d64_bf16": dict(head_size=64, dtype="bf16"),
@@ -460,22 +533,43 @@ def test_supports_rejects_non_gfx942():
 @pytest.mark.parametrize(
     "kw,marker",
     [
-        # persistent is NOT here anymore -- it is supported (P4). See the persistent
-        # build/decode tests below.
+        # persistent and sliding_window are NOT here anymore -- both are supported
+        # (persistent P4; sliding_window via start_tile prune + window mask). See
+        # the persistent build/decode tests and the SWA coverage below.
         (dict(varlen=True), "varlen"),
         (dict(seqlen_q=1000, seqlen_kv=1000, ragged=True), "ragged"),
-        (dict(sliding_window=64), "sliding_window"),
         (dict(use_sinks=True), "sinks"),
     ],
 )
 def test_supports_rejects_modes_deferred_to_later_phases(kw, marker):
     """P0 implements the default-grid uniform dense path only. These modes must be
     rejected by ``supports`` -- not merely by ``build`` -- or dispatch selects a spec
-    it cannot build (``_dense_spec`` sets ragged=True for any non-256-multiple
+    it cannot build (``gfx942_dense._base_spec`` sets ragged=True for any non-256-multiple
     self-attention length, which is most real serving shapes)."""
     ok, why = supports_attention_dense(_spec(**kw), arch="gfx942")
     assert not ok, f"{marker} must be rejected at the supports layer"
     assert marker in why
+
+
+def test_shared_bottom_right_field_is_rejected_by_support_and_build():
+    """The reflected common field is outside gfx942's concrete contract."""
+    spec = AttentionDenseSpec(
+        batch=1,
+        seqlen_q=2048,
+        seqlen_kv=4096,
+        num_query_heads=128,
+        num_kv_heads=8,
+        head_size=128,
+        causal=True,
+        dtype="bf16",
+        block_n=64,
+        causal_bottom_right=True,
+    )
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert not ok
+    assert "causal_bottom_right" in why
+    with pytest.raises(ValueError, match="causal_bottom_right"):
+        build_attention_dense(spec, arch="gfx942")
 
 
 @pytest.mark.parametrize("block_n", [96, 160, 224])
@@ -495,6 +589,24 @@ def test_supports_rejects_block_n_larger_than_the_query_tile():
         _spec(block_n=512, seqlen_kv=2048), arch="gfx942"
     )
     assert not ok and "block_n" in why
+
+
+def test_supports_rejects_sliding_window_past_seqlen_kv():
+    """SWA + causal where the last query block's window starts past seqlen_kv:
+    start_tile >= n_up -> zero-trip KV loop -> l == 0 -> rcp(0) -> NaN. Same class
+    as the block_n zero-trip guards above."""
+    ok, why = supports_attention_dense(
+        _spec(seqlen_q=1024, seqlen_kv=256, sliding_window=128), arch="gfx942"
+    )
+    assert not ok and "sliding_window" in why
+
+
+def test_supports_accepts_sliding_window_in_range():
+    """SWA + causal where the window stays within seqlen_kv is accepted."""
+    ok, why = supports_attention_dense(
+        _spec(seqlen_q=2048, seqlen_kv=2048, sliding_window=128), arch="gfx942"
+    )
+    assert ok, why
 
 
 def test_supports_rejects_over_budget_lds():
@@ -641,9 +753,7 @@ def test_gfx942_auto_decode_cannot_leak_to_gqa_pair():
 #   use_exp2_fast: numerically safe in both directions here (both softmax args are
 #     always <= 0), so it is a perf A/B, not a correctness or tile-exactness
 #     hazard. Gating it would make the config unsweepable.
-#   iglp: a compile-time scheduler directive (llvm.amdgcn.iglp.opt) that leaves no
-#     runtime instruction and is legal on every config.
-_TUNING_FIELDS_WITHOUT_A_REJECTED_REGION = frozenset({"use_exp2_fast", "iglp"})
+_TUNING_FIELDS_WITHOUT_A_REJECTED_REGION = frozenset({"use_exp2_fast"})
 
 # Rows are kwargs for a single :class:`Gfx942AttentionDenseSpec` -- there is one spec
 # and one builder signature, so the shared and gfx942-private knobs go in the same
@@ -672,7 +782,10 @@ _CONTRACT_GRID = [
     dict(persistent=True, num_persistent=228),
     dict(varlen=True),
     dict(seqlen_q=1000, seqlen_kv=1000, ragged=True),
-    dict(sliding_window=64),
+    dict(sliding_window=64),  # accepted: SWA on the default grid
+    dict(
+        sliding_window=128, persistent=True, num_persistent=304
+    ),  # accepted: SWA persistent
     dict(batch=4),
     dict(batch=64, seqlen_q=16384, seqlen_kv=16384, num_kv_heads=8),
     dict(waves_per_eu=4),
@@ -698,9 +811,27 @@ _CONTRACT_GRID = [
     # --- private: use_exp2_fast (no rejected region -- see the comment above) ---
     dict(use_exp2_fast=False),
     dict(use_exp2_fast=True),  # accepted: policy is True for every config
-    # --- private: iglp (no rejected region -- see the comment above) ---
+    # --- private: iglp (rejected only alongside a PV sched fence) ---
     dict(iglp=False),
     dict(dtype="fp16", iglp=True),
+    dict(iglp=True, pv_sched_fence_mask=0),  # REJECTED: iglp owns the schedule
+    # --- private: performance-only codegen knobs ---
+    dict(lds_num_buffers=1),  # accepted: the only implemented depth
+    dict(lds_num_buffers=2),  # REJECTED: NBUF=2 is not implemented
+    dict(iglp=True, iglp_mode=1),  # accepted
+    dict(iglp_mode=1),  # REJECTED: needs iglp=True
+    dict(pv_loop_order="k_major"),  # accepted
+    dict(pv_loop_order="n_major"),  # REJECTED: unknown order
+    dict(o_store_width=2),  # accepted (bf16 base)
+    dict(o_store_width=3),  # REJECTED: not 1, 2 or 4
+    dict(dtype="fp16", o_store_width=2),  # REJECTED: bf16-only below 4
+    dict(pv_priority=3),  # accepted
+    dict(pv_priority=4),  # REJECTED: s_setprio is 0..3
+    dict(pv_sched_fence_mask=0),  # accepted
+    dict(pv_sched_fence_mask=0x800),  # REJECTED: past the 11 mask bits
+    dict(causal_diag_split=True),  # accepted
+    dict(causal=False, causal_diag_split=True),  # REJECTED: causal only
+    dict(sliding_window=64, causal_diag_split=True),  # REJECTED: no window
 ]
 
 
@@ -1208,17 +1339,24 @@ def test_build_bakes_the_tuned_waves_per_eu_attribute():
 def test_dispatch_applies_gfx942_waves_per_eu_and_leaves_gfx950_alone():
     """The gfx942 dispatch spec factory applies the tune; gfx950 stays at the default.
 
-    The tune lives in gfx942's OWN ``_dense_spec`` (``dispatch/attention/gfx942.py``),
+    The tune lives in gfx942's OWN ``_base_spec`` (``dispatch/attention/gfx942_dense.py``),
     so the kernel_name ``wpe`` tag and the emitted attribute agree on the dispatched
-    path (``dense_spec_for_request`` -> ``run_attention_dense_torch``). gfx950 has a
+    path (``attention_tuning_spec`` -> ``run_attention_dense_torch``). gfx950 has a
     separate factory in its own arch module which MUST keep the spec default
     (waves_per_eu=2) -- this is the do-not-touch-gfx950 guard as an executable
     assertion. Both are exercised here precisely because they are now two functions:
     the guard is that they stayed different in the intended direction only.
     """
     from dispatch.attention import AttentionRequest
-    from dispatch.attention.gfx942 import _dense_spec
-    from dispatch.attention.gfx950 import _dense_spec as _dense_spec_gfx950
+    from dispatch.attention import attention_tuning_spec, tuning_spec_with_knobs
+
+    def _dense_spec(req, **knobs):
+        if knobs:
+            return tuning_spec_with_knobs(req, "gfx942_dense", knobs).kernel_spec
+        return attention_tuning_spec(req, "gfx942_dense").kernel_spec
+
+    def _dense_spec_gfx950(req):
+        return attention_tuning_spec(req, "gfx950_dense_grid").kernel_spec
 
     # The gfx942 tune is an OVERRIDE relative to the shared spec's default; if that
     # default (owned by the gfx950 file) ever shifts, the "== 2" baseline below would
@@ -1250,8 +1388,6 @@ def test_dispatch_applies_gfx942_waves_per_eu_and_leaves_gfx950_alone():
             arch=arch,
             mask_type=1,
             dtype=dtype,
-            algorithm="attention_dense",
-            dense_persistent="off",
         )
 
     # gfx942: only bf16 D64 is bumped to 4.
@@ -1330,8 +1466,15 @@ def test_dispatch_ships_the_padded_d64_path_without_restating_the_pad():
     let the two drift. gfx950's own factory is exercised alongside to pin that this
     branch changed nothing for it."""
     from dispatch.attention import AttentionRequest
-    from dispatch.attention.gfx942 import _dense_spec
-    from dispatch.attention.gfx950 import _dense_spec as _dense_spec_gfx950
+    from dispatch.attention import attention_tuning_spec, tuning_spec_with_knobs
+
+    def _dense_spec(req, **knobs):
+        if knobs:
+            return tuning_spec_with_knobs(req, "gfx942_dense", knobs).kernel_spec
+        return attention_tuning_spec(req, "gfx942_dense").kernel_spec
+
+    def _dense_spec_gfx950(req):
+        return attention_tuning_spec(req, "gfx950_dense_grid").kernel_spec
 
     # Pin the shared default: every assertion below is relative to it, so a silent
     # upstream change to the pad amount must fail loudly here rather than downstream.
@@ -1362,8 +1505,6 @@ def test_dispatch_ships_the_padded_d64_path_without_restating_the_pad():
             arch=arch,
             mask_type=1,
             dtype=dtype,
-            algorithm="attention_dense",
-            dense_persistent="off",
         )
 
     # D64 ships padded on both dtypes; D128 is inert.
@@ -1430,6 +1571,158 @@ def test_iglp_true_builds_lowers_and_emits_the_intrinsic(dtype, d):
 
 
 # --------------------------------------------------------------------------- #
+# Performance-only codegen knobs (keyword-only, default = shipped kernel)
+# --------------------------------------------------------------------------- #
+_CODEGEN_KNOB_DEFAULTS = {
+    "lds_num_buffers": 1,
+    "iglp_mode": 0,
+    "pv_loop_order": "d_major",
+    "o_store_width": 4,
+    "pv_priority": 0,
+    "pv_sched_fence_mask": None,
+    "causal_diag_split": False,
+}
+_CODEGEN_KNOB_TOKENS = ("_iglpm", "_pvkmaj", "_osw", "_prio", "_fence", "_dsplit")
+
+
+def _mfma_calls(ir: str) -> int:
+    return len(re.findall(r"call <\d+ x float> @llvm\.amdgcn\.mfma", ir))
+
+
+def _global_stores(ir: str) -> list:
+    return [ln for ln in ir.splitlines() if "store" in ln and "addrspace(1)" in ln]
+
+
+def test_codegen_knobs_are_keyword_only_with_shipped_defaults():
+    params = inspect.signature(Gfx942AttentionDenseSpec).parameters
+    for name, default in _CODEGEN_KNOB_DEFAULTS.items():
+        assert params[name].kind is inspect.Parameter.KEYWORD_ONLY, name
+        assert params[name].default == default, name
+    name = gfx942_kernel_name(_spec())
+    assert not any(tok in name for tok in _CODEGEN_KNOB_TOKENS), name
+
+
+@pytest.mark.parametrize(
+    "overrides, token, marker",
+    [
+        (
+            dict(iglp=True, iglp_mode=1),
+            "_iglp1_iglpm1",
+            "call void @llvm.amdgcn.iglp.opt(i32 1)",
+        ),
+        (dict(pv_loop_order="k_major"), "_pvkmaj", None),
+        (dict(o_store_width=2), "_osw2", "store <2 x bfloat>"),
+        (dict(o_store_width=1), "_osw1", "store <1 x bfloat>"),
+        (dict(pv_priority=2), "_prio2", "call void @llvm.amdgcn.s.setprio(i16 2)"),
+        (
+            dict(pv_sched_fence_mask=0x8),
+            "_fence8",
+            "call void @llvm.amdgcn.sched.barrier(i32 8)",
+        ),
+        (dict(pv_sched_fence_mask=0x108), "_fence108", None),
+        (dict(causal_diag_split=True), "_dsplit", None),
+    ],
+    ids=lambda v: v if isinstance(v, str) else None,
+)
+def test_codegen_knob_moves_ir_and_name_together(overrides, token, marker):
+    base = _spec()
+    alt = _spec(**overrides)
+    ok, why = supports_attention_dense(alt, arch="gfx942")
+    assert ok, why
+
+    kd = build_attention_dense(alt, arch="gfx942")
+    assert kd.name == gfx942_kernel_name(alt)
+    assert kd.name.endswith(token), kd.name
+    assert _ir_body_sha(alt) != _ir_body_sha(base)
+    if marker is not None:
+        assert marker in _lower(kd)
+        assert marker not in _lower(build_attention_dense(base, arch="gfx942"))
+
+
+def test_o_store_width_splits_every_store():
+    base_ir = _lower(build_attention_dense(_spec(), arch="gfx942"))
+    n4 = len(_global_stores(base_ir))
+    assert n4 == 4 * 4  # D_TILES * groups at D128
+    for width, align in ((2, 4), (1, 2)):
+        ir = _lower(build_attention_dense(_spec(o_store_width=width), arch="gfx942"))
+        stores = _global_stores(ir)
+        assert len(stores) == n4 * 4 // width
+        assert all(f"align {align}" in ln for ln in stores)
+
+
+def test_pv_loop_order_only_reorders_the_pv_mfmas():
+    base_ir = _lower(build_attention_dense(_spec(), arch="gfx942"))
+    kmaj_ir = _lower(
+        build_attention_dense(_spec(pv_loop_order="k_major"), arch="gfx942")
+    )
+    assert _mfma_calls(kmaj_ir) == _mfma_calls(base_ir)
+    assert _global_stores(kmaj_ir) == _global_stores(base_ir)
+
+
+def test_pv_priority_brackets_the_pv_mfmas():
+    ir = _lower(build_attention_dense(_spec(pv_priority=3), arch="gfx942"))
+    raise_at = ir.index("call void @llvm.amdgcn.s.setprio(i16 3)")
+    drop_at = ir.index("call void @llvm.amdgcn.s.setprio(i16 0)")
+    assert ir.count("call void @llvm.amdgcn.s.setprio(i16 3)") == 1
+    assert ir.count("call void @llvm.amdgcn.s.setprio(i16 0)") == 1
+    assert raise_at < drop_at
+    assert _mfma_calls(ir[raise_at:drop_at]) == 4 * 8  # D_TILES * KK_STEPS
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [dict(), dict(persistent=True, num_persistent=228, seqlen_q=4096, seqlen_kv=4096)],
+    ids=["grid", "persistent"],
+)
+def test_causal_diag_split_emits_an_unmasked_body_and_a_masked_tail(extra):
+    base = _spec(dtype="fp16", num_query_heads=32, **extra)
+    split = dataclasses.replace(base, causal_diag_split=True)
+    base_ir = _lower(build_attention_dense(base, arch="gfx942"))
+    split_ir = _lower(build_attention_dense(split, arch="gfx942"))
+    assert _mfma_calls(split_ir) == 2 * _mfma_calls(base_ir)
+    # One causal-mask compare per S element (N_SUB * 16), in the masked tail only.
+    assert split_ir.count("icmp sle") == base_ir.count("icmp sle") == 2 * 16
+
+
+def test_lazy_rescale_is_inert_on_gfx942():
+    """This body always rescales; only the shared kernel_name() reads the field."""
+    on, off = _spec(lazy_rescale=True), _spec(lazy_rescale=False)
+    assert _ir_body_sha(on) == _ir_body_sha(off)
+    assert gfx942_kernel_name(on).replace("_lazyrs", "") == gfx942_kernel_name(off)
+    assert gfx942_kernel_name(on) != gfx942_kernel_name(off)
+
+
+@pytest.mark.parametrize(
+    "overrides, reason",
+    [
+        (dict(lds_num_buffers=2), "lds_num_buffers"),
+        (dict(lds_num_buffers=0), "lds_num_buffers"),
+        (dict(iglp_mode=1), "iglp_mode only applies with iglp=True"),
+        (dict(iglp=True, iglp_mode=2), "iglp_mode must be 0 or 1"),
+        (dict(pv_loop_order="n_major"), "pv_loop_order"),
+        (dict(o_store_width=3), "o_store_width"),
+        (dict(o_store_width=8), "o_store_width"),
+        (dict(dtype="fp16", o_store_width=1), "bf16-only"),
+        (dict(dtype="fp16", o_store_width=2), "bf16-only"),
+        (dict(pv_priority=4), "pv_priority"),
+        (dict(pv_priority=-1), "pv_priority"),
+        (dict(pv_sched_fence_mask=0x800), "pv_sched_fence_mask"),
+        (dict(pv_sched_fence_mask=-1), "pv_sched_fence_mask"),
+        (dict(iglp=True, pv_sched_fence_mask=0), "exclusive"),
+        (dict(causal=False, causal_diag_split=True), "causal_diag_split"),
+        (dict(sliding_window=128, causal_diag_split=True), "causal_diag_split"),
+    ],
+)
+def test_codegen_knob_rejections(overrides, reason):
+    spec = _spec(**overrides)
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert not ok
+    assert reason in why
+    with pytest.raises(ValueError, match="unsupported gfx942 attention_dense spec"):
+        build_attention_dense(spec, arch="gfx942")
+
+
+# --------------------------------------------------------------------------- #
 # P4 persistent grid-stride variant
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
@@ -1487,15 +1780,22 @@ def test_persistent_and_default_share_one_inner_body():
 
 
 def test_dispatch_persistent_auto_turns_on_for_large_sq_only():
-    """P4 dispatch: ``dense_persistent='auto'`` resolves to persistent once the work
+    """P4 dispatch: the default spec turns persistent on once the work
     (nqb*Hq*B) fills the gfx942 persistent grid (num_persistent defaulted to 304), and
-    stays off for small Sq. Explicit on/off are honored; gfx950 keeps its 256 default
+    stays off for small Sq. The ``persistent`` knob is honored; gfx950 keeps its 256 default
     and is otherwise untouched."""
     from dispatch.attention import AttentionRequest
-    from dispatch.attention.gfx942 import _dense_spec
-    from dispatch.attention.gfx950 import _dense_spec as _dense_spec_gfx950
+    from dispatch.attention import attention_tuning_spec, tuning_spec_with_knobs
 
-    def _req(sq, arch, persist="auto"):
+    def _dense_spec(req, **knobs):
+        if knobs:
+            return tuning_spec_with_knobs(req, "gfx942_dense", knobs).kernel_spec
+        return attention_tuning_spec(req, "gfx942_dense").kernel_spec
+
+    def _dense_spec_gfx950(req):
+        return attention_tuning_spec(req, "gfx950_dense_grid").kernel_spec
+
+    def _req(sq, arch):
         return AttentionRequest(
             batch=1,
             nhead_q=16,
@@ -1507,8 +1807,6 @@ def test_dispatch_persistent_auto_turns_on_for_large_sq_only():
             arch=arch,
             mask_type=1,
             dtype="fp16",
-            algorithm="attention_dense",
-            dense_persistent=persist,
         )
 
     # gfx942 num_persistent defaulted to the 304-CU part's CU count.
@@ -1517,8 +1815,8 @@ def test_dispatch_persistent_auto_turns_on_for_large_sq_only():
     assert _dense_spec(_req(8192, "gfx942")).persistent is True
     assert _dense_spec(_req(2048, "gfx942")).persistent is False  # 8*16 = 128 < 304
     # explicit modes honored.
-    assert _dense_spec(_req(8192, "gfx942", "off")).persistent is False
-    assert _dense_spec(_req(256, "gfx942", "on")).persistent is True
+    assert _dense_spec(_req(8192, "gfx942"), persistent=False).persistent is False
+    assert _dense_spec(_req(256, "gfx942"), persistent=True).persistent is True
     # gfx950 untouched: keeps the 256 default (not the gfx942 304 override).
     assert _dense_spec_gfx950(_req(8192, "gfx950")).num_persistent == 256
 

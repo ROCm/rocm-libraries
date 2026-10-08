@@ -18,7 +18,7 @@ the perf harness for the optimization phases.
 IT MEASURES THE SHIPPED KERNEL
 ------------------------------
 The spec under test is **resolved through the dispatch factory**
-(``dispatch.attention.gfx942.dense_spec_for_request``), not hand-built from CLI
+(the ``gfx942_dense`` candidate via ``dispatch.attention.attention_tuning_spec``), not hand-built from CLI
 defaults. That is the difference between a gate and a decoration: the tuning that
 ships (per-config ``waves_per_eu``, the 304-CTA persistent grid and its auto-on
 rule, the ragged path) lives in dispatch, so a hardcoded CLI default here would
@@ -34,9 +34,10 @@ Concretely: at the default ``--dtype bf16 --d 64`` the shipped ``waves_per_eu`` 
 (``..._persist304_...``) — neither of which this bench could reach before.
 
 Scope: dense self-attention (uniform batch via the ``[B, S, H, d]`` grid), causal +
-full, bf16/fp16, D64/D128, MHA + GQA (incl. non-pow-2), default AND persistent grid.
-Sliding-window / varlen are still follow-ups: their ``--mode`` values exit with the
-distinct skip code 3 (never 0 — a gate must not report success for no work).
+full + sliding-window (``--mode swa``), bf16/fp16, D64/D128, MHA + GQA (incl.
+non-pow-2), default AND persistent grid. varlen is still a follow-up: its ``--mode``
+value exits with the distinct skip code 3 (never 0 — a gate must not report success
+for no work).
 
 Run as a library module::
 
@@ -52,6 +53,12 @@ or directly with a ROCm-torch venv python::
 
 ``--dry-run`` resolves and prints the spec for every shape without a GPU, which is
 how you check WHAT the gate is about to measure.
+
+``--emit-shapes PATH`` writes every shape this benchmark measures, across all of
+its runnable modes, as JSONL in the rocKE benchmark-trace schema that
+``projects/hipdnn/tools/IngestorGenerator/tools/mine_shapes.py --rocke-bench``
+reads, then exits. It needs neither a GPU nor torch: torch is imported only on
+the paths that build inputs and launch kernels.
 """
 from __future__ import annotations
 
@@ -67,18 +74,6 @@ _RK = os.path.abspath(os.path.join(_HERE, "../../../../.."))
 sys.path.insert(0, _RK + "/platform/python")
 sys.path.insert(0, _RK + "/library")
 
-import torch  # noqa: E402
-
-# Single copy of the CLI -> AttentionRequest -> dispatch-resolved spec plumbing,
-# including the raise-on-drift guard. Duplicating it here is what let the two
-# harnesses drift apart from dispatch in the first place.
-from builders.gfx942.attention.prefill.attention_dense_prefill import (  # noqa: E402
-    add_dense_tuning_args,
-    dense_request,
-    dense_spec_overrides,
-    describe_dense_spec,
-    resolve_dense_spec,
-)
 from kernels.gfx942.attention_dense import (  # noqa: E402
     AttentionDenseSpec,
     attention_dense_block,
@@ -97,7 +92,6 @@ from rocke.runtime import (  # noqa: E402
 )
 
 _ARCH = "gfx942"
-_TORCH_DT = {"bf16": torch.bfloat16, "fp16": torch.float16}
 _TOL = 2e-2
 
 # Exit codes. 0 = every shape passed, 1 = no GPU, 2 = at least one shape failed,
@@ -113,7 +107,7 @@ _EXIT_SKIP = 3
 
 # CLI modes the kernel genuinely cannot run yet. This is a UX shortcut only -- the
 # authoritative rejection is supports_attention_dense (ValueError from build).
-_DEFERRED_MODES = {"swa": "P1+ (sliding window)", "varlen": "P1+ (packed varlen)"}
+_DEFERRED_MODES = {"varlen": "P1+ (packed varlen)"}
 
 
 # --------------------------------------------------------------------------- #
@@ -139,6 +133,8 @@ def _gm(vals) -> float:
 
 
 def _bench_stream_handle() -> int:
+    import torch
+
     return int(torch.cuda.current_stream().cuda_stream)
 
 
@@ -181,8 +177,10 @@ def bench_dense(spec: AttentionDenseSpec, *, warmup: int, iters: int, seed: int)
     The spec is the dispatch-resolved one (see :func:`resolve_dense_spec`); this
     function never invents tuning values.
     """
+    import torch
+
     dev = "cuda"
-    dt = _TORCH_DT[spec.dtype]
+    dt = {"bf16": torch.bfloat16, "fp16": torch.float16}[spec.dtype]
     B, S = spec.batch, spec.seqlen_q
     Hq, Hkv, D = spec.num_query_heads, spec.num_kv_heads, spec.head_size
     causal = spec.causal
@@ -216,19 +214,29 @@ def bench_dense(spec: AttentionDenseSpec, *, warmup: int, iters: int, seed: int)
     call()
     torch.cuda.synchronize()
 
-    # correctness vs SDPA (batched, causal/full, GQA repeat).
+    # correctness vs SDPA (batched, causal/full/SWA, GQA repeat).
+    W = spec.sliding_window
     rep = Hq // Hkv
     qh = q.transpose(1, 2).float()
     kh = k.transpose(1, 2).repeat_interleave(rep, 1).float()
     vh = v.transpose(1, 2).repeat_interleave(rep, 1).float()
-    ref = torch.nn.functional.scaled_dot_product_attention(
-        qh, kh, vh, is_causal=causal
-    ).transpose(1, 2)
+    if W and W > 0:
+        # banded causal: key j allowed for query i iff i-W < j <= i.
+        qi = torch.arange(S, device=dev).view(-1, 1)
+        ki = torch.arange(S, device=dev).view(1, -1)
+        m = (ki <= qi) & (ki > qi - W)
+        ref = torch.nn.functional.scaled_dot_product_attention(
+            qh, kh, vh, attn_mask=m
+        ).transpose(1, 2)
+    else:
+        ref = torch.nn.functional.scaled_dot_product_attention(
+            qh, kh, vh, is_causal=causal
+        ).transpose(1, 2)
     max_err = (out.float() - ref).abs().max().item()
 
     ms = time_launches(call, warmup=warmup, iters=iters, stream=stream)
     synchronize_and_release(stream)
-    tf = _flops(B, S, causal, 0, Hq, D) / (ms * 1e-3) / 1e12
+    tf = _flops(B, S, causal, W, Hq, D) / (ms * 1e-3) / 1e12
     # gfx942_kernel_name, not spec.kernel_name(): the latter omits batch and
     # waves_per_eu, so a B=4 row would report the B=1 symbol -- the exact confusion
     # behind the cache-collision bug this field exists to make visible.
@@ -258,9 +266,19 @@ def _configs(mode: str, Hq: int, Hkv: int, D: int):
     if mode in ("full", "all"):
         for S in (2048, 4096):
             cfgs.append(("full", "non_causal", f"S={S}", S, 1, Hq, Hkv, False))
+    if mode == "swa":
+        # Banded-causal sweep (W multiple of block_n=64). W==0 (full causal) is the
+        # baseline; skip windows past the sequence. Emits a 9-tuple (trailing W);
+        # every other mode's 8-tuple keeps W=0 via the unpack in main().
+        for S in (2048, 4096, 8192):
+            for W in (0, 512, 1024, 2048):
+                if W and W > S:
+                    continue
+                tag = "full-causal" if W == 0 else f"W={W}"
+                cfgs.append(("swa", "gqa_swa", f"S={S} {tag}", S, 1, Hq, Hkv, True, W))
     if mode == "persistent":
         # The causal cohort with the persistent grid FORCED on (main() pins
-        # dense_persistent="on" unless the user said otherwise). Under "all" the
+        # the persistent knob on unless the user said otherwise). Under "all" the
         # same shapes already run persistent via dispatch's auto rule; this mode
         # exists so the grid can be measured deliberately, incl. the small-work
         # shapes auto would leave on the default grid.
@@ -294,6 +312,7 @@ def _record(mode, variant, label, S, B, Hq, Hkv, D, causal, spec, res, err_note=
         "Hkv": Hkv,
         "D": D,
         "causal": causal,
+        "sliding_window": None if spec is None else spec.sliding_window,
         # The tuning actually built, so a report can never be read as if it
         # described a different config than the one that was timed.
         "block_n": None if spec is None else spec.block_n,
@@ -324,17 +343,101 @@ def _record(mode, variant, label, S, B, Hq, Hkv, D, causal, spec, res, err_note=
     }
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+#: Every ``--mode`` choice. ``all`` is the union of causal, mha, gqa and full.
+_MODES = ("causal", "mha", "gqa", "full", "swa", "varlen", "persistent", "all")
+
+#: The modes ``--emit-shapes`` writes: every mode that measures something. Derived,
+#: so a mode leaving _DEFERRED_MODES is emitted without editing this line. ``all``
+#: is left out because its modes are listed one by one.
+_EMIT_MODES = tuple(m for m in _MODES if m != "all" and m not in _DEFERRED_MODES)
+
+
+def shape_records(dtype: str, Hq: int, Hkv: int, D: int) -> list[dict]:
+    """Every shape the benchmark measures, as rocKE benchmark-trace records.
+
+    The schema is the one ``mine_shapes.py --rocke-bench`` reads: ``window_size``
+    is ``[left, right]`` (``[-1, 0]`` causal, ``[W - 1, 0]`` a W-token window) and
+    ``causal`` states the mask explicitly, since a full (non-causal) shape has no
+    window spelling of its own. The persistent mode re-measures the causal cohort
+    on another grid, so its rows repeat request shapes; the miner merges them.
+    """
+    records = []
+    for mode in _EMIT_MODES:
+        for cfg in _configs(mode, Hq, Hkv, D):
+            cmode, variant, label, S, B, hq, hkv, causal = cfg[:8]
+            W = cfg[8] if len(cfg) > 8 else 0
+            records.append(
+                {
+                    "model": "benchmark_dense_prefill_live",
+                    "variant": f"{cmode}/{variant}",
+                    "label": label,
+                    "num_seqs": B,
+                    "max_seqlen_q": S,
+                    "max_seqlen_k": S,
+                    "num_query_heads": hq,
+                    "num_kv_heads": hkv,
+                    "head_size": D,
+                    "q_dtype": dtype,
+                    "causal": causal,
+                    "window_size": (
+                        [W - 1, 0] if W else ([-1, 0] if causal else [-1, -1])
+                    ),
+                    "has_sinks": False,
+                }
+            )
+    return records
+
+
+def _add_shape_args(ap: argparse.ArgumentParser) -> None:
+    """The arguments that decide WHICH shapes run, shared with ``--emit-shapes``."""
     ap.add_argument(
         "--mode",
-        choices=["causal", "mha", "gqa", "full", "swa", "varlen", "persistent", "all"],
+        choices=_MODES,
         default="all",
     )
     ap.add_argument("--dtype", choices=["bf16", "fp16"], default="bf16")
     ap.add_argument("--hq", type=int, default=128, help="query heads (causal/gqa)")
     ap.add_argument("--hkv", type=int, default=8, help="kv heads (causal/gqa)")
     ap.add_argument("--d", type=int, default=128, help="head size (64 or 128)")
+    ap.add_argument(
+        "--emit-shapes",
+        metavar="PATH",
+        help="write every shape of every mode as JSONL for mine_shapes.py "
+        "--rocke-bench and exit (no GPU, no torch)",
+    )
+
+
+def main() -> int:
+    pre = argparse.ArgumentParser(add_help=False)
+    _add_shape_args(pre)
+    known, unknown = pre.parse_known_args()
+    if known.emit_shapes:
+        # Only the shape filters apply to an emit. Anything else is a typo, and
+        # emitting the default set for it would look like success.
+        if unknown:
+            pre.error(f"unrecognized arguments: {' '.join(unknown)}")
+        records = shape_records(known.dtype, known.hq, known.hkv, known.d)
+        with open(known.emit_shapes, "w") as fh:
+            fh.write("".join(json.dumps(r) + "\n" for r in records))
+        print(f"wrote {known.emit_shapes}  ({len(records)} shapes)")
+        return _EXIT_OK
+
+    import torch
+
+    # Single copy of the CLI -> AttentionRequest -> dispatch-resolved spec
+    # plumbing, including the raise-on-drift guard. Duplicating it here is what
+    # let the two harnesses drift apart from dispatch in the first place. Imported
+    # here, not at module scope, because it imports torch.
+    from builders.gfx942.attention.prefill.attention_dense_prefill import (
+        add_dense_tuning_args,
+        dense_request,
+        dense_spec_overrides,
+        describe_dense_spec,
+        resolve_dense_spec,
+    )
+
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    _add_shape_args(ap)
     ap.add_argument("--iterations", type=int, default=50)
     ap.add_argument("--warmup", type=int, default=10)
     ap.add_argument("--seed", type=int, default=0)
@@ -378,7 +481,7 @@ def main() -> int:
         f"warmup={args.warmup} iters={args.iterations}"
     )
     print(
-        "spec source: dispatch.attention.gfx942.dense_spec_for_request"
+        "spec source: dispatch.attention.attention_tuning_spec(spec_id=gfx942_dense)"
         + (
             f"  (+ explicit overrides: {overrides})"
             if overrides
@@ -388,7 +491,9 @@ def main() -> int:
 
     cfgs = _configs(args.mode, args.hq, args.hkv, args.d)
     results = []
-    for mode, variant, label, S, B, Hq, Hkv, causal in cfgs:
+    for cfg in cfgs:
+        mode, variant, label, S, B, Hq, Hkv, causal = cfg[:8]
+        W = cfg[8] if len(cfg) > 8 else 0
         tag = f"[{mode}/{variant}] {label} Hq={Hq} Hkv={Hkv} D={args.d}"
         spec = None
 
@@ -420,6 +525,7 @@ def main() -> int:
                 head_size=args.d,
                 causal=causal,
                 dtype=args.dtype,
+                sliding_window=W,
             )
             spec = resolve_dense_spec(req, overrides)
             if args.dry_run:

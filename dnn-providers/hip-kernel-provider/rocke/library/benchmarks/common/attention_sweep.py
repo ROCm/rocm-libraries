@@ -13,13 +13,37 @@ across arches and the next fix lands once.
 from __future__ import annotations
 
 
-def run_sweep(shape, data, sw, is_fp8, bench, *, arch, stream_handle, warmup, iters):
+def run_sweep(
+    shape,
+    data,
+    sw,
+    is_fp8,
+    bench,
+    *,
+    arch,
+    stream_handle,
+    warmup,
+    iters,
+    candidate_prefix="",
+    tuning_id_prefix="",
+    limit=0,
+    tuning_sample=0,
+    seed=0,
+    sweep_level="production",
+):
     """Time every engine the dispatcher registry offers for this problem.
 
     Builds one :class:`~dispatch.attention.AttentionRequest`, calls
     :func:`~dispatch.attention.attention_sweep_space` (the deduped spec of every
     *supported* candidate), groups the offered engines by their launched path,
     and times each distinct path via ``run_unified_attention_torch``.
+
+    The sweep space includes the opt-in tuning candidates. ``sweep_level``
+    ``production`` (the default) walks the curated stacks. ``full`` samples
+    every kernel knob: pass ``tuning_sample`` / ``seed`` (0 walks the full
+    stream, millions of specs per shape on the transposed paths).
+    ``candidate_prefix`` / ``tuning_id_prefix`` narrow one geometry or
+    codepath, and ``limit`` caps how many specs are timed (0 = no cap).
 
     Returns a dict keyed by launched path. Each value is either a timed entry
     ``{"ms", "engines", "kernel", "out"}`` or -- if that one path raised --
@@ -34,10 +58,15 @@ def run_sweep(shape, data, sw, is_fp8, bench, *, arch, stream_handle, warmup, it
     """
     import torch
     from dispatch.attention import AttentionRequest, attention_sweep_space
+    from dispatch.attention.bindings import (
+        validate_tuning_attention_contract,
+        validate_tuning_attention_tensors,
+    )
     from kernels import run_unified_attention_torch
     from rocke.runtime import synchronize_and_release, time_launches
 
     dtype_str = "bf16" if shape.q_dtype == "torch.bfloat16" else "fp16"
+    problem = bench._problem(shape, sw, is_fp8)
     req = AttentionRequest(
         batch=shape.num_seqs,
         nhead_q=shape.num_query_heads,
@@ -50,25 +79,58 @@ def run_sweep(shape, data, sw, is_fp8, bench, *, arch, stream_handle, warmup, it
         dtype=dtype_str,
         sliding_window=sw,
         kv_block_size=shape.block_size,
-        num_sms=bench.num_sms,
+        num_cus=bench.num_sms,
+        use_fp8=bool(problem.use_fp8),
+        fp8_fnuz=bool(problem.fp8_fnuz),
     )
 
-    specs = attention_sweep_space(req)
-    problem = bench._problem(shape, sw, is_fp8)
-
-    # Group the offered engines by the launched path they resolve to.
-    engines_by_path = {}
-    for spec in specs:
-        engines_by_path.setdefault(spec.path, []).append(spec.name)
-
+    specs = attention_sweep_space(
+        req,
+        candidate_prefix=candidate_prefix,
+        tuning_id_prefix=tuning_id_prefix,
+        tuning_sample=tuning_sample,
+        seed=seed,
+        limit=limit,
+        sweep_level=sweep_level,
+    )
     entries = {}
-    for path, engine_names in engines_by_path.items():
+    tensors_validated = False
+    for spec in specs:
+        if hasattr(spec, "with_num_kv_blocks"):
+            spec = spec.with_num_kv_blocks(int(data["key_cache"].shape[0]))
+            validate_tuning_attention_contract(req, problem, spec)
+        path = spec.path
+        tuning_id = getattr(spec, "tuning_id", "")
+        candidate_name = getattr(spec, "candidate_name", getattr(spec, "name", path))
+        entry_key = (
+            f"{path}:{candidate_name}:{tuning_id}"
+            if tuning_id
+            else f"{path}:{candidate_name}"
+        )
         try:
             run_backend = "tiled" if path == "2d" else path
-            kernel = _sweep_kernel_name(problem, run_backend)
+            kernel = (
+                spec.kernel_name()
+                if tuning_id
+                else _sweep_kernel_name(problem, run_backend)
+            )
             out = torch.empty_like(data["query"])
+            if not tensors_validated and hasattr(spec, "kernel_spec"):
+                validate_tuning_attention_tensors(
+                    problem,
+                    {
+                        "q": data["query"],
+                        "k": data["key_cache"],
+                        "v": data["value_cache"],
+                        "out": out,
+                        "cu_seqlens_q": data["cu_seqlens_q"],
+                        "seqused_k": data["kv_lens"],
+                        "block_table": data["block_tables"],
+                    },
+                )
+                tensors_validated = True
 
-            def call_once(_backend=run_backend, _out=out):
+            def call_once(_backend=run_backend, _out=out, _spec=spec):
                 run_unified_attention_torch(
                     problem=problem,
                     q=data["query"],
@@ -84,20 +146,26 @@ def run_sweep(shape, data, sw, is_fp8, bench, *, arch, stream_handle, warmup, it
                     alibi_slopes=data["alibi_slopes"],
                     backend=_backend,
                     stream=stream_handle,
+                    tuning_spec=_spec if hasattr(_spec, "kernel_spec") else None,
                 )
 
             ms = time_launches(
                 call_once, warmup=warmup, iters=iters, stream=stream_handle
             )
             synchronize_and_release(stream_handle)
-            entries[path] = {
+            entries[entry_key] = {
                 "ms": ms,
-                "engines": engine_names,
+                "engines": [candidate_name],
+                "tuning_id": tuning_id,
                 "kernel": kernel,
                 "out": out,
             }
         except Exception as exc:  # noqa: BLE001  # one bad path must not sink the rest
-            entries[path] = {"error": repr(exc), "engines": engine_names}
+            entries[entry_key] = {
+                "error": repr(exc),
+                "engines": [candidate_name],
+                "tuning_id": tuning_id,
+            }
     return entries
 
 

@@ -16,7 +16,7 @@ THE SPEC COMES FROM DISPATCH, NOT FROM THIS FILE
 ------------------------------------------------
 Both harnesses (this one and the benchmark) used to HAND-BUILD an
 ``AttentionDenseSpec`` from CLI defaults. That is a silent-staleness machine: the
-tuning that actually ships lives in ``dispatch.attention.gfx942._dense_spec``
+tuning that actually ships lives in ``dispatch.attention.gfx942_dense._base_spec``
 (per-config ``waves_per_eu``, the 304-CTA persistent grid, the auto persistent
 decision, the ragged path), and a hardcoded CLI default freezes whatever that
 policy happened to be on the day the flag was written. A harness that measures a
@@ -26,10 +26,11 @@ regression.
 So the flow here is:
 
 1. build an :class:`AttentionRequest` from the CLI *shape* arguments,
-2. resolve the shipped concrete spec through the architecture-routed
-   :func:`dispatch.attention.dense_spec_for_request`,
-3. apply only the tuning flags the user *explicitly passed* as a
-   ``dataclasses.replace`` override on top of the resolved spec.
+2. resolve the shipped spec of the ``gfx942_dense`` candidate through
+   :func:`dispatch.attention.attention_tuning_spec` (``tuning_id=auto``),
+3. apply only the tuning flags the user *explicitly passed* as knobs of that
+   candidate through :func:`dispatch.attention.tuning_spec_with_knobs`, which
+   the kernel validates.
 
 Every tuning flag therefore defaults to ``None`` meaning "whatever dispatch
 ships": an omitted flag TRACKS future policy changes instead of pinning today's
@@ -42,12 +43,13 @@ These helpers (:func:`add_dense_tuning_args`, :func:`dense_request`,
 :func:`describe_dense_spec`) are the SINGLE copy — the live benchmark imports them
 from here rather than keeping a second, drifting resolver.
 
-NOTE: ``--sw`` (sliding window, P1+) still builds a spec that
-``supports_attention_dense`` rejects, so ``run`` raises a ``ValueError`` naming the
-reason. ``--persistent`` is NOT in that category any more: the persistent grid
-ships and dispatch turns it on automatically for large-Sq prefill. ``--bn`` must
-divide the 256-row query tile and keep ``K_lds+V_lds`` inside the 64 KB gfx942 LDS
--- ``--bn 128`` exceeds it at D128 and is rejected (it fits at D64).
+NOTE: ``--sw`` (sliding window) now builds a supported spec (KV-loop prune + window
+mask); only the degenerate shape whose last query block's window starts past
+``seqlen_kv`` is rejected (zero-trip KV loop -> NaN). ``--persistent`` is NOT a
+deferred mode either: the persistent grid ships and dispatch turns it on
+automatically for large-Sq prefill. ``--bn`` must divide the 256-row query tile and
+keep ``K_lds+V_lds`` inside the 64 KB gfx942 LDS -- ``--bn 128`` exceeds it at D128
+and is rejected (it fits at D64).
 
 Usage:
     python attention_dense_prefill.py                 # parity + bench, dispatch spec
@@ -70,7 +72,8 @@ import torch  # noqa: E402
 
 from dispatch.attention import (  # noqa: E402
     AttentionRequest,
-    dense_spec_for_request,
+    attention_tuning_spec,
+    tuning_spec_with_knobs,
 )
 from kernels.gfx942.attention_dense import (  # noqa: E402
     Gfx942AttentionDenseSpec,
@@ -85,21 +88,19 @@ from rocke.helpers.compile import compile_kernel  # noqa: E402
 from rocke.runtime import KernelLauncher, LaunchConfig  # noqa: E402
 
 _ARCH = "gfx942"
+_SPEC_ID = "gfx942_dense"
 _TORCH_DT = {"bf16": torch.bfloat16, "fp16": torch.float16}
 
-# Spec fields a harness may override on top of the dispatch-resolved spec. Every
-# one of these is a real ``AttentionDenseSpec`` field with no ``AttentionRequest``
-# counterpart, so dispatch cannot resolve it and an explicit flag is the only way
-# to reach it. The persistent knobs are deliberately NOT here: they have request
-# fields (``dense_persistent`` / ``dense_num_persistent`` /
-# ``dense_persist_decode``), so they go through dispatch and get its gfx942
-# normalization (e.g. the shared 256-CTA default -> 304) instead of bypassing it.
+# Spec fields a harness may override on top of the candidate's default spec, as
+# knobs of the ``gfx942_dense`` candidate. ``sliding_window`` is problem shape,
+# not a knob: it goes on the request.
 _OVERRIDE_FIELDS = (
     "block_n",
     "waves_per_eu",
     "interleave",
     "lds_k_group_pad",
-    "sliding_window",
+    "num_persistent",
+    "persist_decode",
 )
 
 
@@ -182,7 +183,8 @@ def add_dense_tuning_args(ap: argparse.ArgumentParser) -> None:
         dest="sliding_window",
         type=int,
         default=None,
-        help="sliding_window (0=off; multiple of block_n). P1+: currently rejected",
+        help="sliding_window (0=off; multiple of block_n). Supported: KV-loop "
+        "prune + window mask.",
     )
 
 
@@ -197,20 +199,14 @@ def dense_request(
     head_size: int,
     causal: bool,
     dtype: str,
+    sliding_window: int = 0,
 ) -> AttentionRequest:
-    """The :class:`AttentionRequest` a production caller would submit.
+    """The :class:`AttentionRequest` pinned to the ``gfx942_dense`` candidate.
 
-    Shape comes from the caller; the three persistent knobs come from the CLI when
-    explicitly passed and otherwise keep the request defaults, so dispatch applies
-    its own gfx942 normalization to them.
+    Shape comes from the caller; tuning never rides on the request (it is a knob
+    of the candidate, see :func:`dense_spec_overrides`). ``sliding_window`` is a
+    request property (0 = full causal), so dispatch ships the SWA-pruned spec.
     """
-    req_kwargs = {}
-    if getattr(args, "persistent", None) is not None:
-        req_kwargs["dense_persistent"] = args.persistent
-    if getattr(args, "num_persistent", None) is not None:
-        req_kwargs["dense_num_persistent"] = int(args.num_persistent)
-    if getattr(args, "persist_decode", None) is not None:
-        req_kwargs["dense_persist_decode"] = args.persist_decode
     return AttentionRequest(
         batch=int(batch),
         nhead_q=int(num_query_heads),
@@ -222,20 +218,24 @@ def dense_request(
         arch=_ARCH,
         mask_type=1 if causal else 0,
         dtype=str(dtype).lower(),
+        sliding_window=int(sliding_window),
         # Opt-in selector: this is the candidate whose spec we are measuring.
         algorithm="attention_dense",
-        spec_id="gfx942_attention_dense",
-        **req_kwargs,
+        spec_id=_SPEC_ID,
     )
 
 
 def dense_spec_overrides(args: argparse.Namespace) -> dict:
-    """Spec-field overrides for the tuning flags the user EXPLICITLY passed."""
-    return {
+    """Knob overrides for the tuning flags the user EXPLICITLY passed."""
+    overrides = {
         name: getattr(args, name)
         for name in _OVERRIDE_FIELDS
         if getattr(args, name, None) is not None
     }
+    persistent = getattr(args, "persistent", None)
+    if persistent in ("on", "off"):
+        overrides["persistent"] = persistent == "on"
+    return overrides
 
 
 def assert_tracks_dispatch(
@@ -255,7 +255,7 @@ def assert_tracks_dispatch(
     wrong number, which is worse than a crash.
     """
     overrides = dict(overrides or {})
-    shipped = dense_spec_for_request(req)
+    shipped = attention_tuning_spec(req, _SPEC_ID).kernel_spec
     drift = [
         f"{f.name}: harness={getattr(spec, f.name)!r} dispatch={getattr(shipped, f.name)!r}"
         for f in dataclasses.fields(Gfx942AttentionDenseSpec)
@@ -282,9 +282,7 @@ def resolve_dense_spec(
             f"known fields: {sorted(known)}"
         )
 
-    spec = dense_spec_for_request(req)
-    if overrides:
-        spec = dataclasses.replace(spec, **overrides)
+    spec = tuning_spec_with_knobs(req, _SPEC_ID, overrides).kernel_spec
     assert_tracks_dispatch(spec, req, overrides)
     return spec
 
@@ -447,6 +445,7 @@ def main():
             head_size=args.d,
             causal=bool(args.causal),
             dtype=args.dtype,
+            sliding_window=int(args.sliding_window or 0),
         )
         spec = resolve_dense_spec(req, overrides)
         if args.dry_run:
