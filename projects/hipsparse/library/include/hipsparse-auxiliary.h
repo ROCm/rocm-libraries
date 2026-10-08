@@ -290,9 +290,8 @@ hipsparseStatus_t hipsparseDestroyHybMat(hipsparseHybMat_t hybA);
  *  \note
  *  The returned array pointers are borrowed. An array that hipSPARSE allocated
  *  (for example with hipsparseXcsr2hyb()) stays valid until \p hyb is destroyed
- *  with \ref hipsparseDestroyHybMat, hipsparseXcsr2hyb() is called on the same
- *  \p hyb, or \ref hipsparseHybMatSetInfo replaces it; the caller must not free
- *  it. An array set with \ref hipsparseHybMatSetInfo belongs to the caller.
+ *  with \ref hipsparseDestroyHybMat or hipsparseXcsr2hyb() is called on the
+ *  same \p hyb; the caller must not free it. An array set with \ref hipsparseHybMatSetInfo belongs to the caller.
  *
  *  \note
  *  Only \p ell_nnz is \p int64_t. \p m, \p n, \p ell_width and \p coo_nnz remain
@@ -382,10 +381,10 @@ hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t  hyb,
  *  It does not take ownership of \p ell_col_ind, \p ell_val, \p coo_row_ind,
  *  \p coo_col_ind and \p coo_val: they must stay valid while \p hyb uses them,
  *  and the caller frees them after \p hyb is destroyed or the arrays are
- *  replaced. \ref hipsparseDestroyHybMat never frees them, and
- *  hipsparseXcsr2hyb() rejects a \p hyb that holds them. Arrays that hipSPARSE allocated for \p hyb (for example with
- *  hipsparseXcsr2hyb()) are released by this function when they are replaced;
- *  passed back unchanged, they stay owned by \p hyb. A \p nullptr array with a
+ *  replaced. hipSPARSE never frees them. Arrays that hipSPARSE allocated for
+ *  \p hyb (for example with hipsparseXcsr2hyb()) stay owned by \p hyb, and are
+ *  freed by \ref hipsparseDestroyHybMat or the next hipsparseXcsr2hyb() on
+ *  \p hyb, even after this function replaces them. A \p nullptr array with a
  *  positive count is rejected.
  *
  *  \note
@@ -433,8 +432,8 @@ hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t  hyb,
  *          \p partition or \p data_type is invalid.
  *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED the cuSPARSE backend does not support
  *          this routine.
- *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR releasing a replaced hipSPARSE array
- *          failed, or the rocSPARSE backend reported an internal error.
+ *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR the rocSPARSE backend reported an
+ *          internal error.
  */
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT
