@@ -135,40 +135,40 @@ __forceinline__ __device__ unsigned int getStashIndex(unsigned int vindex,
                                                       unsigned int zgroupoffset,
                                                       unsigned int ygroupoffset,
                                                       unsigned int ystride,
-                                                      unsigned int xgrp_sz,
+                                                      unsigned int xgrp_size,
                                                       unsigned int xgrp_id,
                                                       unsigned int xlid,
                                                       unsigned int xstride,
-                                                      unsigned int nstride)
+                                                      unsigned int batchStride)
 {
     if constexpr(HIP_PLUGIN_USE_FPMIX)
     {
         // 2 _FLOAT values are used to store 1 _FLOAT_PREC value.
         if constexpr(hip_kernel_provider::config::layout_channel_last)
         {
-            if constexpr(config::c % 2 == 0)
+            if constexpr(config::channels % 2 == 0)
             {
-                // xgrp_sz values are split in two parts: even threads use 2 values at even rows,
-                // odd threads - at odd rows. The only restriction for C and xgrp_sz is that they
+                // xgrp_size values are split in two parts: even threads use 2 values at even rows,
+                // odd threads - at odd rows. The only restriction for C and xgrp_size is that they
                 // must be even.
-                return zgroupoffset * (config::c / config::vec_size_x * config::l)
-                       + (vindex * 2 + xlid % 2) * nstride + ygroupoffset * ystride
-                       + (xgrp_sz * xgrp_id + xlid / 2 * 2) * xstride;
+                return zgroupoffset * (config::channels / config::vec_size_x * config::spatial_size)
+                       + (vindex * 2 + xlid % 2) * batchStride + ygroupoffset * ystride
+                       + (xgrp_size * xgrp_id + xlid / 2 * 2) * xstride;
             }
             else
             {
                 // Values are stored consecutively in y dim.
-                return zgroupoffset * (config::c / config::vec_size_x * config::l)
-                       + (vindex * 2) * nstride + ygroupoffset * ystride
-                       + (xgrp_sz * xgrp_id + xlid) * xstride;
+                return zgroupoffset * (config::channels / config::vec_size_x * config::spatial_size)
+                       + (vindex * 2) * batchStride + ygroupoffset * ystride
+                       + (xgrp_size * xgrp_id + xlid) * xstride;
             }
         }
         else
         {
             // Values are stored consecutively in y dim, indices are aligned up by 2 (_FLOAT_PREC).
-            return zgroupoffset * (config::c / config::vec_size_x * config::l)
-                   + ((vindex * 2) * nstride + ygroupoffset * ystride
-                      + (xgrp_sz * xgrp_id + xlid) * xstride + 1)
+            return zgroupoffset * (config::channels / config::vec_size_x * config::spatial_size)
+                   + ((vindex * 2) * batchStride + ygroupoffset * ystride
+                      + (xgrp_size * xgrp_id + xlid) * xstride + 1)
                          / 2 * 2;
         }
     }
@@ -177,36 +177,37 @@ __forceinline__ __device__ unsigned int getStashIndex(unsigned int vindex,
         // 2 _FLOAT values are used to store 1 _FLOAT_PREC value.
         if constexpr(hip_kernel_provider::config::layout_channel_last)
         {
-            if constexpr(config::c % 2 == 0)
+            if constexpr(config::channels % 2 == 0)
             {
-                // xgrp_sz values are split in two parts: even threads use 2 values at even rows,
-                // odd threads - at odd rows. The only restriction for C and xgrp_sz is that they
+                // xgrp_size values are split in two parts: even threads use 2 values at even rows,
+                // odd threads - at odd rows. The only restriction for C and xgrp_size is that they
                 // must be even.
-                return zgroupoffset * (config::c / config::vec_size_x * config::l)
-                       + (vindex * 2 + xlid % 2) * nstride + ygroupoffset * ystride
-                       + (xgrp_sz * xgrp_id + xlid / 2 * 2) * xstride;
+                return zgroupoffset * (config::channels / config::vec_size_x * config::spatial_size)
+                       + (vindex * 2 + xlid % 2) * batchStride + ygroupoffset * ystride
+                       + (xgrp_size * xgrp_id + xlid / 2 * 2) * xstride;
             }
             else
             {
                 // Values are stored consecutively in y dim.
-                return zgroupoffset * (config::c / config::vec_size_x * config::l)
-                       + (vindex * 2) * nstride + ygroupoffset * ystride
-                       + (xgrp_sz * xgrp_id + xlid) * xstride;
+                return zgroupoffset * (config::channels / config::vec_size_x * config::spatial_size)
+                       + (vindex * 2) * batchStride + ygroupoffset * ystride
+                       + (xgrp_size * xgrp_id + xlid) * xstride;
             }
         }
         else
         {
             // Values are stored consecutively in y dim, indices are aligned up by 2 (_FLOAT_PREC).
-            return zgroupoffset * (config::c / config::vec_size_x * config::l)
-                   + ((vindex * 2) * nstride + ygroupoffset * ystride
-                      + (xgrp_sz * xgrp_id + xlid) * xstride + 1)
+            return zgroupoffset * (config::channels / config::vec_size_x * config::spatial_size)
+                   + ((vindex * 2) * batchStride + ygroupoffset * ystride
+                      + (xgrp_size * xgrp_id + xlid) * xstride + 1)
                          / 2 * 2;
         }
     }
     else
     {
-        return zgroupoffset * (config::c / config::vec_size_x * config::l) + vindex * nstride
-               + ygroupoffset * ystride + (xgrp_sz * xgrp_id + xlid) * xstride;
+        return zgroupoffset * (config::channels / config::vec_size_x * config::spatial_size)
+               + vindex * batchStride + ygroupoffset * ystride
+               + (xgrp_size * xgrp_id + xlid) * xstride;
     }
 }
 
@@ -216,16 +217,24 @@ __forceinline__ __device__ FpPrecType_C loadFromStash(const FpType_C* stash,
                                                       unsigned int zgroupoffset,
                                                       unsigned int ygroupoffset,
                                                       unsigned int ystride,
-                                                      unsigned int xgrp_sz,
+                                                      unsigned int xgrp_size,
                                                       unsigned int xgrp_id,
                                                       unsigned int xlid,
                                                       unsigned int xstride)
 {
-    unsigned int nstride
-        = config::stash_method == 0 ? ystride : config::c / config::vec_size_x * config::l;
+    unsigned int batchStride = config::stash_method == 0
+                                   ? ystride
+                                   : config::channels / config::vec_size_x * config::spatial_size;
 
-    unsigned int index = getStashIndex(
-        vindex, zgroupoffset, ygroupoffset, ystride, xgrp_sz, xgrp_id, xlid, xstride, nstride);
+    unsigned int index = getStashIndex(vindex,
+                                       zgroupoffset,
+                                       ygroupoffset,
+                                       ystride,
+                                       xgrp_size,
+                                       xgrp_id,
+                                       xlid,
+                                       xstride,
+                                       batchStride);
 
     if constexpr(config::stash_method == 0 || config::stash_method == 1)
     {
@@ -235,7 +244,7 @@ __forceinline__ __device__ FpPrecType_C loadFromStash(const FpType_C* stash,
     {
         FpPrecType_C value;
         *(reinterpret_cast<FpType_C*>(&value)) = stash[index];
-        *(reinterpret_cast<FpType_C*>(&value) + 1) = stash[index + nstride];
+        *(reinterpret_cast<FpType_C*>(&value) + 1) = stash[index + batchStride];
         return value;
     }
 }
@@ -247,16 +256,24 @@ __forceinline__ __device__ void storeToStash(FpPrecType_C value,
                                              unsigned int zgroupoffset,
                                              unsigned int ygroupoffset,
                                              unsigned int ystride,
-                                             unsigned int xgrp_sz,
+                                             unsigned int xgrp_size,
                                              unsigned int xgrp_id,
                                              unsigned int xlid,
                                              unsigned int xstride)
 {
-    unsigned int nstride
-        = config::stash_method == 0 ? ystride : config::c / config::vec_size_x * config::l;
+    unsigned int batchStride = config::stash_method == 0
+                                   ? ystride
+                                   : config::channels / config::vec_size_x * config::spatial_size;
 
-    unsigned int index = getStashIndex(
-        vindex, zgroupoffset, ygroupoffset, ystride, xgrp_sz, xgrp_id, xlid, xstride, nstride);
+    unsigned int index = getStashIndex(vindex,
+                                       zgroupoffset,
+                                       ygroupoffset,
+                                       ystride,
+                                       xgrp_size,
+                                       xgrp_id,
+                                       xlid,
+                                       xstride,
+                                       batchStride);
 
     if constexpr(config::stash_method == 0 || config::stash_method == 1)
     {
@@ -265,7 +282,7 @@ __forceinline__ __device__ void storeToStash(FpPrecType_C value,
     else
     {
         stash[index] = *(reinterpret_cast<FpType_C*>(&value));
-        stash[index + nstride] = *(reinterpret_cast<FpType_C*>(&value) + 1);
+        stash[index + batchStride] = *(reinterpret_cast<FpType_C*>(&value) + 1);
     }
 }
 
@@ -290,10 +307,11 @@ struct StashUpdater
         runningMean = fma(mean, expAvgFactor, newRunningMean);
 
         const FpAccumType_C adjust
-            = (config::nl == 1)
+            = (config::channel_slice_size == 1)
                   ? variance
                   : variance
-                        * (cast<FpAccumType_C>(config::nl) / cast<FpAccumType_C>(config::nl - 1));
+                        * (cast<FpAccumType_C>(config::channel_slice_size)
+                           / cast<FpAccumType_C>(config::channel_slice_size - 1));
 
         runningVariance
             = fma(cast<FpAccumType_C>(1.0) - expAvgFactor, runningVariance, expAvgFactor * adjust);
@@ -320,11 +338,11 @@ struct StashUpdaterPA
         const FpAccumType_C newRunningMean = fma(-expAvgFactor, runningMean, runningMean);
         runningMean = fma(mean, expAvgFactor, newRunningMean);
 
-        const FpAccumType_C adjust
-            = (config::n == 1)
-                  ? variance
-                  : variance
-                        * (cast<FpAccumType_C>(config::n) / cast<FpAccumType_C>(config::n - 1));
+        const FpAccumType_C adjust = (config::batches == 1)
+                                         ? variance
+                                         : variance
+                                               * (cast<FpAccumType_C>(config::batches)
+                                                  / cast<FpAccumType_C>(config::batches - 1));
 
         runningVariance
             = fma(cast<FpAccumType_C>(1.0) - expAvgFactor, runningVariance, expAvgFactor * adjust);

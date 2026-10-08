@@ -30,31 +30,31 @@ static ProblemDescription extractProblemDescription(const BatchnormBwdParams& pa
            && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 
     const auto* xDims = params.x()->dims();
-    size_t n = 0;
-    size_t c = 0;
-    size_t l = 0;
+    size_t batches = 0;
+    size_t channels = 0;
+    size_t spatialSize = 0;
     if(xDims->size() == 3)
     {
-        n = static_cast<size_t>(xDims->Get(0));
-        c = static_cast<size_t>(xDims->Get(1));
-        l = static_cast<size_t>(xDims->Get(2));
+        batches = static_cast<size_t>(xDims->Get(0));
+        channels = static_cast<size_t>(xDims->Get(1));
+        spatialSize = static_cast<size_t>(xDims->Get(2));
     }
     else if(xDims->size() == 4)
     {
-        n = static_cast<size_t>(xDims->Get(0));
-        c = static_cast<size_t>(xDims->Get(1));
-        const auto h = static_cast<size_t>(xDims->Get(2));
-        const auto w = static_cast<size_t>(xDims->Get(3));
-        l = h * w;
+        batches = static_cast<size_t>(xDims->Get(0));
+        channels = static_cast<size_t>(xDims->Get(1));
+        const auto height = static_cast<size_t>(xDims->Get(2));
+        const auto width = static_cast<size_t>(xDims->Get(3));
+        spatialSize = height * width;
     }
     else if(xDims->size() == 5)
     {
-        n = static_cast<size_t>(xDims->Get(0));
-        c = static_cast<size_t>(xDims->Get(1));
-        const auto d = static_cast<size_t>(xDims->Get(2));
-        const auto h = static_cast<size_t>(xDims->Get(3));
-        const auto w = static_cast<size_t>(xDims->Get(4));
-        l = d * h * w;
+        batches = static_cast<size_t>(xDims->Get(0));
+        channels = static_cast<size_t>(xDims->Get(1));
+        const auto depth = static_cast<size_t>(xDims->Get(2));
+        const auto height = static_cast<size_t>(xDims->Get(3));
+        const auto width = static_cast<size_t>(xDims->Get(4));
+        spatialSize = depth * height * width;
     }
     else
     {
@@ -63,8 +63,14 @@ static ProblemDescription extractProblemDescription(const BatchnormBwdParams& pa
                                                            + std::to_string(xDims->size()));
     }
 
-    return {
-        n, c, l, isChannelLastLayout(params.x()), useFp16Mix, useBfp16Mix, Direction::BACKWARD, 1};
+    return {batches,
+            channels,
+            spatialSize,
+            isChannelLastLayout(params.x()),
+            useFp16Mix,
+            useBfp16Mix,
+            Direction::BACKWARD,
+            1};
 }
 
 BatchnormBwdParams::BatchnormBwdParams(
@@ -212,7 +218,7 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
     }
 
     _kernelVariant = config.variant;
-    _invInNl = 1.0f / static_cast<float>(problem.inNl());
+    _invInChannelSliceSize = 1.0f / static_cast<float>(problem.inChannelSliceSize());
 
     size_t xlocalsize = config.xlocalsize;
     const size_t ylocalsize = config.ylocalsize;
@@ -245,23 +251,20 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
     options.update("HIP_PLUGIN_USE_FP16", 0);
     options.update("HIP_PLUGIN_USE_BFP16", 0);
     options.update("HIP_PLUGIN_BN_USESAVED", _usesSavedStats);
-    options.update("HIP_PLUGIN_BN_N", problem.n());
-    options.update("HIP_PLUGIN_BN_C", problem.c());
-    options.update("HIP_PLUGIN_BN_L", problem.inCstride());
-    options.update("HIP_PLUGIN_BN_NL", problem.inNl());
-    options.update("HIP_PLUGIN_BN_CL", problem.inCl());
-    options.update("HIP_PLUGIN_BN_NCL", problem.inNcl());
+    options.update("HIP_PLUGIN_BN_BATCHES", problem.batches());
+    options.update("HIP_PLUGIN_BN_CHANNELS", problem.channels());
+    options.update("HIP_PLUGIN_BN_SPATIAL_SIZE", problem.spatialSize());
     options.update("HIP_PLUGIN_BN_VARIANT", _kernelVariant);
 
     if(_kernelVariant != 2)
     {
         xlocalsize = 1024;
-        if(((problem.inCstride() < 256) && (problem.n() < 256))
-           || ((problem.inCstride() < 100) && (problem.n() <= 256)))
+        if(((problem.inCstride() < 256) && (problem.batches() < 256))
+           || ((problem.inCstride() < 100) && (problem.batches() <= 256)))
         {
             xlocalsize = 256;
         }
-        xgridsize = problem.c() * xlocalsize;
+        xgridsize = problem.channels() * xlocalsize;
         ldsSize = static_cast<unsigned int>(xlocalsize);
 
         options.update("HIP_PLUGIN_BN_GRP0", xlocalsize);
@@ -279,22 +282,23 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
     {
         if(problem.isLayoutChannelLast())
         {
-            xgridsize
-                = xlocalsize * ((problem.c() / config.vectorsize + xlocalsize - 1) / xlocalsize);
+            xgridsize = xlocalsize
+                        * ((problem.channels() / config.vectorsize + xlocalsize - 1) / xlocalsize);
             ygridsize = ylocalsize * ((problem.inCstride() + ylocalsize - 1) / ylocalsize);
         }
         else
         {
-            xgridsize = xlocalsize * ((problem.c() + xlocalsize - 1) / xlocalsize);
+            xgridsize = xlocalsize * ((problem.channels() + xlocalsize - 1) / xlocalsize);
             ygridsize = ylocalsize
                         * ((problem.inCstride() / config.vectorsize + ylocalsize - 1) / ylocalsize);
         }
-        zgridsize = zlocalsize * ((problem.n() / config.nelements + zlocalsize - 1) / zlocalsize);
+        zgridsize = zlocalsize
+                    * ((problem.batches() / config.batchElements + zlocalsize - 1) / zlocalsize);
 
         stashMethod
-            = getStashMethod(problem, stashValuesBwd, ylocalsize, zlocalsize, config.nelements);
+            = getStashMethod(problem, stashValuesBwd, ylocalsize, zlocalsize, config.batchElements);
 
-        if(problem.isLayoutChannelLast() && problem.c() % 2 == 0 && xlocalsize % 2 == 0)
+        if(problem.isLayoutChannelLast() && problem.channels() % 2 == 0 && xlocalsize % 2 == 0)
         {
             xlocalsizeFinal = 2;
             zlocalsizeFinal = zgridsize / zlocalsize * zlocalsize;
@@ -310,7 +314,7 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
         options.update("HIP_PLUGIN_BN_GRP0", xlocalsize);
         options.update("HIP_PLUGIN_BN_GRP1", ylocalsize);
         options.update("HIP_PLUGIN_BN_GRP2", zlocalsize);
-        options.update("HIP_PLUGIN_BN_N_ELEMENTS", config.nelements);
+        options.update("HIP_PLUGIN_BN_BATCH_ELEMENTS", config.batchElements);
         options.update("HIP_PLUGIN_BN_LDS_SIZE", ldsSize);
         options.update("HIP_PLUGIN_BN_VEC_SIZE", config.vectorsize);
         options.update("HIP_PLUGIN_BN_STASH_METHOD", stashMethod);
@@ -416,7 +420,7 @@ void BatchnormBwdPlan::execute(const Handle& handle,
                                         dbiasBuffer.ptr,
                                         savedMeanPtr,
                                         savedInvVariancePtr,
-                                        _invInNl,
+                                        _invInChannelSliceSize,
                                         _activationAlpha,
                                         _activationBeta);
         }
@@ -431,7 +435,7 @@ void BatchnormBwdPlan::execute(const Handle& handle,
                                         dscaleBuffer.ptr,
                                         dbiasBuffer.ptr,
                                         _epsilon,
-                                        _invInNl,
+                                        _invInChannelSliceSize,
                                         _activationAlpha,
                                         _activationBeta);
         }
@@ -462,14 +466,15 @@ void BatchnormBwdPlan::execute(const Handle& handle,
                                     dbiasBuffer.ptr,
                                     savedMeanPtr,
                                     savedInvVariancePtr,
-                                    _invInNl,
+                                    _invInChannelSliceSize,
                                     _activationAlpha,
                                     _activationBeta);
     }
     else
     {
         _runnableKernels[0]->launch(handle.getStream(), xBuffer.ptr, dxBuffer.ptr);
-        _runnableKernels[1]->launch(handle.getStream(), dxBuffer.ptr, _invInNl, _epsilon);
+        _runnableKernels[1]->launch(
+            handle.getStream(), dxBuffer.ptr, _invInChannelSliceSize, _epsilon);
         _runnableKernels[2]->launch(handle.getStream(),
                                     xBuffer.ptr,
                                     dyBuffer.ptr,
@@ -488,7 +493,7 @@ void BatchnormBwdPlan::execute(const Handle& handle,
                                     biasPtr,
                                     dscaleBuffer.ptr,
                                     dbiasBuffer.ptr,
-                                    _invInNl,
+                                    _invInChannelSliceSize,
                                     _activationAlpha,
                                     _activationBeta);
     }

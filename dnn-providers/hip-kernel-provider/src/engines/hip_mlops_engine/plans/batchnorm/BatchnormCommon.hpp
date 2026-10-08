@@ -21,17 +21,17 @@ enum class Direction : int
 class ProblemDescription
 {
 public:
-    ProblemDescription(size_t n,
-                       size_t c,
-                       size_t l,
+    ProblemDescription(size_t batches,
+                       size_t channels,
+                       size_t spatialSize,
                        bool isLayoutChannelLast,
                        bool useFp16Mix,
                        bool useBfp16Mix,
                        Direction direction,
                        size_t minWorkgroups)
-        : _n(n)
-        , _c(c)
-        , _l(l)
+        : _batches(batches)
+        , _channels(channels)
+        , _spatialSize(spatialSize)
         , _isLayoutChannelLast(isLayoutChannelLast)
         , _useFp16Mix(useFp16Mix)
         , _useBfp16Mix(useBfp16Mix)
@@ -40,17 +40,17 @@ public:
     {
     }
 
-    size_t n() const
+    size_t batches() const
     {
-        return _n;
+        return _batches;
     }
-    size_t c() const
+    size_t channels() const
     {
-        return _c;
+        return _channels;
     }
-    size_t l() const
+    size_t spatialSize() const
     {
-        return _l;
+        return _spatialSize;
     }
     bool isLayoutChannelLast() const
     {
@@ -79,25 +79,25 @@ public:
 
     unsigned int inCstride() const
     {
-        return static_cast<unsigned int>(_l);
+        return static_cast<unsigned int>(_spatialSize);
     }
-    unsigned int inNl() const
+    unsigned int inChannelSliceSize() const
     {
-        return static_cast<unsigned int>(_n * _l);
+        return static_cast<unsigned int>(_batches * _spatialSize);
     }
-    unsigned int inCl() const
+    unsigned int inBatchSize() const
     {
-        return static_cast<unsigned int>(_c * _l);
+        return static_cast<unsigned int>(_channels * _spatialSize);
     }
-    unsigned int inNcl() const
+    unsigned int inTensorSize() const
     {
-        return static_cast<unsigned int>(_n * _c * _l);
+        return static_cast<unsigned int>(_batches * _channels * _spatialSize);
     }
 
 private:
-    size_t _n;
-    size_t _c;
-    size_t _l;
+    size_t _batches;
+    size_t _channels;
+    size_t _spatialSize;
     bool _isLayoutChannelLast;
     bool _useFp16Mix;
     bool _useBfp16Mix;
@@ -112,7 +112,7 @@ struct KernelConfig
     size_t xlocalsize = 1;
     size_t ylocalsize = 1;
     size_t zlocalsize = 1;
-    size_t nelements = 1;
+    size_t batchElements = 1;
 };
 
 // Compute workgroup size configuration given a problem (NLC, NHWC, NDHWC) and a vectorsize
@@ -133,25 +133,25 @@ inline void getLocalConfigChannelLast(const ProblemDescription& problem,
     unsigned int maxLocalsize = 1024 / vectorsize;
 
     // default local config in case the while loop is not entered
-    xlocalsize = std::min(size_t{1} << static_cast<size_t>(
-                              std::ceil(std::log2(std::max(problem.c() / vectorsize, size_t{1})))),
+    xlocalsize = std::min(size_t{1} << static_cast<size_t>(std::ceil(
+                              std::log2(std::max(problem.channels() / vectorsize, size_t{1})))),
                           static_cast<size_t>(xlocalsizeLimit));
     ylocalsize = maxLocalsize / xlocalsize;
 
-    size_t nworkgroups = 0;
+    size_t batchWorkgroups = 0;
     // decrease maxLocalsize until the number of workgroups is greater than 80%
     // of the available CUs
-    while(nworkgroups < problem.minWorkgroups() && maxLocalsize >= xlocalsizeLimit
+    while(batchWorkgroups < problem.minWorkgroups() && maxLocalsize >= xlocalsizeLimit
           && maxLocalsize > 64)
     {
         // xlocalsize must be power of 2 as reductions in the kernels rely on it, here c is rounded
         // up to next power of 2.
         xlocalsize = std::min(size_t{1} << static_cast<size_t>(std::ceil(
-                                  std::log2(std::max(problem.c() / vectorsize, size_t{1})))),
+                                  std::log2(std::max(problem.channels() / vectorsize, size_t{1})))),
                               static_cast<size_t>(xlocalsizeLimit));
         ylocalsize = maxLocalsize / xlocalsize;
-        nworkgroups = ((problem.c() / vectorsize + xlocalsize - 1) / xlocalsize)
-                      * ((problem.inCstride() + ylocalsize - 1) / ylocalsize);
+        batchWorkgroups = ((problem.channels() / vectorsize + xlocalsize - 1) / xlocalsize)
+                          * ((problem.inCstride() + ylocalsize - 1) / ylocalsize);
         maxLocalsize >>= 1;
     }
 }
@@ -172,7 +172,7 @@ inline void getSpatialMultipleConfig(const ProblemDescription& problem,
 
     if(problem.isLayoutChannelLast())
     {
-        if(problem.c() % vectorsize != 0)
+        if(problem.channels() % vectorsize != 0)
         {
             // xlocalsize and ylocalsize already initialized to 1
             return;
@@ -205,14 +205,14 @@ inline bool isSpatialMultipleApplicable(const ProblemDescription& problem,
                                         unsigned int stashValues,
                                         size_t ylocalsize,
                                         size_t zlocalsize,
-                                        size_t nelements)
+                                        size_t batchElements)
 {
     const auto inCstride = problem.inCstride();
 
     if(problem.isLayoutChannelLast())
     {
         // check if the provided vectorsize can be used
-        if(problem.c() % vectorsize != 0)
+        if(problem.channels() % vectorsize != 0)
         {
             return false;
         }
@@ -223,9 +223,9 @@ inline bool isSpatialMultipleApplicable(const ProblemDescription& problem,
                                                 : inCstride % ylocalsize;
 
         const unsigned int lastZocalsize
-            = problem.n() % (zlocalsize * nelements) == 0
-                  ? static_cast<unsigned int>(zlocalsize * nelements)
-                  : problem.n() % static_cast<unsigned int>(zlocalsize * nelements);
+            = problem.batches() % (zlocalsize * batchElements) == 0
+                  ? static_cast<unsigned int>(zlocalsize * batchElements)
+                  : problem.batches() % static_cast<unsigned int>(zlocalsize * batchElements);
 
         // FP32:
         //  - last block must have enough space to stash intermediate results in HW dimension
@@ -237,7 +237,7 @@ inline bool isSpatialMultipleApplicable(const ProblemDescription& problem,
         //    be large enough
         //  - if C is not multiple of 2, intermediate results are stored in N dimension splitting
         //    float values in group of 2 bytes. N must be large enough
-        if((!problem.useFp32() && (problem.c() % 2 != 0 && lastZocalsize < stashValues))
+        if((!problem.useFp32() && (problem.channels() % 2 != 0 && lastZocalsize < stashValues))
            || ((lastYlocalsize < stashValues) && (lastZocalsize < stashValues)))
         {
             return false;
@@ -256,9 +256,9 @@ inline bool isSpatialMultipleApplicable(const ProblemDescription& problem,
                                                 : inCstride % ylocalsize;
 
         const unsigned int lastZocalsize
-            = problem.n() % (zlocalsize * nelements) == 0
-                  ? static_cast<unsigned int>(zlocalsize * nelements)
-                  : problem.n() % static_cast<unsigned int>(zlocalsize * nelements);
+            = problem.batches() % (zlocalsize * batchElements) == 0
+                  ? static_cast<unsigned int>(zlocalsize * batchElements)
+                  : problem.batches() % static_cast<unsigned int>(zlocalsize * batchElements);
         // Restrictions:
         //  - last block must have enough space to stash intermediate results in HW dimension
         //  - if last block doesn't fit, intermediate results are stored in N dimension which must
@@ -275,13 +275,13 @@ inline bool isSpatialMultipleApplicable(const ProblemDescription& problem,
 inline bool useMultiple(const ProblemDescription& problem)
 {
     const auto inCstride = problem.inCstride();
-    const auto inNl = problem.inNl();
-    const auto thrInNl = static_cast<unsigned int>(32 * 1024 * 1024);
+    const auto inChannelSliceSize = problem.inChannelSliceSize();
+    const auto thrInChannelSliceSize = static_cast<unsigned int>(32 * 1024 * 1024);
 
     if(!problem.isLayoutChannelLast() && problem.direction() == Direction::BACKWARD)
     {
-        if((inNl < thrInNl && inCstride > 1024) || (inNl < thrInNl && inCstride > 512)
-           || inCstride <= 512)
+        if((inChannelSliceSize < thrInChannelSliceSize && inCstride > 1024)
+           || (inChannelSliceSize < thrInChannelSliceSize && inCstride > 512) || inCstride <= 512)
         {
             return false;
         }
@@ -290,12 +290,13 @@ inline bool useMultiple(const ProblemDescription& problem)
     if(!problem.isLayoutChannelLast() && problem.direction() == Direction::FORWARD_TRAINING)
     {
         const bool condition1
-            = (problem.n() < 3) || (inCstride <= 512) || (inNl < 33554432 && inCstride > 1024)
-              || (problem.n() >= 256 && inCstride > 60
+            = (problem.batches() < 3) || (inCstride <= 512)
+              || (inChannelSliceSize < 33554432 && inCstride > 1024)
+              || (problem.batches() >= 256 && inCstride > 60
                   && (problem.useFp16Mix() || problem.useBfp16Mix()))
               || ((problem.useFp16Mix() || problem.useBfp16Mix()) && inCstride > 512);
 
-        const bool condition2 = (problem.n() <= 768) || (inCstride <= 150);
+        const bool condition2 = (problem.batches() <= 768) || (inCstride <= 150);
 
         if(condition1 && condition2)
         {
@@ -311,7 +312,7 @@ inline int getStashMethod(const ProblemDescription& problem,
                           unsigned int stashValues,
                           size_t ylocalsize,
                           size_t zlocalsize,
-                          size_t nelements)
+                          size_t batchElements)
 {
     // See `batchnorm_functions.hpp` for stash implementation of different methods
     int stashMethod = 0;
@@ -320,14 +321,14 @@ inline int getStashMethod(const ProblemDescription& problem,
                                             ? static_cast<unsigned int>(ylocalsize)
                                             : problem.inCstride() % ylocalsize;
     const unsigned int lastZocalsize
-        = problem.n() % (zlocalsize * nelements) == 0
-              ? static_cast<unsigned int>(zlocalsize * nelements)
-              : problem.n() % static_cast<unsigned int>(zlocalsize * nelements);
+        = problem.batches() % (zlocalsize * batchElements) == 0
+              ? static_cast<unsigned int>(zlocalsize * batchElements)
+              : problem.batches() % static_cast<unsigned int>(zlocalsize * batchElements);
     if(lastYlocalsize < stashValues && lastZocalsize >= stashValues)
     {
         stashMethod = 1;
     }
-    if(problem.isLayoutChannelLast() && !problem.useFp32() && (problem.c() % 2 != 0)
+    if(problem.isLayoutChannelLast() && !problem.useFp32() && (problem.channels() % 2 != 0)
        && (lastZocalsize >= stashValues))
     {
         stashMethod = 2;
@@ -337,11 +338,11 @@ inline int getStashMethod(const ProblemDescription& problem,
 
 inline void defaultConfigSpatialSingle(const ProblemDescription& problem, KernelConfig& config)
 {
-    const auto n = problem.n();
+    const auto n = problem.batches();
     const auto inCstride = problem.inCstride();
-    const auto inNl = problem.inNl();
+    const auto inChannelSliceSize = problem.inChannelSliceSize();
 
-    // NCHW supports also variants 0 and 3 which can be much faster than
+    // NCL, NCHW and NCDHW support also variants 0 and 3 which can be much faster than
     // variant 1 but have more restrictions. Here we decide if we use variant
     // 0, 1, 3
     // In case variant 0 or 3 are selected, we add also variant 1 for tuning.
@@ -363,7 +364,7 @@ inline void defaultConfigSpatialSingle(const ProblemDescription& problem, Kernel
             // N*L, N*H*W, N*D*H*W < 32M and L, H*W, D*H*W > 1024
             // use batchnorm variant#1 implementation which parallelize
             // work groups over channels and loop through NL/NHW/NDHW.
-            if((inNl < (32 * 1024 * 1024) && inCstride > 1024))
+            if((inChannelSliceSize < (32 * 1024 * 1024) && inCstride > 1024))
             {
                 config.variant = 1;
                 config.vectorsize = 1;
@@ -373,7 +374,7 @@ inline void defaultConfigSpatialSingle(const ProblemDescription& problem, Kernel
             // N*L, N*H*W, N*D*H*W < 32M and L, H*W, D*H*W > 512
             // use batchnorm variant#1 or variant#3 implementation which
             // parallelize work groups over channels and loop through N.
-            if(inNl < (32 * 1024 * 1024) && inCstride > 512)
+            if(inChannelSliceSize < (32 * 1024 * 1024) && inCstride > 512)
             {
                 if(n >= 32)
                 {
@@ -413,7 +414,7 @@ inline void defaultConfigSpatialSingle(const ProblemDescription& problem, Kernel
                 return;
             }
 
-            if((inNl < 33554432 && inCstride > 1024)
+            if((inChannelSliceSize < 33554432 && inCstride > 1024)
                || ((n >= 256) && (inCstride > 60)
                    && (problem.useFp16Mix() || problem.useBfp16Mix()))
                || ((inCstride > 512) && (problem.useFp16Mix() || problem.useBfp16Mix())))
@@ -454,7 +455,7 @@ inline void defaultConfigSpatialMultiple(const ProblemDescription& problem,
     size_t ylocalsizeDefault = 1;
     const size_t zlocalsizeDefault = 1;
     size_t vectorsizeDefault = 4;
-    const size_t nelementsDefault = problem.n();
+    const size_t batchElementsDefault = problem.batches();
 
     if(problem.isLayoutChannelLast())
     {
@@ -468,14 +469,14 @@ inline void defaultConfigSpatialMultiple(const ProblemDescription& problem,
                                            stashValues,
                                            ylocalsizeDefault,
                                            zlocalsizeDefault,
-                                           nelementsDefault))
+                                           batchElementsDefault))
             {
                 config.variant = 2;
                 config.vectorsize = vectorsizeDefault;
                 config.xlocalsize = xlocalsizeDefault;
                 config.ylocalsize = ylocalsizeDefault;
                 config.zlocalsize = zlocalsizeDefault;
-                config.nelements = nelementsDefault;
+                config.batchElements = batchElementsDefault;
             }
             else
             {
@@ -490,14 +491,14 @@ inline void defaultConfigSpatialMultiple(const ProblemDescription& problem,
                                                    stashValues,
                                                    ylocalsizeDefault,
                                                    zlocalsizeDefault,
-                                                   nelementsDefault))
+                                                   batchElementsDefault))
                     {
                         config.variant = 2;
                         config.vectorsize = vectorsizeDefault;
                         config.xlocalsize = xlocalsizeDefault;
                         config.ylocalsize = ylocalsizeDefault;
                         config.zlocalsize = zlocalsizeDefault;
-                        config.nelements = nelementsDefault;
+                        config.batchElements = batchElementsDefault;
                     }
                 }
             }
@@ -520,14 +521,14 @@ inline void defaultConfigSpatialMultiple(const ProblemDescription& problem,
                                        stashValues,
                                        ylocalsizeDefault,
                                        zlocalsizeDefault,
-                                       nelementsDefault))
+                                       batchElementsDefault))
         {
             config.variant = 2;
             config.vectorsize = vectorsizeDefault;
             config.xlocalsize = xlocalsizeDefault;
             config.ylocalsize = ylocalsizeDefault;
             config.zlocalsize = zlocalsizeDefault;
-            config.nelements = nelementsDefault;
+            config.batchElements = batchElementsDefault;
         }
         vectorsizeDefault >>= 1;
     }
