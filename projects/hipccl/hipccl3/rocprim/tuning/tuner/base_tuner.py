@@ -165,9 +165,9 @@ class BaseTuner(ABC):
         self.simulation_mode = args.simulation_mode
         if not self.simulation_mode:
             # TODO: remove or replace this to get rid of hip-python
-            self.device_properties = hip.hipDeviceProp_t()
-            hip.hipGetDeviceProperties(self.device_properties, self.device_id)
-            self.arch_name = self.device_properties.gcnArchName.decode().split(":")[0]
+            self.device_properties: hip.hipDeviceProp_t = hip.hipDeviceProp_t()
+            (_, self.device_properties) = hip.hipGetDeviceProperties(self.device_id)
+            self.arch_name = self.device_properties.gcnArchName.split(":")[0]
         else:
             assert (
                 args.arch_name
@@ -491,5 +491,9 @@ class BaseTuner(ABC):
             f"-I{monorepo_dir / 'shared/primbench'}",
             "-Wno-#pragma-messages",
             f"--offload-arch={self.arch_name}",
+            # Ensure we can find libamd_smi on systems/containers that do not expose /opt/rocm/lib
+            # in LD_LIBRARY_PATH.
+            "-Wl,-rpath=/opt/rocm/lib",
+            # Required for primbench.
             "-lamd_smi",
         ]
