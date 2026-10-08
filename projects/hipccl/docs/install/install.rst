@@ -103,6 +103,16 @@ details, and plan to update include paths to
 ``-I<prefix>/include/hipccl`` (or the equivalent CMake
 ``find_package(hipccl)``/``find_package(rocprim)`` usage) ahead of removal.
 
+.. note::
+
+   On Windows the compatibility paths are installed as copies of the headers,
+   not symlinks, because symlinks created at install time are not reliable
+   there. The copies use additional disk space and are not refreshed if only
+   one of the two header trees is updated later. Whether they are present in a
+   given binary distribution depends on how it was built: if
+   ``<prefix>/include/rocprim`` does not exist, use
+   ``-I<prefix>/include/hipccl`` instead.
+
 .. _install-upgrading:
 
 Upgrading from standalone rocPRIM, hipCUB, or rocThrust
